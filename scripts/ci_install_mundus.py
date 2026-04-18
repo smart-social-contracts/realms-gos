@@ -589,10 +589,57 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Comma-separated stages to run (default: 0,1,2,3)")
     parser.add_argument("--infra-ids-out", type=Path, default=None,
                         help="Write resolved infra canister ids as JSON for downstream jobs")
+    parser.add_argument("--only-realms", default=None,
+                        help="Comma-separated mundus member names. When set, "
+                             "stages 1+2+3 only consider these members "
+                             "(e.g. 'dominion,realm_registry_backend').")
+    parser.add_argument("--only-extensions", default=None,
+                        help="Comma-separated extension ids. When set, "
+                             "stage 1 publishes only these extensions and "
+                             "stage 2 installs only these on each member that "
+                             "would otherwise inherit_from_artifacts=all.")
+    parser.add_argument("--skip-base-wasm", action="store_true",
+                        help="Skip building+publishing the realm_backend "
+                             "(base) WASM in stage 1. Useful when iterating "
+                             "on frontend/extensions only.")
     args = parser.parse_args(argv)
 
     stages = {int(s) for s in args.stages.split(",") if s}
     descriptor = load_descriptor(args.file)
+
+    only_realms = (
+        [r.strip() for r in args.only_realms.split(",") if r.strip()]
+        if args.only_realms else None
+    )
+    if only_realms:
+        members = descriptor.get("mundus") or []
+        names = {m.get("name") for m in members}
+        unknown = [r for r in only_realms if r not in names]
+        if unknown:
+            raise SystemExit(
+                f"--only-realms contains unknown member(s): {unknown}. "
+                f"Known: {sorted(n for n in names if n)}"
+            )
+        descriptor["mundus"] = [m for m in members if m.get("name") in only_realms]
+        print(f"🎯 only-realms : {only_realms}")
+
+    only_exts = (
+        [e.strip() for e in args.only_extensions.split(",") if e.strip()]
+        if args.only_extensions else None
+    )
+    if only_exts:
+        descriptor.setdefault("artifacts", {})["extensions"] = list(only_exts)
+        # Replace `inherit_from_artifacts` / `all` on each member so stage 2
+        # actually narrows the install set too (otherwise it would still
+        # try to install every extension on disk).
+        for m in descriptor.get("mundus") or []:
+            if m.get("extensions") in (None, "all", "inherit_from_artifacts"):
+                m["extensions"] = list(only_exts)
+        print(f"🎯 only-extensions: {only_exts}")
+
+    if args.skip_base_wasm:
+        descriptor.setdefault("artifacts", {}).setdefault("base_wasm", {})["skip"] = True
+        print("⏭  skip-base-wasm: realm_backend WASM build will be skipped")
 
     print(f"📄 descriptor : {args.file}")
     print(f"📡 network    : {descriptor['network']}")

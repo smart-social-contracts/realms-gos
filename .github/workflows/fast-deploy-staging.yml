@@ -1,0 +1,153 @@
+# fast-deploy-staging.yml — manual, fast staging deploy for prototyping.
+#
+# A "see it now" path that runs in PARALLEL to ci-main.yml. Trade-offs:
+#   * Skips Phase A (no local-replica e2e gating).
+#   * Skips stage 0 (staging infra is long-lived).
+#   * Skips stage 4 (no Playwright / no integration tests at the end).
+#   * Collapses stage 1 (publish) + stage 2 (install) into ONE job, so we
+#     pay the runner cold-start tax (checkout submodules, install dfx,
+#     install Node + Python deps) only once instead of three times.
+#   * Optional `realms` / `extensions` filters trim what gets built and
+#     installed, so a frontend-only iteration on a single realm becomes
+#     ~3-5 minutes instead of ~50.
+#
+# Use the regular `CI (main)` pipeline for anything that should be gated
+# by tests before reaching staging. This workflow is a developer tool —
+# not a release pipeline.
+
+name: Fast deploy (staging)
+
+on:
+  workflow_dispatch:
+    inputs:
+      descriptor:
+        description: "Mundus descriptor to deploy"
+        required: true
+        type: choice
+        default: deployments/staging-mundus-layered.yml
+        options:
+          - deployments/staging-mundus-layered.yml
+          - deployments/demo-mundus-layered.yml
+
+      realms:
+        description: "Comma-separated mundus member names to (re)deploy. Leave empty for all (e.g. 'dominion' or 'dominion,agora')."
+        required: false
+        default: ""
+
+      extensions:
+        description: "Comma-separated extension ids to publish + install. Leave empty for all (e.g. 'package_manager,admin_dashboard')."
+        required: false
+        default: ""
+
+      skip_base_wasm:
+        description: "Skip rebuilding+publishing realm_backend.wasm.gz. Tick this for frontend/extension-only iteration."
+        required: false
+        type: boolean
+        default: false
+
+      ref:
+        description: "realms commit/branch to deploy from (defaults to the workflow ref)."
+        required: false
+        default: ""
+
+concurrency:
+  # Different group from `ci-main` so this can run in parallel with the
+  # main pipeline. Self-serializing per-descriptor so two parallel fast-
+  # deploys against the same descriptor don't race.
+  group: fast-deploy-${{ inputs.descriptor }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.10"
+  NODE_VERSION: "20"
+  DFX_VERSION: "0.31.0"
+
+jobs:
+  fast-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dfx ${{ env.DFX_VERSION }}
+        run: |
+          DFXVM_INIT_YES=1 sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
+          echo "$HOME/.local/share/dfx/bin" >> "$GITHUB_PATH"
+
+      - name: Install realms CLI + Python deps
+        run: |
+          pip install -e cli/
+          pip install pyyaml
+
+      - name: Configure dfx identity
+        env:
+          IC_IDENTITY_PEM: ${{ secrets.IC_IDENTITY_PEM }}
+        run: |
+          if [ -z "$IC_IDENTITY_PEM" ]; then
+            echo "::error::IC_IDENTITY_PEM secret is not set on this repo." >&2
+            exit 1
+          fi
+          printf '%s' "$IC_IDENTITY_PEM" > /tmp/identity.pem
+          chmod 600 /tmp/identity.pem
+          dfx identity import ci /tmp/identity.pem --storage-mode=plaintext --force
+          dfx identity use ci
+          rm -f /tmp/identity.pem
+          echo "DFX_WARNING=-mainnet_plaintext_identity" >> "$GITHUB_ENV"
+
+      - name: Print run parameters
+        run: |
+          echo "╭────────────────────────────────────────╮"
+          echo "│ ⚡ Fast deploy (staging)                │"
+          echo "╰────────────────────────────────────────╯"
+          echo "📄 Descriptor:    ${{ inputs.descriptor }}"
+          echo "🏛️  Realms:        ${{ inputs.realms || '(all)' }}"
+          echo "🧩 Extensions:    ${{ inputs.extensions || '(all from descriptor)' }}"
+          echo "⏭  skip_base_wasm: ${{ inputs.skip_base_wasm }}"
+          echo "🔀 Ref:           ${{ inputs.ref || github.ref }}"
+          echo "🆔 Identity:      $(dfx identity get-principal)"
+
+      - name: Run stages 1 + 2 against ${{ inputs.descriptor }}
+        run: |
+          ARGS=(
+            --file "${{ inputs.descriptor }}"
+            --stages 1,2
+          )
+          if [ -n "${{ inputs.realms }}" ]; then
+            ARGS+=( --only-realms "${{ inputs.realms }}" )
+          fi
+          if [ -n "${{ inputs.extensions }}" ]; then
+            ARGS+=( --only-extensions "${{ inputs.extensions }}" )
+          fi
+          if [ "${{ inputs.skip_base_wasm }}" = "true" ]; then
+            ARGS+=( --skip-base-wasm )
+          fi
+          echo "→ python3 scripts/ci_install_mundus.py ${ARGS[*]}"
+          python3 scripts/ci_install_mundus.py "${ARGS[@]}"
+
+      - name: Print frontend URLs
+        if: success()
+        run: |
+          python3 - <<'PY'
+          import os, yaml
+          desc = yaml.safe_load(open(os.environ["DESC"]))
+          print()
+          print("✅ Fast deploy complete. Live frontends:")
+          for m in desc.get("mundus", []):
+              fe = m.get("frontend_canister_id")
+              if fe:
+                  print(f"   • {m.get('display_name') or m['name']:14s} → https://{fe}.icp0.io/")
+          PY
+        env:
+          DESC: ${{ inputs.descriptor }}
