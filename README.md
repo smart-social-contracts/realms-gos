@@ -1,7 +1,9 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="src/realm_frontend/static/images/logo_horizontal_white.svg">
-  <img alt="Realms" src="src/realm_frontend/static/images/logo_horizontal.svg" width="280">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="src/realm_frontend/static/images/logo_horizontal_white.svg">
+    <img alt="Realms" src="src/realm_frontend/static/images/logo_horizontal.svg" width="280">
+  </picture>
+</p>
 
 # Realms GOS
 
