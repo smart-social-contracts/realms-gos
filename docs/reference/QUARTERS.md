@@ -293,7 +293,7 @@ command its Casals stand to mint backend-only quarter canisters.
 4. **localStorage cache** — persist `home_quarter` canister ID for instant reconnect.
 5. **Multi-quarter activation** (optional) — session routing among existing memberships, distinct from registration.
 
-Canonical product doc: root [`QUARTERS.md`](../../QUARTERS.md). Tracking: GitHub [#156](https://github.com/smart-social-contracts/realms/issues/156).
+Canonical product doc: root [`QUARTERS.md`](../../QUARTERS.md). Tracking: GitHub [#156](https://github.com/smart-social-contracts/realms-gos/issues/156).
 
 ## Acting inherit at quarter birth (issue #301)
 

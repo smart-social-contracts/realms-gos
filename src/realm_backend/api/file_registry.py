@@ -7,7 +7,7 @@ frontend bundles, and codex packages from a file registry canister.
 Usage from main.py (async/generator pattern):
     result = yield from install_extension_from_registry(registry_id, ext_id, version)
 
-Refs: https://github.com/smart-social-contracts/realms/issues/168
+Refs: https://github.com/smart-social-contracts/realms-gos/issues/168
 """
 
 import base64

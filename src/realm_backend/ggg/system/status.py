@@ -4,7 +4,7 @@ GGG Status Enums
 OS-level statuses (TaskStatus, TaskExecutionStatus) are re-exported from
 ic-basilisk-toolkit.  Application-level statuses remain defined here.
 
-See: https://github.com/smart-social-contracts/realms/issues/153
+See: https://github.com/smart-social-contracts/realms-gos/issues/153
 """
 
 from enum import Enum

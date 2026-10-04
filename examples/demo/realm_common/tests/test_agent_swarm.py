@@ -34,7 +34,7 @@ GEISTER_API_URL = os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.de
 RUN_DURATION_MINUTES = int(os.getenv("RUN_DURATION_MINUTES", "0"))       # 0 = no overall limit
 FAILURE_THRESHOLD = float(os.getenv("FAILURE_THRESHOLD", "0.3"))        # 30% max failures
 LOGS_DIR = Path(os.getenv("LOGS_DIR", "agent_logs"))
-GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "")   # e.g. "smart-social-contracts/realms"
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "")   # e.g. "smart-social-contracts/realms-gos"
 GH_TOKEN = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN", "")
 ISSUE_LABEL = os.getenv("ISSUE_LABEL", "agent-swarm")
 RUN_ID = os.getenv("RUN_ID") or os.getenv("GITHUB_RUN_ID") or datetime.now().strftime("%Y%m%d_%H%M%S")

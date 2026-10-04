@@ -342,4 +342,4 @@ task = Task(name="async_task", codex=codex)
 
 ---
 
-**Learn More:** [Full Documentation](./README.md) | [GitHub Repository](https://github.com/smart-social-contracts/realms)
+**Learn More:** [Full Documentation](./README.md) | [GitHub Repository](https://github.com/smart-social-contracts/realms-gos)

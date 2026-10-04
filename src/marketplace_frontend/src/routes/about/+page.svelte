@@ -5,7 +5,7 @@ import { CONTACT_MAILTO } from "$lib/contact";
 
 const DEMO_URL = "https://demo.gos.earth";
 const INVITE_URL = "https://tally.so/r/GxQ8QL";
-const DOCS_URL = "https://github.com/smart-social-contracts/realms/tree/main/docs";
+const DOCS_URL = "https://github.com/smart-social-contracts/realms-gos/tree/main/docs";
 
 const FEATURES = [
   { title: "about.features.internetComputer.title", desc: "about.features.internetComputer.description" },

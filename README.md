@@ -156,7 +156,7 @@ def another_function(args: str) -> Async[str]:
 
 ```bash
 # Clone realms repository
-git clone --recurse-submodules https://github.com/smart-social-contracts/realms.git
+git clone --recurse-submodules https://github.com/smart-social-contracts/realms-gos.git
 cd realms
 
 # Install realms CLI in development mode
@@ -625,7 +625,7 @@ Both modes pass the same Playwright snapshot tests (`src/realm_frontend/tests/e2
 
 ### Reference
 
-- Issue tracker: [#168 — Layered realm deployment](https://github.com/smart-social-contracts/realms/issues/168)
+- Issue tracker: [#168 — Layered realm deployment](https://github.com/smart-social-contracts/realms-gos/issues/168)
 - Detailed runtime-extension staging walkthrough: [`docs/reference/RUNTIME_EXTENSION_STAGING_DEPLOY.md`](./docs/reference/RUNTIME_EXTENSION_STAGING_DEPLOY.md)
 
 ---

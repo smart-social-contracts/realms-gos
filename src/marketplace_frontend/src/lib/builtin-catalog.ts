@@ -32,7 +32,7 @@ function ext(
     screenshots: shots,
     file_registry_canister_id: '',
     file_registry_namespace: `ext/${id}/${version}`,
-    download_url: `https://github.com/smart-social-contracts/realms/tree/main/extensions/extensions/${id}`,
+    download_url: `https://github.com/smart-social-contracts/realms-gos/tree/main/extensions/extensions/${id}`,
     installs: 0,
     likes: 0,
     verification_status: BUILTIN_VERIFICATION_STATUS,

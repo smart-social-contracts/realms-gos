@@ -7116,7 +7116,7 @@ def _warn_on_codex_overrides() -> None:
 
 # ---------------------------------------------------------------------------
 # Runtime Extension Management (Layer 2)
-# See: https://github.com/smart-social-contracts/realms/issues/168
+# See: https://github.com/smart-social-contracts/realms-gos/issues/168
 # ---------------------------------------------------------------------------
 
 

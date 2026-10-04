@@ -277,7 +277,7 @@ def _resolve_artifact(
             path.unlink(missing_ok=True)
         return _build_cache[cache_key]
 
-    repo = "smart-social-contracts/realms"
+    repo = "smart-social-contracts/realms-gos"
     if ref == "latest":
         gh_url = f"https://api.github.com/repos/{repo}/releases/latest"
         with urllib.request.urlopen(gh_url, timeout=30) as resp:

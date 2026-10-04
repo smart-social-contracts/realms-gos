@@ -113,7 +113,7 @@ The Realms CLI provides commands for creating, testing, and deploying extensions
 
 - **[Extension Architecture](../reference/EXTENSION_ARCHITECTURE)** - Detailed architecture guide
 - **[Method Override System](../reference/METHOD_OVERRIDE_SYSTEM)** - Override entity methods
-- **[Extension Examples](https://github.com/smart-social-contracts/realms/tree/main/extensions)** - Browse built-in extensions
+- **[Extension Examples](https://github.com/smart-social-contracts/realms-gos/tree/main/extensions)** - Browse built-in extensions
 
 ## Extension Development Workflow
 

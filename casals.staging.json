@@ -130,26 +130,26 @@
       {
         "family": "marketplace-backend",
         "version": "main",
-        "source": "release:smart-social-contracts/realms@v0.5.2:marketplace_backend.wasm.gz",
+        "source": "release:smart-social-contracts/realms-gos@v0.5.2:marketplace_backend.wasm.gz",
         "sha256": "691febbf3f58eb501af1a00b4e7f0aed4dc14aa6937cf4eadaf89f988d0710a7"
       },
       {
         "family": "token-backend",
         "version": "0.1.0",
-        "source": "release:smart-social-contracts/realms@v0.5.2:token_backend.wasm.gz",
+        "source": "release:smart-social-contracts/realms-gos@v0.5.2:token_backend.wasm.gz",
         "sha256": "a1734ad2ec260ce85e541f860dbcaf8c846423709177587c7e5f70adc47e461a"
       },
       {
         "family": "nft-backend",
         "version": "0.1.0",
-        "source": "release:smart-social-contracts/realms@v0.5.2:nft_backend.wasm.gz",
+        "source": "release:smart-social-contracts/realms-gos@v0.5.2:nft_backend.wasm.gz",
         "sha256": "abea08d97de800d4e299545be786dd02c9c6a7d93aaccc3770a08c213dfa484b"
       }
     ],
     "bundles": [
       {
         "path": "frontend/marketplace-assets/main",
-        "source": "release:smart-social-contracts/realms@v0.5.2:marketplace_frontend.tar.gz",
+        "source": "release:smart-social-contracts/realms-gos@v0.5.2:marketplace_frontend.tar.gz",
         "sha256": "03d93021f4eb60f4f7dca80dab9e94ddeed6feaed50f80ba8a065e538402827d"
       },
       {

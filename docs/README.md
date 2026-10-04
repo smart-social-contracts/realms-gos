@@ -188,7 +188,7 @@ See the [examples/](../examples/) directory for code samples.
 
 ## 🔗 External Resources
 
-- **Main Repository** - [GitHub](https://github.com/smart-social-contracts/realms)
+- **Main Repository** - [GitHub](https://github.com/smart-social-contracts/realms-gos)
 - **Realm Registry** - [realmsgos.org](https://realmsgos.org)
 - **Sandbox Realm** - [demo.realmsgos.org](https://demo.realmsgos.org)
 - **Internet Computer** - [internetcomputer.org](https://internetcomputer.org)

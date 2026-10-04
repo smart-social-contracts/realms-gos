@@ -99,7 +99,7 @@
 	<div class="mt-3 flex items-center justify-center gap-1 text-xs font-normal text-gray-400 dark:text-gray-500">
 		<span>Realms GOS {version}</span>
 		<a
-			href="https://github.com/smart-social-contracts/realms"
+			href="https://github.com/smart-social-contracts/realms-gos"
 			target="_blank"
 			rel="noopener noreferrer"
 			aria-label="Realms on GitHub"
@@ -108,7 +108,7 @@
 			<GithubSolid class="block h-3 w-3" size="xs" />
 		</a>
 		<a
-			href="https://github.com/smart-social-contracts/realms/commit/{fullCommitHash}"
+			href="https://github.com/smart-social-contracts/realms-gos/commit/{fullCommitHash}"
 			target="_blank"
 			rel="noopener noreferrer"
 			class="text-gray-400 hover:underline dark:text-gray-500"

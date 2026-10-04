@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 FLEET_REGISTRIES_URL = (
-    "https://raw.githubusercontent.com/smart-social-contracts/realms/main/fleet-registries.json"
+    "https://raw.githubusercontent.com/smart-social-contracts/realms-gos/main/fleet-registries.json"
 )
 FLEET_REGISTRIES_TRANSFORM = "http_transform"
 _HTTP_CYCLES = 30_000_000_000

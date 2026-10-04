@@ -48,7 +48,7 @@ pip install realms-gos
 ### From Source
 
 ```bash
-git clone https://github.com/smartsocialcontracts/realms
+git clone https://github.com/smart-social-contracts/realms-gos
 cd realms/cli
 pip install -e .
 ```
@@ -223,7 +223,7 @@ pip install realms-gos
 For contributing to the CLI tool:
 
 ```bash
-git clone https://github.com/smartsocialcontracts/realms
+git clone https://github.com/smart-social-contracts/realms-gos
 cd realms/cli
 python -m venv venv
 source venv/bin/activate
@@ -333,4 +333,4 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-- 🐛 [Issue Tracker](https://github.com/smart-social-contracts/realms/issues)
+- 🐛 [Issue Tracker](https://github.com/smart-social-contracts/realms-gos/issues)

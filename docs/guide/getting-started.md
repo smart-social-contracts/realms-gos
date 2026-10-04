@@ -105,8 +105,8 @@ Task management is handled via `basilisk-toolkit`. See the basilisk-toolkit docu
 ## Getting Help
 
 - **[Troubleshooting Guide](/reference/TROUBLESHOOTING)** - Common issues and solutions
-- **[GitHub Issues](https://github.com/smart-social-contracts/realms/issues)** - Report bugs or request features
-- **[Examples](https://github.com/smart-social-contracts/realms/tree/main/examples)** - Code examples
+- **[GitHub Issues](https://github.com/smart-social-contracts/realms-gos/issues)** - Report bugs or request features
+- **[Examples](https://github.com/smart-social-contracts/realms-gos/tree/main/examples)** - Code examples
 
 ## Architecture Overview
 

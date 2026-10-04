@@ -3,7 +3,7 @@
 # Auth (pick one; Trusted Publishing preferred):
 # 1. npm Trusted Publishing (OIDC, keyless — no stored token):
 #    - On npmjs.com, for each package (@realmsgos/extension-bridge, @realmsgos/extension-ui),
-#      add Trusted Publisher: GitHub Actions, repo smart-social-contracts/realms,
+#      add Trusted Publisher: GitHub Actions, repo smart-social-contracts/realms-gos,
 #      workflow filename publish-extension-packages.yml.
 #    - This workflow requests id-token: write; npm publish --provenance uses OIDC automatically.
 # 2. Fallback — repository secret NPM_TOKEN:
@@ -85,7 +85,7 @@ jobs:
           echo "  2. Configure npm Trusted Publishing (preferred) on npmjs.com for each package:"
           echo "     @realmsgos/extension-bridge, @realmsgos/extension-ui"
           echo "     Publisher: GitHub Actions"
-          echo "     Repository: smart-social-contracts/realms"
+          echo "     Repository: smart-social-contracts/realms-gos"
           echo "     Workflow: publish-extension-packages.yml"
           echo "  3. Or add repository secret NPM_TOKEN (automation token) as fallback."
 

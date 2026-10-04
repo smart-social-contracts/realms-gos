@@ -1,7 +1,7 @@
 # Deploying runtime-loaded extensions to staging — Path A (Dominion)
 
 This runbook deploys the **Layer 2 (runtime extension frontends)** work
-from [#168](https://github.com/smart-social-contracts/realms/issues/168)
+from [#168](https://github.com/smart-social-contracts/realms-gos/issues/168)
 onto a single staging realm. It is the "fast proof" path: the
 realm_backend / realm_frontend code goes through the existing
 GitHub Actions pipeline, and the file_registry deploy + bundle
@@ -54,7 +54,7 @@ You can run the rollout two ways:
 >
 > The CI identity behind `secrets.IC_IDENTITY_PEM` currently has
 > `0.000 TC` on staging (verified 2026-04-16, see
-> [run 24530392518](https://github.com/smart-social-contracts/realms/actions/runs/24530392518)
+> [run 24530392518](https://github.com/smart-social-contracts/realms-gos/actions/runs/24530392518)
 > which failed with `Insufficient cycles balance to create the canister`).
 >
 > **Before re-running step 2 (the Runtime Extension Deploy workflow),
@@ -86,11 +86,11 @@ write logic must be live on Dominion before the script's install step
 can succeed.
 
 This step was completed in
-[run 24530259620](https://github.com/smart-social-contracts/realms/actions/runs/24530259620)
+[run 24530259620](https://github.com/smart-social-contracts/realms-gos/actions/runs/24530259620)
 (commit `435596fd`). To re-run for a newer commit:
 
 ```
-gh workflow run Deploy --repo smart-social-contracts/realms \
+gh workflow run Deploy --repo smart-social-contracts/realms-gos \
   --ref feat/layered-deployment \
   -f descriptor=deployments/staging-dominion-backend.yml \
   -f source=checkout \
@@ -123,7 +123,7 @@ Two ways to run it:
 
 ```
 gh workflow run "Runtime Extension Deploy" \
-  --repo smart-social-contracts/realms \
+  --repo smart-social-contracts/realms-gos \
   --ref feat/layered-deployment \
   -f network=staging \
   -f realm_backend=ijdaw-dyaaa-aaaac-beh2a-cai \
@@ -132,7 +132,7 @@ gh workflow run "Runtime Extension Deploy" \
   -f commit=<realms-sha>
 ```
 
-See [run 24530392518](https://github.com/smart-social-contracts/realms/actions/runs/24530392518)
+See [run 24530392518](https://github.com/smart-social-contracts/realms-gos/actions/runs/24530392518)
 for the shape of this workflow's logs. That run failed with
 `Insufficient cycles balance` because the CI wallet on staging is
 empty — see the Prerequisites section.

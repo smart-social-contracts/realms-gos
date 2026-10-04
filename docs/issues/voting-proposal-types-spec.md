@@ -2,7 +2,7 @@
 
 > **Status:** Spec for implementation  
 > **App:** `extensions/extensions/voting/` + `src/realm_backend/core/proposal_execution.py`  
-> **Repo:** smart-social-contracts/realms
+> **Repo:** smart-social-contracts/realms-gos
 
 Nothing here is live. Delete the Codex-Files-only form rather than adding typed forms beside it, and do not keep a compatibility branch for the old payload shape.
 

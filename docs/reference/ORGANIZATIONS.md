@@ -43,4 +43,4 @@ each quarter staffs its own orgs.
 
 ## Phases
 
-See [#240](https://github.com/smart-social-contracts/realms/issues/240): Phase 1 schema+UI (done here); Phase 2 policy enforcement on actions; Phase 3 cross-quarter verification.
+See [#240](https://github.com/smart-social-contracts/realms-gos/issues/240): Phase 1 schema+UI (done here); Phase 2 policy enforcement on actions; Phase 3 cross-quarter verification.

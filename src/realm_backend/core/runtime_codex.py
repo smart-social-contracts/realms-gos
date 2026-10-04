@@ -27,7 +27,7 @@ Storage layout on the realm's persistent filesystem:
   /codex_packages/{codex_id}/*.py
   /{codex_name}                            Codex entity code (managed by Codex.code setter)
 
-Refs: https://github.com/smart-social-contracts/realms/issues/168
+Refs: https://github.com/smart-social-contracts/realms-gos/issues/168
 """
 
 import json

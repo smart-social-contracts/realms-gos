@@ -184,4 +184,4 @@ This document supersedes an earlier, heavier design. Removed or reframed:
 - **Capital as governance coordinator** — reframed: the capital is the codex origin + admission gate + pusher, nothing more.
 - **Quantized reputation** — removed; reputation is interpretive and codex/user-driven.
 
-See also GitHub [#156](https://github.com/smart-social-contracts/realms/issues/156) (join-assignment addendum).
+See also GitHub [#156](https://github.com/smart-social-contracts/realms-gos/issues/156) (join-assignment addendum).
