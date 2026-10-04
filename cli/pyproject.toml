@@ -50,10 +50,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/smartsocialcontracts/realms"
-Repository = "https://github.com/smartsocialcontracts/realms"
+Homepage = "https://github.com/smart-social-contracts/realms-gos"
+Repository = "https://github.com/smart-social-contracts/realms-gos"
 Documentation = "https://docs.realms.dev"
-"Bug Tracker" = "https://github.com/smartsocialcontracts/realms/issues"
+"Bug Tracker" = "https://github.com/smart-social-contracts/realms-gos/issues"
 
 [project.scripts]
 realms = "realms.cli.main:app"

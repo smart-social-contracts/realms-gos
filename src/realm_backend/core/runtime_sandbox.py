@@ -3,7 +3,7 @@
 Routes extension backend calls (and, when compatible, codex hooks) into an
 isolated CPython subinterpreter (``_basilisk_sandbox``, ic-basilisk >= 0.14.2)
 according to a realm-admin configurable policy. See
-https://github.com/smart-social-contracts/realms/issues/245
+https://github.com/smart-social-contracts/realms-gos/issues/245
 
 Policy file (persistent FS, survives upgrades): /sandbox_config.json
 

@@ -1,6 +1,6 @@
 # @realmsgos/create-extension
 
-Scaffold a sandboxed [Realms](https://github.com/smart-social-contracts/realms) extension project.
+Scaffold a sandboxed [Realms](https://github.com/smart-social-contracts/realms-gos) extension project.
 
 ## Usage
 
@@ -52,10 +52,10 @@ npm run build
 ## Documentation
 
 Extension authoring guide:
-https://github.com/smart-social-contracts/realms/blob/main/docs/guide/extension-authoring.md
+https://github.com/smart-social-contracts/realms-gos/blob/main/docs/guide/extension-authoring.md
 
 Bridge protocol reference:
-https://github.com/smart-social-contracts/realms/blob/main/docs/reference/EXTENSION_SANDBOXING.md
+https://github.com/smart-social-contracts/realms-gos/blob/main/docs/reference/EXTENSION_SANDBOXING.md
 
 ## License
 

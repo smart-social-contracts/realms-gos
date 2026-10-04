@@ -1,9 +1,9 @@
 # REPL and UI must share the same host surface
 
 > **Status:** Closed — host verbs share the UI surface; member-shaped deny/allow tested
-> **Issue:** [realms#313](https://github.com/smart-social-contracts/realms/issues/313)
+> **Issue:** [realms#313](https://github.com/smart-social-contracts/realms-gos/issues/313)
 > **App:** `src/realm_backend/core/repl_host.py`, `__shell__`
-> **Repo:** smart-social-contracts/realms
+> **Repo:** smart-social-contracts/realms-gos
 
 The REPL is another **client of the same host surface as the UI**, not a second ORM back door.
 

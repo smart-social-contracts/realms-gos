@@ -305,7 +305,7 @@ fi
 info "\n Phase 4: Submit deployment request"
 
 RELEASE_TAG="v0.3.2"
-RELEASE_BASE="https://github.com/smart-social-contracts/realms/releases/download"
+RELEASE_BASE="https://github.com/smart-social-contracts/realms-gos/releases/download"
 REALM_NAME="local-e2e-$(date +%s)"
 
 # Build extensions/codex section based on whether file_registry is available

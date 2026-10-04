@@ -110,7 +110,7 @@ describe('resolveExtensionRepoUrl', () => {
 	it('rewrites legacy realms repo paths to realms-extensions', () => {
 		const manifest: ExtensionManifestInfo = {
 			name: 'voting',
-			doc_url: 'https://github.com/smart-social-contracts/realms/tree/main/extensions/voting',
+			doc_url: 'https://github.com/smart-social-contracts/realms-gos/tree/main/extensions/voting',
 		};
 		expect(resolveExtensionRepoUrl(manifest, 'voting')).toBe(
 			'https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/voting',

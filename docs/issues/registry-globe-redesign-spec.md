@@ -2,7 +2,7 @@
 
 > **Status:** Spec / reference document for GitHub issue  
 > **App:** `src/realm_registry_frontend/`  
-> **Repo:** smart-social-contracts/realms
+> **Repo:** smart-social-contracts/realms-gos
 
 ---
 

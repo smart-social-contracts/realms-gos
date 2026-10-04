@@ -2,7 +2,7 @@ export const CODEX_REPO_BASE =
 	'https://github.com/smart-social-contracts/realms-codices/tree/main/codices';
 
 export const REALMS_RAW_BASE =
-	'https://raw.githubusercontent.com/smart-social-contracts/realms/main';
+	'https://raw.githubusercontent.com/smart-social-contracts/realms-gos/main';
 
 /** Demo-realm folders that hold the official default logo and background. */
 const CODEX_DEMO_DIR: Record<string, string> = {

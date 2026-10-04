@@ -215,7 +215,7 @@ $: routeIsActive = (path) => {
     <div class="socials">
       <a
         class="social"
-        href="https://github.com/smart-social-contracts/realms"
+        href="https://github.com/smart-social-contracts/realms-gos"
         target="_blank"
         rel="noreferrer"
         aria-label={$_('footer.github')}

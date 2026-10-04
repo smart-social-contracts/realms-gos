@@ -97,7 +97,7 @@ function SiteNav({ active = 'home' }) {
               {t('nav.forInstitutions')}
             </a>
             <a
-              href="https://github.com/smart-social-contracts/realms/blob/main/ROADMAP.md"
+              href="https://github.com/smart-social-contracts/realms-gos/blob/main/ROADMAP.md"
               target="_blank"
               rel="noopener noreferrer"
               className={navLinkClass()}
@@ -130,7 +130,7 @@ function SiteNav({ active = 'home' }) {
               {t('nav.forInstitutions')}
             </a>
             <a
-              href="https://github.com/smart-social-contracts/realms/blob/main/ROADMAP.md"
+              href="https://github.com/smart-social-contracts/realms-gos/blob/main/ROADMAP.md"
               target="_blank"
               rel="noopener noreferrer"
               className={mobileNavLinkClass()}

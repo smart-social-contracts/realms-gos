@@ -15,4 +15,4 @@ from `realm_installer`.
   only supported path. `install_realm_backend`, `deploy_frontend`, and
   `fetch_module_hash` were removed from `realm_installer`.
 
-Historical issue reference: [GitHub #192](https://github.com/smart-social-contracts/realms/issues/192).
+Historical issue reference: [GitHub #192](https://github.com/smart-social-contracts/realms-gos/issues/192).

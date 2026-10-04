@@ -41,7 +41,7 @@ export const CUSTOM_TOKEN_ID = 'custom';
 
 /** Published map: environment name → Realms token ledger. */
 export const FLEET_TOKENS_URL =
-	'https://raw.githubusercontent.com/smart-social-contracts/realms/main/fleet-tokens.json';
+	'https://raw.githubusercontent.com/smart-social-contracts/realms-gos/main/fleet-tokens.json';
 
 /** Chain-key ledgers. They do not vary by GaaS environment. */
 export const CHAIN_KEY_TOKENS: SharedTokenOption[] = [

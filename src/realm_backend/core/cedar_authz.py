@@ -123,7 +123,7 @@ def load(extra_policies: str = "") -> bool:
 
     Called once at startup. Deliberately *not* from ``post_upgrade``: the WASI
     filesystem is not mounted during that hook, so reading policy files there
-    finds nothing (smart-social-contracts/realms#281). Call it from the deferred
+    finds nothing (smart-social-contracts/realms-gos#281). Call it from the deferred
     timer that already performs extension discovery.
     """
     if CedarEngine is None or Slicer is None:

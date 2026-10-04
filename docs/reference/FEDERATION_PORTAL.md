@@ -1,7 +1,7 @@
 # Federation portal — single login origin, sandboxed realm frontends
 
 **Status:** Accepted (consolidated implementation decisions)  
-**Related:** [#232](https://github.com/smart-social-contracts/realms/issues/232) (tenant URLs), [#233](https://github.com/smart-social-contracts/realms/issues/233) (cross-realm identity, interim staging only)  
+**Related:** [#232](https://github.com/smart-social-contracts/realms-gos/issues/232) (tenant URLs), [#233](https://github.com/smart-social-contracts/realms-gos/issues/233) (cross-realm identity, interim staging only)  
 **See also:** [FEDERATION_PORTAL_REALM_BRIDGE.md](./FEDERATION_PORTAL_REALM_BRIDGE.md) (iframe `postMessage` contract)
 
 ### Domain (v1 — no new purchase required)

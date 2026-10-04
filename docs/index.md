@@ -13,7 +13,7 @@ hero:
       link: /guide/getting-started
     - theme: alt
       text: View on GitHub
-      link: https://github.com/smart-social-contracts/realms
+      link: https://github.com/smart-social-contracts/realms-gos
     - theme: alt
       text: Try Demo
       link: https://demo.realmsgos.org

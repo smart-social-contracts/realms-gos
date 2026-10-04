@@ -107,7 +107,7 @@ A working showcase of the full governance lifecycle (not yet a full MVP).
   tax collection, token transfer, user registration.
 - **Done when:** a fresh user can complete the whole loop on [demo.realmsgos.org](https://demo.realmsgos.org)
   without manual intervention.
-- **Status:** in progress · 📋 [Epic #104](https://github.com/smart-social-contracts/realms/issues/104)
+- **Status:** in progress · 📋 [Epic #104](https://github.com/smart-social-contracts/realms-gos/issues/104)
 
 ### 🟡 Next — committed, not yet started
 
@@ -119,7 +119,7 @@ Anyone can create a live Realm in a few clicks. No code, no blockchain knowledge
   tracking → founder auto-registration.
 - **Done when:** a non-technical user goes from landing page to a live, self-owned Realm
   unaided.
-- **Status:** planned · 📋 [Epic #98](https://github.com/smart-social-contracts/realms/issues/98)
+- **Status:** planned · 📋 [Epic #98](https://github.com/smart-social-contracts/realms-gos/issues/98)
 
 #### vetKeys encryption
 End-to-end encryption using the IC's vetKeys (Verifiably Encrypted Threshold Keys).
@@ -141,7 +141,7 @@ Federated, autonomous realm backends so a Realm can scale beyond one canister.
   zero data migration.
 - **Done when:** a Realm can split/merge quarters by vote, and any quarter can secede
   intact. See [QUARTERS.md](./QUARTERS.md) for the full design.
-- **Status:** designed, not started · 📋 [Epic #143](https://github.com/smart-social-contracts/realms/issues/143)
+- **Status:** designed, not started · 📋 [Epic #143](https://github.com/smart-social-contracts/realms-gos/issues/143)
 
 #### Marketplace
 Discover, publish, and install extensions and codices.
@@ -188,10 +188,10 @@ gantt
 
 ## How to follow
 
-- ⭐ **Watch / star** the [repo](https://github.com/smart-social-contracts/realms) for releases.
-- 📋 **Epics** track detailed progress: [#104](https://github.com/smart-social-contracts/realms/issues/104),
-  [#98](https://github.com/smart-social-contracts/realms/issues/98),
-  [#143](https://github.com/smart-social-contracts/realms/issues/143).
+- ⭐ **Watch / star** the [repo](https://github.com/smart-social-contracts/realms-gos) for releases.
+- 📋 **Epics** track detailed progress: [#104](https://github.com/smart-social-contracts/realms-gos/issues/104),
+  [#98](https://github.com/smart-social-contracts/realms-gos/issues/98),
+  [#143](https://github.com/smart-social-contracts/realms-gos/issues/143).
 - 🧪 **Try it:** [demo.realmsgos.org](https://demo.realmsgos.org).
 - 💬 **Contribute:** see [extensions/CONTRIBUTING.md](./extensions/CONTRIBUTING.md) and open an issue/PR.
 

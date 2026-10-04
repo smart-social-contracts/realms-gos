@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_DIR = join(__dirname, '..', 'template');
 const DOCS_URL =
-	'https://github.com/smart-social-contracts/realms/blob/main/docs/guide/extension-authoring.md';
+	'https://github.com/smart-social-contracts/realms-gos/blob/main/docs/guide/extension-authoring.md';
 
 const ID_PATTERN = /^[a-z][a-z0-9_]{2,31}$/;
 const TEXT_EXTENSIONS = new Set([

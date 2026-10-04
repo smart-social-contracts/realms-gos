@@ -4,7 +4,7 @@ Codex Entity — Realms extension of the Basilisk Toolkit Codex.
 Base Codex (name, url, checksum, code property, calls) comes from ic-basilisk-toolkit.
 This module adds realms-specific relationships: courts and federation.
 
-See: https://github.com/smart-social-contracts/realms/issues/153
+See: https://github.com/smart-social-contracts/realms-gos/issues/153
 """
 
 from ic_python_db import OneToMany, OneToOne

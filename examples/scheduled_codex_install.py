@@ -22,7 +22,7 @@ print("📦 EXAMPLE: Scheduled Codex Download and Installation")
 print("=" * 70)
 
 # Configuration
-CODEX_URL = "https://raw.githubusercontent.com/smart-social-contracts/realms/refs/heads/main/src/realm_backend/codex.py"
+CODEX_URL = "https://raw.githubusercontent.com/smart-social-contracts/realms-gos/refs/heads/main/src/realm_backend/codex.py"
 CODEX_NAME = "Subsidy Distribution System"
 CODEX_DESCRIPTION = "Automated distribution of subsidies and benefits to eligible citizens"
 SCHEDULE_DELAY_SECONDS = 300  # Run 5 minutes from now

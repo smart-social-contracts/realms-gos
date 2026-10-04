@@ -13,7 +13,7 @@ def test_download_file_with_checksum_verification():
 
     This test:
     1. Calls the download_file canister method via dfx
-    2. Downloads: https://raw.githubusercontent.com/smart-social-contracts/realms/dd22e5523f84acf72ad875c34aaef52ef644d646/canister_ids.json
+    2. Downloads: https://raw.githubusercontent.com/smart-social-contracts/realms-gos/dd22e5523f84acf72ad875c34aaef52ef644d646/canister_ids.json
     3. Verifies SHA256 checksum: 1585029aba1ad0fd473a523c46664323bf68cdf0b65c082ae4130fe9dc772964
     4. Checks that the file is saved to the specified Codex
     """
@@ -23,7 +23,7 @@ def test_download_file_with_checksum_verification():
     print("=" * 80)
 
     # Test parameters
-    url = "https://raw.githubusercontent.com/smart-social-contracts/realms/dd22e5523f84acf72ad875c34aaef52ef644d646/canister_ids.json"
+    url = "https://raw.githubusercontent.com/smart-social-contracts/realms-gos/dd22e5523f84acf72ad875c34aaef52ef644d646/canister_ids.json"
     checksum = "sha256:1585029aba1ad0fd473a523c46664323bf68cdf0b65c082ae4130fe9dc772964"
     codex_name = "test_downloaded_canister_ids"
 

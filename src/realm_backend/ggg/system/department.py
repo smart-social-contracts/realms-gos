@@ -21,7 +21,7 @@ class Department(Entity, TimestampedMixin):
     """Internal governance department within a quarter.
 
     Not to be confused with ``Organization`` (an external party the realm
-    trades with). See https://github.com/smart-social-contracts/realms/issues/240
+    trades with). See https://github.com/smart-social-contracts/realms-gos/issues/240
 
     - Members are users only (no department nesting).
     - Policy (M/N, quorum, veto) governs how members exercise powers.

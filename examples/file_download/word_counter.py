@@ -16,7 +16,7 @@ from ic_python_db import String, Integer
 import json
 
 # Configuration - change this URL to your target
-URL = "https://raw.githubusercontent.com/smart-social-contracts/realms/main/README.md"
+URL = "https://raw.githubusercontent.com/smart-social-contracts/realms-gos/main/README.md"
 MAX_RESPONSE_BYTES = 100_000  # 100KB limit
 
 

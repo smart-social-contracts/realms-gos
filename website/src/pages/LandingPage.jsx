@@ -412,7 +412,7 @@ function LandingPage() {
               <h3 className="text-xl font-semibold text-slate-800 mb-3">{t('getStarted.developers.title')}</h3>
               <p className="text-base text-slate-600 mb-6 flex-grow">{t('getStarted.developers.description')}</p>
               <a 
-                href="https://github.com/smart-social-contracts/realms"
+                href="https://github.com/smart-social-contracts/realms-gos"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center px-6 py-3 border-2 border-primary-900 text-primary-900 rounded-xl font-semibold hover:bg-primary-50 transition-colors"
@@ -434,7 +434,7 @@ function LandingPage() {
             </div>
             
             <div className="flex items-center gap-6">
-              <a href="https://github.com/smart-social-contracts/realms" target="_blank" rel="noopener noreferrer"
+              <a href="https://github.com/smart-social-contracts/realms-gos" target="_blank" rel="noopener noreferrer"
                  className="text-slate-500 hover:text-slate-900 transition-colors">
                 <Github className="w-6 h-6" />
               </a>
@@ -448,7 +448,7 @@ function LandingPage() {
                  className="text-slate-500 hover:text-slate-900 transition-colors">
                 <Mail className="w-6 h-6" />
               </a>
-              <a href="https://github.com/smart-social-contracts/realms/tree/main/docs"
+              <a href="https://github.com/smart-social-contracts/realms-gos/tree/main/docs"
                  target="_blank"
                  rel="noopener noreferrer"
                  className="text-slate-500 hover:text-slate-900 transition-colors">

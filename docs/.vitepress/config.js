@@ -58,7 +58,7 @@ export default defineConfig({
       { 
         text: `v${version}`,
         items: [
-          { text: 'Changelog', link: 'https://github.com/smart-social-contracts/realms/releases' },
+          { text: 'Changelog', link: 'https://github.com/smart-social-contracts/realms-gos/releases' },
           { text: `Current: v${version}`, link: '#' }
         ]
       }
@@ -129,7 +129,7 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/smart-social-contracts/realms' }
+      { icon: 'github', link: 'https://github.com/smart-social-contracts/realms-gos' }
     ],
 
     footer: {
@@ -138,7 +138,7 @@ export default defineConfig({
     },
 
     editLink: {
-      pattern: 'https://github.com/smart-social-contracts/realms/edit/main/docs/:path',
+      pattern: 'https://github.com/smart-social-contracts/realms-gos/edit/main/docs/:path',
       text: 'Edit this page on GitHub'
     }
   }

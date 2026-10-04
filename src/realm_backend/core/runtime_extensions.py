@@ -9,7 +9,7 @@ Extensions are stored at: /extensions/{ext_id}/
   - manifest.json   — extension metadata
   - entry.py        — backend entry point (defines functions callable via the registry)
 
-See: https://github.com/smart-social-contracts/realms/issues/168
+See: https://github.com/smart-social-contracts/realms-gos/issues/168
 """
 
 import json

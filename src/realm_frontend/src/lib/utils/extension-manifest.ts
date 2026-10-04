@@ -22,7 +22,7 @@ let loadPromise: Promise<Record<string, ExtensionManifestInfo>> | null = null;
 export const MANIFEST_FETCH_RETRY_DELAYS_MS = [1000, 3000] as const;
 
 const LEGACY_REALMS_EXTENSIONS_PREFIX =
-	'https://github.com/smart-social-contracts/realms/tree/main/extensions/';
+	'https://github.com/smart-social-contracts/realms-gos/tree/main/extensions/';
 const EXTENSIONS_REPO_PREFIX =
 	'https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/';
 
