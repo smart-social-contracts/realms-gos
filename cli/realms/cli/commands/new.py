@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import typer
 
+from .. import release_assets
 from ..utils import console, get_project_root
 from ..runlog import get_run_log
 
@@ -2400,7 +2401,7 @@ def standalone_artifact_urls(
     *,
     repo: str = REALMS_RELEASE_REPO,
 ) -> Tuple[str, str]:
-    """GitHub URLs for ``realm_backend.wasm.gz`` and ``realm_frontend.tar.gz``."""
+    """GitHub URLs for the release's realm backend wasm and frontend bundle."""
     ref = (version or "latest").strip()
     if ref in ("build",):
         raise StageError(
@@ -2409,13 +2410,15 @@ def standalone_artifact_urls(
             "GitHub semver tag (e.g. v0.3.5)",
         )
     if ref in ("main", "latest", ""):
-        base = f"https://github.com/{repo}/releases/latest/download"
+        try:
+            tag = release_assets.latest_tag(repo=repo)
+        except Exception as exc:
+            raise StageError("deploy", f"Could not resolve the latest {repo} release: {exc}") from exc
     else:
-        tag = ref if ref.startswith("v") else f"v{ref}"
-        base = f"https://github.com/{repo}/releases/download/{tag}"
+        tag = release_assets.normalize_tag(ref)
     return (
-        f"{base}/realm_backend.wasm.gz",
-        f"{base}/realm_frontend.tar.gz",
+        release_assets.asset_url("realm_backend.wasm.gz", tag, repo=repo),
+        release_assets.asset_url("realm_frontend.tar.gz", tag, repo=repo),
     )
 
 

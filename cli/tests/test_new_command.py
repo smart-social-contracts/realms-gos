@@ -658,15 +658,34 @@ class TestDeployMode:
         assert "gaas" in exc.value.message
         assert "standalone" in exc.value.message
 
-    def test_standalone_latest_urls(self):
+    def test_standalone_latest_urls(self, monkeypatch):
+        from realms.cli import release_assets
+
+        monkeypatch.setattr(release_assets, "latest_tag", lambda **_: "v0.6.1")
         backend, frontend = standalone_artifact_urls("latest")
-        assert backend.endswith("/releases/latest/download/realm_backend.wasm.gz")
-        assert frontend.endswith("/releases/latest/download/realm_frontend.tar.gz")
+        assert backend.endswith("/releases/download/v0.6.1/realm-backend-v0.6.1.wasm.gz")
+        assert frontend.endswith("/releases/download/v0.6.1/realm-frontend-v0.6.1.tar.gz")
+
+    def test_standalone_latest_unresolvable(self, monkeypatch):
+        from realms.cli import release_assets
+
+        def offline(**_):
+            raise OSError("offline")
+
+        monkeypatch.setattr(release_assets, "latest_tag", offline)
+        with pytest.raises(StageError) as exc:
+            standalone_artifact_urls("latest")
+        assert "latest" in exc.value.message
 
     def test_standalone_semver_urls(self):
         backend, frontend = standalone_artifact_urls("0.3.5")
         assert "/releases/download/v0.3.5/realm_backend.wasm.gz" in backend
         assert "/releases/download/v0.3.5/realm_frontend.tar.gz" in frontend
+
+    def test_standalone_stamped_semver_urls(self):
+        backend, frontend = standalone_artifact_urls("v0.6.1")
+        assert backend.endswith("/releases/download/v0.6.1/realm-backend-v0.6.1.wasm.gz")
+        assert frontend.endswith("/releases/download/v0.6.1/realm-frontend-v0.6.1.tar.gz")
 
     def test_standalone_rejects_build(self):
         with pytest.raises(StageError) as exc:

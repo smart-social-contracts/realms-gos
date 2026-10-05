@@ -20,6 +20,7 @@ import typer
 import yaml
 from rich.console import Console
 
+from .. import release_assets
 from ..descriptor_flags import TEST_PARAM_MAP
 from ..utils import console, get_project_root
 
@@ -295,9 +296,9 @@ def _resolve_artifact(
         raise ValueError(f"Unknown artifact reference: {ref}")
 
     if artifact_type == "realm_backend":
-        url = f"https://github.com/{repo}/releases/download/v{version}/realm_backend.wasm.gz"
+        url = release_assets.asset_url("realm_backend.wasm.gz", version, repo=repo)
     elif artifact_type == "realm_frontend":
-        url = f"https://github.com/{repo}/releases/download/v{version}/realm_frontend.tar.gz"
+        url = release_assets.asset_url("realm_frontend.tar.gz", version, repo=repo)
     else:
         raise ValueError(f"Unknown artifact type: {artifact_type}")
 
