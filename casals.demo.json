@@ -3,38 +3,26 @@
   "name": "realms-product",
   "description": "Realms product orchestra: the marketplace, the fleet file registry (extensions, codices, catalogs), and the RLM token and NFT canisters.",
   "environments": {
-    "local": {
-      "network": "local",
-      "dns": {
-        "provider": "none"
-      },
-      "marketplace_host": "",
-      "casals_host": "",
-      "principals": {
-        "operator": "$deployer"
-      },
-      "cycles": {
-        "budget_tc": 300
-      }
-    },
-    "production": {
+    "demo": {
       "network": "ic",
-      "$comment": "operator is prod-identity (YubiKey). Deploy through an icp delegation from it. DNS lives in the Cloudflare zone realmsgos.org; the API token is read from $CLOUDFLARE_API_TOKEN, never written here.",
+      "$comment": "Demo on mainnet. Operator is dev-identity. Hosts are demo.realmsgos.org and casals.demo.realmsgos.org.",
       "dns": {
         "provider": "cloudflare",
         "zone": "realmsgos.org",
         "token_env": "CLOUDFLARE_API_TOKEN",
         "ttl": 60
       },
-      "marketplace_host": "realmsgos.org",
-      "casals_host": "casals.realmsgos.org",
+      "marketplace_host": "demo.realmsgos.org",
+      "casals_host": "casals.demo.realmsgos.org",
       "principals": {
         "operator": "$deployer",
+        "$comment_operator_code": "Unclaimed access-code slot. Whoever redeems it becomes a conductor commander with full access. The code is not stored in this file.",
+        "operator_code": "sha256:bfefe7081c3ccf6dc36752e7461f4e98d8ceb4ff966a11a61cfdcb6b7b6cc13a",
         "$comment_deployer": "The identity that ran casals up. It is a controller of the governance multisig only.",
         "deployer": "$deployer"
       },
       "cycles": {
-        "budget_tc": 20
+        "budget_tc": 15
       }
     }
   },
@@ -69,6 +57,10 @@
     "commanders": [
       {
         "principal": "$principal:operator",
+        "permissions": "*"
+      },
+      {
+        "principal": "$principal:operator_code",
         "permissions": "*"
       }
     ],
