@@ -1,0 +1,41 @@
+# Publish the realms-gos CLI to https://pypi.org/project/realms-gos/ from the
+# checked-out tag. Called by release-verify.yml once a published release's
+# signature checks out.
+name: Publish CLI to PyPI
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Build and publish
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          cd cli
+          PYPROJECT_VERSION=$(grep -Po '^version = "\K[^"]*' pyproject.toml)
+          INIT_VERSION=$(grep -Po '(?<=__version__ = ")[^"]*' realms/__init__.py)
+          if [ "$PYPROJECT_VERSION" != "$INIT_VERSION" ]; then
+            echo "ERROR: Version mismatch between pyproject.toml and __init__.py"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "v$PYPROJECT_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "ERROR: cli/pyproject.toml says $PYPROJECT_VERSION but the tag is $GITHUB_REF_NAME"
+            exit 1
+          fi
+          pip install build twine
+          python -m build
+          twine check dist/*
+          twine upload --skip-existing dist/*

@@ -263,7 +263,9 @@ jobs:
           CHECKSUMS="checksums-${RELEASE_TAG}.txt"
           echo "# SHA-256 checksums for release assets" > "$CHECKSUMS"
           for src in realm_backend.wasm.gz realm_backend.did realm_frontend.tar.gz \
+                     realm_frontend.manifest.json \
                      marketplace_backend.wasm.gz marketplace_frontend.tar.gz \
+                     marketplace_frontend.manifest.json \
                      token_backend.wasm.gz nft_backend.wasm.gz; do
             f="$(stamp "$src")"
             [ -f "$f" ] && sha256sum "$f" >> "$CHECKSUMS"
@@ -293,7 +295,11 @@ jobs:
           echo "Backend checksum: ${BACKEND_HASH}"
           echo "Frontend tarball checksum: ${FRONTEND_HASH}"
 
-      - name: Build and publish CLI to PyPI
+      # A CLI-only run has no release assets to sign, so it publishes the CLI
+      # here. Full releases publish it from release-verify.yml once the
+      # signed release is published.
+      - name: Build and publish CLI to PyPI (CLI only)
+        if: ${{ inputs.cli_only == true }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
@@ -310,15 +316,42 @@ jobs:
           twine upload dist/*
           echo "✅ CLI published to PyPI: v${{ steps.bump_version.outputs.NEW_VERSION }}"
 
-      # Create GitHub release (reads notes file from workspace before we clean it up)
+      # The tag is created when the draft is published, at this commit, so it
+      # carries the bumped version files the PyPI build reads.
+      - name: Commit and push version changes
+        id: version_commit
+        run: |
+          if [ -f ".github/RELEASE_NOTES_NEXT.md" ]; then
+            cp .github/RELEASE_NOTES_NEXT.md "$RUNNER_TEMP/release-notes.md"
+          else
+            : > "$RUNNER_TEMP/release-notes.md"
+          fi
+          git add version.txt cli/pyproject.toml cli/realms/__init__.py
+          if [ -f ".github/RELEASE_NOTES_NEXT.md" ]; then
+            git rm .github/RELEASE_NOTES_NEXT.md
+          fi
+          if git diff --cached --quiet; then
+            echo "No version or release-notes changes to commit"
+          else
+            git commit -m "chore: bump version to ${{ steps.bump_version.outputs.NEW_VERSION }}"
+            git remote set-url origin https://${{ secrets.PAT_GITHUB }}@github.com/${{ github.repository }}.git
+            git push origin
+            echo "✅ Version changes committed and pushed"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         if: ${{ inputs.cli_only != true }}
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.bump_version.outputs.NEW_VERSION }}
+          target_commitish: ${{ steps.version_commit.outputs.sha }}
           name: Release v${{ steps.bump_version.outputs.NEW_VERSION }}
-          body_path: .github/RELEASE_NOTES_NEXT.md
+          body_path: ${{ runner.temp }}/release-notes.md
+          # Stays a draft until the checksum file is signed with the release key
+          # (smart-social-contracts/.github scripts/sign-release.sh).
+          draft: true
           fail_on_unmatched_files: true
           files: |
             realm-backend-v${{ steps.bump_version.outputs.NEW_VERSION }}.wasm.gz
@@ -331,35 +364,6 @@ jobs:
             marketplace-frontend-v${{ steps.bump_version.outputs.NEW_VERSION }}.tar.gz
             marketplace-frontend-v${{ steps.bump_version.outputs.NEW_VERSION }}.manifest.json
             checksums-v${{ steps.bump_version.outputs.NEW_VERSION }}.txt
-
-      - name: Create GitHub Release (CLI / PyPI only)
-        if: ${{ inputs.cli_only == true }}
-        id: create_release_cli
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.bump_version.outputs.NEW_VERSION }}
-          name: Release v${{ steps.bump_version.outputs.NEW_VERSION }}
-          body: |
-            CLI / PyPI release `${{ steps.bump_version.outputs.NEW_VERSION }}`.
-
-            Package `realms-gos` public name: **Realms GOS** (Governance Operating System).
-
-      # Commit version bump + remove the consumed release notes file
-      - name: Commit and push version changes
-        run: |
-          git add version.txt cli/pyproject.toml cli/realms/__init__.py
-          # Remove the release notes file now that the release is published
-          if [ -f ".github/RELEASE_NOTES_NEXT.md" ]; then
-            git rm .github/RELEASE_NOTES_NEXT.md
-          fi
-          if git diff --cached --quiet; then
-            echo "No version or release-notes changes to commit"
-          else
-            git commit -m "chore: bump version to ${{ steps.bump_version.outputs.NEW_VERSION }}"
-            git remote set-url origin https://${{ secrets.PAT_GITHUB }}@github.com/${{ github.repository }}.git
-            git push origin
-            echo "✅ Version changes committed and pushed"
-          fi
 
       # Publish the release artifacts to the production file_registry (the
       # installer serves realms from it). The registry id is the operator
@@ -378,11 +382,15 @@ jobs:
         run: |
           echo "═══════════════════════════════════════════════════════"
           echo " Release v${{ steps.bump_version.outputs.NEW_VERSION }} complete"
-          echo " GitHub: ${{ steps.create_release.outputs.url || steps.create_release_cli.outputs.url }}"
-          echo " PyPI:   https://pypi.org/project/realms-gos/${{ steps.bump_version.outputs.NEW_VERSION }}/"
           if [ "${{ inputs.cli_only }}" = "true" ]; then
+            echo " PyPI:   https://pypi.org/project/realms-gos/${{ steps.bump_version.outputs.NEW_VERSION }}/"
             echo " scope: CLI / PyPI only"
-          elif [ "${{ inputs.publish_to_registry }}" = "true" ]; then
+          else
+            echo " Draft:  ${{ steps.create_release.outputs.url }}"
+            echo " Sign and publish: sign-release.sh ${{ github.repository }} v${{ steps.bump_version.outputs.NEW_VERSION }}"
+            echo " PyPI follows from release-verify.yml once the signature checks out."
+          fi
+          if [ "${{ inputs.publish_to_registry }}" = "true" ]; then
             echo " file_registry: published to production"
           fi
           echo "═══════════════════════════════════════════════════════"
