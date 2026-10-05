@@ -106,25 +106,25 @@
       {
         "family": "casals-backend",
         "version": "main",
-        "source": "release:smart-social-contracts/Casals@v0.3.3:casals_backend.wasm.gz",
-        "sha256": "1dce5edb5766123b64b820b6d2c1d38417c68601b6bf46daf4edc4b907f4748b"
+        "source": "release:smart-social-contracts/Casals@v0.4.0:casals_backend.wasm.gz",
+        "sha256": "dc0f557f6b7cde042e643548e1c8ab4a5ce03748c86001bffccbb2bf9486ec1a"
       },
       {
         "family": "certified-assets",
         "version": "0.3.0",
-        "source": "release:smart-social-contracts/Casals@v0.3.2:certified-assets@0.3.0.wasm.gz",
+        "source": "release:smart-social-contracts/Casals@v0.4.0:certified-assets@0.3.0.wasm.gz",
         "sha256": "75df75f39763077fd0333b4ac46ba03b2b23ec313fa85f79a2097bd98bb363d1"
       },
       {
         "family": "certified-assets",
         "version": "1.0.0",
-        "source": "release:smart-social-contracts/Casals@v0.3.2:certified-assets@1.0.0.wasm.gz",
+        "source": "release:smart-social-contracts/Casals@v0.4.0:certified-assets@1.0.0.wasm.gz",
         "sha256": "63d122d0149a29f4e48603efdd7d2bce656a6a83bac1e3207897c68e8e225bb6"
       },
       {
         "family": "orchestration-multisig",
         "version": "1.6.0",
-        "source": "release:smart-social-contracts/Casals@v0.3.2:orchestration-multisig@1.6.0.wasm.gz",
+        "source": "release:smart-social-contracts/Casals@v0.4.0:orchestration-multisig@1.6.0.wasm.gz",
         "sha256": "c8d3adecf9bea8d9e7811cfa5d9eda8f61723c770f85132b91c8b2cffb37974f"
       },
       {
@@ -136,27 +136,27 @@
       {
         "family": "marketplace-backend",
         "version": "main",
-        "source": "release:smart-social-contracts/realms-gos@v0.5.2:marketplace_backend.wasm.gz",
-        "sha256": "691febbf3f58eb501af1a00b4e7f0aed4dc14aa6937cf4eadaf89f988d0710a7"
+        "source": "release:smart-social-contracts/realms-gos@v0.6.1:marketplace-backend-v0.6.1.wasm.gz",
+        "sha256": "7324f73e703efe2423891b71699af07732bba9ec074fddd83cdeba31a5dd1262"
       },
       {
         "family": "token-backend",
         "version": "0.1.0",
-        "source": "release:smart-social-contracts/realms-gos@v0.5.2:token_backend.wasm.gz",
+        "source": "release:smart-social-contracts/realms-gos@v0.6.1:token-backend-v0.6.1.wasm.gz",
         "sha256": "a1734ad2ec260ce85e541f860dbcaf8c846423709177587c7e5f70adc47e461a"
       },
       {
         "family": "nft-backend",
         "version": "0.1.0",
-        "source": "release:smart-social-contracts/realms-gos@v0.5.2:nft_backend.wasm.gz",
+        "source": "release:smart-social-contracts/realms-gos@v0.6.1:nft-backend-v0.6.1.wasm.gz",
         "sha256": "abea08d97de800d4e299545be786dd02c9c6a7d93aaccc3770a08c213dfa484b"
       }
     ],
     "bundles": [
       {
         "path": "frontend/marketplace-assets/main",
-        "source": "release:smart-social-contracts/realms-gos@v0.5.2:marketplace_frontend.tar.gz",
-        "sha256": "03d93021f4eb60f4f7dca80dab9e94ddeed6feaed50f80ba8a065e538402827d"
+        "source": "release:smart-social-contracts/realms-gos@v0.6.1:marketplace-frontend-v0.6.1.tar.gz",
+        "sha256": "4d35ed3a0d6d80a516e643cd3af0b0e87d0d5403d3339118097b6b6b094efbe7"
       },
       {
         "path": "frontend/file-registry-assets/main",
@@ -165,8 +165,8 @@
       },
       {
         "path": "frontend/casals-ui/main",
-        "source": "release:smart-social-contracts/Casals@v0.3.3:casals_frontend.tar.gz",
-        "sha256": "ddcbbcf11cefb2560cb8226f35f282b7f8652b70ef698173c910022342f25cdb"
+        "source": "release:smart-social-contracts/Casals@v0.4.0:casals_frontend.tar.gz",
+        "sha256": "150292ea6d42d20d501f61356ed55efa4c095f5bbdcff3999450818929af768b"
       }
     ]
   },
