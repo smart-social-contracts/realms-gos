@@ -128,6 +128,8 @@ jobs:
 
       # ── cross-quarter addressing against the converged demo realm ───────────
       # The harness keeps each orchestra's bindings in <CASALS_HOME>/<sheet name>/.
+      # Realms are deployed by the gaas orchestra; the product sheet has no
+      # demo-backend, and then there is no realm here to address.
       - name: Resolve the demo realm backend from the live bindings
         working-directory: Casals
         env:
@@ -135,11 +137,16 @@ jobs:
         run: |
           export TERM=xterm
           python3 -m casals_cli.main -e local --identity local-dev export ../realms/casals.json > /tmp/export.json
-          REALM_BACKEND_ID=$(python3 -c 'import json; print(json.load(open("/tmp/export.json"))["bindings"]["demo-backend"])')
+          REALM_BACKEND_ID=$(python3 -c 'import json; print(json.load(open("/tmp/export.json"))["bindings"].get("demo-backend", ""))')
           echo "REALM_BACKEND_ID=$REALM_BACKEND_ID" >> "$GITHUB_ENV"
-          echo "demo-backend = $REALM_BACKEND_ID"
+          if [ -n "$REALM_BACKEND_ID" ]; then
+            echo "demo-backend = $REALM_BACKEND_ID"
+          else
+            echo "::notice::casals.json has no demo-backend; skipping the cross-quarter live tests"
+          fi
 
       - name: cross-quarter live integration tests
+        if: env.REALM_BACKEND_ID != ''
         working-directory: realms
         env:
           DFX_WARNING: -mainnet_plaintext_identity
