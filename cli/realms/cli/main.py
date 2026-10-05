@@ -1629,6 +1629,25 @@ def marketplace_publish(
     )
 
 
+@marketplace_app.command("transfer")
+def marketplace_transfer(
+    marketplace: str = typer.Option(..., "--marketplace", "-m", help="marketplace_backend canister id"),
+    to: str = typer.Option(..., "--to", help="Principal that becomes the owner"),
+    network: str = typer.Option("ic", "--network", "-n", help="Network (ic, local)"),
+    identity: Optional[str] = typer.Option(None, "--identity", help="Current owner, or a controller of the marketplace"),
+    extensions: str = typer.Option("", "--extensions", help="Comma-separated extension ids (default: every listing the signer owns)"),
+    codices: str = typer.Option("", "--codices", help="Comma-separated codex ids"),
+    assistants: str = typer.Option("", "--assistants", help="Comma-separated assistant ids"),
+) -> None:
+    """Hand marketplace listings to another principal, keeping version and review state."""
+    from .commands.marketplace_transfer import marketplace_transfer_command
+
+    marketplace_transfer_command(
+        marketplace=marketplace, to=to, network=network, identity=identity,
+        extensions=extensions, codices=codices, assistants=assistants,
+    )
+
+
 # ============== Billing Commands ==============
 
 @registry_billing_app.command("balance")

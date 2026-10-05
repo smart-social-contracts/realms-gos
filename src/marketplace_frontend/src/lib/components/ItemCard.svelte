@@ -9,6 +9,7 @@ export let name;
 export let description;
 export let version;
 export let developer;
+export let developerName = "";
 export let icon = "";
 export let priceE8s = 0;
 export let installs = 0;
@@ -34,7 +35,7 @@ export let thumbnail = "";
       <p class="meta">
         <span>v{version}</span>
         <span class="dot">·</span>
-        <span class="dev" class:mono={looksLikePrincipal(developer)}>{$_('card.by')} {developerLabel(developer)}</span>
+        <span class="dev" class:mono={!developerName && looksLikePrincipal(developer)}>{$_('card.by')} {developerLabel(developer, developerName)}</span>
       </p>
     </div>
     <div class="price-badge">{priceE8s ? formatPrice(priceE8s) : $_('card.free')}</div>

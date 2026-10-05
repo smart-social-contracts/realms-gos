@@ -176,6 +176,7 @@ function doSearch() {
         description={a.description}
         version={a.version}
         developer={a.developer}
+        developerName={a.developer_name}
         icon={a.icon}
         priceE8s={a.price_e8s}
         installs={a.installs}

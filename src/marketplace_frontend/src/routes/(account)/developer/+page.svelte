@@ -11,6 +11,7 @@ let license = null;
 let pricing = { license_price_usd_cents: 0, license_duration_seconds: 0 };
 let myExtensions = [];
 let myCodices = [];
+let myAssistants = [];
 let buyingLicense = false;
 let licenseError = "";
 $: void load($isAuthenticated);
@@ -19,6 +20,7 @@ async function load(_authed) {
     license = null;
     myExtensions = [];
     myCodices = [];
+    myAssistants = [];
     return;
   }
   loading = true;
@@ -28,6 +30,7 @@ async function load(_authed) {
     license = await marketplaceClient.getLicenseStatus();
     myExtensions = await marketplaceClient.getMyExtensions();
     myCodices = await marketplaceClient.getMyCodices();
+    myAssistants = await marketplaceClient.getMyAssistants();
   } catch (e) {
     error = e?.message ?? String(e);
   } finally {
@@ -77,6 +80,7 @@ async function delist(kind, id) {
   if (!confirm($_("developer.delist_confirm", { values: { kind, id } }))) return;
   try {
     if (kind === "ext") await marketplaceClient.delistExtension(id);
+    else if (kind === "assistant") await marketplaceClient.delistAssistant(id);
     else await marketplaceClient.delistCodex(id);
     await load(true);
   } catch (e) {
@@ -140,7 +144,7 @@ async function delist(kind, id) {
       <table>
         <thead><tr><th>{$_('developer.col_id')}</th><th>{$_('developer.col_version')}</th><th>{$_('developer.col_verified')}</th><th>{$_('developer.col_installs')}</th><th>{$_('developer.col_likes')}</th><th>{$_('developer.col_updated')}</th><th></th></tr></thead>
         <tbody>
-          {#each myExtensions as e}
+          {#each myExtensions as e (e.extension_id)}
             <tr>
               <td><a class="link" href={`/extensions/${encodeURIComponent(e.extension_id)}`}>{e.extension_id}</a></td>
               <td>{e.version}</td>
@@ -169,7 +173,7 @@ async function delist(kind, id) {
       <table>
         <thead><tr><th>{$_('developer.col_id')}</th><th>{$_('developer.col_version')}</th><th>{$_('developer.col_verified')}</th><th>{$_('developer.col_installs')}</th><th>{$_('developer.col_likes')}</th><th>{$_('developer.col_updated')}</th><th></th></tr></thead>
         <tbody>
-          {#each myCodices as c}
+          {#each myCodices as c (c.codex_id)}
             <tr>
               <td><a class="link" href={`/codices/${encodeURIComponent(c.codex_id)}`}>{c.codex_id}</a></td>
               <td>{c.version}</td>
@@ -182,6 +186,35 @@ async function delist(kind, id) {
                   {$_('developer.request_audit')}
                 </button>
                 <button class="btn tiny ghost" on:click={() => delist('codex', c.codex_id)}>{$_('developer.delist')}</button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+  </section>
+
+  <section class="card">
+    <h2>{$_('developer.my_assistants', { values: { count: myAssistants.length } })}</h2>
+    {#if myAssistants.length === 0}
+      <p class="muted">{$_('developer.none_assistant')} <a href="/upload">{$_('developer.upload_one')}</a></p>
+    {:else}
+      <table>
+        <thead><tr><th>{$_('developer.col_id')}</th><th>{$_('developer.col_version')}</th><th>{$_('developer.col_verified')}</th><th>{$_('developer.col_installs')}</th><th>{$_('developer.col_likes')}</th><th>{$_('developer.col_updated')}</th><th></th></tr></thead>
+        <tbody>
+          {#each myAssistants as a (a.assistant_id)}
+            <tr>
+              <td><a class="link" href={`/assistants/${encodeURIComponent(a.assistant_id)}`}>{a.assistant_id}</a></td>
+              <td>{a.version}</td>
+              <td><VerifiedBadge status={a.verification_status} /></td>
+              <td>{formatCount(a.installs)}</td>
+              <td>{formatCount(a.likes)}</td>
+              <td>{formatTimeAgo(a.updated_at)}</td>
+              <td>
+                <button class="btn tiny" disabled={a.verification_status === 'pending_audit' || a.verification_status === 'verified'} on:click={() => requestAuditFor('assistant', a.assistant_id)}>
+                  {$_('developer.request_audit')}
+                </button>
+                <button class="btn tiny ghost" on:click={() => delist('assistant', a.assistant_id)}>{$_('developer.delist')}</button>
               </td>
             </tr>
           {/each}

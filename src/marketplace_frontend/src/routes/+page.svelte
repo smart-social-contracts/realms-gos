@@ -295,6 +295,7 @@ function extensionThumbnail(ext) {
         description={it.description}
         version={it.version}
         developer={it.developer}
+        developerName={it.developer_name}
         icon={it.icon || defaultIcon(kind)}
         priceE8s={it.price_e8s}
         installs={it.installs}

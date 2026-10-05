@@ -22,7 +22,8 @@ function ext(
 ): ExtensionListing {
   return {
     extension_id: id,
-    developer: 'Realms Team',
+    developer: 'Realms GOS team',
+    developer_name: 'Realms GOS team',
     name,
     description,
     version,
@@ -57,7 +58,8 @@ function codex(
     codex_id: id,
     codex_alias: alias,
     realm_type: realmType,
-    developer: 'Realms Team',
+    developer: 'Realms GOS team',
+    developer_name: 'Realms GOS team',
     name,
     description,
     version,

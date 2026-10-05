@@ -80,7 +80,7 @@ sys.modules["_cdk"] = sys.modules["_cdk_marketplace"]
 
 _short_aliases = ["core", "core.models", "api"]
 _api_short_modules = [
-    "api.config", "api.extensions", "api.codices", "api.assistants",
+    "api.config", "api.developers", "api.extensions", "api.codices", "api.assistants",
     "api.likes", "api.rankings", "api.licenses", "api.verification",
     "api.status", "api.approval",
 ]
@@ -102,6 +102,7 @@ licenses_api = sys.modules["api.licenses"]
 config_api = sys.modules["api.config"]
 verification_api = sys.modules["api.verification"]
 approval_api = sys.modules["api.approval"]
+developers_api = sys.modules["api.developers"]
 
 # 2. Drop the short-name aliases from sys.modules so other test
 #    suites that import a different package's `core`, `api`, or `_cdk`
@@ -172,6 +173,7 @@ def _reset_state():
         AssistantListingEntity,
         CodexListingEntity,
         DeveloperLicenseEntity,
+        DeveloperProfileEntity,
         ExtensionListingEntity,
         LikeEntity,
         MarketplaceConfigEntity,
@@ -184,6 +186,7 @@ def _reset_state():
         PurchaseEntity,
         LikeEntity,
         DeveloperLicenseEntity,
+        DeveloperProfileEntity,
         MarketplaceConfigEntity,
     ):
         try:

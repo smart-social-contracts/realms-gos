@@ -279,6 +279,8 @@
     "my_codices": "Mes codex ({count})",
     "none_ext": "Vous n’avez encore publié aucune extension.",
     "none_codex": "Vous n’avez encore publié aucun codex.",
+    "my_assistants": "Mes assistants ({count})",
+    "none_assistant": "Vous n’avez encore publié aucun assistant.",
     "upload_one": "Téléversez-en une →",
     "col_id": "Id",
     "col_version": "Version",

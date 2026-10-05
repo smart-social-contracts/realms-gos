@@ -13,6 +13,7 @@ Lookups accept the original id; we convert before hitting the entity.
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
+from api.developers import developer_name
 from api.licenses import has_active_license
 from core.models import CodexListingEntity, PurchaseEntity
 from ic_python_logging import get_logger
@@ -42,6 +43,7 @@ def _to_dict(c: CodexListingEntity) -> Dict[str, Any]:
         "codex_alias": str(c.codex_alias or ""),
         "realm_type": str(c.realm_type or ""),
         "developer": str(c.developer or ""),
+        "developer_name": developer_name(str(c.developer or "")),
         "name": str(c.name or ""),
         "description": str(c.description or ""),
         "version": str(c.version or ""),

@@ -22,6 +22,7 @@ from typing import Any, Dict
 
 from _cdk import ic
 from api.config import add_reviewer, get_billing_service_principal, get_reviewers
+from api.developers import developer_names
 from core.models import DeveloperLicenseEntity
 from ic_python_logging import get_logger
 
@@ -173,14 +174,17 @@ def grant_publisher_from_json(args: str) -> Dict:
 
 
 def publishing_status() -> Dict:
-    """Who may publish and review: {"reviewers": [...], "licensed": [...]},
-    both sorted, so a sheet's `converged_when.contains` can read it back."""
+    """Who may publish and review, and how developers are named:
+    {"reviewers": [...], "licensed": [...], "names": [{"principal", "name"}, ...]},
+    all sorted by principal, so a sheet's `converged_when.contains` can read it
+    back (a sheet resolves placeholders in values, not in object keys)."""
     licensed = sorted(
         str(lic.principal)
         for lic in DeveloperLicenseEntity.instances()
         if has_active_license(str(lic.principal))
     )
-    return {"reviewers": sorted(get_reviewers()), "licensed": licensed}
+    names = [{"principal": p, "name": n} for p, n in sorted(developer_names().items())]
+    return {"reviewers": sorted(get_reviewers()), "licensed": licensed, "names": names}
 
 
 def revoke_license(principal: str) -> Dict:

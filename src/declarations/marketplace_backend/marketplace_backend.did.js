@@ -92,6 +92,7 @@ export const idlFactory = ({ IDL }) => {
     'runtime' : IDL.Text,
     'file_registry_namespace' : IDL.Text,
     'developer' : IDL.Text,
+    'developer_name' : IDL.Text,
     'pricing_summary' : IDL.Text,
   });
   const AssistantResult = IDL.Variant({
@@ -118,6 +119,7 @@ export const idlFactory = ({ IDL }) => {
     'price_e8s' : IDL.Nat64,
     'file_registry_namespace' : IDL.Text,
     'developer' : IDL.Text,
+    'developer_name' : IDL.Text,
   });
   const CodexResult = IDL.Variant({ 'Ok' : CodexListing, 'Err' : IDL.Text });
   const ExtensionListing = IDL.Record({
@@ -140,6 +142,7 @@ export const idlFactory = ({ IDL }) => {
     'price_e8s' : IDL.Nat64,
     'file_registry_namespace' : IDL.Text,
     'developer' : IDL.Text,
+    'developer_name' : IDL.Text,
   });
   const ExtensionResult = IDL.Variant({
     'Ok' : ExtensionListing,
@@ -250,6 +253,11 @@ export const idlFactory = ({ IDL }) => {
     'create_codex' : IDL.Func([CodexInput], [GenericResult], []),
     'create_extension' : IDL.Func([ExtensionInput], [GenericResult], []),
     'delist_assistant' : IDL.Func([IDL.Text], [GenericResult], []),
+    'transfer_listing' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text],
+        [GenericResult],
+        [],
+      ),
     'delist_codex' : IDL.Func([IDL.Text], [GenericResult], []),
     'delist_extension' : IDL.Func([IDL.Text], [GenericResult], []),
     'get_assistant_details' : IDL.Func(

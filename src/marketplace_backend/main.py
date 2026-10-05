@@ -284,6 +284,10 @@ from api.config import (
     set_file_registry_canister_id as set_file_registry_canister_id_impl,
     set_license_pricing as set_license_pricing_impl,
 )
+from api.developers import (
+    set_developer_name_from_json as set_developer_name_from_json_impl,
+    transfer_listing as transfer_listing_impl,
+)
 from api.extensions import (
     buy_extension as buy_extension_impl,
     create_extension as create_extension_impl,
@@ -419,6 +423,7 @@ class ExtensionInput(Record):
 class ExtensionListing(Record):
     extension_id: text
     developer: text
+    developer_name: text
     name: text
     description: text
     version: text
@@ -470,6 +475,7 @@ class CodexListing(Record):
     codex_alias: text
     realm_type: text
     developer: text
+    developer_name: text
     name: text
     description: text
     version: text
@@ -527,6 +533,7 @@ class AssistantListing(Record):
     assistant_id: text
     assistant_alias: text
     developer: text
+    developer_name: text
     name: text
     description: text
     version: text
@@ -638,6 +645,7 @@ def _ext_listing_record(d: dict) -> "ExtensionListing":
     return ExtensionListing(
         extension_id=d["extension_id"],
         developer=d["developer"],
+        developer_name=d.get("developer_name", ""),
         name=d["name"],
         description=d["description"],
         version=d["version"],
@@ -664,6 +672,7 @@ def _codex_listing_record(d: dict) -> "CodexListing":
         codex_alias=d["codex_alias"],
         realm_type=d["realm_type"],
         developer=d["developer"],
+        developer_name=d.get("developer_name", ""),
         name=d["name"],
         description=d["description"],
         version=d["version"],
@@ -687,6 +696,7 @@ def _assistant_listing_record(d: dict) -> "AssistantListing":
         assistant_id=d["assistant_id"],
         assistant_alias=d["assistant_alias"],
         developer=d["developer"],
+        developer_name=d.get("developer_name", ""),
         name=d["name"],
         description=d["description"],
         version=d["version"],
@@ -1488,6 +1498,28 @@ def admin_grant_publisher(args: text) -> text:
         return json.dumps(grant_publisher_from_json_impl(args))
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
+
+
+@update
+def admin_set_developer_name(args: text) -> text:
+    """Give a developer principal a public display name, from a JSON argument
+    {"principal", "name"} (empty name removes it), so a Casals sheet config row
+    can set it through the conductor. Controller only."""
+    try:
+        return json.dumps(set_developer_name_from_json_impl(args))
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@update
+def transfer_listing(item_kind: text, item_id: text, new_developer: text) -> GenericResult:
+    """Hand a listing (item_kind ext | codex | assistant) to another principal.
+    Current owner or a controller only; version and review state are kept."""
+    try:
+        r = transfer_listing_impl(str(ic.caller()), item_kind, item_id, new_developer)
+        return {"Ok": r["action"]} if r["success"] else {"Err": r["error"]}
+    except Exception as e:
+        return {"Err": str(e)}
 
 
 @query

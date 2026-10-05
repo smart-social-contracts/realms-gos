@@ -279,6 +279,8 @@
     "my_codices": "My codices ({count})",
     "none_ext": "You haven't published any extensions yet.",
     "none_codex": "You haven't published any codices yet.",
+    "my_assistants": "My assistants ({count})",
+    "none_assistant": "You haven't published any assistants yet.",
     "upload_one": "Upload one →",
     "col_id": "Id",
     "col_version": "Version",

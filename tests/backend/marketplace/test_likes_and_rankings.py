@@ -18,6 +18,7 @@ def _create_ext(extension_id="voting", **kw):
         price_e8s=0,
         icon="",
         categories="other",
+        screenshots="",
         file_registry_canister_id="fr-1",
         file_registry_namespace=f"ext/{extension_id}/0.1.0",
     )

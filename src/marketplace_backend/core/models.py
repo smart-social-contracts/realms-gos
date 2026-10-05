@@ -6,6 +6,7 @@ Five families:
   * PurchaseEntity                              — record of a buy_*.
   * LikeEntity                                  — one row per (user, item).
   * DeveloperLicenseEntity                      — paid annual license.
+  * DeveloperProfileEntity                      — display name per developer principal.
   * MarketplaceConfigEntity                     — singleton config (file_registry id, billing service principal, license pricing).
 
 All record fields are stored on-chain in the canister's StableBTreeMap
@@ -211,6 +212,19 @@ class DeveloperLicenseEntity(Entity):
     payment_method                = String(max_length=32)   # stripe | manual | voucher
     note                          = String(max_length=512)
     is_active                     = Boolean()
+
+
+class DeveloperProfileEntity(Entity):
+    """Public display name for a developer principal (e.g. "Realms GOS team").
+
+    Listings still name their owner by principal; this only changes how the
+    owner is shown. Set by a controller (``admin_set_developer_name``).
+    """
+    __alias__ = "principal"
+
+    principal    = String(max_length=128)
+    display_name = String(max_length=64)
+    updated_at   = Float()
 
 
 # ---------------------------------------------------------------------------

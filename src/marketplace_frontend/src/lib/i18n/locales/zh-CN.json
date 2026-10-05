@@ -279,6 +279,8 @@
     "my_codices": "我的法典（{count}）",
     "none_ext": "你还没有发布任何扩展。",
     "none_codex": "你还没有发布任何法典。",
+    "my_assistants": "我的助手（{count}）",
+    "none_assistant": "你还没有发布任何助手。",
     "upload_one": "上传一个 →",
     "col_id": "Id",
     "col_version": "版本",

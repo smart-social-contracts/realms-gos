@@ -55,6 +55,7 @@ def publish_extension(
         price_e8s=0,
         icon="",
         categories="",
+        screenshots="",
         file_registry_canister_id=REGISTRY,
         file_registry_namespace=namespace,
         download_url="",

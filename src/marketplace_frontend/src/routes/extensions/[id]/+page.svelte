@@ -160,7 +160,7 @@ function isOwner() {
           <VerifiedBadge status={item.verification_status} size="md" />
         </div>
         <p class="meta">
-          v{item.version} · {$_('card.by')} <code>{shortPrincipal(item.developer)}</code> · {$_('detail.updated', { values: { time: formatTimeAgo(item.updated_at) } })}
+          v{item.version} · {$_('card.by')} {#if item.developer_name}{item.developer_name}{:else}<code>{shortPrincipal(item.developer)}</code>{/if} · {$_('detail.updated', { values: { time: formatTimeAgo(item.updated_at) } })}
         </p>
         <div class="badges">
           <span class="badge">{$_('detail.installs', { values: { count: formatCount(item.installs) } })}</span>

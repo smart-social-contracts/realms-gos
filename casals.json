@@ -223,6 +223,25 @@
                       ]
                     }
                   }
+                },
+                {
+                  "$comment": "First-party listings are created by the operator; this is the name the marketplace shows for it.",
+                  "method": "admin_set_developer_name",
+                  "args": {
+                    "principal": "$principal:operator",
+                    "name": "Realms GOS team"
+                  },
+                  "converged_when": {
+                    "query": "admin_status",
+                    "contains": {
+                      "names": [
+                        {
+                          "principal": "$principal:operator",
+                          "name": "Realms GOS team"
+                        }
+                      ]
+                    }
+                  }
                 }
               ]
             },

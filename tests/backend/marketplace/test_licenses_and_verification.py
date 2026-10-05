@@ -20,6 +20,7 @@ def _create_ext(extension_id="voting", developer="dev-1"):
         price_e8s=0,
         icon="",
         categories="other",
+        screenshots="",
         file_registry_canister_id="fr-1",
         file_registry_namespace=f"ext/{extension_id}/0.1.0",
     )
@@ -243,20 +244,20 @@ def test_json_grant_licenses_the_principal_and_reads_back_in_status(as_caller):
     r = lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 315360000, "note": "sheet", "reviewer": true}')
     assert r["success"] is True and r["reviewer"] is True
     assert lic_api.has_active_license("op-1") is True
-    assert lic_api.publishing_status() == {"reviewers": ["op-1"], "licensed": ["op-1"]}
+    assert lic_api.publishing_status() == {"reviewers": ["op-1"], "licensed": ["op-1"], "names": []}
 
 
 def test_json_grant_is_idempotent_for_the_same_principal(as_caller):
     as_caller("conductor", controller=True)
     lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 3600, "reviewer": true}')
     lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 3600, "reviewer": true}')
-    assert lic_api.publishing_status() == {"reviewers": ["op-1"], "licensed": ["op-1"]}
+    assert lic_api.publishing_status() == {"reviewers": ["op-1"], "licensed": ["op-1"], "names": []}
 
 
 def test_json_grant_without_reviewer_flag_only_licenses(as_caller):
     as_caller("conductor", controller=True)
     lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 3600}')
-    assert lic_api.publishing_status() == {"reviewers": [], "licensed": ["op-1"]}
+    assert lic_api.publishing_status() == {"reviewers": [], "licensed": ["op-1"], "names": []}
 
 
 def test_json_grant_rejects_bad_input(as_caller):

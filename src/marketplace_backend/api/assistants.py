@@ -14,6 +14,7 @@ realm-side runtime are out of scope for this canister.
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
+from api.developers import developer_name
 from core.models import AssistantListingEntity, PurchaseEntity
 from ic_python_logging import get_logger
 
@@ -44,6 +45,7 @@ def _to_dict(a: AssistantListingEntity) -> Dict[str, Any]:
         "assistant_id": str(a.assistant_id or ""),
         "assistant_alias": str(a.assistant_alias or ""),
         "developer": str(a.developer or ""),
+        "developer_name": developer_name(str(a.developer or "")),
         "name": str(a.name or ""),
         "description": str(a.description or ""),
         "version": str(a.version or ""),

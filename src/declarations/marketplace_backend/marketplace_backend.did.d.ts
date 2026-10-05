@@ -69,6 +69,7 @@ export interface AssistantListing {
   'runtime' : string,
   'file_registry_namespace' : string,
   'developer' : string,
+  'developer_name' : string,
   'pricing_summary' : string,
 }
 export type AssistantResult = { 'Ok' : AssistantListing } |
@@ -165,6 +166,7 @@ export interface CodexListing {
   'price_e8s' : bigint,
   'file_registry_namespace' : string,
   'developer' : string,
+  'developer_name' : string,
 }
 export type CodexResult = { 'Ok' : CodexListing } |
   { 'Err' : string };
@@ -276,6 +278,7 @@ export interface ExtensionListing {
   'price_e8s' : bigint,
   'file_registry_namespace' : string,
   'developer' : string,
+  'developer_name' : string,
 }
 export type ExtensionResult = { 'Ok' : ExtensionListing } |
   { 'Err' : string };
@@ -781,6 +784,7 @@ export interface _SERVICE {
   'create_codex' : ActorMethod<[CodexInput], GenericResult>,
   'create_extension' : ActorMethod<[ExtensionInput], GenericResult>,
   'delist_assistant' : ActorMethod<[string], GenericResult>,
+  'transfer_listing' : ActorMethod<[string, string, string], GenericResult>,
   'delist_codex' : ActorMethod<[string], GenericResult>,
   'delist_extension' : ActorMethod<[string], GenericResult>,
   'get_assistant_details' : ActorMethod<[string], AssistantResult>,

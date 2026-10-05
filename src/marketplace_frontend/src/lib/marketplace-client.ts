@@ -39,6 +39,7 @@ function unwrap<T>(variant: any): T {
 export interface ExtensionListing {
   extension_id: string;
   developer: string;
+  developer_name: string;
   name: string;
   description: string;
   version: string;
@@ -63,6 +64,7 @@ export interface CodexListing {
   codex_alias: string;
   realm_type: string;
   developer: string;
+  developer_name: string;
   name: string;
   description: string;
   version: string;
@@ -111,6 +113,7 @@ export interface AssistantListing {
   assistant_id: string;
   assistant_alias: string;
   developer: string;
+  developer_name: string;
   name: string;
   description: string;
   version: string;
@@ -224,6 +227,7 @@ function normExt(raw: any): ExtensionListing {
   return {
     extension_id: String(raw.extension_id ?? ''),
     developer: String(raw.developer ?? ''),
+    developer_name: String(raw.developer_name ?? ''),
     name: String(raw.name ?? ''),
     description: String(raw.description ?? ''),
     version: String(raw.version ?? ''),
@@ -249,6 +253,7 @@ function normAssistant(raw: any): AssistantListing {
     assistant_id: String(raw.assistant_id ?? ''),
     assistant_alias: String(raw.assistant_alias ?? ''),
     developer: String(raw.developer ?? ''),
+    developer_name: String(raw.developer_name ?? ''),
     name: String(raw.name ?? ''),
     description: String(raw.description ?? ''),
     version: String(raw.version ?? ''),
@@ -284,6 +289,7 @@ function normCodex(raw: any): CodexListing {
     codex_alias: String(raw.codex_alias ?? ''),
     realm_type: String(raw.realm_type ?? ''),
     developer: String(raw.developer ?? ''),
+    developer_name: String(raw.developer_name ?? ''),
     name: String(raw.name ?? ''),
     description: String(raw.description ?? ''),
     version: String(raw.version ?? ''),

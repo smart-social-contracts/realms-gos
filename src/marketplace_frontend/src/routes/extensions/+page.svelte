@@ -184,6 +184,7 @@ function doSearch() {
         description={ext.description}
         version={ext.version}
         developer={ext.developer}
+        developerName={ext.developer_name}
         icon={ext.icon}
         priceE8s={ext.price_e8s}
         installs={ext.installs}

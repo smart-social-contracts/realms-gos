@@ -7,7 +7,7 @@ const now = Date.now() * 1_000_000
 function ext(id, name, description, version, icon, cats) {
   return {
     extension_id: id,
-    developer: 'Realms Team',
+    developer: 'Realms GOS team',
     name,
     description,
     version,
@@ -28,7 +28,7 @@ function codex(id, alias, name, description, version, icon, cats, realmType) {
     codex_id: id,
     codex_alias: alias,
     realm_type: realmType,
-    developer: 'Realms Team',
+    developer: 'Realms GOS team',
     name,
     description,
     version,

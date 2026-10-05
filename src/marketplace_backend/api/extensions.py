@@ -10,6 +10,7 @@ frontend). Purchase increments ``installs`` (the new counter that
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
+from api.developers import developer_name
 from api.licenses import has_active_license
 from core.models import ExtensionListingEntity, PurchaseEntity
 from ic_python_logging import get_logger
@@ -41,6 +42,7 @@ def _to_dict(ext: ExtensionListingEntity) -> Dict[str, Any]:
     return {
         "extension_id": str(ext.extension_id or ""),
         "developer": str(ext.developer or ""),
+        "developer_name": developer_name(str(ext.developer or "")),
         "name": str(ext.name or ""),
         "description": str(ext.description or ""),
         "version": str(ext.version or ""),

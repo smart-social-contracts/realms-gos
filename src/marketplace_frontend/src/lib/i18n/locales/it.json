@@ -279,6 +279,8 @@
     "my_codices": "I miei codici ({count})",
     "none_ext": "Non hai ancora pubblicato alcuna estensione.",
     "none_codex": "Non hai ancora pubblicato alcun codice.",
+    "my_assistants": "I miei assistenti ({count})",
+    "none_assistant": "Non hai ancora pubblicato alcun assistente.",
     "upload_one": "Caricane una →",
     "col_id": "Id",
     "col_version": "Versione",
