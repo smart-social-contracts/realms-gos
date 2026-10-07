@@ -127,7 +127,10 @@ Realm *instances* that users deploy through the GaaS portal are stands of the
 
 `casals up` does not touch DNS (`domains` reports `unverifiable`). The sheet's
 `domains` block (`realmsgos.org` → `marketplace-frontend`) is applied by the
-product CLI, which reads the canister id from the conductor:
+product CLI, which reads the canister id from the conductor. It reads as the
+selected icp identity (the operator; a hardware key needs `DFX_HSM_PIN`): a
+conductor answers only its commanders and controllers unless the sheet sets
+`public_read`.
 
 ```sh
 # from realms/, with CASALS_HOME pointing at the bindings `casals up` wrote

@@ -12,12 +12,13 @@ it, for this sheet and for the GaaS portal's alike.
 
 Canister ids are never read from a table in this repo. They come from the
 output of ``casals export`` (``--export FILE``) or, failing that, from the
-conductor itself (``export_sheet`` query), located through the ``CASALS_HOME``
+conductor itself (``export_sheet`` query, as the operator), located through the ``CASALS_HOME``
 bindings file that ``casals up`` writes.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -25,7 +26,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 import requests
 import typer
@@ -161,26 +162,66 @@ def conductor_from_casals_home(sheet_name: str, env: str) -> str:
     return str(data.get("backend_id") or (data.get("conductor") or {}).get("casals-backend") or "")
 
 
-def export_from_conductor(conductor_id: str, network: str, identity: str = "anonymous") -> dict:
+@contextlib.contextmanager
+def _hsm_pin_file() -> Iterator[Optional[str]]:
+    """``--identity-password-file`` for a hardware-key identity: ``ICP_IDENTITY_PASSWORD_FILE``
+    as-is, else a 0600 file written from ``DFX_HSM_PIN`` and removed after the call."""
+    explicit = (os.environ.get("ICP_IDENTITY_PASSWORD_FILE") or "").strip()
+    if explicit:
+        yield explicit
+        return
+    pin = os.environ.get("DFX_HSM_PIN") or ""
+    if not pin:
+        yield None
+        return
+    fd, path = tempfile.mkstemp(prefix="realms-hsm-pin-")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(pin)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def export_from_conductor(conductor_id: str, network: str, identity: str = "") -> dict:
     """``export_sheet`` straight from the conductor — the same JSON ``casals export`` prints.
-    A query: the anonymous identity is enough and needs no hardware key."""
+
+    A conductor answers only its commanders and controllers unless its sheet sets
+    ``public_read``, so this runs as the selected icp identity (the operator) unless
+    ``identity`` names another. A hardware-key identity needs ``DFX_HSM_PIN``."""
     with tempfile.NamedTemporaryFile("w", suffix=".candid", delete=False) as fh:
         fh.write("()")
         args_file = fh.name
     try:
         cmd = ["icp", "canister", "call", conductor_id, "export_sheet", "--query", "--json",
-               "--args-file", args_file, "--args-format", "candid", "--identity", identity]
+               "--args-file", args_file, "--args-format", "candid"]
         cmd += ["-n", "ic"] if network == "ic" else ["-e", network]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if identity:
+            cmd += ["--identity", identity]
+        with contextlib.ExitStack() as stack:
+            pin_file = stack.enter_context(_hsm_pin_file()) if identity != "anonymous" else None
+            if pin_file:
+                cmd += ["--identity-password-file", pin_file]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     finally:
         os.unlink(args_file)
     if proc.returncode != 0:
         raise RuntimeError(f"export_sheet on {conductor_id} failed: {(proc.stderr or proc.stdout).strip()[:400]}")
     try:
         raw = bytes.fromhex(json.loads(proc.stdout.strip().splitlines()[-1])["response_bytes"])
-        return json.loads(candid_single_text(raw))
+        payload = json.loads(candid_single_text(raw))
     except (ValueError, KeyError, IndexError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"export_sheet on {conductor_id} returned something that is not JSON: {exc}") from exc
+    if isinstance(payload, dict) and payload.get("ok") is False:
+        who = identity or "the selected icp identity"
+        raise RuntimeError(
+            f"export_sheet on {conductor_id} refused {who}: {payload.get('error')} — "
+            "run as the operator (or a commander), or pass --export <casals export JSON>"
+        )
+    return payload
 
 
 def candid_single_text(raw: bytes) -> str:
@@ -219,7 +260,7 @@ def resolve_canister_ids(
     export_path: Optional[Path],
     conductor: str,
     overrides: dict[str, str],
-    identity: str = "anonymous",
+    identity: str = "",
 ) -> None:
     """Fill ``canister_id`` on every target, in this order: ``--canister``
     overrides, ``--export`` file, then the live conductor (``--conductor`` or
@@ -490,7 +531,7 @@ _ENV_OPT = typer.Option("production", "--env", "-e", help="Environment in the sh
 _EXPORT_OPT = typer.Option(None, "--export", help="JSON printed by `casals export` (name → canister id)")
 _CONDUCTOR_OPT = typer.Option("", "--conductor", help="Conductor canister id to read the bindings from (default: CASALS_HOME bindings file)")
 _CANISTER_OPT = typer.Option([], "--canister", help="name=id override, repeatable")
-_IDENTITY_OPT = typer.Option("anonymous", "--identity", help="icp identity for the read-only export_sheet query")
+_IDENTITY_OPT = typer.Option("", "--identity", help="icp identity for the export_sheet query (default: the selected icp identity)")
 
 
 @domains_app.command("check")

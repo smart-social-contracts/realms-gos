@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -68,7 +69,7 @@ class TestCanisterIds:
         monkeypatch.setenv("CASALS_HOME", str(tmp_path))
         seen = {}
 
-        def fake_export(cid, network, identity="anonymous"):
+        def fake_export(cid, network, identity=""):
             seen["cid"], seen["network"] = cid, network
             return {"bindings": {"marketplace-frontend": "ccccc-cc"}}
 
@@ -83,6 +84,42 @@ class TestCanisterIds:
         targets = d.domain_targets(_sheet(), "production")
         with pytest.raises(RuntimeError, match="--export"):
             d.resolve_canister_ids(targets, sheet=_sheet(), env="production", export_path=None, conductor="", overrides={})
+
+    @staticmethod
+    def _fake_icp(monkeypatch, payload: dict) -> list:
+        text = json.dumps(payload).encode()
+        reply = b"DIDL\x00\x01\x71" + bytes([len(text)]) + text
+        calls = []
+
+        def run(cmd, **_kw):
+            pin = cmd[cmd.index("--identity-password-file") + 1] if "--identity-password-file" in cmd else None
+            calls.append((cmd, pin and open(pin).read()))
+            return type("P", (), {"returncode": 0, "stdout": json.dumps({"response_bytes": reply.hex()}), "stderr": ""})()
+
+        monkeypatch.setattr(d.subprocess, "run", run)
+        return calls
+
+    def test_the_conductor_is_read_as_the_selected_identity(self, monkeypatch):
+        monkeypatch.delenv("ICP_IDENTITY_PASSWORD_FILE", raising=False)
+        monkeypatch.setenv("DFX_HSM_PIN", "pin-1")
+        calls = self._fake_icp(monkeypatch, {"ok": True, "bindings": {"x": "aaaaa-aa"}})
+        assert d.export_from_conductor("cond-id", "ic")["bindings"] == {"x": "aaaaa-aa"}
+        (cmd, pin), = calls
+        assert "--identity" not in cmd and pin == "pin-1"
+        pin_path = cmd[cmd.index("--identity-password-file") + 1]
+        assert not os.path.exists(pin_path)
+
+    def test_anonymous_needs_no_pin(self, monkeypatch):
+        monkeypatch.setenv("DFX_HSM_PIN", "pin-1")
+        calls = self._fake_icp(monkeypatch, {"ok": True, "bindings": {}})
+        d.export_from_conductor("cond-id", "ic", "anonymous")
+        (cmd, pin), = calls
+        assert cmd[cmd.index("--identity") + 1] == "anonymous" and pin is None
+
+    def test_a_private_conductor_refusal_says_who_to_run_as(self, monkeypatch):
+        self._fake_icp(monkeypatch, {"ok": False, "error": "unauthorized: caller is not a commander"})
+        with pytest.raises(RuntimeError, match="refused anonymous: unauthorized.*operator"):
+            d.export_from_conductor("cond-id", "ic", "anonymous")
 
     def test_unbound_canister_names_the_stand(self, tmp_path):
         export = tmp_path / "export.json"
