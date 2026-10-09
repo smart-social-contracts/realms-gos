@@ -70,7 +70,7 @@
   },
   "governance": {
     "multisig": {
-      "wasm": "orchestration-multisig@1.6.0",
+      "wasm": "orchestration-multisig@1.7.0",
       "kind": "backend",
       "mode": "managed",
       "signers": [
@@ -98,26 +98,26 @@
       {
         "family": "casals-backend",
         "version": "main",
-        "source": "release:smart-social-contracts/Casals@v0.4.0:casals_backend.wasm.gz",
-        "sha256": "dc0f557f6b7cde042e643548e1c8ab4a5ce03748c86001bffccbb2bf9486ec1a"
+        "source": "release:smart-social-contracts/Casals@v0.6.0:casals_backend.wasm.gz",
+        "sha256": "891ea575fe1ea7bb722b85f62166d45e68d1c9c21274faf95451fc2731eacf9b"
       },
       {
         "family": "certified-assets",
         "version": "0.3.0",
-        "source": "release:smart-social-contracts/Casals@v0.4.0:certified-assets@0.3.0.wasm.gz",
+        "source": "release:smart-social-contracts/Casals@v0.6.0:certified-assets@0.3.0.wasm.gz",
         "sha256": "75df75f39763077fd0333b4ac46ba03b2b23ec313fa85f79a2097bd98bb363d1"
       },
       {
         "family": "certified-assets",
         "version": "1.0.0",
-        "source": "release:smart-social-contracts/Casals@v0.4.0:certified-assets@1.0.0.wasm.gz",
+        "source": "release:smart-social-contracts/Casals@v0.6.0:certified-assets@1.0.0.wasm.gz",
         "sha256": "63d122d0149a29f4e48603efdd7d2bce656a6a83bac1e3207897c68e8e225bb6"
       },
       {
         "family": "orchestration-multisig",
-        "version": "1.6.0",
-        "source": "release:smart-social-contracts/Casals@v0.4.0:orchestration-multisig@1.6.0.wasm.gz",
-        "sha256": "c8d3adecf9bea8d9e7811cfa5d9eda8f61723c770f85132b91c8b2cffb37974f"
+        "version": "1.7.0",
+        "source": "release:smart-social-contracts/Casals@v0.6.0:orchestration-multisig@1.7.0.wasm.gz",
+        "sha256": "68732f3a69213475a53971d51ca6a43c19610f8bbc5bbcf6a0c0404b7f6ae204"
       },
       {
         "family": "file-registry",
@@ -157,8 +157,8 @@
       },
       {
         "path": "frontend/casals-ui/main",
-        "source": "release:smart-social-contracts/Casals@v0.4.0:casals_frontend.tar.gz",
-        "sha256": "150292ea6d42d20d501f61356ed55efa4c095f5bbdcff3999450818929af768b"
+        "source": "release:smart-social-contracts/Casals@v0.6.0:casals_frontend.tar.gz",
+        "sha256": "37d1c6463f342f095b95013657fb4de10eea0340b388a6434f40dffe765bf8d0"
       }
     ]
   },
