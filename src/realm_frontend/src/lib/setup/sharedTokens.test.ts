@@ -4,7 +4,7 @@ import {
 	CUSTOM_TOKEN_ID,
 	completeCatalogTokenDraft,
 	configureTokenPayload,
-	defaultTokenFromMap,
+	defaultTokenFromLedger,
 	matchSharedToken,
 	sharedTokenOptions,
 	tokenDraftFromChoice,
@@ -101,19 +101,15 @@ describe('sharedTokens', () => {
 	});
 
 	it('offers the environment Realms token plus ckBTC and ckUSDC', () => {
-		const realms = defaultTokenFromMap(
-			{
-				_comment: 'ignored',
-				staging: { symbol: 'RLM', ledger: 'r6dmi-3yaaa-aaaak-qzgka-cai', decimals: 8 }
-			},
-			'Staging'
-		);
+		const realms = defaultTokenFromLedger('r6dmi-3yaaa-aaaak-qzgka-cai', 'RLM');
 		expect(realms).toMatchObject({
 			id: 'RLM',
 			symbol: 'RLM',
+			name: 'Realms Token',
 			ledger: 'r6dmi-3yaaa-aaaak-qzgka-cai'
 		});
-		expect(defaultTokenFromMap({ staging: { ledger: 'aaaaa-aa' } }, 'production')).toBeNull();
+		expect(defaultTokenFromLedger('', 'RLM')).toBeNull();
+		expect(defaultTokenFromLedger('aaaaa-aa', '')?.symbol).toBe('RLM');
 		expect(wizardTokenOptions(realms).map((token) => token.id)).toEqual(['RLM', 'ckBTC', 'ckUSDC']);
 		expect(wizardTokenOptions(null).map((token) => token.ledger)).toEqual(
 			CHAIN_KEY_TOKENS.map((token) => token.ledger)

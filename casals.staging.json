@@ -40,6 +40,9 @@
       "kind": "frontend",
       "mode": "managed",
       "content": "frontend/casals-ui/main",
+      "files": {
+        "/.well-known/casals.json": "{\"orchestra\":\"realms-product\",\"conductor\":\"$self\"}\n"
+      },
       "controllers": [
         "$self",
         "$multisig"
@@ -265,6 +268,7 @@
           "canisters": [
             {
               "name": "fleet-file-registry",
+              "public": true,
               "kind": "backend",
               "mode": "managed",
               "wasm": "file-registry@main",
@@ -332,6 +336,7 @@
           "canisters": [
             {
               "name": "token-backend",
+              "public": true,
               "kind": "backend",
               "mode": "managed",
               "wasm": "token-backend@0.1.0",

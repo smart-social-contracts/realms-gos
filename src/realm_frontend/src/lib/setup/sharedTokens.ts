@@ -1,9 +1,9 @@
 /**
  * Treasury tokens a founder may adopt in the setup wizard.
  *
- * The Realms token ledger depends on the environment and is read from
- * `fleet-tokens.json` in the Realms GitHub repo. ckBTC and ckUSDC are the
- * chain-key ledgers: the same principals on every environment.
+ * The Realms token ledger is the product orchestra's `token-backend`, which the
+ * realm backend discovers once through Casals (`setup_fleet`). ckBTC and
+ * ckUSDC are the chain-key ledgers: the same principals on every environment.
  */
 
 export interface SharedTokenCatalogEntry {
@@ -39,10 +39,6 @@ const TOKEN_INFO: Record<string, { name: string; description: string }> = {
 
 export const CUSTOM_TOKEN_ID = 'custom';
 
-/** Published map: environment name → Realms token ledger. */
-export const FLEET_TOKENS_URL =
-	'https://raw.githubusercontent.com/smart-social-contracts/realms-gos/main/fleet-tokens.json';
-
 /** Chain-key ledgers. They do not vary by GaaS environment. */
 export const CHAIN_KEY_TOKENS: SharedTokenOption[] = [
 	{
@@ -77,43 +73,27 @@ export function wizardTokenOptions(
 	return out;
 }
 
-export function defaultTokenFromMap(
-	table: unknown,
-	environment: string
-): SharedTokenOption | null {
-	if (!table || typeof table !== 'object') return null;
-	const name = environment.trim().toLowerCase();
-	if (!name || name.startsWith('_')) return null;
-	const entry = (table as Record<string, unknown>)[name];
-	if (!entry || typeof entry !== 'object') return null;
-	const row = entry as Record<string, unknown>;
-	const ledger = String(row.ledger || '').trim();
-	if (!ledger) return null;
-	const symbol = String(row.symbol || 'RLM').trim() || 'RLM';
-	const info = TOKEN_INFO[symbol.toUpperCase()];
-	const indexer = String(row.indexer || '').trim();
+export function defaultTokenFromLedger(ledger: string, symbol: string): SharedTokenOption | null {
+	const id = ledger.trim();
+	if (!id) return null;
+	const sym = symbol.trim() || 'RLM';
+	const info = TOKEN_INFO[sym.toUpperCase()];
 	return {
-		id: symbol,
-		symbol,
-		name: String(row.name || info?.name || symbol),
+		id: sym,
+		symbol: sym,
+		name: info?.name || sym,
 		description: info?.description || 'The Realms token for this environment',
-		decimals: typeof row.decimals === 'number' ? row.decimals : 8,
-		ledger,
-		...(indexer ? { indexer } : {})
+		decimals: 8,
+		ledger: id
 	};
 }
 
-export async function fetchDefaultTreasuryToken(environment: string): Promise<SharedTokenOption> {
-	const name = environment.trim().toLowerCase();
-	if (!name) throw new Error('This realm has no environment name');
-	const response = await fetch(FLEET_TOKENS_URL);
-	if (!response.ok) {
-		throw new Error(`Could not load the Realms token map (${response.status})`);
-	}
-	const token = defaultTokenFromMap(await response.json(), name);
-	if (!token) {
-		throw new Error(`No Realms token is published for environment ${name}`);
-	}
+export async function fetchDefaultTreasuryToken(): Promise<SharedTokenOption> {
+	const { fetchFleet } = await import('./api');
+	const { lookupLedgerSymbol } = await import('./ledgerSymbol');
+	const ledger = (await fetchFleet()).token_ledger || '';
+	const token = defaultTokenFromLedger(ledger, await lookupLedgerSymbol(ledger).catch(() => ''));
+	if (!token) throw new Error('This realm has no Realms token ledger');
 	return token;
 }
 

@@ -641,7 +641,7 @@
 		if (!name || defaultTokenEnvironment === name) return;
 		defaultTokenEnvironment = name;
 		try {
-			defaultToken = await fetchDefaultTreasuryToken(name);
+			defaultToken = await fetchDefaultTreasuryToken();
 			defaultTokenError = '';
 		} catch (e) {
 			defaultToken = null;

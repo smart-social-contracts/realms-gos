@@ -1,57 +1,71 @@
-"""Resolve a realm's fleet file-registry from its GaaS environment name.
+"""Find the Realms product orchestra's public canisters from a realm.
 
-GaaS does not know these principals. The map is ``fleet-registries.json`` at
-the root of the Realms GitHub repo, fetched when a catalog or codex install
-needs it. ``network: ic`` is not an environment name.
+Once per realm: fetch ``/.well-known/casals.json`` from that orchestra's Casals
+domain (production ``casals.realmsgos.org``, otherwise
+``casals.<env>.realmsgos.org``), ask its conductor to ``resolve`` the fleet
+file registry and the RLM ledger, and pin the ids in the setup config. Only an
+explicit refresh looks again, so a changed domain cannot silently redirect a
+realm's package source.
 """
 
 from __future__ import annotations
 
 import json
 
-FLEET_REGISTRIES_URL = (
-    "https://raw.githubusercontent.com/smart-social-contracts/realms-gos/main/fleet-registries.json"
-)
-FLEET_REGISTRIES_TRANSFORM = "http_transform"
+PRODUCT_DOMAIN = "realmsgos.org"
+WELL_KNOWN_PATH = "/.well-known/casals.json"
+FLEET_TRANSFORM = "http_transform"
+FLEET_CANISTERS = {"file_registry": "fleet-file-registry", "token_ledger": "token-backend"}
 _HTTP_CYCLES = 30_000_000_000
-_HTTP_MAX_BYTES = 100_000
-
-_cached_body = ""
+_HTTP_MAX_BYTES = 4_096
 
 
-def parse_fleet_registries(text: str) -> dict:
-    """Return ``{environment: principal}``. Keys starting with ``_`` are comments."""
-    try:
-        data = json.loads(text or "")
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise ValueError(f"fleet-registries.json is not JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError("fleet-registries.json must be an object")
-    out = {}
-    for key, value in data.items():
-        name = str(key or "").strip().lower()
-        if not name or name.startswith("_"):
-            continue
-        principal = str(value or "").strip()
-        if not principal:
-            raise ValueError(f"fleet-registries.json has an empty principal for {name!r}")
-        out[name] = principal
-    return out
-
-
-def registry_for_environment(table: dict, environment: str) -> str:
-    """Principal for ``environment``, or raise ValueError."""
+def casals_url(environment: str) -> str:
     name = (environment or "").strip().lower()
     if not name:
         raise ValueError("gos environment is empty")
-    principal = (table.get(name) or "").strip()
-    if not principal:
-        known = ", ".join(sorted(table)) or "(none)"
-        raise ValueError(
-            f"no fleet file-registry for environment {name!r} "
-            f"(published environments: {known})"
-        )
-    return principal
+    if not all(ch.isalnum() or ch == "-" for ch in name):
+        raise ValueError(f"gos environment {name!r} is not a DNS label")
+    host = f"casals.{PRODUCT_DOMAIN}" if name == "production" else f"casals.{name}.{PRODUCT_DOMAIN}"
+    return f"https://{host}{WELL_KNOWN_PATH}"
+
+
+def _principal_text(value, what: str) -> str:
+    text = str(value or "").strip()
+    if not text or not all(ch.isalnum() or ch == "-" for ch in text) or "-" not in text:
+        raise ValueError(f"{what} is not a principal: {text[:80]!r}")
+    return text
+
+
+def parse_well_known(text: str) -> str:
+    """The conductor id from ``/.well-known/casals.json``."""
+    try:
+        data = json.loads(text or "")
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError(f"casals.json is not JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("casals.json must be an object")
+    return _principal_text(data.get("conductor"), "casals.json conductor")
+
+
+def parse_resolve_reply(text: str, name: str) -> str:
+    try:
+        data = json.loads(text or "")
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError(f"resolve {name}: reply is not JSON") from exc
+    if not isinstance(data, dict) or not data.get("ok"):
+        error = data.get("error") if isinstance(data, dict) else ""
+        raise ValueError(f"resolve {name}: {error or 'refused'}")
+    return _principal_text(data.get("canister_id"), f"resolve {name}")
+
+
+def pinned_fleet(realm) -> dict:
+    from core.setup import get_setup_config
+
+    fleet = get_setup_config(realm).get("fleet")
+    if isinstance(fleet, dict) and fleet.get("file_registry"):
+        return dict(fleet)
+    return {}
 
 
 def _body_text(body) -> str:
@@ -66,17 +80,13 @@ def _body_text(body) -> str:
     return str(body)
 
 
-def fetch_fleet_registries_text():
-    """Generator: JSON text of the published map. Cached for this canister process."""
-    global _cached_body
-    if _cached_body:
-        return _cached_body
-
+def _fetch_text(url: str):
+    """Generator: body of a small HTTPS GET."""
     from _cdk import ic, management_canister
 
     resp = yield management_canister.http_request(
         {
-            "url": FLEET_REGISTRIES_URL,
+            "url": url,
             "max_response_bytes": _HTTP_MAX_BYTES,
             "method": {"get": None},
             "headers": [
@@ -85,47 +95,53 @@ def fetch_fleet_registries_text():
             ],
             "body": None,
             "transform": {
-                "function": (ic.id(), FLEET_REGISTRIES_TRANSFORM),
+                "function": (ic.id(), FLEET_TRANSFORM),
                 "context": bytes(),
             },
         }
     ).with_cycles(_HTTP_CYCLES)
 
     if not isinstance(resp, dict) or "Ok" not in resp:
-        raise RuntimeError(f"fleet registry list download failed: {resp}")
+        raise RuntimeError(f"{url} download failed: {resp}")
     ok = resp["Ok"] or {}
     status = int(ok.get("status") or 0)
     text = _body_text(ok.get("body"))
     if status != 200:
-        raise RuntimeError(
-            f"fleet registry list download returned HTTP {status}: {text[:200]}"
-        )
-    # Validate before caching so a bad document is not sticky.
-    parse_fleet_registries(text)
-    _cached_body = text
+        raise RuntimeError(f"{url} returned HTTP {status}: {text[:200]}")
     return text
 
 
-def clear_fleet_registries_cache() -> None:
-    global _cached_body
-    _cached_body = ""
+def discover_fleet(realm, refresh: bool = False):
+    """Generator: ``{conductor, file_registry, token_ledger}``, pinned after the first success."""
+    pinned = pinned_fleet(realm)
+    if pinned and not refresh:
+        return pinned
+
+    from _cdk import Principal
+    from api.file_registry import CasalsConductorService, _unwrap_call_result
+    from core.setup import get_gos_environment, update_setup_config
+
+    conductor = parse_well_known((yield from _fetch_text(casals_url(get_gos_environment(realm)))))
+    service = CasalsConductorService(Principal.from_str(conductor))
+    fleet = {"conductor": conductor}
+    for key, name in FLEET_CANISTERS.items():
+        reply = yield service.resolve(json.dumps({"name": name}))
+        fleet[key] = parse_resolve_reply(_unwrap_call_result(reply), name)
+
+    update_setup_config(realm, {"fleet": fleet})
+    realm.file_registry_canister_id = fleet["file_registry"]
+    return fleet
 
 
 def resolve_catalog_registry_id(realm):
-    """Generator: fleet file-registry principal for this realm.
+    """Generator: the fleet file-registry principal for this realm.
 
-    A realm with ``gos_environment`` loads the map from GitHub. Otherwise the
-    stored ``file_registry_canister_id`` is used, which is how realms created
-    before this contract keep working.
+    A realm without ``gos_environment`` (local dev) keeps its stored
+    ``file_registry_canister_id``.
     """
     from core.setup import get_gos_environment
 
-    environment = get_gos_environment(realm)
-    if not environment:
+    if not pinned_fleet(realm) and not get_gos_environment(realm):
         return (getattr(realm, "file_registry_canister_id", "") or "").strip()
-
-    text = yield from fetch_fleet_registries_text()
-    registry_id = registry_for_environment(parse_fleet_registries(text), environment)
-    if registry_id and (getattr(realm, "file_registry_canister_id", "") or "") != registry_id:
-        realm.file_registry_canister_id = registry_id
-    return registry_id
+    fleet = yield from discover_fleet(realm)
+    return fleet["file_registry"]

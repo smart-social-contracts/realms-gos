@@ -366,6 +366,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'list_available_codices' : IDL.Func([], [IDL.Text], []),
+    'setup_fleet' : IDL.Func([IDL.Text], [IDL.Text], []),
     'list_codex_packages' : IDL.Func([], [IDL.Text], ['query']),
     'list_delegations_json' : IDL.Func([], [IDL.Text], ['query']),
     'list_extensions' : IDL.Func([IDL.Text], [RealmResponse], ['query']),

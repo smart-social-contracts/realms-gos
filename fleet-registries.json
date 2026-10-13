@@ -1,5 +1,0 @@
-{
-  "_comment": "Environment name to fleet file-registry backend principal. Realms fetch this file from GitHub. Keys starting with _ are ignored. The frontend canister is not listed.",
-  "production": "qofs7-qyaaa-aaaag-azbya-cai",
-  "staging": "rmf3r-xiaaa-aaaak-qzgja-cai"
-}

@@ -1174,6 +1174,7 @@ export interface _SERVICE {
   'join_federation' : ActorMethod<[string, boolean], RealmResponse>,
   'join_realm' : ActorMethod<[string, string, string], RealmResponse>,
   'list_available_codices' : ActorMethod<[], string>,
+  'setup_fleet' : ActorMethod<[string], string>,
   'list_codex_packages' : ActorMethod<[], string>,
   'list_delegations_json' : ActorMethod<[], string>,
   'list_extensions' : ActorMethod<[string], RealmResponse>,

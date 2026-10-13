@@ -6,6 +6,7 @@ import type {
 	SetupBackendActor,
 	SetupDraftPartial,
 	SetupDraftSaveResult,
+	SetupFleet,
 	SetupLaunchResult,
 	SetupLaunchState,
 	SetupState
@@ -170,6 +171,17 @@ export async function listAvailableCodices(): Promise<AvailableCodex[]> {
 	}
 
 	return pollCachedCodices(actor);
+}
+
+export async function fetchFleet(): Promise<SetupFleet> {
+	const actor = await getActor();
+	const parsed = parseJson<{ success?: boolean; fleet?: SetupFleet; error?: string }>(
+		await actor.setup_fleet('{}')
+	);
+	if (!parsed?.success || !parsed.fleet) {
+		throw new Error(parsed?.error || 'Could not find the Realms product canisters');
+	}
+	return parsed.fleet;
 }
 
 export function isAmbiguousInstallError(error: unknown): boolean {

@@ -387,6 +387,7 @@ service : {
   "get_setup_state" : () -> (text) query;
   "get_available_codices_cached" : () -> (text) query;
   "list_available_codices" : () -> (text);
+  "setup_fleet" : (text) -> (text);
   "setup_install_codex" : (text) -> (text);
   "setup_configure_token" : (text) -> (text);
   "setup_set_branding" : (text) -> (text);

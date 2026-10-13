@@ -679,6 +679,7 @@ def get_setup_state_payload() -> dict:
         "realm_welcome_message": getattr(realm, "welcome_message", None) or "",
         "realm_token_canister_id": (getattr(realm, "token_canister_id", "") or "").strip() or None,
         "gos_environment": get_gos_environment(realm) or None,
+        "fleet": setup.get("fleet") if isinstance(setup.get("fleet"), dict) else None,
         "shared_tokens": _shared_token_catalog(),
         "setup_completed_at": setup.get("setup_completed_at"),
         **_setup_language_fields(realm, identity if isinstance(identity, dict) else None, draft),

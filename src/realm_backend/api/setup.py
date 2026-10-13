@@ -945,6 +945,38 @@ def effective_realm_status(realm) -> str:
     return _effective(realm)
 
 
+def _may_refresh_fleet(caller: str) -> bool:
+    from core.access import _check_access
+    from ggg.system.user_profile import Operations
+
+    return ic.is_controller(Principal.from_str(caller)) or _check_access(caller, Operations.REALM_ADMIN)
+
+
+def setup_fleet(args_json: str) -> Async[str]:
+    """Pinned fleet ids, discovered on first use. ``{"refresh": true}`` (admin) looks again."""
+    try:
+        params = json.loads(args_json) if args_json else {}
+    except json.JSONDecodeError:
+        return json.dumps({"success": False, "error": "Invalid JSON"})
+    refresh = params.get("refresh") is True
+    if refresh and not _may_refresh_fleet(ic.caller().to_str()):
+        return json.dumps({"success": False, "error": "Access denied: refresh requires a realm admin"})
+
+    realm = _load_realm()
+    if not realm:
+        return json.dumps({"success": False, "error": "Realm not found"})
+
+    from core.fleet_registry import discover_fleet
+
+    try:
+        fleet = yield from discover_fleet(realm, refresh=refresh)
+    except (ValueError, RuntimeError) as exc:
+        return json.dumps({"success": False, "error": str(exc)})
+    if refresh:
+        _SETUP_CATALOG_CACHE.remove(_SETUP_CATALOG_CACHE_KEY)
+    return json.dumps({"success": True, "fleet": fleet})
+
+
 def list_available_codices() -> Async[str]:
     from ggg import Realm
 

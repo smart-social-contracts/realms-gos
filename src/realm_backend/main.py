@@ -8401,6 +8401,18 @@ def list_available_codices() -> Async[text]:
 
 
 @update
+def setup_fleet(args: text) -> Async[text]:
+    """Fleet file registry and RLM ledger ids, found once via the product orchestra's Casals."""
+    try:
+        from api.setup import setup_fleet as _fleet
+
+        return (yield from _fleet(args))
+    except Exception as e:
+        logger.error(f"setup_fleet error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@update
 def setup_install_codex(args: text) -> Async[text]:
     """Install a codex during setup (creator or realm admin)."""
     try:

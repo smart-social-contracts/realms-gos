@@ -62,6 +62,11 @@ class FileRegistryService(Service):
     def get_namespace_approval_icc(self, namespace: text) -> text: ...
 
 
+class CasalsConductorService(Service):
+    @service_query
+    def resolve(self, args: text) -> text: ...
+
+
 class _AssetStoreArg(Record):
     key: text
     content_type: text

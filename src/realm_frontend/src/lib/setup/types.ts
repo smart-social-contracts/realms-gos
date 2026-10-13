@@ -83,8 +83,16 @@ export interface SetupState {
 	realm_token_canister_id?: string | null;
 	/** Logical GaaS environment (`staging`, `production`, …), not the IC network. */
 	gos_environment?: string | null;
+	/** Product orchestra ids the realm pinned after discovering them through Casals. */
+	fleet?: SetupFleet | null;
 	/** {symbol: {ledger, indexer, decimals}} — the shared ledgers this realm may adopt (from casals.json via the installer). */
 	shared_tokens?: Record<string, { ledger: string; indexer?: string; decimals?: number; name?: string }>;
+}
+
+export interface SetupFleet {
+	conductor?: string;
+	file_registry?: string;
+	token_ledger?: string;
 }
 
 export interface AvailableCodex {
@@ -135,6 +143,7 @@ export interface SetupBackendActor {
 	get_setup_state: () => Promise<string>;
 	get_available_codices_cached?: () => Promise<string>;
 	list_available_codices: () => Promise<string>;
+	setup_fleet: (json: string) => Promise<string>;
 	setup_install_codex: (json: string) => Promise<string>;
 	setup_configure_token: (json: string) => Promise<string>;
 	setup_set_branding: (json: string) => Promise<string>;
