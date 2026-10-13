@@ -5,7 +5,7 @@
   "environments": {
     "demo": {
       "network": "ic",
-      "$comment": "Demo on mainnet. Operator is dev-identity. Hosts are demo.realmsgos.org and casals.demo.realmsgos.org.",
+      "$comment": "Demo on mainnet, run as production. Operator is prod-identity (YubiKey), through an icp delegation from it. Hosts are demo.realmsgos.org and casals.demo.realmsgos.org.",
       "dns": {
         "provider": "cloudflare",
         "zone": "realmsgos.org",
@@ -16,8 +16,8 @@
       "casals_host": "casals.demo.realmsgos.org",
       "principals": {
         "operator": "$deployer",
-        "$comment_operator_code": "Unclaimed access-code slot. Whoever redeems it becomes a conductor commander with full access. The code is not stored in this file.",
-        "operator_code": "sha256:bfefe7081c3ccf6dc36752e7461f4e98d8ceb4ff966a11a61cfdcb6b7b6cc13a",
+        "$comment_operator_code": "Unclaimed access-code slot with full access. casals up mints the code and prints it once.",
+        "operator_code": "$new_access_code",
         "$comment_deployer": "The identity that ran casals up. It is a controller of the governance multisig only.",
         "deployer": "$deployer"
       },
