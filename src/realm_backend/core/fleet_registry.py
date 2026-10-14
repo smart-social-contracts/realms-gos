@@ -2,7 +2,7 @@
 
 Once per realm: fetch ``/.well-known/casals.json`` from that orchestra's Casals
 domain (production ``casals.realmsgos.org``, otherwise
-``casals.<env>.realmsgos.org``), ask its conductor to ``resolve`` the fleet
+``casals.<env>.realmsgos.org``), ask its conductor to ``orchestra_resolve`` the fleet
 file registry and the RLM ledger, and pin the ids in the setup config. Only an
 explicit refresh looks again, so a changed domain cannot silently redirect a
 realm's package source.
@@ -125,7 +125,7 @@ def discover_fleet(realm, refresh: bool = False):
     service = CasalsConductorService(Principal.from_str(conductor))
     fleet = {"conductor": conductor}
     for key, name in FLEET_CANISTERS.items():
-        reply = yield service.resolve(json.dumps({"name": name}))
+        reply = yield service.orchestra_resolve(json.dumps({"name": name}))
         fleet[key] = parse_resolve_reply(_unwrap_call_result(reply), name)
 
     update_setup_config(realm, {"fleet": fleet})

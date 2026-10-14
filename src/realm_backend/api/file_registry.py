@@ -64,7 +64,7 @@ class FileRegistryService(Service):
 
 class CasalsConductorService(Service):
     @service_query
-    def resolve(self, args: text) -> text: ...
+    def orchestra_resolve(self, args: text) -> text: ...
 
 
 class _AssetStoreArg(Record):
