@@ -160,8 +160,8 @@
       },
       {
         "path": "frontend/casals-ui/main",
-        "source": "release:smart-social-contracts/Casals@v0.6.0:casals_frontend.tar.gz",
-        "sha256": "37d1c6463f342f095b95013657fb4de10eea0340b388a6434f40dffe765bf8d0"
+        "source": "release:smart-social-contracts/Casals@v0.6.1:casals_frontend.tar.gz",
+        "sha256": "e0914fa6096bbcaf8419e89b1854e8a21e25cc59e9f08adc6f1a73aba81609db"
       }
     ]
   },
