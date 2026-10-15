@@ -101,22 +101,22 @@
       {
         "family": "casals-backend",
         "version": "main",
-        "source": "release:smart-social-contracts/Casals@latest:casals_backend.wasm.gz"
+        "source": "release:smart-social-contracts/Casals@v0.7.0-rc7:casals_backend.wasm.gz"
       },
       {
         "family": "certified-assets",
         "version": "0.3.0",
-        "source": "release:smart-social-contracts/Casals@latest:certified-assets@0.3.0.wasm.gz"
+        "source": "release:smart-social-contracts/Casals@v0.7.0-rc7:certified-assets@0.3.0.wasm.gz"
       },
       {
         "family": "certified-assets",
         "version": "1.0.0",
-        "source": "release:smart-social-contracts/Casals@latest:certified-assets@1.0.0.wasm.gz"
+        "source": "release:smart-social-contracts/Casals@v0.7.0-rc7:certified-assets@1.0.0.wasm.gz"
       },
       {
         "family": "orchestration-multisig",
         "version": "1.7.0",
-        "source": "release:smart-social-contracts/Casals@latest:orchestration-multisig@1.7.0.wasm.gz"
+        "source": "release:smart-social-contracts/Casals@v0.7.0-rc7:orchestration-multisig@1.7.0.wasm.gz"
       },
       {
         "family": "file-registry",
@@ -156,7 +156,7 @@
       },
       {
         "path": "frontend/casals-ui/main",
-        "source": "release:smart-social-contracts/Casals@latest:casals_frontend.tar.gz"
+        "source": "release:smart-social-contracts/Casals@v0.7.0-rc7:casals_frontend.tar.gz"
       }
     ]
   },
