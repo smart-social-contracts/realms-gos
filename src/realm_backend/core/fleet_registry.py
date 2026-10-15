@@ -17,7 +17,9 @@ WELL_KNOWN_PATH = "/.well-known/casals.json"
 FLEET_TRANSFORM = "http_transform"
 FLEET_CANISTERS = {"file_registry": "fleet-file-registry", "token_ledger": "token-backend"}
 _HTTP_CYCLES = 30_000_000_000
-_HTTP_MAX_BYTES = 4_096
+# The limit covers response headers too; a certified-assets domain sends ~6 KB
+# of them (ic-certificate alone is ~3.4 KB) before the 70-byte body.
+_HTTP_MAX_BYTES = 32_768
 
 
 def casals_url(environment: str) -> str:

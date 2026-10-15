@@ -30,3 +30,10 @@ def test_resolve_reply():
         parse_resolve_reply(json.dumps({"ok": False, "error": "no resolvable canister 'x'"}), "x")
     with pytest.raises(ValueError):
         parse_resolve_reply("nope", "x")
+
+
+def test_outcall_limit_fits_certified_asset_headers():
+    """The replica counts headers against max_response_bytes; casals.staging sent 5,951 bytes of them."""
+    from core import fleet_registry
+
+    assert fleet_registry._HTTP_MAX_BYTES >= 16_384
