@@ -9,7 +9,6 @@ own rule on top: a package already published by someone else is refused.
 """
 
 import json
-import re
 from typing import Dict
 
 from _cdk import Async, CallResult, Principal, Service, ic, service_update, text
@@ -23,8 +22,22 @@ from ic_python_logging import get_logger
 logger = get_logger("api.uploads")
 
 ANONYMOUS = "2vxsx-fae"
-_ID_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
+# basilisk's CPython has no `re` (its import hook hands back an empty stub).
+_ALNUM = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+
+
+def _is_id_segment(s: str) -> bool:
+    return bool(s) and s[0] in _ALNUM and all(c in _ALNUM or c in "_.-" for c in s)
+
+
+def _is_semver(v: str) -> bool:
+    """1.2.3, optionally followed by -pre or +build of [0-9A-Za-z.-]."""
+    cut = min([i for i in (v.find("-"), v.find("+")) if i >= 0], default=len(v))
+    core, suffix = v[:cut], v[cut + 1:]
+    nums = core.split(".")
+    if len(nums) != 3 or not all(n and all(c in "0123456789" for c in n) for n in nums):
+        return False
+    return cut == len(v) or (bool(suffix) and all(c in _ALNUM or c in ".-" for c in suffix))
 
 
 class FileRegistryGrantService(Service):
@@ -53,13 +66,13 @@ def check_upload(*, caller: str, item_kind: str, item_id: str, version: str) -> 
     segments = item_id.split("/")
     if item_kind == "ext" and len(segments) != 1:
         return {"success": False, "error": "extension_id must not contain '/'"}
-    if len(segments) > 2 or not all(_ID_SEGMENT_RE.match(s) for s in segments):
+    if len(segments) > 2 or not all(_is_id_segment(s) for s in segments):
         return {
             "success": False,
             "error": "id: letters, digits, '_', '-' and '.', starting with a letter or digit"
             + ("" if item_kind == "ext" else ", with at most one '/'"),
         }
-    if not _VERSION_RE.match((version or "").strip()):
+    if not _is_semver((version or "").strip()):
         return {"success": False, "error": "version must be semver, e.g. 0.1.0"}
 
     if not _is_controller():
