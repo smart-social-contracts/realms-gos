@@ -488,6 +488,43 @@ export interface PaginationInfo {
   'total_items_count' : bigint,
   'page_num' : bigint,
 }
+export interface AdminListing {
+  'updated_at' : number,
+  'name' : string,
+  'item_kind' : string,
+  'verification_status' : string,
+  'installs' : bigint,
+  'developer_name' : string,
+  'is_active' : boolean,
+  'created_at' : number,
+  'version' : string,
+  'likes' : bigint,
+  'verification_notes' : string,
+  'item_id' : string,
+  'file_registry_namespace' : string,
+  'developer' : string,
+}
+export interface AdminUser {
+  'principal' : string,
+  'display_name' : string,
+  'is_admin' : boolean,
+  'is_reviewer' : boolean,
+  'is_suspended' : boolean,
+  'suspended_reason' : string,
+  'has_license' : boolean,
+  'license_active' : boolean,
+  'license_expires_at' : number,
+  'license_payment_method' : string,
+  'license_note' : string,
+  'extensions_count' : bigint,
+  'codices_count' : bigint,
+  'assistants_count' : bigint,
+}
+export interface MyRolesRecord {
+  'is_controller' : boolean,
+  'is_admin' : boolean,
+  'is_reviewer' : boolean,
+}
 export interface PendingAudit {
   'updated_at' : number,
   'name' : string,
@@ -774,8 +811,23 @@ export interface _ListAssetsArg {
 }
 export interface _SERVICE {
   '__get_candid_interface_tmp_hack' : ActorMethod<[], string>,
+  'add_admin' : ActorMethod<[string], GenericResult>,
   'add_reviewer' : ActorMethod<[string], GenericResult>,
   'admin_approve_namespace' : ActorMethod<[string, string], string>,
+  'admin_list_listings' : ActorMethod<[], Array<AdminListing>>,
+  'admin_list_users' : ActorMethod<[], Array<AdminUser>>,
+  'admin_set_developer_name' : ActorMethod<[string], string>,
+  'admin_set_listing_active' : ActorMethod<
+    [string, string, boolean],
+    GenericResult
+  >,
+  'admin_set_user_suspended' : ActorMethod<
+    [string, boolean, string],
+    GenericResult
+  >,
+  'get_my_roles' : ActorMethod<[], MyRolesRecord>,
+  'list_admins' : ActorMethod<[], Array<string>>,
+  'remove_admin' : ActorMethod<[string], GenericResult>,
   'buy_assistant' : ActorMethod<[string], GenericResult>,
   'buy_codex' : ActorMethod<[string], GenericResult>,
   'buy_extension' : ActorMethod<[string], GenericResult>,

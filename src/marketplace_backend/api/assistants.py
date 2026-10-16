@@ -14,7 +14,8 @@ realm-side runtime are out of scope for this canister.
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
-from api.developers import developer_name
+from api.config import caller_is_admin
+from api.developers import developer_name, is_suspended
 from core.models import AssistantListingEntity, PurchaseEntity
 from ic_python_logging import get_logger
 
@@ -115,6 +116,9 @@ def create_assistant(
     if runtime and runtime not in VALID_RUNTIMES:
         return {"success": False, "error": f"runtime must be one of {VALID_RUNTIMES} (got {runtime!r})"}
 
+    if is_suspended(developer) and not _is_controller():
+        return {"success": False, "error": "This account is suspended from publishing"}
+
     alias = _safe_assistant_alias(assistant_id)
     now = _now()
     existing = AssistantListingEntity[alias]
@@ -192,7 +196,7 @@ def delist_assistant(developer: str, assistant_id: str) -> Dict:
     a = AssistantListingEntity[alias]
     if a is None:
         return {"success": False, "error": "Assistant not found"}
-    if str(a.developer) != developer and not _is_controller():
+    if str(a.developer) != developer and not caller_is_admin():
         return {"success": False, "error": "Not the owner"}
     a.is_active = False
     a.updated_at = _now()

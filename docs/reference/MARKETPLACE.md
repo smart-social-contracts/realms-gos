@@ -97,28 +97,62 @@ developer license. The flow:
    marketplace creates or extends the developer's license.
 3. Developer can then `request_audit("ext"|"codex", item_id)` on any
    listing they own. The listing's status flips to `pending_audit`.
-4. A controller (Smart Social Contracts curator) calls
-   `set_verification_status(item_kind, item_id, "verified" | "rejected", notes)`
-   from the Admin page in the marketplace UI. The listing's status
-   flips and surfaces the curator notes.
+4. A reviewer or admin approves or rejects it from the Admin section
+   (`review_listing`), which stamps the decision onto the file registry
+   and flips the listing's status with the curator notes.
 5. `verified_only=true` filters limit Top Charts and browse pages to
    approved items.
 
 For local development the off-chain billing service is usually not
-running. Controllers can call `grant_manual_license(principal,
-duration_seconds, note)` directly via `dfx canister call` or the Admin
-page's "Grant manual license" form.
+running. Admins can call `grant_manual_license(principal,
+duration_seconds, note)` directly via `dfx canister call` or from the
+Admin section's Users tab.
+
+## Roles
+
+| Role | Who decides | Can do |
+|---|---|---|
+| Controller | the canister's controller list | everything, including canister settings and the admin list |
+| Admin | controllers (`add_admin` / `remove_admin`) | every listing, every user and every license; appoint reviewers; review |
+| Reviewer | admins (`add_reviewer` / `remove_reviewer`) | approve and reject submissions |
+
+Controllers are admins, and admins are reviewers, without being listed.
+Admins use the **Admin** section of the marketplace's left panel
+(`/admin`). It has three tabs:
+
+- **Listings**: every extension, codex and assistant from every developer,
+  delisted ones included. Approve or reject (stamped onto the file
+  registry), send back to the review queue, delist or relist, transfer
+  to another owner.
+- **Users**: every principal the marketplace knows (listing owners,
+  license holders, reviewers, admins). Grant, extend or revoke a license;
+  suspend or reinstate; make or remove a reviewer; set the display name.
+  A suspended principal cannot publish, update or request audits; its
+  listings stay up until delisted.
+- **Roles & settings**: the admin list (read-only), the reviewer list,
+  and the canister settings (read-only).
+
+Only a controller changes the admin list:
+
+```bash
+dfx canister call marketplace_backend add_admin '("<principal>")'
+dfx canister call marketplace_backend remove_admin '("<principal>")'
+dfx canister call marketplace_backend list_admins
+```
 
 ## Authorisation matrix
 
 | Endpoint | Caller |
 |---|---|
-| All `*_q` queries, browse / search / status / get_*_details / has_purchased / has_liked / my_likes / my_purchases / get_my_*  | open |
-| `create_extension`, `create_codex`, `update_extension`, `update_codex`, `buy_*`, `like_*`, `unlike_*` | any II principal |
-| `delist_*` | listing owner OR controller |
-| `request_audit` | active license + listing owner |
+| All `*_q` queries, browse / search / status / get_*_details / has_purchased / has_liked / my_likes / my_purchases / get_my_* / get_my_roles / list_admins / list_reviewers | open |
+| `create_*`, `update_*` | active license, not suspended (controllers exempt); updates also need ownership or controller |
+| `buy_*`, `like_*`, `unlike_*` | any II principal |
+| `delist_*`, `transfer_listing` | listing owner OR admin |
+| `request_audit` | active license + listing owner, not suspended |
 | `record_license_payment` | controller OR `config.billing_service_principal` |
-| `grant_manual_license`, `revoke_license`, `set_verification_status`, `set_*_canister_id`, `set_billing_service_principal`, `set_license_pricing`, `list_pending_audits`, `recount_listing_likes` | controller-only |
+| `review_listing`, `set_verification_status`, `list_pending_audits` | reviewer (admins and controllers included) |
+| `admin_list_listings`, `admin_set_listing_active`, `admin_list_users`, `admin_set_user_suspended`, `admin_set_developer_name`, `admin_grant_publisher`, `grant_manual_license`, `revoke_license`, `add_reviewer`, `remove_reviewer` | admin (controllers included) |
+| `add_admin`, `remove_admin`, `admin_approve_namespace`, `set_*_canister_id`, `set_billing_service_principal`, `set_license_pricing`, `recount_listing_likes` | controller-only |
 
 `request_audit` requires both ownership and a license — the license is
 the gate to even enter the audit queue.

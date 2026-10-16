@@ -109,6 +109,9 @@ type LikeRecord = record { item_kind : text; item_id : text; created_at : float6
 type DeveloperLicense = record { "principal" : text; created_at : float64; expires_at : float64; last_payment_id : text; last_payment_amount_usd_cents : nat64; payment_method : text; note : text; is_active : bool };
 type LicensePaymentInput = record { "principal" : text; stripe_session_id : text; amount_usd_cents : nat64; duration_seconds : nat64; payment_method : text; note : text };
 type PendingAudit = record { item_kind : text; item_id : text; name : text; developer : text; version : text; updated_at : float64 };
+type MyRolesRecord = record { is_controller : bool; is_admin : bool; is_reviewer : bool };
+type AdminListing = record { item_kind : text; item_id : text; name : text; developer : text; developer_name : text; version : text; verification_status : text; verification_notes : text; is_active : bool; installs : nat64; likes : nat64; file_registry_namespace : text; created_at : float64; updated_at : float64 };
+type AdminUser = record { "principal" : text; display_name : text; is_admin : bool; is_reviewer : bool; is_suspended : bool; suspended_reason : text; has_license : bool; license_active : bool; license_expires_at : float64; license_payment_method : text; license_note : text; extensions_count : nat64; codices_count : nat64; assistants_count : nat64 };
 type MarketplaceInitArg = record { file_registry : opt text; billing_service_principal : opt text };
 type Header = record { 0 : text; 1 : text };
 type HttpRequest = record { method : text; url : text; headers : vec Header; body : blob };
@@ -205,8 +208,17 @@ service : (opt MarketplaceInitArg) -> {
   "list_reviewers" : () -> (vec text) query;
   "add_reviewer" : (text) -> (GenericResult);
   "remove_reviewer" : (text) -> (GenericResult);
+  "list_admins" : () -> (vec text) query;
+  "add_admin" : (text) -> (GenericResult);
+  "remove_admin" : (text) -> (GenericResult);
+  "get_my_roles" : () -> (MyRolesRecord) query;
+  "admin_list_listings" : () -> (vec AdminListing) query;
+  "admin_set_listing_active" : (text, text, bool) -> (GenericResult);
+  "admin_list_users" : () -> (vec AdminUser) query;
+  "admin_set_user_suspended" : (text, bool, text) -> (GenericResult);
   "review_listing" : (text, text, bool, text) -> (text);
   "admin_approve_namespace" : (text, text) -> (text);
+  "admin_set_developer_name" : (text) -> (text);
   "get_billing_service_principal_q" : () -> (text) query;
   "set_billing_service_principal" : (text) -> (GenericResult);
   "get_license_pricing_q" : () -> (LicensePricingRecord) query;

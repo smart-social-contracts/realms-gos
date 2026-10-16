@@ -200,6 +200,43 @@ export const idlFactory = ({ IDL }) => {
     'page' : IDL.Nat64,
     'total_count' : IDL.Nat64,
   });
+  const AdminListing = IDL.Record({
+    'updated_at' : IDL.Float64,
+    'name' : IDL.Text,
+    'item_kind' : IDL.Text,
+    'verification_status' : IDL.Text,
+    'installs' : IDL.Nat64,
+    'developer_name' : IDL.Text,
+    'is_active' : IDL.Bool,
+    'created_at' : IDL.Float64,
+    'version' : IDL.Text,
+    'likes' : IDL.Nat64,
+    'verification_notes' : IDL.Text,
+    'item_id' : IDL.Text,
+    'file_registry_namespace' : IDL.Text,
+    'developer' : IDL.Text,
+  });
+  const AdminUser = IDL.Record({
+    'principal' : IDL.Text,
+    'display_name' : IDL.Text,
+    'is_admin' : IDL.Bool,
+    'is_reviewer' : IDL.Bool,
+    'is_suspended' : IDL.Bool,
+    'suspended_reason' : IDL.Text,
+    'has_license' : IDL.Bool,
+    'license_active' : IDL.Bool,
+    'license_expires_at' : IDL.Float64,
+    'license_payment_method' : IDL.Text,
+    'license_note' : IDL.Text,
+    'extensions_count' : IDL.Nat64,
+    'codices_count' : IDL.Nat64,
+    'assistants_count' : IDL.Nat64,
+  });
+  const MyRolesRecord = IDL.Record({
+    'is_controller' : IDL.Bool,
+    'is_admin' : IDL.Bool,
+    'is_reviewer' : IDL.Bool,
+  });
   const PendingAudit = IDL.Record({
     'updated_at' : IDL.Float64,
     'name' : IDL.Text,
@@ -243,8 +280,25 @@ export const idlFactory = ({ IDL }) => {
   const StatusResult = IDL.Variant({ 'Ok' : StatusRecord, 'Err' : IDL.Text });
   return IDL.Service({
     '__get_candid_interface_tmp_hack' : IDL.Func([], [IDL.Text], ['query']),
+    'add_admin' : IDL.Func([IDL.Text], [GenericResult], []),
     'add_reviewer' : IDL.Func([IDL.Text], [GenericResult], []),
     'admin_approve_namespace' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+    'admin_list_listings' : IDL.Func([], [IDL.Vec(AdminListing)], ['query']),
+    'admin_list_users' : IDL.Func([], [IDL.Vec(AdminUser)], ['query']),
+    'admin_set_developer_name' : IDL.Func([IDL.Text], [IDL.Text], []),
+    'admin_set_listing_active' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Bool],
+        [GenericResult],
+        [],
+      ),
+    'admin_set_user_suspended' : IDL.Func(
+        [IDL.Text, IDL.Bool, IDL.Text],
+        [GenericResult],
+        [],
+      ),
+    'get_my_roles' : IDL.Func([], [MyRolesRecord], ['query']),
+    'list_admins' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
+    'remove_admin' : IDL.Func([IDL.Text], [GenericResult], []),
     'buy_assistant' : IDL.Func([IDL.Text], [GenericResult], []),
     'buy_codex' : IDL.Func([IDL.Text], [GenericResult], []),
     'buy_extension' : IDL.Func([IDL.Text], [GenericResult], []),

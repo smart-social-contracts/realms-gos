@@ -10,7 +10,8 @@ frontend). Purchase increments ``installs`` (the new counter that
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
-from api.developers import developer_name
+from api.config import caller_is_admin
+from api.developers import developer_name, is_suspended
 from api.licenses import has_active_license
 from core.models import ExtensionListingEntity, PurchaseEntity
 from ic_python_logging import get_logger
@@ -103,6 +104,8 @@ def create_extension(
     if err:
         return {"success": False, "error": err}
 
+    if is_suspended(developer) and not _is_controller():
+        return {"success": False, "error": "This account is suspended from publishing"}
     if not has_active_license(developer) and not _is_controller():
         return {
             "success": False,
@@ -175,7 +178,7 @@ def delist_extension(developer: str, extension_id: str) -> Dict:
     ext = ExtensionListingEntity[extension_id]
     if ext is None:
         return {"success": False, "error": "Extension not found"}
-    if str(ext.developer) != developer and not _is_controller():
+    if str(ext.developer) != developer and not caller_is_admin():
         return {"success": False, "error": "Not the owner"}
     ext.is_active = False
     ext.updated_at = _now()

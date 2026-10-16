@@ -82,7 +82,7 @@ _short_aliases = ["core", "core.models", "api"]
 _api_short_modules = [
     "api.config", "api.developers", "api.extensions", "api.codices", "api.assistants",
     "api.likes", "api.rankings", "api.licenses", "api.verification",
-    "api.status", "api.approval",
+    "api.status", "api.approval", "api.admin",
 ]
 
 # 1. Install short-name aliases pointing at marketplace_backend.*.
@@ -103,6 +103,7 @@ config_api = sys.modules["api.config"]
 verification_api = sys.modules["api.verification"]
 approval_api = sys.modules["api.approval"]
 developers_api = sys.modules["api.developers"]
+admin_api = sys.modules["api.admin"]
 
 # 2. Drop the short-name aliases from sys.modules so other test
 #    suites that import a different package's `core`, `api`, or `_cdk`

@@ -3,8 +3,9 @@
 Stores the file_registry canister id, the billing-service principal
 allowed to call ``record_license_payment``, and license pricing.
 
-All mutators are controller-only; the marketplace canister's
-controller list is curated by Smart Social Contracts.
+Canister settings and the admin list are controller-only; the
+marketplace canister's controller list is curated by Smart Social
+Contracts. Admins may manage the reviewer list.
 """
 
 from typing import Dict
@@ -69,6 +70,7 @@ def get_config() -> Dict:
             "license_price_usd_cents": int(cfg.license_price_usd_cents or DEFAULT_LICENSE_PRICE_USD_CENTS),
             "license_duration_seconds": int(cfg.license_duration_seconds or DEFAULT_LICENSE_DURATION_SECONDS),
             "reviewers": get_reviewers(),
+            "admins": get_admins(),
         },
     }
 
@@ -89,15 +91,15 @@ def get_reviewers() -> list:
 
 
 def is_reviewer(principal: str) -> bool:
-    """Controllers are implicitly reviewers, so a fresh marketplace is usable
-    before anyone has been appointed."""
-    if _is_controller():
+    """Controllers and admins are implicitly reviewers, so a fresh marketplace
+    is usable before anyone has been appointed."""
+    if is_admin(principal):
         return True
     return (principal or "").strip() in get_reviewers()
 
 
 def add_reviewer(principal: str) -> Dict:
-    err = _require_controller()
+    err = _require_admin()
     if not err["success"]:
         return err
     principal = (principal or "").strip()
@@ -112,7 +114,7 @@ def add_reviewer(principal: str) -> Dict:
 
 
 def remove_reviewer(principal: str) -> Dict:
-    err = _require_controller()
+    err = _require_admin()
     if not err["success"]:
         return err
     principal = (principal or "").strip()
@@ -120,6 +122,71 @@ def remove_reviewer(principal: str) -> Dict:
     _ensure_config().reviewers = ",".join(reviewers)
     logger.info(f"remove_reviewer -> {principal}")
     return {"success": True, "reviewers": reviewers}
+
+
+# ---------------------------------------------------------------------------
+# Admins
+#
+# An admin runs the marketplace from its UI: every listing, every user, every
+# license, and the reviewer list. Who is an admin is still a key holder's
+# decision, so only controllers add or remove them. Canister settings (file
+# registry, billing principal, pricing) stay controller-only.
+# ---------------------------------------------------------------------------
+
+
+def get_admins() -> list:
+    cfg = _ensure_config()
+    raw = getattr(cfg, "admins", "") or ""
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def is_admin(principal: str) -> bool:
+    """Controllers are implicitly admins. ``principal`` must be the caller:
+    the controller check is made against ``ic.caller()``."""
+    if _is_controller():
+        return True
+    return (principal or "").strip() in get_admins()
+
+
+def caller_is_admin() -> bool:
+    try:
+        return is_admin(str(ic.caller()))
+    except Exception:
+        return False
+
+
+def _require_admin() -> Dict:
+    if not caller_is_admin():
+        return {"success": False, "error": "Unauthorized: admins only"}
+    return {"success": True}
+
+
+def add_admin(principal: str) -> Dict:
+    err = _require_controller()
+    if not err["success"]:
+        return err
+    principal = (principal or "").strip()
+    if not principal:
+        return {"success": False, "error": "principal is required"}
+    if len(principal) > 128:
+        return {"success": False, "error": "principal too long"}
+    admins = get_admins()
+    if principal not in admins:
+        admins.append(principal)
+        _ensure_config().admins = ",".join(admins)
+        logger.info(f"add_admin -> {principal}")
+    return {"success": True, "admins": admins}
+
+
+def remove_admin(principal: str) -> Dict:
+    err = _require_controller()
+    if not err["success"]:
+        return err
+    principal = (principal or "").strip()
+    admins = [p for p in get_admins() if p != principal]
+    _ensure_config().admins = ",".join(admins)
+    logger.info(f"remove_admin -> {principal}")
+    return {"success": True, "admins": admins}
 
 
 def get_file_registry_canister_id() -> str:

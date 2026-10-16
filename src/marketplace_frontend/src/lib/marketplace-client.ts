@@ -199,6 +199,48 @@ export interface PendingAudit {
   updated_at: number;
 }
 
+export type ItemKind = 'ext' | 'codex' | 'assistant';
+
+export interface MyRoles {
+  is_controller: boolean;
+  is_admin: boolean;
+  is_reviewer: boolean;
+}
+
+export interface AdminListing {
+  item_kind: ItemKind;
+  item_id: string;
+  name: string;
+  developer: string;
+  developer_name: string;
+  version: string;
+  verification_status: string;
+  verification_notes: string;
+  is_active: boolean;
+  installs: number;
+  likes: number;
+  file_registry_namespace: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminUser {
+  principal: string;
+  display_name: string;
+  is_admin: boolean;
+  is_reviewer: boolean;
+  is_suspended: boolean;
+  suspended_reason: string;
+  has_license: boolean;
+  license_active: boolean;
+  license_expires_at: number;
+  license_payment_method: string;
+  license_note: string;
+  extensions_count: number;
+  codices_count: number;
+  assistants_count: number;
+}
+
 export interface MarketplaceStatus {
   version: string;
   commit: string;
@@ -350,6 +392,50 @@ function normPendingAudit(raw: any): PendingAudit {
     version: String(raw.version ?? ''),
     updated_at: toNumber(raw.updated_at),
   };
+}
+
+function normAdminListing(raw: any): AdminListing {
+  return {
+    item_kind: String(raw.item_kind ?? 'ext') as ItemKind,
+    item_id: String(raw.item_id ?? ''),
+    name: String(raw.name ?? ''),
+    developer: String(raw.developer ?? ''),
+    developer_name: String(raw.developer_name ?? ''),
+    version: String(raw.version ?? ''),
+    verification_status: String(raw.verification_status ?? 'unverified'),
+    verification_notes: String(raw.verification_notes ?? ''),
+    is_active: Boolean(raw.is_active),
+    installs: toNumber(raw.installs),
+    likes: toNumber(raw.likes),
+    file_registry_namespace: String(raw.file_registry_namespace ?? ''),
+    created_at: toNumber(raw.created_at),
+    updated_at: toNumber(raw.updated_at),
+  };
+}
+
+function normAdminUser(raw: any): AdminUser {
+  return {
+    principal: String(raw.principal ?? ''),
+    display_name: String(raw.display_name ?? ''),
+    is_admin: Boolean(raw.is_admin),
+    is_reviewer: Boolean(raw.is_reviewer),
+    is_suspended: Boolean(raw.is_suspended),
+    suspended_reason: String(raw.suspended_reason ?? ''),
+    has_license: Boolean(raw.has_license),
+    license_active: Boolean(raw.license_active),
+    license_expires_at: toNumber(raw.license_expires_at),
+    license_payment_method: String(raw.license_payment_method ?? ''),
+    license_note: String(raw.license_note ?? ''),
+    extensions_count: toNumber(raw.extensions_count),
+    codices_count: toNumber(raw.codices_count),
+    assistants_count: toNumber(raw.assistants_count),
+  };
+}
+
+function unwrapJson(raw: string): any {
+  const r = JSON.parse(raw);
+  if (r && r.success === false) throw new Error(String(r.error ?? 'failed'));
+  return r;
 }
 
 function fallbackExtensions(canisterItems: ExtensionListing[], verifiedOnly: boolean): ExtensionListing[] {
@@ -661,6 +747,54 @@ export const marketplaceClient = {
   async listPendingAudits(): Promise<PendingAudit[]> {
     const r = await marketplace.list_pending_audits();
     return (r as any[]).map(normPendingAudit);
+  },
+  /** Approve or reject, stamping the decision onto the file registry so realms honour it. */
+  async reviewListing(kind: ItemKind, id: string, approve: boolean, notes: string): Promise<any> {
+    return unwrapJson(String(await marketplace.review_listing(kind, id, approve, notes)));
+  },
+
+  // --- roles / admin ---------------------------------------------------
+  async getMyRoles(): Promise<MyRoles> {
+    try {
+      const r: any = await marketplace.get_my_roles();
+      return {
+        is_controller: Boolean(r.is_controller),
+        is_admin: Boolean(r.is_admin),
+        is_reviewer: Boolean(r.is_reviewer),
+      };
+    } catch {
+      return { is_controller: false, is_admin: false, is_reviewer: false };
+    }
+  },
+  async listAdmins(): Promise<string[]> {
+    return ((await marketplace.list_admins()) as any[]).map(String);
+  },
+  async listReviewers(): Promise<string[]> {
+    return ((await marketplace.list_reviewers()) as any[]).map(String);
+  },
+  async addReviewer(principal: string): Promise<string> {
+    return unwrap<string>(await marketplace.add_reviewer(principal));
+  },
+  async removeReviewer(principal: string): Promise<string> {
+    return unwrap<string>(await marketplace.remove_reviewer(principal));
+  },
+  async adminListListings(): Promise<AdminListing[]> {
+    return ((await marketplace.admin_list_listings()) as any[]).map(normAdminListing);
+  },
+  async adminSetListingActive(kind: ItemKind, id: string, active: boolean): Promise<string> {
+    return unwrap<string>(await marketplace.admin_set_listing_active(kind, id, active));
+  },
+  async transferListing(kind: ItemKind, id: string, newDeveloper: string): Promise<string> {
+    return unwrap<string>(await marketplace.transfer_listing(kind, id, newDeveloper));
+  },
+  async adminListUsers(): Promise<AdminUser[]> {
+    return ((await marketplace.admin_list_users()) as any[]).map(normAdminUser);
+  },
+  async adminSetUserSuspended(principal: string, suspended: boolean, reason: string): Promise<string> {
+    return unwrap<string>(await marketplace.admin_set_user_suspended(principal, suspended, reason));
+  },
+  async setDeveloperName(principal: string, name: string): Promise<any> {
+    return unwrapJson(String(await marketplace.admin_set_developer_name(JSON.stringify({ principal, name }))));
   },
 };
 

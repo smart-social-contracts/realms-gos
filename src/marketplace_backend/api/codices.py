@@ -13,7 +13,8 @@ Lookups accept the original id; we convert before hitting the entity.
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
-from api.developers import developer_name
+from api.config import caller_is_admin
+from api.developers import developer_name, is_suspended
 from api.licenses import has_active_license
 from core.models import CodexListingEntity, PurchaseEntity
 from ic_python_logging import get_logger
@@ -93,6 +94,8 @@ def create_codex(
     if err:
         return {"success": False, "error": err}
 
+    if is_suspended(developer) and not _is_controller():
+        return {"success": False, "error": "This account is suspended from publishing"}
     if not has_active_license(developer) and not _is_controller():
         return {
             "success": False,
@@ -160,7 +163,7 @@ def delist_codex(developer: str, codex_id: str) -> Dict:
     c = CodexListingEntity[alias]
     if c is None:
         return {"success": False, "error": "Codex not found"}
-    if str(c.developer) != developer and not _is_controller():
+    if str(c.developer) != developer and not caller_is_admin():
         return {"success": False, "error": "Not the owner"}
     c.is_active = False
     c.updated_at = _now()

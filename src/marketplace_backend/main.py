@@ -265,12 +265,20 @@ from api.codices import (
     list_codices as list_codices_impl,
     search_codices as search_codices_impl,
 )
+from api.admin import (
+    list_all_listings as admin_list_listings_impl,
+    list_users as admin_list_users_impl,
+    my_roles as my_roles_impl,
+    set_listing_active as admin_set_listing_active_impl,
+)
 from api.approval import (
     admin_approve_namespace as admin_approve_namespace_impl,
     review_listing as review_listing_impl,
 )
 from api.config import (
+    add_admin as add_admin_impl,
     add_reviewer as add_reviewer_impl,
+    get_admins,
     get_billing_service_principal,
     get_casals_frontend_canister_id,
     get_config,
@@ -278,6 +286,7 @@ from api.config import (
     get_license_pricing,
     get_reviewers,
     init_config_from_args,
+    remove_admin as remove_admin_impl,
     remove_reviewer as remove_reviewer_impl,
     set_billing_service_principal as set_billing_service_principal_impl,
     set_casals_frontend_canister_id as set_casals_frontend_canister_id_impl,
@@ -286,6 +295,7 @@ from api.config import (
 )
 from api.developers import (
     set_developer_name_from_json as set_developer_name_from_json_impl,
+    set_user_suspended as set_user_suspended_impl,
     transfer_listing as transfer_listing_impl,
 )
 from api.extensions import (
@@ -629,6 +639,48 @@ class PendingAudit(Record):
     updated_at: float64
 
 
+# ----- Admin -----------------------------------------------------------------
+
+class MyRolesRecord(Record):
+    is_controller: bool
+    is_admin: bool
+    is_reviewer: bool
+
+
+class AdminListing(Record):
+    item_kind: text
+    item_id: text
+    name: text
+    developer: text
+    developer_name: text
+    version: text
+    verification_status: text
+    verification_notes: text
+    is_active: bool
+    installs: nat64
+    likes: nat64
+    file_registry_namespace: text
+    created_at: float64
+    updated_at: float64
+
+
+class AdminUser(Record):
+    principal: text
+    display_name: text
+    is_admin: bool
+    is_reviewer: bool
+    is_suspended: bool
+    suspended_reason: text
+    has_license: bool
+    license_active: bool
+    license_expires_at: float64
+    license_payment_method: text
+    license_note: text
+    extensions_count: nat64
+    codices_count: nat64
+    assistants_count: nat64
+
+
 # ----- Init arg --------------------------------------------------------------
 
 class MarketplaceInitArg(Record):
@@ -885,6 +937,129 @@ def remove_reviewer(principal: text) -> GenericResult:
     try:
         r = remove_reviewer_impl(principal)
         return {"Ok": ",".join(r["reviewers"])} if r["success"] else {"Err": r["error"]}
+    except Exception as e:
+        return {"Err": str(e)}
+
+
+@query
+def list_admins() -> Vec[text]:
+    """Principals who may use the marketplace Admin section (controllers are
+    admins without being listed)."""
+    try:
+        return get_admins()
+    except Exception as e:
+        logger.error(f"list_admins: {e}")
+        return []
+
+
+@update
+def add_admin(principal: text) -> GenericResult:
+    """Controller only."""
+    try:
+        r = add_admin_impl(principal)
+        return {"Ok": ",".join(r["admins"])} if r["success"] else {"Err": r["error"]}
+    except Exception as e:
+        return {"Err": str(e)}
+
+
+@update
+def remove_admin(principal: text) -> GenericResult:
+    """Controller only."""
+    try:
+        r = remove_admin_impl(principal)
+        return {"Ok": ",".join(r["admins"])} if r["success"] else {"Err": r["error"]}
+    except Exception as e:
+        return {"Err": str(e)}
+
+
+@query
+def get_my_roles() -> MyRolesRecord:
+    try:
+        r = my_roles_impl()
+        return MyRolesRecord(
+            is_controller=bool(r["is_controller"]),
+            is_admin=bool(r["is_admin"]),
+            is_reviewer=bool(r["is_reviewer"]),
+        )
+    except Exception as e:
+        logger.error(f"get_my_roles: {e}")
+        return MyRolesRecord(is_controller=False, is_admin=False, is_reviewer=False)
+
+
+@query
+def admin_list_listings() -> Vec[AdminListing]:
+    """Every listing of every kind and developer, delisted ones included.
+    Empty for non-admins."""
+    try:
+        return [
+            AdminListing(
+                item_kind=r["item_kind"],
+                item_id=r["item_id"],
+                name=r["name"],
+                developer=r["developer"],
+                developer_name=r["developer_name"],
+                version=r["version"],
+                verification_status=r["verification_status"],
+                verification_notes=r["verification_notes"],
+                is_active=bool(r["is_active"]),
+                installs=int(r["installs"]),
+                likes=int(r["likes"]),
+                file_registry_namespace=r["file_registry_namespace"],
+                created_at=float(r["created_at"]),
+                updated_at=float(r["updated_at"]),
+            )
+            for r in admin_list_listings_impl()
+        ]
+    except Exception as e:
+        logger.error(f"admin_list_listings: {e}")
+        return []
+
+
+@update
+def admin_set_listing_active(item_kind: text, item_id: text, active: bool) -> GenericResult:
+    """Delist or relist any listing. Admin only."""
+    try:
+        r = admin_set_listing_active_impl(item_kind, item_id, bool(active))
+        return {"Ok": r["action"]} if r["success"] else {"Err": r["error"]}
+    except Exception as e:
+        return {"Err": str(e)}
+
+
+@query
+def admin_list_users() -> Vec[AdminUser]:
+    """Every principal the marketplace knows, with roles, license and
+    suspension state. Empty for non-admins."""
+    try:
+        return [
+            AdminUser(
+                principal=u["principal"],
+                display_name=u["display_name"],
+                is_admin=bool(u["is_admin"]),
+                is_reviewer=bool(u["is_reviewer"]),
+                is_suspended=bool(u["is_suspended"]),
+                suspended_reason=u["suspended_reason"],
+                has_license=bool(u["has_license"]),
+                license_active=bool(u["license_active"]),
+                license_expires_at=float(u["license_expires_at"]),
+                license_payment_method=u["license_payment_method"],
+                license_note=u["license_note"],
+                extensions_count=int(u["extensions_count"]),
+                codices_count=int(u["codices_count"]),
+                assistants_count=int(u["assistants_count"]),
+            )
+            for u in admin_list_users_impl()
+        ]
+    except Exception as e:
+        logger.error(f"admin_list_users: {e}")
+        return []
+
+
+@update
+def admin_set_user_suspended(principal: text, suspended: bool, reason: text) -> GenericResult:
+    """Suspend (or reinstate) a principal from publishing. Admin only."""
+    try:
+        r = set_user_suspended_impl(principal, bool(suspended), reason)
+        return {"Ok": r["action"]} if r["success"] else {"Err": r["error"]}
     except Exception as e:
         return {"Err": str(e)}
 
@@ -1504,7 +1679,7 @@ def admin_grant_publisher(args: text) -> text:
 def admin_set_developer_name(args: text) -> text:
     """Give a developer principal a public display name, from a JSON argument
     {"principal", "name"} (empty name removes it), so a Casals sheet config row
-    can set it through the conductor. Controller only."""
+    can set it through the conductor. Admin only."""
     try:
         return json.dumps(set_developer_name_from_json_impl(args))
     except Exception as e:
@@ -1514,7 +1689,7 @@ def admin_set_developer_name(args: text) -> text:
 @update
 def transfer_listing(item_kind: text, item_id: text, new_developer: text) -> GenericResult:
     """Hand a listing (item_kind ext | codex | assistant) to another principal.
-    Current owner or a controller only; version and review state are kept."""
+    Current owner or an admin only; version and review state are kept."""
     try:
         r = transfer_listing_impl(str(ic.caller()), item_kind, item_id, new_developer)
         return {"Ok": r["action"]} if r["success"] else {"Err": r["error"]}
@@ -1524,7 +1699,8 @@ def transfer_listing(item_kind: text, item_id: text, new_developer: text) -> Gen
 
 @query
 def admin_status() -> text:
-    """{"reviewers": [...], "licensed": [...]} as JSON, for a sheet's `converged_when`."""
+    """{"reviewers": [...], "admins": [...], "licensed": [...], "names": [...]}
+    as JSON, for a sheet's `converged_when`."""
     try:
         return json.dumps(publishing_status_impl())
     except Exception as e:

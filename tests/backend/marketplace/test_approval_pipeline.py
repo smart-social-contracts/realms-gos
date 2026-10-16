@@ -209,11 +209,11 @@ def test_reviewers_are_separate_from_controllers(as_caller):
     assert config_api.is_reviewer(OUTSIDER) is False
 
 
-def test_only_a_controller_can_appoint_reviewers(as_caller):
+def test_only_an_admin_can_appoint_reviewers(as_caller):
     as_caller(REVIEWER)
     r = config_api.add_reviewer(OUTSIDER)
     assert r["success"] is False
-    assert "controller-only" in r["error"]
+    assert "admins only" in r["error"]
 
 
 def test_a_removed_reviewer_loses_the_right(as_caller):

@@ -232,10 +232,10 @@ def test_list_pending_audits_reviewers_only(as_caller):
 # ── sheet-driven grants (admin_grant_license / admin_status) ─────────────────
 
 
-def test_json_grant_is_controller_only(as_caller):
+def test_json_grant_is_admin_only(as_caller):
     as_caller("op-1", controller=False)
     r = lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 3600}')
-    assert r["success"] is False and "controller" in r["error"]
+    assert r["success"] is False and "admins only" in r["error"]
     assert lic_api.has_active_license("op-1") is False
 
 
@@ -244,20 +244,20 @@ def test_json_grant_licenses_the_principal_and_reads_back_in_status(as_caller):
     r = lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 315360000, "note": "sheet", "reviewer": true}')
     assert r["success"] is True and r["reviewer"] is True
     assert lic_api.has_active_license("op-1") is True
-    assert lic_api.publishing_status() == {"reviewers": ["op-1"], "licensed": ["op-1"], "names": []}
+    assert lic_api.publishing_status() == {"reviewers": ["op-1"], "admins": [], "licensed": ["op-1"], "names": []}
 
 
 def test_json_grant_is_idempotent_for_the_same_principal(as_caller):
     as_caller("conductor", controller=True)
     lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 3600, "reviewer": true}')
     lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 3600, "reviewer": true}')
-    assert lic_api.publishing_status() == {"reviewers": ["op-1"], "licensed": ["op-1"], "names": []}
+    assert lic_api.publishing_status() == {"reviewers": ["op-1"], "admins": [], "licensed": ["op-1"], "names": []}
 
 
 def test_json_grant_without_reviewer_flag_only_licenses(as_caller):
     as_caller("conductor", controller=True)
     lic_api.grant_publisher_from_json('{"principal": "op-1", "duration_seconds": 3600}')
-    assert lic_api.publishing_status() == {"reviewers": [], "licensed": ["op-1"], "names": []}
+    assert lic_api.publishing_status() == {"reviewers": [], "admins": [], "licensed": ["op-1"], "names": []}
 
 
 def test_json_grant_rejects_bad_input(as_caller):

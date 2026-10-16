@@ -215,16 +215,28 @@ class DeveloperLicenseEntity(Entity):
 
 
 class DeveloperProfileEntity(Entity):
-    """Public display name for a developer principal (e.g. "Realms GOS team").
+    """Per-principal account state kept by the marketplace.
 
-    Listings still name their owner by principal; this only changes how the
-    owner is shown. Set by a controller (``admin_set_developer_name``).
+    ``display_name`` is a public name (e.g. "Realms GOS team"); listings still
+    name their owner by principal, this only changes how the owner is shown.
+    ``suspended`` blocks the principal from publishing and requesting audits.
+    Both are set by an admin.
     """
     __alias__ = "principal"
+    __version__ = 2
 
-    principal    = String(max_length=128)
-    display_name = String(max_length=64)
-    updated_at   = Float()
+    @classmethod
+    def migrate(cls, obj, from_version, to_version):
+        if from_version < 2:
+            obj.setdefault("suspended", False)
+            obj.setdefault("suspended_reason", "")
+        return obj
+
+    principal        = String(max_length=128)
+    display_name     = String(max_length=64)
+    suspended        = Boolean()
+    suspended_reason = String(max_length=512)
+    updated_at       = Float()
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +257,7 @@ class MarketplaceConfigEntity(Entity):
         same pricing when creating a checkout session.
     """
     __alias__ = "id"
-    __version__ = 3
+    __version__ = 4
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
@@ -255,6 +267,8 @@ class MarketplaceConfigEntity(Entity):
             obj.setdefault("reviewers", "")
         if from_version < 3:
             obj.setdefault("casals_frontend_canister_id", "")
+        if from_version < 4:
+            obj.setdefault("admins", "")
         return obj
 
     id                          = String(max_length=16)  # always "config"
@@ -267,3 +281,6 @@ class MarketplaceConfigEntity(Entity):
     # Distinct from the controller list: reviewing content is a day-to-day job,
     # holding the upgrade key is not.
     reviewers                   = String(max_length=2048)
+    # Comma-separated principals who run the marketplace day to day: every
+    # listing, every user, every license. Only controllers change this list.
+    admins                      = String(max_length=2048)

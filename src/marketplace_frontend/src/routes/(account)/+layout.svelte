@@ -2,8 +2,10 @@
   import { _ } from 'svelte-i18n';
   import { page } from '$app/stores';
   import { ACCOUNT_ALPHA } from '$lib/config';
+  import { roles } from '$lib/roles';
 
   $: active = (path: string) => $page.url.pathname.startsWith(path);
+  $: alpha = ACCOUNT_ALPHA && !active('/admin');
 </script>
 
 <div class="account">
@@ -24,11 +26,18 @@
         <span>{$_('nav.developer')}</span>
         {#if ACCOUNT_ALPHA}<span class="soon">{$_('account.coming_soon_badge')}</span>{/if}
       </a>
+      {#if $roles.is_admin}
+        <span class="sep" aria-hidden="true"></span>
+        <a class="item" href="/admin" class:active={active('/admin')}>
+          <i class="ti ti-shield-lock" aria-hidden="true"></i>
+          <span>{$_('nav.admin')}</span>
+        </a>
+      {/if}
     </nav>
   </aside>
 
   <div class="content">
-    {#if ACCOUNT_ALPHA}
+    {#if alpha}
       <div class="alpha-banner" role="status">
         <strong>{$_('account.coming_soon_title')}</strong>
         <p>{$_('account.coming_soon_body')}</p>
@@ -76,6 +85,7 @@
   .item:hover { background: var(--surface-2); color: var(--text); }
   .item.active { background: var(--surface-2); color: var(--text); font-weight: 500; }
   .item .ti { font-size: 1.1rem; flex-shrink: 0; }
+  .sep { height: 1px; background: var(--border); margin: 0.35rem 0.5rem; }
   .soon {
     margin-left: auto;
     font-size: 0.65rem;
@@ -101,8 +111,9 @@
 
   @media (max-width: 760px) {
     .account { grid-template-columns: 1fr; gap: 1rem; }
-    .sidebar { position: static; }
+    .sidebar { position: static; min-width: 0; }
     .side-nav { flex-direction: row; overflow-x: auto; padding: 0.4rem; }
     .item { padding: 0.5rem 0.75rem; white-space: nowrap; font-size: 0.85rem; }
+    .sep { width: 1px; height: auto; margin: 0.35rem 0.15rem; }
   }
 </style>

@@ -3,8 +3,8 @@
 Lifecycle:
     unverified ──request_audit──▶ pending_audit ──set_verification_status──▶ verified | rejected
 
-Only license-holders may call ``request_audit``; only controllers may
-flip the final status. The browse / search endpoints accept a
+Only license-holders who are not suspended may call ``request_audit``;
+only reviewers (admins and controllers included) may flip the final status. The browse / search endpoints accept a
 ``verified_only`` flag that gates by ``status == "verified"``.
 """
 
@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 
 from _cdk import ic
 from api.config import is_reviewer
+from api.developers import is_suspended
 from api.licenses import has_active_license
 from core.models import (
     AssistantListingEntity,
@@ -68,6 +69,8 @@ def _get_listing(item_kind: str, item_id: str):
 def request_audit(*, caller: str, item_kind: str, item_id: str) -> Dict:
     if item_kind not in VALID_KINDS:
         return {"success": False, "error": f"item_kind must be one of {VALID_KINDS}"}
+    if is_suspended(caller):
+        return {"success": False, "error": "This account is suspended"}
     if not has_active_license(caller):
         return {"success": False, "error": "Active developer license required to request an audit"}
     listing = _get_listing(item_kind, item_id)

@@ -16,10 +16,10 @@ from .test_extensions import _create as create_extension
 # ── display names ────────────────────────────────────────────────────────────
 
 
-def test_setting_a_name_is_controller_only(as_caller):
+def test_setting_a_name_is_admin_only(as_caller):
     as_caller("dev-1", controller=False)
     r = dev_api.set_developer_name_from_json('{"principal": "dev-1", "name": "Me"}')
-    assert r["success"] is False and "controller" in r["error"]
+    assert r["success"] is False and "admins only" in r["error"]
     assert dev_api.developer_name("dev-1") == ""
 
 

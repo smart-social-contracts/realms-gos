@@ -13,15 +13,15 @@ Payment flow (off-chain → canister):
 
 ``record_license_payment`` is gated to either a controller or to the
 ``billing_service_principal`` configured via ``set_billing_service_principal``.
-``grant_manual_license`` is a controller escape hatch for vouchers and
-local development.
+``grant_manual_license`` and ``revoke_license`` are admin tools for
+vouchers, comps, local development and taking a license away.
 """
 
 import json
 from typing import Any, Dict
 
 from _cdk import ic
-from api.config import add_reviewer, get_billing_service_principal, get_reviewers
+from api.config import add_reviewer, caller_is_admin, get_admins, get_billing_service_principal, get_reviewers
 from api.developers import developer_names
 from core.models import DeveloperLicenseEntity
 from ic_python_logging import get_logger
@@ -88,7 +88,27 @@ def record_license_payment(
     billing_principal = get_billing_service_principal()
     if not _is_controller() and (not billing_principal or caller != billing_principal):
         return {"success": False, "error": "Unauthorized: caller is not the billing service or a controller"}
-    if not principal or not principal.strip():
+    return _apply_license_payment(
+        principal=principal,
+        stripe_session_id=stripe_session_id,
+        duration_seconds=duration_seconds,
+        amount_usd_cents=amount_usd_cents,
+        payment_method=payment_method,
+        note=note,
+    )
+
+
+def _apply_license_payment(
+    *,
+    principal: str,
+    stripe_session_id: str,
+    duration_seconds: int,
+    amount_usd_cents: int = 0,
+    payment_method: str = "stripe",
+    note: str = "",
+) -> Dict:
+    principal = (principal or "").strip()
+    if not principal:
         return {"success": False, "error": "principal is required"}
     if duration_seconds <= 0:
         return {"success": False, "error": "duration_seconds must be positive"}
@@ -129,9 +149,9 @@ def record_license_payment(
 
 
 def grant_manual_license(*, principal: str, duration_seconds: int, note: str = "") -> Dict:
-    if not _is_controller():
-        return {"success": False, "error": "Unauthorized: controller-only"}
-    return record_license_payment(
+    if not caller_is_admin():
+        return {"success": False, "error": "Unauthorized: admins only"}
+    return _apply_license_payment(
         principal=principal,
         stripe_session_id="",
         duration_seconds=duration_seconds,
@@ -174,8 +194,9 @@ def grant_publisher_from_json(args: str) -> Dict:
 
 
 def publishing_status() -> Dict:
-    """Who may publish and review, and how developers are named:
-    {"reviewers": [...], "licensed": [...], "names": [{"principal", "name"}, ...]},
+    """Who may publish, review and administer, and how developers are named:
+    {"reviewers": [...], "admins": [...], "licensed": [...],
+    "names": [{"principal", "name"}, ...]},
     all sorted by principal, so a sheet's `converged_when.contains` can read it
     back (a sheet resolves placeholders in values, not in object keys)."""
     licensed = sorted(
@@ -184,12 +205,17 @@ def publishing_status() -> Dict:
         if has_active_license(str(lic.principal))
     )
     names = [{"principal": p, "name": n} for p, n in sorted(developer_names().items())]
-    return {"reviewers": sorted(get_reviewers()), "licensed": licensed, "names": names}
+    return {
+        "reviewers": sorted(get_reviewers()),
+        "admins": sorted(get_admins()),
+        "licensed": licensed,
+        "names": names,
+    }
 
 
 def revoke_license(principal: str) -> Dict:
-    if not _is_controller():
-        return {"success": False, "error": "Unauthorized: controller-only"}
+    if not caller_is_admin():
+        return {"success": False, "error": "Unauthorized: admins only"}
     lic = DeveloperLicenseEntity[principal]
     if lic is None:
         return {"success": False, "error": "No license found"}
