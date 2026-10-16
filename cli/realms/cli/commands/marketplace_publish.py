@@ -86,6 +86,14 @@ def _categories(manifest: dict) -> str:
     return ",".join(str(c) for c in cats)
 
 
+def _screenshots(manifest: dict) -> str:
+    """Package-relative paths, comma-joined as the listing stores them."""
+    shots = manifest.get("screenshots") or []
+    if not isinstance(shots, list):
+        return ""
+    return ",".join(s.strip() for s in shots if isinstance(s, str) and s.strip())
+
+
 def extension_listing(manifest: dict, dir_name: str) -> Listing:
     ext_id = str(manifest.get("name") or dir_name).strip()
     version = str(manifest.get("version") or "").strip()
@@ -99,7 +107,7 @@ def extension_listing(manifest: dict, dir_name: str) -> Listing:
         "price_e8s": 0,
         "icon": _text(manifest.get("icon")),
         "categories": _categories(manifest),
-        "screenshots": "",
+        "screenshots": _screenshots(manifest),
         "download_url": _text(manifest.get("doc_url") or manifest.get("repository")),
     })
 

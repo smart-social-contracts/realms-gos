@@ -66,6 +66,19 @@ class TestDiscovery:
         assert mp.item_kind_for(cdx) == "codex"   # still reviewed as a codex
         assert 'file_registry_namespace = "ext/agora/0.9.6"' in mp.listing_input(cdx, "reg")
 
+    def test_extension_screenshots_come_from_the_manifest(self):
+        lst = mp.extension_listing({
+            "name": "member_dashboard", "version": "1.1.20",
+            "screenshots": ["screenshots/01-overview.png", " screenshots/02-detail.png ", "", 7],
+        }, "member_dashboard")
+        assert lst.fields["screenshots"] == "screenshots/01-overview.png,screenshots/02-detail.png"
+        assert 'screenshots = "screenshots/01-overview.png,screenshots/02-detail.png"' in mp.listing_input(lst, "reg")
+
+    def test_extension_without_screenshots_lists_none(self, tmp_path):
+        ext = [l for l in mp.discover(_tree(tmp_path)) if l.kind == "extension"][0]
+        assert ext.fields["screenshots"] == ""
+        assert mp.extension_listing({"name": "x", "version": "1", "screenshots": "a.png"}, "x").fields["screenshots"] == ""
+
     def test_missing_version_is_refused(self):
         with pytest.raises(ValueError, match="no version"):
             mp.extension_listing({"name": "x"}, "x")
