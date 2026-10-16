@@ -236,7 +236,12 @@
     "checking": "Comprobando…",
     "license_needed_title": "Se necesita una licencia de desarrollador",
     "license_needed_body": "Puedes rellenar el formulario, pero para subir archivos necesitas una licencia de desarrollador activa.",
-    "license_needed_link": "Obtener una licencia"
+    "license_needed_link": "Obtener una licencia",
+    "package_no_manifest": "No hay manifest.json en la raíz de esta carpeta, así que los realms no podrían instalarlo. Elige la carpeta del paquete.",
+    "package_nested_manifest": "manifest.json está dentro de «{folder}». Elige esa carpeta en lugar de la carpeta superior.",
+    "package_bad_manifest": "manifest.json no es un objeto JSON válido.",
+    "package_id_mismatch": "manifest.json es de «{found}», pero esta publicación es «{expected}».",
+    "package_version_mismatch": "manifest.json indica la versión {found}, pero esta publicación es la versión {expected}."
   },
   "account": {
     "coming_soon_badge": "Pronto",

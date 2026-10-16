@@ -6,6 +6,7 @@ import Spinner from "$lib/components/Spinner.svelte";
 import { isAuthenticated, principalStore } from "$lib/auth";
 import { uploadAndPublish } from "$lib/file-registry-client";
 import { marketplaceClient, type ItemKind } from "$lib/marketplace-client";
+import { checkPackage, type PackageProblem } from "$lib/packageCheck";
 let step = 1;
 let kind: ItemKind = "ext";
 let id = "";
@@ -38,6 +39,7 @@ let uploading = false;
 let uploadError = "";
 let listingHref = "";
 let manifestScreenshots = "";
+let packageProblem: PackageProblem | null = null;
 $: if (kind === "ext" && id.includes("/")) id = id.replace(/\//g, "_");
 const dirInputAttrs = { webkitdirectory: "", directory: "" };
 onMount(async () => {
@@ -110,6 +112,7 @@ async function next() {
   try {
     await marketplaceClient.checkUpload(kind, id.trim(), version.trim());
     step = 2;
+    if (pickedFiles.length) void readManifest(pickedFiles);
   } catch (e) {
     checkError = e?.message ?? String(e);
   } finally {
@@ -121,17 +124,21 @@ function onFiles(e) {
   const list = Array.from(input.files ?? []);
   pickedFiles = list;
   manifestScreenshots = "";
+  packageProblem = null;
   if (list.length > 0) {
     const first = list[0].webkitRelativePath;
     baseFolder = first?.split("/")?.[0] ?? "";
   }
-  if (kind === "ext") void readManifestScreenshots(list);
+  void readManifest(list);
 }
-async function readManifestScreenshots(list) {
+async function readManifest(list) {
   const manifestFile = list.find((f) => relativePath(f) === "manifest.json");
-  if (!manifestFile) return;
+  const text = manifestFile ? await manifestFile.text() : null;
+  if (list !== pickedFiles) return;
+  packageProblem = list.length ? checkPackage(kind, id, version, list.map(relativePath), text) : null;
+  if (kind !== "ext" || text === null) return;
   try {
-    const manifest = JSON.parse(await manifestFile.text());
+    const manifest = JSON.parse(text);
     if (Array.isArray(manifest.screenshots)) {
       manifestScreenshots = manifest.screenshots
         .map((p) => (typeof p === "string" ? p.trim() : ""))
@@ -238,6 +245,7 @@ function reset() {
   listingHref = "";
   extLanguages = "en";
   manifestScreenshots = "";
+  packageProblem = null;
 }
 </script>
 
@@ -358,6 +366,9 @@ function reset() {
           on:change={onFiles}
         />
 
+        {#if packageProblem}
+          <p class="error">{$_(`upload.package_${packageProblem.key}`, { values: { ...packageProblem.values, id, version } })}</p>
+        {/if}
         {#if pickedFiles.length > 0}
           <table class="files">
             <thead><tr><th>{$_('upload.col_path')}</th><th>{$_('upload.col_size')}</th></tr></thead>
@@ -375,7 +386,7 @@ function reset() {
 
         <div class="actions">
           <button class="btn ghost" on:click={() => (step = 1)}>{$_('upload.back')}</button>
-          <button class="btn primary" disabled={pickedFiles.length === 0 || uploading} on:click={startUpload}>
+          <button class="btn primary" disabled={pickedFiles.length === 0 || uploading || packageProblem !== null} on:click={startUpload}>
             {$_('upload.upload_publish')}
           </button>
         </div>

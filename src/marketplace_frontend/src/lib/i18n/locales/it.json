@@ -236,7 +236,12 @@
     "checking": "Verifica in corso…",
     "license_needed_title": "Serve una licenza da sviluppatore",
     "license_needed_body": "Puoi compilare il modulo, ma per caricare serve una licenza da sviluppatore attiva.",
-    "license_needed_link": "Ottieni una licenza"
+    "license_needed_link": "Ottieni una licenza",
+    "package_no_manifest": "In cima a questa cartella non c’è manifest.json, quindi i realm non potrebbero installarlo. Scegli la cartella del pacchetto.",
+    "package_nested_manifest": "manifest.json si trova in «{folder}». Scegli quella cartella invece di quella superiore.",
+    "package_bad_manifest": "manifest.json non è un oggetto JSON valido.",
+    "package_id_mismatch": "manifest.json è di «{found}», ma questo annuncio è «{expected}».",
+    "package_version_mismatch": "manifest.json indica la versione {found}, ma questo annuncio è la versione {expected}."
   },
   "account": {
     "coming_soon_badge": "Presto",

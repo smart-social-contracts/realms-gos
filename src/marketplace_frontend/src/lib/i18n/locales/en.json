@@ -236,7 +236,12 @@
     "checking": "Checking…",
     "license_needed_title": "Developer license needed",
     "license_needed_body": "You can fill in the form, but uploading needs an active developer license.",
-    "license_needed_link": "Get a license"
+    "license_needed_link": "Get a license",
+    "package_no_manifest": "There is no manifest.json at the top of this folder, so realms could not install it. Pick the package folder itself.",
+    "package_nested_manifest": "manifest.json is inside “{folder}”. Pick that folder instead of its parent.",
+    "package_bad_manifest": "manifest.json is not a valid JSON object.",
+    "package_id_mismatch": "manifest.json is for “{found}”, but this listing is “{expected}”.",
+    "package_version_mismatch": "manifest.json says version {found}, but this listing is version {expected}."
   },
   "account": {
     "coming_soon_badge": "Soon",

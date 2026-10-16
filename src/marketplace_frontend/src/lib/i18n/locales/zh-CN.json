@@ -236,7 +236,12 @@
     "checking": "正在检查…",
     "license_needed_title": "需要开发者许可",
     "license_needed_body": "你可以先填写表单，但上传需要有效的开发者许可。",
-    "license_needed_link": "获取许可"
+    "license_needed_link": "获取许可",
+    "package_no_manifest": "此文件夹顶层没有 manifest.json，realm 无法安装它。请选择包文件夹本身。",
+    "package_nested_manifest": "manifest.json 位于“{folder}”中。请选择该文件夹，而不是它的上级文件夹。",
+    "package_bad_manifest": "manifest.json 不是有效的 JSON 对象。",
+    "package_id_mismatch": "manifest.json 对应的是“{found}”，但此条目是“{expected}”。",
+    "package_version_mismatch": "manifest.json 写的版本是 {found}，但此条目的版本是 {expected}。"
   },
   "account": {
     "coming_soon_badge": "即将推出",

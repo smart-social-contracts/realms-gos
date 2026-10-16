@@ -236,7 +236,12 @@
     "checking": "Wird geprüft…",
     "license_needed_title": "Entwicklerlizenz erforderlich",
     "license_needed_body": "Du kannst das Formular ausfüllen, aber zum Hochladen brauchst du eine aktive Entwicklerlizenz.",
-    "license_needed_link": "Lizenz holen"
+    "license_needed_link": "Lizenz holen",
+    "package_no_manifest": "In diesem Ordner liegt oben kein manifest.json, deshalb könnten Realms es nicht installieren. Wähle den Paketordner selbst.",
+    "package_nested_manifest": "manifest.json liegt in „{folder}“. Wähle diesen Ordner statt des übergeordneten.",
+    "package_bad_manifest": "manifest.json ist kein gültiges JSON-Objekt.",
+    "package_id_mismatch": "manifest.json gehört zu „{found}“, dieser Eintrag ist aber „{expected}“.",
+    "package_version_mismatch": "manifest.json nennt Version {found}, dieser Eintrag ist aber Version {expected}."
   },
   "account": {
     "coming_soon_badge": "Bald",

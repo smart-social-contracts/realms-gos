@@ -236,7 +236,12 @@
     "checking": "Vérification…",
     "license_needed_title": "Licence de développeur requise",
     "license_needed_body": "Vous pouvez remplir le formulaire, mais le téléversement nécessite une licence de développeur active.",
-    "license_needed_link": "Obtenir une licence"
+    "license_needed_link": "Obtenir une licence",
+    "package_no_manifest": "Il n’y a pas de manifest.json à la racine de ce dossier : les realms ne pourraient pas l’installer. Choisissez le dossier du paquet lui-même.",
+    "package_nested_manifest": "manifest.json se trouve dans « {folder} ». Choisissez ce dossier plutôt que son parent.",
+    "package_bad_manifest": "manifest.json n’est pas un objet JSON valide.",
+    "package_id_mismatch": "manifest.json concerne « {found} », mais cette annonce est « {expected} ».",
+    "package_version_mismatch": "manifest.json indique la version {found}, mais cette annonce est en version {expected}."
   },
   "account": {
     "coming_soon_badge": "Bientôt",
