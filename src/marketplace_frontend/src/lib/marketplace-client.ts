@@ -201,6 +201,11 @@ export interface PendingAudit {
 
 export type ItemKind = 'ext' | 'codex' | 'assistant';
 
+export interface UploadTarget {
+  namespace: string;
+  file_registry_canister_id: string;
+}
+
 export interface MyRoles {
   is_controller: boolean;
   is_admin: boolean;
@@ -751,6 +756,16 @@ export const marketplaceClient = {
   /** Approve or reject, stamping the decision onto the file registry so realms honour it. */
   async reviewListing(kind: ItemKind, id: string, approve: boolean, notes: string): Promise<any> {
     return unwrapJson(String(await marketplace.review_listing(kind, id, approve, notes)));
+  },
+
+  // --- browser uploads -------------------------------------------------
+  /** Whether the caller may upload this item; throws with the reason if not. */
+  async checkUpload(kind: ItemKind, id: string, version: string): Promise<UploadTarget> {
+    return unwrapJson(String(await marketplace.check_upload(kind, id, version)));
+  },
+  /** Make the caller a publisher of the item's registry namespace. */
+  async prepareUpload(kind: ItemKind, id: string, version: string): Promise<UploadTarget> {
+    return unwrapJson(String(await marketplace.prepare_upload(kind, id, version)));
   },
 
   // --- roles / admin ---------------------------------------------------

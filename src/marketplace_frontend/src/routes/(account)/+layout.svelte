@@ -5,7 +5,7 @@
   import { roles } from '$lib/roles';
 
   $: active = (path: string) => $page.url.pathname.startsWith(path);
-  $: alpha = ACCOUNT_ALPHA && !active('/admin');
+  $: alpha = ACCOUNT_ALPHA && active('/my-purchases');
 </script>
 
 <div class="account">
@@ -19,12 +19,10 @@
       <a class="item" href="/upload" class:active={active('/upload')}>
         <i class="ti ti-upload" aria-hidden="true"></i>
         <span>{$_('nav.upload')}</span>
-        {#if ACCOUNT_ALPHA}<span class="soon">{$_('account.coming_soon_badge')}</span>{/if}
       </a>
       <a class="item" href="/developer" class:active={active('/developer')}>
         <i class="ti ti-code" aria-hidden="true"></i>
         <span>{$_('nav.developer')}</span>
-        {#if ACCOUNT_ALPHA}<span class="soon">{$_('account.coming_soon_badge')}</span>{/if}
       </a>
       {#if $roles.is_admin}
         <span class="sep" aria-hidden="true"></span>

@@ -880,6 +880,8 @@ export interface _SERVICE {
   'recount_listing_likes' : ActorMethod<[], GenericResult>,
   'remove_reviewer' : ActorMethod<[string], GenericResult>,
   'request_audit' : ActorMethod<[string, string], GenericResult>,
+  'check_upload' : ActorMethod<[string, string, string], string>,
+  'prepare_upload' : ActorMethod<[string, string, string], string>,
   'review_listing' : ActorMethod<[string, string, boolean, string], string>,
   'revoke_license' : ActorMethod<[string], GenericResult>,
   'search_assistants' : ActorMethod<[string, boolean], Array<AssistantListing>>,

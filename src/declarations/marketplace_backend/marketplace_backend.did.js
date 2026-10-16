@@ -390,6 +390,8 @@ export const idlFactory = ({ IDL }) => {
     'recount_listing_likes' : IDL.Func([], [GenericResult], []),
     'remove_reviewer' : IDL.Func([IDL.Text], [GenericResult], []),
     'request_audit' : IDL.Func([IDL.Text, IDL.Text], [GenericResult], []),
+    'check_upload' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], ['query']),
+    'prepare_upload' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
     'review_listing' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Bool, IDL.Text],
         [IDL.Text],

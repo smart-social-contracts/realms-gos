@@ -81,7 +81,8 @@
   "verified": {
     "verified": "Verified",
     "pending": "Audit pending",
-    "rejected": "Rejected"
+    "rejected": "Rejected",
+    "in_review": "In review"
   },
   "pager": {
     "prev": "Prev",
@@ -192,7 +193,7 @@
     "subtitle": "Share your extension, codex, or AI assistant with the Realms community. Fill in the details, pick your files, and submit for review.",
     "signin_title": "Sign in required",
     "signin_body": "You need to sign in with Internet Identity before you can upload.",
-    "signin_note": "(Anyone can upload — a developer license is only required to request an audit.)",
+    "signin_note": "Publishing needs an active developer license.",
     "step_metadata": "1. Type & metadata",
     "step_files": "2. Pick files",
     "step_upload": "3. Upload",
@@ -222,18 +223,20 @@
     "back": "← Back",
     "upload_publish": "Upload & publish",
     "uploading": "Uploading…",
-    "uploading_note": "Direct browser → file_registry. Each file uploads in 128 KB chunks.",
+    "uploading_note": "Files go straight from your browser to the file registry, in 64 KB chunks.",
     "retry": "Retry",
     "queued": "queued",
-    "published": "Published!",
-    "published_body": "Your {kind} is live. Files served from the file_registry canister.",
+    "published": "Submitted for review",
+    "published_body": "Your {kind} is uploaded and waiting for a reviewer. It shows in the marketplace once it is approved; you can follow it on the Developer page.",
     "view_listing": "View listing →",
     "upload_another": "Upload another",
     "step_review": "4. Review",
-    "coming_soon_title": "Coming soon",
-    "coming_soon_body": "Publishing via the web interface is not yet available. If you're a developer, you can use the Realms CLI in the meantime.",
-    "coming_soon_close": "Got it",
-    "languages": "Supported languages"
+    "languages": "Supported languages",
+    "view_submissions": "My submissions",
+    "checking": "Checking…",
+    "license_needed_title": "Developer license needed",
+    "license_needed_body": "You can fill in the form, but uploading needs an active developer license.",
+    "license_needed_link": "Get a license"
   },
   "account": {
     "coming_soon_badge": "Soon",
@@ -292,7 +295,8 @@
     "delist": "Delist",
     "could_not_audit": "Could not request audit: {error}",
     "could_not_delist": "Could not delist: {error}",
-    "delist_confirm": "Delist {kind} '{id}'?"
+    "delist_confirm": "Delist {kind} '{id}'?",
+    "license_by_admin": "On this environment an admin grants developer licenses. Send them your principal:"
   },
   "admin": {
     "title": "Admin",

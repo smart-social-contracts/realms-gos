@@ -81,7 +81,8 @@
   "verified": {
     "verified": "Verifiziert",
     "pending": "Prüfung ausstehend",
-    "rejected": "Abgelehnt"
+    "rejected": "Abgelehnt",
+    "in_review": "In Prüfung"
   },
   "pager": {
     "prev": "Zurück",
@@ -192,7 +193,7 @@
     "subtitle": "Teile deine Erweiterung, deinen Codex oder KI-Assistenten mit der Realms-Community. Fülle die Details aus, wähle deine Dateien und reiche sie zur Prüfung ein.",
     "signin_title": "Anmeldung erforderlich",
     "signin_body": "Du musst dich mit Internet Identity anmelden, bevor du hochladen kannst.",
-    "signin_note": "(Jeder kann hochladen — eine Entwicklerlizenz ist nur erforderlich, um ein Audit anzufordern.)",
+    "signin_note": "Zum Veröffentlichen brauchst du eine aktive Entwicklerlizenz.",
     "step_metadata": "1. Typ & Metadaten",
     "step_files": "2. Dateien auswählen",
     "step_upload": "3. Hochladen",
@@ -222,18 +223,20 @@
     "back": "← Zurück",
     "upload_publish": "Hochladen & veröffentlichen",
     "uploading": "Wird hochgeladen…",
-    "uploading_note": "Direkt vom Browser → file_registry. Jede Datei wird in 128-KB-Blöcken hochgeladen.",
+    "uploading_note": "Die Dateien gehen direkt von deinem Browser in die Dateiregistrierung, in 64-KB-Blöcken.",
     "retry": "Erneut versuchen",
     "queued": "in Warteschlange",
-    "published": "Veröffentlicht!",
-    "published_body": "Dein {kind} ist live. Dateien werden vom file_registry-Canister bereitgestellt.",
+    "published": "Zur Prüfung eingereicht",
+    "published_body": "Dein {kind} ist hochgeladen und wartet auf eine Prüfung. Nach der Freigabe erscheint es im Marketplace; den Stand siehst du auf der Entwicklerseite.",
     "view_listing": "Eintrag ansehen →",
     "upload_another": "Weitere hochladen",
     "step_review": "4. Überprüfung",
-    "coming_soon_title": "Demnächst verfügbar",
-    "coming_soon_body": "Das Veröffentlichen über die Web-Oberfläche ist noch nicht verfügbar. In der Zwischenzeit kannst du die Realms CLI verwenden.",
-    "coming_soon_close": "Verstanden",
-    "languages": "Unterstützte Sprachen"
+    "languages": "Unterstützte Sprachen",
+    "view_submissions": "Meine Einreichungen",
+    "checking": "Wird geprüft…",
+    "license_needed_title": "Entwicklerlizenz erforderlich",
+    "license_needed_body": "Du kannst das Formular ausfüllen, aber zum Hochladen brauchst du eine aktive Entwicklerlizenz.",
+    "license_needed_link": "Lizenz holen"
   },
   "account": {
     "coming_soon_badge": "Bald",
@@ -292,7 +295,8 @@
     "delist": "Entfernen",
     "could_not_audit": "Audit konnte nicht angefordert werden: {error}",
     "could_not_delist": "Konnte nicht entfernt werden: {error}",
-    "delist_confirm": "{kind} '{id}' entfernen?"
+    "delist_confirm": "{kind} '{id}' entfernen?",
+    "license_by_admin": "In dieser Umgebung vergibt ein Admin die Entwicklerlizenzen. Schick ihm deinen Principal:"
   },
   "admin": {
     "title": "Admin",

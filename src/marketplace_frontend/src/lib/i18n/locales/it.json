@@ -81,7 +81,8 @@
   "verified": {
     "verified": "Verificato",
     "pending": "Audit in attesa",
-    "rejected": "Rifiutato"
+    "rejected": "Rifiutato",
+    "in_review": "In revisione"
   },
   "pager": {
     "prev": "Precedente",
@@ -192,7 +193,7 @@
     "subtitle": "Condividi la tua estensione, il tuo codice o l'assistente AI con la community di Realms. Compila i dettagli, scegli i file e invialo per la revisione.",
     "signin_title": "Accesso richiesto",
     "signin_body": "Devi accedere con Internet Identity prima di poter caricare.",
-    "signin_note": "(Chiunque può caricare — una licenza da sviluppatore serve solo per richiedere un audit.)",
+    "signin_note": "Per pubblicare serve una licenza da sviluppatore attiva.",
     "step_metadata": "1. Tipo e metadati",
     "step_files": "2. Scegli i file",
     "step_upload": "3. Carica",
@@ -222,18 +223,20 @@
     "back": "← Indietro",
     "upload_publish": "Carica e pubblica",
     "uploading": "Caricamento…",
-    "uploading_note": "Browser diretto → file_registry. Ogni file viene caricato in blocchi da 128 KB.",
+    "uploading_note": "I file vanno direttamente dal browser al registro dei file, in blocchi da 64 KB.",
     "retry": "Riprova",
     "queued": "in coda",
-    "published": "Pubblicato!",
-    "published_body": "Il tuo {kind} è online. I file sono serviti dal canister file_registry.",
+    "published": "Inviato per la revisione",
+    "published_body": "Il tuo {kind} è stato caricato e attende un revisore. Comparirà nel marketplace una volta approvato; puoi seguirlo nella pagina Sviluppatore.",
     "view_listing": "Visualizza annuncio →",
     "upload_another": "Carica un altro",
     "step_review": "4. Revisione",
-    "coming_soon_title": "Prossimamente",
-    "coming_soon_body": "La pubblicazione tramite l'interfaccia web non è ancora disponibile. Nel frattempo, gli sviluppatori possono usare la Realms CLI.",
-    "coming_soon_close": "Capito",
-    "languages": "Lingue supportate"
+    "languages": "Lingue supportate",
+    "view_submissions": "I miei invii",
+    "checking": "Verifica in corso…",
+    "license_needed_title": "Serve una licenza da sviluppatore",
+    "license_needed_body": "Puoi compilare il modulo, ma per caricare serve una licenza da sviluppatore attiva.",
+    "license_needed_link": "Ottieni una licenza"
   },
   "account": {
     "coming_soon_badge": "Presto",
@@ -292,7 +295,8 @@
     "delist": "Rimuovi",
     "could_not_audit": "Impossibile richiedere l’audit: {error}",
     "could_not_delist": "Impossibile rimuovere: {error}",
-    "delist_confirm": "Rimuovere {kind} '{id}'?"
+    "delist_confirm": "Rimuovere {kind} '{id}'?",
+    "license_by_admin": "In questo ambiente le licenze da sviluppatore le concede un amministratore. Inviagli il tuo principal:"
   },
   "admin": {
     "title": "Admin",

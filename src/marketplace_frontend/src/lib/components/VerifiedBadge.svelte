@@ -7,6 +7,8 @@ $: meta = (() => {
       return { label: $_("verified.verified"), cls: "verified" };
     case "pending_audit":
       return { label: $_("verified.pending"), cls: "pending" };
+    case "pending_review":
+      return { label: $_("verified.in_review"), cls: "pending" };
     case "rejected":
       return { label: $_("verified.rejected"), cls: "rejected" };
     default:

@@ -215,6 +215,8 @@ service : (opt MarketplaceInitArg) -> {
   "admin_set_listing_active" : (text, text, bool) -> (GenericResult);
   "admin_list_users" : () -> (vec AdminUser) query;
   "admin_set_user_suspended" : (text, bool, text) -> (GenericResult);
+  "check_upload" : (text, text, text) -> (text) query;
+  "prepare_upload" : (text, text, text) -> (text);
   "review_listing" : (text, text, bool, text) -> (text);
   "admin_approve_namespace" : (text, text) -> (text);
   "get_billing_service_principal_q" : () -> (text) query;

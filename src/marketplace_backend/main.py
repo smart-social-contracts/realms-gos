@@ -333,6 +333,10 @@ from api.rankings import (
     top_extensions_by_likes as top_extensions_by_likes_impl,
 )
 from api.status import get_status
+from api.uploads import (
+    check_upload as check_upload_impl,
+    prepare_upload as prepare_upload_impl,
+)
 from api.version_http import (
     http_request_upgrade_signal,
     version_http_response,
@@ -1079,6 +1083,34 @@ def review_listing(item_kind: text, item_id: text, approve: bool, notes: text) -
         return json.dumps(result)
     except Exception as e:
         logger.error(f"review_listing: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@query
+def check_upload(item_kind: text, item_id: text, version: text) -> text:
+    """Whether the caller may upload this item's files, and to which registry
+    namespace. JSON: {"success", "namespace", "file_registry_canister_id"} or
+    {"success": false, "error"}."""
+    try:
+        return json.dumps(check_upload_impl(
+            caller=str(ic.caller()), item_kind=item_kind, item_id=item_id, version=version
+        ))
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@update
+def prepare_upload(item_kind: text, item_id: text, version: text) -> Async[text]:
+    """Make the caller a publisher of the item's `<kind>/<id>/<version>`
+    namespace on the file registry so the browser can upload the files.
+    Same JSON as check_upload."""
+    try:
+        result = yield from prepare_upload_impl(
+            caller=str(ic.caller()), item_kind=item_kind, item_id=item_id, version=version
+        )
+        return json.dumps(result)
+    except Exception as e:
+        logger.error(f"prepare_upload: {e}")
         return json.dumps({"success": False, "error": str(e)})
 
 

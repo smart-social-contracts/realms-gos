@@ -67,7 +67,6 @@ async function buyLicense() {
   }
 }
 async function requestAuditFor(kind, id) {
-  if (ACCOUNT_ALPHA) return;
   try {
     await marketplaceClient.requestAudit(kind, id);
     await load(true);
@@ -76,7 +75,6 @@ async function requestAuditFor(kind, id) {
   }
 }
 async function delist(kind, id) {
-  if (ACCOUNT_ALPHA) return;
   if (!confirm($_("developer.delist_confirm", { values: { kind, id } }))) return;
   try {
     if (kind === "ext") await marketplaceClient.delistExtension(id);
@@ -124,15 +122,20 @@ async function delist(kind, id) {
       <p class="price">
         {$_('developer.per_month', { values: { price: formatPriceUsd(pricing.license_price_usd_cents) } })}
       </p>
-      <button class="btn primary" disabled={buyingLicense} on:click={buyLicense}>
-        {buyingLicense ? $_('developer.redirecting') : $_('developer.pay_card')}
-      </button>
-      {#if licenseError}
-        <p class="license-error">{licenseError}</p>
+      {#if ACCOUNT_ALPHA}
+        <p class="small">{$_('developer.license_by_admin')}</p>
+        <p class="small"><code class="principal">{$principalStore?.toText() ?? ''}</code></p>
+      {:else}
+        <button class="btn primary" disabled={buyingLicense} on:click={buyLicense}>
+          {buyingLicense ? $_('developer.redirecting') : $_('developer.pay_card')}
+        </button>
+        {#if licenseError}
+          <p class="license-error">{licenseError}</p>
+        {/if}
+        <p class="small muted">
+          {$_('developer.billing_note', { values: { url: CONFIG.billing_service_url } })}
+        </p>
       {/if}
-      <p class="small muted">
-        {$_('developer.billing_note', { values: { url: CONFIG.billing_service_url } })}
-      </p>
     {/if}
   </section>
 
@@ -153,7 +156,7 @@ async function delist(kind, id) {
               <td>{formatCount(e.likes)}</td>
               <td>{formatTimeAgo(e.updated_at)}</td>
               <td>
-                <button class="btn tiny" disabled={e.verification_status === 'pending_audit' || e.verification_status === 'verified'} on:click={() => requestAuditFor('ext', e.extension_id)}>
+                <button class="btn tiny" disabled={e.verification_status === 'pending_review' || e.verification_status === 'pending_audit' || e.verification_status === 'verified'} on:click={() => requestAuditFor('ext', e.extension_id)}>
                   {$_('developer.request_audit')}
                 </button>
                 <button class="btn tiny ghost" on:click={() => delist('ext', e.extension_id)}>{$_('developer.delist')}</button>
@@ -182,7 +185,7 @@ async function delist(kind, id) {
               <td>{formatCount(c.likes)}</td>
               <td>{formatTimeAgo(c.updated_at)}</td>
               <td>
-                <button class="btn tiny" disabled={c.verification_status === 'pending_audit' || c.verification_status === 'verified'} on:click={() => requestAuditFor('codex', c.codex_id)}>
+                <button class="btn tiny" disabled={c.verification_status === 'pending_review' || c.verification_status === 'pending_audit' || c.verification_status === 'verified'} on:click={() => requestAuditFor('codex', c.codex_id)}>
                   {$_('developer.request_audit')}
                 </button>
                 <button class="btn tiny ghost" on:click={() => delist('codex', c.codex_id)}>{$_('developer.delist')}</button>
@@ -211,7 +214,7 @@ async function delist(kind, id) {
               <td>{formatCount(a.likes)}</td>
               <td>{formatTimeAgo(a.updated_at)}</td>
               <td>
-                <button class="btn tiny" disabled={a.verification_status === 'pending_audit' || a.verification_status === 'verified'} on:click={() => requestAuditFor('assistant', a.assistant_id)}>
+                <button class="btn tiny" disabled={a.verification_status === 'pending_review' || a.verification_status === 'pending_audit' || a.verification_status === 'verified'} on:click={() => requestAuditFor('assistant', a.assistant_id)}>
                   {$_('developer.request_audit')}
                 </button>
                 <button class="btn tiny ghost" on:click={() => delist('assistant', a.assistant_id)}>{$_('developer.delist')}</button>
@@ -235,6 +238,7 @@ async function delist(kind, id) {
   .card h2 { margin: 0 0 0.85rem; font-size: 1.1rem; }
   .ok { color: var(--success); font-weight: 500; }
   .price { font-size: 1.5rem; font-weight: 700; margin: 0.85rem 0; color: var(--text); }
+  .principal { word-break: break-all; }
   .license-error {
     margin: 0.75rem 0 0;
     padding: 0.65rem 0.85rem;

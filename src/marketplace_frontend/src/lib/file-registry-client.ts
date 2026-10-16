@@ -79,6 +79,7 @@ const fileRegistryIdlFactory = ({ IDL: idl }: { IDL: typeof IDL }) =>
   idl.Service({
     store_file_chunk: idl.Func([idl.Text], [idl.Text], []),
     finalize_chunked_file_step: idl.Func([idl.Text], [idl.Text], []),
+    finalize_chunked_file: idl.Func([idl.Text], [idl.Text], []),
     publish_namespace: idl.Func([idl.Text], [idl.Text], []),
     list_files: idl.Func([idl.Text], [idl.Text], ['query']),
     list_namespaces: idl.Func([], [idl.Text], ['query']),
@@ -192,7 +193,9 @@ export async function uploadFile(
   }
 
   // Finalize step-by-step. Send expected_sha256 only on the first call;
-  // it's cached in the registry's pending state.
+  // it's cached in the registry's pending state. Registries without the
+  // step method (ic-file-registry ≥ 0.1) assemble while chunks arrive and
+  // take one finalize_chunked_file call instead.
   onProgress?.({ path, uploaded: total, total, status: 'finalizing' });
   let firstCall = true;
   while (true) {
@@ -201,8 +204,17 @@ export async function uploadFile(
         ? { namespace, path, expected_sha256: sha256, batch_size: 1 }
         : { namespace, path, batch_size: 1 },
     );
+    let resp: unknown;
+    try {
+      resp = await (actor as any).finalize_chunked_file_step(args);
+    } catch (e) {
+      if (!firstCall || !isMissingMethod(e)) throw e;
+      resp = await (actor as any).finalize_chunked_file(JSON.stringify({ namespace, path, sha256 }));
+      const parsed = JSON.parse(String(resp));
+      if (parsed?.error) throw new Error(`finalize: ${parsed.error}`);
+      break;
+    }
     firstCall = false;
-    const resp = await (actor as any).finalize_chunked_file_step(args);
     const parsed = JSON.parse(String(resp));
     if (parsed?.error) throw new Error(`finalize: ${parsed.error}`);
     if (parsed?.done) break;
@@ -228,7 +240,20 @@ export async function uploadAndPublish(
     await uploadFile(canisterId, { namespace, path: item.path, file: item.file }, onProgress);
   }
   const actor = await getRegistryActor(canisterId);
-  const resp = await (actor as any).publish_namespace(JSON.stringify({ namespace }));
+  let resp: unknown;
+  try {
+    resp = await (actor as any).publish_namespace(JSON.stringify({ namespace }));
+  } catch (e) {
+    // Registries without publish_namespace serve stored files right away.
+    if (isMissingMethod(e)) return;
+    throw e;
+  }
   const parsed = JSON.parse(String(resp));
   if (parsed?.error) throw new Error(`publish_namespace: ${parsed.error}`);
+}
+
+/** The canister rejected the call because it has no such method (IC0536). */
+export function isMissingMethod(e: unknown): boolean {
+  const msg = String((e as any)?.message ?? e).toLowerCase();
+  return msg.includes('ic0536') || msg.includes('has no update method') || msg.includes('has no query method');
 }

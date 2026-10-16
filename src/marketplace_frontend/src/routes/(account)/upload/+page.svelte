@@ -5,10 +5,9 @@ import { goto } from "$app/navigation";
 import Spinner from "$lib/components/Spinner.svelte";
 import { isAuthenticated, principalStore } from "$lib/auth";
 import { uploadAndPublish } from "$lib/file-registry-client";
-import { marketplaceClient } from "$lib/marketplace-client";
+import { marketplaceClient, type ItemKind } from "$lib/marketplace-client";
 let step = 1;
-let showComingSoon = false;
-let kind = "ext";
+let kind: ItemKind = "ext";
 let id = "";
 let realmType = "";
 let name = "";
@@ -30,8 +29,10 @@ let evalReportUrl = "";
 let pricingSummary = "";
 let pickedFiles = [];
 let baseFolder = "";
-let registryCanisterId = "";
-let registryError = "";
+let license = null;
+let licenseLoaded = false;
+let checking = false;
+let checkError = "";
 let uploadProgress = {};
 let uploading = false;
 let uploadError = "";
@@ -96,18 +97,23 @@ onMount(async () => {
   } catch {
   }
 });
-$: ns = (() => {
-  if (!id || !version) return "";
-  if (kind === "ext") return `ext/${id}/${version}`;
-  if (kind === "assistant") return `assistant/${id}/${version}`;
-  return `codex/${id}/${version}`;
-})();
-async function loadRegistry() {
+$: ns = id && version ? `${kind}/${id}/${version}` : "";
+$: if ($isAuthenticated && $principalStore) void loadLicense();
+$: kind, id, version, (checkError = "");
+async function loadLicense() {
+  license = await marketplaceClient.getLicenseStatus();
+  licenseLoaded = true;
+}
+async function next() {
+  checking = true;
+  checkError = "";
   try {
-    registryCanisterId = await marketplaceClient.getFileRegistryCanisterId();
-    if (!registryCanisterId) registryError = "Marketplace has no file_registry configured (controller must call set_file_registry_canister_id).";
+    await marketplaceClient.checkUpload(kind, id.trim(), version.trim());
+    step = 2;
   } catch (e) {
-    registryError = e?.message ?? String(e);
+    checkError = e?.message ?? String(e);
+  } finally {
+    checking = false;
   }
 }
 function onFiles(e) {
@@ -149,18 +155,16 @@ function totalBytes() {
   return pickedFiles.reduce((s, f) => s + f.size, 0);
 }
 async function startUpload() {
-  if (!ns || pickedFiles.length === 0) return;
-  if (!registryCanisterId) await loadRegistry();
-  if (!registryCanisterId) {
-    uploadError = registryError || "No file_registry available";
-    return;
-  }
+  if (!ns || pickedFiles.length === 0 || uploading) return;
   uploading = true;
   uploadError = "";
   uploadProgress = {};
   step = 3;
   const items = pickedFiles.map((f) => ({ path: relativePath(f), file: f }));
   try {
+    const target = await marketplaceClient.prepareUpload(kind, id.trim(), version.trim());
+    const registryCanisterId = target.file_registry_canister_id;
+    const ns = target.namespace;
     await uploadAndPublish(registryCanisterId, ns, items, (p) => {
       uploadProgress = { ...uploadProgress, [p.path]: p };
     });
@@ -232,7 +236,6 @@ function reset() {
   uploadProgress = {};
   uploadError = "";
   listingHref = "";
-  showComingSoon = false;
   extLanguages = "en";
   manifestScreenshots = "";
 }
@@ -260,6 +263,13 @@ function reset() {
     </ol>
 
     {#if step === 1}
+      {#if licenseLoaded && !license?.is_active}
+        <div class="card warn notice">
+          <h2>{$_('upload.license_needed_title')}</h2>
+          <p>{$_('upload.license_needed_body')}</p>
+          <a class="btn" href="/developer">{$_('upload.license_needed_link')}</a>
+        </div>
+      {/if}
       <section class="card">
         <h2>{$_('upload.what')}</h2>
         <div class="kind-switch">
@@ -319,8 +329,13 @@ function reset() {
           {$_('upload.namespace')} <code>{ns || $_('upload.namespace_hint')}</code>
         </p>
 
+        {#if checkError}
+          <p class="error">{checkError}</p>
+        {/if}
         <div class="actions">
-          <button class="btn primary" disabled={!id || !name || !version} on:click={() => (step = 2)}>{$_('upload.next')}</button>
+          <button class="btn primary" disabled={!id || !name || !version || checking} on:click={next}>
+            {checking ? $_('upload.checking') : $_('upload.next')}
+          </button>
         </div>
       </section>
     {:else if step === 2}
@@ -360,7 +375,7 @@ function reset() {
 
         <div class="actions">
           <button class="btn ghost" on:click={() => (step = 1)}>{$_('upload.back')}</button>
-          <button class="btn primary" disabled={pickedFiles.length === 0} on:click={() => (showComingSoon = true)}>
+          <button class="btn primary" disabled={pickedFiles.length === 0 || uploading} on:click={startUpload}>
             {$_('upload.upload_publish')}
           </button>
         </div>
@@ -406,23 +421,12 @@ function reset() {
         <h2>{$_('upload.published')}</h2>
         <p>{$_('upload.published_body', { values: { kind: kind === 'ext' ? $_('upload.kind_ext') : kind === 'codex' ? $_('upload.kind_codex') : $_('upload.kind_assistant') } })}</p>
         <div class="actions">
-          <a class="btn primary" href={listingHref}>{$_('upload.view_listing')}</a>
+          <a class="btn primary" href="/developer">{$_('upload.view_submissions')}</a>
+          <a class="btn" href={listingHref}>{$_('upload.view_listing')}</a>
           <button class="btn ghost" on:click={reset}>{$_('upload.upload_another')}</button>
         </div>
       </section>
     {/if}
-  </div>
-{/if}
-
-{#if showComingSoon}
-  <div class="scrim" role="presentation" on:click={() => (showComingSoon = false)}>
-    <div class="modal" role="dialog" aria-modal="true" on:click|stopPropagation>
-      <h2>{$_('upload.coming_soon_title')}</h2>
-      <p>{$_('upload.coming_soon_body')}</p>
-      <div class="modal-actions">
-        <button class="btn primary" on:click={() => (showComingSoon = false)}>{$_('upload.coming_soon_close')}</button>
-      </div>
-    </div>
   </div>
 {/if}
 
@@ -495,20 +499,7 @@ function reset() {
   .centered { text-align: center; padding: 1rem 0; }
   .error { color: var(--danger); }
   .muted { color: var(--text-muted); font-size: 0.85rem; }
-
-  /* Coming-soon modal */
-  .scrim {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.45);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 200;
-  }
-  .modal {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 0.85rem; padding: 2rem 2.25rem;
-    max-width: 420px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.18);
-  }
-  .modal h2 { margin: 0 0 0.65rem; font-size: 1.2rem; }
-  .modal p { color: var(--text-muted); margin: 0 0 1.5rem; line-height: 1.65; font-size: 0.9rem; }
-  .modal-actions { display: flex; justify-content: flex-end; }
+  .notice { margin-bottom: 1rem; }
+  .notice p { margin: 0 0 0.85rem; color: var(--text-muted); }
+  .notice .btn { display: inline-block; }
 </style>

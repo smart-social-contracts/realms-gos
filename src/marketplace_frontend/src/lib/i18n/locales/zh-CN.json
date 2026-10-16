@@ -81,7 +81,8 @@
   "verified": {
     "verified": "已验证",
     "pending": "等待审核",
-    "rejected": "已拒绝"
+    "rejected": "已拒绝",
+    "in_review": "审核中"
   },
   "pager": {
     "prev": "上一页",
@@ -192,7 +193,7 @@
     "subtitle": "将您的扩展、法典或 AI 助手分享给 Realms 社区。填写详情、选择文件，然后提交审核。",
     "signin_title": "需要登录",
     "signin_body": "上传前需使用 Internet Identity 登录。",
-    "signin_note": "（任何人都可以上传 —— 仅在申请审计时才需要开发者许可。）",
+    "signin_note": "发布需要有效的开发者许可。",
     "step_metadata": "1. 类型与元数据",
     "step_files": "2. 选择文件",
     "step_upload": "3. 上传",
@@ -222,18 +223,20 @@
     "back": "← 返回",
     "upload_publish": "上传并发布",
     "uploading": "上传中…",
-    "uploading_note": "浏览器直传 → file_registry。每个文件以 128 KB 分块上传。",
+    "uploading_note": "文件会以 64 KB 分块，从浏览器直接上传到文件注册表。",
     "retry": "重试",
     "queued": "排队中",
-    "published": "已发布！",
-    "published_body": "你的 {kind} 已上线。文件由 file_registry canister 提供。",
+    "published": "已提交审核",
+    "published_body": "你的{kind}已上传，正在等待审核。通过后会在市场中显示；你可以在开发者页面查看进度。",
     "view_listing": "查看条目 →",
     "upload_another": "再上传一个",
     "step_review": "4. 审核",
-    "coming_soon_title": "即将推出",
-    "coming_soon_body": "通过网页界面发布的功能尚未开放。目前，开发者可以使用 Realms CLI。",
-    "coming_soon_close": "知道了",
-    "languages": "支持的语言"
+    "languages": "支持的语言",
+    "view_submissions": "我的提交",
+    "checking": "正在检查…",
+    "license_needed_title": "需要开发者许可",
+    "license_needed_body": "你可以先填写表单，但上传需要有效的开发者许可。",
+    "license_needed_link": "获取许可"
   },
   "account": {
     "coming_soon_badge": "即将推出",
@@ -292,7 +295,8 @@
     "delist": "下架",
     "could_not_audit": "无法申请审计：{error}",
     "could_not_delist": "无法下架：{error}",
-    "delist_confirm": "下架 {kind}“{id}”？"
+    "delist_confirm": "下架 {kind}“{id}”？",
+    "license_by_admin": "在此环境中，开发者许可由管理员授予。请把你的 principal 发给管理员："
   },
   "admin": {
     "title": "管理",

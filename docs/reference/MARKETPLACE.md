@@ -65,27 +65,41 @@ The frontend's homepage exposes them via two toggles
 (extensions ⇄ codices ⇄ assistants, downloads ⇄ likes) plus the
 verified filter.
 
-### Open uploads
+### Uploading a submission (`/upload`)
 
-Anyone authenticated with Internet Identity can publish an extension or
-codex — no developer license required. The flow is:
+A developer with an active license who is not suspended submits an
+extension, codex or assistant from the browser:
 
-1. `marketplace_backend.get_file_registry_canister_id_q()` →
-   `<FILE_REGISTRY_ID>`.
-2. Browser uploads the file folder directly to the file_registry via
-   `store_file` / `store_file_chunk` + `finalize_chunked_file_step`,
-   then `publish_namespace`. The first authenticated caller of an
-   empty namespace is auto-granted publisher rights by the registry.
-3. Browser calls `marketplace_backend.create_extension(...)` or
-   `create_codex(...)` with the namespace pointer + metadata.
+1. `check_upload(kind, id, version)` (query) validates the id and semver
+   version, the license and suspension, and that nobody else owns the
+   listing. The form shows the reason before any file is picked.
+2. `prepare_upload(kind, id, version)` repeats those checks and asks the
+   file registry to make the caller a publisher of exactly
+   `<kind>/<id>/<version>`. The marketplace may do this because it is on
+   the registry's `_granters` ACL; the registry refuses a package root
+   (`<kind>/<id>`) someone else already publishes under, so a newcomer
+   cannot add a "latest" version to another developer's package.
+3. The browser uploads the folder straight to the registry with
+   `store_file_chunk` and `finalize_chunked_file_step` (or
+   `finalize_chunked_file` on registries without the step method), then
+   `publish_namespace` where the registry has it.
+4. The browser calls `create_extension` / `create_codex` /
+   `create_assistant` with the namespace and metadata. The listing starts
+   in `pending_review`; the Developer page shows it as *In review* until a
+   reviewer approves or rejects it from the Admin section.
 
-The marketplace canister itself never writes to the registry — it only
-records the pointer.
+The registry has to list the marketplace as a granter once, by a registry
+controller:
+
+```bash
+dfx canister call file_registry grant_publish \
+  '("{\"namespace\": \"_granters\", \"principal\": \"<marketplace_backend id>\"}")'
+```
 
 ### Paid developer license + audit/verification
 
-Anyone can publish, but **getting verified** requires a paid monthly
-developer license. The flow:
+Publishing and audits require a paid monthly developer license. The
+flow:
 
 1. Developer page POSTs to
    `${BILLING_SERVICE_URL}/marketplace/license/checkout` with their
@@ -146,6 +160,7 @@ dfx canister call marketplace_backend list_admins
 |---|---|
 | All `*_q` queries, browse / search / status / get_*_details / has_purchased / has_liked / my_likes / my_purchases / get_my_* / get_my_roles / list_admins / list_reviewers | open |
 | `create_*`, `update_*` | active license, not suspended (controllers exempt); updates also need ownership or controller |
+| `check_upload`, `prepare_upload` | active license, not suspended, owner of the listing or a new id (controllers exempt) |
 | `buy_*`, `like_*`, `unlike_*` | any II principal |
 | `delist_*`, `transfer_listing` | listing owner OR admin |
 | `request_audit` | active license + listing owner, not suspended |

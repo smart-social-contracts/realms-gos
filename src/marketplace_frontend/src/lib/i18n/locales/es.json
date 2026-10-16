@@ -81,7 +81,8 @@
   "verified": {
     "verified": "Verificado",
     "pending": "Auditoría pendiente",
-    "rejected": "Rechazado"
+    "rejected": "Rechazado",
+    "in_review": "En revisión"
   },
   "pager": {
     "prev": "Anterior",
@@ -192,7 +193,7 @@
     "subtitle": "Comparte tu extensión, códice o asistente de IA con la comunidad de Realms. Completa los detalles, elige tus archivos y envíalo para revisión.",
     "signin_title": "Inicio de sesión requerido",
     "signin_body": "Debes iniciar sesión con Internet Identity antes de poder subir.",
-    "signin_note": "(Cualquiera puede subir — solo se necesita una licencia de desarrollador para solicitar una auditoría.)",
+    "signin_note": "Para publicar necesitas una licencia de desarrollador activa.",
     "step_metadata": "1. Tipo y metadatos",
     "step_files": "2. Elegir archivos",
     "step_upload": "3. Subir",
@@ -222,18 +223,20 @@
     "back": "← Atrás",
     "upload_publish": "Subir y publicar",
     "uploading": "Subiendo…",
-    "uploading_note": "Navegador directo → file_registry. Cada archivo se sube en fragmentos de 128 KB.",
+    "uploading_note": "Los archivos van directamente de tu navegador al registro de archivos, en fragmentos de 64 KB.",
     "retry": "Reintentar",
     "queued": "en cola",
-    "published": "¡Publicado!",
-    "published_body": "Tu {kind} está activo. Los archivos se sirven desde el canister file_registry.",
+    "published": "Enviado a revisión",
+    "published_body": "Tu {kind} se ha subido y espera a un revisor. Aparecerá en el marketplace cuando se apruebe; puedes seguirlo en la página de Desarrollador.",
     "view_listing": "Ver publicación →",
     "upload_another": "Subir otro",
     "step_review": "4. Revisión",
-    "coming_soon_title": "Próximamente",
-    "coming_soon_body": "La publicación desde la interfaz web estará disponible próximamente. Si eres desarrollador, puedes usar la CLI de Realms mientras tanto.",
-    "coming_soon_close": "Entendido",
-    "languages": "Idiomas compatibles"
+    "languages": "Idiomas compatibles",
+    "view_submissions": "Mis envíos",
+    "checking": "Comprobando…",
+    "license_needed_title": "Se necesita una licencia de desarrollador",
+    "license_needed_body": "Puedes rellenar el formulario, pero para subir archivos necesitas una licencia de desarrollador activa.",
+    "license_needed_link": "Obtener una licencia"
   },
   "account": {
     "coming_soon_badge": "Pronto",
@@ -292,7 +295,8 @@
     "delist": "Retirar",
     "could_not_audit": "No se pudo solicitar la auditoría: {error}",
     "could_not_delist": "No se pudo retirar: {error}",
-    "delist_confirm": "¿Retirar {kind} '{id}'?"
+    "delist_confirm": "¿Retirar {kind} '{id}'?",
+    "license_by_admin": "En este entorno, un administrador concede las licencias de desarrollador. Envíale tu principal:"
   },
   "admin": {
     "title": "Administración",

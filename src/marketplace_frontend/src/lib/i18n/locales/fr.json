@@ -81,7 +81,8 @@
   "verified": {
     "verified": "Vérifié",
     "pending": "Audit en attente",
-    "rejected": "Rejeté"
+    "rejected": "Rejeté",
+    "in_review": "En cours d’examen"
   },
   "pager": {
     "prev": "Précédent",
@@ -192,7 +193,7 @@
     "subtitle": "Partagez votre extension, codex ou assistant IA avec la communauté Realms. Renseignez les détails, choisissez vos fichiers et soumettez-les pour révision.",
     "signin_title": "Connexion requise",
     "signin_body": "Vous devez vous connecter avec Internet Identity avant de pouvoir téléverser.",
-    "signin_note": "(Tout le monde peut téléverser — une licence de développeur n’est requise que pour demander un audit.)",
+    "signin_note": "La publication nécessite une licence de développeur active.",
     "step_metadata": "1. Type et métadonnées",
     "step_files": "2. Choisir les fichiers",
     "step_upload": "3. Téléverser",
@@ -222,18 +223,20 @@
     "back": "← Retour",
     "upload_publish": "Téléverser et publier",
     "uploading": "Téléversement…",
-    "uploading_note": "Navigateur direct → file_registry. Chaque fichier est téléversé par blocs de 128 Ko.",
+    "uploading_note": "Les fichiers vont directement de votre navigateur au registre de fichiers, par blocs de 64 Ko.",
     "retry": "Réessayer",
     "queued": "en attente",
-    "published": "Publié !",
-    "published_body": "Votre {kind} est en ligne. Les fichiers sont servis depuis le canister file_registry.",
+    "published": "Soumis pour examen",
+    "published_body": "Votre {kind} est téléversé et attend un examinateur. Il apparaîtra sur le marketplace une fois approuvé ; vous pouvez le suivre sur la page Développeur.",
     "view_listing": "Voir l’annonce →",
     "upload_another": "Téléverser un autre",
     "step_review": "4. Révision",
-    "coming_soon_title": "Bientôt disponible",
-    "coming_soon_body": "La publication via l'interface web n'est pas encore disponible. En attendant, vous pouvez utiliser la CLI Realms.",
-    "coming_soon_close": "Compris",
-    "languages": "Langues prises en charge"
+    "languages": "Langues prises en charge",
+    "view_submissions": "Mes soumissions",
+    "checking": "Vérification…",
+    "license_needed_title": "Licence de développeur requise",
+    "license_needed_body": "Vous pouvez remplir le formulaire, mais le téléversement nécessite une licence de développeur active.",
+    "license_needed_link": "Obtenir une licence"
   },
   "account": {
     "coming_soon_badge": "Bientôt",
@@ -292,7 +295,8 @@
     "delist": "Retirer",
     "could_not_audit": "Impossible de demander l’audit : {error}",
     "could_not_delist": "Impossible de retirer : {error}",
-    "delist_confirm": "Retirer {kind} « {id} » ?"
+    "delist_confirm": "Retirer {kind} « {id} » ?",
+    "license_by_admin": "Sur cet environnement, un administrateur attribue les licences de développeur. Envoyez-lui votre principal :"
   },
   "admin": {
     "title": "Admin",
