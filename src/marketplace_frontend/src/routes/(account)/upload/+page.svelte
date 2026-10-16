@@ -41,7 +41,8 @@ let listingHref = "";
 let manifestScreenshots = "";
 let packageProblem: PackageProblem | null = null;
 $: if (kind === "ext" && id.includes("/")) id = id.replace(/\//g, "_");
-const dirInputAttrs = { webkitdirectory: "", directory: "" };
+// Svelte assigns spread keys with a DOM setter as properties, so "" would become false.
+const dirInputAttrs = { webkitdirectory: true, directory: true };
 onMount(async () => {
   const prefill = $page.url.searchParams.get("prefill");
   if (!prefill) return;
