@@ -120,7 +120,7 @@
         "family": "ic-frontend",
         "version": "1.0.0",
         "source": "release:smart-social-contracts/ic-frontend@v1.0.0:ic-frontend@1.0.0.wasm.gz",
-        "sha256": "bcc3eb159c6b36969319edc71d915dbc182e00eee727d9116728c03ad87915ff"
+        "sha256": "c5b8952aa20b58312aa395c56136c0e9c3811f435c185cf3cdfaf63149b02d89"
       },
       {
         "family": "orchestration-multisig",
