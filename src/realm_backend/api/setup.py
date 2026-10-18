@@ -9,7 +9,12 @@ from typing import Any, Dict, Optional
 from _cdk import Async, CallResult, Principal, StableBTreeMap, ic
 from ic_python_logging import get_logger
 
-from api.file_registry import AssetCanisterService, FileRegistryService, _unwrap_call_result
+from api.file_registry import (
+    AssetCanisterService,
+    FileRegistryService,
+    _pin_frontend_prefix,
+    _unwrap_call_result,
+)
 from core.setup import (
     BRANDING_DATA_URL_MAX_BYTES,
     SETUP_LAUNCH_STEP_CODE,
@@ -163,6 +168,7 @@ def upload_live_branding_assets(kinds) -> Async[dict]:
         return {"success": False, "error": "frontend_canister_id not configured"}
 
     asset = AssetCanisterService(Principal.from_str(frontend_id))
+    yield from _pin_frontend_prefix(Principal.from_str(frontend_id), "/custom/")
     uploaded = []
     errors: Dict[str, str] = {}
     for kind in kinds:
@@ -770,6 +776,7 @@ def _launch_phase_upload_branding(realm, draft: dict) -> Async[dict]:
     uploaded = []
     errors: Dict[str, str] = {}
     asset = AssetCanisterService(Principal.from_str(frontend_id))
+    yield from _pin_frontend_prefix(Principal.from_str(frontend_id), "/custom/")
 
     for kind, asset_key in _BRANDING_ASSET_PATHS.items():
         if not branding.get(kind):

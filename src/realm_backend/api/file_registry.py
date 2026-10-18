@@ -1173,6 +1173,10 @@ def _guess_content_type(path: str) -> str:
     return "application/octet-stream"
 
 
+# Files the realm writes into its frontend; pinned so frontend deploys keep them.
+PINNED_FRONTEND_PREFIXES = ("/ext/", "/custom/")
+
+
 def _pin_frontend_prefix(frontend_principal: Principal, prefix: str) -> Async[None]:
     """Pin a directory prefix on the frontend asset canister. Non-fatal on failure."""
     pin_arg = f'(record {{ prefix = "{prefix}" }})'
@@ -1463,7 +1467,8 @@ def resync_extension_frontends(
             }
         )
 
-    yield from _pin_frontend_prefix(Principal.from_str(fe_canister), "/ext/")
+    for prefix in PINNED_FRONTEND_PREFIXES:
+        yield from _pin_frontend_prefix(Principal.from_str(fe_canister), prefix)
 
     default_registry = (registry_canister_id or "").strip()
     if not default_registry:
@@ -1584,6 +1589,7 @@ def install_branding_from_registry(
 
     registry = FileRegistryService(Principal.from_str(registry_canister_id))
     asset = AssetCanisterService(Principal.from_str(frontend_canister_id))
+    yield from _pin_frontend_prefix(Principal.from_str(frontend_canister_id), "/custom/")
 
     uploaded = []
     errors = {}
