@@ -118,9 +118,9 @@
       },
       {
         "family": "ic-frontend",
-        "version": "1.0.0",
-        "source": "release:smart-social-contracts/ic-frontend@v1.0.0:ic-frontend@1.0.0.wasm.gz",
-        "sha256": "c5b8952aa20b58312aa395c56136c0e9c3811f435c185cf3cdfaf63149b02d89"
+        "version": "1.0.1",
+        "source": "release:smart-social-contracts/ic-frontend@v1.0.1:ic-frontend@1.0.1.wasm.gz",
+        "sha256": "feec64ef3ae77608b7399866d678532d4956c09121d06e00fb3e3b57d4ad8939"
       },
       {
         "family": "orchestration-multisig",
@@ -248,7 +248,7 @@
               "name": "marketplace-frontend",
               "kind": "frontend",
               "mode": "managed",
-              "wasm": "ic-frontend@1.0.0",
+              "wasm": "ic-frontend@1.0.1",
               "controllers": [
                 "$self",
                 "$multisig"
@@ -317,7 +317,7 @@
               "name": "fleet-file-registry-frontend",
               "kind": "frontend",
               "mode": "managed",
-              "wasm": "ic-frontend@1.0.0",
+              "wasm": "ic-frontend@1.0.1",
               "controllers": [
                 "$self",
                 "$multisig"
