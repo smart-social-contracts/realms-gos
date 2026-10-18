@@ -109,9 +109,10 @@
         "source": "release:smart-social-contracts/Casals@latest:certified-assets@0.3.0.wasm.gz"
       },
       {
-        "family": "certified-assets",
+        "family": "ic-frontend",
         "version": "1.0.0",
-        "source": "release:smart-social-contracts/Casals@latest:certified-assets@1.0.0.wasm.gz"
+        "source": "release:smart-social-contracts/ic-frontend@v1.0.0:ic-frontend@1.0.0.wasm.gz",
+        "sha256": "bcc3eb159c6b36969319edc71d915dbc182e00eee727d9116728c03ad87915ff"
       },
       {
         "family": "orchestration-multisig",
@@ -239,7 +240,7 @@
               "name": "marketplace-frontend",
               "kind": "frontend",
               "mode": "managed",
-              "wasm": "certified-assets@1.0.0",
+              "wasm": "ic-frontend@1.0.0",
               "controllers": [
                 "$self",
                 "$multisig"
@@ -308,7 +309,7 @@
               "name": "fleet-file-registry-frontend",
               "kind": "frontend",
               "mode": "managed",
-              "wasm": "certified-assets@1.0.0",
+              "wasm": "ic-frontend@1.0.0",
               "controllers": [
                 "$self",
                 "$multisig"
