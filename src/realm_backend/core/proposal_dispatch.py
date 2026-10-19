@@ -7,7 +7,6 @@ The sandbox is used only for ``code_execution``.
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ic_python_logging import get_logger
@@ -25,8 +24,19 @@ HIGH_RISK_VERBS = frozenset(
     }
 )
 CODEX_NAME_PREFIX = "proposal_"
-_AMOUNT_RE = re.compile(r"^[1-9][0-9]*$")
 _FORBIDDEN_SUBMIT_KEYS = ("code_inline", "codices", "codex_name")
+
+
+def _is_positive_decimal(value: Any) -> bool:
+    """``^[1-9][0-9]*$`` without ``re``: the canister's ``re`` has no
+    ``compile``, and a failing module body makes every attribute of this
+    lazily loaded module look missing."""
+    return (
+        isinstance(value, str)
+        and value.isascii()
+        and value.isdigit()
+        and value[0] != "0"
+    )
 
 
 class DispatchError(Exception):
@@ -136,7 +146,7 @@ def freeze_action(
                 "error": "token and to_principal are required",
                 "error_code": "invalid_action",
             }
-        if not isinstance(amount, str) or not _AMOUNT_RE.match(amount):
+        if not _is_positive_decimal(amount):
             return {}, [], {
                 "error": "amount must be a positive decimal string",
                 "error_code": "invalid_amount",
@@ -488,4 +498,36 @@ def _approve_orchestration(action: dict):
             "error_code": "orchestration_failed",
         })
     raw = call_res.get("Ok") if isinstance(call_res, dict) else getattr(call_res, "Ok", call_res)
-    return json.dumps({"success": True, "reply": str(raw)[:500]})
+    decoded = ic.candid_decode(raw) if isinstance(raw, (bytes, bytearray)) else raw
+    reply = parse_baton_reply(decoded)
+    if reply.get("ok") is not True:
+        return json.dumps({
+            "success": False,
+            "error": f"baton refused {method}: {reply.get('error') or reply}",
+            "error_code": "orchestration_refused",
+            "reply": reply,
+        })
+    return json.dumps({"success": True, "reply": reply})
+
+
+def parse_baton_reply(decoded: Any) -> dict:
+    """A Baton text reply (plain JSON, or candid text ``("<json>")``) as a dict."""
+    if isinstance(decoded, dict):
+        return decoded
+    if isinstance(decoded, (list, tuple)) and decoded:
+        decoded = decoded[0]
+    s = str(decoded or "").strip()
+    if s.startswith("(") and ")" in s:
+        inner = s[1:s.rfind(")")].strip().rstrip(",").strip()
+        if inner.startswith('"') and inner.endswith('"'):
+            try:
+                inner_text = json.loads(inner.replace("\\'", "'"))
+                if isinstance(inner_text, str):
+                    s = inner_text
+            except json.JSONDecodeError:
+                pass
+    try:
+        parsed = json.loads(s)
+        return parsed if isinstance(parsed, dict) else {"result": parsed}
+    except json.JSONDecodeError:
+        return {"raw": s[:500]}

@@ -3751,25 +3751,9 @@ def _orchestration_baton_id(realm) -> str:
 
 def _parse_baton_text_reply(decoded) -> dict:
     """Parse a Baton text-method reply: plain JSON or candid-wrapped ("<json>")."""
-    if isinstance(decoded, dict):
-        return decoded
-    if isinstance(decoded, (list, tuple)) and decoded:
-        decoded = decoded[0]
-    s = str(decoded or "").strip()
-    if s.startswith("(") and ")" in s:
-        inner = s[1:s.rfind(")")].strip().rstrip(",").strip()
-        if inner.startswith('"') and inner.endswith('"'):
-            try:
-                inner_text = json.loads(inner)
-                if isinstance(inner_text, str):
-                    s = inner_text
-            except json.JSONDecodeError:
-                pass
-    try:
-        parsed = json.loads(s)
-        return parsed if isinstance(parsed, dict) else {"result": parsed}
-    except json.JSONDecodeError:
-        return {"raw": s[:500]}
+    from core.proposal_dispatch import parse_baton_reply
+
+    return parse_baton_reply(decoded)
 
 
 @update

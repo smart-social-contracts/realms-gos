@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
 CANONICAL_SEPARATORS = (",", ":")
@@ -33,7 +32,6 @@ LEG_REJECTED = "rejected"
 LEG_NO_QUORUM = "no_quorum"
 LEG_ABSENT = "absent"
 
-_VOTE_ID_SAFE_RE = re.compile(r"[^a-zA-Z0-9_-]")
 _SECONDS_PER_DAY = 86400
 _SECONDS_PER_HOUR = 3600
 
@@ -309,6 +307,10 @@ def is_past(now_epoch_s: int, deadline: int, grace_hours: int = 0) -> bool:
 
 
 def build_vote_id(origin_quarter: str, now_epoch_s: int, counter: int) -> str:
-    quarter = _VOTE_ID_SAFE_RE.sub("_", (origin_quarter or "").strip())[:32]
+    # No ``re`` here: the canister's ``re`` has no ``compile``.
+    quarter = "".join(
+        c if (c.isascii() and c.isalnum()) or c in "_-" else "_"
+        for c in (origin_quarter or "").strip()
+    )[:32]
     raw = f"fv_{quarter}_{int(now_epoch_s)}_{int(counter)}"
     return raw[:64]
