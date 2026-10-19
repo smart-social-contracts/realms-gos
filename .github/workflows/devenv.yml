@@ -1,0 +1,108 @@
+name: devenv
+
+# A fresh Ubuntu 24.04 + GNOME VM (QEMU/KVM) runs the developer onboarding:
+# install the realms CLI, start a local realm, scaffold an extension and a
+# codex, publish, launch, and press the hello button in a browser.
+# Same entry point as on a laptop: devenv/devenv.sh run (see devenv/README.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_source:
+        description: "Where the VM installs the realms CLI from"
+        type: choice
+        options: [checkout, pypi]
+        default: checkout
+      rebuild_base:
+        description: "Rebuild the base image even if cached"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "devenv/**"
+      - "cli/**"
+      - "packages/create-extension/**"
+      - ".github/workflows/devenv.yml"
+  schedule:
+    - cron: "17 4 * * 1"
+
+concurrency:
+  group: devenv-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      DEVENV_HYPERVISOR: qemu
+      DEVENV_CPUS: "4"
+      DEVENV_MEMORY_MB: "8192"
+      DEVENV_OUT: ${{ github.workspace }}/devenv-artifacts
+      CLI_SOURCE: ${{ inputs.cli_source || 'checkout' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils genisoimage
+          qemu-system-x86_64 --version
+
+      - name: Restore base image
+        id: base-cache
+        if: ${{ !inputs.rebuild_base }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cache/realms-devenv/base-qemu.qcow2
+            ~/.cache/realms-devenv/base-qemu.stamp
+            ~/.cache/realms-devenv/id_ed25519
+            ~/.cache/realms-devenv/id_ed25519.pub
+          key: devenv-base-qemu-${{ hashFiles('devenv/cloud-init/**', 'devenv/guest/provision.sh', 'devenv/browser-check/package.json') }}
+
+      - name: Build base image (Ubuntu 24.04 + GNOME)
+        run: devenv/devenv.sh base ${{ inputs.rebuild_base && '--force' || '' }}
+
+      - name: Save base image
+        if: steps.base-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/realms-devenv/base-qemu.qcow2
+            ~/.cache/realms-devenv/base-qemu.stamp
+            ~/.cache/realms-devenv/id_ed25519
+            ~/.cache/realms-devenv/id_ed25519.pub
+          key: devenv-base-qemu-${{ hashFiles('devenv/cloud-init/**', 'devenv/guest/provision.sh', 'devenv/browser-check/package.json') }}
+
+      - name: Run the developer onboarding in a fresh VM
+        run: devenv/devenv.sh run
+
+      - name: Console logs
+        if: failure()
+        run: |
+          tail -200 ~/.cache/realms-devenv/provision-status.log 2>/dev/null || true
+          tail -100 ~/.cache/realms-devenv/console-base.log 2>/dev/null || true
+          tail -100 ~/.cache/realms-devenv/console-run.log 2>/dev/null || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devenv-artifacts
+          path: devenv-artifacts/
+          if-no-files-found: warn

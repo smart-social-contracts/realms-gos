@@ -5,5 +5,9 @@ recursive-include realms *.py
 recursive-include realms/scripts *.sh *.py
 recursive-include realms/src *.py *.js *.ts *.svelte *.css *.html *.json *.did
 recursive-include realms/extensions *.py *.js *.ts *.svelte *.css *.html *.json *.md
+recursive-include realms/templates *
+prune realms/templates/extension/node_modules
+prune realms/templates/extension/frontend/node_modules
+prune realms/templates/extension/frontend/dist
 recursive-exclude * __pycache__
 recursive-exclude * *.py[co]

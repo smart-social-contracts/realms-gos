@@ -715,8 +715,42 @@ def _parse_candid_string(raw: str) -> str:
         raw = raw[:-1].strip()
     if raw.startswith('"') and raw.endswith('"'):
         raw = raw[1:-1]
-    raw = raw.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
-    return raw
+    return _candid_unescape(raw)
+
+
+_CANDID_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "'": "'", "\\": "\\"}
+_HEX_DIGITS = set("0123456789abcdefABCDEF")
+
+
+def _candid_unescape(text: str) -> str:
+    """Undo Candid text escapes in one pass: \\n \\t \\r \\" \\' \\\\ \\u{X} and \\HH bytes."""
+    buf = bytearray()
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c != "\\" or i + 1 >= n:
+            buf += c.encode("utf-8")
+            i += 1
+            continue
+        nxt = text[i + 1]
+        if nxt in _CANDID_SIMPLE_ESCAPES:
+            buf += _CANDID_SIMPLE_ESCAPES[nxt].encode("utf-8")
+            i += 2
+        elif nxt == "u" and i + 2 < n and text[i + 2] == "{":
+            end = text.find("}", i + 3)
+            try:
+                buf += chr(int(text[i + 3 : end], 16)).encode("utf-8")
+                i = end + 1
+            except ValueError:
+                buf += b"\\"
+                i += 1
+        elif i + 2 < n and text[i + 1] in _HEX_DIGITS and text[i + 2] in _HEX_DIGITS:
+            buf.append(int(text[i + 1 : i + 3], 16))
+            i += 3
+        else:
+            buf += b"\\"
+            i += 1
+    return buf.decode("utf-8", errors="replace")
 
 
 # dfx → icp translation notes:

@@ -1,0 +1,13 @@
+{
+  "name": "__EXTENSION_ID__",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace frontend",
+    "dev": "npm run dev --workspace frontend",
+    "check": "npm run check --workspace frontend"
+  }
+}

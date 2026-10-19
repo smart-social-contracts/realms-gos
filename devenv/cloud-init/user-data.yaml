@@ -1,0 +1,43 @@
+#cloud-config
+# Template filled in by devenv.sh (placeholders: __SSH_PUBKEY__, __HYPERVISOR__,
+# __PLAYWRIGHT_VERSION__, __PROVISION_B64__). Used once, to build the base image.
+hostname: realms-devenv
+users:
+  - name: dev
+    gecos: Realms Developer
+    groups: [sudo, adm]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: false
+    plain_text_passwd: dev
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+ssh_pwauth: false
+package_update: false
+package_upgrade: false
+write_files:
+  - path: /etc/realms-devenv/hypervisor
+    content: "__HYPERVISOR__\n"
+  - path: /etc/realms-devenv/playwright-version
+    content: "__PLAYWRIGHT_VERSION__\n"
+  - path: /usr/local/sbin/realms-devenv-provision
+    permissions: "0755"
+    encoding: b64
+    content: __PROVISION_B64__
+runcmd:
+  # Progress and the final marker go to the second serial port (ttyS1), which
+  # devenv.sh writes to a status file. No getty runs there, unlike ttyS0.
+  - - bash
+    - -c
+    - |
+      log=/var/log/realms-devenv-provision.log
+      : > "$log"
+      (tail -n +1 -F "$log" > /dev/ttyS1 2>/dev/null || true) &
+      mirror=$!
+      if /usr/local/sbin/realms-devenv-provision >> "$log" 2>&1; then marker=REALMS_DEVENV_PROVISION_OK; else marker=REALMS_DEVENV_PROVISION_FAILED; fi
+      sleep 2; kill "$mirror" 2>/dev/null
+      echo "$marker" > /dev/ttyS1
+power_state:
+  mode: poweroff
+  timeout: 60
+  condition: true

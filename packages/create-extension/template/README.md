@@ -8,6 +8,7 @@ Sandboxed Realms extension scaffolded with `npm create @realmsgos/extension`.
 
 ```
 __EXTENSION_ID__/
+├── package.json        # npm workspace root: install/build/dev run from here
 ├── manifest.json       # runtime, capabilities, entry_access
 ├── backend/
 │   └── entry.py        # Python backend (greet example)
@@ -19,9 +20,15 @@ __EXTENSION_ID__/
 ## Getting started
 
 ```bash
-cd frontend
 npm install
 npm run build
+```
+
+To try it in a realm on your machine:
+
+```bash
+realms local start
+realms local publish .
 ```
 
 The build emits `frontend/dist/index.html` with relative asset paths (`base: './'`). In production the realm serves it at:

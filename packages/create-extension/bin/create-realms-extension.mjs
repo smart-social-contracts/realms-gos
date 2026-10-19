@@ -223,7 +223,7 @@ async function main() {
 	console.log(`\nCreated sandboxed Realms extension in ${targetDir}\n`);
 	console.log('Next steps:');
 	console.log(`  cd ${targetDir === process.cwd() ? basename(targetDir) : targetDir}`);
-	console.log('  cd frontend && npm install');
+	console.log('  npm install');
 	console.log('  npm run build');
 	console.log(`\nAuthoring guide: ${DOCS_URL}\n`);
 }

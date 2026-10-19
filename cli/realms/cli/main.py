@@ -306,16 +306,45 @@ def installer_health(
 def new(
     spec_file: Optional[str] = typer.Argument(
         None,
-        help="Optional spec JSON (paths relative to the spec file). Flags override spec fields.",
+        metavar="[KIND|SPEC]",
+        help=(
+            "`extension <dir>` or `codex <dir>` scaffolds a package project; "
+            "`realm <spec>` (or just a spec JSON) creates a live realm. "
+            "Spec paths are relative to the spec file; flags override spec fields."
+        ),
     ),
-    identity: str = typer.Option(
-        ...,
+    target: Optional[str] = typer.Argument(
+        None,
+        metavar="[DIR]",
+        help="Project directory for `extension` / `codex`; spec JSON for `realm`.",
+    ),
+    identity: Optional[str] = typer.Option(
+        None,
         "--identity",
         "-i",
         help=(
-            "Identity that pays credits, is manifest.founder, and runs setup. "
-            "II-linked, or a dfx key (e.g. deployer) together with --co-admin."
+            "Realm only (required): identity that pays credits, is manifest.founder, "
+            "and runs setup. II-linked, or a dfx key (e.g. deployer) together with --co-admin."
         ),
+    ),
+    package_id: Optional[str] = typer.Option(
+        None, "--id", help="extension/codex: package id (default: derived from DIR)"
+    ),
+    display_name: Optional[str] = typer.Option(
+        None, "--display-name", help="extension/codex: display name (default: derived from DIR)"
+    ),
+    description: Optional[str] = typer.Option(
+        None, "--description", help="extension/codex: one-line description"
+    ),
+    extension_deps: Optional[List[str]] = typer.Option(
+        None,
+        "--extension",
+        help="codex: extension id the codex depends on (repeatable)",
+    ),
+    install: bool = typer.Option(
+        True,
+        "--install/--no-install",
+        help="extension: run npm install + npm run build after scaffolding",
     ),
     network: Optional[str] = typer.Option(
         None,
@@ -433,7 +462,12 @@ def new(
         ),
     ),
 ) -> None:
-    """Create a live realm.
+    """Scaffold an extension or codex project, or create a live realm.
+
+    \b
+      realms new extension my-hello-world      # sandboxed extension (npm build)
+      realms new codex my-codex --extension my_hello_world
+      realms new realm <spec.json> --identity …  # same as: realms new <spec.json> --identity …
 
     --deploy-mode=gaas (default) mirrors the *.gos.earth wizard: charges 5
     registry credits, enqueues request_deployment, then completes founder
@@ -457,6 +491,37 @@ def new(
       realms new spec.json --gaas-config environments/test.json \\
         --identity deployer --slug acme --from-stage setup --yes
     """
+    if spec_file in ("extension", "codex"):
+        from .commands.scaffold import new_codex_command, new_extension_command
+
+        if not target:
+            console.print(f"[red]Error: usage: realms new {spec_file} <dir>[/red]")
+            raise typer.Exit(1)
+        if spec_file == "extension":
+            new_extension_command(
+                target,
+                extension_id=package_id,
+                display_name=display_name,
+                description=description,
+                install=install,
+            )
+        else:
+            new_codex_command(
+                target,
+                codex_id=package_id,
+                display_name=display_name,
+                description=description,
+                extensions=extension_deps,
+            )
+        return
+    if spec_file == "realm":
+        spec_file = target
+    elif target:
+        console.print(f"[red]Error: unexpected argument {target!r}[/red]")
+        raise typer.Exit(1)
+    if not identity:
+        console.print("[red]Error: --identity is required to create a realm[/red]")
+        raise typer.Exit(1)
     start_run_log(
         network or (gaas_config.stem if gaas_config else "new"),
         log_file=log_file,
@@ -2315,6 +2380,95 @@ def db_export(
     network = ctx.obj.get("network") if ctx.obj else None
     effective_network = network or "local"
     export_data_command(output_dir, entity_types, effective_network, identity, include_codexes)
+
+
+local_app = typer.Typer(
+    name="local",
+    help="A realm on this machine (icp-cli + PocketIC, release canisters, no Casals/dfx)",
+)
+app.add_typer(local_app, name="local", rich_help_panel="Development")
+
+
+@local_app.command("start")
+def local_start(
+    port: int = typer.Option(8000, "--port", help="Local gateway port"),
+    version: str = typer.Option(
+        "", "--version", help="Realms release tag (default: the one matching this CLI; or 'latest')"
+    ),
+    fresh: bool = typer.Option(False, "--fresh", help="Stop and wipe an existing local realm first"),
+    core_ui: bool = typer.Option(
+        True, "--core-ui/--no-core-ui", help="Build the core extensions' UI bundles (npm, cached)"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Install missing tools without asking"),
+) -> None:
+    """Start the local network and deploy a realm (in setup), a file registry and core extensions."""
+    from .commands.local import start_command
+
+    start_command(port=port, version=version, yes=yes, fresh=fresh, core_ui=core_ui)
+
+
+@local_app.command("publish")
+def local_publish(
+    paths: List[str] = typer.Argument(..., help="Extension / codex directories (manifest.json inside)"),
+    install: bool = typer.Option(
+        False, "--install", help="Also install (or upgrade) the extensions in the local realm"
+    ),
+) -> None:
+    """Publish extension and codex directories to the local file registry."""
+    from .commands.local import publish_command
+
+    publish_command(paths, install=install)
+
+
+@local_app.command("setup")
+def local_setup(
+    codex: str = typer.Option(..., "--codex", help="Codex package id (published to the local registry)"),
+    codex_version: Optional[str] = typer.Option(None, "--codex-version", help="Default: latest"),
+    token_canister: str = typer.Option(
+        "ryjl3-tyaaa-aaaaa-aaaba-cai", "--token-canister", help="Treasury ledger (default: local ICP ledger)"
+    ),
+) -> None:
+    """Run founder setup: install the codex (and its extensions), set the token, launch."""
+    from .commands.local import setup_command
+
+    setup_command(codex=codex, codex_version=codex_version, token_canister=token_canister)
+
+
+@local_app.command("add-admin")
+def local_add_admin(principal: str = typer.Argument(..., help="Principal to make an admin")) -> None:
+    """Make a principal (e.g. your browser login) an admin of the local realm."""
+    from .commands.local import add_admin_command
+
+    add_admin_command(principal)
+
+
+@local_app.command("call")
+def local_call(
+    extension: str = typer.Argument(..., help="Extension id"),
+    function: str = typer.Argument(..., help="Function in the extension's backend/entry.py"),
+    args: str = typer.Argument("{}", help="JSON args"),
+    as_json: bool = typer.Option(False, "--json", help="Print the raw response as JSON"),
+) -> None:
+    """Call an installed extension's backend function as the local identity."""
+    from .commands.local import ext_call_command
+
+    ext_call_command(extension, function, args, as_json)
+
+
+@local_app.command("status")
+def local_status(as_json: bool = typer.Option(False, "--json", help="JSON output")) -> None:
+    """Show the local realm: URL, canister ids, network and setup state."""
+    from .commands.local import status_command
+
+    status_command(as_json)
+
+
+@local_app.command("stop")
+def local_stop() -> None:
+    """Stop the local network (its canister state is discarded)."""
+    from .commands.local import stop_command
+
+    stop_command()
 
 
 # Create network subcommand group

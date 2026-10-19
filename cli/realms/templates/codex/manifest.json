@@ -1,0 +1,57 @@
+{
+  "id": "__CODEX_ID__",
+  "version": "0.1.0",
+  "name": "__CODEX_NAME__",
+  "description": "__CODEX_DESCRIPTION__",
+  "kind": "codex",
+  "codex_api_version": 1,
+  "dependencies": [],
+  "show_in_sidebar": false,
+  "onboarding": {
+    "territory_mode": "greenfield",
+    "registration": {
+      "open_registration": true,
+      "admin_requires_invite": true,
+      "member_requires_invite": false,
+      "default_profile": "member"
+    },
+    "identity_requirements": []
+  },
+  "lifecycle": {
+    "critical_mass": 10,
+    "beta_proving_days": 30,
+    "transitions": {
+      "alpha_to_beta": {
+        "mode": "checklist"
+      },
+      "beta_to_production": {
+        "mode": "admin_approval"
+      }
+    }
+  },
+  "fees": {
+    "registration": 0,
+    "monthly_membership": 0,
+    "proposal_submission": 0
+  },
+  "governance": {
+    "voting_window_days": 7,
+    "quorum_percent": 20,
+    "approval_threshold": 0.5,
+    "proposal_types": [
+      "codex_change"
+    ]
+  },
+  "membership": {
+    "activation_requires": [
+      "registered"
+    ],
+    "invoice_validity_days": 30
+  },
+  "entry_access": {
+    "default": "realm.admin",
+    "functions": {
+      "get_config": "realm.data_view"
+    }
+  }
+}

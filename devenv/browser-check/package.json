@@ -1,0 +1,13 @@
+{
+  "name": "realms-devenv-browser-check",
+  "private": true,
+  "type": "module",
+  "description": "Logs into a local realm through the portal bridge, presses an extension's hello button, asserts the phrase.",
+  "scripts": {
+    "check": "node check.mjs"
+  },
+  "dependencies": {
+    "@dfinity/identity": "3.4.3",
+    "playwright": "1.64.1"
+  }
+}

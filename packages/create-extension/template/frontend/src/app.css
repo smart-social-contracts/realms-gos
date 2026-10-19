@@ -1,4 +1,6 @@
 @import "tailwindcss";
 
 @source "./**/*.{html,js,svelte,ts}";
+/* extension-ui sits in the workspace root node_modules after `npm install` at the project root. */
+@source "../../node_modules/@realmsgos/extension-ui/dist/**/*.{html,js,svelte,ts}";
 @source "../node_modules/@realmsgos/extension-ui/dist/**/*.{html,js,svelte,ts}";

@@ -4,16 +4,15 @@ Welcome to Realms GOS! This guide will help you get up and running quickly.
 
 ## What You'll Need
 
-- **Python 3.8+** - For the Realms CLI
-- **Node.js 18+** - For frontend development
-- **dfx** - Internet Computer SDK ([install guide](https://internetcomputer.org/docs/current/developer-docs/setup/install/))
+- **Python 3.8+** - For the Realms CLI (`pipx` recommended)
+- **Node.js 20+** - Extension frontends are built with npm; `realms local` also installs icp-cli through npm on first use
 
 ## Installation
 
 ### 1. Install the Realms CLI
 
 ```bash
-pip install realms-gos
+pipx install realms-gos
 ```
 
 Verify the installation:
@@ -21,6 +20,34 @@ Verify the installation:
 ```bash
 realms --version
 ```
+
+## Quick Start: a Local Realm with Your Own Extension and Codex
+
+```bash
+realms local start                                  # local network + realm from the matching release
+realms new extension my-hello-world                 # scaffold + npm install + build
+realms new codex my-hello-codex --extension my_hello_world
+realms local publish my-hello-world my-hello-codex  # into the local file registry
+realms local setup --codex my_hello_codex           # install codex + extensions, launch the realm
+realms local call my_hello_world greet '{}'         # → "Hello, World!"
+realms local status                                 # realm URL and canister IDs
+```
+
+Open the realm URL from `realms local status`, sign in with the local
+Internet Identity, and go to `/extensions/my_hello_world`. The **Say hello**
+button calls the extension backend's `greet` and shows `Hello, World!`.
+
+After editing the extension, run `npm run build` in its directory and then
+`realms local publish my-hello-world --install`. Bump `version` in
+`manifest.json` first so the realm picks up the new build.
+`realms local stop` stops the network. `realms local start --fresh` deploys a new realm.
+
+The same journey runs end to end in a fresh Ubuntu + GNOME VM with
+[`devenv/devenv.sh run`](https://github.com/smart-social-contracts/realms-gos/tree/main/devenv).
+
+## Generated Demo Realm (dfx)
+
+These steps need **dfx** ([install guide](https://internetcomputer.org/docs/current/developer-docs/setup/install/)).
 
 ### 2. Create Your First Realm
 

@@ -9,7 +9,7 @@
 	let greetResult = $state<string | null>(null);
 	let actionBusy = $state(false);
 
-	let ctx: Awaited<ReturnType<typeof createExtensionClient>> | null = null;
+	let ctx = $state.raw<Awaited<ReturnType<typeof createExtensionClient>> | null>(null);
 
 	function applyTheme(theme: 'light' | 'dark') {
 		document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -41,9 +41,8 @@
 		actionBusy = true;
 		greetResult = null;
 		try {
-			const data = await ctx.callExtension<string>('greet', { name: 'Realm' });
+			const data = await ctx.callExtension<string>('greet', {});
 			greetResult = typeof data === 'string' ? data : JSON.stringify(data);
-			ctx.notify('success', 'Backend call succeeded');
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
 			greetResult = `Error: ${message}`;
@@ -91,17 +90,22 @@
 		{/snippet}
 	</Card>
 
-	<Card title="Backend call">
+	<Card title="Hello world">
 		{#snippet children()}
 			<p class="mb-4 text-sm text-gray-500 dark:text-gray-400">
 				Calls <code class="font-mono text-xs">greet</code> in <code class="font-mono text-xs">backend/entry.py</code>
 				via the bridge (<code class="font-mono text-xs">call_extension</code> capability).
 			</p>
-			<Button tone="primary" disabled={!bridgeReady || actionBusy} onclick={runGreet}>
-				callExtension('greet')
-			</Button>
+			<span data-testid="hello-button">
+				<Button tone="primary" disabled={!bridgeReady || actionBusy} onclick={runGreet}>
+					Say hello
+				</Button>
+			</span>
 			{#if greetResult}
-				<p class="mt-4 rounded-md bg-gray-50 p-3 font-mono text-sm text-gray-700 dark:bg-gray-900 dark:text-gray-300">
+				<p
+					data-testid="hello-result"
+					class="mt-4 rounded-md bg-gray-50 p-3 font-mono text-sm text-gray-700 dark:bg-gray-900 dark:text-gray-300"
+				>
 					{greetResult}
 				</p>
 			{/if}
