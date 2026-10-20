@@ -25,6 +25,24 @@
     }
   },
   {
+    // GET /.well-known/ii-app-metadata — the name, tagline and logo Internet
+    // Identity shows on its sign-in screens. II reads the document and the logo
+    // cross-origin, so both need CORS; the logo URL in it must stay relative.
+    // Placed after `.well-known/*` so the JSON content-type wins.
+    "match": ".well-known/ii-app-metadata",
+    "ignore": false,
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    }
+  },
+  {
+    "match": "logo.png",
+    "headers": {
+      "Access-Control-Allow-Origin": "*"
+    }
+  },
+  {
     // SVG files need explicit content-type for proper certification
     "match": "**/*.svg",
     "headers": {

@@ -87,7 +87,7 @@ console = Console()
 
 app = typer.Typer(
     name="realms",
-    help="CLI tool for deploying and managing Realms",
+    help="CLI tool for deploying and managing Realms GOS",
     add_completion=False,
     rich_markup_mode="rich",
     invoke_without_command=True,
