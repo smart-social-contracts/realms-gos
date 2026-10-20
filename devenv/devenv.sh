@@ -443,6 +443,7 @@ main() {
       --gui) GUI=1; shift ;;
       --force) FORCE=1; shift ;;
       --cli-source) CLI_SOURCE="$2"; shift 2 ;;
+      --cli-version) CLI_VERSION="$2"; shift 2 ;;
       --out) OUT="$2"; shift 2 ;;
       -h|--help) usage ;;
       *) args+=("$1"); shift ;;

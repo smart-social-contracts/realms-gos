@@ -7,7 +7,7 @@
 # Env:
 #   REALMS_SRC     realms-gos source tree copied into the VM (default ~/realms-gos)
 #   CLI_SOURCE     checkout (pipx install $REALMS_SRC/cli, default) | pypi
-#   CLI_VERSION    realms-gos version on PyPI when CLI_SOURCE=pypi (default: latest)
+#   CLI_VERSION    realms-gos version on PyPI when CLI_SOURCE=pypi (default: latest, pre-releases included)
 #   REALM_PORT     local network port (default 8000)
 #   ARTIFACTS      output directory (default ~/devenv-artifacts)
 set -euo pipefail
@@ -15,6 +15,7 @@ set -euo pipefail
 REALMS_SRC="${REALMS_SRC:-$HOME/realms-gos}"
 CLI_SOURCE="${CLI_SOURCE:-checkout}"
 CLI_VERSION="${CLI_VERSION:-}"
+CLI_VERSION="${CLI_VERSION#v}"
 REALM_PORT="${REALM_PORT:-8000}"
 ARTIFACTS="${ARTIFACTS:-$HOME/devenv-artifacts}"
 EXT_DIR=my-hello-world
@@ -37,7 +38,13 @@ systemctl is-active gdm && echo "GNOME display manager: active"
 
 step "install the realms CLI ($CLI_SOURCE)"
 if [ "$CLI_SOURCE" = "pypi" ]; then
-  pipx install --force "realms-gos${CLI_VERSION:+==$CLI_VERSION}"
+  # --pre: until 0.7.0 is final, the only releases with `realms local` are rcs.
+  # Retries: right after a release, PyPI can take a few minutes to serve it.
+  for attempt in 1 2 3 4 5 6; do
+    pipx install --force --pip-args=--pre "realms-gos${CLI_VERSION:+==$CLI_VERSION}" && break
+    [ "$attempt" = 6 ] && exit 1
+    sleep 60
+  done
 else
   pipx install --force "$REALMS_SRC/cli"
 fi

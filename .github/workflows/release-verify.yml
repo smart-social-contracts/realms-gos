@@ -26,3 +26,14 @@ jobs:
       contents: read
     uses: ./.github/workflows/publish-pypi.yml
     secrets: inherit
+
+  # A fresh VM installs exactly this version from PyPI and runs the developer
+  # journey (devenv/). Informational: the release is already out.
+  devenv:
+    needs: pypi
+    permissions:
+      contents: read
+    uses: ./.github/workflows/devenv.yml
+    with:
+      cli_source: pypi
+      cli_version: ${{ github.event.release.tag_name }}

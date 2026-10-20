@@ -11,8 +11,15 @@ Welcome to Realms GOS! This guide will help you get up and running quickly.
 
 ### 1. Install the Realms CLI
 
+The package is **`realms-gos`** (the `realms` package on PyPI is unrelated).
+Use [pipx](https://pipx.pypa.io/): on Ubuntu 24.04 and Debian 12, plain
+`pip install` into the system Python fails with "externally-managed-environment".
+No clone of the repository is needed.
+
 ```bash
-pipx install realms-gos
+sudo apt install pipx
+pipx ensurepath                           # then open a new terminal
+pipx install --pip-args=--pre realms-gos  # --pre until 0.7.0 is final
 ```
 
 Verify the installation:

@@ -1,81 +1,54 @@
 # Realms CLI
 
-A powerful command-line tool for managing Realms project lifecycle on the Internet Computer.
-
-## Features
-
-- **🏗️ Project Scaffolding**: Initialize complete Realms projects with proper structure
-- **🚀 Automated Deployment**: Deploy backend + frontend + extensions with single command
-- **📦 Extension Management**: Phased rollouts (q1-q4) with dependency management
-- **⚙️ Post-Deployment Actions**: Automated setup and data population
-- **🔧 Configuration Validation**: Schema validation with helpful error messages
-- **📊 Project Status**: Check project health and deployment status
-
-## Prerequisites
-
-Before installing realms-gos, ensure you have the following dependencies:
-
-### 1. DFX (DFINITY Canister SDK)
-```bash
-sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
-```
-- **Required for**: Canister deployment, local replica management
-- **Used by**: `realms realm deploy` command for backend/frontend deployment
-- **Verify installation**: `dfx --version`
-
-### 2. Node.js (v16 or later)
-```bash
-# Option 1: Download from https://nodejs.org
-# Option 2: Via package manager (Ubuntu/Debian)
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Option 3: Via nvm (recommended)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-nvm install 18
-nvm use 18
-```
-- **Required for**: Frontend building, npm package management
-- **Used by**: Frontend canister builds during deployment
-- **Verify installation**: `node --version && npm --version`
+Command-line tool for Realms GOS: build extensions and codices, run a realm
+locally, and deploy realms to the Internet Computer.
 
 ## Installation
 
-```bash
-pip install realms-gos
-```
-
-### From Source
-
-```bash
-git clone https://github.com/smart-social-contracts/realms-gos
-cd realms/cli
-pip install -e .
-```
-
-## Prerequisites
-
-- Python 3.8+
-- [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install/) (Internet Computer SDK)
-- Node.js 16+
-- Git
-
-## Quick Start
-
-### 1. Create a New Realm
+The package is **`realms-gos`** (the `realms` package on PyPI is unrelated).
+Install it with [pipx](https://pipx.pypa.io/), which gives the CLI its own
+environment; on Ubuntu 24.04 and Debian 12, plain `pip install` into the
+system Python is refused ("externally-managed-environment").
 
 ```bash
-realms realm create --realm-name "My Government Realm" --random --deploy
+sudo apt install pipx            # or see pipx.pypa.io for other systems
+pipx ensurepath                  # then open a new terminal
+pipx install --pip-args=--pre realms-gos
+realms --version
 ```
 
-This creates a complete project structure (under `.realms/realm_*/`) with:
-- Backend canister (Python/Basilisk)
-- Frontend canister (SvelteKit)
-- Extension system
-- Configuration files
-- Deployment scripts
+`--pre` is needed until 0.7.0 is final: the `realms new extension|codex` and
+`realms local` commands below ship in the 0.7.0 release candidates.
+No clone of the repository is needed.
 
-Your realm will be available at `http://<canister_id>.localhost:8000`
+Requirements: Python 3.8+ and **Node.js 20+ with npm** (extension frontends
+are built with npm; `realms local` installs icp-cli through npm on first use).
+
+## Quick Start: an Extension and a Codex on a Local Realm
+
+```bash
+realms local start                                   # local network + realm from the matching release
+realms new extension my-hello-world                  # scaffold, npm install, build
+realms new codex my-hello-codex --extension my_hello_world
+realms local publish my-hello-world my-hello-codex   # into the local file registry
+realms local setup --codex my_hello_codex            # install codex + extensions, launch
+realms local call my_hello_world greet '{}'          # "Hello, World!"
+realms local status                                  # realm URL and canister IDs
+```
+
+Open the realm URL, sign in with the local Internet Identity, join the realm,
+and open **My Hello World**: its **Say hello** button shows `Hello, World!`.
+
+After a change: bump `version` in the extension's `manifest.json`, run
+`npm run build` in it, then `realms local publish my-hello-world --install`.
+`realms local add-admin <principal>` makes a browser user an admin;
+`realms local stop` stops the network.
+
+## Deploying Realms (dfx)
+
+The `realms realm …` and `realms registry …` commands below deploy with
+[dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install/)
+and need it installed (`dfx --version`).
 
 ## Commands
 
@@ -190,41 +163,13 @@ For the fleet itself (marketplace, file registry, token, NFT, demo realm) see
 - **name**: Display name for the realm
 - **options.random**: Optional knobs for generated demo data
 
-## Installation
-
-### Recommended: Using pipx (Isolated Environment)
-
-The easiest way to install the Realms CLI is using `pipx`, which automatically manages isolated Python environments:
-
-```bash
-# Install pipx if you don't have it
-pip install pipx
-
-# Install realms-gos in an isolated environment
-pipx install realms-gos
-
-# Use the CLI tool (no venv activation needed)
-realms --help
-realms realm create --citizens 50
-```
-
-### Alternative: Using pip with venv
-
-If you prefer manual environment management:
-
-```bash
-python -m venv realms-env
-source realms-env/bin/activate  # On Windows: realms-env\Scripts\activate
-pip install realms-gos
-```
-
-### Development Setup
+## Development Setup
 
 For contributing to the CLI tool:
 
 ```bash
 git clone https://github.com/smart-social-contracts/realms-gos
-cd realms/cli
+cd realms-gos/cli
 python -m venv venv
 source venv/bin/activate
 pip install -e ".[dev]"

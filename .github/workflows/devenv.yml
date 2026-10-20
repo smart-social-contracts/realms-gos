@@ -4,6 +4,10 @@ name: devenv
 # install the realms CLI, start a local realm, scaffold an extension and a
 # codex, publish, launch, and press the hello button in a browser.
 # Same entry point as on a laptop: devenv/devenv.sh run (see devenv/README.md).
+#
+# CLI source: this checkout on pushes; PyPI (what a new developer gets with
+# `pipx install realms-gos`) on the weekly run and after each release, which
+# release-verify.yml triggers once the version is on PyPI.
 
 on:
   workflow_dispatch:
@@ -13,8 +17,23 @@ on:
         type: choice
         options: [checkout, pypi]
         default: checkout
+      cli_version:
+        description: "realms-gos version on PyPI (pypi only; empty = latest, pre-releases included)"
+        type: string
+        default: ""
       rebuild_base:
         description: "Rebuild the base image even if cached"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      cli_source:
+        type: string
+        default: pypi
+      cli_version:
+        type: string
+        default: ""
+      rebuild_base:
         type: boolean
         default: false
   push:
@@ -40,7 +59,8 @@ jobs:
       DEVENV_CPUS: "4"
       DEVENV_MEMORY_MB: "8192"
       DEVENV_OUT: ${{ github.workspace }}/devenv-artifacts
-      CLI_SOURCE: ${{ inputs.cli_source || 'checkout' }}
+      CLI_SOURCE: ${{ inputs.cli_source || (github.event_name == 'schedule' && 'pypi') || 'checkout' }}
+      CLI_VERSION: ${{ inputs.cli_version || '' }}
     steps:
       - uses: actions/checkout@v4
 

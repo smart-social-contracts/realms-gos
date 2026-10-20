@@ -2,7 +2,10 @@
 
 A fresh Ubuntu 24.04 + GNOME (minimal) VM that walks through the developer
 journey end to end, driven entirely from the command line. The same entry
-point runs on a laptop and in GitHub Actions (`.github/workflows/devenv.yml`).
+point runs on a laptop and in GitHub Actions (`.github/workflows/devenv.yml`):
+with this checkout's CLI on pushes to `main`, and with the CLI from PyPI
+weekly and after every release (`release-verify.yml` runs it once the new
+version is on PyPI).
 
 ```bash
 devenv/devenv.sh run
@@ -10,7 +13,9 @@ devenv/devenv.sh run
 
 `run` does, inside a brand-new VM:
 
-1. installs the `realms` CLI (from this checkout, or PyPI with `--cli-source pypi`);
+1. installs the `realms` CLI: from this checkout by default, or from PyPI
+   exactly as a new developer would (`pipx install realms-gos`) with
+   `--cli-source pypi [--cli-version 0.7.0rc5]`;
 2. `realms local start`: local network (icp-cli, installed on first use), realm
    backend + frontend and file registry from the matching GitHub release;
 3. `realms new extension my-hello-world` (hello-world button) and
@@ -47,6 +52,7 @@ virtualization), otherwise QEMU without KVM (very slow). Force one with
 
 ```bash
 devenv/devenv.sh run [--keep]   # whole flow; --keep leaves the VM running afterwards
+devenv/devenv.sh run --cli-source pypi [--cli-version X]   # the CLI from PyPI instead
 devenv/devenv.sh base [--force] # build (or rebuild) the base image only
 devenv/devenv.sh up [--gui]     # boot a fresh VM from the base image
 devenv/devenv.sh ssh [cmd]      # shell or command in the VM (user dev, password dev)
