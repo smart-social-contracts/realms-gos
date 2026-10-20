@@ -262,7 +262,7 @@ vbox_exists() { VBoxManage showvminfo "$VM_NAME" >/dev/null 2>&1; }
 vbox_info() { VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null; }
 vbox_state() { vbox_info | sed -n 's/^VMState="\(.*\)"/\1/p'; }
 vbox_running() { vbox_exists && [ "$(vbox_state)" = running ]; }
-vbox_ours() { vbox_info | grep -qF "$VBOX_MARKER"; }
+vbox_ours() { vbox_info | grep -F "$VBOX_MARKER" >/dev/null; }
 
 vbox_wait_off() {
   for _ in $(seq 1 60); do
@@ -327,9 +327,15 @@ vbox_down() {
     vbox_running && VBoxManage controlvm "$VM_NAME" poweroff >/dev/null 2>&1 || true
     vbox_wait_off || true
   fi
-  if vbox_exists; then
-    VBoxManage snapshot "$VM_NAME" restore base >/dev/null 2>&1 || true
-  fi
+  vbox_exists || return 0
+  # A VirtualBox window attached to the VM keeps its session locked for a
+  # while after power-off, and the restore fails until it lets go.
+  local _
+  for _ in $(seq 1 30); do
+    VBoxManage snapshot "$VM_NAME" restore base >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  die "could not restore the base snapshot of $VM_NAME (is a VirtualBox window still attached?)"
 }
 
 vbox_gui() {
@@ -352,7 +358,7 @@ base_ready() {
   [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$(base_stamp)" ] || return 1
   case "$HYPERVISOR" in
     qemu) [ -f "$DEVENV_HOME/base-qemu.qcow2" ] ;;
-    virtualbox) vbox_exists && vbox_info | grep -q 'SnapshotName="base"' ;;
+    virtualbox) vbox_exists && vbox_info | grep -F 'SnapshotName="base"' >/dev/null ;;
   esac
 }
 
@@ -369,7 +375,10 @@ cmd_base() {
 }
 
 cmd_up() {
-  base_ready || die "no base image yet: devenv.sh base"
+  if ! base_ready; then
+    log "base stamp: $(cat "$DEVENV_HOME/base-$HYPERVISOR.stamp" 2>/dev/null || echo none), expected $(base_stamp)"
+    die "no up-to-date base image: devenv.sh base"
+  fi
   hv up
   wait_ssh
 }
