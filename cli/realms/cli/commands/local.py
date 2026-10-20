@@ -478,6 +478,10 @@ def json_call(state: Dict[str, Any], method: str, payload: Any = None, **kw) -> 
 def start_command(
     port: int, version: str, yes: bool, fresh: bool, core_ui: bool = True
 ) -> Dict[str, Any]:
+    if core_ui:
+        from .scaffold import require_node
+
+        require_node(skip_hint="rerun with --no-core-ui (core extensions without their UIs)")
     ensure_icp(yes=yes)
     home = local_home()
     state = load_state()
@@ -489,7 +493,19 @@ def start_command(
         state = {}
     elif state.get("canisters") and (home / "icp.yaml").exists():
         if network_running():
-            console.print(f"[green]✓ Local realm already running[/green] ({network_url(state)})")
+            if state.get("core_extensions"):
+                console.print(f"[green]✓ Local realm already running[/green] ({network_url(state)})")
+                print_status(state)
+                return state
+            if not state.get("deployed"):
+                _fail(
+                    "the previous `realms local start` stopped before the realm was deployed.\n"
+                    "  Rerun with --fresh."
+                )
+            console.print("[bold]Resuming[/bold]: the core extensions were not published yet")
+            state["core_extensions"] = seed_core_extensions(state, build_ui=core_ui)
+            save_state(state)
+            console.print("[green]✓ Local realm deployed (in setup)[/green]")
             print_status(state)
             return state
         _fail(
@@ -559,6 +575,8 @@ def start_command(
     )
     # file-registry has no namespace approval API, so registry installs must not wait on it.
     json_call(state, "update_realm_config", {"require_marketplace_approval": False})
+    state["deployed"] = True
+    save_state(state)
 
     state["core_extensions"] = seed_core_extensions(state, build_ui=core_ui)
     save_state(state)
@@ -593,6 +611,8 @@ def status_command(as_json: bool) -> None:
         print(json.dumps(out, indent=2))
         return
     console.print(f"network: {'running' if running else 'stopped'}  ({network_url(state)})")
+    if not state.get("core_extensions"):
+        console.print("[yellow]`realms local start` did not finish: rerun it[/yellow]")
     if launch:
         console.print(f"setup launch: {launch}")
     print_status(state)

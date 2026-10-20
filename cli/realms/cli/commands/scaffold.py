@@ -96,20 +96,24 @@ def node_major_version() -> Optional[int]:
         return None
 
 
-def require_node() -> None:
-    """Fail early when Node.js / npm cannot build an extension frontend."""
+def require_node(skip_hint: str = "rerun with --no-install") -> None:
+    """Fail early when Node.js / npm cannot build extension frontends."""
     major = node_major_version()
+    install = (
+        f"  Install Node.js {MIN_NODE_MAJOR}+ (https://nodejs.org/en/download; on Ubuntu,\n"
+        "  Ubuntu's own nodejs package is too old: use NodeSource or nvm), or "
+        f"{skip_hint}."
+    )
     if major is None or shutil.which("npm") is None:
         console.print(
-            f"[red]Error: Node.js {MIN_NODE_MAJOR}+ and npm are needed to build the "
-            "extension frontend.[/red]\n"
-            "  Install Node.js (https://nodejs.org) or rerun with --no-install."
+            f"[red]Error: Node.js {MIN_NODE_MAJOR}+ and npm are needed to build "
+            f"extension frontends.[/red]\n{install}"
         )
         raise typer.Exit(1)
     if major < MIN_NODE_MAJOR:
         console.print(
             f"[red]Error: Node.js {major} is too old; the frontend toolchain needs "
-            f"Node.js {MIN_NODE_MAJOR}+.[/red]"
+            f"Node.js {MIN_NODE_MAJOR}+.[/red]\n{install}"
         )
         raise typer.Exit(1)
 

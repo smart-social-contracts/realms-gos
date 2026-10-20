@@ -2,6 +2,7 @@
 
 import ast
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -124,3 +125,43 @@ def test_ext_call_reply_parsing():
     text = _candid_unescape(local._RESPONSE_FIELD.search(reply).group(1))
     assert json.loads(text) == "Hello, World!"
     assert local._SUCCESS_FIELD.search(reply).group(1) == "true"
+
+
+def test_start_refuses_old_node_before_doing_anything(capsys):
+    with patch.object(scaffold, "node_major_version", return_value=18), \
+         patch.object(scaffold.shutil, "which", return_value="/usr/bin/npm"), \
+         patch.object(local, "ensure_icp") as ensure_icp:
+        with pytest.raises(typer.Exit):
+            local.start_command(port=8000, version="", yes=True, fresh=False)
+    ensure_icp.assert_not_called()
+    out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+    assert "Node.js 18 is too old" in out and "--no-core-ui" in out
+
+
+def _half_started(tmp_path, monkeypatch, **extra):
+    monkeypatch.setenv("REALMS_LOCAL_HOME", str(tmp_path))
+    (tmp_path / "icp.yaml").write_text("")
+    state = {"version": "v0.7.0-rc5", "port": 8000, "canisters": {"file_registry": "x", "realm_frontend": "y", "realm_backend": "z"}, **extra}
+    (tmp_path / "state.json").write_text(json.dumps(state))
+    return state
+
+
+def test_start_resumes_core_extensions_after_a_failed_build(tmp_path, monkeypatch):
+    _half_started(tmp_path, monkeypatch, deployed=True)
+    with patch.object(local, "ensure_icp"), \
+         patch.object(local, "network_running", return_value=True), \
+         patch.object(local, "seed_core_extensions", return_value=["voting"]) as seed:
+        state = local.start_command(port=8000, version="", yes=True, fresh=False, core_ui=False)
+    seed.assert_called_once()
+    assert state["core_extensions"] == ["voting"]
+    assert json.loads((tmp_path / "state.json").read_text())["core_extensions"] == ["voting"]
+
+
+def test_start_wants_fresh_when_deploy_never_finished(tmp_path, monkeypatch):
+    _half_started(tmp_path, monkeypatch)
+    with patch.object(local, "ensure_icp"), \
+         patch.object(local, "network_running", return_value=True), \
+         patch.object(local, "seed_core_extensions") as seed:
+        with pytest.raises(typer.Exit):
+            local.start_command(port=8000, version="", yes=True, fresh=False, core_ui=False)
+    seed.assert_not_called()
