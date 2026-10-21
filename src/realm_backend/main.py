@@ -5887,7 +5887,11 @@ def extension_sync_call(extension_name: text, function_name: text, args: text) -
                 success=False,
                 response=_setup_gate_json(gate_err),
             )
-        if not _check_access(caller, Operations.EXTENSION_SYNC_CALL):
+        from core.extension_access import delegate_may_call
+
+        if not _check_access(caller, Operations.EXTENSION_SYNC_CALL) and not delegate_may_call(
+            args, caller, Operations.EXTENSION_SYNC_CALL
+        ):
             return _extension_denied_response(
                 f"Access denied: you lack permission '{Operations.EXTENSION_SYNC_CALL}'",
                 Operations.EXTENSION_SYNC_CALL,
@@ -5930,7 +5934,11 @@ def extension_async_call(extension_name: text, function_name: text, args: text) 
                 success=False,
                 response=_setup_gate_json(gate_err),
             )
-        if not _check_access(caller, Operations.EXTENSION_ASYNC_CALL):
+        from core.extension_access import delegate_may_call
+
+        if not _check_access(caller, Operations.EXTENSION_ASYNC_CALL) and not delegate_may_call(
+            args, caller, Operations.EXTENSION_ASYNC_CALL
+        ):
             return _extension_denied_response(
                 f"Access denied: you lack permission '{Operations.EXTENSION_ASYNC_CALL}'",
                 Operations.EXTENSION_ASYNC_CALL,

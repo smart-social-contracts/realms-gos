@@ -68,9 +68,11 @@ Delegated extension call (voting):
 }
 ```
 
-The extension gate (`core/extension_access.py`) lets a caller below the
-method's level through when `on_behalf_of` names a grantor whose active
-delegation covers it; the extension then resolves the acting user with
+`extension_sync_call` / `extension_async_call` admit a caller without the
+extension-call permission when it holds an active grant from `on_behalf_of`
+and that grantor has the permission (`delegate_may_call`). The extension gate
+(`core/extension_access.py`) then lets it through only if the grant covers the
+method's level; the extension resolves the acting user with
 `resolve_acting_context`.
 
 ## Frontend

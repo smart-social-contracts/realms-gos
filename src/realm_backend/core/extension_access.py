@@ -152,6 +152,26 @@ def _delegation_allows(args: str, caller: str, level: str) -> bool:
         return False
 
 
+def delegate_may_call(args: str, caller: str, operation: str) -> bool:
+    """True when ``caller`` holds an active grant from ``on_behalf_of`` and that grantor holds ``operation``.
+
+    Lets a non-member delegate past the endpoint's extension-call permission;
+    ``gate_extension_call`` then checks the grant covers the method.
+    """
+    try:
+        args_obj = json.loads(args) if args else {}
+        grantor = str((args_obj or {}).get("on_behalf_of") or "").strip()
+        if not grantor or grantor == caller:
+            return False
+        from core.access import _check_access
+        from core.delegation import find_active_delegation
+
+        return find_active_delegation(grantor, caller) is not None and _check_access(grantor, operation)
+    except Exception as e:
+        logger.error(f"extension_access: delegate check failed ({e})")
+        return False
+
+
 def gate_extension_call(
     extension_name: str,
     function_name: str,

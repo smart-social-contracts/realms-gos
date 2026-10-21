@@ -131,6 +131,34 @@ def test_extension_gate_admits_delegate_through_grant(realm):
     assert not _delegation_allows(json.dumps({"vote": "yes"}), AI, Operations.PROPOSAL_VOTE)
 
 
+def test_delegate_may_call_extensions_for_grantor(realm, monkeypatch):
+    import json
+
+    import core.access
+    from core.extension_access import delegate_may_call
+
+    monkeypatch.setattr(core.access, "_check_access", lambda who, op: who == ALICE)
+    assert grant()["success"]
+    op = Operations.EXTENSION_SYNC_CALL
+    assert delegate_may_call(json.dumps({"on_behalf_of": ALICE}), AI, op)
+    assert not delegate_may_call(json.dumps({"on_behalf_of": BOB}), AI, op)
+    assert not delegate_may_call(json.dumps({"vote": "yes"}), AI, op)
+    assert not delegate_may_call(json.dumps({"on_behalf_of": ALICE}), BOB, op)
+
+
+def test_delegate_may_call_extensions_for_grantor(realm):
+    import json
+
+    from core.extension_access import delegate_may_call
+
+    on_behalf = json.dumps({"on_behalf_of": ALICE})
+    assert not delegate_may_call(on_behalf, AI, Operations.EXTENSION_SYNC_CALL)
+    assert grant()["success"]
+    assert delegate_may_call(on_behalf, AI, Operations.EXTENSION_SYNC_CALL)
+    assert not delegate_may_call(on_behalf, BOB, Operations.EXTENSION_SYNC_CALL)
+    assert not delegate_may_call(json.dumps({}), AI, Operations.EXTENSION_SYNC_CALL)
+
+
 def test_acting_context_resolves_grantor(realm):
     assert grant()["success"]
     realm["id"] = AI
