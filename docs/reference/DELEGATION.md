@@ -93,7 +93,7 @@ and `delegate`).
   description, permission checklist, start and expiry), inbox, accept/decline,
   revoke. Query parameters `delegate`, `name`, `description`, `ops`
   (comma-separated) and `hours` pre-fill the form.
-- `/delegations/authorize?request=<id>` — the consent page for a request
+- `/delegations/authorize/<id>` (or `?request=<id>`) — the consent page for a request
   (Geister's `request_power_of_attorney` links here): self-declared name,
   requesting principal, the permissions asked for (ones the member does not
   hold greyed out), expiry, "signed in as". The member can untick permissions

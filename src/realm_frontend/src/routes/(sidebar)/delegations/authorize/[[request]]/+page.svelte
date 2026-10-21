@@ -1,5 +1,5 @@
 <script lang="ts">
-	import MetaTag from '../../../utils/MetaTag.svelte';
+	import MetaTag from '../../../../utils/MetaTag.svelte';
 	import { Button, Card, Checkbox, Heading, Input, Label, P, Spinner } from 'flowbite-svelte';
 	import { page } from '$app/stores';
 	import { isAuthenticated, principal } from '$lib/stores/auth';
@@ -27,7 +27,7 @@
 		permissions?: Permission[];
 	};
 
-	const requestId = $page.url.searchParams.get('request') || '';
+	const requestId = $page.params.request || $page.url.searchParams.get('request') || '';
 
 	let loading = true;
 	let loadedFor = '';
@@ -38,8 +38,10 @@
 	let busy = false;
 	let outcome: 'approved' | 'declined' | '' = '';
 
-	// frame-ancestors already limits framing to the realm and gos.earth; this
-	// also refuses any framing parent other than the portal this realm uses.
+	// Same parents as frame-ancestors in static/.ic-assets.json5; keep in sync.
+	const PORTAL_PARENT =
+		/^(https:\/\/([a-z0-9-]+\.)*gos\.earth|https:\/\/realmsgos\.org|http:\/\/([a-z0-9-]+\.)*localhost(:\d+)?|http:\/\/127\.0\.0\.1(:\d+)?)$/;
+
 	function framedByStranger(): boolean {
 		if (typeof window === 'undefined' || window.self === window.top) return false;
 		const allowed = new Set([window.location.origin]);
@@ -60,7 +62,7 @@
 				parent = '';
 			}
 		}
-		return !parent || !allowed.has(parent);
+		return !parent || !(allowed.has(parent) || PORTAL_PARENT.test(parent));
 	}
 
 	const refused = framedByStranger();
