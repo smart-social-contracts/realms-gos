@@ -98,6 +98,16 @@ below is what the phases do, for a single step.
 `realms deploy --folder <realm>` is the dfx path for a generated realm on a local
 replica only.
 
+### Release candidates
+
+A `vX.Y.Z-rcN` release is a build you expect to ship as `vX.Y.Z` unchanged.
+It is not how a fix reaches staging: try changes there with a local build
+(a `local:` row in a working copy of `casals.staging.json`, then
+`casals upgrade --wasm` / `--content`) or a `publish-build.yml` `from_main`
+build, and cut the RC once the change works. Before the next RC, the previous
+one is signed and published, or deleted. An RC carries the release summary,
+is marked as a pre-release, and is never Latest.
+
 ### Environments
 
 `local` (a fresh replica, `build_variant: test`, test flags on) and `production`
