@@ -101,7 +101,8 @@
       {
         "family": "casals-backend",
         "version": "main",
-        "source": "release:smart-social-contracts/Casals@v0.7.0-rc7:casals_backend.wasm.gz"
+        "source": "release:smart-social-contracts/Casals@v0.7.0-rc21:casals_backend.wasm.gz",
+        "sha256": "244487f7867f92e3e7f7b10e36817fa0bdc3f602bf21a4e1d76240546dc200c8"
       },
       {
         "family": "certified-assets",
@@ -122,42 +123,43 @@
       {
         "family": "file-registry",
         "version": "main",
-        "source": "release:smart-social-contracts/file-registry@v0.1.1:file_registry.wasm.gz",
-        "sha256": "05ec042b1ed6944db2b3b69a781938f5f6ac5d7353490413b8b02b2149bd58e5"
+        "source": "release:smart-social-contracts/file-registry@v0.1.2-rc1:file_registry.wasm.gz",
+        "sha256": "9e6d85c8bf4695b38c3ae63b62a2636d54c5849073cc97e98e95415e8d1a7d21"
       },
       {
         "family": "marketplace-backend",
         "version": "main",
-        "source": "release:smart-social-contracts/realms-gos@v0.6.4:marketplace-backend-v0.6.4.wasm.gz",
-        "sha256": "13e273fb96a3c9054f68a8f377d6d81f68b49da3611f992e47919df6721f4151"
+        "source": "release:smart-social-contracts/realms-gos@v0.7.0-rc6:marketplace-backend-v0.7.0-rc6.wasm.gz",
+        "sha256": "d85cffe7d7f5865360dced97ccf5cef6c5c8eb9fac844cdcba2ad50f5405f0a7"
       },
       {
         "family": "token-backend",
         "version": "0.1.0",
-        "source": "release:smart-social-contracts/realms-gos@v0.6.4:token-backend-v0.6.4.wasm.gz",
+        "source": "release:smart-social-contracts/realms-gos@v0.7.0-rc6:token-backend-v0.7.0-rc6.wasm.gz",
         "sha256": "a1734ad2ec260ce85e541f860dbcaf8c846423709177587c7e5f70adc47e461a"
       },
       {
         "family": "nft-backend",
         "version": "0.1.0",
-        "source": "release:smart-social-contracts/realms-gos@v0.6.4:nft-backend-v0.6.4.wasm.gz",
+        "source": "release:smart-social-contracts/realms-gos@v0.7.0-rc6:nft-backend-v0.7.0-rc6.wasm.gz",
         "sha256": "abea08d97de800d4e299545be786dd02c9c6a7d93aaccc3770a08c213dfa484b"
       }
     ],
     "bundles": [
       {
         "path": "frontend/marketplace-assets/main",
-        "source": "release:smart-social-contracts/realms-gos@v0.6.4:marketplace-frontend-v0.6.4.tar.gz",
-        "sha256": "512d45cc8d097fa2790bbf3460d957c2f6e7171de0b88603c56a1800118c1f6b"
+        "source": "release:smart-social-contracts/realms-gos@v0.7.0-rc6:marketplace-frontend-v0.7.0-rc6.tar.gz",
+        "sha256": "a00407534bf4095916caafb6ca6dc68cc4a3b00bd7697d517e8bdbc5eeef0fe9"
       },
       {
         "path": "frontend/file-registry-assets/main",
-        "source": "release:smart-social-contracts/file-registry@v0.1.0:file_registry_frontend.tar.gz",
-        "sha256": "7ba94633f56ee83418ab3d91cc5b9a952a504a6694235b261cbabb35e728a05c"
+        "source": "release:smart-social-contracts/file-registry@v0.1.2-rc1:file_registry_frontend.tar.gz",
+        "sha256": "89a6268f4d29f5ad6ac6b7930dc18d6dd8c3f4adc5c72e633e493dbb17044806"
       },
       {
         "path": "frontend/casals-ui/main",
-        "source": "release:smart-social-contracts/Casals@v0.7.0-rc7:casals_frontend.tar.gz"
+        "source": "release:smart-social-contracts/Casals@v0.7.0-rc21:casals_frontend.tar.gz",
+        "sha256": "de5ab6b3e12e4c1bf0e7ec2d4f38b1618372314fe64c7b5777d3946550edee73"
       }
     ]
   },
@@ -298,6 +300,21 @@
                     "query": "get_acl",
                     "contains": {
                       "_approvers": [
+                        "$canister:marketplace-backend"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "method": "grant_publish",
+                  "args": {
+                    "namespace": "_granters",
+                    "principal": "$canister:marketplace-backend"
+                  },
+                  "converged_when": {
+                    "query": "get_acl",
+                    "contains": {
+                      "_granters": [
                         "$canister:marketplace-backend"
                       ]
                     }
