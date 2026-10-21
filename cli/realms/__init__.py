@@ -18,5 +18,5 @@ from . import realm as realm
 from . import mundus as mundus
 from . import registry as registry
 
-__version__ = "0.7.0-rc5"
+__version__ = "0.7.0-rc6"
 __all__ = ["realm", "mundus", "registry", "__version__"]
