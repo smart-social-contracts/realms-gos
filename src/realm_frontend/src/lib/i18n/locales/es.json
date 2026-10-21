@@ -23,6 +23,8 @@
     "my_mundus": "MI MUNDUS",
     "account": "Cuenta",
     "messages": "Mensajes",
+    "power_of_attorney": "Poderes",
+    "power_of_attorney_tooltip": "Permite que alguien, o una IA, actúe por ti",
     "settings": "Configuración",
     "account_tooltip": "Gestiona tu identidad y la configuración de tu cuenta",
     "messages_tooltip": "Avisos dirigidos a ti",

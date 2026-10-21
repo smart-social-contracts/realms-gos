@@ -1177,6 +1177,8 @@ export interface _SERVICE {
   'setup_fleet' : ActorMethod<[string], string>,
   'list_codex_packages' : ActorMethod<[], string>,
   'list_delegations_json' : ActorMethod<[], string>,
+  'list_delegations_page_json' : ActorMethod<[string], string>,
+  'get_delegable_operations_json' : ActorMethod<[], string>,
   'list_extensions' : ActorMethod<[string], RealmResponse>,
   'list_federal_votes' : ActorMethod<[string], string>,
   'list_position_holders' : ActorMethod<[], string>,

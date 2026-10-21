@@ -1816,7 +1816,9 @@ def grant_delegation_json(args: text) -> text:
     """Grant scoped act-on-behalf authority from grantor to delegate.
 
     JSON args: grantor, delegate, scope ({operations: [...]} or {all: true}),
-    optional label, expires_in_hours (default 168), requires_acceptance (default true).
+    optional label (name), description, starts_at and expires_at (epoch seconds;
+    expires_in_hours, default 168, when expires_at is absent), requires_acceptance
+    (default true; ignored when the delegate is not a member).
     Caller must be grantor or realm admin.
     """
     try:
@@ -1844,6 +1846,9 @@ def grant_delegation_json(args: text) -> text:
             delegate,
             scope,
             label=(params.get("label") or "").strip(),
+            description=(params.get("description") or "").strip(),
+            starts_at=int(params.get("starts_at") or 0),
+            expires_at=int(params["expires_at"]) if params.get("expires_at") else None,
             expires_in_hours=int(params.get("expires_in_hours") or 168),
             requires_acceptance=bool(params.get("requires_acceptance", True)),
             granted_by=caller,
@@ -1898,13 +1903,49 @@ def revoke_delegation_json(args: text) -> text:
 
 @query
 def list_delegations_json() -> text:
-    """List delegations where the caller is grantor or delegate."""
+    """First page of delegations where the caller is grantor or delegate."""
     try:
         from core.delegation import list_delegations_for_caller
 
         return json.dumps(list_delegations_for_caller())
     except Exception as e:
         logger.error(f"list_delegations_json error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@query
+def list_delegations_page_json(args: text) -> text:
+    """A page of the caller's delegations.
+
+    JSON args: grantor_cursor, delegate_cursor (1 = first page, 0/null = skip that
+    side), count (max 100). Returns next_grantor_cursor / next_delegate_cursor.
+    """
+    try:
+        from core.delegation import list_delegations_for_caller
+
+        params = json.loads(args) if args else {}
+        return json.dumps(list_delegations_for_caller(
+            grantor_cursor=params.get("grantor_cursor", 1),
+            delegate_cursor=params.get("delegate_cursor", 1),
+            count=params.get("count") or 50,
+        ))
+    except Exception as e:
+        logger.error(f"list_delegations_page_json error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@query
+def get_delegable_operations_json() -> text:
+    """Operations the caller holds here and may grant as power of attorney."""
+    try:
+        from core.delegation import delegable_operations_for
+
+        return json.dumps({
+            "success": True,
+            "data": delegable_operations_for(ic.caller().to_str()),
+        })
+    except Exception as e:
+        logger.error(f"get_delegable_operations_json error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -5625,38 +5666,51 @@ def _kick_off_proposal_index_backfill() -> void:
     init/post_upgrade/update context, which is why this is called from
     initialize().
     """
-    from ggg import Proposal
+    from ggg import Delegation, Proposal
 
+    _kick_off_index_backfill(Proposal, _PROPOSAL_INDEX_FIELDS, _PROPOSAL_INDEX_BACKFILL_FLAG)
+    _kick_off_index_backfill(
+        Delegation, _DELEGATION_INDEX_FIELDS, _DELEGATION_INDEX_BACKFILL_FLAG
+    )
+
+
+_DELEGATION_INDEX_BACKFILL_FLAG = "fi_backfill:Delegation:v2"
+_DELEGATION_INDEX_FIELDS = ["grantor", "delegate"]
+
+
+def _kick_off_index_backfill(entity_cls, fields, flag) -> void:
+    """Index rows of ``entity_cls`` written before ``fields`` became indexed, once, in timer batches."""
+    name = entity_cls.__name__
     db = Database.get_instance()
-    if db.load("_system", _PROPOSAL_INDEX_BACKFILL_FLAG):
+    if db.load("_system", flag):
         return
-    if Proposal.max_id() == 0:
-        db.save("_system", _PROPOSAL_INDEX_BACKFILL_FLAG, "done")
+    if entity_cls.max_id() == 0:
+        db.save("_system", flag, "done")
         return
 
     state = {"field_idx": 0, "cursor": 1}
 
     def _step():
         try:
-            field = _PROPOSAL_INDEX_FIELDS[state["field_idx"]]
-            next_cursor = Proposal.rebuild_field_index(
+            field = fields[state["field_idx"]]
+            next_cursor = entity_cls.rebuild_field_index(
                 field, from_id=state["cursor"], batch=50
             )
             if next_cursor is None:
                 state["field_idx"] += 1
                 state["cursor"] = 1
-                if state["field_idx"] >= len(_PROPOSAL_INDEX_FIELDS):
-                    db.save("_system", _PROPOSAL_INDEX_BACKFILL_FLAG, "done")
-                    logger.info("✅ Proposal field-index backfill complete")
+                if state["field_idx"] >= len(fields):
+                    db.save("_system", flag, "done")
+                    logger.info(f"✅ {name} field-index backfill complete")
                     return
             else:
                 state["cursor"] = next_cursor
             ic.set_timer(1, _step)
         except Exception as e:
-            logger.error(f"❌ Proposal index backfill step failed: {str(e)}")
+            logger.error(f"❌ {name} index backfill step failed: {str(e)}")
 
     ic.set_timer(5, _step)
-    logger.info("Proposal field-index backfill scheduled")
+    logger.info(f"{name} field-index backfill scheduled")
 
 
 @init

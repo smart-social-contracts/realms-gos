@@ -255,6 +255,8 @@ service : {
   "accept_delegation_json" : (text) -> (text);
   "revoke_delegation_json" : (text) -> (text);
   "list_delegations_json" : () -> (text) query;
+  "list_delegations_page_json" : (text) -> (text) query;
+  "get_delegable_operations_json" : () -> (text) query;
   "change_quarter" : (text) -> (RealmResponse);
   "get_my_principal" : () -> (text) query;
   "get_canister_id" : () -> (text) query;

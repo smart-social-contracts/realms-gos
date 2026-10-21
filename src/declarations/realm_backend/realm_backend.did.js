@@ -369,6 +369,8 @@ export const idlFactory = ({ IDL }) => {
     'setup_fleet' : IDL.Func([IDL.Text], [IDL.Text], []),
     'list_codex_packages' : IDL.Func([], [IDL.Text], ['query']),
     'list_delegations_json' : IDL.Func([], [IDL.Text], ['query']),
+    'list_delegations_page_json' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
+    'get_delegable_operations_json' : IDL.Func([], [IDL.Text], ['query']),
     'list_extensions' : IDL.Func([IDL.Text], [RealmResponse], ['query']),
     'list_federal_votes' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
     'list_position_holders' : IDL.Func([], [IDL.Text], ['query']),

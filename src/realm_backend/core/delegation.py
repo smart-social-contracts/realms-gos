@@ -23,6 +23,29 @@ from ic_python_logging import get_logger
 
 logger = get_logger("core.delegation")
 
+# Operations whose endpoints honour ``on_behalf_of``. Granting anything else
+# would look like power but do nothing, so grants are limited to these.
+DELEGABLE_OPERATIONS: dict[str, dict[str, str]] = {
+    Operations.PROPOSAL_VOTE: {
+        "label": "Vote on proposals",
+        "description": "Cast yes / no / abstain votes in your name.",
+    },
+    Operations.PROPOSAL_CREATE: {
+        "label": "Submit proposals",
+        "description": "Submit polls and other general proposals in your name.",
+    },
+    Operations.TRANSFER_CREATE: {
+        "label": "Propose treasury transactions",
+        "description": (
+            "Submit transaction proposals (together with Submit proposals); "
+            "they still need the vote to pass."
+        ),
+    },
+}
+
+MAX_DELEGATION_SECONDS = 366 * 24 * 3600
+_PAGE = 50
+
 
 def _now_ts() -> int:
     try:
@@ -91,6 +114,8 @@ def _validate_scope_for_grantor(grantor: User, scope: dict[str, Any]) -> str | N
     for op in ops:
         if not isinstance(op, str) or not op.strip():
             return "Invalid operation in scope"
+        if op != Operations.ALL and op not in DELEGABLE_OPERATIONS:
+            return f"'{op}' cannot be delegated"
         if op == Operations.ALL and not _user_has_operation(grantor, Operations.ALL):
             return "Grantor cannot delegate Operations.ALL"
         if op != Operations.ALL and not _user_has_operation(grantor, op):
@@ -106,34 +131,65 @@ def _delegation_to_dict(d: Delegation) -> dict[str, Any]:
         "scope": _parse_scope(d.scope_json),
         "status": d.status,
         "label": d.label or "",
+        "description": d.description or "",
         "requires_acceptance": bool(int(d.requires_acceptance or 0)),
         "granted_by": d.granted_by or "",
         "accepted_at": int(d.accepted_at or 0),
+        "starts_at": int(d.starts_at or 0),
         "expires_at": int(d.expires_at or 0),
         "revoked_at": int(d.revoked_at or 0),
         "revoked_by": d.revoked_by or "",
     }
 
 
-def _is_active(d: Delegation) -> bool:
-    if d.status != STATUS_ACTIVE:
-        return False
+def _is_expired(d: Delegation) -> bool:
     exp = int(d.expires_at or 0)
     if exp and _now_ts() > exp:
-        d.status = STATUS_EXPIRED
+        if d.status in (STATUS_ACTIVE, STATUS_PENDING):
+            d.status = STATUS_EXPIRED
+        return True
+    return d.status == STATUS_EXPIRED
+
+
+def _is_active(d: Delegation) -> bool:
+    if d.status != STATUS_ACTIVE or _is_expired(d):
         return False
-    return True
+    return int(d.starts_at or 0) <= _now_ts()
+
+
+def _delegations_by(field: str, principal: str):
+    """Yield every Delegation whose indexed ``field`` equals ``principal``, a page at a time."""
+    cursor = 1
+    while cursor is not None:
+        page, cursor = Delegation.find_by(field, principal, from_id=cursor, count=_PAGE)
+        yield from page
+
+
+def _open_delegation(grantor: str, delegate: str) -> Delegation | None:
+    """The pair's grant that is pending, active or not yet started, if any."""
+    for d in _delegations_by("delegate", delegate):
+        if (d.grantor or "").strip() != grantor:
+            continue
+        if d.status in (STATUS_ACTIVE, STATUS_PENDING) and not _is_expired(d):
+            return d
+    return None
 
 
 def find_active_delegation(grantor: str, delegate: str) -> Delegation | None:
-    for d in Delegation.instances():
-        if (
-            (d.grantor or "").strip() == grantor
-            and (d.delegate or "").strip() == delegate
-            and _is_active(d)
-        ):
-            return d
-    return None
+    d = _open_delegation(grantor, delegate)
+    return d if d and _is_active(d) else None
+
+
+def delegable_operations_for(principal: str) -> list[dict[str, str]]:
+    """Operations ``principal`` holds in this realm and may delegate."""
+    user = User[principal]
+    if not user:
+        return []
+    return [
+        {"operation": op, **info}
+        for op, info in DELEGABLE_OPERATIONS.items()
+        if _user_has_operation(user, op)
+    ]
 
 
 @dataclass
@@ -197,46 +253,62 @@ def grant_delegation(
     scope: dict[str, Any],
     *,
     label: str = "",
+    description: str = "",
+    starts_at: int = 0,
+    expires_at: int | None = None,
     expires_in_hours: int = 168,
     requires_acceptance: bool = True,
     granted_by: str | None = None,
 ) -> dict[str, Any]:
+    """Create a grant. ``expires_at`` (epoch seconds) wins over ``expires_in_hours``.
+
+    A delegate that is not a realm member (e.g. an AI connection) has no inbox to
+    accept from, so its grant is active from ``starts_at`` without acceptance.
+    """
     grantor = (grantor or "").strip()
     delegate = (delegate or "").strip()
     if not grantor or not delegate:
         return {"success": False, "error": "grantor and delegate are required"}
     if grantor == delegate:
         return {"success": False, "error": "grantor and delegate must differ"}
+    try:
+        from _cdk import Principal
+
+        Principal.from_str(delegate)
+    except Exception:
+        return {"success": False, "error": f"'{delegate}' is not a valid principal"}
 
     grantor_user = User[grantor]
-    delegate_user = User[delegate]
     if not grantor_user:
         return {"success": False, "error": f"Grantor user {grantor} not found"}
+    delegate_user = User[delegate]
     if not delegate_user:
-        return {"success": False, "error": f"Delegate user {delegate} not found"}
+        requires_acceptance = False
 
     err = _validate_scope_for_grantor(grantor_user, scope)
     if err:
         return {"success": False, "error": err}
 
-    existing = find_active_delegation(grantor, delegate)
+    now = _now_ts()
+    starts_at = max(int(starts_at or 0), 0)
+    if expires_at is None:
+        expires_at = (starts_at or now) + int(expires_in_hours) * 3600 if expires_in_hours else 0
+    expires_at = int(expires_at or 0)
+    if not expires_at:
+        return {"success": False, "error": "An expiry is required"}
+    if expires_at <= max(starts_at, now):
+        return {"success": False, "error": "The expiry must be after the start and in the future"}
+    if expires_at - max(starts_at, now) > MAX_DELEGATION_SECONDS:
+        return {"success": False, "error": "A delegation can last at most one year"}
+
+    existing = _open_delegation(grantor, delegate)
     if existing:
         return {
             "success": False,
-            "error": f"Active delegation already exists ({existing.id})",
+            "error": f"A delegation to this principal already exists ({existing.id}); revoke it first",
         }
 
-    for d in Delegation.instances():
-        if (
-            d.grantor == grantor
-            and d.delegate == delegate
-            and d.status == STATUS_PENDING
-        ):
-            return {"success": False, "error": "Pending delegation already exists"}
-
     delegation_id = secrets.token_hex(16)
-    now = _now_ts()
-    expires_at = now + int(expires_in_hours) * 3600 if expires_in_hours else 0
     status = STATUS_PENDING if requires_acceptance else STATUS_ACTIVE
 
     d = Delegation(
@@ -245,10 +317,12 @@ def grant_delegation(
         delegate=delegate,
         scope_json=json.dumps(scope),
         status=status,
-        label=label or f"{grantor[:8]}… → {delegate[:8]}…",
+        label=(label or "").strip()[:256] or f"{grantor[:8]}… → {delegate[:8]}…",
+        description=(description or "").strip()[:2048],
         requires_acceptance=1 if requires_acceptance else 0,
         granted_by=(granted_by or ic.caller().to_str()),
         accepted_at=now if not requires_acceptance else 0,
+        starts_at=starts_at,
         expires_at=expires_at,
     )
 
@@ -307,25 +381,35 @@ def revoke_delegation(delegation_id: str) -> dict[str, Any]:
     return {"success": True, "data": _delegation_to_dict(d)}
 
 
-def list_delegations_for_caller() -> dict[str, Any]:
+def _page_for(field: str, principal: str, cursor: int, count: int):
+    page, nxt = Delegation.find_by(field, principal, from_id=max(int(cursor or 1), 1), count=count)
+    records = []
+    for d in page:
+        _is_expired(d)
+        records.append(_delegation_to_dict(d))
+    return records, nxt
+
+
+def list_delegations_for_caller(
+    grantor_cursor: int = 1, delegate_cursor: int = 1, count: int = _PAGE
+) -> dict[str, Any]:
+    """One page of the caller's grants on each side; pass ``next_*`` back to continue."""
     caller = ic.caller().to_str()
-    as_grantor = []
-    as_delegate = []
-    pending_inbox = []
-    for d in Delegation.instances():
-        rec = _delegation_to_dict(d)
-        if d.grantor == caller:
-            as_grantor.append(rec)
-        if d.delegate == caller:
-            as_delegate.append(rec)
-            if d.status == STATUS_PENDING:
-                pending_inbox.append(rec)
+    count = min(max(int(count or _PAGE), 1), 100)
+    as_grantor, next_grantor = ([], None)
+    as_delegate, next_delegate = ([], None)
+    if grantor_cursor:
+        as_grantor, next_grantor = _page_for("grantor", caller, grantor_cursor, count)
+    if delegate_cursor:
+        as_delegate, next_delegate = _page_for("delegate", caller, delegate_cursor, count)
     return {
         "success": True,
         "data": {
             "as_grantor": as_grantor,
             "as_delegate": as_delegate,
-            "pending_inbox": pending_inbox,
+            "pending_inbox": [r for r in as_delegate if r["status"] == STATUS_PENDING],
+            "next_grantor_cursor": next_grantor,
+            "next_delegate_cursor": next_delegate,
         },
     }
 

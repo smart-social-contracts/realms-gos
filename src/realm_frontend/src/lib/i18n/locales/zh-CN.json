@@ -23,6 +23,8 @@
     "my_mundus": "我的世界",
     "account": "账户",
     "messages": "消息",
+    "power_of_attorney": "授权委托",
+    "power_of_attorney_tooltip": "允许他人或 AI 代表您行事",
     "settings": "设置",
     "account_tooltip": "管理您的身份和账户设置",
     "messages_tooltip": "发给您的通知",

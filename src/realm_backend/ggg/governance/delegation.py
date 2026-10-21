@@ -16,16 +16,22 @@ class Delegation(Entity, TimestampedMixin):
 
     ``scope_json`` is a JSON object, e.g.
     ``{"operations": ["proposal.vote", "proposal.create"]}`` or ``{"all": true}``.
+
+    The delegate need not be a realm member: an AI connection's principal can hold
+    a grant. ``starts_at`` / ``expires_at`` are seconds since the epoch (0 = none).
     """
 
     __alias__ = "id"
+    __version__ = 2
 
     id = String(max_length=64)
-    grantor = String(max_length=64)
-    delegate = String(max_length=64)
+    grantor = String(max_length=64, indexed=True)
+    delegate = String(max_length=64, indexed=True)
     scope_json = String(max_length=2048, default="{}")
     status = String(max_length=16, default=STATUS_PENDING)
     label = String(max_length=256, default="")
+    description = String(max_length=2048, default="")
+    starts_at = Integer(default=0)
     requires_acceptance = Integer(default=1)
     granted_by = String(max_length=64, default="")
     accepted_at = Integer(default=0)

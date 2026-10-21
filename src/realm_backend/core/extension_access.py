@@ -129,6 +129,29 @@ def _level_allows(caller: str, level: str) -> bool:
     return _check_access(caller, level)
 
 
+def _delegation_allows(args: str, caller: str, level: str) -> bool:
+    """True when ``args`` act ``on_behalf_of`` a grantor whose active grant to ``caller`` covers ``level``.
+
+    The delegate itself need not hold ``level`` (or be a member); the endpoint
+    re-checks the grant through ``core.delegation.resolve_acting_context``.
+    """
+    try:
+        args_obj = json.loads(args) if args else {}
+        grantor = str((args_obj or {}).get("on_behalf_of") or "").strip()
+        if not grantor or grantor == caller:
+            return False
+        from core.delegation import AccessDenied, resolve_acting_context
+
+        try:
+            resolve_acting_context(args_obj, level)
+        except AccessDenied:
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"extension_access: delegation check failed ({e})")
+        return False
+
+
 def gate_extension_call(
     extension_name: str,
     function_name: str,
@@ -159,8 +182,10 @@ def gate_extension_call(
         )
         spec = {"level": FAIL_CLOSED_LEVEL, "governed": False, "org": None}
 
-    # Layer 1 — RBAC / access level.
-    if not _level_allows(caller, spec["level"]):
+    # Layer 1 — RBAC / access level, directly or through power of attorney.
+    if not _level_allows(caller, spec["level"]) and not _delegation_allows(
+        args, caller, spec["level"]
+    ):
         logger.warning(
             f"extension_access: denied {caller} -> "
             f"{extension_name}.{function_name} (level '{spec['level']}')"

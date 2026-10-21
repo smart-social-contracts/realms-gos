@@ -23,6 +23,8 @@
     "my_mundus": "EL MEU MUNDUS",
     "account": "Compte",
     "messages": "Missatges",
+    "power_of_attorney": "Poders",
+    "power_of_attorney_tooltip": "Permet que algú, o una IA, actue per tu",
     "settings": "Ajustos",
     "account_tooltip": "Gestiona la teua identitat i els ajustos del compte",
     "messages_tooltip": "Avisos dirigits a tu",

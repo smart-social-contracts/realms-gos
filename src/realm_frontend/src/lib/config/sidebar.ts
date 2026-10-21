@@ -64,6 +64,12 @@ export const topUtilityItems: TopUtilityItem[] = [
 		href: '/messages',
 	},
 	{
+		labelKey: 'chrome.power_of_attorney',
+		tooltipKey: 'chrome.power_of_attorney_tooltip',
+		icon: 'ti-user-shield',
+		href: '/delegations',
+	},
+	{
 		labelKey: 'chrome.settings',
 		tooltipKey: 'chrome.settings_tooltip',
 		icon: 'ti-settings',
