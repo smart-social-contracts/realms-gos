@@ -3,6 +3,7 @@
 	import { Button, Card, Checkbox, Heading, Input, Label, P, Spinner, Textarea } from 'flowbite-svelte';
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { styles, cn } from '$lib/theme/utilities';
 	import { resolveDelegationBackend } from '$lib/stores/delegation.js';
 	import { isAuthenticated, principal } from '$lib/stores/auth';
 	import {
@@ -263,7 +264,12 @@
 							<Input id="poa-expires" type="datetime-local" bind:value={grantExpires} />
 						</div>
 					</div>
-					<Button type="submit" disabled={granting}>
+					<Button
+						type="submit"
+						color="none"
+						class={cn(styles.button.primary(), 'disabled:opacity-50')}
+						disabled={granting}
+					>
 						{#if granting}<Spinner size="4" class="me-2" />{/if}
 						Grant
 					</Button>

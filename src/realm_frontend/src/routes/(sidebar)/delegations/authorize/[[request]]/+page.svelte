@@ -2,6 +2,7 @@
 	import MetaTag from '../../../../utils/MetaTag.svelte';
 	import { Button, Card, Checkbox, Heading, Input, Label, P, Spinner } from 'flowbite-svelte';
 	import { page } from '$app/stores';
+	import { styles, cn } from '$lib/theme/utilities';
 	import { isAuthenticated, principal } from '$lib/stores/auth';
 	import {
 		loadDelegationRequest,
@@ -272,7 +273,12 @@
 
 			<div class="flex gap-3">
 				<Button color="light" class="flex-1" disabled={busy} on:click={cancel}>Cancel</Button>
-				<Button class="flex-1" disabled={busy || !holdsAny || !chosen.length} on:click={authorize}>
+				<Button
+					color="none"
+					class={cn(styles.button.primary(), 'flex-1 disabled:opacity-50')}
+					disabled={busy || !holdsAny || !chosen.length}
+					on:click={authorize}
+				>
 					{#if busy}<Spinner size="4" class="me-2" />{/if}
 					Authorize
 				</Button>
