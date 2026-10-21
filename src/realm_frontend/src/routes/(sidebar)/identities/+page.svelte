@@ -37,24 +37,24 @@
 	}
 
 	// Per-section loading states
-	let publicDataLoaded = false;
-	let privateDataLoaded = false;
-	let identitiesLoading = true;
-	let identityProviders: IdentityProvider[] = [];
+	let publicDataLoaded = $state(false);
+	let privateDataLoaded = $state(false);
+	let identitiesLoading = $state(true);
+	let identityProviders: IdentityProvider[] = $state([]);
 
 	// Public data
-	let nickname = '';
-	let avatarUrl = '';
-	let publicSaving = false;
-	let publicMessage = '';
+	let nickname = $state('');
+	let avatarUrl = $state('');
+	let publicSaving = $state(false);
+	let publicMessage = $state('');
 
 	// Private data
-	let privateData: Record<string, string> = {};
-	let privateSaving = false;
-	let privateMessage = '';
+	let privateData: Record<string, string> = $state({});
+	let privateSaving = $state(false);
+	let privateMessage = $state('');
 	/** null = not probed yet; do not treat that as "unavailable". */
-	let encryptionAvailable: boolean | null = null;
-	let encryptionError = '';
+	let encryptionAvailable: boolean | null = $state(null);
+	let encryptionError = $state('');
 	const ANON_PRINCIPAL = '2vxsx-fae';
 
 	// Data sharing (consent-based, via vetKey crypto groups — issue #215)
@@ -64,12 +64,12 @@
 		type: string;
 		principals: string[];
 	}
-	let sharingLoaded = false;
-	let sharingSaving = false;
-	let sharingMessage = '';
-	let audiences: ShareAudience[] = [];
-	let selectedAudiences: Record<string, boolean> = {};
-	let currentlySharedWith: string[] = [];
+	let sharingLoaded = $state(false);
+	let sharingSaving = $state(false);
+	let sharingMessage = $state('');
+	let audiences: ShareAudience[] = $state([]);
+	let selectedAudiences: Record<string, boolean> = $state({});
+	let currentlySharedWith: string[] = $state([]);
 
 	const privateDataFields = $derived([
 		{ key: 'first_name', label: $_('identities.first_name'), type: 'text' },
