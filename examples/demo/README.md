@@ -99,6 +99,30 @@ To customize the demo mundus:
 3. **Change Data Generation**: Adjust command-line parameters (--members, --organizations, etc.)
 4. **Configure Registry**: Edit `registry/manifest.json`
 
+## València Demo Realm
+
+`initargdemo-valencia-entities.json` is a hand-written municipality: eight
+citizens, seven departments with heads and appointed seats, eight districts,
+three proposals (one open ballot), FY2026 funds and budget lines backed by
+ledger entries, and a civic case that runs from dispute to verdict, fine, and
+appeal. `valencia.spec.json` creates a realm and imports it:
+
+```bash
+cp gaas-config.staging.example.json /tmp/gaas-config.staging.json  # fill in the registry + installer ids
+realms new examples/demo/valencia.spec.json \
+  --gaas-config /tmp/gaas-config.staging.json \
+  --identity <founder identity> --co-admin <your II principal> --yes
+```
+
+Marina Soler, Lúcia Ferrer, Joan Ribera, and Pau Navarro are the staging
+II-bypass test identities 1–4. Log in as Identity 1 (Marina, councillor and
+mayor) to cast the open vote on the Túria ciclovia. These identities' keys are
+derived from a public seed, so none of them is given the admin profile, and
+anyone can sign as them on any network.
+
+The Agora codex seeds its own national departments and zones; they sit next to
+the municipal ones. Proposal deadlines run to early 2027.
+
 ## Single Source of Truth
 
 This folder serves as the canonical demo configuration. Any changes made here will automatically propagate to all newly created mundus instances via the `realms realm create` command.

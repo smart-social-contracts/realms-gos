@@ -1,0 +1,17 @@
+{
+  "name": "València",
+  "slug": "valencia",
+  "codex": {
+    "package": "agora"
+  },
+  "token": {
+    "symbol": "ckEURC"
+  },
+  "branding": {
+    "manifesto": "València as a realm: seven municipal departments, eight districts, citizen ballots, an open FY2026 budget, and a civic court, all on-chain.",
+    "welcome_message": "Benvinguda a València! Browse the districts, follow the FY2026 budget, and vote on the Túria ciclovia."
+  },
+  "data": "initargdemo-valencia-entities.json",
+  "members": 0,
+  "open_registration": false
+}

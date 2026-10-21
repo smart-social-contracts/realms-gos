@@ -33,6 +33,7 @@ from realms.cli.commands.new import (
     format_stage_catalog,
     identity_refuse_message,
     load_gaas_config,
+    load_spec_file,
     merge_spec_and_flags,
     new_command,
     normalize_deploy_mode,
@@ -135,6 +136,15 @@ class TestSpecFlagMerge:
         spec = {"name": "Acme Realm", "branding": {"logo": "./logo.png"}, "codex": {"package": "agora"}}
         merged = merge_spec_and_flags(spec, spec_dir=tmp_path)
         assert merged["branding"]["logo"] == str(logo.resolve())
+
+    def test_loaded_spec_resolves_data_next_to_spec_file(self, tmp_path: Path):
+        data = tmp_path / "entities.json"
+        data.write_text("[]")
+        spec_file = tmp_path / "spec.json"
+        spec_file.write_text(json.dumps({"name": "Acme Realm", "data": "entities.json"}))
+        spec, spec_dir = load_spec_file(str(spec_file))
+        merged = merge_spec_and_flags(spec, spec_dir=spec_dir)
+        assert merged["data"] == str(data.resolve())
 
     def test_missing_required_fields(self):
         merged = merge_spec_and_flags({}, spec_dir=None)

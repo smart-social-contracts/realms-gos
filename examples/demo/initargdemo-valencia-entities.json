@@ -17,15 +17,13 @@
     "updater": "system",
     "owner": "system",
     "_type": "User",
-    "id": "marina-soler",
+    "id": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
     "nickname": "Marina Soler",
     "avatar": "",
     "home_quarter": "",
     "profiles": [
-      "admin"
-    ],
-    "departments": [
-      "Urbanisme"
+      "member",
+      "councillor"
     ]
   },
   {
@@ -35,15 +33,12 @@
     "updater": "system",
     "owner": "system",
     "_type": "User",
-    "id": "joan-ribera",
+    "id": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae",
     "nickname": "Joan Ribera",
     "avatar": "",
     "home_quarter": "",
     "profiles": [
       "member"
-    ],
-    "departments": [
-      "Hisenda"
     ]
   },
   {
@@ -53,15 +48,12 @@
     "updater": "system",
     "owner": "system",
     "_type": "User",
-    "id": "lucia-ferrer",
+    "id": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae",
     "nickname": "Lúcia Ferrer",
     "avatar": "",
     "home_quarter": "",
     "profiles": [
       "member"
-    ],
-    "departments": [
-      "Mobilitat"
     ]
   },
   {
@@ -71,15 +63,12 @@
     "updater": "system",
     "owner": "system",
     "_type": "User",
-    "id": "pau-navarro",
+    "id": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "nickname": "Pau Navarro",
     "avatar": "",
     "home_quarter": "",
     "profiles": [
       "member"
-    ],
-    "departments": [
-      "Cultura"
     ]
   },
   {
@@ -95,9 +84,6 @@
     "home_quarter": "",
     "profiles": [
       "member"
-    ],
-    "departments": [
-      "Serveis Socials"
     ]
   },
   {
@@ -113,9 +99,6 @@
     "home_quarter": "",
     "profiles": [
       "member"
-    ],
-    "departments": [
-      "Medi Ambient"
     ]
   },
   {
@@ -131,9 +114,6 @@
     "home_quarter": "",
     "profiles": [
       "member"
-    ],
-    "departments": [
-      "Justícia Municipal"
     ]
   },
   {
@@ -163,7 +143,7 @@
     "latitude": 39.4699,
     "longitude": -0.3763,
     "h3_index": "87390cb6fffffff",
-    "user": "marina-soler"
+    "user": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -177,7 +157,7 @@
     "latitude": 39.475,
     "longitude": -0.38,
     "h3_index": "87390cb2fffffff",
-    "user": "joan-ribera"
+    "user": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -191,7 +171,7 @@
     "latitude": 39.46,
     "longitude": -0.352,
     "h3_index": "87390caefffffff",
-    "user": "lucia-ferrer"
+    "user": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -205,7 +185,7 @@
     "latitude": 39.4735,
     "longitude": -0.368,
     "h3_index": "87390cb47ffffff",
-    "user": "pau-navarro"
+    "user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -271,7 +251,7 @@
     "owner": "system",
     "_type": "Member",
     "id": "m-marina-soler",
-    "user": "marina-soler"
+    "user": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -281,7 +261,7 @@
     "owner": "system",
     "_type": "Member",
     "id": "m-joan-ribera",
-    "user": "joan-ribera"
+    "user": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -291,7 +271,7 @@
     "owner": "system",
     "_type": "Member",
     "id": "m-lucia-ferrer",
-    "user": "lucia-ferrer"
+    "user": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -301,7 +281,7 @@
     "owner": "system",
     "_type": "Member",
     "id": "m-pau-navarro",
-    "user": "pau-navarro"
+    "user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -382,7 +362,7 @@
     "target_policy_threshold_m": 2,
     "target_policy_threshold_n": 3,
     "target_policy_quorum_percent": 50,
-    "head": "marina-soler"
+    "head": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -401,7 +381,7 @@
     "target_policy_threshold_m": 2,
     "target_policy_threshold_n": 3,
     "target_policy_quorum_percent": 50,
-    "head": "joan-ribera"
+    "head": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -417,7 +397,7 @@
     "policy_threshold_n": 1,
     "policy_quorum_percent": 0,
     "policy_veto_principals": "",
-    "head": "lucia-ferrer"
+    "head": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -433,7 +413,7 @@
     "policy_threshold_n": 1,
     "policy_quorum_percent": 0,
     "policy_veto_principals": "",
-    "head": "pau-navarro"
+    "head": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -489,6 +469,90 @@
     "creator": "system",
     "updater": "system",
     "owner": "system",
+    "_type": "User",
+    "id": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
+    "departments": [
+      "Urbanisme"
+    ]
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "User",
+    "id": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae",
+    "departments": [
+      "Hisenda"
+    ]
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "User",
+    "id": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae",
+    "departments": [
+      "Mobilitat"
+    ]
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "User",
+    "id": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
+    "departments": [
+      "Cultura"
+    ]
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "User",
+    "id": "aina-bosch",
+    "departments": [
+      "Serveis Socials"
+    ]
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "User",
+    "id": "marc-vila",
+    "departments": [
+      "Medi Ambient"
+    ]
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "User",
+    "id": "elena-serra",
+    "departments": [
+      "Justícia Municipal"
+    ]
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
     "_type": "DepartmentAuthority",
     "id": "auth-hisenda-urbanisme",
     "grantor": "Hisenda",
@@ -507,7 +571,7 @@
     "title": "alcaldessa",
     "description": "Mayor of València — heads Urbanisme as a demo seat.",
     "department": "Urbanisme",
-    "profile": "admin",
+    "profile": "councillor",
     "headcount": 1,
     "salary_amount": 6500,
     "salary_period": "monthly",
@@ -558,7 +622,7 @@
     "owner": "system",
     "_type": "Appointment",
     "position": "Urbanisme/alcaldessa",
-    "user": "marina-soler",
+    "user": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
     "started_at": 1711929600,
     "ended_at": 0,
     "status": "active",
@@ -572,7 +636,7 @@
     "owner": "system",
     "_type": "Appointment",
     "position": "Hisenda/interventor",
-    "user": "joan-ribera",
+    "user": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae",
     "started_at": 1711929600,
     "ended_at": 0,
     "status": "active",
@@ -635,7 +699,7 @@
     "metadata": "{\"place\":\"Llotja de la Seda\"}",
     "status": "active",
     "registered_by": "Urbanisme",
-    "owner_user": "marina-soler"
+    "owner_user": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -685,7 +749,7 @@
     "description": "Historic centre — cathedral, silk exchange, and the riverbed garden edge.",
     "zone_type": "mixed",
     "metadata": "{\"district\":\"Ciutat Vella\",\"city\":\"València\"}",
-    "user": "marina-soler"
+    "user": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -699,7 +763,7 @@
     "description": "Nineteenth-century grid, markets, and tram lines.",
     "zone_type": "residential",
     "metadata": "{\"district\":\"Eixample\"}",
-    "user": "joan-ribera"
+    "user": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -769,7 +833,7 @@
     "description": "Cafés, galleries, and the Sunday flea around the market.",
     "zone_type": "mixed",
     "metadata": "{\"district\":\"Russafa\"}",
-    "user": "pau-navarro"
+    "user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -783,7 +847,7 @@
     "description": "Village-in-the-city, tram terminus, and student streets.",
     "zone_type": "residential",
     "metadata": "{\"district\":\"Benimaclet\"}",
-    "user": "lucia-ferrer"
+    "user": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -797,13 +861,13 @@
     "description": "Extend a protected cycleway from Parc de Capçalera through the riverbed garden to Malvarrosa, with neighbourhood crossings at Serrans, Pont de Fusta, and Cabanyal.",
     "code_url": "",
     "code_checksum": "",
-    "proposer": "lucia-ferrer",
+    "proposer": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae",
     "status": "voting",
-    "voting_deadline": "2026-10-01T18:00:00Z",
-    "votes_yes": 3.0,
+    "voting_deadline": "2027-01-31T18:00:00Z",
+    "votes_yes": 2.0,
     "votes_no": 1.0,
     "votes_abstain": 0.0,
-    "total_voters": 4.0,
+    "total_voters": 3.0,
     "required_threshold": 0.6,
     "metadata": "{\"city\":\"València\"}",
     "org_scope": "Mobilitat"
@@ -820,7 +884,7 @@
     "description": "Allocate a transparent municipal line for casals and commissions, published as open data after each mascletà season.",
     "code_url": "",
     "code_checksum": "",
-    "proposer": "pau-navarro",
+    "proposer": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "status": "approved",
     "voting_deadline": "2026-03-19T23:00:00Z",
     "votes_yes": 5.0,
@@ -845,7 +909,7 @@
     "code_checksum": "",
     "proposer": "marc-vila",
     "status": "pending_vote",
-    "voting_deadline": "2026-11-15T18:00:00Z",
+    "voting_deadline": "2027-02-28T18:00:00Z",
     "votes_yes": 0.0,
     "votes_no": 0.0,
     "votes_abstain": 0.0,
@@ -862,19 +926,7 @@
     "owner": "system",
     "_type": "Vote",
     "proposal": "vlc-prop-ciclovia",
-    "voter": "marina-soler",
-    "vote_choice": "yes",
-    "metadata": "{}"
-  },
-  {
-    "timestamp_created": "2026-03-15 10:00:00.000",
-    "timestamp_updated": "2026-03-15 10:00:00.000",
-    "creator": "system",
-    "updater": "system",
-    "owner": "system",
-    "_type": "Vote",
-    "proposal": "vlc-prop-ciclovia",
-    "voter": "lucia-ferrer",
+    "voter": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae",
     "vote_choice": "yes",
     "metadata": "{}"
   },
@@ -898,7 +950,7 @@
     "owner": "system",
     "_type": "Vote",
     "proposal": "vlc-prop-ciclovia",
-    "voter": "joan-ribera",
+    "voter": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae",
     "vote_choice": "no",
     "metadata": "{}"
   },
@@ -910,7 +962,7 @@
     "owner": "system",
     "_type": "Vote",
     "proposal": "vlc-prop-falles",
-    "voter": "pau-navarro",
+    "voter": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "vote_choice": "yes",
     "metadata": "{}"
   },
@@ -922,8 +974,56 @@
     "owner": "system",
     "_type": "Vote",
     "proposal": "vlc-prop-falles",
-    "voter": "marina-soler",
+    "voter": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
     "vote_choice": "yes",
+    "metadata": "{}"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "Vote",
+    "proposal": "vlc-prop-falles",
+    "voter": "aina-bosch",
+    "vote_choice": "yes",
+    "metadata": "{}"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "Vote",
+    "proposal": "vlc-prop-falles",
+    "voter": "elena-serra",
+    "vote_choice": "yes",
+    "metadata": "{}"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "Vote",
+    "proposal": "vlc-prop-falles",
+    "voter": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae",
+    "vote_choice": "yes",
+    "metadata": "{}"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "Vote",
+    "proposal": "vlc-prop-falles",
+    "voter": "carles-moya",
+    "vote_choice": "abstain",
     "metadata": "{}"
   },
   {
@@ -934,10 +1034,10 @@
     "owner": "system",
     "_type": "Notification",
     "topic": "welcome",
-    "title": "Benvinguda a InitArgDemo",
-    "message": "The València demo graph is live — departments, districts, and a first round of proposals.",
+    "title": "Benvinguda a València",
+    "message": "Welcome to the València demo: departments, districts, an open ballot on the Túria ciclovia, and the FY2026 budget.",
     "sender": "system",
-    "recipient": "marina-soler",
+    "recipient": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
     "visibility": "public",
     "audience_type": "realm",
     "origin_realm": "",
@@ -958,12 +1058,12 @@
     "topic": "governance",
     "title": "Your vote is needed: ciclovia",
     "message": "Mobilitat opened a proposal to extend the Túria cycleway to the sea.",
-    "sender": "lucia-ferrer",
-    "recipient": "marina-soler",
+    "sender": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae",
+    "recipient": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
     "visibility": "private",
     "audience_type": "user",
     "origin_realm": "",
-    "user": "marina-soler",
+    "user": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
     "read": false,
     "metadata": "{}",
     "icon": "clipboard",
@@ -980,7 +1080,7 @@
     "topic": "org",
     "title": "Hisenda monthly close",
     "message": "Please review the FY2026 personnel vs parks expense lines.",
-    "sender": "joan-ribera",
+    "sender": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae",
     "recipient": "",
     "visibility": "private",
     "audience_type": "department",
@@ -1023,7 +1123,7 @@
     "status": "Active",
     "due_date": "2027-03-01T00:00:00Z",
     "link": "",
-    "user": "lucia-ferrer",
+    "user": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae",
     "metadata": "{}"
   },
   {
@@ -1038,7 +1138,7 @@
     "description": "Pre-enrolment for municipal infant schools.",
     "provider": "Serveis Socials",
     "status": "Pending",
-    "due_date": "2026-05-15T00:00:00Z",
+    "due_date": "2027-05-15T00:00:00Z",
     "link": "",
     "user": "aina-bosch",
     "metadata": "{}"
@@ -1052,15 +1152,15 @@
     "_type": "Invoice",
     "id": "inv-falles-01",
     "amount": 1250.0,
-    "currency": "EUR",
+    "currency": "ckEURC",
     "due_date": "2026-03-19T00:00:00Z",
     "status": "Paid",
-    "user": "pau-navarro",
+    "user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "paid_at": "2026-03-10T12:00:00Z",
-    "metadata": "{\"event\":\"Falles\"}",
-    "payment_currency": "EUR",
+    "metadata": "{\"event\":\"Falles\",\"item\":\"mascletà site permit fee\"}",
+    "payment_currency": "ckEURC",
     "payment_amount": 1250.0,
-    "payment_amount_raw": 125000,
+    "payment_amount_raw": 1250000000,
     "payment_nonce": 17
   },
   {
@@ -1070,15 +1170,15 @@
     "updater": "system",
     "owner": "system",
     "_type": "Invoice",
-    "id": "inv-empadron",
-    "amount": 0.0,
-    "currency": "EUR",
-    "due_date": "2026-09-30T00:00:00Z",
+    "id": "inv-residus-2026",
+    "amount": 84.0,
+    "currency": "ckEURC",
+    "due_date": "2026-12-15T00:00:00Z",
     "status": "Pending",
     "user": "carles-moya",
     "paid_at": "",
-    "metadata": "{\"service\":\"empadronament\"}",
-    "payment_currency": "EUR",
+    "metadata": "{\"service\":\"waste collection fee (TAMER) 2026\"}",
+    "payment_currency": "ckEURC",
     "payment_amount": 0.0,
     "payment_amount_raw": 0,
     "payment_nonce": 3
@@ -1092,7 +1192,7 @@
     "_type": "Dispute",
     "dispute_id": "dsp-noise",
     "requester": "carles-moya",
-    "defendant": "pau-navarro",
+    "defendant": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "case_title": "Night-time mascletà near Cabanyal",
     "description": "Residents ask for an earlier end time on weeknights during Falles rehearsals.",
     "status": "open",
@@ -1121,7 +1221,7 @@
     "updater": "system",
     "owner": "system",
     "_type": "Court",
-    "name": "Juzjat de Pau de València",
+    "name": "Jutjat de Pau de València",
     "description": "First-instance civic court.",
     "jurisdiction": "València city",
     "level": "first_instance",
@@ -1142,7 +1242,7 @@
     "level": "appellate",
     "status": "active",
     "justice_system": "Justícia de València",
-    "parent_court": "Juzjat de Pau de València",
+    "parent_court": "Jutjat de Pau de València",
     "metadata": "{}"
   },
   {
@@ -1157,7 +1257,7 @@
     "status": "active",
     "specialization": "civic ordinances and mediation",
     "member": "m-elena-serra",
-    "court": "Juzjat de Pau de València",
+    "court": "Jutjat de Pau de València",
     "metadata": "{}"
   },
   {
@@ -1173,9 +1273,9 @@
     "status": "verdict_issued",
     "filed_date": "2026-02-20T09:00:00Z",
     "closed_date": "",
-    "court": "Juzjat de Pau de València",
+    "court": "Jutjat de Pau de València",
     "plaintiff": "carles-moya",
-    "defendant": "pau-navarro",
+    "defendant": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "judges": [
       "judge-elena"
     ],
@@ -1194,8 +1294,8 @@
     "status": "in_progress",
     "filed_date": "2026-06-02T11:30:00Z",
     "closed_date": "",
-    "court": "Juzjat de Pau de València",
-    "plaintiff": "lucia-ferrer",
+    "court": "Jutjat de Pau de València",
+    "plaintiff": "z32zf-ic72u-jhtqq-ojjqp-jblhx-dxxin-vqelt-ljmo4-ymwmh-gcnzo-hae",
     "defendant": "carles-moya",
     "judges": [
       "judge-elena"
@@ -1227,13 +1327,13 @@
     "id": "pen-014-fine",
     "penalty_type": "fine",
     "amount": 300.0,
-    "currency": "EUR",
+    "currency": "ckEURC",
     "description": "Fine for four documented late rehearsals.",
-    "status": "pending",
-    "due_date": "2026-04-01T00:00:00Z",
+    "status": "appealed",
+    "due_date": "2026-12-31T00:00:00Z",
     "executed_date": "",
     "verdict": "vrd-014",
-    "target_user": "pau-navarro",
+    "target_user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "metadata": "{}"
   },
   {
@@ -1253,7 +1353,7 @@
     "original_case": "VLC-2026-014",
     "original_verdict": "vrd-014",
     "appellate_court": "Audiència de València",
-    "appellant": "pau-navarro",
+    "appellant": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "metadata": "{}"
   },
   {
@@ -1326,8 +1426,7 @@
     "planned_amount": 2400000,
     "actual_amount": 810000,
     "status": "adopted",
-    "description": "Salaries across municipal seats.",
-    "proposal": "vlc-prop-falles"
+    "description": "Salaries across municipal seats."
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -1371,6 +1470,43 @@
     "creator": "system",
     "updater": "system",
     "owner": "system",
+    "_type": "Budget",
+    "id": "b-cult-commissions",
+    "name": "Falles neighbourhood commissions",
+    "fund": "CULT",
+    "fiscal_period": "FY2026",
+    "category": "services",
+    "budget_type": "expense",
+    "planned_amount": 150000,
+    "actual_amount": 60000,
+    "status": "adopted",
+    "description": "Transparent line for casals and commissions, approved by citizen vote.",
+    "proposal": "vlc-prop-falles"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "Budget",
+    "id": "b-gen-ibi",
+    "name": "Property tax (IBI)",
+    "fund": "GEN",
+    "fiscal_period": "FY2026",
+    "category": "tax",
+    "budget_type": "revenue",
+    "planned_amount": 3000000,
+    "actual_amount": 1500000,
+    "status": "adopted",
+    "description": "First IBI instalment collected in June."
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
     "_type": "LedgerEntry",
     "id": "le-1d",
     "transaction_id": "tx-tax-01",
@@ -1381,7 +1517,7 @@
     "entry_date": "2026-03-10",
     "fund": "CULT",
     "fiscal_period": "FY2026",
-    "currency": "EUR",
+    "currency": "ckEURC",
     "description": "Falles co-funding received",
     "reference": "N-441",
     "tags": "falles"
@@ -1402,7 +1538,7 @@
     "entry_date": "2026-03-10",
     "fund": "CULT",
     "fiscal_period": "FY2026",
-    "currency": "EUR",
+    "currency": "ckEURC",
     "description": "Falles co-funding received",
     "reference": "N-441",
     "tags": "falles"
@@ -1423,11 +1559,11 @@
     "entry_date": "2026-03-01",
     "fund": "GEN",
     "fiscal_period": "FY2026",
-    "currency": "EUR",
+    "currency": "ckEURC",
     "description": "Noise ordinance fine",
     "case": "VLC-2026-014",
     "penalty": "pen-014-fine",
-    "user": "pau-navarro",
+    "user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "reference": "VLC-2026-014",
     "tags": "justice"
   },
@@ -1447,13 +1583,225 @@
     "entry_date": "2026-03-01",
     "fund": "GEN",
     "fiscal_period": "FY2026",
-    "currency": "EUR",
+    "currency": "ckEURC",
     "description": "Noise ordinance fine",
     "case": "VLC-2026-014",
     "penalty": "pen-014-fine",
-    "user": "pau-navarro",
+    "user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe",
     "reference": "VLC-2026-014",
     "tags": "justice"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-falles-fee-d",
+    "transaction_id": "tx-falles-fee",
+    "entry_type": "asset",
+    "category": "cash",
+    "debit": 1250,
+    "credit": 0,
+    "entry_date": "2026-03-10",
+    "fund": "CULT",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "Mascletà site permit fee",
+    "reference": "inv-falles-01",
+    "tags": "falles",
+    "user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-falles-fee-c",
+    "transaction_id": "tx-falles-fee",
+    "entry_type": "revenue",
+    "category": "fee",
+    "debit": 0,
+    "credit": 1250,
+    "entry_date": "2026-03-10",
+    "fund": "CULT",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "Mascletà site permit fee",
+    "reference": "inv-falles-01",
+    "tags": "falles",
+    "user": "kmsvy-37fmb-ktmz5-b7c5m-36fp4-ausay-ewo76-zuusq-7uh7s-rczwk-kqe"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-ibi-1-d",
+    "transaction_id": "tx-ibi-1",
+    "entry_type": "asset",
+    "category": "cash",
+    "debit": 1500000,
+    "credit": 0,
+    "entry_date": "2026-06-30",
+    "fund": "GEN",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "IBI first instalment",
+    "reference": "IBI-2026-1",
+    "tags": "tax"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-ibi-1-c",
+    "transaction_id": "tx-ibi-1",
+    "entry_type": "revenue",
+    "category": "tax",
+    "debit": 0,
+    "credit": 1500000,
+    "entry_date": "2026-06-30",
+    "fund": "GEN",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "IBI first instalment",
+    "reference": "IBI-2026-1",
+    "tags": "tax"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-payroll-q1q3-d",
+    "transaction_id": "tx-payroll-q1q3",
+    "entry_type": "expense",
+    "category": "personnel",
+    "debit": 810000,
+    "credit": 0,
+    "entry_date": "2026-09-30",
+    "fund": "GEN",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "Municipal payroll Jan–Sep",
+    "reference": "NOM-2026-09",
+    "tags": "payroll"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-payroll-q1q3-c",
+    "transaction_id": "tx-payroll-q1q3",
+    "entry_type": "asset",
+    "category": "cash",
+    "debit": 0,
+    "credit": 810000,
+    "entry_date": "2026-09-30",
+    "fund": "GEN",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "Municipal payroll Jan–Sep",
+    "reference": "NOM-2026-09",
+    "tags": "payroll"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-parks-capex-d",
+    "transaction_id": "tx-parks-capex",
+    "entry_type": "expense",
+    "category": "capital",
+    "debit": 120000,
+    "credit": 0,
+    "entry_date": "2026-07-15",
+    "fund": "PARKS",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "Túria lighting, first phase",
+    "reference": "OBR-114",
+    "tags": "parks"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-parks-capex-c",
+    "transaction_id": "tx-parks-capex",
+    "entry_type": "asset",
+    "category": "cash",
+    "debit": 0,
+    "credit": 120000,
+    "entry_date": "2026-07-15",
+    "fund": "PARKS",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "Túria lighting, first phase",
+    "reference": "OBR-114",
+    "tags": "parks"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-falles-commissions-d",
+    "transaction_id": "tx-falles-commissions",
+    "entry_type": "expense",
+    "category": "services",
+    "debit": 60000,
+    "credit": 0,
+    "entry_date": "2026-03-05",
+    "fund": "CULT",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "Grants to 40 Falles commissions",
+    "reference": "SUB-2026-FALLES",
+    "tags": "falles"
+  },
+  {
+    "timestamp_created": "2026-03-15 10:00:00.000",
+    "timestamp_updated": "2026-03-15 10:00:00.000",
+    "creator": "system",
+    "updater": "system",
+    "owner": "system",
+    "_type": "LedgerEntry",
+    "id": "le-falles-commissions-c",
+    "transaction_id": "tx-falles-commissions",
+    "entry_type": "asset",
+    "category": "cash",
+    "debit": 0,
+    "credit": 60000,
+    "entry_date": "2026-03-05",
+    "fund": "CULT",
+    "fiscal_period": "FY2026",
+    "currency": "ckEURC",
+    "description": "Grants to 40 Falles commissions",
+    "reference": "SUB-2026-FALLES",
+    "tags": "falles"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -1464,7 +1812,7 @@
     "_type": "Instrument",
     "name": "Euro",
     "principal_id": "",
-    "metadata": "{\"symbol\":\"EUR\"}"
+    "metadata": "{\"symbol\":\"ckEURC\"}"
   },
   {
     "timestamp_created": "2026-03-15 10:00:00.000",
@@ -1506,12 +1854,12 @@
     "updater": "system",
     "owner": "system",
     "_type": "License",
-    "name": "Llicència Falles 2026",
+    "name": "Llicència Falles 2027",
     "license_type": "other",
     "description": "Seasonal permit for commissions and mascletà sites.",
     "status": "active",
-    "issued_at": 1738368000,
-    "expires_at": 1742774400,
+    "issued_at": 1790812800,
+    "expires_at": 1805846400,
     "issuing_authority": "Cultura",
     "organization": "Falles de València",
     "metadata": "{}"
@@ -1528,7 +1876,7 @@
     "description": "Operating licence for port lands.",
     "status": "active",
     "issued_at": 1704067200,
-    "expires_at": 1767225600,
+    "expires_at": 1893456000,
     "issuing_authority": "Urbanisme",
     "organization": "Port de València",
     "metadata": "{}"
@@ -1560,10 +1908,10 @@
     "kind": "as_of",
     "as_of": "2026-03-31",
     "issued_at": "2026-04-05",
-    "issued_by": "joan-ribera",
-    "currency": "EUR",
-    "statements": "{\"cash\":90300,\"grants\":90000}",
-    "entry_count": 4,
+    "issued_by": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae",
+    "currency": "ckEURC",
+    "statements": "{\"cash\":31250,\"receivables\":300,\"grants\":90000,\"fees\":1250,\"fines\":300,\"commission_grants\":60000}",
+    "entry_count": 8,
     "source_hash": "",
     "period": "FY2026"
   },
@@ -1586,15 +1934,15 @@
     "owner": "system",
     "_type": "Delegation",
     "id": "del-mayor-finance",
-    "grantor": "marina-soler",
-    "delegate": "joan-ribera",
+    "grantor": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
+    "delegate": "cybi7-lmxkc-lgijx-c6jqu-mzeh7-mamgq-vtorr-5qrvs-52frq-i6chg-2ae",
     "scope_json": "{\"operations\":[\"proposal.vote\"]}",
     "status": "accepted",
     "label": "Vote on budget ballots while alcaldessa travels",
     "requires_acceptance": 1,
-    "granted_by": "marina-soler",
-    "accepted_at": 1743465600,
-    "expires_at": 1775001600,
+    "granted_by": "2eqns-rmzes-7npxw-dxpw2-qdy2s-mw6ix-svdo2-oya7o-a6ldc-sqgwh-bqe",
+    "accepted_at": 1775001600,
+    "expires_at": 1806537600,
     "revoked_at": 0,
     "revoked_by": ""
   },
@@ -1605,7 +1953,7 @@
     "updater": "system",
     "owner": "system",
     "_type": "GuestUser",
-    "principal": "guest-visitant",
+    "principal": "ieurl-h66s4-hk7ia-bxwtv-vekzw-7sfsy-dqvjc-lqdq3-32d7c-pl2jx-iae",
     "home_quarter": "",
     "permissions": "view"
   }

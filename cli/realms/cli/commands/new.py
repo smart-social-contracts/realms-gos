@@ -459,7 +459,7 @@ def load_spec_file(path: Optional[str]) -> Tuple[Dict[str, Any], Optional[Path]]
         raise StageError("validate", f"Spec file is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise StageError("validate", "Spec file must be a JSON object")
-    return data, spec_path
+    return data, spec_path.parent
 
 
 def resolve_spec_path(value: Optional[str], spec_dir: Optional[Path]) -> Optional[str]:
