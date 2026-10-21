@@ -392,6 +392,9 @@
   ],
   "cycles": {
     "min_balance_tc": 0.5,
+    "backend": {
+      "min_balance_tc": 1.0
+    },
     "top_up_from": "$self",
     "conductor_min_balance_tc": 5.0
   }
