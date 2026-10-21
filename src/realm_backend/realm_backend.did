@@ -210,6 +210,10 @@ service : (text) -> {
   "list_delegations_json" : () -> (text) query;
   "list_delegations_page_json" : (text) -> (text) query;
   "get_delegable_operations_json" : () -> (text) query;
+  "request_delegation_json" : (text) -> (text);
+  "get_delegation_request_json" : (text) -> (text) query;
+  "approve_delegation_request_json" : (text) -> (text);
+  "decline_delegation_request_json" : (text) -> (text);
   "change_quarter" : (text) -> (RealmResponse);
   "get_my_principal" : () -> (text) query;
   "get_canister_id" : () -> (text) query;

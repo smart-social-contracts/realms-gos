@@ -38,3 +38,24 @@ class Delegation(Entity, TimestampedMixin):
     expires_at = Integer(default=0)
     revoked_at = Integer(default=0)
     revoked_by = String(max_length=64, default="")
+
+
+class DelegationRequest(Entity, TimestampedMixin):
+    """A delegate asking a member for power of attorney, signed by the delegate.
+
+    Only open requests are stored: a request is deleted once the grantor
+    approves or declines it, or once it is found past ``request_expires_at``.
+    ``starts_at`` / ``expires_at`` are the grant window asked for.
+    """
+
+    __alias__ = "id"
+
+    id = String(max_length=64)
+    grantor = String(max_length=64, indexed=True)
+    delegate = String(max_length=64, indexed=True)
+    scope_json = String(max_length=2048, default="{}")
+    label = String(max_length=256, default="")
+    description = String(max_length=2048, default="")
+    starts_at = Integer(default=0)
+    expires_at = Integer(default=0)
+    request_expires_at = Integer(default=0)

@@ -3,7 +3,7 @@
 from .calendar import Calendar
 from .codex import Codex
 from .contract import Contract
-from .delegation import Delegation
+from .delegation import Delegation, DelegationRequest
 from .entity_migration import EntityMigration
 from .federation import FederationMessage, QuarterResident
 from .federal_vote import (
@@ -35,6 +35,7 @@ __all__ = [
     "Codex",
     "Contract",
     "Delegation",
+    "DelegationRequest",
     "EntityMigration",
     "FederalVote",
     "FederalVoteLeg",

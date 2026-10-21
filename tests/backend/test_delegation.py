@@ -166,3 +166,85 @@ def test_acting_context_resolves_grantor(realm):
     assert ctx.is_delegated and ctx.subject == ALICE and ctx.actor == AI
     with pytest.raises(dl.AccessDenied):
         dl.resolve_acting_context({"on_behalf_of": ALICE}, Operations.PROPOSAL_CREATE)
+
+
+def ask(realm, scope=None, **kw):
+    realm["id"] = AI
+    kw.setdefault("expires_at", NOW + 7 * 24 * 3600)
+    scope = scope or {"operations": [Operations.PROPOSAL_VOTE, Operations.PROPOSAL_CREATE]}
+    res = dl.request_delegation(ALICE, scope, label="Claude", **kw)
+    realm["id"] = ALICE
+    return res
+
+
+def test_request_is_signed_by_the_delegate_and_visible_to_the_grantor(realm):
+    res = ask(realm)
+    assert res["success"], res
+    req = res["data"]
+    assert req["delegate"] == AI and req["grantor"] == ALICE and req["label"] == "Claude"
+    seen = dl.get_delegation_request(req["id"])["data"]
+    assert [(p["operation"], p["grantor_holds"]) for p in seen["permissions"]] == [
+        (Operations.PROPOSAL_VOTE, True),
+        (Operations.PROPOSAL_CREATE, True),
+    ]
+    assert seen["permissions"][0]["label"] == "Vote on proposals"
+    realm["id"] = BOB
+    assert not dl.get_delegation_request(req["id"])["success"]
+
+
+def test_approve_can_narrow_but_not_widen(realm):
+    rid = ask(realm)["data"]["id"]
+    assert "Not asked for" in dl.approve_delegation_request(rid, [Operations.EXTENSION_SYNC_CALL])["error"]
+    assert "earlier" in dl.approve_delegation_request(rid, None, NOW + 8 * 24 * 3600)["error"]
+    res = dl.approve_delegation_request(rid, [Operations.PROPOSAL_VOTE], NOW + 3600)
+    assert res["success"], res
+    d = dl.find_active_delegation(ALICE, AI)
+    assert d is not None and int(d.expires_at) == NOW + 3600
+    assert dl.scope_allows(dl._parse_scope(d.scope_json), Operations.PROPOSAL_VOTE)
+    assert not dl.scope_allows(dl._parse_scope(d.scope_json), Operations.PROPOSAL_CREATE)
+    assert not dl.get_delegation_request(rid)["success"]
+
+
+def test_only_the_grantor_approves(realm):
+    rid = ask(realm)["data"]["id"]
+    realm["id"] = AI
+    assert not dl.approve_delegation_request(rid)["success"]
+    assert dl.find_active_delegation(ALICE, AI) is None
+
+
+def test_approve_replaces_an_existing_grant(realm):
+    assert grant()["success"]
+    rid = ask(realm)["data"]["id"]
+    assert dl.approve_delegation_request(rid)["success"]
+    d = dl.find_active_delegation(ALICE, AI)
+    assert dl.scope_allows(dl._parse_scope(d.scope_json), Operations.PROPOSAL_CREATE)
+
+
+def test_decline_and_expiry_remove_the_request(realm, monkeypatch):
+    rid = ask(realm)["data"]["id"]
+    assert dl.decline_delegation_request(rid)["success"]
+    assert not dl.get_delegation_request(rid)["success"]
+    rid = ask(realm)["data"]["id"]
+    monkeypatch.setattr(dl, "_now_ts", lambda: NOW + dl.REQUEST_TTL_SECONDS + 1)
+    assert not dl.approve_delegation_request(rid)["success"]
+    assert dl.DelegationRequest.count_by("grantor", ALICE) == 0
+
+
+def test_request_rules(realm, monkeypatch):
+    assert "not a member" in dl.request_delegation("nobody", VOTE)["error"]
+    assert "cannot be delegated" in ask(realm, {"operations": ["realm.admin"]})["error"]
+    assert "list the permissions" in ask(realm, {"all": True})["error"]
+    realm["id"] = dl.ANONYMOUS_PRINCIPAL
+    assert not dl.request_delegation(ALICE, VOTE, expires_at=NOW + 60)["success"]
+
+
+def test_new_request_supersedes_and_grantor_cap_holds(realm, monkeypatch):
+    first = ask(realm)["data"]["id"]
+    second = ask(realm)["data"]["id"]
+    assert dl.DelegationRequest.count_by("grantor", ALICE) == 1
+    assert dl.DelegationRequest[first] is None and dl.DelegationRequest[second] is not None
+    for i in range(dl.MAX_OPEN_REQUESTS_PER_GRANTOR - 1):
+        realm["id"] = f"ai-{i}"
+        assert dl.request_delegation(ALICE, VOTE, expires_at=NOW + 60)["success"]
+    realm["id"] = "ai-late"
+    assert "too many" in dl.request_delegation(ALICE, VOTE, expires_at=NOW + 60)["error"]

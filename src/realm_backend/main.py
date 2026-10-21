@@ -1950,6 +1950,89 @@ def get_delegable_operations_json() -> text:
 
 
 @update
+def request_delegation_json(args: text) -> text:
+    """The caller asks a member for power of attorney (expires after an hour).
+
+    JSON args: grantor, scope ({operations: [...]}), optional label (the
+    caller's self-declared name), description, starts_at and expires_at (epoch
+    seconds) or expires_in_hours (default 168). Returns the request; its id goes
+    in the link the member opens to approve it.
+    """
+    try:
+        from core.delegation import request_delegation
+
+        gate_err = setup_gate_error(ic.caller().to_str())
+        if gate_err:
+            return json.dumps({"success": False, "error": gate_err})
+
+        params = json.loads(args) if args else {}
+        return json.dumps(request_delegation(
+            (params.get("grantor") or "").strip(),
+            params.get("scope") or {},
+            label=params.get("label") or "",
+            description=params.get("description") or "",
+            starts_at=int(params.get("starts_at") or 0),
+            expires_at=int(params["expires_at"]) if params.get("expires_at") else None,
+            expires_in_hours=int(params.get("expires_in_hours") or 168),
+        ))
+    except Exception as e:
+        logger.error(f"request_delegation_json error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@query
+def get_delegation_request_json(args: text) -> text:
+    """An open request, for its grantor or delegate. JSON args: request_id."""
+    try:
+        from core.delegation import get_delegation_request
+
+        params = json.loads(args) if args else {}
+        return json.dumps(get_delegation_request(params.get("request_id") or ""))
+    except Exception as e:
+        logger.error(f"get_delegation_request_json error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@update
+def approve_delegation_request_json(args: text) -> text:
+    """The grantor approves a request.
+
+    JSON args: request_id, optional operations (a subset of those asked for)
+    and expires_at (no later than asked for). Returns the new delegation.
+    """
+    try:
+        from core.delegation import approve_delegation_request
+
+        gate_err = setup_gate_error(ic.caller().to_str())
+        if gate_err:
+            return json.dumps({"success": False, "error": gate_err})
+
+        params = json.loads(args) if args else {}
+        ops = params.get("operations")
+        return json.dumps(approve_delegation_request(
+            params.get("request_id") or "",
+            ops if isinstance(ops, list) else None,
+            int(params["expires_at"]) if params.get("expires_at") else None,
+        ))
+    except Exception as e:
+        logger.error(f"approve_delegation_request_json error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@update
+def decline_delegation_request_json(args: text) -> text:
+    """The grantor declines a request, or its delegate withdraws it. JSON args: request_id."""
+    try:
+        from core.delegation import decline_delegation_request
+
+        params = json.loads(args) if args else {}
+        return json.dumps(decline_delegation_request(params.get("request_id") or ""))
+    except Exception as e:
+        logger.error(f"decline_delegation_request_json error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@update
 @require(Operations.SELF_CHANGE_QUARTER)
 def change_quarter(new_quarter_canister_id: text) -> RealmResponse:
     """Change the caller's assigned quarter."""

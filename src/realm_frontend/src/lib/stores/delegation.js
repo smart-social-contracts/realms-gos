@@ -139,6 +139,30 @@ export async function grantDelegation({ grantor, delegate, operations, label, de
 	);
 }
 
+/** A power of attorney request addressed to (or filed by) the caller. */
+export async function loadDelegationRequest(requestId) {
+	const backend = await resolveDelegationBackend();
+	if (!backend?.get_delegation_request_json) {
+		return { success: false, error: 'This realm does not support power of attorney requests yet' };
+	}
+	return parseJson(await backend.get_delegation_request_json(JSON.stringify({ request_id: requestId })));
+}
+
+/** Approve a request, with a subset of its permissions and an expiry no later than asked. */
+export async function approveDelegationRequest(requestId, { operations, expiresAt } = {}) {
+	const backend = await resolveDelegationBackend();
+	return parseJson(
+		await backend.approve_delegation_request_json(
+			JSON.stringify({ request_id: requestId, operations, expires_at: expiresAt })
+		)
+	);
+}
+
+export async function declineDelegationRequest(requestId) {
+	const backend = await resolveDelegationBackend();
+	return parseJson(await backend.decline_delegation_request_json(JSON.stringify({ request_id: requestId })));
+}
+
 /** Active delegations the caller may act under (active, started, not expired). */
 export function activeDelegationsAsDelegate(list) {
 	const now = Math.floor(Date.now() / 1000);

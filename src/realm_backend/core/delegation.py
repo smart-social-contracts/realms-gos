@@ -17,6 +17,7 @@ from ggg.governance.delegation import (
     STATUS_PENDING,
     STATUS_REVOKED,
     Delegation,
+    DelegationRequest,
 )
 from ggg.system.user_profile import Operations
 from ic_python_logging import get_logger
@@ -45,6 +46,11 @@ DELEGABLE_OPERATIONS: dict[str, dict[str, str]] = {
 
 MAX_DELEGATION_SECONDS = 366 * 24 * 3600
 _PAGE = 50
+
+REQUEST_TTL_SECONDS = 3600
+MAX_OPEN_REQUESTS_PER_GRANTOR = 10
+MAX_OPEN_REQUESTS_PER_DELEGATE = 20
+ANONYMOUS_PRINCIPAL = "2vxsx-fae"
 
 
 def _now_ts() -> int:
@@ -290,16 +296,10 @@ def grant_delegation(
         return {"success": False, "error": err}
 
     now = _now_ts()
-    starts_at = max(int(starts_at or 0), 0)
-    if expires_at is None:
-        expires_at = (starts_at or now) + int(expires_in_hours) * 3600 if expires_in_hours else 0
-    expires_at = int(expires_at or 0)
-    if not expires_at:
-        return {"success": False, "error": "An expiry is required"}
-    if expires_at <= max(starts_at, now):
-        return {"success": False, "error": "The expiry must be after the start and in the future"}
-    if expires_at - max(starts_at, now) > MAX_DELEGATION_SECONDS:
-        return {"success": False, "error": "A delegation can last at most one year"}
+    window = _grant_window(starts_at, expires_at, expires_in_hours, now)
+    if isinstance(window, str):
+        return {"success": False, "error": window}
+    starts_at, expires_at = window
 
     existing = _open_delegation(grantor, delegate)
     if existing:
@@ -412,6 +412,202 @@ def list_delegations_for_caller(
             "next_delegate_cursor": next_delegate,
         },
     }
+
+
+def _grant_window(starts_at, expires_at, expires_in_hours, now: int) -> tuple[int, int] | str:
+    starts_at = max(int(starts_at or 0), 0)
+    if expires_at is None:
+        expires_at = (starts_at or now) + int(expires_in_hours or 0) * 3600
+    expires_at = int(expires_at or 0)
+    if not expires_at:
+        return "An expiry is required"
+    if expires_at <= max(starts_at, now):
+        return "The expiry must be after the start and in the future"
+    if expires_at - max(starts_at, now) > MAX_DELEGATION_SECONDS:
+        return "A delegation can last at most one year"
+    return starts_at, expires_at
+
+
+def _request_to_dict(r: DelegationRequest, viewer: str = "") -> dict[str, Any]:
+    out = {
+        "id": r.id,
+        "grantor": r.grantor,
+        "delegate": r.delegate,
+        "scope": _parse_scope(r.scope_json),
+        "label": r.label or "",
+        "description": r.description or "",
+        "starts_at": int(r.starts_at or 0),
+        "expires_at": int(r.expires_at or 0),
+        "request_expires_at": int(r.request_expires_at or 0),
+        "delegate_is_member": User[r.delegate] is not None,
+    }
+    grantor = User[r.grantor] if viewer and viewer == r.grantor else None
+    if grantor:
+        out["permissions"] = [
+            {
+                "operation": op,
+                **DELEGABLE_OPERATIONS.get(op, {"label": op, "description": ""}),
+                "grantor_holds": _user_has_operation(grantor, op),
+            }
+            for op in out["scope"].get("operations") or []
+        ]
+    return out
+
+
+def _open_requests(field: str, principal: str) -> list[DelegationRequest]:
+    """Open requests on one side; deletes the expired ones it meets (the table holds only open rows)."""
+    now = _now_ts()
+    live = []
+    cursor = 1
+    while cursor is not None:
+        page, cursor = DelegationRequest.find_by(field, principal, from_id=cursor, count=_PAGE)
+        for r in page:
+            if int(r.request_expires_at or 0) <= now:
+                r.delete()
+            else:
+                live.append(r)
+    return live
+
+
+def request_delegation(
+    grantor: str,
+    scope: dict[str, Any],
+    *,
+    label: str = "",
+    description: str = "",
+    starts_at: int = 0,
+    expires_at: int | None = None,
+    expires_in_hours: int = 168,
+) -> dict[str, Any]:
+    """The caller asks ``grantor`` for power of attorney; the grantor approves or declines it.
+
+    The caller (the future delegate) signs the request, so the principal the
+    grantor sees in the dialog is proven, not taken from a link. A newer
+    request from the same delegate to the same grantor replaces the older one.
+    """
+    delegate = ic.caller().to_str()
+    grantor = (grantor or "").strip()
+    if delegate == ANONYMOUS_PRINCIPAL:
+        return {"success": False, "error": "Sign the request with your own identity"}
+    if not grantor:
+        return {"success": False, "error": "grantor is required"}
+    if grantor == delegate:
+        return {"success": False, "error": "You cannot ask yourself for power of attorney"}
+    if not User[grantor]:
+        return {"success": False, "error": f"{grantor} is not a member of this realm"}
+
+    ops = (scope or {}).get("operations") if isinstance(scope, dict) else None
+    if not isinstance(ops, list) or not ops or (scope or {}).get("all"):
+        return {"success": False, "error": "scope.operations must list the permissions asked for"}
+    for op in ops:
+        if op not in DELEGABLE_OPERATIONS:
+            return {"success": False, "error": f"'{op}' cannot be delegated"}
+
+    now = _now_ts()
+    window = _grant_window(starts_at, expires_at, expires_in_hours, now)
+    if isinstance(window, str):
+        return {"success": False, "error": window}
+
+    for r in _open_requests("delegate", delegate):
+        if r.grantor == grantor:
+            r.delete()
+    if len(_open_requests("delegate", delegate)) >= MAX_OPEN_REQUESTS_PER_DELEGATE:
+        return {"success": False, "error": "Too many open requests from you; wait for answers or an hour"}
+    if len(_open_requests("grantor", grantor)) >= MAX_OPEN_REQUESTS_PER_GRANTOR:
+        return {"success": False, "error": "This member has too many open requests; try again later"}
+
+    r = DelegationRequest(
+        id=secrets.token_hex(16),
+        grantor=grantor,
+        delegate=delegate,
+        scope_json=json.dumps({"operations": list(dict.fromkeys(ops))}),
+        label=(label or "").strip()[:256],
+        description=(description or "").strip()[:2048],
+        starts_at=window[0],
+        expires_at=window[1],
+        request_expires_at=now + REQUEST_TTL_SECONDS,
+    )
+    logger.info(f"Delegation request {r.id}: {delegate} asks {grantor}")
+    return {"success": True, "data": _request_to_dict(r)}
+
+
+def _load_open_request(request_id: str) -> DelegationRequest | None:
+    r = DelegationRequest[(request_id or "").strip()] if request_id else None
+    if r and int(r.request_expires_at or 0) <= _now_ts():
+        r.delete()
+        return None
+    return r
+
+
+def get_delegation_request(request_id: str) -> dict[str, Any]:
+    """The request, for its grantor or its delegate only."""
+    caller = ic.caller().to_str()
+    r = _load_open_request(request_id)
+    if not r or caller not in (r.grantor, r.delegate):
+        return {"success": False, "error": "This request does not exist, has expired, or is not for you"}
+    return {"success": True, "data": _request_to_dict(r, viewer=caller)}
+
+
+def approve_delegation_request(
+    request_id: str, operations: list[str] | None = None, expires_at: int | None = None
+) -> dict[str, Any]:
+    """The grantor approves, optionally with fewer permissions or an earlier expiry.
+
+    Replaces an open grant the grantor already gave this delegate.
+    """
+    caller = ic.caller().to_str()
+    r = _load_open_request(request_id)
+    if not r or caller != r.grantor:
+        return {"success": False, "error": "This request does not exist, has expired, or is not for you"}
+
+    asked = _parse_scope(r.scope_json).get("operations") or []
+    chosen = asked if operations is None else [op for op in operations if isinstance(op, str)]
+    if not chosen:
+        return {"success": False, "error": "Choose at least one permission"}
+    widened = [op for op in chosen if op not in asked]
+    if widened:
+        return {"success": False, "error": f"Not asked for: {', '.join(widened)}"}
+    until = int(r.expires_at or 0)
+    if expires_at is not None:
+        if int(expires_at) > until:
+            return {"success": False, "error": "The expiry can only be made earlier"}
+        until = int(expires_at)
+
+    existing = _open_delegation(r.grantor, r.delegate)
+    existing_status = existing.status if existing else ""
+    if existing:
+        existing.status = STATUS_REVOKED
+        existing.revoked_at = _now_ts()
+        existing.revoked_by = caller
+
+    result = grant_delegation(
+        r.grantor,
+        r.delegate,
+        {"operations": chosen},
+        label=r.label,
+        description=r.description,
+        starts_at=int(r.starts_at or 0),
+        expires_at=until,
+        requires_acceptance=False,
+        granted_by=caller,
+    )
+    if result.get("success"):
+        r.delete()
+    elif existing:
+        existing.status = existing_status
+        existing.revoked_at = 0
+        existing.revoked_by = ""
+    return result
+
+
+def decline_delegation_request(request_id: str) -> dict[str, Any]:
+    """The grantor declines, or the delegate withdraws."""
+    caller = ic.caller().to_str()
+    r = _load_open_request(request_id)
+    if not r or caller not in (r.grantor, r.delegate):
+        return {"success": False, "error": "This request does not exist, has expired, or is not for you"}
+    r.delete()
+    return {"success": True, "data": {"id": request_id, "status": "declined"}}
 
 
 def _notify_delegate_pending(d: Delegation) -> None:
