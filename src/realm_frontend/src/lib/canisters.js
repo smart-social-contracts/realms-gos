@@ -67,6 +67,30 @@ function isLocalDevelopment() {
 // Create a writable store for the backend actor
 export const backendStore = writable(buildingOrTesting ? dummyActor() : null);
 
+// Principal the current backend actor signs as ('' while anonymous).
+export const backendPrincipal = writable('');
+
+/** Resolves once the backend actor signs as ``principalText`` (or after ``timeoutMs``). */
+export function whenBackendSignsAs(principalText, timeoutMs = 15000) {
+	if (!principalText || buildingOrTesting) return Promise.resolve();
+	return new Promise((resolve) => {
+		let unsubscribe = null;
+		let done = false;
+		const finish = () => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			if (unsubscribe) unsubscribe();
+			resolve();
+		};
+		const timer = setTimeout(finish, timeoutMs);
+		unsubscribe = backendPrincipal.subscribe((p) => {
+			if (p === principalText) finish();
+		});
+		if (done) unsubscribe();
+	});
+}
+
 // Singleton promise so concurrent callers all wait for the same init.
 let _initBackendPromise = null;
 
@@ -124,6 +148,7 @@ function initializeBackendStore() {
 				}
 				actor = createActor(canisterId, { agent });
 				backendStore.set(actor);
+				backendPrincipal.set(identity.getPrincipal().toText());
 				console.log('Backend store initialized with authenticated identity');
 				return;
 			}
@@ -179,6 +204,7 @@ export async function initBackendWithIdentity(explicitIdentity = null) {
 			const currentActor = get(backendStore);
 			if (currentActor && currentActor._agent && currentActor._agent._identity === identity) {
 				console.log('Backend already initialized with current identity');
+				backendPrincipal.set(identity.getPrincipal().toText());
 				return currentActor;
 			}
 
@@ -201,6 +227,7 @@ export async function initBackendWithIdentity(explicitIdentity = null) {
 
 			// Update the store with the authenticated actor
 			backendStore.set(authenticatedActor);
+			backendPrincipal.set(identity.getPrincipal().toText());
 
 			// If a quarter is active, its actor was built with the previous
 			// (possibly anonymous) identity — rebuild it so quarter-routed calls

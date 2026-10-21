@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
-import { backend, quarterBackend, setActiveQuarter } from '$lib/canisters.js';
+import { backend, quarterBackend, setActiveQuarter, whenBackendSignsAs } from '$lib/canisters.js';
+import { principal } from '$lib/stores/auth';
 import { activeQuarterId } from '$lib/stores/quarters';
 
 const STORAGE_KEY = 'realm_acting_on_behalf_of';
@@ -55,6 +56,9 @@ export function withDelegationJson(args = {}) {
 
 /** PoA lives on the member's assigned quarter backend when one is active. */
 export async function resolveDelegationBackend() {
+	// The auth store can flip to signed-in before the actor carries the identity
+	// (portal sessions); an anonymous call would show no permissions or grants.
+	await whenBackendSignsAs(get(principal));
 	const quarterId = get(activeQuarterId);
 	if (quarterId) {
 		await setActiveQuarter(quarterId);
