@@ -1,5 +1,0 @@
-- **Power of attorney.** A member can grant someone else, such as an AI assistant connection, the right to act for them: which permissions, from when, until when. The delegate asks for it on the new Authorize page, and once granted can vote, submit proposals and call extensions for that member, even without being a member itself.
-- **Realms appear in the registry by themselves.** A realm now sends the registry its listing (name, stage, members, last activity, manifesto and zones) whenever these change, so the registry's globe and realm list stay current without asking each realm.
-- **Last activity.** A realm's status says when a person last changed something in it.
-- **Land registry.** It can list the parcels an organization owns.
-- **CLI.** `realms registry listing publish`, `list` and `remove` manage registry listings that have no canister behind them, from a JSON file, including generated logos and freely licensed Wikimedia Commons background photos (`pip install 'realms-gos[listings]'`).
