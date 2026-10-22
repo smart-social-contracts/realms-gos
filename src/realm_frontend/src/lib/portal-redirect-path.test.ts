@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  consumePortalSigningIn,
   consumePortalSigningOut,
+  markPortalSigningIn,
   markPortalSigningOut,
   normalizePortalRedirectPath,
   portalLoginHref,
@@ -194,6 +196,24 @@ describe('consumePortalSigningOut', () => {
     markPortalSigningOut();
     expect(consumePortalSigningOut()).toBe(true);
     expect(consumePortalSigningOut()).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('consumePortalSigningIn', () => {
+  it('is true once for the page load after a recent portal login', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+      removeItem: (key: string) => store.delete(key),
+    });
+    expect(consumePortalSigningIn()).toBe(false);
+    markPortalSigningIn(1_000);
+    expect(consumePortalSigningIn(61_000)).toBe(true);
+    expect(consumePortalSigningIn(61_000)).toBe(false);
+    markPortalSigningIn(1_000);
+    expect(consumePortalSigningIn(1_000 + 11 * 60 * 1000)).toBe(false);
     vi.unstubAllGlobals();
   });
 });

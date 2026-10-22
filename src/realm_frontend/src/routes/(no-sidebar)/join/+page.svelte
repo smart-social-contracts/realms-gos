@@ -6,7 +6,7 @@
   import { principal, isAuthenticated } from '$lib/stores/auth';
   import { login, logout, restoreAuthSession, resetAuthSessionRestore } from '$lib/auth';
   import { isEmbeddedInPortal, portalNavPush } from '$lib/portal-bridge.ts';
-  import { consumePortalSigningOut } from '$lib/portal-redirect-path.ts';
+  import { consumePortalSigningOut, consumePortalSigningIn } from '$lib/portal-redirect-path.ts';
   import { backend, backendReady, initBackendWithIdentity, setActiveQuarter, createQuarterActor, asJoinSafeActor } from '$lib/canisters.js';
   import { loadUserProfiles, profilesLoading } from '$lib/stores/profiles';
   import { activeQuarterId } from '$lib/stores/quarters';
@@ -56,6 +56,10 @@
   // paints. Hold the sign-in form until that handoff settles.
   let awaitingPortalSession = browser && isEmbeddedInPortal();
   let portalHandoffIsSignOut = browser && consumePortalSigningOut();
+  // Back from the portal login: the portal may still be restoring its session
+  // and answer "no session" first, so only the delegation (or an error) ends
+  // the wait.
+  let portalHandoffIsSignIn = browser && consumePortalSigningIn() && !portalHandoffIsSignOut;
 
   function releasePortalHandoff() {
     awaitingPortalSession = false;
@@ -290,9 +294,11 @@
     // The portal answers the first probe during hydration, before the awaits
     // below finish. Listen now so a "no session" reply is not missed.
     if (awaitingPortalSession) {
-      onPortalPending = () => releasePortalHandoff();
+      onPortalPending = () => {
+        if (!portalHandoffIsSignIn) releasePortalHandoff();
+      };
       window.addEventListener('portal:auth-pending', onPortalPending);
-      handoffTimer = setTimeout(releasePortalHandoff, 8000);
+      handoffTimer = setTimeout(releasePortalHandoff, portalHandoffIsSignIn ? 20000 : 8000);
     }
     let authUnsub = () => {};
     let profilesUnsub = () => {};

@@ -130,6 +130,32 @@ export function consumePortalSigningOut(): boolean {
   }
 }
 
+const SIGNING_IN_KEY = 'realms:signing_in';
+/** A sign-in abandoned at Internet Identity must not slow a later /join. */
+const SIGNING_IN_MAX_AGE_MS = 10 * 60 * 1000;
+
+/** Remember that the next /join paint follows a portal sign-in. */
+export function markPortalSigningIn(now = Date.now()): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(SIGNING_IN_KEY, String(now));
+  } catch {
+    // private mode
+  }
+}
+
+/** Read and clear the sign-in flag. True only for the page load after the portal login. */
+export function consumePortalSigningIn(now = Date.now()): boolean {
+  if (typeof sessionStorage === 'undefined') return false;
+  try {
+    const startedAt = Number(sessionStorage.getItem(SIGNING_IN_KEY));
+    sessionStorage.removeItem(SIGNING_IN_KEY);
+    return startedAt > 0 && now - startedAt < SIGNING_IN_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * In-realm path to resume after the portal login page.
  * Sign-in from anywhere else returns to `/join`. An in-progress `/join`

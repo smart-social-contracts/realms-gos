@@ -2,7 +2,7 @@
  * Federation portal iframe bridge (realm frontend side).
  */
 import { DelegationIdentity, DelegationChain, Ed25519KeyIdentity } from '@dfinity/identity';
-import { portalLoginHref } from '$lib/portal-redirect-path.ts';
+import { portalLoginHref, markPortalSigningIn } from '$lib/portal-redirect-path.ts';
 
 const BRIDGE_VERSION = '1';
 const PORTAL_SESSION_KEY = 'realms:portal-embed';
@@ -420,6 +420,7 @@ export function requestAuthRefresh() {
 export function redirectToPortalLogin(returnPath = '/join'): boolean {
   if (typeof window === 'undefined' || !isEmbeddedInPortal()) return false;
   const safePath = returnPath.startsWith('/') && !returnPath.startsWith('//') ? returnPath : '/join';
+  markPortalSigningIn();
   const origin = (portalConfig?.origin || '').replace(/\/+$/, '');
   const slug = (
     portalConfig?.slug || new URLSearchParams(window.location.search).get('slug') || ''
