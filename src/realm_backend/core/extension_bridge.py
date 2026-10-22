@@ -56,6 +56,7 @@ from core import justice as _justice
 from core import land_bridge as _land_bridge
 from core import notification_bridge as _notification_bridge
 from core import procurement as _procurement
+from core import tax_bridge as _tax_bridge
 from core import treasury_bridge as _treasury_bridge
 from core.bridge_core import (  # noqa: F401
     BridgeSerializationError,
@@ -1088,6 +1089,7 @@ VERBS: Dict[str, Callable[..., Any]] = {
     **_console_bridge.VERBS,
     **_dept_docs_bridge.VERBS,
     **_treasury_bridge.VERBS,
+    **_tax_bridge.VERBS,
     **_procurement.VERBS,
     **_justice.VERBS,
     "ext_entity.create": _v_ext_entity_create,
@@ -1140,6 +1142,7 @@ READ_VERBS = (
     )
     | _dept_docs_bridge.READ_VERBS
     | _treasury_bridge.READ_VERBS
+    | _tax_bridge.READ_VERBS
     | _procurement.READ_VERBS
     | _justice.READ_VERBS
 )

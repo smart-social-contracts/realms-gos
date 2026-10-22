@@ -380,6 +380,78 @@ def iso_days_from(epoch_seconds, days):
     return "%04d-%02d-%02dT%02d:%02d:%02d" % (y, m, d, hh, mm, ss)
 
 
+def tax_period(period, epoch_seconds):
+    """Period key an instant falls in: ``2026-10``, ``2026-Q4`` or ``2026``."""
+    iso = iso_days_from(epoch_seconds, 0)
+    year, month = iso[:4], int(iso[5:7])
+    if period == "monthly":
+        return iso[:7]
+    if period == "quarterly":
+        return "%s-Q%d" % (year, (month - 1) // 3 + 1)
+    if period == "annual":
+        return year
+    raise ValueError("unknown tax period '%s'" % period)
+
+
+def tax_breakdown(tax, quantity=1):
+    """How much one taxpayer owes under one tax definition, and why.
+
+    *tax* is one entry of an adopted tax policy (see ``core.taxation``).
+    *quantity* is what the base counts: ignored for ``flat`` beyond being
+    positive, an area for ``land_area``. The taxable value is
+    ``quantity * unit_value`` for land and 1 for flat taxes.
+
+    ``exempt_below`` exempts a value below it entirely; it is not a deduction.
+    Progressive brackets are marginal: each rate applies to the slice of the
+    value inside its bracket.
+    """
+    base = tax.get("base") or "flat"
+    method = tax.get("method") or "fixed"
+    qty = float(quantity or 0)
+    if base == "flat":
+        value = 1.0 if qty > 0 else 0.0
+    else:
+        value = qty * float(tax.get("unit_value", 1) or 0)
+    out = {"code": tax.get("code", ""), "quantity": qty, "value": value,
+           "amount": 0.0, "exempt": False, "lines": []}
+    if value <= 0:
+        return out
+    exempt_below = float(tax.get("exempt_below") or 0)
+    if exempt_below and value < exempt_below:
+        out["exempt"] = True
+        return out
+
+    lines = []
+    if method == "fixed":
+        amount = float(tax.get("amount") or 0)
+        lines.append({"from": 0.0, "to": value, "rate_bp": 0, "amount": amount})
+    elif method == "proportional":
+        rate = int(tax.get("rate_bp") or 0)
+        amount = value * rate / 10000.0
+        lines.append({"from": 0.0, "to": value, "rate_bp": rate, "amount": amount})
+    elif method == "progressive":
+        amount = 0.0
+        lower = 0.0
+        for bracket in tax.get("brackets") or []:
+            up_to = bracket.get("up_to")
+            rate = int(bracket.get("rate_bp") or 0)
+            upper = value if up_to is None else min(value, float(up_to))
+            if upper > lower:
+                part = (upper - lower) * rate / 10000.0
+                lines.append({"from": lower, "to": upper, "rate_bp": rate,
+                              "amount": round(part, 6)})
+                amount += part
+            if up_to is None or value <= float(up_to):
+                break
+            lower = float(up_to)
+    else:
+        raise ValueError("unknown tax method '%s'" % method)
+
+    out["amount"] = round(amount, 6)
+    out["lines"] = lines
+    return out
+
+
 # ---------------------------------------------------------------------------
 # realm facade — reads from context, writes recorded as effects
 # ---------------------------------------------------------------------------
@@ -472,6 +544,21 @@ class _Treasury:
         })
 
 
+class _Taxes:
+    def policy(self):
+        """The tax parameters in force: ``{"source", "policy_id", "taxes"}``.
+
+        ``source`` is ``policy`` (adopted in the realm), ``codex`` (the
+        codex's own ``taxes`` config block) or ``none``.
+        """
+        if "tax_policy" in _state.context:
+            return _state.context["tax_policy"]
+        ok, value = _rpc("tax.policy", {})
+        if not ok or value is None:
+            return {"source": "none", "policy_id": "", "taxes": []}
+        return value
+
+
 class _Init:
     def apply_init_policy(self):
         codex_id = _state.context.get("codex_id", "")
@@ -499,6 +586,7 @@ class _Realm:
         self.notifications = _Notifications()
         self.members = _Members()
         self.treasury = _Treasury()
+        self.taxes = _Taxes()
         self.init = _Init()
 
     def _read(self, key, verb, default):
@@ -673,6 +761,33 @@ class _Treasury:
     def issue_draft(self):
         """Freeze current working books as an unofficial draft snapshot."""
         return _require_rpc("treasury.issue_draft", {})
+
+
+class _Tax:
+    """Tax policy: a draft the extension edits, and the adopted version a codex
+    reads. Adopting goes through the root org's policy host-side, with the same
+    three reply shapes as ``treasury.action``."""
+
+    def overview(self):
+        return _require_rpc("tax.overview", {})
+
+    def history(self, cursor=1, count=20):
+        return _require_rpc("tax.history", {"cursor": cursor, "count": count})
+
+    def save_draft(self, document, description=""):
+        return _require_rpc("tax.save_draft", {
+            "document": document, "description": description,
+        })
+
+    def discard_draft(self):
+        return _require_rpc("tax.discard_draft", {})
+
+    def adopt(self, confirm=False):
+        return _require_rpc("tax.adopt", {"confirm": bool(confirm)})
+
+    def assess(self, cursor=""):
+        """Ask the active codex to assess one batch; pass back ``next_cursor``."""
+        return _require_rpc("tax.assess", {"cursor": cursor or ""})
 
 
 class _DeptDocs:
@@ -1366,6 +1481,7 @@ class _Ctx:
         self.services = _Services()
         self.dept_docs = _DeptDocs()
         self.treasury = _Treasury()
+        self.tax = _Tax()
         self.procurement = _Procurement()
         self.justice = _Justice()
         self._caller = None
@@ -1419,7 +1535,7 @@ class _Ctx:
 ctx = _Ctx()
 
 __all__ = [
-    "hook", "realm", "ctx", "iso_days_from",
+    "hook", "realm", "ctx", "iso_days_from", "tax_period", "tax_breakdown",
     "NeedEffect", "ServiceCallError",
 ]
 '''

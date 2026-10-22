@@ -118,6 +118,13 @@ jobs:
                     tests/backend/test_no_module_level_re.py \
                     tests/backend/test_proposal_dispatch_orchestration.py \
                     tests/backend/test_delegation.py
+      - name: Tax policy
+        # Its own process: these load the real ggg entities, which the run
+        # above replaces with the CLI's mock module.
+        run: |
+          pytest -q tests/backend/test_taxation.py \
+                    tests/backend/test_tax_bridge.py \
+                    tests/backend/test_agora_tax_assessment.py
       - name: Test-flag ratchet
         # Blocking on purpose: these are source and config scans that keep the
         # removed authentication bypass deleted, keep can_test_mode out of the

@@ -386,6 +386,13 @@ def _v_justice_seed_template(codex_id: str = "", **kwargs: Any) -> dict:
     return seed_justice_from_package(codex_id)
 
 
+def _v_tax_policy(**kwargs: Any) -> dict:
+    """Tax parameters in force (see ``core.taxation.effective_policy``)."""
+    from core.taxation import effective_policy
+
+    return effective_policy()
+
+
 def _v_notification_create(user_id: str = "", **kwargs: Any) -> dict:
     """Create a ``Notification`` (optionally bound to *user_id*)."""
     from ggg import Notification, User
@@ -409,6 +416,7 @@ VERBS: Dict[str, Callable[..., Any]] = {
     "user.get": _v_user_get,
     "realm.get": _v_realm_get,
     "proposal.find_executed": _v_proposal_find_executed,
+    "tax.policy": _v_tax_policy,
     "member.activate": _v_member_activate,
     "member.assign_profile": _v_member_assign_profile,
     "member.revoke_profile": _v_member_revoke_profile,
@@ -474,6 +482,7 @@ READ_VERBS = frozenset(
         "user.get",
         "realm.get",
         "proposal.find_executed",
+        "tax.policy",
     }
 )
 

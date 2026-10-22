@@ -12,6 +12,7 @@ from .ledger_entry import Category, EntryType, LedgerEntry
 from .marketplace import MarketPlace
 from .nft_token import NFTToken
 from .payment_account import PaymentAccount
+from .tax_policy import TaxPolicy, TaxPolicyStatus
 from .token import Token
 from .trade import Trade
 from .transfer import Transfer
@@ -37,6 +38,8 @@ __all__ = [
     "MarketPlace",
     "NFTToken",
     "PaymentAccount",
+    "TaxPolicy",
+    "TaxPolicyStatus",
     "Token",
     "Trade",
     "Transfer",
