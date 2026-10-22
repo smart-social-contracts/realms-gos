@@ -379,7 +379,7 @@ LABELS: Dict[str, Dict[str, str]] = {
         "fr": "Bienvenue",
         "it": "Benvenuto",
         "zh-CN": "欢迎",
-        "ca-valencia": "Benvinguda",
+        "ca-valencia": "Benvingut",
     },
     "zone_selector": {
         "en": "Zones",
