@@ -5,9 +5,9 @@ eligible member once per period, land taxes bill each active parcel's owner,
 and a second run over the same period bills nobody twice.
 """
 
-import importlib
 import json
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -34,15 +34,35 @@ MEMBERSHIP = {"code": "membership", "base": "flat", "method": "fixed", "amount":
               "period": "monthly", "exempt_profiles": ["admin"]}
 
 
+def load_installed(monkeypatch):
+    """Agora's backend as an installed codex: a ``_runtime_ext_agora`` package
+    whose modules exist only under it (``core.runtime_extensions``), with the
+    backend directory not on ``sys.path``."""
+    package_name = "_runtime_ext_agora"
+    package = types.ModuleType(package_name)
+    package.__path__ = [str(AGORA_BACKEND)]
+    package.__package__ = package_name
+    monkeypatch.setitem(sys.modules, package_name, package)
+    for path in sorted(AGORA_BACKEND.glob("*.py")):
+        if path.name in ("entry.py", "__init__.py"):
+            continue
+        full = f"{package_name}.{path.stem}"
+        module = types.ModuleType(full)
+        module.__file__ = str(path)
+        module.__package__ = package_name
+        exec(compile(path.read_text(), str(path), "exec"), module.__dict__)
+        monkeypatch.setitem(sys.modules, full, module)
+        setattr(package, path.stem, module)
+    return sys.modules[f"{package_name}.tax_assessment"]
+
+
 @pytest.fixture
 def agora(monkeypatch):
     from ic_python_db import Database
 
     Database.get_instance().clear()
-    monkeypatch.syspath_prepend(str(AGORA_BACKEND))
-    for name in ("tax_assessment", "invoice_currency"):
-        sys.modules.pop(name, None)
-    module = importlib.import_module("tax_assessment")
+    assert str(AGORA_BACKEND) not in sys.path
+    module = load_installed(monkeypatch)
     monkeypatch.setattr(module.ic, "time", lambda: NOW * 1_000_000_000, raising=False)
     monkeypatch.setattr(module.ic, "print", lambda *a: None, raising=False)
 
