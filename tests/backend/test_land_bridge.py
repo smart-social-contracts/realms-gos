@@ -107,7 +107,8 @@ def realm(monkeypatch):
     monkeypatch.setitem(sys.modules, "ggg", ggg)
 
     users["alice"] = types.SimpleNamespace(id="alice", nickname="Alice")
-    orgs["acme"] = types.SimpleNamespace(id="acme", name="Acme")
+    # Organization is keyed by its name; it has no ``id`` field.
+    orgs["Acme"] = types.SimpleNamespace(name="Acme")
 
     granted = set()
     monkeypatch.setattr(eb, "caller_has_operation", lambda c, op: op in granted)
@@ -231,7 +232,7 @@ def test_a_parcel_has_at_most_one_owner(realm):
     with pytest.raises(ValueError, match="both user and organization"):
         call()("land_registry", "land.set_owner", {
             "land_id": "1", "owner_user_id": "alice",
-            "owner_organization_id": "acme",
+            "owner_organization_id": "Acme",
         })
 
 
@@ -247,7 +248,7 @@ def test_organizations_may_not_own_residential_land(realm):
     make_land(realm, x_coordinate=1, y_coordinate=1, land_type="residential")
     with pytest.raises(ValueError, match="cannot own residential land"):
         call()("land_registry", "land.set_owner", {
-            "land_id": "1", "owner_organization_id": "acme",
+            "land_id": "1", "owner_organization_id": "Acme",
         })
 
 
@@ -261,6 +262,16 @@ def test_transfer_clears_the_previous_owner(realm):
     cleared = call()("land_registry", "land.set_owner", {"land_id": "1"})
     assert cleared["owner_user_id"] is None
     assert cleared["owner_organization_id"] is None
+
+
+def test_parcels_owned_by_an_organization_are_listed(realm):
+    make_land(realm, x_coordinate=1, y_coordinate=1, land_type="commercial")
+    call()("land_registry", "land.set_owner", {
+        "land_id": "1", "owner_organization_id": "Acme",
+    })
+    land = call()("land_registry", "land.list", {})["lands"][0]
+    assert land["owner_organization_id"] == "Acme"
+    assert land["owner_organization_name"] == "Acme"
 
 
 def test_unknown_owner_is_rejected(realm):

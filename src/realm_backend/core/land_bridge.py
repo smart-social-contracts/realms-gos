@@ -160,7 +160,7 @@ def project(land) -> dict:
         "registered_by": land.registered_by,
         "nft_token_id": land.nft_token_id,
         "owner_user_id": owner_user.id if owner_user else None,
-        "owner_organization_id": owner_org.id if owner_org else None,
+        "owner_organization_id": owner_org.name if owner_org else None,
         "owner_user_name": getattr(owner_user, "nickname", None) if owner_user else None,
         "owner_organization_name": getattr(owner_org, "name", None) if owner_org else None,
         "zones": zones,
