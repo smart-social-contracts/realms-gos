@@ -102,9 +102,12 @@ def build_directory_self(
     codex: Optional[Mapping[str, Any]],
     ballot: Optional[Mapping[str, Any]] = None,
     federal: Optional[Mapping[str, Any]] = None,
+    last_activity_at: int = 0,
 ) -> dict:
     """Build the gossip ``self`` block describing this realm's codex + ballot."""
     block = {"canister_id": (canister_id or "").strip()}
+    if last_activity_at:
+        block["last_activity_at"] = int(last_activity_at)
     if codex:
         block["codex_id"] = (codex.get("codex_id") or "").strip()
         block["codex_version"] = normalize_version(codex.get("version"))
@@ -158,6 +161,13 @@ def apply_self_report_to_quarter(quarter_entity: Any, self_block: Optional[Mappi
         if (getattr(quarter_entity, entity_field, "") or "") != sval:
             setattr(quarter_entity, entity_field, sval)
             changed = True
+    try:
+        reported = int(self_block.get("last_activity_at") or 0)
+    except (TypeError, ValueError):
+        reported = 0
+    if reported > int(getattr(quarter_entity, "last_activity_at", 0) or 0):
+        quarter_entity.last_activity_at = reported
+        changed = True
     return changed
 
 

@@ -268,6 +268,7 @@ def get_status() -> "dict[str, Any]":
 
     # Quarter discovery
     quarters = []
+    quarter_entities = []
     is_quarter = False
     is_capital = False
     parent_realm_canister_id = ""
@@ -350,6 +351,18 @@ def get_status() -> "dict[str, Any]":
     except Exception as e:
         logger.warning(f"Could not load quarter info: {e}")
 
+    # A capital shows the latest activity of the whole federation; quarters
+    # report theirs through the gossip ``self`` block.
+    last_activity_at = 0
+    try:
+        from core.activity import federation_latest
+
+        last_activity_at = federation_latest(
+            Realm.load("1"), [] if is_quarter else quarter_entities
+        )
+    except Exception:
+        pass
+
     # Federation-wide headcount: the capital's User.count() covers capital residents
     # only — sub-quarters store their own user tables and push counts into
     # Quarter.population. Sum the quarter directory for total realm population.
@@ -372,6 +385,7 @@ def get_status() -> "dict[str, Any]":
         "realm_welcome_message": realm_welcome_message,
         "realm_manifesto": realm_manifesto,
         "realm_stage": realm_stage,
+        "last_activity_at": last_activity_at or None,
         "open_registration": realm_open_registration,
         "ai_assistant_enabled": realm_ai_assistant_enabled,
         "users_count": users_count,

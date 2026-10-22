@@ -15,7 +15,7 @@ class QuarterStatus:
 
 class Quarter(Entity, TimestampedMixin):
     __alias__ = "name"
-    __version__ = 2
+    __version__ = 3
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
@@ -24,6 +24,8 @@ class Quarter(Entity, TimestampedMixin):
             obj.setdefault("reported_codex_version", "")
             obj.setdefault("last_sync_ballot_id", "")
             obj.setdefault("last_sync_ballot_status", "")
+        if from_version < 3:
+            obj.setdefault("last_activity_at", 0)
         return obj
 
     name = String(min_length=2, max_length=256)
@@ -42,3 +44,5 @@ class Quarter(Entity, TimestampedMixin):
     reported_codex_version = String(max_length=64, default="")
     last_sync_ballot_id = String(max_length=64, default="")
     last_sync_ballot_status = String(max_length=32, default="")
+    # The quarter's own core.activity time, from the same gossip ``self`` block.
+    last_activity_at = Integer(default=0)

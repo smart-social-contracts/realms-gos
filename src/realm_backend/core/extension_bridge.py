@@ -1146,6 +1146,9 @@ READ_VERBS = (
 
 WRITE_VERBS = frozenset(VERBS) - READ_VERBS
 
+# Writes that are bookkeeping rather than something a person did.
+_NOT_ACTIVITY = frozenset({"log.write"})
+
 # Verbs whose behaviour depends on which entity types the extension declared,
 # so they receive the capability list itself.
 _CAPABILITY_AWARE = frozenset({"entity.list", "entity.get", "schema.describe"})
@@ -1315,6 +1318,13 @@ def make_rpc_handler(
         result = dispatch(
             VERBS, action, extension_call(ext_id), caller=caller, **safe_kwargs
         )
+        if action in WRITE_VERBS and action not in _NOT_ACTIVITY:
+            try:
+                from core.activity import record
+
+                record(caller)
+            except Exception as e:
+                logger.warning(f"extension_bridge[{ext_id}]: activity not recorded: {e}")
         return to_plain(result)
 
     return handler

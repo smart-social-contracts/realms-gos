@@ -16,7 +16,7 @@ class RealmStatus:
 
 class Realm(Entity, TimestampedMixin):
     __alias__ = "name"
-    __version__ = 11
+    __version__ = 12
     name = String(min_length=2, max_length=256)
     manifesto = String(max_length=256)
 
@@ -51,6 +51,8 @@ class Realm(Entity, TimestampedMixin):
             # test_mode_skip_authentication disabled every permission check and
             # no longer exists. Drop any stored value so it cannot be read back.
             obj.pop("test_mode_skip_authentication", None)
+        if from_version < 12:
+            obj.setdefault("last_activity_at", 0)
         return obj
     welcome_message = String(max_length=1024)  # Welcome message displayed on landing page
     status = String(max_length=STATUS_MAX_LENGTH, default=RealmStatus.SETUP)
@@ -96,6 +98,8 @@ class Realm(Entity, TimestampedMixin):
     sync_state = String(max_length=8192, default="")
     # Codex install job cursor (multi-message IC0522-safe install).
     codex_install_state = String(max_length=8192, default="")
+    # When a person last changed something here, in seconds (core.activity).
+    last_activity_at = Integer(default=0)
     # Canister id of the realm_installer that provisioned this realm. Used for
     # bootstrap-admin bypass after setup. Empty on realms not wired to an installer.
     installer_canister_id = String(max_length=64, default="")

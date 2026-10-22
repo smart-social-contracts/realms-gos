@@ -25,6 +25,7 @@ from _cdk import (
     init,
     nat,
     nat16,
+    nat64,
     post_upgrade,
     query,
     text,
@@ -162,6 +163,8 @@ class StatusRecord(Record):
     realm_manifesto: text
     realm_welcome_message: text
     realm_stage: text
+    # Seconds; absent until a person has changed something (core.activity).
+    last_activity_at: Opt[nat64]
     open_registration: bool
     ai_assistant_enabled: bool
     user_profiles_count: nat
@@ -1625,6 +1628,14 @@ def join_realm(
             u = User[caller]
             if u and assigned_quarter_canister_id:
                 u.home_quarter = assigned_quarter_canister_id
+
+        if was_new_user:
+            try:
+                from core.activity import record
+
+                record(caller)
+            except Exception as e:
+                logger.warning(f"join_realm: activity not recorded: {e}")
 
         # Immediate capital population push (issue #156): after a brand-new
         # member lands on a quarter, tell the capital our live User.count() so
@@ -3309,7 +3320,12 @@ def get_quarter_directory() -> text:
                 federal = latest_leg_for_directory()
             except Exception:
                 pass
-            payload["self"] = build_directory_self(self_id, codex, ballot, federal=federal)
+            from core.activity import own as own_activity
+
+            payload["self"] = build_directory_self(
+                self_id, codex, ballot, federal=federal,
+                last_activity_at=own_activity(realm),
+            )
         except Exception as e:
             logger.warning(f"get_quarter_directory: self block unavailable: {e}")
 
