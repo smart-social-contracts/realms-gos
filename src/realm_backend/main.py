@@ -5750,6 +5750,13 @@ def initialize() -> void:
     except Exception as e:
         logger.warning(f"Could not schedule treasury token reconcile: {e}")
 
+    try:
+        from core.listing import start as start_listing_rounds
+
+        start_listing_rounds()
+    except Exception as e:
+        logger.warning(f"Could not schedule listing rounds: {e}")
+
 
 _PROPOSAL_INDEX_BACKFILL_FLAG = "fi_backfill:Proposal:v2"
 _PROPOSAL_INDEX_FIELDS = ["status", "org_scope"]

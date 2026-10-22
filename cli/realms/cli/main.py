@@ -1303,6 +1303,53 @@ registry_app.add_typer(registry_realm_app, name="realm")
 registry_billing_app = typer.Typer(name="billing", help="Manage credits and billing")
 registry_app.add_typer(registry_billing_app, name="billing")
 
+registry_listing_app = typer.Typer(
+    name="listing", help="Listings with no canister behind them (directory and globe)"
+)
+registry_app.add_typer(registry_listing_app, name="listing")
+
+
+@registry_listing_app.command("publish")
+def registry_listing_publish(
+    spec: str = typer.Argument(..., help="Listings spec (JSON)"),
+    network: str = typer.Option("local", "--network", "-n", help="Network to use"),
+    canister_id: Optional[str] = typer.Option(None, "--canister-id", help="Registry canister ID"),
+    identity: Optional[str] = typer.Option(None, "--identity", help="dfx identity (a listing publisher)"),
+    file_registry: Optional[str] = typer.Option(
+        None, "--file-registry", help="File registry canister that stores the listings' logos and backgrounds"
+    ),
+) -> None:
+    """Create or update every listing in SPEC, zones and images included."""
+    from .commands.listings import publish_command
+
+    publish_command(spec, network, canister_id, identity, file_registry)
+
+
+@registry_listing_app.command("remove")
+def registry_listing_remove(
+    spec: Optional[str] = typer.Argument(None, help="Remove every listing in this spec"),
+    listing_id: Optional[str] = typer.Option(None, "--id", help="Remove one listing"),
+    network: str = typer.Option("local", "--network", "-n", help="Network to use"),
+    canister_id: Optional[str] = typer.Option(None, "--canister-id", help="Registry canister ID"),
+    identity: Optional[str] = typer.Option(None, "--identity", help="dfx identity (the listing's publisher)"),
+) -> None:
+    """Remove listings you published."""
+    from .commands.listings import remove_command
+
+    remove_command(spec, listing_id, network, canister_id, identity)
+
+
+@registry_listing_app.command("list")
+def registry_listing_list(
+    network: str = typer.Option("local", "--network", "-n", help="Network to use"),
+    canister_id: Optional[str] = typer.Option(None, "--canister-id", help="Registry canister ID"),
+    identity: Optional[str] = typer.Option(None, "--identity", help="dfx identity"),
+) -> None:
+    """Every listing in the registry, page by page."""
+    from .commands.listings import list_command
+
+    list_command(network, canister_id, identity)
+
 
 @registry_realm_app.command("add")
 def registry_add(

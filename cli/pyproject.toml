@@ -38,6 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+listings = ["h3>=4.0"]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
