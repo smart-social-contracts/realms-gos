@@ -60,7 +60,10 @@
   function releasePortalHandoff() {
     awaitingPortalSession = false;
   }
-  let realmName = 'Realm';
+  // Signed in, but membership is still being probed: keep the spinner up so
+  // the sign-in form does not flash before the next step.
+  $: finishingSignIn = currentStep === 'auth' && $isAuthenticated && !error;
+  $: realmName = $realmNameStore || 'Realm';
   let inviteCode = '';
   let inviteProfile = '';
   let inviteValid = false;
@@ -327,9 +330,6 @@
 
       await realmInfo.fetch();
       if (disposed) return;
-      if ($realmNameStore) {
-        realmName = $realmNameStore;
-      }
 
       if ($testModeIIBypass) {
         releasePortalHandoff();
@@ -345,7 +345,12 @@
       }
 
       if ($isAuthenticated) {
-        await advanceStepAfterAuth();
+        try {
+          await advanceStepAfterAuth();
+        } catch (e) {
+          console.error('Restoring the session failed:', e);
+          error = t('join.auth_failed');
+        }
       }
 
       targetsResolved = true;
@@ -820,14 +825,14 @@
       {/if}
 
       <!-- Step: Auth -->
-      {#if currentStep === 'auth' && awaitingPortalSession}
+      {#if currentStep === 'auth' && (awaitingPortalSession || finishingSignIn)}
         <div class="bg-white rounded-2xl shadow-xl p-5 md:p-8 border border-gray-100" role="status" aria-live="polite">
           <div class="text-center py-6">
             <div class="flex justify-center mb-6">
               <Spinner size="8" color="gray" />
             </div>
             <h2 class="text-2xl font-bold text-gray-900 mb-2">
-              {portalHandoffIsSignOut ? $_('join.signing_out') : $_('join.signing_in')}
+              {portalHandoffIsSignOut && !finishingSignIn ? $_('join.signing_out') : $_('join.signing_in')}
             </h2>
             <p class="text-gray-500">{$_('join.signing_in_hint')}</p>
           </div>
