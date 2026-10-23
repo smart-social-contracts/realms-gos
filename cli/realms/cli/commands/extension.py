@@ -55,6 +55,39 @@ def _iter_frontend_dist_uploads(dist_dir: str) -> list[tuple[str, str]]:
     return specs
 
 
+def _remember_uploaded_hash(existing_hashes, registry_path: str, local_sha: str) -> None:
+    """The snapshot is taken once per publish; a later upload to the same path
+    must compare against this write, not the pre-publish hash."""
+    if existing_hashes is not None:
+        existing_hashes[registry_path] = local_sha
+
+
+def _frontend_shell_uploads(
+    legacy_dist_dir: str,
+    runtime_dist_dir: str,
+    bundle_path: Optional[str] = None,
+) -> list[tuple[str, str]]:
+    """Files to store under ``frontend/dist/``.
+
+    Both dists map to the same registry paths. ``frontend-rt/dist`` is what
+    ``realms files build`` produces, so it owns every path it ships; a
+    ``frontend/dist`` file is kept only where the runtime dist has none.
+    """
+    runtime_specs = _iter_frontend_dist_uploads(runtime_dist_dir)
+    if bundle_path and os.path.isfile(bundle_path):
+        runtime_specs = [
+            spec for spec in runtime_specs if spec[0] != "frontend/dist/index.js"
+        ]
+        runtime_specs.insert(0, ("frontend/dist/index.js", bundle_path))
+    runtime_paths = {path for path, _local in runtime_specs}
+    legacy_specs = [
+        spec
+        for spec in _iter_frontend_dist_uploads(legacy_dist_dir)
+        if spec[0] not in runtime_paths
+    ]
+    return legacy_specs + runtime_specs
+
+
 def validate_extension_id(extension_id):
     """Validate extension ID (no hyphens allowed)"""
     if "-" in extension_id:
@@ -1503,6 +1536,7 @@ def _upload_one_file(
             if isinstance(res, dict) and (res.get("ok") is True or res.get("success") is True):
                 label = "chunked" if total_chunks > 1 else "stored"
                 console.print(f"  [green]✓[/green] {namespace}/{registry_path} ({size:,} bytes, {label})")
+                _remember_uploaded_hash(existing_hashes, registry_path, local_sha)
                 return "uploaded"
         if not (isinstance(res, dict) and res.get("ok") is True):
             console.print(f"  [red]✗[/red] finalize failed for {registry_path}: {res}")
@@ -1510,6 +1544,7 @@ def _upload_one_file(
         if res.get("done") is True:
             label = "chunked" if total_chunks > 1 else "stored"
             console.print(f"  [green]✓[/green] {namespace}/{registry_path} ({size:,} bytes, {label})")
+            _remember_uploaded_hash(existing_hashes, registry_path, local_sha)
             return "uploaded"
 
 
@@ -1616,7 +1651,7 @@ def publish_extension_command(
     Layout uploaded:
       manifest.json
       backend/<py files>
-      frontend/dist/index.html, index.js, assets/…   (if frontend-rt/dist exists)
+      frontend/dist/index.html, index.js, assets/…   (frontend-rt/dist; frontend/dist only for paths the runtime build does not ship)
       frontend/i18n/locales/<locale>.json         (if frontend/i18n/ exists)
       screenshots/<image files>                   (manifest ``screenshots`` list)
 
@@ -1684,27 +1719,16 @@ def publish_extension_command(
                 rel = os.path.relpath(local, backend_dir).replace(os.sep, "/")
                 _upload(f"backend/{rel}", local)
 
-    # Sandboxed extensions additionally ship a standalone shell app under
-    # frontend/dist (index.html + hashed assets) that the iframe loader mounts
-    # at /ext/<id>/<ver>/frontend/dist/index.html. Upload it before the
-    # frontend-rt bundle so the rt index.js wins if both provide one.
-    sandbox_dist_dir = os.path.join(source_dir, "frontend", "dist")
-    for reg_path, local in _iter_frontend_dist_uploads(sandbox_dist_dir):
-        _upload(reg_path, local)
-
-    # Frontend runtime dist (index.html, index.js, nested assets/, …).
-    dist_dir = os.path.join(source_dir, "frontend-rt", "dist")
-    if bundle_path:
-        if not os.path.exists(bundle_path):
-            console.print(
-                f"  [yellow]![/yellow] bundle not found, skipping: {bundle_path}"
-            )
-        else:
-            _upload("frontend/dist/index.js", bundle_path)
-
-    for reg_path, local in _iter_frontend_dist_uploads(dist_dir):
-        if bundle_path and reg_path == "frontend/dist/index.js":
-            continue
+    if bundle_path and not os.path.isfile(bundle_path):
+        console.print(
+            f"  [yellow]![/yellow] bundle not found, skipping: {bundle_path}"
+        )
+        bundle_path = None
+    for reg_path, local in _frontend_shell_uploads(
+        os.path.join(source_dir, "frontend", "dist"),
+        os.path.join(source_dir, "frontend-rt", "dist"),
+        bundle_path,
+    ):
         _upload(reg_path, local)
 
     # Frontend i18n must land at ext/<id>/<ver>/frontend/i18n/<locale>.json
