@@ -1,7 +1,7 @@
 import hashlib
 import json
-import re
 
+import candid
 import chain
 from db import Fail, each, find, next_id, page, view
 from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
@@ -10,7 +10,6 @@ from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, 
 from op import op
 from proposals import realm_wide, root
 
-OK = re.compile(r"(?:Ok|17_724) = (\d[\d_]*)")
 CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate")
 
 
@@ -33,7 +32,7 @@ def subaccount(invoice_id):
 
 
 def nat(reply):
-    return int(re.search(r"\d[\d_]*", reply).group().replace("_", ""))
+    return candid.number(reply)
 
 
 def balance_of(token, sub):
@@ -42,8 +41,9 @@ def balance_of(token, sub):
 
 
 def outcome(reply):
-    m = OK.search(reply)
-    return m.group(1).replace("_", "") if m else None
+    # 17_724 is how an unnamed candid decoder labels the Ok case.
+    found = candid.number(reply, "Ok =") if "Ok =" in reply else candid.number(reply, "17_724 =")
+    return None if found is None else str(found)
 
 
 # --- books ----------------------------------------------------------------------------------------

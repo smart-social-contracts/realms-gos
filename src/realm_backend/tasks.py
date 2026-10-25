@@ -3,7 +3,7 @@ import json
 import chain
 from db import Fail, each, find, view
 from ggg import Task, TaskExecution, TaskSchedule, TaskStep
-from op import OPS, dispatch, op
+from op import dispatch, op, ops
 
 BUSY = ("running", "waiting")
 
@@ -19,7 +19,7 @@ def ordered(task):
 def checked(steps):
     """Steps as ``(op, args, wait)``: an operation, its arguments and the seconds to wait before the next step."""
     for s in steps:
-        if s.get("op") not in OPS:
+        if s.get("op") not in ops():
             raise Fail(f"unknown operation '{s.get('op')}'")
     return [(s["op"], s.get("args") or {}, int(s.get("wait", 0))) for s in steps]
 

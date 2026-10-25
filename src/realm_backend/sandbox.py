@@ -5,7 +5,7 @@ import sys
 import chain
 import sdk
 from db import Fail
-from op import OPS, dispatch, run
+from op import dispatch, ops, run
 
 try:
     import _basilisk_sandbox
@@ -13,6 +13,7 @@ except ImportError:  # unit tests: no subinterpreters, hooks run in a fresh name
     _basilisk_sandbox = None
 
 BUDGET = 10_000_000  # bytecode instructions per call, metered by the sandbox (deterministic)
+MAX_ACTIONS = 32  # _basilisk_sandbox traps on a longer allow-list
 LOADER = ("import sys\n_sdk = type(sys)('ggg_sdk')\nexec(compile(%r, 'ggg_sdk.py', 'exec'), _sdk.__dict__)\n"
           "sys.modules['ggg_sdk'] = _sdk\n" % sdk.SOURCE)
 
@@ -68,7 +69,7 @@ def call(source, fn, args, context, declared):
     A generator: an effect may call other canisters. Returns ``{ok, result, effects}`` with one
     ``{op, ok, ...}`` per effect, or ``{ok: false, error}`` when the hook itself failed.
     """
-    reads = [a for a in declared if OPS.get(a, {}).get("read")]
+    reads = readable(declared)
     envelope = execute(source, fn, {"args": args, "context": context},
                        lambda action, kw: read(action, kw, declared), reads)
     if not envelope["ok"]:
@@ -80,15 +81,20 @@ def call(source, fn, args, context, declared):
             "effects": [{"op": e[0], **r} for e, r in zip(envelope["effects"], results)]}
 
 
+def readable(declared):
+    """The declared operations a hook may call for data; the rest it returns as effects."""
+    return [a for a in declared if ops().get(a, {}).get("read")]
+
+
 def read(action, args, declared):
-    if not OPS.get(action, {}).get("read"):
+    if not ops().get(action, {}).get("read"):
         raise Fail(f"{action} is not a read operation: return it as an effect")
     return json.loads(run(dispatch(action, json.dumps(args), origin="codex", signer=chain.self_id(),
                                    declared=declared)))
 
 
 def apply(name, args, declared):
-    if name not in OPS:
+    if name not in ops():
         return {"ok": False, "error": f"unknown operation '{name}'"}
     reply = yield from dispatch(name, json.dumps(args), origin="codex", signer=chain.self_id(), declared=declared)
     return json.loads(reply)

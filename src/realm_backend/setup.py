@@ -9,7 +9,7 @@ from extensions import approved
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
 import codex
-from op import OPS, call, op
+from op import call, op, ops
 from proposals import root
 
 VERSION = "VERSION_PLACEHOLDER"
@@ -43,7 +43,7 @@ HEX = "0123456789abcdef"
 COUNTED = ("User", "Member", "Department", "Organization", "Proposal", "Extension", "Task", "Notification")
 SHELL = """class _Ops:
     def __getattr__(self, name):
-        return lambda args=None, **kw: rpc(name, **{**(args or {}), **kw})
+        return lambda args=None, **kw: rpc("op", name=name, args={**(args or {}), **kw})
 
 
 ops = _Ops()
@@ -59,9 +59,9 @@ def start():
         realm = Realm(id="1", principal_id=chain.self_id())
         realm.calendar, realm.treasury = Calendar(id="1"), Treasury(id="1")
         Department(id="Administration", is_root=True, description="The realm's root department")
-    for name, ops in PROFILES.items():
+    for name, allowed in PROFILES.items():
         if UserProfile[name] is None:
-            UserProfile(id=name, allowed_to=ops)
+            UserProfile(id=name, allowed_to=allowed)
     tasks.rearm()
 
 
@@ -69,7 +69,7 @@ def start():
 def status(c, args):
     realm = Realm["1"]
     return {"version": VERSION, "status": realm.status if realm else "", "name": realm.name if realm else "",
-            "canister": chain.self_id(), "operations": len(OPS)}
+            "canister": chain.self_id(), "operations": len(ops())}
 
 
 @op(None, read=True, public=True)
@@ -249,7 +249,7 @@ def orchestration_decide(c, args):
 def realm_monitor(c, args):
     realm = Realm["1"]
     return {"status": realm.status, "version": VERSION, "installed_version": realm.installed_version,
-            "operations": len(OPS), "events": Event.max_id(), "rows": {n: getattr(ggg, n).count() for n in COUNTED},
+            "operations": len(ops()), "events": Event.max_id(), "rows": {n: getattr(ggg, n).count() for n in COUNTED},
             "upgrade": realm.manifest_data.get("upgrade", {})}
 
 
@@ -266,7 +266,7 @@ def realm_export(c, args):
 @op("shell.execute")
 def shell(c, args):
     """Evaluate one expression in the sandbox; ``ops.<name>(args)`` calls an operation as you, through Cedar."""
-    def as_caller(name, kw):
-        return call(name, kw, user=c.user, origin="shell")
+    def as_caller(_, kw):
+        return call(kw["name"], kw["args"], user=c.user, origin="shell")
 
-    return {"result": sandbox.execute(SHELL % args["expr"], "main", {}, as_caller, tuple(OPS))}
+    return {"result": sandbox.execute(SHELL % args["expr"], "main", {}, as_caller, ("op",))}

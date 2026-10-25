@@ -1,7 +1,7 @@
 import chain
 from db import Fail, deref, each, find, next_id, ref, view
 from ggg import Event, Notification
-from op import OPS, op
+from op import op, ops
 from proposals import appointed
 
 SHOWN = ("id", "topic", "title", "body", "href", "sender", "at")
@@ -63,9 +63,6 @@ def events(c, args):
 @op(None, read=True, public=True)
 def ops_list(c, args):
     """Every operation with its permission, flags and description."""
-    # Basilisk loads modules lazily: import every domain so that all operations are registered.
-    import assets, codex, crypto, delegation, extensions, federation, justice, licenses, members  # noqa: F401,E401
-    import orgs, procurement, proposals, quarters, setup, taxes, tasks, treasury  # noqa: F401,E401
     return {"operations": [{"name": name, "perm": s["perm"], "read": s["read"], "delegable": s["delegable"],
                             "governed": s["governed"] is not None, "signing": s["signing"], "public": s["public"],
-                            "doc": (s["fn"].__doc__ or "").strip()} for name, s in sorted(OPS.items())]}
+                            "doc": (s["fn"].__doc__ or "").strip()} for name, s in sorted(ops().items())]}

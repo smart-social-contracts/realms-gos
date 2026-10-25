@@ -124,6 +124,12 @@ def test_refuses_another_hook_api():
     assert "codex API 2" in call("codex_install", "ctl", manifest=manifest(codex_api_version=1), source=SOURCE)["error"]
 
 
+def test_refuses_more_reads_than_the_sandbox_allows():
+    build()
+    reads = sorted(n for n, s in op.ops().items() if s["read"])[:33]
+    assert "at most 32" in call("codex_install", "ctl", manifest=manifest(capabilities=reads), source=SOURCE)["error"]
+
+
 def test_hook_needs_an_active_codex_declaring_it():
     build()
     assert hook("act") is None
@@ -157,7 +163,7 @@ def test_failing_hook_marks_the_codex_unhealthy_until_one_succeeds():
     assert "ZeroDivisionError" in hook("broken")["error"]
     s = ok("codex_status", "alice")
     assert not s["healthy"] and s["problem"]["hook"] == "broken"
-    hook("act")
+    hook("init")
     assert ok("codex_status", "alice")["healthy"]
 
 

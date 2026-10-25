@@ -2,7 +2,7 @@ import auth
 import chain
 from db import Fail, each, find, next_id, view
 from ggg import Delegation, DelegationRequest, User
-from op import OPS, op
+from op import op, ops
 
 YEAR = 365 * 86400
 REQUEST_TTL = 3600
@@ -11,11 +11,11 @@ OPEN = ("pending", "active")
 
 
 def delegable():
-    return {s["perm"] for s in OPS.values() if s["delegable"] and not s["signing"] and s["perm"]}
+    return {s["perm"] for s in ops().values() if s["delegable"] and not s["signing"] and s["perm"]}
 
 
 def signing():
-    return {s["perm"] for s in OPS.values() if s["signing"]}
+    return {s["perm"] for s in ops().values() if s["signing"]}
 
 
 def check_scope(perms, grantor=None):
@@ -163,5 +163,5 @@ def delegation_list(c, args):
 
 @op("self.data_view", read=True)
 def delegable_operations(c, args):
-    return {"operations": sorted(({"op": n, "permission": s["perm"]} for n, s in OPS.items()
+    return {"operations": sorted(({"op": n, "permission": s["perm"]} for n, s in ops().items()
                                   if s["delegable"] and not s["signing"]), key=lambda o: o["op"])}

@@ -1,7 +1,8 @@
 from basilisk import Duration, Principal, ic
 
+from candid import unquote
+
 ANONYMOUS = "2vxsx-fae"
-ESCAPES = {"n": b"\n", "r": b"\r", "t": b"\t", '"': b'"', "\\": b"\\", "'": b"'"}
 
 
 class Trap(BaseException):
@@ -43,22 +44,3 @@ def call_text(cid, method, arg=None):
     candid = "()" if arg is None else '("' + arg.replace("\\", "\\\\").replace('"', '\\"') + '")'
     reply = yield from call(cid, method, candid)
     return unquote(reply)
-
-
-def unquote(decoded):
-    body, out, i = decoded[decoded.index('"') + 1:decoded.rindex('"')], bytearray(), 0
-    while i < len(body):
-        if body[i] != "\\":
-            out += body[i].encode()
-            i += 1
-        elif body[i + 1] in ESCAPES:
-            out += ESCAPES[body[i + 1]]
-            i += 2
-        elif body[i + 1] == "u":
-            end = body.index("}", i)
-            out += chr(int(body[i + 3:end], 16)).encode()
-            i = end + 1
-        else:
-            out.append(int(body[i + 1:i + 3], 16))
-            i += 3
-    return out.decode()

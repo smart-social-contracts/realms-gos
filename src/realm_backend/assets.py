@@ -1,5 +1,5 @@
-import re
 
+import candid
 import chain
 from db import Fail, deref, each, find, next_id, page, view
 from ggg import Appointment, Codex, Land, License, NFTToken, Organization, Realm, User, Verdict, Zone
@@ -29,10 +29,10 @@ def value(v):
 
 def ledger(collection, method, arg):
     reply = yield from chain.call(collection.canister, method, arg)
-    found = re.search(r"Ok\s*=\s*([\d_]+)", reply)
-    if not found:
+    found = candid.number(reply, "Ok") if "Ok" in reply else None
+    if found is None:
         raise Fail(f"the {collection.id} ledger refused {method}: {reply}")
-    return int(found.group(1).replace("_", ""))
+    return found
 
 
 def mint(collection, owner, meta):

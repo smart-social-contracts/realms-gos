@@ -3,7 +3,7 @@ import json
 import chain
 from db import Fail, each, find, next_id, view
 from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Vote
-from op import OPS, dispatch, op
+from op import dispatch, op, ops
 
 CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")
@@ -88,7 +88,7 @@ def outcome(p, final):
 def proposal_create(c, args):
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
-    if action is not None and action.get("op") not in OPS:
+    if action is not None and action.get("op") not in ops():
         raise Fail(f"unknown operation '{action.get('op')}'")
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""))
     return {"proposal": p.id}

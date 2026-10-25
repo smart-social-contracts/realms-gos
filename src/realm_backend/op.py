@@ -5,6 +5,8 @@ import chain
 from db import Fail
 
 OPS = {}
+MODULES = ("assets", "codex", "crypto", "delegation", "extensions", "federation", "justice", "licenses", "members",
+           "notifications", "orgs", "procurement", "proposals", "quarters", "setup", "tasks", "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
 EVENTS_KEPT = 2000
 # Basilisk stubs the `types` module.
@@ -35,9 +37,17 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     return wrap
 
 
+def ops():
+    """Every registered operation. Read this, not OPS, when looking an operation up by name."""
+    # Basilisk imports modules lazily and runs one only when a name it has not yet defined is read.
+    for name in MODULES:
+        getattr(__import__(name), "op", None)
+    return OPS
+
+
 def dispatch(fn, arg, origin="user", signer=None, declared=()):
     name = fn if isinstance(fn, str) else fn.__name__
-    spec = OPS[name]
+    spec = OPS.get(name) or ops()[name]
     try:
         args = json.loads(arg or "{}") if isinstance(arg, str) else dict(arg)
         by = signer or chain.caller()

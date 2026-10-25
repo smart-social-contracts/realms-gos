@@ -82,7 +82,9 @@ def hook(name, context=None):
     realm = Realm["1"]
     facts = {"codex": codex.id, "config": config(codex), "now": chain.now(), "realm": view(realm, *REALM_FIELDS)}
     out = yield from sandbox.call(codex.source, name, context or {}, facts, codex.capabilities or [])
-    problem = {} if out["ok"] else {"codex": codex.id, "hook": name, "error": out["error"], "at": chain.now()}
+    failed = [e for e in out.get("effects", []) if not e.get("ok")]
+    error = out.get("error") or "; ".join(f"{e['op']}: {e.get('error')}" for e in failed)
+    problem = {"codex": codex.id, "hook": name, "error": error, "at": chain.now()} if error else {}
     if realm.codex_install_state != problem:
         realm.codex_install_state = problem
     return out
@@ -100,6 +102,8 @@ def codex_install(c, args):
     digest = checksum(manifest, source)
     trust(digest, approval)
     compile(source, "hooks.py", "exec")
+    if len(sandbox.readable(manifest.get("capabilities", []))) > sandbox.MAX_ACTIONS:
+        raise Fail(f"a codex may declare at most {sandbox.MAX_ACTIONS} read operations")
     key, current = f"{manifest['id']}@{manifest['version']}", active()
     if current and current.id == key:
         raise Fail(f"{key} is already active")
