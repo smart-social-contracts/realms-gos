@@ -13,6 +13,8 @@ export interface ExtensionManifestInfo {
 	sdk_version?: string;
 	capabilities?: string[];
 	entry_access?: { functions?: Record<string, string> };
+	/** Side-effect-free functions the frontend may call via the `extension_call` query. */
+	query_functions?: string[];
 	[key: string]: unknown;
 }
 
@@ -130,6 +132,28 @@ export async function getExtensionManifestWithRetry(
 	}
 
 	return null;
+}
+
+/**
+ * Installed version of an extension from the shared manifest cache, so a
+ * navigation does not wait on its own list_runtime_extensions round trip.
+ * A miss (e.g. installed during this session) refetches once; `fresh`
+ * bypasses the cache entirely (e.g. retrying after a stale bundle failed).
+ */
+export async function getInstalledExtensionVersion(
+	extId: string,
+	{ fresh = false }: { fresh?: boolean } = {},
+): Promise<string | undefined> {
+	if (fresh) clearExtensionManifestCache();
+	const version = (await fetchExtensionManifests())[extId]?.version;
+	if (version || fresh) return version;
+	clearExtensionManifestCache();
+	return (await fetchExtensionManifests())[extId]?.version;
+}
+
+/** Cached manifest only: never triggers a list_runtime_extensions round trip. */
+export function peekExtensionManifest(extId: string): ExtensionManifestInfo | null {
+	return cache?.[extId] ?? null;
 }
 
 export function clearExtensionManifestCache(): void {

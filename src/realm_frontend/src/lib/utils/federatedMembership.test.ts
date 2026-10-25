@@ -40,3 +40,20 @@ describe('pickPrimaryHit', () => {
 		expect(pickPrimaryHit(hits)?.canisterId).toBe('q1');
 	});
 });
+
+describe('mapWithConcurrency', () => {
+	it('keeps input order and caps calls in flight', async () => {
+		const { mapWithConcurrency } = await import('./federatedMembership');
+		let inFlight = 0;
+		let peak = 0;
+		const out = await mapWithConcurrency([5, 1, 3, 2, 4], 2, async (n) => {
+			inFlight++;
+			peak = Math.max(peak, inFlight);
+			await new Promise((r) => setTimeout(r, n));
+			inFlight--;
+			return n * 10;
+		});
+		expect(out).toEqual([50, 10, 30, 20, 40]);
+		expect(peak).toBe(2);
+	});
+});

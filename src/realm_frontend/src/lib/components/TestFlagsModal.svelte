@@ -81,7 +81,7 @@
 			if (!result?.success) {
 				throw new Error(result?.error || 'Failed to update test flags');
 			}
-			await realmInfo.fetch();
+			await realmInfo.fetch({ force: true });
 			message = 'Test flags updated';
 			if (!values.test_mode) open = false;
 		} catch (e) {

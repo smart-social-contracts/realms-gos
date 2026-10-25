@@ -6,6 +6,7 @@ import { applyBrandingPrimary, DEFAULT_PRIMARY_COLOR, parsePrimaryColor } from '
 import { applyResolvedLocale } from '$lib/i18n';
 import { coerceRealmLanguages } from '$lib/i18n/realmLocales';
 import { userLocale } from '$lib/stores/userLocale';
+import { singleFlight } from '$lib/utils/singleFlight';
 import {
 	resolveDemoNoticeEnabled,
 	resolveDisableMonetaryTokens,
@@ -15,6 +16,9 @@ import {
 const RUNTIME_FLAGS_TIMEOUT_MS = 12_000;
 const STATUS_QUERY_TIMEOUT_MS = 12_000;
 const JOIN_TARGETS_TIMEOUT_MS = 8_000;
+// Boot mounts call fetch() from the backend init, layout, navbar and setup
+// gate; share one round of queries instead of repeating it per caller.
+const REALM_INFO_FRESH_MS = 5_000;
 
 /** Prevent hung IC queries from blocking backendReady forever during boot. */
 function withQueryTimeout<T>(
@@ -121,9 +125,7 @@ const createRealmInfoStore = () => {
 		error: null
 	});
 
-	return {
-		subscribe,
-		fetch: async () => {
+	const load = async (): Promise<boolean> => {
 			update(state => ({ ...state, loading: true, error: null }));
 			
 			try {
@@ -266,6 +268,7 @@ const createRealmInfoStore = () => {
 							primaryLanguage: languageConfig.primary
 						});
 					}
+					return true;
 				} else {
 					throw new Error('Failed to fetch realm info');
 				}
@@ -276,7 +279,17 @@ const createRealmInfoStore = () => {
 					loading: false,
 					error: error instanceof Error ? error.message : 'Unknown error'
 				}));
+				return false;
 			}
+	};
+
+	const sharedLoad = singleFlight(load, { ttlMs: REALM_INFO_FRESH_MS, cacheIf: (ok) => ok });
+
+	return {
+		subscribe,
+		/** Concurrent/recent calls share one load; pass `{ force: true }` after changing realm config. */
+		fetch: async (opts?: { force?: boolean }): Promise<void> => {
+			await sharedLoad(opts);
 		}
 	};
 };

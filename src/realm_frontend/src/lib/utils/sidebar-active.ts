@@ -67,3 +67,15 @@ export function sidebarFoldExpandKey(
 ): string {
 	return `${pathname}${search}|${membership}|${foldIds.join(',')}`;
 }
+
+/**
+ * Path+search of an afterNavigate endpoint. SvelteKit passes
+ * `from: { url: null }` on the initial `enter` navigation; throwing there
+ * aborts client start-up before the router is installed, turning every
+ * link click into a full page reload.
+ */
+export function navigationTargetKey(
+	target: { url: { pathname: string; search: string } | null } | null | undefined,
+): string {
+	return `${target?.url?.pathname ?? ''}${target?.url?.search ?? ''}`;
+}

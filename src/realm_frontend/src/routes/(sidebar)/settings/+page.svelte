@@ -7,9 +7,15 @@
 	import { _ } from 'svelte-i18n';
 	import { get } from 'svelte/store';
 	import { localizeBackendError } from '$lib/utils/backendError';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	// @ts-ignore
-	import { quarterBackend, createQuarterActor, asJoinSafeActor } from '$lib/canisters.js';
+	import {
+		quarterBackend,
+		quarterBackendStore,
+		createQuarterActor,
+		asJoinSafeActor
+	} from '$lib/canisters.js';
+	import { profilesLoading } from '$lib/stores/profiles';
 	import { realmInfo } from '$lib/stores/realmInfo';
 	import { activeQuarterId } from '$lib/stores/quarters';
 	import {
@@ -120,8 +126,13 @@
 		);
 	}
 
-	async function loadUserStatus() {
+	let userStatusSeq = 0;
+
+	/** Returns false when a newer load superseded this one (its result is dropped). */
+	async function loadUserStatus(): Promise<boolean> {
+		const seq = ++userStatusSeq;
 		const response = await quarterBackend.get_my_user_status();
+		if (seq !== userStatusSeq) return false;
 		if (response && response.success && response.data && response.data.userGet) {
 			const u = response.data.userGet;
 			principal = u.principal;
@@ -144,6 +155,7 @@
 				languages: $realmInfo.languages,
 				primaryLanguage: $realmInfo.primaryLanguage
 			});
+			return true;
 		} else {
 			throw new Error(
 				(response && !response.success && response.data?.error) ||
@@ -151,6 +163,25 @@
 			);
 		}
 	}
+
+	async function refreshUserStatus() {
+		const seq = userStatusSeq + 1;
+		try {
+			if (await loadUserStatus()) userStatusError = '';
+		} catch (e: any) {
+			if (seq === userStatusSeq) userStatusError = e.message || 'Failed to fetch user status.';
+		} finally {
+			if (seq === userStatusSeq) loadingUserStatus = false;
+		}
+	}
+
+	// On reload the capital answers first; members live on their home quarter,
+	// which activates once the membership probe finishes. Re-read the user
+	// record whenever the quarter-aware actor swaps.
+	$effect(() => {
+		$quarterBackendStore;
+		untrack(() => void refreshUserStatus());
+	});
 
 	function parseExtensionResponse(result: any) {
 		const tr = (key: string) => get(_)(key);
@@ -401,15 +432,6 @@
 				} finally {
 					loadingMembership = false;
 				}
-			})(),
-			(async () => {
-				try {
-					await loadUserStatus();
-				} catch (e: any) {
-					userStatusError = e.message || 'Failed to fetch user status.';
-				} finally {
-					loadingUserStatus = false;
-				}
 			})()
 		]);
 	});
@@ -425,7 +447,7 @@
 			</Heading>
 
 			<!-- User Info -->
-			{#if loadingUserStatus}
+			{#if loadingUserStatus || (userStatusError && $profilesLoading)}
 				<div class="mt-4 text-gray-500">{$_('settings.loading_status')}</div>
 			{:else if userStatusError}
 				<div class="mt-4 text-red-500">{userStatusError}</div>

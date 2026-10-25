@@ -17,8 +17,10 @@
 	// @ts-ignore
 	import { CONFIG } from '$lib/config.js';
 	import { cn } from '$lib/theme/utilities';
-	import { mountExtension, resolveExtensionVersion, type MountResult } from '$lib/extension-loader';
+	import { mountExtension, type MountResult } from '$lib/extension-loader';
+	import { getInstalledExtensionVersion } from '$lib/utils/extension-manifest';
 	import { loadExtensionTranslation } from '$lib/i18n';
+	import { getInfraConfig } from '$lib/utils/infraConfig';
 	import { IconSettings, IconX } from '@tabler/icons-svelte';
 
 	export let open = false;
@@ -149,20 +151,7 @@
 	}
 
 	async function resolveInfraConfig() {
-		try {
-			const raw = await backend.status();
-			const resp = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const canisters: { canister_id: string; canister_type: string }[] =
-				resp?.data?.status?.canisters ?? [];
-			const fr = canisters.find((c) => c.canister_type === 'file_registry');
-			const mp = canisters.find((c) => c.canister_type === 'marketplace');
-			infraConfig = {
-				fileRegistryCanisterId: fr?.canister_id ?? '',
-				marketplaceCanisterId: mp?.canister_id ?? '',
-			};
-		} catch {
-			infraConfig = {};
-		}
+		infraConfig = await getInfraConfig();
 	}
 
 	function buildContext(id: string, version: string): any {
@@ -235,7 +224,7 @@
 
 		try {
 			const [version] = await Promise.all([
-				resolveExtensionVersion(backend as any, EXTENSION_ID),
+				getInstalledExtensionVersion(EXTENSION_ID),
 				resolveInfraConfig(),
 			]);
 			if (!version) {

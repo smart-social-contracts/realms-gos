@@ -90,21 +90,6 @@ async function resolveInstalledVersion(
 }
 
 /**
- * Resolve an extension's installed version by querying the realm_backend.
- */
-export async function resolveExtensionVersion(
-  backend: {
-    list_runtime_extensions: () => Promise<string>;
-  },
-  extId: string,
-): Promise<string | undefined> {
-  const raw = await backend.list_runtime_extensions();
-  const parsed = JSON.parse(raw);
-  const manifest = parsed?.all_manifests?.[extId];
-  return manifest?.version;
-}
-
-/**
  * Fetch and dynamically import an extension's compiled frontend bundle,
  * then call its default export to mount it into `target`.
  *

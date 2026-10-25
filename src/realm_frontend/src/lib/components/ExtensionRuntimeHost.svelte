@@ -16,15 +16,19 @@
 	import {
 		mountExtension,
 		mountSandboxedExtension,
-		resolveExtensionVersion,
 		type MountResult,
 		type SandboxMountResult
 	} from '$lib/extension-loader';
 	import { isPrivilegedExtension } from '$lib/extension-privileged';
 	import { loadExtensionTranslation } from '$lib/i18n';
+	import { getInfraConfig } from '$lib/utils/infraConfig';
+	import { callExtensionFunction, extensionQueryFunctions } from '$lib/utils/extension-query';
 	import { createMarketplaceExtensionBackend } from '$lib/marketplace-extension-backend';
 	import type { RealmExtensionContext } from '$lib/realm-extension-sdk';
-	import { getExtensionManifestWithRetry } from '$lib/utils/extension-manifest';
+	import {
+		getExtensionManifestWithRetry,
+		getInstalledExtensionVersion
+	} from '$lib/utils/extension-manifest';
 	import { resolveExtensionMountMode } from '$lib/utils/extension-runtime-mode';
 	import { requestBridgeModal, showBridgeNotify } from '$lib/stores/bridge-modal';
 	import type { HostRealmInfo, HostState } from '@realmsgos/extension-bridge';
@@ -114,23 +118,14 @@
 	let infraConfig: { fileRegistryCanisterId?: string; marketplaceCanisterId?: string } = {};
 
 	async function resolveInfraConfig() {
-		try {
-			const raw = await backend.status();
-			const resp = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const canisters: { canister_id: string; canister_type: string }[] =
-				resp?.data?.status?.canisters ?? [];
-			const fr = canisters.find((c) => c.canister_type === 'file_registry');
-			const mp = canisters.find((c) => c.canister_type === 'marketplace');
-			infraConfig = {
-				fileRegistryCanisterId: fr?.canister_id ?? '',
-				marketplaceCanisterId: mp?.canister_id ?? ''
-			};
-		} catch {
-			infraConfig = {};
-		}
+		infraConfig = await getInfraConfig();
 	}
 
-	async function buildContext(id: string, version: string): Promise<RealmExtensionContext> {
+	async function buildContext(
+		id: string,
+		version: string,
+		queryFunctions: ReadonlySet<string>
+	): Promise<RealmExtensionContext> {
 		let extensionBackend: typeof backend = quarterBackend;
 		let marketplaceAdapter: Awaited<ReturnType<typeof createMarketplaceExtensionBackend>> | null =
 			null;
@@ -169,7 +164,13 @@
 		async function callSync(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
 			let raw: string;
 			try {
-				raw = await extensionBackend.extension_sync_call(id, fn, JSON.stringify(args));
+				raw = (await callExtensionFunction(
+					extensionBackend,
+					id,
+					fn,
+					JSON.stringify(args),
+					queryFunctions
+				)) as string;
 			} catch (e) {
 				const friendly = formatDelegationExpiredError(e);
 				if (friendly) throw new Error(friendly);
@@ -294,16 +295,18 @@
 		throw new Error('mount point not ready');
 	}
 
-	async function loadRuntimeExtension(id: string) {
+	async function loadRuntimeExtension(id: string, freshManifests = false): Promise<void> {
 		cleanupMounted();
 		status = 'loading';
 		errorMsg = '';
 		errorRetryable = false;
 		runtimeDenied = null;
+		let version: string | undefined;
 
 		try {
-			const [version, manifest] = await Promise.all([
-				resolveExtensionVersion(backend as any, id),
+			let manifest: Awaited<ReturnType<typeof getExtensionManifestWithRetry>>;
+			[version, manifest] = await Promise.all([
+				getInstalledExtensionVersion(id, { fresh: freshManifests }),
 				getExtensionManifestWithRetry(id),
 				resolveInfraConfig()
 			]);
@@ -334,7 +337,7 @@
 
 			if (mountMode.kind === 'sandboxed') {
 				sandboxed = true;
-				const ctx = await buildContext(id, version);
+				const ctx = await buildContext(id, version, extensionQueryFunctions(manifest));
 				mounted = await mountSandboxedExtension(id, version, mountEl, {
 					manifest: {
 						sdk_version: manifest?.sdk_version as string | undefined,
@@ -362,7 +365,7 @@
 				await (mounted as SandboxMountResult).ready;
 				console.debug(`[extension] Sandboxed bridge ready ${id}@${version}`);
 			} else {
-				const ctx = await buildContext(id, version);
+				const ctx = await buildContext(id, version, extensionQueryFunctions(manifest));
 				mounted = await mountExtension(id, version, mountEl, ctx);
 				console.debug(`[extension] Mounted ${id}@${version}`);
 			}
@@ -377,6 +380,14 @@
 			} else if (String(e?.message ?? e).includes('SDK version mismatch')) {
 				status = 'sdk_mismatch';
 				errorMsg = String(e?.message ?? e);
+			} else if (
+				!freshManifests &&
+				version !== (await getInstalledExtensionVersion(id, { fresh: true }).catch(() => version))
+			) {
+				// Version came from the session manifest cache and the extension was
+				// upgraded since (new bundle path): retry once with fresh manifests.
+				console.warn('Extension load failed on a stale version; retrying:', e);
+				return loadRuntimeExtension(id, true);
 			} else {
 				console.error('Extension load failed:', e);
 				status = 'error';

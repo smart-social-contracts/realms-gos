@@ -77,21 +77,74 @@ export async function activateMembership(
 		activeQuarterId.set(null);
 		await setActiveQuarter(null);
 		if (cache && typeof localStorage !== 'undefined') {
-			localStorage.removeItem('home_quarter');
+			// Capital members cache the capital too, so reloads stop at one call.
+			if (capitalId) localStorage.setItem('home_quarter', capitalId);
+			else localStorage.removeItem('home_quarter');
 		}
 	}
 }
 
 /**
+ * A user record's `assigned_quarter` is only a hint (it can point at a quarter
+ * that never received the record). Returns a hit for it only when that quarter
+ * recognizes the caller; otherwise the caller should stay where they were found.
+ */
+export async function verifyAssignedQuarter(primary: MembershipHit): Promise<MembershipHit | null> {
+	const assigned = String(primary.response?.data?.userGet?.assigned_quarter || '').trim();
+	if (!assigned || assigned === primary.canisterId) return null;
+	// @ts-ignore
+	const { createQuarterActor } = await import('$lib/canisters');
+	try {
+		const actor = await createQuarterActor(assigned);
+		const r = await actor.get_my_user_status();
+		if (hasMembership(r)) {
+			return { canisterId: assigned, isCapital: false, response: r, profiles: profilesOf(r) };
+		}
+	} catch (e) {
+		console.warn('assigned_quarter probe failed for', assigned, e);
+	}
+	console.warn(
+		`assigned_quarter ${assigned} does not recognize the caller; staying on ${primary.canisterId}`
+	);
+	return null;
+}
+
+/** Like Promise.all(items.map(fn)) with at most `limit` calls in flight; keeps input order. */
+export async function mapWithConcurrency<T, R>(
+	items: T[],
+	limit: number,
+	fn: (item: T) => Promise<R>
+): Promise<R[]> {
+	const results = new Array<R>(items.length);
+	let next = 0;
+	const worker = async () => {
+		while (next < items.length) {
+			const i = next++;
+			results[i] = await fn(items[i]);
+		}
+	};
+	await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+	return results;
+}
+
+const PROBE_CONCURRENCY = 8;
+
+/**
  * Probe capital + every quarter from get_join_targets for the caller's membership.
  * Prefers a valid localStorage home_quarter cache when it still recognizes the caller.
+ *
+ * `stopAtCachedHit`: when the cached home quarter still recognizes the caller,
+ * return it without probing the other canisters (boot/login only needs the
+ * primary; a realm can have dozens of quarters).
  */
 export async function probeFederatedMembership(options?: {
 	activate?: boolean;
 	cache?: boolean;
+	stopAtCachedHit?: boolean;
 }): Promise<ProbeResult> {
 	const activate = options?.activate !== false;
 	const cache = options?.cache !== false;
+	const stopAtCachedHit = options?.stopAtCachedHit === true;
 
 	// @ts-ignore
 	const { backend, createQuarterActor } = await import('$lib/canisters');
@@ -132,7 +185,7 @@ export async function probeFederatedMembership(options?: {
 		}
 	}
 
-	for (const q of ordered) {
+	const probeOne = async (q: { canister_id: string; is_capital?: boolean }) => {
 		const cid = q.canister_id || '';
 		const isCapital = !!(q.is_capital || (capitalId && cid === capitalId) || !cid);
 		try {
@@ -140,17 +193,31 @@ export async function probeFederatedMembership(options?: {
 				!cid || cid === capitalId ? backend : await createQuarterActor(cid);
 			const r = await actor.get_my_user_status();
 			if (hasMembership(r)) {
-				hits.push({
+				return {
 					canisterId: cid || capitalId,
 					isCapital,
 					response: r,
 					profiles: profilesOf(r),
-				});
+				} as MembershipHit;
 			}
 		} catch (qe) {
 			console.warn('Quarter membership probe failed for', cid || '(capital)', qe);
 		}
+		return null;
+	};
+
+	let remaining = ordered;
+	if (stopAtCachedHit && cached && ordered[0]?.canister_id === cached) {
+		const cachedHit = await probeOne(ordered[0]);
+		if (cachedHit) {
+			hits.push(cachedHit);
+			remaining = [];
+		} else {
+			remaining = ordered.slice(1);
+		}
 	}
+	const probed = await mapWithConcurrency(remaining, PROBE_CONCURRENCY, probeOne);
+	for (const h of probed) if (h) hits.push(h);
 
 	const primary = pickPrimaryHit(hits, cached);
 

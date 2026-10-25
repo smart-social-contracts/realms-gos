@@ -47,6 +47,8 @@ async function loadSidebarManifests(
 	}
 }
 
+let latestSidebarRequest = 0;
+
 export async function loadSidebar(
 	backend: {
 		get_sidebar: (args: string) => Promise<string>;
@@ -54,6 +56,7 @@ export async function loadSidebar(
 	},
 	locale: string = 'en',
 ): Promise<void> {
+	const request = ++latestSidebarRequest;
 	const cached = readCache(locale);
 	if (cached) {
 		sidebarConfig.set(cached);
@@ -65,6 +68,9 @@ export async function loadSidebar(
 			backend.get_sidebar(JSON.stringify({ locale })),
 			loadSidebarManifests(backend),
 		]);
+		// The actor swaps capital → home quarter during boot; the capital's
+		// guest menu must not overwrite (or be cached over) the member's.
+		if (request !== latestSidebarRequest) return;
 		const parsed = JSON.parse(raw);
 
 		if (!parsed?.success) {
@@ -84,11 +90,12 @@ export async function loadSidebar(
 		sidebarConfig.set(config);
 		writeCache(locale, config);
 	} catch (e) {
+		if (request !== latestSidebarRequest) return;
 		console.error('Failed to load sidebar:', e);
 		if (!get(sidebarConfig) && cached) {
 			sidebarConfig.set(cached);
 		}
 	} finally {
-		sidebarLoading.set(false);
+		if (request === latestSidebarRequest) sidebarLoading.set(false);
 	}
 }

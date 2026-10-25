@@ -1,6 +1,9 @@
 import { writable } from 'svelte/store';
 // @ts-ignore
 import { backend } from '$lib/canisters';
+import { singleFlight } from '../utils/singleFlight';
+import { callExtensionFunction, extensionQueryFunctions } from '../utils/extension-query';
+import { peekExtensionManifest } from '../utils/extension-manifest';
 
 export interface NotificationItem {
     id: string;
@@ -20,11 +23,25 @@ export interface NotificationItem {
 export const notifications = writable<NotificationItem[]>([]);
 export const unreadCount = writable<number>(0);
 
-export async function loadNotifications() {
+// The sidebar layout reloads on mount and on every navigation, so the first
+// render fired two identical (update) calls; share the one in flight.
+const sharedLoad = singleFlight(fetchNotifications);
+
+export function loadNotifications(): Promise<void> {
+    return sharedLoad();
+}
+
+async function fetchNotifications(): Promise<void> {
     try {
         console.log('[notifications] Loading notifications...');
         // Candid signature is positional: (extension_name, function_name, args)
-        const result = await backend.extension_sync_call('notifications', 'get_notifications', '{}');
+        const result = await callExtensionFunction(
+            backend,
+            'notifications',
+            'get_notifications',
+            '{}',
+            extensionQueryFunctions(peekExtensionManifest('notifications')),
+        ) as any;
         console.log('[notifications] Raw result:', result);
         // ExtensionCallResponse is { response: string, success: bool }
         const responseStr = result.response || result;

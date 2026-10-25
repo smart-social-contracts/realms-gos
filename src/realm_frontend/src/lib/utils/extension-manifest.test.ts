@@ -82,6 +82,49 @@ describe('fetchExtensionManifests', () => {
 	});
 });
 
+describe('getInstalledExtensionVersion', () => {
+	const manifests = (version: string, extra: Record<string, unknown> = {}) =>
+		JSON.stringify({ all_manifests: { voting: { name: 'voting', version }, ...extra } });
+
+	beforeEach(async () => {
+		const { clearExtensionManifestCache } = await import('./extension-manifest');
+		clearExtensionManifestCache();
+		listRuntimeExtensions.mockReset();
+	});
+
+	it('reuses the cached manifests instead of querying per navigation', async () => {
+		listRuntimeExtensions.mockResolvedValue(manifests('1.4.2'));
+		const { getInstalledExtensionVersion, getExtensionManifest } = await import(
+			'./extension-manifest'
+		);
+		await getExtensionManifest('voting');
+		await expect(getInstalledExtensionVersion('voting')).resolves.toBe('1.4.2');
+		await expect(getInstalledExtensionVersion('voting')).resolves.toBe('1.4.2');
+		expect(listRuntimeExtensions).toHaveBeenCalledTimes(1);
+	});
+
+	it('refetches once when the extension is missing from the cache', async () => {
+		listRuntimeExtensions
+			.mockResolvedValueOnce(manifests('1.4.2'))
+			.mockResolvedValueOnce(manifests('1.4.2', { vault: { name: 'vault', version: '0.3.0' } }));
+		const { getInstalledExtensionVersion } = await import('./extension-manifest');
+		await getInstalledExtensionVersion('voting');
+		await expect(getInstalledExtensionVersion('vault')).resolves.toBe('0.3.0');
+		expect(listRuntimeExtensions).toHaveBeenCalledTimes(2);
+	});
+
+	it('fresh bypasses the cache (upgrade during the session)', async () => {
+		listRuntimeExtensions
+			.mockResolvedValueOnce(manifests('1.4.2'))
+			.mockResolvedValueOnce(manifests('1.5.0'));
+		const { getInstalledExtensionVersion } = await import('./extension-manifest');
+		await expect(getInstalledExtensionVersion('voting')).resolves.toBe('1.4.2');
+		await expect(getInstalledExtensionVersion('voting', { fresh: true })).resolves.toBe('1.5.0');
+		await expect(getInstalledExtensionVersion('voting')).resolves.toBe('1.5.0');
+		expect(listRuntimeExtensions).toHaveBeenCalledTimes(2);
+	});
+});
+
 describe('parseExtensionIdFromPath', () => {
 	it('extracts extension id from extension routes', () => {
 		expect(parseExtensionIdFromPath('/extensions/voting')).toBe('voting');
