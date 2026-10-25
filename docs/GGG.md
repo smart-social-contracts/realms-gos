@@ -1,6 +1,6 @@
 # GGG — Generalized Global Governance
 
-**Status:** draft v0.1 for review (phase 0 of [REFACTOR_PLAN.md](../REFACTOR_PLAN.md)).
+**Status:** draft v0.2 for review (phase 0 of [REFACTOR_PLAN.md](../REFACTOR_PLAN.md)).
 
 GGG is the standard a realm implements: the **entities** it stores, the **operations** that change
 them, and the **invariants** that must always hold. It describes behaviour, not code. The realm's
@@ -9,7 +9,7 @@ operations, and the invariants are enforced by Cedar guardrails and checked by t
 
 When this document and the code disagree, the code is wrong.
 
-Design decisions still open are marked **[D1]**…**[D6]** and listed at the end.
+Design decisions still open are marked **[D1]**…**[D5]** and listed at the end.
 
 ## 1. Conventions
 
@@ -35,7 +35,7 @@ result. Several operations may share a permission. Flags:
 |---|---|
 | `read` | Query; changes nothing; not audited. |
 | `delegable` | May be called with `on_behalf_of`: the caller acts for a grantor whose active `Delegation` covers the permission. Both principals are audited. |
-| `governed` | When the governing organization's policy is not direct, calling it files a `Proposal` that replays the exact call once approved. |
+| `governed` | When the governing department's policy is not direct, calling it files a `Proposal` that replays the exact call once approved. |
 | `signing` | Produces an act that only an accountable human may make. Agents can never perform it, directly or by delegation. |
 
 Results are `{"ok": true, ...}` or `{"ok": false, "error": "..."}`.
@@ -62,17 +62,20 @@ organizations: **Clinic B** (health provider) and **BuildCo** (contractor). Agen
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `User` | `id` (principal), `nickname`, `avatar`, `status`, `home_quarter`, `joined_at`, `profiles` → `Profile`*, `private_data` (encrypted) | One per principal known to this quarter. **[D2]** absorbs today's `Member` and `GuestUser`. | `alice`: nickname Alice, `member`, home quarter North, profiles `[member]` |
+| `User` | `id` (principal), `nickname`, `avatar`, `status`, `home_quarter`, `joined_at`, `profiles` → `Profile`*, `private_data` (encrypted) | One per principal known to this quarter. **[D1]** absorbs today's `Member` and `GuestUser`. | `alice`: nickname Alice, `member`, home quarter North, profiles `[member]` |
 | `Human` | `id`, `user` → `User`, `date_of_birth`, `h3_index` | A verified person behind a user. At most one user per human. | Alice's verified person record: born 1990-04-12, home cell `871f1d489ffffff` |
 | `Identity` | `id`, `human` → `Human`, `kind` (`passport`, `email`, `registry`, …), `issuer`, `ref`, `verified_at` | An attestation. Proof material is stored encrypted or off-chain; `ref` points to it. | Alice's passport proof: kind `passport`, issuer `zkpassport`, verified 2026-03-02 |
-| `Profile` | `id` (name), `description`, `operations` (Json list of permissions) | A named role. Defaults: `admin` (`all`), `member`. **[D3]** replaces `UserProfile` and `Permission`. | `member` → `[self.join, proposal.vote, proposal.create, dispute.create, …]` |
-| `Invite` | `id` (code hash), `profile`, `organization`, `position`, `max_uses`, `uses`, `redeemed_by` (Json), `expires_at`, `revoked`, `created_by` | Today's `RegistrationCode`. The code itself is never stored. | 50-use code for new clerks: profile `member`, Civil Registry, position `clerk`, expires in 30 days |
+| `Profile` | `id` (name), `description`, `operations` (Json list of permissions) | A named role. Defaults: `admin` (`all`), `member`. **[D2]** replaces `UserProfile` and `Permission`. | `member` → `[self.join, proposal.vote, proposal.create, dispute.create, …]` |
+| `Invite` | `id` (code hash), `profile`, `department`, `position`, `max_uses`, `uses`, `redeemed_by` (Json), `expires_at`, `revoked`, `created_by` | Today's `RegistrationCode`. The code itself is never stored. | 50-use code for new clerks: profile `member`, Civil Registry, position `clerk`, expires in 30 days |
+| `Delegation` | `id`, `grantor`, `delegate`, `scope` (Json), `status`, `label`, `description`, `requires_acceptance`, `granted_by`, `accepted_at`, `starts_at`, `expires_at`, `revoked_at`, `revoked_by` | Power of attorney. | Alice → `claude-conn`: `[proposal.vote, proposal.create]` for 24 h, `active` |
+| `DelegationRequest` | `id`, `grantor`, `delegate`, `scope`, `label`, `description`, `starts_at`, `expires_at`, `request_expires_at` | A delegate asking a member for a grant. Deleted once decided. | Claude asks Alice for `[proposal.vote]` for 7 days; the link is valid 1 h |
 
 ### Lifecycles
 
 - `User.status`: `visitor` → `member` → `suspended` ⇄ `member`; `member` → `banned` (terminal);
   `guest` for users whose `home_quarter` is another quarter.
 - `Identity`: `pending` → `verified` | `rejected`.
+- `Delegation.status`: `pending` → `active` → `revoked` | `expired`; `pending` → `declined`.
 
 ### Operations
 
@@ -92,62 +95,81 @@ organizations: **Clinic B** (health provider) and **BuildCo** (contractor). Agen
 | `invite_create`, `invite_revoke`, `invite_list` | `invite.manage` | | Dana creates 50 clerk invites; revokes one sent to the wrong email |
 | `profile_create`, `profile_edit` | `permission.grant` | governed | New profile `treasurer` → `[treasury.view, transfer.create]` |
 | `role_assign`, `role_revoke` (profile ↔ user) | `role.assign`, `role.revoke` | governed | Give Bob `treasurer` → proposal under the root department's policy |
+| `delegation_grant`, `delegation_revoke`, `delegation_accept` | `self.delegate` | | Alice lets Bob vote for her for 2 weeks while she travels |
+| `delegation_request` (by the delegate), `delegation_request_decide` (by the grantor) | `self.delegate` | | Claude asks for `[proposal.vote, proposal.create]`, 24 h; Alice approves only voting |
+| `delegation_list`, `delegable_operations` | `self.data_view` | read | Alice's grants; delegable operations: `[proposal.vote, proposal.create, …]` |
 
 ### Invariants
 
 - I-ID-1: A user's `id` equals the principal that signs their calls; nobody can act as another user
   except through a `Delegation`.
-- I-ID-2: An invite grants at most the profile, organization and position it names, at most
+- I-ID-2: An invite grants at most the profile, department and position it names, at most
   `max_uses` times, never after `expires_at` or `revoked`.
 - I-ID-3: Nobody can assign a profile containing a permission they do not hold themselves.
 - I-ID-4: A `banned` user can call nothing except read operations on public data.
 - I-ID-5: Private data is readable only by its owner and by principals the owner shared it with.
+- I-ID-6: A delegation never covers a permission the grantor lacks at the time of use, never a
+  `signing` permission, never `all`, and never lasts more than one year.
+- I-ID-7: A delegate acts only within `starts_at`…`expires_at` and while the grant is `active`.
+- I-ID-8: Every delegated act records both the grantor and the delegate.
 
-## 3. Organizations
+## 3. Departments and organizations
 
-**[D1]** One `Organization` entity covers both internal departments and external parties
-(companies, clinics, schools, courts' operators). Today these are two entities (`Department`,
-`Organization`) with crossed names: departments use `organization.*` permissions and their positions
-are documented as "product name: Organization", while external organizations have no members at all.
+Two kinds of body:
+
+- A **department** belongs to the realm. Its positions, appointments and policy are realm data and
+  change only under the realm's own rules.
+- An **organization** is an external party: a company, clinic, school or contractor. How it runs
+  inside is its own business. The realm records its licences and its **representatives**: the people
+  and agents who may act or sign for it.
 
 ### Entities
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `Organization` | `id` (name), `kind` (`department`, `external`), `description`, `parent` → `Organization`, `is_root`, `head` → `User`, `policy` (Json), `target_policy` (Json), `fund` → `Fund`, `extensions` → `Extension`* | `policy` = `{m, n, quorum_percent, veto: [principals]}`. Exactly one root department per realm. | `civil-registry`: department under Administration, 2-of-3 policy, head `dana`; `clinic-b`: external |
-| `Position` | `id` (key), `organization` → `Organization`, `title`, `profile` → `Profile`, `headcount`, `salary` (int), `salary_period`, `status`, `inherit_from_capital` | A seat. | `civil-registry.clerk`: 4 seats, 2,000 REALM/month, profile `clerk` |
+| `Department` | `id` (name), `description`, `parent` → `Department`, `is_root`, `head` → `User`, `policy` (Json), `target_policy` (Json), `fund` → `Fund`, `extensions` → `Extension`* | `policy` = `{m, n, quorum_percent, veto: [principals]}`. Exactly one root department per realm. | Civil Registry: under Administration, 2-of-3 policy, head `dana` |
+| `Organization` | `id` (name), `description`, `status`, `admins` → `User`* | An external party. Its admins manage its representatives. | Clinic B: `active`, admin `dr-ana` |
+| `Position` | `id` (key), `department` → `Department` or `organization` → `Organization`, `title`, `profile` → `Profile`, `headcount`, `salary` (int), `salary_period`, `status`, `inherit_from_capital` | A seat in a department, or a representative seat in an organization. | `civil-registry.clerk`: 4 seats, 2,000 REALM/month, profile `clerk`; `clinic-b.physician`: 3 seats |
 | `Appointment` | `id`, `position` → `Position`, `user` → `User`, `kind` (`substantive`, `acting`), `agent` (bool), `supervisor` → `User`, `started_at`, `ended_at`, `status`, `source_quarter` | One user holding one seat. Agents are users with `agent = true`. | Bob holds a clerk seat since 2026-05-01; `records-bot` holds `records_agent` at Clinic B, agent, supervisor `dr-ana` |
-| `Authority` | `id`, `grantor` → `Organization`, `target` (organization or quarter ref), `operations` (Json) | One organization's powers over another. Today's `DepartmentAuthority`. | Finance lets Infrastructure use `[transfer.create]` on the `ROADS` fund |
+| `Authority` | `id`, `grantor` → `Department`, `target` (department or quarter ref), `operations` (Json) | One department's powers over another. Today's `DepartmentAuthority`. | Finance lets Infrastructure use `[transfer.create]` on the `ROADS` fund |
 
 ### Lifecycles
 
 - `Position.status`: `open` ⇄ `frozen`; `open` | `frozen` → `closed`.
 - `Appointment.status`: `active` → `ended`.
+- `Organization.status`: `active` ⇄ `suspended`; `active` | `suspended` → `dissolved`.
 
 ### Operations
 
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
-| `org_create` | `org.create` | governed | Create department Health under the root → proposal `P-12` |
-| `org_edit`, `org_delete` | `org.set_policy` | governed | Rename Roads to Mobility |
-| `org_set_policy` | `org.set_policy` | governed | Infrastructure goes from 1-of-1 to 2-of-3 with 50% quorum |
-| `org_get`, `org_list`, `org_chart` | `realm.data_view` | read | Civil Registry's chart: 3 positions, 7 of 9 seats filled |
+| `department_create` | `org.create` | governed | Create department Health under the root → proposal `P-12` |
+| `department_edit`, `department_delete` | `org.set_policy` | governed | Rename Roads to Mobility |
+| `department_set_policy` | `org.set_policy` | governed | Infrastructure goes from 1-of-1 to 2-of-3 with 50% quorum |
+| `department_get`, `department_list`, `department_chart` | `realm.data_view` | read | Civil Registry's chart: 3 positions, 7 of 9 seats filled |
 | `position_create`, `position_edit`, `position_close` | `org.manage_members` | governed | Open 2 `inspector` seats in Infrastructure at 2,400 REALM/month |
 | `appoint`, `appoint_acting`, `appointment_end` | `org.appoint` | governed | Appoint Carla planning officer; Bob acts as head while Dana is on leave |
-| `org_member_add`, `org_member_remove` | `org.manage_members` | governed | Clinic B adds Nurse Ben |
-| `org_expel` | `org.expel` | governed | Expel a member from Infrastructure after a misconduct verdict |
+| `department_expel` | `org.expel` | governed | Expel a member from Infrastructure after a misconduct verdict |
 | `authority_grant`, `authority_revoke` | `org.grant_authority`, `org.revoke_authority` | governed | Finance grants Infrastructure spending on `ROADS` |
+| `organization_register` | `organization.add` | | Dr. Ana registers Clinic B and becomes its admin |
+| `organization_edit` | `organization.edit` (its admins) | | Clinic B updates its description and adds an admin |
+| `representative_add`, `representative_remove` | `organization.edit` (its admins) | | Clinic B adds `records-bot` as an agent supervised by Dr. Ana |
+| `organization_set_status` | `organization.delete` | governed | Suspend BuildCo while it is investigated for fraud |
+| `organization_get`, `organization_list` | `realm.data_view` | read | Licensed health providers in North |
 
 ### Invariants
 
-- I-ORG-1: A user holds an organization's permissions only through an active appointment in it (or
-  through an `Authority` granted to an organization they hold an appointment in).
+- I-ORG-1: A user holds a department's permissions only through an active appointment in it (or
+  through an `Authority` granted to a department they hold an appointment in).
 - I-ORG-2: Active appointments of a position never exceed its `headcount`.
 - I-ORG-3: An agent appointment always has a supervisor who holds an active, non-agent appointment in
-  the same organization.
+  the same department or organization.
 - I-ORG-4: An agent never holds a `signing` permission. (Cedar guardrail.)
-- I-ORG-5: A policy satisfies `1 ≤ m ≤ n`; veto principals hold an appointment in the organization.
+- I-ORG-5: A policy satisfies `1 ≤ m ≤ n`; veto principals hold an appointment in the department.
 - I-ORG-6: The root department always exists and cannot be deleted.
+- I-ORG-7: A department's positions and policy change only under the realm's rules; an organization's
+  representatives are managed only by its admins.
+- I-ORG-8: Nobody can act for a suspended or dissolved organization.
 
 ## 4. Governance
 
@@ -155,12 +177,10 @@ are documented as "product name: Organization", while external organizations hav
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `Proposal` | `id`, `title`, `description`, `proposer` → `User`, `on_behalf_of`, `organization` → `Organization` (scope; root = realm-wide), `action` (Json: `{op, args}` or codex code ref + checksum), `status`, `opens_at`, `deadline`, `threshold`, `quorum_percent`, `tally` (Json), `result` (Json) | | `P-7` Bike lane on Main St, scope Infrastructure, action `transfer_create` 50,000 REALM to BuildCo, `voting` until 8 Nov |
+| `Proposal` | `id`, `title`, `description`, `proposer` → `User`, `on_behalf_of`, `department` → `Department` (scope; root = realm-wide), `action` (Json: `{op, args}` or codex code ref + checksum), `status`, `opens_at`, `deadline`, `threshold`, `quorum_percent`, `tally` (Json), `result` (Json) | | `P-7` Bike lane on Main St, scope Infrastructure, action `transfer_create` 50,000 REALM to BuildCo, `voting` until 8 Nov |
 | `Vote` | `id`, `proposal` → `Proposal`, `voter` → `User`, `cast_by`, `choice` (`yes`, `no`, `abstain`), `cast_at` | One per voter per proposal; may be replaced until the deadline. | Alice votes `yes` on `P-7`, cast by `claude-conn` |
-| `Mandate` | `id`, `title`, `scope` (Json), `executor` → `Organization`, `proposal` → `Proposal`, `status`, `expires_at` | An authorization to act, granted by governance. | Infrastructure may contract road works up to 200,000 REALM until 2027-06-30 (from `P-4`) |
+| `Mandate` | `id`, `title`, `scope` (Json), `executor` → `Department`, `proposal` → `Proposal`, `status`, `expires_at` | An authorization to act, granted by governance. | Infrastructure may contract road works up to 200,000 REALM until 2027-06-30 (from `P-4`) |
 | `Contract` | `id`, `title`, `parties` (Json list of `Entity:id`), `mandate` → `Mandate`, `terms_ref`, `terms_hash`, `status`, `starts_at`, `ends_at` | Agreement between parties, possibly under a mandate. | `C-9`: Agora × BuildCo, bike lane works, Dec–Mar, terms `sha256:4be1…` |
-| `Delegation` | `id`, `grantor`, `delegate`, `scope` (Json), `status`, `label`, `description`, `requires_acceptance`, `granted_by`, `accepted_at`, `starts_at`, `expires_at`, `revoked_at`, `revoked_by` | Power of attorney. | Alice → `claude-conn`: `[proposal.vote, proposal.create]` for 24 h, `active` |
-| `DelegationRequest` | `id`, `grantor`, `delegate`, `scope`, `label`, `description`, `starts_at`, `expires_at`, `request_expires_at` | A delegate asking a member for a grant. Deleted once decided. | Claude asks Alice for `[proposal.vote]` for 7 days; the link is valid 1 h |
 
 ### Lifecycles
 
@@ -169,13 +189,12 @@ are documented as "product name: Organization", while external organizations hav
 - `Mandate.status`: `active` → `completed` | `revoked` | `expired`.
 - `Contract.status`: `draft` → `active` → `fulfilled` | `terminated` | `disputed`; `disputed` →
   `active` | `terminated`.
-- `Delegation.status`: `pending` → `active` → `revoked` | `expired`; `pending` → `declined`.
 
 ### Operations
 
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
-| `proposal_create` | `proposal.create` | delegable | `{title: "Bike lane on Main St", organization: "infrastructure", action: {…}}` → `P-7` |
+| `proposal_create` | `proposal.create` | delegable | `{title: "Bike lane on Main St", department: "infrastructure", action: {…}}` → `P-7` |
 | `proposal_withdraw` | `proposal.create` (own) | delegable | Bob withdraws his draft `P-8` |
 | `proposal_vote` | `proposal.vote` | delegable | `{proposal: "P-7", choice: "yes", on_behalf_of: "alice"}` → `V-31` |
 | `proposal_open`, `proposal_finalize`, `proposal_execute` | `proposal.manage` | | After the deadline: 412 yes, 120 no, quorum met → `accepted`; execute pays BuildCo |
@@ -184,9 +203,6 @@ are documented as "product name: Organization", while external organizations hav
 | `mandate_assign_executor` | `mandate.assign_executor` | governed | Make Infrastructure the mandate's executor |
 | `contract_create` | `contract.create_under_mandate` | | Sign `C-9` with BuildCo under the road-works mandate |
 | `contract_terminate` | `contract.terminate` | signing | End `C-9` after BuildCo misses two milestones (court order) |
-| `delegation_grant`, `delegation_revoke`, `delegation_accept` | `self.delegate` | | Alice lets Bob vote for her for 2 weeks while she travels |
-| `delegation_request` (by the delegate), `delegation_request_decide` (by the grantor) | `self.delegate` | | Claude asks for `[proposal.vote, proposal.create]`, 24 h; Alice approves only voting |
-| `delegation_list`, `delegable_operations` | `self.data_view` | read | Alice's grants; delegable operations: `[proposal.vote, proposal.create, …]` |
 | `governance_update` (voting windows, thresholds, quorum) | `governance.update` | governed | Voting window from 7 to 5 days |
 
 ### Invariants
@@ -194,11 +210,7 @@ are documented as "product name: Organization", while external organizations hav
 - I-GOV-1: A replayed proposal executes exactly the `action` that was voted on, and only once.
 - I-GOV-2: Votes count only from users eligible for the proposal's scope at the deadline.
 - I-GOV-3: A proposal is accepted only if quorum and threshold are met at finalization.
-- I-GOV-4: A delegation never covers a permission the grantor lacks at the time of use, never a
-  `signing` permission, never `all`, and never lasts more than one year.
-- I-GOV-5: A delegate acts only within `starts_at`…`expires_at` and while the grant is `active`.
-- I-GOV-6: Every delegated act records both the grantor and the delegate.
-- I-GOV-7: A contract created under a mandate stays within the mandate's scope and term.
+- I-GOV-4: A contract created under a mandate stays within the mandate's scope and term.
 
 ## 5. Finance
 
@@ -208,8 +220,8 @@ are documented as "product name: Organization", while external organizations hav
 |---|---|---|---|
 | `Treasury` | `id` (`1`), `config` (Json: epoch length, anchor month, source fund, auto-allocate) | Singleton. Absorbs `TreasuryConfig`. | Monthly epochs, source fund `ROOT`, auto-allocation on |
 | `Token` | `id` (symbol), `ledger`, `indexer`, `decimals`, `fee` | A fungible ledger the realm uses (ICRC-1). | `ckBTC`: ledger `mxzaz-…`, 8 decimals, fee 10 |
-| `Collection` | `id` (symbol), `canister`, `name`, `transferable`, `required_license` (licence type or empty), `supply_cap` | An NFT ledger (ICRC-7). Absorbs `NFTToken`. | `LAND` (transferable); `CRED` (non-transferable, minting needs a licence) |
-| `Fund` | `id` (code), `name`, `kind` (general, special revenue, …), `organization` → `Organization` | | `ROADS`: special revenue, owned by Infrastructure |
+| `NFTToken` | `id` (symbol), `canister`, `name`, `description`, `transferable`, `required_license` (licence type or empty), `supply_cap`, `total_supply` | An NFT ledger (ICRC-7) the realm mints into. | `LAND` (transferable); `CRED` (non-transferable, minting needs a licence) |
+| `Fund` | `id` (code), `name`, `kind` (general, special revenue, …), `department` → `Department` | | `ROADS`: special revenue, owned by Infrastructure |
 | `FiscalPeriod` | `id`, `name`, `starts_at`, `ends_at`, `status` | | `FY2026`: 2026-01-01 to 2026-12-31, `open` |
 | `Budget` | `id`, `fund` → `Fund`, `period` → `FiscalPeriod`, `category`, `kind`, `planned`, `actual`, `status`, `proposal` → `Proposal` | | Roads FY2026, capital: planned 300,000, actual 120,500, `adopted` |
 | `AllocationRule` | `id`, `source_fund`, `rules` (Json), `status`, `proposal` → `Proposal` | How revenue is split between funds. | From `ROOT`: 30% `WELFARE`, 20% `ROADS`, 50% `GENERAL` |
@@ -222,7 +234,7 @@ are documented as "product name: Organization", while external organizations hav
 | `TaxPolicy` | `id`, `status`, `document` (Json), `description`, `proposal` → `Proposal`, `adopted_at` | Parameters; the codex calculates. | `TAX-POLICY-3`: property tax 0.4% up to 50,000, 0.8% above, annual, `adopted` |
 | `TaxDeclaration` | `id`, `declarant` (`Entity:id`), `period`, `base`, `amount`, `status`, `invoice` → `Invoice` | New: self-declared bases (revenue, payroll). | Clinic B declares 182,000 revenue for 2026-Q3 → `INV-412` |
 
-Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/`Collection`),
+Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/`NFTToken`),
 `MarketPlace` (→ realm canister settings), `TreasuryConfig` (→ `Treasury.config`).
 
 ### Lifecycles
@@ -239,7 +251,7 @@ Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
 | `treasury_view`, `ledger_view`, `report_view` | `treasury.view` | read | Finance sees `ROOT` 1.2M, `ROADS` 180k REALM |
-| `treasury_configure`, `token_register`, `collection_register` | `treasury.manage` | governed | Quarterly allocation epochs; register ckUSDC |
+| `treasury_configure`, `token_register`, `nft_token_register` | `treasury.manage` | governed | Quarterly allocation epochs; register ckUSDC |
 | `transfer_create` (from a fund) | `transfer.create` | delegable, governed | `{fund: "ROADS", to: "buildco", amount: 50000}` → proposal under Infrastructure's policy |
 | `transfer_revert` | `transfer.delete` | governed | Cancel a duplicate pending payment |
 | `invoice_create` | `treasury.manage` | | Registration fee: 10 REALM for new member Bob |
@@ -266,7 +278,7 @@ Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/
 - I-FIN-5: A closed fiscal period accepts no new entries; corrections go into a restating report.
 - I-FIN-6: The realm can never move a member's own funds.
 
-## 6. Assets: land, collections and credentials
+## 6. Assets: land and NFTs
 
 ### Entities
 
@@ -274,9 +286,10 @@ Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/
 |---|---|---|---|
 | `Land` | `id`, `x`, `y`, `width`, `height`, `kind`, `owner` (`Entity:id`), `status`, `token_id`, `registered_by`, `metadata` (Json) | A parcel. | `L-17`: 3×2 cells at (12, 40), residential, owner `alice`, `LAND` #4412 |
 | `Zone` | `id` (h3 index), `name`, `kind`, `land` → `Land`, `user` → `User`, `metadata` (Json) | | Cell `871f1d489ffffff` "Riverside", residential, Alice's home |
-| `Credential` | `id`, `schema`, `collection` → `Collection`, `token_id`, `holder`, `issuer` → `Organization`, `license` → `License`, `prepared_by`, `signer`, `issued_at`, `expires_at`, `status`, `payload_hash`, `payload_ref` | The realm's record of a credential NFT. | `RX-88`: `health.prescription/1`, Clinic B, signed by `dr-ana`, prepared by `records-bot`, 30 days |
 
-Every NFT the realm mints carries a `ggg:` metadata header:
+Certificates (prescriptions, diplomas, permits, titles) are NFTs, not realm entities: the ledger is
+the source of truth, and the token's `ggg:` header carries what the realm knows about it. Every NFT the
+realm mints carries that header:
 
 | Key | Meaning | Example |
 |---|---|---|
@@ -294,7 +307,6 @@ fields) in their manifest; GGG does not define any schema.
 ### Lifecycles
 
 - `Land.status`: `active` → `disputed` → `active`; `active` → `transferred` | `revoked`.
-- `Credential.status`: `draft` → `issued` → `revoked` | `expired`.
 
 ### Operations
 
@@ -306,28 +318,27 @@ fields) in their manifest; GGG does not define any schema.
 | `land_mint_nft` | `nft.mint` | | Mint `LAND` #4412 for `L-17` to Alice |
 | `land_freeze`, `land_unfreeze` | `nft.freeze` | signing | Freeze `L-17` during an ownership dispute |
 | `zone_set`, `zone_clear` | `self.data_manage` | delegable | Alice picks Riverside as her home zone |
-| `credential_prepare` | `credential.prepare` | | `records-bot` drafts Alice's prescription → draft `CD-301` |
-| `credential_sign` | `credential.sign` | signing | Dr. Ana signs `CD-301` → `CRED` #4412 minted to Alice |
-| `credential_revoke` | `credential.sign` | signing | Revoke a diploma issued in error |
+| `credential_issue` | `credential.sign` | signing | Dr. Ana issues `{schema: "health.prescription/1", holder: "alice", organization: "clinic-b", prepared_by: "records-bot"}` → `CRED` #4412 |
+| `credential_revoke` | `credential.sign` | signing | Revoke a diploma issued in error; the token is burned |
 | `credential_verify` | — (public) | read | A pharmacy checks `CRED` #4412: valid, issuer licensed, not expired |
 
 ### Invariants
 
-- I-AST-1: A credential is minted only if the issuer holds an active licence of the schema's type, the
-  signer holds an active non-agent appointment in a position the schema accepts, and the codex allows it.
-- I-AST-2: A non-transferable collection's tokens never change owner except by a court order.
-- I-AST-3: Revoking a licence suspends new mints under it; existing credentials follow the codex rule.
+- I-AST-1: A credential NFT is minted only if the issuing organization holds an active licence of the
+  schema's type, the caller holds an active non-agent appointment in a position the schema accepts, and
+  the codex allows it.
+- I-AST-2: Tokens of a non-transferable `NFTToken` never change owner except by a court order.
+- I-AST-3: Revoking a licence stops new mints under it; existing credential NFTs follow the codex rule.
 - I-AST-4: NFT metadata never contains personal data in clear text.
 - I-AST-5: A parcel has exactly one owner.
 
-## 7. Licensing and providers
+## 7. Licensing
 
 ### Entities
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `License` | `id`, `kind` (court, business, professional, health, education, …), `holder` (`Entity:id`: organization or user), `issued_by` → `Organization`, `status`, `applied_at`, `issued_at`, `expires_at`, `evidence_ref`, `conditions` (Json) | Many licences per holder. An application is a licence in `applied`. | `LIC-12`: health, holder Clinic B, issued by Health, active until 2028-10-25 |
-| `Report` | `id`, `organization` → `Organization`, `kind`, `period`, `public` (Json), `payload_ref`, `payload_hash`, `signer`, `filed_at` | Regulatory reporting by licensed providers. Public part is aggregate only. | Clinic B, week 43: public `{visits: 412, vaccinations: 37}` |
+| `License` | `id`, `kind` (court, business, professional, health, education, …), `holder` (`Entity:id`: organization or user), `issued_by` → `Department`, `status`, `applied_at`, `issued_at`, `expires_at`, `evidence_ref`, `conditions` (Json) | Many licences per holder. An application is a licence in `applied`. | `LIC-12`: health, holder Clinic B, issued by Health, active until 2028-10-25 |
 
 ### Lifecycles
 
@@ -342,15 +353,14 @@ fields) in their manifest; GGG does not define any schema.
 | `license_decide` | `license.issue` | signing | A Health officer approves → `LIC-12` active for 2 years |
 | `license_suspend`, `license_revoke` | `license.revoke` | signing | Suspend `LIC-12` pending an inspection |
 | `license_list`, `license_verify` | — (public) | read | A patient checks Clinic B: licence active |
-| `report_submit` | `report.submit` | | Clinic B files its week-43 statistics |
-| `report_list` | `realm.data_view` | read | Health sees this week's reports from all clinics |
 
 ### Invariants
 
 - I-LIC-1: Nobody decides a licence for an organization they hold an appointment in, or for themselves.
 - I-LIC-2: Only `active`, unexpired licences authorize anything.
-- I-LIC-3: An identified report is signed by a human holding an active appointment in the reporting
-  organization.
+
+Regulatory reports from licensed providers are department documents (`document_*`) or codex-defined
+credential NFTs; GGG has no report entity.
 
 ## 8. Justice
 
@@ -358,8 +368,7 @@ fields) in their manifest; GGG does not define any schema.
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `JusticeSystem` | `id`, `name`, `kind` (`public`, `private`, `hybrid`), `status`, `license` → `License` | | Agora public justice, `public`, `active` |
-| `Court` | `id`, `name`, `system` → `JusticeSystem`, `level` (first instance, appellate, supreme, specialized), `jurisdiction`, `parent` → `Court`, `status`, `license` → `License` | | North First Instance Court, appeals go to Agora Appeals Court |
+| `Court` | `id`, `name`, `operator` (`Entity:id`: a department for public courts, an organization for private ones), `level` (first instance, appellate, supreme, specialized), `jurisdiction`, `parent` → `Court`, `status`, `license` → `License` | | North First Instance Court, run by the Justice department; appeals go to Agora Appeals Court |
 | `Judge` | `id`, `user` → `User`, `court` → `Court`, `specialization`, `status`, `appointed_at` | | Judge Elena, North First Instance Court, civil |
 | `Dispute` | `id`, `claimant` → `User`, `respondent` (`Entity:id`), `subject` (`Entity:id`, e.g. a contract), `title`, `description_ref`, `status`, `case` → `Case` | A complaint before it is accepted. | `D-14`: Bob vs Infrastructure, "building permit refused unfairly", `filed` |
 | `Case` | `id`, `court` → `Court`, `plaintiff`, `defendant`, `judges` → `Judge`*, `title`, `status`, `filed_at`, `closed_at` | | `CASE-12` from `D-14`, North First Instance, Judge Elena, `in_progress` |
@@ -380,7 +389,7 @@ fields) in their manifest; GGG does not define any schema.
 
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
-| `dispute_file`, `dispute_withdraw` | `dispute.create` | delegable | `{respondent: "Organization:infrastructure", title: "Permit refused"}` → `D-14` |
+| `dispute_file`, `dispute_withdraw` | `dispute.create` | delegable | `{respondent: "Department:infrastructure", title: "Permit refused"}` → `D-14` |
 | `dispute_get` (own) | `dispute.view` | read, delegable | Bob checks `D-14` |
 | `dispute_list_all` | `dispute.view_all` | read | The court clerk lists all open disputes |
 | `dispute_accept`, `dispute_reject` | `dispute.accept`, `dispute.reject` | signing | The court accepts `D-14` → `CASE-12` |
@@ -394,17 +403,17 @@ fields) in their manifest; GGG does not define any schema.
 | `appeal_decide` | `appeal.allow` | signing | The appeals court denies the appeal |
 | `penalty_execute` (fine → invoice, freeze, revoke access, terminate contract, reassign resource, lock instrument) | `fine.apply`, `access.revoke`, `contract.terminate`, `resource.reassign`, `instrument.lock`, `trade.execute` | signing | Mallory's 500 REALM fine → invoice `INV-520` |
 | `enforcement_record`, `enforcement_escalate`, `enforcement_notify` | `enforcement.record`, `enforcement.escalate`, `notification.send` | | Record that the permit was issued as ordered |
-| `justice_system_create`, `court_create`, `judge_appoint`, `judge_revoke` | `org.create`, `org.appoint` | governed | Create South First Instance Court; appoint Judge Elena |
+| `court_create`, `judge_appoint`, `judge_revoke` | `org.create`, `org.appoint` | governed | Create South First Instance Court; appoint Judge Elena |
 | `resolution_query` | `resolution.query` | read | All verdicts about building permits since 2026 |
 
 ### Invariants
 
-- I-JUS-1: No judge sits on a case in which they, or an organization they hold an appointment in, is
-  a party. (Cedar guardrail.)
+- I-JUS-1: No judge sits on a case in which they, or a department or organization they hold an
+  appointment in, is a party. (Cedar guardrail.)
 - I-JUS-2: Only judges assigned to a case issue its verdict.
 - I-JUS-3: An appeal is heard by a court of higher level than the original.
 - I-JUS-4: A penalty executes only after its verdict is final (no pending appeal, appeal window passed).
-- I-JUS-5: Courts and justice systems operate only under an active licence.
+- I-JUS-5: A court run by an organization operates only under an active court licence.
 
 ## 9. Procurement
 
@@ -412,7 +421,7 @@ fields) in their manifest; GGG does not define any schema.
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `Tender` | `id`, `title`, `description`, `requester` → `Organization`, `status`, `opens_at`, `closes_at`, `rubric` (Json), `winner` → `Bid`, `contract` → `Contract` | Today's `Rfp`. | `T-5` Bike lane works, by Infrastructure, open 1–30 Nov, rubric: price 60%, quality 40% |
+| `Tender` | `id`, `title`, `description`, `requester` → `Department`, `status`, `opens_at`, `closes_at`, `rubric` (Json), `winner` → `Bid`, `contract` → `Contract` | Today's `Rfp`. | `T-5` Bike lane works, by Infrastructure, open 1–30 Nov, rubric: price 60%, quality 40% |
 | `Bid` | `id`, `tender` → `Tender`, `vendor` → `Organization`, `submitted_at`, `sealed`, `payload_ref`, `payload_hash`, `score` | Content is encrypted until the reveal. | BuildCo's bid on `T-5`, sealed until 30 Nov |
 | `BidScore` | `id`, `bid` → `Bid`, `evaluator` → `User`, `criterion`, `score`, `scored_at` | | Carla scores BuildCo's quality 8/10 |
 
@@ -439,7 +448,7 @@ tenders), `BidPayload` (merged into `Bid` as an encrypted reference).
 
 - I-PRC-1: Sealed bid contents are unreadable by anyone, including the requester, until `bids_reveal`
   after `closes_at`.
-- I-PRC-2: No evaluator scores a bid from an organization they hold an appointment in.
+- I-PRC-2: No evaluator scores a bid from an organization they hold an appointment in. (Cedar guardrail.)
 - I-PRC-3: The award goes to the best-scored bid under the published rubric, or the deviation is
   justified and recorded.
 - I-PRC-4: Bids are accepted only between `opens_at` and `closes_at`.
@@ -454,11 +463,14 @@ A realm can be one canister or a federation of quarters, one of which is the cap
 |---|---|---|---|
 | `Realm` | `id` (`1`), `name`, `manifesto`, `welcome`, `status`, `is_capital`, `federation_id`, `currency`, `currency_decimals`, `canisters` (Json), `settings` (Json), `test_flags` (Json), `state` (Json), `calendar` (Json), `manifest` (Json) | Singleton per canister. Today ~60 columns; grouped into Json by purpose. Absorbs `Calendar` and `Registry`. | Agora: `beta`, capital, currency REALM (8 decimals) |
 | `Quarter` | `id` (canister id), `name`, `index`, `status`, `population`, `codex_id`, `codex_version`, `last_sync`, `last_activity_at` | Known on the capital. | North: population 1,240, `active`, codex agora 1.4.2 |
-| `Resident` | `id` (principal), `quarter` | Directory of where users live. Today's `QuarterResident`. | `alice` → North |
 | `Forward` | `id`, `subject` (`Entity:id`), `from`, `to`, `moved_at`, `signature` | Signed pointer left when a user moves quarter. Today's `EntityMigration`. | Bob moved North → South on 2026-09-01, signed by North |
 | `FederalVote` | `id`, `origin_quarter`, `action` (Json), `rule` (Json), `hash`, `deadline`, `status`, `tally` (Json) | | `FV-3` Adopt tax policy 3: majority of quarters, deadline 15 Nov |
 | `FederalVoteLeg` | `id`, `vote` → `FederalVote`, `quarter`, `proposal_id`, `outcome`, `yes`, `no`, `abstain`, `eligible`, `status`, `hash` | One per quarter. | North on `FV-3`: 812 yes, 301 no of 1,240 eligible → passed |
 | `FederationMessage` | `id`, `topic`, `source`, `body` (Json), `response` (Json) | | North → capital: population report |
+
+There is no central user-to-quarter directory. As [QUARTERS.md](reference/QUARTERS.md) requires, a
+user's home quarter is found from their own client pointer, the quarter index, or a broadcast search,
+so no canister grows with the population of the whole federation.
 
 ### Lifecycles
 
@@ -496,15 +508,18 @@ A realm can be one canister or a federation of quarters, one of which is the cap
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
 | `Codex` | `id`, `version`, `checksum`, `status`, `manifest` (Json), `capabilities` (Json), `installed_at`, `previous` → `Codex` | The realm's policy package. | `agora` 1.4.2, `active`, capabilities `[invoice.create, notification.create, …]` |
-| `Extension` | `id` (name), `version`, `status`, `operations` (Json, declared), `access` (Json: profiles and organizations), `sidebar` (Json) | Absorbs `MenuItemConfig`, `MenuCategoryConfig`, `MenuDepartmentVisibility`. | `voting` 2.1.0, for `[member]`, in the Governance menu |
+| `Extension` | `id` (name), `version`, `status`, `operations` (Json, declared), `access` (Json: profiles and departments), `sidebar` (Json) | Absorbs `MenuItemConfig`, `MenuCategoryConfig`, `MenuDepartmentVisibility`. | `voting` 2.1.0, for `[member]`, in the Governance menu |
 | `Task`, `TaskStep`, `TaskSchedule`, `TaskExecution`, `Call` | as in `ic-basilisk-toolkit` | Scheduled and multi-step automation. | Monthly payroll on the 1st; last run succeeded |
-| `Notification` | `id`, `recipient` (`Entity:id`: user or organization), `topic`, `title`, `body`, `href`, `sender`, `visibility`, `read_by` (Json), `at` | | To Alice: "P-7 passed", link `/proposals/P-7` |
+| `Notification` | `id`, `recipient` (`Entity:id`: user, department or organization), `topic`, `title`, `body`, `href`, `sender`, `visibility`, `read_by` (Json), `at` | | To Alice: "P-7 passed", link `/proposals/P-7` |
 | `Event` | `id`, `op`, `caller`, `on_behalf_of`, `args` (Json, secrets stripped), `result` (Json), `at` | New: the audit log. Append-only. | `proposal_vote` by `claude-conn` for `alice` at 09:31 → ok |
 
-Removed: `Service` (services are provided by licensed organizations), `MarketPlace`, `Registry`,
-`Member`, `GuestUser`, `Permission`, `UserProfile`, `RegistrationCode`, `Department`,
-`DepartmentAuthority`, `Calendar`, `TreasuryConfig`, `NFTToken`, `Instrument`, `Balance`,
-`EntityMigration`, `QuarterResident`, `Menu*` (renamed or merged as noted in each section).
+Removed or merged: `Service` (services are provided by licensed organizations), `MarketPlace` and
+`Registry` (→ `Realm.canisters`), `Member` and `GuestUser` (→ `User.status`), `Permission` and
+`UserProfile` (→ `Profile`), `RegistrationCode` (→ `Invite`), `DepartmentAuthority` (→ `Authority`),
+`Calendar` (→ `Realm.calendar`), `TreasuryConfig` (→ `Treasury.config`), `Instrument` (→ `Token`),
+`Balance` (ledgers are the source of truth), `EntityMigration` (→ `Forward`), `Menu*`
+(→ `Extension.sidebar`), `JusticeSystem` (courts stand on their own), `QuarterResident` (no central
+user directory).
 
 ### Operations
 
@@ -570,17 +585,17 @@ disappear.
   `self.delegate` (new), `user.add`, `user.edit`, `user.delete`, `user.update_status`, `user.view`,
   `invite.manage`, `identity.submit`, `identity.review`, `role.assign`, `role.revoke`,
   `permission.grant`.
-- Organizations: `org.create`, `org.appoint`, `org.expel`, `org.set_policy`, `org.grant_authority`,
+- Departments: `org.create`, `org.appoint`, `org.expel`, `org.set_policy`, `org.grant_authority`,
   `org.revoke_authority`, `org.manage_budget`, `org.manage_members`.
+- Organizations: `organization.add`, `organization.edit`, `organization.delete`.
 - Governance: `proposal.create`, `proposal.vote`, `proposal.manage`, `mandate.create`,
   `mandate.assign_executor`, `contract.create_under_mandate`, `governance.update`,
   `orchestration.approve`.
 - Finance: `treasury.view`, `treasury.manage`, `transfer.create`, `transfer.delete`,
   `invoice.refresh`, `tax.manage` (new), `tax.assess` (new), `tax.declare` (new),
   `token.force_transfer`, `token.freeze`.
-- Assets: `nft.mint`, `nft.force_transfer`, `nft.freeze`, `credential.prepare` (new),
-  `credential.sign` (new).
-- Licensing: `license.apply` (new), `license.issue`, `license.revoke`, `report.submit` (new).
+- Assets: `nft.mint`, `nft.force_transfer`, `nft.freeze`, `credential.sign` (new).
+- Licensing: `license.apply` (new), `license.issue`, `license.revoke`.
 - Justice: `dispute.create`, `dispute.view`, `dispute.view_all`, `dispute.accept`, `dispute.reject`,
   `dispute.assign`, `evidence.evaluate`, `resolution.draft`, `resolution.issue`,
   `resolution.link_contract`, `resolution.modify_terms`, `resolution.finalize`, `resolution.query`,
@@ -599,8 +614,7 @@ disappear.
 
 **Removed:** `realm.admin` (same as `all`), `extension.sync_call` and `extension.async_call` (one
 `extension.call`), `db.manage` (no raw database writes; everything is an operation), `demo.manage`
-(no demo code in the canister), `organization.add`, `organization.edit`, `organization.delete`
-(→ `org.*`), `realm.configure.codex` (→ `codex.install`), `scope.authorize`, `permission.view` and `permission.revoke` (unused today; viewing and
+(no demo code in the canister), `realm.configure.codex` (→ `codex.install`), `scope.authorize`, `permission.view` and `permission.revoke` (unused today; viewing and
 revoking roles is covered by `user.view` and `role.revoke`).
 
 **Signing permissions** (never held by agents, never delegable): `identity.review`,
@@ -614,8 +628,8 @@ revoking roles is covered by `user.view` and `role.revoke`).
 
 - I-ALL-1: Every call is decided by Cedar; there is no other authorization path.
 - I-ALL-2: Guardrails (`guardrails.cedar`) cannot be weakened by governance, codices or extensions.
-- I-ALL-3: Nobody decides a matter they filed, that was filed on their behalf, or in which an
-  organization they hold an appointment in is a party.
+- I-ALL-3: Nobody decides a matter they filed, that was filed on their behalf, or in which a
+  department or organization they hold an appointment in is a party.
 - I-ALL-4: Every update operation is audited with the caller, the grantor (if delegated) and the
   outcome.
 - I-ALL-5: Personal data never appears in clear text in public state, NFT metadata or the event log.
@@ -625,9 +639,8 @@ revoking roles is covered by `user.view` and `role.revoke`).
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | Merge `Department` and `Organization` into one `Organization` with `kind` | Yes: removes the crossed naming and gives external providers positions, funds, policies and licences |
-| D2 | Merge `Member` and `GuestUser` into `User.status` | Yes |
-| D3 | Replace `UserProfile` + `Permission` with `Profile.operations` (roles hold operations; users hold roles; positions grant a role) | Yes: one way to hold a permission |
-| D4 | Collapse `Realm`'s ~60 columns into a few Json groups (`canisters`, `settings`, `test_flags`, `state`, `calendar`) | Yes |
-| D5 | Replace `LedgerEntry`'s eight optional foreign keys with one `subject` reference | Yes |
-| D6 | Keep `Task*` entities defined in `ic-basilisk-toolkit` (shared with Casals) rather than in `ggg/` | Yes |
+| D1 | Merge `Member` and `GuestUser` into `User.status` | Yes |
+| D2 | Replace `UserProfile` + `Permission` with `Profile.operations` (roles hold operations; users hold roles; positions grant a role) | Yes: one way to hold a permission |
+| D3 | Collapse `Realm`'s ~60 columns into a few Json groups (`canisters`, `settings`, `test_flags`, `state`, `calendar`) | Yes |
+| D4 | Replace `LedgerEntry`'s eight optional foreign keys with one `subject` reference | Yes |
+| D5 | Keep `Task*` entities defined in `ic-basilisk-toolkit` (shared with Casals) rather than in `ggg/` | Yes |
