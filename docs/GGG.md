@@ -227,7 +227,7 @@ Two kinds of body:
 | `AllocationRule` | `id`, `source_fund`, `rules` (Json), `status`, `proposal` → `Proposal` | How revenue is split between funds. | From `ROOT`: 30% `WELFARE`, 20% `ROADS`, 50% `GENERAL` |
 | `LedgerEntry` | `id`, `transaction`, `kind` (asset, liability, equity, revenue, expense), `category`, `debit`, `credit`, `symbol`, `fund` → `Fund`, `period` → `FiscalPeriod`, `transfer` → `Transfer`, `invoice` → `Invoice`, `user` → `User`, `organization` → `Organization`, `contract` → `Contract`, `case` → `Case`, `penalty` → `Penalty`, `appeal` → `Appeal`, `at`, `description` | Double entry. At most one of the source references is set. | Tx `T-88`: debit `ROADS` capital expense 50,000, credit cash 50,000, contract `C-9` |
 | `Invoice` | `id`, `payer` (`Entity:id`), `amount`, `symbol`, `due_at`, `status`, `reason` (`Entity:id`), `paid_at`, `payment` (Json) | Paid into the subaccount derived from its `id`. | `INV-301`: Alice owes 120 REALM property tax, due 2026-12-31, `pending` |
-| `Transfer` | `id`, `from`, `to`, `symbol`, `amount`, `ledger_tx`, `invoice` → `Invoice`, `status`, `at` | | 50,000 REALM from `ROADS` to BuildCo, ledger tx 18234, `completed` |
+| `Transfer` | `id`, `sender`, `to`, `symbol`, `amount`, `ledger_tx`, `invoice` → `Invoice`, `status`, `at` | | 50,000 REALM from `ROADS` to BuildCo, ledger tx 18234, `completed` |
 | `Trade` | `id`, `contract` → `Contract`, `leg_a` → `Transfer`, `leg_b` → `Transfer`, `status` | An exchange of two transfers. | `C-9` milestone: realm pays 10,000 REALM, BuildCo hands over the road deed NFT |
 | `PaymentAccount` | `id`, `owner` (`Entity:id`), `network`, `address`, `symbol`, `label`, `verified` | External accounts for payouts. | Bob's ckBTC payout address, verified |
 | `FinancialReport` | `id`, `kind`, `period` → `FiscalPeriod`, `as_of`, `statements` (Json), `source_hash`, `issued_by`, `supersedes` → `FinancialReport` | Frozen statements. | FY2025 closing statements issued by Finance, `sha256:77d0…` |
@@ -489,11 +489,11 @@ so no canister grows with the population of the whole federation.
 | `quarter_join_federation` | `quarter.join_federation` | governed | The independent realm Harbor joins Agora as a quarter |
 | `quarter_directory`, `join_targets`, `scale_status` | — (public) | read | Quarters and their populations |
 | `self_change_quarter` | `self.change_quarter` | delegable | Bob moves to South |
-| `quarter_sync`, `quarter_report` (quarter → capital) | quarter canister principal | | North reports population 1,240 and codex 1.4.2 to the capital |
+| `quarter_sync`, `quarter_report` (quarter → capital) | `quarter.sync` | | North reports population 1,240 and codex 1.4.2 to the capital |
 | `federal_vote_propose` | `federal_vote.propose` | delegable | Propose `FV-3` |
 | `federal_vote_cancel` | `federal_vote.manage` | governed | Withdraw `FV-3` before its deadline |
-| `federal_vote_finalize` | — (anyone, after deadline) | | After 15 Nov: 3 of 4 quarters in favour → `passed` |
-| `federation_message` | quarter canister principal | | The capital announces codex 1.5.0 to its quarters |
+| `federal_vote_finalize` | — (public) | | After 15 Nov: 3 of 4 quarters in favour → `passed` |
+| `federation_message` | `quarter.sync` | | The capital announces codex 1.5.0 to its quarters |
 
 ### Invariants
 
@@ -513,7 +513,7 @@ so no canister grows with the population of the whole federation.
 | `Extension` | `id` (name), `version`, `status`, `operations` (Json, declared), `access` (Json: profiles and departments), `sidebar` (Json) | Absorbs `MenuItemConfig`, `MenuCategoryConfig`, `MenuDepartmentVisibility`. | `voting` 2.1.0, for `[member]`, in the Governance menu |
 | `Task`, `TaskStep`, `TaskSchedule`, `TaskExecution`, `Call` | as in `ic-basilisk-toolkit` | Scheduled and multi-step automation. | Monthly payroll on the 1st; last run succeeded |
 | `Notification` | `id`, `recipient` (`Entity:id`: user, department or organization), `topic`, `title`, `body`, `href`, `sender`, `visibility`, `read_by` (Json), `at` | | To Alice: "P-7 passed", link `/proposals/P-7` |
-| `Event` | `id`, `op`, `caller`, `on_behalf_of`, `args` (Json, secrets stripped), `result` (Json), `at` | New: the audit log. Append-only. | `proposal_vote` by `claude-conn` for `alice` at 09:31 → ok |
+| `Event` | `id`, `op`, `user`, `by` (the signer, when delegated), `origin`, `args` (Json, secrets stripped), `result` (Json), `at` | New: the audit log. Append-only. | `proposal_vote` by `claude-conn` for `alice` at 09:31 → ok |
 
 Removed or merged: `Service` (services are provided by licensed organizations), `MarketPlace`
 (→ `Realm.marketplace_canister_id`), `RegistrationCode` (→ `Invite`), `DepartmentAuthority`
@@ -603,7 +603,7 @@ disappear.
   `resource.reassign`, `instrument.lock`, `notification.send`, `enforcement.escalate`,
   `enforcement.record`.
 - Procurement: `tender.manage` (new), `bid.submit`, `bid.evaluate`.
-- Federation: `quarter.register`, `quarter.deregister`, `quarter.configure`, `quarter.secede`,
+- Federation: `quarter.sync` (new: held by registered quarter canisters), `quarter.register`, `quarter.deregister`, `quarter.configure`, `quarter.secede`,
   `quarter.join_federation`, `federal_vote.propose`, `federal_vote.manage`, `realm.register`.
 - Platform: `codex.install`, `codex.uninstall`, `codex.revert`, `extension.install`,
   `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`,

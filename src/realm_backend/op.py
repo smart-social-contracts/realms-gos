@@ -1,0 +1,94 @@
+import json
+
+import auth
+import chain
+from db import Fail
+
+OPS = {}
+SECRET = {"code", "private_data", "payload", "ciphertext"}
+EVENTS_KEPT = 2000
+# Basilisk stubs the `types` module.
+GENERATOR = type((lambda: (yield))())
+
+
+class Call:
+    """``user`` is who acts; ``by`` signed the message (the user, or their delegate)."""
+
+    def __init__(self, user, by, origin):
+        self.user, self.by, self.origin = user, by, origin
+
+    @property
+    def delegated(self):
+        return self.user != self.by
+
+
+def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False):
+    """Register an operation.
+
+    governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
+    the call into a proposal. parties(args) -> principals with a stake, who may not perform it.
+    """
+    def wrap(fn):
+        OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable,
+                            "governed": governed, "signing": signing, "parties": parties, "public": public}
+        return fn
+    return wrap
+
+
+def dispatch(name, arg, origin="user", signer=None, declared=()):
+    spec = OPS[name]
+    try:
+        args = json.loads(arg or "{}") if isinstance(arg, str) else dict(arg)
+        by = signer or chain.caller()
+        user = args.pop("on_behalf_of", None) or by
+        auth.authorize(user, by, name, spec, args, origin, declared)
+        governing = spec["governed"](args) if spec["governed"] and origin != "replay" else None
+        if governing is not None and not direct(governing):
+            import proposals
+
+            out = proposals.file_replay(name, args, user, by, governing)
+        else:
+            out = spec["fn"](Call(user, by, origin), args)
+            if isinstance(out, GENERATOR):
+                out = yield from out
+            out = out or {}
+        if not spec["read"]:
+            audit(name, user, by, origin, args, out)
+        return json.dumps({"ok": True, **out})
+    except (Fail, auth.Denied) as e:
+        return json.dumps({"ok": False, "error": str(e)})
+    except KeyError as e:
+        return json.dumps({"ok": False, "error": f"missing {e}"})
+    except Exception as e:
+        chain.trap(f"{name}: {e}")
+
+
+def direct(department):
+    p = department.policy or {}
+    return int(p.get("m", 1)) <= 1 and int(p.get("n", 1)) <= 1 and not p.get("quorum_percent") and not p.get("veto")
+
+
+def audit(name, user, by, origin, args, out):
+    from ggg import Event
+
+    kept = {k: v for k, v in args.items() if k not in SECRET}
+    if len(json.dumps(kept)) > 2000:
+        kept = {"keys": sorted(kept)}
+    Event(id=str(Event.max_id() + 1), op=name, user=user, by=by, origin=origin, args=kept,
+          result={k: v for k, v in out.items() if isinstance(v, (str, int, bool))}, at=chain.now())
+    old = Event[str(Event.max_id() - EVENTS_KEPT)]
+    if old:
+        old.delete()
+
+
+def run(gen):
+    try:
+        next(gen)
+    except StopIteration as done:
+        return done.value
+    raise RuntimeError("a query cannot call other canisters")
+
+
+def call(name, args=None, user=None, origin="user"):
+    """Run an operation from Python (REPL, codex effects, replays) and return its result as a dict."""
+    return json.loads(run(dispatch(name, json.dumps(args or {}), origin=origin, signer=user)))

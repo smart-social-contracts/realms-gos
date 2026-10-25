@@ -93,7 +93,7 @@ type DecimalsResult = record { decimals : nat32 };
 type PaginationInfo = record { page_num : int; page_size : int; total_items_count : int; total_pages : int };
 type CanisterInfo = record { canister_id : text; canister_type : text };
 type QuarterInfoRecord = record { name : text; canister_id : text; population : nat; status : text; index : nat; is_capital : bool };
-type StatusRecord = record { version : text; status : text; users_count : nat; organizations_count : nat; realms_count : nat; mandates_count : nat; tasks_count : nat; transfers_count : nat; instruments_count : nat; codexes_count : nat; disputes_count : nat; licenses_count : nat; trades_count : nat; proposals_count : nat; votes_count : nat; commit : text; commit_datetime : text; extensions : vec text; test_mode : bool; test_mode_ii_bypass : bool; test_mode_user_self_registration : bool; test_mode_demo_data : bool; test_mode_skip_terms : bool; test_mode_skip_passport_zkproof : bool; realm_name : text; realm_manifesto : text; realm_welcome_message : text; realm_stage : text; open_registration : bool; ai_assistant_enabled : bool; user_profiles_count : nat; canisters : vec CanisterInfo; registries : vec CanisterInfo; dependencies : vec text; python_version : text; quarters : vec QuarterInfoRecord; is_quarter : bool; parent_realm_canister_id : text; accounting_currency : text; accounting_currency_decimals : nat; logo_url : text; background_image_url : text; file_registry_canister_id : text; marketplace_canister_id : text; realm_logo : text; realm_description : text; realm_welcome_image : text };
+type StatusRecord = record { version : text; status : text; users_count : nat; organizations_count : nat; realms_count : nat; mandates_count : nat; tasks_count : nat; transfers_count : nat; instruments_count : nat; codexes_count : nat; disputes_count : nat; licenses_count : nat; trades_count : nat; proposals_count : nat; votes_count : nat; commit : text; commit_datetime : text; extensions : vec text; test_mode : bool; test_mode_ii_bypass : bool; test_mode_user_self_registration : bool; test_mode_demo_data : bool; test_mode_skip_terms : bool; test_mode_skip_passport_zkproof : bool; realm_name : text; realm_manifesto : text; realm_welcome_message : text; realm_stage : text; last_activity_at : opt nat64; open_registration : bool; ai_assistant_enabled : bool; user_profiles_count : nat; canisters : vec CanisterInfo; registries : vec CanisterInfo; dependencies : vec text; python_version : text; quarters : vec QuarterInfoRecord; is_quarter : bool; parent_realm_canister_id : text; accounting_currency : text; accounting_currency_decimals : nat; logo_url : text; background_image_url : text; file_registry_canister_id : text; marketplace_canister_id : text; realm_logo : text; realm_description : text; realm_welcome_image : text; gos_environment : text };
 type UserGetRecord = record { "principal" : principal; profiles : vec text; departments : vec text; nickname : text; avatar : text; private_data : text; assigned_quarter : text };
 type ObjectsListRecordPaginated = record { objects : vec text; pagination : PaginationInfo };
 type ObjectsListRecord = record { objects : vec text };
@@ -137,25 +137,25 @@ type _IcrcTransaction = record { kind : text; transfer : opt _IcrcTransfer };
 type _IcrcTransactionWithId = record { id : nat; transaction : _IcrcTransaction };
 type _GetAccountTransactionsArgs = record { account : _IcrcAccount; start : opt nat; max_results : nat };
 type _GetAccountTransactionsOk = record { balance : nat; transactions : vec _IcrcTransactionWithId };
-type LLMChatResponse = record { response : text };
-type RealmData = record { json : text; principal_id : text; timestamp : nat64 };
-type TestBenchResponse = record { data : text };
 type ConfigRecord = record { file_registry_canister_id : text; billing_service_principal : text; license_price_usd_cents : nat64; license_duration_seconds : nat64 };
 type LicensePricingRecord = record { license_price_usd_cents : nat64; license_duration_seconds : nat64 };
 type ExtensionInput = record { extension_id : text; name : text; description : text; version : text; price_e8s : nat64; icon : text; categories : text; screenshots : text; file_registry_canister_id : text; file_registry_namespace : text; download_url : text };
-type ExtensionListing = record { extension_id : text; developer : text; name : text; description : text; version : text; price_e8s : nat64; icon : text; categories : text; screenshots : text; file_registry_canister_id : text; file_registry_namespace : text; download_url : text; installs : nat64; likes : nat64; verification_status : text; verification_notes : text; is_active : bool; created_at : float64; updated_at : float64 };
+type ExtensionListing = record { extension_id : text; developer : text; developer_name : text; name : text; description : text; version : text; price_e8s : nat64; icon : text; categories : text; screenshots : text; file_registry_canister_id : text; file_registry_namespace : text; download_url : text; installs : nat64; likes : nat64; verification_status : text; verification_notes : text; is_active : bool; created_at : float64; updated_at : float64 };
 type ExtensionListResult = record { listings : vec ExtensionListing; total_count : nat64; page : nat64; per_page : nat64 };
 type CodexInput = record { codex_id : text; realm_type : text; name : text; description : text; version : text; price_e8s : nat64; icon : text; categories : text; file_registry_canister_id : text; file_registry_namespace : text };
-type CodexListing = record { codex_id : text; codex_alias : text; realm_type : text; developer : text; name : text; description : text; version : text; price_e8s : nat64; icon : text; categories : text; file_registry_canister_id : text; file_registry_namespace : text; installs : nat64; likes : nat64; verification_status : text; verification_notes : text; is_active : bool; created_at : float64; updated_at : float64 };
+type CodexListing = record { codex_id : text; codex_alias : text; realm_type : text; developer : text; developer_name : text; name : text; description : text; version : text; price_e8s : nat64; icon : text; categories : text; file_registry_canister_id : text; file_registry_namespace : text; installs : nat64; likes : nat64; verification_status : text; verification_notes : text; is_active : bool; created_at : float64; updated_at : float64 };
 type CodexListResult = record { listings : vec CodexListing; total_count : nat64; page : nat64; per_page : nat64 };
 type AssistantInput = record { assistant_id : text; name : text; description : text; version : text; price_e8s : nat64; pricing_summary : text; icon : text; categories : text; runtime : text; endpoint_url : text; base_model : text; requested_role : text; requested_permissions : text; domains : text; languages : text; training_data_summary : text; eval_report_url : text; file_registry_canister_id : text; file_registry_namespace : text };
-type AssistantListing = record { assistant_id : text; assistant_alias : text; developer : text; name : text; description : text; version : text; price_e8s : nat64; pricing_summary : text; icon : text; categories : text; runtime : text; endpoint_url : text; base_model : text; requested_role : text; requested_permissions : text; domains : text; languages : text; training_data_summary : text; eval_report_url : text; file_registry_canister_id : text; file_registry_namespace : text; installs : nat64; likes : nat64; verification_status : text; verification_notes : text; is_active : bool; created_at : float64; updated_at : float64 };
+type AssistantListing = record { assistant_id : text; assistant_alias : text; developer : text; developer_name : text; name : text; description : text; version : text; price_e8s : nat64; pricing_summary : text; icon : text; categories : text; runtime : text; endpoint_url : text; base_model : text; requested_role : text; requested_permissions : text; domains : text; languages : text; training_data_summary : text; eval_report_url : text; file_registry_canister_id : text; file_registry_namespace : text; installs : nat64; likes : nat64; verification_status : text; verification_notes : text; is_active : bool; created_at : float64; updated_at : float64 };
 type AssistantListResult = record { listings : vec AssistantListing; total_count : nat64; page : nat64; per_page : nat64 };
 type PurchaseRecord = record { purchase_id : text; realm_principal : text; item_kind : text; item_id : text; developer : text; price_paid_e8s : nat64; purchased_at : float64 };
 type LikeRecord = record { item_kind : text; item_id : text; created_at : float64 };
 type DeveloperLicense = record { "principal" : text; created_at : float64; expires_at : float64; last_payment_id : text; last_payment_amount_usd_cents : nat64; payment_method : text; note : text; is_active : bool };
 type LicensePaymentInput = record { "principal" : text; stripe_session_id : text; amount_usd_cents : nat64; duration_seconds : nat64; payment_method : text; note : text };
 type PendingAudit = record { item_kind : text; item_id : text; name : text; developer : text; version : text; updated_at : float64 };
+type MyRolesRecord = record { is_controller : bool; is_admin : bool; is_reviewer : bool };
+type AdminListing = record { item_kind : text; item_id : text; name : text; developer : text; developer_name : text; version : text; verification_status : text; verification_notes : text; is_active : bool; installs : nat64; likes : nat64; file_registry_namespace : text; created_at : float64; updated_at : float64 };
+type AdminUser = record { "principal" : text; display_name : text; is_admin : bool; is_reviewer : bool; is_suspended : bool; suspended_reason : text; has_license : bool; license_active : bool; license_expires_at : float64; license_payment_method : text; license_note : text; extensions_count : nat64; codices_count : nat64; assistants_count : nat64 };
 type MarketplaceInitArg = record { file_registry : opt text; billing_service_principal : opt text };
 type StreamingStrategy = variant { Callback : CallbackStrategy };
 type MintError = variant { GenericError : GenericError; SupplyCapReached : null; Unauthorized : null; TokenIdAlreadyExists : null };
@@ -182,6 +182,7 @@ type CapitalPopulationService = service { report_quarter_population : (nat) -> (
 type DemoRegistrationService = service { register_demo_citizens : (text) -> (text) };
 type FederationService = service { federation_message : (text) -> (text) };
 type FileRegistryService = service { get_extension_manifest : (text) -> (text) query; latest_version : (text) -> (text) query; list_extensions : () -> (text) query; list_codices : () -> (text) query; list_files_icc : (text) -> (text) query; get_file_size_icc : (text, text) -> (text) query; get_file_chunk_icc : (text, text, text, text) -> (text) query; get_namespace_approval_icc : (text) -> (text) };
+type CasalsConductorService = service { orchestra_resolve : (text) -> (text) query };
 type AssetCanisterService = service { store : (_AssetStoreArg) -> (); list : (_ListAssetsArg) -> (text) query; delete_asset : (_DeleteAssetArg) -> () };
 type RealmMessagingService = service { receive_realm_message : (text, text, text, text) -> (text) };
 type NFTService = service { mint : (MintArg) -> (MintResult); force_transfer : (ForceTransferArg) -> (AuthorityResult); freeze_token : (FreezeArg) -> (AuthorityResult); unfreeze_token : (nat) -> (AuthorityResult) };
@@ -193,6 +194,8 @@ type TokenAuthorityService = service { forced_transfer : (ForcedTransferArgs) ->
 type Icrc1MetadataService = service { icrc1_symbol : () -> (text) query; icrc1_name : () -> (text) query; icrc1_decimals : () -> (nat8) query };
 type RealmRegistryUpgradeService = service { request_upgrade : (text) -> (text); get_credits : (text) -> (GetCreditsResult) query; get_latest_version : () -> (UpgradeResult) query };
 type _ICRC1IndexerService = service { get_account_transactions : (_GetAccountTransactionsArgs) -> (_GetAccountTransactionsResult) query };
+type ListingRegistry = service { listing_publish : (text) -> (text) };
+type FileRegistryGrantService = service { grant_publish : (text) -> (text) };
 
 service : (text) -> {
   "policy_status" : () -> (text) query;
@@ -361,10 +364,6 @@ service : (text) -> {
   "setup_launch" : () -> (text);
   "complete_setup" : () -> (text);
   "list_extensions" : (text) -> (RealmResponse) query;
-  "get_verification_link" : (text) -> (text);
-  "check_verification_status" : (text) -> (text);
-  "get_current_application_id" : (text) -> (text) query;
-  "set_application_id" : (text) -> (text);
   "__browse__" : (text) -> (text) query;
   "__get_candid_interface_tmp_hack" : () -> (text) query;
 }
