@@ -78,6 +78,9 @@ def issue(grantor, delegate, perms, starts, expires, by, args, acceptance):
 
 @op("self.delegate")
 def delegation_grant(c, args):
+    """Let ``delegate`` act for you with ``operations`` (permission names you hold) from ``starts_at`` (default now)
+    until ``expires_at`` or for ``expires_in`` seconds, at most a year; optional ``label`` and ``description``.
+    Returns ``delegation`` and ``status``: pending until a delegate who is a user accepts, otherwise active at once."""
     delegate, perms = args["delegate"], list(dict.fromkeys(args["operations"]))
     if delegate == c.user:
         raise Fail("you cannot delegate to yourself")
@@ -91,6 +94,7 @@ def delegation_grant(c, args):
 
 @op("self.delegate")
 def delegation_accept(c, args):
+    """Accept ``delegation``, a pending grant to you, so it becomes active."""
     d = find(Delegation, args["delegation"])
     if d.delegate != c.user or d.status != "pending":
         raise Fail(f"{d.id} is not a pending grant to you")
@@ -99,6 +103,8 @@ def delegation_accept(c, args):
 
 @op("self.delegate")
 def delegation_revoke(c, args):
+    """End ``delegation`` as its grantor or delegate; a delegate turning down a pending grant declines it.
+    Returns ``status``."""
     d = find(Delegation, args["delegation"])
     if c.user not in (d.grantor, d.delegate) and "all" not in auth.permissions(c.user):
         raise Fail(f"{d.id} is not yours")
@@ -111,6 +117,9 @@ def delegation_revoke(c, args):
 
 @op("self.join")
 def delegation_request(c, args):
+    """Ask ``grantor`` to let you act for them with ``operations`` (permission names) from ``starts_at`` until
+    ``expires_at`` or for ``expires_in`` seconds; optional ``label`` and ``description``. Returns ``request``.
+    The request stays open for an hour; asking the same grantor again replaces it."""
     grantor, perms = args["grantor"], list(dict.fromkeys(args["operations"]))
     find(User, grantor)
     if grantor == c.user:
@@ -131,6 +140,9 @@ def delegation_request(c, args):
 
 @op("self.delegate")
 def delegation_request_decide(c, args):
+    """Answer ``request``, made to you: ``approve`` true grants it, optionally for fewer ``operations`` or an earlier
+    ``expires_at``, and replaces your open grant to that delegate; otherwise it is declined.
+    Returns ``status``, and ``delegation`` when approved."""
     r = find(DelegationRequest, args["request"])
     if r.grantor != c.user or r.request_expires_at <= chain.now():
         raise Fail(f"{r.id} is not an open request to you")
@@ -156,6 +168,7 @@ def delegation_request_decide(c, args):
 
 @op("self.data_view", read=True)
 def delegation_list(c, args):
+    """Your grants given (``as_grantor``) and received (``as_delegate``), and your open ``requests`` either way."""
     requests = open_requests("grantor", c.user) + open_requests("delegate", c.user)
     return {**mine(c.user), "requests": [view(r, "id", "grantor", "delegate", "scope", "label", "description",
                                               "starts_at", "expires_at", "request_expires_at") for r in requests]}
@@ -163,5 +176,6 @@ def delegation_list(c, args):
 
 @op("self.data_view", read=True)
 def delegable_operations(c, args):
+    """The operations that can be delegated, each with the permission to name in a grant's ``operations``."""
     return {"operations": sorted(({"op": n, "permission": s["perm"]} for n, s in ops().items()
                                   if s["delegable"] and not s["signing"]), key=lambda o: o["op"])}

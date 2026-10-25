@@ -112,6 +112,9 @@ def bases(tax):
 
 @op("tax.manage", governed=realm_wide)
 def tax_policy_draft(c, args):
+    """Draft a tax policy from ``document`` (optional symbol, list of taxes) and optional ``description``. Each tax
+    has a unique code, a base (flat, land_area or declared) and a method: fixed (amount), proportional (rate_bp,
+    basis points) or progressive (brackets of up_to and rate_bp, the last with up_to null). Returns ``policy``."""
     p = TaxPolicy(id=next_id(TaxPolicy, "TAX-POLICY"), document=check(args["document"]),
                   description=args.get("description", ""))
     return {"policy": p.id}
@@ -119,6 +122,7 @@ def tax_policy_draft(c, args):
 
 @op("tax.manage", governed=realm_wide)
 def tax_policy_propose(c, args):
+    """Adopt the draft tax ``policy``, superseding the one in force."""
     p = find(TaxPolicy, args["policy"])
     if p.status != "draft":
         raise Fail(f"{p.id} is {p.status}; only a draft can be adopted")
@@ -130,6 +134,8 @@ def tax_policy_propose(c, args):
 
 @op("tax.assess")
 def tax_assess(c, args):
+    """Bill every taxpayer for ``period`` (a label) under the adopted policy: tax ``tax`` only, or by default every
+    enabled tax that is not self-declared. Those already billed are skipped. Returns ``invoices``, ``skipped``."""
     policy, period = adopted(), args["period"]
     taxes = [tax_of(policy, args["tax"])] if args.get("tax") else [
         t for t in policy.document["taxes"] if t.get("enabled", True) and t.get("base", "flat") != "declared"]
@@ -147,6 +153,9 @@ def tax_assess(c, args):
 
 @op("tax.declare", delegable=True)
 def tax_declare(c, args):
+    """Declare ``amount`` for the self-declared tax ``base`` (its code) and ``period``, once, for yourself or an
+    ``organization`` you administer, and get billed what it owes. Returns ``declaration``, ``invoice``, ``owed``.
+    Example: ``{"organization": "clinic-b", "period": "2026-Q3", "base": "revenue", "amount": 182000}``."""
     policy, period, amount = adopted(), args["period"], int(args["amount"])
     tax = tax_of(policy, args["base"])
     if tax.get("base") != "declared":

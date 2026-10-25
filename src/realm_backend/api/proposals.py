@@ -86,6 +86,9 @@ def outcome(p, final):
 
 @op("proposal.create", delegable=True)
 def proposal_create(c, args):
+    """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
+    (``{op, args}``, run once accepted). Voting opens at once. Returns ``proposal``.
+    Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
     if action is not None and action.get("op") not in ops():
@@ -96,6 +99,7 @@ def proposal_create(c, args):
 
 @op("proposal.create", delegable=True)
 def proposal_withdraw(c, args):
+    """Withdraw ``proposal``, a proposal of yours that is still a draft or being voted on."""
     p = find(Proposal, args["proposal"])
     if p.proposer != c.user or p.status not in OPEN:
         raise Fail("only an open proposal of yours can be withdrawn")
@@ -104,6 +108,8 @@ def proposal_withdraw(c, args):
 
 @op("proposal.vote", delegable=True)
 def proposal_vote(c, args):
+    """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
+    Voting again replaces your earlier vote."""
     p = find(Proposal, args["proposal"])
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
@@ -119,6 +125,7 @@ def proposal_vote(c, args):
 
 @op("proposal.manage")
 def proposal_open(c, args):
+    """Open the draft ``proposal`` for voting, for the realm's voting window from now."""
     p = find(Proposal, args["proposal"])
     if p.status != "draft":
         raise Fail(f"{p.id} is not a draft")
@@ -127,6 +134,8 @@ def proposal_open(c, args):
 
 @op("proposal.manage")
 def proposal_finalize(c, args):
+    """Close voting on ``proposal`` and record it as accepted or rejected. Returns ``status``.
+    A realm-wide proposal waits for its deadline; a department's closes early once its outcome is certain."""
     p = find(Proposal, args["proposal"])
     if p.status != "voting":
         raise Fail(f"{p.id} is not being voted on")
@@ -140,6 +149,7 @@ def proposal_finalize(c, args):
 
 @op("proposal.manage")
 def proposal_execute(c, args):
+    """Run the action of the accepted ``proposal``, once. Returns ``status`` (executed or failed) and ``result``."""
     p = find(Proposal, args["proposal"])
     if p.status != "accepted" or not p.action:
         raise Fail(f"{p.id} has no accepted action to execute")
@@ -154,6 +164,7 @@ def proposal_execute(c, args):
 
 @op("realm.data_view", read=True)
 def proposal_get(c, args):
+    """The proposal ``proposal`` with its votes, its current tally and the number of eligible voters."""
     p = find(Proposal, args["proposal"])
     tally, size, _ = count(p)
     return {"proposal": view(p), "tally": tally, "eligible": size,
@@ -162,12 +173,15 @@ def proposal_get(c, args):
 
 @op("realm.data_view", read=True)
 def proposal_list(c, args):
+    """Every proposal (id, title, status, deadline, proposer), or only those with ``status`` (e.g. voting)."""
     rows = each(Proposal, "status", args["status"]) if args.get("status") else each(Proposal)
     return {"proposals": [view(p, "id", "title", "status", "deadline", "proposer") for p in rows]}
 
 
 @op("mandate.create", governed=realm_wide)
 def mandate_create(c, args):
+    """Grant a mandate: ``title``, optional ``scope`` (e.g. ``{"max_value": 200000}``), ``executor`` (a department),
+    the ``proposal`` that approved it and ``expires_at`` (default 0: never). Returns ``mandate``."""
     m = Mandate(id=next_id(Mandate, "M"), title=args["title"], scope=args.get("scope", {}),
                 executor=find(Department, args["executor"]) if args.get("executor") else None,
                 proposal=args.get("proposal", ""), expires_at=int(args.get("expires_at", 0)))
@@ -176,16 +190,21 @@ def mandate_create(c, args):
 
 @op("mandate.create", governed=realm_wide)
 def mandate_revoke(c, args):
+    """Revoke ``mandate``: no new contract can be made under it."""
     find(Mandate, args["mandate"]).status = "revoked"
 
 
 @op("mandate.assign_executor", governed=realm_wide)
 def mandate_assign_executor(c, args):
+    """Make the department ``executor`` the executor of ``mandate``."""
     find(Mandate, args["mandate"]).executor = find(Department, args["executor"])
 
 
 @op("contract.create_under_mandate")
 def contract_create(c, args):
+    """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
+    now), ``ends_at``, ``value`` and ``mandate``. Returns ``contract``. Under a mandate, the mandate must be active,
+    ``value`` within its ``max_value``, and the contract must end before the mandate expires."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
     value = int(args.get("value", 0))
     if m is not None:
@@ -204,6 +223,7 @@ def contract_create(c, args):
 
 @op("contract.terminate", signing=True)
 def contract_terminate(c, args):
+    """Terminate ``contract``, unless it is already terminated or fulfilled."""
     k = find(Contract, args["contract"])
     if k.status in ("terminated", "fulfilled"):
         raise Fail(f"{k.id} is already {k.status}")
@@ -212,6 +232,8 @@ def contract_terminate(c, args):
 
 @op("governance.update", governed=realm_wide)
 def governance_update(c, args):
+    """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``threshold`` (percent of yes
+    among yes and no votes a realm-wide proposal must exceed) and ``quorum_percent`` (realm-wide turnout)."""
     realm, cal = Realm["1"] or Realm(id="1"), Calendar["1"] or Calendar(id="1")
     if "voting_window" in args:
         cal.voting_window = int(args["voting_window"])

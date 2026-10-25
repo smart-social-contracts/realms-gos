@@ -54,6 +54,9 @@ def moving(args, before, after):
 
 @op("tender.manage", governed=lambda args: find(Department, args["requester"]))
 def tender_create(c, args):
+    """Draft a tender ``title`` for department ``requester``, with optional ``description``, the times it ``opens_at``
+    and ``closes_at`` (seconds, closing after opening), and ``rubric``, criterion weights that are positive and add up
+    to 100 (e.g. ``{"price": 60, "quality": 40}``). Returns ``tender``."""
     rubric = {k: int(w) for k, w in (args.get("rubric") or {}).items()}
     if not rubric or min(rubric.values()) <= 0 or sum(rubric.values()) != 100:
         raise Fail("rubric weights must be positive and add up to 100")
@@ -67,22 +70,27 @@ def tender_create(c, args):
 
 @op("tender.manage", governed=requester)
 def tender_open(c, args):
+    """Open the draft ``tender``; it takes bids between its opening and closing times."""
     moving(args, ("draft",), "open")
 
 
 @op("tender.manage", governed=requester)
 def tender_close(c, args):
+    """Close the open ``tender`` to bids now, bringing its closing time forward if it was later."""
     t = moving(args, ("open",), "closed")
     t.closes_at = min(t.closes_at, chain.now())
 
 
 @op("tender.manage", governed=requester)
 def tender_cancel(c, args):
+    """Cancel ``tender`` while it is a draft or open."""
     moving(args, ("draft", "open"), "cancelled")
 
 
 @op("realm.data_view", read=True)
 def tender_list(c, args):
+    """List tenders, or only those whose ``status`` is draft, open, closed, evaluation, contracted or cancelled.
+    Returns ``tenders``."""
     rows = [t for t in each(Tender) if not args.get("status") or t.status == args["status"]]
     return {"tenders": [{**view(t, "id", "title", "status", "opens_at", "closes_at"), "requester": t.requester.id}
                         for t in rows]}
@@ -90,6 +98,8 @@ def tender_list(c, args):
 
 @op("realm.data_view", read=True)
 def tender_get(c, args):
+    """Show ``tender`` with its rubric and bids; a sealed bid shows only its vendor, time and commitment hash.
+    Returns ``tender``."""
     t = find(Tender, args["tender"])
     data = view(t, "id", "title", "description", "status", "opens_at", "closes_at", "rubric", "winner", "contract")
     return {"tender": {**data, "requester": t.requester.id, "bids": [shown(b) for b in t.bids]}}
@@ -97,6 +107,8 @@ def tender_get(c, args):
 
 @op("bid.submit", delegable=True)
 def bid_submit(c, args):
+    """For ``vendor``, an active organization you represent, bid on the open ``tender``: ``payload_ref`` (the encrypted
+    bid) and ``payload_hash``, the ``sha256:`` of ``price:nonce``. One bid per vendor and tender. Returns ``bid``."""
     t, org = find(Tender, args["tender"]), find(Organization, args["vendor"])
     representing(c, org)
     now = chain.now()
@@ -113,6 +125,7 @@ def bid_submit(c, args):
 
 @op("bid.submit", delegable=True)
 def bid_withdraw(c, args):
+    """Withdraw ``bid``, made for a vendor you represent, while its tender still takes bids."""
     b = find(Bid, args["bid"])
     representing(c, b.vendor)
     if b.tender.status != "open" or chain.now() >= b.tender.closes_at:
@@ -122,6 +135,8 @@ def bid_withdraw(c, args):
 
 @op("tender.manage")
 def bids_reveal(c, args):
+    """Once ``tender`` has closed, unseal all its bids and start evaluation; ``openings`` maps a bid id to
+    ``{price, nonce}``, which must match its hash and sets its price. Returns ``revealed``, the number of bids."""
     t = find(Tender, args["tender"])
     if t.status not in ("open", "closed") or chain.now() < t.closes_at:
         raise Fail(f"bids on {t.id} stay sealed until {t.closes_at}")
@@ -139,6 +154,8 @@ def bids_reveal(c, args):
 
 @op("bid.evaluate", signing=True, parties=vendor_people)
 def bid_score(c, args):
+    """Score the revealed ``bid``: ``scores`` maps rubric criteria to marks from 0 to 10; scoring again replaces your
+    marks. Returns ``bid`` and its weighted ``score`` out of 100, averaged over evaluators."""
     b = find(Bid, args["bid"])
     rubric = b.tender.rubric
     if b.tender.status != "evaluation" or b.sealed:
@@ -156,6 +173,9 @@ def bid_score(c, args):
 
 @op("tender.manage", signing=True, governed=requester)
 def tender_award(c, args):
+    """Award ``tender`` to ``bid`` (default the best-scored revealed bid), signing an active contract between the
+    requester and the vendor; a lower-scored bid needs a ``justification``. Returns ``winner``, ``score``,
+    ``contract``."""
     t = find(Tender, args["tender"])
     bids = [b for b in t.bids if not b.sealed]
     if t.status != "evaluation" or not bids:

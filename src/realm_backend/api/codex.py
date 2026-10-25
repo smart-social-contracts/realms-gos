@@ -92,7 +92,8 @@ def hook(name, context=None):
 
 @op("codex.install", governed=realm_wide)
 def codex_install(c, args):
-    """Install and activate a codex: ``{manifest, source}``, or ``{codex, version}`` from the file registry."""
+    """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
+    The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``."""
     if "source" in args:
         manifest, source, approval = args["manifest"], args["source"], None
     else:
@@ -119,6 +120,7 @@ def codex_install(c, args):
 
 @op("codex.uninstall", governed=realm_wide)
 def codex_uninstall(c, args):
+    """Deactivate the active codex; the realm then runs without one."""
     codex = active()
     if codex is None:
         raise Fail("no codex is installed")
@@ -139,6 +141,8 @@ def codex_revert(c, args):
 
 @op("realm.data_view", read=True)
 def codex_status(c, args):
+    """The active codex, whether it is healthy (its last hook succeeded), its hooks and configuration, and the
+    install history."""
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
     return {"codex": view(codex, *SHOWN) if codex else None, "healthy": codex is not None and not problem,

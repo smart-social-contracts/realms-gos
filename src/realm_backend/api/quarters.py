@@ -143,6 +143,8 @@ def apply_directory(reply):
 
 @op("quarter.register", governed=proposals.realm_wide)
 def quarter_register(c, args):
+    """On the capital, add canister ``quarter`` to the federation, with optional ``name`` (default "Quarter <index>").
+    Returns ``quarter`` and its ``index``."""
     cid = args["quarter"]
     if federated():
         raise Fail("only the capital registers quarters")
@@ -157,6 +159,7 @@ def quarter_register(c, args):
 
 @op("quarter.deregister", governed=proposals.realm_wide)
 def quarter_deregister(c, args):
+    """On the capital, remove ``quarter`` from the federation."""
     if federated():
         raise Fail("only the capital deregisters quarters")
     find(Quarter, args["quarter"]).delete()
@@ -164,6 +167,9 @@ def quarter_deregister(c, args):
 
 @op("quarter.configure", governed=proposals.realm_wide)
 def quarter_configure(c, args):
+    """Set ``quarter``'s ``name`` or ``status`` (setup→active, active⇄suspended, active→splitting or merging→active),
+    and realm-wide ``capacity``, ``auto_scale_enabled``, ``quarter_join_mode``, ``federation_codex`` and the federal
+    vote ``rule``: kind majority_of_quarters or majority_of_members, absent wait, no or ignore, threshold below 100."""
     q = find(Quarter, args["quarter"]) if args.get("quarter") else None
     status, rule = args.get("status"), args.get("rule")
     if status and (q is None or status not in MOVES.get(q.status, ())):
@@ -188,6 +194,8 @@ def quarter_configure(c, args):
 
 @op("quarter.secede", governed=proposals.realm_wide)
 def quarter_secede(c, args):
+    """On a quarter, leave the federation: tell the capital, then run as an independent realm. Returns ``left``, the
+    former capital."""
     if not federated():
         raise Fail("only a quarter of a federation can secede")
     old = capital()
@@ -201,6 +209,8 @@ def quarter_secede(c, args):
 
 @op("quarter.join_federation", governed=proposals.realm_wide)
 def quarter_join_federation(c, args):
+    """Make this independent realm a quarter of ``capital`` (its canister id), known here as ``name`` (default
+    "capital"). The capital registers this realm separately. Returns ``capital``."""
     r, cid = realm(), args["capital"]
     if r.is_quarter or cid == chain.self_id():
         raise Fail("this realm already belongs to a federation")
@@ -212,6 +222,8 @@ def quarter_join_federation(c, args):
 
 @op(None, read=True, public=True)
 def quarter_directory(c, args):
+    """The capital and every quarter with its status, population and codex, and whether that codex drifts from the
+    capital's. Returns ``capital`` and ``quarters``."""
     return {"capital": capital(), "quarters": directory()}
 
 
@@ -229,11 +241,14 @@ def join_targets(c, args):
 
 @op(None, read=True, public=True)
 def scale_status(c, args):
+    """Quarter populations against the capacity per quarter, and whether a new quarter is wanted or being set up."""
     return scale()
 
 
 @op("self.change_quarter", delegable=True)
 def self_change_quarter(c, args):
+    """Move your membership to ``quarter``, another active quarter of the federation; here you become a guest.
+    Returns ``forward`` and ``home_quarter``."""
     dest, here = args["quarter"], chain.self_id()
     member, user = Member[c.user], User[c.user]
     if member is None or member.status != "active" or user is None:
@@ -259,7 +274,8 @@ def self_change_quarter(c, args):
 
 @op("quarter.sync")
 def quarter_sync(c, args):
-    """On a quarter: report to the capital and take its directory. On the capital: answer that call."""
+    """On a quarter: report to the capital and take its directory. On the capital: answer that call, which carries
+    ``population``, ``codex_id``, ``codex_version`` and optionally a federal vote ``leg``."""
     if federated():
         reply = yield from ask(capital(), "quarter_sync", report())
         if not reply.get("ok"):
@@ -272,6 +288,8 @@ def quarter_sync(c, args):
 
 @op("quarter.sync")
 def quarter_report(c, args):
+    """On the capital, record a quarter's ``population``, ``codex_id``, ``codex_version`` and optional federal vote
+    ``leg``. Returns ``drifting``: whether its codex differs from the capital's."""
     q = record(c, args)
     return {"drifting": drifting(q.codex_version)}
 

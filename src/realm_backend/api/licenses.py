@@ -51,12 +51,16 @@ def application(c, kind, holder, department, evidence_ref, conditions):
 
 @op("license.apply", delegable=True)
 def license_apply(c, args):
+    """Apply for a licence of ``kind`` for ``holder`` (default you, or ``Organization:id`` of one you administer), to
+    issuing ``department`` (optional), with optional ``evidence_ref`` and ``conditions``. Returns ``license``."""
     return application(c, args["kind"], args.get("holder") or f"User:{c.user}", args.get("department"),
                        args.get("evidence_ref", ""), args.get("conditions", {}))
 
 
 @op("license.apply", delegable=True)
 def license_renew(c, args):
+    """Apply to renew the active or expired ``license``, optionally with new ``evidence_ref``. Approving the renewal
+    expires the old licence. Returns the new application's ``license``."""
     old = find(License, args["license"])
     if old.status not in ("active", "expired"):
         raise Fail(f"{old.id} is {old.status}")
@@ -66,6 +70,9 @@ def license_renew(c, args):
 
 @op("license.issue", signing=True, parties=holders)
 def license_decide(c, args):
+    """Issue the applied-for ``license`` if ``approve`` is true, else reject it; issuing ``department`` defaults to
+    the one applied to. On approval: ``expires_at`` (default now plus the licence review cycle, 2 years) and extra
+    ``conditions``. Returns ``status`` and ``expires_at``."""
     lic = find(License, args["license"])
     if lic.status != "applied":
         raise Fail(f"{lic.id} is {lic.status}, not an application")
@@ -85,6 +92,7 @@ def license_decide(c, args):
 
 @op("license.revoke", signing=True, parties=holders)
 def license_suspend(c, args):
+    """Suspend the active ``license``, or with ``resume`` true reinstate a suspended one."""
     lic = find(License, args["license"])
     before, after = ("suspended", "active") if args.get("resume") else ("active", "suspended")
     if lic.status != before:
@@ -95,6 +103,7 @@ def license_suspend(c, args):
 
 @op("license.revoke", signing=True, parties=holders)
 def license_revoke(c, args):
+    """Revoke the active or suspended ``license`` for good."""
     lic = find(License, args["license"])
     if lic.status not in ("active", "suspended"):
         raise Fail(f"{lic.id} is {lic.status}")
@@ -108,6 +117,8 @@ def shown(lic):
 
 @op(None, read=True, public=True)
 def license_list(c, args):
+    """One page of licences (``from``, ``count``), optionally filtered by ``holder``, ``kind`` and ``status``; ``next``
+    continues it. A page can hold fewer matches than ``count``: follow ``next``."""
     want = {k: args[k] for k in ("holder", "kind", "status") if args.get(k)}
     rows, more = page(License, args, lambda x: all(getattr(x, k) == v for k, v in want.items()))
     return {"licenses": [shown(x) for x in rows], "next": more}
@@ -115,5 +126,7 @@ def license_list(c, args):
 
 @op(None, read=True, public=True)
 def license_verify(c, args):
+    """Whether ``license``, or else the licence of ``kind`` that ``holder`` (``Entity:id``) holds, is valid now.
+    Returns ``valid`` and the ``license``."""
     lic = find(License, args["license"]) if args.get("license") else active(args["holder"], args["kind"])
     return {"valid": bool(lic and valid(lic)), "license": shown(lic) if lic else None}

@@ -69,6 +69,7 @@ def start():
 
 @op(None, read=True, public=True)
 def status(c, args):
+    """The realm's ``version``, ``status``, ``name``, ``canister`` id and number of ``operations``."""
     realm = Realm["1"]
     return {"version": VERSION, "status": realm.status if realm else "", "name": realm.name if realm else "",
             "canister": chain.self_id(), "operations": len(ops())}
@@ -76,11 +77,14 @@ def status(c, args):
 
 @op(None, read=True, public=True)
 def version(c, args):
+    """The ``version`` of the realm's code."""
     return {"version": VERSION}
 
 
 @op(None, read=True, public=True)
 def realm_info(c, args):
+    """The realm's public profile: name, manifesto, welcome message, status, branding, accounting currency,
+    whether registration is open and whether it is a capital."""
     realm = Realm["1"]
     return {"realm": view(realm, "name", "manifesto", "welcome_message", "status", "logo_url",
                           "background_image_url", "primary_color", "accounting_currency",
@@ -136,6 +140,7 @@ def install(values):
 
 @op("realm.configure")
 def setup_state(c, args):
+    """Setup progress: the realm's ``status``, its ``founder``, the steps ``done`` and ``todo``, and its settings."""
     realm, d = Realm["1"], draft()
     fields = [f for group in FIELDS.values() for f in group if f != "baton_canister_id"]
     return {"status": realm.status, "founder": d.get("founder", ""), "done": d["done"],
@@ -145,7 +150,9 @@ def setup_state(c, args):
 
 @op("realm.configure")
 def setup_step(c, args):
-    """One setup step: ``step`` (install, realm, branding, tokens, infrastructure, trust_policy) and its values."""
+    """One setup step: ``step`` (install, realm, branding, tokens, infrastructure, trust_policy) and its values.
+    The values are the fields of the matching realm_configure operation; install takes network, can_test_mode
+    and founder."""
     step, values, d = args["step"], {k: v for k, v in args.items() if k != "step"}, draft()
     if Realm["1"].status != "setup":
         raise Fail("the realm has launched: configuration is governed now")
@@ -181,27 +188,35 @@ def setup_launch(c, args):
 
 @op("realm.configure", governed=launched)
 def realm_configure(c, args):
+    """Set any of ``name``, ``manifesto``, ``welcome_message``, ``open_registration``, ``ai_assistant_enabled``,
+    ``quarter_join_mode``, ``auto_scale_enabled``, ``test_mode`` and ``test_flags``. Returns ``configured``.
+    Test mode and flags need a non-production network or ``can_test_mode`` set at install."""
     return configure(FIELDS["realm"], args)
 
 
 @op("realm.configure.branding", governed=launched)
 def realm_configure_branding(c, args):
+    """Set any of ``logo_url``, ``background_image_url`` and ``primary_color`` (like ``#1E6B52``)."""
     return configure(FIELDS["branding"], args)
 
 
 @op("realm.configure.tokens", governed=launched)
 def realm_configure_tokens(c, args):
+    """Set any of ``accounting_currency``, ``accounting_currency_decimals``, ``token_canister_id``,
+    ``nft_canister_id`` and ``shared_tokens_json``."""
     return configure(FIELDS["tokens"], args)
 
 
 @op("realm.configure.infrastructure", governed=launched)
 def realm_configure_infrastructure(c, args):
+    """Set the canisters the realm uses, any of ``frontend_canister_id``, ``file_registry_canister_id``,
+    ``marketplace_canister_id``, ``installer_canister_id`` and ``baton_canister_id`` (the Casals baton)."""
     return configure(FIELDS["infrastructure"], args)
 
 
 @op("realm.configure.trust_policy", governed=launched)
 def realm_configure_trust_policy(c, args):
-    """Which code the realm accepts: ``require_marketplace_approval``, ``trusted_approvers``."""
+    """Which code the realm accepts: ``require_marketplace_approval``, ``trusted_approvers``, ``trusted_principals``."""
     return configure(FIELDS["trust_policy"], args)
 
 
@@ -249,6 +264,8 @@ def orchestration_decide(c, args):
 
 @op("realm.monitor", read=True)
 def realm_monitor(c, args):
+    """Health figures: status, running and installed versions, counts of operations, events and rows per entity,
+    and the last accepted ``upgrade``."""
     realm = Realm["1"]
     return {"status": realm.status, "version": VERSION, "installed_version": realm.installed_version,
             "operations": len(ops()), "events": Event.max_id(), "rows": {n: getattr(ggg, n).count() for n in COUNTED},
@@ -267,7 +284,8 @@ def realm_export(c, args):
 
 @op("shell.execute")
 def shell(c, args):
-    """Evaluate one expression in the sandbox; ``ops.<name>(args)`` calls an operation as you, through Cedar."""
+    """Evaluate one expression ``expr`` in the sandbox; ``ops.<name>(args)`` calls an operation as you, through Cedar.
+    Example: ``{"expr": "ops.proposal_list({'status': 'voting'})"}``."""
     def as_caller(_, kw):
         return call(kw["name"], kw["args"], user=c.user, origin="shell")
 

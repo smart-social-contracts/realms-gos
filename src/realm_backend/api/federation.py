@@ -108,6 +108,8 @@ def execute(v):
 
 @op("federal_vote.propose", delegable=True)
 def federal_vote_propose(c, args):
+    """Propose a federal vote titled ``title`` on ``action`` (``{"op": …, "args": …}``), held in every active quarter
+    under the published rule; a quarter passes it to the capital. Returns ``vote``."""
     action = {**args["action"], "title": args["title"]}
     if not quarters.federated():
         return (yield from open_vote(action, c.user, c.by, chain.self_id()))
@@ -120,6 +122,7 @@ def federal_vote_propose(c, args):
 
 @op("federal_vote.manage", governed=proposals.realm_wide)
 def federal_vote_cancel(c, args):
+    """On the capital, cancel the open federal ``vote`` and withdraw its local vote in every quarter."""
     v = find(FederalVote, args["vote"])
     if quarters.federated() or v.status != "open":
         raise Fail(f"{v.id} can only be cancelled on the capital while open")
@@ -135,7 +138,8 @@ def federal_vote_cancel(c, args):
 
 @op(None, public=True)
 def federal_vote_finalize(c, args):
-    """On a quarter: settle and report the local leg. On the capital: decide the vote and announce it."""
+    """On a quarter: settle and report the local leg of ``vote``. On the capital: decide the vote and announce it.
+    The capital waits for missing legs, even past the deadline if the rule says wait; a passed vote runs its action."""
     v = find(FederalVote, args["vote"])
     if v.status != "open":
         raise Fail(f"{v.id} is already {v.status}")
@@ -210,7 +214,8 @@ TOPICS = {"user.arrive": quarters.on_arrive, "quarter.secede": quarters.on_seced
 
 @op("quarter.sync")
 def federation_message(c, args):
-    """From a registered quarter: handle the topic. From a local holder of quarter.sync: send it out."""
+    """From a registered quarter: handle ``topic`` with ``body``. From a local holder of quarter.sync: send it out, to
+    quarter ``to`` or by default to every quarter."""
     topic, body = args["topic"], args.get("body", {})
     if Quarter[c.by] is None:
         targets = [find(Quarter, args["to"]).id] if args.get("to") else [q.id for q in each(Quarter)]

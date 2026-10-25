@@ -49,7 +49,8 @@ def available(ext, principal):
 
 @op("extension.install", governed=realm_wide)
 def extension_install(c, args):
-    """Install or upgrade an extension from the file registry (``ext/<extension>/<version>``)."""
+    """Install or upgrade ``extension`` at ``version`` from the file registry (``ext/<extension>/<version>``).
+    Returns ``approved_by``; if the realm requires marketplace approval, an approver it trusts must have approved it."""
     namespace = f"ext/{args['extension']}/{args['version']}"
     approver = yield from approved(namespace)
     manifest = json.loads((yield from fetch(namespace, "manifest.json")))
@@ -64,12 +65,14 @@ def extension_install(c, args):
 
 @op("extension.uninstall", governed=realm_wide)
 def extension_uninstall(c, args):
+    """Remove ``extension``, with its access and menu settings."""
     find(Extension, args["extension"]).delete()
 
 
 @op("extension.call")
 def extension_call(c, args):
-    """Run ``function`` of an extension's backend; it can call only its declared operations, as you (I-EXT-1)."""
+    """Run ``function`` of ``extension``'s backend with ``args`` (its keyword arguments); it can call only its declared
+    operations, as you (I-EXT-1). The extension must be available to you. Returns ``result``."""
     ext = find(Extension, args["extension"])
     if not ext.source:
         raise Fail(f"{ext.id} has no backend")
@@ -86,7 +89,8 @@ def extension_call(c, args):
 
 @op("realm.configure", governed=realm_wide)
 def extension_set_access(c, args):
-    """Who gets an extension: ``profiles`` and ``departments``."""
+    """Who gets ``extension``: ``profiles`` and ``departments``.
+    Both lists replace the current ones; one left out becomes empty."""
     ext = find(Extension, args["extension"])
     profiles, departments = list(args.get("profiles", [])), list(args.get("departments", []))
     for p in profiles:
@@ -98,7 +102,8 @@ def extension_set_access(c, args):
 
 @op("realm.configure", governed=realm_wide)
 def sidebar_configure(c, args):
-    """Where an extension shows in the menu: ``sidebar`` (label, category, icon, order, show)."""
+    """Where ``extension`` shows in the menu: ``sidebar`` (label, category, icon, order, show), merged into its
+    current settings."""
     ext = find(Extension, args["extension"])
     ext.sidebar = {**ext.sidebar, **args["sidebar"]}
 

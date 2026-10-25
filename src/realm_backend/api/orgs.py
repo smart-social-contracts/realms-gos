@@ -88,6 +88,8 @@ def profile_of(c, args):
 
 @op("org.create", governed=parent_of)
 def department_create(c, args):
+    """Create ``department`` (a new name) under ``parent`` (default the root), with an optional ``description``.
+    Returns ``department``."""
     if Department[args["department"]]:
         raise Fail(f"department {args['department']} exists")
     d = Department(id=args["department"], description=args.get("description", ""), parent=parent_of(args))
@@ -96,6 +98,8 @@ def department_create(c, args):
 
 @op("org.set_policy", governed=dept)
 def department_edit(c, args):
+    """Edit ``department``: ``description``, ``parent`` (never itself or one of its sub-departments; the root has none)
+    and ``head`` (someone holding a seat in it, or "" for nobody); a field you leave out stays."""
     d = dept(args)
     parent = find(Department, args["parent"]) if args.get("parent") else None
     up = parent
@@ -114,6 +118,7 @@ def department_edit(c, args):
 
 @op("org.set_policy", governed=lambda a: dept(a).parent or root())
 def department_delete(c, args):
+    """Delete ``department``; it must not be the root and must have no sub-departments and only closed positions."""
     d = dept(args)
     if d.is_root:
         raise Fail("the root department cannot be deleted")
@@ -124,6 +129,8 @@ def department_delete(c, args):
 
 @op("org.set_policy", governed=dept)
 def department_set_policy(c, args):
+    """Set how ``department`` approves: ``m`` of ``n`` approvals (1 ≤ m ≤ n), ``quorum_percent`` (0 to 100, default 0)
+    and ``veto``, principals holding a seat in it who can block (default none)."""
     d = dept(args)
     m, n, quorum, veto = int(args["m"]), int(args["n"]), int(args.get("quorum_percent", 0)), args.get("veto", [])
     if not 1 <= m <= n or not 0 <= quorum <= 100:
@@ -150,6 +157,7 @@ def chart(d):
 
 @op("realm.data_view", read=True)
 def department_get(c, args):
+    """``department`` with its parent, head and policy, and its ``positions`` with their holders."""
     d = dept(args)
     return {"department": {**view(d, "id", "description", "is_root", "head", "policy"),
                            "parent": d.parent.id if d.parent else ""},
@@ -158,6 +166,8 @@ def department_get(c, args):
 
 @op("realm.data_view", read=True)
 def department_list(c, args):
+    """Departments, ``count`` rows at a time (default 100, at most 500) from row ``from`` (default 1).
+    Returns ``departments`` and ``next``, the ``from`` of the next page (null at the end)."""
     rows, nxt = page(Department, args)
     return {"departments": [{**view(d, "id", "description", "is_root", "head"),
                              "parent": d.parent.id if d.parent else ""} for d in rows], "next": nxt}
@@ -165,11 +175,15 @@ def department_list(c, args):
 
 @op("realm.data_view", read=True)
 def department_chart(c, args):
+    """The org chart below ``department`` (default the root): head, policy, positions and seats filled, then each
+    sub-department the same way."""
     return {"chart": chart(dept(args) if args.get("department") else root())}
 
 
 @op("org.manage_members", governed=dept)
 def position_create(c, args):
+    """Open seat ``position`` (a new key) in ``department``: ``headcount`` (default 1), optional ``title``, ``salary``,
+    ``salary_period`` and ``profile`` its holders get (one whose permissions you hold). Returns ``position``."""
     d = dept(args)
     if Position[args["position"]]:
         raise Fail(f"position {args['position']} exists")
@@ -182,6 +196,8 @@ def position_create(c, args):
 
 @op("org.manage_members", governed=lambda a: dept_seat(a).department)
 def position_edit(c, args):
+    """Edit department seat ``position``: ``status`` open or frozen, ``headcount`` (not below its holders), ``profile``,
+    ``title``, ``salary`` and ``salary_period``; a field you leave out stays. Closing is position_close."""
     pos = dept_seat(args)
     status, count = args.get("status", pos.status), int(args.get("headcount", pos.headcount))
     if pos.status == "closed" or status not in ("open", "frozen"):
@@ -198,6 +214,7 @@ def position_edit(c, args):
 
 @op("org.manage_members", governed=lambda a: dept_seat(a).department)
 def position_close(c, args):
+    """Close department seat ``position`` for good; it must have no holders."""
     pos = dept_seat(args)
     if pos.status == "closed" or seated(pos):
         raise Fail(f"{pos.id} is closed already or still has holders")
@@ -212,21 +229,28 @@ def appoint_as(args, kind):
 
 @op("org.appoint", governed=lambda a: dept_seat(a).department)
 def appoint(c, args):
+    """Seat ``user`` (a user of the realm, unless an agent) in department seat ``position``; ``agent`` true (default
+    false) needs a ``supervisor`` holding a non-agent seat in the same department. Returns ``appointment``."""
     return appoint_as(args, "substantive")
 
 
 @op("org.appoint", governed=lambda a: dept_seat(a).department)
 def appoint_acting(c, args):
+    """Like appoint, but as an acting holder: ``user`` in ``position``, with ``agent`` and ``supervisor`` as there.
+    Returns ``appointment``."""
     return appoint_as(args, "acting")
 
 
 @op("org.appoint", governed=lambda a: dept_appointment(a).position.department)
 def appointment_end(c, args):
+    """End ``appointment``, an active department seat; whoever supervises agents there must keep another non-agent
+    seat in that department, or end or reassign those agents first."""
     release([dept_appointment(args)])
 
 
 @op("org.expel", governed=dept, parties=lambda a: {a["user"]})
 def department_expel(c, args):
+    """End every seat ``user`` holds in ``department``, and remove them as its head if they are."""
     d = dept(args)
     seats = [a for pos in d.positions for a in seated(pos) if a.user == args["user"]]
     if not seats:
@@ -238,6 +262,8 @@ def department_expel(c, args):
 
 @op("org.grant_authority", governed=dept)
 def authority_grant(c, args):
+    """Let ``target`` ("Department:<id>" or "Quarter:<id>", not ``department`` itself) use ``operations``,
+    permissions that ``department`` holds itself or through its positions' profiles. Returns ``authority``."""
     d, target, ops = dept(args), deref(args["target"]), args["operations"]
     if type(target).__name__ not in ("Department", "Quarter") or ref(target) == ref(d):
         raise Fail("authority goes to another department or a quarter")
@@ -250,6 +276,7 @@ def authority_grant(c, args):
 
 @op("org.revoke_authority", governed=lambda a: find(Authority, a["authority"]).grantor)
 def authority_revoke(c, args):
+    """Withdraw ``authority``, a department's grant of its permissions to another department or a quarter."""
     find(Authority, args["authority"]).delete()
 
 
@@ -264,6 +291,8 @@ def admin_of(c, args):
 
 @op("organization.add")
 def organization_register(c, args):
+    """Register ``organization`` (a new name) with an optional ``description``; you become its only admin.
+    Returns ``organization``."""
     if Organization[args["organization"]]:
         raise Fail(f"organization {args['organization']} exists")
     Organization(id=args["organization"], description=args.get("description", ""), admins=[c.user])
@@ -272,6 +301,8 @@ def organization_register(c, args):
 
 @op("organization.edit")
 def organization_edit(c, args):
+    """As an admin of active ``organization``, change its ``description`` or replace its ``admins`` (at least one);
+    a field you leave out stays."""
     org = admin_of(c, args)
     if "admins" in args and not args["admins"]:
         raise Fail("an organization keeps at least one admin")
@@ -280,6 +311,9 @@ def organization_edit(c, args):
 
 @op("organization.edit")
 def representative_add(c, args):
+    """As an admin of ``organization``, seat ``user`` in its seat ``position``, created if new with ``title``,
+    ``profile`` and ``headcount`` (default 1); ``agent`` true needs a ``supervisor`` holding a non-agent seat there.
+    Returns ``appointment``."""
     org, pos = admin_of(c, args), Position[args["position"]]
     if pos is not None and ref(pos.organization) != ref(org):
         raise Fail(f"{pos.id} is not a seat of {org.id}")
@@ -292,6 +326,8 @@ def representative_add(c, args):
 
 @op("organization.edit")
 def representative_remove(c, args):
+    """As an admin of ``organization``, end ``appointment``, one of its active seats; whoever supervises agents there
+    must keep another non-agent seat in it, or end or reassign those agents first."""
     org, a = admin_of(c, args), find(Appointment, args["appointment"])
     if ref(a.position.organization) != ref(org):
         raise Fail(f"{a.id} is not a seat of {org.id}")
@@ -300,6 +336,8 @@ def representative_remove(c, args):
 
 @op("organization.delete", governed=realm_wide)
 def organization_set_status(c, args):
+    """Set ``organization``'s ``status``: active, suspended, or dissolved, which is final and ends all its seats.
+    Returns ``status``."""
     org = find(Organization, args["organization"])
     if args["status"] not in ORG_MOVES[org.status]:
         raise Fail(f"a {org.status} organization cannot become {args['status']}")
@@ -311,6 +349,7 @@ def organization_set_status(c, args):
 
 @op("realm.data_view", read=True)
 def organization_get(c, args):
+    """``organization`` with its status and admins, and its ``positions`` with their holders."""
     org = find(Organization, args["organization"])
     return {"organization": view(org, "id", "description", "status", "admins"),
             "positions": [seat_view(p) for p in org.positions]}
@@ -318,5 +357,7 @@ def organization_get(c, args):
 
 @op("realm.data_view", read=True)
 def organization_list(c, args):
+    """Organizations, ``count`` rows at a time (default 100, at most 500) from row ``from``, optionally only those with
+    ``status``. Returns ``organizations`` and ``next``; a filtered page can be short or empty, so follow ``next``."""
     rows, nxt = page(Organization, args, lambda o: not args.get("status") or o.status == args["status"])
     return {"organizations": [view(o, "id", "description", "status") for o in rows], "next": nxt}

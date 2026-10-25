@@ -20,7 +20,8 @@ def addressed_to(principal):
 
 @op("self.data_view", read=True, delegable=True)
 def notification_list(c, args):
-    """Your notifications, newest first; ``unread`` keeps only those you have not read."""
+    """Your notifications, newest first, at most ``count`` (default 50); ``unread`` keeps only those you have not
+    read."""
     rows = [n for r in addressed_to(c.user) for n in each(Notification, "recipient", r)]
     rows = [n for n in rows if not (args.get("unread") and c.user in n.read_by)]
     rows.sort(key=lambda n: (n.at, int(n.id.split("-")[1])), reverse=True)
@@ -46,6 +47,8 @@ def notification_read(c, args):
 
 @op("notification.send")
 def notification_send(c, args):
+    """Notify ``recipient`` ("User:<id>", "Department:<id>" or "Organization:<id>") with ``title`` and optional
+    ``body``, ``href`` and ``topic``; you are the sender. Returns ``notification``."""
     deref(args["recipient"])
     return {"notification": notify(args["recipient"], args["title"], args.get("body", ""), args.get("href", ""),
                                    args.get("topic", ""), c.user)}
@@ -53,7 +56,8 @@ def notification_send(c, args):
 
 @op("realm.monitor", read=True)
 def events(c, args):
-    """The audit log, newest first: ``count`` events before id ``from``; ``next`` continues it."""
+    """The audit log, newest first: ``count`` events (default 100, at most 500) from id ``from`` (default the latest)
+    down; ``next`` continues it."""
     start = int(args.get("from") or Event.max_id())
     count = min(int(args.get("count") or 100), 500)
     rows = [Event[str(i)] for i in range(start, max(start - count, 0), -1)]

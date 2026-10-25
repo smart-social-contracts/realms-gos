@@ -92,6 +92,7 @@ def crypto_grant(c, args):
 
 @op("self.data_manage")
 def crypto_revoke(c, args):
+    """Delete the wrapped keys of ``principals`` at ``scope`` (managers only). Returns ``revoked``."""
     manager(args["scope"], c.user)
     return {"revoked": revoke(args["scope"], args["principals"])}
 
@@ -105,6 +106,7 @@ def crypto_envelope(c, args):
 
 @op("self.data_manage", read=True)
 def crypto_scopes(c, args):
+    """The scopes where you hold a wrapped key."""
     return {"scopes": sorted(e.scope for e in each(KeyEnvelope, "principal", c.user))}
 
 
@@ -126,7 +128,8 @@ def staff(department, principal):
 
 @op("document.manage")
 def document_store(c, args):
-    """Store (or replace) a department document: ``ref`` and ``hash`` of its ciphertext, and optional ``keys``."""
+    """Store a ``department`` document (or replace ``document``): ``title``, ``ref`` and ``hash`` of its ciphertext,
+    and optional ``keys`` (principal to wrapped key). Returns ``document`` and its key ``scope``."""
     fields = {"title": args["title"], "ref": args["ref"], "hash": args["hash"], "at": chain.now()}
     staff(args["department"], c.user)
     doc = find(Document, args["document"]) if args.get("document") else None
@@ -141,6 +144,7 @@ def document_store(c, args):
 
 @op("document.manage")
 def document_share(c, args):
+    """Share ``document``: ``keys`` maps principal to wrapped key. Returns ``granted``."""
     doc = find(Document, args["document"])
     staff(doc.department, c.user)
     return {"granted": grant(scope_of(doc), args["keys"], c.user)}
@@ -148,6 +152,7 @@ def document_share(c, args):
 
 @op("document.manage")
 def document_revoke(c, args):
+    """Delete the wrapped keys of ``principals`` for ``document``. Returns ``revoked``."""
     doc = find(Document, args["document"])
     staff(doc.department, c.user)
     return {"revoked": revoke(scope_of(doc), args["principals"])}
@@ -155,6 +160,7 @@ def document_revoke(c, args):
 
 @op("document.manage")
 def document_delete(c, args):
+    """Delete ``document`` and every wrapped key for it."""
     doc = find(Document, args["document"])
     staff(doc.department, c.user)
     revoke(scope_of(doc), [e.principal for e in each(KeyEnvelope, "scope", scope_of(doc))])
@@ -163,6 +169,7 @@ def document_delete(c, args):
 
 @op("document.manage", read=True)
 def document_list(c, args):
+    """The documents of ``department`` (id, title, hash, author, time), for its staff."""
     staff(args["department"], c.user)
     rows = each(Document, "department", args["department"])
     return {"documents": [view(d, "id", "title", "hash", "author", "at") for d in rows]}
@@ -170,7 +177,7 @@ def document_list(c, args):
 
 @op("self.data_view", read=True)
 def document_get(c, args):
-    """A document's ciphertext reference and your wrapped key: for its department's staff and key holders."""
+    """The ciphertext reference of ``document`` and your wrapped key: for its department's staff and key holders."""
     doc = find(Document, args["document"])
     mine = KeyEnvelope[f"{scope_of(doc)}|{c.user}"]
     if mine is None and c.user not in managers(f"dept:{doc.department}"):

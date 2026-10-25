@@ -28,6 +28,26 @@ def test_only_op_reads_the_raw_registry():
             assert "OPS" not in path.read_text(), f"{path.name}: use op.ops(), OPS may be partly loaded"
 
 
+def test_every_op_says_what_it_does_and_names_its_arguments():
+    # ops_list serves these docstrings: they are how agents and developers discover the realm.
+    problems = []
+    for path in sorted((SRC / "api").glob("*.py")):
+        for node in ast.parse(path.read_text()).body:
+            if not (isinstance(node, ast.FunctionDef) and any(
+                    getattr(getattr(d, "func", None), "id", "") == "op" for d in node.decorator_list)):
+                continue
+            doc = ast.get_docstring(node) or ""
+            if not doc:
+                problems.append(f"{node.name}: no docstring")
+            read = {n.slice.value for n in ast.walk(node) if isinstance(n, ast.Subscript)
+                    and getattr(n.value, "id", "") == "args" and isinstance(n.slice, ast.Constant)}
+            read |= {n.args[0].value for n in ast.walk(node) if isinstance(n, ast.Call)
+                     and getattr(n.func, "attr", "") == "get" and getattr(n.func.value, "id", "") == "args"
+                     and n.args and isinstance(n.args[0], ast.Constant)}
+            problems += [f"{node.name}: ``{a}`` not described" for a in sorted(read) if f"``{a}``" not in doc]
+    assert not problems, "\n".join(problems)
+
+
 def test_core_does_not_import_api():
     # op.py is the exception: it loads the operations it dispatches to.
     for path in (SRC / "core").glob("*.py"):

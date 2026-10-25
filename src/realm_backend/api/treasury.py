@@ -162,6 +162,9 @@ def positive(args, key="amount"):
 
 @op("transfer.create", delegable=True, governed=fund_department, parties=lambda a: {a.get("to", "")})
 def transfer_create(c, args):
+    """Pay ``amount`` of ``symbol`` (default the realm currency) from ``fund`` to ``to`` (principal, user or org); the
+    fund must also cover the ledger fee. Optional ``category`` (default transfer), ``description``, ``contract``.
+    Returns ``transfer``, ``status``. Example: ``{"fund": "ROADS", "to": "buildco", "amount": 50000}``."""
     fund, amount = find(Fund, args["fund"]), positive(args)
     symbol = args.get("symbol") or currency()
     need = amount + find(Token, symbol).fee
@@ -176,6 +179,7 @@ def transfer_create(c, args):
 
 @op("transfer.delete", governed=lambda a: owner_of(transfer_fund(find(Transfer, a["transfer"]))))
 def transfer_revert(c, args):
+    """Revert a pending ``transfer`` (its ledger call never completed), refunding its fund; optional ``reason``."""
     t = find(Transfer, args["transfer"])
     if t.status != "pending":
         raise Fail(f"{t.id} is {t.status}; only a pending transfer can be reverted")
@@ -245,6 +249,8 @@ def refresh(inv):
 
 @op("treasury.manage")
 def invoice_create(c, args):
+    """Bill ``payer`` (user id or ``Entity:id``) ``amount`` of ``symbol`` (default the realm currency), optionally
+    due at ``due_at`` and for ``reason``. Returns ``invoice`` and ``pay_to``, the ledger account to pay it into."""
     inv = new_invoice(args["payer"], positive(args), args.get("symbol") or currency(), args.get("due_at", 0),
                       args.get("reason", ""))
     return {"invoice": inv.id, "pay_to": pay_to(inv)}
@@ -252,6 +258,7 @@ def invoice_create(c, args):
 
 @op("self.invoice_refresh", delegable=True)
 def invoice_check(c, args):
+    """Check the ledger for a payment of ``invoice`` (yours or your organization's). Returns its ``status``."""
     inv = find(Invoice, args["invoice"])
     if not owns(inv, c.user):
         raise Fail(f"{inv.id} is not yours")
@@ -261,6 +268,8 @@ def invoice_check(c, args):
 
 @op("invoice.refresh")
 def invoice_refresh(c, args):
+    """Check the ledger for payments of ``invoice``, or of every pending or overdue invoice when omitted.
+    Returns ``checked``, ``paid`` and each invoice's status in ``invoices``."""
     period()
     if args.get("invoice"):
         rows = [find(Invoice, args["invoice"])]
@@ -274,6 +283,7 @@ def invoice_refresh(c, args):
 
 @op("self.data_view", read=True, delegable=True)
 def my_invoices(c, args):
+    """Your ``invoices``, each with its status and ``pay_to``, the ledger account to pay it into."""
     return {"invoices": [show(i) for i in each(Invoice, "payer", f"User:{c.user}")]}
 
 
@@ -281,6 +291,7 @@ def my_invoices(c, args):
 
 @op("treasury.view", read=True)
 def treasury_view(c, args):
+    """Each fund's balance per token (``funds``), the treasury ``config``, and the registered tokens and NFTs."""
     funds = {f.id: {} for f in each(Fund)}
     for e in each(LedgerEntry):
         if e.kind == "asset" and e.fund is not None:
@@ -292,6 +303,8 @@ def treasury_view(c, args):
 
 @op("treasury.view", read=True)
 def ledger_view(c, args):
+    """One page of ledger entries (``from``, ``count``), optionally filtered by ``transaction``, ``symbol``, ``kind``,
+    ``fund`` and ``period``; ``next`` continues it. A page can hold fewer matches than ``count``: follow ``next``."""
     keys = {k: args[k] for k in ("transaction", "symbol", "kind") if k in args}
 
     def keep(e):
@@ -307,6 +320,7 @@ def ledger_view(c, args):
 
 @op("treasury.view", read=True)
 def report_view(c, args):
+    """The financial ``report`` in full, or a summary of every report when ``report`` is omitted."""
     if args.get("report"):
         return {"report": view(find(FinancialReport, args["report"]))}
     return {"reports": [view(r, "id", "kind", "as_of", "issued_by", "supersedes") for r in each(FinancialReport)]}
@@ -314,6 +328,8 @@ def report_view(c, args):
 
 @op("treasury.manage", governed=realm_wide)
 def treasury_configure(c, args):
+    """Update the treasury settings in ``config``: ``epoch``, ``anchor_month``, ``source_fund`` (receives invoice
+    payments) and ``auto_allocate`` (split them by its adopted allocation rule). Returns the merged ``config``."""
     t = Treasury["1"] or Treasury(id="1")
     unknown = set(args["config"]) - set(CONFIG)
     if unknown:
@@ -326,6 +342,8 @@ def treasury_configure(c, args):
 
 @op("treasury.manage", governed=realm_wide)
 def token_register(c, args):
+    """Register or update the fungible token ``symbol``: its ``ledger`` canister, optional ``indexer``, ``decimals``
+    (default 8) and ``fee`` (default 0). Omitted options keep their current value."""
     t = Token[args["symbol"]] or Token(id=args["symbol"])
     t.ledger, t.indexer = args["ledger"], args.get("indexer", t.indexer)
     t.decimals, t.fee = int(args.get("decimals", t.decimals)), int(args.get("fee", t.fee))
@@ -334,6 +352,8 @@ def token_register(c, args):
 
 @op("treasury.manage", governed=realm_wide)
 def nft_token_register(c, args):
+    """Register or update the NFT collection ``symbol`` at ``canister``, with optional ``name``, ``description``,
+    ``required_license`` (licence kind needed to mint), ``transferable`` and ``supply_cap``; omitted ones are kept."""
     t = NFTToken[args["symbol"]] or NFTToken(id=args["symbol"])
     t.canister = args["canister"]
     for k in ("name", "description", "required_license"):
@@ -347,6 +367,8 @@ def nft_token_register(c, args):
 
 @op("org.manage_budget", governed=realm_wide)
 def fund_create(c, args):
+    """Create the fund with code ``fund``, optional ``name``, ``kind`` (default general) and owning ``department``.
+    A department owns at most one fund."""
     if Fund[args["fund"]]:
         raise Fail(f"fund {args['fund']} exists")
     dept = find(Department, args["department"]) if args.get("department") else None
@@ -359,6 +381,7 @@ def fund_create(c, args):
 
 @op("org.manage_budget", governed=realm_wide)
 def period_open(c, args):
+    """Open the fiscal ``period`` from ``starts_at`` to ``ends_at`` (seconds), optional ``name``; no overlaps."""
     starts, ends = int(args["starts_at"]), int(args["ends_at"])
     if FiscalPeriod[args["period"]] or ends <= starts:
         raise Fail(f"period {args['period']} exists or ends before it starts")
@@ -371,6 +394,7 @@ def period_open(c, args):
 
 @op("org.manage_budget", governed=realm_wide)
 def period_close(c, args):
+    """Close the fiscal ``period`` and its adopted budgets. Nothing can be booked while a closed period covers now."""
     p = find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Fail(f"{p.id} is {p.status}")
@@ -394,6 +418,8 @@ def supersede(b, status):
 
 @op("org.manage_budget", governed=fund_department)
 def budget_draft(c, args):
+    """Draft a budget for ``fund`` in the open ``period``: ``planned`` amount for ``category``, ``kind`` (default
+    expense). Returns ``budget``."""
     fund, p = find(Fund, args["fund"]), find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Fail(f"{p.id} is {p.status}")
@@ -404,6 +430,8 @@ def budget_draft(c, args):
 
 @op("org.manage_budget", governed=budget_department)
 def budget_propose(c, args):
+    """Adopt the draft ``budget``, replacing the adopted one for the same fund, period and category.
+    Spending booked against the replaced budget carries over."""
     b = find(Budget, args["budget"])
     if b.status != "draft" or b.period.status != "open":
         raise Fail(f"{b.id} is {b.status}; only a draft for an open period can be adopted")
@@ -414,6 +442,7 @@ def budget_propose(c, args):
 
 @op("org.manage_budget", governed=budget_department)
 def budget_amend(c, args):
+    """Replace the adopted ``budget`` with a new adopted version planning ``planned``. Returns the new ``budget``."""
     old = find(Budget, args["budget"])
     if old.status != "adopted":
         raise Fail(f"{old.id} is {old.status}; only an adopted budget can be amended")
@@ -431,6 +460,8 @@ def rule_department(args):
 
 @op("org.manage_budget", governed=rule_department)
 def allocation_rule_draft(c, args):
+    """Draft how payments into ``source_fund`` are split: ``rules`` maps fund codes to whole percentages adding up to at
+    most 100. Returns ``rule``."""
     source, rules = find(Fund, args["source_fund"]), {k: int(v) for k, v in args["rules"].items()}
     for code in rules:
         find(Fund, code)
@@ -442,6 +473,7 @@ def allocation_rule_draft(c, args):
 
 @op("org.manage_budget", governed=rule_department)
 def allocation_rule_propose(c, args):
+    """Adopt the draft allocation ``rule``, superseding its source fund's adopted rule."""
     r = find(AllocationRule, args["rule"])
     if r.status != "draft":
         raise Fail(f"{r.id} is {r.status}; only a draft can be adopted")
@@ -456,6 +488,8 @@ def allocation_rule_propose(c, args):
 
 @op("org.manage_budget", governed=lambda a: find(Department, a["department"]))
 def payroll_run(c, args):
+    """Pay each active, non-agent appointee of ``department`` their position's salary in ``symbol`` (default the realm
+    currency) from its fund, once per ``period`` label (e.g. 2026-11). Returns ``transfers``, ``seats``, ``total``."""
     dept, label = find(Department, args["department"]), args["period"]
     fund, symbol = dept.fund, args.get("symbol") or currency()
     if fund is None:
@@ -493,6 +527,8 @@ def statements(rows):
 
 @op("treasury.manage", signing=True)
 def report_issue(c, args):
+    """Freeze the statements of fiscal ``period`` as a report of ``kind`` (default period_close), with a hash of its
+    ledger entries, superseding the previous one of that kind. Returns ``report``, ``source_hash``, ``supersedes``."""
     p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
     rows = sorted(p.ledger_entries, key=lambda e: int(e.id.split("-")[1]))
     source = json.dumps([[e.id, e.transaction, e.debit, e.credit, e.symbol] for e in rows]).encode()
@@ -516,6 +552,8 @@ def account_owner(c, args):
 
 @op("self.data_manage", delegable=True)
 def payment_account_add(c, args):
+    """Add a payout account (``network``, ``address``, optional ``symbol`` and ``label``) for you, or for
+    ``organization`` if you administer it. Transfers in ``symbol`` are paid to it. Returns ``account``."""
     a = PaymentAccount(id=next_id(PaymentAccount, "PA"), owner=account_owner(c, args), network=args["network"],
                        address=args["address"], symbol=args.get("symbol", ""), label=args.get("label", ""))
     return {"account": a.id}
@@ -523,6 +561,7 @@ def payment_account_add(c, args):
 
 @op("self.data_manage", delegable=True)
 def payment_account_remove(c, args):
+    """Remove your payout ``account``, or with ``organization`` one of an organization you administer."""
     a = find(PaymentAccount, args["account"])
     if a.owner != account_owner(c, args):
         raise Fail(f"{a.id} is not yours")
@@ -533,6 +572,8 @@ def payment_account_remove(c, args):
 
 @op("token.force_transfer", signing=True, governed=realm_wide, parties=lambda a: {a.get("from", ""), a.get("to", "")})
 def token_force_transfer(c, args):
+    """By court order, move ``amount`` of ``symbol`` from principal ``from`` to principal ``to`` on the token's ledger,
+    with optional ``reason`` as memo. Returns ``transfer``, ``status`` and ``ledger_tx``."""
     token, amount = find(Token, args["symbol"]), positive(args)
     p = period()
     t = Transfer(id=next_id(Transfer, "TR"), sender=args["from"], to=args["to"], symbol=token.id, amount=amount,
@@ -552,6 +593,7 @@ def token_force_transfer(c, args):
 
 @op("token.freeze", signing=True, governed=realm_wide, parties=lambda a: {a.get("account", "")})
 def token_freeze(c, args):
+    """Freeze principal ``account`` on the ``symbol`` ledger with optional ``reason``; ``frozen`` false unfreezes it."""
     token = find(Token, args["symbol"])
     method = "freeze_account" if args.get("frozen", True) else "unfreeze_account"
     reply = yield from chain.call(token.ledger, method,

@@ -86,7 +86,8 @@ def rearm():
 
 @op("task.create")
 def task_create(c, args):
-    """A task of ``steps``: ``[{op, args, wait}]``, each run as you."""
+    """Create task ``name`` of ``steps``: ``[{op, args, wait}]``, each run as you, ``wait`` seconds before the next.
+    Returns ``task``."""
     steps = checked(args["steps"])
     if Task[args["name"]]:
         raise Fail(f"task '{args['name']}' exists")
@@ -97,6 +98,7 @@ def task_create(c, args):
 
 @op("task.edit")
 def task_edit(c, args):
+    """Replace the steps of ``task`` with ``steps`` (``[{op, args, wait}]``), unless it is running or waiting."""
     task, steps = find(Task, args["task"]), checked(args["steps"])
     if task.status in BUSY:
         raise Fail(f"task '{task.name}' is {task.status}")
@@ -107,6 +109,7 @@ def task_edit(c, args):
 
 @op("task.delete")
 def task_delete(c, args):
+    """Delete ``task`` with its steps, schedules and run history."""
     task = find(Task, args["task"])
     for row in list(task.steps) + list(task.schedules) + list(task.executions):
         row.delete()
@@ -115,6 +118,7 @@ def task_delete(c, args):
 
 @op("task.run")
 def task_run(c, args):
+    """Run ``task`` now, steps as its creator. Returns ``execution`` and ``status`` (completed, failed or waiting)."""
     task = find(Task, args["task"])
     if task.status in BUSY:
         raise Fail(f"task '{task.name}' is {task.status}")
@@ -124,7 +128,7 @@ def task_run(c, args):
 
 @op("task.schedule")
 def task_schedule(c, args):
-    """Run a task at ``run_at`` (default now), then every ``repeat_every`` seconds if set."""
+    """Run ``task`` at ``run_at`` (default now), then every ``repeat_every`` seconds if set. Returns ``schedule``."""
     task = find(Task, args["task"])
     s = TaskSchedule(name=f"{task.name}@{len(task.schedules) + 1}", task=task, disabled=False, last_run_at=0,
                      run_at=int(args.get("run_at") or chain.now()), repeat_every=int(args.get("repeat_every", 0)))
@@ -134,6 +138,7 @@ def task_schedule(c, args):
 
 @op("task.cancel")
 def task_cancel(c, args):
+    """Cancel ``task``: disable its schedules and stop a waiting run before its next step."""
     task = find(Task, args["task"])
     for s in task.schedules:
         s.disabled = True
@@ -148,12 +153,13 @@ def summary(task):
 
 @op("task.view", read=True)
 def task_list(c, args):
+    """Every task with its status, creator, steps and schedules."""
     return {"tasks": [summary(t) for t in each(Task)]}
 
 
 @op("task.view", read=True)
 def task_logs(c, args):
-    """A task's runs, newest first (``count``, default 10)."""
+    """The runs of ``task``, newest first (``count``, default 10)."""
     runs = sorted(find(Task, args["task"]).executions, key=lambda e: int(e._id), reverse=True)
     return {"runs": [view(e, "name", "status", "started_at", "completed_at", "result")
                      for e in runs[:int(args.get("count") or 10)]]}

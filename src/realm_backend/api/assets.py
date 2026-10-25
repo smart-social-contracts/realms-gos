@@ -85,6 +85,8 @@ def transfer_parties(args):
 
 @op("nft.mint", governed=realm_wide)
 def land_register(c, args):
+    """Register a parcel of ``width`` × ``height`` cells (default 1) at ``x``, ``y`` (default 0) for ``owner`` (user
+    or organization), optional ``kind`` (default unassigned) and ``metadata``; no overlaps. Returns ``land``."""
     x, y, w, h = (int(args.get(k, d)) for k, d in (("x", 0), ("y", 0), ("width", 1), ("height", 1)))
     if w < 1 or h < 1:
         raise Fail("a parcel is at least one cell wide and high")
@@ -99,6 +101,8 @@ def land_register(c, args):
 
 @op("nft.force_transfer", signing=True, governed=realm_wide, parties=transfer_parties)
 def land_transfer(c, args):
+    """Move parcel ``land`` to ``to`` (user or organization) under court ``order`` (``Verdict:id``, issued or final),
+    and its NFT with it if minted."""
     land, to, order = find(Land, args["land"]), owner_ref(args["to"]), deref(args["order"])
     if not isinstance(order, Verdict) or order.status not in ("issued", "final"):
         raise Fail("moving a parcel needs an issued court verdict")
@@ -114,6 +118,8 @@ def land_transfer(c, args):
 
 @op("realm.data_view", read=True)
 def land_list(c, args):
+    """One page of parcels (``from``, ``count``), optionally only those of ``owner``; ``next`` continues it.
+    A page can hold fewer matches than ``count``: follow ``next``."""
     owner = owner_ref(args["owner"]) if args.get("owner") else None
     rows, more = page(Land, args, lambda p: owner in (None, p.owner))
     return {"lands": [view(p, *PARCEL) for p in rows], "next": more}
@@ -121,6 +127,8 @@ def land_list(c, args):
 
 @op("realm.data_view", read=True)
 def land_map(c, args):
+    """The ``parcels`` overlapping the box from ``min_x``, ``min_y`` to ``max_x``, ``max_y`` (default 0 to 100), and the
+    ``zones`` not tied to a parcel."""
     x, y = int(args.get("min_x", 0)), int(args.get("min_y", 0))
     w, h = int(args.get("max_x", 100)) - x, int(args.get("max_y", 100)) - y
     return {"parcels": [view(p, *PARCEL) for p in each(Land) if p.status != "revoked" and overlaps(p, x, y, w, h)],
@@ -129,6 +137,8 @@ def land_map(c, args):
 
 @op("nft.mint")
 def land_mint_nft(c, args):
+    """Mint the LAND NFT for the active parcel ``land`` to its owner (an organization's stays in the realm's custody),
+    optional ``prepared_by``. Returns ``token_id``."""
     land, collection = find(Land, args["land"]), find(NFTToken, LAND)
     if land.token_id or land.status != "active":
         raise Fail(f"{land.id} is {land.status}{' and already minted' if land.token_id else ''}")
@@ -154,16 +164,19 @@ def freeze(args, on):
 
 @op("nft.freeze", signing=True, parties=owners)
 def land_freeze(c, args):
+    """Mark the active parcel ``land`` disputed and freeze its NFT, with optional ``reason``."""
     return (yield from freeze(args, True))
 
 
 @op("nft.freeze", signing=True, parties=owners)
 def land_unfreeze(c, args):
+    """End the dispute on parcel ``land``: it becomes active again and its NFT is unfrozen."""
     return (yield from freeze(args, False))
 
 
 @op("self.data_manage", delegable=True)
 def zone_set(c, args):
+    """Make ``zone`` (an h3 cell) your home, with optional ``name`` and ``kind``; it replaces your previous home."""
     zone = Zone[args["zone"]]
     if zone and zone.user not in ("", c.user):
         raise Fail(f"zone {zone.id} is someone else's home")
@@ -176,6 +189,7 @@ def zone_set(c, args):
 
 @op("self.data_manage", delegable=True)
 def zone_clear(c, args):
+    """Stop having ``zone`` as your home."""
     zone = find(Zone, args["zone"])
     if zone.user != c.user:
         raise Fail(f"zone {zone.id} is not your home")
@@ -211,6 +225,9 @@ def signer(c, args):
 
 @op("credential.sign", signing=True)
 def credential_issue(c, args):
+    """Mint a ``schema`` credential to principal ``holder`` for ``organization`` (you need a seat there that signs it),
+    with optional ``subject``, public ``fields``, ``payload_hash`` (sha256:…), ``payload_ref``, ``prepared_by`` and
+    ``expires_at``. Returns ``token_id`` and ``header``."""
     rule, org, collection = signer(c, args)
     issuer = f"Organization:{org.id}"
     for kind in filter(None, (rule["license"], collection.required_license)):
@@ -233,6 +250,8 @@ def credential_issue(c, args):
 
 @op("credential.sign", signing=True)
 def credential_revoke(c, args):
+    """Revoke the ``schema`` credential ``token_id`` for ``organization`` (you need a seat there that signs it):
+    the token is frozen for good, with ``reason``."""
     # The ledger has no burn: a revoked credential is frozen for good, with the reason on the ledger.
     rule, org, collection = signer(c, args)
     reason = quote(f"ggg:revoked by Organization:{org.id}: {args.get('reason', '')}")
@@ -243,7 +262,7 @@ def credential_revoke(c, args):
 
 @op(None, read=True, public=True)
 def credential_verify(c, args):
-    """Check a token's `ggg:` header (as read from the ledger, with its frozen flag) against this realm."""
+    """Check a token's `ggg:` ``header`` (as read from the ledger, with its ``frozen`` flag) against this realm."""
     h, now = args["header"], chain.now()
     rule, used = schema_of(h["ggg:schema"]), License[h.get("ggg:license") or "-"]
     genuine = bool(used and used.holder == h["ggg:issuer"] and used.kind == rule["license"]
