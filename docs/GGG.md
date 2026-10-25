@@ -1,6 +1,6 @@
 # GGG — Generalized Global Governance
 
-**Status:** draft v0.2 for review (phase 0 of [REFACTOR_PLAN.md](../REFACTOR_PLAN.md)).
+**Status:** draft v0.3 for review (phase 0 of [REFACTOR_PLAN.md](../REFACTOR_PLAN.md)).
 
 GGG is the standard a realm implements: the **entities** it stores, the **operations** that change
 them, and the **invariants** that must always hold. It describes behaviour, not code. The realm's
@@ -8,8 +8,6 @@ them, and the **invariants** that must always hold. It describes behaviour, not 
 operations, and the invariants are enforced by Cedar guardrails and checked by the acceptance tests.
 
 When this document and the code disagree, the code is wrong.
-
-Design decisions still open are marked **[D1]**…**[D5]** and listed at the end.
 
 ## 1. Conventions
 
@@ -62,18 +60,20 @@ organizations: **Clinic B** (health provider) and **BuildCo** (contractor). Agen
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `User` | `id` (principal), `nickname`, `avatar`, `status`, `home_quarter`, `joined_at`, `profiles` → `Profile`*, `private_data` (encrypted) | One per principal known to this quarter. **[D1]** absorbs today's `Member` and `GuestUser`. | `alice`: nickname Alice, `member`, home quarter North, profiles `[member]` |
+| `User` | `id` (principal), `nickname`, `avatar`, `home_quarter`, `profiles` → `UserProfile`*, `private_data` (encrypted) | One per principal known to this quarter. | `alice`: nickname Alice, home quarter North, profiles `[member]` |
+| `Member` | `id`, `user` → `User`, `status`, `joined_at` | Membership of a user in this quarter. | Alice: `active` since 2026-03-02 |
+| `GuestUser` | `id` (principal), `home_quarter`, `permissions` (Json) | A user from another quarter acting here. | Bob from South, allowed to view and transact |
 | `Human` | `id`, `user` → `User`, `date_of_birth`, `h3_index` | A verified person behind a user. At most one user per human. | Alice's verified person record: born 1990-04-12, home cell `871f1d489ffffff` |
 | `Identity` | `id`, `human` → `Human`, `kind` (`passport`, `email`, `registry`, …), `issuer`, `ref`, `verified_at` | An attestation. Proof material is stored encrypted or off-chain; `ref` points to it. | Alice's passport proof: kind `passport`, issuer `zkpassport`, verified 2026-03-02 |
-| `Profile` | `id` (name), `description`, `operations` (Json list of permissions) | A named role. Defaults: `admin` (`all`), `member`. **[D2]** replaces `UserProfile` and `Permission`. | `member` → `[self.join, proposal.vote, proposal.create, dispute.create, …]` |
+| `UserProfile` | `id` (name), `description`, `allowed_to` (Json list of permissions), `permissions` → `Permission`*, `extensions` → `Extension`* | A named role. Defaults: `admin` (`all`), `member`. | `member` → `[self.join, proposal.vote, proposal.create, dispute.create, …]` |
+| `Permission` | `id` (name), `description`, `category`, `scope`, `users` → `User`*, `profiles` → `UserProfile`*, `departments` → `Department`* | A fine-grained grant of one permission to users, profiles or departments. | `transfer.create` on scope `fund:ROADS`, granted to Infrastructure |
 | `Invite` | `id` (code hash), `profile`, `department`, `position`, `max_uses`, `uses`, `redeemed_by` (Json), `expires_at`, `revoked`, `created_by` | Today's `RegistrationCode`. The code itself is never stored. | 50-use code for new clerks: profile `member`, Civil Registry, position `clerk`, expires in 30 days |
 | `Delegation` | `id`, `grantor`, `delegate`, `scope` (Json), `status`, `label`, `description`, `requires_acceptance`, `granted_by`, `accepted_at`, `starts_at`, `expires_at`, `revoked_at`, `revoked_by` | Power of attorney. | Alice → `claude-conn`: `[proposal.vote, proposal.create]` for 24 h, `active` |
 | `DelegationRequest` | `id`, `grantor`, `delegate`, `scope`, `label`, `description`, `starts_at`, `expires_at`, `request_expires_at` | A delegate asking a member for a grant. Deleted once decided. | Claude asks Alice for `[proposal.vote]` for 7 days; the link is valid 1 h |
 
 ### Lifecycles
 
-- `User.status`: `visitor` → `member` → `suspended` ⇄ `member`; `member` → `banned` (terminal);
-  `guest` for users whose `home_quarter` is another quarter.
+- `Member.status`: `active` ⇄ `inactive`; `active` ⇄ `suspended`; any → `banned` (terminal).
 - `Identity`: `pending` → `verified` | `rejected`.
 - `Delegation.status`: `pending` → `active` → `revoked` | `expired`; `pending` → `declined`.
 
@@ -106,7 +106,7 @@ organizations: **Clinic B** (health provider) and **BuildCo** (contractor). Agen
 - I-ID-2: An invite grants at most the profile, department and position it names, at most
   `max_uses` times, never after `expires_at` or `revoked`.
 - I-ID-3: Nobody can assign a profile containing a permission they do not hold themselves.
-- I-ID-4: A `banned` user can call nothing except read operations on public data.
+- I-ID-4: A `banned` member can call nothing except read operations on public data.
 - I-ID-5: Private data is readable only by its owner and by principals the owner shared it with.
 - I-ID-6: A delegation never covers a permission the grantor lacks at the time of use, never a
   `signing` permission, never `all`, and never lasts more than one year.
@@ -129,7 +129,7 @@ Two kinds of body:
 |---|---|---|---|
 | `Department` | `id` (name), `description`, `parent` → `Department`, `is_root`, `head` → `User`, `policy` (Json), `target_policy` (Json), `fund` → `Fund`, `extensions` → `Extension`* | `policy` = `{m, n, quorum_percent, veto: [principals]}`. Exactly one root department per realm. | Civil Registry: under Administration, 2-of-3 policy, head `dana` |
 | `Organization` | `id` (name), `description`, `status`, `admins` → `User`* | An external party. Its admins manage its representatives. | Clinic B: `active`, admin `dr-ana` |
-| `Position` | `id` (key), `department` → `Department` or `organization` → `Organization`, `title`, `profile` → `Profile`, `headcount`, `salary` (int), `salary_period`, `status`, `inherit_from_capital` | A seat in a department, or a representative seat in an organization. | `civil-registry.clerk`: 4 seats, 2,000 REALM/month, profile `clerk`; `clinic-b.physician`: 3 seats |
+| `Position` | `id` (key), `department` → `Department` or `organization` → `Organization`, `title`, `profile` → `UserProfile`, `headcount`, `salary` (int), `salary_period`, `status`, `inherit_from_capital` | A seat in a department, or a representative seat in an organization. | `civil-registry.clerk`: 4 seats, 2,000 REALM/month, profile `clerk`; `clinic-b.physician`: 3 seats |
 | `Appointment` | `id`, `position` → `Position`, `user` → `User`, `kind` (`substantive`, `acting`), `agent` (bool), `supervisor` → `User`, `started_at`, `ended_at`, `status`, `source_quarter` | One user holding one seat. Agents are users with `agent = true`. | Bob holds a clerk seat since 2026-05-01; `records-bot` holds `records_agent` at Clinic B, agent, supervisor `dr-ana` |
 | `Authority` | `id`, `grantor` → `Department`, `target` (department or quarter ref), `operations` (Json) | One department's powers over another. Today's `DepartmentAuthority`. | Finance lets Infrastructure use `[transfer.create]` on the `ROADS` fund |
 
@@ -225,7 +225,7 @@ Two kinds of body:
 | `FiscalPeriod` | `id`, `name`, `starts_at`, `ends_at`, `status` | | `FY2026`: 2026-01-01 to 2026-12-31, `open` |
 | `Budget` | `id`, `fund` → `Fund`, `period` → `FiscalPeriod`, `category`, `kind`, `planned`, `actual`, `status`, `proposal` → `Proposal` | | Roads FY2026, capital: planned 300,000, actual 120,500, `adopted` |
 | `AllocationRule` | `id`, `source_fund`, `rules` (Json), `status`, `proposal` → `Proposal` | How revenue is split between funds. | From `ROOT`: 30% `WELFARE`, 20% `ROADS`, 50% `GENERAL` |
-| `LedgerEntry` | `id`, `transaction`, `kind` (asset, liability, equity, revenue, expense), `category`, `debit`, `credit`, `symbol`, `fund` → `Fund`, `period` → `FiscalPeriod`, `subject` (`Entity:id`), `at`, `description` | Double entry. One `subject` reference replaces today's eight optional foreign keys. | Tx `T-88`: debit `ROADS` capital expense 50,000, credit cash 50,000, subject `Contract:C-9` |
+| `LedgerEntry` | `id`, `transaction`, `kind` (asset, liability, equity, revenue, expense), `category`, `debit`, `credit`, `symbol`, `fund` → `Fund`, `period` → `FiscalPeriod`, `transfer` → `Transfer`, `invoice` → `Invoice`, `user` → `User`, `organization` → `Organization`, `contract` → `Contract`, `case` → `Case`, `penalty` → `Penalty`, `appeal` → `Appeal`, `at`, `description` | Double entry. At most one of the source references is set. | Tx `T-88`: debit `ROADS` capital expense 50,000, credit cash 50,000, contract `C-9` |
 | `Invoice` | `id`, `payer` (`Entity:id`), `amount`, `symbol`, `due_at`, `status`, `reason` (`Entity:id`), `paid_at`, `payment` (Json) | Paid into the subaccount derived from its `id`. | `INV-301`: Alice owes 120 REALM property tax, due 2026-12-31, `pending` |
 | `Transfer` | `id`, `from`, `to`, `symbol`, `amount`, `ledger_tx`, `invoice` → `Invoice`, `status`, `at` | | 50,000 REALM from `ROADS` to BuildCo, ledger tx 18234, `completed` |
 | `Trade` | `id`, `contract` → `Contract`, `leg_a` → `Transfer`, `leg_b` → `Transfer`, `status` | An exchange of two transfers. | `C-9` milestone: realm pays 10,000 REALM, BuildCo hands over the road deed NFT |
@@ -461,7 +461,9 @@ A realm can be one canister or a federation of quarters, one of which is the cap
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `Realm` | `id` (`1`), `name`, `manifesto`, `welcome`, `status`, `is_capital`, `federation_id`, `currency`, `currency_decimals`, `canisters` (Json), `settings` (Json), `test_flags` (Json), `state` (Json), `calendar` (Json), `manifest` (Json) | Singleton per canister. Today ~60 columns; grouped into Json by purpose. Absorbs `Calendar` and `Registry`. | Agora: `beta`, capital, currency REALM (8 decimals) |
+| `Realm` | `id` (`1`), `name`, `manifesto`, `welcome_message`, `status`, `manifest_data`, `calendar` → `Calendar`, `treasury` → `Treasury`, `accounting_currency`, `accounting_currency_decimals`; canisters: `principal_id`, `frontend_canister_id`, `token_canister_id`, `nft_canister_id`, `file_registry_canister_id`, `marketplace_canister_id`, `installer_canister_id`, `shared_tokens_json`; federation: `is_quarter`, `is_capital`, `federation_realm_id`, `federation_codex`, `quarter_join_mode`; scaling and sync: `auto_scale_enabled`, `scale_in_flight`, `scale_requested_at`, `bootstrap_state`, `sync_state`, `codex_install_state`, `last_activity_at`; trust: `trusted_principals`, `require_marketplace_approval`, `trusted_approvers`; settings: `open_registration`, `ai_assistant_enabled`, `logo_url`, `background_image_url`, `installed_version`, `network`; test flags: `can_test_mode`, `test_mode` and the `test_mode_*` switches | Singleton per canister. | Agora: `beta`, capital, currency REALM (8 decimals), open registration off |
+| `Calendar` | `id`, `realm` → `Realm`, `epoch`, `fiscal_period`, `voting_window`, `codex_release_cycle`, `benefit_cycle`, `service_payment_cycle`, `license_review_cycle`, `custom_cycles` (Json) | The realm's governance time cycles, in seconds. | Voting window 7 days, fiscal period 1 year, licence review every 2 years |
+| `Registry` | `id` (name), `description`, `principal_id` | A registry canister the realm is listed in. | `realm-registry`, `ufxgi-…` |
 | `Quarter` | `id` (canister id), `name`, `index`, `status`, `population`, `codex_id`, `codex_version`, `last_sync`, `last_activity_at` | Known on the capital. | North: population 1,240, `active`, codex agora 1.4.2 |
 | `Forward` | `id`, `subject` (`Entity:id`), `from`, `to`, `moved_at`, `signature` | Signed pointer left when a user moves quarter. Today's `EntityMigration`. | Bob moved North → South on 2026-09-01, signed by North |
 | `FederalVote` | `id`, `origin_quarter`, `action` (Json), `rule` (Json), `hash`, `deadline`, `status`, `tally` (Json) | | `FV-3` Adopt tax policy 3: majority of quarters, deadline 15 Nov |
@@ -513,13 +515,11 @@ so no canister grows with the population of the whole federation.
 | `Notification` | `id`, `recipient` (`Entity:id`: user, department or organization), `topic`, `title`, `body`, `href`, `sender`, `visibility`, `read_by` (Json), `at` | | To Alice: "P-7 passed", link `/proposals/P-7` |
 | `Event` | `id`, `op`, `caller`, `on_behalf_of`, `args` (Json, secrets stripped), `result` (Json), `at` | New: the audit log. Append-only. | `proposal_vote` by `claude-conn` for `alice` at 09:31 → ok |
 
-Removed or merged: `Service` (services are provided by licensed organizations), `MarketPlace` and
-`Registry` (→ `Realm.canisters`), `Member` and `GuestUser` (→ `User.status`), `Permission` and
-`UserProfile` (→ `Profile`), `RegistrationCode` (→ `Invite`), `DepartmentAuthority` (→ `Authority`),
-`Calendar` (→ `Realm.calendar`), `TreasuryConfig` (→ `Treasury.config`), `Instrument` (→ `Token`),
-`Balance` (ledgers are the source of truth), `EntityMigration` (→ `Forward`), `Menu*`
-(→ `Extension.sidebar`), `JusticeSystem` (courts stand on their own), `QuarterResident` (no central
-user directory).
+Removed or merged: `Service` (services are provided by licensed organizations), `MarketPlace`
+(→ `Realm.marketplace_canister_id`), `RegistrationCode` (→ `Invite`), `DepartmentAuthority`
+(→ `Authority`), `TreasuryConfig` (→ `Treasury.config`), `Instrument` (→ `Token`), `Balance` (ledgers
+are the source of truth), `EntityMigration` (→ `Forward`), `Menu*` (→ `Extension.sidebar`),
+`JusticeSystem` (courts stand on their own), `QuarterResident` (no central user directory).
 
 ### Operations
 
@@ -635,12 +635,12 @@ revoking roles is covered by `user.view` and `role.revoke`).
 - I-ALL-5: Personal data never appears in clear text in public state, NFT metadata or the event log.
 - I-ALL-6: An operation that fails changes nothing.
 
-## 15. Open decisions
+## 15. Decisions
 
-| # | Decision | Recommendation |
+| # | Decision | Outcome |
 |---|---|---|
-| D1 | Merge `Member` and `GuestUser` into `User.status` | Yes |
-| D2 | Replace `UserProfile` + `Permission` with `Profile.operations` (roles hold operations; users hold roles; positions grant a role) | Yes: one way to hold a permission |
-| D3 | Collapse `Realm`'s ~60 columns into a few Json groups (`canisters`, `settings`, `test_flags`, `state`, `calendar`) | Yes |
-| D4 | Replace `LedgerEntry`'s eight optional foreign keys with one `subject` reference | Yes |
-| D5 | Keep `Task*` entities defined in `ic-basilisk-toolkit` (shared with Casals) rather than in `ggg/` | Yes |
+| D1 | Merge `Member` and `GuestUser` into a `User.status` | Rejected: both entities stay |
+| D2 | Replace `UserProfile` + `Permission` with a single `Profile` | Rejected: both entities stay |
+| D3 | Collapse `Realm`'s columns into Json groups | Rejected: the columns stay, and so do `Calendar` and `Registry` |
+| D4 | Replace `LedgerEntry`'s source foreign keys with one `subject` reference | Rejected: the foreign keys stay |
+| D5 | Keep the `Task*` entities in `ic-basilisk-toolkit`, shared with Casals | Accepted |
