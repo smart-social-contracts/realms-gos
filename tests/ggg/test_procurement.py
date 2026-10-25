@@ -2,7 +2,7 @@ import fake_chain
 import world
 from ggg import Bid, Contract, Delegation, Department, Event, Organization, Tender
 from kit import call, denied, later, ok
-from procurement import seal
+from api.procurement import seal
 
 DAY = 86400
 RUBRIC = {"price": 60, "quality": 40}

@@ -1,8 +1,8 @@
-import chain
-from db import Fail, deref, each, find, next_id, ref, view
+from core import chain
+from core.db import Fail, deref, each, find, next_id, ref, view
 from ggg import Event, Notification
-from op import op, ops
-from proposals import appointed
+from core.op import op, ops
+from api.proposals import appointed
 
 SHOWN = ("id", "topic", "title", "body", "href", "sender", "at")
 

@@ -3,7 +3,7 @@
 import pathlib
 import re
 
-import op
+from core import op
 
 SPEC = pathlib.Path(__file__).resolve().parents[2] / "docs" / "GGG.md"
 FLAGS = ("read", "delegable", "governed", "signing")

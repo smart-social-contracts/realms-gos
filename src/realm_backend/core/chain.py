@@ -1,6 +1,6 @@
 from basilisk import Duration, Principal, ic
 
-from candid import unquote
+from core.candid import unquote
 
 ANONYMOUS = "2vxsx-fae"
 

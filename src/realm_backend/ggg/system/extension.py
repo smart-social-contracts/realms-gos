@@ -1,6 +1,6 @@
 from ic_python_db import String
 
-from db import Json, Row
+from core.db import Json, Row
 
 
 class Extension(Row):

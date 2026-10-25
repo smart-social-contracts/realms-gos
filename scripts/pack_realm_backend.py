@@ -21,7 +21,7 @@ from gen_main import registry, render  # noqa: E402
 
 def pack(version=None):
     (SRC / "main.py").write_text(render())
-    setup = SRC / "setup.py"
+    setup = SRC / "api" / "setup.py"
     original = setup.read_text()
     if version:
         setup.write_text(original.replace('VERSION = "VERSION_PLACEHOLDER"', f'VERSION = "{version}"'))

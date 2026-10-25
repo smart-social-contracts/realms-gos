@@ -1,8 +1,8 @@
 import json
 
-import auth
+from core import auth
 import fake_chain
-import quarters
+from api import quarters
 import world
 from ggg import Codex, Department, Forward, GuestUser, Member, Quarter, Realm, User
 from kit import call, denied, ok

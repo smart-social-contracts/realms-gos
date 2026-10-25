@@ -1,6 +1,6 @@
 from ic_python_db import Boolean, ManyToMany, ManyToOne, OneToMany, OneToOne, String
 
-from db import Json, Row
+from core.db import Json, Row
 
 
 class Department(Row):

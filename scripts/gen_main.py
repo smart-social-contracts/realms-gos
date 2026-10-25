@@ -21,7 +21,7 @@ __basilisk_features__ = ["shell", "browse"]
 Database.init(db_storage=StableBTreeMap[str, str](memory_id=1, max_key_size=256, max_value_size=100_000))
 
 {imports}
-from op import dispatch, run  # noqa: E402
+from core.op import dispatch, run  # noqa: E402
 
 
 @init
@@ -38,9 +38,7 @@ def post_upgrade_() -> void:
 
 def registry():
     ops = {}
-    for path in sorted(SRC.glob("*.py")):
-        if path.stem in ("main", "op"):
-            continue
+    for path in sorted((SRC / "api").glob("*.py")):
         for node in ast.parse(path.read_text()).body:
             for dec in getattr(node, "decorator_list", []):
                 if isinstance(dec, ast.Call) and getattr(dec.func, "id", "") == "op":
@@ -52,7 +50,7 @@ def registry():
 def render():
     ops = registry()
     modules = sorted({m for _, m in ops.values()} | {"setup"})
-    imports = "\n".join(f"import {m}  # noqa: E402,F401" for m in modules)
+    imports = "\n".join(f"from api import {m}  # noqa: E402,F401" for m in modules)
     stubs = "".join(
         f"\n@query\ndef {name}(args: text) -> text: return run(dispatch({module}.{name}, args))\n" if read else
         f"\n@update\ndef {name}(args: text) -> Async[text]: return (yield from dispatch({module}.{name}, args))\n"

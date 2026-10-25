@@ -1,11 +1,11 @@
 import inspect
 
-from db import each
+from core.db import each
 
 import pytest
 
 import fake_chain
-import treasury
+from api import treasury
 import world
 from ggg import (AllocationRule, Budget, Delegation, Department, FinancialReport, Invoice, LedgerEntry, Position,
                  Token, Transfer)

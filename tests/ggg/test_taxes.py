@@ -1,9 +1,9 @@
 import pytest
 
 import fake_chain
-import taxes
+from api import taxes
 import world
-from db import each
+from core.db import each
 from ggg import Delegation, Department, Invoice, Land, Member, TaxDeclaration, TaxPolicy
 from kit import call, denied, later, ok
 from test_treasury import balance_reply, setup_finance

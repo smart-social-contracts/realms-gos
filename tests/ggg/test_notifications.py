@@ -1,15 +1,8 @@
-import importlib
-import sys
-import types
-
 import fake_chain
-import op
 import world
+from core import op
 from ggg import Delegation, Event
 from kit import call, denied, ok
-
-DOMAINS = ("assets", "codex", "crypto", "delegation", "extensions", "federation", "justice", "licenses", "members",
-           "orgs", "procurement", "proposals", "quarters", "setup", "taxes", "tasks", "treasury")
 
 
 def test_story_justice_notifies_mallory_of_her_fine():
@@ -72,10 +65,7 @@ def test_I_EXT_4_the_event_log_is_append_only():
     assert Event.count() == 3
 
 
-def test_ops_list_is_public_and_complete(monkeypatch):
-    for name in DOMAINS:
-        if importlib.util.find_spec(name) is None:  # a domain still being written
-            monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+def test_ops_list_is_public_and_complete():
     out = ok("ops_list", fake_chain.ANONYMOUS)["operations"]
     by_name = {o["name"]: o for o in out}
     assert set(by_name) == set(op.OPS)

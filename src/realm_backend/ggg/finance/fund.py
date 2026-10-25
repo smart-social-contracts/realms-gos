@@ -1,6 +1,6 @@
 from ic_python_db import OneToMany, OneToOne, String
 
-from db import Row
+from core.db import Row
 
 
 class Fund(Row):

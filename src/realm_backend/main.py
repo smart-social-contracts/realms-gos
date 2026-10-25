@@ -7,25 +7,25 @@ __basilisk_features__ = ["shell", "browse"]
 
 Database.init(db_storage=StableBTreeMap[str, str](memory_id=1, max_key_size=256, max_value_size=100_000))
 
-import assets  # noqa: E402,F401
-import codex  # noqa: E402,F401
-import crypto  # noqa: E402,F401
-import delegation  # noqa: E402,F401
-import extensions  # noqa: E402,F401
-import federation  # noqa: E402,F401
-import justice  # noqa: E402,F401
-import licenses  # noqa: E402,F401
-import members  # noqa: E402,F401
-import notifications  # noqa: E402,F401
-import orgs  # noqa: E402,F401
-import procurement  # noqa: E402,F401
-import proposals  # noqa: E402,F401
-import quarters  # noqa: E402,F401
-import setup  # noqa: E402,F401
-import tasks  # noqa: E402,F401
-import taxes  # noqa: E402,F401
-import treasury  # noqa: E402,F401
-from op import dispatch, run  # noqa: E402
+from api import assets  # noqa: E402,F401
+from api import codex  # noqa: E402,F401
+from api import crypto  # noqa: E402,F401
+from api import delegation  # noqa: E402,F401
+from api import extensions  # noqa: E402,F401
+from api import federation  # noqa: E402,F401
+from api import justice  # noqa: E402,F401
+from api import licenses  # noqa: E402,F401
+from api import members  # noqa: E402,F401
+from api import notifications  # noqa: E402,F401
+from api import orgs  # noqa: E402,F401
+from api import procurement  # noqa: E402,F401
+from api import proposals  # noqa: E402,F401
+from api import quarters  # noqa: E402,F401
+from api import setup  # noqa: E402,F401
+from api import tasks  # noqa: E402,F401
+from api import taxes  # noqa: E402,F401
+from api import treasury  # noqa: E402,F401
+from core.op import dispatch, run  # noqa: E402
 
 
 @init

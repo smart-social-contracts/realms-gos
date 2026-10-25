@@ -2,7 +2,7 @@ import json
 
 import fake_chain
 from ic_python_db import Database
-import federation
+from api import federation
 import world
 from ggg import Delegation, Department, FederalVote, FederalVoteLeg, FederationMessage, Proposal, Realm
 from kit import call, denied, later, ok

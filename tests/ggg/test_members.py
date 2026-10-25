@@ -1,6 +1,6 @@
 import hashlib
 
-import auth
+from core import auth
 import fake_chain
 import world
 from ggg import Appointment, Delegation, Event, Identity, Invite, Member, Position, Proposal, Realm, User, UserProfile

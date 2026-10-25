@@ -1,10 +1,10 @@
-import chain
-from db import Fail, deref, each, find, next_id, view
+from core import chain
+from core.db import Fail, deref, each, find, next_id, view
 from ggg import (Appeal, Case, Contract, Court, Department, Dispute, Invoice, Judge, Member, Notification, Organization,
                  Penalty, User, Verdict)
-from licenses import active
-from op import op
-from proposals import holders, realm_wide
+from api.licenses import active
+from core.op import op
+from api.proposals import holders, realm_wide
 
 LEVELS = {"first_instance": 1, "specialized": 1, "appellate": 2, "supreme": 3}
 APPEAL_WINDOW = 14 * 86400

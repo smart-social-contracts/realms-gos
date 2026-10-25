@@ -1,11 +1,11 @@
 
-import candid
-import chain
-from db import Fail, deref, each, find, next_id, page, view
+from core import candid
+from core import chain
+from core.db import Fail, deref, each, find, next_id, page, view
 from ggg import Appointment, Codex, Land, License, NFTToken, Organization, Realm, User, Verdict, Zone
-from licenses import active, principals
-from op import op
-from proposals import realm_wide
+from api.licenses import active, principals
+from core.op import op
+from api.proposals import realm_wide
 
 LAND = "LAND"
 PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id")

@@ -1,6 +1,6 @@
 from ic_python_db import Boolean, Integer, String
 
-from db import Json, Row
+from core.db import Json, Row
 
 
 class Invite(Row):

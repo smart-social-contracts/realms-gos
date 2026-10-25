@@ -2,12 +2,12 @@ import hashlib
 import json
 import math
 
-import chain
-import proposals
-from db import Fail, each, find, next_id, view
+from core import chain
+from api import proposals
+from core.db import Fail, each, find, next_id, view
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
-import codex as runtime
-from op import op, run
+from api import codex as runtime
+from core.op import op, run
 
 CAPACITY, TEST_CAPACITY, TEST_NETWORKS, SCALE_AT = 2000, 10, ("test", "staging", "demo", "local"), 0.9
 GUEST = ["self.data_view", "realm.data_view"]
@@ -111,7 +111,7 @@ def record(c, args):
         raise Fail("quarters report to their capital")
     q = registered(c.by)
     if args.get("leg"):
-        import federation
+        from api import federation
 
         federation.record_leg(q, args["leg"])
     q.population = int(args.get("population", q.population))

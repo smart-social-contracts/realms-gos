@@ -1,8 +1,8 @@
 import pytest
 
 import fake_chain
-import op
-from db import Fail
+from core import op
+from core.db import Fail
 from ggg import Appointment, Delegation, Event, Member, Position, User, UserProfile
 from kit import call, denied, later, ok
 

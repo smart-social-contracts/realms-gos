@@ -1,14 +1,14 @@
 import hashlib
 import json
 
-import candid
-import chain
-from db import Fail, each, find, next_id, page, view
+from core import candid
+from core import chain
+from core.db import Fail, each, find, next_id, page, view
 from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, NFTToken, Organization, PaymentAccount, Proposal, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
-from op import op
-from proposals import realm_wide, root
+from core.op import op
+from api.proposals import realm_wide, root
 
 CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate")
 

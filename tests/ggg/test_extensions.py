@@ -5,7 +5,7 @@ import pytest
 
 import fake_chain
 import world
-from db import each
+from core.db import each
 from ggg import Department, Event, Extension, Realm, Vote
 from kit import call, denied, later, ok
 

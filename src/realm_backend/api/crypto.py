@@ -1,8 +1,8 @@
-import chain
-from db import Fail, each, find, next_id, view
+from core import chain
+from core.db import Fail, each, find, next_id, view
 from ggg import Department, Document, KeyEnvelope, Realm
-from op import op
-from proposals import holders, root
+from core.op import op
+from api.proposals import holders, root
 
 MGMT = "aaaaa-aa"
 CONTEXT = (bytes([len(b"realms")]) + b"realms").hex()  # one root context; recipients differ by vetKD input

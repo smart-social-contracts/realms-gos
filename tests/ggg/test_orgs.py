@@ -1,4 +1,4 @@
-import auth
+from core import auth
 import fake_chain
 import world
 from ggg import Appointment, Authority, Department, Organization, Position, Proposal

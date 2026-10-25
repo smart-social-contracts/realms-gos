@@ -1,8 +1,9 @@
 import json
+import sys
 
-import auth
-import chain
-from db import Fail
+from core import auth
+from core import chain
+from core.db import Fail
 
 OPS = {}
 MODULES = ("assets", "codex", "crypto", "delegation", "extensions", "federation", "justice", "licenses", "members",
@@ -41,7 +42,8 @@ def ops():
     """Every registered operation. Read this, not OPS, when looking an operation up by name."""
     # Basilisk imports modules lazily and runs one only when a name it has not yet defined is read.
     for name in MODULES:
-        getattr(__import__(name), "op", None)
+        __import__(f"api.{name}")
+        getattr(sys.modules[f"api.{name}"], "op", None)
     return OPS
 
 
@@ -55,7 +57,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=()):
         auth.authorize(user, by, name, spec, args, origin, declared)
         governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
         if governing is not None and not direct(governing):
-            import proposals
+            from api import proposals
 
             out = proposals.file_replay(name, args, user, by, governing)
         else:

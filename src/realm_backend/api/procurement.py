@@ -1,10 +1,10 @@
 import hashlib
 
-import chain
-from db import Fail, each, find, next_id, view
+from core import chain
+from core.db import Fail, each, find, next_id, view
 from ggg import Bid, BidScore, Contract, Department, Organization, Tender
-from justice import people
-from op import op
+from api.justice import people
+from core.op import op
 
 MAX_MARK = 10
 

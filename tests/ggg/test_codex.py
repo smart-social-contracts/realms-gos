@@ -4,11 +4,11 @@ import pathlib
 
 import pytest
 
-import codex
+from api import codex
 import fake_chain
-import op
+from core import op
 import world
-from db import each
+from core.db import each
 from ggg import Codex, Department, Event, Invoice, Realm, Token
 from kit import call, denied, later, ok
 from test_spec import spec_ops

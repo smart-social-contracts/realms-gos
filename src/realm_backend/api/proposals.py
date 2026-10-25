@@ -1,9 +1,9 @@
 import json
 
-import chain
-from db import Fail, each, find, next_id, view
+from core import chain
+from core.db import Fail, each, find, next_id, view
 from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Vote
-from op import dispatch, op, ops
+from core.op import dispatch, op, ops
 
 CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")

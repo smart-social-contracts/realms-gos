@@ -9,16 +9,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "..", "src", "realm_backend")
 sys.path[:0] = [HERE, SRC]
 
+import core  # noqa: E402
 import fake_chain  # noqa: E402
 
-sys.modules["chain"] = fake_chain
+sys.modules["core.chain"] = core.chain = fake_chain
 
 import cedarpy  # noqa: E402
 from ic_python_db import Database  # noqa: E402
 
 Database.init()
 
-import auth  # noqa: E402
+from core import auth  # noqa: E402
 
 POLICIES = auth.GUARDRAILS + auth.POLICIES
 _check = cedarpy.validate_policies(POLICIES, auth.SCHEMA)
@@ -31,10 +32,10 @@ def decide(principal, action, resource, entities, context):
 
 
 auth.decide = decide
-for path in sorted(glob.glob(os.path.join(SRC, "*.py"))):
-    name = os.path.basename(path)[:-3]
-    if name not in ("main", "chain"):
-        importlib.import_module(name)
+for path in sorted(glob.glob(os.path.join(SRC, "*", "*.py"))):
+    package, name = path.split(os.sep)[-2], os.path.basename(path)[:-3]
+    if package in ("core", "api") and name not in ("__init__", "chain"):
+        importlib.import_module(f"{package}.{name}")
 
 
 @pytest.fixture(autouse=True)

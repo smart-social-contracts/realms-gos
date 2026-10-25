@@ -1,9 +1,9 @@
-import chain
-import members
-from db import Fail, deref, each, find, next_id, page, ref, view
+from core import chain
+from api import members
+from core.db import Fail, deref, each, find, next_id, page, ref, view
 from ggg import Appointment, Authority, Department, Organization, Position, User, UserProfile
-from op import op
-from proposals import holders, realm_wide, root
+from core.op import op
+from api.proposals import holders, realm_wide, root
 
 ORG_MOVES = {"active": {"suspended", "dissolved"}, "suspended": {"active", "dissolved"}, "dissolved": set()}
 SEAT_FIELDS = ("title", "salary", "salary_period")

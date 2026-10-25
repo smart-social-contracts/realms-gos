@@ -1,16 +1,16 @@
 import json
 
-import chain
+from core import chain
 import ggg
-import sandbox
-import tasks
-from db import Fail, page, view
-from extensions import approved
+from core import sandbox
+from api import tasks
+from core.db import Fail, page, view
+from api.extensions import approved
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
-import codex
-from op import call, op, ops
-from proposals import root
+from api import codex
+from core.op import call, op, ops
+from api.proposals import root
 
 VERSION = "VERSION_PLACEHOLDER"
 

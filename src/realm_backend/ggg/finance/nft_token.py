@@ -1,6 +1,6 @@
 from ic_python_db import Boolean, Integer, String
 
-from db import Row
+from core.db import Row
 
 
 class NFTToken(Row):

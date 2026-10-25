@@ -1,7 +1,7 @@
 import json
 
 import fake_chain
-import op
+from core import op
 
 
 def call(name, caller="ctl", /, **args):

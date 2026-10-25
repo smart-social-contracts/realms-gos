@@ -1,6 +1,6 @@
 from ic_python_db import OneToOne, String
 
-from db import Json, Row
+from core.db import Json, Row
 
 
 class Treasury(Row):

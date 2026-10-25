@@ -1,6 +1,6 @@
 from ic_python_db import String
 
-from db import Row
+from core.db import Row
 
 
 class Dispute(Row):

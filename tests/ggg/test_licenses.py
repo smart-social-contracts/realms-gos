@@ -2,7 +2,7 @@ import fake_chain
 import world
 from ggg import Delegation, License, Organization
 from kit import call, denied, later, ok
-from licenses import active
+from api.licenses import active
 
 YEAR = 365 * 86400
 

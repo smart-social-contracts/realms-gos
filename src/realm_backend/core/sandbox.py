@@ -2,10 +2,10 @@ import builtins
 import json
 import sys
 
-import chain
-import sdk
-from db import Fail
-from op import dispatch, ops, run
+from core import chain
+from core import sdk
+from core.db import Fail
+from core.op import dispatch, ops, run
 
 try:
     import _basilisk_sandbox

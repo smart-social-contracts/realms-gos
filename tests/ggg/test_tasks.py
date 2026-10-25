@@ -1,6 +1,6 @@
 import fake_chain
-import op
-import setup
+from core import op
+from api import setup
 import world
 from ggg import Event, Notification, Task, TaskSchedule
 from kit import call, denied, later, ok

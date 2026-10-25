@@ -7,7 +7,7 @@ organizations Clinic B and BuildCo; agents `claude-conn` (Alice's AI connection,
 """
 
 import fake_chain
-import setup
+from api import setup
 from ggg import (Appointment, Department, Fund, Member, Organization, Permission, Position, Token, User,
                  UserProfile)
 

@@ -16,13 +16,20 @@ def test_no_re_module():
 
 def test_every_op_module_is_loaded_by_ops():
     # The canister loads modules lazily: an op module missing from MODULES is unknown to lookups by name.
-    import op
+    from core import op
 
-    defining = {p.stem for p in SRC.glob("*.py") if "\n@op(" in p.read_text()}
-    assert defining == set(op.MODULES)
+    defining = {p.stem for p in SRC.rglob("*.py") if "\n@op(" in p.read_text()}
+    assert defining == set(op.MODULES) == {p.stem for p in (SRC / "api").glob("*.py")} - {"__init__"}
 
 
 def test_only_op_reads_the_raw_registry():
-    for path in SRC.glob("*.py"):
+    for path in SRC.rglob("*.py"):
         if path.name not in ("op.py", "main.py"):
             assert "OPS" not in path.read_text(), f"{path.name}: use op.ops(), OPS may be partly loaded"
+
+
+def test_core_does_not_import_api():
+    # op.py is the exception: it loads the operations it dispatches to.
+    for path in (SRC / "core").glob("*.py"):
+        if path.name != "op.py":
+            assert "from api" not in path.read_text() and "import api" not in path.read_text(), path.name

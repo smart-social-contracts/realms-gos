@@ -1,14 +1,14 @@
 import hashlib
 
-import auth
-import chain
-import delegation
-import orgs
-from db import Fail, each, find, next_id, page, view
+from core import auth
+from core import chain
+from api import delegation
+from api import orgs
+from core.db import Fail, each, find, next_id, page, view
 from ggg import Appointment, Department, Human, Identity, Invite, Member, Position, Realm, User, UserProfile
-import codex
-from op import op
-from proposals import root
+from api import codex
+from core.op import op
+from api.proposals import root
 
 MOVES = {"active": {"inactive", "suspended", "banned"}, "inactive": {"active", "banned"},
          "suspended": {"active", "banned"}, "banned": set()}

@@ -1,12 +1,12 @@
 import base64
 import json
 
-import chain
-import sandbox
-from db import Fail, each, find, view
+from core import chain
+from core import sandbox
+from core.db import Fail, each, find, view
 from ggg import Department, Extension, Realm, User, UserProfile
-from op import dispatch, op, run
-from proposals import appointed, realm_wide
+from core.op import dispatch, op, run
+from api.proposals import appointed, realm_wide
 
 SIDEBAR = ("show_in_sidebar", "sidebar_label", "categories", "icon")
 
