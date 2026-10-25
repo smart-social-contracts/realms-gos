@@ -35,7 +35,8 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     return wrap
 
 
-def dispatch(name, arg, origin="user", signer=None, declared=()):
+def dispatch(fn, arg, origin="user", signer=None, declared=()):
+    name = fn if isinstance(fn, str) else fn.__name__
     spec = OPS[name]
     try:
         args = json.loads(arg or "{}") if isinstance(arg, str) else dict(arg)

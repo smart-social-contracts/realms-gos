@@ -1,21 +1,14 @@
-import json
-
 import chain
 from db import each
 
-SET = {"type": "Set", "element": {"type": "String"}}
-BOOL, STR = {"type": "Boolean"}, {"type": "String"}
-CONTEXT = {"op": STR, "permission": STR, "user": STR, "signer": STR, "origin": STR, "read": BOOL,
-           "public": BOOL, "signing": BOOL, "delegable": BOOL, "delegated": BOOL, "signer_agent": BOOL,
-           "scope": SET, "declared": SET, "parties": SET}
-SCHEMA = {"Realm": {
-    "entityTypes": {
-        "User": {"shape": {"type": "Record", "attributes": {"permissions": SET, "banned": BOOL}}},
-        "Realm": {},
-    },
-    "actions": {"call": {"appliesTo": {"principalTypes": ["User"], "resourceTypes": ["Realm"],
-                                       "context": {"type": "Record", "attributes": CONTEXT}}}},
-}}
+CONTEXT = {"op": "String", "permission": "String", "user": "String", "signer": "String", "origin": "String",
+           "read": "Bool", "public": "Bool", "signing": "Bool", "delegable": "Bool", "delegated": "Bool",
+           "signer_agent": "Bool", "scope": "Set<String>", "declared": "Set<String>", "parties": "Set<String>"}
+SCHEMA = """namespace Realm {
+  entity User = { permissions: Set<String>, banned: Bool };
+  entity Realm;
+  action call appliesTo { principal: [User], resource: [Realm], context: { %s } };
+}""" % ", ".join(f"{k}: {v}" for k, v in CONTEXT.items())
 
 POLICIES = """
 permit (principal, action == Realm::Action::"call", resource) when { context.public };
@@ -47,7 +40,7 @@ def _canister_decide(principal, action, resource, entities, context):
     from ic_basilisk_toolkit import cedar
 
     if not _canister_decide.loaded:
-        cedar.load(json.dumps(SCHEMA), GUARDRAILS + POLICIES)
+        cedar.load(SCHEMA, GUARDRAILS + POLICIES)
         _canister_decide.loaded = True
     return cedar.is_authorized(principal, action, resource, entities, context)
 

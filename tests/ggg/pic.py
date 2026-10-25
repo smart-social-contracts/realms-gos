@@ -17,6 +17,7 @@ from pocket_ic import PocketIC
 os.environ.setdefault("POCKET_IC_BIN", os.path.expanduser("~/.cache/dfinity/versions/0.31.0/pocket-ic"))
 
 CHUNK = 1_000_000
+CONTROLLER = "kber3-kmjak-kngoi-c3iyv-ix4le-p27yv-3fzmi-vnnab-xtjtf-ndfta-wqe"
 _HASH = Types.Record({"hash": Types.Vec(Types.Nat8)})
 _UPLOAD = Types.Record({"canister_id": Types.Principal, "chunk": Types.Vec(Types.Nat8)})
 _INSTALL = Types.Record({
@@ -33,7 +34,10 @@ _INSTALL = Types.Record({
 class Canister:
     def __init__(self, wasm_path):
         self.pic = PocketIC()
-        self.id = self.pic.create_canister()
+        self.pic.set_sender(Principal.from_str(CONTROLLER))
+        self.id = self.pic.create_canister(settings={"controllers": [[Principal.from_str(CONTROLLER).bytes]],
+                                                     "compute_allocation": [], "memory_allocation": [],
+                                                     "freezing_threshold": []})
         self.pic.add_cycles(self.id, 10**15)
         self._install(gzip.compress(open(wasm_path, "rb").read()))
 

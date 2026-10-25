@@ -54,9 +54,9 @@ def render():
     modules = sorted({m for _, m in ops.values()} | {"setup"})
     imports = "\n".join(f"import {m}  # noqa: E402,F401" for m in modules)
     stubs = "".join(
-        f"\n@query\ndef {name}(args: text) -> text: return run(dispatch('{name}', args))\n" if read else
-        f"\n@update\ndef {name}(args: text) -> Async[text]: return (yield from dispatch('{name}', args))\n"
-        for name, (read, _) in ops.items())
+        f"\n@query\ndef {name}(args: text) -> text: return run(dispatch({module}.{name}, args))\n" if read else
+        f"\n@update\ndef {name}(args: text) -> Async[text]: return (yield from dispatch({module}.{name}, args))\n"
+        for name, (read, module) in ops.items())
     return HEAD.format(imports=imports) + stubs
 
 

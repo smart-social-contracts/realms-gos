@@ -1,6 +1,5 @@
 import glob
 import importlib
-import json
 import os
 import sys
 
@@ -22,7 +21,7 @@ Database.init()
 import auth  # noqa: E402
 
 POLICIES = auth.GUARDRAILS + auth.POLICIES
-_check = cedarpy.validate_policies(POLICIES, json.dumps(auth.SCHEMA))
+_check = cedarpy.validate_policies(POLICIES, auth.SCHEMA)
 assert _check.validation_passed, _check.errors
 
 
