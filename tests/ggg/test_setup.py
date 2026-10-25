@@ -54,18 +54,44 @@ def test_I_ADM_2_founder_configures_during_setup_then_it_is_governed():
     denied("setup_state", "alice")
 
 
-def test_I_ADM_3_an_upgrade_needs_a_release_the_trust_policy_accepts():
+def release(sha256="aa", approval=APPROVED):
+    """A realm with a file registry whose release wasm hashes to ``sha256``, approved as ``approval`` says."""
     world.build()
     ok("realm_configure_infrastructure", "ctl", file_registry_canister_id="registry", marketplace_canister_id="market")
-    fake_chain.state["replies"][("registry", "get_namespace_approval_icc")] = json.dumps({"approved": False})
+    fake_chain.state["replies"][("registry", "get_file_size")] = json.dumps({"sha256": sha256})
+    fake_chain.state["replies"][("registry", "get_namespace_approval_icc")] = approval
+
+
+def test_I_ADM_3_an_upgrade_needs_a_release_the_trust_policy_accepts():
+    release(approval=json.dumps({"approved": False}))
     assert "not approved" in call("realm_upgrade", "ctl", version="0.9.1", module_hash="sha256:aa")["error"]
     fake_chain.state["replies"][("registry", "get_namespace_approval_icc")] = APPROVED
     out = ok("realm_upgrade", "ctl", version="0.9.1", module_hash="sha256:aa")
     assert (out["approved_by"], Realm["1"].manifest_data["upgrade"]["version"]) == ("market", "0.9.1")
-    assert fake_chain.state["calls"][-1] == ("registry", "get_namespace_approval_icc", "realm/0.9.1")
+    assert fake_chain.state["calls"][-2:] == [
+        ("registry", "get_file_size", json.dumps({"namespace": "wasm/realm-backend/0.9.1",
+                                                  "path": "realm_backend.wasm.gz"})),
+        ("registry", "get_namespace_approval_icc", "wasm/realm-backend/0.9.1")]
     ok("realm_configure_trust_policy", "ctl", trusted_approvers=["reviewers"])
-    assert "does not trust" in call("realm_upgrade", "ctl", version="0.9.2", module_hash="sha256:bb")["error"]
+    assert "does not trust" in call("realm_upgrade", "ctl", version="0.9.2", module_hash="aa")["error"]
     denied("realm_upgrade", "alice", version="0.9.1", module_hash="sha256:aa")
+
+
+def test_I_ADM_3_the_approval_covers_only_the_release_wasm_hash():
+    release(sha256="aa")
+    out = call("realm_upgrade", "ctl", version="0.9.1", module_hash="sha256:bb")
+    assert "is sha256:aa, not sha256:bb" in out["error"] and "upgrade" not in Realm["1"].manifest_data
+    assert ok("realm_upgrade", "ctl", version="0.9.1", module_hash="aa")["approved_by"] == "market"
+
+
+def test_I_ADM_3_a_pinned_module_needs_no_approval():
+    release(sha256="aa")
+    ok("realm_configure_trust_policy", "ctl", trusted_approvers=["sha256:cc"])
+    fake_chain.state["calls"].clear()
+    assert ok("realm_upgrade", "ctl", version="0.9.3", module_hash="sha256:cc")["approved_by"] == "sha256:cc"
+    assert fake_chain.state["calls"] == []
+    assert ok("realm_upgrade", "ctl", version="0.9.1", module_hash="aa")["approved_by"] == "market"
+    assert "not sha256:dd" in call("realm_upgrade", "ctl", version="0.9.1", module_hash="dd")["error"]
 
 
 def test_register_in_the_realm_registry():

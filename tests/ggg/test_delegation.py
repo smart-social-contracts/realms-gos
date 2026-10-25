@@ -103,6 +103,52 @@ def test_grant_rules_and_who_may_accept_or_revoke():
     assert "already declined" in denied("delegation_revoke", "alice", delegation=d)
 
 
+def test_a_lapsed_pending_grant_cannot_be_accepted_and_does_not_block_a_new_one():
+    world.build()
+    d = ok("delegation_grant", "alice", delegate="bob", operations=["proposal.vote"], expires_in=DAY)["delegation"]
+    later(DAY)
+    assert "expired" in denied("delegation_accept", "bob", delegation=d)
+    assert Delegation[d].status == "pending"
+    d2 = ok("delegation_grant", "alice", delegate="bob", operations=["proposal.vote"], expires_in=DAY)["delegation"]
+    assert (Delegation[d].status, Delegation[d].link, Delegation[d2].link) == ("expired", None, "alice|bob")
+    ok("delegation_accept", "bob", delegation=d2)
+    assert "already holds" in denied("delegation_grant", "alice", delegate="bob", operations=["proposal.vote"],
+                                     expires_in=DAY)
+
+
+def test_grants_are_listed_a_page_at_a_time():
+    world.build()
+    for who in ("bob", "carla", "dana"):
+        ok("delegation_grant", "alice", delegate=who, operations=["proposal.vote"], expires_in=DAY)
+    ok("delegation_grant", "bob", delegate="alice", operations=["proposal.vote"], expires_in=DAY)
+    first = ok("delegation_list", "alice", count=2)
+    assert [g["delegate"] for g in first["as_grantor"]] == ["bob", "carla"] and first["next"]["grantor"]
+    assert [g["grantor"] for g in first["as_delegate"]] == ["bob"] and first["next"]["delegate"] is None
+    rest = ok("delegation_list", "alice", count=2, from_grantor=first["next"]["grantor"])
+    assert [g["delegate"] for g in rest["as_grantor"]] == ["dana"] and rest["next"]["grantor"] is None
+    me = ok("me", "alice")["delegations"]
+    assert len(me["as_grantor"]) == 3 and me["next"] == {"grantor": None, "delegate": None}
+
+
+def test_expired_requests_are_cleared_and_open_ones_capped_each_way():
+    world.build()
+    ask = dict(operations=["proposal.vote"], expires_in=DAY)
+    asking = [f"agent-{i}" for i in range(10)]
+    for a in asking:
+        ok("delegation_request", a, grantor="alice", **ask)
+    assert "too many open requests" in denied("delegation_request", "claude-conn", grantor="alice", **ask)
+    later(3601)
+    ok("delegation_request", "claude-conn", grantor="alice", **ask)
+    assert DelegationRequest.count() == 1
+    grantors = [world.person(f"user-{i}").id for i in range(9)]
+    for g in grantors:
+        ok("delegation_request", "claude-conn", grantor=g, **ask)
+    assert "you have too many" in denied("delegation_request", "claude-conn", grantor="bob", **ask)
+    ok("delegation_request", "claude-conn", grantor="alice", **ask)
+    assert DelegationRequest.count() == 10
+    assert len(ok("delegation_list", "alice")["requests"]) == 1
+
+
 def test_auth():
     world.build()
     for name in ("delegation_grant", "delegation_accept", "delegation_revoke", "delegation_request_decide",

@@ -121,7 +121,8 @@ def user_list(c, args):
 
 @op("self.data_view", read=True, delegable=True)
 def me(c, args):
-    """Your card, permissions and delegations, plus your private data when you call it yourself (not as a delegate)."""
+    """Your card, permissions and the first page of your delegations each way (``next`` in it continues them with
+    delegation_list), plus your private data when you call it yourself (not as a delegate)."""
     user = User[c.user]
     out = {"user": card(user) if user else {"id": c.user}, "permissions": sorted(auth.permissions(c.user)),
            "delegations": delegation.mine(c.user)}
@@ -261,9 +262,12 @@ def invite_revoke(c, args):
 
 @op("invite.manage")
 def invite_list(c, args):
-    """Every invite with its profile, seat, uses, expiry and whether it is revoked; codes are never shown."""
+    """Invites with their profile, seat, uses, expiry and whether they are revoked; codes are never shown.
+    ``count`` rows at a time (default 100, at most 500) from row ``from`` (default 1). Returns ``invites`` and
+    ``next``, the ``from`` of the next page (null at the end)."""
+    rows, nxt = page(Invite, args)
     return {"invites": [view(i, "id", "profile", "department", "position", "max_uses", "uses", "expires_at",
-                             "revoked", "created_by") for i in each(Invite)]}
+                             "revoked", "created_by") for i in rows], "next": nxt}
 
 
 @op("permission.grant", governed=in_charge("permission.grant"))

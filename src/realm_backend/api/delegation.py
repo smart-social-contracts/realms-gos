@@ -1,6 +1,6 @@
 from core import auth
 from core import chain
-from core.db import Fail, each, find, next_id, view
+from core.db import Fail, each, find, next_id, page_by, view
 from ggg import Delegation, DelegationRequest, User
 from core.op import op, ops
 
@@ -43,18 +43,27 @@ def window(args):
 
 
 def status(d):
-    lapsed = d.status == "active" and d.expires_at and chain.now() >= d.expires_at
+    lapsed = d.status in OPEN and d.expires_at and chain.now() >= d.expires_at
     return "expired" if lapsed else d.status
 
 
+def linked(grantor, delegate):
+    """The grants from ``grantor`` to ``delegate`` not yet closed: the open one and any that lapsed since."""
+    return list(each(Delegation, "link", f"{grantor}|{delegate}"))
+
+
 def open_grant(grantor, delegate):
-    for d in each(Delegation, "delegate", delegate):
-        if d.grantor == grantor and status(d) in OPEN:
-            return d
-    return None
+    return next((d for d in linked(grantor, delegate) if status(d) in OPEN), None)
+
+
+def close(d, state, by=""):
+    d.status, d.link = state, None
+    if by:
+        d.revoked_at, d.revoked_by = chain.now(), by
 
 
 def open_requests(field, principal):
+    # At most OPEN_REQUESTS_MAX rows each way: delegation_request deletes expired ones before adding one.
     return [r for r in each(DelegationRequest, field, principal) if r.request_expires_at > chain.now()]
 
 
@@ -63,13 +72,21 @@ def card(d):
                    "accepted_at", "revoked_at"), "status": status(d)}
 
 
-def mine(principal):
-    return {"as_grantor": [card(d) for d in each(Delegation, "grantor", principal)],
-            "as_delegate": [card(d) for d in each(Delegation, "delegate", principal)]}
+def mine(principal, args=None):
+    """A page of ``principal``'s grants each way; ``next`` maps grantor and delegate to the ``from`` continuing it."""
+    args, out = args or {}, {"next": {}}
+    for side in ("grantor", "delegate"):
+        rows, out["next"][side] = page_by(Delegation, side, principal,
+                                          {"from": args.get(f"from_{side}"), "count": args.get("count")})
+        out[f"as_{side}"] = [card(d) for d in rows]
+    return out
 
 
 def issue(grantor, delegate, perms, starts, expires, by, args, acceptance):
+    for d in linked(grantor, delegate):
+        close(d, status(d))
     d = Delegation(id=next_id(Delegation, "D"), grantor=grantor, delegate=delegate, scope={"operations": perms},
+                   link=f"{grantor}|{delegate}",
                    status="pending" if acceptance else "active", label=args.get("label", ""),
                    description=args.get("description", ""), requires_acceptance=acceptance, granted_by=by,
                    accepted_at=0 if acceptance else chain.now(), starts_at=starts, expires_at=expires)
@@ -94,10 +111,12 @@ def delegation_grant(c, args):
 
 @op("self.delegate")
 def delegation_accept(c, args):
-    """Accept ``delegation``, a pending grant to you, so it becomes active."""
+    """Accept ``delegation``, a pending grant to you that has not expired, so it becomes active."""
     d = find(Delegation, args["delegation"])
     if d.delegate != c.user or d.status != "pending":
         raise Fail(f"{d.id} is not a pending grant to you")
+    if status(d) == "expired":
+        raise Fail(f"{d.id} expired at {d.expires_at}")
     d.status, d.accepted_at = "active", chain.now()
 
 
@@ -110,8 +129,7 @@ def delegation_revoke(c, args):
         raise Fail(f"{d.id} is not yours")
     if status(d) not in OPEN:
         raise Fail(f"{d.id} is already {status(d)}")
-    declined = d.status == "pending" and c.user == d.delegate
-    d.status, d.revoked_at, d.revoked_by = "declined" if declined else "revoked", chain.now(), c.by
+    close(d, "declined" if d.status == "pending" and c.user == d.delegate else "revoked", c.by)
     return {"status": d.status}
 
 
@@ -119,17 +137,23 @@ def delegation_revoke(c, args):
 def delegation_request(c, args):
     """Ask ``grantor`` to let you act for them with ``operations`` (permission names) from ``starts_at`` until
     ``expires_at`` or for ``expires_in`` seconds; optional ``label`` and ``description``. Returns ``request``.
-    The request stays open for an hour; asking the same grantor again replaces it."""
+    The request stays open for an hour; asking the same grantor again replaces it. A grantor can have at most 10
+    open requests, and so can you."""
     grantor, perms = args["grantor"], list(dict.fromkeys(args["operations"]))
     find(User, grantor)
     if grantor == c.user:
         raise Fail("you cannot ask yourself")
     check_scope(perms)
     starts, expires = window(args)
-    older = [r for r in open_requests("delegate", c.user) if r.grantor == grantor]
-    if len(open_requests("grantor", grantor)) - len(older) >= OPEN_REQUESTS_MAX:
+    to_them = list(each(DelegationRequest, "grantor", grantor))
+    from_me = list(each(DelegationRequest, "delegate", c.user))
+    gone = {r.id: r for r in to_them + from_me
+            if r.request_expires_at <= chain.now() or (r.grantor, r.delegate) == (grantor, c.user)}
+    if sum(r.id not in gone for r in to_them) >= OPEN_REQUESTS_MAX:
         raise Fail(f"{grantor} has too many open requests; try again later")
-    for r in older:
+    if sum(r.id not in gone for r in from_me) >= OPEN_REQUESTS_MAX:
+        raise Fail("you have too many open requests; wait for answers first")
+    for r in gone.values():
         r.delete()
     r = DelegationRequest(id=next_id(DelegationRequest, "DR"), grantor=grantor, delegate=c.user,
                           scope={"operations": perms}, label=args.get("label", ""),
@@ -159,7 +183,7 @@ def delegation_request_decide(c, args):
     check_scope(perms, c.user)
     old = open_grant(r.grantor, r.delegate)
     if old:
-        old.status, old.revoked_at, old.revoked_by = "revoked", chain.now(), c.by
+        close(old, "revoked", c.by)
     out = issue(r.grantor, r.delegate, perms, r.starts_at, until, c.by,
                 {"label": r.label, "description": r.description}, False)
     r.delete()
@@ -168,10 +192,14 @@ def delegation_request_decide(c, args):
 
 @op("self.data_view", read=True)
 def delegation_list(c, args):
-    """Your grants given (``as_grantor``) and received (``as_delegate``), and your open ``requests`` either way."""
+    """Your grants given (``as_grantor``) and received (``as_delegate``), ``count`` of each at a time (default 100,
+    at most 500) from rows ``from_grantor`` and ``from_delegate`` (default 1), and your open ``requests`` either way.
+    ``next`` maps grantor and delegate to the ``from_grantor`` and ``from_delegate`` of the next page (null at the
+    end)."""
     requests = open_requests("grantor", c.user) + open_requests("delegate", c.user)
-    return {**mine(c.user), "requests": [view(r, "id", "grantor", "delegate", "scope", "label", "description",
-                                              "starts_at", "expires_at", "request_expires_at") for r in requests]}
+    return {**mine(c.user, args), "requests": [view(r, "id", "grantor", "delegate", "scope", "label", "description",
+                                                    "starts_at", "expires_at", "request_expires_at")
+                                               for r in requests]}
 
 
 @op("self.data_view", read=True)

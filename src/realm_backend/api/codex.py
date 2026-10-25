@@ -1,11 +1,12 @@
-import base64
 import json
 
 from core import chain
 from core import sandbox
-from core.db import Fail, each, find, view
+from core.db import Fail, find, first, page, view
 from ggg import Codex, Realm
 from core.op import op
+from api import extensions
+from api.extensions import checksum, trust
 from api.proposals import realm_wide
 
 API = 2  # the hook contract codices declare as `codex_api_version`
@@ -15,7 +16,12 @@ REALM_FIELDS = ("name", "status", "accounting_currency", "accounting_currency_de
 
 
 def active():
-    return next((c for c in each(Codex) if c.status == "active"), None)
+    return first(Codex, "status", "active")
+
+
+def runnable(manifest):
+    if manifest.get("codex_api_version") != API:
+        raise Fail(f"this realm runs codex API {API}, not {manifest.get('codex_api_version')}")
 
 
 def merge(base, over):
@@ -28,45 +34,10 @@ def config(codex):
     return merge(codex.manifest or {}, (Realm["1"].manifest_data or {}).get("config_overrides", {}))
 
 
-def checksum(manifest, source):
-    return sandbox.sha256(json.dumps(manifest, sort_keys=True) + "\n" + source)
-
-
-def trust(digest, approval):
-    """I-EXT-3: new code needs the trust policy: an allowlisted checksum, or an approval by a trusted approver."""
-    realm = Realm["1"]
-    if not realm.require_marketplace_approval:
-        return
-    pins = [a for a in realm.trusted_approvers or [] if a.startswith("sha256:")]
-    approvers = [a for a in realm.trusted_approvers or [] if a not in pins] or [realm.marketplace_canister_id]
-    if f"sha256:{digest}" in pins:
-        return
-    if approval is None:
-        raise Fail(f"code sha256:{digest} is neither allowlisted nor approved by the marketplace")
-    where = approval.get("namespace", "the codex")
-    if not approval.get("approved"):
-        raise Fail(f"{where} is not approved by the marketplace ({approval.get('status', 'unapproved')})")
-    if approval.get("approver") not in approvers:
-        raise Fail(f"{where} is approved by {approval.get('approver')}, whom this realm does not trust")
-
-
-def fetch(name, version):
-    """Manifest, hook source and marketplace approval of a published codex, from the file registry."""
-    registry, namespace = Realm["1"].file_registry_canister_id, f"ext/{name}/{version}"
-    if not registry:
-        raise Fail("no file registry is configured")
-    manifest = json.loads((yield from pull(registry, namespace, "manifest.json")))
-    source = yield from pull(registry, namespace, "backend/hooks.py")
-    approval = json.loads((yield from chain.call_text(registry, "get_namespace_approval_icc", namespace)))
-    return manifest, source, approval
-
-
-def pull(registry, namespace, path):
-    reply = json.loads((yield from chain.call_text(registry, "get_file",
-                                                   json.dumps({"namespace": namespace, "path": path}))))
-    if "error" in reply:
-        raise Fail(reply["error"])
-    return base64.b64decode(reply["content_b64"]).decode()
+def fetch(namespace):
+    """Manifest and hook source of a published codex, from the file registry."""
+    manifest = json.loads((yield from extensions.fetch(namespace, "manifest.json")))
+    return manifest, (yield from extensions.fetch(namespace, "backend/hooks.py"))
 
 
 def hook(name, context=None):
@@ -95,13 +66,13 @@ def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
     The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``."""
     if "source" in args:
-        manifest, source, approval = args["manifest"], args["source"], None
+        manifest, source, namespace = args["manifest"], args["source"], None
     else:
-        manifest, source, approval = yield from fetch(args["codex"], args["version"])
-    if manifest.get("codex_api_version") != API:
-        raise Fail(f"this realm runs codex API {API}, not {manifest.get('codex_api_version')}")
+        namespace = f"ext/{args['codex']}/{args['version']}"
+        manifest, source = yield from fetch(namespace)
+    runnable(manifest)
     digest = checksum(manifest, source)
-    trust(digest, approval)
+    yield from trust(digest, namespace)
     compile(source, "hooks.py", "exec")
     if len(sandbox.readable(manifest.get("capabilities", []))) > sandbox.MAX_ACTIONS:
         raise Fail(f"a codex may declare at most {sandbox.MAX_ACTIONS} read operations")
@@ -130,22 +101,25 @@ def codex_uninstall(c, args):
 
 @op("codex.revert", governed=realm_wide)
 def codex_revert(c, args):
-    """Go back to the version the active codex replaced."""
+    """Go back to the version the active codex replaced, if this realm still runs its codex API."""
     codex = active()
     if codex is None or not codex.previous:
         raise Fail("there is no previous codex to revert to")
     prior = find(Codex, codex.previous)
+    runnable(prior.manifest or {})
     codex.status, prior.status = "reverted", "active"
     return {"codex": prior.id}
 
 
 @op("realm.data_view", read=True)
 def codex_status(c, args):
-    """The active codex, whether it is healthy (its last hook succeeded), its hooks and configuration, and the
-    install history."""
+    """The active codex, whether it is healthy (its last hook succeeded), its hooks and configuration, and one page
+    of the install ``history``: ``count`` installs (default 100, at most 500) from row ``from`` (default 1), with
+    ``next``, the ``from`` of the next page (null at the end)."""
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
+    rows, nxt = page(Codex, args)
     return {"codex": view(codex, *SHOWN) if codex else None, "healthy": codex is not None and not problem,
             "problem": problem, "hooks": (codex.manifest or {}).get("hooks", []) if codex else [],
             "config": config(codex) if codex else {},
-            "history": [view(x, "id", "version", "status", "installed_at") for x in each(Codex)]}
+            "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt}

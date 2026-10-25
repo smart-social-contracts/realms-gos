@@ -24,3 +24,8 @@ def denied(name, caller, /, **args):
 
 def later(seconds):
     fake_chain.state["now"] += seconds
+
+
+def rows(cls):
+    """Every row of ``cls``: for checking results in tests, never in canister code."""
+    return cls.load_some(1, max(cls.max_id(), 1))

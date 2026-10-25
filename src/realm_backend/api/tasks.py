@@ -1,15 +1,37 @@
 import json
 
+from core import auth
 from core import chain
-from core.db import Fail, each, find, view
+from core.db import PAGE, PAGE_MAX, Fail, find, page, view
 from ggg import Task, TaskExecution, TaskSchedule, TaskStep
 from core.op import dispatch, op, ops
 
 BUSY = ("running", "waiting")
+# The toolkit's TaskSchedule declares no indexed field, so the enabled schedules are kept in this field index.
+ENABLED = (TaskSchedule.get_full_type_name(), "enabled", "1")
 
 
 def creator(task):
     return json.loads(task.metadata)["creator"]
+
+
+def owned(c, args):
+    """``task``, if you created it or hold ``all``: its steps run as its creator."""
+    task = find(Task, args["task"])
+    if c.user != creator(task) and "all" not in auth.permissions(c.user):
+        raise Fail(f"task '{task.name}' is not yours")
+    return task
+
+
+def children(task, relation):
+    """Ids of the task's ``relation`` rows, oldest first, read from the relation's index without loading the rows."""
+    return sorted(int(i) for i in task.db().reverse_index_get(task._type, task._id, relation))
+
+
+def enable(schedule, on):
+    schedule.disabled = not on
+    db = schedule.db()
+    (db.field_index_add if on else db.field_index_remove)(*ENABLED, schedule._id)
 
 
 def ordered(task):
@@ -32,7 +54,7 @@ def define(task, steps):
 
 def execute(task, start=0, ex=None):
     """Run the steps from ``start`` through ``dispatch`` as the task's creator, pausing where a step waits."""
-    ex = ex or TaskExecution(name=f"{task.name}#{len(task.executions) + 1}", task=task, status="running",
+    ex = ex or TaskExecution(name=f"{task.name}#{len(children(task, 'executions')) + 1}", task=task, status="running",
                              started_at=chain.now(), result="")
     task.status, steps, out = "running", ordered(task), {}
     for i in range(start, len(steps)):
@@ -73,15 +95,25 @@ def fire(name):
     if s.repeat_every:
         s.run_at = s.last_run_at + s.repeat_every
         arm(s)
+    else:
+        enable(s, False)
     if s.task.status not in BUSY + ("cancelled",):
         yield from execute(s.task)
 
 
-def rearm():
-    """Timers do not survive an upgrade: set them again for every active schedule."""
-    for s in each(TaskSchedule):
-        if not s.disabled:
-            arm(s)
+def rearm(start=1):
+    """Timers do not survive an upgrade: set them again for the enabled schedules, a page per message."""
+    ids = sorted(i for i in map(int, TaskSchedule.db().field_index_get(*ENABLED)) if i >= start)
+    for i in ids[:PAGE]:
+        arm(TaskSchedule.load(str(i)))
+    if len(ids) > PAGE:
+        chain.set_timer(0, lambda n=ids[PAGE]: rearm(n))
+
+
+def stop(task):
+    for s in task.schedules:
+        enable(s, False)
+    task.status = "cancelled"
 
 
 @op("task.create")
@@ -98,8 +130,9 @@ def task_create(c, args):
 
 @op("task.edit")
 def task_edit(c, args):
-    """Replace the steps of ``task`` with ``steps`` (``[{op, args, wait}]``), unless it is running or waiting."""
-    task, steps = find(Task, args["task"]), checked(args["steps"])
+    """Replace the steps of your ``task`` (any task if you hold all) with ``steps`` (``[{op, args, wait}]``), unless
+    it is running or waiting."""
+    task, steps = owned(c, args), checked(args["steps"])
     if task.status in BUSY:
         raise Fail(f"task '{task.name}' is {task.status}")
     for s in task.steps:
@@ -109,18 +142,27 @@ def task_edit(c, args):
 
 @op("task.delete")
 def task_delete(c, args):
-    """Delete ``task`` with its steps, schedules and run history."""
-    task = find(Task, args["task"])
-    for row in list(task.steps) + list(task.schedules) + list(task.executions):
+    """Cancel and delete your ``task`` (any task if you hold all) with its steps, schedules and run history, at most
+    100 runs per call. Returns ``remaining``, the runs still to delete: call again until it is 0 and the task is gone."""
+    task = owned(c, args)
+    stop(task)
+    runs = children(task, "executions")
+    for i in runs[:PAGE]:
+        TaskExecution.load(str(i)).delete()
+    if len(runs) > PAGE:
+        return {"remaining": len(runs) - PAGE}
+    for row in list(task.steps) + list(task.schedules):
         row.delete()
     task.delete()
+    return {"remaining": 0}
 
 
 @op("task.run")
 def task_run(c, args):
-    """Run ``task`` now, steps as its creator. Returns ``execution`` and ``status`` (completed, failed or waiting)."""
-    task = find(Task, args["task"])
-    if task.status in BUSY:
+    """Run your ``task`` (any task if you hold all) now, steps as its creator; a cancelled task does not run again.
+    Returns ``execution`` and ``status`` (completed, failed or waiting)."""
+    task = owned(c, args)
+    if task.status in BUSY + ("cancelled",):
         raise Fail(f"task '{task.name}' is {task.status}")
     ex = yield from execute(task)
     return {"execution": ex.name, "status": task.status}
@@ -128,21 +170,23 @@ def task_run(c, args):
 
 @op("task.schedule")
 def task_schedule(c, args):
-    """Run ``task`` at ``run_at`` (default now), then every ``repeat_every`` seconds if set. Returns ``schedule``."""
-    task = find(Task, args["task"])
-    s = TaskSchedule(name=f"{task.name}@{len(task.schedules) + 1}", task=task, disabled=False, last_run_at=0,
+    """Run your ``task`` (any task if you hold all; not a cancelled one) at ``run_at`` (default now), then every
+    ``repeat_every`` seconds if set. Returns ``schedule``."""
+    task = owned(c, args)
+    if task.status == "cancelled":
+        raise Fail(f"task '{task.name}' is cancelled")
+    s = TaskSchedule(name=f"{task.name}@{len(children(task, 'schedules')) + 1}", task=task, last_run_at=0,
                      run_at=int(args.get("run_at") or chain.now()), repeat_every=int(args.get("repeat_every", 0)))
+    enable(s, True)
     arm(s)
     return {"schedule": s.name}
 
 
 @op("task.cancel")
 def task_cancel(c, args):
-    """Cancel ``task``: disable its schedules and stop a waiting run before its next step."""
-    task = find(Task, args["task"])
-    for s in task.schedules:
-        s.disabled = True
-    task.status = "cancelled"
+    """Cancel your ``task`` (any task if you hold all) for good: disable its schedules and stop a waiting run before
+    its next step."""
+    stop(owned(c, args))
 
 
 def summary(task):
@@ -153,13 +197,17 @@ def summary(task):
 
 @op("task.view", read=True)
 def task_list(c, args):
-    """Every task with its status, creator, steps and schedules."""
-    return {"tasks": [summary(t) for t in each(Task)]}
+    """Tasks with their status, creator, steps and schedules, ``count`` rows at a time (default 100, at most 500) from
+    row ``from`` (default 1). Returns ``tasks`` and ``next``, the ``from`` of the next page (null at the end)."""
+    rows, nxt = page(Task, args)
+    return {"tasks": [summary(t) for t in rows], "next": nxt}
 
 
 @op("task.view", read=True)
 def task_logs(c, args):
-    """The runs of ``task``, newest first (``count``, default 10)."""
-    runs = sorted(find(Task, args["task"]).executions, key=lambda e: int(e._id), reverse=True)
-    return {"runs": [view(e, "name", "status", "started_at", "completed_at", "result")
-                     for e in runs[:int(args.get("count") or 10)]]}
+    """The runs of ``task``, newest first: ``count`` (default 10, at most 500) from run ``from`` (default the newest)
+    down. Returns ``runs`` and ``next``, the ``from`` of the older page (null at the end)."""
+    top, count = int(args.get("from") or 0), min(int(args.get("count") or 10), PAGE_MAX)
+    ids = [i for i in reversed(children(find(Task, args["task"]), "executions")) if not top or i <= top]
+    return {"runs": [view(TaskExecution.load(str(i)), "name", "status", "started_at", "completed_at", "result")
+                     for i in ids[:count]], "next": ids[count] if len(ids) > count else None}

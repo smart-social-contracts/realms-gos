@@ -8,9 +8,8 @@ from api import codex
 import fake_chain
 from core import op
 import world
-from core.db import each
 from ggg import Codex, Department, Event, Invoice, Realm, Token
-from kit import call, denied, later, ok
+from kit import call, denied, later, ok, rows
 from test_spec import spec_ops
 
 CODICES = pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices"
@@ -124,6 +123,26 @@ def test_refuses_another_hook_api():
     assert "codex API 2" in call("codex_install", "ctl", manifest=manifest(codex_api_version=1), source=SOURCE)["error"]
 
 
+def test_revert_refuses_a_codex_on_another_hook_api():
+    build()
+    ok("codex_install", "ctl", manifest=manifest(), source=SOURCE)
+    Codex["test@1.0.0"].manifest = manifest(codex_api_version=1)
+    ok("codex_install", "ctl", manifest=manifest("1.1.0"), source=SOURCE)
+    assert "codex API 2, not 1" in call("codex_revert", "ctl")["error"]
+    assert (Codex["test@1.0.0"].status, Codex["test@1.1.0"].status) == ("inactive", "active")
+
+
+def test_status_pages_the_install_history():
+    build()
+    for v in ("1.0.0", "1.1.0", "1.2.0"):
+        ok("codex_install", "ctl", manifest=manifest(v), source=SOURCE)
+    first = ok("codex_status", "alice", count=2)
+    assert [h["id"] for h in first["history"]] == ["test@1.0.0", "test@1.1.0"] and first["next"] == 3
+    rest = ok("codex_status", "alice", count=2, **{"from": first["next"]})
+    assert [h["id"] for h in rest["history"]] == ["test@1.2.0"] and rest["next"] is None
+    assert rest["codex"]["id"] == "test@1.2.0"
+
+
 def test_refuses_more_reads_than_the_sandbox_allows():
     build()
     reads = sorted(n for n, s in op.ops().items() if s["read"])[:33]
@@ -147,7 +166,7 @@ def test_I_EXT_2_codex_applies_only_declared_effects():
     assert chained["note"] == "N-N-a"
     assert not undeclared["ok"] and "not declared" in undeclared["error"]
     assert not impersonating["ok"] and "power of attorney" in impersonating["error"]
-    assert [e.op for e in each(Event) if e.origin == "codex"] == ["t_note", "t_note"]
+    assert [e.op for e in rows(Event) if e.origin == "codex"] == ["t_note", "t_note"]
 
 
 def test_I_EXT_2_reads_only_declared_and_never_writes():
@@ -190,6 +209,7 @@ def test_I_EXT_3_code_from_args_needs_an_allowlisted_checksum():
 
 @pytest.mark.parametrize("approval, trusted, error", [
     ({"approved": True, "approver": "mkt"}, [], None),
+    ({"approved": True, "approver": "mkt"}, ["sha256:" + "0" * 64], None),
     ({"approved": True, "approver": "evil"}, [], "does not trust"),
     ({"approved": True, "approver": "evil"}, ["evil"], None),
     ({"approved": False, "status": "pending"}, [], "not approved"),
@@ -273,5 +293,5 @@ def test_hooks_fire_from_their_operations():
     m = manifest(hooks=["on_user_register", "on_stage_change", "assign_quarter"])
     ok("codex_install", "ctl", manifest=m, source=WIRED)
     ok("realm_join", "newbie")
-    notes = [e.result.get("note") for e in each(Event) if e.op == "t_note"]
+    notes = [e.result.get("note") for e in rows(Event) if e.op == "t_note"]
     assert "N-welcome newbie" in notes

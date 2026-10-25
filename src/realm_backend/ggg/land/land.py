@@ -10,6 +10,7 @@ class Land(Row):
     y = Integer(default=0)
     width = Integer(default=1)
     height = Integer(default=1)
+    cell = String(default="", indexed=True)  # spatial index: f"{x // CELL}:{y // CELL}", CELL in api/assets.py
     kind = String(default="unassigned")
     owner = String(default="", indexed=True)  # "User:alice" or "Organization:buildco"
     status = String(default="active")  # active | disputed | transferred | revoked

@@ -151,6 +151,17 @@ def test_cancel_is_governed_and_withdraws_every_leg():
     assert "cancelled" in call("federal_vote_finalize", ANON, vote=v)["error"]
 
 
+def test_votes_and_messages_go_to_active_quarters_only():
+    capital(*QUARTERS)
+    ok("quarter_configure", "ctl", quarter="harbor", status="suspended")
+    for q in QUARTERS:
+        reply(q, "federation_message", proposal="P-1")
+    v = ok("federal_vote_propose", "alice", title="x", action=ACTION)["vote"]
+    assert {leg.quarter for leg in FederalVote[v].legs} == {CAPITAL, "north", "south"}
+    out = ok("federation_message", "ctl", topic="codex", body={"id": "agora", "version": "1.5.0"})
+    assert sorted(out["replies"]) == ["north", "south"]
+
+
 def test_capital_announces_codex_to_its_quarters(monkeypatch):
     capital("north", "south")
     assert "needs quarter.sync" in denied("federation_message", "alice", topic="codex")

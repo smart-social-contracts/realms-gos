@@ -63,6 +63,34 @@ def test_key_scopes_decide_who_grants():
     assert ok("crypto_access", "alice", scope="user:alice:private")["principals"] == ["alice"]
 
 
+def test_scopes_holders_and_documents_are_listed_a_page_at_a_time():
+    health()
+    docs = [ok("document_store", "carla", department="Health", keys={"bob": f"env:{i}"}, **REPORT)["document"]
+            for i in range(3)]
+    first = ok("document_list", "carla", department="Health", count=2)
+    rest = ok("document_list", "carla", department="Health", count=2, **{"from": first["next"]})
+    assert [d["id"] for d in first["documents"] + rest["documents"]] == docs and rest["next"] is None
+    scopes = ok("crypto_scopes", "bob", count=2)
+    tail = ok("crypto_scopes", "bob", count=2, **{"from": scopes["next"]})
+    assert scopes["scopes"] + tail["scopes"] == [f"dept:Health:doc:{d}" for d in docs] and tail["next"] is None
+    keys = {p: "env" for p in ("alice", "bob", "dana")}
+    ok("crypto_grant", "carla", scope="dept:Health:roster", keys=keys)
+    who = ok("crypto_access", "carla", scope="dept:Health:roster", count=2)
+    more = ok("crypto_access", "carla", scope="dept:Health:roster", count=2, **{"from": who["next"]})
+    assert who["principals"] + more["principals"] == ["alice", "bob", "dana"] and more["next"] is None
+
+
+def test_document_delete_revokes_keys_in_batches():
+    health()
+    keys = {p: f"env:{p}" for p in ("alice", "bob", "carla", "dana", "dr-ana")}
+    doc = ok("document_store", "carla", department="Health", keys=keys, **REPORT)["document"]
+    first = ok("document_delete", "carla", document=doc, count=3)
+    assert first["revoked"] == ["alice", "bob", "carla"] and not first["deleted"] and Document[doc]
+    last = ok("document_delete", "carla", document=doc, count=3)
+    assert last["revoked"] == ["dana", "dr-ana"] and last["deleted"] and Document[doc] is None
+    assert KeyEnvelope.count_by("scope", f"dept:Health:doc:{doc}") == 0
+
+
 def test_vetkd_public_key_and_sign_in():
     world.build()
     fake_chain.state["replies"][("aaaaa-aa", "vetkd_public_key")] = '(record { public_key = blob "\\01\\02\\"" })'

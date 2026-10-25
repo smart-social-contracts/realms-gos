@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, each, find, next_id, view
+from core.db import Fail, find, next_id, page_by, view
 from ggg import Department, Document, KeyEnvelope, Realm
 from core.op import op
 from api.proposals import holders, root
@@ -106,15 +106,19 @@ def crypto_envelope(c, args):
 
 @op("self.data_manage", read=True)
 def crypto_scopes(c, args):
-    """The scopes where you hold a wrapped key."""
-    return {"scopes": sorted(e.scope for e in each(KeyEnvelope, "principal", c.user))}
+    """The scopes where you hold a wrapped key, ``count`` at a time (default 100, at most 500) from row ``from``
+    (default 1). Returns ``scopes`` and ``next`` (null at the end)."""
+    rows, nxt = page_by(KeyEnvelope, "principal", c.user, args)
+    return {"scopes": [e.scope for e in rows], "next": nxt}
 
 
 @op("self.data_manage", read=True)
 def crypto_access(c, args):
-    """Who holds a key at ``scope`` (managers only)."""
+    """Who holds a key at ``scope`` (managers only), ``count`` at a time (default 100, at most 500) from row
+    ``from`` (default 1). Returns ``principals`` and ``next`` (null at the end)."""
     manager(args["scope"], c.user)
-    return {"principals": sorted(e.principal for e in each(KeyEnvelope, "scope", args["scope"]))}
+    rows, nxt = page_by(KeyEnvelope, "scope", args["scope"], args)
+    return {"principals": [e.principal for e in rows], "next": nxt}
 
 
 def scope_of(doc):
@@ -160,19 +164,25 @@ def document_revoke(c, args):
 
 @op("document.manage")
 def document_delete(c, args):
-    """Delete ``document`` and every wrapped key for it."""
+    """Delete ``document``'s wrapped keys, ``count`` per call (default 100, at most 500), then the document itself:
+    call again until ``deleted`` is true. Returns ``revoked`` (this call's principals) and ``deleted``."""
     doc = find(Document, args["document"])
     staff(doc.department, c.user)
-    revoke(scope_of(doc), [e.principal for e in each(KeyEnvelope, "scope", scope_of(doc))])
-    doc.delete()
+    rows, more = page_by(KeyEnvelope, "scope", scope_of(doc), {"count": args.get("count")})
+    for e in rows:
+        e.delete()
+    if more is None:
+        doc.delete()
+    return {"revoked": sorted(e.principal for e in rows), "deleted": more is None}
 
 
 @op("document.manage", read=True)
 def document_list(c, args):
-    """The documents of ``department`` (id, title, hash, author, time), for its staff."""
+    """The documents of ``department`` (id, title, hash, author, time), for its staff, ``count`` at a time (default
+    100, at most 500) from row ``from`` (default 1). Returns ``documents`` and ``next`` (null at the end)."""
     staff(args["department"], c.user)
-    rows = each(Document, "department", args["department"])
-    return {"documents": [view(d, "id", "title", "hash", "author", "at") for d in rows]}
+    rows, nxt = page_by(Document, "department", args["department"], args)
+    return {"documents": [view(d, "id", "title", "hash", "author", "at") for d in rows], "next": nxt}
 
 
 @op("self.data_view", read=True)

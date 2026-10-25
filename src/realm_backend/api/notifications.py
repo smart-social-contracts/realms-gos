@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, deref, each, find, next_id, ref, view
+from core.db import Fail, deref, find, next_id, page_by, ref, view
 from ggg import Event, Notification
 from core.op import op, ops
 from api.proposals import appointed
@@ -18,31 +18,39 @@ def addressed_to(principal):
     return {f"User:{principal}"} | {ref(a.position.department or a.position.organization) for a in appointed(principal)}
 
 
+def inbox(c, args):
+    """``recipient`` (default "User:<you>"), which must be you or a department or organization where you hold a seat."""
+    recipient = args.get("recipient") or f"User:{c.user}"
+    if recipient not in addressed_to(c.user):
+        raise Fail(f"you do not read {recipient}'s notifications")
+    return recipient
+
+
 @op("self.data_view", read=True, delegable=True)
 def notification_list(c, args):
-    """Your notifications, newest first, at most ``count`` (default 50); ``unread`` keeps only those you have not
-    read."""
-    rows = [n for r in addressed_to(c.user) for n in each(Notification, "recipient", r)]
+    """The notifications of ``recipient`` (default "User:<you>"; or "Department:<id>", "Organization:<id>" where
+    you hold a seat), oldest first, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1);
+    ``unread`` keeps only those you have not read. Returns ``notifications`` and ``next`` (null at the end)."""
+    rows, nxt = page_by(Notification, "recipient", inbox(c, args), args)
     rows = [n for n in rows if not (args.get("unread") and c.user in n.read_by)]
-    rows.sort(key=lambda n: (n.at, int(n.id.split("-")[1])), reverse=True)
-    shown = rows[:int(args.get("count") or 50)]
-    return {"notifications": [{**view(n, *SHOWN), "read": c.user in n.read_by} for n in shown],
-            "unread": sum(c.user not in n.read_by for n in rows)}
+    return {"notifications": [{**view(n, *SHOWN), "read": c.user in n.read_by} for n in rows], "next": nxt}
 
 
 @op("self.data_manage", delegable=True)
 def notification_read(c, args):
-    """Mark notifications as read: ``notification`` (one id) or ``all``."""
+    """Mark notifications as read: ``notification`` (one id), or with ``all`` a page of ``recipient``'s (default
+    "User:<you>"), ``count`` (default 100, at most 500) from row ``from`` (default 1); call again with ``next`` until
+    it is null. Returns ``read``, how many were newly marked."""
     if args.get("all"):
-        rows = [n for r in addressed_to(c.user) for n in each(Notification, "recipient", r)]
+        rows, nxt = page_by(Notification, "recipient", inbox(c, args), args)
     else:
-        rows = [find(Notification, args["notification"])]
+        rows, nxt = [find(Notification, args["notification"])], None
         if rows[0].recipient not in addressed_to(c.user):
             raise Fail(f"notification {rows[0].id} is not addressed to you")
-    for n in rows:
-        if c.user not in n.read_by:
-            n.read_by = n.read_by + [c.user]
-    return {"read": len(rows)}
+    fresh = [n for n in rows if c.user not in n.read_by]
+    for n in fresh:
+        n.read_by = n.read_by + [c.user]
+    return {"read": len(fresh), "next": nxt}
 
 
 @op("notification.send")

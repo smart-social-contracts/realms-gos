@@ -5,9 +5,9 @@ import pytest
 
 import fake_chain
 import world
-from core.db import each
+from api.extensions import checksum
 from ggg import Department, Event, Extension, Realm, Vote
-from kit import call, denied, later, ok
+from kit import call, denied, later, ok, rows
 
 VOTING = '''
 def cast_vote(proposal, choice):
@@ -53,7 +53,7 @@ def test_story_the_voting_extension_casts_alices_vote(registry):
     assert res["result"]["ok"]
     v = Vote[f"{p}:alice"]
     assert (v.voter, v.cast_by, v.choice) == ("alice", "alice", "yes")
-    assert [(e.op, e.user, e.origin) for e in each(Event) if e.op == "proposal_vote"] == [("proposal_vote", "alice", "extension")]
+    assert [(e.op, e.user, e.origin) for e in rows(Event) if e.op == "proposal_vote"] == [("proposal_vote", "alice", "extension")]
     assert "voting" in [e["id"] for e in ok("extension_list", "alice")["extensions"] if e["available"]]
 
 
@@ -81,6 +81,32 @@ def test_I_EXT_3_installing_code_needs_the_trust_policy(registry):
     ok("extension_install", "ctl", extension="voting", version="9.9.9")
     assert "get_namespace_approval_icc" not in [m for _, m, _ in fake_chain.state["calls"]]
     denied("extension_install", "alice", extension="voting", version="2.1.0")
+
+
+def test_I_EXT_3_a_pinned_extension_needs_no_approval(registry):
+    pin = "sha256:" + checksum(MANIFEST, VOTING)
+    ok("realm_configure_trust_policy", "ctl", trusted_approvers=[pin])
+    fake_chain.state["calls"].clear()
+    assert ok("extension_install", "ctl", extension="voting", version="9.9.9")["approved_by"] == pin
+    assert "get_namespace_approval_icc" not in [m for _, m, _ in fake_chain.state["calls"]]
+
+
+def test_I_EXT_3_pins_alone_keep_trusting_the_marketplace(registry):
+    approvals, _ = registry
+    ok("realm_configure_trust_policy", "ctl", trusted_approvers=["sha256:" + "0" * 64])
+    assert ok("extension_install", "ctl", extension="voting", version="2.1.0")["approved_by"] == "market"
+    approvals["ext/voting/2.1.0"]["approver"] = "someone-else"
+    assert "does not trust" in call("extension_install", "ctl", extension="voting", version="2.1.0")["error"]
+
+
+def test_list_pages_follow_next(registry):
+    for name in ("a", "b", "c"):
+        Extension(id=name, version="1.0.0")
+    first = ok("extension_list", "alice", count=2)
+    assert [e["id"] for e in first["extensions"]] == ["a", "b"] and first["next"] == 3
+    rest = ok("extension_list", "alice", count=2, **{"from": first["next"]})
+    assert [e["id"] for e in rest["extensions"]] == ["c"] and rest["next"] is None
+    assert rest["extensions"][0]["available"]
 
 
 def test_install_is_a_realm_wide_vote(registry):

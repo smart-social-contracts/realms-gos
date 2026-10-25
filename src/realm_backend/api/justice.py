@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, deref, each, find, next_id, view
+from core.db import Fail, deref, each, find, next_id, page, page_by, view, window
 from ggg import (Appeal, Case, Contract, Court, Department, Dispute, Invoice, Judge, Member, Notification, Organization,
                  Penalty, User, Verdict)
 from api.licenses import active
@@ -14,6 +14,9 @@ PENDING = ("filed", "under_review")
 PENALTIES = ("fine", "restitution", "community_service", "suspension", "revocation", "injunction", "freeze",
              "termination")
 TARGETS = {"suspension": ("User", "Organization"), "revocation": ("License",), "termination": ("Contract",)}
+CARRIED_OUT_WITH = {"fine": "fine.apply", "restitution": "fine.apply", "suspension": "access.revoke",
+                    "revocation": "access.revoke", "termination": "contract.terminate", "freeze": "instrument.lock",
+                    "injunction": "enforcement.record", "community_service": "enforcement.record"}
 
 
 def people(ref):
@@ -146,10 +149,13 @@ def dispute_get(c, args):
 
 @op("dispute.view_all", read=True)
 def dispute_list_all(c, args):
-    """List every dispute, or only those whose ``status`` is filed, accepted, rejected or withdrawn. Returns
-    ``disputes``."""
-    rows = [d for d in each(Dispute) if not args.get("status") or d.status == args["status"]]
-    return {"disputes": [view(d, "id", "claimant", "respondent", "title", "status", "case") for d in rows]}
+    """List disputes, or only those whose ``status`` is filed, accepted, rejected or withdrawn, ``count`` rows at a time
+    (default 100, at most 500) from row ``from`` (default 1). Returns ``disputes`` and ``next``, the ``from`` of the
+    next page (null at the end)."""
+    status = args.get("status")
+    rows, nxt = page_by(Dispute, "status", status, args) if status else page(Dispute, args)
+    return {"disputes": [view(d, "id", "claimant", "respondent", "title", "status", "case") for d in rows],
+            "next": nxt}
 
 
 @op("dispute.accept", signing=True, parties=of_dispute)
@@ -350,11 +356,14 @@ def appeal_decide(c, args):
     return {"status": a.status, "verdict": a.new_verdict or a.verdict}
 
 
-@op("fine.apply", signing=True, parties=of_penalty)
+@op("fine.apply", signing=True, parties=of_penalty,
+    perm_for=lambda args: CARRIED_OUT_WITH[find(Penalty, args["penalty"]).kind])
 def penalty_execute(c, args):
     """Carry out pending ``penalty`` once its verdict is final: a fine or restitution becomes an invoice (due in 30 days
     unless set), a suspension, revocation or termination changes its target's status, other kinds are only marked
-    executed. Returns ``penalty`` and ``invoice``."""
+    executed. Returns ``penalty`` and ``invoice``. The permission depends on the kind: fine.apply for a fine or
+    restitution, access.revoke for a suspension or revocation, contract.terminate for a termination, instrument.lock
+    for a freeze, enforcement.record for an injunction or community service."""
     p = find(Penalty, args["penalty"])
     if p.status != "pending":
         raise Fail(f"{p.id} is {p.status}")
@@ -455,9 +464,14 @@ def judge_revoke(c, args):
 @op("resolution.query", read=True)
 def resolution_query(c, args):
     """Search verdicts that are no longer drafts, optionally only those issued at or after ``since`` (seconds), at
-    ``court``, or with ``text`` in their decision or case title. Returns ``verdicts`` with their penalties."""
+    ``court``, or with ``text`` in their decision or case title, newest first: ``count`` rows (default 100, at most
+    500) from row ``from`` (default the newest) down. Returns ``verdicts`` with their penalties and ``next``, the
+    ``from`` of the older page (null at the end); a page can be short or empty, so follow ``next``."""
     since, text, court = int(args.get("since", 0)), args.get("text", "").lower(), args.get("court")
-    found = [v for v in each(Verdict) if v.status != "draft" and v.issued_at >= since
-             and (not court or (v.case.court and v.case.court.id == court))
+    top, count = int(args.get("from") or Verdict.max_id()), window(args)[1]
+    start = max(top - count + 1, 1)
+    rows = reversed(Verdict.load_some(start, top - start + 1)) if top else []
+    found = [v for v in rows if v.status != "draft"
+             and v.issued_at >= since and (not court or (v.case.court and v.case.court.id == court))
              and text in f"{v.decision} {v.case.title}".lower()]
-    return {"verdicts": [verdict_view(v) for v in found]}
+    return {"verdicts": [verdict_view(v) for v in found], "next": start - 1 if start > 1 else None}

@@ -9,7 +9,7 @@ class Department(Row):
     description = String(default="")
     parent = ManyToOne("Department", "children")
     children = OneToMany("Department", "parent")
-    is_root = Boolean(default=False)
+    is_root = Boolean(default=False, indexed=True)
     head = String(default="")
     policy = Json({"m": 1, "n": 1, "quorum_percent": 0, "veto": []})
     target_policy = Json({})

@@ -38,6 +38,22 @@ def test_story_clinic_b_is_licensed_suspended_and_revoked():
     assert "revoked" in call("license_suspend", "hector", license=lic)["error"]
 
 
+def test_license_list_pages():
+    agora()
+    mine = [ok("license_apply", "alice", kind=kind)["license"] for kind in ("professional", "education", "business")]
+    apply_clinic()
+    pages, cursor = [], 1
+    while cursor:
+        out = ok("license_list", fake_chain.ANONYMOUS, holder="User:alice", count=2, **{"from": cursor})
+        pages.append([x["id"] for x in out["licenses"]])
+        cursor = out["next"]
+    assert pages == [mine[:2], mine[2:]]
+    out = ok("license_list", fake_chain.ANONYMOUS, count=3, kind="health")
+    assert out["licenses"] == [] and out["next"] == 4
+    assert [x["id"] for x in ok("license_list", fake_chain.ANONYMOUS, kind="health", **{"from": 4})["licenses"]] == [
+        "LIC-4"]
+
+
 def test_apply_and_renew_authorization():
     agora()
     assert "sign in" in denied("license_apply", fake_chain.ANONYMOUS, kind="business")

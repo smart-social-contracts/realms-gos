@@ -8,7 +8,7 @@ class Quarter(Row):
     id = String()  # canister id
     name = String(default="")
     index = Integer(default=0)
-    status = String(default="setup")  # setup | active | suspended | splitting | merging
+    status = String(default="setup", indexed=True)  # setup | active | suspended | splitting | merging
     population = Integer(default=0)
     codex_id = String(default="")
     codex_version = String(default="")

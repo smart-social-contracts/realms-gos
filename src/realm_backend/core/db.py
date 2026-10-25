@@ -44,15 +44,11 @@ def next_id(cls, prefix):
     return f"{prefix}-{cls.max_id() + 1}"
 
 
-def each(cls, field=None, value=None):
-    """Every row, or every row whose indexed ``field`` equals ``value``, a page at a time."""
+def each(cls, field, value):
+    """Every row whose indexed ``field`` equals ``value``, a page at a time: only where the matches are bounded."""
     cursor = 1
     while cursor is not None:
-        if field is None:
-            rows = cls.load_some(cursor, PAGE)
-            cursor = cursor + PAGE if cursor + PAGE <= cls.max_id() else None
-        else:
-            rows, cursor = cls.find_by(field, value, from_id=cursor, count=PAGE)
+        rows, cursor = cls.find_by(field, value, from_id=cursor, count=PAGE)
         yield from rows
 
 

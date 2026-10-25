@@ -149,6 +149,14 @@ def test_user_admin_ops_and_auth():
     assert "does not handle" in denied("user_add", "ctl", user="q", department="Justice")
 
 
+def test_invites_are_listed_a_page_at_a_time():
+    world.build()
+    made = [ok("invite_create", "dana", code=f"CODE-{i}")["invite"]["id"] for i in range(3)]
+    first = ok("invite_list", "bob", count=2)
+    rest = ok("invite_list", "bob", count=2, **{"from": first["next"]})
+    assert [i["id"] for i in first["invites"] + rest["invites"]] == made and rest["next"] is None
+
+
 def test_identity_review_is_signed_by_a_human_not_the_owner():
     world.build()
     world.person("dana")

@@ -5,7 +5,7 @@ import ggg
 from core import sandbox
 from api import tasks
 from core.db import Fail, page, view
-from api.extensions import approved
+from api.extensions import trust
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
 from api import codex
@@ -13,6 +13,7 @@ from core.op import call, op, ops
 from api.proposals import root
 
 VERSION = "VERSION_PLACEHOLDER"
+RELEASE_WASM = "realm_backend.wasm.gz"  # as `realms files publish-release` stores it
 
 PROFILES = {
     "admin": ["all"],
@@ -239,8 +240,12 @@ def realm_register(c, args):
 
 @op("realm.upgrade", governed=launched)
 def realm_upgrade(c, args):
-    """Accept release ``version`` (``module_hash``) for Casals to install, if the trust policy approves it (I-ADM-3)."""
-    approver = yield from approved(f"realm/{args['version']}")
+    """Accept release ``version`` with wasm ``module_hash`` (hex, optionally prefixed ``sha256:``) for Casals to
+    install, if the trust policy accepts that exact module (I-ADM-3): its hash is pinned, or it is the release's
+    backend wasm in the file registry (``wasm/realm-backend/<version>/realm_backend.wasm.gz``) and a trusted approver
+    approved that namespace."""
+    digest = args["module_hash"].removeprefix("sha256:")
+    approver = yield from trust(digest, f"wasm/realm-backend/{args['version']}", RELEASE_WASM)
     release = {"version": args["version"], "module_hash": args["module_hash"], "approved_by": approver,
                "accepted_at": chain.now()}
     remember("upgrade", release)

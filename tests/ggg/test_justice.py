@@ -107,9 +107,48 @@ def test_penalties_suspend_and_terminate_a_contract():
     assert k.status == "disputed" and Verdict[v].contract == "C-9"
     later(15 * DAY)
     ok("verdict_finalize", "elena", verdict=v)
-    for p in Verdict[v].penalties:
-        ok("penalty_execute", "dana", penalty=p.id)
+    suspension, termination = Verdict[v].penalties
+    assert "needs access.revoke" in denied("penalty_execute", "dana", penalty=suspension.id)
+    assert "needs contract.terminate" in denied("penalty_execute", "dana", penalty=termination.id)
+    world.seat("justice.enforcer", "carla", a["depts"]["Justice"], "access.revoke", "contract.terminate")
+    ok("penalty_execute", "carla", penalty=suspension.id)
+    ok("penalty_execute", "carla", penalty=termination.id)
     assert Member["mallory"].status == "suspended" and Contract["C-9"].status == "terminated"
+
+
+def test_penalty_execute_needs_the_permission_of_its_kind():
+    a = agora()
+    case, v = trial(a, "alice", "mallory", "Spam", [
+        {"target": "mallory", "amount": 500, "symbol": "REALM"}, {"target": "mallory", "kind": "suspension"},
+        {"target": "mallory", "kind": "freeze"}, {"target": "mallory", "kind": "injunction"}])
+    later(15 * DAY)
+    ok("verdict_finalize", "elena", verdict=v)
+    fine, suspension, freeze, injunction = Verdict[v].penalties
+    ok("penalty_execute", "dana", penalty=fine.id)
+    for p, perm in [(suspension, "access.revoke"), (freeze, "instrument.lock"), (injunction, "enforcement.record")]:
+        assert f"needs {perm}" in denied("penalty_execute", "dana", penalty=p.id)
+    assert Member["mallory"].status != "suspended" and Penalty[suspension.id].status == "pending"
+
+
+def test_dispute_list_all_pages():
+    agora()
+    filed = [ok("dispute_file", "bob", respondent="mallory", title=f"Spam {i}")["dispute"] for i in range(3)]
+    ok("dispute_withdraw", "bob", dispute=filed[1])
+    first = ok("dispute_list_all", "ctl", count=2)
+    second = ok("dispute_list_all", "ctl", count=2, **{"from": first["next"]})
+    assert [d["id"] for d in first["disputes"] + second["disputes"]] == filed and second["next"] is None
+    first = ok("dispute_list_all", "ctl", status="filed", count=1)
+    second = ok("dispute_list_all", "ctl", status="filed", count=1, **{"from": first["next"]})
+    assert [d["id"] for d in first["disputes"] + second["disputes"]] == [filed[0], filed[2]]
+    assert second["next"] is None
+
+
+def test_resolution_query_pages_newest_first():
+    a = agora()
+    verdicts = [trial(a, "bob", "mallory", f"Spam {i}")[1] for i in range(3)]
+    first = ok("resolution_query", "ctl", text="spam", count=2)
+    second = ok("resolution_query", "ctl", text="spam", count=2, **{"from": first["next"]})
+    assert [v["id"] for v in first["verdicts"] + second["verdicts"]] == verdicts[::-1] and second["next"] is None
 
 
 def test_verdict_modify_terms_reopens_the_window():

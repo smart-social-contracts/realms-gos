@@ -1,15 +1,17 @@
+import hashlib
 import inspect
+import json
 
-from core.db import each
+from core import op
 
 import pytest
 
 import fake_chain
 from api import treasury
 import world
-from ggg import (AllocationRule, Budget, Delegation, Department, FinancialReport, Invoice, LedgerEntry, Position,
-                 Token, Transfer)
-from kit import call, denied, ok
+from ggg import (AllocationRule, Budget, Delegation, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
+                 LedgerEntry, Position, Token, Transfer)
+from kit import call, denied, ok, rows
 
 LEDGER = "realm-ledger"
 FY2026 = {"period": "FY2026", "starts_at": 1_767_225_600, "ends_at": 1_798_761_600}
@@ -59,7 +61,7 @@ def funds():
 
 def balanced():
     txs = {}
-    for e in each(LedgerEntry):
+    for e in rows(LedgerEntry):
         d, c = txs.get(e.transaction, (0, 0))
         txs[e.transaction] = (d + e.debit, c + e.credit)
     return txs and all(d == c for d, c in txs.values())
@@ -120,7 +122,7 @@ def test_I_FIN_1_every_transaction_balances():
     fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = "(variant { Err = variant { TooOld } })"
     failed = ok("transfer_create", "ctl", fund="ROADS", to="buildco", amount=50)
     assert failed["status"] == "failed" and funds()["ROADS"] == 140
-    assert balanced() and len({e.transaction for e in each(LedgerEntry)}) == 4
+    assert balanced() and len({e.transaction for e in rows(LedgerEntry)}) == 4
 
 
 def test_I_FIN_2_money_leaves_a_fund_only_by_transfer_under_the_owners_policy():
@@ -181,6 +183,7 @@ def test_I_FIN_4_adopted_budgets_rules_and_policies_are_frozen():
     first = allocate(ROADS=30)
     second = allocate(ROADS=35)
     assert (AllocationRule[first].status, AllocationRule[second].status) == ("superseded", "adopted")
+    assert treasury.adopted_rule(Fund["ROOT"]).id == second
     assert "only a draft" in call("allocation_rule_propose", "bob", rule=first)["error"]
 
 
@@ -234,14 +237,210 @@ def test_transfer_revert_only_pending():
     allocate(ROADS=100)
     receive(100)
     fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = RuntimeError("canister stopped")
-    with pytest.raises(fake_chain.Trap):
-        call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=40)
+    out = ok("transfer_create", "ctl", fund="ROADS", to="buildco", amount=40)
+    assert (out["status"], out["error"]) == ("pending", "canister stopped")
     t = Transfer["TR-1"]
     assert t.status == "pending" and funds()["ROADS"] == 50
     assert "needs transfer.delete" in denied("transfer_revert", "alice", transfer=t.id)
     ok("transfer_revert", "bob", transfer=t.id)
     assert t.status == "failed" and funds()["ROADS"] == 100 and balanced()
     assert "only a pending" in call("transfer_revert", "bob", transfer=t.id)["error"]
+
+
+def suspended(cid, method, candid="()", cycles=0):
+    """A ledger call that stays in flight until the test sends its reply (or an exception) in."""
+    fake_chain.state["calls"].append((cid, method, candid))
+    reply = yield
+    if isinstance(reply, Exception):
+        raise reply
+    return reply
+
+
+def start(name, caller, **args):
+    fake_chain.state["caller"] = caller
+    message = op.dispatch(name, json.dumps(args))
+    next(message)
+    return message
+
+
+def finish(message, reply):
+    with pytest.raises(StopIteration) as done:
+        message.send(reply)
+    return json.loads(done.value.value)
+
+
+@pytest.mark.parametrize("reply, status, roads", [("(variant { Ok = 9 : nat })", "completed", 40),
+                                                  ("(variant { Err = variant { TooOld } })", "failed", 100)])
+def test_transfer_in_flight_cannot_be_reverted(monkeypatch, reply, status, roads):
+    setup_finance()
+    allocate(ROADS=100)
+    receive(100)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    message = start("transfer_create", "ctl", fund="ROADS", to="buildco", amount=50)
+    t = Transfer["TR-1"]
+    assert t.status == "sending" and funds()["ROADS"] == 40
+    assert "TR-1 is sending" in call("transfer_revert", "bob", transfer=t.id)["error"]
+    assert finish(message, reply)["status"] == status
+    assert "only a pending" in call("transfer_revert", "bob", transfer=t.id)["error"]
+    assert funds()["ROADS"] == roads and balanced()
+    assert len({e.transaction for e in t.ledger_entries}) == (1 if status == "completed" else 2)
+
+
+def test_ledger_reply_does_not_complete_a_reverted_transfer(monkeypatch):
+    setup_finance()
+    allocate(ROADS=100)
+    receive(100)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    message = start("transfer_create", "ctl", fund="ROADS", to="buildco", amount=50)
+    t = Transfer["TR-1"]
+    treasury.reverse(t, treasury.period(), "reverted while in flight")
+    out = finish(message, "(variant { Ok = 9 : nat })")
+    assert (out["status"], out["ledger_tx"], t.status, t.ledger_tx) == ("failed", "9", "failed", "")
+    assert funds()["ROADS"] == 100 and len(t.ledger_entries) == 6 and balanced()
+    message = start("transfer_create", "ctl", fund="ROADS", to="buildco", amount=50)
+    t = Transfer["TR-2"]
+    treasury.reverse(t, treasury.period(), "reverted while in flight")
+    assert finish(message, RuntimeError("canister stopped"))["status"] == "failed"
+    assert t.status == "failed" and funds()["ROADS"] == 100
+
+
+def summed(fund, symbol):
+    return sum(e.debit - e.credit for e in fund.ledger_entries if e.kind == "asset" and e.symbol == symbol)
+
+
+def test_fund_balances_are_the_sum_of_their_ledger_entries():
+    setup_finance()
+    ok("token_register", "bob", symbol="ckUSDC", ledger=LEDGER, decimals=6, fee=5)
+    ok("fund_create", "bob", fund="WELFARE")
+    allocate(WELFARE=30, ROADS=20)
+    receive(1_000)
+    receive(333, payer="dana")
+    inv = ok("invoice_create", "bob", payer="alice", amount=700, symbol="ckUSDC", reason="User:alice")["invoice"]
+    balance_reply(700)
+    ok("invoice_check", "alice", invoice=inv)
+    ledger_ok()
+    ok("transfer_create", "ctl", fund="ROADS", to="buildco", amount=60)
+    ok("transfer_create", "ctl", fund="ROOT", to="buildco", amount=100, symbol="ckUSDC")
+    Position["infrastructure.planning_officer"].salary = 25
+    ok("payroll_run", "ctl", department="Infrastructure", period="2026-11")
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = "(variant { Err = variant { TooOld } })"
+    ok("transfer_create", "ctl", fund="WELFARE", to="buildco", amount=40)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = RuntimeError("canister stopped")
+    ok("transfer_create", "ctl", fund="WELFARE", to="buildco", amount=50)
+    ok("transfer_revert", "bob", transfer=Transfer.load_some(Transfer.max_id(), 1)[0].id)
+
+    summed_view = {f: {} for f in ("ROOT", "ROADS", "WELFARE")}
+    for e in rows(LedgerEntry):
+        if e.kind == "asset" and e.fund is not None:
+            summed_view[e.fund.id][e.symbol] = summed_view[e.fund.id].get(e.symbol, 0) + e.debit - e.credit
+    assert ok("treasury_view", "bob")["funds"] == summed_view
+    for code in summed_view:
+        for symbol in ("REALM", "ckUSDC"):
+            assert treasury.balance(Fund[code], symbol) == summed(Fund[code], symbol)
+    assert summed_view["ROADS"]["REALM"] == 200 + 66 - 70 - 35
+
+
+def test_report_statements_and_hash_match_the_periods_entries():
+    setup_finance()
+    allocate(ROADS=40)
+    receive(500)
+    ledger_ok()
+    ok("transfer_create", "ctl", fund="ROADS", to="buildco", amount=70, category="capital")
+    rows = sorted(FiscalPeriod["FY2026"].ledger_entries, key=lambda e: int(e.id.split("-")[1]))
+    accounts, balances = {}, {}
+    for e in rows:
+        a = accounts.setdefault(f"{e.kind}:{e.category}:{e.symbol}", {"debit": 0, "credit": 0})
+        a["debit"], a["credit"] = a["debit"] + e.debit, a["credit"] + e.credit
+        if e.kind == "asset" and e.fund is not None:
+            balances[f"{e.fund.id}:{e.symbol}"] = balances.get(f"{e.fund.id}:{e.symbol}", 0) + e.debit - e.credit
+    chained = hashlib.sha256(b"").hexdigest()
+    for e in rows:
+        line = json.dumps([e.id, e.transaction, e.debit, e.credit, e.symbol])
+        chained = hashlib.sha256((chained + line).encode()).hexdigest()
+    out = ok("report_issue", "bob", period="FY2026")
+    assert out["source_hash"] == "sha256:" + chained
+    assert FinancialReport[out["report"]].statements == {
+        "accounts": dict(sorted(accounts.items())), "fund_balances": dict(sorted(balances.items())),
+        "debit": sum(e.debit for e in rows), "credit": sum(e.credit for e in rows)}
+
+
+def test_periods_open_in_order_and_bookings_find_theirs():
+    setup_finance()
+    year = 365 * 86400
+    earlier = {"period": "FY2025", "starts_at": FY2026["starts_at"] - year, "ends_at": FY2026["starts_at"]}
+    assert "starts before fiscal period FY2026 ends" in call("period_open", "bob", **earlier)["error"]
+    for n in (1, 2, 3):
+        ok("period_open", "bob", period=f"FY{2026 + n}", starts_at=FY2026["ends_at"] + (n - 1) * year,
+           ends_at=FY2026["ends_at"] + n * year)
+    assert treasury.period().id == "FY2026"
+    fake_chain.state["now"] = FY2026["ends_at"] + year + 5
+    receive(10)
+    assert {e.period.id for e in LedgerEntry.load_some(1, 10)} == {"FY2028"}
+    ok("period_close", "bob", period="FY2028")
+    assert "fiscal period FY2028 is closed" in call("invoice_refresh", "bob")["error"]
+    fake_chain.state["now"] = FY2026["ends_at"] + 3 * year
+    assert treasury.period() is None
+
+
+def test_treasury_view_reads_funds_a_page_at_a_time():
+    setup_finance()
+    ok("fund_create", "bob", fund="WELFARE")
+    first = ok("treasury_view", "bob", count=2)
+    assert list(first["funds"]) == ["ROOT", "ROADS"] and first["tokens"][0]["id"] == "REALM"
+    second = ok("treasury_view", "bob", count=2, **{"from": first["next"]})
+    assert (list(second["funds"]), second["next"]) == (["WELFARE"], None)
+
+
+def test_registries_are_bounded(monkeypatch):
+    setup_finance()
+    monkeypatch.setattr(treasury, "REGISTRY", 2)
+    ok("token_register", "bob", symbol="ckUSDC", ledger="x")
+    assert "registry is full" in call("token_register", "bob", symbol="ckETH", ledger="y")["error"]
+    ok("token_register", "bob", symbol="ckUSDC", ledger="z")
+    ok("nft_token_register", "bob", symbol="LAND", canister="a")
+    ok("nft_token_register", "bob", symbol="DEED", canister="b")
+    assert "registry is full" in call("nft_token_register", "bob", symbol="PASS", canister="c")["error"]
+
+
+def test_invoice_refresh_checks_a_batch_at_a_time():
+    setup_finance()
+    due = fake_chain.now() + 10
+    invoices = [ok("invoice_create", "bob", payer="alice", amount=5, due_at=due)["invoice"] for _ in range(3)]
+    ok("invoice_create", "bob", payer="alice", amount=5)
+    fake_chain.state["now"] += 20
+    balance_reply(0)
+    Invoice[invoices[1]].status = "overdue"
+    first = ok("invoice_refresh", "bob", count=2)
+    assert first["invoices"] == {invoices[0]: "overdue", invoices[1]: "overdue"} and first["next"]
+    balance_reply(5)
+    second = ok("invoice_refresh", "bob", count=2, **{"from": first["next"]})
+    assert (second["checked"], second["paid"], second["next"]) == (2, 2, None)
+    assert len([c for c in fake_chain.state["calls"] if c[1] == "icrc1_balance_of"]) == 4
+    balance_reply(0)
+    assert ok("invoice_refresh", "bob")["invoices"] == {invoices[0]: "overdue", invoices[1]: "overdue"}
+
+
+def test_invoice_refresh_makes_at_most_twenty_ledger_calls():
+    setup_finance()
+    for _ in range(25):
+        ok("invoice_create", "bob", payer="alice", amount=5)
+    balance_reply(0)
+    out = ok("invoice_refresh", "bob", count=100)
+    assert out["checked"] == 20 and out["next"]
+    assert ok("invoice_refresh", "bob", **{"from": out["next"]})["checked"] == 5
+
+
+def test_reports_and_my_invoices_are_paginated():
+    setup_finance()
+    reports = [ok("report_issue", "bob", period="FY2026")["report"] for _ in range(3)]
+    first = ok("report_view", "bob", count=2)
+    second = ok("report_view", "bob", count=2, **{"from": first["next"]})
+    assert [r["id"] for r in first["reports"] + second["reports"]] == reports and second["next"] is None
+    mine = [ok("invoice_create", "bob", payer="alice", amount=n)["invoice"] for n in (1, 2, 3)]
+    ok("invoice_create", "bob", payer="dana", amount=4)
+    first = ok("my_invoices", "alice", count=2)
+    second = ok("my_invoices", "alice", count=2, **{"from": first["next"]})
+    assert [i["id"] for i in first["invoices"] + second["invoices"]] == mine and second["next"] is None
 
 
 def test_signing_ops_need_a_human():

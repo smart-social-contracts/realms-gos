@@ -10,6 +10,7 @@ class Delegation(Row):
     delegate = String(indexed=True)
     scope = Json({})
     status = String(default="pending")  # pending | active | revoked | expired | declined
+    link = String(indexed=True)  # "grantor|delegate" until the grant is closed, then None
     label = String(default="")
     description = String(default="")
     requires_acceptance = Boolean(default=True)

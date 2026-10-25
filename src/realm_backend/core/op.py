@@ -15,10 +15,11 @@ GENERATOR = type((lambda: (yield))())
 
 
 class Call:
-    """``user`` is who acts; ``by`` signed the message (the user, or their delegate)."""
+    """``user`` is who acts; ``by`` signed the message (the user, or their delegate); ``proposal`` is the
+    accepted proposal whose replay this is, if any."""
 
-    def __init__(self, user, by, origin):
-        self.user, self.by, self.origin = user, by, origin
+    def __init__(self, user, by, origin, proposal=""):
+        self.user, self.by, self.origin, self.proposal = user, by, origin, proposal
 
     @property
     def delegated(self):
@@ -48,7 +49,7 @@ def ops():
     return OPS
 
 
-def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False):
+def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, proposal=""):
     """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded."""
     name = fn if isinstance(fn, str) else fn.__name__
     spec = OPS.get(name) or ops().get(name)
@@ -67,7 +68,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False):
 
             out = proposals.file_replay(name, args, user, by, governing)
         else:
-            out = spec["fn"](Call(user, by, origin), args)
+            out = spec["fn"](Call(user, by, origin, proposal), args)
             if isinstance(out, GENERATOR):
                 out = yield from out
             out = out or {}

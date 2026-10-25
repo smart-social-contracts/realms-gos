@@ -3,14 +3,16 @@ import json
 
 from core import candid
 from core import chain
-from core.db import Fail, each, find, next_id, page, view
+from core.db import Fail, each, find, first, next_id, page, page_by, view, window
 from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
-                 LedgerEntry, NFTToken, Organization, PaymentAccount, Proposal, Realm, TaxDeclaration, Token,
+                 LedgerEntry, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
 from core.op import op
 from api.proposals import realm_wide, root
 
 CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate")
+REGISTRY = 100  # tokens, and NFT collections, a realm can register: treasury_view lists them all
+REFRESH = 20  # invoices one invoice_refresh checks, one ledger call each
 
 
 # --- ledger calls ---------------------------------------------------------------------------------
@@ -52,56 +54,81 @@ def currency():
     realm = Realm["1"]
     if realm and realm.accounting_currency:
         return realm.accounting_currency
-    return next((t.id for t in each(Token)), "")
+    oldest = Token.load_some(1, 1)
+    return oldest[0].id if oldest else ""
 
 
 def owner_of(fund):
     return fund.department or root()
 
 
-def same(a, b):
-    return (a.id if a else None) == (b.id if b else None)
+def period_at(t):
+    """The fiscal period covering ``t``, if any. Periods open in order, so their ids follow time."""
+    lo, hi, found = 1, FiscalPeriod.max_id(), None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        p = FiscalPeriod.load_some(mid, 1)[0]
+        if p.starts_at <= t:
+            found, lo = p, mid + 1
+        else:
+            hi = mid - 1
+    return found if found and t < found.ends_at else None
 
 
 def period():
     """The fiscal period covering now; refuses if it is closed (I-FIN-5)."""
-    now = chain.now()
-    for p in each(FiscalPeriod):
-        if p.starts_at <= now and (not p.ends_at or now < p.ends_at):
-            if p.status != "open":
-                raise Fail(f"fiscal period {p.id} is {p.status}")
-            return p
-    return None
+    p = period_at(chain.now())
+    if p is not None and p.status != "open":
+        raise Fail(f"fiscal period {p.id} is {p.status}")
+    return p
+
+
+def slot(fund, p, category):
+    return f"{fund.id}:{p.id}:{category}"
+
+
+def tally(p, e):
+    """Add ``e`` to its period's running statements and chain it into the period's source hash."""
+    s = p.statements
+    key = f"{e.kind}:{e.category}:{e.symbol}"
+    a = s["accounts"].get(key, {"debit": 0, "credit": 0})
+    s["accounts"][key] = {"debit": a["debit"] + e.debit, "credit": a["credit"] + e.credit}
+    if e.kind == "asset" and e.fund is not None:
+        k = f"{e.fund.id}:{e.symbol}"
+        s["fund_balances"][k] = s["fund_balances"].get(k, 0) + e.debit - e.credit
+    s["debit"], s["credit"] = s["debit"] + e.debit, s["credit"] + e.credit
+    p.statements = s
+    line = json.dumps([e.id, e.transaction, e.debit, e.credit, e.symbol])
+    p.source_hash = hashlib.sha256((p.source_hash + line).encode()).hexdigest()
 
 
 def post(p, lines, symbol, description="", **refs):
-    """One balanced transaction: lines are (kind, category, debit, credit, fund)."""
+    """One balanced transaction: lines are (kind, category, debit, credit, fund). The only place entries are
+    booked, so it keeps fund balances, adopted budgets' actuals and the period's statements."""
     tx = f"T-{LedgerEntry.max_id() + 1}"
     for kind, category, debit, credit, fund in lines:
-        LedgerEntry(id=f"LE-{LedgerEntry.max_id() + 1}", transaction=tx, kind=kind, category=category,
-                    debit=debit, credit=credit, symbol=symbol, fund=fund, period=p, at=chain.now(),
-                    description=description, **refs)
+        e = LedgerEntry(id=f"LE-{LedgerEntry.max_id() + 1}", transaction=tx, kind=kind, category=category,
+                        debit=debit, credit=credit, symbol=symbol, fund=fund, period=p, at=chain.now(),
+                        description=description, **refs)
+        if kind == "asset" and fund is not None:
+            held = fund.balances
+            fund.balances = {**held, symbol: held.get(symbol, 0) + debit - credit}
+        if p is None:
+            continue
+        tally(p, e)
         if kind == "expense" and fund is not None:
-            for b in fund.budgets:
-                if b.status == "adopted" and b.category == category and same(b.period, p):
+            for b in each(Budget, "slot", slot(fund, p, category)):
+                if b.status == "adopted":
                     b.actual += debit - credit
     return tx
 
 
 def balance(fund, symbol):
-    return sum(e.debit - e.credit for e in fund.ledger_entries if e.kind == "asset" and e.symbol == symbol)
+    return fund.balances.get(symbol, 0)
 
 
-def adopted_rule(source):
-    return next((r for r in each(AllocationRule) if r.source_fund == source and r.status == "adopted"), None)
-
-
-def replaying(c, name):
-    """The proposal whose replay is running this call, if any."""
-    if c.origin != "replay":
-        return ""
-    return next((p.id for p in each(Proposal, "status", "executed")
-                 if p.result is None and (p.action or {}).get("op") == name), "")
+def adopted_rule(fund):
+    return AllocationRule[fund.allocation_rule] if fund.allocation_rule else None
 
 
 # --- transfers ------------------------------------------------------------------------------------
@@ -114,9 +141,9 @@ def address(to, symbol):
     return to
 
 
-def reserve(p, fund, to, symbol, amount, category, description="", **refs):
+def reserve(p, fund, to, symbol, amount, category, description="", payroll=None, **refs):
     t = Transfer(id=next_id(Transfer, "TR"), sender=f"Fund:{fund.id}", to=to, symbol=symbol, amount=amount,
-                 status="pending", at=chain.now())
+                 status="sending", at=chain.now(), payroll=payroll)
     fee = find(Token, symbol).fee
     post(p, [("expense", category, amount, 0, fund), ("expense", "ledger_fee", fee, 0, fund),
              ("asset", "cash", 0, amount + fee, fund)], symbol, description or f"{t.id} to {to}", transfer=t, **refs)
@@ -133,13 +160,19 @@ def send(t):
     token = find(Token, t.symbol)
     arg = (f"(record {{ to = {account(address(t.to, t.symbol))}; amount = {t.amount} : nat; fee = null; "
            f"memo = opt {blob(t.id.encode())}; from_subaccount = null; created_at_time = null }})")
-    reply = yield from chain.call(token.ledger, "icrc1_transfer", arg)
-    tx = outcome(reply)
-    if tx is None:
-        reverse(t, period(), reply[:200])
-        return {"transfer": t.id, "status": t.status, "error": reply[:200]}
-    t.status, t.ledger_tx = "completed", tx
-    return {"transfer": t.id, "status": t.status, "ledger_tx": tx}
+    try:
+        reply, rejected = (yield from chain.call(token.ledger, "icrc1_transfer", arg)), False
+    except Exception as e:
+        reply, rejected = str(e), True
+    tx = None if rejected else outcome(reply)
+    if t.status == "sending":
+        if rejected:
+            t.status = "pending"
+        elif tx is None:
+            reverse(t, period(), reply[:200])
+        else:
+            t.status, t.ledger_tx = "completed", tx
+    return {"transfer": t.id, "status": t.status, **({"ledger_tx": tx} if tx else {"error": reply[:200]})}
 
 
 def fund_department(args):
@@ -179,7 +212,8 @@ def transfer_create(c, args):
 
 @op("transfer.delete", governed=lambda a: owner_of(transfer_fund(find(Transfer, a["transfer"]))))
 def transfer_revert(c, args):
-    """Revert a pending ``transfer`` (its ledger call never completed), refunding its fund; optional ``reason``."""
+    """Revert a pending ``transfer`` (the ledger rejected its call), refunding its fund; optional ``reason``.
+    A transfer still ``sending`` (its ledger call in flight) cannot be reverted."""
     t = find(Transfer, args["transfer"])
     if t.status != "pending":
         raise Fail(f"{t.id} is {t.status}; only a pending transfer can be reverted")
@@ -223,7 +257,7 @@ def receive(inv, received):
     source = find(Fund, config.get("source_fund", "ROOT"))
     category = inv.reason.partition(":")[0].lower() or "invoice"
     lines = [("asset", "cash", inv.amount, 0, source), ("revenue", category, 0, inv.amount, source)]
-    rule = adopted_rule(source.id) if config.get("auto_allocate") else None
+    rule = adopted_rule(source) if config.get("auto_allocate") else None
     for code, percent in ((rule.rules or {}).items() if rule else ()):
         share = inv.amount * int(percent) // 100
         if share and code != source.id:
@@ -266,39 +300,52 @@ def invoice_check(c, args):
     return {"invoice": inv.id, "status": (yield from refresh(inv))}
 
 
+def open_invoices(args):
+    """One batch of pending or overdue invoices, in id order from ``from``, and the cursor continuing it."""
+    start, count = window(args, REFRESH)
+    rows, more = [], False
+    for status in ("pending", "overdue"):
+        found, nxt = Invoice.find_by("status", status, from_id=start, count=count)
+        rows, more = rows + found, more or nxt is not None
+    rows.sort(key=lambda i: int(i._id))
+    more = more or len(rows) > count
+    rows = rows[:count]
+    return rows, (int(rows[-1]._id) + 1 if more else None)
+
+
 @op("invoice.refresh")
 def invoice_refresh(c, args):
-    """Check the ledger for payments of ``invoice``, or of every pending or overdue invoice when omitted.
+    """Check the ledger for payments of ``invoice``, or, when omitted, of one batch of pending or overdue invoices
+    (``from``, ``count``, at most 20: one ledger call each); ``next`` continues it.
     Returns ``checked``, ``paid`` and each invoice's status in ``invoices``."""
     period()
-    if args.get("invoice"):
-        rows = [find(Invoice, args["invoice"])]
-    else:
-        rows = [i for i in each(Invoice) if i.status in ("pending", "overdue")]
+    rows, nxt = ([find(Invoice, args["invoice"])], None) if args.get("invoice") else open_invoices(args)
     statuses = {}
     for inv in rows:
         statuses[inv.id] = yield from refresh(inv)
-    return {"checked": len(rows), "paid": sum(s == "paid" for s in statuses.values()), "invoices": statuses}
+    return {"checked": len(rows), "paid": sum(s == "paid" for s in statuses.values()), "invoices": statuses,
+            "next": nxt}
 
 
 @op("self.data_view", read=True, delegable=True)
 def my_invoices(c, args):
-    """Your ``invoices``, each with its status and ``pay_to``, the ledger account to pay it into."""
-    return {"invoices": [show(i) for i in each(Invoice, "payer", f"User:{c.user}")]}
+    """One page of your ``invoices`` (``from``, ``count``), each with its status and ``pay_to``, the ledger account to
+    pay it into; ``next`` continues it."""
+    rows, nxt = page_by(Invoice, "payer", f"User:{c.user}", args)
+    return {"invoices": [show(i) for i in rows], "next": nxt}
 
 
 # --- treasury -------------------------------------------------------------------------------------
 
 @op("treasury.view", read=True)
 def treasury_view(c, args):
-    """Each fund's balance per token (``funds``), the treasury ``config``, and the registered tokens and NFTs."""
-    funds = {f.id: {} for f in each(Fund)}
-    for e in each(LedgerEntry):
-        if e.kind == "asset" and e.fund is not None:
-            funds[e.fund.id][e.symbol] = funds[e.fund.id].get(e.symbol, 0) + e.debit - e.credit
+    """One page of funds (``from``, ``count``) with each one's balance per token (``funds``); ``next`` continues it.
+    Also the treasury ``config``, and the registered tokens and NFTs."""
+    rows, nxt = page(Fund, args)
     t = Treasury["1"]
-    return {"funds": funds, "config": t.config if t else {},
-            "tokens": [view(k) for k in each(Token)], "nft_tokens": [view(k) for k in each(NFTToken)]}
+    return {"funds": {f.id: f.balances for f in rows}, "next": nxt, "config": t.config if t else {},
+            "tokens": [view(k) for k in Token.load_some(1, REGISTRY)],
+            "nft_tokens": [view(k) for k in NFTToken.load_some(1, REGISTRY)]}
 
 
 @op("treasury.view", read=True)
@@ -320,10 +367,12 @@ def ledger_view(c, args):
 
 @op("treasury.view", read=True)
 def report_view(c, args):
-    """The financial ``report`` in full, or a summary of every report when ``report`` is omitted."""
+    """The financial ``report`` in full or, when ``report`` is omitted, a summary of one page of reports (``from``,
+    ``count``); ``next`` continues it."""
     if args.get("report"):
         return {"report": view(find(FinancialReport, args["report"]))}
-    return {"reports": [view(r, "id", "kind", "as_of", "issued_by", "supersedes") for r in each(FinancialReport)]}
+    rows, nxt = page(FinancialReport, args)
+    return {"reports": [view(r, "id", "kind", "as_of", "issued_by", "supersedes") for r in rows], "next": nxt}
 
 
 @op("treasury.manage", governed=realm_wide)
@@ -340,11 +389,18 @@ def treasury_configure(c, args):
     return {"config": t.config}
 
 
+def registered(cls, symbol):
+    """The entry for ``symbol`` in the token or NFT registry, added if the registry has room."""
+    if cls[symbol] is None and cls.count() >= REGISTRY:
+        raise Fail(f"{cls.__name__} registry is full ({REGISTRY})")
+    return cls[symbol] or cls(id=symbol)
+
+
 @op("treasury.manage", governed=realm_wide)
 def token_register(c, args):
     """Register or update the fungible token ``symbol``: its ``ledger`` canister, optional ``indexer``, ``decimals``
-    (default 8) and ``fee`` (default 0). Omitted options keep their current value."""
-    t = Token[args["symbol"]] or Token(id=args["symbol"])
+    (default 8) and ``fee`` (default 0). Omitted options keep their current value. At most 100 tokens."""
+    t = registered(Token, args["symbol"])
     t.ledger, t.indexer = args["ledger"], args.get("indexer", t.indexer)
     t.decimals, t.fee = int(args.get("decimals", t.decimals)), int(args.get("fee", t.fee))
     return {"token": t.id}
@@ -353,8 +409,9 @@ def token_register(c, args):
 @op("treasury.manage", governed=realm_wide)
 def nft_token_register(c, args):
     """Register or update the NFT collection ``symbol`` at ``canister``, with optional ``name``, ``description``,
-    ``required_license`` (licence kind needed to mint), ``transferable`` and ``supply_cap``; omitted ones are kept."""
-    t = NFTToken[args["symbol"]] or NFTToken(id=args["symbol"])
+    ``required_license`` (licence kind needed to mint), ``transferable`` and ``supply_cap``; omitted ones are kept.
+    At most 100 collections."""
+    t = registered(NFTToken, args["symbol"])
     t.canister = args["canister"]
     for k in ("name", "description", "required_license"):
         setattr(t, k, args.get(k, getattr(t, k)))
@@ -381,13 +438,14 @@ def fund_create(c, args):
 
 @op("org.manage_budget", governed=realm_wide)
 def period_open(c, args):
-    """Open the fiscal ``period`` from ``starts_at`` to ``ends_at`` (seconds), optional ``name``; no overlaps."""
+    """Open the fiscal ``period`` from ``starts_at`` to ``ends_at`` (seconds), optional ``name``. Periods open in
+    order: it starts no earlier than the latest period ends."""
     starts, ends = int(args["starts_at"]), int(args["ends_at"])
     if FiscalPeriod[args["period"]] or ends <= starts:
         raise Fail(f"period {args['period']} exists or ends before it starts")
-    for p in each(FiscalPeriod):
-        if p.starts_at < ends and starts < (p.ends_at or ends + 1):
-            raise Fail(f"overlaps fiscal period {p.id}")
+    latest = FiscalPeriod.load_some(FiscalPeriod.max_id(), 1) if FiscalPeriod.max_id() else []
+    if latest and starts < latest[0].ends_at:
+        raise Fail(f"starts before fiscal period {latest[0].id} ends")
     p = FiscalPeriod(id=args["period"], name=args.get("name", args["period"]), starts_at=starts, ends_at=ends)
     return {"period": p.id}
 
@@ -410,8 +468,8 @@ def budget_department(args):
 
 
 def supersede(b, status):
-    for old in b.fund.budgets:
-        if old.id != b.id and old.status == "adopted" and old.category == b.category and same(old.period, b.period):
+    for old in each(Budget, "slot", b.slot):
+        if old.id != b.id and old.status == "adopted":
             old.status = status
             b.actual += old.actual
 
@@ -424,7 +482,7 @@ def budget_draft(c, args):
     if p.status != "open":
         raise Fail(f"{p.id} is {p.status}")
     b = Budget(id=next_id(Budget, "B"), fund=fund, period=p, category=args["category"],
-               kind=args.get("kind", "expense"), planned=int(args["planned"]))
+               slot=slot(fund, p, args["category"]), kind=args.get("kind", "expense"), planned=int(args["planned"]))
     return {"budget": b.id}
 
 
@@ -436,7 +494,7 @@ def budget_propose(c, args):
     if b.status != "draft" or b.period.status != "open":
         raise Fail(f"{b.id} is {b.status}; only a draft for an open period can be adopted")
     supersede(b, "amended")
-    b.status, b.proposal = "adopted", replaying(c, "budget_propose")
+    b.status, b.proposal = "adopted", c.proposal
     return {"budget": b.id, "status": b.status}
 
 
@@ -446,8 +504,8 @@ def budget_amend(c, args):
     old = find(Budget, args["budget"])
     if old.status != "adopted":
         raise Fail(f"{old.id} is {old.status}; only an adopted budget can be amended")
-    b = Budget(id=next_id(Budget, "B"), fund=old.fund, period=old.period, category=old.category, kind=old.kind,
-               planned=int(args["planned"]), proposal=replaying(c, "budget_amend"))
+    b = Budget(id=next_id(Budget, "B"), fund=old.fund, period=old.period, category=old.category, slot=old.slot,
+               kind=old.kind, planned=int(args["planned"]), proposal=c.proposal)
     supersede(b, "amended")
     b.status = "adopted"
     return {"budget": b.id, "amends": old.id}
@@ -477,10 +535,12 @@ def allocation_rule_propose(c, args):
     r = find(AllocationRule, args["rule"])
     if r.status != "draft":
         raise Fail(f"{r.id} is {r.status}; only a draft can be adopted")
-    old = adopted_rule(r.source_fund)
+    source = find(Fund, r.source_fund)
+    old = adopted_rule(source)
     if old:
         old.status = "superseded"
-    r.status, r.proposal = "adopted", replaying(c, "allocation_rule_propose")
+    source.allocation_rule = r.id
+    r.status, r.proposal = "adopted", c.proposal
     return {"rule": r.id, "status": r.status}
 
 
@@ -495,7 +555,7 @@ def payroll_run(c, args):
     if fund is None:
         raise Fail(f"{dept.id} has no fund")
     note = f"payroll {label} {dept.id}"
-    if any(e.description.startswith(note) for e in fund.ledger_entries):
+    if first(Transfer, "payroll", note):
         raise Fail(f"{dept.id} payroll for {label} already ran")
     seats = [(a.user, pos.salary) for pos in dept.positions if pos.salary > 0
              for a in pos.appointments if a.status == "active" and not a.agent]
@@ -504,37 +564,26 @@ def payroll_run(c, args):
     if balance(fund, symbol) < need:
         raise Fail(f"fund {fund.id} holds {balance(fund, symbol)} {symbol}, payroll needs {need}")
     p = period()
-    batch = [reserve(p, fund, user, symbol, salary, "payroll", f"{note}: {user}", user=user) for user, salary in seats]
+    batch = [reserve(p, fund, user, symbol, salary, "payroll", f"{note}: {user}", payroll=note, user=user)
+             for user, salary in seats]
     results = []
     for t in batch:
         results.append((yield from send(t)))
     return {"transfers": results, "seats": len(batch), "total": total}
 
 
-def statements(rows):
-    totals, funds = {}, {}
-    for e in rows:
-        key = f"{e.kind}:{e.category}:{e.symbol}"
-        d, cr = totals.get(key, (0, 0))
-        totals[key] = (d + e.debit, cr + e.credit)
-        if e.kind == "asset" and e.fund is not None:
-            k = f"{e.fund.id}:{e.symbol}"
-            funds[k] = funds.get(k, 0) + e.debit - e.credit
-    return {"accounts": {k: {"debit": d, "credit": cr} for k, (d, cr) in sorted(totals.items())},
-            "fund_balances": dict(sorted(funds.items())),
-            "debit": sum(e.debit for e in rows), "credit": sum(e.credit for e in rows)}
-
-
 @op("treasury.manage", signing=True)
 def report_issue(c, args):
-    """Freeze the statements of fiscal ``period`` as a report of ``kind`` (default period_close), with a hash of its
-    ledger entries, superseding the previous one of that kind. Returns ``report``, ``source_hash``, ``supersedes``."""
+    """Freeze the statements of fiscal ``period`` as a report of ``kind`` (default period_close), with a hash chained
+    over its ledger entries in id order, superseding the previous one of that kind. Returns ``report``,
+    ``source_hash``, ``supersedes``."""
     p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
-    rows = sorted(p.ledger_entries, key=lambda e: int(e.id.split("-")[1]))
-    source = json.dumps([[e.id, e.transaction, e.debit, e.credit, e.symbol] for e in rows]).encode()
+    s = p.statements
+    statements = {"accounts": dict(sorted(s["accounts"].items())),
+                  "fund_balances": dict(sorted(s["fund_balances"].items())), "debit": s["debit"], "credit": s["credit"]}
     previous = [r for r in p.reports if r.kind == kind]
     r = FinancialReport(id=next_id(FinancialReport, "FR"), kind=kind, period=p, as_of=chain.now(),
-                        statements=statements(rows), source_hash="sha256:" + hashlib.sha256(source).hexdigest(),
+                        statements=statements, source_hash="sha256:" + p.source_hash,
                         issued_by=c.user, supersedes=previous[-1].id if previous else "")
     return {"report": r.id, "source_hash": r.source_hash, "supersedes": r.supersedes}
 
@@ -577,7 +626,7 @@ def token_force_transfer(c, args):
     token, amount = find(Token, args["symbol"]), positive(args)
     p = period()
     t = Transfer(id=next_id(Transfer, "TR"), sender=args["from"], to=args["to"], symbol=token.id, amount=amount,
-                 status="pending", at=chain.now())
+                 status="sending", at=chain.now())
     arg = (f'(record {{ from = {account(args["from"])}; to = {account(args["to"])}; amount = {amount} : nat; '
            f'memo = opt {text(args.get("reason", "")[:64])} }})')
     reply = yield from chain.call(token.ledger, "force_transfer", arg)

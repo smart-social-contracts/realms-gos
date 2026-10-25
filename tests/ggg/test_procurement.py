@@ -159,3 +159,26 @@ def test_I_PRC_4_bids_only_while_open():
     assert "does not accept" in denied("bid_submit", "alice", tender=t, vendor="roadcorp", payload_ref="r",
                                        payload_hash=seal(1, "n"))
     assert "closed" in denied("bid_withdraw", "bob", bid=b)
+
+
+def test_tenders_are_listed_a_page_at_a_time():
+    world.build()
+    made = [tender()["tender"] for _ in range(3)]
+    ok("tender_open", "carla", tender=made[1])
+    first = ok("tender_list", "alice", count=2)
+    rest = ok("tender_list", "alice", count=2, **{"from": first["next"]})
+    assert [x["id"] for x in first["tenders"] + rest["tenders"]] == made and rest["next"] is None
+    drafts = ok("tender_list", "alice", status="draft", count=2)
+    more = ok("tender_list", "alice", status="draft", count=2, **{"from": drafts["next"]})
+    assert [x["id"] for x in drafts["tenders"] + more["tenders"]] == [made[0], made[2]]
+
+
+def test_bids_reveal_is_governed_by_the_requester():
+    depts = agora()
+    t = tender()["tender"]
+    ok("tender_open", "carla", tender=t)
+    b = bid(t, "bob", "buildco", 48000, "n1")
+    later(31 * DAY)
+    world.policy(depts["Infrastructure"], 2, 3)
+    assert ok("bids_reveal", "carla", tender=t, openings={b: {"price": 48000, "nonce": "n1"}})["requires_vote"]
+    assert Tender[t].status == "open" and Bid[b].sealed

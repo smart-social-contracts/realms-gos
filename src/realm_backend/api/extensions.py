@@ -3,7 +3,7 @@ import json
 
 from core import chain
 from core import sandbox
-from core.db import Fail, each, find, view
+from core.db import Fail, find, page, view
 from ggg import Department, Extension, Realm, User, UserProfile
 from core.op import dispatch, op, run
 from api.proposals import appointed, realm_wide
@@ -18,43 +18,71 @@ def registry():
     return cid
 
 
-def approved(namespace):
-    """Who approved ``namespace`` under the realm's trust policy (I-EXT-3); refuses anything else."""
+def checksum(manifest, source):
+    return sandbox.sha256(json.dumps(manifest, sort_keys=True) + "\n" + source)
+
+
+def ask(method, namespace, path):
+    arg = json.dumps({"namespace": namespace, "path": path})
+    return json.loads((yield from chain.call_text(registry(), method, arg)))
+
+
+def trust(digest, namespace=None, path=None):
+    """I-EXT-3, I-ADM-3: code is accepted when ``sha256:<digest>`` is pinned in the realm's ``trusted_approvers``,
+    or when the file registry reports ``namespace`` approved by a trusted approver (the other entries, by default
+    the marketplace). With ``path``, that file of ``namespace`` must hash to ``digest``: the registry's approval
+    holds only while the namespace's files are the ones approved, but it does not say which hash that is.
+    A generator; returns the pin or the approver ("" when the realm requires no approval)."""
     realm = Realm["1"]
     if not realm.require_marketplace_approval:
         return ""
-    reply = json.loads((yield from chain.call_text(registry(), "get_namespace_approval_icc", namespace)))
-    if not reply.get("approved"):
-        raise Fail(f"{namespace} is not approved by the marketplace ({reply.get('status') or reply.get('error')})")
-    trusted = realm.trusted_approvers or [realm.marketplace_canister_id]
-    if reply.get("approver") not in trusted:
-        raise Fail(f"{namespace} is approved by {reply.get('approver')}, whom this realm does not trust")
-    return reply["approver"]
+    pins = [a for a in realm.trusted_approvers or [] if a.startswith("sha256:")]
+    approvers = [a for a in realm.trusted_approvers or [] if a not in pins] or [realm.marketplace_canister_id]
+    if f"sha256:{digest}" in pins:
+        return f"sha256:{digest}"
+    if namespace is None:
+        raise Fail(f"code sha256:{digest} is neither allowlisted nor approved by the marketplace")
+    if path is not None:
+        found = (yield from ask("get_file_size", namespace, path)).get("sha256")
+        if not found or found != digest:
+            raise Fail(f"{namespace}/{path} is sha256:{found or 'missing'}, not sha256:{digest}")
+    approval = json.loads((yield from chain.call_text(registry(), "get_namespace_approval_icc", namespace)))
+    if not approval.get("approved"):
+        raise Fail(f"{namespace} is not approved by the marketplace "
+                   f"({approval.get('status') or approval.get('error') or 'unapproved'})")
+    if approval.get("approver") not in approvers:
+        raise Fail(f"{namespace} is approved by {approval.get('approver')}, whom this realm does not trust")
+    return approval["approver"]
 
 
 def fetch(namespace, path):
-    reply = json.loads((yield from chain.call_text(registry(), "get_file",
-                                                    json.dumps({"namespace": namespace, "path": path}))))
+    reply = yield from ask("get_file", namespace, path)
     if "content_b64" not in reply:
         raise Fail(f"{namespace}/{path}: {reply.get('error')}")
     return base64.b64decode(reply["content_b64"]).decode()
 
 
-def available(ext, principal):
-    access, user = ext.access or {}, User[principal]
-    profiles = {p.id for p in user.profiles} if user else set()
-    departments = {a.position.department.id for a in appointed(principal) if a.position.department}
+def holds(principal):
+    """The profiles and departments through which ``principal`` gets extensions."""
+    user = User[principal]
+    return ({p.id for p in user.profiles} if user else set(),
+            {a.position.department.id for a in appointed(principal) if a.position.department})
+
+
+def available(ext, held):
+    access, (profiles, departments) = ext.access or {}, held
     return bool(profiles & set(access.get("profiles", [])) or departments & set(access.get("departments", [])))
 
 
 @op("extension.install", governed=realm_wide)
 def extension_install(c, args):
     """Install or upgrade ``extension`` at ``version`` from the file registry (``ext/<extension>/<version>``).
-    Returns ``approved_by``; if the realm requires marketplace approval, an approver it trusts must have approved it."""
+    Returns ``approved_by``: if the realm requires marketplace approval, its checksum must be pinned or an approver it
+    trusts must have approved it."""
     namespace = f"ext/{args['extension']}/{args['version']}"
-    approver = yield from approved(namespace)
     manifest = json.loads((yield from fetch(namespace, "manifest.json")))
     source = (yield from fetch(namespace, "backend/entry.py")) if manifest.get("operations") else ""
+    approver = yield from trust(checksum(manifest, source), namespace)
     ext = Extension[args["extension"]] or Extension(
         id=args["extension"], access={"profiles": manifest.get("profiles", ["member"]), "departments": []},
         sidebar={k: manifest[k] for k in SIDEBAR if k in manifest})
@@ -76,7 +104,7 @@ def extension_call(c, args):
     ext = find(Extension, args["extension"])
     if not ext.source:
         raise Fail(f"{ext.id} has no backend")
-    if not available(ext, c.user):
+    if not available(ext, holds(c.user)):
         raise Fail(f"{ext.id} is not available to you")
     declared = ext.operations
 
@@ -110,6 +138,10 @@ def sidebar_configure(c, args):
 
 @op("realm.data_view", read=True)
 def extension_list(c, args):
-    """Installed extensions, with whether each is available to you."""
+    """Installed extensions with whether each is available to you, ``count`` rows at a time (default 100, at most
+    500) from row ``from`` (default 1). Returns ``extensions`` and ``next``, the ``from`` of the next page (null at the
+    end); a page can be short where extensions were uninstalled, so follow ``next``."""
+    rows, nxt = page(Extension, args)
+    held = holds(c.user)
     return {"extensions": [{**view(e, "id", "version", "status", "operations", "sidebar", "access"),
-                            "available": available(e, c.user)} for e in each(Extension)]}
+                            "available": available(e, held)} for e in rows], "next": nxt}

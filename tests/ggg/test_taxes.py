@@ -25,6 +25,10 @@ def invoices_of(payer):
     return {i.amount for i in each(Invoice, "payer", payer)}
 
 
+def owed_on(area):
+    return taxes.owed(PROPERTY, area * PROPERTY["unit_value"])
+
+
 def test_story_agora_taxes():
     setup_finance()
     Land(id="L-1", owner="User:alice", width=10, height=30)
@@ -98,6 +102,33 @@ def test_flat_tax_skips_exempt_and_inactive_members():
     adopt_policy({"taxes": [RESIDENCE]})
     ok("tax_assess", "bob", period="2026", tax="residence")
     assert not invoices_of("User:elena") and not invoices_of("User:mallory") and invoices_of("User:alice") == {5}
+
+
+def test_tax_assess_runs_in_batches_and_bills_nobody_twice():
+    setup_finance()
+    Land(id="L-1", owner="User:alice", width=10, height=30)
+    Land(id="L-2", owner="User:bob", width=20, height=40)
+    Land(id="L-3", owner="User:alice", width=10, height=10)
+    adopt_policy()
+    first = ok("tax_assess", "bob", period="2026", count=2)
+    assert first["next"] == 3 and first["count"] == 2 + 2
+    second = ok("tax_assess", "bob", period="2026", count=2, **{"from": first["next"]})
+    assert (second["count"], second["skipped"]) == (2, 1)
+    while second["next"]:
+        second = ok("tax_assess", "bob", period="2026", count=2, **{"from": second["next"]})
+    assert invoices_of("User:alice") == {owed_on(400), 5} and invoices_of("User:bob") == {owed_on(800), 5}
+    assert all(len(invoices_of(f"User:{p}")) == 1 for p in world.PEOPLE if p not in ("alice", "bob"))
+    assert TaxDeclaration.count() == 2 + len(world.PEOPLE)
+
+
+def test_tax_assess_leaves_self_declared_taxes_to_tax_declare():
+    setup_finance()
+    Land(id="L-1", owner="User:alice", width=10, height=30)
+    adopt_policy()
+    assert "self-declared" in call("tax_assess", "bob", period="2026", tax="revenue")["error"]
+    assert TaxDeclaration.count() == 0
+    ok("tax_assess", "bob", period="2026")
+    assert not [d for d in each(TaxDeclaration, "declarant", "User:alice") if d.base == "revenue"]
 
 
 def test_tax_assess_needs_an_adopted_policy():

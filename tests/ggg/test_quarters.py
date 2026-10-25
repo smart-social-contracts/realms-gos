@@ -172,3 +172,12 @@ def test_harbor_joins_agora():
     r = Realm["1"]
     assert r.is_quarter and not r.is_capital and Quarter["agora"].index == 0 and quarters.capital() == "agora"
     assert "already belongs" in call("quarter_join_federation", "ctl", capital="other")["error"]
+
+
+def test_population_counts_active_members_only():
+    capital()
+    assert ok("quarter_directory", fake_chain.ANONYMOUS)["quarters"][0]["population"] == len(world.PEOPLE)
+    ok("user_set_status", "ctl", user="mallory", status="suspended")
+    ok("user_remove", "ctl", user="alice")
+    assert ok("scale_status", fake_chain.ANONYMOUS)["populations"][CAPITAL] == len(world.PEOPLE) - 2
+    assert quarters.report()["population"] == Member.count_by("status", "active") == len(world.PEOPLE) - 2

@@ -4,13 +4,16 @@ import math
 
 from core import chain
 from api import proposals
-from core.db import Fail, each, find, next_id, view
+from core.db import Fail, each, find, first, next_id, view
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
 from core.op import op, run
 
 CAPACITY, TEST_CAPACITY, TEST_NETWORKS, SCALE_AT = 2000, 10, ("test", "staging", "demo", "local"), 0.9
 GUEST = ["self.data_view", "realm.data_view"]
+# Every sync carries the whole directory, so a federation has a fixed most quarters.
+MAX_QUARTERS = 500
+STATUSES = ("setup", "active", "suspended", "splitting", "merging")
 MOVES = {"setup": {"active"}, "active": {"suspended", "splitting", "merging"}, "suspended": {"active"},
          "splitting": {"active"}, "merging": {"active"}}
 RULE = {"kind": "majority_of_quarters", "threshold": 50, "absent": "wait"}
@@ -37,14 +40,14 @@ def capital():
 
 
 def population():
-    return sum(1 for m in each(Member) if m.status == "active")
+    return Member.count_by("status", "active")
 
 
 def codex():
-    for x in each(Codex):
-        if x.status == "active":
-            return {"id": (x.manifest or {}).get("id", x.id.split("@")[0]), "version": x.version}
-    return {"id": "", "version": ""}
+    x = first(Codex, "status", "active")
+    if x is None:
+        return {"id": "", "version": ""}
+    return {"id": (x.manifest or {}).get("id", x.id.split("@")[0]), "version": x.version}
 
 
 def capital_codex():
@@ -66,8 +69,13 @@ def me():
             "status": "setup" if r.status == "setup" else "active", "last_sync": state.get("at", 0), **report()}
 
 
+def known():
+    for status in STATUSES:
+        yield from each(Quarter, "status", status)
+
+
 def directory():
-    rows = [me()] + [view(q, *FIELDS) for q in each(Quarter)]
+    rows = [me()] + [view(q, *FIELDS) for q in known()]
     for row in rows:
         row["capital"], row["drifting"] = row["id"] == capital(), drifting(row["codex_version"])
     return rows
@@ -136,7 +144,7 @@ def apply_directory(reply):
         for k in FIELDS[1:]:
             setattr(q, k, row[k])
         seen.add(q.id)
-    for q in [q for q in each(Quarter) if q.id not in seen]:
+    for q in [q for q in known() if q.id not in seen]:
         q.delete()
     realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index}
 
@@ -150,7 +158,9 @@ def quarter_register(c, args):
         raise Fail("only the capital registers quarters")
     if Quarter[cid] or cid == chain.self_id():
         raise Fail(f"{cid} is already part of this federation")
-    index = max([q.index for q in each(Quarter)] + [0]) + 1
+    if Quarter.count() >= MAX_QUARTERS:
+        raise Fail(f"a federation has at most {MAX_QUARTERS} quarters")
+    index = max([q.index for q in known()] + [0]) + 1
     Quarter(id=cid, name=args.get("name", f"Quarter {index}"), index=index, last_activity_at=chain.now())
     r = realm()
     r.is_quarter, r.scale_in_flight = True, False
@@ -202,7 +212,7 @@ def quarter_secede(c, args):
     yield from ask(old, "federation_message", {"topic": "quarter.secede", "body": {}})
     r = realm()
     r.is_quarter, r.is_capital, r.federation_realm_id, r.sync_state = False, True, "", {}
-    for q in list(each(Quarter)):
+    for q in list(known()):
         q.delete()
     return {"left": old}
 

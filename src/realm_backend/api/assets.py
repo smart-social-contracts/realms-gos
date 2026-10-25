@@ -2,13 +2,16 @@
 from core import candid
 from core import chain
 from core.db import Fail, deref, each, find, next_id, page, view
-from ggg import Appointment, Codex, Land, License, NFTToken, Organization, Realm, User, Verdict, Zone
+from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Realm, User, Verdict, Zone
+from api import codex
 from api.licenses import active, principals
 from core.op import op
 from api.proposals import realm_wide
 
 LAND = "LAND"
 PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id")
+CELL = 16  # the side of a spatial index cell, and the most a parcel spans
+VIEW = 32  # the most a map viewport spans
 
 
 # --- ledger (ICRC-7, smart-social-contracts/ic-tokens), spoken in candid text ---
@@ -25,6 +28,28 @@ def value(v):
     if isinstance(v, int):
         return f"variant {{ Nat = {v} : nat }}" if v >= 0 else f"variant {{ Int = {v} : int }}"
     return f"variant {{ Text = {quote(v)} }}"
+
+
+def literal(text, i):
+    """The candid text literal opening at ``text[i]``, and the index after it."""
+    j = i + 1
+    while text[j] != '"':
+        j += 2 if text[j] == "\\" else 1
+    return candid.unquote(text[i:j + 1]), j + 1
+
+
+def token_meta(reply):
+    """The text entries of an ``icrc7_token_metadata`` reply (variant labels as names or hashes); {} for no token."""
+    meta, i = {}, reply.find('"')
+    while i >= 0:
+        key, i = literal(reply, i)
+        i = reply.index("=", reply.index("variant", i)) + 1
+        while reply[i] == " ":
+            i += 1
+        if reply[i] == '"':
+            meta[key], i = literal(reply, i)
+        i = reply.find('"', i)
+    return meta
 
 
 def ledger(collection, method, arg):
@@ -75,6 +100,18 @@ def overlaps(p, x, y, w, h):
     return p.x < x + w and x < p.x + p.width and p.y < y + h and y < p.y + p.height
 
 
+def cell(x, y):
+    return f"{x // CELL}:{y // CELL}"
+
+
+def parcels_in(x, y, w, h):
+    """The parcels overlapping the box, read from the cells that can hold their corner: a parcel spans at most CELL,
+    so its corner lies at most CELL - 1 before the box."""
+    return [p for cx in range((x - CELL + 1) // CELL, (x + w - 1) // CELL + 1)
+            for cy in range((y - CELL + 1) // CELL, (y + h - 1) // CELL + 1)
+            for p in each(Land, "cell", f"{cx}:{cy}") if p.status != "revoked" and overlaps(p, x, y, w, h)]
+
+
 def owners(args):
     return principals(find(Land, args["land"]).owner)
 
@@ -85,27 +122,32 @@ def transfer_parties(args):
 
 @op("nft.mint", governed=realm_wide)
 def land_register(c, args):
-    """Register a parcel of ``width`` × ``height`` cells (default 1) at ``x``, ``y`` (default 0) for ``owner`` (user
-    or organization), optional ``kind`` (default unassigned) and ``metadata``; no overlaps. Returns ``land``."""
+    """Register a parcel of ``width`` × ``height`` cells (default 1, at most 16) at ``x``, ``y`` (default 0) for
+    ``owner`` (user or organization), optional ``kind`` (default unassigned) and ``metadata``; no overlaps.
+    Returns ``land``."""
     x, y, w, h = (int(args.get(k, d)) for k, d in (("x", 0), ("y", 0), ("width", 1), ("height", 1)))
-    if w < 1 or h < 1:
-        raise Fail("a parcel is at least one cell wide and high")
+    if not (1 <= w <= CELL and 1 <= h <= CELL):
+        raise Fail(f"a parcel is 1 to {CELL} cells wide and high")
     owner = owner_ref(args["owner"])
-    taken = next((p for p in each(Land) if p.status != "revoked" and overlaps(p, x, y, w, h)), None)
+    taken = parcels_in(x, y, w, h)
     if taken:
-        raise Fail(f"the parcel overlaps {taken.id}")
-    land = Land(id=next_id(Land, "L"), x=x, y=y, width=w, height=h, kind=args.get("kind", "unassigned"),
-                owner=owner, registered_by=c.user, metadata=args.get("metadata", {}))
+        raise Fail(f"the parcel overlaps {taken[0].id}")
+    land = Land(id=next_id(Land, "L"), x=x, y=y, width=w, height=h, cell=cell(x, y),
+                kind=args.get("kind", "unassigned"), owner=owner, registered_by=c.user,
+                metadata=args.get("metadata", {}))
     return {"land": land.id}
 
 
 @op("nft.force_transfer", signing=True, governed=realm_wide, parties=transfer_parties)
 def land_transfer(c, args):
-    """Move parcel ``land`` to ``to`` (user or organization) under court ``order`` (``Verdict:id``, issued or final),
-    and its NFT with it if minted."""
+    """Move parcel ``land`` to ``to`` (user or organization) under court ``order`` (``Verdict:id``, issued or final,
+    in a case whose dispute is about ``Land:<id>`` and in which ``to`` is a party), and its NFT with it if minted."""
     land, to, order = find(Land, args["land"]), owner_ref(args["to"]), deref(args["order"])
     if not isinstance(order, Verdict) or order.status not in ("issued", "final"):
         raise Fail("moving a parcel needs an issued court verdict")
+    case = order.case
+    if find(Dispute, case.dispute).subject != f"Land:{land.id}" or to not in (case.plaintiff, case.defendant):
+        raise Fail(f"{order.id} does not settle {land.id} with {to} as a party")
     if land.status not in ("active", "disputed") or to == land.owner:
         raise Fail(f"{land.id} cannot be moved to {to}")
     if land.token_id:
@@ -127,12 +169,15 @@ def land_list(c, args):
 
 @op("realm.data_view", read=True)
 def land_map(c, args):
-    """The ``parcels`` overlapping the box from ``min_x``, ``min_y`` to ``max_x``, ``max_y`` (default 0 to 100), and the
-    ``zones`` not tied to a parcel."""
-    x, y = int(args.get("min_x", 0)), int(args.get("min_y", 0))
-    w, h = int(args.get("max_x", 100)) - x, int(args.get("max_y", 100)) - y
-    return {"parcels": [view(p, *PARCEL) for p in each(Land) if p.status != "revoked" and overlaps(p, x, y, w, h)],
-            "zones": [view(z, "id", "name", "kind") for z in each(Zone) if z.land is None]}
+    """The ``parcels`` overlapping the viewport of ``w`` × ``h`` cells (default and at most 32) from ``x``, ``y``
+    (default 0), and one page (``from``, ``count``) of the ``zones`` not tied to a parcel; ``next`` continues the
+    zones. A page can hold fewer zones than ``count``: follow ``next``."""
+    x, y, w, h = (int(args.get(k, d)) for k, d in (("x", 0), ("y", 0), ("w", VIEW), ("h", VIEW)))
+    if not (1 <= w <= VIEW and 1 <= h <= VIEW):
+        raise Fail(f"a map viewport is 1 to {VIEW} cells wide and high")
+    zones, more = page(Zone, args, lambda z: z.land is None)
+    return {"parcels": [view(p, *PARCEL) for p in parcels_in(x, y, w, h)],
+            "zones": [view(z, "id", "name", "kind") for z in zones], "next": more}
 
 
 @op("nft.mint")
@@ -200,11 +245,11 @@ def zone_clear(c, args):
 
 def schema_of(name):
     """A codex manifest's `credentials` block: {schema: {license, positions, collection, public, after_license}}."""
-    for codex in each(Codex):
-        rule = (codex.manifest or {}).get("credentials", {}).get(name)
-        if codex.status == "active" and rule:
-            return rule
-    raise Fail(f"no active codex declares the schema '{name}'")
+    current = codex.active()
+    rule = current and (current.manifest or {}).get("credentials", {}).get(name)
+    if not rule:
+        raise Fail(f"no active codex declares the schema '{name}'")
+    return rule
 
 
 def seats(user, org):
@@ -250,14 +295,18 @@ def credential_issue(c, args):
 
 @op("credential.sign", signing=True)
 def credential_revoke(c, args):
-    """Revoke the ``schema`` credential ``token_id`` for ``organization`` (you need a seat there that signs it):
-    the token is frozen for good, with ``reason``."""
+    """Revoke the ``schema`` credential ``token_id`` that ``organization`` issued (you need a seat there that signs
+    it; the ledger's token header must name both): the token is frozen for good, with ``reason``."""
     # The ledger has no burn: a revoked credential is frozen for good, with the reason on the ledger.
     rule, org, collection = signer(c, args)
+    token_id = int(args["token_id"])
+    meta = token_meta((yield from chain.call(collection.canister, "icrc7_token_metadata", f"({token_id} : nat)")))
+    if (meta.get("ggg:issuer"), meta.get("ggg:schema")) != (f"Organization:{org.id}", args["schema"]):
+        raise Fail(f"token {token_id} of {collection.id} is not a {args['schema']} credential issued by {org.id}")
     reason = quote(f"ggg:revoked by Organization:{org.id}: {args.get('reason', '')}")
-    arg = f"(record {{ token_id = {int(args['token_id'])} : nat; reason = opt {reason} }})"
+    arg = f"(record {{ token_id = {token_id} : nat; reason = opt {reason} }})"
     yield from ledger(collection, "freeze_token", arg)
-    return {"collection": collection.id, "token_id": int(args["token_id"]), "status": "revoked"}
+    return {"collection": collection.id, "token_id": token_id, "status": "revoked"}
 
 
 @op(None, read=True, public=True)

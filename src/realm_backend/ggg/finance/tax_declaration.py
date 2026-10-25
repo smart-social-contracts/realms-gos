@@ -9,6 +9,7 @@ class TaxDeclaration(Row):
     declarant = String(indexed=True)
     period = String(default="")
     base = String(default="")
+    key = String(default="", indexed=True)  # "declarant|base|period": one declaration each
     amount = Integer(default=0)
     status = String(default="filed")  # filed | assessed | settled | disputed
     invoice = String(default="")

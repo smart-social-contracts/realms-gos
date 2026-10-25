@@ -35,7 +35,7 @@ def open_vote(action, proposer, by, origin):
     body = {"vote": vid, "action": action, "rule": rule, "deadline": deadline, "hash": h, "proposer": proposer,
             "origin": origin}
     legs = {}
-    for cid in [q.id for q in each(Quarter) if q.status == "active"]:
+    for cid in [q.id for q in each(Quarter, "status", "active")]:
         reply = yield from quarters.ask(cid, "federation_message", {"topic": "federal_vote.open", "body": body})
         if not reply.get("ok"):
             raise Fail(f"{cid} refused {vid}: {reply.get('error')}")
@@ -215,10 +215,11 @@ TOPICS = {"user.arrive": quarters.on_arrive, "quarter.secede": quarters.on_seced
 @op("quarter.sync")
 def federation_message(c, args):
     """From a registered quarter: handle ``topic`` with ``body``. From a local holder of quarter.sync: send it out, to
-    quarter ``to`` or by default to every quarter."""
+    quarter ``to`` or by default to every active quarter."""
     topic, body = args["topic"], args.get("body", {})
     if Quarter[c.by] is None:
-        targets = [find(Quarter, args["to"]).id] if args.get("to") else [q.id for q in each(Quarter)]
+        targets = [find(Quarter, args["to"]).id] if args.get("to") else [
+            q.id for q in each(Quarter, "status", "active")]
         replies = {}
         for cid in targets:
             replies[cid] = yield from quarters.ask(cid, "federation_message", {"topic": topic, "body": body})

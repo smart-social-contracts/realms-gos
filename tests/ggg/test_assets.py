@@ -2,11 +2,26 @@ import pytest
 
 import fake_chain
 import world
-from ggg import Codex, Delegation, Land, NFTToken, Organization, Verdict, Zone
+from api.assets import quote, value
+from ggg import Case, Codex, Delegation, Dispute, Land, NFTToken, Organization, Verdict, Zone
 from kit import call, denied, later, ok
 
 OK = "(variant { Ok = 4_412 : nat })"
 RX = "health.prescription/1"
+
+
+def metadata_reply(header, text="Text"):
+    """``icrc7_token_metadata``'s reply for a token carrying ``header``, its Text label as named or hashed."""
+    pairs = "; ".join(f"record {{ {quote(k)}; {value(v).replace('Text =', text + ' =', 1)} }}" for k, v in header.items())
+    return f"(opt vec {{ {pairs} }})"
+
+
+def order(land, status="issued", plaintiff="alice", defendant="User:mallory", n=1):
+    """A court verdict ``V-n`` in a case about ``land`` between ``plaintiff`` and ``defendant``."""
+    Dispute(id=f"D-{n}", claimant=plaintiff, respondent=defendant, subject=f"Land:{land}", status="accepted",
+            case=f"CASE-{n}")
+    case = Case(id=f"CASE-{n}", plaintiff=f"User:{plaintiff}", defendant=defendant, dispute=f"D-{n}")
+    return Verdict(id=f"V-{n}", case=case, status=status).id
 
 
 def agora(after_license="void"):
@@ -55,14 +70,13 @@ def test_story_land_registered_minted_disputed_and_moved_by_court_order():
     assert "already minted" in call("land_mint_nft", "ctl", land=land)["error"]
     ok("land_freeze", "ctl", land=land, reason="ownership dispute")
     assert Land[land].status == "disputed" and ledger_calls("freeze_token")
-    Verdict(id="V-1", status="issued")
-    ok("land_transfer", "ctl", land=land, to="alice", order="Verdict:V-1")
+    ok("land_transfer", "ctl", land=land, to="alice", order=f"Verdict:{order(land)}")
     assert Land[land].owner == "User:alice" and 'principal "alice"' in ledger_calls("force_transfer")[0]
     ok("land_unfreeze", "ctl", land=land)
     assert Land[land].status == "active" and ledger_calls("unfreeze_token")
     assert [p["id"] for p in ok("land_list", "bob", owner="alice")["lands"]] == [land]
-    assert [p["id"] for p in ok("land_map", "bob", min_x=10, max_x=20, min_y=35, max_y=45)["parcels"]] == [land]
-    assert ok("land_map", "bob", min_x=0, max_x=5)["parcels"] == []
+    assert [p["id"] for p in ok("land_map", "bob", x=10, y=35, w=10, h=10)["parcels"]] == [land]
+    assert ok("land_map", "bob", x=0, w=5)["parcels"] == []
 
 
 def test_land_operations_need_their_permissions():
@@ -72,7 +86,7 @@ def test_land_operations_need_their_permissions():
     assert "nft.mint" in denied("land_mint_nft", "alice", land=land)
     assert "nft.freeze" in denied("land_freeze", "bob", land=land)
     assert "nft.freeze" in denied("land_unfreeze", "bob", land=land)
-    Verdict(id="V-1", status="issued")
+    order(land)
     assert "nft.force_transfer" in denied("land_transfer", "bob", land=land, to="carla", order="Verdict:V-1")
     assert "sign in" in denied("land_list", fake_chain.ANONYMOUS)
     assert "sign in" in denied("land_map", fake_chain.ANONYMOUS)
@@ -114,11 +128,29 @@ def test_credential_revoke():
     agora()
     license_clinic()
     h = prescribe()["header"]
+    fake_chain.state["replies"][("cred-ledger", "icrc7_token_metadata")] = metadata_reply(h)
     assert "credential.sign" in denied("credential_revoke", "alice", schema=RX, organization="clinic-b", token_id=4412)
     assert ok("credential_revoke", "dr-ana", schema=RX, organization="clinic-b", token_id=4412,
               reason="issued in error")["status"] == "revoked"
+    assert ledger_calls("icrc7_token_metadata") == ["(4412 : nat)"]
     assert "ggg:revoked" in ledger_calls("freeze_token")[0]
     assert not ok("credential_verify", fake_chain.ANONYMOUS, header=h, frozen=True)["valid"]
+
+
+def test_credential_revoke_needs_a_token_the_organization_issued_under_that_schema():
+    agora()
+    license_clinic()
+    h = prescribe()["header"]
+    replies = fake_chain.state["replies"]
+    for theirs in ({**h, "ggg:issuer": "Organization:clinic-c"}, {**h, "ggg:schema": "edu.diploma/1"}, {}):
+        replies[("cred-ledger", "icrc7_token_metadata")] = metadata_reply(theirs) if theirs else "(null)"
+        assert "is not a" in call("credential_revoke", "dr-ana", schema=RX, organization="clinic-b",
+                                  token_id=4412)["error"]
+    assert not ledger_calls("freeze_token")
+    tricky = {**h, "ggg:subject": 'say "ggg:issuer"; variant { Text = "x" }'}
+    replies[("cred-ledger", "icrc7_token_metadata")] = metadata_reply(tricky, text="936_573_133")
+    ok("credential_revoke", "dr-ana", schema=RX, organization="clinic-b", token_id=4412)
+    assert len(ledger_calls("freeze_token")) == 1
 
 
 def test_I_AST_1_credentials_need_licence_seat_and_codex():
@@ -149,7 +181,7 @@ def test_I_AST_2_tokens_change_owner_only_by_court_order():
     land = register("mallory")
     ok("land_mint_nft", "ctl", land=land)
     assert "missing 'order'" in call("land_transfer", "ctl", land=land, to="alice")["error"]
-    Verdict(id="V-1", status="draft")
+    order(land, status="draft")
     assert "court verdict" in call("land_transfer", "ctl", land=land, to="alice", order="Verdict:V-1")["error"]
     world.person("mallory", "admin")
     world.person("alice", "admin")
@@ -158,6 +190,43 @@ def test_I_AST_2_tokens_change_owner_only_by_court_order():
     Verdict["V-1"].status = "issued"
     ok("land_transfer", "ctl", land=land, to="alice", order="Verdict:V-1")
     assert len(ledger_calls("force_transfer")) == 1
+
+
+def test_land_transfer_needs_a_verdict_about_this_parcel_awarding_a_party():
+    agora()
+    land, other = register("mallory"), register("bob", x=0, y=0)
+    elsewhere = order(other, defendant="User:bob")
+    assert "does not settle" in call("land_transfer", "ctl", land=land, to="alice", order=f"Verdict:{elsewhere}")["error"]
+    here = order(land, n=2)
+    assert "does not settle" in call("land_transfer", "ctl", land=land, to="carla", order=f"Verdict:{here}")["error"]
+    assert Land[land].owner == "User:mallory"
+    ok("land_transfer", "ctl", land=land, to="alice", order=f"Verdict:{here}")
+    assert (Land[land].owner, Land[land].status) == ("User:alice", "active")
+
+
+def test_parcels_are_found_through_their_cells():
+    agora()
+    a = register(x=14, y=14, w=4, h=4)
+    assert Land[a].cell == "0:0"
+    assert "overlaps L-1" in call("land_register", "ctl", owner="bob", x=17, y=17)["error"]
+    assert "overlaps L-1" in call("land_register", "ctl", owner="bob", x=-1, y=10, width=16, height=16)["error"]
+    assert "1 to 16" in call("land_register", "ctl", owner="bob", x=100, y=0, width=17)["error"]
+    b = register("bob", x=18, y=14, w=16, h=16)
+    register("carla", x=-16, y=-16, w=16, h=16)
+    assert [p["id"] for p in ok("land_map", "bob", x=16, y=16, w=2, h=2)["parcels"]] == [a]
+    assert {p["id"] for p in ok("land_map", "bob", x=16, y=16, w=3, h=3)["parcels"]} == {a, b}
+    assert [p["id"] for p in ok("land_map", "bob", x=-1, y=-1, w=1, h=1)["parcels"]] == ["L-3"]
+    assert "1 to 32" in call("land_map", "bob", w=33)["error"]
+
+
+def test_land_map_pages_zones():
+    agora()
+    for n in range(3):
+        ok("zone_set", world.PEOPLE[n], zone=f"cell-{n}")
+    first = ok("land_map", "bob", count=2)
+    second = ok("land_map", "bob", count=2, **{"from": first["next"]})
+    assert [z["id"] for z in first["zones"] + second["zones"]] == ["cell-0", "cell-1", "cell-2"]
+    assert second["next"] is None
 
 
 @pytest.mark.parametrize("rule, still_valid", [("void", False), ("keep", True)])

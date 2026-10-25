@@ -23,6 +23,7 @@ When this document and the code disagree, the code is wrong.
 | Behaviour | Entities hold data only: no hooks, no methods beyond trivial reads. Behaviour lives in operations. |
 | Audit | Every update operation writes one `Event`. |
 | Privacy | Personal or sensitive content is stored encrypted (vetKeys envelopes); entities hold only a reference and a hash. |
+| Collections | No call reads a whole collection. Lists take `from` and `count` and return `next`; work over many rows runs in batches the same way; lookups go through indexed fields; totals are kept as running totals. |
 
 ### Operations
 
@@ -36,7 +37,9 @@ result. Several operations may share a permission. Flags:
 | `governed` | When the governing department's policy is not direct, calling it files a `Proposal` that replays the exact call once approved. |
 | `signing` | Produces an act that only an accountable human may make. Agents can never perform it, directly or by delegation. |
 
-Results are `{"ok": true, ...}` or `{"ok": false, "error": "..."}`.
+Results are `{"ok": true, ...}` or `{"ok": false, "error": "..."}`. The canister exposes every operation
+through two methods, `read(name, args)` for `read` operations (queries) and `run(name, args)` for the rest;
+`ops_list` lists them with their permission, flags and description.
 
 ### Callers
 
@@ -68,7 +71,7 @@ organizations: **Clinic B** (health provider) and **BuildCo** (contractor). Agen
 | `UserProfile` | `id` (name), `description`, `allowed_to` (Json list of permissions), `permissions` → `Permission`*, `extensions` → `Extension`* | A named role. Defaults: `admin` (`all`), `member`. | `member` → `[self.join, proposal.vote, proposal.create, dispute.create, …]` |
 | `Permission` | `id` (name), `description`, `category`, `scope`, `users` → `User`*, `profiles` → `UserProfile`*, `departments` → `Department`* | A fine-grained grant of one permission to users, profiles or departments. | `transfer.create` on scope `fund:ROADS`, granted to Infrastructure |
 | `Invite` | `id` (code hash), `profile`, `department`, `position`, `max_uses`, `uses`, `redeemed_by` (Json), `expires_at`, `revoked`, `created_by` | Today's `RegistrationCode`. The code itself is never stored. | 50-use code for new clerks: profile `member`, Civil Registry, position `clerk`, expires in 30 days |
-| `Delegation` | `id`, `grantor`, `delegate`, `scope` (Json), `status`, `label`, `description`, `requires_acceptance`, `granted_by`, `accepted_at`, `starts_at`, `expires_at`, `revoked_at`, `revoked_by` | Power of attorney. | Alice → `claude-conn`: `[proposal.vote, proposal.create]` for 24 h, `active` |
+| `Delegation` | `id`, `grantor`, `delegate`, `scope` (Json), `status`, `label`, `description`, `requires_acceptance`, `granted_by`, `accepted_at`, `starts_at`, `expires_at`, `revoked_at`, `revoked_by`, `link` (grantor and delegate while pending or active, indexed) | Power of attorney. | Alice → `claude-conn`: `[proposal.vote, proposal.create]` for 24 h, `active` |
 | `DelegationRequest` | `id`, `grantor`, `delegate`, `scope`, `label`, `description`, `starts_at`, `expires_at`, `request_expires_at` | A delegate asking a member for a grant. Deleted once decided. | Claude asks Alice for `[proposal.vote]` for 7 days; the link is valid 1 h |
 
 ### Lifecycles
@@ -182,7 +185,7 @@ Two kinds of body:
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
 | `Proposal` | `id`, `title`, `description`, `proposer` → `User`, `on_behalf_of`, `department` → `Department` (scope; root = realm-wide), `action` (Json: `{op, args}` or codex code ref + checksum), `status`, `opens_at`, `deadline`, `threshold`, `quorum_percent`, `tally` (Json), `result` (Json) | | `P-7` Bike lane on Main St, scope Infrastructure, action `transfer_create` 50,000 REALM to BuildCo, `voting` until 8 Nov |
-| `Vote` | `id`, `proposal` → `Proposal`, `voter` → `User`, `cast_by`, `choice` (`yes`, `no`, `abstain`), `cast_at` | One per voter per proposal; may be replaced until the deadline. | Alice votes `yes` on `P-7`, cast by `claude-conn` |
+| `Vote` | `id`, `proposal` → `Proposal`, `voter` → `User`, `cast_by`, `choice` (`yes`, `no`, `abstain`), `cast_at`, `proposal_id` (indexed) | One per voter per proposal; may be replaced until the deadline. | Alice votes `yes` on `P-7`, cast by `claude-conn` |
 | `Mandate` | `id`, `title`, `scope` (Json), `executor` → `Department`, `proposal` → `Proposal`, `status`, `expires_at` | An authorization to act, granted by governance. | Infrastructure may contract road works up to 200,000 REALM until 2027-06-30 (from `P-4`) |
 | `Contract` | `id`, `title`, `parties` (Json list of `Entity:id`), `mandate` → `Mandate`, `terms_ref`, `terms_hash`, `status`, `starts_at`, `ends_at` | Agreement between parties, possibly under a mandate. | `C-9`: Agora × BuildCo, bike lane works, Dec–Mar, terms `sha256:4be1…` |
 
@@ -212,7 +215,7 @@ Two kinds of body:
 ### Invariants
 
 - I-GOV-1: A replayed proposal executes exactly the `action` that was voted on, and only once.
-- I-GOV-2: Votes count only from users eligible for the proposal's scope at the deadline.
+- I-GOV-2: Votes count only from users eligible for the proposal's scope when they vote.
 - I-GOV-3: A proposal is accepted only if quorum and threshold are met at finalization.
 - I-GOV-4: A contract created under a mandate stays within the mandate's scope and term.
 
@@ -225,18 +228,18 @@ Two kinds of body:
 | `Treasury` | `id` (`1`), `config` (Json: epoch length, anchor month, source fund, auto-allocate) | Singleton. Absorbs `TreasuryConfig`. | Monthly epochs, source fund `ROOT`, auto-allocation on |
 | `Token` | `id` (symbol), `ledger`, `indexer`, `decimals`, `fee` | A fungible ledger the realm uses (ICRC-1). | `ckBTC`: ledger `mxzaz-…`, 8 decimals, fee 10 |
 | `NFTToken` | `id` (symbol), `canister`, `name`, `description`, `transferable`, `required_license` (licence type or empty), `supply_cap`, `total_supply` | An NFT ledger (ICRC-7) the realm mints into. | `LAND` (transferable); `CRED` (non-transferable, minting needs a licence) |
-| `Fund` | `id` (code), `name`, `kind` (general, special revenue, …), `department` → `Department` | | `ROADS`: special revenue, owned by Infrastructure |
-| `FiscalPeriod` | `id`, `name`, `starts_at`, `ends_at`, `status` | | `FY2026`: 2026-01-01 to 2026-12-31, `open` |
-| `Budget` | `id`, `fund` → `Fund`, `period` → `FiscalPeriod`, `category`, `kind`, `planned`, `actual`, `status`, `proposal` → `Proposal` | | Roads FY2026, capital: planned 300,000, actual 120,500, `adopted` |
+| `Fund` | `id` (code), `name`, `kind` (general, special revenue, …), `department` → `Department`, `balances` (Json: running balance per token), `allocation_rule` → `AllocationRule` | | `ROADS`: special revenue, owned by Infrastructure |
+| `FiscalPeriod` | `id`, `name`, `starts_at`, `ends_at`, `status`, `statements` (Json: running totals), `source_hash` (chained over its entries) | | `FY2026`: 2026-01-01 to 2026-12-31, `open` |
+| `Budget` | `id`, `fund` → `Fund`, `period` → `FiscalPeriod`, `category`, `kind`, `planned`, `actual`, `status`, `proposal` → `Proposal`, `slot` (`fund:period:category`, indexed) | | Roads FY2026, capital: planned 300,000, actual 120,500, `adopted` |
 | `AllocationRule` | `id`, `source_fund`, `rules` (Json), `status`, `proposal` → `Proposal` | How revenue is split between funds. | From `ROOT`: 30% `WELFARE`, 20% `ROADS`, 50% `GENERAL` |
 | `LedgerEntry` | `id`, `transaction`, `kind` (asset, liability, equity, revenue, expense), `category`, `debit`, `credit`, `symbol`, `fund` → `Fund`, `period` → `FiscalPeriod`, `transfer` → `Transfer`, `invoice` → `Invoice`, `user` → `User`, `organization` → `Organization`, `contract` → `Contract`, `case` → `Case`, `penalty` → `Penalty`, `appeal` → `Appeal`, `at`, `description` | Double entry. At most one of the source references is set. | Tx `T-88`: debit `ROADS` capital expense 50,000, credit cash 50,000, contract `C-9` |
 | `Invoice` | `id`, `payer` (`Entity:id`), `amount`, `symbol`, `due_at`, `status`, `reason` (`Entity:id`), `paid_at`, `payment` (Json) | Paid into the subaccount derived from its `id`. | `INV-301`: Alice owes 120 REALM property tax, due 2026-12-31, `pending` |
-| `Transfer` | `id`, `sender`, `to`, `symbol`, `amount`, `ledger_tx`, `invoice` → `Invoice`, `status`, `at` | | 50,000 REALM from `ROADS` to BuildCo, ledger tx 18234, `completed` |
+| `Transfer` | `id`, `sender`, `to`, `symbol`, `amount`, `ledger_tx`, `invoice` → `Invoice`, `status`, `at`, `payroll` (the payroll run, indexed) | | 50,000 REALM from `ROADS` to BuildCo, ledger tx 18234, `completed` |
 | `Trade` | `id`, `contract` → `Contract`, `leg_a` → `Transfer`, `leg_b` → `Transfer`, `status` | An exchange of two transfers. | `C-9` milestone: realm pays 10,000 REALM, BuildCo hands over the road deed NFT |
 | `PaymentAccount` | `id`, `owner` (`Entity:id`), `network`, `address`, `symbol`, `label`, `verified` | External accounts for payouts. | Bob's ckBTC payout address, verified |
 | `FinancialReport` | `id`, `kind`, `period` → `FiscalPeriod`, `as_of`, `statements` (Json), `source_hash`, `issued_by`, `supersedes` → `FinancialReport` | Frozen statements. | FY2025 closing statements issued by Finance, `sha256:77d0…` |
 | `TaxPolicy` | `id`, `status`, `document` (Json), `description`, `proposal` → `Proposal`, `adopted_at` | Parameters; the codex calculates. | `TAX-POLICY-3`: property tax 0.4% up to 50,000, 0.8% above, annual, `adopted` |
-| `TaxDeclaration` | `id`, `declarant` (`Entity:id`), `period`, `base`, `amount`, `status`, `invoice` → `Invoice` | New: self-declared bases (revenue, payroll). | Clinic B declares 182,000 revenue for 2026-Q3 → `INV-412` |
+| `TaxDeclaration` | `id`, `declarant` (`Entity:id`), `period`, `base`, `amount`, `status`, `invoice` → `Invoice`, `key` (declarant, base and period, indexed) | New: self-declared bases (revenue, payroll). | Clinic B declares 182,000 revenue for 2026-Q3 → `INV-412` |
 
 Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/`NFTToken`),
 `MarketPlace` (→ realm canister settings), `TreasuryConfig` (→ `Treasury.config`).
@@ -244,7 +247,7 @@ Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/
 ### Lifecycles
 
 - `Invoice.status`: `pending` → `paid` | `overdue` | `cancelled`; `overdue` → `paid` | `cancelled`.
-- `Transfer.status`: `pending` → `completed` | `failed`.
+- `Transfer.status`: `sending` (ledger call in flight) → `completed` | `failed`; `sending` → `pending` (ledger refused) → `failed` (reverted).
 - `Budget.status`: `draft` → `proposed` → `adopted` → `amended`* → `closed`.
 - `FiscalPeriod.status`: `open` → `closed` → `archived`.
 - `AllocationRule.status`, `TaxPolicy.status`: `draft` → `proposed` → `adopted` → `superseded`.
@@ -288,7 +291,7 @@ Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `Land` | `id`, `x`, `y`, `width`, `height`, `kind`, `owner` (`Entity:id`), `status`, `token_id`, `registered_by`, `metadata` (Json) | A parcel. | `L-17`: 3×2 cells at (12, 40), residential, owner `alice`, `LAND` #4412 |
+| `Land` | `id`, `x`, `y`, `width`, `height`, `kind`, `owner` (`Entity:id`), `status`, `token_id`, `registered_by`, `metadata` (Json), `cell` (`x//16:y//16`, indexed) | A parcel, at most 16×16 cells. | `L-17`: 3×2 cells at (12, 40), residential, owner `alice`, `LAND` #4412 |
 | `Zone` | `id` (h3 index), `name`, `kind`, `land` → `Land`, `user` → `User`, `metadata` (Json) | | Cell `871f1d489ffffff` "Riverside", residential, Alice's home |
 
 Certificates (prescriptions, diplomas, permits, titles) are NFTs, not realm entities: the ledger is
@@ -315,7 +318,7 @@ The ICRC-7 ledger has no burn, so a revoked credential is frozen with a `ggg:rev
 
 ### Lifecycles
 
-- `Land.status`: `active` → `disputed` → `active`; `active` → `transferred` | `revoked`.
+- `Land.status`: `active` → `disputed` → `active`; `active` → `revoked`. A court-ordered transfer changes the owner and keeps `active`.
 
 ### Operations
 
@@ -323,7 +326,7 @@ The ICRC-7 ledger has no burn, so a revoked credential is frozen with a `ggg:rev
 |---|---|---|---|
 | `land_register` | `nft.mint` | governed | Register `L-17` for Alice after the survey |
 | `land_transfer` | `nft.force_transfer` | signing, governed | Court orders `L-17` moved from Mallory to Alice (normal sales use the ledger) |
-| `land_list`, `land_map` | `realm.data_view` | read | Map of quarter North's parcels |
+| `land_list`, `land_map` (a viewport of at most 32×32 cells) | `realm.data_view` | read | Map of quarter North's parcels |
 | `land_mint_nft` | `nft.mint` | | Mint `LAND` #4412 for `L-17` to Alice |
 | `land_freeze`, `land_unfreeze` | `nft.freeze` | signing | Freeze `L-17` during an ownership dispute |
 | `zone_set`, `zone_clear` | `self.data_manage` | delegable | Alice picks Riverside as her home zone |
@@ -411,7 +414,7 @@ credential NFTs; GGG has no report entity.
 | `verdict_link_contract`, `verdict_modify_terms` | `resolution.link_contract`, `resolution.modify_terms` | signing | Link the verdict to contract `C-9` it terminates |
 | `appeal_file` | `dispute.create` (party) | delegable | Infrastructure appeals within 14 days |
 | `appeal_decide` | `appeal.allow` | signing | The appeals court denies the appeal |
-| `penalty_execute` (fine → invoice, freeze, revoke access, terminate contract, reassign resource, lock instrument) | `fine.apply`, `access.revoke`, `contract.terminate`, `resource.reassign`, `instrument.lock`, `trade.execute` | signing | Mallory's 500 REALM fine → invoice `INV-520` |
+| `penalty_execute` (the permission depends on the kind: fine and restitution `fine.apply`; suspension and revocation `access.revoke`; termination `contract.terminate`; freeze `instrument.lock`; injunction and community service `enforcement.record`) | `fine.apply`, `access.revoke`, `contract.terminate`, `instrument.lock`, `enforcement.record` | signing | Mallory's 500 REALM fine → invoice `INV-520` |
 | `enforcement_record`, `enforcement_escalate`, `enforcement_notify` | `enforcement.record`, `enforcement.escalate`, `notification.send` | | Record that the permit was issued as ordered |
 | `court_create`, `judge_appoint`, `judge_revoke` | `org.create`, `org.appoint` | governed | Create South First Instance Court; appoint Judge Elena |
 | `resolution_query` | `resolution.query` | read | All verdicts about building permits since 2026 |
@@ -450,7 +453,7 @@ tenders), `BidPayload` (merged into `Bid` as an encrypted reference).
 | `tender_create`, `tender_open`, `tender_close`, `tender_cancel` | `tender.manage` | governed | Infrastructure drafts `T-5`, then opens it |
 | `tender_list`, `tender_get` | `realm.data_view` | read | Open tenders |
 | `bid_submit`, `bid_withdraw` | `bid.submit` | delegable | BuildCo's agent submits an encrypted bid on `T-5` |
-| `bids_reveal` | `tender.manage` | | After 30 Nov the 4 bids are decrypted |
+| `bids_reveal` | `tender.manage` | governed | After 30 Nov the 4 bids are decrypted |
 | `bid_score` | `bid.evaluate` | signing | Carla and two colleagues score each bid |
 | `tender_award` | `tender.manage` | signing, governed | Award `T-5` to BuildCo (score 86) → contract `C-9` |
 
@@ -543,9 +546,9 @@ are the source of truth), `EntityMigration` (→ `Forward`), `Menu*` (→ `Exten
 | `extension_call` | `extension.call` + the extension's declared operation | | The voting extension casts Alice's vote through `proposal_vote` |
 | `extension_set_access`, `sidebar_configure` | `realm.configure` | governed | Show `vault` only to Finance |
 | `extension_list` | `realm.data_view` | read | Alice's sidebar shows `voting`, not `vault` |
-| `task_create`, `task_edit`, `task_delete`, `task_run`, `task_schedule`, `task_cancel` | `task.*` | | Schedule a daily invoice check |
+| `task_create`, `task_edit`, `task_delete`, `task_run`, `task_schedule`, `task_cancel` (only the task's creator, or a controller; a cancelled task stays cancelled) | `task.*` | | Schedule a daily invoice check |
 | `task_list`, `task_logs` | `task.view` | read | Payroll task and its last 3 runs |
-| `notification_list` | `self.data_view` | read, delegable | Alice's 4 unread notifications |
+| `notification_list` (one recipient a page at a time) | `self.data_view` | read, delegable | Alice's notifications, then Civil Registry's |
 | `notification_read` (mark as read) | `self.data_manage` | delegable | Alice marks "P-7 passed" as read |
 | `notification_send` | `notification.send` | | Justice notifies Mallory of her fine |
 | `events` | `realm.monitor` | read | The last 100 audited calls |
@@ -598,7 +601,8 @@ by default the realm's marketplace).
 - I-ADM-1: Test flags can be enabled only on non-production networks or when `can_test_mode` was set
   at install.
 - I-ADM-2: During `setup`, only the founder can configure; after `setup_launch`, configuration is governed.
-- I-ADM-3: A realm upgrade installs only a release the trust policy accepts.
+- I-ADM-3: A realm upgrade installs only a release the trust policy accepts: its `sha256:<module_hash>` is pinned, or
+  the registry's release wasm has exactly that hash and its namespace is approved by a trusted approver.
 
 ## 13. Permissions
 

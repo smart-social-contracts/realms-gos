@@ -1,7 +1,7 @@
 import hashlib
 
 from core import chain
-from core.db import Fail, each, find, next_id, view
+from core.db import Fail, find, next_id, page, view
 from ggg import Bid, BidScore, Contract, Department, Organization, Tender
 from api.justice import people
 from core.op import op
@@ -89,11 +89,12 @@ def tender_cancel(c, args):
 
 @op("realm.data_view", read=True)
 def tender_list(c, args):
-    """List tenders, or only those whose ``status`` is draft, open, closed, evaluation, contracted or cancelled.
-    Returns ``tenders``."""
-    rows = [t for t in each(Tender) if not args.get("status") or t.status == args["status"]]
+    """List tenders, or only those whose ``status`` is draft, open, closed, evaluation, contracted or cancelled, from
+    row ``from`` (default 1) over ``count`` rows (default 100, at most 500); a filtered page may hold fewer.
+    Returns ``tenders`` and ``next``, the ``from`` of the next page (null at the end)."""
+    rows, nxt = page(Tender, args, keep=lambda t: not args.get("status") or t.status == args["status"])
     return {"tenders": [{**view(t, "id", "title", "status", "opens_at", "closes_at"), "requester": t.requester.id}
-                        for t in rows]}
+                        for t in rows], "next": nxt}
 
 
 @op("realm.data_view", read=True)
@@ -133,7 +134,7 @@ def bid_withdraw(c, args):
     b.delete()
 
 
-@op("tender.manage")
+@op("tender.manage", governed=requester)
 def bids_reveal(c, args):
     """Once ``tender`` has closed, unseal all its bids and start evaluation; ``openings`` maps a bid id to
     ``{price, nonce}``, which must match its hash and sets its price. Returns ``revealed``, the number of bids."""

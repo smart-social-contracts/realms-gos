@@ -1,7 +1,7 @@
 import fake_chain
 import world
 from core import op
-from ggg import Delegation, Event
+from ggg import Delegation, Event, Notification
 from kit import call, denied, ok
 
 
@@ -10,23 +10,45 @@ def test_story_justice_notifies_mallory_of_her_fine():
     n = ok("notification_send", "ctl", recipient="User:mallory", topic="fine", title="Fine of 500 REALM",
            body="Spam in the forum", href="/justice/CASE-1")["notification"]
     ok("notification_send", "ctl", recipient="User:alice", title="P-7 passed", href="/proposals/P-7")
-    mine = ok("notification_list", "mallory")
-    assert mine["unread"] == 1 and mine["notifications"][0]["title"] == "Fine of 500 REALM"
-    assert mine["notifications"][0]["sender"] == "ctl"
+    mine = ok("notification_list", "mallory")["notifications"]
+    assert [(x["title"], x["sender"], x["read"]) for x in mine] == [("Fine of 500 REALM", "ctl", False)]
     assert "not addressed to you" in call("notification_read", "alice", notification=n)["error"]
-    ok("notification_read", "mallory", notification=n)
-    assert ok("notification_list", "mallory", unread=True) == {"ok": True, "notifications": [], "unread": 0}
+    assert ok("notification_read", "mallory", notification=n)["read"] == 1
+    assert ok("notification_list", "mallory", unread=True) == {"ok": True, "notifications": [], "next": None}
 
 
-def test_department_notifications_reach_its_staff_newest_first():
+def test_department_notifications_reach_its_staff():
     world.build()
     ok("notification_send", "ctl", recipient="Department:Civil Registry", title="Office closed Friday")
-    fake_chain.state["now"] += 60
     ok("notification_send", "ctl", recipient="User:bob", title="Your shift")
-    assert [n["title"] for n in ok("notification_list", "bob")["notifications"]] == ["Your shift", "Office closed Friday"]
+    assert [n["title"] for n in ok("notification_list", "bob")["notifications"]] == ["Your shift"]
+    staff = ok("notification_list", "bob", recipient="Department:Civil Registry")["notifications"]
+    assert [n["title"] for n in staff] == ["Office closed Friday"]
     assert ok("notification_list", "alice")["notifications"] == []
-    ok("notification_read", "bob", all=True)
-    assert ok("notification_list", "bob")["unread"] == 0
+    assert "do not read" in call("notification_list", "alice", recipient="Department:Civil Registry")["error"]
+    assert "do not read" in call("notification_read", "alice", all=True, recipient="User:bob")["error"]
+    ok("notification_read", "bob", all=True, recipient="Department:Civil Registry")
+    assert ok("notification_list", "bob", recipient="Department:Civil Registry", unread=True)["notifications"] == []
+    assert ok("notification_list", "dana", recipient="Department:Civil Registry", unread=True)["notifications"]
+
+
+def test_inbox_pages_and_read_all_runs_in_batches():
+    world.build()
+    for i in range(5):
+        ok("notification_send", "ctl", recipient="User:alice", title=f"n{i}")
+    first = ok("notification_list", "alice", count=3)
+    rest = ok("notification_list", "alice", count=3, **{"from": first["next"]})
+    assert [n["title"] for n in first["notifications"] + rest["notifications"]] == [f"n{i}" for i in range(5)]
+    assert rest["next"] is None
+    ok("notification_read", "alice", notification=first["notifications"][1]["id"])
+    batch = ok("notification_read", "alice", all=True, count=3)
+    assert batch["read"] == 2 and batch["next"]
+    again = ok("notification_read", "alice", all=True, count=3)
+    assert again == {"ok": True, "read": 0, "next": batch["next"]}
+    last = ok("notification_read", "alice", all=True, count=3, **{"from": batch["next"]})
+    assert last == {"ok": True, "read": 2, "next": None}
+    assert ok("notification_list", "alice", unread=True)["notifications"] == []
+    assert all(n.read_by == ["alice"] for n in Notification.load_some(1, 10))
 
 
 def test_notifications_are_delegable_and_sending_needs_the_permission():
@@ -34,9 +56,9 @@ def test_notifications_are_delegable_and_sending_needs_the_permission():
     ok("notification_send", "ctl", recipient="User:alice", title="P-7 passed")
     Delegation(id="d1", grantor="alice", delegate="claude-conn", status="active",
                scope={"operations": ["self.data_view", "self.data_manage"]}, expires_at=fake_chain.now() + 3600)
-    assert ok("notification_list", "claude-conn", on_behalf_of="alice")["unread"] == 1
+    assert len(ok("notification_list", "claude-conn", on_behalf_of="alice", unread=True)["notifications"]) == 1
     ok("notification_read", "claude-conn", on_behalf_of="alice", all=True)
-    assert ok("notification_list", "alice")["unread"] == 0
+    assert ok("notification_list", "alice", unread=True)["notifications"] == []
     denied("notification_list", fake_chain.ANONYMOUS)
     denied("notification_send", "alice", recipient="User:bob", title="hi")
     assert "unknown" in call("notification_send", "ctl", recipient="User:nobody", title="hi")["error"]
@@ -72,4 +94,4 @@ def test_ops_list_is_public_and_complete():
     assert by_name["notification_list"] == {"name": "notification_list", "perm": "self.data_view", "read": True,
                                             "delegable": True, "governed": False, "signing": False, "public": False,
                                             "doc": by_name["notification_list"]["doc"]}
-    assert "newest first" in by_name["notification_list"]["doc"] and by_name["ops_list"]["public"]
+    assert "``recipient``" in by_name["notification_list"]["doc"] and by_name["ops_list"]["public"]

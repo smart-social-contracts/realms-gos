@@ -48,6 +48,17 @@ def test_every_op_says_what_it_does_and_names_its_arguments():
     assert not problems, "\n".join(problems)
 
 
+def test_no_read_loads_a_whole_collection():
+    # A read that loads a whole collection works until the collection grows, then fails for good.
+    for path in SRC.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            whole = node.func.attr == "instances" or node.func.attr == "load_some" and any(
+                isinstance(a, ast.Call) and getattr(a.func, "attr", "") == "max_id" for a in node.args[1:])
+            assert not whole, f"{path.name}:{node.lineno} reads a whole collection"
+
+
 def test_core_does_not_import_api():
     # op.py is the exception: it loads the operations it dispatches to.
     for path in (SRC / "core").glob("*.py"):

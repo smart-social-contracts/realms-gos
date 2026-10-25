@@ -1,7 +1,7 @@
 import json
 
 from core import chain
-from core.db import Fail, each, find, next_id, view
+from core.db import Fail, each, find, first, next_id, page, page_by, view
 from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Vote
 from core.op import dispatch, op, ops
 
@@ -10,10 +10,10 @@ OPEN = ("draft", "voting")
 
 
 def root():
-    for d in each(Department):
-        if d.is_root:
-            return d
-    raise Fail("the realm has no root department")
+    d = first(Department, "is_root", True)
+    if d is None:
+        raise Fail("the realm has no root department")
+    return d
 
 
 def realm_wide(args):
@@ -38,8 +38,9 @@ def new_proposal(title, user, by, department, action=None, description=""):
                  threshold=int(settings().get("threshold", 50)),
                  quorum_percent=int(settings().get("quorum_percent", 0) if department.is_root
                                     else policy.get("quorum_percent", 0)))
+    p.tally = {c: 0 for c in CHOICES}
     if not department.is_root:
-        p.tally = {"required": int(policy.get("m", 1)), "veto": list(policy.get("veto", []))}
+        p.tally = {**p.tally, "required": int(policy.get("m", 1)), "veto": list(policy.get("veto", []))}
     return p
 
 
@@ -50,22 +51,30 @@ def file_replay(name, args, user, by, department):
     return {"proposal": p.id, "requires_vote": True}
 
 
-def eligible(p):
-    if p.department is None or p.department.is_root:
-        return {m.id for m in each(Member) if m.status == "active"}
-    seats = {a.user for pos in p.department.positions for a in pos.appointments if a.status == "active"}
-    return seats | ({p.department.head} - {""})
+def realm_scope(p):
+    return p.department is None or p.department.is_root
+
+
+def seated(principal, department):
+    """``principal`` heads ``department`` or holds an active seat in it."""
+    return principal == department.head or any(
+        a.position.department and a.position.department.id == department.id for a in appointed(principal))
+
+
+def eligible(p, principal):
+    if realm_scope(p):
+        m = Member[principal]
+        return m is not None and m.status == "active"
+    return seated(principal, p.department)
 
 
 def count(p):
-    voters = eligible(p)
-    tally = {c: 0 for c in CHOICES}
-    vetoed = False
-    for v in p.votes:
-        if v.voter in voters:
-            tally[v.choice] += 1
-            vetoed |= v.choice == "no" and v.voter in (p.tally or {}).get("veto", [])
-    return tally, len(voters), vetoed
+    """The tally kept as votes are cast, the number of eligible voters and whether a veto holder voted no."""
+    tally = {c: int((p.tally or {}).get(c, 0)) for c in CHOICES}
+    size = (Member.count_by("status", "active") if realm_scope(p)
+            else len(holders(p.department) | ({p.department.head} - {""})))
+    vetoes = (Vote[f"{p.id}:{v}"] for v in (p.tally or {}).get("veto", []))
+    return tally, size, any(v is not None and v.choice == "no" for v in vetoes)
 
 
 def outcome(p, final):
@@ -115,10 +124,15 @@ def proposal_vote(c, args):
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
     if p.status != "voting" or chain.now() > p.deadline:
         raise Fail(f"{p.id} is not open for voting")
-    if c.user not in eligible(p):
+    if not eligible(p, c.user):
         raise Fail(f"you are not eligible to vote on {p.id}")
     key = f"{p.id}:{c.user}"
-    v = Vote[key] or Vote(id=key, proposal=p, voter=c.user)
+    v = Vote[key] or Vote(id=key, proposal=p, proposal_id=p.id, voter=c.user)
+    tally = p.tally or {}
+    if v.choice:
+        tally[v.choice] -= 1
+    tally[args["choice"]] = tally.get(args["choice"], 0) + 1
+    p.tally = tally
     v.choice, v.cast_by, v.cast_at = args["choice"], c.by, chain.now()
     return {"vote": v.id}
 
@@ -155,7 +169,7 @@ def proposal_execute(c, args):
         raise Fail(f"{p.id} has no accepted action to execute")
     p.status = "executed"
     out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay",
-                                 signer=p.action.get("initiator") or p.proposer)
+                                 signer=p.action.get("initiator") or p.proposer, proposal=p.id)
     p.result = json.loads(out)
     if not p.result.get("ok"):
         p.status = "failed"
@@ -164,18 +178,22 @@ def proposal_execute(c, args):
 
 @op("realm.data_view", read=True)
 def proposal_get(c, args):
-    """The proposal ``proposal`` with its votes, its current tally and the number of eligible voters."""
+    """The proposal ``proposal`` with its current tally, the number of eligible voters and its votes, ``count`` at a
+    time (default 100, at most 500) from row ``from`` (default 1); ``next`` continues the votes (null at the end)."""
     p = find(Proposal, args["proposal"])
     tally, size, _ = count(p)
+    votes, nxt = page_by(Vote, "proposal_id", p.id, args)
     return {"proposal": view(p), "tally": tally, "eligible": size,
-            "votes": [view(v, "voter", "choice", "cast_by") for v in p.votes]}
+            "votes": [view(v, "voter", "choice", "cast_by") for v in votes], "next": nxt}
 
 
 @op("realm.data_view", read=True)
 def proposal_list(c, args):
-    """Every proposal (id, title, status, deadline, proposer), or only those with ``status`` (e.g. voting)."""
-    rows = each(Proposal, "status", args["status"]) if args.get("status") else each(Proposal)
-    return {"proposals": [view(p, "id", "title", "status", "deadline", "proposer") for p in rows]}
+    """Proposals (id, title, status, deadline, proposer), or only those with ``status`` (e.g. voting), ``count`` at a
+    time (default 100, at most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the
+    end)."""
+    rows, nxt = page_by(Proposal, "status", args["status"], args) if args.get("status") else page(Proposal, args)
+    return {"proposals": [view(p, "id", "title", "status", "deadline", "proposer") for p in rows], "next": nxt}
 
 
 @op("mandate.create", governed=realm_wide)
@@ -204,12 +222,15 @@ def mandate_assign_executor(c, args):
 def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
     now), ``ends_at``, ``value`` and ``mandate``. Returns ``contract``. Under a mandate, the mandate must be active,
-    ``value`` within its ``max_value``, and the contract must end before the mandate expires."""
+    ``value`` within its ``max_value``, the contract must end before the mandate expires, and you must head or hold
+    an active seat in the mandate's executor department."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
     value = int(args.get("value", 0))
     if m is not None:
         if m.status != "active" or (m.expires_at and chain.now() > m.expires_at):
             raise Fail(f"mandate {m.id} is not active")
+        if m.executor is None or not seated(c.user, m.executor):
+            raise Fail(f"only the executor department's staff may contract under mandate {m.id}")
         limit = int((m.scope or {}).get("max_value", 0))
         if limit and value > limit:
             raise Fail(f"{value} exceeds mandate {m.id}'s limit of {limit}")

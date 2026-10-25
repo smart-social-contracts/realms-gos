@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, deref, each, find, next_id, page, view
+from core.db import Fail, deref, each, find, next_id, page, page_by, view
 from ggg import Calendar, Department, License, Organization
 from core.op import op
 
@@ -119,9 +119,9 @@ def shown(lic):
 def license_list(c, args):
     """One page of licences (``from``, ``count``), optionally filtered by ``holder``, ``kind`` and ``status``; ``next``
     continues it. A page can hold fewer matches than ``count``: follow ``next``."""
-    want = {k: args[k] for k in ("holder", "kind", "status") if args.get(k)}
-    rows, more = page(License, args, lambda x: all(getattr(x, k) == v for k, v in want.items()))
-    return {"licenses": [shown(x) for x in rows], "next": more}
+    want = {k: args[k] for k in ("kind", "status") if args.get(k)}
+    rows, more = page_by(License, "holder", args["holder"], args) if args.get("holder") else page(License, args)
+    return {"licenses": [shown(x) for x in rows if all(getattr(x, k) == v for k, v in want.items())], "next": more}
 
 
 @op(None, read=True, public=True)
