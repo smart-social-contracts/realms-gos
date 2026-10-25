@@ -1,9 +1,9 @@
-from ic_python_db import Entity, Integer, ManyToMany, ManyToOne, OneToMany, String
+from ic_python_db import Integer, ManyToMany, ManyToOne, OneToMany, String
 
-from db import Json
+from db import Json, Row
 
 
-class Land(Entity):
+class Land(Row):
     __alias__ = "id"
     id = String()
     x = Integer(default=0)
@@ -19,7 +19,7 @@ class Land(Entity):
     zones = OneToMany("Zone", "land")
 
 
-class Zone(Entity):
+class Zone(Row):
     __alias__ = "id"
     id = String()  # h3 index
     name = String(default="")
@@ -29,7 +29,7 @@ class Zone(Entity):
     metadata = Json({})
 
 
-class License(Entity):
+class License(Row):
     __alias__ = "id"
     id = String()
     kind = String(default="")  # court | business | professional | health | education | ...
@@ -43,7 +43,7 @@ class License(Entity):
     conditions = Json({})
 
 
-class Court(Entity):
+class Court(Row):
     __alias__ = "id"
     id = String()
     name = String(default="")
@@ -59,7 +59,7 @@ class Court(Entity):
     appeals = OneToMany("Appeal", "court")
 
 
-class Judge(Entity):
+class Judge(Row):
     __alias__ = "id"
     id = String()
     user = String(indexed=True)
@@ -71,7 +71,7 @@ class Judge(Entity):
     verdicts = OneToMany("Verdict", "issued_by")
 
 
-class Dispute(Entity):
+class Dispute(Row):
     __alias__ = "id"
     id = String()
     claimant = String(indexed=True)
@@ -83,7 +83,7 @@ class Dispute(Entity):
     case = String(default="")
 
 
-class Case(Entity):
+class Case(Row):
     __alias__ = "id"
     id = String()
     court = ManyToOne("Court", "cases")
@@ -101,20 +101,20 @@ class Case(Entity):
     ledger_entries = OneToMany("LedgerEntry", "case")
 
 
-class Verdict(Entity):
+class Verdict(Row):
     __alias__ = "id"
     id = String()
     case = ManyToOne("Case", "verdicts")
     issued_by = ManyToOne("Judge", "verdicts")
     decision = String(default="")
     reasoning_ref = String(default="")
-    status = String(default="draft")  # draft | issued | final
+    status = String(default="draft")  # draft | issued | final | overturned
     contract = String(default="")
     issued_at = Integer(default=0)
     penalties = OneToMany("Penalty", "verdict")
 
 
-class Appeal(Entity):
+class Appeal(Row):
     __alias__ = "id"
     id = String()
     case = ManyToOne("Case", "appeals")
@@ -128,12 +128,13 @@ class Appeal(Entity):
     ledger_entries = OneToMany("LedgerEntry", "appeal")
 
 
-class Penalty(Entity):
+class Penalty(Row):
     __alias__ = "id"
     id = String()
     verdict = ManyToOne("Verdict", "penalties")
     target = String(default="")
-    kind = String(default="fine")  # fine | restitution | community_service | suspension | revocation | injunction
+    # fine | restitution | community_service | suspension | revocation | injunction | freeze | termination
+    kind = String(default="fine")
     amount = Integer(default=0)
     symbol = String(default="")
     status = String(default="pending")  # pending | executed | waived
@@ -143,7 +144,7 @@ class Penalty(Entity):
     ledger_entries = OneToMany("LedgerEntry", "penalty")
 
 
-class Tender(Entity):
+class Tender(Row):
     __alias__ = "id"
     id = String()
     title = String(default="")
@@ -158,7 +159,7 @@ class Tender(Entity):
     bids = OneToMany("Bid", "tender")
 
 
-class Bid(Entity):
+class Bid(Row):
     __alias__ = "id"
     id = String()
     tender = ManyToOne("Tender", "bids")
@@ -172,7 +173,7 @@ class Bid(Entity):
     scores = OneToMany("BidScore", "bid")
 
 
-class BidScore(Entity):
+class BidScore(Row):
     __alias__ = "id"
     id = String()
     bid = ManyToOne("Bid", "scores")

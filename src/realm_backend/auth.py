@@ -54,7 +54,7 @@ def permissions(principal):
         return {"all"}
     if principal == chain.ANONYMOUS:
         return set()
-    from ggg import Appointment, GuestUser, User
+    from ggg import Appointment, Authority, GuestUser, Quarter, User
 
     held = {"self.join"}
     user = User[principal]
@@ -65,12 +65,17 @@ def permissions(principal):
     guest = GuestUser[principal]
     if guest:
         held |= set(guest.permissions or [])
+    held |= {"quarter.sync"} if Quarter[principal] else set()
     for a in each(Appointment, "user", principal):
-        if a.status == "active":
-            if a.position.profile:
-                held |= set(a.position.profile.allowed_to or [])
-            if a.position.department:
-                held |= {p.id for p in a.position.department.permissions}
+        pos = a.position
+        if a.status != "active" or (pos.organization and pos.organization.status != "active"):
+            continue
+        if pos.profile:
+            held |= set(pos.profile.allowed_to or [])
+        if pos.department:
+            held |= {p.id for p in pos.department.permissions}
+            held |= {op for auth in each(Authority, "target", f"Department:{pos.department.id}")
+                     for op in auth.operations or []}
     return held
 
 

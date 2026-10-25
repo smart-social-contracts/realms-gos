@@ -20,7 +20,7 @@ def spec_ops():
             continue
         perms = re.findall(r"`([a-z_]+(?:\.[a-z_*]+)+)`", perm_cell)
         flags = {f: f in flag_cell for f in FLAGS}
-        flags["public"] = "public" in perm_cell
+        flags["public"] = "(public)" in perm_cell
         for i, name in enumerate(names):
             if len(perms) == len(names):
                 allowed = {perms[i]}

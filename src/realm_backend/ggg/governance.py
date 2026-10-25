@@ -1,9 +1,9 @@
-from ic_python_db import Entity, Integer, ManyToOne, OneToMany, String
+from ic_python_db import Integer, ManyToOne, OneToMany, String
 
-from db import Json
+from db import Json, Row
 
 
-class Proposal(Entity):
+class Proposal(Row):
     __alias__ = "id"
     id = String()
     title = String(default="")
@@ -22,7 +22,7 @@ class Proposal(Entity):
     votes = OneToMany("Vote", "proposal")
 
 
-class Vote(Entity):
+class Vote(Row):
     __alias__ = "id"
     id = String()
     proposal = ManyToOne("Proposal", "votes")
@@ -32,7 +32,7 @@ class Vote(Entity):
     cast_at = Integer(default=0)
 
 
-class Mandate(Entity):
+class Mandate(Row):
     __alias__ = "id"
     id = String()
     title = String(default="")
@@ -44,7 +44,7 @@ class Mandate(Entity):
     contracts = OneToMany("Contract", "mandate")
 
 
-class Contract(Entity):
+class Contract(Row):
     __alias__ = "id"
     id = String()
     title = String(default="")

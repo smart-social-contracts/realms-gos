@@ -43,7 +43,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=()):
         by = signer or chain.caller()
         user = args.pop("on_behalf_of", None) or by
         auth.authorize(user, by, name, spec, args, origin, declared)
-        governing = spec["governed"](args) if spec["governed"] and origin != "replay" else None
+        governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
         if governing is not None and not direct(governing):
             import proposals
 
@@ -76,7 +76,7 @@ def audit(name, user, by, origin, args, out):
     if len(json.dumps(kept)) > 2000:
         kept = {"keys": sorted(kept)}
     Event(id=str(Event.max_id() + 1), op=name, user=user, by=by, origin=origin, args=kept,
-          result={k: v for k, v in out.items() if isinstance(v, (str, int, bool))}, at=chain.now())
+          result={k: v for k, v in out.items() if k not in SECRET and isinstance(v, (str, int, bool))}, at=chain.now())
     old = Event[str(Event.max_id() - EVENTS_KEPT)]
     if old:
         old.delete()

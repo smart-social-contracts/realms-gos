@@ -7,8 +7,24 @@ __basilisk_features__ = ["shell", "browse"]
 
 Database.init(db_storage=StableBTreeMap[str, str](memory_id=1, max_key_size=256, max_value_size=100_000))
 
+import assets  # noqa: E402,F401
+import codex  # noqa: E402,F401
+import crypto  # noqa: E402,F401
+import delegation  # noqa: E402,F401
+import extensions  # noqa: E402,F401
+import federation  # noqa: E402,F401
+import justice  # noqa: E402,F401
+import licenses  # noqa: E402,F401
+import members  # noqa: E402,F401
+import notifications  # noqa: E402,F401
+import orgs  # noqa: E402,F401
+import procurement  # noqa: E402,F401
 import proposals  # noqa: E402,F401
+import quarters  # noqa: E402,F401
 import setup  # noqa: E402,F401
+import tasks  # noqa: E402,F401
+import taxes  # noqa: E402,F401
+import treasury  # noqa: E402,F401
 from op import dispatch, run  # noqa: E402
 
 
@@ -23,13 +39,316 @@ def post_upgrade_() -> void:
 
 
 @update
+def allocation_rule_draft(args: text) -> Async[text]: return (yield from dispatch(treasury.allocation_rule_draft, args))
+
+@update
+def allocation_rule_propose(args: text) -> Async[text]: return (yield from dispatch(treasury.allocation_rule_propose, args))
+
+@update
+def appeal_decide(args: text) -> Async[text]: return (yield from dispatch(justice.appeal_decide, args))
+
+@update
+def appeal_file(args: text) -> Async[text]: return (yield from dispatch(justice.appeal_file, args))
+
+@update
+def appoint(args: text) -> Async[text]: return (yield from dispatch(orgs.appoint, args))
+
+@update
+def appoint_acting(args: text) -> Async[text]: return (yield from dispatch(orgs.appoint_acting, args))
+
+@update
+def appointment_end(args: text) -> Async[text]: return (yield from dispatch(orgs.appointment_end, args))
+
+@update
+def authority_grant(args: text) -> Async[text]: return (yield from dispatch(orgs.authority_grant, args))
+
+@update
+def authority_revoke(args: text) -> Async[text]: return (yield from dispatch(orgs.authority_revoke, args))
+
+@update
+def bid_score(args: text) -> Async[text]: return (yield from dispatch(procurement.bid_score, args))
+
+@update
+def bid_submit(args: text) -> Async[text]: return (yield from dispatch(procurement.bid_submit, args))
+
+@update
+def bid_withdraw(args: text) -> Async[text]: return (yield from dispatch(procurement.bid_withdraw, args))
+
+@update
+def bids_reveal(args: text) -> Async[text]: return (yield from dispatch(procurement.bids_reveal, args))
+
+@update
+def budget_amend(args: text) -> Async[text]: return (yield from dispatch(treasury.budget_amend, args))
+
+@update
+def budget_draft(args: text) -> Async[text]: return (yield from dispatch(treasury.budget_draft, args))
+
+@update
+def budget_propose(args: text) -> Async[text]: return (yield from dispatch(treasury.budget_propose, args))
+
+@update
+def case_assign(args: text) -> Async[text]: return (yield from dispatch(justice.case_assign, args))
+
+@update
+def codex_install(args: text) -> Async[text]: return (yield from dispatch(codex.codex_install, args))
+
+@update
+def codex_revert(args: text) -> Async[text]: return (yield from dispatch(codex.codex_revert, args))
+
+@query
+def codex_status(args: text) -> text: return run(dispatch(codex.codex_status, args))
+
+@update
+def codex_uninstall(args: text) -> Async[text]: return (yield from dispatch(codex.codex_uninstall, args))
+
+@update
 def contract_create(args: text) -> Async[text]: return (yield from dispatch(proposals.contract_create, args))
 
 @update
 def contract_terminate(args: text) -> Async[text]: return (yield from dispatch(proposals.contract_terminate, args))
 
 @update
+def court_create(args: text) -> Async[text]: return (yield from dispatch(justice.court_create, args))
+
+@update
+def credential_issue(args: text) -> Async[text]: return (yield from dispatch(assets.credential_issue, args))
+
+@update
+def credential_revoke(args: text) -> Async[text]: return (yield from dispatch(assets.credential_revoke, args))
+
+@query
+def credential_verify(args: text) -> text: return run(dispatch(assets.credential_verify, args))
+
+@query
+def crypto_access(args: text) -> text: return run(dispatch(crypto.crypto_access, args))
+
+@update
+def crypto_derive_key(args: text) -> Async[text]: return (yield from dispatch(crypto.crypto_derive_key, args))
+
+@query
+def crypto_envelope(args: text) -> text: return run(dispatch(crypto.crypto_envelope, args))
+
+@update
+def crypto_grant(args: text) -> Async[text]: return (yield from dispatch(crypto.crypto_grant, args))
+
+@update
+def crypto_public_key(args: text) -> Async[text]: return (yield from dispatch(crypto.crypto_public_key, args))
+
+@update
+def crypto_revoke(args: text) -> Async[text]: return (yield from dispatch(crypto.crypto_revoke, args))
+
+@query
+def crypto_scopes(args: text) -> text: return run(dispatch(crypto.crypto_scopes, args))
+
+@query
+def delegable_operations(args: text) -> text: return run(dispatch(delegation.delegable_operations, args))
+
+@update
+def delegation_accept(args: text) -> Async[text]: return (yield from dispatch(delegation.delegation_accept, args))
+
+@update
+def delegation_grant(args: text) -> Async[text]: return (yield from dispatch(delegation.delegation_grant, args))
+
+@query
+def delegation_list(args: text) -> text: return run(dispatch(delegation.delegation_list, args))
+
+@update
+def delegation_request(args: text) -> Async[text]: return (yield from dispatch(delegation.delegation_request, args))
+
+@update
+def delegation_request_decide(args: text) -> Async[text]: return (yield from dispatch(delegation.delegation_request_decide, args))
+
+@update
+def delegation_revoke(args: text) -> Async[text]: return (yield from dispatch(delegation.delegation_revoke, args))
+
+@query
+def department_chart(args: text) -> text: return run(dispatch(orgs.department_chart, args))
+
+@update
+def department_create(args: text) -> Async[text]: return (yield from dispatch(orgs.department_create, args))
+
+@update
+def department_delete(args: text) -> Async[text]: return (yield from dispatch(orgs.department_delete, args))
+
+@update
+def department_edit(args: text) -> Async[text]: return (yield from dispatch(orgs.department_edit, args))
+
+@update
+def department_expel(args: text) -> Async[text]: return (yield from dispatch(orgs.department_expel, args))
+
+@query
+def department_get(args: text) -> text: return run(dispatch(orgs.department_get, args))
+
+@query
+def department_list(args: text) -> text: return run(dispatch(orgs.department_list, args))
+
+@update
+def department_set_policy(args: text) -> Async[text]: return (yield from dispatch(orgs.department_set_policy, args))
+
+@update
+def dispute_accept(args: text) -> Async[text]: return (yield from dispatch(justice.dispute_accept, args))
+
+@update
+def dispute_file(args: text) -> Async[text]: return (yield from dispatch(justice.dispute_file, args))
+
+@query
+def dispute_get(args: text) -> text: return run(dispatch(justice.dispute_get, args))
+
+@query
+def dispute_list_all(args: text) -> text: return run(dispatch(justice.dispute_list_all, args))
+
+@update
+def dispute_reject(args: text) -> Async[text]: return (yield from dispatch(justice.dispute_reject, args))
+
+@update
+def dispute_withdraw(args: text) -> Async[text]: return (yield from dispatch(justice.dispute_withdraw, args))
+
+@update
+def document_delete(args: text) -> Async[text]: return (yield from dispatch(crypto.document_delete, args))
+
+@query
+def document_get(args: text) -> text: return run(dispatch(crypto.document_get, args))
+
+@query
+def document_list(args: text) -> text: return run(dispatch(crypto.document_list, args))
+
+@update
+def document_revoke(args: text) -> Async[text]: return (yield from dispatch(crypto.document_revoke, args))
+
+@update
+def document_share(args: text) -> Async[text]: return (yield from dispatch(crypto.document_share, args))
+
+@update
+def document_store(args: text) -> Async[text]: return (yield from dispatch(crypto.document_store, args))
+
+@update
+def enforcement_escalate(args: text) -> Async[text]: return (yield from dispatch(justice.enforcement_escalate, args))
+
+@update
+def enforcement_notify(args: text) -> Async[text]: return (yield from dispatch(justice.enforcement_notify, args))
+
+@update
+def enforcement_record(args: text) -> Async[text]: return (yield from dispatch(justice.enforcement_record, args))
+
+@query
+def events(args: text) -> text: return run(dispatch(notifications.events, args))
+
+@update
+def evidence_evaluate(args: text) -> Async[text]: return (yield from dispatch(justice.evidence_evaluate, args))
+
+@update
+def evidence_submit(args: text) -> Async[text]: return (yield from dispatch(justice.evidence_submit, args))
+
+@update
+def extension_call(args: text) -> Async[text]: return (yield from dispatch(extensions.extension_call, args))
+
+@update
+def extension_install(args: text) -> Async[text]: return (yield from dispatch(extensions.extension_install, args))
+
+@query
+def extension_list(args: text) -> text: return run(dispatch(extensions.extension_list, args))
+
+@update
+def extension_set_access(args: text) -> Async[text]: return (yield from dispatch(extensions.extension_set_access, args))
+
+@update
+def extension_uninstall(args: text) -> Async[text]: return (yield from dispatch(extensions.extension_uninstall, args))
+
+@update
+def federal_vote_cancel(args: text) -> Async[text]: return (yield from dispatch(federation.federal_vote_cancel, args))
+
+@update
+def federal_vote_finalize(args: text) -> Async[text]: return (yield from dispatch(federation.federal_vote_finalize, args))
+
+@update
+def federal_vote_propose(args: text) -> Async[text]: return (yield from dispatch(federation.federal_vote_propose, args))
+
+@update
+def federation_message(args: text) -> Async[text]: return (yield from dispatch(federation.federation_message, args))
+
+@update
+def fund_create(args: text) -> Async[text]: return (yield from dispatch(treasury.fund_create, args))
+
+@update
 def governance_update(args: text) -> Async[text]: return (yield from dispatch(proposals.governance_update, args))
+
+@update
+def identity_review(args: text) -> Async[text]: return (yield from dispatch(members.identity_review, args))
+
+@update
+def identity_submit(args: text) -> Async[text]: return (yield from dispatch(members.identity_submit, args))
+
+@update
+def invite_create(args: text) -> Async[text]: return (yield from dispatch(members.invite_create, args))
+
+@update
+def invite_list(args: text) -> Async[text]: return (yield from dispatch(members.invite_list, args))
+
+@update
+def invite_revoke(args: text) -> Async[text]: return (yield from dispatch(members.invite_revoke, args))
+
+@update
+def invoice_check(args: text) -> Async[text]: return (yield from dispatch(treasury.invoice_check, args))
+
+@update
+def invoice_create(args: text) -> Async[text]: return (yield from dispatch(treasury.invoice_create, args))
+
+@update
+def invoice_refresh(args: text) -> Async[text]: return (yield from dispatch(treasury.invoice_refresh, args))
+
+@query
+def join_targets(args: text) -> text: return run(dispatch(quarters.join_targets, args))
+
+@update
+def judge_appoint(args: text) -> Async[text]: return (yield from dispatch(justice.judge_appoint, args))
+
+@update
+def judge_revoke(args: text) -> Async[text]: return (yield from dispatch(justice.judge_revoke, args))
+
+@update
+def land_freeze(args: text) -> Async[text]: return (yield from dispatch(assets.land_freeze, args))
+
+@query
+def land_list(args: text) -> text: return run(dispatch(assets.land_list, args))
+
+@query
+def land_map(args: text) -> text: return run(dispatch(assets.land_map, args))
+
+@update
+def land_mint_nft(args: text) -> Async[text]: return (yield from dispatch(assets.land_mint_nft, args))
+
+@update
+def land_register(args: text) -> Async[text]: return (yield from dispatch(assets.land_register, args))
+
+@update
+def land_transfer(args: text) -> Async[text]: return (yield from dispatch(assets.land_transfer, args))
+
+@update
+def land_unfreeze(args: text) -> Async[text]: return (yield from dispatch(assets.land_unfreeze, args))
+
+@query
+def ledger_view(args: text) -> text: return run(dispatch(treasury.ledger_view, args))
+
+@update
+def license_apply(args: text) -> Async[text]: return (yield from dispatch(licenses.license_apply, args))
+
+@update
+def license_decide(args: text) -> Async[text]: return (yield from dispatch(licenses.license_decide, args))
+
+@query
+def license_list(args: text) -> text: return run(dispatch(licenses.license_list, args))
+
+@update
+def license_renew(args: text) -> Async[text]: return (yield from dispatch(licenses.license_renew, args))
+
+@update
+def license_revoke(args: text) -> Async[text]: return (yield from dispatch(licenses.license_revoke, args))
+
+@update
+def license_suspend(args: text) -> Async[text]: return (yield from dispatch(licenses.license_suspend, args))
+
+@query
+def license_verify(args: text) -> text: return run(dispatch(licenses.license_verify, args))
 
 @update
 def mandate_assign_executor(args: text) -> Async[text]: return (yield from dispatch(proposals.mandate_assign_executor, args))
@@ -39,6 +358,84 @@ def mandate_create(args: text) -> Async[text]: return (yield from dispatch(propo
 
 @update
 def mandate_revoke(args: text) -> Async[text]: return (yield from dispatch(proposals.mandate_revoke, args))
+
+@query
+def me(args: text) -> text: return run(dispatch(members.me, args))
+
+@query
+def my_invoices(args: text) -> text: return run(dispatch(treasury.my_invoices, args))
+
+@update
+def nft_token_register(args: text) -> Async[text]: return (yield from dispatch(treasury.nft_token_register, args))
+
+@query
+def notification_list(args: text) -> text: return run(dispatch(notifications.notification_list, args))
+
+@update
+def notification_read(args: text) -> Async[text]: return (yield from dispatch(notifications.notification_read, args))
+
+@update
+def notification_send(args: text) -> Async[text]: return (yield from dispatch(notifications.notification_send, args))
+
+@query
+def ops_list(args: text) -> text: return run(dispatch(notifications.ops_list, args))
+
+@update
+def orchestration_decide(args: text) -> Async[text]: return (yield from dispatch(setup.orchestration_decide, args))
+
+@update
+def organization_edit(args: text) -> Async[text]: return (yield from dispatch(orgs.organization_edit, args))
+
+@query
+def organization_get(args: text) -> text: return run(dispatch(orgs.organization_get, args))
+
+@query
+def organization_list(args: text) -> text: return run(dispatch(orgs.organization_list, args))
+
+@update
+def organization_register(args: text) -> Async[text]: return (yield from dispatch(orgs.organization_register, args))
+
+@update
+def organization_set_status(args: text) -> Async[text]: return (yield from dispatch(orgs.organization_set_status, args))
+
+@update
+def payment_account_add(args: text) -> Async[text]: return (yield from dispatch(treasury.payment_account_add, args))
+
+@update
+def payment_account_remove(args: text) -> Async[text]: return (yield from dispatch(treasury.payment_account_remove, args))
+
+@update
+def payroll_run(args: text) -> Async[text]: return (yield from dispatch(treasury.payroll_run, args))
+
+@update
+def penalty_execute(args: text) -> Async[text]: return (yield from dispatch(justice.penalty_execute, args))
+
+@update
+def period_close(args: text) -> Async[text]: return (yield from dispatch(treasury.period_close, args))
+
+@update
+def period_open(args: text) -> Async[text]: return (yield from dispatch(treasury.period_open, args))
+
+@update
+def position_close(args: text) -> Async[text]: return (yield from dispatch(orgs.position_close, args))
+
+@update
+def position_create(args: text) -> Async[text]: return (yield from dispatch(orgs.position_create, args))
+
+@update
+def position_edit(args: text) -> Async[text]: return (yield from dispatch(orgs.position_edit, args))
+
+@update
+def private_data_update(args: text) -> Async[text]: return (yield from dispatch(members.private_data_update, args))
+
+@update
+def profile_create(args: text) -> Async[text]: return (yield from dispatch(members.profile_create, args))
+
+@update
+def profile_edit(args: text) -> Async[text]: return (yield from dispatch(members.profile_edit, args))
+
+@update
+def profile_update(args: text) -> Async[text]: return (yield from dispatch(members.profile_update, args))
 
 @update
 def proposal_create(args: text) -> Async[text]: return (yield from dispatch(proposals.proposal_create, args))
@@ -64,11 +461,227 @@ def proposal_vote(args: text) -> Async[text]: return (yield from dispatch(propos
 @update
 def proposal_withdraw(args: text) -> Async[text]: return (yield from dispatch(proposals.proposal_withdraw, args))
 
+@update
+def quarter_configure(args: text) -> Async[text]: return (yield from dispatch(quarters.quarter_configure, args))
+
+@update
+def quarter_deregister(args: text) -> Async[text]: return (yield from dispatch(quarters.quarter_deregister, args))
+
+@query
+def quarter_directory(args: text) -> text: return run(dispatch(quarters.quarter_directory, args))
+
+@update
+def quarter_join_federation(args: text) -> Async[text]: return (yield from dispatch(quarters.quarter_join_federation, args))
+
+@update
+def quarter_register(args: text) -> Async[text]: return (yield from dispatch(quarters.quarter_register, args))
+
+@update
+def quarter_report(args: text) -> Async[text]: return (yield from dispatch(quarters.quarter_report, args))
+
+@update
+def quarter_secede(args: text) -> Async[text]: return (yield from dispatch(quarters.quarter_secede, args))
+
+@update
+def quarter_sync(args: text) -> Async[text]: return (yield from dispatch(quarters.quarter_sync, args))
+
+@update
+def realm_configure(args: text) -> Async[text]: return (yield from dispatch(setup.realm_configure, args))
+
+@update
+def realm_configure_branding(args: text) -> Async[text]: return (yield from dispatch(setup.realm_configure_branding, args))
+
+@update
+def realm_configure_infrastructure(args: text) -> Async[text]: return (yield from dispatch(setup.realm_configure_infrastructure, args))
+
+@update
+def realm_configure_tokens(args: text) -> Async[text]: return (yield from dispatch(setup.realm_configure_tokens, args))
+
+@update
+def realm_configure_trust_policy(args: text) -> Async[text]: return (yield from dispatch(setup.realm_configure_trust_policy, args))
+
+@query
+def realm_export(args: text) -> text: return run(dispatch(setup.realm_export, args))
+
 @query
 def realm_info(args: text) -> text: return run(dispatch(setup.realm_info, args))
+
+@update
+def realm_join(args: text) -> Async[text]: return (yield from dispatch(members.realm_join, args))
+
+@query
+def realm_monitor(args: text) -> text: return run(dispatch(setup.realm_monitor, args))
+
+@update
+def realm_register(args: text) -> Async[text]: return (yield from dispatch(setup.realm_register, args))
+
+@update
+def realm_upgrade(args: text) -> Async[text]: return (yield from dispatch(setup.realm_upgrade, args))
+
+@update
+def report_issue(args: text) -> Async[text]: return (yield from dispatch(treasury.report_issue, args))
+
+@query
+def report_view(args: text) -> text: return run(dispatch(treasury.report_view, args))
+
+@update
+def representative_add(args: text) -> Async[text]: return (yield from dispatch(orgs.representative_add, args))
+
+@update
+def representative_remove(args: text) -> Async[text]: return (yield from dispatch(orgs.representative_remove, args))
+
+@query
+def resolution_query(args: text) -> text: return run(dispatch(justice.resolution_query, args))
+
+@update
+def role_assign(args: text) -> Async[text]: return (yield from dispatch(members.role_assign, args))
+
+@update
+def role_revoke(args: text) -> Async[text]: return (yield from dispatch(members.role_revoke, args))
+
+@query
+def scale_status(args: text) -> text: return run(dispatch(quarters.scale_status, args))
+
+@update
+def self_change_quarter(args: text) -> Async[text]: return (yield from dispatch(quarters.self_change_quarter, args))
+
+@update
+def setup_launch(args: text) -> Async[text]: return (yield from dispatch(setup.setup_launch, args))
+
+@update
+def setup_state(args: text) -> Async[text]: return (yield from dispatch(setup.setup_state, args))
+
+@update
+def setup_step(args: text) -> Async[text]: return (yield from dispatch(setup.setup_step, args))
+
+@update
+def shell(args: text) -> Async[text]: return (yield from dispatch(setup.shell, args))
+
+@update
+def sidebar_configure(args: text) -> Async[text]: return (yield from dispatch(extensions.sidebar_configure, args))
 
 @query
 def status(args: text) -> text: return run(dispatch(setup.status, args))
 
+@update
+def task_cancel(args: text) -> Async[text]: return (yield from dispatch(tasks.task_cancel, args))
+
+@update
+def task_create(args: text) -> Async[text]: return (yield from dispatch(tasks.task_create, args))
+
+@update
+def task_delete(args: text) -> Async[text]: return (yield from dispatch(tasks.task_delete, args))
+
+@update
+def task_edit(args: text) -> Async[text]: return (yield from dispatch(tasks.task_edit, args))
+
+@query
+def task_list(args: text) -> text: return run(dispatch(tasks.task_list, args))
+
+@query
+def task_logs(args: text) -> text: return run(dispatch(tasks.task_logs, args))
+
+@update
+def task_run(args: text) -> Async[text]: return (yield from dispatch(tasks.task_run, args))
+
+@update
+def task_schedule(args: text) -> Async[text]: return (yield from dispatch(tasks.task_schedule, args))
+
+@update
+def tax_assess(args: text) -> Async[text]: return (yield from dispatch(taxes.tax_assess, args))
+
+@update
+def tax_declare(args: text) -> Async[text]: return (yield from dispatch(taxes.tax_declare, args))
+
+@update
+def tax_policy_draft(args: text) -> Async[text]: return (yield from dispatch(taxes.tax_policy_draft, args))
+
+@update
+def tax_policy_propose(args: text) -> Async[text]: return (yield from dispatch(taxes.tax_policy_propose, args))
+
+@update
+def tender_award(args: text) -> Async[text]: return (yield from dispatch(procurement.tender_award, args))
+
+@update
+def tender_cancel(args: text) -> Async[text]: return (yield from dispatch(procurement.tender_cancel, args))
+
+@update
+def tender_close(args: text) -> Async[text]: return (yield from dispatch(procurement.tender_close, args))
+
+@update
+def tender_create(args: text) -> Async[text]: return (yield from dispatch(procurement.tender_create, args))
+
+@query
+def tender_get(args: text) -> text: return run(dispatch(procurement.tender_get, args))
+
+@query
+def tender_list(args: text) -> text: return run(dispatch(procurement.tender_list, args))
+
+@update
+def tender_open(args: text) -> Async[text]: return (yield from dispatch(procurement.tender_open, args))
+
+@update
+def token_force_transfer(args: text) -> Async[text]: return (yield from dispatch(treasury.token_force_transfer, args))
+
+@update
+def token_freeze(args: text) -> Async[text]: return (yield from dispatch(treasury.token_freeze, args))
+
+@update
+def token_register(args: text) -> Async[text]: return (yield from dispatch(treasury.token_register, args))
+
+@update
+def transfer_create(args: text) -> Async[text]: return (yield from dispatch(treasury.transfer_create, args))
+
+@update
+def transfer_revert(args: text) -> Async[text]: return (yield from dispatch(treasury.transfer_revert, args))
+
+@update
+def treasury_configure(args: text) -> Async[text]: return (yield from dispatch(treasury.treasury_configure, args))
+
+@query
+def treasury_view(args: text) -> text: return run(dispatch(treasury.treasury_view, args))
+
+@update
+def user_add(args: text) -> Async[text]: return (yield from dispatch(members.user_add, args))
+
+@update
+def user_edit(args: text) -> Async[text]: return (yield from dispatch(members.user_edit, args))
+
+@query
+def user_get(args: text) -> text: return run(dispatch(members.user_get, args))
+
+@update
+def user_import(args: text) -> Async[text]: return (yield from dispatch(members.user_import, args))
+
+@query
+def user_list(args: text) -> text: return run(dispatch(members.user_list, args))
+
+@update
+def user_remove(args: text) -> Async[text]: return (yield from dispatch(members.user_remove, args))
+
+@update
+def user_set_status(args: text) -> Async[text]: return (yield from dispatch(members.user_set_status, args))
+
+@update
+def verdict_draft(args: text) -> Async[text]: return (yield from dispatch(justice.verdict_draft, args))
+
+@update
+def verdict_finalize(args: text) -> Async[text]: return (yield from dispatch(justice.verdict_finalize, args))
+
+@update
+def verdict_issue(args: text) -> Async[text]: return (yield from dispatch(justice.verdict_issue, args))
+
+@update
+def verdict_link_contract(args: text) -> Async[text]: return (yield from dispatch(justice.verdict_link_contract, args))
+
+@update
+def verdict_modify_terms(args: text) -> Async[text]: return (yield from dispatch(justice.verdict_modify_terms, args))
+
 @query
 def version(args: text) -> text: return run(dispatch(setup.version, args))
+
+@update
+def zone_clear(args: text) -> Async[text]: return (yield from dispatch(assets.zone_clear, args))
+
+@update
+def zone_set(args: text) -> Async[text]: return (yield from dispatch(assets.zone_set, args))

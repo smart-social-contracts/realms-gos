@@ -1,9 +1,9 @@
-from ic_python_db import Boolean, Entity, Integer, ManyToMany, ManyToOne, OneToMany, OneToOne, String
+from ic_python_db import Boolean, Integer, ManyToMany, ManyToOne, OneToMany, OneToOne, String
 
-from db import Json
+from db import Json, Row
 
 
-class Department(Entity):
+class Department(Row):
     __alias__ = "id"
     id = String()  # name
     description = String(default="")
@@ -23,7 +23,7 @@ class Department(Entity):
     tenders = OneToMany("Tender", "requester")
 
 
-class Organization(Entity):
+class Organization(Row):
     __alias__ = "id"
     id = String()  # name
     description = String(default="")
@@ -34,7 +34,7 @@ class Organization(Entity):
     ledger_entries = OneToMany("LedgerEntry", "organization")
 
 
-class Position(Entity):
+class Position(Row):
     __alias__ = "id"
     id = String()  # key, e.g. "civil-registry.clerk"
     department = ManyToOne("Department", "positions")
@@ -49,7 +49,7 @@ class Position(Entity):
     appointments = OneToMany("Appointment", "position")
 
 
-class Appointment(Entity):
+class Appointment(Row):
     __alias__ = "id"
     id = String()
     position = ManyToOne("Position", "appointments")
@@ -63,9 +63,9 @@ class Appointment(Entity):
     source_quarter = String(default="")
 
 
-class Authority(Entity):
+class Authority(Row):
     __alias__ = "id"
     id = String()
     grantor = ManyToOne("Department", "authorities")
-    target = String(default="")  # "Department:x" or "Quarter:canister-id"
+    target = String(default="", indexed=True)  # "Department:x" or "Quarter:canister-id"
     operations = Json([])

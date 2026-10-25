@@ -5,6 +5,18 @@ from ic_python_db import Entity, String
 PAGE, PAGE_MAX = 100, 500
 
 
+class Row(Entity):
+    """An entity whose indexed fields are indexed from creation, defaults included."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        if not kw.get("_loaded"):
+            for name in type(self)._indexed_properties():
+                value = getattr(self, name)
+                if value is not None:
+                    self.db().field_index_add(self._type, name, str(value), self._id)
+
+
 class Fail(Exception):
     """A refusal the caller should see: raised before anything is written."""
 

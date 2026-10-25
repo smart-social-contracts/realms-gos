@@ -81,7 +81,7 @@ organizations: **Clinic B** (health provider) and **BuildCo** (contractor). Agen
 
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
-| `realm_join` (with optional invite code) | `self.join` | | Bob joins with code `X7K-29Q` → `{user: "bob", status: "member"}` |
+| `realm_join` (with optional invite code) | `self.join` | | Bob joins with code `X7K-29Q` → `{user: "bob", status: "active", profiles: ["member"]}` |
 | `user_get`, `user_list` | `user.view` | read | Dana looks up `bob`: nickname, status, profiles |
 | `me` (own record, profiles, permissions, delegations) | `self.data_view` | read, delegable | Alice's dashboard: her profiles, permissions and the grant to Claude |
 | `profile_update` (nickname, avatar) | `self.update_public_profile` | delegable | Claude sets Alice's avatar `{avatar: "…/alice.png", on_behalf_of: "alice"}` |
@@ -96,8 +96,12 @@ organizations: **Clinic B** (health provider) and **BuildCo** (contractor). Agen
 | `profile_create`, `profile_edit` | `permission.grant` | governed | New profile `treasurer` → `[treasury.view, transfer.create]` |
 | `role_assign`, `role_revoke` (profile ↔ user) | `role.assign`, `role.revoke` | governed | Give Bob `treasurer` → proposal under the root department's policy |
 | `delegation_grant`, `delegation_revoke`, `delegation_accept` | `self.delegate` | | Alice lets Bob vote for her for 2 weeks while she travels |
-| `delegation_request` (by the delegate), `delegation_request_decide` (by the grantor) | `self.delegate` | | Claude asks for `[proposal.vote, proposal.create]`, 24 h; Alice approves only voting |
+| `delegation_request` (by the delegate: any signed-in principal, e.g. an AI connection) | `self.join` | | Claude asks Alice for `[proposal.vote, proposal.create]`, 24 h |
+| `delegation_request_decide` (by the grantor) | `self.delegate` | | Alice approves only voting |
 | `delegation_list`, `delegable_operations` | `self.data_view` | read | Alice's grants; delegable operations: `[proposal.vote, proposal.create, …]` |
+
+Governed identity operations follow the policy of the department named in their `department`
+argument (it must hold that permission through its positions or grants); otherwise the root's.
 
 ### Invariants
 
@@ -144,7 +148,7 @@ Two kinds of body:
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
 | `department_create` | `org.create` | governed | Create department Health under the root → proposal `P-12` |
-| `department_edit`, `department_delete` | `org.set_policy` | governed | Rename Roads to Mobility |
+| `department_edit`, `department_delete` | `org.set_policy` | governed | Move Roads under Infrastructure; make `dana` head of Civil Registry |
 | `department_set_policy` | `org.set_policy` | governed | Infrastructure goes from 1-of-1 to 2-of-3 with 50% quorum |
 | `department_get`, `department_list`, `department_chart` | `realm.data_view` | read | Civil Registry's chart: 3 positions, 7 of 9 seats filled |
 | `position_create`, `position_edit`, `position_close` | `org.manage_members` | governed | Open 2 `inspector` seats in Infrastructure at 2,400 REALM/month |
@@ -276,7 +280,7 @@ Removed: `Balance` (ledgers are the source of truth), `Instrument` (→ `Token`/
 - I-FIN-3: An invoice is `paid` only when the ledger shows the amount in its subaccount.
 - I-FIN-4: Adopted budgets, allocation rules and tax policies are frozen; changes create a new version.
 - I-FIN-5: A closed fiscal period accepts no new entries; corrections go into a restating report.
-- I-FIN-6: The realm can never move a member's own funds.
+- I-FIN-6: The realm never moves a member's own funds, except a court-ordered `token_force_transfer` on a realm-issued token (signing, governed).
 
 ## 6. Assets: land and NFTs
 
@@ -302,7 +306,12 @@ realm mints carries that header:
 | `ggg:payload_hash`, `ggg:payload_ref` | private content: hash and encrypted pointer only | `sha256:9f2c…`, `user:alice:rx-88` |
 
 Codices declare schemas (licence type, signer position, human signer required, transferable, public
-fields) in their manifest; GGG does not define any schema.
+fields) in their manifest; GGG does not define any schema. The active codex's manifest carries them as
+`credentials: {schema: {license, positions, collection, transferable, public, after_license}}`:
+`positions` lists accepted position ids or titles, `public` the only extra keys allowed on the token,
+and `after_license` (`keep` or `void`) whether credentials stand once their licence is gone (I-AST-3).
+The ICRC-7 ledger has no burn, so a revoked credential is frozen with a `ggg:revoked` reason.
+`credential_verify` takes the token's header and frozen flag as read from the ledger.
 
 ### Lifecycles
 
@@ -319,7 +328,7 @@ fields) in their manifest; GGG does not define any schema.
 | `land_freeze`, `land_unfreeze` | `nft.freeze` | signing | Freeze `L-17` during an ownership dispute |
 | `zone_set`, `zone_clear` | `self.data_manage` | delegable | Alice picks Riverside as her home zone |
 | `credential_issue` | `credential.sign` | signing | Dr. Ana issues `{schema: "health.prescription/1", holder: "alice", organization: "clinic-b", prepared_by: "records-bot"}` → `CRED` #4412 |
-| `credential_revoke` | `credential.sign` | signing | Revoke a diploma issued in error; the token is burned |
+| `credential_revoke` | `credential.sign` | signing | Revoke a diploma issued in error; the token is frozen as revoked |
 | `credential_verify` | — (public) | read | A pharmacy checks `CRED` #4412: valid, issuer licensed, not expired |
 
 ### Invariants
@@ -371,10 +380,10 @@ credential NFTs; GGG has no report entity.
 | `Court` | `id`, `name`, `operator` (`Entity:id`: a department for public courts, an organization for private ones), `level` (first instance, appellate, supreme, specialized), `jurisdiction`, `parent` → `Court`, `status`, `license` → `License` | | North First Instance Court, run by the Justice department; appeals go to Agora Appeals Court |
 | `Judge` | `id`, `user` → `User`, `court` → `Court`, `specialization`, `status`, `appointed_at` | | Judge Elena, North First Instance Court, civil |
 | `Dispute` | `id`, `claimant` → `User`, `respondent` (`Entity:id`), `subject` (`Entity:id`, e.g. a contract), `title`, `description_ref`, `status`, `case` → `Case` | A complaint before it is accepted. | `D-14`: Bob vs Infrastructure, "building permit refused unfairly", `filed` |
-| `Case` | `id`, `court` → `Court`, `plaintiff`, `defendant`, `judges` → `Judge`*, `title`, `status`, `filed_at`, `closed_at` | | `CASE-12` from `D-14`, North First Instance, Judge Elena, `in_progress` |
-| `Verdict` | `id`, `case` → `Case`, `issued_by` → `Judge`, `decision`, `reasoning_ref`, `issued_at` | | `CASE-12`: refusal annulled, issue the permit within 15 days |
+| `Case` | `id`, `court` → `Court`, `plaintiff`, `defendant`, `judges` → `Judge`*, `title`, `dispute` → `Dispute`, `evidence` (Json: encrypted refs and hashes), `status`, `filed_at`, `closed_at` | | `CASE-12` from `D-14`, North First Instance, Judge Elena, `in_progress` |
+| `Verdict` | `id`, `case` → `Case`, `issued_by` → `Judge`, `decision`, `reasoning_ref`, `status`, `contract` → `Contract`, `issued_at` | | `CASE-12`: refusal annulled, issue the permit within 15 days |
 | `Appeal` | `id`, `case` → `Case`, `verdict` → `Verdict`, `court` → `Court`, `appellant` → `User`, `grounds_ref`, `status`, `decision`, `new_verdict` → `Verdict` | | Infrastructure appeals `CASE-12` to Agora Appeals Court, `under_review` |
-| `Penalty` | `id`, `verdict` → `Verdict`, `target` (`Entity:id`), `kind` (fine, restitution, community service, suspension, revocation, injunction), `amount`, `symbol`, `status`, `due_at`, `executed_at`, `invoice` → `Invoice` | | Mallory: 500 REALM fine for spam, due in 30 days → `INV-520` |
+| `Penalty` | `id`, `verdict` → `Verdict`, `target` (`Entity:id`), `kind` (fine, restitution, community service, suspension, revocation, injunction, freeze, termination), `amount`, `symbol`, `status`, `due_at`, `executed_at`, `invoice` → `Invoice` | | Mallory: 500 REALM fine for spam, due in 30 days → `INV-520` |
 
 ### Lifecycles
 
@@ -382,6 +391,7 @@ credential NFTs; GGG has no report entity.
 - `Case.status`: `filed` → `assigned` → `in_progress` → `verdict_issued` → `closed`;
   `verdict_issued` → `appealed` → `verdict_issued` | `closed`; any open state → `dismissed` |
   `transferred`.
+- `Verdict.status`: `draft` → `issued` → `final`; `issued` → `overturned` (appeal granted).
 - `Appeal.status`: `filed` → `under_review` → `granted` | `denied`; `filed` → `withdrawn`.
 - `Penalty.status`: `pending` → `executed` | `waived`.
 
@@ -422,7 +432,7 @@ credential NFTs; GGG has no report entity.
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
 | `Tender` | `id`, `title`, `description`, `requester` → `Department`, `status`, `opens_at`, `closes_at`, `rubric` (Json), `winner` → `Bid`, `contract` → `Contract` | Today's `Rfp`. | `T-5` Bike lane works, by Infrastructure, open 1–30 Nov, rubric: price 60%, quality 40% |
-| `Bid` | `id`, `tender` → `Tender`, `vendor` → `Organization`, `submitted_at`, `sealed`, `payload_ref`, `payload_hash`, `score` | Content is encrypted until the reveal. | BuildCo's bid on `T-5`, sealed until 30 Nov |
+| `Bid` | `id`, `tender` → `Tender`, `vendor` → `Organization`, `submitted_at`, `sealed`, `payload_ref`, `payload_hash` (`sha256:` of `price:nonce`), `price` (set at the reveal), `score` | Content is encrypted until the reveal. | BuildCo's bid on `T-5`, sealed until 30 Nov |
 | `BidScore` | `id`, `bid` → `Bid`, `evaluator` → `User`, `criterion`, `score`, `scored_at` | | Carla scores BuildCo's quality 8/10 |
 
 Removed: `RfpTransition` (the `Event` log records transitions), `VendorRecord` (derived from awarded
@@ -465,7 +475,7 @@ A realm can be one canister or a federation of quarters, one of which is the cap
 | `Calendar` | `id`, `realm` → `Realm`, `epoch`, `fiscal_period`, `voting_window`, `codex_release_cycle`, `benefit_cycle`, `service_payment_cycle`, `license_review_cycle`, `custom_cycles` (Json) | The realm's governance time cycles, in seconds. | Voting window 7 days, fiscal period 1 year, licence review every 2 years |
 | `Registry` | `id` (name), `description`, `principal_id` | A registry canister the realm is listed in. | `realm-registry`, `ufxgi-…` |
 | `Quarter` | `id` (canister id), `name`, `index`, `status`, `population`, `codex_id`, `codex_version`, `last_sync`, `last_activity_at` | Known on the capital. | North: population 1,240, `active`, codex agora 1.4.2 |
-| `Forward` | `id`, `subject` (`Entity:id`), `from`, `to`, `moved_at`, `signature` | Signed pointer left when a user moves quarter. Today's `EntityMigration`. | Bob moved North → South on 2026-09-01, signed by North |
+| `Forward` | `id`, `subject` (`Entity:id`), `origin`, `destination`, `moved_at`, `signature` | Signed pointer left when a user moves quarter. Today's `EntityMigration`. | Bob moved North → South on 2026-09-01, signed by North |
 | `FederalVote` | `id`, `origin_quarter`, `action` (Json), `rule` (Json), `hash`, `deadline`, `status`, `tally` (Json) | | `FV-3` Adopt tax policy 3: majority of quarters, deadline 15 Nov |
 | `FederalVoteLeg` | `id`, `vote` → `FederalVote`, `quarter`, `proposal_id`, `outcome`, `yes`, `no`, `abstain`, `eligible`, `status`, `hash` | One per quarter. | North on `FV-3`: 812 yes, 301 no of 1,240 eligible → passed |
 | `FederationMessage` | `id`, `topic`, `source`, `body` (Json), `response` (Json) | | North → capital: population report |
@@ -509,11 +519,13 @@ so no canister grows with the population of the whole federation.
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `Codex` | `id`, `version`, `checksum`, `status`, `manifest` (Json), `capabilities` (Json), `installed_at`, `previous` → `Codex` | The realm's policy package. | `agora` 1.4.2, `active`, capabilities `[invoice.create, notification.create, …]` |
+| `Codex` | `id` (`name@version`), `version`, `checksum`, `status` (`active`, `inactive`, `reverted`), `manifest` (Json), `capabilities` (Json: operation names), `source` (hooks module), `installed_at`, `previous` → `Codex` | The realm's policy package. At most one is `active`. | `agora@1.4.2`, `active`, capabilities `[invoice_create, notification_send, …]` |
 | `Extension` | `id` (name), `version`, `status`, `operations` (Json, declared), `access` (Json: profiles and departments), `sidebar` (Json) | Absorbs `MenuItemConfig`, `MenuCategoryConfig`, `MenuDepartmentVisibility`. | `voting` 2.1.0, for `[member]`, in the Governance menu |
 | `Task`, `TaskStep`, `TaskSchedule`, `TaskExecution`, `Call` | as in `ic-basilisk-toolkit` | Scheduled and multi-step automation. | Monthly payroll on the 1st; last run succeeded |
 | `Notification` | `id`, `recipient` (`Entity:id`: user, department or organization), `topic`, `title`, `body`, `href`, `sender`, `visibility`, `read_by` (Json), `at` | | To Alice: "P-7 passed", link `/proposals/P-7` |
 | `Event` | `id`, `op`, `user`, `by` (the signer, when delegated), `origin`, `args` (Json, secrets stripped), `result` (Json), `at` | New: the audit log. Append-only. | `proposal_vote` by `claude-conn` for `alice` at 09:31 → ok |
+| `KeyEnvelope` | `id` (`scope\|principal`), `scope`, `principal`, `wrapped_dek`, `granted_by`, `at` | A scope's data key, IBE-wrapped (vetKeys) for one principal. Scopes: `user:<principal>:…` (the owner manages), `dept:<department>:…` (its staff), `realm:…` (the root department's staff). | `dept:Health:doc:DOC-1` for `dr-ana` |
+| `Document` | `id`, `department`, `title`, `ref` (where the ciphertext lives), `hash`, `author`, `at` | A department document; its key scope is `dept:<department>:doc:<id>`. | Health's inspection report `DOC-1`, shared with Dr. Ana |
 
 Removed or merged: `Service` (services are provided by licensed organizations), `MarketPlace`
 (→ `Realm.marketplace_canister_id`), `RegistrationCode` (→ `Invite`), `DepartmentAuthority`
@@ -530,9 +542,11 @@ are the source of truth), `EntityMigration` (→ `Forward`), `Menu*` (→ `Exten
 | `extension_install`, `extension_uninstall` | `extension.install`, `extension.uninstall` | governed | Install `procurement` 1.0.3 (marketplace-approved) → vote |
 | `extension_call` | `extension.call` + the extension's declared operation | | The voting extension casts Alice's vote through `proposal_vote` |
 | `extension_set_access`, `sidebar_configure` | `realm.configure` | governed | Show `vault` only to Finance |
+| `extension_list` | `realm.data_view` | read | Alice's sidebar shows `voting`, not `vault` |
 | `task_create`, `task_edit`, `task_delete`, `task_run`, `task_schedule`, `task_cancel` | `task.*` | | Schedule a daily invoice check |
 | `task_list`, `task_logs` | `task.view` | read | Payroll task and its last 3 runs |
-| `notification_list`, `notification_read` | `self.data_view` | read, delegable | Alice's 4 unread notifications |
+| `notification_list` | `self.data_view` | read, delegable | Alice's 4 unread notifications |
+| `notification_read` (mark as read) | `self.data_manage` | delegable | Alice marks "P-7 passed" as read |
 | `notification_send` | `notification.send` | | Justice notifies Mallory of her fine |
 | `events` | `realm.monitor` | read | The last 100 audited calls |
 | `ops_list` | — (public) | read | geister reads it to build MCP tools |
@@ -545,6 +559,16 @@ are the source of truth), `EntityMigration` (→ `Forward`), `Menu*` (→ `Exten
 - I-EXT-3: Installing or upgrading codex or extension code requires the realm's trust policy
   (marketplace approval or trusted approvers).
 - I-EXT-4: The `Event` log is append-only.
+
+A codex is a `manifest.json` (`codex_api_version` 2, `hooks`, `capabilities`, configuration) and one hooks
+module, run in a fresh sandbox per call. A hook reads its context (the codex configuration, the realm, the
+time) and the read operations it declares, and returns `(op, args)` effects that the realm applies as itself
+with origin `codex`; Cedar refuses the undeclared ones. Hooks: `init` (after install), `on_user_register`
+`{user}`, `on_stage_change` `{stage}`, `assign_quarter` `{user, preferred, quarters}`. A failing hook never
+fails its caller; `codex_status` shows the codex unhealthy until a hook succeeds. Under
+`require_marketplace_approval`, code is accepted when its checksum is pinned in `trusted_approvers` as
+`sha256:<hex>`, or when the file registry reports it approved by a trusted approver (`trusted_approvers`,
+by default the realm's marketplace).
 
 ## 12. Realm setup and administration
 
@@ -564,7 +588,8 @@ are the source of truth), `EntityMigration` (→ `Forward`), `Menu*` (→ `Exten
 | `orchestration_decide` (approve or reject a Casals baton action for this realm) | `orchestration.approve` | | Approve Casals' action "upgrade North to 0.9.1" |
 | `realm_monitor` | `realm.monitor` | read | Cycles 4.2T, memory 310 MB |
 | `realm_export` | `db.export` | read | Export a snapshot for backup |
-| `document_*` (department documents: store, share, revoke) | `document.manage` | | Health stores an encrypted inspection report and shares it with Clinic B |
+| `document_*` (department documents: store, share, revoke, delete, list) | `document.manage` | | Health stores an encrypted inspection report and shares it with Clinic B |
+| `document_get` (the department's staff and key holders) | `self.data_view` | read | Dr. Ana fetches the report's reference and her wrapped key |
 | `crypto_*` (vetKeys, envelopes, sharing) | `self.data_manage` / scope rules | | Alice derives her vetKey to open a shared document |
 | `shell` (REPL; calls operations as the caller) | `shell.execute` | | An admin runs `ops.proposal_list({"status": "voting"})` |
 

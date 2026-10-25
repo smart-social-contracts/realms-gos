@@ -1,0 +1,115 @@
+import json
+
+import fake_chain
+import world
+from ggg import Department, Realm, Registry
+from kit import call, denied, ok
+
+APPROVED = json.dumps({"approved": True, "approver": "market"})
+
+
+def test_story_the_founder_sets_up_and_launches_agora():
+    world.build()
+    ok("setup_step", "ctl", step="install", network="ic", founder="frank")
+    ok("setup_step", "frank", step="realm", name="Agora", open_registration=True)
+    ok("setup_step", "frank", step="branding", primary_color="#1E6B52")
+    ok("setup_step", "frank", step="tokens", accounting_currency="ckUSDC")
+    state = ok("setup_state", "frank")
+    assert state["founder"] == "frank" and state["done"] == ["branding", "install", "realm", "tokens"]
+    assert state["todo"] == ["infrastructure", "trust_policy"] and state["realm"]["primary_color"] == "#1E6B52"
+    assert ok("setup_launch", "frank")["status"] == "alpha"
+    assert Realm["1"].status == "alpha" and ok("status", fake_chain.ANONYMOUS)["name"] == "Agora"
+    denied("realm_configure", "frank", open_registration=False)
+    assert "governed" in call("setup_step", "ctl", step="branding", logo_url="x")["error"]
+    assert "already launched" in call("setup_launch", "ctl")["error"]
+
+
+def test_I_ADM_1_test_flags_only_off_production_or_when_allowed_at_install():
+    world.build()
+    ok("setup_step", "ctl", step="install", network="ic")
+    assert "test flags" in call("realm_configure", "ctl", test_mode=True)["error"]
+    assert "test flags" in call("realm_configure", "ctl", test_flags={"fast_clock": True})["error"]
+    ok("realm_configure", "ctl", test_flags={"fast_clock": False})
+    Realm["1"].can_test_mode = True
+    ok("realm_configure", "ctl", test_mode=True)
+    Realm["1"].can_test_mode, Realm["1"].network = False, "local"
+    ok("realm_configure", "ctl", test_flags={"fast_clock": True})
+    assert Realm["1"].test_flags == {"fast_clock": True}
+
+
+def test_I_ADM_2_founder_configures_during_setup_then_it_is_governed():
+    world.build()
+    world.policy(Department["Administration"], 2, 3)
+    denied("setup_step", "alice", step="realm", name="Mine")
+    ok("setup_step", "ctl", step="install", network="local", founder="frank")
+    assert "set once" in call("setup_step", "frank", step="install", can_test_mode=True)["error"]
+    assert ok("realm_configure_branding", "frank", logo_url="/logo.png").get("configured") == ["logo_url"]
+    assert "unknown setup step" in call("setup_step", "frank", step="codex")["error"]
+    assert "cannot configure" in call("setup_step", "frank", step="branding", name="x")["error"]
+    assert "name the realm" in call("setup_launch", "frank")["error"]
+    ok("setup_step", "frank", step="realm", name="Agora")
+    ok("setup_launch", "frank")
+    out = ok("realm_configure", "ctl", open_registration=True)
+    assert out["requires_vote"] and not Realm["1"].open_registration
+    denied("setup_state", "alice")
+
+
+def test_I_ADM_3_an_upgrade_needs_a_release_the_trust_policy_accepts():
+    world.build()
+    ok("realm_configure_infrastructure", "ctl", file_registry_canister_id="registry", marketplace_canister_id="market")
+    fake_chain.state["replies"][("registry", "get_namespace_approval_icc")] = json.dumps({"approved": False})
+    assert "not approved" in call("realm_upgrade", "ctl", version="0.9.1", module_hash="sha256:aa")["error"]
+    fake_chain.state["replies"][("registry", "get_namespace_approval_icc")] = APPROVED
+    out = ok("realm_upgrade", "ctl", version="0.9.1", module_hash="sha256:aa")
+    assert (out["approved_by"], Realm["1"].manifest_data["upgrade"]["version"]) == ("market", "0.9.1")
+    assert fake_chain.state["calls"][-1] == ("registry", "get_namespace_approval_icc", "realm/0.9.1")
+    ok("realm_configure_trust_policy", "ctl", trusted_approvers=["reviewers"])
+    assert "does not trust" in call("realm_upgrade", "ctl", version="0.9.2", module_hash="sha256:bb")["error"]
+    denied("realm_upgrade", "alice", version="0.9.1", module_hash="sha256:aa")
+
+
+def test_register_in_the_realm_registry():
+    world.build()
+    ok("setup_step", "ctl", step="realm", name='Agora "the first"')
+    fake_chain.state["replies"][("reg", "register_realm")] = '(variant { Ok = "registered" })'
+    ok("realm_register", "ctl", registry="reg", url="https://agora.realms")
+    assert Registry["reg"].description == 'Agora "the first"'
+    assert fake_chain.state["calls"][-1][2].startswith('("Agora \\"the first\\"", "https://agora.realms", ""')
+    fake_chain.state["replies"][("reg2", "register_realm")] = '(variant { Err = "unpaid" })'
+    assert "refused" in call("realm_register", "ctl", registry="reg2")["error"] and Registry["reg2"] is None
+    denied("realm_register", "alice", registry="reg")
+
+
+def test_orchestration_decide_answers_the_casals_baton():
+    world.build()
+    assert "no Casals baton" in call("orchestration_decide", "ctl", action_id=7, decision="approve")["error"]
+    ok("realm_configure_infrastructure", "ctl", baton_canister_id="baton")
+    fake_chain.state["replies"][("baton", "submit_approval")] = json.dumps({"ok": True, "status": "APPROVED"})
+    assert ok("orchestration_decide", "ctl", action_id=7, decision="approve")["reply"]["status"] == "APPROVED"
+    fake_chain.state["replies"][("baton", "reject_action")] = json.dumps({"ok": False, "error": "already executed"})
+    assert "already executed" in call("orchestration_decide", "ctl", action_id=7, decision="reject")["error"]
+    assert "approve or reject" in call("orchestration_decide", "ctl", action_id=7, decision="maybe")["error"]
+    denied("orchestration_decide", "alice", action_id=7, decision="approve")
+
+
+def test_monitor_and_export():
+    world.build()
+    mon = ok("realm_monitor", "ctl")
+    assert mon["rows"]["Member"] == len(world.PEOPLE) and mon["status"] == "setup"
+    page = ok("realm_export", "ctl", entity="Member", count=3)
+    assert [r["id"] for r in page["rows"]] == ["alice", "bob", "dana"] and page["next"] == 4
+    assert "unknown entity" in call("realm_export", "ctl", entity="json")["error"]
+    denied("realm_monitor", "alice")
+    denied("realm_export", "alice", entity="Member")
+
+
+def test_shell_calls_operations_as_the_caller():
+    world.build()
+    p = ok("proposal_create", "alice", title="Bike lane")["proposal"]
+    out = ok("shell", "ctl", expr='ops.proposal_list({"status": "voting"})')["result"]
+    assert [x["id"] for x in out["proposals"]] == [p]
+    world.profile("console", "shell.execute")
+    world.person("bob", "console")
+    weak = ok("shell", "bob", expr=f'ops.proposal_finalize(proposal="{p}")')["result"]
+    assert not weak["ok"] and "proposal.manage" in weak["error"]
+    denied("shell", "alice", expr="1")

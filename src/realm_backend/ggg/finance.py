@@ -1,16 +1,16 @@
-from ic_python_db import Boolean, Entity, Integer, ManyToOne, OneToMany, OneToOne, String
+from ic_python_db import Boolean, Integer, ManyToOne, OneToMany, OneToOne, String
 
-from db import Json
+from db import Json, Row
 
 
-class Treasury(Entity):
+class Treasury(Row):
     __alias__ = "id"
     id = String(default="1")
     config = Json({"epoch": "monthly", "anchor_month": 1, "source_fund": "ROOT", "auto_allocate": False})
     realm = OneToOne("Realm", "treasury")
 
 
-class Token(Entity):
+class Token(Row):
     __alias__ = "id"
     id = String()  # symbol
     ledger = String(default="")
@@ -19,7 +19,7 @@ class Token(Entity):
     fee = Integer(default=0)
 
 
-class NFTToken(Entity):
+class NFTToken(Row):
     __alias__ = "id"
     id = String()  # symbol
     canister = String(default="")
@@ -31,7 +31,7 @@ class NFTToken(Entity):
     total_supply = Integer(default=0)
 
 
-class Fund(Entity):
+class Fund(Row):
     __alias__ = "id"
     id = String()  # code
     name = String(default="")
@@ -41,7 +41,7 @@ class Fund(Entity):
     ledger_entries = OneToMany("LedgerEntry", "fund")
 
 
-class FiscalPeriod(Entity):
+class FiscalPeriod(Row):
     __alias__ = "id"
     id = String()
     name = String(default="")
@@ -53,7 +53,7 @@ class FiscalPeriod(Entity):
     reports = OneToMany("FinancialReport", "period")
 
 
-class Budget(Entity):
+class Budget(Row):
     __alias__ = "id"
     id = String()
     fund = ManyToOne("Fund", "budgets")
@@ -66,7 +66,7 @@ class Budget(Entity):
     proposal = String(default="")
 
 
-class AllocationRule(Entity):
+class AllocationRule(Row):
     __alias__ = "id"
     id = String()
     source_fund = String(default="ROOT")
@@ -75,7 +75,7 @@ class AllocationRule(Entity):
     proposal = String(default="")
 
 
-class LedgerEntry(Entity):
+class LedgerEntry(Row):
     __alias__ = "id"
     id = String()
     transaction = String(indexed=True)
@@ -98,7 +98,7 @@ class LedgerEntry(Entity):
     description = String(default="")
 
 
-class Invoice(Entity):
+class Invoice(Row):
     __alias__ = "id"
     id = String()
     payer = String(indexed=True)  # "User:alice" or "Organization:clinic-b"
@@ -113,7 +113,7 @@ class Invoice(Entity):
     ledger_entries = OneToMany("LedgerEntry", "invoice")
 
 
-class Transfer(Entity):
+class Transfer(Row):
     __alias__ = "id"
     id = String()
     sender = String(default="")
@@ -127,7 +127,7 @@ class Transfer(Entity):
     ledger_entries = OneToMany("LedgerEntry", "transfer")
 
 
-class Trade(Entity):
+class Trade(Row):
     __alias__ = "id"
     id = String()
     contract = ManyToOne("Contract", "trades")
@@ -136,7 +136,7 @@ class Trade(Entity):
     status = String(default="pending")
 
 
-class PaymentAccount(Entity):
+class PaymentAccount(Row):
     __alias__ = "id"
     id = String()
     owner = String(indexed=True)
@@ -147,7 +147,7 @@ class PaymentAccount(Entity):
     verified = Boolean(default=False)
 
 
-class FinancialReport(Entity):
+class FinancialReport(Row):
     __alias__ = "id"
     id = String()
     kind = String(default="period_close")
@@ -159,7 +159,7 @@ class FinancialReport(Entity):
     supersedes = String(default="")
 
 
-class TaxPolicy(Entity):
+class TaxPolicy(Row):
     __alias__ = "id"
     id = String()
     status = String(default="draft", indexed=True)  # draft | proposed | adopted | superseded
@@ -169,7 +169,7 @@ class TaxPolicy(Entity):
     adopted_at = Integer(default=0)
 
 
-class TaxDeclaration(Entity):
+class TaxDeclaration(Row):
     __alias__ = "id"
     id = String()
     declarant = String(indexed=True)

@@ -1,9 +1,9 @@
-from ic_python_db import Boolean, Entity, Integer, ManyToMany, ManyToOne, OneToMany, String
+from ic_python_db import Boolean, Integer, ManyToMany, ManyToOne, OneToMany, String
 
-from db import Json
+from db import Json, Row
 
 
-class User(Entity):
+class User(Row):
     __alias__ = "id"
     id = String()  # principal
     nickname = String(default="")
@@ -14,21 +14,21 @@ class User(Entity):
     permissions = ManyToMany(["Permission"], "users")
 
 
-class Member(Entity):
+class Member(Row):
     __alias__ = "id"
     id = String()  # principal
     status = String(default="active", indexed=True)  # active | inactive | suspended | banned
     joined_at = Integer(default=0)
 
 
-class GuestUser(Entity):
+class GuestUser(Row):
     __alias__ = "id"
     id = String()  # principal
     home_quarter = String(default="")
     permissions = Json([])
 
 
-class Human(Entity):
+class Human(Row):
     __alias__ = "id"
     id = String()
     user = String(default="", indexed=True)
@@ -37,7 +37,7 @@ class Human(Entity):
     identities = OneToMany("Identity", "human")
 
 
-class Identity(Entity):
+class Identity(Row):
     __alias__ = "id"
     id = String()
     human = ManyToOne("Human", "identities")
@@ -48,7 +48,7 @@ class Identity(Entity):
     verified_at = Integer(default=0)
 
 
-class UserProfile(Entity):
+class UserProfile(Row):
     __alias__ = "id"
     id = String()  # name
     description = String(default="")
@@ -58,7 +58,7 @@ class UserProfile(Entity):
     positions = OneToMany("Position", "profile")
 
 
-class Permission(Entity):
+class Permission(Row):
     __alias__ = "id"
     id = String()  # the permission key, e.g. "transfer.create"
     description = String(default="")
@@ -69,7 +69,7 @@ class Permission(Entity):
     departments = ManyToMany(["Department"], "permissions")
 
 
-class Invite(Entity):
+class Invite(Row):
     __alias__ = "id"
     id = String()  # sha256 of the code
     profile = String(default="member")
@@ -83,7 +83,7 @@ class Invite(Entity):
     created_by = String(default="")
 
 
-class Delegation(Entity):
+class Delegation(Row):
     __alias__ = "id"
     id = String()
     grantor = String(indexed=True)
@@ -101,7 +101,7 @@ class Delegation(Entity):
     revoked_by = String(default="")
 
 
-class DelegationRequest(Entity):
+class DelegationRequest(Row):
     __alias__ = "id"
     id = String()
     grantor = String(indexed=True)

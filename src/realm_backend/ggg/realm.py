@@ -1,9 +1,9 @@
-from ic_python_db import Boolean, Entity, Integer, ManyToOne, OneToMany, OneToOne, String
+from ic_python_db import Boolean, Integer, ManyToOne, OneToMany, OneToOne, String
 
-from db import Json
+from db import Json, Row
 
 
-class Realm(Entity):
+class Realm(Row):
     __alias__ = "id"
     id = String(default="1")
     name = String(default="")
@@ -50,7 +50,7 @@ class Realm(Entity):
     test_flags = Json({})  # the test_mode_* switches
 
 
-class Calendar(Entity):
+class Calendar(Row):
     __alias__ = "id"
     id = String(default="1")
     realm = OneToOne("Realm", "calendar")
@@ -64,14 +64,14 @@ class Calendar(Entity):
     custom_cycles = Json({})
 
 
-class Registry(Entity):
+class Registry(Row):
     __alias__ = "id"
     id = String()
     description = String(default="")
     principal_id = String(default="")
 
 
-class Quarter(Entity):
+class Quarter(Row):
     __alias__ = "id"
     id = String()  # canister id
     name = String(default="")
@@ -84,7 +84,7 @@ class Quarter(Entity):
     last_activity_at = Integer(default=0)
 
 
-class Forward(Entity):
+class Forward(Row):
     __alias__ = "id"
     id = String()
     subject = String(indexed=True)
@@ -94,7 +94,7 @@ class Forward(Entity):
     signature = String(default="")
 
 
-class FederalVote(Entity):
+class FederalVote(Row):
     __alias__ = "id"
     id = String()
     origin_quarter = String(default="")
@@ -107,7 +107,7 @@ class FederalVote(Entity):
     legs = OneToMany("FederalVoteLeg", "vote")
 
 
-class FederalVoteLeg(Entity):
+class FederalVoteLeg(Row):
     __alias__ = "id"
     id = String()
     vote = ManyToOne("FederalVote", "legs")
@@ -122,7 +122,7 @@ class FederalVoteLeg(Entity):
     hash = String(default="")
 
 
-class FederationMessage(Entity):
+class FederationMessage(Row):
     __alias__ = "id"
     id = String()
     topic = String(default="")
@@ -131,7 +131,7 @@ class FederationMessage(Entity):
     response = Json({})
 
 
-class Codex(Entity):
+class Codex(Row):
     __alias__ = "id"
     id = String()
     version = String(default="")
@@ -144,7 +144,7 @@ class Codex(Entity):
     previous = String(default="")
 
 
-class Extension(Entity):
+class Extension(Row):
     __alias__ = "id"
     id = String()  # name
     version = String(default="")
@@ -156,7 +156,7 @@ class Extension(Entity):
     source = String(default="")
 
 
-class Notification(Entity):
+class Notification(Row):
     __alias__ = "id"
     id = String()
     recipient = String(indexed=True)  # "User:alice", "Department:health", "Organization:clinic-b"
@@ -170,7 +170,7 @@ class Notification(Entity):
     at = Integer(default=0)
 
 
-class Event(Entity):
+class Event(Row):
     __alias__ = "id"
     id = String()
     op = String(default="")
@@ -179,4 +179,25 @@ class Event(Entity):
     origin = String(default="")
     args = Json({})
     result = Json({})
+    at = Integer(default=0)
+
+
+class KeyEnvelope(Row):
+    __alias__ = "id"
+    id = String()  # "<scope>|<principal>"
+    scope = String(indexed=True)  # "user:alice:private", "dept:Health:doc:DOC-1", "realm:x"
+    principal = String(indexed=True)
+    wrapped_dek = String(default="")  # the scope's key, IBE-wrapped for this principal
+    granted_by = String(default="")
+    at = Integer(default=0)
+
+
+class Document(Row):
+    __alias__ = "id"
+    id = String()
+    department = String(indexed=True)
+    title = String(default="")
+    ref = String(default="")  # where the ciphertext lives (file registry path)
+    hash = String(default="")
+    author = String(default="")
     at = Integer(default=0)
