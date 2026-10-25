@@ -111,8 +111,9 @@ def authorize(user, by, name, spec, args, origin="user", declared=()):
     if by == chain.ANONYMOUS and not spec["public"]:
         raise Denied("sign in first")
     held = permissions(user)
+    needed = spec["perm_for"](args) if spec.get("perm_for") else spec["perm"]
     context = {
-        "op": name, "permission": spec["perm"] or "", "user": user, "signer": by, "origin": origin,
+        "op": name, "permission": needed or "", "user": user, "signer": by, "origin": origin,
         "read": spec["read"], "public": spec["public"], "signing": spec["signing"],
         "delegable": spec["delegable"], "delegated": user != by,
         "signer_agent": spec["signing"] and is_agent(by),
@@ -136,4 +137,4 @@ def reason(name, spec, context, held):
         return f"{name}: you are a party to this matter"
     if context["origin"] in ("extension", "codex") and name not in context["declared"]:
         return f"{name} is not declared by this {context['origin']}"
-    return f"{name} needs {spec['perm']}"
+    return f"{name} needs {context['permission']}"

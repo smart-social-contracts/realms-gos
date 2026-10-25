@@ -56,12 +56,29 @@ def each(cls, field=None, value=None):
         yield from rows
 
 
+def window(args, most=PAGE_MAX):
+    """``from`` (an id, default 1) and ``count`` (default PAGE, at most ``most``) of a paginated call."""
+    return max(1, int(args.get("from") or 1)), max(1, min(int(args.get("count") or PAGE), most))
+
+
 def page(cls, args, keep=lambda row: True):
-    start = max(1, int(args.get("from") or 1))
-    count = min(int(args.get("count") or PAGE), PAGE_MAX)
+    """One id range of ``cls`` (``from``, ``count``), filtered by ``keep``; ``next`` continues it."""
+    start, count = window(args)
     rows = [r for r in cls.load_some(start, count) if keep(r)]
     more = start + count <= cls.max_id()
     return rows, (start + count if more else None)
+
+
+def page_by(cls, field, value, args, most=PAGE_MAX):
+    """One page of the rows whose indexed ``field`` is ``value`` (``from``, ``count``); ``next`` continues it."""
+    start, count = window(args, most)
+    return cls.find_by(field, value, from_id=start, count=count)
+
+
+def first(cls, field, value):
+    """The row with the lowest id whose indexed ``field`` is ``value``, or None."""
+    rows, _ = cls.find_by(field, value, count=1)
+    return rows[0] if rows else None
 
 
 def ref(row):

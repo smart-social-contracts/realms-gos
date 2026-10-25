@@ -25,15 +25,16 @@ class Call:
         return self.user != self.by
 
 
-def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False):
+def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
     the call into a proposal. parties(args) -> principals with a stake, who may not perform it.
+    perm_for(args) -> the permission this call needs, when it depends on the arguments (``perm`` otherwise).
     """
     def wrap(fn):
-        OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable,
-                            "governed": governed, "signing": signing, "parties": parties, "public": public}
+        OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
+                            "signing": signing, "parties": parties, "public": public, "perm_for": perm_for}
         return fn
     return wrap
 
