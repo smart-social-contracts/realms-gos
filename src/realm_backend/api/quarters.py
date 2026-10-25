@@ -88,8 +88,8 @@ def scale():
             "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at}
 
 
-def ask(cid, method, payload):
-    reply = yield from chain.call_text(cid, method, json.dumps(payload))
+def ask(cid, name, payload):
+    reply = yield from chain.call_op(cid, name, payload)
     return json.loads(reply or '{"ok": false, "error": "no reply"}')
 
 

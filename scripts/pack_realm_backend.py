@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Build the realm backend wasm: regenerate main.py, pack it on the Cedar template, check the exports.
+"""Build the realm backend wasm on the Cedar template and check it exports ``read`` and ``run``.
 
     python3 scripts/pack_realm_backend.py [--version X.Y.Z]
 """
 
 import argparse
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -13,14 +12,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "realm_backend"
 WASM = ROOT / ".basilisk" / "realm_backend" / "realm_backend.wasm"
+ENDPOINTS = ('"read" : (text, text) -> (text) query;', '"run" : (text, text) -> (text);')
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from basilisk_cedar_template import apply_cedar_template_env  # noqa: E402
-from gen_main import registry, render  # noqa: E402
 
 
 def pack(version=None):
-    (SRC / "main.py").write_text(render())
     setup = SRC / "api" / "setup.py"
     original = setup.read_text()
     if version:
@@ -32,10 +30,10 @@ def pack(version=None):
                        cwd=ROOT, env=env, check=True)
     finally:
         setup.write_text(original)
-    exported = set(re.findall(r"^\s*\"?(\w+)\"? *: *\(text\)", (SRC / "realm_backend.did").read_text(), re.M))
-    missing = set(registry()) - exported
+    did = (SRC / "realm_backend.did").read_text()
+    missing = [e for e in ENDPOINTS if e not in did]
     if missing:
-        sys.exit(f"not exported: {sorted(missing)}")
+        sys.exit(f"not exported: {missing}")
     return WASM
 
 

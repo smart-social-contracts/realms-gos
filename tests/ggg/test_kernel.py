@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import fake_chain
@@ -54,6 +56,16 @@ def member(principal, *perms):
 def grant(grantor, delegate, *perms, expires_in=3600):
     Delegation(id=f"{grantor}>{delegate}", grantor=grantor, delegate=delegate, status="active",
                scope={"operations": list(perms)}, starts_at=0, expires_at=fake_chain.now() + expires_in)
+
+
+def test_read_endpoint_refuses_changes_and_unknown_names():
+    def read(name):
+        return json.loads(op.run(op.dispatch(name, "{}", query=True)))
+
+    assert read("t_public")["ok"]
+    assert "call it with run" in read("t_vote")["error"]
+    assert "unknown operation 'nope'" in read("nope")["error"]
+    assert "unknown operation 'nope'" in call("nope")["error"]
 
 
 def test_public_needs_no_sign_in():

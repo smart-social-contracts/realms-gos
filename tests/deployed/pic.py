@@ -58,13 +58,13 @@ class Canister:
             "arg": encode([]), "sender_canister_version": [],
         })
 
-    def call(self, method, arg="{}", sender=None, query=False):
-        """Call a ``method(text) -> text`` endpoint; returns the decoded JSON."""
+    def call(self, name, args=None, sender=None, query=False):
+        """Run operation ``name`` through ``read`` (query) or ``run``; returns the decoded JSON reply."""
         self.pic.set_sender(Principal.from_str(sender) if sender else Principal.anonymous())
-        payload = encode([{"type": Types.Text, "value": arg if isinstance(arg, str) else json.dumps(arg)}])
+        payload = encode([{"type": Types.Text, "value": name},
+                          {"type": Types.Text, "value": json.dumps(args or {})}])
         call = self.pic.query_call if query else self.pic.update_call
-        out = decode(bytes(call(self.id, method, payload)))[0]["value"]
-        return json.loads(out) if isinstance(out, str) and out[:1] in "{[" else out
+        return json.loads(decode(bytes(call(self.id, "read" if query else "run", payload)))[0]["value"])
 
     def raw(self, method, payload=b"DIDL\x00\x00", query=True):
         call = self.pic.query_call if query else self.pic.update_call

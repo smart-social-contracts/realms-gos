@@ -1,5 +1,7 @@
 """Stand-in for ``chain`` in unit tests: a clock, a caller, controllers and recorded calls."""
 
+import json
+
 ANONYMOUS = "2vxsx-fae"
 SELF = "realm"
 state = {}
@@ -54,3 +56,8 @@ def call_text(cid, method, arg=None):
         raise reply
     return reply
     yield
+
+
+def call_op(cid, name, args):
+    """Recorded as ``(cid, name, json)``, like call_text, with replies keyed by ``(cid, name)``."""
+    return (yield from call_text(cid, name, json.dumps(args)))

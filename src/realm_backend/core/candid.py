@@ -3,6 +3,10 @@
 ESCAPES = {"n": b"\n", "r": b"\r", "t": b"\t", '"': b'"', "\\": b"\\", "'": b"'"}
 
 
+def quote(text):
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def unquote(decoded):
     body, out, i = decoded[decoded.index('"') + 1:decoded.rindex('"')], bytearray(), 0
     while i < len(body):

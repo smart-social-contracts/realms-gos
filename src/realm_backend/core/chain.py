@@ -1,6 +1,8 @@
+import json
+
 from basilisk import Duration, Principal, ic
 
-from core.candid import unquote
+from core.candid import quote, unquote
 
 ANONYMOUS = "2vxsx-fae"
 
@@ -41,6 +43,11 @@ def call(cid, method, candid="()", cycles=0):
 
 
 def call_text(cid, method, arg=None):
-    candid = "()" if arg is None else '("' + arg.replace("\\", "\\\\").replace('"', '\\"') + '")'
-    reply = yield from call(cid, method, candid)
+    reply = yield from call(cid, method, "()" if arg is None else f"({quote(arg)})")
+    return unquote(reply)
+
+
+def call_op(cid, name, args):
+    """Run operation ``name`` on another realm canister; returns its JSON reply as text."""
+    reply = yield from call(cid, "run", f"({quote(name)}, {quote(json.dumps(args))})")
     return unquote(reply)

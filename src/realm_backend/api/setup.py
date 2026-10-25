@@ -55,6 +55,8 @@ def main():
 
 
 def start():
+    # Load every operation here, where it is kept: a query loading modules would redo it on every call.
+    ops()
     if Realm["1"] is None:
         realm = Realm(id="1", principal_id=chain.self_id())
         realm.calendar, realm.treasury = Calendar(id="1"), Treasury(id="1")

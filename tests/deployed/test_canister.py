@@ -55,4 +55,5 @@ def test_story(realm, people):
     events = ok(realm, "events", ctl, query=True)["events"]
     assert any(e["op"] == "proposal_vote" and e["user"] == alice and e["by"] == claude for e in events)
     assert len(ok(realm, "ops_list", None, query=True)["operations"]) >= 200
+    assert "call it with run" in refused(realm, "proposal_create", alice, query=True, title="x")
     assert ok(realm, "shell", ctl, expr="ops.proposal_list()")["result"]["proposals"][0]["id"] == p

@@ -47,9 +47,14 @@ def ops():
     return OPS
 
 
-def dispatch(fn, arg, origin="user", signer=None, declared=()):
+def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False):
+    """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded."""
     name = fn if isinstance(fn, str) else fn.__name__
-    spec = OPS.get(name) or ops()[name]
+    spec = OPS.get(name) or ops().get(name)
+    if spec is None:
+        return json.dumps({"ok": False, "error": f"unknown operation '{name}'"})
+    if query and not spec["read"]:
+        return json.dumps({"ok": False, "error": f"{name} changes the realm: call it with run, not read"})
     try:
         args = json.loads(arg or "{}") if isinstance(arg, str) else dict(arg)
         by = signer or chain.caller()
