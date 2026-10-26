@@ -3,7 +3,7 @@
 	import { goto, replaceState } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
-	import { Button, Heading, Input, Label, P } from 'flowbite-svelte';
+	import { Button, Heading, Input, Label, P, Spinner } from 'flowbite-svelte';
 	import {
 		LAUNCH_STATUS_POLL_MS,
 		applySetupDraftToken,
@@ -102,6 +102,7 @@
 	let tokenIndexerId = $state('');
 	let tokenChoice = $state('');
 	let symbolLookupTimer: ReturnType<typeof setTimeout> | null = null;
+	let symbolReading = $state(false);
 	let primaryColor = $state('#3b82f6');
 	let logoPreview = $state('');
 	let backgroundPreview = $state('');
@@ -633,7 +634,8 @@
 		tokenSymbol = '';
 		if (symbolLookupTimer) clearTimeout(symbolLookupTimer);
 		const ledger = tokenCanisterId.trim();
-		if (!ledger.endsWith('-cai')) return;
+		symbolReading = ledger.endsWith('-cai');
+		if (!symbolReading) return;
 		symbolLookupTimer = setTimeout(async () => {
 			try {
 				const symbol = await lookupLedgerSymbol(ledger);
@@ -644,6 +646,8 @@
 				if (tokenCanisterId.trim() !== ledger) return;
 				tokenSymbol = '';
 				error = e instanceof Error ? e.message : 'Could not read the ledger symbol';
+			} finally {
+				if (tokenCanisterId.trim() === ledger) symbolReading = false;
 			}
 		}, 400);
 	}
@@ -1350,13 +1354,17 @@
 							/>
 						</div>
 						<div class="setup-wizard__field">
-							<Label for="token-symbol">{$_('setup.wizard.token_symbol')}</Label>
-							<Input
-								id="token-symbol"
-								value={tokenSymbol}
-								placeholder="Read from the ledger"
-								readonly
-							/>
+							<Label>{$_('setup.wizard.token_symbol')}</Label>
+							<p class="setup-wizard__symbol" aria-live="polite">
+								{#if symbolReading}
+									<Spinner size="4" />
+									<span class="text-gray-500">Reading from the ledger…</span>
+								{:else if tokenSymbol}
+									<strong>{tokenSymbol}</strong>
+								{:else}
+									<span class="text-gray-500">Read from the ledger once you enter its canister id</span>
+								{/if}
+							</p>
 						</div>
 					{/if}
 				</section>
@@ -2443,6 +2451,14 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
+	}
+
+	.setup-wizard__symbol {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-height: 1.5rem;
+		font-size: 0.875rem;
 	}
 
 	.setup-wizard__version-select {
