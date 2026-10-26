@@ -1,7 +1,7 @@
 import { Actor, HttpAgent } from '@dfinity/agent';
 import { IDL } from '@dfinity/candid';
 
-const icrc1IdlFactory = ({ IDL: idl }: { IDL: typeof IDL }) =>
+const icrc1IdlFactory: IDL.InterfaceFactory = ({ IDL: idl }) =>
 	idl.Service({
 		icrc1_symbol: idl.Func([], [idl.Text], ['query'])
 	});
