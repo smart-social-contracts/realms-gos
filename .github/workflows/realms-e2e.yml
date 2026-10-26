@@ -84,6 +84,7 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -r Casals/requirements-dev.txt
           python3 -m pip install -r realms/requirements.txt
+          python3 -m pip install cryptography   # scripts/e2e_standalone_realm.py: founder Ed25519 key
           python3 -m basilisk --version || true
 
       - name: Create the local-dev identity (dfx + icp)
@@ -126,6 +127,45 @@ jobs:
           export TERM=xterm
           scripts/up.sh -e local --skip-build --yes --extensions-only --extensions hello_world
 
+      # ── standalone realm UI e2e (no gaas) ────────────────────────────────────
+      # One realm_backend + realm_frontend beside the orchestra, installed the
+      # way the installer would (scripts/e2e_standalone_realm.py); Playwright
+      # logs in as the founder through the portal bridge, walks the setup
+      # wizard (codex, custom token = the orchestra's token-backend, branding,
+      # languages, launch) and checks the launched realm in the UI and on chain.
+      # The realm gets the core extensions and the codex's dependencies, frontends
+      # included, so build every extension bundle and publish them with the codex.
+      - name: Publish the extensions and the codex under test (syntropia)
+        working-directory: realms
+        run: |
+          export TERM=xterm
+          realms files build
+          scripts/up.sh -e local --publish-only --yes --codices syntropia
+
+      - name: Install Playwright chromium
+        working-directory: realms/src/realm_frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Standalone realm UI e2e (scripts/e2e_ui.sh)
+        working-directory: realms
+        env:
+          E2E_DIR: ${{ runner.temp }}/realms-e2e
+          E2E_CODEX: syntropia
+        run: |
+          export TERM=xterm
+          scripts/e2e_ui.sh
+
+      - name: Upload the UI e2e report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: realms-standalone-ui-e2e
+          path: |
+            realms/src/realm_frontend/playwright-report/standalone
+            realms/src/realm_frontend/test-results/standalone
+          if-no-files-found: ignore
+          retention-days: 14
+
       # ── cross-quarter addressing against the converged demo realm ───────────
       # The harness keeps each orchestra's bindings in <CASALS_HOME>/<sheet name>/.
       # Realms are deployed by the gaas orchestra; the product sheet has no
@@ -137,7 +177,7 @@ jobs:
         run: |
           export TERM=xterm
           python3 -m casals_cli.main -e local --identity local-dev export ../realms/casals.json > /tmp/export.json
-          REALM_BACKEND_ID=$(python3 -c 'import json; print(json.load(open("/tmp/export.json"))["bindings"].get("demo-backend", ""))')
+          REALM_BACKEND_ID=$(python3 -c 'import json; print(json.load(open("/tmp/export.json")).get("bindings", {}).get("demo-backend", ""))')
           echo "REALM_BACKEND_ID=$REALM_BACKEND_ID" >> "$GITHUB_ENV"
           if [ -n "$REALM_BACKEND_ID" ]; then
             echo "demo-backend = $REALM_BACKEND_ID"
@@ -160,7 +200,7 @@ jobs:
         run: |
           export TERM=xterm
           python3 -m casals_cli.main -e local --identity local-dev show ../realms/casals.json || true
-          python3 -m casals_cli.main -e local --identity local-dev plan ../realms/casals.json || true
+          python3 -m casals_cli.main -e local --identity local-dev events ../realms/casals.json || true
 
       - name: Stop local replica
         if: always()
