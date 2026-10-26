@@ -1,0 +1,11 @@
+{
+  "name": "Realms",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "dfx-replica",
+      "command": "export TERM=xterm DFX_WARNING=-mainnet_plaintext_identity && dfx start --host 127.0.0.1:4943"
+    }
+  ]
+}
