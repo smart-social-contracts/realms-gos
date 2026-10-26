@@ -28,7 +28,11 @@ export const on = (actor: any) => ({
 	run: (name: string, args: object = {}) => call(actor, 'run', name, args)
 });
 
-export const quarter = on(quarterBackend);
+// realm.ts and canisters.js import each other (through the stores): read quarterBackend only when called.
+export const quarter = {
+	read: (name: string, args: object = {}) => call(quarterBackend, 'read', name, args),
+	run: (name: string, args: object = {}) => call(quarterBackend, 'run', name, args)
+};
 
 /** The reply of a call that must succeed; throws ``RealmError`` with the realm's message otherwise. */
 export async function must(reply: Reply | Promise<Reply>): Promise<{ [key: string]: any }> {

@@ -85,11 +85,11 @@ def version(c, args):
 @op(None, read=True, public=True)
 def realm_info(c, args):
     """The realm's public profile: name, manifesto, welcome message, status, branding, accounting currency,
-    whether registration is open and whether it is a capital."""
+    whether registration is open and whether it is a capital, its network, and its test mode and test flags."""
     realm = Realm["1"]
     return {"realm": view(realm, "name", "manifesto", "welcome_message", "status", "logo_url",
                           "background_image_url", "primary_color", "accounting_currency",
-                          "open_registration", "is_capital") if realm else {}}
+                          "open_registration", "is_capital", "network", "test_mode", "test_flags") if realm else {}}
 
 
 def launched(args):

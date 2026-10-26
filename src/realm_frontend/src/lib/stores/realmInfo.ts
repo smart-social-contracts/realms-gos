@@ -130,8 +130,8 @@ const createRealmInfoStore = () => {
 			// awaiting backendReady would deadlock the boot (circular await).
 			await backendActorReady;
 
-				// Test mode, network, languages and the AI assistant switch are not public on this
-				// realm version: they keep their defaults (test flags fall back to canister_ids.js).
+				// Languages and the AI assistant switch are not public on this realm version: they keep
+				// their defaults.
 				const [info, directory] = await Promise.all([
 					withQueryTimeout(read('realm_info'), STATUS_QUERY_TIMEOUT_MS, 'realm_info'),
 					withQueryTimeout(read('quarter_directory'), STATUS_QUERY_TIMEOUT_MS, 'quarter_directory')
@@ -140,6 +140,8 @@ const createRealmInfoStore = () => {
 					throw new Error('Failed to fetch realm info');
 				}
 				const realm = info.realm;
+				const flags = realm.test_flags || {};
+				const network = realm.network || '';
 				const primaryColor = parsePrimaryColor(realm.primary_color) ?? DEFAULT_PRIMARY_COLOR;
 				const languageConfig = defaultRealmLanguages();
 				const federation = directory?.ok
@@ -157,8 +159,15 @@ const createRealmInfoStore = () => {
 					primaryColor,
 					languages: languageConfig.languages,
 					primaryLanguage: languageConfig.primary,
-					testModeDisableMonetaryTokens: resolveDisableMonetaryTokens(undefined, ''),
-					testModeDemoNotice: resolveDemoNoticeEnabled(undefined, ''),
+					network,
+					testMode: !!realm.test_mode,
+					testModeIIBypass: !!flags.test_mode_ii_bypass,
+					testModeUserSelfRegistration: !!flags.test_mode_user_self_registration,
+					testModeDemoData: !!flags.test_mode_demo_data,
+					testModeSkipTerms: !!flags.test_mode_skip_terms,
+					testModeSkipPassportZkproof: !!flags.test_mode_skip_passport_zkproof,
+					testModeDisableMonetaryTokens: resolveDisableMonetaryTokens(flags.test_mode_disable_monetary_tokens, network),
+					testModeDemoNotice: resolveDemoNoticeEnabled(flags.test_mode_demo_notice, network),
 					loading: false
 				}));
 				if (browser) {
