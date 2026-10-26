@@ -147,6 +147,12 @@ export interface RealmExtensionContext {
 	/** Same as callSync; kept for bundles that call inter-canister functions this way. */
 	callAsync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
 
+	/** Call a realm read operation as the user; only the operations the extension's manifest declares. */
+	read: (name: string, args?: Record<string, unknown>) => Promise<Reply>;
+
+	/** Call a realm operation that changes the realm, as the user; only the operations the manifest declares. */
+	run: (name: string, args?: Record<string, unknown>) => Promise<Reply>;
+
 	/** The logged-in user's principal as a reactive store. Empty string when anonymous. */
 	principal: Readable<string>;
 	/** Whether the user has authenticated via Internet Identity. */

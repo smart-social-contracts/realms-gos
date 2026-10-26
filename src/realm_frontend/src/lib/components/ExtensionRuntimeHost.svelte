@@ -4,7 +4,7 @@
 	import { browser } from '$app/environment';
 	import { Alert } from 'flowbite-svelte';
 	import { quarterBackend } from '$lib/canisters';
-	import type { Reply } from '$lib/realm';
+	import { quarter, type Reply } from '$lib/realm';
 	import { getFileRegistryCanisterIds } from '$lib/file-registry-client';
 	import { canisterId as backendCanisterId } from '$lib/declarations/realm_backend';
 	import { principal, isAuthenticated } from '$lib/stores/auth';
@@ -161,6 +161,15 @@
 		}
 		const callSync = callExtension;
 		const callAsync = callExtension;
+		const declared = new Set(((await getExtensionManifestWithRetry(id))?.operations as string[]) ?? []);
+		const operation =
+			(read: boolean) =>
+			async (name: string, args: Record<string, unknown> = {}): Promise<Reply> =>
+				!declared.has(name)
+					? { ok: false, error: `${id} does not declare the operation ${name} in its manifest` }
+					: read
+						? quarter.read(name, args)
+						: quarter.run(name, args);
 
 		return {
 			...createHostContext(),
@@ -168,6 +177,8 @@
 			version,
 			backend: extensionBackend,
 			marketplace: marketplaceAdapter,
+			read: operation(true),
+			run: operation(false),
 			callSync,
 			callAsync,
 			principal,
