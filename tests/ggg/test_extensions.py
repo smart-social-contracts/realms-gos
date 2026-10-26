@@ -22,7 +22,7 @@ def quorum(percent):
     return rpc("governance_update", quorum_percent=percent)
 '''
 MANIFEST = {"name": "voting", "version": "2.1.0", "profiles": ["member"], "categories": ["governance"],
-            "show_in_sidebar": True, "operations": ["proposal_vote", "governance_update"]}
+            "show_in_sidebar": True, "backend": True, "operations": ["proposal_vote", "governance_update"]}
 
 
 @pytest.fixture
@@ -55,6 +55,30 @@ def test_story_the_voting_extension_casts_alices_vote(registry):
     assert (v.voter, v.cast_by, v.choice) == ("alice", "alice", "yes")
     assert [(e.op, e.user, e.origin) for e in rows(Event) if e.op == "proposal_vote"] == [("proposal_vote", "alice", "extension")]
     assert "voting" in [e["id"] for e in ok("extension_list", "alice")["extensions"] if e["available"]]
+
+
+def test_a_frontend_only_extension_installs_without_a_backend(registry, monkeypatch):
+    approvals, _ = registry
+    approvals["ext/board/1.0.0"] = {"approved": True, "approver": "market"}
+    board = {"name": "board", "version": "1.0.0", "runtime": "sandboxed", "sdk_version": "1",
+             "capabilities": ["call_operation"], "operations": ["proposal_list"], "secret_note": "not for the host"}
+    files = {"manifest.json": json.dumps(board)}
+    fetched = []
+
+    def call_text(cid, method, arg=None):
+        if method == "get_namespace_approval_icc":
+            return json.dumps(approvals[arg])
+        fetched.append(json.loads(arg)["path"])
+        return json.dumps({"content_b64": base64.b64encode(files[fetched[-1]].encode()).decode()})
+        yield
+
+    monkeypatch.setattr(fake_chain, "call_text", call_text)
+    ok("extension_install", "ctl", extension="board", version="1.0.0")
+    assert fetched == ["manifest.json"] and not Extension["board"].source
+    row = next(e for e in ok("extension_list", "alice")["extensions"] if e["id"] == "board")
+    assert row["operations"] == ["proposal_list"]
+    assert row["manifest"] == {"runtime": "sandboxed", "sdk_version": "1", "capabilities": ["call_operation"]}
+    assert "has no backend" in call("extension_call", "alice", extension="board", function="x")["error"]
 
 
 def test_I_EXT_1_an_extension_calls_only_declared_ops_as_the_caller(registry):

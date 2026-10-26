@@ -9,6 +9,8 @@ from core.op import dispatch, op, run
 from api.proposals import appointed, realm_wide
 
 SIDEBAR = ("show_in_sidebar", "sidebar_label", "categories", "icon")
+# What the frontend needs from the installed manifest to host an extension.
+HOST = ("description", "runtime", "sdk_version", "capabilities", "entry_access", "backend")
 
 
 def registry():
@@ -77,11 +79,12 @@ def available(ext, held):
 @op("extension.install", governed=realm_wide)
 def extension_install(c, args):
     """Install or upgrade ``extension`` at ``version`` from the file registry (``ext/<extension>/<version>``).
-    Returns ``approved_by``: if the realm requires marketplace approval, its checksum must be pinned or an approver it
-    trusts must have approved it."""
+    Its manifest's ``operations`` are the only realm operations its frontend and backend may call; its
+    ``backend/entry.py`` is installed when the manifest sets ``backend``. Returns ``approved_by``: if the realm
+    requires marketplace approval, its checksum must be pinned or an approver it trusts must have approved it."""
     namespace = f"ext/{args['extension']}/{args['version']}"
     manifest = json.loads((yield from fetch(namespace, "manifest.json")))
-    source = (yield from fetch(namespace, "backend/entry.py")) if manifest.get("operations") else ""
+    source = (yield from fetch(namespace, "backend/entry.py")) if manifest.get("backend") else ""
     approver = yield from trust(checksum(manifest, source), namespace)
     ext = Extension[args["extension"]] or Extension(
         id=args["extension"], access={"profiles": manifest.get("profiles", ["member"]), "departments": []},
@@ -144,4 +147,5 @@ def extension_list(c, args):
     rows, nxt = page(Extension, args)
     held = holds(c.user)
     return {"extensions": [{**view(e, "id", "version", "status", "operations", "sidebar", "access"),
+                            "manifest": {k: v for k, v in (e.manifest or {}).items() if k in HOST},
                             "available": available(e, held)} for e in rows], "next": nxt}

@@ -313,7 +313,8 @@
 						capabilities: manifest?.capabilities as string[] | undefined,
 						entry_access: manifest?.entry_access as
 							| { functions?: Record<string, string> }
-							| undefined
+							| undefined,
+						operations: manifest?.operations
 					},
 					callSync: ctx.callSync,
 					callAsync: ctx.callAsync,

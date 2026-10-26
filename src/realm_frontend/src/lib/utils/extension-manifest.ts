@@ -17,6 +17,8 @@ export interface ExtensionManifestInfo {
 	sdk_version?: string;
 	capabilities?: string[];
 	entry_access?: { functions?: Record<string, string> };
+	/** The realm operations the installed extension may call. */
+	operations?: string[];
 	[key: string]: unknown;
 }
 
@@ -93,9 +95,11 @@ async function fetchExtensionManifestsOnce(): Promise<Record<string, ExtensionMa
 				{
 					name: e.id,
 					...published,
+					...e.manifest,
 					...e.sidebar,
 					id: e.id,
 					version: e.version,
+					operations: e.operations ?? [],
 					profiles: e.access?.profiles ?? []
 				}
 			];

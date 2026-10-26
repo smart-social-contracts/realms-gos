@@ -9,6 +9,7 @@ export {
 	type ModalAction,
 	type BridgeMessage,
 	type ExtToHostMessage,
+	type CallOperationMessage,
 	type HostToExtMessage,
 	type TaskResultStatus,
 	type TaskResultPayload,
@@ -23,6 +24,7 @@ export {
 	type ExtensionClientOptions,
 	type OpenModalOptions,
 	type CallExtensionAsyncOptions,
+	type RealmReply,
 } from './client.js';
 
 export {
@@ -36,6 +38,7 @@ export {
 	validateHello,
 	validateCallExtension,
 	validateCallExtensionAsync,
+	validateCallOperation,
 	validateNavigate,
 	validateNotify,
 	validateOpenModal,

@@ -2,6 +2,7 @@ import {
 	BRIDGE_SOURCE,
 	type CallExtensionAsyncMessage,
 	type CallExtensionMessage,
+	type CallOperationMessage,
 	type ExtToHostMessage,
 	type GetStateMessage,
 	type GoodbyeMessage,
@@ -112,6 +113,30 @@ export function validateCallExtension(data: Record<string, unknown>): ExtMessage
 		id: data.id,
 		fn: data.fn,
 		args: (data.args as Record<string, unknown> | undefined) ?? {},
+	};
+	return { ok: true, message };
+}
+
+export function validateCallOperation(data: Record<string, unknown>): ExtMessageValidationResult {
+	if (!envelope(data) || data.kind !== 'call_operation') {
+		return { ok: false, reason: 'invalid call_operation envelope' };
+	}
+	if (!isRequestId(data.id)) {
+		return { ok: false, reason: 'call_operation.id must be a positive integer', responseId: typeof data.id === 'number' ? data.id : undefined };
+	}
+	if (!isString(data.name)) {
+		return { ok: false, reason: 'call_operation.name must be a string', responseId: data.id };
+	}
+	if (data.args !== undefined && !isPlainObject(data.args)) {
+		return { ok: false, reason: 'call_operation.args must be an object when present', responseId: data.id };
+	}
+	const message: CallOperationMessage = {
+		source: BRIDGE_SOURCE,
+		kind: 'call_operation',
+		id: data.id,
+		name: data.name,
+		args: (data.args as Record<string, unknown> | undefined) ?? {},
+		read: data.read === true,
 	};
 	return { ok: true, message };
 }
@@ -269,6 +294,8 @@ export function validateExtToHostMessage(data: unknown): ExtMessageValidationRes
 			return validateCallExtension(data);
 		case 'call_extension_async':
 			return validateCallExtensionAsync(data);
+		case 'call_operation':
+			return validateCallOperation(data);
 		case 'navigate':
 			return validateNavigate(data);
 		case 'notify':

@@ -17,6 +17,7 @@ import {
 	type BridgeModalAction,
 } from '$lib/stores/bridge-modal';
 import { parseAccessError, AccessDeniedError } from '$lib/utils/errors';
+import { quarter } from '$lib/realm';
 
 const NAVIGATE_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 
@@ -44,6 +45,8 @@ export interface SandboxManifest {
 	sdk_version?: string;
 	capabilities?: string[];
 	entry_access?: { functions?: Record<string, string> };
+	/** The realm operations the installed extension may call (from the realm, not the published manifest). */
+	operations?: string[];
 }
 
 export interface SandboxBridgeDeps {
@@ -112,6 +115,8 @@ export class SandboxBridgeService {
 			requiredSdkVersion: deps.manifest.sdk_version ?? BRIDGE_PROTOCOL_VERSION,
 			capabilities,
 			entryAccessFunctions: deps.manifest.entry_access?.functions,
+			operations: deps.manifest.operations ?? [],
+			onCallOperation: (name, args, read) => (read ? quarter.read(name, args) : quarter.run(name, args)),
 			getState: deps.getHostState,
 			onHandshakeComplete: () => {
 				deps.onHandshakeComplete?.();
