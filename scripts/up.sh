@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # up.sh — the Realms product orchestra (casals.json), end-to-end, in one command:
 #
-#   preflight → build → pin → casals up → export → domains → publish → verify
+#   preflight → build → casals up → export → domains → publish → verify
 #
 #   scripts/up.sh -e local --yes                       # laptop / CI: everything, test variant
 #   scripts/up.sh -e production --identity prod-session --yes   # prod-session: icp delegation from the HSM
@@ -16,14 +16,14 @@
 #   --skip-build                reuse the artifacts already on disk
 #   --build-only                stop after the build phase
 #   --skip-publish              stop after up + domains (provision only)
-#   --publish-only              skip build/pin/up/domains: export bindings and publish + verify
+#   --publish-only              skip build/up/domains: export bindings and publish + verify
 #   --no-domains                skip `realms domains apply`
 #   --branding                  also `realms files publish-branding` (demo realm branding)
 #   --extensions LIST           forward to files/marketplace publish (comma-separated ids)
 #   --codices LIST              forward to files/marketplace publish
 #   --extensions-only | --codices-only
 #   --bootstrap                 forward to casals up (production: allow a brand-new conductor)
-#   -y, --yes                   non-interactive (casals up --yes, domains --yes, no pin prompt)
+#   -y, --yes                   non-interactive (casals up --yes, domains --yes)
 #   -h, --help
 #
 # Environment
@@ -36,8 +36,8 @@
 #   DFX_HSM_PIN          production: PIN of the hardware key behind --identity
 #   CLOUDFLARE_API_TOKEN production: Zone:Read + DNS:Edit on the zone, for the domains phase
 #
-# Every phase is idempotent: a second run rebuilds (or --skip-build), finds the pins clean,
-# `casals plan` empty, domains in place, 0 changed files / listings, and exits 0.
+# Every phase is idempotent: a second run rebuilds (or --skip-build),
+# `casals up` reporting the orchestra already built, domains in place, 0 changed files / listings, and exits 0.
 #
 # This builds the sheet (day one) and re-runs are no-ops; it does not roll out a
 # new build to canisters that already exist. A release is
@@ -202,10 +202,10 @@ if [ "$PUBLISH_ONLY" = 0 ] && [ "$SKIP_BUILD" = 0 ]; then
     note "fetched $w.wasm"
   done
 
-  say "Build: backends (realm_backend --variant $BUILD_VARIANT, marketplace_backend)"
+  say "Build: backends (realm_backend, marketplace_backend)"
   (cd "$REALMS_DIR"
    CANISTER_CANDID_PATH="$PWD/src/realm_backend/realm_backend.did" \
-     python3 scripts/pack_realm_backend.py --variant "$BUILD_VARIANT"
+     python3 scripts/pack_realm_backend.py
    CANISTER_CANDID_PATH="$PWD/src/marketplace_backend/marketplace_backend.did" \
      python3 -m basilisk marketplace_backend src/marketplace_backend/main.py
    ls -l .basilisk/realm_backend/realm_backend.wasm .basilisk/marketplace_backend/marketplace_backend.wasm)
@@ -222,35 +222,31 @@ if [ "$PUBLISH_ONLY" = 0 ] && [ "$SKIP_BUILD" = 0 ]; then
 fi
 [ "$BUILD_ONLY" = 1 ] && { say "Build only: done"; exit 0; }
 
-# ── pin ───────────────────────────────────────────────────────────────────────
-# Production refuses a registry.wasms / registry.publish row without a sha256
-# that matches what was built; other environments re-pin to the build and say so.
-if [ "$PUBLISH_ONLY" = 0 ]; then
-  if [ "$ENV" = local ]; then
-    say "Pin: informational for -e local (up re-pins to what was built)"
-    casals pin "$SHEET" --check || note "rows drift from their pins; fine locally, run \`casals pin casals.json\` before a production deploy"
-  else
-    say "Pin: casals pin casals.json (production requires pins on every row)"
-    casals pin "$SHEET"
-    if ! (cd "$REALMS_DIR" && git diff --quiet -- casals.json); then
-      (cd "$REALMS_DIR" && git --no-pager diff --stat -- casals.json)
-      note "casals pin rewrote pins in casals.json: review and commit them (the sheet in git must match what runs)."
-      confirm "Continue the deploy with these pins?" || die "stopped at pin; commit casals.json and re-run"
-    else
-      note "pins unchanged"
-    fi
-  fi
-fi
-
 # ── up ────────────────────────────────────────────────────────────────────────
 if [ "$PUBLISH_ONLY" = 0 ]; then
   if [ "$ENV" = local ]; then
     # The Casals e2e harness: starts the replica if needed, funds the identity,
     # then grades the sheet (fresh: converges from nothing, plan empty, oracle
     # PASS; idempotent: a second up changes nothing). KEEP=1 leaves it up.
+    # The harness keeps each orchestra under $CASALS_E2E_ROOT/<name> (a temp dir
+    # when unset) and runs every scenario in tests/e2e/scenarios.py; the
+    # wrapper narrows that list to $SCENARIOS (the release/content scenarios
+    # need `release:` sources a local build does not have).
     say "casals up (harness, scenarios: $SCENARIOS)"
-    (cd "$CASALS_DIR" && CASALS_HOME="$CASALS_HOME" CASALS_E2E_ENV=local CASALS_E2E_IDENTITY="$IDENTITY" \
-       KEEP=1 SCENARIOS="$SCENARIOS" python3 tests/e2e/run_e2e.py "$SHEET")
+    (cd "$CASALS_DIR" && CASALS_E2E_ROOT="$CASALS_HOME" CASALS_E2E_IDENTITY="$IDENTITY" \
+       KEEP=1 SCENARIOS="$SCENARIOS" python3 - "$SHEET" <<'PY'
+import os, sys
+sys.path.insert(0, "tests/e2e")
+import run_e2e, scenarios
+want = [s for s in os.environ["SCENARIOS"].split(",") if s]
+have = {f.__name__: f for f in scenarios.SCENARIOS}
+unknown = [s for s in want if s not in have]
+if unknown:
+    sys.exit(f"unknown harness scenario(s): {', '.join(unknown)} (have: {', '.join(have)})")
+scenarios.SCENARIOS[:] = [have[s] for s in want]
+sys.exit(run_e2e.main(sys.argv[1:]))
+PY
+    )
   else
     up_args=(up "$SHEET")
     [ "$YES" = 1 ] && up_args+=(--yes)
@@ -259,8 +255,8 @@ if [ "$PUBLISH_ONLY" = 0 ]; then
     if [ "$ENV" = local ]; then
       eval "$(cd "$CASALS_DIR" && python3 -m casals_cli.replica start)"   # idempotent
     elif [ "$YES" = 0 ] && [ -f "$BINDINGS_FILE" ]; then
-      say "casals plan (what up would change)"
-      casals plan "$SHEET" || true
+      say "casals up --dry-run (what up would create)"
+      casals up "$SHEET" --dry-run || true
       confirm "Apply this plan to $ENV as $IDENTITY?" || die "stopped before up"
     fi
     say "casals ${global_args[*]:-} ${up_args[*]}"
@@ -275,6 +271,21 @@ fi
 say "Export: live bindings"
 EXPORT_JSON="$ORCH_HOME/$ORCHESTRA.$ENV.export.json"
 casals export "$SHEET" > "$EXPORT_JSON"
+# Casals nests ids as sections[].stands[].canisters[]; add the flat name → id
+# map (`bindings`) that this script, `realms domains --export` and the e2e read.
+python3 - "$EXPORT_JSON" <<'PY'
+import json, sys
+path = sys.argv[1]
+d = json.load(open(path))
+flat = dict(d.get("bindings") or {})
+for sec in d.get("sections") or []:
+    for st in sec.get("stands") or []:
+        for c in st.get("canisters") or []:
+            if c.get("name") and c.get("canister_id"):
+                flat.setdefault(c["name"], c["canister_id"])
+d["bindings"] = flat
+json.dump(d, open(path, "w"), indent=2)
+PY
 binding() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("bindings",{}).get(sys.argv[2],""))' "$EXPORT_JSON" "$1"; }
 FLEET_REGISTRY="$(binding fleet-file-registry)"
 MARKETPLACE="$(binding marketplace-backend)"
@@ -327,16 +338,8 @@ say "Publish: marketplace listings on $MARKETPLACE (created/updated + review-app
 
 # ── verify ────────────────────────────────────────────────────────────────────
 say "Verify"
-if [ "$PUBLISH_ONLY" = 0 ]; then
-  # `up` converged when the sheet has nothing left to add: the plan is empty.
-  # (--json is a global option of the CLI: it goes before the subcommand.)
-  if casals --json plan "$SHEET" | python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if r.get("ok") and not (r.get("plan") or {}).get("items") else 1)'; then
-    note "casals plan: empty"
-  else
-    casals plan "$SHEET" || true
-    die "casals plan is not empty after up"
-  fi
-fi
+# `casals up` builds the sheet once and fails unless every row converged (locally
+# the harness also grades fresh + idempotent); there is no separate plan to check.
 # Read-only queries as `anonymous`: no touch on a hardware key, and the same
 # call shape on a local replica (by URL) and on mainnet (by name).
 if [ "$ENV" = local ]; then

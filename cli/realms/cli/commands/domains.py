@@ -141,6 +141,15 @@ def domain_targets(sheet: dict, env: str) -> list[DomainTarget]:
 
 def _bindings_from_export(payload: dict) -> dict[str, str]:
     bindings = payload.get("bindings") if isinstance(payload, dict) else None
+    if not isinstance(bindings, dict) and isinstance(payload, dict) and isinstance(payload.get("sections"), list):
+        # current `casals export`: sections[].stands[].canisters[] {name, canister_id}
+        bindings = {
+            c.get("name"): c.get("canister_id")
+            for sec in payload["sections"]
+            for st in sec.get("stands") or []
+            for c in st.get("canisters") or []
+            if c.get("name")
+        }
     if not isinstance(bindings, dict):
         raise ValueError("export has no bindings (expected the JSON `casals export` prints)")
     return {str(k): str(v) for k, v in bindings.items() if v}
