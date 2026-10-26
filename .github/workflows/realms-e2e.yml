@@ -28,7 +28,8 @@ env:
 
 jobs:
   realms-local-e2e:
-    runs-on: ubuntu-latest
+    # Playwright 1.55 has no chromium for ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       # The sheet resolves `local:` sources against its own directory, and the
