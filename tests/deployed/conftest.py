@@ -20,9 +20,9 @@ def principal(name):
 
 @pytest.fixture(scope="session")
 def realm():
-    return Canister(str(pack()))
+    return Canister(str(pack()), installer=principal("installer"))
 
 
 @pytest.fixture(scope="session")
 def people():
-    return {n: principal(n) for n in ("founder", "alice", "bob", "claude-conn", "mallory")} | {"ctl": CONTROLLER}
+    return {n: principal(n) for n in ("founder", "alice", "bob", "claude-conn", "mallory", "installer")} | {"ctl": CONTROLLER}

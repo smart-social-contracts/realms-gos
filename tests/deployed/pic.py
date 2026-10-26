@@ -32,21 +32,21 @@ _INSTALL = Types.Record({
 
 
 class Canister:
-    def __init__(self, wasm_path):
+    def __init__(self, wasm_path, installer=""):
         self.pic = PocketIC()
         self.pic.set_sender(Principal.from_str(CONTROLLER))
         self.id = self.pic.create_canister(settings={"controllers": [[Principal.from_str(CONTROLLER).bytes]],
                                                      "compute_allocation": [], "memory_allocation": [],
                                                      "freezing_threshold": []})
         self.pic.add_cycles(self.id, 10**15)
-        self._install(gzip.compress(open(wasm_path, "rb").read()))
+        self._install(gzip.compress(open(wasm_path, "rb").read()), installer)
 
     def _management(self, method, typ, value):
         effective = {"CanisterId": base64.b64encode(self.id.bytes).decode()}
         return self.pic.update_call_with_effective_principal(
             None, effective, method, encode([{"type": typ, "value": value}]))
 
-    def _install(self, wasm):
+    def _install(self, wasm, installer):
         hashes = []
         for i in range(0, len(wasm), CHUNK):
             reply = self._management("upload_chunk", _UPLOAD,
@@ -55,7 +55,7 @@ class Canister:
         self._management("install_chunked_code", _INSTALL, {
             "mode": {"install": None}, "target_canister": self.id.bytes, "store_canister": [],
             "chunk_hashes_list": hashes, "wasm_module_hash": hashlib.sha256(wasm).digest(),
-            "arg": encode([]), "sender_canister_version": [],
+            "arg": encode([{"type": Types.Text, "value": installer}]), "sender_canister_version": [],
         })
 
     def call(self, name, args=None, sender=None, query=False):

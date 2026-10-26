@@ -55,13 +55,18 @@ def main():
 """
 
 
-def start():
+def start(installer=""):
+    """Boot the realm. ``installer``, the init argument, is the GaaS installer canister: it keeps admin rights
+    after the stand hands off its controllers, so it can finish setup. Recorded once."""
     # Load every operation here, where it is kept: a query loading modules would redo it on every call.
     ops()
     if Realm["1"] is None:
         realm = Realm(id="1", principal_id=chain.self_id())
         realm.calendar, realm.treasury = Calendar(id="1"), Treasury(id="1")
         Department(id="Administration", is_root=True, description="The realm's root department")
+    installer = (installer or "").strip()
+    if installer and not Realm["1"].installer_canister_id:
+        Realm["1"].installer_canister_id = installer
     for name, allowed in PROFILES.items():
         if UserProfile[name] is None:
             UserProfile(id=name, allowed_to=allowed)

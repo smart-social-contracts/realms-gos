@@ -14,8 +14,8 @@ from core.op import dispatch, run as drive  # noqa: E402
 
 
 @init
-def init_() -> void:
-    setup.start()
+def init_(installer: text) -> void:
+    setup.start(installer)
 
 
 @post_upgrade

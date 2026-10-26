@@ -54,7 +54,11 @@ def permissions(principal):
         return {"all"}
     if principal == chain.ANONYMOUS:
         return set()
-    from ggg import Appointment, Authority, GuestUser, Quarter, User
+    from ggg import Appointment, Authority, GuestUser, Quarter, Realm, User
+
+    realm = Realm["1"]
+    if realm and realm.installer_canister_id and realm.installer_canister_id == principal:
+        return {"all"}
 
     held = {"self.join"}
     user = User[principal]

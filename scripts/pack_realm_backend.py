@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "realm_backend"
 WASM = ROOT / ".basilisk" / "realm_backend" / "realm_backend.wasm"
-ENDPOINTS = ('"read" : (text, text) -> (text) query;', '"run" : (text, text) -> (text);')
+ENDPOINTS = ('service : (text) -> {', '"read" : (text, text) -> (text) query;', '"run" : (text, text) -> (text);')
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from basilisk_cedar_template import apply_cedar_template_env  # noqa: E402

@@ -124,7 +124,7 @@ type LicenseResult = variant { Ok : DeveloperLicense; Err : text };
 type FileRegistryService = service { set_namespace_approval : (text) -> (text) };
 type FileRegistryGrantService = service { grant_publish : (text) -> (text) };
 
-service : {
+service : (text) -> {
   "read" : (text, text) -> (text) query;
   "run" : (text, text) -> (text);
   "__shell__" : (text) -> (text);

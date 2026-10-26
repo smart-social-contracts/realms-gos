@@ -23,7 +23,7 @@ def test_story(realm, people):
     assert ok(realm, "status", None, query=True)["status"] == "setup"
     assert "sign in" in refused(realm, "proposal_list", None, query=True)
 
-    ok(realm, "setup_step", ctl, step="install", network="local", founder=founder)
+    ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
     ok(realm, "setup_step", founder, step="realm", name="Agora", open_registration=False)
     ok(realm, "setup_step", founder, step="trust_policy", require_marketplace_approval=False)
     ok(realm, "setup_step", founder, step="tokens", accounting_currency="DOM", accounting_currency_decimals=8)

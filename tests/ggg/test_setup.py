@@ -2,6 +2,7 @@ import json
 
 import fake_chain
 import world
+from api import setup
 from ggg import Department, Realm, Registry
 from kit import call, denied, ok
 
@@ -22,6 +23,16 @@ def test_story_the_founder_sets_up_and_launches_agora():
     denied("realm_configure", "frank", open_registration=False)
     assert "governed" in call("setup_step", "ctl", step="branding", logo_url="x")["error"]
     assert "already launched" in call("setup_launch", "ctl")["error"]
+
+
+def test_the_installer_named_at_init_keeps_admin_rights_without_being_a_controller():
+    world.build()
+    setup.start("gaas")
+    setup.start("other")
+    assert Realm["1"].installer_canister_id == "gaas"
+    ok("setup_step", "gaas", step="install", network="ic", founder="frank")
+    ok("setup_step", "gaas", step="realm", name="Agora")
+    denied("setup_step", "other", step="branding", primary_color="#1E6B52")
 
 
 def test_I_ADM_1_test_flags_only_off_production_or_when_allowed_at_install():

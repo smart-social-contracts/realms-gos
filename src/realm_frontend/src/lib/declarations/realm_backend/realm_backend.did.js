@@ -4,4 +4,4 @@ export const idlFactory = ({ IDL }) => {
     'run' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
   });
 };
-export const init = ({ IDL }) => { return []; };
+export const init = ({ IDL }) => { return [IDL.Text]; };
