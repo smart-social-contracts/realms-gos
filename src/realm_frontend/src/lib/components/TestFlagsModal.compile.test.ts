@@ -27,9 +27,10 @@ describe('TestFlagsModal layout', () => {
 		expect(source).not.toMatch(/items-start justify-between gap-4/);
 	});
 
-	it('stringifies only test-only keys on save', () => {
+	it('saves only test-only keys through realm_configure', () => {
+		expect(source).toContain("run('realm_configure'");
 		expect(source).toContain("test_flags: testOnlyFlags()");
-		expect(source).toContain("'test_mode'");
+		expect(source).toContain('test_mode: !!values.test_mode');
 		expect(source).toContain("'ii_bypass'");
 		expect(source).toContain("'demo_data'");
 		expect(source).toContain("'skip_terms'");

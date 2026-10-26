@@ -7,19 +7,15 @@
  * browser, where it is decrypted locally using an ephemeral BLS12-381 key pair.
  *
  * Flow:
- *   1. get_my_vetkey_public_key  → derived public key (hex)
- *   2. generate TransportSecretKey.random() (BLS12-381 G1, 48-byte compressed)
- *   3. derive_my_vetkey(tpk_hex) → encrypted vetKey (hex)
- *   4. EncryptedVetKey.decryptAndVerify(…)  → VetKey
- *   5. VetKey.deriveSymmetricKey(…)  → 32-byte AES-256-GCM key
- *   6. AES-GCM encrypt / decrypt
+ *   1. the caller's vetKey (crypto_public_key + crypto_derive_key, see sharing.ts)
+ *   2. VetKey.deriveSymmetricKey(…)  → 32-byte AES-256-GCM key
+ *   3. AES-GCM encrypt / decrypt
  */
 
-import {
-	TransportSecretKey,
-	DerivedPublicKey,
-	EncryptedVetKey
-} from '@dfinity/vetkeys';
+import { get } from 'svelte/store';
+// @ts-ignore
+import { backendPrincipal } from '$lib/canisters';
+import { deriveMySharingVetKey } from './sharing';
 
 // ---------------------------------------------------------------------------
 // Hex helpers
@@ -50,44 +46,13 @@ const AES_GCM_DOMAIN_SEP = 'aes-256-gcm-realms-private-data';
 /**
  * Derive a 32-byte AES-256-GCM key for the currently authenticated user.
  *
- * @param backend  The canister actor (must be authenticated).
+ * @param backend  The realm actor or quarterBackend (see `realmFor` in sharing.ts); must be authenticated.
  * @returns A `CryptoKey` ready for `encrypt` / `decrypt`.
  */
 export async function deriveAesKey(backend: any): Promise<CryptoKey> {
-	// 1. Fetch the vetKD derived public key for this user's context
-	const pkResp = await backend.get_my_vetkey_public_key();
-	if (!pkResp.success || !pkResp.data?.message) {
-		throw new Error(
-			`vetKD public key fetch failed: ${pkResp.data?.error || 'unknown error'}`
-		);
-	}
-	const publicKeyHex: string = pkResp.data.message;
-	console.log('vetKD public key hex:', publicKeyHex.substring(0, 80) + '...', 'hex len:', publicKeyHex.length, 'bytes:', publicKeyHex.length / 2);
-	const publicKeyBytes = hexToBytes(publicKeyHex);
-	const dpk = DerivedPublicKey.deserialize(publicKeyBytes);
-
-	// 2. Generate ephemeral transport key pair (48-byte compressed G1)
-	const tsk = TransportSecretKey.random();
-	const tpkHex = bytesToHex(tsk.publicKeyBytes());
-
-	// 3. Ask the canister to derive the encrypted key
-	const deriveResp = await backend.derive_my_vetkey(tpkHex);
-	if (!deriveResp.success || !deriveResp.data?.message) {
-		throw new Error(
-			`vetKD key derivation failed: ${deriveResp.data?.error || 'unknown error'}`
-		);
-	}
-	const encryptedKeyBytes = hexToBytes(deriveResp.data.message);
-
-	// 4. Decrypt & verify → VetKey (BLS signature)
-	//    input is empty (matches backend input_hex="")
-	const encryptedVetKey = EncryptedVetKey.deserialize(encryptedKeyBytes);
-	const vetKey = encryptedVetKey.decryptAndVerify(tsk, dpk, new Uint8Array());
-
-	// 5. Derive 32-byte symmetric key via HKDF
+	const { vetKey } = await deriveMySharingVetKey(backend, get(backendPrincipal));
 	const symmetricKeyRaw = vetKey.deriveSymmetricKey(AES_GCM_DOMAIN_SEP, 32);
 
-	// 6. Import into Web Crypto
 	return crypto.subtle.importKey('raw', symmetricKeyRaw, { name: 'AES-GCM' }, false, [
 		'encrypt',
 		'decrypt'
@@ -151,7 +116,7 @@ export async function aesGcmDecrypt(key: CryptoKey, ciphertext: string): Promise
 /**
  * Encrypt a private-data JSON object for storage.
  *
- * Returns an `enc:v=2:iv=...:d=...` string for `update_my_private_data`.
+ * Returns an `enc:v=2:iv=...:d=...` string for `private_data_update`.
  */
 export async function encryptPrivateData(
 	backend: any,

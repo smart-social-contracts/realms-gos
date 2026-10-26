@@ -5,8 +5,6 @@ These commands allow a realm to register itself with the central realm registry
 programmatically during deployment or at any time.
 """
 
-import json
-import subprocess
 from typing import Optional
 
 import typer
@@ -14,48 +12,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ..realm_api import call_op
+
 console = Console()
 app = typer.Typer()
-
-
-def _run_dfx_call(
-    canister: str,
-    method: str,
-    args: str = "",
-    network: str = "local",
-    query: bool = False,
-) -> dict:
-    """Run a dfx canister call command and return the result"""
-    cmd = ["dfx", "canister", "call", "--network", network, canister, method]
-    
-    if args:
-        cmd.append(args)
-    
-    if query:
-        cmd.insert(3, "--query")
-    
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=30
-        )
-        
-        # Parse the Candid output - remove outer parentheses if present
-        output = result.stdout.strip()
-        if output.startswith("(") and output.endswith(")"):
-            output = output[1:-1].strip()
-        
-        # Remove quotes if it's a string response
-        if output.startswith('"') and output.endswith('"'):
-            output = output[1:-1]
-        
-        return {"success": True, "output": output}
-        
-    except subprocess.CalledProcessError as e:
-        return {"success": False, "error": f"Command failed: {e.stderr.strip()}"}
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": "Command timed out"}
-    except Exception as e:
-        return {"success": False, "error": f"Unexpected error: {str(e)}"}
 
 
 @app.command("register")
@@ -78,7 +38,7 @@ def self_register(
     """
     Register this realm with the central realm registry.
     
-    This command calls the realm backend's register_realm_with_registry function,
+    This command runs the realm backend's realm_register operation,
     which makes an inter-canister call to the registry to register itself.
     
     Example:
@@ -99,47 +59,37 @@ def self_register(
         console.print(f"[cyan]Frontend URL:[/cyan] {frontend_url}")
     console.print(f"[dim]Network:[/dim] {network}\n")
     
-    # Prepare arguments for the inter-canister call
-    args = f'("{registry_canister_id}", "{realm_id}", "{realm_name}", "{frontend_url}")'
-    
-    # Make the call to realm backend (which will make inter-canister call to registry)
-    result = _run_dfx_call(
-        canister=realm_backend_canister,
-        method="register_realm_with_registry",
-        args=args,
+    # The realm makes the inter-canister call to the registry, under its own name
+    response = call_op(
+        realm_backend_canister,
+        "realm_register",
+        {"registry": registry_canister_id, "url": frontend_url},
         network=network,
-        query=False
     )
-    
-    if not result["success"]:
-        console.print(f"[red]❌ Error: {result['error']}[/red]")
-        raise typer.Exit(1)
-    
-    # Parse the JSON response
-    try:
-        response = json.loads(result["output"])
-        
-        if response.get("success"):
-            console.print(Panel(
-                f"[green]✅ Successfully registered realm with registry![/green]\n\n"
-                f"[cyan]Realm ID:[/cyan] {response.get('realm_id', realm_id)}\n"
-                f"[cyan]Realm Name:[/cyan] {response.get('realm_name', realm_name)}\n"
-                f"[cyan]Realm URL:[/cyan] {response.get('realm_url', frontend_url)}\n"
-                f"[dim]Registry:[/dim] {response.get('registry_canister', registry_canister_id)}",
-                border_style="green",
-                title="Registration Complete"
-            ))
-        else:
-            console.print(Panel(
-                f"[red]❌ Registration failed[/red]\n\n"
-                f"[yellow]Error:[/yellow] {response.get('error', 'Unknown error')}",
-                border_style="red",
-                title="Registration Failed"
-            ))
-            raise typer.Exit(1)
-            
-    except json.JSONDecodeError:
-        console.print(f"[yellow]⚠️  Unexpected response format:[/yellow]\n{result['output']}")
+
+    if response.get("requires_vote"):
+        console.print(Panel(
+            f"[yellow]Registration needs a vote: filed as proposal {response['proposal']}[/yellow]",
+            border_style="yellow",
+            title="Proposal Filed"
+        ))
+    elif response.get("ok"):
+        console.print(Panel(
+            f"[green]✅ Successfully registered realm with registry![/green]\n\n"
+            f"[cyan]Realm ID:[/cyan] {realm_id}\n"
+            f"[cyan]Realm Name:[/cyan] {realm_name}\n"
+            f"[cyan]Realm URL:[/cyan] {frontend_url}\n"
+            f"[dim]Registry:[/dim] {response['registry']}",
+            border_style="green",
+            title="Registration Complete"
+        ))
+    else:
+        console.print(Panel(
+            f"[red]❌ Registration failed[/red]\n\n"
+            f"[yellow]Error:[/yellow] {response.get('error', 'Unknown error')}",
+            border_style="red",
+            title="Registration Failed"
+        ))
         raise typer.Exit(1)
 
 

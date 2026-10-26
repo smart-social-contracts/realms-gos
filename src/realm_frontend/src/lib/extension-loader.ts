@@ -21,6 +21,7 @@ import type {
   ExtensionMountFn,
 } from './realm-extension-sdk';
 import { SandboxBridgeService, type SandboxBridgeDeps } from './extension-bridge-host';
+import { read, must } from './realm';
 
 export type { MountResult, ExtensionMountFn as MountFn };
 
@@ -62,46 +63,19 @@ export function fileRegistryBaseUrlFor(canisterId: string): string {
 
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 
-async function resolveInstalledVersion(
-  backend: { get_extension_frontend_info?: (args: string) => Promise<string> },
-  extId: string,
-  fallbackVersion: string,
-): Promise<string> {
-  // Manifest version (from list_runtime_extensions) matches the installed
-  // backend and the same-origin bundle uploaded at runtime-install time.
-  // _source.json can lag after direct runtime-install — prefer manifest.
-  if (fallbackVersion) {
-    return fallbackVersion;
-  }
-  if (typeof backend?.get_extension_frontend_info === 'function') {
-    try {
-      const raw = await backend.get_extension_frontend_info(
-        JSON.stringify({ extension_id: extId }),
-      );
-      const parsed = JSON.parse(raw);
-      if (parsed?.success && parsed.version) {
-        return parsed.version;
-      }
-    } catch (e) {
-      console.warn('[extension-loader] get_extension_frontend_info failed:', e);
-    }
-  }
-  return fallbackVersion;
-}
-
 /**
- * Resolve an extension's installed version by querying the realm_backend.
+ * The installed version of an extension, from the realm's extension_list; undefined when it is
+ * not installed.
  */
-export async function resolveExtensionVersion(
-  backend: {
-    list_runtime_extensions: () => Promise<string>;
-  },
-  extId: string,
-): Promise<string | undefined> {
-  const raw = await backend.list_runtime_extensions();
-  const parsed = JSON.parse(raw);
-  const manifest = parsed?.all_manifests?.[extId];
-  return manifest?.version;
+export async function resolveExtensionVersion(extId: string): Promise<string | undefined> {
+  let from: number | null = 1;
+  while (from) {
+    const page = await must(read('extension_list', { from, count: 100 }));
+    const row = page.extensions.find((e: { id: string }) => e.id === extId);
+    if (row) return row.version;
+    from = page.next;
+  }
+  return undefined;
 }
 
 /**
@@ -117,9 +91,7 @@ export async function mountExtension(
   target: HTMLElement,
   ctx: RealmExtensionContext,
 ): Promise<MountResult | void> {
-  const backend: any = ctx?.backend;
-  const ver = await resolveInstalledVersion(backend, extId, version);
-
+  const ver = version;
   const sameOriginPath = `/ext/${extId}/${ver}/frontend/dist/index.js`;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const sameOriginUrl = `${origin}${sameOriginPath}`;

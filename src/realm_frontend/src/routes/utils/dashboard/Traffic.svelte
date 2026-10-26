@@ -2,7 +2,7 @@
 	import { Button, Card, Chart } from 'flowbite-svelte';
 	import { ChevronRightOutline } from 'flowbite-svelte-icons';
 	import { onMount } from 'svelte';
-	import { backend } from '$lib/canisters';
+	import { must, read } from '$lib/realm';
 	import { formatUSD, formatNumber } from '$lib/utils';
 	import { page } from '$app/stores';
 	import { ArrowUpRightFromSquareOutline } from 'flowbite-svelte-icons';
@@ -119,13 +119,8 @@
 	async function loadTokenData() {
 		try {
 			console.log('Loading data for organization:', organizationId);
-			const orgData = await backend.get_organization_data(organizationId);
+			const orgData = (await must(read('organization_get', { organization: organizationId }))).organization;
 			console.log('Organization data:', orgData);
-
-			if (!orgData) {
-				console.error('No organization data found');
-				return;
-			}
 
 			organizationData = orgData;
 

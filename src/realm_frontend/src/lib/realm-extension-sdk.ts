@@ -8,6 +8,46 @@
  * The stores follow the Svelte store contract: { subscribe(cb): unsubscribe }.
  * Plain-JS bundles can call ctx.principal.subscribe(v => …) directly.
  */
+import { quarter, type Reply } from '$lib/realm';
+
+// ── Host side: extension calls go through the realm's extension_call ──
+
+/** Run ``fn`` of ``extension``'s backend with ``args`` on the active quarter. */
+export function callRealmExtension(
+	extension: string,
+	fn: string,
+	args: Record<string, unknown> = {},
+): Promise<Reply> {
+	return quarter.run('extension_call', { extension, function: fn, args });
+}
+
+/** An ``extension_call`` result, parsed when the extension returned JSON text. */
+export function extensionResult(reply: { [key: string]: any }): unknown {
+	if (typeof reply.result !== 'string') return reply.result;
+	try {
+		return JSON.parse(reply.result);
+	} catch {
+		return reply.result;
+	}
+}
+
+async function legacyExtensionCall(extension: string, fn: string, argsJson = '{}') {
+	const reply = await callRealmExtension(extension, fn, JSON.parse(argsJson || '{}'));
+	if (!reply.ok) return { success: false, response: reply.error };
+	const result = reply.result;
+	return { success: true, response: typeof result === 'string' ? result : JSON.stringify(result) };
+}
+
+/**
+ * ``ctx.backend`` for in-process bundles: ``read`` / ``run`` of the active quarter, plus
+ * ``extension_sync_call`` / ``extension_async_call`` with their old ``{success, response}`` reply.
+ */
+export const realmExtensionBackend = {
+	read: quarter.read,
+	run: quarter.run,
+	extension_sync_call: legacyExtensionCall,
+	extension_async_call: legacyExtensionCall,
+};
 
 // ── Re-exported helper types ───────────────────────────────────────────
 
@@ -81,9 +121,10 @@ export interface RealmExtensionContext {
 	version: string;
 
 	/**
-	 * The realm backend canister actor (proxy).
-	 * Supports extension_sync_call, extension_async_call, get_objects_paginated,
-	 * status, and all other Candid methods exposed by the realm_backend.
+	 * The realm backend of the active quarter (`realmExtensionBackend`): `read(name, args)` and
+	 * `run(name, args)` call its operations and return `{ ok, ... }`; `extension_sync_call` /
+	 * `extension_async_call` remain for older bundles. The market_place extension gets the
+	 * marketplace adapter here instead.
 	 */
 	backend: any;
 
@@ -95,19 +136,15 @@ export interface RealmExtensionContext {
 	marketplace?: any;
 
 	/**
-	 * Call a sync extension function on the backend.
-	 * Automatically handles positional Candid args and JSON serialization.
+	 * Call an extension function on the backend (the realm's `extension_call`).
 	 *
 	 * @param fn    The function name exposed by the backend extension.
-	 * @param args  A plain JS object that will be JSON-stringified as the `args` parameter.
-	 * @returns     The parsed JSON response, or throws on failure.
+	 * @param args  A plain JS object passed as the function's keyword arguments.
+	 * @returns     The function's result (parsed if it is JSON text), or throws on failure.
 	 */
 	callSync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
 
-	/**
-	 * Call an async (inter-canister) extension function on the backend.
-	 * Same ergonomics as callSync.
-	 */
+	/** Same as callSync; kept for bundles that call inter-canister functions this way. */
 	callAsync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 	/** The logged-in user's principal as a reactive store. Empty string when anonymous. */
@@ -119,19 +156,19 @@ export interface RealmExtensionContext {
 
 	/** Realm metadata (name, logo, manifesto, quarters, etc.). */
 	realmInfo: Readable<RealmInfo>;
-	/** Host config. Ledger ids are not here: read `backend.status().canisters` / `.shared_tokens`. */
+	/** Host config. Ledger ids are not here: read `backend.read('treasury_view')`. */
 	config: {
-		/** @deprecated never populated; use `backend.status().shared_tokens`. */
+		/** @deprecated never populated; use `backend.read('treasury_view')`. */
 		ckbtc_ledger_canister_id?: string;
-		/** @deprecated never populated; use `backend.status().shared_tokens`. */
+		/** @deprecated never populated; use `backend.read('treasury_view')`. */
 		ckbtc_indexer_canister_id?: string;
-		/** @deprecated never populated; use `backend.status().canisters` (canister_type "token_backend"). */
+		/** @deprecated never populated; use `backend.read('treasury_view')`. */
 		token_backend_canister_id?: string;
 		/** The realm_backend canister ID itself. */
 		canisterId: string;
-		/** File registry canister ID (shared infra, set via set_canister_config). */
+		/** File registry canister ID: this build's, when it has one. */
 		fileRegistryCanisterId?: string;
-		/** Marketplace canister ID (shared infra, set via set_canister_config). */
+		/** Marketplace canister ID. Not reported by this realm version. */
 		marketplaceCanisterId?: string;
 	};
 

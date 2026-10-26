@@ -3,8 +3,9 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
-	// @ts-ignore
-	import { backend } from '$lib/canisters';
+	import { must } from '$lib/realm';
+	import { callRealmExtension, extensionResult, realmExtensionBackend } from '$lib/realm-extension-sdk';
+	import { getFileRegistryCanisterIds } from '$lib/file-registry-client';
 	import { canisterId as backendCanisterId } from '$lib/declarations/realm_backend';
 	import { principal, isAuthenticated } from '$lib/stores/auth';
 	import { userProfiles } from '$lib/stores/profiles';
@@ -39,7 +40,7 @@
 		}).__CANISTER_IDS ?? {};
 	}
 
-	// The realm declares its own network (canister_ids.js / status()); there is
+	// The realm declares its own network (canister_ids.js); there is
 	// no id→network table here to go stale when an environment is rebuilt.
 	function resolveGeisterNetwork(): string {
 		const ids = runtimeCanisterIds();
@@ -60,7 +61,10 @@
 	let status: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
 	let errorMsg = '';
 	let mounted: MountResult | void;
-	let infraConfig: { fileRegistryCanisterId?: string; marketplaceCanisterId?: string } = {};
+	// The realm does not report its file registry or marketplace: the registry is this build's.
+	const infraConfig: { fileRegistryCanisterId?: string; marketplaceCanisterId?: string } = {
+		fileRegistryCanisterId: getFileRegistryCanisterIds()[0] ?? '',
+	};
 	let isResizing = false;
 	let mobilePanelHeight = '';
 	let panelElement: HTMLDivElement | undefined;
@@ -148,46 +152,18 @@
 		return { pathname, extensionId, title };
 	}
 
-	async function resolveInfraConfig() {
-		try {
-			const raw = await backend.status();
-			const resp = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const canisters: { canister_id: string; canister_type: string }[] =
-				resp?.data?.status?.canisters ?? [];
-			const fr = canisters.find((c) => c.canister_type === 'file_registry');
-			const mp = canisters.find((c) => c.canister_type === 'marketplace');
-			infraConfig = {
-				fileRegistryCanisterId: fr?.canister_id ?? '',
-				marketplaceCanisterId: mp?.canister_id ?? '',
-			};
-		} catch {
-			infraConfig = {};
-		}
-	}
-
 	function buildContext(id: string, version: string): any {
 		async function callSync(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
-			const raw = await backend.extension_sync_call(id, fn, JSON.stringify(args));
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res?.success === false) throw new Error(res.response ?? 'extension_sync_call failed');
-			if (!res?.response) return res;
-			try { return JSON.parse(res.response); } catch { return res.response; }
-		}
-		async function callAsync(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
-			const raw = await backend.extension_async_call(id, fn, JSON.stringify(args));
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res?.success === false) throw new Error(res.response ?? 'extension_async_call failed');
-			if (!res?.response) return res;
-			try { return JSON.parse(res.response); } catch { return res.response; }
+			return extensionResult(await must(callRealmExtension(id, fn, args)));
 		}
 
 		return {
 			...createHostContext(),
 			extensionId: id,
 			version,
-			backend,
+			backend: realmExtensionBackend,
 			callSync,
-			callAsync,
+			callAsync: callSync,
 			principal,
 			isAuthenticated,
 			userProfiles,
@@ -234,10 +210,7 @@
 		errorMsg = '';
 
 		try {
-			const [version] = await Promise.all([
-				resolveExtensionVersion(backend as any, EXTENSION_ID),
-				resolveInfraConfig(),
-			]);
+			const version = await resolveExtensionVersion(EXTENSION_ID);
 			if (!version) {
 				status = 'error';
 				errorMsg = get(_)('errors.ai_not_installed');

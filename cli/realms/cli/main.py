@@ -114,7 +114,7 @@ def extension(
     raw_json: bool = typer.Option(False, "--json", help="Output raw JSON (for runtime-list)"),
     registry: Optional[str] = typer.Option(
         None, "--registry", "-r",
-        help="File registry canister ID (registry-install or publish)",
+        help="File registry canister ID (registry-install, publish; runtime-install publishes there first)",
     ),
     version: Optional[str] = typer.Option(
         None, "--version", "-v",
@@ -670,22 +670,16 @@ def status(
     # Try to call backend canister status
     console.print("\n[bold]Canister Status:[/bold]")
     try:
-        import subprocess
+        from .commands.db import realm_op
 
-        cmd = ["dfx", "canister", "call", effective_canister, "status"]
-        if effective_network != "local":
-            cmd.extend(["--network", effective_network])
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
+        reply = realm_op(effective_canister, "status", network=effective_network, read=True, timeout=10)
+        if reply.get("ok"):
             console.print("  ✅ Backend canister is responding")
-            # Parse the response if needed
-            if "success = true" in result.stdout:
-                console.print("  ✅ Backend status: healthy")
+            console.print(f"  ✅ Backend status: {reply.get('status') or 'healthy'} (version {reply.get('version')})")
         else:
             console.print("  ❌ Backend canister not responding")
-            if result.stderr:
-                console.print(f"      Error: {result.stderr.strip()}")
+            if reply.get("error"):
+                console.print(f"      Error: {reply['error']}")
     except Exception as e:
         console.print(f"  ❌ Could not check backend status: {e}")
 
@@ -1058,8 +1052,8 @@ def realm_deploy(
 @realm_app.command("call")
 def realm_call(
     realm_ref: str = typer.Argument(help="Realm canister ID or name (e.g., 'Dominion' or 'xxxxx-xxxxx-xxxxx-xxxxx-cai')"),
-    method: str = typer.Argument(help="Method name or 'extension' for extension calls"),
-    args: str = typer.Argument("()", help="Candid arguments (e.g., '(\"admin\")') or extension name for extension calls"),
+    method: str = typer.Argument(help="Operation name (see `ops_list`) or 'extension' for extension calls"),
+    args: str = typer.Argument("{}", help="JSON arguments (e.g., '{\"code\": \"X7K-29Q\"}') or extension name for extension calls"),
     function_name: Optional[str] = typer.Argument(None, help="Function name (only for extension calls)"),
     function_args: Optional[str] = typer.Argument(None, help="JSON arguments (only for extension calls)"),
     network: Optional[str] = typer.Option(
@@ -1069,32 +1063,32 @@ def realm_call(
         "json", "--output", "-o", help="Output format: json or candid"
     ),
     async_call: bool = typer.Option(
-        False, "--async", "-a", help="Use async extension call (for extension calls only)"
+        False, "--async", "-a", help="Ignored: an extension call is one operation now"
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show verbose output"
     ),
 ) -> None:
     """
-    Call a backend method or extension function on a realm.
+    Call an operation or an extension function on a realm.
     
     Examples:
-        # Call backend method on a realm by name
+        # Call an operation on a realm by name
         realms realm call Dominion status --network staging
-        realms realm call Dominion join_realm '("admin")' --network staging
+        realms realm call Dominion realm_join '{"code": "X7K-29Q"}' --network staging
         
-        # Call backend method on a realm by canister ID
-        realms realm call xxxxx-xxxxx-xxxxx-xxxxx-cai status --network staging
+        # Call an operation on a realm by canister ID
+        realms realm call xxxxx-xxxxx-xxxxx-xxxxx-cai ops_list --network staging
         
-        # Call extension function
+        # Call extension function (extension_call)
         realms realm call Dominion extension member_dashboard check_invoice_payment '{"invoice_id": "x"}' --network staging
         
         # Output format (default: json)
         realms realm call Dominion status --output candid --network staging
     """
     import json as json_module
-    import subprocess
-    import sys
+
+    from .realm_api import call_any, quote
     
     # Validate output format
     if output not in ("json", "candid"):
@@ -1133,58 +1127,37 @@ def realm_call(
             console.print("[bold blue]🔧 Calling Extension Function[/bold blue]\n")
             console.print(f"Extension: [cyan]{extension_name}[/cyan]")
             console.print(f"Function: [cyan]{function_name}[/cyan]")
-            console.print(f"Args: [dim]{function_args}[/dim]")
-            console.print(f"Async: [dim]{async_call}[/dim]\n")
+            console.print(f"Args: [dim]{function_args}[/dim]\n")
         
         try:
-            # Validate JSON args
-            json_module.loads(function_args)
+            name, payload = "extension_call", {
+                "extension": extension_name, "function": function_name, "args": json_module.loads(function_args)}
         except json_module.JSONDecodeError as e:
             console.print(f"[red]❌ Invalid JSON arguments: {e}[/red]")
             raise typer.Exit(1)
-        
-        # Build extension call
-        escaped_args = function_args.replace('"', '\\"')
-        call_record = f"""(record {{ extension_name = "{extension_name}"; function_name = "{function_name}"; args = "{escaped_args}"; }})"""
-        
-        call_method = "extension_async_call" if async_call else "extension_sync_call"
-        cmd = ["dfx", "canister", "call", "--network", effective_network, effective_canister, call_method, call_record]
-        if output == "json":
-            cmd.extend(["--output", "json"])
     else:
-        # Regular backend method call
         if verbose:
-            console.print("[bold blue]📞 Calling Backend Method[/bold blue]\n")
-            console.print(f"Method: [cyan]{method}[/cyan]")
+            console.print("[bold blue]📞 Calling Operation[/bold blue]\n")
+            console.print(f"Operation: [cyan]{method}[/cyan]")
             console.print(f"Args: [dim]{args}[/dim]\n")
-        
-        cmd = ["dfx", "canister", "call", "--network", effective_network, effective_canister, method, args]
-        if output == "json":
-            cmd.extend(["--output", "json"])
-    
-    try:
-        if verbose:
-            console.print("[dim]Executing...[/dim]")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        
-        if result.returncode == 0:
-            if verbose:
-                console.print("[green]✅ Call successful[/green]\n")
-                console.print("[bold]Response:[/bold]")
-            
-            print(result.stdout.strip())
-        else:
-            if result.stderr:
-                sys.stderr.write(f"Error: {result.stderr}\n")
-            if result.stdout:
-                sys.stderr.write(f"Output: {result.stdout}\n")
+
+        name = method
+        try:
+            payload = json_module.loads("{}" if args.strip() in ("", "()") else args)
+        except json_module.JSONDecodeError:
+            payload = None
+        if not isinstance(payload, dict):
+            console.print(f"[red]❌ Operations take a JSON object as arguments, not {args}[/red]")
+            console.print("Example: realms realm call Dominion realm_join '{\"code\": \"X7K-29Q\"}' --network staging")
             raise typer.Exit(1)
-    except subprocess.TimeoutExpired:
-        sys.stderr.write("Error: Call timed out\n")
-        raise typer.Exit(1)
-    except Exception as e:
-        sys.stderr.write(f"Error: {e}\n")
-        raise typer.Exit(1)
+
+    if verbose:
+        console.print("[dim]Executing...[/dim]")
+    reply = call_any(effective_canister, name, payload, network=effective_network, timeout=60)
+    if verbose:
+        console.print("[green]✅ Call successful[/green]\n" if reply.get("ok") else "[red]❌ Refused[/red]\n")
+        console.print("[bold]Response:[/bold]")
+    print(json_module.dumps(reply, indent=2) if output == "json" else f"({quote(json_module.dumps(reply))})")
 
 
 # Create quarter subcommand group under realm
@@ -1353,7 +1326,9 @@ def registry_listing_list(
 
 @registry_realm_app.command("add")
 def registry_add(
-    realm_name: str = typer.Option(..., "--realm-name", help="Human-readable realm name"),
+    realm_name: str = typer.Option(
+        ..., "--realm-name", help="Human-readable realm name (the realm registers under its configured name)"
+    ),
     frontend_url: str = typer.Option("", "--frontend-url", help="Frontend canister URL (optional, will auto-derive)"),
     backend_url: str = typer.Option("", "--backend-url", help="Backend canister URL for status fetching"),
     network: str = typer.Option("local", "--network", "-n", help="Network to use"),
@@ -1371,27 +1346,26 @@ def registry_add(
     """
     Register this realm with the central registry.
     
-    Calls the realm backend's register_realm_with_registry function which makes
-    a secure inter-canister call to the registry. The registry uses the calling
-    canister's principal as the realm ID.
+    Runs the realm's realm_register operation, which makes a secure
+    inter-canister call to the registry. The registry uses the calling
+    canister's principal as the realm ID, and lists the realm under the name
+    and canister ids the realm is configured with.
     
     Example:
         realms registry realm add \\
             --realm-name "My Demo Governance Realm" \\
             --network local
     """
-    import json
     import subprocess
+
+    from .commands.db import realm_op
     
     console.print(Panel.fit(
         "[bold cyan]🌐 Registering Realm with Central Registry[/bold cyan]",
         border_style="cyan"
     ))
     
-    # Get canister IDs for registration
     frontend_canister_id = ""
-    token_canister_id = ""
-    nft_canister_id = ""
     
     # Auto-derive frontend canister ID and URL
     try:
@@ -1413,27 +1387,16 @@ def registry_add(
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         console.print("[yellow]⚠️  Could not get frontend canister ID[/yellow]")
     
-    # Try to get optional token_backend canister ID
-    try:
-        result = subprocess.run(
-            ["dfx", "canister", "id", "token_backend", "--network", network],
-            capture_output=True, text=True, check=True, timeout=5
-        )
-        token_canister_id = result.stdout.strip()
-        console.print(f"[dim]Found token_backend: {token_canister_id}[/dim]")
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        pass  # Optional canister
-    
-    # Try to get optional nft_backend canister ID
-    try:
-        result = subprocess.run(
-            ["dfx", "canister", "id", "nft_backend", "--network", network],
-            capture_output=True, text=True, check=True, timeout=5
-        )
-        nft_canister_id = result.stdout.strip()
-        console.print(f"[dim]Found nft_backend: {nft_canister_id}[/dim]")
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        pass  # Optional canister
+    # The realm calls the registry by its canister id
+    if not is_canister_id(registry_canister_id):
+        try:
+            registry_canister_id = subprocess.run(
+                ["dfx", "canister", "id", registry_canister_id, "--network", network],
+                capture_output=True, text=True, check=True, timeout=5
+            ).stdout.strip()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            console.print(f"[red]❌ Could not resolve the registry canister '{registry_canister_id}' to an id[/red]")
+            raise typer.Exit(1)
     
     console.print(f"\n[cyan]Realm Name:[/cyan] {realm_name}")
     console.print(f"[cyan]Frontend URL:[/cyan] {frontend_url}")
@@ -1443,68 +1406,43 @@ def registry_add(
         console.print(f"[cyan]Backend URL:[/cyan] {backend_url}")
     console.print(f"[dim]Network:[/dim] {network}\n")
     
-    # Call realm backend's register_realm_with_registry (secure inter-canister call)
-    # Pack canister IDs as pipe-delimited string: frontend_id|token_id|nft_id
-    # NOTE: Cannot use JSON — basilisk's Candid encoder parses {} as record syntax
-    canister_ids_packed = f"{frontend_canister_id}|{token_canister_id}|{nft_canister_id}"
-    
-    args = f'("{registry_canister_id}", "{realm_name}", "{frontend_url}", "{canister_ids_packed}")'
-    cmd = ["dfx", "canister", "call", "--network", network, realm_backend_canister, "register_realm_with_registry", args]
-    
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=60
+        response = realm_op(
+            realm_backend_canister,
+            "realm_register",
+            {"registry": registry_canister_id, "url": frontend_url, "backend_url": backend_url},
+            network=network,
         )
-        
-        # Parse the JSON response
-        output = result.stdout.strip()
-        if output.startswith("(") and output.endswith(")"):
-            output = output[1:-1].strip()
-        if output.startswith('"') and output.endswith('"'):
-            output = output[1:-1]
-        
-        # Unescape the JSON string
-        output = output.replace('\\"', '"').replace('\\n', '\n')
-        
-        try:
-            response = json.loads(output)
-            if response.get("success"):
-                console.print(Panel(
-                    f"[green]✅ Successfully registered realm with registry![/green]\n\n"
-                    f"[cyan]Realm ID:[/cyan] {response.get('realm_id', 'N/A')}\n"
-                    f"[cyan]Realm Name:[/cyan] {realm_name}\n"
-                    f"[cyan]Frontend URL:[/cyan] {frontend_url}",
-                    border_style="green",
-                    title="Registration Complete"
-                ))
-            else:
-                console.print(Panel(
-                    f"[red]❌ Registration failed[/red]\n\n"
-                    f"[yellow]Error:[/yellow] {response.get('error', 'Unknown error')}",
-                    border_style="red",
-                    title="Registration Failed"
-                ))
-                raise typer.Exit(1)
-        except json.JSONDecodeError:
-            # Check for Ok/Err in raw output
-            if "success" in output.lower() or "Ok" in output:
-                console.print(Panel(
-                    f"[green]✅ Successfully registered realm with registry![/green]",
-                    border_style="green",
-                    title="Registration Complete"
-                ))
-            else:
-                console.print(f"[yellow]⚠️  Unexpected response:[/yellow] {output}")
-            
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]❌ Error: {e.stderr.strip()}[/red]")
-        raise typer.Exit(1)
     except subprocess.TimeoutExpired:
         console.print("[red]❌ Command timed out[/red]")
         raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]❌ Unexpected error: {str(e)}[/red]")
         raise typer.Exit(1)
+
+    if not response.get("ok"):
+        console.print(Panel(
+            f"[red]❌ Registration failed[/red]\n\n"
+            f"[yellow]Error:[/yellow] {response.get('error', 'Unknown error')}",
+            border_style="red",
+            title="Registration Failed"
+        ))
+        raise typer.Exit(1)
+    if response.get("proposal"):
+        console.print(Panel(
+            f"[yellow]Registration filed as proposal {response['proposal']}: it runs once the realm approves it[/yellow]",
+            border_style="yellow",
+            title="Registration Proposed"
+        ))
+        return
+    console.print(Panel(
+        f"[green]✅ Successfully registered realm with registry![/green]\n\n"
+        f"[cyan]Registry:[/cyan] {response.get('registry', registry_canister_id)}\n"
+        f"[cyan]Realm Name:[/cyan] {realm_name}\n"
+        f"[cyan]Frontend URL:[/cyan] {frontend_url}",
+        border_style="green",
+        title="Registration Complete"
+    ))
 
 
 @registry_realm_app.command("list")
@@ -2242,7 +2180,7 @@ def realm_status(
             f"\n[dim]💡 Frontend canisters can be accessed directly via their URLs[/dim]"
         )
         console.print(
-            f"[dim]💡 Use 'realms realm call <realm> <method>' to call backend methods[/dim]"
+            f"[dim]💡 Use 'realms realm call <realm> <operation>' to call realm operations[/dim]"
         )
 
     except Exception as e:
@@ -2252,8 +2190,8 @@ def realm_status(
 
 def _show_remote_realm_status(backend_canister_id: str, realm_name: str, network: str) -> None:
     """Show status for a remote realm (queried from registry)."""
-    import subprocess
-    
+    from .commands.db import realm_op
+
     # Construct URLs based on network
     if network != "local":
         frontend_url = f"https://{backend_canister_id}.icp0.io"  # Actually need frontend ID
@@ -2272,21 +2210,14 @@ def _show_remote_realm_status(backend_canister_id: str, realm_name: str, network
     
     # Try to get realm info from backend to find frontend canister
     try:
-        cmd = [
-            "dfx", "canister", "call",
-            "--network", network,
-            backend_canister_id,
-            "status"
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            console.print(f"[dim]Backend is responding[/dim]\n")
+        if realm_op(backend_canister_id, "status", network=network, read=True, timeout=10).get("ok"):
+            console.print("[dim]Backend is responding[/dim]\n")
     except Exception:
         pass
     
     console.print(table)
     
-    console.print(f"\n[dim]💡 Use 'realms realm call {realm_name} <method> --network {network}' to call backend methods[/dim]")
+    console.print(f"\n[dim]💡 Use 'realms realm call {realm_name} <operation> --network {network}' to call realm operations[/dim]")
 
 
 # Create db subcommand group
@@ -2491,15 +2422,21 @@ def local_add_admin(principal: str = typer.Argument(..., help="Principal to make
 
 @local_app.command("call")
 def local_call(
-    extension: str = typer.Argument(..., help="Extension id"),
-    function: str = typer.Argument(..., help="Function in the extension's backend/entry.py"),
-    args: str = typer.Argument("{}", help="JSON args"),
+    name: str = typer.Argument(..., help="Operation name, or an extension id followed by its function"),
+    args: str = typer.Argument("{}", help="JSON args, or the extension's function"),
+    function_args: Optional[str] = typer.Argument(None, help="JSON args of the extension's function"),
     as_json: bool = typer.Option(False, "--json", help="Print the raw response as JSON"),
 ) -> None:
-    """Call an installed extension's backend function as the local identity."""
-    from .commands.local import ext_call_command
+    """Call an operation of the local realm as the local identity.
 
-    ext_call_command(extension, function, args, as_json)
+    Examples:
+        realms local call me
+        realms local call proposal_list '{"status": "voting"}'
+        realms local call my_hello_world greet '{"name": "Realm"}'   # extension_call
+    """
+    from .commands.local import call_command
+
+    call_command(name, args, function_args, as_json)
 
 
 @local_app.command("status")

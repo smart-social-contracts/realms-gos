@@ -19,7 +19,6 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-import time
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -38,9 +37,6 @@ LOCAL_IDENTITY = "realms-local"
 DEFAULT_PORT = 8000
 LOCAL_ICP_LEDGER = "ryjl3-tyaaa-aaaaa-aaaba-cai"
 CANISTERS = ("realm_backend", "realm_frontend", "file_registry")
-POLL_INTERVAL_S = 3
-CODEX_INSTALL_TIMEOUT_S = 900
-LAUNCH_TIMEOUT_S = 900
 
 
 def realms_home() -> Path:
@@ -454,22 +450,23 @@ def call(
     return _dfx_call(target, method, arg, network_url(state), identity, is_query=query, timeout=timeout)
 
 
-def json_call(state: Dict[str, Any], method: str, payload: Any = None, **kw) -> Dict[str, Any]:
-    if payload is None:
-        arg = "()"
-    else:
-        arg = "(" + json.dumps(json.dumps(payload)) + ")"
-    raw = call(state, method, arg, **kw)
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            _fail(f"{method} returned non-JSON: {raw[:300]}")
-    if not isinstance(raw, dict):
-        _fail(f"{method} returned unexpected payload: {raw!r}")
-    if raw.get("success") is False or raw.get("ok") is False:
-        _fail(f"{method}: {raw.get('error') or raw}")
-    return raw
+def op(
+    state: Dict[str, Any],
+    name: str,
+    args: Optional[Dict[str, Any]] = None,
+    *,
+    read: bool = False,
+    check: bool = True,
+    timeout: int = 300,
+) -> Dict[str, Any]:
+    """Run operation ``name`` on the local realm as the local identity."""
+    from ..realm_api import call_op
+
+    reply = call_op(state["canisters"]["realm_backend"], name, args, network=network_url(state),
+                    identity=LOCAL_IDENTITY, read=read, timeout=timeout)
+    if check and not reply.get("ok"):
+        _fail(f"{name}: {reply.get('error')}")
+    return reply
 
 
 # ── commands ─────────────────────────────────────────────────────────────
@@ -555,26 +552,19 @@ def start_command(
         f'(record {{ to_principal = principal "{ids["realm_backend"]}"; permission = variant {{ Commit }} }})',
         canister="realm_frontend",
     )
-    console.print("  enter_setup")
-    raw = call(state, "enter_setup", f'(principal "{principal}", "", "local")', timeout=180)
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            raw = {}
-    if isinstance(raw, dict) and raw.get("ok") is False:
-        _fail(f"enter_setup: {raw.get('error')}")
-    json_call(
+    console.print("  setup_step install")
+    op(state, "setup_step", {"step": "install", "network": "local", "founder": principal}, timeout=180)
+    op(
         state,
-        "set_canister_config_json",
+        "setup_step",
         {
+            "step": "infrastructure",
             "frontend_canister_id": ids["realm_frontend"],
             "file_registry_canister_id": ids["file_registry"],
-            "creator_principal": principal,
         },
     )
     # file-registry has no namespace approval API, so registry installs must not wait on it.
-    json_call(state, "update_realm_config", {"require_marketplace_approval": False})
+    op(state, "setup_step", {"step": "trust_policy", "require_marketplace_approval": False})
     state["deployed"] = True
     save_state(state)
 
@@ -601,8 +591,8 @@ def status_command(as_json: bool) -> None:
     launch = None
     if running:
         try:
-            raw = call(state, "get_setup_launch_status", query=True, timeout=60)
-            launch = (json.loads(raw) if isinstance(raw, str) else raw or {}).get("launch", {}).get("status")
+            status = op(state, "setup_state", check=False, timeout=60).get("status")
+            launch = status and ("not started" if status == "setup" else "completed")
         except Exception:
             launch = None
     if as_json:
@@ -686,114 +676,69 @@ def publish_command(paths: List[str], install: bool = False) -> None:
             if _package_kind(path) == "codex":
                 console.print(f"  {ext_id} is a codex: use `realms local setup --codex {ext_id}`")
                 continue
-            console.print(f"  install_extension_from_registry {ext_id}")
+            console.print(f"  extension_install {ext_id}")
             _install_extension(state, ext_id)
         console.print("[green]✓ Installed in the local realm[/green]")
 
 
+def _version(state: Dict[str, Any], package: str) -> str:
+    """The version of ``package`` published by `realms local publish`, else the newest in the local registry."""
+    from .extension import latest_version
+
+    published = (state.get("published", {}).get(package) or {}).get("version")
+    return published or latest_version(state["canisters"]["file_registry"], package, network_url(state), LOCAL_IDENTITY)
+
+
 def _install_extension(state: Dict[str, Any], ext_id: str) -> None:
-    payload = {
-        "registry_canister_id": state["canisters"]["file_registry"],
-        "ext_id": ext_id,
-        "version": "latest",
-    }
-    raw = call(state, "install_extension_from_registry", "(" + json.dumps(json.dumps(payload)) + ")", timeout=600)
-    data = raw
-    if isinstance(raw, str):
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            data = {}
-    if isinstance(data, dict) and data.get("success") is False:
-        err = str(data.get("error") or data)
-        if "already" in err.lower():
-            return
-        _fail(f"install_extension_from_registry {ext_id}: {err}")
+    op(state, "extension_install", {"extension": ext_id, "version": _version(state, ext_id)}, timeout=600)
 
 
 def install_codex_dependencies(state: Dict[str, Any], codex: str) -> None:
     """Install the codex's extensions and the core extensions one call each.
 
-    ``setup_install_codex`` only installs the codex package; installing all
+    ``codex_install`` only installs the codex package; installing all
     dependencies inside one call would not fit a single message's budget.
     """
+    from .extension import installed_extensions
+
     deps = list((state.get("published", {}).get(codex) or {}).get("dependencies") or [])
     for core in state.get("core_extensions") or []:
         if core not in deps:
             deps.append(core)
-    try:
-        raw = call(state, "list_runtime_extensions", query=True, timeout=60)
-        installed = set((json.loads(raw) if isinstance(raw, str) else raw or {}).get("runtime_extensions") or [])
-    except Exception:
-        installed = set()
+    installed = {e["id"] for e in installed_extensions(state["canisters"]["realm_backend"], network_url(state),
+                                                       LOCAL_IDENTITY)}
     pending = [d for d in deps if d not in installed]
     if not pending:
         return
     console.print(f"  install {len(pending)} extensions for {codex}")
     for ext_id in pending:
-        console.print(f"  install_extension_from_registry {ext_id}")
+        console.print(f"  extension_install {ext_id}")
         _install_extension(state, ext_id)
 
 
 def setup_command(codex: str, codex_version: Optional[str], token_canister: str) -> None:
     state = require_state()
-    raw = call(state, "get_setup_launch_status", query=True, timeout=60)
-    launch = (json.loads(raw) if isinstance(raw, str) else raw or {}).get("launch") or {}
-    if launch.get("status") == "completed":
+    setup = op(state, "setup_state", timeout=60)
+    if setup["status"] != "setup":
         install_codex_dependencies(state, codex)
         console.print("[green]✓ Setup already completed[/green]")
         return
 
-    draft: Dict[str, Any] = {"codex": {"package": codex}}
-    if codex_version:
-        draft["codex"]["version"] = codex_version
-    draft["token"] = {"token_canister_id": token_canister}
-    console.print(f"  setup_save_draft codex={codex}")
-    json_call(state, "setup_save_draft", draft)
     install_codex_dependencies(state, codex)
+    version = codex_version or _version(state, codex)
+    console.print(f"  codex_install {codex} {version}")
+    res = op(state, "codex_install", {"codex": codex, "version": version}, timeout=600)
+    init = res.get("init")
+    if init and not init.get("ok"):
+        console.print(f"  [yellow]init hook: {init.get('error')}[/yellow]")
 
-    install_args: Dict[str, Any] = {"package": codex}
-    if codex_version:
-        install_args["version"] = codex_version
-    started, last = time.time(), ""
-    while True:
-        res = json_call(state, "setup_install_codex", install_args, timeout=600)
-        status = str(res.get("status") or "")
-        label = f"{status} {res.get('phase') or res.get('step') or ''}".strip() or "ok"
-        if label != last:
-            console.print(f"  setup_install_codex: {label}")
-            last = label
-        if status != "in_progress":
-            break
-        if time.time() - started > CODEX_INSTALL_TIMEOUT_S:
-            _fail(f"setup_install_codex {codex} did not finish in {CODEX_INSTALL_TIMEOUT_S}s")
-        time.sleep(POLL_INTERVAL_S)
-    installed_version = str(res.get("version") or (res.get("codex") or {}).get("version") or "")
-    if installed_version and not codex_version:
-        # Pin the draft to what was installed so launch's install phase skips it.
-        json_call(state, "setup_save_draft", {"codex": {"package": codex, "version": installed_version}})
-
-    console.print(f"  setup_configure_token {token_canister}")
-    json_call(state, "setup_configure_token", {"token_canister_id": token_canister})
+    console.print(f"  setup_step tokens {token_canister}")
+    op(state, "setup_step", {"step": "tokens", "token_canister_id": token_canister})
+    if not op(state, "setup_state")["realm"].get("name"):
+        op(state, "setup_step", {"step": "realm", "name": codex})
 
     console.print("  setup_launch")
-    json_call(state, "setup_launch")
-    started, last = time.time(), ""
-    while True:
-        raw = call(state, "get_setup_launch_status", query=True, timeout=60)
-        launch = (json.loads(raw) if isinstance(raw, str) else raw or {}).get("launch") or {}
-        status = str(launch.get("status") or "unknown")
-        label = f"{status} {launch.get('phase') or ''}".strip()
-        if label != last:
-            console.print(f"  launch: {label}")
-            last = label
-        if status == "completed":
-            break
-        if status == "failed":
-            _fail(f"setup_launch failed: {launch.get('error') or launch}")
-        if time.time() - started > LAUNCH_TIMEOUT_S:
-            _fail(f"setup_launch did not complete in {LAUNCH_TIMEOUT_S}s")
-        time.sleep(POLL_INTERVAL_S)
+    op(state, "setup_launch", timeout=600)
 
     state["codex"] = codex
     save_state(state)
@@ -803,42 +748,32 @@ def setup_command(codex: str, codex_version: Optional[str], token_canister: str)
 
 def add_admin_command(principal: str) -> None:
     state = require_state()
-    raw = call(state, "register_co_admin", f'("{principal}")', timeout=180)
-    data = json.loads(raw) if isinstance(raw, str) else raw
-    if isinstance(data, dict) and data.get("success") is False:
-        _fail(f"register_co_admin: {data.get('error')}")
+    for name, args, already in (("user_add", {"user": principal}, "already a user"),
+                                ("role_assign", {"user": principal, "profile": "admin"}, "already has")):
+        reply = op(state, name, args, check=False, timeout=180)
+        if not reply.get("ok") and already not in str(reply.get("error")):
+            _fail(f"{name}: {reply.get('error')}")
     console.print(f"[green]✓ {principal} is an admin of the local realm[/green]")
 
 
-_RESPONSE_FIELD = re.compile(r'response\s*=\s*"((?:[^"\\]|\\.)*)"', re.S)
-_SUCCESS_FIELD = re.compile(r"success\s*=\s*(true|false)")
+def call_command(name: str, args: str, function_args: Optional[str], as_json: bool) -> Dict[str, Any]:
+    """Operation ``name`` with JSON ``args``, or ``<extension> <function> [<json>]``: ``extension_call``.
 
-
-def ext_call_command(extension: str, function: str, args: str, as_json: bool) -> Dict[str, Any]:
-    """``extension_async_call`` → ``{"success": bool, "response": <decoded JSON or text>}``."""
-    from .extension import _candid_unescape
+    Returns ``{"success": bool, "response": <the reply, or the extension's result or error>}``.
+    """
+    from ..realm_api import call_any
 
     state = require_state()
-    arg = f"({json.dumps(extension)}, {json.dumps(function)}, {json.dumps(args)})"
-    target = state["canisters"]["realm_backend"]
-    proc = subprocess.run(
-        ["icp", "canister", "call", target, "extension_async_call", arg,
-         "--network", network_url(state), "--root-key", "fetch",
-         "--identity", LOCAL_IDENTITY, "-o", "candid"],
-        capture_output=True, text=True, timeout=300,
-    )
-    if proc.returncode != 0:
-        _fail(f"extension_async_call failed: {(proc.stderr or proc.stdout).strip()}")
-    resp_m = _RESPONSE_FIELD.search(proc.stdout)
-    ok_m = _SUCCESS_FIELD.search(proc.stdout)
-    if not resp_m or not ok_m:
-        _fail(f"unexpected extension_async_call reply: {proc.stdout.strip()[:300]}")
-    text = _candid_unescape(resp_m.group(1))
+    is_op = args.lstrip().startswith("{")
     try:
-        response: Any = json.loads(text)
-    except json.JSONDecodeError:
-        response = text
-    result = {"success": ok_m.group(1) == "true", "response": response}
+        payload = json.loads(args) if is_op else {
+            "extension": name, "function": args, "args": json.loads(function_args or "{}")}
+    except json.JSONDecodeError as e:
+        _fail(f"invalid JSON arguments: {e}")
+    reply = call_any(state["canisters"]["realm_backend"], name if is_op else "extension_call", payload,
+                     network=network_url(state), identity=LOCAL_IDENTITY, timeout=300)
+    response: Any = reply if is_op else reply.get("result") if reply.get("ok") else reply.get("error")
+    result = {"success": bool(reply.get("ok")), "response": response}
     if as_json:
         print(json.dumps(result, ensure_ascii=False))
     else:

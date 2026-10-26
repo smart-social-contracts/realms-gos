@@ -1,10 +1,6 @@
-"""Import command for loading JSON data and codex files into Realms."""
+"""Import command: loads JSON records and codices into a realm through the operations that create them."""
 
-import base64
 import json
-import math
-import sys
-import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -16,9 +12,57 @@ from ..utils import (
     display_error_panel,
     display_success_panel,
     get_effective_cwd,
-    get_project_root,
-    run_command,
 )
+from .db import realm_op
+
+# Entity types in the order they are imported (profiles before users, departments before funds), each with the
+# operation that creates one and its arguments from a record (as `realms db export` writes it). Users and
+# departments are handled in ``_operations``.
+CREATORS = {
+    "UserProfile": ("profile_create", lambda r: {
+        "profile": r["id"], "description": r.get("description", ""), "allowed_to": r.get("allowed_to", [])}),
+    "User": None,
+    "Department": None,
+    "Organization": ("organization_register", lambda r: {
+        "organization": r["id"], "description": r.get("description", "")}),
+    "Fund": ("fund_create", lambda r: {
+        "fund": r["id"], "name": r.get("name") or r["id"], "kind": r.get("kind", "general"),
+        **({"department": r["department"]} if r.get("department") else {})}),
+    "Land": ("land_register", lambda r: {
+        k: r[k] for k in ("x", "y", "width", "height", "kind", "owner", "metadata") if k in r}),
+}
+
+
+def _parents_first(departments):
+    known, placed, ordered = {d["id"] for d in departments}, set(), []
+    pending = list(departments)
+    while pending:
+        ready = [d for d in pending if d.get("parent") not in known or d["parent"] in placed]
+        if not ready:
+            raise ValueError(f"departments with circular parents: {', '.join(d['id'] for d in pending)}")
+        ordered += ready
+        placed |= {d["id"] for d in ready}
+        pending = [d for d in pending if d["id"] not in placed]
+    return ordered
+
+
+def _operations(by_type, batch_size):
+    """``(operation, args)`` creating every record, in import order."""
+    for kind, creator in CREATORS.items():
+        rows = by_type.get(kind, [])
+        if kind == "User":
+            for i in range(0, len(rows), batch_size):
+                yield "user_import", {"users": [{"user": r["id"], "nickname": r.get("nickname", "")}
+                                                for r in rows[i:i + batch_size]]}
+        elif kind == "Department":
+            for d in _parents_first(rows):
+                if not d.get("is_root"):
+                    yield "department_create", {"department": d["id"], "description": d.get("description", ""),
+                                                **({"parent": d["parent"]} if d.get("parent") else {})}
+        else:
+            name, args = creator
+            for r in rows:
+                yield name, args(r)
 
 
 def import_data_command(
@@ -32,7 +76,7 @@ def import_data_command(
     canister: str = "realm_backend",
     folder: Optional[str] = None,
 ) -> None:
-    """Import data into the realm. Supports JSON data and Python codex files."""
+    """Import data into the realm. Supports JSON data and codex packages."""
 
     # Handle codex files separately
     if entity_type == "codex":
@@ -55,97 +99,48 @@ def import_data_command(
         with open(data_file, "r") as f:
             data = json.load(f)
 
-        console.print(type(data))
-
         if not isinstance(data, list):
             raise ValueError("JSON data must be an array of objects")
 
-        console.print(f"📊 Found {len(data)} records to import")
-
-        # Topologically sort so referents exist before referees (issue #14).
-        try:
-            backend_root = Path(__file__).resolve().parents[4] / "src" / "realm_backend"
-            if str(backend_root) not in sys.path:
-                sys.path.insert(0, str(backend_root))
-            import ggg  # noqa: F401
-            from core.entity_import import topological_sort_records
-
-            data, sort_warnings = topological_sort_records(data)
-            for warning in sort_warnings:
-                console.print(f"[yellow]⚠ {warning}[/yellow]")
-        except Exception as sort_err:
-            console.print(
-                f"[yellow]⚠ Import order sort skipped: {sort_err}[/yellow]"
+        by_type = {}
+        for record in data:
+            by_type.setdefault(record.get("_type") or entity_type, []).append(record)
+        unsupported = sorted(str(t) for t in by_type if t not in CREATORS)
+        if unsupported:
+            raise ValueError(
+                f"importing {', '.join(unsupported)} is not supported by this realm version "
+                f"(importable: {', '.join(CREATORS)})"
             )
+        calls = list(_operations(by_type, batch_size))
+        console.print(f"📊 Found {len(data)} records to import ({len(calls)} operations)")
 
-        # Calculate the total number of chunks using ceiling division
-        total_chunks = math.ceil(len(data) / batch_size)
+        if dry_run:
+            console.print("[yellow]🔍 Dry run mode - nothing will be imported[/yellow]")
+            for name, args in calls:
+                console.print(f"  {name} {json.dumps(args)[:120]}")
+            display_success_panel("Dry Run Complete", f"Would import {len(data)} records from {file_path}")
+            return
 
-        for i in range(0, len(data), batch_size):
-            chunk = data[i : i + batch_size]
-
-            console.print(f"📊 Sending chunk {i // batch_size + 1}/{total_chunks}")
-
-            args = {
-                "format": format,
-                "data": chunk,
-                "sort_records": False,
-            }
-
-            args_json = json.dumps(args)
-            # Use base64 encoding to avoid shell escaping issues
-            args_b64 = base64.b64encode(args_json.encode()).decode()
-
-            cmd = [
-                "dfx",
-                "canister",
-                "call",
-                canister,
-                "extension_sync_call",
-                f'(record {{ extension_name = "import_export"; function_name = "import_data"; args = "base64:{args_b64}"; }})',
-                "--network",
-                network,
-                "--output",
-                "json",
-            ]
-
-            if identity:
-                cmd.extend(["--identity", identity])
-
-            # Run from realm folder so dfx can find .dfx/local/canister_ids.json
-            effective_cwd = get_effective_cwd(folder)
-            result = run_command(
-                cmd,
-                cwd=effective_cwd,
-                capture_output=True,
-            )
-
-            # Parse the dfx response to check for backend errors
-            if result and result.stdout:
-                # Check for success in response (handle both JSON double quotes and Python single quotes)
-                if (
-                    '"success": true' in result.stdout.lower()
-                    or "'success': True" in result.stdout
-                ):
-                    display_success_panel("Import Chunk Complete! 🎉", result.stdout)
-                else:
-                    display_error_panel("Backend Import Chunk Failed", result.stdout)
-                    raise typer.Exit(1)
-
-            elif result and result.stderr:
-                # dfx command had stderr output
-                display_error_panel("Backend Import Chunk Failed", result.stderr)
-                raise typer.Exit(1)
+        effective_cwd = get_effective_cwd(folder)
+        done = present = 0
+        for i, (name, args) in enumerate(calls, 1):
+            console.print(f"📊 {i}/{len(calls)} {name}")
+            reply = realm_op(canister, name, args, network, identity, cwd=effective_cwd, timeout=120)
+            error = str(reply.get("error", ""))
+            if reply.get("ok"):
+                done += 1
+                if reply.get("proposal"):
+                    console.print(f"[yellow]  filed as proposal {reply['proposal']}: applies once approved[/yellow]")
+            elif "exists" in error or "already" in error:
+                present += 1
+                console.print(f"[yellow]  skipped: {error}[/yellow]")
             else:
-                # dfx command failed completely
-                display_error_panel(
-                    "Backend Import Data Failed", "dfx command failed with no output"
-                )
-                raise typer.Exit(1)
+                raise RuntimeError(f"{name}: {error}")
 
         display_success_panel(
             "Import Data Complete! 🎉",
-            f"Successfully imported {len(data)} records from {file_path}",
+            f"Successfully imported {len(data)} records from {file_path} "
+            f"({done} operations, {present} skipped as already present)",
         )
 
     except Exception as e:
@@ -162,23 +157,24 @@ def import_codex_command(
     canister: str = "realm_backend",
     folder: Optional[str] = None,
 ) -> None:
-    """Import Python codex file into the realm.
-
-    We use base64 encoding for codexes because escaping Python code in JSON can be problematic.
-    """
+    """Install a codex package (``codex_install``): its directory, or its ``backend/hooks.py`` with the
+    ``manifest.json`` beside or above it."""
 
     console.print(f"[bold blue]📜 Importing codex from {file_path}[/bold blue]\n")
 
     try:
-        codex_file = Path(file_path)
-        if not codex_file.exists():
+        path = Path(file_path)
+        if not path.exists():
             raise FileNotFoundError(f"Codex file not found: {file_path}")
-
-        with open(codex_file, "r") as f:
-            codex_content = f.read()
-
-        if not codex_name:
-            codex_name = codex_file.stem
+        hooks = path / "backend" / "hooks.py" if path.is_dir() else path
+        manifest_path = next((d / "manifest.json" for d in (hooks.parent, hooks.parent.parent)
+                              if (d / "manifest.json").is_file()), None)
+        if not hooks.is_file() or manifest_path is None:
+            raise FileNotFoundError(
+                f"{file_path}: a codex installs as a package, manifest.json with backend/hooks.py"
+            )
+        manifest = json.loads(manifest_path.read_text())
+        codex_name = manifest.get("id") or codex_name or hooks.stem
 
         console.print(f"📜 Importing codex: {codex_name}")
 
@@ -192,41 +188,15 @@ def import_codex_command(
             )
             return
 
-        project_root = get_project_root()
-        base64_content = "base64:" + base64.b64encode(codex_content.encode()).decode()
-
-        args = {
-            "format": "json",
-            "data": [{"_type": "Codex", "name": codex_name, "code": base64_content}],
-        }
-
-        args_json = json.dumps(args)
-        escaped_args = args_json.replace('"', '\\"')
-
-        cmd = [
-            "dfx",
-            "canister",
-            "call",
-            canister,
-            "extension_sync_call",
-            f'(record {{ extension_name = "import_export"; function_name = "import_data"; args = "{escaped_args}"; }})',
-            "--network",
-            network,
-        ]
-
-        if identity:
-            cmd.extend(["--identity", identity])
-
-        # Run from realm folder so dfx can find .dfx/local/canister_ids.json
-        effective_cwd = get_effective_cwd(folder)
-        result = run_command(
-            cmd,
-            cwd=effective_cwd,
-        )
+        reply = realm_op(canister, "codex_install", {"manifest": manifest, "source": hooks.read_text()},
+                         network, identity, cwd=get_effective_cwd(folder), timeout=300)
+        if not reply.get("ok"):
+            raise RuntimeError(reply.get("error"))
 
         display_success_panel(
             "Codex Import Complete! 🎉",
-            f"Successfully imported codex '{codex_name}' from {file_path}",
+            f"Filed codex '{codex_name}' as proposal {reply['proposal']}" if reply.get("proposal")
+            else f"Successfully imported codex '{codex_name}' from {file_path}",
         )
 
     except Exception as e:

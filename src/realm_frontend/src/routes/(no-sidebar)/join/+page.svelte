@@ -7,7 +7,8 @@
   import { login, logout, restoreAuthSession, resetAuthSessionRestore } from '$lib/auth';
   import { isEmbeddedInPortal, portalNavPush } from '$lib/portal-bridge.ts';
   import { consumePortalSigningOut, consumePortalSigningIn } from '$lib/portal-redirect-path.ts';
-  import { backend, backendReady, initBackendWithIdentity, setActiveQuarter, createQuarterActor, asJoinSafeActor } from '$lib/canisters.js';
+  import { backend, backendReady, initBackendWithIdentity, setActiveQuarter, createQuarterActor } from '$lib/canisters.js';
+  import { must, on, read } from '$lib/realm';
   import { loadUserProfiles, profilesLoading } from '$lib/stores/profiles';
   import { activeQuarterId } from '$lib/stores/quarters';
   import { goto } from '$app/navigation';
@@ -76,10 +77,10 @@
 
   // Quarter targeting (issue #156): a new member joins exactly ONE quarter.
   // Target comes from invite (?quarter=) or system assignment via
-  // get_join_targets().default_quarter (least-populated joinable). No free picker.
+  // join_targets.default (least-populated joinable). No free picker.
   let capitalId = '';
   let joinMode = 'auto';        // 'auto' | 'choice' (choice must not enable a free picker)
-  let quarterDirectory = [];    // all quarters from get_join_targets (for lookups)
+  let quarterDirectory = [];    // all quarters from quarter_directory (for lookups)
   let selectedQuarter = '';     // canister id assigned / invite override
   let targetQuarterId = '';     // resolved join target
   let targetActor = null;       // actor for the target quarter (or capital backend)
@@ -390,14 +391,31 @@
     };
   });
 
+  async function loadJoinPolicy() {
+    const [targets, directory] = await Promise.all([must(read('join_targets')), must(read('quarter_directory'))]);
+    return {
+      capital_id: directory.capital,
+      mode: targets.mode,
+      default_quarter: targets.default,
+      quarters: directory.quarters.map((q) => ({
+        canister_id: q.id,
+        name: q.name,
+        population: q.population,
+        status: q.status,
+        index: q.index,
+        is_capital: q.capital,
+        joinable: targets.targets.includes(q.id),
+      })),
+    };
+  }
+
   // Ask the capital where new members may register and assign a target quarter.
   async function resolveJoinTarget(quarterParam) {
     let policy = null;
     try {
-      const raw = await backend.get_join_targets();
-      policy = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      policy = await loadJoinPolicy();
     } catch (e) {
-      console.warn('get_join_targets failed; defaulting to capital', e);
+      console.warn('join_targets failed; defaulting to capital', e);
     }
 
     capitalId = policy?.capital_id || '';
@@ -449,11 +467,10 @@
   /** Re-fetch join targets and retarget after coordinator-only / full errors. */
   async function reassignJoinTarget() {
     try {
-      const raw = await backend.get_join_targets();
-      const policy = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      capitalId = policy?.capital_id || capitalId;
-      joinMode = policy?.mode || joinMode;
-      quarterDirectory = policy?.quarters || quarterDirectory;
+      const policy = await loadJoinPolicy();
+      capitalId = policy.capital_id || capitalId;
+      joinMode = policy.mode || joinMode;
+      quarterDirectory = policy.quarters;
       const def = pickJoinQuarterExcluding(quarterDirectory, skippedJoinQuarters);
       if (def && def !== targetQuarterId) {
         await selectQuarter(def);
@@ -495,12 +512,15 @@
     }
   }
 
+  function onTarget(method, name, args = {}) {
+    return on(targetActor || backend)[method](name, args);
+  }
+
   // Fallback: is the authenticated caller already a member on the resolved target?
   async function isJoinedOnTarget() {
     try {
-      const actor = targetActor || backend;
-      const res = await actor.get_my_user_status();
-      return !!(res && res.success);
+      const res = await onTarget('read', 'me');
+      return !!(res.ok && res.user.status);
     } catch (e) {
       return false;
     }
@@ -593,61 +613,17 @@
     }
   }
 
-  async function sha256Hex(plaintext) {
-    const data = new TextEncoder().encode(plaintext);
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  async function validateInvite() {
+  function validateInvite() {
     if (!inviteCode) return;
-    inviteChecking = true;
     inviteError = '';
     error = '';
-    try {
-      // Green-field test realms only: magic invite strings accepted client-side.
-      const trimmed = inviteCode.trim().toLowerCase();
-      if ($testModeUserSelfRegistration && (trimmed === 'admin' || trimmed === 'member' || trimmed === 'dev' || trimmed === 'developer')) {
-        inviteValid = true;
-        inviteProfile = trimmed === 'dev' || trimmed === 'developer' ? 'developer' : trimmed;
-        return;
-      }
-
-      // Validate against the TARGET quarter — invite codes live on the quarter
-      // they were created for, not the capital. role_manager owns invitations;
-      // fall back to the deprecated census extension on older realms.
-      const actor = targetActor || backend;
-      const callValidate = async (ext) => {
-        const result = await actor.extension_call(
-          ext,
-          'validate_registration_code',
-          JSON.stringify({ code: inviteCode })
-        );
-        return typeof result.response === 'string' ? JSON.parse(result.response) : result.response;
-      };
-      let parsed;
-      try {
-        parsed = await callValidate('role_manager');
-      } catch (e) {
-        parsed = null;
-      }
-      if (!parsed || (parsed.success === false && /unknown|not (found|installed)/i.test(parsed.error || ''))) {
-        parsed = await callValidate('census');
-      }
-      if (parsed.success && parsed.data) {
-        inviteValid = true;
-        inviteProfile = parsed.data.profile || 'member';
-      } else {
-        inviteError = localizeBackendError(parsed.error || t('errors.invalid_invite'), (key) => t(key));
-        inviteValid = false;
-      }
-    } catch (e) {
-      console.error('Invite validation error:', e);
-      inviteError = t('join.could_not_validate_invite');
-      inviteValid = false;
-    } finally {
-      inviteChecking = false;
+    // Green-field test realms only: magic invite strings accepted client-side.
+    const trimmed = inviteCode.trim().toLowerCase();
+    if ($testModeUserSelfRegistration && (trimmed === 'admin' || trimmed === 'member' || trimmed === 'dev' || trimmed === 'developer')) {
+      inviteProfile = trimmed === 'dev' || trimmed === 'developer' ? 'developer' : trimmed;
     }
+    // The realm checks a code, and tells its profile, only when realm_join redeems it.
+    inviteValid = true;
   }
 
   function handleTermsAccept() {
@@ -657,12 +633,6 @@
     }
     error = '';
     currentStep = 'profile';
-  }
-
-  
-  async function resolveInviteChecksum() {
-    if (inviteCode) return sha256Hex(inviteCode);
-    return '';
   }
 
   async function handleJoin() {
@@ -678,12 +648,10 @@
       console.log(`Joining quarter ${targetQuarterId || '(capital)'}${inviteProfile ? ` as ${inviteProfile}` : ''}`);
       // Register directly on the resolved target quarter (single call). The
       // invite code is consumed on that quarter, where it lives. The profile
-      // is resolved server-side (invite code profile or codex default); the
-      // first argument is only a consistency check.
-      const inviteChecksum = await resolveInviteChecksum();
-      const actor = await asJoinSafeActor(targetActor || backend);
-      const response = await actor.join_realm(inviteValid ? inviteProfile : '', '', inviteChecksum);
-      if (response.success) {
+      // is resolved server-side (invite code profile or codex default).
+      // A known profile means a client-side test code, which is not a realm invite.
+      const response = await onTarget('run', 'realm_join', { code: inviteProfile ? '' : inviteCode });
+      if (response.ok) {
         // Point the app at the quarter we just joined and remember it.
         if (targetQuarterId && targetQuarterId !== capitalId) {
           activeQuarterId.set(targetQuarterId);
@@ -705,7 +673,7 @@
         await loadUserProfiles();
         currentStep = 'success';
       } else {
-        const joinError = response.data?.error || t('errors.generic');
+        const joinError = response.error || t('errors.generic');
         error = localizeBackendError(joinError, (key) => t(key));
         // Coordinator-only / full / bootstrapping: re-resolve assignment, no free picker.
         if (isAssignableJoinError(joinError)) {
@@ -1148,7 +1116,7 @@
         <div class="bg-white rounded-2xl shadow-xl p-5 md:p-8 border border-gray-100">
           <div class="flex items-center justify-between mb-2">
             <h2 class="text-2xl font-bold text-gray-900">{$_('join.join_title', { values: { name: realmName } })}</h2>
-{#if inviteValid}
+{#if inviteProfile}
               <span class="px-3 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">{$_('join.invited_as', { values: { profile: inviteProfile } })}</span>
             {:else if $testMode}
               <span class="px-3 py-1 bg-gray-200 text-gray-600 text-xs font-medium rounded-full">{$_('join.test_mode')}</span>
@@ -1193,7 +1161,7 @@
 
           <!-- Access summary: only after a valid invite, or when open registration
                advertises the codex default profile. Invite-only realms stay code-only. -->
-          {#if inviteValid || $realmOpenRegistration}
+          {#if inviteProfile || $realmOpenRegistration}
           <div class="mb-6 p-4 rounded-xl border-2 border-gray-200 bg-gray-50">
             <div class="flex items-center gap-4">
               <div class="w-12 h-12 rounded-full flex items-center justify-center bg-gray-900 text-white">
@@ -1202,7 +1170,7 @@
                 </svg>
               </div>
               <div class="flex-1">
-                {#if inviteValid}
+                {#if inviteProfile}
                   <div class="font-semibold text-gray-900 capitalize">{inviteProfile}</div>
                   <div class="text-sm text-gray-500">{$_('join.access_by_invite')}</div>
                 {:else}
@@ -1259,7 +1227,7 @@
                 </button>
               {/if}
             </div>
-            {#if inviteValid}
+            {#if inviteProfile}
               <p class="mt-2 text-sm text-green-600 flex items-center gap-1">
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                   <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />

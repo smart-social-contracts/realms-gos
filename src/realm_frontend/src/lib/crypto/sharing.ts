@@ -34,6 +34,14 @@ import {
 	IbeSeed,
 	type VetKey
 } from '@dfinity/vetkeys';
+// @ts-ignore
+import { quarterBackend } from '$lib/canisters';
+import { read, run, quarter, must } from '$lib/realm';
+
+/** The realm client for ``backend``, the actor callers pass: ``quarterBackend`` means the active quarter. */
+export function realmFor(backend: unknown) {
+	return backend === quarterBackend ? quarter : { read, run };
+}
 
 // ---------------------------------------------------------------------------
 // Hex helpers
@@ -69,13 +77,8 @@ export function identityBytesFor(principalText: string): Uint8Array {
 
 /** Fetch the shared root derived public key (one call, cacheable). */
 export async function getSharingRootPublicKey(backend: any): Promise<DerivedPublicKey> {
-	const pkResp = await backend.get_sharing_root_public_key();
-	if (!pkResp.success || !pkResp.data?.message) {
-		throw new Error(
-			`sharing root public key fetch failed: ${pkResp.data?.error || 'unknown error'}`
-		);
-	}
-	return DerivedPublicKey.deserialize(hexToBytes(pkResp.data.message));
+	const { public_key } = await must(realmFor(backend).run('crypto_public_key'));
+	return DerivedPublicKey.deserialize(hexToBytes(public_key));
 }
 
 /**
@@ -93,13 +96,10 @@ export async function deriveMySharingVetKey(
 	const tsk = TransportSecretKey.random();
 	const tpkHex = bytesToHex(tsk.publicKeyBytes());
 
-	const deriveResp = await backend.derive_my_sharing_vetkey(tpkHex);
-	if (!deriveResp.success || !deriveResp.data?.message) {
-		throw new Error(
-			`sharing vetKey derivation failed: ${deriveResp.data?.error || 'unknown error'}`
-		);
-	}
-	const encryptedVetKey = EncryptedVetKey.deserialize(hexToBytes(deriveResp.data.message));
+	const { encrypted_key } = await must(
+		realmFor(backend).run('crypto_derive_key', { transport_public_key: tpkHex })
+	);
+	const encryptedVetKey = EncryptedVetKey.deserialize(hexToBytes(encrypted_key));
 	const identity = identityBytesFor(myPrincipal);
 	const vetKey = encryptedVetKey.decryptAndVerify(tsk, dpk, identity);
 	return { vetKey, dpk };
@@ -204,13 +204,13 @@ export async function aesGcmDecryptWithDek(dek: Uint8Array, ciphertext: string):
 // ---------------------------------------------------------------------------
 //
 // A scope names an encrypted payload and (server-side) who may manage read
-// access to it. Keep these in sync with core/crypto_scopes.py on the backend.
+// access to it. Keep these in sync with `managers` in the backend's api/crypto.py.
 
 /** `user:<principal>:<name>` — owned by the principal (self-service). */
 export const userScope = (principal: string, name = 'private') => `user:${principal}:${name}`;
-/** `dept:<department>:<name>` — managed by the department head or a realm admin. */
+/** `dept:<department>:<name>` — managed by the department's head and staff. */
 export const deptScope = (department: string, name: string) => `dept:${department}:${name}`;
-/** `realm:<name>` — managed by realm admins. */
+/** `realm:<name>` — managed by the root department's staff. */
 export const realmScope = (name: string) => `realm:${name}`;
 
 // ---------------------------------------------------------------------------
@@ -222,7 +222,7 @@ export interface SharePlan {
 	ciphertext: string;
 	/**
 	 * Wrapped DEK per recipient principal, ready to upsert in a single
-	 * `crypto_grant_to_scope_batch` call.
+	 * `crypto_grant` call.
 	 */
 	wrappedDeks: Record<string, string>;
 }
@@ -234,7 +234,7 @@ export interface SharePlan {
  *
  * `recipients` should include everyone who must be able to read the payload —
  * typically the owner plus any consented parties. The caller is responsible for
- * persisting `ciphertext` (e.g. `update_my_private_data`, or a document field)
+ * persisting `ciphertext` (e.g. `private_data_update`, or a document field)
  * and for calling {@link grantScopeData} with `wrappedDeks`.
  */
 export async function buildSharePlan(
@@ -257,7 +257,7 @@ export async function buildSharePlan(
 }
 
 /**
- * Persist a share plan's access grants for `scope` in (at most) two batch
+ * Persist a share plan's access grants for `scope` in (at most) two
  * calls: one grant for all current recipients, and one revoke for principals
  * who previously had access but no longer do.
  *
@@ -271,11 +271,9 @@ export async function grantScopeData(
 	wrappedDeks: Record<string, string>,
 	opts: { previousRecipients?: string[]; keep?: string[] } = {}
 ): Promise<string[]> {
+	const realm = realmFor(backend);
 	const granted = Object.keys(wrappedDeks);
-	const grantResp = await backend.crypto_grant_to_scope_batch(scope, JSON.stringify(wrappedDeks));
-	if (grantResp?.success === false) {
-		throw new Error(grantResp?.data?.error || 'crypto_grant_to_scope_batch failed');
-	}
+	await must(realm.run('crypto_grant', { scope, keys: wrappedDeks }));
 
 	const grantedSet = new Set(granted);
 	const keepSet = new Set(opts.keep ?? []);
@@ -284,7 +282,7 @@ export async function grantScopeData(
 	);
 	if (toRevoke.length > 0) {
 		try {
-			await backend.crypto_revoke_from_scope_batch(scope, JSON.stringify(toRevoke));
+			await must(realm.run('crypto_revoke', { scope, principals: toRevoke }));
 		} catch (e) {
 			console.warn('[sharing] batch revoke failed:', e);
 		}
@@ -305,9 +303,9 @@ export async function decryptScopeData<T = Record<string, string>>(
 ): Promise<T | null> {
 	if (!ciphertext) return null;
 	try {
-		const envResp = await backend.crypto_get_my_envelope(scope);
-		const wrapped = envResp?.data?.envelope?.wrapped_dek;
-		if (envResp?.success && wrapped) {
+		const envelope = await realmFor(backend).read('crypto_envelope', { scope });
+		const wrapped = envelope.ok && envelope.wrapped_dek;
+		if (wrapped) {
 			const { vetKey } = await deriveMySharingVetKey(backend, myPrincipal);
 			const dek = unwrapDek(vetKey, wrapped);
 			const plaintext = await aesGcmDecryptWithDek(dek, ciphertext);

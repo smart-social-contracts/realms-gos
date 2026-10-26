@@ -7,7 +7,7 @@ Usage:
     from realms import realm
     
     folder = await realm.create(deploy=True)
-    await realm.call("join_realm", '("admin")', folder=folder)
+    await realm.call("realm_join", {"code": "X7K-29Q"}, realm="Dominion", network="staging")
     invoices = await realm.db.get("Invoice", folder=folder)
 """
 
@@ -79,26 +79,24 @@ async def create(
 
 
 async def call(
-    method: str,
-    args: str,
-    folder: str,
+    op: str,
+    args: dict,
+    realm: str,
     network: str = "local",
-    canister: str = "realm_backend"
 ) -> dict:
     """
-    Call a backend method on a realm canister.
+    Call an operation of a realm.
     
     Args:
-        method: Method name (e.g., "join_realm", "get_status")
-        args: Candid-encoded arguments (e.g., '("admin")')
-        folder: Path to the realm folder
+        op: Operation name (e.g., "realm_join", "proposal_vote"; "ops_list" lists them)
+        args: The operation's arguments
+        realm: Realm canister ID or registry name
         network: Target network
-        canister: Canister name (default: realm_backend)
         
     Returns:
-        Parsed response from the canister
+        The realm's reply: {"ok": true, ...} or {"ok": false, "error": ...}
     """
-    cmd = ["realms", "realm", "call", method, args, "-f", folder, "-n", network, "-c", canister]
+    cmd = ["realms", "realm", "call", realm, op, json.dumps(args), "-n", network]
     return await _run_command(cmd)
 
 
@@ -106,47 +104,42 @@ async def call_extension(
     extension: str,
     function: str,
     args: dict,
-    folder: str,
+    realm: str,
     network: str = "local",
-    async_call: bool = False
 ) -> dict:
     """
-    Call an extension function on a realm.
+    Call an extension function on a realm (the extension_call operation).
     
     Args:
         extension: Extension name (e.g., "member_dashboard")
         function: Function name (e.g., "check_invoice_payment")
         args: Arguments as a dictionary (will be JSON-encoded)
-        folder: Path to the realm folder
+        realm: Realm canister ID or registry name
         network: Target network
-        async_call: If True, use async extension call
         
     Returns:
-        Parsed response from the extension
+        The realm's reply; the function's return value is under "result"
     """
     cmd = [
-        "realms", "realm", "call", "extension",
+        "realms", "realm", "call", realm, "extension",
         extension, function, json.dumps(args),
-        "-f", folder, "-n", network
+        "-n", network,
     ]
-    if async_call:
-        cmd.append("--async")
     return await _run_command(cmd)
 
 
-async def status(folder: str, network: str = "local") -> dict:
+async def status(realm: str, network: str = "local") -> dict:
     """
-    Get the status of a realm.
+    Get the status of a realm (the status operation).
     
     Args:
-        folder: Path to the realm folder
+        realm: Realm canister ID or registry name
         network: Target network
         
     Returns:
-        Realm status information
+        The realm's version, status, name, canister id and number of operations
     """
-    cmd = ["realms", "realm", "status", "-f", folder, "-n", network]
-    return await _run_command(cmd, cwd=folder)
+    return await call("status", {}, realm, network)
 
 
 class db:

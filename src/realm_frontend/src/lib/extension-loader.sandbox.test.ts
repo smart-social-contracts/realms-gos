@@ -13,6 +13,8 @@ vi.mock('./extension-bridge-host', () => ({
 	},
 }));
 
+vi.mock('./realm', () => ({ read: vi.fn(), must: vi.fn() }));
+
 import { mountSandboxedExtension } from './extension-loader';
 
 describe('mountSandboxedExtension', () => {

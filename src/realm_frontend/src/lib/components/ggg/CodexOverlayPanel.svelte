@@ -1,35 +1,32 @@
 <script>
   import { onMount } from 'svelte';
-  import { backend } from '$lib/canisters';
+  import { read, run } from '$lib/realm';
 
   let status = null;
   let loading = true;
   let error = null;
+  let notice = null;
   let busy = false;
 
-  function parseResult(raw) {
-    if (raw == null) return null;
-    if (typeof raw === 'string') {
-      try {
-        return JSON.parse(raw);
-      } catch (e) {
-        return { success: false, error: raw };
-      }
-    }
-    return raw;
+  function slotOf(id, version, hash) {
+    return { name: id.split('@')[0], version, hash };
   }
 
   async function loadStatus() {
     loading = true;
     error = null;
     try {
-      const raw = await backend.get_codex_overlay_status();
-      const data = parseResult(raw);
-      if (!data || data.success === false) {
-        error = (data && data.error) || 'Could not load overlay status';
+      const data = await read('codex_status', { count: 1 });
+      if (!data.ok) {
+        error = data.error;
         status = null;
       } else {
-        status = data;
+        const codex = data.codex;
+        status = {
+          current: codex && slotOf(codex.id, codex.version, codex.checksum),
+          previous: codex?.previous ? slotOf(codex.previous, codex.previous.split('@')[1]) : null,
+          has_previous: !!codex?.previous
+        };
       }
     } catch (e) {
       error = e?.message || String(e);
@@ -47,25 +44,6 @@
     return hash ? `${name}${version} (${hash}…)` : `${name}${version}`;
   }
 
-  async function toggleSafeMode() {
-    if (!status || busy) return;
-    const enabled = !status.safe_mode;
-    busy = true;
-    error = null;
-    try {
-      const raw = await backend.set_codex_safe_mode(JSON.stringify({ enabled }));
-      const data = parseResult(raw);
-      if (!data || data.success === false) {
-        error = (data && data.error) || 'Safe mode update failed';
-      }
-      await loadStatus();
-    } catch (e) {
-      error = e?.message || String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
   async function revertOverlay() {
     if (busy) return;
     const ok = window.confirm(
@@ -74,11 +52,13 @@
     if (!ok) return;
     busy = true;
     error = null;
+    notice = null;
     try {
-      const raw = await backend.revert_codex('{}');
-      const data = parseResult(raw);
-      if (!data || data.success === false) {
-        error = (data && data.error) || 'Revert failed';
+      const data = await run('codex_revert');
+      if (!data.ok) {
+        error = data.error;
+      } else if (data.proposal) {
+        notice = `Proposal ${data.proposal} filed: the codex reverts once it is accepted.`;
       }
       await loadStatus();
     } catch (e) {
@@ -125,9 +105,7 @@
       </div>
       <div class="bg-white rounded-lg border p-3">
         <dt class="text-gray-500">Safe mode</dt>
-        <dd class="font-medium {status.safe_mode ? 'text-amber-800' : 'text-gray-900'}">
-          {status.safe_mode ? 'On — hooks skipped' : 'Off'}
-        </dd>
+        <dd class="font-medium text-gray-900">Not supported by this realm version</dd>
       </div>
     </dl>
   {/if}
@@ -135,14 +113,16 @@
   {#if error}
     <p class="mt-3 text-sm text-red-700">{error}</p>
   {/if}
+  {#if notice}
+    <p class="mt-3 text-sm text-amber-800">{notice}</p>
+  {/if}
 
   <div class="mt-4 flex flex-wrap gap-3">
     <button
       class="px-4 py-2 rounded text-sm font-medium border border-amber-300 bg-white text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-      on:click={toggleSafeMode}
-      disabled={busy || !status}
+      disabled
     >
-      {status?.safe_mode ? 'Disable safe mode' : 'Enable safe mode'}
+      Enable safe mode
     </button>
     <button
       class="px-4 py-2 rounded text-sm font-medium bg-amber-800 text-white hover:bg-amber-900 disabled:opacity-50"

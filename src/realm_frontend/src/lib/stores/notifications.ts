@@ -1,6 +1,5 @@
 import { writable } from 'svelte/store';
-// @ts-ignore
-import { backend } from '$lib/canisters';
+import { read, run, must } from '$lib/realm';
 
 export interface NotificationItem {
     id: string;
@@ -20,63 +19,60 @@ export interface NotificationItem {
 export const notifications = writable<NotificationItem[]>([]);
 export const unreadCount = writable<number>(0);
 
+function setRead(id: string | null, read: boolean) {
+    notifications.update(items => {
+        const updated = items.map(item => (id === null || item.id === id ? { ...item, read } : item));
+        unreadCount.set(updated.filter(n => !n.read).length);
+        return updated;
+    });
+}
+
 export async function loadNotifications() {
     try {
-        console.log('[notifications] Loading notifications...');
-        // Candid signature is positional: (extension_name, function_name, args)
-        const result = await backend.extension_sync_call('notifications', 'get_notifications', '{}');
-        console.log('[notifications] Raw result:', result);
-        // ExtensionCallResponse is { response: string, success: bool }
-        const responseStr = result.response || result;
-        console.log('[notifications] Response string:', responseStr);
-        const notificationData = typeof responseStr === 'string' ? JSON.parse(responseStr) : responseStr;
-        console.log('[notifications] Parsed data:', notificationData);
-        console.log('[notifications] Notifications array:', notificationData.notifications);
-        console.log('[notifications] Unread count:', notificationData.unread_count);
-        notifications.set(notificationData.notifications || []);
-        unreadCount.set(notificationData.unread_count || 0);
+        const items: NotificationItem[] = [];
+        let from: number | null = 1;
+        while (from) {
+            const page = await must(read('notification_list', { from, count: 100 }));
+            for (const n of page.notifications) {
+                items.push({
+                    id: n.id,
+                    title: n.title,
+                    message: n.body,
+                    timestamp_ms: n.at * 1000,
+                    read: n.read,
+                    sender: n.sender,
+                    href: n.href
+                });
+            }
+            from = page.next;
+        }
+        notifications.set(items);
+        unreadCount.set(items.filter(n => !n.read).length);
     } catch (error) {
         console.error('[notifications] Failed to load notifications:', error);
-        // Set empty data on error
         notifications.set([]);
         unreadCount.set(0);
     }
 }
 
+/** The realm only records reads: marking a notification unread changes this list until the next load. */
 export async function markAsRead(notificationId: string, read: boolean = true) {
     try {
-        await backend.extension_sync_call(
-            'notifications',
-            'mark_as_read',
-            JSON.stringify({ id: notificationId, read })
-        );
-        
-        notifications.update(items => {
-            const updated = items.map(item => 
-                item.id === notificationId ? { ...item, read } : item
-            );
-            unreadCount.set(updated.filter(n => !n.read).length);
-            return updated;
-        });
+        if (read) await must(run('notification_read', { notification: notificationId }));
     } catch (error) {
         console.error('Failed to update notification read status:', error);
-        notifications.update(items => {
-            const updated = items.map(item => 
-                item.id === notificationId ? { ...item, read } : item
-            );
-            unreadCount.set(updated.filter(n => !n.read).length);
-            return updated;
-        });
     }
+    setRead(notificationId, read);
 }
 
 export async function markAllAsRead() {
-    let unread: NotificationItem[] = [];
-    notifications.update((items) => {
-        unread = items.filter((n) => !n.read);
-        return items;
-    });
-    for (const item of unread) {
-        await markAsRead(item.id, true);
+    try {
+        let from: number | null = 1;
+        while (from) {
+            from = (await must(run('notification_read', { all: true, from, count: 500 }))).next;
+        }
+    } catch (error) {
+        console.error('Failed to mark all notifications as read:', error);
     }
+    setRead(null, true);
 }

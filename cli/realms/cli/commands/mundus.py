@@ -22,6 +22,7 @@ from rich.console import Console
 
 from .. import release_assets
 from ..descriptor_flags import TEST_PARAM_MAP
+from ..realm_api import call_op
 from ..utils import console, get_project_root
 
 DEPLOYER_URL = os.environ.get("DEPLOYER_URL", "https://deploy.realmsgos.dev")
@@ -655,13 +656,6 @@ def _should_resync_extension_frontends(canister_filter: str) -> bool:
     return canister_filter != "backend"
 
 
-def _resync_frontends_payload(frontend_id: str, registry_id: str = "") -> str:
-    payload: dict[str, str] = {"frontend_canister_id": frontend_id}
-    if registry_id:
-        payload["registry_canister_id"] = registry_id
-    return '("' + json.dumps(payload).replace("\\", "\\\\").replace('"', '\\"') + '")'
-
-
 def _resync_extension_frontends_after_deploy(
     realm: dict, network: str, infra: dict | None = None,
 ) -> None:
@@ -669,50 +663,11 @@ def _resync_extension_frontends_after_deploy(
 
     Frontend asset deploys replace certified assets and drop ``/ext/{id}/{ver}/...``.
     Sandboxed extensions then 404 on ``index.html`` (plain "not found" in the iframe).
-    Casals rollout already resyncs; mundus must do the same.
+    Casals rollout already resyncs; this realm version has no operation to do it.
     """
-    from .extension import _dfx_call as _icp_call
-    from .files import file_registry_id_for
-
-    backend_id = (realm.get("canister_id") or "").strip()
-    frontend_id = (realm.get("frontend_canister_id") or "").strip()
-    if not backend_id or not frontend_id:
-        return
-
-    registry = (
-        (infra or {}).get("file_registry_canister_id")
-        or file_registry_id_for(network)
-        or ""
-    ).strip()
-
-    try:
-        _icp_call(
-            frontend_id,
-            "grant_permission",
-            f'(record {{ to_principal = principal "{backend_id}"; '
-            f"permission = variant {{ Commit }} }})",
-            network,
-            None,
-        )
-        console.print("  Granted Commit on frontend to realm backend")
-    except Exception as e:
-        console.print(f"  [yellow]⚠ grant_permission Commit (non-fatal): {e}[/yellow]")
-
-    candid = _resync_frontends_payload(frontend_id, registry)
-    console.print("  Resyncing extension frontends onto the new asset canister...")
-    raw = _icp_call(
-        backend_id, "resync_extension_frontends", candid, network, None, timeout=600,
+    console.print(
+        "  [yellow]⚠ Extension frontends not resynced: not supported by this realm version[/yellow]"
     )
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"resync_extension_frontends: unreadable response: {raw}") from e
-    if not result.get("success"):
-        errors = result.get("errors") or []
-        detail = result.get("error") or errors or raw
-        raise RuntimeError(f"resync_extension_frontends failed: {detail}")
-    synced = result.get("synced") or []
-    console.print(f"  ✓ Resynced {len(synced)} extension frontend bundle(s)")
 
 
 _PINNED_FRONTEND_PREFIXES = ("/custom/", "/ext/")
@@ -729,52 +684,43 @@ def _pin_frontend_directories(frontend_id: str, network: str) -> None:
 
 def _post_deploy_config(realm: dict, network: str, version: str, parameters: dict = None,
                          infra: dict | None = None, resync_frontends: bool = False) -> None:
-    """Call set_canister_config on a realm backend after successful deployment.
+    """Configure a realm backend after successful deployment.
 
-    Wires frontend_canister_id, installed_version, network, and test flags into
-    the realm's DB. After a frontend deploy, recopies ``/ext/`` bundles that the
-    asset canister reinstall wiped.
+    Wires frontend_canister_id and test flags into the realm (its network and
+    version are its own: set at install and built into its code). After a
+    frontend deploy, recopies ``/ext/`` bundles that the asset canister
+    reinstall wiped.
     """
     backend_id = realm.get("canister_id", "")
     frontend_id = realm.get("frontend_canister_id", "")
     if not backend_id:
         return
 
-    def opt(v):
-        if not v:
-            return "null"
-        escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
-        return f'opt "{escaped}"'
+    # Test flags from deployment descriptor parameters
+    flags = {}
+    for param_name, flag_key in TEST_PARAM_MAP.items():
+        if param_name in (parameters or {}):
+            flags[flag_key] = bool(parameters[param_name])
+    realm_cfg = {"test_mode": flags.pop("test_mode")} if "test_mode" in flags else {}
+    if flags:
+        realm_cfg["test_flags"] = flags
 
-    # Build test_flags_json from deployment descriptor parameters
-    test_flags_json = ""
-    if parameters:
-        flags = {}
-        for param_name, flag_key in TEST_PARAM_MAP.items():
-            if param_name in parameters:
-                flags[flag_key] = bool(parameters[param_name])
-        if flags:
-            test_flags_json = json.dumps(flags)
-
-    arg = f'({opt(frontend_id)}, null, null, null, null, {opt(version)}, {opt(network)}, {opt(test_flags_json)})'
-
-    parts = []
+    calls = []
     if frontend_id:
-        parts.append(f"frontend={frontend_id}")
-    if version:
-        parts.append(f"version={version}")
-    if network:
-        parts.append(f"network={network}")
-    if test_flags_json:
-        parts.append(f"test_flags={test_flags_json}")
-    if not parts:
+        calls.append(("realm_configure_infrastructure", {"frontend_canister_id": frontend_id}))
+    if realm_cfg:
+        calls.append(("realm_configure", realm_cfg))
+    if not calls:
         return
 
-    console.print(f"  Configuring: {', '.join(parts)}")
-    try:
-        _dfx_call(backend_id, "set_canister_config", arg, network)
-    except Exception as e:
-        console.print(f"  [yellow]⚠ set_canister_config failed: {e}[/yellow]")
+    console.print(f"  Configuring: {', '.join(f'{k}={v}' for _, args in calls for k, v in args.items())}")
+    for name, args in calls:
+        try:
+            reply = call_op(backend_id, name, args, network=network)
+        except Exception as e:
+            reply = {"error": e}
+        if not reply.get("ok"):
+            console.print(f"  [yellow]⚠ {name} failed: {reply.get('error')}[/yellow]")
 
     # Upload branding and pin /custom/ on the frontend canister
     if frontend_id:

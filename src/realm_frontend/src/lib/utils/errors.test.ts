@@ -78,6 +78,24 @@ describe('parseAccessError', () => {
     ).toBeNull();
   });
 
+  it('recognizes a realm refusal and names the missing permission', () => {
+    const denied = parseAccessError({ ok: false, error: 'user_list needs user.view' });
+    expect(denied).toEqual({
+      isAccessDenied: true,
+      operation: 'user.view',
+      message: DEFAULT_PERMISSION_MESSAGE,
+    });
+    expect(parseAccessError(new Error('user_list needs user.view'))?.operation).toBe('user.view');
+  });
+
+  it('recognizes an anonymous realm refusal', () => {
+    expect(parseAccessError({ ok: false, error: 'sign in first' })?.operation).toBe('');
+  });
+
+  it('ignores other realm failures', () => {
+    expect(parseAccessError({ ok: false, error: 'unknown operation x' })).toBeNull();
+  });
+
   it('ignores denied_operation without error_code', () => {
     expect(
       parseAccessError({

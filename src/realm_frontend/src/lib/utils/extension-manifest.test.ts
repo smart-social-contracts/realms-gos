@@ -5,22 +5,41 @@ import {
 	type ExtensionManifestInfo,
 } from './extension-manifest';
 
-const { listRuntimeExtensions } = vi.hoisted(() => ({
-	listRuntimeExtensions: vi.fn(),
+const { realmRead, publishedManifest } = vi.hoisted(() => ({
+	realmRead: vi.fn(),
+	publishedManifest: vi.fn(),
 }));
 
-vi.mock('$lib/canisters', () => ({
-	backend: {
-		list_runtime_extensions: listRuntimeExtensions,
+vi.mock('$lib/realm', () => ({
+	read: realmRead,
+	must: async (reply: Promise<Record<string, unknown>>) => {
+		const out = await reply;
+		if (!out.ok) throw new Error(String(out.error));
+		return out;
 	},
 }));
+
+vi.mock('$lib/file-registry-client', () => ({
+	getExtensionManifest: publishedManifest,
+	getFileRegistryCanisterIds: () => ['registry'],
+}));
+
+const DASHBOARD_PAGE = {
+	ok: true,
+	extensions: [
+		{ id: 'member_dashboard', version: '1.0.0', sidebar: {}, access: { profiles: ['member'] } },
+	],
+	next: null,
+};
 
 describe('fetchExtensionManifests', () => {
 	beforeEach(async () => {
 		vi.useFakeTimers();
 		const { clearExtensionManifestCache } = await import('./extension-manifest');
 		clearExtensionManifestCache();
-		listRuntimeExtensions.mockReset();
+		realmRead.mockReset();
+		publishedManifest.mockReset();
+		publishedManifest.mockResolvedValue({ name: 'Member dashboard', runtime: 'sandboxed' });
 	});
 
 	afterEach(async () => {
@@ -30,15 +49,9 @@ describe('fetchExtensionManifests', () => {
 	});
 
 	it('retries after a transient failure instead of caching an empty result forever', async () => {
-		listRuntimeExtensions
+		realmRead
 			.mockRejectedValueOnce(new Error('backend unavailable'))
-			.mockResolvedValueOnce(
-				JSON.stringify({
-					all_manifests: {
-						member_dashboard: { name: 'member_dashboard', runtime: 'sandboxed' },
-					},
-				}),
-			);
+			.mockResolvedValueOnce(DASHBOARD_PAGE);
 
 		const {
 			fetchExtensionManifests: fetchManifests,
@@ -51,13 +64,19 @@ describe('fetchExtensionManifests', () => {
 		await expect(first).resolves.toMatchObject({
 			member_dashboard: { runtime: 'sandboxed' },
 		});
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(2);
+		expect(realmRead).toHaveBeenCalledTimes(2);
 
 		const manifest = await getExtensionManifest('member_dashboard');
-		expect(manifest?.runtime).toBe('sandboxed');
+		expect(manifest).toMatchObject({
+			name: 'Member dashboard',
+			runtime: 'sandboxed',
+			version: '1.0.0',
+			profiles: ['member'],
+		});
+		expect(publishedManifest).toHaveBeenCalledWith('registry', 'member_dashboard', '1.0.0');
 
 		clearExtensionManifestCache();
-		listRuntimeExtensions
+		realmRead
 			.mockRejectedValueOnce(new Error('fail 1'))
 			.mockRejectedValueOnce(new Error('fail 2'))
 			.mockRejectedValueOnce(new Error('fail 3'));
@@ -65,20 +84,14 @@ describe('fetchExtensionManifests', () => {
 		const exhausted = fetchManifests();
 		await vi.advanceTimersByTimeAsync(4000);
 		await expect(exhausted).resolves.toEqual({});
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(5);
+		expect(realmRead).toHaveBeenCalledTimes(5);
 
-		listRuntimeExtensions.mockResolvedValueOnce(
-			JSON.stringify({
-				all_manifests: {
-					member_dashboard: { name: 'member_dashboard', runtime: 'sandboxed' },
-				},
-			}),
-		);
+		realmRead.mockResolvedValueOnce(DASHBOARD_PAGE);
 		const recovered = fetchManifests();
 		await expect(recovered).resolves.toMatchObject({
 			member_dashboard: { runtime: 'sandboxed' },
 		});
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(6);
+		expect(realmRead).toHaveBeenCalledTimes(6);
 	});
 });
 

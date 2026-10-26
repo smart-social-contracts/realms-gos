@@ -21,15 +21,18 @@ from realms.cli.commands.new import (
     catalog_token_symbol,
     default_catalog_symbol,
     _format_installer_job_failure,
+    _list_runtime_extension_ids,
     _local_manifest_dependencies,
     _parse_jsonish,
     _token_draft,
     _unwrap_ok_json,
     _identity_kind_is_web,
+    apply_runtime_config,
     assert_credits_sufficient,
     build_portal_manifest,
     check_ic_members_policy,
     classify_identity,
+    ensure_founder_installed,
     format_stage_catalog,
     identity_refuse_message,
     load_gaas_config,
@@ -40,8 +43,10 @@ from realms.cli.commands.new import (
     parse_from_stage,
     parse_subnet,
     portal_url_for_slug,
+    register_admin_principal,
     resolve_gos_queue,
     run_setup_stage,
+    setup_already_complete,
     slugify,
     stage_ids_to_run,
     standalone_artifact_urls,
@@ -54,7 +59,7 @@ from realms.cli.main import app
 runner = CliRunner()
 
 
-# A shared-ledger catalog as get_setup_state().shared_tokens reports it (fixture ids).
+# A shared-ledger catalog as setup_state().realm.shared_tokens_json reports it (fixture ids).
 _CATALOG = {
     "REALMS": {"ledger": "rrrrr-rr", "decimals": 8},
     "ckBTC": {"ledger": "bbbbb-bb", "indexer": "bbbbb-ix", "decimals": 8},
@@ -413,24 +418,19 @@ class TestBrandingSize:
         assert "1.5 MiB" in exc.value.message
 
 
-class TestBrandingReachesTheDraft:
-    """Images must travel the wizard's route: setup_save_draft, not setup_set_branding.
-
-    setup_launch's upload phase reads the draft asset store; anything written by
-    setup_set_branding lands under a key it never reads, so branding passed to
-    ``realms new`` used to be accepted and then silently dropped.
-    """
+class TestSetupSteps:
+    """The founder's setup goes out as ``run`` operations: setup_step per group, then setup_launch."""
 
     @staticmethod
-    def _drive(tmp_path: Path, branding: dict) -> list:
+    def _drive(branding: dict) -> list:
         merged = _merged()
         merged["branding"] = branding
         calls: list = []
 
         with patch(
-            "realms.cli.commands.new._setup_json_call",
-            side_effect=lambda backend, method, payload, *a, **k: (
-                calls.append((method, payload)) or {"success": True}
+            "realms.cli.commands.new.call_op",
+            side_effect=lambda backend, name, args=None, **k: (
+                calls.append((name, args)) or {"ok": True}
             ),
         ), patch(
             "realms.cli.commands.new._setup_state_has_token", return_value=True
@@ -439,61 +439,151 @@ class TestBrandingReachesTheDraft:
         ), patch(
             "realms.cli.commands.new.preinstall_codex_dependencies"
         ), patch(
-            "realms.cli.commands.new.call_setup_install_codex"
-        ), patch(
-            "realms.cli.commands.new.poll_setup_launch"
+            "realms.cli.commands.new.call_codex_install"
         ):
             run_setup_stage(merged, "be-1", "test", "deployer")
         return calls
 
-    def test_images_go_out_as_save_draft_branding(self, tmp_path: Path):
+    @staticmethod
+    def _steps(calls: list, step: str) -> list:
+        return [args for name, args in calls if name == "setup_step" and args["step"] == step]
+
+    def test_images_are_skipped_and_the_colour_is_a_branding_step(self, tmp_path: Path, capsys):
         logo = tmp_path / "logo.png"
         logo.write_bytes(b"\x89PNG-logo")
         bg = tmp_path / "bg.png"
         bg.write_bytes(b"\x89PNG-bg")
 
-        calls = self._drive(
-            tmp_path,
-            {"logo": str(logo), "background": str(bg), "primary": "#123456"},
-        )
+        calls = self._drive({"logo": str(logo), "background": str(bg), "primary": "#123456"})
 
-        assert "setup_set_branding" not in [method for method, _ in calls]
+        assert self._steps(calls, "branding") == [{"step": "branding", "primary_color": "#123456"}]
+        assert "not supported by this realm version" in capsys.readouterr().out
 
-        branding = [
-            payload["branding"]
-            for method, payload in calls
-            if method == "setup_save_draft" and "branding" in (payload or {})
+    def test_branding_precedes_launch(self):
+        names = [
+            args["step"] if name == "setup_step" else name
+            for name, args in self._drive({"primary": "#123456"})
         ]
-        assert [sorted(part) for part in branding] == [
-            ["logo_data_url"],
-            ["background_data_url"],
-            ["colors"],
+        assert names.index("branding") < names.index("setup_launch")
+        assert names[-1] == "setup_launch"
+
+    def test_text_only_branding_goes_to_the_realm_step(self):
+        calls = self._drive({"manifesto": "We build together."})
+
+        assert not self._steps(calls, "branding")
+        assert self._steps(calls, "realm") == [
+            {"step": "realm", "name": "Acme Realm", "manifesto": "We build together."}
         ]
-        assert branding[0]["logo_data_url"].startswith("data:image/png;base64,")
-        assert branding[2]["colors"] == {"primary": "#123456"}
 
-    def test_branding_precedes_launch(self, tmp_path: Path):
-        logo = tmp_path / "logo.png"
-        logo.write_bytes(b"\x89PNG")
+    def test_catalog_token_is_a_tokens_step(self):
+        merged = _merged(token={"symbol": "ckEURC", "canister": ""})
+        calls: list = []
+        with patch(
+            "realms.cli.commands.new.call_op",
+            side_effect=lambda backend, name, args=None, **k: (
+                calls.append((name, args)) or {"ok": True}
+            ),
+        ), patch(
+            "realms.cli.commands.new.fetch_shared_token_catalog", return_value=_CATALOG
+        ), patch(
+            "realms.cli.commands.new.preinstall_codex_dependencies"
+        ), patch(
+            "realms.cli.commands.new.call_codex_install"
+        ):
+            run_setup_stage(merged, "be-1", "test", "deployer")
+        assert self._steps(calls, "tokens") == [{
+            "step": "tokens",
+            "token_canister_id": "eeeee-ee",
+            "accounting_currency": "ckEURC",
+            "accounting_currency_decimals": 6,
+        }]
 
-        methods = [method for method, _ in self._drive(tmp_path, {"logo": str(logo)})]
-        assert methods.index("setup_save_draft") < methods.index("setup_launch")
+    def test_refusal_fails_the_stage(self):
+        with patch(
+            "realms.cli.commands.new.call_op",
+            return_value={"ok": False, "error": "name the realm first"},
+        ), patch(
+            "realms.cli.commands.new._setup_state_has_token", return_value=True
+        ), patch(
+            "realms.cli.commands.new.fetch_shared_token_catalog", return_value={}
+        ):
+            with pytest.raises(StageError) as exc:
+                run_setup_stage(_merged(), "be-1", "test", "deployer")
+        assert exc.value.stage == "setup"
+        assert exc.value.message == "name the realm first"
 
-    def test_text_only_branding_sends_no_branding_draft(self):
-        calls = self._drive(Path("."), {"manifesto": "We build together."})
 
-        assert "setup_set_branding" not in [method for method, _ in calls]
-        assert not [
-            payload
-            for method, payload in calls
-            if method == "setup_save_draft" and "branding" in (payload or {})
+class TestRealmCalls:
+    @staticmethod
+    def _record(replies: dict):
+        calls: list = []
+
+        def fake(backend, name, args=None, **kwargs):
+            calls.append((name, args, kwargs))
+            return replies.get(name, {"ok": True})
+
+        return calls, patch("realms.cli.commands.new.call_op", side_effect=fake)
+
+    def test_setup_already_complete_reads_status(self):
+        calls, fake = self._record({"status": {"ok": True, "status": "alpha"}})
+        with fake:
+            assert setup_already_complete("be-1", "test", "alice") is True
+        assert calls == [("status", None, {"network": "test", "identity": "alice", "read": True, "timeout": 60})]
+        _, fake = self._record({"status": {"ok": True, "status": "setup"}})
+        with fake:
+            assert setup_already_complete("be-1", "test", "alice") is False
+
+    def test_install_step_records_the_founder(self, monkeypatch):
+        monkeypatch.setattr("realms.cli.commands.new.time.sleep", lambda _s: None)
+        states = iter([{"ok": True, "founder": "fff-ff"}])
+        calls: list = []
+
+        def fake(backend, name, args=None, **kwargs):
+            calls.append((name, args))
+            return next(states) if name == "setup_state" else {"ok": True}
+
+        with patch("realms.cli.commands.new.call_op", side_effect=fake):
+            state = ensure_founder_installed("be-1", "fff-ff", "demo", "demo", "alice", timeout_s=0)
+        assert state["founder"] == "fff-ff"
+        assert ("setup_step", {"step": "install", "network": "demo", "founder": "fff-ff"}) in calls
+
+    def test_co_admin_is_user_add_then_role_assign_and_idempotent(self):
+        calls, fake = self._record({
+            "user_add": {"ok": False, "error": "p-1 is already a user"},
+            "role_assign": {"ok": False, "error": "p-1 already has admin"},
+        })
+        with fake:
+            register_admin_principal("p-1", "be-1", "test", "alice")
+        assert [(name, args) for name, args, _ in calls] == [
+            ("user_add", {"user": "p-1"}),
+            ("role_assign", {"user": "p-1", "profile": "admin"}),
         ]
-        identity = [
-            payload["identity"]
-            for method, payload in calls
-            if method == "setup_save_draft" and "identity" in (payload or {})
+
+    def test_co_admin_refusal_fails_the_stage(self):
+        _, fake = self._record({"user_add": {"ok": False, "error": "user_add needs user.add"}})
+        with fake, pytest.raises(StageError) as exc:
+            register_admin_principal("p-1", "be-1", "test", "alice")
+        assert exc.value.stage == "co-admin"
+
+    def test_runtime_config_is_realm_and_quarter_configure(self):
+        merged = _merged(open_registration=True)
+        merged["config"] = {"scaling": {"quarter_capacity": 50}}
+        calls, fake = self._record({})
+        with fake:
+            apply_runtime_config(merged, "be-1", "test", "alice")
+        assert [(name, args) for name, args, _ in calls] == [
+            ("realm_configure", {"open_registration": True}),
+            ("realm_configure", {"auto_scale_enabled": True}),
+            ("quarter_configure", {"capacity": 50}),
         ]
-        assert identity == [{"manifesto": "We build together."}]
+
+    def test_installed_extensions_follow_pages(self):
+        pages = iter([
+            {"ok": True, "extensions": [{"id": "voting"}], "next": 2},
+            {"ok": True, "extensions": [{"id": "vault"}], "next": None},
+        ])
+        with patch("realms.cli.commands.new.call_op", side_effect=lambda *a, **k: next(pages)):
+            assert _list_runtime_extension_ids("be-1", "test", "alice") == {"voting", "vault"}
 
 
 class TestIdentityClassification:
@@ -724,7 +814,7 @@ class TestDeployMode:
     @patch("realms.cli.commands.new.run_setup_stage")
     @patch("realms.cli.commands.new.setup_already_complete", return_value=True)
     @patch("realms.cli.commands.new.apply_bootstrap_canister_config")
-    @patch("realms.cli.commands.new.ensure_founder_enter_setup")
+    @patch("realms.cli.commands.new.ensure_founder_installed")
     @patch(
         "realms.cli.commands.new.deploy_standalone_realm",
         return_value=("aaaaa-aaaaa-aaaaa-aaaaa-aaa", "bbbbb-bbbbb-bbbbb-bbbbb-bbb"),
@@ -793,7 +883,7 @@ class TestGaasFlow:
     @patch("realms.cli.commands.new.run_setup_stage")
     @patch("realms.cli.commands.new.setup_already_complete", return_value=False)
     @patch("realms.cli.commands.new.apply_bootstrap_canister_config")
-    @patch("realms.cli.commands.new.ensure_founder_enter_setup")
+    @patch("realms.cli.commands.new.ensure_founder_installed")
     @patch(
         "realms.cli.commands.new.poll_installer_until_ready",
         return_value={
@@ -985,18 +1075,26 @@ class TestFromStage:
         assert _unwrap_ok_json({"Ok": json.dumps(inner)}) == inner
         assert _unwrap_ok_json(inner) == inner
 
-    @patch("realms.cli.commands.new.time.sleep")
-    @patch("realms.cli.commands.new._setup_json_call")
-    def test_setup_install_codex_retries_in_progress(self, mock_call, _sleep):
-        from realms.cli.commands.new import call_setup_install_codex
+    @patch("realms.cli.commands.new._latest_version", return_value="0.9.6")
+    @patch("realms.cli.commands.new.call_op")
+    def test_codex_install_resolves_latest(self, mock_call, mock_latest):
+        from realms.cli.commands.new import call_codex_install
 
-        mock_call.side_effect = [
-            {"success": True, "status": "in_progress", "phase": "pull_backend"},
-            {"success": True, "status": "complete", "version": "0.9.6"},
-        ]
-        raw = call_setup_install_codex("be", "agora", None, "test", "alice")
-        assert raw["status"] == "complete"
-        assert mock_call.call_count == 2
+        mock_call.return_value = {"ok": True, "codex": "agora@0.9.6", "init": None}
+        raw = call_codex_install("be", "agora", None, "test", "alice")
+        assert raw["codex"] == "agora@0.9.6"
+        mock_latest.assert_called_once_with("agora", "test", "alice")
+        assert mock_call.call_args[0][1:3] == ("codex_install", {"codex": "agora", "version": "0.9.6"})
+
+    @patch("realms.cli.commands.new.call_op")
+    def test_codex_install_accepts_already_active(self, mock_call):
+        from realms.cli.commands.new import call_codex_install
+
+        mock_call.return_value = {"ok": False, "error": "agora@1.0.0 is already active"}
+        call_codex_install("be", "agora", "1.0.0", "test", "alice")
+        mock_call.return_value = {"ok": False, "error": "this realm runs codex API 2, not 1"}
+        with pytest.raises(StageError):
+            call_codex_install("be", "agora", "1.0.0", "test", "alice")
 
 
 def test_new_help_lists_from_stage():

@@ -1,4 +1,8 @@
-import { backend } from '$lib/canisters';
+import { read, must } from '$lib/realm';
+import {
+	getExtensionManifest as getPublishedManifest,
+	getFileRegistryCanisterIds
+} from '$lib/file-registry-client';
 
 export interface ExtensionManifestInfo {
 	name: string;
@@ -67,10 +71,37 @@ export function parseExtensionIdFromPath(pathname: string): string | null {
 	return match?.[1] ?? null;
 }
 
+/**
+ * Every installed extension: its row in the realm (version, menu settings, access) over the
+ * manifest.json it was published with, which the realm does not return (runtime, sdk_version,
+ * capabilities, description…). That manifest comes from this build's file registry, when it has one.
+ */
 async function fetchExtensionManifestsOnce(): Promise<Record<string, ExtensionManifestInfo>> {
-	const raw = await backend.list_runtime_extensions();
-	const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-	return parsed?.all_manifests ?? {};
+	const rows: Record<string, any>[] = [];
+	let from: number | null = 1;
+	while (from) {
+		const page = await must(read('extension_list', { from, count: 100 }));
+		rows.push(...page.extensions);
+		from = page.next;
+	}
+	const [registry] = getFileRegistryCanisterIds();
+	const manifests = await Promise.all(
+		rows.map(async (e): Promise<[string, ExtensionManifestInfo]> => {
+			const published = registry ? await getPublishedManifest(registry, e.id, e.version) : null;
+			return [
+				e.id,
+				{
+					name: e.id,
+					...published,
+					...e.sidebar,
+					id: e.id,
+					version: e.version,
+					profiles: e.access?.profiles ?? []
+				}
+			];
+		})
+	);
+	return Object.fromEntries(manifests);
 }
 
 export async function fetchExtensionManifests(): Promise<Record<string, ExtensionManifestInfo>> {

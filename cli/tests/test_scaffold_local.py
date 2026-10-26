@@ -120,13 +120,6 @@ def test_parse_candid_string_with_apostrophe():
     assert data["launch"]["error"] == "No versions found for extension 'role_manager'"
 
 
-def test_ext_call_reply_parsing():
-    reply = 'record {\n  response = "\\"Hello, World!\\"";\n  success = true;\n}\n'
-    text = _candid_unescape(local._RESPONSE_FIELD.search(reply).group(1))
-    assert json.loads(text) == "Hello, World!"
-    assert local._SUCCESS_FIELD.search(reply).group(1) == "true"
-
-
 def test_start_refuses_old_node_before_doing_anything(capsys):
     with patch.object(scaffold, "node_major_version", return_value=18), \
          patch.object(scaffold.shutil, "which", return_value="/usr/bin/npm"), \
@@ -165,3 +158,21 @@ def test_start_wants_fresh_when_deploy_never_finished(tmp_path, monkeypatch):
         with pytest.raises(typer.Exit):
             local.start_command(port=8000, version="", yes=True, fresh=False, core_ui=False)
     seed.assert_not_called()
+
+
+def test_local_call_runs_operations_and_extension_functions(tmp_path, monkeypatch):
+    _half_started(tmp_path, monkeypatch, deployed=True)
+    replies = {"me": {"ok": True, "user": "u"}, "extension_call": {"ok": True, "result": "Hello, Realm!"}}
+    calls = []
+
+    def call_any(canister, name, args, **kw):
+        calls.append((canister, name, args))
+        return replies[name]
+
+    with patch.object(local, "ensure_icp"), patch("realms.cli.realm_api.call_any", side_effect=call_any):
+        assert local.call_command("me", "{}", None, as_json=True)["response"]["user"] == "u"
+        assert local.call_command("hello", "greet", '{"name": "Realm"}', as_json=True)["response"] == "Hello, Realm!"
+    assert calls == [
+        ("z", "me", {}),
+        ("z", "extension_call", {"extension": "hello", "function": "greet", "args": {"name": "Realm"}}),
+    ]

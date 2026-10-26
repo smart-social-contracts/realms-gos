@@ -1,322 +1,240 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { writable, get } from 'svelte/store';
 
-const backendStore = writable<unknown>(null);
+type Op = (args: Record<string, unknown>) => unknown;
+
+const { ops, read, run, registry } = vi.hoisted(() => {
+	const ops: Record<string, Op> = {};
+	const call = async (name: string, args: Record<string, unknown> = {}) => ops[name](args);
+	return {
+		ops,
+		read: vi.fn(call),
+		run: vi.fn(call),
+		registry: { listRegistryCodices: vi.fn(), getExtensionManifest: vi.fn() }
+	};
+});
+
 let actorReadyResolve: () => void;
 const backendActorReady = new Promise<void>((resolve) => {
 	actorReadyResolve = resolve;
 });
-let backendReadySettled = false;
-const backendReady = new Promise<void>((resolve) => {
-	queueMicrotask(() => {
-		if (!backendReadySettled) {
-			// Simulate the production hang: backendReady never settles during boot.
-			return;
-		}
-		resolve();
-	});
-});
 
 vi.mock('$lib/canisters', () => ({
-	backendStore,
 	backendActorReady,
-	backendReady
+	// Simulates the production hang: backendReady never settles during boot.
+	backendReady: new Promise(() => {})
 }));
 
-function makeActor(overrides: Record<string, unknown> = {}) {
+vi.mock('$lib/realm', () => ({
+	read,
+	run,
+	must: async (reply: Promise<{ ok: boolean; error?: string }>) => {
+		const out = await reply;
+		if (!out.ok) throw new Error(out.error);
+		return out;
+	}
+}));
+
+vi.mock('$lib/file-registry-client', () => ({
+	...registry,
+	getFileRegistryCanisterIds: () => []
+}));
+
+vi.mock('./ledgerSymbol', () => ({ lookupLedgerSymbol: vi.fn().mockResolvedValue('RLM') }));
+
+function setupState(overrides: Record<string, unknown> = {}) {
 	return {
-		get_setup_state: vi.fn().mockResolvedValue(
-			JSON.stringify({
-				status: 'setup',
-				creator: '',
-				is_caller_authorized: true,
-				codex: null,
-				token: null,
-				branding: null
-			})
-		),
-		get_available_codices_cached: vi.fn().mockResolvedValue(
-			JSON.stringify({ success: false, error: 'empty' })
-		),
-		list_available_codices: vi.fn().mockResolvedValue(
-			JSON.stringify({
-				success: true,
-				codices: [{ id: 'syntropia', versions: ['1.0.0'], name: 'Syntropia' }]
-			})
-		),
-		setup_install_codex: vi.fn().mockResolvedValue(JSON.stringify({ success: true })),
-		...overrides
+		ok: true,
+		status: 'setup',
+		founder: 'founder-principal',
+		done: ['install'],
+		todo: ['realm'],
+		realm: {
+			name: 'Agora',
+			manifesto: '',
+			welcome_message: '',
+			token_canister_id: '',
+			file_registry_canister_id: 'registry-id',
+			shared_tokens_json: { RLM: { ledger: 'rlm-ledger', decimals: 8 } },
+			...overrides
+		}
 	};
 }
 
-describe('setup api getActor', () => {
-	beforeEach(() => {
-		backendStore.set(null);
-		backendReadySettled = false;
-		vi.resetModules();
-	});
+function codexStatus(codex: { id: string; version: string } | null = null) {
+	return { ok: true, codex, history: [], next: null };
+}
 
+function useOps(overrides: Record<string, Op> = {}) {
+	for (const key of Object.keys(ops)) delete ops[key];
+	Object.assign(
+		ops,
+		{
+			setup_state: () => setupState(),
+			codex_status: () => codexStatus(),
+			realm_info: () => ({ ok: true, realm: { status: 'alpha' } })
+		},
+		overrides
+	);
+}
+
+beforeEach(() => {
+	vi.resetModules();
+	read.mockClear();
+	run.mockClear();
+	useOps();
+	actorReadyResolve();
+});
+
+describe('fetchSetupState', () => {
 	it('resolves once backendActorReady settles even if backendReady is still pending', async () => {
-		const mockActor = makeActor();
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
+		useOps({ codex_status: () => codexStatus({ id: 'syntropia@1.0.0', version: '1.0.0' }) });
 		const { fetchSetupState } = await import('./api');
 		const state = await fetchSetupState();
 
-		expect(state.status).toBe('setup');
-		expect(mockActor.get_setup_state).toHaveBeenCalled();
+		expect(state).toMatchObject({
+			status: 'setup',
+			creator: 'founder-principal',
+			is_caller_authorized: true,
+			codex: { package: 'syntropia', version: '1.0.0' },
+			token: null,
+			realm_name: 'Agora'
+		});
+		expect(run).toHaveBeenCalledWith('setup_state', {});
+	});
+
+	it('falls back to the public realm status for a caller who may not configure the realm', async () => {
+		useOps({ setup_state: () => ({ ok: false, error: 'setup_state needs realm.configure' }) });
+		const { fetchSetupState } = await import('./api');
+		const state = await fetchSetupState();
+
+		expect(state.status).toBe('alpha');
+		expect(state.is_caller_authorized).toBe(false);
 	});
 });
 
 describe('listAvailableCodices', () => {
-	beforeEach(() => {
-		vi.useFakeTimers();
-		vi.resetModules();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it('returns cached codices without firing the slow update', async () => {
-		const mockActor = makeActor({
-			get_available_codices_cached: vi.fn().mockResolvedValue(
-				JSON.stringify({
-					success: true,
-					codices: [{ id: 'cached', versions: ['2.0.0'], name: 'Cached' }]
-				})
-			)
-		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
+	it('lists the registry codices the wizard offers, with their manifest names', async () => {
+		registry.listRegistryCodices.mockResolvedValue([
+			{ codex_id: 'syntropia', versions: ['1.0.0'], latest: '1.0.0' },
+			{ codex_id: 'common', versions: ['1.0.0'], latest: '1.0.0' }
+		]);
+		registry.getExtensionManifest.mockResolvedValue({ name: 'Syntropia', description: 'A codex' });
 		const { listAvailableCodices } = await import('./api');
-		const codices = await listAvailableCodices();
 
-		expect(codices).toEqual([{ id: 'cached', versions: ['2.0.0'], name: 'Cached' }]);
-		expect(mockActor.list_available_codices).not.toHaveBeenCalled();
-	});
-
-	it('fires update and polls cache when empty', async () => {
-		let cacheReads = 0;
-		const mockActor = makeActor({
-			get_available_codices_cached: vi.fn().mockImplementation(async () => {
-				cacheReads += 1;
-				if (cacheReads >= 2) {
-					return JSON.stringify({
-						success: true,
-						codices: [{ id: 'fresh', versions: ['1.0.0'], name: 'Fresh' }]
-					});
-				}
-				return JSON.stringify({ success: false, error: 'empty' });
-			}),
-			list_available_codices: vi.fn().mockResolvedValue(undefined)
-		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
-		const { listAvailableCodices } = await import('./api');
-		const promise = listAvailableCodices();
-		await vi.advanceTimersByTimeAsync(2_500);
-		const codices = await promise;
-
-		expect(mockActor.list_available_codices).toHaveBeenCalledTimes(1);
-		expect(codices).toEqual([{ id: 'fresh', versions: ['1.0.0'], name: 'Fresh' }]);
+		expect(await listAvailableCodices()).toEqual([
+			{ id: 'syntropia', versions: ['1.0.0'], name: 'Syntropia', description: 'A codex', repository: '' }
+		]);
+		expect(registry.listRegistryCodices).toHaveBeenCalledWith('registry-id');
 	});
 });
 
 describe('installSetupCodex', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		vi.resetModules();
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	it('polls setup state when the raw install call never settles', async () => {
-		let setupReads = 0;
-		const mockActor = makeActor({
-			setup_install_codex: vi.fn().mockReturnValue(new Promise(() => {})),
-			get_setup_state: vi.fn().mockImplementation(async () => {
-				setupReads += 1;
-				const codex =
-					setupReads >= 2
-						? { package: 'syntropia', version: '1.0.0' }
-						: null;
-				return JSON.stringify({
-					status: 'setup',
-					creator: '',
-					is_caller_authorized: true,
-					codex,
-					token: null,
-					branding: null
-				});
-			})
-		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
+	it('installs through codex_install', async () => {
+		useOps({ codex_install: () => ({ ok: true, codex: 'syntropia@1.0.0' }) });
+		const { installSetupCodex } = await import('./api');
+		const result = await installSetupCodex({ package: 'syntropia', version: '1.0.0' });
 
+		expect(result).toMatchObject({ success: true, resolved_version: '1.0.0' });
+		expect(run).toHaveBeenCalledWith('codex_install', { codex: 'syntropia', version: '1.0.0' });
+	});
+
+	it('polls setup state when the install call throws an ambiguous error', async () => {
+		let reads = 0;
+		useOps({
+			codex_install: () => {
+				throw new Error('Call was returned undefined');
+			},
+			codex_status: () => {
+				reads += 1;
+				return codexStatus(reads >= 2 ? { id: 'syntropia@1.0.0', version: '1.0.0' } : null);
+			}
+		});
 		const { installSetupCodex } = await import('./api');
 		const promise = installSetupCodex(
 			{ package: 'syntropia', version: '1.0.0' },
 			{ rawCallGraceMs: 100, pollIntervalMs: 50 }
 		);
-		await Promise.resolve();
 		await vi.advanceTimersByTimeAsync(100);
 		await vi.advanceTimersByTimeAsync(50);
-		const result = await promise;
 
-		expect(result.success).toBe(true);
-		expect(mockActor.get_setup_state).toHaveBeenCalled();
+		expect((await promise).success).toBe(true);
+		expect(reads).toBeGreaterThanOrEqual(2);
 	});
 
-	it('polls setup state when the raw install call throws an ambiguous error', async () => {
-		let setupReads = 0;
-		const mockActor = makeActor({
-			setup_install_codex: vi
-				.fn()
-				.mockRejectedValue(new Error('Call was returned undefined')),
-			get_setup_state: vi.fn().mockImplementation(async () => {
-				setupReads += 1;
-				const codex =
-					setupReads >= 2
-						? { package: 'syntropia', version: '1.0.0' }
-						: null;
-				return JSON.stringify({
-					status: 'setup',
-					creator: '',
-					is_caller_authorized: true,
-					codex,
-					token: null,
-					branding: null
-				});
-			})
-		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
-		const { installSetupCodex } = await import('./api');
-		const promise = installSetupCodex(
-			{ package: 'syntropia', version: '1.0.0' },
-			{ rawCallGraceMs: 100, pollIntervalMs: 50 }
-		);
-		await Promise.resolve();
-		await vi.advanceTimersByTimeAsync(100);
-		await vi.advanceTimersByTimeAsync(50);
-		const result = await promise;
-
-		expect(result.success).toBe(true);
-		expect(mockActor.get_setup_state).toHaveBeenCalled();
-	});
-
-	it('surfaces fast failures without polling', async () => {
-		const mockActor = makeActor({
-			setup_install_codex: vi
-				.fn()
-				.mockResolvedValue(JSON.stringify({ success: false, error: 'approval denied' })),
-			get_setup_state: vi.fn()
-		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
+	it('surfaces refusals without polling', async () => {
+		useOps({ codex_install: () => ({ ok: false, error: 'approval denied' }) });
 		const { installSetupCodex } = await import('./api');
 		const result = await installSetupCodex(
 			{ package: 'syntropia', version: '1.0.0' },
 			{ rawCallGraceMs: 100 }
 		);
-		await Promise.resolve();
-		await vi.advanceTimersByTimeAsync(100);
 
 		expect(result).toEqual({ success: false, error: 'approval denied' });
-		expect(mockActor.get_setup_state).not.toHaveBeenCalled();
+		expect(read).not.toHaveBeenCalledWith('codex_status', expect.anything());
 	});
 
 	it('throws on non-ambiguous install errors without polling', async () => {
-		const mockActor = makeActor({
-			setup_install_codex: vi.fn().mockImplementation(() => {
+		useOps({
+			codex_install: () => {
 				throw new Error('Network error');
-			}),
-			get_setup_state: vi.fn()
+			}
 		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
 		const { installSetupCodex } = await import('./api');
 
 		await expect(
 			installSetupCodex({ package: 'syntropia', version: '1.0.0' }, { rawCallGraceMs: 100 })
 		).rejects.toThrow('Network error');
-		expect(mockActor.get_setup_state).not.toHaveBeenCalled();
+		expect(read).not.toHaveBeenCalledWith('codex_status', expect.anything());
 	});
 });
 
 describe('completeSetup', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		vi.resetModules();
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	it('polls setup state when the raw complete call never settles', async () => {
-		let setupReads = 0;
-		const mockActor = makeActor({
-			complete_setup: vi.fn().mockReturnValue(new Promise(() => {})),
-			get_setup_state: vi.fn().mockImplementation(async () => {
-				setupReads += 1;
-				return JSON.stringify({
-					status: setupReads >= 2 ? 'alpha' : 'setup',
-					creator: '',
-					is_caller_authorized: true,
-					codex: { package: 'syntropia', version: '1.0.0' },
-					token: null,
-					branding: null
-				});
-			})
+	it('polls setup state when the launch call never settles', async () => {
+		let reads = 0;
+		useOps({
+			setup_launch: () => new Promise(() => {}),
+			setup_state: () => {
+				reads += 1;
+				return { ...setupState(), status: reads >= 2 ? 'alpha' : 'setup' };
+			}
 		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
 		const { completeSetup } = await import('./api');
 		const promise = completeSetup({ rawCallGraceMs: 100, pollIntervalMs: 50 });
-		await Promise.resolve();
 		await vi.advanceTimersByTimeAsync(100);
 		await vi.advanceTimersByTimeAsync(50);
-		const result = await promise;
 
-		expect(result).toEqual({ success: true });
-		expect(mockActor.get_setup_state).toHaveBeenCalled();
+		expect(await promise).toEqual({ success: true });
 	});
 
-	it('returns fast failures without polling', async () => {
-		const mockActor = makeActor({
-			complete_setup: vi
-				.fn()
-				.mockResolvedValue(JSON.stringify({ success: false, error: 'Not authorized' })),
-			get_setup_state: vi.fn()
-		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
+	it('returns refusals without polling', async () => {
+		useOps({ setup_launch: () => ({ ok: false, error: 'name the realm first' }) });
 		const { completeSetup } = await import('./api');
 		const result = await completeSetup({ rawCallGraceMs: 100 });
-		await Promise.resolve();
-		await vi.advanceTimersByTimeAsync(100);
 
-		expect(result).toEqual({ success: false, error: 'Not authorized' });
-		expect(mockActor.get_setup_state).not.toHaveBeenCalled();
+		expect(result).toEqual({ success: false, error: 'name the realm first' });
+		expect(run).not.toHaveBeenCalledWith('setup_state', expect.anything());
 	});
 });
 
 describe('pollUntilCodexInstalled', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		vi.resetModules();
 	});
 
 	afterEach(() => {
@@ -324,51 +242,22 @@ describe('pollUntilCodexInstalled', () => {
 	});
 
 	it('succeeds on a final setup-state check after the poll deadline', async () => {
-		let setupReads = 0;
-		const mockActor = makeActor({
-			get_setup_state: vi.fn().mockImplementation(async () => {
-				setupReads += 1;
-				const codex =
-					setupReads >= 3
-						? { package: 'syntropia', version: '1.0.0' }
-						: null;
-				return JSON.stringify({
-					status: 'setup',
-					creator: '',
-					is_caller_authorized: true,
-					codex,
-					token: null,
-					branding: null
-				});
-			})
+		let reads = 0;
+		useOps({
+			codex_status: () => {
+				reads += 1;
+				return codexStatus(reads >= 3 ? { id: 'syntropia@1.0.0', version: '1.0.0' } : null);
+			}
 		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
 		const { pollUntilCodexInstalled } = await import('./api');
 		const promise = pollUntilCodexInstalled('syntropia', '1.0.0', 100, 50);
 		await vi.advanceTimersByTimeAsync(100);
 		await promise;
 
-		expect(mockActor.get_setup_state).toHaveBeenCalledTimes(3);
+		expect(reads).toBe(3);
 	});
 
 	it('throws a 40-minute timeout error when the final check still has no codex', async () => {
-		const mockActor = makeActor({
-			get_setup_state: vi.fn().mockResolvedValue(
-				JSON.stringify({
-					status: 'setup',
-					creator: '',
-					is_caller_authorized: true,
-					codex: null,
-					token: null,
-					branding: null
-				})
-			)
-		});
-		backendStore.set(mockActor);
-		actorReadyResolve();
-
 		const { pollUntilCodexInstalled } = await import('./api');
 		const timeoutMs = 40 * 60 * 1_000;
 		const promise = pollUntilCodexInstalled('syntropia', '1.0.0', timeoutMs, 5_000);
@@ -377,7 +266,77 @@ describe('pollUntilCodexInstalled', () => {
 		);
 		await vi.advanceTimersByTimeAsync(timeoutMs);
 		await expectation;
-		expect(mockActor.get_setup_state).toHaveBeenCalled();
+	});
+});
+
+describe('setup draft and launch', () => {
+	beforeEach(() => {
+		const store = new Map<string, string>();
+		vi.stubGlobal('localStorage', {
+			getItem: (key: string) => store.get(key) ?? null,
+			setItem: (key: string, value: string) => store.set(key, value)
+		});
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('keeps the draft and its images in this browser', async () => {
+		const { saveSetupDraft, fetchSetupDraftAsset } = await import('./api');
+		const saved = await saveSetupDraft({
+			codex: { package: 'syntropia', version: '1.0.0' },
+			branding: { logo_data_url: 'data:image/png;base64,AA', colors: { primary: '#1E6B52' } }
+		});
+
+		expect(saved.draft).toMatchObject({
+			codex: { package: 'syntropia' },
+			branding: { logo: true, colors: { primary: '#1E6B52' } }
+		});
+		expect(await fetchSetupDraftAsset('logo')).toBe('data:image/png;base64,AA');
+		expect(await fetchSetupDraftAsset('background')).toBeNull();
+	});
+
+	it('applies the draft step by step, then opens the realm', async () => {
+		useOps({
+			codex_install: () => ({ ok: true }),
+			setup_step: () => ({ ok: true }),
+			setup_launch: () => ({ ok: true, status: 'alpha' })
+		});
+		const { saveSetupDraft, startSetupLaunch, fetchSetupLaunchStatus } = await import('./api');
+		await saveSetupDraft({
+			codex: { package: 'syntropia', version: '1.0.0' },
+			token: 'RLM',
+			identity: { manifesto: 'We share' }
+		});
+
+		expect((await startSetupLaunch()).launch?.status).toBe('running');
+		await vi.waitFor(async () => expect((await fetchSetupLaunchStatus()).status).toBe('completed'));
+
+		const calls = run.mock.calls.filter(([name]) => name !== 'setup_state');
+		expect(calls).toEqual([
+			['codex_install', { codex: 'syntropia', version: '1.0.0' }],
+			[
+				'setup_step',
+				{
+					step: 'tokens',
+					token_canister_id: 'rlm-ledger',
+					accounting_currency: 'RLM',
+					accounting_currency_decimals: 8
+				}
+			],
+			['setup_step', expect.objectContaining({ step: 'branding' })],
+			['setup_step', expect.objectContaining({ step: 'realm', manifesto: 'We share' })],
+			['setup_launch', {}]
+		]);
+	});
+
+	it('refuses to launch without a codex', async () => {
+		const { startSetupLaunch } = await import('./api');
+		expect(await startSetupLaunch()).toEqual({
+			success: false,
+			error: 'Choose a codex before launching'
+		});
 	});
 });
 

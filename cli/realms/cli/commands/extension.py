@@ -15,7 +15,6 @@ import tempfile
 import zipfile
 from pathlib import Path
 from typing import List, Optional
-from pprint import pformat
 
 import typer
 from rich.console import Console
@@ -283,66 +282,6 @@ def list_extensions_command():
     console.print(table)
 
 
-def update_extension_imports(extension_id, action="add"):
-    """Update the extension_imports.py file"""
-    paths = get_project_paths()
-    imports_file = os.path.join(
-        paths["backend_dir"], "extension_packages", "extension_imports.py"
-    )
-
-    if not os.path.exists(imports_file):
-        os.makedirs(os.path.dirname(imports_file), exist_ok=True)
-        with open(imports_file, "w") as f:
-            f.write("")
-        console.print(f"[blue]Created extension imports file: {imports_file}[/blue]")
-
-    with open(imports_file, "r") as f:
-        content = f.read()
-
-    import_line = f"import extension_packages.{extension_id}.entry"
-
-    if action == "add":
-        if import_line in content:
-            console.print(
-                f"[yellow]Import for {extension_id} already exists in extension_imports.py[/yellow]"
-            )
-            return True
-
-        if content and not content.endswith("\n"):
-            import_line = "\n" + import_line
-
-        if content:
-            import_line += "\n"
-
-        with open(imports_file, "a") as f:
-            f.write(import_line)
-        console.print(
-            f"[green]Added import for {extension_id} to extension_imports.py[/green]"
-        )
-
-    elif action == "remove":
-        if import_line not in content:
-            console.print(
-                f"[yellow]No import for {extension_id} found in extension_imports.py[/yellow]"
-            )
-            return True
-
-        lines = content.splitlines()
-        new_lines = [line for line in lines if line.strip() != import_line]
-        new_content = "\n".join(new_lines)
-
-        if new_content and not new_content.endswith("\n"):
-            new_content += "\n"
-
-        with open(imports_file, "w") as f:
-            f.write(new_content)
-        console.print(
-            f"[green]Removed import for {extension_id} from extension_imports.py[/green]"
-        )
-
-    return True
-
-
 def package_extension_command(extension_id: str, output_dir: Optional[str] = None, output_path: Optional[str] = None, source_dir: Optional[str] = None):
     """Package an extension into a zip file
     
@@ -446,296 +385,6 @@ def package_extension_command(extension_id: str, output_dir: Optional[str] = Non
             # extensions are loaded dynamically via frontend-rt at runtime.
 
     console.print(f"[green]Extension packaged successfully: {zip_path}[/green]")
-    return True
-
-
-def install_extension_command(package_path: str):
-    """Deprecated: extensions are now installed dynamically at runtime."""
-    console.print(
-        "[yellow]install (from package) is deprecated. "
-        "Extensions are now installed dynamically via the file registry at runtime.[/yellow]"
-    )
-    return True
-
-
-def uninstall_extension_command(extension_id: str):
-    """Uninstall an extension"""
-    try:
-        validate_extension_id(extension_id)
-    except ValueError as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
-        return False
-
-    locations = find_extension_locations(extension_id)
-    paths = get_extension_paths(extension_id)
-
-    if not locations and not any(os.path.exists(path) for path in paths.values()):
-        console.print(
-            f"[red]Extension {extension_id} not found or already uninstalled[/red]"
-        )
-        return False
-
-    if "backend" in locations:
-        try:
-            shutil.rmtree(locations["backend"])
-            console.print(f"[green]Removed backend files for {extension_id}[/green]")
-
-            update_extension_imports(extension_id, "remove")
-        except Exception as e:
-            console.print(f"[red]Failed to remove backend files: {e}[/red]")
-
-    if "frontend_lib" in locations or os.path.exists(paths["frontend_lib"]):
-        try:
-            if os.path.exists(paths["frontend_lib"]):
-                shutil.rmtree(paths["frontend_lib"])
-                console.print(
-                    f"[green]Removed frontend library files for {extension_id}[/green]"
-                )
-        except Exception as e:
-            console.print(f"[red]Failed to remove frontend library files: {e}[/red]")
-
-    if "frontend_route" in locations or os.path.exists(paths["frontend_route"]):
-        try:
-            if os.path.exists(paths["frontend_route"]):
-                shutil.rmtree(paths["frontend_route"])
-                console.print(
-                    f"[green]Removed frontend route files for {extension_id}[/green]"
-                )
-        except Exception as e:
-            console.print(f"[red]Failed to remove frontend route files: {e}[/red]")
-
-    if "i18n" in locations or os.path.exists(paths["i18n"]):
-        try:
-            if os.path.exists(paths["i18n"]):
-                shutil.rmtree(paths["i18n"])
-                console.print(f"[green]Removed i18n files for {extension_id}[/green]")
-        except Exception as e:
-            console.print(f"[red]Failed to remove i18n files: {e}[/red]")
-
-    if "frontend_custom_routes" in locations:
-        try:
-            shutil.rmtree(locations["frontend_custom_routes"])
-            console.print(
-                f"[green]Removed custom route files for {extension_id}[/green]"
-            )
-        except Exception as e:
-            console.print(f"[red]Failed to remove custom route files: {e}[/red]")
-
-    console.print(f"[green]Extension {extension_id} uninstalled successfully[/green]")
-    return True
-
-
-def uninstall_all_extensions_command():
-    """Uninstall all installed extensions"""
-    paths = get_project_paths()
-    backend_ext_dir = os.path.join(paths["backend_dir"], "extension_packages")
-    frontend_ext_dir = os.path.join(paths["frontend_dir"], "src/lib/extensions")
-
-    extensions = set()
-
-    # Find all backend extensions
-    if os.path.exists(backend_ext_dir):
-        for item in os.listdir(backend_ext_dir):
-            if os.path.isdir(
-                os.path.join(backend_ext_dir, item)
-            ) and not item.startswith("__"):
-                try:
-                    validate_extension_id(item)
-                    extensions.add(item)
-                except ValueError:
-                    pass
-
-    # Find all frontend extensions
-    if os.path.exists(frontend_ext_dir):
-        for item in os.listdir(frontend_ext_dir):
-            if os.path.isdir(
-                os.path.join(frontend_ext_dir, item)
-            ) and not item.startswith("__"):
-                try:
-                    validate_extension_id(item)
-                    extensions.add(item)
-                except ValueError:
-                    pass
-
-    if not extensions:
-        console.print("[yellow]No extensions found to uninstall[/yellow]")
-        return True
-
-    console.print(f"[blue]Found {len(extensions)} extension(s) to uninstall[/blue]")
-    
-    success_count = 0
-    failed_count = 0
-    
-    for ext_id in sorted(extensions):
-        console.print(f"\n[blue]Uninstalling {ext_id}...[/blue]")
-        if uninstall_extension_command(ext_id):
-            success_count += 1
-        else:
-            failed_count += 1
-
-    console.print(
-        f"\n[green]Uninstallation complete: {success_count} succeeded, {failed_count} failed[/green]"
-    )
-    
-    # Regenerate manifests and registry after uninstalling all
-    if success_count > 0:
-        generate_extension_manifests()
-        generate_extension_registry()
-    
-    return failed_count == 0
-
-
-def generate_extension_registry():
-    """Generate registry.py that maps extension functions for the backend"""
-    paths = get_project_paths()
-    backend_ext_dir = os.path.join(paths["backend_dir"], "extension_packages")
-    registry_file = os.path.join(backend_ext_dir, "registry.py")
-    
-    # Get list of installed extensions
-    extensions = []
-    if os.path.exists(backend_ext_dir):
-        for item in os.listdir(backend_ext_dir):
-            ext_path = os.path.join(backend_ext_dir, item)
-            if os.path.isdir(ext_path) and not item.startswith("__"):
-                entry_file = os.path.join(ext_path, "entry.py")
-                if os.path.exists(entry_file):
-                    extensions.append(item)
-    
-    # Generate the registry file
-    content = '''"""
-Extension Function Registry
-
-This file provides a centralized registry for all extension functions.
-It maps extension names and function names to their actual implementations.
-
-Auto-generated by the realms CLI extension command.
-DO NOT EDIT MANUALLY - your changes will be overwritten.
-"""
-
-from typing import Callable, Optional
-from ic_python_logging import get_logger
-
-logger = get_logger("extension_packages.registry")
-
-'''
-    
-    # Import all extension entry modules
-    for ext_id in extensions:
-        content += f'import extension_packages.{ext_id}.entry as {ext_id}_entry\n'
-    
-    content += '''
-
-def get_func(extension_name: str, function_name: str) -> Optional[Callable]:
-    """
-    Get a function from an extension by name.
-    
-    Args:
-        extension_name: The ID of the extension
-        function_name: The name of the function to retrieve
-        
-    Returns:
-        The function object if found, None otherwise
-    """
-    logger.debug(f"Looking up function '{function_name}' in extension '{extension_name}'")
-    
-    # Map extension names to their entry modules
-    extension_modules = {
-'''
-    
-    for ext_id in extensions:
-        content += f'        "{ext_id}": {ext_id}_entry,\n'
-    
-    content += '''    }
-    
-    # Get the extension module
-    module = extension_modules.get(extension_name)
-    if not module:
-        logger.error(f"Extension '{extension_name}' not found in registry")
-        raise ValueError(f"Extension '{extension_name}' not found")
-    
-    # Get the function from the module
-    if not hasattr(module, function_name):
-        logger.error(f"Function '{function_name}' not found in extension '{extension_name}'")
-        raise AttributeError(f"Extension '{extension_name}' has no function '{function_name}'")
-    
-    func = getattr(module, function_name)
-    logger.debug(f"Found function '{function_name}' in extension '{extension_name}'")
-    return func
-'''
-    
-    # Write the file
-    os.makedirs(backend_ext_dir, exist_ok=True)
-    with open(registry_file, "w") as f:
-        f.write(content)
-    
-    console.print(f"[green]Generated registry.py with {len(extensions)} extensions[/green]")
-    return True
-
-
-def generate_extension_manifests():
-    """Generate extension_manifests.py file from installed extension manifests"""
-    paths = get_project_paths()
-    backend_ext_dir = os.path.join(paths["backend_dir"], "extension_packages")
-    manifests_file = os.path.join(backend_ext_dir, "extension_manifests.py")
-    
-    manifests = {}
-    
-    # Scan for installed extensions with manifests
-    if os.path.exists(backend_ext_dir):
-        for item in os.listdir(backend_ext_dir):
-            ext_path = os.path.join(backend_ext_dir, item)
-            if os.path.isdir(ext_path) and not item.startswith("__"):
-                manifest_path = os.path.join(ext_path, "manifest.json")
-                if os.path.exists(manifest_path):
-                    try:
-                        with open(manifest_path, "r") as f:
-                            manifest_data = json.load(f)
-                            manifests[item] = manifest_data
-                    except Exception as e:
-                        console.print(f"[yellow]Warning: Could not load manifest for {item}: {e}[/yellow]")
-    
-    # Generate the Python file
-    content = '''"""
-Static extension manifest registry for Basilisk canister environment.
-This file contains all extension manifests as Python dictionaries since
-Basilisk canisters don't have filesystem access.
-
-This file is auto-generated by the realms CLI extension command.
-DO NOT EDIT MANUALLY - your changes will be overwritten.
-"""
-
-# Extension manifests embedded as Python dictionaries
-EXTENSION_MANIFESTS = {
-'''
-    
-    for ext_id, manifest in manifests.items():
-        # Use pformat for readable formatting, then indent properly
-        formatted = pformat(manifest, width=100, compact=False)
-        # Add proper indentation (4 spaces for extension level)
-        indented = '\n'.join('    ' + line for line in formatted.split('\n'))
-        content += f'    "{ext_id}": {indented},\n\n'
-    
-    content += '''}\n\n
-def get_all_extension_manifests() -> dict:
-    """Get all extension manifests"""
-    return EXTENSION_MANIFESTS
-'''
-    
-    # Write the file
-    os.makedirs(backend_ext_dir, exist_ok=True)
-    with open(manifests_file, "w") as f:
-        f.write(content)
-    
-    console.print(f"[green]Generated extension_manifests.py with {len(manifests)} extensions[/green]")
-    return True
-
-
-def install_from_source_command(source_dir: str = "extensions"):
-    """Deprecated: extensions are now loaded dynamically at runtime."""
-    console.print(
-        "[yellow]install-from-source is deprecated. "
-        "Extensions are now loaded dynamically via the file registry at runtime.[/yellow]"
-    )
     return True
 
 
@@ -909,62 +558,6 @@ def _dfx_call(canister, method, arg, network, identity, is_query=False, timeout=
                 pass
 
 
-def _ic_safe_text(content: str) -> str:
-    """Strip astral Unicode (emoji) for IC narrow-unicode filesystem writes.
-
-    ``open(path, 'w')`` on the canister raises ``UnicodeEncodeError: surrogates
-    not allowed`` when extension sources contain emoji. Registry installs hit
-    the same path; direct runtime-install sanitizes at upload time.
-    """
-    return "".join(c if ord(c) < 0x10000 else "?" for c in content)
-
-
-def _collect_backend_package_files(source_dir: str) -> dict:
-    """Collect manifest.json plus backend/*.py and backend/**/*.json (flattened).
-
-    Matches what ``install_extension`` expects on the canister: ``entry.py`` at
-    the extension root and ``data/*.json`` beside it (``backend/`` prefix
-    stripped), same as ``install_extension_from_registry``.
-    """
-    files = {}
-
-    manifest_path = os.path.join(source_dir, "manifest.json")
-    if not os.path.exists(manifest_path):
-        console.print(f"[red]Error: manifest.json not found in {source_dir}[/red]")
-        raise typer.Exit(1)
-    with open(manifest_path, "r") as f:
-        files["manifest.json"] = _ic_safe_text(f.read())
-
-    backend_dir = os.path.join(source_dir, "backend")
-    if os.path.isdir(backend_dir):
-        for root, _dirs, filenames in os.walk(backend_dir):
-            for fname in filenames:
-                if not fname.endswith((".py", ".json")):
-                    continue
-                full_path = os.path.join(root, fname)
-                rel = os.path.relpath(full_path, backend_dir).replace(os.sep, "/")
-                with open(full_path, "r") as f:
-                    files[rel] = _ic_safe_text(f.read())
-    else:
-        entry_path = os.path.join(source_dir, "entry.py")
-        if os.path.exists(entry_path):
-            with open(entry_path, "r") as f:
-                files["entry.py"] = _ic_safe_text(f.read())
-
-    if "entry.py" not in files:
-        console.print(
-            f"[red]Error: entry.py not found in {source_dir}/backend/ or {source_dir}/[/red]"
-        )
-        raise typer.Exit(1)
-
-    return files
-
-
-def _collect_runtime_extension_files(source_dir: str) -> dict:
-    """Collect extension backend files for ``install_extension``."""
-    return _collect_backend_package_files(source_dir)
-
-
 def _upload_extension_frontend_bundle(
     frontend_canister: str,
     ext_id: str,
@@ -993,24 +586,49 @@ def _upload_extension_frontend_bundle(
     console.print(f"  [green]✓[/green] frontend bundle uploaded")
 
 
-def _extension_sync_call(
-    backend_canister: str,
-    ext_id: str,
-    method: str,
-    args: str,
-    network: str,
-    identity: Optional[str] = None,
-) -> None:
-    """Best-effort post-install hook (``initialize``, codex ``init``, …)."""
-    escaped_args = args.replace("\\", "\\\\").replace('"', '\\"')
-    candid = f'("{ext_id}", "{method}", "{escaped_args}")'
-    try:
-        raw = _dfx_call(
-            backend_canister, "extension_sync_call", candid, network, identity, timeout=120
+def _realm_op(canister, name, args, network, identity, read=False, timeout=300) -> dict:
+    from ..realm_api import call_op
+
+    return call_op(canister, name, args, network=network, identity=identity, read=read, timeout=timeout)
+
+
+def _applied(reply: dict, done: str) -> bool:
+    """Report a governed operation: applied now, or filed as a proposal for the realm to vote on."""
+    if not reply.get("ok"):
+        console.print(f"[red]  ✗ {reply.get('error', 'unknown error')}[/red]")
+        raise typer.Exit(1)
+    if reply.get("proposal"):
+        console.print(
+            f"[yellow]  … filed as proposal {reply['proposal']}: it applies once the realm approves it[/yellow]"
         )
-        console.print(f"  [dim]{method}(): {raw[:200]}[/dim]")
-    except Exception as e:
-        console.print(f"  [yellow]⚠ {method}() hook: {e}[/yellow]")
+        return False
+    console.print(f"[green]  ✓ {done}[/green]")
+    return True
+
+
+def _version_key(version: str):
+    core, _, pre = version.partition("-")
+    return tuple(int(p) if p.isdigit() else 0 for p in core.split(".")), pre == "", pre
+
+
+def latest_version(registry: str, package: str, network: str, identity: Optional[str]) -> str:
+    """The newest version of ``package`` published to the file registry (namespace ``ext/<package>/<version>``)."""
+    prefix = f"ext/{package}/"
+    raw = _dfx_call(registry, "list_namespaces", "()", network, identity, is_query=True)
+    versions = [n["namespace"][len(prefix):] for n in json.loads(raw) if n["namespace"].startswith(prefix)]
+    if not versions:
+        console.print(f"[red]Error: {registry} has no published version of '{package}' under {prefix}[/red]")
+        raise typer.Exit(1)
+    return max(versions, key=_version_key)
+
+
+def _read_manifest(source_dir: str) -> dict:
+    manifest_path = os.path.join(source_dir, "manifest.json")
+    if not os.path.isfile(manifest_path):
+        console.print(f"[red]Error: manifest.json not found in {source_dir}[/red]")
+        raise typer.Exit(1)
+    with open(manifest_path, "r") as f:
+        return json.load(f)
 
 
 def runtime_install_command(
@@ -1019,48 +637,36 @@ def runtime_install_command(
     network: str = "local",
     identity: Optional[str] = None,
     frontend_canister: Optional[str] = None,
+    registry: Optional[str] = None,
 ):
-    """Install an extension on a deployed realm canister at runtime.
+    """Install the extension in ``source_dir`` on a deployed realm (``extension_install``).
 
-    Reads backend files from the source directory and uploads them to the
-    canister's persistent filesystem via the install_extension endpoint.
+    The realm installs from its own file registry (``ext/<id>/<version>``); with ``registry`` the
+    source is published there first.
     """
     source_dir = os.path.abspath(source_dir)
     if not os.path.isdir(source_dir):
         console.print(f"[red]Error: {source_dir} is not a directory[/red]")
         raise typer.Exit(1)
 
-    manifest_path = os.path.join(source_dir, "manifest.json")
-    with open(manifest_path, "r") as f:
-        manifest = json.loads(f.read())
-    ext_id = manifest.get("name") or os.path.basename(source_dir)
+    manifest = _read_manifest(source_dir)
+    ext_id = manifest.get("id") or manifest.get("name") or os.path.basename(source_dir)
     version = str(manifest.get("version") or "0.0.0")
 
-    console.print(f"[blue]Installing extension '{ext_id}' on {canister} ({network})...[/blue]")
+    if registry:
+        publish_extension_command(
+            registry, source_dir, extension_id=ext_id, version=version, network=network, identity=identity
+        )
+    else:
+        console.print(
+            f"[dim]The realm installs ext/{ext_id}/{version} from its file registry: publish it first "
+            "(`realms extension publish`, or pass --registry).[/dim]"
+        )
 
-    files = _collect_runtime_extension_files(source_dir)
-    total_bytes = sum(len(v) for v in files.values())
-    console.print(f"  Files: {len(files)} ({total_bytes:,} bytes)")
-    for fname, content in sorted(files.items()):
-        console.print(f"    {fname} ({len(content):,} bytes)")
-
-    payload = json.dumps({"extension_id": ext_id, "files": files})
-    candid_arg = '("' + payload.replace("\\", "\\\\").replace('"', '\\"') + '")'
-
-    console.print("  Uploading backend to canister...")
-    raw = _dfx_call(canister, "install_extension", candid_arg, network, identity, timeout=300)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(f"  Response: {raw}")
+    console.print(f"[blue]Installing extension '{ext_id}' {version} on {canister} ({network})...[/blue]")
+    reply = _realm_op(canister, "extension_install", {"extension": ext_id, "version": version}, network, identity)
+    if not _applied(reply, f"Extension '{ext_id}' {version} installed"):
         return
-
-    if not result.get("success"):
-        console.print(f"[red]  ✗ Installation failed: {result.get('error', 'unknown error')}[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]  ✓ Extension '{ext_id}' backend installed[/green]")
 
     if frontend_canister:
         bundle = os.path.join(source_dir, "frontend-rt", "dist", "index.js")
@@ -1068,114 +674,64 @@ def runtime_install_command(
             frontend_canister, ext_id, version, bundle, network, identity
         )
 
-    _extension_sync_call(canister, ext_id, "initialize", "{}", network, identity)
+    hook = _realm_op(
+        canister, "extension_call", {"extension": ext_id, "function": "initialize", "args": {}}, network, identity
+    )
+    if hook.get("ok"):
+        console.print(f"  [dim]initialize(): {json.dumps(hook.get('result'))[:200]}[/dim]")
+    else:
+        console.print(f"  [yellow]⚠ initialize() hook: {hook.get('error')}[/yellow]")
 
 
 def runtime_uninstall_command(canister: str, extension_id: str, network: str = "local", identity: Optional[str] = None):
-    """Uninstall a runtime extension from a deployed realm canister."""
+    """Uninstall an extension from a deployed realm (``extension_uninstall``)."""
     console.print(f"[blue]Uninstalling extension '{extension_id}' from {canister} ({network})...[/blue]")
+    reply = _realm_op(canister, "extension_uninstall", {"extension": extension_id}, network, identity)
+    _applied(reply, f"Extension '{extension_id}' uninstalled")
 
-    payload = json.dumps({"extension_id": extension_id})
-    candid_arg = '("' + payload.replace("\\", "\\\\").replace('"', '\\"') + '")'
 
-    raw = _dfx_call(canister, "uninstall_extension", candid_arg, network, identity)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(f"  Response: {raw}")
-        return
-
-    if result.get("success"):
-        console.print(f"[green]  ✓ Extension '{extension_id}' uninstalled[/green]")
-    else:
-        console.print(f"[red]  ✗ Uninstall failed: {result.get('error', 'unknown error')}[/red]")
-        raise typer.Exit(1)
+def installed_extensions(canister: str, network: str = "local", identity: Optional[str] = None) -> list:
+    """Every installed extension (``extension_list``, page by page)."""
+    extensions, start = [], 1
+    while start is not None:
+        reply = _realm_op(canister, "extension_list", {"from": start, "count": 100}, network, identity, read=True)
+        if not reply.get("ok"):
+            console.print(f"[red]Error: {reply.get('error', 'unknown')}[/red]")
+            raise typer.Exit(1)
+        extensions += reply["extensions"]
+        start = reply["next"]
+    return extensions
 
 
 def runtime_list_command(canister: str, network: str = "local", identity: Optional[str] = None, raw_json: bool = False):
-    """List runtime-installed extensions on a deployed realm canister."""
-    raw = _dfx_call(canister, "list_runtime_extensions", "()", network, identity, is_query=True)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(raw)
-        return
+    """List the extensions installed on a deployed realm."""
+    extensions = installed_extensions(canister, network, identity)
 
     if raw_json:
-        console.print(json.dumps(result, indent=2))
+        console.print(json.dumps({"extensions": extensions}, indent=2))
         return
 
-    if not result.get("success"):
-        console.print(f"[red]Error: {result.get('error', 'unknown')}[/red]")
-        raise typer.Exit(1)
-
-    extensions = result.get("runtime_extensions", [])
-    manifests = result.get("all_manifests", {})
-
-    if not extensions and not manifests:
+    if not extensions:
         console.print("[yellow]No extensions installed.[/yellow]")
         return
 
-    if extensions:
-        table = Table(title=f"Runtime Extensions ({len(extensions)})")
-        table.add_column("ID", style="cyan")
-        table.add_column("Version", style="green")
-        table.add_column("Description", style="white")
-
-        for ext_id in extensions:
-            m = manifests.get(ext_id, {})
-            version = m.get("version", "?")
-            desc = m.get("description", "")
-            table.add_row(ext_id, version, desc[:60] + "..." if len(desc) > 60 else desc)
-
-        console.print(table)
-
-    baked = [k for k in manifests if k not in extensions]
-    if baked:
-        table = Table(title=f"Baked-in Extensions ({len(baked)})")
-        table.add_column("ID", style="cyan")
-        table.add_column("Version", style="green")
-        table.add_column("Description", style="white")
-
-        for ext_id in baked:
-            m = manifests[ext_id]
-            version = m.get("version", "?")
-            desc = m.get("description", "")
-            table.add_row(ext_id, version, desc[:60] + "..." if len(desc) > 60 else desc)
-
-        console.print(table)
+    table = Table(title=f"Extensions ({len(extensions)})")
+    table.add_column("ID", style="cyan")
+    table.add_column("Version", style="green")
+    table.add_column("Status", style="white")
+    table.add_column("Available to you", style="white")
+    for ext in extensions:
+        table.add_row(ext["id"], ext.get("version") or "?", ext.get("status") or "", "yes" if ext.get("available") else "no")
+    console.print(table)
 
 
 def registry_install_command(canister: str, registry: str, ext_id: str, version: Optional[str] = None, network: str = "local", identity: Optional[str] = None):
-    """Install an extension from the file registry via the realm canister."""
+    """Install an extension published to the realm's file registry (``extension_install``)."""
     console.print(f"[blue]Installing extension '{ext_id}' from registry {registry} on {canister} ({network})...[/blue]")
-    if version:
-        console.print(f"  Version: {version}")
-    else:
-        console.print("  Version: latest")
-
-    payload = json.dumps({
-        "registry_canister_id": registry,
-        "ext_id": ext_id,
-        "version": version,
-    })
-    candid_arg = '("' + payload.replace("\\", "\\\\").replace('"', '\\"') + '")'
-
-    raw = _dfx_call(canister, "install_extension_from_registry", candid_arg, network, identity, timeout=300)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(f"  Response: {raw}")
-        return
-
-    if result.get("success"):
-        console.print(f"[green]  ✓ Extension '{ext_id}' installed (version {result.get('version', '?')})[/green]")
-    else:
-        console.print(f"[red]  ✗ Installation failed: {result.get('error', 'unknown error')}[/red]")
-        raise typer.Exit(1)
+    version = version or latest_version(registry, ext_id, network, identity)
+    console.print(f"  Version: {version}")
+    reply = _realm_op(canister, "extension_install", {"extension": ext_id, "version": version}, network, identity)
+    _applied(reply, f"Extension '{ext_id}' installed (version {version})")
 
 
 def resync_frontends_command(
@@ -1185,41 +741,12 @@ def resync_frontends_command(
     network: str = "local",
     identity: Optional[str] = None,
 ):
-    """Re-copy installed extensions' frontend bundles onto the realm frontend."""
+    """Not supported: the realm no longer copies extension frontends onto its frontend canister."""
     console.print(
-        f"[blue]Resyncing extension frontends on {canister} ({network})...[/blue]"
+        "[red]Error: resync-frontends is not supported by this realm version: the realm backend no longer "
+        "copies extension frontends onto the frontend canister.[/red]"
     )
-    payload = {}
-    if registry:
-        payload["registry_canister_id"] = registry
-    if frontend:
-        payload["frontend_canister_id"] = frontend
-    candid_arg = '("' + json.dumps(payload).replace("\\", "\\\\").replace('"', '\\"') + '")'
-    raw = _dfx_call(
-        canister, "resync_extension_frontends", candid_arg, network, identity, timeout=600,
-    )
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(f"  Response: {raw}")
-        return
-    if result.get("success"):
-        synced = result.get("synced") or []
-        console.print(f"[green]  ✓ Resynced {len(synced)} extension frontend bundle(s)[/green]")
-        for item in synced:
-            console.print(
-                f"    - {item.get('extension_id')}@{item.get('version', '?')}"
-            )
-        skipped = result.get("skipped") or []
-        if skipped:
-            console.print(f"[yellow]  Skipped {len(skipped)} (no version/registry)[/yellow]")
-    else:
-        console.print(f"[red]  ✗ Resync failed[/red]")
-        for err in result.get("errors") or []:
-            console.print(f"    - {err.get('extension_id')}: {err.get('error')}")
-        if result.get("error"):
-            console.print(f"  {result['error']}")
-        raise typer.Exit(1)
+    raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -1227,123 +754,79 @@ def resync_frontends_command(
 # ---------------------------------------------------------------------------
 
 
-def _collect_codex_files(source_dir: str) -> dict:
-    """Collect codex package files for direct install (includes JSON data files)."""
-    return _collect_backend_package_files(source_dir)
+def _codex_installed(reply: dict, codex: str) -> None:
+    if not _applied(reply, f"Codex '{reply.get('codex', codex)}' installed"):
+        return
+    init = reply.get("init")
+    if init and not init.get("ok"):
+        console.print(f"[yellow]  ⚠ init hook: {init.get('error')}[/yellow]")
 
 
 def codex_runtime_install_command(canister: str, source_dir: str, codex_id: Optional[str] = None, run_init: bool = True, network: str = "local", identity: Optional[str] = None):
-    """Install a codex package on a deployed realm canister at runtime."""
+    """Install the codex in ``source_dir`` (manifest.json, backend/hooks.py) on a deployed realm (``codex_install``)."""
     source_dir = os.path.abspath(source_dir)
     if not os.path.isdir(source_dir):
         console.print(f"[red]Error: {source_dir} is not a directory[/red]")
         raise typer.Exit(1)
 
-    manifest_path = os.path.join(source_dir, "manifest.json")
-    with open(manifest_path, "r") as f:
-        manifest = json.loads(f.read())
-
-    if not codex_id:
-        codex_id = manifest.get("id") or os.path.basename(source_dir)
-
-    is_hook_codex = manifest.get("kind") == "codex"
+    manifest = _read_manifest(source_dir)
+    hooks_path = os.path.join(source_dir, "backend", "hooks.py")
+    if not os.path.isfile(hooks_path):
+        console.print(
+            f"[red]Error: {hooks_path} not found: this realm version runs codices with backend/hooks.py "
+            "(codex_api_version 2)[/red]"
+        )
+        raise typer.Exit(1)
+    with open(hooks_path, "r") as f:
+        source = f.read()
+    codex_id = manifest.get("id") or codex_id or os.path.basename(source_dir)
+    if not run_init:
+        console.print("[yellow]  ⚠ --no-init is not supported by this realm version: the init hook always runs[/yellow]")
 
     console.print(f"[blue]Installing codex '{codex_id}' on {canister} ({network})...[/blue]")
-
-    files = _collect_codex_files(source_dir)
-    total_bytes = sum(len(v) for v in files.values())
-    console.print(f"  Files: {len(files)} ({total_bytes:,} bytes)")
-    for fname, content in sorted(files.items()):
-        console.print(f"    {fname} ({len(content):,} bytes)")
-
-    if is_hook_codex:
-        payload = json.dumps({"extension_id": codex_id, "files": files})
-        candid_arg = '("' + payload.replace("\\", "\\\\").replace('"', '\\"') + '")'
-        method = "install_extension"
-    else:
-        payload = json.dumps({"codex_id": codex_id, "files": files, "run_init": run_init})
-        candid_arg = '("' + payload.replace("\\", "\\\\").replace('"', '\\"') + '")'
-        method = "install_codex"
-
-    console.print(f"  Uploading via {method}...")
-    raw = _dfx_call(canister, method, candid_arg, network, identity, timeout=300)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(f"  Response: {raw}")
-        return
-
-    if not result.get("success"):
-        console.print(f"[red]  ✗ Installation failed: {result.get('error', 'unknown error')}[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]  ✓ Codex '{codex_id}' installed[/green]")
-
-    if is_hook_codex and run_init:
-        _extension_sync_call(canister, codex_id, "init", "{}", network, identity)
-    elif result.get("init_warning"):
-        console.print(f"[yellow]  ⚠ init warning: {result['init_warning']}[/yellow]")
+    reply = _realm_op(canister, "codex_install", {"manifest": manifest, "source": source}, network, identity)
+    _codex_installed(reply, codex_id)
 
 
-def codex_runtime_uninstall_command(canister: str, codex_id: str, network: str = "local", identity: Optional[str] = None):
-    """Uninstall a codex package from a deployed realm canister."""
-    console.print(f"[blue]Uninstalling codex '{codex_id}' from {canister} ({network})...[/blue]")
-
-    payload = json.dumps({"codex_id": codex_id})
-    candid_arg = '("' + payload.replace("\\", "\\\\").replace('"', '\\"') + '")'
-
-    raw = _dfx_call(canister, "uninstall_codex", candid_arg, network, identity)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(f"  Response: {raw}")
-        return
-
-    if result.get("success"):
-        console.print(f"[green]  ✓ Codex '{codex_id}' uninstalled[/green]")
-    else:
-        console.print(f"[red]  ✗ Uninstall failed: {result.get('error', 'unknown error')}[/red]")
-        raise typer.Exit(1)
+def codex_runtime_uninstall_command(canister: str, codex_id: Optional[str] = None, network: str = "local", identity: Optional[str] = None):
+    """Deactivate the realm's active codex (``codex_uninstall``)."""
+    console.print(f"[blue]Uninstalling the active codex from {canister} ({network})...[/blue]")
+    reply = _realm_op(canister, "codex_uninstall", {}, network, identity)
+    _applied(reply, f"Codex '{reply.get('codex', codex_id)}' uninstalled")
 
 
 def codex_runtime_list_command(canister: str, network: str = "local", identity: Optional[str] = None, raw_json: bool = False):
-    """List codex packages installed on a deployed realm canister."""
-    raw = _dfx_call(canister, "list_codex_packages", "()", network, identity, is_query=True)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(raw)
-        return
+    """Show the realm's active codex and its install history (``codex_status``)."""
+    status, history, start = {}, [], 1
+    while start is not None:
+        status = _realm_op(canister, "codex_status", {"from": start, "count": 100}, network, identity, read=True)
+        if not status.get("ok"):
+            console.print(f"[red]Error: {status.get('error', 'unknown')}[/red]")
+            raise typer.Exit(1)
+        history += status["history"]
+        start = status["next"]
+    status = {**status, "history": history}
+    del status["next"]
 
     if raw_json:
-        console.print(json.dumps(result, indent=2))
+        console.print(json.dumps(status, indent=2))
         return
 
-    if not result.get("success"):
-        console.print(f"[red]Error: {result.get('error', 'unknown')}[/red]")
-        raise typer.Exit(1)
-
-    packages = result.get("codex_packages", [])
-    manifests = result.get("manifests", {})
-
-    if not packages:
+    if not history:
         console.print("[yellow]No codex packages installed.[/yellow]")
         return
 
-    table = Table(title=f"Codex Packages ({len(packages)})")
+    active = status.get("codex")
+    if active:
+        health = "healthy" if status.get("healthy") else f"unhealthy ({status['problem'].get('error')})"
+        console.print(f"Active codex: [cyan]{active['id']}[/cyan] ({health})")
+
+    table = Table(title=f"Codex Packages ({len(history)})")
     table.add_column("ID", style="cyan")
     table.add_column("Version", style="green")
-    table.add_column("Description", style="white")
-
-    for pkg_id in packages:
-        m = manifests.get(pkg_id, {})
-        version = m.get("version", "?")
-        desc = m.get("description", "")
-        table.add_row(pkg_id, version, desc[:60] + "..." if len(desc) > 60 else desc)
-
+    table.add_column("Status", style="white")
+    for row in history:
+        table.add_row(row["id"], row.get("version") or "?", row.get("status") or "")
     console.print(table)
 
 
@@ -2019,36 +1502,14 @@ def publish_assistant_command(
 
 
 def codex_registry_install_command(canister: str, registry: str, codex_id: str, version: Optional[str] = None, run_init: bool = True, network: str = "local", identity: Optional[str] = None):
-    """Install a codex package from the file registry via the realm canister."""
+    """Install a codex published to the realm's file registry (``codex_install``)."""
     console.print(f"[blue]Installing codex '{codex_id}' from registry {registry} on {canister} ({network})...[/blue]")
-    if version:
-        console.print(f"  Version: {version}")
-    else:
-        console.print("  Version: latest")
-
-    payload = json.dumps({
-        "registry_canister_id": registry,
-        "codex_id": codex_id,
-        "version": version,
-        "run_init": run_init,
-    })
-    candid_arg = '("' + payload.replace("\\", "\\\\").replace('"', '\\"') + '")'
-
-    raw = _dfx_call(canister, "install_codex_from_registry", candid_arg, network, identity, timeout=300)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        console.print(f"  Response: {raw}")
-        return
-
-    if result.get("success"):
-        console.print(f"[green]  ✓ Codex '{codex_id}' installed (version {result.get('version', '?')})[/green]")
-        if result.get("init_warning"):
-            console.print(f"[yellow]  ⚠ init.py warning: {result['init_warning']}[/yellow]")
-    else:
-        console.print(f"[red]  ✗ Installation failed: {result.get('error', 'unknown error')}[/red]")
-        raise typer.Exit(1)
+    version = version or latest_version(registry, codex_id, network, identity)
+    console.print(f"  Version: {version}")
+    if not run_init:
+        console.print("[yellow]  ⚠ --no-init is not supported by this realm version: the init hook always runs[/yellow]")
+    reply = _realm_op(canister, "codex_install", {"codex": codex_id, "version": version}, network, identity)
+    _codex_installed(reply, codex_id)
 
 
 def extension_command(
@@ -2111,13 +1572,14 @@ def extension_command(
 
     if action == "list":
         list_extensions_command()
-    elif action == "install-from-source":
-        install_from_source_command(source_dir)
-    elif action == "generate-manifests":
+    elif action in ("install-from-source", "install", "uninstall", "generate-manifests"):
         console.print(
-            "[yellow]generate-manifests is deprecated. "
-            "Extensions are now loaded dynamically via the file registry at runtime.[/yellow]"
+            f"[red]Error: `realms extension {action}` wrote extensions into src/realm_backend/extension_packages/, "
+            "but this realm backend has no baked-in extensions. Publish the extension "
+            "(`realms extension publish`) and install it on a deployed realm "
+            "(`realms extension registry-install` / `runtime-uninstall`).[/red]"
         )
+        raise typer.Exit(1)
     elif action == "package":
         if not extension_id:
             console.print(
@@ -2125,28 +1587,11 @@ def extension_command(
             )
             raise typer.Exit(1)
         package_extension_command(extension_id, output_path=package_path, source_dir=source_dir)
-    elif action == "install":
-        if not package_path:
-            console.print(
-                "[red]Error: --package-path is required for install action[/red]"
-            )
-            raise typer.Exit(1)
-        install_extension_command(package_path)
-    elif action == "uninstall":
-        if all_extensions:
-            uninstall_all_extensions_command()
-        elif extension_id:
-            uninstall_extension_command(extension_id)
-        else:
-            console.print(
-                "[red]Error: Either --extension-id or --all is required for uninstall action[/red]"
-            )
-            raise typer.Exit(1)
     elif action == "runtime-install":
         if not canister:
             console.print("[red]Error: --canister is required for runtime-install[/red]")
             raise typer.Exit(1)
-        runtime_install_command(canister, source_dir, network, identity, frontend_canister)
+        runtime_install_command(canister, source_dir, network, identity, frontend_canister, registry)
     elif action == "runtime-uninstall":
         if not canister:
             console.print("[red]Error: --canister is required for runtime-uninstall[/red]")
@@ -2258,9 +1703,6 @@ def codex_command(
     elif action == "runtime-uninstall":
         if not canister:
             console.print("[red]Error: --canister is required for runtime-uninstall[/red]")
-            raise typer.Exit(1)
-        if not codex_id:
-            console.print("[red]Error: --codex-id is required for runtime-uninstall[/red]")
             raise typer.Exit(1)
         codex_runtime_uninstall_command(canister, codex_id, network, identity)
     elif action == "runtime-list":

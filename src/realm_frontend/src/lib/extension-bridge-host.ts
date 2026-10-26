@@ -50,7 +50,7 @@ export interface SandboxBridgeDeps {
 	extensionId: string;
 	manifest: SandboxManifest;
 	callSync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
-	/** Same backend path as in-process `ctx.callAsync` (extension_async_call). */
+	/** Same backend path as in-process `ctx.callAsync` (the realm's extension_call). */
 	callAsync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
 	navigate: (path: string) => Promise<void>;
 	getHostState: () => HostState;

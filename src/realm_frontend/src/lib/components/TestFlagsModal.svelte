@@ -1,6 +1,6 @@
 <script>
 	import { Button, Modal, Toggle, Alert } from 'flowbite-svelte';
-	import { backend } from '$lib/canisters';
+	import { run, must } from '$lib/realm';
 	import { realmInfo, testMode } from '$lib/stores/realmInfo';
 	import {
 		NOTICE_LOCALE_SLOTS,
@@ -22,9 +22,8 @@
 		{ key: 'demo_notice', store: 'testModeDemoNotice', label: 'Demo notice', hint: 'Show the configurable demo notice on founder setup and join' }
 	];
 
-	// set_test_flags_json rejects product keys; persist only test-only flags.
+	// Only the test-only flags are saved; realm_configure stores them as test_mode_<key>.
 	const TEST_ONLY_KEYS = [
-		'test_mode',
 		'ii_bypass',
 		'demo_data',
 		'skip_terms',
@@ -63,7 +62,7 @@
 
 	function testOnlyFlags() {
 		const flags = {};
-		for (const key of TEST_ONLY_KEYS) flags[key] = !!values[key];
+		for (const key of TEST_ONLY_KEYS) flags[`test_mode_${key}`] = !!values[key];
 		return flags;
 	}
 
@@ -72,17 +71,13 @@
 		error = '';
 		message = '';
 		try {
-			const raw = await backend.set_test_flags_json(
-				JSON.stringify({
-					test_flags: testOnlyFlags()
-				})
+			const result = await must(
+				run('realm_configure', { test_mode: !!values.test_mode, test_flags: testOnlyFlags() })
 			);
-			const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (!result?.success) {
-				throw new Error(result?.error || 'Failed to update test flags');
-			}
 			await realmInfo.fetch();
-			message = 'Test flags updated';
+			message = result.proposal
+				? `Proposal ${result.proposal} filed: the flags change once it is accepted`
+				: 'Test flags updated';
 			if (!values.test_mode) open = false;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);

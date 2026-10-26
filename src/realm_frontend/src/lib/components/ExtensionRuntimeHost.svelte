@@ -3,7 +3,9 @@
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { Alert } from 'flowbite-svelte';
-	import { backend, quarterBackend } from '$lib/canisters';
+	import { quarterBackend } from '$lib/canisters';
+	import type { Reply } from '$lib/realm';
+	import { getFileRegistryCanisterIds } from '$lib/file-registry-client';
 	import { canisterId as backendCanisterId } from '$lib/declarations/realm_backend';
 	import { principal, isAuthenticated } from '$lib/stores/auth';
 	import { userProfiles } from '$lib/stores/profiles';
@@ -23,7 +25,12 @@
 	import { isPrivilegedExtension } from '$lib/extension-privileged';
 	import { loadExtensionTranslation } from '$lib/i18n';
 	import { createMarketplaceExtensionBackend } from '$lib/marketplace-extension-backend';
-	import type { RealmExtensionContext } from '$lib/realm-extension-sdk';
+	import {
+		callRealmExtension,
+		extensionResult,
+		realmExtensionBackend,
+		type RealmExtensionContext
+	} from '$lib/realm-extension-sdk';
 	import { getExtensionManifestWithRetry } from '$lib/utils/extension-manifest';
 	import { resolveExtensionMountMode } from '$lib/utils/extension-runtime-mode';
 	import { requestBridgeModal, showBridgeNotify } from '$lib/stores/bridge-modal';
@@ -111,27 +118,13 @@
 		return () => unsubs.forEach((u) => u());
 	}
 
-	let infraConfig: { fileRegistryCanisterId?: string; marketplaceCanisterId?: string } = {};
-
-	async function resolveInfraConfig() {
-		try {
-			const raw = await backend.status();
-			const resp = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const canisters: { canister_id: string; canister_type: string }[] =
-				resp?.data?.status?.canisters ?? [];
-			const fr = canisters.find((c) => c.canister_type === 'file_registry');
-			const mp = canisters.find((c) => c.canister_type === 'marketplace');
-			infraConfig = {
-				fileRegistryCanisterId: fr?.canister_id ?? '',
-				marketplaceCanisterId: mp?.canister_id ?? ''
-			};
-		} catch {
-			infraConfig = {};
-		}
-	}
+	// The realm does not report its file registry or marketplace: the registry is this build's.
+	const infraConfig: { fileRegistryCanisterId?: string; marketplaceCanisterId?: string } = {
+		fileRegistryCanisterId: getFileRegistryCanisterIds()[0] ?? ''
+	};
 
 	async function buildContext(id: string, version: string): Promise<RealmExtensionContext> {
-		let extensionBackend: typeof backend = quarterBackend;
+		let extensionBackend: unknown = realmExtensionBackend;
 		let marketplaceAdapter: Awaited<ReturnType<typeof createMarketplaceExtensionBackend>> | null =
 			null;
 		if (
@@ -144,50 +137,30 @@
 			).catch(() => null);
 		}
 		if (id === 'market_place' && marketplaceAdapter) {
-			extensionBackend = marketplaceAdapter as unknown as typeof backend;
+			extensionBackend = marketplaceAdapter;
 		}
 
-		function unwrapCallResult(raw: unknown, label: string): unknown {
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res?.success === false) {
-				const denied = parseAccessError(res);
+		async function callExtension(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
+			let reply: Reply;
+			try {
+				reply = await callRealmExtension(id, fn, args);
+			} catch (e) {
+				const friendly = formatDelegationExpiredError(e);
+				if (friendly) throw new Error(friendly);
+				throw e;
+			}
+			if (!reply.ok) {
+				const denied = parseAccessError(reply);
 				if (denied) {
 					runtimeDenied = denied;
 					throw new AccessDeniedError(denied);
 				}
-				throw new Error(res.response ?? `${label} failed`);
+				throw new Error(reply.error);
 			}
-			if (!res?.response) return res;
-			let inner: unknown;
-			try {
-				inner = JSON.parse(res.response);
-			} catch {
-				return res.response;
-			}
-			return inner;
+			return extensionResult(reply);
 		}
-		async function callSync(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
-			let raw: string;
-			try {
-				raw = await extensionBackend.extension_sync_call(id, fn, JSON.stringify(args));
-			} catch (e) {
-				const friendly = formatDelegationExpiredError(e);
-				if (friendly) throw new Error(friendly);
-				throw e;
-			}
-			return unwrapCallResult(raw, 'extension_sync_call');
-		}
-		async function callAsync(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
-			let raw: string;
-			try {
-				raw = await extensionBackend.extension_async_call(id, fn, JSON.stringify(args));
-			} catch (e) {
-				const friendly = formatDelegationExpiredError(e);
-				if (friendly) throw new Error(friendly);
-				throw e;
-			}
-			return unwrapCallResult(raw, 'extension_async_call');
-		}
+		const callSync = callExtension;
+		const callAsync = callExtension;
 
 		return {
 			...createHostContext(),
@@ -303,9 +276,8 @@
 
 		try {
 			const [version, manifest] = await Promise.all([
-				resolveExtensionVersion(backend as any, id),
-				getExtensionManifestWithRetry(id),
-				resolveInfraConfig()
+				resolveExtensionVersion(id),
+				getExtensionManifestWithRetry(id)
 			]);
 
 			const mountMode = resolveExtensionMountMode(version, manifest, isPrivilegedExtension(id));
