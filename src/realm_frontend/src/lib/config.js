@@ -1,7 +1,7 @@
 // Runtime configuration — test mode flags.
 //
 // Canister ids are NOT baked in here: the realm backend reports its own
-// (status().canisters) and the shared-ledger catalog (status().shared_tokens).
+// (status().canisters) and the tokens it offers (token_catalog).
 //
 // Test mode flags are read from the backend status() response at runtime,
 // NOT baked in at build time. This means self-upgrades and environment changes

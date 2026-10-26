@@ -1,7 +1,5 @@
 export type DemoNoticeBodies = Record<string, string>;
 
-export const CUSTOM_TOKEN_CHOICE_ID = 'custom';
-
 export const NOTICE_LOCALE_SLOTS = [
 	'en',
 	'es',
@@ -24,8 +22,6 @@ export function filledNoticeTranslationCount(
 	const map = bodies && typeof bodies === 'object' ? bodies : {};
 	return noticeTranslationSlots().filter((loc) => String(map[loc] || '').trim()).length;
 }
-
-export const REALMS_TOKEN_ID = 'REALMS';
 
 export function defaultDisableMonetaryTokens(network?: string | null): boolean {
 	const n = (network || '').trim().toLowerCase();
@@ -61,19 +57,9 @@ export function shouldShowJoinNotice(
 	return demoNotice && !skipTerms;
 }
 
-/** The mundus token (REALMS, or RLM in production) is not real money. */
-const NON_MONETARY_TOKEN_IDS = new Set([REALMS_TOKEN_ID, 'RLM']);
-
-export function isMonetaryTokenChoice(choiceId: string): boolean {
-	return !NON_MONETARY_TOKEN_IDS.has((choiceId || '').trim().toUpperCase());
-}
-
-export function isTokenChoiceSelectable(
-	choiceId: string,
-	monetaryDisabled: boolean
-): boolean {
-	if (!monetaryDisabled) return true;
-	return !isMonetaryTokenChoice(choiceId);
+/** A custom ledger is the founder's own choice, so only the catalog's monetary tokens are ever disabled. */
+export function isTokenChoiceSelectable(monetary: boolean, monetaryDisabled: boolean): boolean {
+	return !(monetary && monetaryDisabled);
 }
 
 export function monetaryUnavailableLabel(locale: string): string {
@@ -103,16 +89,4 @@ export function resolveDemoNoticeView(
 		primaryLanguage: primary,
 		showPrimary: Boolean(primaryBody) && primary !== 'en'
 	};
-}
-
-export function catalogChoiceFromLedger(input: {
-	symbol?: string;
-	token_canister_id?: string;
-	match?: { id?: string } | undefined;
-}): string {
-	if (input.match?.id) return input.match.id;
-	const symbol = (input.symbol || '').trim();
-	if (symbol && symbol.toUpperCase() === REALMS_TOKEN_ID) return REALMS_TOKEN_ID;
-	if (input.token_canister_id || symbol) return CUSTOM_TOKEN_CHOICE_ID;
-	return REALMS_TOKEN_ID;
 }

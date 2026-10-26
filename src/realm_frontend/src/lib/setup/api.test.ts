@@ -39,7 +39,7 @@ vi.mock('$lib/file-registry-client', () => ({
 	getFileRegistryCanisterIds: () => []
 }));
 
-vi.mock('./ledgerSymbol', () => ({ lookupLedgerSymbol: vi.fn().mockResolvedValue('RLM') }));
+vi.mock('./ledgerSymbol', () => ({ lookupLedgerSymbol: vi.fn().mockResolvedValue('AAA') }));
 
 function setupState(overrides: Record<string, unknown> = {}) {
 	return {
@@ -54,7 +54,6 @@ function setupState(overrides: Record<string, unknown> = {}) {
 			welcome_message: '',
 			token_canister_id: '',
 			file_registry_canister_id: 'registry-id',
-			shared_tokens_json: { RLM: { ledger: 'rlm-ledger', decimals: 8 } },
 			...overrides
 		}
 	};
@@ -71,6 +70,7 @@ function useOps(overrides: Record<string, Op> = {}) {
 		{
 			setup_state: () => setupState(),
 			codex_status: () => codexStatus(),
+			token_catalog: () => ({ ok: true, tokens: [{ symbol: 'AAA', ledger: 'aaa-ledger', decimals: 8 }] }),
 			realm_info: () => ({ ok: true, realm: { status: 'alpha' } })
 		},
 		overrides
@@ -306,7 +306,7 @@ describe('setup draft and launch', () => {
 		const { saveSetupDraft, startSetupLaunch, fetchSetupLaunchStatus } = await import('./api');
 		await saveSetupDraft({
 			codex: { package: 'syntropia', version: '1.0.0' },
-			token: 'RLM',
+			token: 'AAA',
 			identity: { manifesto: 'We share' }
 		});
 
@@ -320,8 +320,8 @@ describe('setup draft and launch', () => {
 				'setup_step',
 				{
 					step: 'tokens',
-					token_canister_id: 'rlm-ledger',
-					accounting_currency: 'RLM',
+					token_canister_id: 'aaa-ledger',
+					accounting_currency: 'AAA',
 					accounting_currency_decimals: 8
 				}
 			],

@@ -1,10 +1,5 @@
 import type { SetupState } from './types';
-import {
-	configureTokenPayload,
-	type CatalogTokenDraftInput,
-	sharedTokenOptions,
-	wizardTokenOptions
-} from './sharedTokens';
+import { configureTokenPayload, type CatalogTokenDraftInput } from './sharedTokens';
 
 export type WizardStep = 'welcome' | 'codex' | 'token' | 'branding' | 'languages' | 'review';
 
@@ -273,9 +268,9 @@ function tokenSymbolFromStoredValue(token: unknown): string {
 }
 
 /**
- * Token label for Launch review. Uses persisted draft / applied token only —
- * never the wizard's UI default (REALMS), so a skipped token stays skipped.
- * Accepts {symbol}, {id}, {existing}, or a bare "ckEURC" string.
+ * Token label for Launch review. Uses persisted draft / applied token only,
+ * so a skipped token stays skipped.
+ * Accepts {symbol}, {id}, {existing}, or a bare symbol string.
  */
 export function resolveReviewTokenSymbol(setupState: SetupState | null | undefined): string {
 	const draftToken = setupState?.draft?.token;
@@ -298,11 +293,7 @@ export function founderConfigureTokenFromSetupState(
 ): Record<string, string | number> | null {
 	if (setupState?.draft?.token === null) return null;
 	const token = (setupState?.draft?.token ?? setupState?.token ?? null) as CatalogTokenDraftInput;
-	const options = [
-		...wizardTokenOptions(null),
-		...sharedTokenOptions(setupState?.shared_tokens)
-	];
-	return configureTokenPayload(token, options);
+	return configureTokenPayload(token, setupState?.token_catalog ?? []);
 }
 
 export function persistedRealmLedger(setupState: SetupState | null | undefined): string {

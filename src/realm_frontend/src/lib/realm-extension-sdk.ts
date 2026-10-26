@@ -164,12 +164,6 @@ export interface RealmExtensionContext {
 	realmInfo: Readable<RealmInfo>;
 	/** Host config. Ledger ids are not here: read `backend.read('treasury_view')`. */
 	config: {
-		/** @deprecated never populated; use `backend.read('treasury_view')`. */
-		ckbtc_ledger_canister_id?: string;
-		/** @deprecated never populated; use `backend.read('treasury_view')`. */
-		ckbtc_indexer_canister_id?: string;
-		/** @deprecated never populated; use `backend.read('treasury_view')`. */
-		token_backend_canister_id?: string;
 		/** The realm_backend canister ID itself. */
 		canisterId: string;
 		/** File registry canister ID: this build's, when it has one. */

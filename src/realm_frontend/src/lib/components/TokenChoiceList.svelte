@@ -6,7 +6,7 @@
 	} from '$lib/config/hostTestFlags';
 
 	interface Props {
-		/** The realm's shared-ledger catalog (get_setup_state().shared_tokens). */
+		/** The realm's token catalog (`token_catalog`). */
 		options: SharedTokenOption[];
 		selectedId: string;
 		monetaryDisabled?: boolean;
@@ -27,7 +27,8 @@
 	const unavailable = $derived(monetaryUnavailableLabel(locale));
 
 	function selectable(id: string): boolean {
-		return isTokenChoiceSelectable(id, monetaryDisabled);
+		const token = options.find((t) => t.id === id);
+		return isTokenChoiceSelectable(token?.monetary ?? false, monetaryDisabled);
 	}
 
 	function choose(id: string) {

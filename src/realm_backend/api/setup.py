@@ -1,6 +1,7 @@
 import json
 
 from core import chain
+import constants
 import ggg
 from core import sandbox
 from api import tasks
@@ -95,6 +96,13 @@ def realm_info(c, args):
     return {"realm": view(realm, "name", "manifesto", "welcome_message", "status", "logo_url",
                           "background_image_url", "primary_color", "accounting_currency",
                           "open_registration", "is_capital", "network", "test_mode", "test_flags") if realm else {}}
+
+
+@op(None, read=True, public=True)
+def token_catalog(c, args):
+    """The tokens a realm may adopt as its treasury token: ``symbol``, ``name``, ``description``, ``ledger``,
+    ``indexer``, ``decimals`` and whether it is ``monetary`` (real money). Any other ICRC-1 ledger is added by hand."""
+    return {"tokens": [dict(t) for t in constants.TOKENS]}
 
 
 def launched(args):

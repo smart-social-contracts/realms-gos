@@ -34,13 +34,10 @@ describe('hostTestFlags', () => {
 		expect(shouldShowJoinNotice(false, false)).toBe(false);
 	});
 
-	it('keeps REALMS selectable and grays out monetary choices', () => {
-		expect(isTokenChoiceSelectable('REALMS', true)).toBe(true);
-		expect(isTokenChoiceSelectable('ckBTC', true)).toBe(false);
-		expect(isTokenChoiceSelectable('ckUSDC', true)).toBe(false);
-		expect(isTokenChoiceSelectable('ckEURC', true)).toBe(false);
-		expect(isTokenChoiceSelectable('custom', true)).toBe(false);
-		expect(isTokenChoiceSelectable('ckEURC', false)).toBe(true);
+	it('grays out monetary catalog tokens only when they are disabled', () => {
+		expect(isTokenChoiceSelectable(true, true)).toBe(false);
+		expect(isTokenChoiceSelectable(true, false)).toBe(true);
+		expect(isTokenChoiceSelectable(false, true)).toBe(true);
 	});
 
 	it('uses the specified unavailable labels', () => {

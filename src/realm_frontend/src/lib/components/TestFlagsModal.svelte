@@ -18,7 +18,7 @@
 		{ key: 'demo_data', store: 'testModeDemoData', label: 'Demo data', hint: 'Auto-activate the demo data simulator' },
 		{ key: 'skip_terms', store: 'testModeSkipTerms', label: 'Skip terms', hint: 'Skip the demo notice step on join' },
 		{ key: 'skip_passport_zkproof', store: 'testModeSkipPassportZkproof', label: 'Skip passport ZK-proof', hint: 'Bypass passport zero-knowledge verification' },
-		{ key: 'disable_monetary_tokens', store: 'testModeDisableMonetaryTokens', label: 'Disable monetary tokens', hint: 'Gray out ckBTC, ckUSDC, ckEURC, and Custom. REALMS stays selectable. Does not strip an already-configured ledger.' },
+		{ key: 'disable_monetary_tokens', store: 'testModeDisableMonetaryTokens', label: 'Disable monetary tokens', hint: 'Gray out the catalog\'s monetary tokens. A custom ledger stays selectable. Does not strip an already-configured ledger.' },
 		{ key: 'demo_notice', store: 'testModeDemoNotice', label: 'Demo notice', hint: 'Show the configurable demo notice on founder setup and join' }
 	];
 

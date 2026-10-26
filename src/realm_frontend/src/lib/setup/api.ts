@@ -6,7 +6,7 @@ import {
 	listRegistryCodices
 } from '$lib/file-registry-client';
 import { lookupLedgerSymbol } from './ledgerSymbol';
-import { CHAIN_KEY_TOKENS, configureTokenPayload, sharedTokenOptions } from './sharedTokens';
+import { catalogTokenOptions, configureTokenPayload, type SharedTokenOption } from './sharedTokens';
 import { LAUNCH_PHASES } from './wizardLogic';
 import type {
 	AvailableCodex,
@@ -14,7 +14,6 @@ import type {
 	SetupDraft,
 	SetupDraftPartial,
 	SetupDraftSaveResult,
-	SetupFleet,
 	SetupLaunchResult,
 	SetupLaunchState,
 	SetupState
@@ -96,10 +95,16 @@ export async function fetchSetupDraftAsset(kind: 'logo' | 'background'): Promise
 
 let launch: SetupLaunchState | null = null;
 
+/** The tokens the realm offers as its treasury token (``token_catalog``). */
+export async function fetchTokenCatalog(): Promise<SharedTokenOption[]> {
+	return catalogTokenOptions((await must(setupRead('token_catalog'))).tokens);
+}
+
 export async function fetchSetupState(): Promise<SetupState> {
-	const [state, status] = await Promise.all([
+	const [state, status, catalog] = await Promise.all([
 		setupRun('setup_state'),
-		setupRead('codex_status', { count: 1 })
+		setupRead('codex_status', { count: 1 }),
+		setupRead('token_catalog')
 	]);
 	if (!state.ok) {
 		const info = await must(setupRead('realm_info'));
@@ -139,8 +144,7 @@ export async function fetchSetupState(): Promise<SetupState> {
 		realm_manifesto: realm.manifesto,
 		realm_welcome_message: realm.welcome_message,
 		realm_token_canister_id: realm.token_canister_id || null,
-		gos_environment: null,
-		shared_tokens: realm.shared_tokens_json,
+		token_catalog: catalog.ok ? catalogTokenOptions(catalog.tokens) : [],
 		draft: loadDraft().draft,
 		launch: launch ?? undefined
 	};
@@ -167,17 +171,6 @@ export async function listAvailableCodices(): Promise<AvailableCodex[]> {
 			};
 		})
 	);
-}
-
-/** The realm's file registry and Realms token ledger (the shared RLM / REALMS one, else its own). */
-export async function fetchFleet(): Promise<SetupFleet> {
-	const realm = (await must(setupRun('setup_state'))).realm;
-	const catalog: Record<string, { ledger?: string }> = realm.shared_tokens_json || {};
-	const shared = Object.entries(catalog).find(([symbol]) => ['RLM', 'REALMS'].includes(symbol.toUpperCase()));
-	return {
-		file_registry: realm.file_registry_canister_id,
-		token_ledger: shared?.[1].ledger || realm.token_canister_id
-	};
 }
 
 export function isAmbiguousInstallError(error: unknown): boolean {
@@ -303,14 +296,9 @@ export async function configureSetupToken(payload: Record<string, unknown>): Pro
 	});
 }
 
-async function tokenOptions() {
-	const state = await must(setupRun('setup_state'));
-	return [...sharedTokenOptions(state.realm.shared_tokens_json), ...CHAIN_KEY_TOKENS];
-}
-
 export async function applySetupDraftToken(): Promise<SetupActionResult> {
 	try {
-		const payload = configureTokenPayload(loadDraft().draft.token, await tokenOptions());
+		const payload = configureTokenPayload(loadDraft().draft.token, await fetchTokenCatalog());
 		if (!payload) return { success: false, error: 'token_canister_id is required' };
 		return await configureSetupToken(payload);
 	} catch (err) {
@@ -364,7 +352,7 @@ async function runLaunch({ draft, assets }: StoredDraft): Promise<void> {
 			return active ? null : setupRun('codex_install', { codex: codex.package, version: codex.version });
 		},
 		configure_token: async () => {
-			const payload = configureTokenPayload(draft.token, await tokenOptions());
+			const payload = configureTokenPayload(draft.token, await fetchTokenCatalog());
 			return payload ? setupRun('setup_step', await tokenStep(payload)) : null;
 		},
 		upload_branding: () =>

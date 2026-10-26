@@ -1,20 +1,18 @@
 /**
- * Treasury tokens a founder may adopt in the setup wizard.
- *
- * The Realms token ledger is the product orchestra's `token-backend`, which the
- * realm backend discovers once through Casals (`setup_fleet`). ckBTC and
- * ckUSDC are the chain-key ledgers: the same principals on every environment.
+ * Treasury tokens a founder may adopt in the setup wizard: the realm backend's
+ * `token_catalog`, plus a custom ICRC-1 ledger the founder enters by hand.
  */
 
-export interface SharedTokenCatalogEntry {
+/** One entry of the backend's `token_catalog`. */
+export interface CatalogToken {
+	symbol: string;
+	name?: string;
+	description?: string;
 	ledger: string;
 	indexer?: string;
 	decimals?: number;
-	name?: string;
+	monetary?: boolean;
 }
-
-/** `{symbol: {ledger, indexer, decimals}}` as the backend reports it. */
-export type SharedTokenCatalog = Record<string, SharedTokenCatalogEntry>;
 
 export interface SharedTokenOption {
 	id: string;
@@ -24,96 +22,28 @@ export interface SharedTokenOption {
 	decimals: number;
 	ledger: string;
 	indexer?: string;
+	/** Real money: unavailable where the realm disables monetary tokens. */
+	monetary: boolean;
 }
-
-const TOKEN_INFO: Record<string, { name: string; description: string }> = {
-	RLM: { name: 'Realms Token', description: 'The shared mundus-wide token, common to all realms' },
-	REALMS: { name: 'REALMS Token', description: 'The shared mundus-wide token, common to all realms' },
-	CKBTC: { name: 'ckBTC', description: 'Chain-Key Bitcoin — IC-native Bitcoin twin' },
-	CKUSDC: { name: 'ckUSDC', description: 'Chain-Key USDC — IC-native USD stablecoin' },
-	CKEURC: {
-		name: 'ckEURC',
-		description: 'Circle EURC on Ethereum, chain-key — IC-native euro stablecoin'
-	}
-};
 
 export const CUSTOM_TOKEN_ID = 'custom';
 
-/** Chain-key ledgers. They do not vary by GaaS environment. */
-export const CHAIN_KEY_TOKENS: SharedTokenOption[] = [
-	{
-		id: 'ckBTC',
-		symbol: 'ckBTC',
-		name: 'ckBTC',
-		description: TOKEN_INFO.CKBTC.description,
-		decimals: 8,
-		ledger: 'mxzaz-hqaaa-aaaar-qaada-cai',
-		indexer: 'n5wcd-faaaa-aaaar-qaaea-cai'
-	},
-	{
-		id: 'ckUSDC',
-		symbol: 'ckUSDC',
-		name: 'ckUSDC',
-		description: TOKEN_INFO.CKUSDC.description,
-		decimals: 6,
-		ledger: 'xevnm-gaaaa-aaaar-qafnq-cai',
-		indexer: 'xrs4b-hiaaa-aaaar-qafoa-cai'
-	}
-];
-
-/** Realms token for this environment, then the two chain-key ledgers. */
-export function wizardTokenOptions(
-	defaultToken: SharedTokenOption | null | undefined
-): SharedTokenOption[] {
+/** The wizard's catalog cards, in the backend's order. */
+export function catalogTokenOptions(tokens: CatalogToken[] | null | undefined): SharedTokenOption[] {
 	const out: SharedTokenOption[] = [];
-	if (defaultToken?.ledger) out.push(defaultToken);
-	for (const token of CHAIN_KEY_TOKENS) {
-		if (!out.some((item) => item.ledger === token.ledger)) out.push(token);
-	}
-	return out;
-}
-
-export function defaultTokenFromLedger(ledger: string, symbol: string): SharedTokenOption | null {
-	const id = ledger.trim();
-	if (!id) return null;
-	const sym = symbol.trim() || 'RLM';
-	const info = TOKEN_INFO[sym.toUpperCase()];
-	return {
-		id: sym,
-		symbol: sym,
-		name: info?.name || sym,
-		description: info?.description || 'The Realms token for this environment',
-		decimals: 8,
-		ledger: id
-	};
-}
-
-export async function fetchDefaultTreasuryToken(): Promise<SharedTokenOption> {
-	const { fetchFleet } = await import('./api');
-	const { lookupLedgerSymbol } = await import('./ledgerSymbol');
-	const ledger = (await fetchFleet()).token_ledger || '';
-	const token = defaultTokenFromLedger(ledger, await lookupLedgerSymbol(ledger).catch(() => ''));
-	if (!token) throw new Error('This realm has no Realms token ledger');
-	return token;
-}
-
-/** The wizard's catalog cards, in the backend's order. Empty when the realm has none. */
-export function sharedTokenOptions(
-	catalog: SharedTokenCatalog | null | undefined
-): SharedTokenOption[] {
-	const out: SharedTokenOption[] = [];
-	for (const [symbol, entry] of Object.entries(catalog || {})) {
-		const ledger = String(entry?.ledger || '').trim();
-		if (!symbol.trim() || !ledger) continue;
-		const info = TOKEN_INFO[symbol.toUpperCase()];
+	for (const token of tokens || []) {
+		const symbol = String(token?.symbol || '').trim();
+		const ledger = String(token?.ledger || '').trim();
+		if (!symbol || !ledger) continue;
 		out.push({
 			id: symbol,
 			symbol,
-			name: entry.name || info?.name || symbol,
-			description: info?.description || `Shared ${symbol} ledger`,
-			decimals: entry.decimals ?? 8,
+			name: token.name || symbol,
+			description: token.description || '',
+			decimals: token.decimals ?? 8,
 			ledger,
-			indexer: String(entry.indexer || '').trim() || undefined
+			indexer: String(token.indexer || '').trim() || undefined,
+			monetary: token.monetary !== false
 		});
 	}
 	return out;

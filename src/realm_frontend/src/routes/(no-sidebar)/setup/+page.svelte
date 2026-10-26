@@ -41,12 +41,9 @@
 	import {
 		CUSTOM_TOKEN_ID,
 		configureTokenPayload,
-		fetchDefaultTreasuryToken,
 		matchSharedToken,
 		completeCatalogTokenDraft,
-		tokenDraftFromChoice,
-		wizardTokenOptions,
-		type SharedTokenOption
+		tokenDraftFromChoice
 	} from '$lib/setup/sharedTokens';
 	import { lookupLedgerSymbol } from '$lib/setup/ledgerSymbol';
 	import { fileToCompressedDataUrl, urlToCompressedDataUrl } from '$lib/utils/imageDataUrl';
@@ -94,10 +91,7 @@
 	let busy = $state(false);
 	let error = $state('');
 	let setupState = $state<SetupState | null>(null);
-	let defaultToken = $state<SharedTokenOption | null>(null);
-	let defaultTokenError = $state('');
-	let defaultTokenEnvironment = '';
-	const tokenOptions = $derived(wizardTokenOptions(defaultToken));
+	const tokenOptions = $derived(setupState?.token_catalog ?? []);
 	let launchState = $state<SetupLaunchState | null>(null);
 	let codices = $state<AvailableCodex[]>([]);
 	let selectedCodexId = $state('');
@@ -325,7 +319,6 @@
 			}
 			syncTokenChoice();
 		}
-		void loadDefaultTreasury(state.gos_environment || '');
 
 		const branding = state.draft?.branding ?? state.branding;
 		if (branding) {
@@ -636,20 +629,6 @@
 		tokenChoice = matched?.id ?? CUSTOM_TOKEN_ID;
 	}
 
-	async function loadDefaultTreasury(environment: string) {
-		const name = environment.trim().toLowerCase();
-		if (!name || defaultTokenEnvironment === name) return;
-		defaultTokenEnvironment = name;
-		try {
-			defaultToken = await fetchDefaultTreasuryToken();
-			defaultTokenError = '';
-		} catch (e) {
-			defaultToken = null;
-			defaultTokenError = e instanceof Error ? e.message : 'Could not load the Realms token';
-		}
-		syncTokenChoice();
-	}
-
 	function scheduleSymbolLookup() {
 		tokenSymbol = '';
 		if (symbolLookupTimer) clearTimeout(symbolLookupTimer);
@@ -712,7 +691,8 @@
 	}
 
 	function selectTokenChoice(id: string) {
-		if (!isTokenChoiceSelectable(id, $testModeDisableMonetaryTokens)) return;
+		const monetary = tokenOptions.find((t) => t.id === id)?.monetary ?? false;
+		if (!isTokenChoiceSelectable(monetary, $testModeDisableMonetaryTokens)) return;
 		tokenChoice = id;
 		if (id === CUSTOM_TOKEN_ID) {
 			tokenSymbol = '';
@@ -1344,9 +1324,6 @@
 					<P class="text-gray-600">
 						{$_('setup.wizard.token_help')}
 					</P>
-					{#if defaultTokenError}
-						<P class="text-sm text-red-700">{defaultTokenError}</P>
-					{/if}
 					<TokenChoiceList
 						options={tokenOptions}
 						selectedId={tokenChoice}
@@ -1361,7 +1338,6 @@
 								id="token-canister"
 								bind:value={tokenCanisterId}
 								placeholder="Ledger canister id"
-								disabled={$testModeDisableMonetaryTokens}
 								oninput={scheduleSymbolLookup}
 							/>
 						</div>
@@ -1371,7 +1347,6 @@
 								id="token-indexer"
 								bind:value={tokenIndexerId}
 								placeholder="Index canister id"
-								disabled={$testModeDisableMonetaryTokens}
 							/>
 						</div>
 						<div class="setup-wizard__field">
@@ -1381,7 +1356,6 @@
 								value={tokenSymbol}
 								placeholder="Read from the ledger"
 								readonly
-								disabled={$testModeDisableMonetaryTokens}
 							/>
 						</div>
 					{/if}
