@@ -95,7 +95,8 @@ organizations: **Clinic B** (health provider) and **BuildCo** (contractor). Agen
 | `user_remove` | `user.delete` | governed | Remove Bob's duplicate test account |
 | `identity_submit` | `identity.submit` | delegable | Alice submits her passport proof |
 | `identity_review` | `identity.review` | signing | Dana approves Alice's passport proof |
-| `invite_create`, `invite_revoke`, `invite_list` | `invite.manage` | | Dana creates 50 clerk invites; revokes one sent to the wrong email |
+| `invite_create`, `invite_revoke` | `invite.manage` | | Dana creates 50 clerk invites; revokes one sent to the wrong email |
+| `invite_list` | `invite.manage` | read | Dana checks which of her invites have been used |
 | `profile_create`, `profile_edit` | `permission.grant` | governed | New profile `treasurer` → `[treasury.view, transfer.create]` |
 | `role_assign`, `role_revoke` (profile ↔ user) | `role.assign`, `role.revoke` | governed | Give Bob `treasurer` → proposal under the root department's policy |
 | `delegation_grant`, `delegation_revoke`, `delegation_accept` | `self.delegate` | | Alice lets Bob vote for her for 2 weeks while she travels |

@@ -260,7 +260,7 @@ def invite_revoke(c, args):
     inv.revoked = True
 
 
-@op("invite.manage")
+@op("invite.manage", read=True)
 def invite_list(c, args):
     """Invites with their profile, seat, uses, expiry and whether they are revoked; codes are never shown.
     ``count`` rows at a time (default 100, at most 500) from row ``from`` (default 1). Returns ``invites`` and
