@@ -11,10 +11,11 @@ export default defineConfig({
 	timeout: 15 * 60 * 1000,
 	outputDir: 'test-results/standalone',
 	reporter: [['list'], ['html', { outputFolder: 'playwright-report/standalone', open: 'never' }]],
+	// Kept for every test, passed or not: the run is reviewed afterwards from the report.
 	use: {
-		trace: 'retain-on-failure',
-		screenshot: 'only-on-failure',
-		video: 'retain-on-failure',
+		trace: 'on',
+		screenshot: 'on',
+		video: 'on',
 		headless: true,
 		viewport: { width: 1280, height: 900 }
 	},

@@ -266,15 +266,68 @@ async function settle(page: Page, timeout = 45_000): Promise<boolean> {
 	return false;
 }
 
-test('every sidebar page of the launched realm loads without errors', async ({ page }) => {
-	test.setTimeout(30 * 60 * 1000);
-	const founder = founderIdentity(realm);
-	await exposeSigner(page, founder);
+function collectErrors(page: Page): string[] {
 	const errors: string[] = [];
 	page.on('console', (msg) => {
 		if (msg.type() === 'error') errors.push(`console: ${msg.text()}`);
 	});
 	page.on('pageerror', (err) => errors.push(`page error: ${err.message}`));
+	return errors;
+}
+
+// Waits for the page to load, screenshots it, and soft-fails on loading, error text or console errors.
+async function checkPage(page: Page, label: string, shot: string, errors: string[]) {
+	const loaded = await settle(page);
+	await page.waitForTimeout(1_500);
+	await snap(page, shot.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, ''));
+	expect.soft(loaded, `${label}: finishes loading`).toBe(true);
+	const broken = (await pageTexts(page))
+		.flatMap((t) => t.split('\n'))
+		.filter((line) => BROKEN.test(line));
+	expect.soft(broken, `${label}: error text on the page`).toEqual([]);
+	expect.soft([...errors], `${label}: console errors`).toEqual([]);
+}
+
+test('every installed extension opens without errors', async ({ page }) => {
+	const ids = Object.keys(realm.extensions ?? {});
+	test.setTimeout((5 + ids.length) * 60 * 1000);
+	expect(ids.length, 'realm.json lists the installed extensions').toBeGreaterThan(0);
+	await exposeSigner(page, founderIdentity(realm));
+	const errors = collectErrors(page);
+	for (const id of ids) {
+		await test.step(`/extensions/${id}`, async () => {
+			errors.length = 0;
+			const { frame, close } = await openInPortal(page, realm, `/extensions/${id}`);
+			try {
+				// Mounted, or redirected to a realm page (e.g. notifications -> /messages).
+				await expect
+					.poll(
+						async () => {
+							if (await frame.locator(`[data-extension-id="${id}"]`).count()) return 'mounted';
+							const f = page.frames().find((x) => x.url().startsWith(realm.realm_url));
+							const path = f ? new URL(f.url()).pathname : '';
+							return path && !path.startsWith(`/extensions/${id}`)
+								? `redirected to ${path}`
+								: 'waiting';
+						},
+						{ message: `${id} opens`, timeout: 120_000, intervals: [1_000] }
+					)
+					.not.toBe('waiting');
+				await checkPage(page, id, `extension-${id}`, errors);
+				const denied = await frame.getByText(/access denied|you don't have permission/i).count();
+				expect.soft(denied, `${id}: open to the founder`).toBe(0);
+			} finally {
+				await close();
+			}
+		});
+	}
+});
+
+test('every sidebar page of the launched realm loads without errors', async ({ page }) => {
+	test.setTimeout(30 * 60 * 1000);
+	const founder = founderIdentity(realm);
+	await exposeSigner(page, founder);
+	const errors = collectErrors(page);
 
 	const portal: { current?: Awaited<ReturnType<typeof openInPortal>> } = {};
 	// The sidebar folds its sections again after each navigation.
@@ -327,15 +380,7 @@ test('every sidebar page of the launched realm loads without errors', async ({ p
 					errors.length = 0;
 					await link.click({ timeout: 30_000 });
 				}
-				const loaded = await settle(page);
-				await page.waitForTimeout(1_500);
-				await snap(page, `sidebar-${href.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}`);
-				expect.soft(loaded, `${label}: finishes loading`).toBe(true);
-				const broken = (await pageTexts(page))
-					.flatMap((t) => t.split('\n'))
-					.filter((line) => BROKEN.test(line));
-				expect.soft(broken, `${label}: error text on the page`).toEqual([]);
-				expect.soft([...errors], `${label}: console errors`).toEqual([]);
+				await checkPage(page, label, `sidebar-${href}`, errors);
 			});
 		}
 	} finally {
