@@ -235,7 +235,7 @@ test('after launch /setup sends the founder to the public dashboard', async ({ p
 // Text that means a page is still loading, or that it failed, in the realm or in an extension's own iframe.
 const LOADING = /\bLoading\b[^\n]{0,40}\.\.\.|\bLoading\b[^\n]{0,40}…/i;
 const BROKEN =
-	/Failed to load|has no backend|is not available to you|is not a function|not declared|is not a read operation|unknown operation|Cannot read propert|Something went wrong|SDK version mismatch|\bundefined\b|\bNaN\b|\[object Object\]/i;
+	/Failed to load|could not be (listed|loaded)|call it with run|has no backend|is not available to you|is not a function|not declared|is not a read operation|unknown operation|Cannot read propert|Something went wrong|SDK version mismatch|\bundefined\b|\bNaN\b|\[object Object\]/i;
 
 async function pageTexts(page: Page): Promise<string[]> {
 	return Promise.all(
@@ -331,14 +331,28 @@ test('every sidebar page of the launched realm loads without errors', async ({ p
 
 	const portal: { current?: Awaited<ReturnType<typeof openInPortal>> } = {};
 	// The sidebar folds its sections again after each navigation.
+	// A refold mid-loop leaves the next target inside a closed (inert) section: retry from the top.
 	async function unfold(sidebar: Locator) {
 		const folded = sidebar.locator('.fold-summary[aria-expanded="false"]');
-		while ((await folded.count()) > 0) await folded.first().click();
+		for (let attempt = 0; (await folded.count()) > 0; attempt++) {
+			if (attempt >= 40) throw new Error('the sidebar keeps folding its sections');
+			await folded.first().click({ timeout: 5_000 }).catch(() => {});
+		}
 	}
 	// Opens the realm at / with every sidebar section unfolded; again after a page that loses the sidebar.
 	async function openSidebar() {
 		await portal.current?.close();
 		portal.current = await openInPortal(page, realm, '/');
+		// / sends a signed-in member on to the home extension, which refolds the sidebar.
+		await expect
+			.poll(
+				() => {
+					const f = page.frames().find((x) => x.url().startsWith(realm.realm_url));
+					return f ? new URL(f.url()).pathname : '/';
+				},
+				{ message: 'the realm leaves / for its home page', timeout: 120_000, intervals: [500] }
+			)
+			.not.toBe('/');
 		const sidebar = portal.current.frame.locator('aside').filter({ visible: true }).first();
 		// Signed in (the ME section) and done loading the realm's extension menu.
 		await expect(sidebar.locator('nav a[href="/identities"]')).toBeVisible({ timeout: 120_000 });
