@@ -287,9 +287,14 @@ test('every sidebar page of the launched realm loads without errors', async ({ p
 		await portal.current?.close();
 		portal.current = await openInPortal(page, realm, '/');
 		const sidebar = portal.current.frame.locator('aside').filter({ visible: true }).first();
-		await expect(sidebar.locator('nav a[href^="/extensions/"]').first()).toBeVisible({
-			timeout: 120_000
-		});
+		// Signed in (the ME section) and done loading the realm's extension menu.
+		await expect(sidebar.locator('nav a[href="/identities"]')).toBeVisible({ timeout: 120_000 });
+		await expect(sidebar.locator('nav .animate-spin')).toHaveCount(0, { timeout: 120_000 });
+		await expect(
+			sidebar
+				.locator('nav a[href^="/extensions/"]:not([href="/extensions/public_dashboard"])')
+				.first()
+		).toBeAttached({ timeout: 120_000 });
 		await unfold(sidebar);
 		return sidebar;
 	}
