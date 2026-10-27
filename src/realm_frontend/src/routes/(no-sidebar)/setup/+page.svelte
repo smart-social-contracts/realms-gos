@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
+	import { hrefWithPreservedTestIdentityParams } from '$lib/test-identity-query.ts';
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { Button, Heading, Input, Label, P, Spinner } from 'flowbite-svelte';
@@ -883,9 +884,12 @@
 		}
 	}
 
+	// Not '/': it sends a member (the founder, once launched) to their own dashboard.
 	function goToPublicDashboard() {
 		leftSetup = true;
-		void goto('/', { replaceState: true });
+		void goto(hrefWithPreservedTestIdentityParams(window.location.search, '/extensions/public_dashboard'), {
+			replaceState: true
+		});
 	}
 
 	function generateBrandingFromIdentity() {
@@ -998,7 +1002,7 @@
 				if (state.status !== 'setup') {
 					leftSetup = true;
 					await setupStateStore.refresh();
-					void goto('/', { replaceState: true });
+					goToPublicDashboard();
 					return;
 				}
 				if (state.launch) {
