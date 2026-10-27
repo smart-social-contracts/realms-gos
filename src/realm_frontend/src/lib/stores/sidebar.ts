@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import type { SidebarCategory, SidebarConfig, SidebarManifest, SidebarNavItem } from '$lib/config/sidebar';
-import { quarter, must } from '$lib/realm';
+import { quarter, must, RealmError } from '$lib/realm';
 import { settleAuthSession } from '$lib/auth.js';
 import { isAuthenticated } from '$lib/stores/auth.js';
 import { resolveMemberHomeHref } from '../extension-home';
@@ -139,7 +139,10 @@ export async function loadSidebar(_backend: unknown, locale: string = 'en'): Pro
 		sidebarConfig.set(config);
 		writeCache(locale, config);
 	} catch (e) {
-		console.error('Failed to load sidebar:', e);
+		// Signed in but the signed actor is not in quarterBackendStore yet: Sidebar reloads when it lands.
+		if (!(e instanceof RealmError && e.message === 'sign in first')) {
+			console.error('Failed to load sidebar:', e);
+		}
 		if (!get(sidebarConfig) && cached) {
 			sidebarConfig.set(cached);
 		}
