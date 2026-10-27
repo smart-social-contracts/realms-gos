@@ -1,11 +1,15 @@
-# publish-extension-packages.yml — publish @realmsgos/extension-* to npm @next (experimental).
+# publish-extension-packages.yml — stage @realmsgos/extension-* for npm @next (experimental).
+#
+# The workflow only stages each version (npm stage publish). It goes public once a maintainer
+# approves it with 2FA: npmjs.com → Staged Packages, or `npm stage approve <stage-id>`.
 #
 # Auth (pick one; Trusted Publishing preferred):
 # 1. npm Trusted Publishing (OIDC, keyless — no stored token):
 #    - On npmjs.com, for each package (@realmsgos/extension-bridge, @realmsgos/extension-ui),
 #      add Trusted Publisher: GitHub Actions, repo smart-social-contracts/realms-gos,
-#      workflow filename publish-extension-packages.yml.
-#    - This workflow requests id-token: write; npm (11.5.1 or later) uses OIDC automatically.
+#      workflow filename publish-extension-packages.yml. Staging is always allowed;
+#      "Allow npm publish" can stay off.
+#    - This workflow requests id-token: write; npm (11.15.0 or later) uses OIDC automatically.
 # 2. Fallback — repository secret NPM_TOKEN:
 #    - Long-lived automation token written via npm config set (never echoed).
 #    - Used when Trusted Publishing is not configured; OIDC is still attempted first.
@@ -71,9 +75,9 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upgrade npm (Trusted Publishing needs 11.5.1 or later)
+      - name: Upgrade npm (npm stage needs 11.15.0 or later)
         if: ${{ steps.skip.outputs.skip != 'true' }}
-        run: npm install -g npm@^11.5.1
+        run: npm install -g npm@^11.15.0
 
       - name: Configure npm auth (NPM_TOKEN fallback)
         if: ${{ steps.skip.outputs.skip != 'true' }}
@@ -84,9 +88,9 @@ jobs:
             npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
           fi
 
-      - name: Publish to npm (@next)
+      - name: Stage for npm (@next), to approve on npmjs.com
         if: ${{ steps.skip.outputs.skip != 'true' }}
         working-directory: packages/${{ matrix.package_dir }}
         run: |
           npm version "${{ steps.meta.outputs.version }}" --no-git-tag-version
-          npm publish --access public --tag next --provenance
+          npm stage publish --access public --tag next --provenance
