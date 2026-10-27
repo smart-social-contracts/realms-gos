@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/realm', () => ({ quarter: {}, must: vi.fn() }));
+vi.mock('$lib/auth.js', () => ({ settleAuthSession: vi.fn() }));
+vi.mock('$lib/stores/auth.js', async () => ({ isAuthenticated: (await import('svelte/store')).writable(false) }));
 
 import { sidebarCacheKey } from '../stores/sidebar';
 

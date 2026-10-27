@@ -51,6 +51,7 @@
 	import { sidebarConfig } from '$lib/stores/sidebar';
 	import { extensionLoadingMessage } from '$lib/utils/breadcrumb';
 	import { createHostContext } from '$lib/host-bridge';
+	import { settleAuthSession } from '$lib/auth';
 
 	export let extensionId: string;
 
@@ -286,6 +287,8 @@
 		runtimeDenied = null;
 
 		try {
+			// A deep link mounts before the portal session is restored: the manifest read would be anonymous.
+			await settleAuthSession();
 			const [version, manifest] = await Promise.all([
 				resolveExtensionVersion(id),
 				getExtensionManifestWithRetry(id)

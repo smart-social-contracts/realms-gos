@@ -453,8 +453,8 @@ export function requestSilentAuthProbe() {
 /**
  * Wait for the portal host to deliver a scoped II delegation.
  *
- * `portal:auth-pending` (host has no session) does NOT settle the promise.
- * `interactive: false` only probes for a session the portal already has.
+ * `portal:auth-pending` (host has no session) settles a silent probe (`interactive: false`) with null,
+ * not an interactive wait. `interactive: false` only probes for a session the portal already has.
  * @param {{ timeoutMs?: number, interactive?: boolean }} [opts]
  * @returns {Promise<DelegationIdentity | null>}
  */
@@ -473,12 +473,17 @@ export function waitForPortalDelegation({
       clearTimeout(timer);
       window.removeEventListener('portal:auth', onAuth);
       window.removeEventListener('portal:auth-error', onAuthError);
+      window.removeEventListener('portal:auth-pending', onPending);
       resolve(value);
     };
 
     const onAuth = () => {
       const identity = getPortalDelegationIdentity();
       if (identity) finish(identity);
+    };
+
+    const onPending = () => {
+      if (!interactive) finish(null);
     };
 
     const onAuthError = (event: Event) => {
@@ -490,6 +495,7 @@ export function waitForPortalDelegation({
     const timer = setTimeout(() => finish(null), timeoutMs);
     window.addEventListener('portal:auth', onAuth);
     window.addEventListener('portal:auth-error', onAuthError);
+    window.addEventListener('portal:auth-pending', onPending);
     if (interactive) requestAuthRefresh();
     else requestSilentAuthProbe();
   });

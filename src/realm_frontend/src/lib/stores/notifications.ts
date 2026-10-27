@@ -1,5 +1,7 @@
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import { read, run, must } from '$lib/realm';
+import { settleAuthSession } from '$lib/auth.js';
+import { isAuthenticated } from '$lib/stores/auth.js';
 
 export interface NotificationItem {
     id: string;
@@ -29,6 +31,12 @@ function setRead(id: string | null, read: boolean) {
 
 export async function loadNotifications() {
     try {
+        await settleAuthSession();
+        if (!get(isAuthenticated)) {
+            notifications.set([]);
+            unreadCount.set(0);
+            return;
+        }
         const items: NotificationItem[] = [];
         let from: number | null = 1;
         while (from) {

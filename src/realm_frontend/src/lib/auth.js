@@ -465,10 +465,34 @@ export async function isAuthenticated() {
 }
 
 let restorePromise = null;
+let settlePromise = null;
 
 /** Reset so a later call re-checks IC session (e.g. after logout). */
 export function resetAuthSessionRestore() {
   restorePromise = null;
+  settlePromise = null;
+}
+
+/**
+ * Restore the session and, inside the portal, wait for a delegation the portal already has
+ * (without asking the visitor to sign in), so later calls are not made anonymously.
+ */
+export function settleAuthSession() {
+  if (!settlePromise) {
+    settlePromise = (async () => {
+      await restoreAuthSession();
+      if (!isEmbeddedInPortal() || getPortalDelegationIdentity()) return;
+      const { waitForPortalDelegation } = await import('$lib/portal-bridge.ts');
+      if (await waitForPortalDelegation({ timeoutMs: 15_000, interactive: false })) {
+        restorePromise = null;
+        await restoreAuthSession();
+      }
+    })().catch((error) => {
+      settlePromise = null;
+      throw error;
+    });
+  }
+  return settlePromise;
 }
 
 /**

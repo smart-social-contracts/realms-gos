@@ -1,6 +1,8 @@
 import { writable, get } from 'svelte/store';
 import type { SidebarCategory, SidebarConfig, SidebarManifest, SidebarNavItem } from '$lib/config/sidebar';
 import { quarter, must } from '$lib/realm';
+import { settleAuthSession } from '$lib/auth.js';
+import { isAuthenticated } from '$lib/stores/auth.js';
 import { resolveMemberHomeHref } from '../extension-home';
 
 export const sidebarConfig = writable<SidebarConfig | null>(null);
@@ -75,6 +77,9 @@ export async function loadSidebar(_backend: unknown, locale: string = 'en'): Pro
 
 	sidebarLoading.set(true);
 	try {
+		await settleAuthSession();
+		// extension_list needs a signed-in caller; visitors get the public menu.
+		if (!get(isAuthenticated)) return;
 		const rows = await sidebarRows();
 		const manifests: SidebarManifest[] = [];
 		const welcomeItems: SidebarNavItem[] = [];
