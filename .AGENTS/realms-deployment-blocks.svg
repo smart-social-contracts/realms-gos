@@ -192,7 +192,7 @@
   <text x="912" y="342" font-size="9" fill="#64748b" font-family="system-ui,sans-serif">take_pre_upgrade_snapshot, report_canister_ready</text>
   <text x="912" y="356" font-size="9" fill="#64748b" font-family="system-ui,sans-serif">report_deployment_failure on error</text>
   <text x="912" y="372" font-size="9" fill="#64748b" font-family="system-ui,sans-serif">hosts uploaded artifacts via /upload-file</text>
-  <text x="912" y="384" font-size="8" fill="#b45309" font-family="system-ui,sans-serif">Legacy fast path - slated for retirement by Casals (CASALS_MIGRATION.md)</text>
+  <text x="912" y="384" font-size="8" fill="#b45309" font-family="system-ui,sans-serif">Legacy fast path - slated for retirement by Casals</text>
 
   <!-- ============ REALM REGISTRY ============ -->
   <g filter="url(#shadow)">
@@ -291,5 +291,5 @@
   <text x="640" y="990" font-size="11" font-weight="700" fill="#d97706" font-family="system-ui,sans-serif">Off-chain mundus path (fast)</text>
   <text x="640" y="1006" font-size="9" fill="#475569" font-family="system-ui,sans-serif">wizard / mundus &#8594; registry.request_deployment &#8594; installer queues job &#8594; deploy</text>
   <text x="640" y="1019" font-size="9" fill="#475569" font-family="system-ui,sans-serif">service polls, installs WASM+frontend via dfx, reports back &#8594; installer finishes</text>
-  <text x="640" y="1035" font-size="9" fill="#64748b" font-family="system-ui,sans-serif">extensions/codices + register_realm. Docs: AGENTS.md | CASALS_ROLLOUT.md | CASALS_MIGRATION.md</text>
+  <text x="640" y="1035" font-size="9" fill="#64748b" font-family="system-ui,sans-serif">extensions/codices + register_realm. Docs: AGENTS.md | docs/deployment/README.md</text>
 </svg>

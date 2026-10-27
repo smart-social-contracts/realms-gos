@@ -602,7 +602,7 @@ def deploy(
 
     \b
     Fleet environments are converged by `casals up` from casals.json
-    (docs/OPERATIONS.md); new realms on a live GOS go through
+    (docs/deployment/README.md); new realms on a live GOS go through
     `realms new --gaas-config`.
     """
     deploy_command(

@@ -1,7 +1,7 @@
 # ci-main.yml — main pipeline: casals up on a local replica + the cross-quarter
 # live suite (realms-e2e.yml). Live environments are built by hand with
 # `casals up -e production` and released with `casals upgrade`
-# (docs/OPERATIONS.md); nothing here deploys.
+# (docs/deployment/README.md); nothing here deploys.
 
 name: CI (main)
 

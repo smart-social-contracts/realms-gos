@@ -19,7 +19,7 @@ console.log(`Using Identity Provider: ${II_URL}`);
 // `/.well-known/ii-alternative-origins`). Injected at deploy time via
 // canister_ids.js so the whole federation (every realm + the registry) resolves
 // to ONE principal per human. When unset, login falls back to per-origin
-// principals (legacy behaviour). See issue #233 / QUARTERS.md.
+// principals (legacy behaviour). See issue #233 / docs/project/quarters-design.md.
 const DERIVATION_ORIGIN = globalThis.__CANISTER_IDS?.derivation_origin || '';
 if (DERIVATION_ORIGIN) {
   console.log(`Using II derivationOrigin: ${DERIVATION_ORIGIN}`);

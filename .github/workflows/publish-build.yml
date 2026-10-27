@@ -4,7 +4,7 @@
 # This does NOT deploy to any canister: the installer serves new realms from
 # the file_registry. Existing canisters move only when an operator runs
 # `casals upgrade casals.json --wasm <family> | --content <namespace>`
-# (docs/OPERATIONS.md); `casals up` builds the sheet on day one and is not a
+# (docs/deployment/README.md); `casals up` builds the sheet on day one and is not a
 # release tool. The registry id comes from the operator inventory
 # (canister_ids.json) unless file_registry is given.
 

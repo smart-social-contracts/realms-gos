@@ -17,7 +17,7 @@ Canonical sources live in this repo’s deployed copies:
 | `logo.svg`, `logo_horizontal.svg` | Wide lockup (black) |
 | `logo_horizontal_white.svg` | Wide lockup (white) |
 
-Paths: `src/*/static/images/`, `website/public/`, `docs/img/`, `docs/public/img/`, and CLI mirrors under `cli/realms/`.
+Paths: `src/*/static/images/`, `website/public/`, `docs/img/`, and CLI mirrors under `cli/realms/`.
 
 The legacy filename `logo_sphere_only.svg` is kept for path compatibility; it now serves the same planet icon as `logo_mark.svg`.
 

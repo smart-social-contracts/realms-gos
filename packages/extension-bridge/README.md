@@ -102,7 +102,7 @@ server.pushState(nextState);
 server.destroy();
 ```
 
-See `docs/reference/EXTENSION_SANDBOXING.md` for the full protocol contract.
+See [`docs/extensions/frontend.md`](../../docs/extensions/frontend.md) and [`docs/architecture/frontend.md`](../../docs/architecture/frontend.md) for the bridge and its limits.
 
 ## Capabilities
 

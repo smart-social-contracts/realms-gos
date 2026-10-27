@@ -56,8 +56,7 @@ realms/
 ├── canister_ids.json                 # Operator inventory of live ids, written by `casals export` (never a source of truth in code)
 ├── scripts/
 │   └── publish_build.py              # Build+publish engine used by publish-build.yml / release.yml
-├── docs/OPERATIONS.md                # How to build and converge the orchestra
-└── docs/reference/
+└── docs/                            # The documentation: start at docs/README.md
 ```
 
 `extensions/` is a git submodule. Commit/push there first, then update the ref in `realms`.
@@ -67,7 +66,7 @@ realms/
 ## Deploying Code Changes
 
 Every environment is declared in [`casals.json`](casals.json) and converged by
-`casals up` (see [`docs/OPERATIONS.md`](docs/OPERATIONS.md)). There is no
+`casals up` (see [`docs/deployment/README.md`](docs/deployment/README.md)). There is no
 per-network table anywhere in this repo: canister ids, controllers, hosts and
 test flags live in the sheet's `environments` block, and the running canisters
 read theirs at runtime (`set_canister_config_json`, `get_setup_state().shared_tokens`).
@@ -86,7 +85,7 @@ below is what the phases do, for a single step.
 
 | What changed | Path |
 |---|---|
-| Anything in the orchestra (code, sheet, packages) | `scripts/up.sh -e production …` (docs/OPERATIONS.md, "One command") |
+| Anything in the orchestra (code, sheet, packages) | `scripts/up.sh -e production …` (docs/deployment/README.md, "One command") |
 | Product canister code (realm backend/frontend, marketplace, token, NFT) | Build (`scripts/up.sh --build-only`; recipes also in `release.yml`), `casals pin`, then `casals up -e production` from the Casals repo |
 | The conductor / file registry / multisig themselves | Same `casals up`; the sheet's `registry.wasms` pins them |
 | Extensions / codices bundles only | `scripts/up.sh -e production --identity prod-identity --publish-only`, or `realms files publish --network ic --registry <fleet-file-registry>` + `realms marketplace publish`, or `deploy-files.yml` |
@@ -433,7 +432,7 @@ from the table above (same `--source-dir codices/codices/syntropia`).
 |---|---|
 | Wizard / portal realm (`/r/<slug>/`), or user said **fast off-chain** | **Direct runtime install** (this section) — look up IDs with `resolve_slug` |
 | Single-realm dev iteration, registry or installer down | **Direct runtime install** (this section) |
-| The demo stand of `casals.json` | rebuild, then `casals up` (docs/OPERATIONS.md) |
+| The demo stand of `casals.json` | rebuild, then `casals up` (docs/deployment/README.md) |
 | Extension-only change, registry healthy | [Fast Remote Extension Deploy](#fast-remote-extension-deploy-26s) above |
 | Quarters / multi-realm / pre-merge authoritative deploy | `deploy-files` → registry install → `casals up` |
 
@@ -782,7 +781,7 @@ signing the update as that principal.
 Prefer **`icp`** over dfx. Interactive wrapper: `basilisk shell`.
 
 Internet Identity is pairwise per frontend origin. Realms pins a canonical
-`derivationOrigin` (see [`docs/reference/IDENTITY_AND_ASSISTANT.md`](docs/reference/IDENTITY_AND_ASSISTANT.md)).
+`derivationOrigin` (see `src/realm_frontend/src/lib/auth.js`).
 `icp identity link web` must use `--app` matching that origin, or the linked
 principal will **not** match `User.id` in the realm.
 
@@ -826,7 +825,7 @@ raw state, but Cedar ownership and the REPL namespace will not match that user.
 `icp identity delegation request/sign/use` is IC-level session delegation (same
 as linking a key). It does **not** let you act as someone else's II without
 their signature, and it is not Realms PoA
-([`docs/reference/DELEGATION.md`](docs/reference/DELEGATION.md)).
+([`docs/architecture/governance-and-delegation.md`](docs/architecture/governance-and-delegation.md#delegation-power-of-attorney)).
 
 Do **not** add a REPL extension for CLI debugging or impersonation. An in-realm
 REPL UI would only be UX (browser session already has the correct II
@@ -861,7 +860,7 @@ until updated manually or re-provisioned.
 
 ## Rules
 
-- **Default deploy path**: the sheet. Rebuild, then `casals up` (docs/OPERATIONS.md);
+- **Default deploy path**: the sheet. Rebuild, then `casals up` (docs/deployment/README.md);
   never an imperative `dfx canister install` on a canister the conductor controls.
   For a wizard/portal realm (`/r/<slug>/`) or when the user says **fast off-chain**,
   use [direct runtime install](#direct-runtime-install-no-file-registry-no-casals-installer)
@@ -997,8 +996,6 @@ await target.locator("text=Advanced").first.click()
 - [`.AGENTS/realms-deployment-paths.svg`](.AGENTS/realms-deployment-paths.svg) — Deployment decision tree (Casals, mundus, extensions, release)
 - `AGENTS.md` — Agent/operator guide (deploy paths, fast iteration)
 - [Cursor Cloud specific instructions](#cursor-cloud-specific-instructions) — named env (Environment2) vs Task `environment: cloud`, plaintext PEM, `icp` replica flags, Playwright Chrome path
-- `docs/OPERATIONS.md` — Product orchestra (`casals up` on `casals.json`, `*.realmsgos.org`)
-- `docs/reference/RUNTIME_EXTENSION_STAGING_DEPLOY.md` — Layered deploy runbook
-- `docs/reference/EXTENSION_ARCHITECTURE.md` — Extension lifecycle
-- `docs/reference/PRIVATE_DATA_SHARING.md` — End-to-end encrypted, consent-based data sharing for extensions (own entity + scope kind + `ctx.crypto`)
+- [`docs/README.md`](docs/README.md) — The documentation: architecture, GGG, extensions, codices, testing
+- [`docs/deployment/README.md`](docs/deployment/README.md) — Product orchestra (`casals up` on `casals.json`, `*.realmsgos.org`)
 - `cli/README.md` — CLI command reference

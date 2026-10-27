@@ -1,4 +1,4 @@
-"""The running example of docs/GGG.md, as test data.
+"""The running example of docs/ggg/spec.md, as test data.
 
 Agora: departments Civil Registry, Infrastructure, Finance, Health and Justice under the root
 (Administration); members Alice, Bob, Dana, Carla, Dr. Ana, Judge Elena and Mallory; external

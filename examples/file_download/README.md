@@ -19,6 +19,3 @@ basilisk-toolkit exec -f examples/file_download/simple_download.py
 basilisk-toolkit exec -f examples/file_download/word_counter.py
 ```
 
-## Documentation
-
-See [EXAMPLE_FILE_DOWNLOAD.md](../../docs/EXAMPLE_FILE_DOWNLOAD.md) for detailed documentation.

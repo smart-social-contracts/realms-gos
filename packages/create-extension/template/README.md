@@ -56,4 +56,4 @@ Open http://localhost:5555 — the mock host enforces manifest capabilities and 
 - Build UI in `frontend/src/` using `@realmsgos/extension-bridge` and `@realmsgos/extension-ui`.
 
 Full authoring guide:
-https://github.com/smart-social-contracts/realms-gos/blob/main/docs/guide/extension-authoring.md
+https://github.com/smart-social-contracts/realms-gos/blob/main/docs/extensions/build-test-publish.md

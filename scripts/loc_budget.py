@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when src/realm_backend grows past its line budget (REFACTOR_PLAN.md)."""
+"""Fail when src/realm_backend grows past its line budget (docs/project/refactor-plan.md)."""
 
 import pathlib
 import sys

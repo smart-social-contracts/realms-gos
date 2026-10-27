@@ -1,6 +1,6 @@
 """Host-dispatch REPL: api/ext RPC hits the same Candid surface as the UI.
 
-See realms#313 and docs/issues/repl-ui-parity-spec.md.
+See realms#313.
 """
 
 import os

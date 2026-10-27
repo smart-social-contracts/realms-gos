@@ -1,11 +1,11 @@
-"""The operation registry must match the operation tables of docs/GGG.md, both ways."""
+"""The operation registry must match the operation tables of docs/ggg/spec.md, both ways."""
 
 import pathlib
 import re
 
 from core import op
 
-SPEC = pathlib.Path(__file__).resolve().parents[2] / "docs" / "GGG.md"
+SPEC = pathlib.Path(__file__).resolve().parents[2] / "docs" / "ggg" / "spec.md"
 FLAGS = ("read", "delegable", "governed", "signing")
 
 
@@ -46,7 +46,7 @@ def test_every_spec_operation_is_registered_as_specified():
     ops, wildcards = spec_ops()
     reg = registered()
     missing = sorted(set(ops) - set(reg))
-    assert not missing, f"in GGG.md but not registered: {missing}"
+    assert not missing, f"in the GGG spec but not registered: {missing}"
     for name, (allowed, flags) in ops.items():
         s = reg[name]
         assert flags_of(s) == flags, f"{name}: flags {flags_of(s)} != spec {flags}"
@@ -58,4 +58,4 @@ def test_every_spec_operation_is_registered_as_specified():
 def test_every_registered_operation_is_specified():
     ops, wildcards = spec_ops()
     extra = sorted(n for n in registered() if n not in ops and not any(n.startswith(w) for w in wildcards))
-    assert not extra, f"registered but not in GGG.md: {extra}"
+    assert not extra, f"registered but not in the GGG spec: {extra}"

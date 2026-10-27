@@ -1,4 +1,4 @@
-"""GGG entities: the data a realm stores (docs/GGG.md). Data only; behaviour lives in operations."""
+"""GGG entities: the data a realm stores (docs/ggg/spec.md). Data only; behaviour lives in operations."""
 
 from ggg.finance import (AllocationRule, Bid, BidScore, Budget, FinancialReport, FiscalPeriod, Fund, Invoice,
                          LedgerEntry, NFTToken, PaymentAccount, TaxDeclaration, TaxPolicy, Tender, Token, Trade,
