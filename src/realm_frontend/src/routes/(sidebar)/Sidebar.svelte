@@ -160,8 +160,8 @@
 
 	afterNavigate((nav) => {
 		document.getElementById('svelte')?.scrollTo({ top: 0 });
-		const from = `${nav.from?.url.pathname ?? ''}${nav.from?.url.search ?? ''}`;
-		const to = `${nav.to.url.pathname}${nav.to.url.search}`;
+		const from = `${nav.from?.url?.pathname ?? ''}${nav.from?.url?.search ?? ''}`;
+		const to = `${nav.to?.url?.pathname ?? ''}${nav.to?.url?.search ?? ''}`;
 		if (from !== to) {
 			userHasToggledFolds = false;
 			lastFoldExpandKey = '';
