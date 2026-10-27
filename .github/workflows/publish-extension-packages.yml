@@ -5,13 +5,10 @@
 #    - On npmjs.com, for each package (@realmsgos/extension-bridge, @realmsgos/extension-ui),
 #      add Trusted Publisher: GitHub Actions, repo smart-social-contracts/realms-gos,
 #      workflow filename publish-extension-packages.yml.
-#    - This workflow requests id-token: write; npm publish --provenance uses OIDC automatically.
+#    - This workflow requests id-token: write; npm (11.5.1 or later) uses OIDC automatically.
 # 2. Fallback — repository secret NPM_TOKEN:
 #    - Long-lived automation token written via npm config set (never echoed).
 #    - Used when Trusted Publishing is not configured; OIDC is still attempted first.
-#
-# Publishing is OFF until the repository variable NPM_PUBLISH_ENABLED is set to "true".
-# Until then, matching pushes still build packages but skip publish so CI stays green.
 
 name: Publish extension packages (@next)
 
@@ -74,23 +71,12 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish disabled — setup instructions
-        if: ${{ vars.NPM_PUBLISH_ENABLED != 'true' && steps.skip.outputs.skip != 'true' }}
-        run: |
-          echo "npm publish skipped: repository variable NPM_PUBLISH_ENABLED is not 'true'."
-          echo ""
-          echo "To enable experimental (@next) publishes from main:"
-          echo "  1. Repository Settings → Secrets and variables → Actions → Variables:"
-          echo "     set NPM_PUBLISH_ENABLED=true"
-          echo "  2. Configure npm Trusted Publishing (preferred) on npmjs.com for each package:"
-          echo "     @realmsgos/extension-bridge, @realmsgos/extension-ui"
-          echo "     Publisher: GitHub Actions"
-          echo "     Repository: smart-social-contracts/realms-gos"
-          echo "     Workflow: publish-extension-packages.yml"
-          echo "  3. Or add repository secret NPM_TOKEN (automation token) as fallback."
+      - name: Upgrade npm (Trusted Publishing needs 11.5.1 or later)
+        if: ${{ steps.skip.outputs.skip != 'true' }}
+        run: npm install -g npm@^11.5.1
 
       - name: Configure npm auth (NPM_TOKEN fallback)
-        if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' && steps.skip.outputs.skip != 'true' }}
+        if: ${{ steps.skip.outputs.skip != 'true' }}
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -99,7 +85,7 @@ jobs:
           fi
 
       - name: Publish to npm (@next)
-        if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' && steps.skip.outputs.skip != 'true' }}
+        if: ${{ steps.skip.outputs.skip != 'true' }}
         working-directory: packages/${{ matrix.package_dir }}
         run: |
           npm version "${{ steps.meta.outputs.version }}" --no-git-tag-version
