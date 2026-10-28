@@ -14,6 +14,12 @@
     "mundus_explorer",
     "role_manager"
   ],
+  "$comment_not_ported": "Extensions whose frontend still calls a backend the slim realm does not install (they need realm operations that do not exist yet). Setup skips them, as core extensions or codex dependencies, until they are ported; then remove them here.",
+  "not_ported_to_slim": [
+    "import_export",
+    "mundus_explorer",
+    "passport_verification"
+  ],
   "defaults": {
     "ai_assistant_enabled": true,
     "assistant_consumer_extension": ""

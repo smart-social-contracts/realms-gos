@@ -32,6 +32,8 @@ const HIDDEN_CODICES = new Set(['common', 'westminster', '_common']);
 const DRAFT_KEY = 'realm_setup_draft';
 /** Extensions every realm gets, whatever its codex: the repository's core-extensions.json. */
 const CORE_EXTENSIONS: readonly string[] = coreExtensions.core_extensions;
+/** Extensions not yet ported to the slim realm, which setup leaves out (core-extensions.json). */
+const NOT_PORTED: ReadonlySet<string> = new Set(coreExtensions.not_ported_to_slim);
 
 // SetupStageGate restores portal auth before the wizard mounts; the store may already hold an
 // authenticated actor while backendReady is still waiting on realmInfo.fetch(). Wait for the actor only.
@@ -370,7 +372,7 @@ async function installRealmExtensions(codex: { package: string; version: string 
 	}
 	const latest = new Map((await listRegistryExtensions(registry)).map((e) => [e.ext_id, e.latest]));
 	for (const id of new Set([...CORE_EXTENSIONS, ...dependencies])) {
-		if (installed.has(id)) continue;
+		if (installed.has(id) || NOT_PORTED.has(id)) continue;
 		const version = latest.get(id);
 		if (!version) return { ok: false, error: `${id} is not published in the realm's file registry` };
 		const reply = await setupRun('extension_install', { extension: id, version });
