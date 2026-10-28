@@ -75,7 +75,9 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         if not spec["read"]:
             audit(name, user, by, origin, args, out)
         return json.dumps({"ok": True, **out})
-    except (Fail, auth.Denied) as e:
+    except auth.Denied as e:
+        return json.dumps({"ok": False, "error": str(e), "denied": True})
+    except Fail as e:
         return json.dumps({"ok": False, "error": str(e)})
     except KeyError as e:
         return json.dumps({"ok": False, "error": f"missing {e}"})

@@ -27,6 +27,24 @@ def now():
     return ic.time() // 1_000_000_000
 
 
+def candid_encode(text):
+    return ic.candid_encode(text)
+
+
+def candid_decode(data):
+    """Candid text for the encoded ``data``; it must be Candid ("DIDL…"): anything else traps."""
+    return ic.candid_decode(data)
+
+
+def cycles():
+    return ic.canister_balance128()
+
+
+def memory():
+    """Bytes of stable memory in use."""
+    return ic.stable64_size() * 65536
+
+
 def trap(message):
     ic.trap(message)
 

@@ -221,7 +221,7 @@ def mandate_assign_executor(c, args):
 @op("contract.create_under_mandate")
 def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
-    now), ``ends_at``, ``value`` and ``mandate``. Returns ``contract``. Under a mandate, the mandate must be active,
+    now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``. Returns ``contract``. Under a mandate, the mandate must be active,
     ``value`` within its ``max_value``, the contract must end before the mandate expires, and you must head or hold
     an active seat in the mandate's executor department."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
@@ -237,7 +237,7 @@ def contract_create(c, args):
         if m.expires_at and int(args.get("ends_at", 0)) > m.expires_at:
             raise Fail(f"the contract outlasts mandate {m.id}")
     k = Contract(id=next_id(Contract, "C"), title=args["title"], parties=args.get("parties", []), mandate=m,
-                 terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
+                 value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency, terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
                  starts_at=int(args.get("starts_at", chain.now())), ends_at=int(args.get("ends_at", 0)))
     return {"contract": k.id}
 

@@ -141,6 +141,14 @@ jobs:
         # source files; a stale copy silently changes what a realm enforces.
         run: |
           python3 scripts/sync_cedar_policies.py --check
+      - name: GGG interface
+        # The generated GGG methods must match ggg/ggg.did, and every operation must pass
+        # tests/ggg. Its own process: its fake chain replaces the ggg entities loaded above.
+        run: |
+          python3 scripts/ggg_candid.py --check
+          pytest -q tests/ggg
+          # Again, each operation through its ggg_ method, every reply checked against ggg.did.
+          GGG_MIRROR=strict pytest -q tests/ggg
       - name: Host locale parity and sidebar labels
         run: |
           pytest -q tests/backend/test_sidebar_labels.py \

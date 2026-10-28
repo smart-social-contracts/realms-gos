@@ -9,6 +9,8 @@ class Contract(Row):
     title = String(default="")
     parties = Json([])  # ["Organization:buildco", "Department:infrastructure"]
     mandate = ManyToOne("Mandate", "contracts")
+    value = Integer(default=0)
+    symbol = String(default="")
     terms_ref = String(default="")
     terms_hash = String(default="")
     status = String(default="draft")  # draft | active | fulfilled | terminated | disputed

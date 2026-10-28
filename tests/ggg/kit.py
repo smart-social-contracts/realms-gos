@@ -3,9 +3,17 @@ import json
 import fake_chain
 from core import op
 
+MIRROR = None  # set by conftest to mirror.call
+
 
 def call(name, caller="ctl", /, **args):
-    """Run an operation as ``caller``; returns the decoded reply."""
+    """Run an operation as ``caller``; returns the decoded reply. With GGG_MIRROR set, through its ggg_ method."""
+    if MIRROR is not None:
+        return MIRROR(name, caller, args, direct)
+    return direct(name, caller, **args)
+
+
+def direct(name, caller="ctl", /, **args):
     fake_chain.state["caller"] = caller
     return json.loads(op.run(op.dispatch(name, json.dumps(args))))
 

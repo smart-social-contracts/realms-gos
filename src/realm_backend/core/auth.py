@@ -123,7 +123,9 @@ def authorize(user, by, name, spec, args, origin="user", declared=()):
         "signer_agent": spec["signing"] and is_agent(by),
         "scope": sorted(delegated_scope(user, by)) if user != by else [],
         "declared": sorted(declared),
-        "parties": sorted(spec["parties"](args)) if spec["parties"] else [],
+        # A party may be named by principal or as "User:<principal>" (I-ALL-3).
+        "parties": sorted({q for p in spec["parties"](args) for q in (p, p.removeprefix("User:"))})
+        if spec["parties"] else [],
     }
     entities = [{"uid": {"type": "Realm::User", "id": user},
                  "attrs": {"permissions": sorted(held), "banned": is_banned(user)}, "parents": []},

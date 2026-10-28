@@ -132,6 +132,7 @@ def test_I_FIN_2_money_leaves_a_fund_only_by_transfer_under_the_owners_policy():
     world.grant(depts["Infrastructure"], "transfer.create")
     assert "needs transfer.create" in denied("transfer_create", "alice", fund="ROADS", to="buildco", amount=1)
     assert "party" in denied("transfer_create", "carla", fund="ROADS", to="carla", amount=1)
+    assert "party" in denied("transfer_create", "carla", fund="ROADS", to="User:carla", amount=1)
     assert "less than" in call("transfer_create", "carla", fund="ROADS", to="buildco", amount=5_000)["error"]
     world.policy(depts["Infrastructure"], 2, 3)
     out = ok("transfer_create", "carla", fund="ROADS", to="buildco", amount=500)

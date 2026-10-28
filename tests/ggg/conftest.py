@@ -38,8 +38,24 @@ for path in sorted(glob.glob(os.path.join(SRC, "*", "*.py"))):
         importlib.import_module(f"{package}.{name}")
 
 
+import ggg_api  # noqa: E402
+import kit  # noqa: E402
+import mirror  # noqa: E402
+
+ggg_api.Principal = mirror.FakePrincipal
+MIRROR = os.environ.get("GGG_MIRROR")
+if MIRROR:
+    kit.MIRROR = mirror.call
+
+
 @pytest.fixture(autouse=True)
 def fresh():
     Database.get_instance().clear()
     fake_chain.reset()
+    fake_chain.state["mirror"] = MIRROR
     yield
+
+
+def pytest_sessionfinish(session):
+    if MIRROR:
+        mirror.dump(os.path.join(HERE, "..", "..", ".ggg-mirror.txt"))

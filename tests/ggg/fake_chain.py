@@ -32,6 +32,23 @@ def now():
     return state["now"]
 
 
+def candid_encode(text):
+    """Stands in for Candid: the text itself, after the magic bytes."""
+    return b"DIDL" + text.encode()
+
+
+def candid_decode(data):
+    return data[4:].decode()
+
+
+def cycles():
+    return 5_000_000_000_000
+
+
+def memory():
+    return 64 * 65536
+
+
 def trap(message):
     raise Trap(message)
 

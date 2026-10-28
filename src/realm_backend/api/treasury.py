@@ -138,7 +138,7 @@ def address(to, symbol):
         for a in each(PaymentAccount, "owner", owner):
             if a.symbol == symbol:
                 return a.address
-    return to
+    return to.removeprefix("User:")  # a user without an account is paid at their principal
 
 
 def reserve(p, fund, to, symbol, amount, category, description="", payroll=None, **refs):

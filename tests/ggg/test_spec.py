@@ -1,17 +1,19 @@
-"""The operation registry must match the operation tables of docs/ggg/spec.md, both ways."""
+"""The operation registry must match the operation tables of the GGG model (the ggg submodule) and of
+docs/ggg/spec.md, which lists what Realms GOS adds, both ways."""
 
 import pathlib
 import re
 
 from core import op
 
-SPEC = pathlib.Path(__file__).resolve().parents[2] / "docs" / "ggg" / "spec.md"
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+SPECS = (ROOT / "ggg" / "model" / "README.md", ROOT / "docs" / "ggg" / "spec.md")
 FLAGS = ("read", "delegable", "governed", "signing")
 
 
 def spec_ops():
     ops, wildcards = {}, {}
-    rows = [line for line in SPEC.read_text().splitlines()
+    rows = [line for spec in SPECS for line in spec.read_text().splitlines()
             if line.startswith("| `") and line.count("|") == 5]
     for row in rows:
         names_cell, perm_cell, flag_cell = [c.strip() for c in row.split("|")[1:4]]
