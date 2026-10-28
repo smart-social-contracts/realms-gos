@@ -160,6 +160,7 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 | `token_catalog` | — (public) | read | The ICRC-1 ledgers this GOS ships with, not the realm's registered tokens |
 | `scale_status` | — (public) | read | Quarter populations against this GOS's auto-scale capacity |
 | `realm_configure_infrastructure` | `realm.configure.infrastructure` | governed | Frontend, file-registry, marketplace, installer and Casals baton canister ids |
+| `realm_export` | `db.export` | read | One page of an entity's rows, as stored, for a backup |
 
 Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.schedule`,
 `task.cancel`, `task.view`, `orchestration.approve`, `shell.execute`.

@@ -391,8 +391,6 @@ type SetupState = record { status : RealmStatus; founder : opt principal; done :
 type HostInstallArgs = record { founder : principal; network : text; registry : opt principal; test_mode : bool };
 type HostInfrastructure = record { frontend : opt principal; file_registry : opt principal; extra : vec record { 0 : text; 1 : principal } };
 type Monitor = record { status : RealmStatus; installed_version : text; cycles : nat; memory : nat; events : nat };
-type ExportArgs = record { entity : text; cursor : opt text; limit : opt nat32 };
-type ExportPage = record { entity : text; items : vec Value; next : opt text };
 type ScopePage = record { items : vec text; next : opt text };
 type AccessArgs = record { scope : text; cursor : opt text; limit : opt nat32 };
 type PrincipalPage = record { items : vec principal; next : opt text };
@@ -511,7 +509,6 @@ type NotificationPageReply = variant { Ok : NotificationPage; Err : GggError };
 type EventPageReply = variant { Ok : EventPage; Err : GggError };
 type NotificationsReadReply = variant { Ok : NotificationsRead; Err : GggError };
 type MonitorReply = variant { Ok : Monitor; Err : GggError };
-type ExportPageReply = variant { Ok : ExportPage; Err : GggError };
 type SetupStateReply = variant { Ok : SetupState; Err : GggError };
 type RealmReply = variant { Ok : Realm; Err : GggError };
 type OptKeyEnvelopeReply = variant { Ok : opt KeyEnvelope; Err : GggError };
@@ -707,7 +704,6 @@ service : (text) -> {
   "ggg_notification_send" : (NotificationSendArgs) -> (NotificationReply);
   "ggg_realm_info" : () -> (Realm) query;
   "ggg_realm_monitor" : () -> (MonitorReply) query;
-  "ggg_realm_export" : (ExportArgs) -> (ExportPageReply) query;
   "ggg_setup_state" : () -> (SetupStateReply);
   "ggg_setup_step" : (SetupStep) -> (SetupStateReply);
   "ggg_setup_launch" : () -> (RealmReply);

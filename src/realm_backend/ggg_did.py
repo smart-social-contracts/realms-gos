@@ -311,8 +311,6 @@ class SetupState(Record): status: "RealmStatus"; founder: Opt[Principal]; done: 
 class HostInstallArgs(Record): founder: Principal; network: text; registry: Opt[Principal]; test_mode: bool
 class HostInfrastructure(Record): frontend: Opt[Principal]; file_registry: Opt[Principal]; extra: Vec[Tuple[text, Principal]]
 class Monitor(Record): status: "RealmStatus"; installed_version: text; cycles: nat; memory: nat; events: nat
-class ExportArgs(Record): entity: text; cursor: Opt[text]; limit: Opt[nat32]
-class ExportPage(Record): entity: text; items: Vec["Value"]; next: Opt[text]
 class ScopePage(Record): items: Vec[text]; next: Opt[text]
 class AccessArgs(Record): scope: text; cursor: Opt[text]; limit: Opt[nat32]
 class PrincipalPage(Record): items: Vec[Principal]; next: Opt[text]
@@ -403,7 +401,6 @@ class NotificationPageReply(Variant, total=False): Ok: "NotificationPage"; Err: 
 class EventPageReply(Variant, total=False): Ok: "EventPage"; Err: "GggError"
 class NotificationsReadReply(Variant, total=False): Ok: "NotificationsRead"; Err: "GggError"
 class MonitorReply(Variant, total=False): Ok: "Monitor"; Err: "GggError"
-class ExportPageReply(Variant, total=False): Ok: "ExportPage"; Err: "GggError"
 class SetupStateReply(Variant, total=False): Ok: "SetupState"; Err: "GggError"
 class RealmReply(Variant, total=False): Ok: "Realm"; Err: "GggError"
 class OptKeyEnvelopeReply(Variant, total=False): Ok: Opt["KeyEnvelope"]; Err: "GggError"
@@ -721,8 +718,6 @@ SCHEMA["SetupState"] = ("record", {"status": "RealmStatus", "founder": "opt prin
 SCHEMA["HostInstallArgs"] = ("record", {"founder": "principal", "network": "text", "registry": "opt principal", "test_mode": "bool"})
 SCHEMA["HostInfrastructure"] = ("record", {"frontend": "opt principal", "file_registry": "opt principal", "extra": "vec (text, principal)"})
 SCHEMA["Monitor"] = ("record", {"status": "RealmStatus", "installed_version": "text", "cycles": "nat", "memory": "nat", "events": "nat"})
-SCHEMA["ExportArgs"] = ("record", {"entity": "text", "cursor": "opt text", "limit": "opt nat32"})
-SCHEMA["ExportPage"] = ("record", {"entity": "text", "items": "vec Value", "next": "opt text"})
 SCHEMA["ScopePage"] = ("record", {"items": "vec text", "next": "opt text"})
 SCHEMA["AccessArgs"] = ("record", {"scope": "text", "cursor": "opt text", "limit": "opt nat32"})
 SCHEMA["PrincipalPage"] = ("record", {"items": "vec principal", "next": "opt text"})
@@ -813,7 +808,6 @@ SCHEMA["NotificationPageReply"] = ("variant", {"Ok": "NotificationPage", "Err": 
 SCHEMA["EventPageReply"] = ("variant", {"Ok": "EventPage", "Err": "GggError"})
 SCHEMA["NotificationsReadReply"] = ("variant", {"Ok": "NotificationsRead", "Err": "GggError"})
 SCHEMA["MonitorReply"] = ("variant", {"Ok": "Monitor", "Err": "GggError"})
-SCHEMA["ExportPageReply"] = ("variant", {"Ok": "ExportPage", "Err": "GggError"})
 SCHEMA["SetupStateReply"] = ("variant", {"Ok": "SetupState", "Err": "GggError"})
 SCHEMA["RealmReply"] = ("variant", {"Ok": "Realm", "Err": "GggError"})
 SCHEMA["OptKeyEnvelopeReply"] = ("variant", {"Ok": "opt KeyEnvelope", "Err": "GggError"})
@@ -919,18 +913,18 @@ METHODS = {
     "events": ("ListArgs", "EventPageReply"), "codex_install": ("CodexSource", "GovernedReply"), "codex_uninstall":
     (None, "GovernedReply"), "codex_revert": (None, "GovernedReply"), "notification_read": ("NotificationReadArgs",
     "NotificationsReadReply"), "notification_send": ("NotificationSendArgs", "NotificationReply"), "realm_info":
-    (None, "Realm"), "realm_monitor": (None, "MonitorReply"), "realm_export": ("ExportArgs", "ExportPageReply"),
-    "setup_state": (None, "SetupStateReply"), "setup_step": ("SetupStep", "SetupStateReply"), "setup_launch": (None,
-    "RealmReply"), "host_install": ("HostInstallArgs", "SetupStateReply"), "host_infrastructure":
-    ("HostInfrastructure", "SetupStateReply"), "realm_configure": ("RealmConfigureArgs", "GovernedReply"),
-    "realm_configure_branding": ("BrandingArgs", "GovernedReply"), "realm_configure_tokens": ("TokensArgs",
-    "GovernedReply"), "realm_configure_trust_policy": ("TrustPolicyArgs", "GovernedReply"), "realm_register":
-    ("RealmRegisterArgs", "GovernedReply"), "realm_upgrade": ("RealmUpgradeArgs", "GovernedReply"),
-    "crypto_envelope": ("text", "OptKeyEnvelopeReply"), "crypto_scopes": ("ListArgs", "ScopePageReply"),
-    "crypto_access": ("AccessArgs", "PrincipalPageReply"), "document_list": ("DocumentListArgs",
-    "DocumentPageReply"), "document_get": ("text", "OptDocumentAccessReply"), "crypto_public_key": (None,
-    "BlobReply"), "crypto_derive_key": ("blob", "BlobReply"), "crypto_grant": ("KeyGrantArgs", "NatReply"),
-    "crypto_revoke": ("KeyRevokeArgs", "NatReply"), "document_store": ("DocumentStoreArgs", "DocumentStoredReply"),
-    "document_share": ("DocumentShareArgs", "NatReply"), "document_revoke": ("DocumentRevokeArgs", "NatReply"),
-    "document_delete": ("DocumentDeleteArgs", "DocumentDeletedReply")
+    (None, "Realm"), "realm_monitor": (None, "MonitorReply"), "setup_state": (None, "SetupStateReply"),
+    "setup_step": ("SetupStep", "SetupStateReply"), "setup_launch": (None, "RealmReply"), "host_install":
+    ("HostInstallArgs", "SetupStateReply"), "host_infrastructure": ("HostInfrastructure", "SetupStateReply"),
+    "realm_configure": ("RealmConfigureArgs", "GovernedReply"), "realm_configure_branding": ("BrandingArgs",
+    "GovernedReply"), "realm_configure_tokens": ("TokensArgs", "GovernedReply"), "realm_configure_trust_policy":
+    ("TrustPolicyArgs", "GovernedReply"), "realm_register": ("RealmRegisterArgs", "GovernedReply"), "realm_upgrade":
+    ("RealmUpgradeArgs", "GovernedReply"), "crypto_envelope": ("text", "OptKeyEnvelopeReply"), "crypto_scopes":
+    ("ListArgs", "ScopePageReply"), "crypto_access": ("AccessArgs", "PrincipalPageReply"), "document_list":
+    ("DocumentListArgs", "DocumentPageReply"), "document_get": ("text", "OptDocumentAccessReply"),
+    "crypto_public_key": (None, "BlobReply"), "crypto_derive_key": ("blob", "BlobReply"), "crypto_grant":
+    ("KeyGrantArgs", "NatReply"), "crypto_revoke": ("KeyRevokeArgs", "NatReply"), "document_store":
+    ("DocumentStoreArgs", "DocumentStoredReply"), "document_share": ("DocumentShareArgs", "NatReply"),
+    "document_revoke": ("DocumentRevokeArgs", "NatReply"), "document_delete": ("DocumentDeleteArgs",
+    "DocumentDeletedReply")
 }
