@@ -3,7 +3,7 @@ import json
 from core import chain
 from api import proposals
 from api import quarters
-from core.db import Fail, each, find, next_id
+from core.db import Conflict, Fail, Forbidden, each, find, next_id
 from ggg import FederalVote, FederalVoteLeg, FederationMessage, Proposal, Quarter
 from core.op import GENERATOR, dispatch, op, ops
 
@@ -52,7 +52,7 @@ def settle(leg):
     if p.status == "voting":
         result = proposals.outcome(p, chain.now() > p.deadline)
         if result is None:
-            raise Fail(f"{p.id} is still open until {p.deadline}")
+            raise Conflict(f"{p.id} is still open until {p.deadline}")
         tally, size, _ = proposals.count(p)
         p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
     tally, size, _ = proposals.count(p)
@@ -68,7 +68,7 @@ def leg_data(leg):
 def record_leg(q, data):
     leg = find(FederalVoteLeg, leg_id(data["vote"], q.id))
     if leg.vote.status != "open":
-        raise Fail(f"{leg.vote.id} is already {leg.vote.status}")
+        raise Conflict(f"{leg.vote.id} is already {leg.vote.status}")
     if data.get("hash") != leg.vote.hash:
         raise Fail(f"the leg does not match {leg.vote.id}'s published action and rule")
     leg.outcome, leg.status = "passed" if data["outcome"] == "passed" else "failed", "reported"
@@ -125,7 +125,7 @@ def federal_vote_cancel(c, args):
     """On the capital, cancel the open federal ``vote`` and withdraw its local vote in every quarter."""
     v = find(FederalVote, args["vote"])
     if quarters.federated() or v.status != "open":
-        raise Fail(f"{v.id} can only be cancelled on the capital while open")
+        raise Conflict(f"{v.id} can only be cancelled on the capital while open")
     v.status = "cancelled"
     for leg in list(v.legs):
         if leg.quarter == chain.self_id():
@@ -136,23 +136,23 @@ def federal_vote_cancel(c, args):
     return {"status": "cancelled"}
 
 
-@op(None, public=True)
+@op(None, public=True, returns="vote")
 def federal_vote_finalize(c, args):
     """On a quarter: settle and report the local leg of ``vote``. On the capital: decide the vote and announce it.
     The capital waits for missing legs, even past the deadline if the rule says wait; a passed vote runs its action."""
     v = find(FederalVote, args["vote"])
     if v.status != "open":
-        raise Fail(f"{v.id} is already {v.status}")
+        raise Conflict(f"{v.id} is already {v.status}")
     here = chain.self_id()
     own = find(FederalVoteLeg, leg_id(v.id, here))
     if quarters.federated():
         if own.status != "reported":
             settle(own)
         reply = yield from quarters.ask(quarters.capital(), "quarter_report", {**quarters.report(), "leg": leg_data(own)})
-        return {"leg": own.outcome, "reported": bool(reply.get("ok")), "error": reply.get("error", "")}
+        return {"vote": v.id, "leg": own.outcome, "reported": bool(reply.get("ok")), "error": reply.get("error", "")}
     missing = [leg.quarter for leg in v.legs if leg.status != "reported" and leg.quarter != here]
     if missing and (chain.now() <= v.deadline or rule_of(v)["absent"] == "wait"):
-        raise Fail(f"{v.id} is waiting for legs from {', '.join(missing)}")
+        raise Conflict(f"{v.id} is waiting for legs from {', '.join(missing)}")
     if own.status != "reported":
         settle(own)
     status, tally = count(v)
@@ -162,12 +162,12 @@ def federal_vote_finalize(c, args):
     for cid in [leg.quarter for leg in v.legs if leg.quarter != here]:
         yield from quarters.ask(cid, "federation_message",
                                 {"topic": "federal_vote.result", "body": {"vote": v.id, "status": status, "hash": v.hash}})
-    return {"status": status, **tally}
+    return {"vote": v.id, "status": status, **tally}
 
 
 def on_propose(c, body):
     if quarters.federated():
-        raise Fail("federal votes are opened by the capital")
+        raise Forbidden("federal votes are opened by the capital")
     return (yield from open_vote(body["action"], body["proposer"], c.by, c.by))
 
 
@@ -176,7 +176,7 @@ def on_open(c, body):
     if freeze(body["action"], body["rule"], body["deadline"]) != body["hash"]:
         raise Fail("the vote's hash does not match its action, rule and deadline")
     if FederalVote[body["vote"]]:
-        raise Fail(f"{body['vote']} is already open here")
+        raise Conflict(f"{body['vote']} is already open here")
     v = FederalVote(id=body["vote"], origin_quarter=body["origin"], action=body["action"], rule=body["rule"],
                     hash=body["hash"], deadline=body["deadline"])
     p = ballot(v.id, v.action, v.deadline, body["proposer"], c.by)

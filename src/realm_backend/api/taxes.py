@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, each, find, first, next_id, window
+from core.db import Conflict, Fail, Forbidden, each, find, first, next_id, window
 from ggg import Land, Member, Organization, TaxDeclaration, TaxPolicy, User
 from core.op import op
 from api.proposals import realm_wide
@@ -64,7 +64,7 @@ def owed(tax, value):
 def adopted():
     p = first(TaxPolicy, "status", "adopted")
     if p is None:
-        raise Fail("no tax policy is adopted")
+        raise Conflict("no tax policy is adopted")
     return p
 
 
@@ -118,7 +118,7 @@ def taxable(tax, payer):
                                                if p.status == "active")
 
 
-@op("tax.manage", governed=realm_wide)
+@op("tax.manage", governed=realm_wide, returns="policy")
 def tax_policy_draft(c, args):
     """Draft a tax policy from ``document`` (optional symbol, list of taxes) and optional ``description``. Each tax
     has a unique code, a base (flat, land_area or declared) and a method: fixed (amount), proportional (rate_bp,
@@ -133,14 +133,14 @@ def tax_policy_propose(c, args):
     """Adopt the draft tax ``policy``, superseding the one in force."""
     p = find(TaxPolicy, args["policy"])
     if p.status != "draft":
-        raise Fail(f"{p.id} is {p.status}; only a draft can be adopted")
+        raise Conflict(f"{p.id} is {p.status}; only a draft can be adopted")
     for old in list(each(TaxPolicy, "status", "adopted")):
         old.status = "superseded"
     p.status, p.adopted_at, p.proposal = "adopted", chain.now(), c.proposal
     return {"policy": p.id, "status": p.status}
 
 
-@op("tax.assess")
+@op("tax.assess", returns="invoices")
 def tax_assess(c, args):
     """Bill one batch of taxpayers for ``period`` (a label) under the adopted policy: tax ``tax`` only (not a
     self-declared one: those are billed by tax_declare), or by default every enabled tax that is not self-declared.
@@ -179,10 +179,11 @@ def tax_declare(c, args):
     declarant = f"User:{c.user}"
     if args.get("organization"):
         if c.user not in (find(Organization, args["organization"]).admins or []):
-            raise Fail(f"you do not administer {args['organization']}")
+            raise Forbidden(f"you do not administer {args['organization']}")
         declarant = f"Organization:{args['organization']}"
-    if amount < 0 or declared(declarant, period, tax["code"]):
-        raise Fail(f"{declarant} has already declared {tax['code']} for {period}" if amount >= 0
-                   else "a declared amount cannot be negative")
+    if amount < 0:
+        raise Fail("a declared amount cannot be negative")
+    if declared(declarant, period, tax["code"]):
+        raise Conflict(f"{declarant} has already declared {tax['code']} for {period}")
     d = levy(policy, tax, declarant, period, amount)
     return {"declaration": d.id, "invoice": d.invoice, "owed": owed(tax, amount)}

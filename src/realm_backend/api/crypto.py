@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, find, next_id, page_by, view
+from core.db import Fail, Forbidden, find, next_id, page_by, view
 from ggg import Department, Document, KeyEnvelope, Realm
 from core.op import op
 from api.proposals import holders, root
@@ -47,7 +47,7 @@ def managers(scope):
 
 def manager(scope, principal):
     if principal not in managers(scope):
-        raise Fail(f"you do not manage keys at {scope}")
+        raise Forbidden(f"you do not manage keys at {scope}")
 
 
 def grant(scope, keys, by):
@@ -66,7 +66,7 @@ def revoke(scope, principals):
     return sorted(principals)
 
 
-@op("self.data_manage")
+@op("self.data_manage", returns="public_key")
 def crypto_public_key(c, args):
     """The realm's vetKD public key: wrap a scope's key for any principal with it (IBE, identity = principal)."""
     reply = yield from chain.call(MGMT, "vetkd_public_key", f'(record {{ canister_id = null; context = blob '
@@ -74,7 +74,7 @@ def crypto_public_key(c, args):
     return {"public_key": blob_hex(reply)}
 
 
-@op("self.data_manage")
+@op("self.data_manage", returns="encrypted_key")
 def crypto_derive_key(c, args):
     """Your vetKey, encrypted to ``transport_public_key`` (hex). It opens only what was wrapped for you."""
     reply = yield from chain.call(MGMT, "vetkd_derive_key", f'(record {{ input = blob "{blob(c.user.encode().hex())}"; '
@@ -83,28 +83,28 @@ def crypto_derive_key(c, args):
     return {"encrypted_key": blob_hex(reply)}
 
 
-@op("self.data_manage")
+@op("self.data_manage", returns="granted")
 def crypto_grant(c, args):
     """Store wrapped keys at ``scope``: ``keys`` maps principal to wrapped key. Replaces earlier wraps."""
     manager(args["scope"], c.user)
     return {"granted": grant(args["scope"], args["keys"], c.user)}
 
 
-@op("self.data_manage")
+@op("self.data_manage", returns="revoked")
 def crypto_revoke(c, args):
     """Delete the wrapped keys of ``principals`` at ``scope`` (managers only). Returns ``revoked``."""
     manager(args["scope"], c.user)
     return {"revoked": revoke(args["scope"], args["principals"])}
 
 
-@op("self.data_manage", read=True)
+@op("self.data_manage", read=True, returns="envelope")
 def crypto_envelope(c, args):
     """Your wrapped key at ``scope``: nobody can read another principal's envelope."""
     e = find(KeyEnvelope, f"{args['scope']}|{c.user}")
-    return {"wrapped_dek": e.wrapped_dek, "granted_by": e.granted_by, "at": e.at}
+    return {"envelope": e.id, "wrapped_dek": e.wrapped_dek, "granted_by": e.granted_by, "at": e.at}
 
 
-@op("self.data_manage", read=True)
+@op("self.data_manage", read=True, returns="scopes")
 def crypto_scopes(c, args):
     """The scopes where you hold a wrapped key, ``count`` at a time (default 100, at most 500) from row ``from``
     (default 1). Returns ``scopes`` and ``next`` (null at the end)."""
@@ -112,7 +112,7 @@ def crypto_scopes(c, args):
     return {"scopes": [e.scope for e in rows], "next": nxt}
 
 
-@op("self.data_manage", read=True)
+@op("self.data_manage", read=True, returns="principals")
 def crypto_access(c, args):
     """Who holds a key at ``scope`` (managers only), ``count`` at a time (default 100, at most 500) from row
     ``from`` (default 1). Returns ``principals`` and ``next`` (null at the end)."""
@@ -127,7 +127,7 @@ def scope_of(doc):
 
 def staff(department, principal):
     if principal not in managers(f"dept:{department}"):
-        raise Fail(f"only {department}'s staff manage its documents")
+        raise Forbidden(f"only {department}'s staff manage its documents")
 
 
 @op("document.manage")
@@ -146,7 +146,7 @@ def document_store(c, args):
     return {"document": doc.id, "scope": scope_of(doc)}
 
 
-@op("document.manage")
+@op("document.manage", returns="granted")
 def document_share(c, args):
     """Share ``document``: ``keys`` maps principal to wrapped key. Returns ``granted``."""
     doc = find(Document, args["document"])
@@ -154,7 +154,7 @@ def document_share(c, args):
     return {"granted": grant(scope_of(doc), args["keys"], c.user)}
 
 
-@op("document.manage")
+@op("document.manage", returns="revoked")
 def document_revoke(c, args):
     """Delete the wrapped keys of ``principals`` for ``document``. Returns ``revoked``."""
     doc = find(Document, args["document"])
@@ -176,7 +176,7 @@ def document_delete(c, args):
     return {"revoked": sorted(e.principal for e in rows), "deleted": more is None}
 
 
-@op("document.manage", read=True)
+@op("document.manage", read=True, returns="documents")
 def document_list(c, args):
     """The documents of ``department`` (id, title, hash, author, time), for its staff, ``count`` at a time (default
     100, at most 500) from row ``from`` (default 1). Returns ``documents`` and ``next`` (null at the end)."""
@@ -191,5 +191,6 @@ def document_get(c, args):
     doc = find(Document, args["document"])
     mine = KeyEnvelope[f"{scope_of(doc)}|{c.user}"]
     if mine is None and c.user not in managers(f"dept:{doc.department}"):
-        raise Fail(f"{doc.id} was not shared with you")
-    return {"document": view(doc), "scope": scope_of(doc), "wrapped_dek": mine.wrapped_dek if mine else ""}
+        raise Forbidden(f"{doc.id} was not shared with you")
+    return {"document": view(doc), "scope": scope_of(doc), "wrapped_dek": mine.wrapped_dek if mine else "",
+            "envelope": mine.id if mine else None}

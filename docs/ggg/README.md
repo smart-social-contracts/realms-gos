@@ -72,10 +72,16 @@ of the reply.
   The rest are short tables:
   - field renames;
   - argument adapters, for operations whose arguments are shaped differently;
-  - reply builders, for operations whose replies are;
-  - snapshots of rows an operation deletes, so its reply can describe them.
+  - reply builders, for operations whose replies are.
 
-  A reply is built from the rows the operation touched, so records come back whole.
+  The operations say the rest themselves. Each `@op` names with `returns` the key of its reply that
+  holds the result, and a record named by id is read from its row, so it comes back whole. The
+  exception an operation raises names the `GggError` (`Conflict`, `Forbidden`, ...), and the
+  dispatcher passes it on as the refusal's `kind`.
+  [`tests/ggg/test_candid.py`](../../tests/ggg/test_candid.py) checks that every operation whose
+  reply is a record, a page or a value names its key, and
+  [`tests/ggg/test_refusals.py`](../../tests/ggg/test_refusals.py) that no plain `Fail` describes a
+  record's state or who owns it.
 - A proposal's `Call` carries Candid. `ggg_api` decodes it with the target method's argument type
   and stores the operation and its JSON arguments, as Realms GOS always has. It encodes them back
   when the proposal is read.

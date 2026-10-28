@@ -1,6 +1,6 @@
 from core import chain
 from api import members
-from core.db import Fail, deref, each, find, next_id, page, ref, view
+from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
 from ggg import Appointment, Authority, Department, Organization, Position, User, UserProfile
 from core.op import op
 from api.proposals import holders, realm_wide, root
@@ -31,11 +31,11 @@ def supervised(owner, agent, supervisor):
 def fill(position, user, kind="substantive", agent=False, supervisor=""):
     held = seated(position)
     if position.status != "open":
-        raise Fail(f"{position.id} is {position.status}")
+        raise Conflict(f"{position.id} is {position.status}")
     if any(a.user == user for a in held):
-        raise Fail(f"{user} already holds {position.id}")
+        raise Conflict(f"{user} already holds {position.id}")
     if len(held) >= position.headcount:
-        raise Fail(f"{position.id} has no free seat ({position.headcount} filled)")
+        raise Conflict(f"{position.id} has no free seat ({position.headcount} filled)")
     supervised(body(position), agent, supervisor)
     a = Appointment(id=next_id(Appointment, "A"), position=position, user=user, kind=kind, agent=bool(agent),
                     supervisor=supervisor if agent else "", started_at=chain.now())
@@ -49,9 +49,9 @@ def release(appointments):
         orphans = [x.user for pos in owner.positions for x in seated(pos)
                    if x.agent and x.supervisor == a.user and x.id not in gone]
         if a.status != "active":
-            raise Fail(f"{a.id} is not active")
+            raise Conflict(f"{a.id} is not active")
         if orphans and not a.agent and not human_seat(a.user, owner, gone):
-            raise Fail(f"{a.user} supervises {', '.join(orphans)}; end or reassign them first")
+            raise Conflict(f"{a.user} supervises {', '.join(orphans)}; end or reassign them first")
     for a in appointments:
         a.status, a.ended_at = "ended", chain.now()
 
@@ -67,14 +67,14 @@ def parent_of(args):
 def dept_seat(args):
     pos = find(Position, args["position"])
     if pos.department is None:
-        raise Fail(f"{pos.id} is an organization seat; its admins manage it")
+        raise Forbidden(f"{pos.id} is an organization seat; its admins manage it")
     return pos
 
 
 def dept_appointment(args):
     a = find(Appointment, args["appointment"])
     if a.position.department is None:
-        raise Fail(f"{a.id} is an organization seat; its admins manage it")
+        raise Forbidden(f"{a.id} is an organization seat; its admins manage it")
     return a
 
 
@@ -86,12 +86,12 @@ def profile_of(c, args):
     return p
 
 
-@op("org.create", governed=parent_of)
+@op("org.create", governed=parent_of, returns="department")
 def department_create(c, args):
     """Create ``department`` (a new name) under ``parent`` (default the root), with an optional ``description``.
     Returns ``department``."""
     if Department[args["department"]]:
-        raise Fail(f"department {args['department']} exists")
+        raise Conflict(f"department {args['department']} exists")
     d = Department(id=args["department"], description=args.get("description", ""), parent=parent_of(args))
     return {"department": d.id}
 
@@ -123,7 +123,7 @@ def department_delete(c, args):
     if d.is_root:
         raise Fail("the root department cannot be deleted")
     if list(d.children) or any(p.status != "closed" for p in d.positions):
-        raise Fail(f"{d.id} still has sub-departments or open positions")
+        raise Conflict(f"{d.id} still has sub-departments or open positions")
     d.delete()
 
 
@@ -164,7 +164,7 @@ def department_get(c, args):
             "positions": [seat_view(p) for p in d.positions]}
 
 
-@op("realm.data_view", read=True)
+@op("realm.data_view", read=True, returns="departments")
 def department_list(c, args):
     """Departments, ``count`` rows at a time (default 100, at most 500) from row ``from`` (default 1).
     Returns ``departments`` and ``next``, the ``from`` of the next page (null at the end)."""
@@ -180,13 +180,13 @@ def department_chart(c, args):
     return {"chart": chart(dept(args) if args.get("department") else root())}
 
 
-@op("org.manage_members", governed=dept)
+@op("org.manage_members", governed=dept, returns="position")
 def position_create(c, args):
     """Open seat ``position`` (a new key) in ``department``: ``headcount`` (default 1), optional ``title``, ``salary``,
     ``salary_period`` and ``profile`` its holders get (one whose permissions you hold). Returns ``position``."""
     d = dept(args)
     if Position[args["position"]]:
-        raise Fail(f"position {args['position']} exists")
+        raise Conflict(f"position {args['position']} exists")
     if int(args.get("headcount", 1)) < 1:
         raise Fail("headcount must be at least 1")
     pos = Position(id=args["position"], department=d, profile=profile_of(c, args),
@@ -203,7 +203,7 @@ def position_edit(c, args):
     if pos.status == "closed" or status not in ("open", "frozen"):
         raise Fail(f"{pos.id} can only move between open and frozen; use position_close to close it")
     if count < max(1, len(seated(pos))):
-        raise Fail(f"{pos.id} has {len(seated(pos))} holders; headcount cannot go below that")
+        raise Conflict(f"{pos.id} has {len(seated(pos))} holders; headcount cannot go below that")
     if args.get("profile"):
         pos.profile = profile_of(c, args)
     pos.status, pos.headcount = status, count
@@ -217,24 +217,24 @@ def position_close(c, args):
     """Close department seat ``position`` for good; it must have no holders."""
     pos = dept_seat(args)
     if pos.status == "closed" or seated(pos):
-        raise Fail(f"{pos.id} is closed already or still has holders")
+        raise Conflict(f"{pos.id} is closed already or still has holders")
     pos.status = "closed"
 
 
 def appoint_as(args, kind):
     if not args.get("agent") and not User[args["user"]]:
-        raise Fail(f"{args['user']} is not a user of this realm")
+        raise NotFound(f"{args['user']} is not a user of this realm")
     return fill(dept_seat(args), args["user"], kind, args.get("agent", False), args.get("supervisor", ""))
 
 
-@op("org.appoint", governed=lambda a: dept_seat(a).department)
+@op("org.appoint", governed=lambda a: dept_seat(a).department, returns="appointment")
 def appoint(c, args):
     """Seat ``user`` (a user of the realm, unless an agent) in department seat ``position``; ``agent`` true (default
     false) needs a ``supervisor`` holding a non-agent seat in the same department. Returns ``appointment``."""
     return appoint_as(args, "substantive")
 
 
-@op("org.appoint", governed=lambda a: dept_seat(a).department)
+@op("org.appoint", governed=lambda a: dept_seat(a).department, returns="appointment")
 def appoint_acting(c, args):
     """Like appoint, but as an acting holder: ``user`` in ``position``, with ``agent`` and ``supervisor`` as there.
     Returns ``appointment``."""
@@ -260,7 +260,7 @@ def department_expel(c, args):
         d.head = ""
 
 
-@op("org.grant_authority", governed=dept)
+@op("org.grant_authority", governed=dept, returns="authority")
 def authority_grant(c, args):
     """Let ``target`` ("Department:<id>" or "Quarter:<id>", not ``department`` itself) use ``operations``,
     permissions that ``department`` holds itself or through its positions' profiles. Returns ``authority``."""
@@ -269,7 +269,7 @@ def authority_grant(c, args):
         raise Fail("authority goes to another department or a quarter")
     lacking = sorted(set(ops) - members.powers(d))
     if not ops or lacking:
-        raise Fail(f"{d.id} cannot pass on what it does not hold: {', '.join(lacking) or 'nothing named'}")
+        raise Forbidden(f"{d.id} cannot pass on what it does not hold: {', '.join(lacking) or 'nothing named'}")
     a = Authority(id=next_id(Authority, "AUTH"), grantor=d, target=ref(target), operations=ops)
     return {"authority": a.id}
 
@@ -283,33 +283,34 @@ def authority_revoke(c, args):
 def admin_of(c, args):
     org = find(Organization, args["organization"])
     if c.user not in org.admins:
-        raise Fail(f"only {org.id}'s admins can do this")
+        raise Forbidden(f"only {org.id}'s admins can do this")
     if org.status != "active":
-        raise Fail(f"{org.id} is {org.status}")
+        raise Conflict(f"{org.id} is {org.status}")
     return org
 
 
-@op("organization.add")
+@op("organization.add", returns="organization")
 def organization_register(c, args):
     """Register ``organization`` (a new name) with an optional ``description``; you become its only admin.
     Returns ``organization``."""
     if Organization[args["organization"]]:
-        raise Fail(f"organization {args['organization']} exists")
+        raise Conflict(f"organization {args['organization']} exists")
     Organization(id=args["organization"], description=args.get("description", ""), admins=[c.user])
     return {"organization": args["organization"]}
 
 
-@op("organization.edit")
+@op("organization.edit", returns="organization")
 def organization_edit(c, args):
     """As an admin of active ``organization``, change its ``description`` or replace its ``admins`` (at least one);
     a field you leave out stays."""
     org = admin_of(c, args)
     if "admins" in args and not args["admins"]:
-        raise Fail("an organization keeps at least one admin")
+        raise Conflict("an organization keeps at least one admin")
     org.description, org.admins = args.get("description", org.description), args.get("admins", org.admins)
+    return {"organization": org.id}
 
 
-@op("organization.edit")
+@op("organization.edit", returns="appointment")
 def representative_add(c, args):
     """As an admin of ``organization``, seat ``user`` in its seat ``position``, created if new with ``title``,
     ``profile`` and ``headcount`` (default 1); ``agent`` true needs a ``supervisor`` holding a non-agent seat there.
@@ -324,7 +325,7 @@ def representative_add(c, args):
     return fill(pos, args["user"], "substantive", args.get("agent", False), args.get("supervisor", ""))
 
 
-@op("organization.edit")
+@op("organization.edit", returns="appointment")
 def representative_remove(c, args):
     """As an admin of ``organization``, end ``appointment``, one of its active seats; whoever supervises agents there
     must keep another non-agent seat in it, or end or reassign those agents first."""
@@ -332,6 +333,7 @@ def representative_remove(c, args):
     if ref(a.position.organization) != ref(org):
         raise Fail(f"{a.id} is not a seat of {org.id}")
     release([a])
+    return {"appointment": a.id}
 
 
 @op("organization.delete", governed=realm_wide)
@@ -340,7 +342,7 @@ def organization_set_status(c, args):
     Returns ``status``."""
     org = find(Organization, args["organization"])
     if args["status"] not in ORG_MOVES[org.status]:
-        raise Fail(f"a {org.status} organization cannot become {args['status']}")
+        raise Conflict(f"a {org.status} organization cannot become {args['status']}")
     if args["status"] == "dissolved":
         release([a for pos in org.positions for a in seated(pos)])
     org.status = args["status"]
@@ -355,7 +357,7 @@ def organization_get(c, args):
             "positions": [seat_view(p) for p in org.positions]}
 
 
-@op("realm.data_view", read=True)
+@op("realm.data_view", read=True, returns="organizations")
 def organization_list(c, args):
     """Organizations, ``count`` rows at a time (default 100, at most 500) from row ``from``, optionally only those with
     ``status``. Returns ``organizations`` and ``next``; a filtered page can be short or empty, so follow ``next``."""

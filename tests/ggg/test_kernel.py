@@ -4,7 +4,7 @@ import pytest
 
 import fake_chain
 from core import op
-from core.db import Fail
+from core.db import Conflict, Fail
 from ggg import Appointment, Delegation, Event, Member, Position, User, UserProfile
 from kit import call, denied, later, ok
 
@@ -121,9 +121,19 @@ def test_banned_member_can_only_read():
     ok("t_public", "mallory")
 
 
+@op.op("proposal.vote")
+def t_conflict(c, args):
+    raise Conflict("P-7 is closed")
+
+
 def test_refusal_and_trap():
     member("alice", "proposal.vote")
-    assert call("t_fail", "alice") == {"ok": False, "error": "nope"}
+    assert call("t_fail", "alice") == {"ok": False, "error": "nope", "kind": "invalid_argument"}
+    assert call("t_conflict", "alice") == {"ok": False, "error": "P-7 is closed", "kind": "conflict"}
+    assert call("t_manage", "alice") == {"ok": False, "error": "t_manage needs proposal.manage", "kind": "forbidden",
+                                         "permission": "proposal.manage", "denied": True}
+    assert call("t_vote", fake_chain.ANONYMOUS)["kind"] == "unauthenticated"
+    assert call("t_none", "alice")["kind"] == "invalid_argument"
     with pytest.raises(fake_chain.Trap):
         call("t_crash", "alice")
 

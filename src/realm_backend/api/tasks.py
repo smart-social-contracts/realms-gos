@@ -2,7 +2,7 @@ import json
 
 from core import auth
 from core import chain
-from core.db import PAGE, PAGE_MAX, Fail, find, page, view
+from core.db import PAGE, PAGE_MAX, Conflict, Fail, Forbidden, find, page, view
 from ggg import Task, TaskExecution, TaskSchedule, TaskStep
 from core.op import dispatch, op, ops
 
@@ -19,7 +19,7 @@ def owned(c, args):
     """``task``, if you created it or hold ``all``: its steps run as its creator."""
     task = find(Task, args["task"])
     if c.user != creator(task) and "all" not in auth.permissions(c.user):
-        raise Fail(f"task '{task.name}' is not yours")
+        raise Forbidden(f"task '{task.name}' is not yours")
     return task
 
 
@@ -122,7 +122,7 @@ def task_create(c, args):
     Returns ``task``."""
     steps = checked(args["steps"])
     if Task[args["name"]]:
-        raise Fail(f"task '{args['name']}' exists")
+        raise Conflict(f"task '{args['name']}' exists")
     task = Task(name=args["name"], metadata=json.dumps({"creator": c.user}), status="pending")
     define(task, steps)
     return {"task": task.name}
@@ -134,7 +134,7 @@ def task_edit(c, args):
     it is running or waiting."""
     task, steps = owned(c, args), checked(args["steps"])
     if task.status in BUSY:
-        raise Fail(f"task '{task.name}' is {task.status}")
+        raise Conflict(f"task '{task.name}' is {task.status}")
     for s in task.steps:
         s.delete()
     define(task, steps)
@@ -163,7 +163,7 @@ def task_run(c, args):
     Returns ``execution`` and ``status`` (completed, failed or waiting)."""
     task = owned(c, args)
     if task.status in BUSY + ("cancelled",):
-        raise Fail(f"task '{task.name}' is {task.status}")
+        raise Conflict(f"task '{task.name}' is {task.status}")
     ex = yield from execute(task)
     return {"execution": ex.name, "status": task.status}
 
@@ -174,7 +174,7 @@ def task_schedule(c, args):
     ``repeat_every`` seconds if set. Returns ``schedule``."""
     task = owned(c, args)
     if task.status == "cancelled":
-        raise Fail(f"task '{task.name}' is cancelled")
+        raise Conflict(f"task '{task.name}' is cancelled")
     s = TaskSchedule(name=f"{task.name}@{len(children(task, 'schedules')) + 1}", task=task, last_run_at=0,
                      run_at=int(args.get("run_at") or chain.now()), repeat_every=int(args.get("repeat_every", 0)))
     enable(s, True)

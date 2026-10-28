@@ -144,5 +144,5 @@ def test_proposals_and_votes_are_paginated():
 def test_withdraw_only_own():
     world.build()
     p = ok("proposal_create", "bob", title="x")["proposal"]
-    assert "yours" in call("proposal_withdraw", "alice", proposal=p)["error"]
+    assert "not your proposal" in call("proposal_withdraw", "alice", proposal=p)["error"]
     ok("proposal_withdraw", "bob", proposal=p)

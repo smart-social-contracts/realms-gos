@@ -169,7 +169,7 @@ def test_dispute_withdraw_reject_and_delegation():
                scope={"operations": ["dispute.create", "dispute.view"]}, expires_at=fake_chain.now() + DAY)
     d = ok("dispute_file", "claude-conn", respondent="mallory", title="Spam", on_behalf_of="alice")["dispute"]
     assert ok("dispute_get", "claude-conn", dispute=d, on_behalf_of="alice")["dispute"]["claimant"] == "alice"
-    assert "yours" in denied("dispute_withdraw", "bob", dispute=d)
+    assert "not your dispute" in denied("dispute_withdraw", "bob", dispute=d)
     ok("dispute_withdraw", "claude-conn", dispute=d, on_behalf_of="alice")
     d2 = ok("dispute_file", "alice", respondent="mallory", title="Spam again")["dispute"]
     denied("dispute_reject", "alice", dispute=d2)

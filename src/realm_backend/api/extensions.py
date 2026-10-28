@@ -3,7 +3,7 @@ import json
 
 from core import chain
 from core import sandbox
-from core.db import Fail, find, page, view
+from core.db import Fail, Forbidden, Unavailable, find, page, view
 from ggg import Department, Extension, Realm, User, UserProfile
 from core.op import dispatch, op, run
 from api.proposals import appointed, realm_wide
@@ -16,7 +16,7 @@ HOST = ("description", "runtime", "sdk_version", "capabilities", "entry_access",
 def registry():
     cid = Realm["1"].file_registry_canister_id
     if not cid:
-        raise Fail("no file registry is configured")
+        raise Unavailable("no file registry is configured")
     return cid
 
 
@@ -43,17 +43,17 @@ def trust(digest, namespace=None, path=None):
     if f"sha256:{digest}" in pins:
         return f"sha256:{digest}"
     if namespace is None:
-        raise Fail(f"code sha256:{digest} is neither allowlisted nor approved by the marketplace")
+        raise Forbidden(f"code sha256:{digest} is neither allowlisted nor approved by the marketplace")
     if path is not None:
         found = (yield from ask("get_file_size", namespace, path)).get("sha256")
         if not found or found != digest:
             raise Fail(f"{namespace}/{path} is sha256:{found or 'missing'}, not sha256:{digest}")
     approval = json.loads((yield from chain.call_text(registry(), "get_namespace_approval_icc", namespace)))
     if not approval.get("approved"):
-        raise Fail(f"{namespace} is not approved by the marketplace "
+        raise Forbidden(f"{namespace} is not approved by the marketplace "
                    f"({approval.get('status') or approval.get('error') or 'unapproved'})")
     if approval.get("approver") not in approvers:
-        raise Fail(f"{namespace} is approved by {approval.get('approver')}, whom this realm does not trust")
+        raise Forbidden(f"{namespace} is approved by {approval.get('approver')}, whom this realm does not trust")
     return approval["approver"]
 
 
@@ -108,7 +108,7 @@ def extension_call(c, args):
     if not ext.source:
         raise Fail(f"{ext.id} has no backend")
     if not available(ext, holds(c.user)):
-        raise Fail(f"{ext.id} is not available to you")
+        raise Forbidden(f"{ext.id} is not available to you")
     declared = ext.operations
 
     def rpc(name, payload):

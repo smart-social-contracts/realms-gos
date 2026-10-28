@@ -1,7 +1,7 @@
 import json
 
 from core import chain
-from core.db import Fail, each, find, first, next_id, page, page_by, view
+from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
 from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Vote
 from core.op import dispatch, op, ops
 
@@ -12,7 +12,7 @@ OPEN = ("draft", "voting")
 def root():
     d = first(Department, "is_root", True)
     if d is None:
-        raise Fail("the realm has no root department")
+        raise Unavailable("the realm has no root department")
     return d
 
 
@@ -93,7 +93,7 @@ def outcome(p, final):
     return "accepted" if turnout and decisive and tally["yes"] * 100 > p.threshold * decisive else "rejected"
 
 
-@op("proposal.create", delegable=True)
+@op("proposal.create", delegable=True, returns="proposal")
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted). Voting opens at once. Returns ``proposal``.
@@ -106,16 +106,19 @@ def proposal_create(c, args):
     return {"proposal": p.id}
 
 
-@op("proposal.create", delegable=True)
+@op("proposal.create", delegable=True, returns="proposal")
 def proposal_withdraw(c, args):
     """Withdraw ``proposal``, a proposal of yours that is still a draft or being voted on."""
     p = find(Proposal, args["proposal"])
-    if p.proposer != c.user or p.status not in OPEN:
-        raise Fail("only an open proposal of yours can be withdrawn")
+    if p.proposer != c.user:
+        raise Forbidden(f"{p.id} is not your proposal")
+    if p.status not in OPEN:
+        raise Conflict(f"{p.id} is {p.status}; only an open proposal can be withdrawn")
     p.status = "withdrawn"
+    return {"proposal": p.id}
 
 
-@op("proposal.vote", delegable=True)
+@op("proposal.vote", delegable=True, returns="vote")
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
     Voting again replaces your earlier vote."""
@@ -123,9 +126,9 @@ def proposal_vote(c, args):
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
     if p.status != "voting" or chain.now() > p.deadline:
-        raise Fail(f"{p.id} is not open for voting")
+        raise Conflict(f"{p.id} is not open for voting")
     if not eligible(p, c.user):
-        raise Fail(f"you are not eligible to vote on {p.id}")
+        raise Forbidden(f"you are not eligible to vote on {p.id}")
     key = f"{p.id}:{c.user}"
     v = Vote[key] or Vote(id=key, proposal=p, proposal_id=p.id, voter=c.user)
     tally = p.tally or {}
@@ -137,43 +140,44 @@ def proposal_vote(c, args):
     return {"vote": v.id}
 
 
-@op("proposal.manage")
+@op("proposal.manage", returns="proposal")
 def proposal_open(c, args):
     """Open the draft ``proposal`` for voting, for the realm's voting window from now."""
     p = find(Proposal, args["proposal"])
     if p.status != "draft":
-        raise Fail(f"{p.id} is not a draft")
+        raise Conflict(f"{p.id} is not a draft")
     p.status, p.opens_at, p.deadline = "voting", chain.now(), chain.now() + window()
+    return {"proposal": p.id}
 
 
-@op("proposal.manage")
+@op("proposal.manage", returns="proposal")
 def proposal_finalize(c, args):
     """Close voting on ``proposal`` and record it as accepted or rejected. Returns ``status``.
     A realm-wide proposal waits for its deadline; a department's closes early once its outcome is certain."""
     p = find(Proposal, args["proposal"])
     if p.status != "voting":
-        raise Fail(f"{p.id} is not being voted on")
+        raise Conflict(f"{p.id} is not being voted on")
     result = outcome(p, chain.now() > p.deadline)
     if result is None:
-        raise Fail(f"{p.id} is still open until {p.deadline}")
+        raise Conflict(f"{p.id} is still open until {p.deadline}")
     tally, size, _ = count(p)
     p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
-    return {"status": result}
+    return {"proposal": p.id, "status": result}
 
 
-@op("proposal.manage")
+@op("proposal.manage", returns="proposal")
 def proposal_execute(c, args):
     """Run the action of the accepted ``proposal``, once. Returns ``status`` (executed or failed) and ``result``."""
     p = find(Proposal, args["proposal"])
     if p.status != "accepted" or not p.action:
-        raise Fail(f"{p.id} has no accepted action to execute")
+        raise Conflict(f"{p.id} has no accepted action to execute")
     p.status = "executed"
     out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay",
                                  signer=p.action.get("initiator") or p.proposer, proposal=p.id)
     p.result = json.loads(out)
     if not p.result.get("ok"):
         p.status = "failed"
-    return {"status": p.status, "result": p.result}
+    return {"proposal": p.id, "status": p.status, "result": p.result}
 
 
 @op("realm.data_view", read=True)
@@ -187,7 +191,7 @@ def proposal_get(c, args):
             "votes": [view(v, "voter", "choice", "cast_by") for v in votes], "next": nxt}
 
 
-@op("realm.data_view", read=True)
+@op("realm.data_view", read=True, returns="proposals")
 def proposal_list(c, args):
     """Proposals (id, title, status, deadline, proposer), or only those with ``status`` (e.g. voting), ``count`` at a
     time (default 100, at most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the
@@ -196,7 +200,7 @@ def proposal_list(c, args):
     return {"proposals": [view(p, "id", "title", "status", "deadline", "proposer") for p in rows], "next": nxt}
 
 
-@op("mandate.create", governed=realm_wide)
+@op("mandate.create", governed=realm_wide, returns="mandate")
 def mandate_create(c, args):
     """Grant a mandate: ``title``, optional ``scope`` (e.g. ``{"max_value": 200000}``), ``executor`` (a department),
     the ``proposal`` that approved it and ``expires_at`` (default 0: never). Returns ``mandate``."""
@@ -218,37 +222,39 @@ def mandate_assign_executor(c, args):
     find(Mandate, args["mandate"]).executor = find(Department, args["executor"])
 
 
-@op("contract.create_under_mandate")
+@op("contract.create_under_mandate", returns="contract")
 def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
-    now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``. Returns ``contract``. Under a mandate, the mandate must be active,
-    ``value`` within its ``max_value``, the contract must end before the mandate expires, and you must head or hold
-    an active seat in the mandate's executor department."""
+    now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``. Returns ``contract``.
+    Under a mandate, the mandate must be active, ``value`` within its ``max_value``, the contract must end before the
+    mandate expires, and you must head or hold an active seat in the mandate's executor department."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
     value = int(args.get("value", 0))
     if m is not None:
         if m.status != "active" or (m.expires_at and chain.now() > m.expires_at):
-            raise Fail(f"mandate {m.id} is not active")
+            raise Conflict(f"mandate {m.id} is not active")
         if m.executor is None or not seated(c.user, m.executor):
-            raise Fail(f"only the executor department's staff may contract under mandate {m.id}")
+            raise Forbidden(f"only the executor department's staff may contract under mandate {m.id}")
         limit = int((m.scope or {}).get("max_value", 0))
         if limit and value > limit:
             raise Fail(f"{value} exceeds mandate {m.id}'s limit of {limit}")
         if m.expires_at and int(args.get("ends_at", 0)) > m.expires_at:
             raise Fail(f"the contract outlasts mandate {m.id}")
     k = Contract(id=next_id(Contract, "C"), title=args["title"], parties=args.get("parties", []), mandate=m,
-                 value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency, terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
+                 value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency,
+                 terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
                  starts_at=int(args.get("starts_at", chain.now())), ends_at=int(args.get("ends_at", 0)))
     return {"contract": k.id}
 
 
-@op("contract.terminate", signing=True)
+@op("contract.terminate", signing=True, returns="contract")
 def contract_terminate(c, args):
     """Terminate ``contract``, unless it is already terminated or fulfilled."""
     k = find(Contract, args["contract"])
     if k.status in ("terminated", "fulfilled"):
-        raise Fail(f"{k.id} is already {k.status}")
+        raise Conflict(f"{k.id} is already {k.status}")
     k.status = "terminated"
+    return {"contract": k.id}
 
 
 @op("governance.update", governed=realm_wide)

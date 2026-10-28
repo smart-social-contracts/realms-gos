@@ -1,7 +1,7 @@
 
 from core import candid
 from core import chain
-from core.db import Fail, deref, each, find, next_id, page, view
+from core.db import Conflict, Fail, Forbidden, deref, each, find, next_id, page, view
 from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Realm, User, Verdict, Zone
 from api import codex
 from api.licenses import active, principals
@@ -62,7 +62,7 @@ def ledger(collection, method, arg):
 
 def mint(collection, owner, meta):
     if collection.supply_cap and collection.total_supply >= collection.supply_cap:
-        raise Fail(f"{collection.id} has reached its supply cap")
+        raise Conflict(f"{collection.id} has reached its supply cap")
     pairs = "; ".join(f"record {{ {quote(k)}; {value(v)} }}" for k, v in meta.items())
     arg = f"(record {{ token_id = null; owner = {account(owner)}; metadata = opt vec {{ {pairs} }} }})"
     token_id = yield from ledger(collection, "mint", arg)
@@ -120,7 +120,7 @@ def transfer_parties(args):
     return owners(args) | principals(owner_ref(args["to"]))
 
 
-@op("nft.mint", governed=realm_wide)
+@op("nft.mint", governed=realm_wide, returns="land")
 def land_register(c, args):
     """Register a parcel of ``width`` × ``height`` cells (default 1, at most 16) at ``x``, ``y`` (default 0) for
     ``owner`` (user or organization), optional ``kind`` (default unassigned) and ``metadata``; no overlaps.
@@ -131,7 +131,7 @@ def land_register(c, args):
     owner = owner_ref(args["owner"])
     taken = parcels_in(x, y, w, h)
     if taken:
-        raise Fail(f"the parcel overlaps {taken[0].id}")
+        raise Conflict(f"the parcel overlaps {taken[0].id}")
     land = Land(id=next_id(Land, "L"), x=x, y=y, width=w, height=h, cell=cell(x, y),
                 kind=args.get("kind", "unassigned"), owner=owner, registered_by=c.user,
                 metadata=args.get("metadata", {}))
@@ -158,7 +158,7 @@ def land_transfer(c, args):
     return {"land": land.id, "owner": to}
 
 
-@op("realm.data_view", read=True)
+@op("realm.data_view", read=True, returns="lands")
 def land_list(c, args):
     """One page of parcels (``from``, ``count``), optionally only those of ``owner``; ``next`` continues it.
     A page can hold fewer matches than ``count``: follow ``next``."""
@@ -180,13 +180,13 @@ def land_map(c, args):
             "zones": [view(z, "id", "name", "kind") for z in zones], "next": more}
 
 
-@op("nft.mint")
+@op("nft.mint", returns="token_id")
 def land_mint_nft(c, args):
     """Mint the LAND NFT for the active parcel ``land`` to its owner (an organization's stays in the realm's custody),
     optional ``prepared_by``. Returns ``token_id``."""
     land, collection = find(Land, args["land"]), find(NFTToken, LAND)
     if land.token_id or land.status != "active":
-        raise Fail(f"{land.id} is {land.status}{' and already minted' if land.token_id else ''}")
+        raise Conflict(f"{land.id} is {land.status}{' and already minted' if land.token_id else ''}")
     meta = {**header(c, "ggg.land/1", f"Land:{land.id}", f"Department:{realm_wide(args).id}",
                      prepared_by=args.get("prepared_by", "")),
             "x": land.x, "y": land.y, "width": land.width, "height": land.height, "kind": land.kind}
@@ -198,7 +198,7 @@ def land_mint_nft(c, args):
 def freeze(args, on):
     land = find(Land, args["land"])
     if land.status != ("active" if on else "disputed"):
-        raise Fail(f"{land.id} is {land.status}")
+        raise Conflict(f"{land.id} is {land.status}")
     if land.token_id:
         arg = (f"(record {{ token_id = {land.token_id} : nat; reason = opt {quote(args.get('reason', ''))} }})" if on
                else f"({land.token_id} : nat)")
@@ -207,24 +207,24 @@ def freeze(args, on):
     return {"land": land.id, "status": land.status}
 
 
-@op("nft.freeze", signing=True, parties=owners)
+@op("nft.freeze", signing=True, parties=owners, returns="land")
 def land_freeze(c, args):
     """Mark the active parcel ``land`` disputed and freeze its NFT, with optional ``reason``."""
     return (yield from freeze(args, True))
 
 
-@op("nft.freeze", signing=True, parties=owners)
+@op("nft.freeze", signing=True, parties=owners, returns="land")
 def land_unfreeze(c, args):
     """End the dispute on parcel ``land``: it becomes active again and its NFT is unfrozen."""
     return (yield from freeze(args, False))
 
 
-@op("self.data_manage", delegable=True)
+@op("self.data_manage", delegable=True, returns="zone")
 def zone_set(c, args):
     """Make ``zone`` (an h3 cell) your home, with optional ``name`` and ``kind``; it replaces your previous home."""
     zone = Zone[args["zone"]]
     if zone and zone.user not in ("", c.user):
-        raise Fail(f"zone {zone.id} is someone else's home")
+        raise Forbidden(f"zone {zone.id} is someone else's home")
     for old in [z for z in each(Zone, "user", c.user) if z.id != args["zone"]]:
         old.user = ""
     zone = zone or Zone(id=args["zone"])
@@ -232,13 +232,14 @@ def zone_set(c, args):
     return {"zone": zone.id}
 
 
-@op("self.data_manage", delegable=True)
+@op("self.data_manage", delegable=True, returns="zone")
 def zone_clear(c, args):
     """Stop having ``zone`` as your home."""
     zone = find(Zone, args["zone"])
     if zone.user != c.user:
-        raise Fail(f"zone {zone.id} is not your home")
+        raise Forbidden(f"zone {zone.id} is not your home")
     zone.user = ""
+    return {"zone": zone.id}
 
 
 # --- credentials: NFTs whose schemas the active codex declares ---
@@ -261,10 +262,10 @@ def signer(c, args):
     """The schema, organization and collection, once the caller holds a seat that signs it (I-AST-1)."""
     rule, org = schema_of(args["schema"]), find(Organization, args["organization"])
     if org.status != "active":
-        raise Fail(f"{org.id} is {org.status}")
+        raise Conflict(f"{org.id} is {org.status}")
     accepted = set(rule.get("positions", []))
     if not any(not a.agent and {a.position.id, a.position.title} & accepted for a in seats(c.by, org)):
-        raise Fail(f"you hold no seat at {org.id} that signs {args['schema']}")
+        raise Forbidden(f"you hold no seat at {org.id} that signs {args['schema']}")
     return rule, org, find(NFTToken, rule["collection"])
 
 
@@ -277,7 +278,7 @@ def credential_issue(c, args):
     issuer = f"Organization:{org.id}"
     for kind in filter(None, (rule["license"], collection.required_license)):
         if not active(issuer, kind):
-            raise Fail(f"{org.id} holds no active {kind} licence")
+            raise Forbidden(f"{org.id} holds no active {kind} licence")
     if collection.transferable and not rule.get("transferable"):
         raise Fail(f"{args['schema']} needs a non-transferable collection, not {collection.id}")
     fields, prepared_by = args.get("fields", {}), args.get("prepared_by", "")
@@ -285,7 +286,7 @@ def credential_issue(c, args):
     if private or not str(args.get("payload_hash") or "sha256:").startswith("sha256:"):
         raise Fail(f"only hashes, references and public fields go on a token (not {sorted(private) or 'payload_hash'})")
     if prepared_by and not seats(prepared_by, org):
-        raise Fail(f"{prepared_by} does not represent {org.id}")
+        raise Forbidden(f"{prepared_by} does not represent {org.id}")
     meta = {**header(c, args["schema"], args.get("subject", ""), issuer, license=active(issuer, rule["license"]).id,
                      prepared_by=prepared_by, expires_at=int(args.get("expires_at", 0)),
                      payload_hash=args.get("payload_hash", ""), payload_ref=args.get("payload_ref", "")), **fields}
@@ -293,7 +294,7 @@ def credential_issue(c, args):
     return {"collection": collection.id, "token_id": token_id, "header": meta}
 
 
-@op("credential.sign", signing=True)
+@op("credential.sign", signing=True, returns="token_id")
 def credential_revoke(c, args):
     """Revoke the ``schema`` credential ``token_id`` that ``organization`` issued (you need a seat there that signs
     it; the ledger's token header must name both): the token is frozen for good, with ``reason``."""

@@ -1,6 +1,6 @@
 from core import auth
 from core import chain
-from core.db import Fail, each, find, next_id, page_by, view
+from core.db import Conflict, Fail, Forbidden, each, find, next_id, page_by, view
 from ggg import Delegation, DelegationRequest, User
 from core.op import op, ops
 
@@ -28,7 +28,7 @@ def check_scope(perms, grantor=None):
         if p not in delegable():
             raise Fail(f"{p} is not a delegable permission")
         if grantor and "all" not in held and p not in held:
-            raise Fail(f"{grantor} does not hold {p}")
+            raise Forbidden(f"{grantor} does not hold {p}")
 
 
 def window(args):
@@ -93,7 +93,7 @@ def issue(grantor, delegate, perms, starts, expires, by, args, acceptance):
     return {"delegation": d.id, "status": d.status}
 
 
-@op("self.delegate")
+@op("self.delegate", returns="delegation")
 def delegation_grant(c, args):
     """Let ``delegate`` act for you with ``operations`` (permission names you hold) from ``starts_at`` (default now)
     until ``expires_at`` or for ``expires_in`` seconds, at most a year; optional ``label`` and ``description``.
@@ -104,36 +104,37 @@ def delegation_grant(c, args):
     check_scope(perms, c.user)
     starts, expires = window(args)
     if open_grant(c.user, delegate):
-        raise Fail(f"{delegate} already holds a grant from you; revoke it first")
+        raise Conflict(f"{delegate} already holds a grant from you; revoke it first")
     # An AI connection has no User row, hence no inbox: its grant is active at once.
     return issue(c.user, delegate, perms, starts, expires, c.by, args, User[delegate] is not None)
 
 
-@op("self.delegate")
+@op("self.delegate", returns="delegation")
 def delegation_accept(c, args):
     """Accept ``delegation``, a pending grant to you that has not expired, so it becomes active."""
     d = find(Delegation, args["delegation"])
     if d.delegate != c.user or d.status != "pending":
-        raise Fail(f"{d.id} is not a pending grant to you")
+        raise Conflict(f"{d.id} is not a pending grant to you")
     if status(d) == "expired":
-        raise Fail(f"{d.id} expired at {d.expires_at}")
+        raise Conflict(f"{d.id} expired at {d.expires_at}")
     d.status, d.accepted_at = "active", chain.now()
+    return {"delegation": d.id}
 
 
-@op("self.delegate")
+@op("self.delegate", returns="delegation")
 def delegation_revoke(c, args):
     """End ``delegation`` as its grantor or delegate; a delegate turning down a pending grant declines it.
     Returns ``status``."""
     d = find(Delegation, args["delegation"])
     if c.user not in (d.grantor, d.delegate) and "all" not in auth.permissions(c.user):
-        raise Fail(f"{d.id} is not yours")
+        raise Forbidden(f"{d.id} is not yours")
     if status(d) not in OPEN:
-        raise Fail(f"{d.id} is already {status(d)}")
+        raise Conflict(f"{d.id} is already {status(d)}")
     close(d, "declined" if d.status == "pending" and c.user == d.delegate else "revoked", c.by)
-    return {"status": d.status}
+    return {"delegation": d.id, "status": d.status}
 
 
-@op("self.join")
+@op("self.join", returns="request")
 def delegation_request(c, args):
     """Ask ``grantor`` to let you act for them with ``operations`` (permission names) from ``starts_at`` until
     ``expires_at`` or for ``expires_in`` seconds; optional ``label`` and ``description``. Returns ``request``.
@@ -150,9 +151,9 @@ def delegation_request(c, args):
     gone = {r.id: r for r in to_them + from_me
             if r.request_expires_at <= chain.now() or (r.grantor, r.delegate) == (grantor, c.user)}
     if sum(r.id not in gone for r in to_them) >= OPEN_REQUESTS_MAX:
-        raise Fail(f"{grantor} has too many open requests; try again later")
+        raise Conflict(f"{grantor} has too many open requests; try again later")
     if sum(r.id not in gone for r in from_me) >= OPEN_REQUESTS_MAX:
-        raise Fail("you have too many open requests; wait for answers first")
+        raise Conflict("you have too many open requests; wait for answers first")
     for r in gone.values():
         r.delete()
     r = DelegationRequest(id=next_id(DelegationRequest, "DR"), grantor=grantor, delegate=c.user,
@@ -162,14 +163,14 @@ def delegation_request(c, args):
     return {"request": r.id}
 
 
-@op("self.delegate")
+@op("self.delegate", returns="delegation")
 def delegation_request_decide(c, args):
     """Answer ``request``, made to you: ``approve`` true grants it, optionally for fewer ``operations`` or an earlier
     ``expires_at``, and replaces your open grant to that delegate; otherwise it is declined.
     Returns ``status``, and ``delegation`` when approved."""
     r = find(DelegationRequest, args["request"])
     if r.grantor != c.user or r.request_expires_at <= chain.now():
-        raise Fail(f"{r.id} is not an open request to you")
+        raise Conflict(f"{r.id} is not an open request to you")
     if not args.get("approve"):
         r.delete()
         return {"status": "declined"}
@@ -202,7 +203,7 @@ def delegation_list(c, args):
                                                for r in requests]}
 
 
-@op("self.data_view", read=True)
+@op("self.data_view", read=True, returns="operations")
 def delegable_operations(c, args):
     """The operations that can be delegated, each with the permission to name in a grant's ``operations``."""
     return {"operations": sorted(({"op": n, "permission": s["perm"]} for n, s in ops().items()

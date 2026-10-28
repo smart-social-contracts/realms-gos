@@ -1,5 +1,5 @@
 from core import chain
-from core.db import each
+from core.db import Forbidden, each
 
 CONTEXT = {"op": "String", "permission": "String", "user": "String", "signer": "String", "origin": "String",
            "read": "Bool", "public": "Bool", "signing": "Bool", "delegable": "Bool", "delegated": "Bool",
@@ -32,8 +32,16 @@ forbid (principal, action, resource)
 """
 
 
-class Denied(Exception):
-    pass
+class Denied(Forbidden):
+    """Refused by the permission check. ``permission`` is the one the caller needs, when holding it would do."""
+
+    def __init__(self, message, permission=None):
+        super().__init__(message)
+        self.permission = permission
+
+
+class SignIn(Denied):
+    kind = "unauthenticated"
 
 
 def _canister_decide(principal, action, resource, entities, context):
@@ -113,7 +121,7 @@ def authorize(user, by, name, spec, args, origin="user", declared=()):
     if origin == "replay":
         return
     if by == chain.ANONYMOUS and not spec["public"]:
-        raise Denied("sign in first")
+        raise SignIn("sign in first")
     held = permissions(user)
     needed = spec["perm_for"](args) if spec.get("perm_for") else spec["perm"]
     context = {
@@ -131,16 +139,17 @@ def authorize(user, by, name, spec, args, origin="user", declared=()):
                  "attrs": {"permissions": sorted(held), "banned": is_banned(user)}, "parents": []},
                 {"uid": {"type": "Realm::Realm", "id": "1"}, "attrs": {}, "parents": []}]
     if not decide(f'Realm::User::"{user}"', 'Realm::Action::"call"', 'Realm::Realm::"1"', entities, context):
-        raise Denied(reason(name, spec, context, held))
+        raise Denied(*reason(name, spec, context, held))
 
 
 def reason(name, spec, context, held):
+    """Why the call was refused, and the permission that would have allowed it, if one would."""
     if context["signing"] and context["signer_agent"]:
-        return f"{name} must be done by a human, not an agent"
+        return f"{name} must be done by a human, not an agent", None
     if context["delegated"]:
-        return f"{name} cannot be done under this power of attorney"
+        return f"{name} cannot be done under this power of attorney", None
     if context["user"] in context["parties"] or context["signer"] in context["parties"]:
-        return f"{name}: you are a party to this matter"
+        return f"{name}: you are a party to this matter", None
     if context["origin"] in ("extension", "codex") and name not in context["declared"]:
-        return f"{name} is not declared by this {context['origin']}"
-    return f"{name} needs {context['permission']}"
+        return f"{name} is not declared by this {context['origin']}", None
+    return f"{name} needs {context['permission']}", context["permission"] or None

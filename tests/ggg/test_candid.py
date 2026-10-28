@@ -91,3 +91,21 @@ def test_realm_info_converts_to_ggg():
     assert r["installed_version"] == setup.VERSION and r["network"] == "ic"
     ok("setup_launch", "frank")
     assert ggg_methods.ggg_realm_info()["status"] == {"Alpha": None}
+
+
+def test_every_operation_names_where_its_result_is():
+    """A GGG reply that is a record, a page or a value comes from the key its @op ``returns`` names: ggg_api
+    does not search the reply for it."""
+    import ggg_api
+    from core.op import ops
+
+    unnamed = []
+    for name, (_, reply_t) in ggg_api.METHODS.items():
+        if name in ggg_api.LOCAL or name in ggg_api.BUILD:
+            continue
+        t = ggg_api.unwrap(ggg_api.fields(reply_t)["Ok"]) if ggg_api.is_variant(reply_t) else reply_t
+        page = ggg_api.is_record(t) and {"items", "next"} <= set(ggg_api.fields(t))
+        if (ggg_api.entity(t) is not None or page or ggg_api.kind(t)[0] in ("prim", "vec")) \
+                and not ops()[name]["returns"]:
+            unnamed.append(f"{name} -> {t}")
+    assert not unnamed, "give these @op a returns=:\n" + "\n".join(unnamed)

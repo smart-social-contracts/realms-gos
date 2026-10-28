@@ -1,7 +1,7 @@
 import hashlib
 
 from core import chain
-from core.db import Fail, find, next_id, page, view
+from core.db import Conflict, Fail, Forbidden, find, next_id, page, view
 from ggg import Bid, BidScore, Contract, Department, Organization, Tender
 from api.justice import people
 from core.op import op
@@ -24,9 +24,9 @@ def vendor_people(args):
 
 def representing(c, org):
     if c.user not in people(f"Organization:{org.id}"):
-        raise Fail(f"you do not represent {org.id}")
+        raise Forbidden(f"you do not represent {org.id}")
     if org.status != "active":
-        raise Fail(f"{org.id} is {org.status}")
+        raise Conflict(f"{org.id} is {org.status}")
 
 
 def shown(bid):
@@ -47,12 +47,12 @@ def total(bid, rubric):
 def moving(args, before, after):
     t = find(Tender, args["tender"])
     if t.status not in before:
-        raise Fail(f"{t.id} is {t.status}")
+        raise Conflict(f"{t.id} is {t.status}")
     t.status = after
     return t
 
 
-@op("tender.manage", governed=lambda args: find(Department, args["requester"]))
+@op("tender.manage", governed=lambda args: find(Department, args["requester"]), returns="tender")
 def tender_create(c, args):
     """Draft a tender ``title`` for department ``requester``, with optional ``description``, the times it ``opens_at``
     and ``closes_at`` (seconds, closing after opening), and ``rubric``, criterion weights that are positive and add up
@@ -87,7 +87,7 @@ def tender_cancel(c, args):
     moving(args, ("draft", "open"), "cancelled")
 
 
-@op("realm.data_view", read=True)
+@op("realm.data_view", read=True, returns="tenders")
 def tender_list(c, args):
     """List tenders, or only those whose ``status`` is draft, open, closed, evaluation, contracted or cancelled, from
     row ``from`` (default 1) over ``count`` rows (default 100, at most 500); a filtered page may hold fewer.
@@ -106,7 +106,7 @@ def tender_get(c, args):
     return {"tender": {**data, "requester": t.requester.id, "bids": [shown(b) for b in t.bids]}}
 
 
-@op("bid.submit", delegable=True)
+@op("bid.submit", delegable=True, returns="bid")
 def bid_submit(c, args):
     """For ``vendor``, an active organization you represent, bid on the open ``tender``: ``payload_ref`` (the encrypted
     bid) and ``payload_hash``, the ``sha256:`` of ``price:nonce``. One bid per vendor and tender. Returns ``bid``."""
@@ -114,9 +114,9 @@ def bid_submit(c, args):
     representing(c, org)
     now = chain.now()
     if t.status != "open" or not t.opens_at <= now < t.closes_at:
-        raise Fail(f"{t.id} does not accept bids now")
+        raise Conflict(f"{t.id} does not accept bids now")
     if any(b.vendor.id == org.id for b in t.bids):
-        raise Fail(f"{org.id} already bid on {t.id}")
+        raise Conflict(f"{org.id} already bid on {t.id}")
     if not args.get("payload_ref") or not str(args.get("payload_hash", "")).startswith("sha256:"):
         raise Fail("a bid is an encrypted reference with its sha256 commitment")
     b = Bid(id=next_id(Bid, "B"), tender=t, vendor=org, submitted_at=now, payload_ref=args["payload_ref"],
@@ -124,14 +124,17 @@ def bid_submit(c, args):
     return {"bid": b.id}
 
 
-@op("bid.submit", delegable=True)
+@op("bid.submit", delegable=True, returns="bid")
 def bid_withdraw(c, args):
-    """Withdraw ``bid``, made for a vendor you represent, while its tender still takes bids."""
+    """Withdraw ``bid``, made for a vendor you represent, while its tender still takes bids. Returns the ``bid``
+    as it was."""
     b = find(Bid, args["bid"])
     representing(c, b.vendor)
     if b.tender.status != "open" or chain.now() >= b.tender.closes_at:
-        raise Fail(f"{b.tender.id} is closed")
+        raise Conflict(f"{b.tender.id} is closed")
+    gone = view(b)
     b.delete()
+    return {"bid": gone}
 
 
 @op("tender.manage", governed=requester)
@@ -140,7 +143,7 @@ def bids_reveal(c, args):
     ``{price, nonce}``, which must match its hash and sets its price. Returns ``revealed``, the number of bids."""
     t = find(Tender, args["tender"])
     if t.status not in ("open", "closed") or chain.now() < t.closes_at:
-        raise Fail(f"bids on {t.id} stay sealed until {t.closes_at}")
+        raise Conflict(f"bids on {t.id} stay sealed until {t.closes_at}")
     bids, openings = {b.id: b for b in t.bids}, args.get("openings", {})
     for key, o in openings.items():
         if key not in bids or seal(o["price"], o["nonce"]) != bids[key].payload_hash:
@@ -153,14 +156,14 @@ def bids_reveal(c, args):
     return {"revealed": len(bids)}
 
 
-@op("bid.evaluate", signing=True, parties=vendor_people)
+@op("bid.evaluate", signing=True, parties=vendor_people, returns="bid")
 def bid_score(c, args):
     """Score the revealed ``bid``: ``scores`` maps rubric criteria to marks from 0 to 10; scoring again replaces your
     marks. Returns ``bid`` and its weighted ``score`` out of 100, averaged over evaluators."""
     b = find(Bid, args["bid"])
     rubric = b.tender.rubric
     if b.tender.status != "evaluation" or b.sealed:
-        raise Fail(f"{b.id} is not open for evaluation")
+        raise Conflict(f"{b.id} is not open for evaluation")
     marks = {k: int(v) for k, v in (args.get("scores") or {}).items()}
     if not marks or any(k not in rubric or not 0 <= v <= MAX_MARK for k, v in marks.items()):
         raise Fail(f"scores are 0-{MAX_MARK} on the rubric's criteria: {', '.join(rubric)}")
@@ -172,7 +175,7 @@ def bid_score(c, args):
     return {"bid": b.id, "score": b.score}
 
 
-@op("tender.manage", signing=True, governed=requester)
+@op("tender.manage", signing=True, governed=requester, returns="contract")
 def tender_award(c, args):
     """Award ``tender`` to ``bid`` (default the best-scored revealed bid), signing an active contract between the
     requester and the vendor; a lower-scored bid needs a ``justification``. Returns ``winner``, ``score``,
@@ -180,7 +183,7 @@ def tender_award(c, args):
     t = find(Tender, args["tender"])
     bids = [b for b in t.bids if not b.sealed]
     if t.status != "evaluation" or not bids:
-        raise Fail(f"{t.id} has no evaluated bids")
+        raise Conflict(f"{t.id} has no evaluated bids")
     best = max(bids, key=lambda b: b.score)
     b = find(Bid, args["bid"]) if args.get("bid") else best
     if b.id not in {x.id for x in bids}:

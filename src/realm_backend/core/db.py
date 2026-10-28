@@ -18,7 +18,34 @@ class Row(Entity):
 
 
 class Fail(Exception):
-    """A refusal the caller should see: raised before anything is written."""
+    """A refusal the caller should see: raised before anything is written. ``kind`` is GGG's error for it, and
+    the reply carries it: Fail itself is a bad argument, the subclasses below the other reasons."""
+
+    kind = "invalid_argument"
+
+
+class NotFound(Fail):
+    """A record the call needs does not exist."""
+
+    kind = "not_found"
+
+
+class Forbidden(Fail):
+    """The caller may not do this, beyond what the permission check decides: not theirs, not a party."""
+
+    kind = "forbidden"
+
+
+class Conflict(Fail):
+    """The call contradicts the current state: already done, closed, still open, in the wrong status."""
+
+    kind = "conflict"
+
+
+class Unavailable(Fail):
+    """The realm cannot do this yet: something it needs is not set up."""
+
+    kind = "unavailable"
 
 
 class Json(String):
@@ -36,7 +63,7 @@ class Json(String):
 def find(cls, key):
     row = cls[str(key)] if key not in (None, "") else None
     if row is None:
-        raise Fail(f"unknown {cls.__name__} '{key}'")
+        raise NotFound(f"unknown {cls.__name__} '{key}'")
     return row
 
 

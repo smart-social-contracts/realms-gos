@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, deref, each, find, next_id, page, page_by, view
+from core.db import Conflict, Forbidden, deref, each, find, next_id, page, page_by, view
 from ggg import Calendar, Department, License, Organization
 from core.op import op
 
@@ -36,7 +36,7 @@ def applicant(ref, user):
     entity = deref(ref)
     org = isinstance(entity, Organization)
     if not (ref == f"User:{user}" or org and entity.status == "active" and user in (entity.admins or [])):
-        raise Fail(f"you cannot apply for {ref}")
+        raise Forbidden(f"you cannot apply for {ref}")
 
 
 def application(c, kind, holder, department, evidence_ref, conditions):
@@ -49,7 +49,7 @@ def application(c, kind, holder, department, evidence_ref, conditions):
     return {"license": lic.id}
 
 
-@op("license.apply", delegable=True)
+@op("license.apply", delegable=True, returns="license")
 def license_apply(c, args):
     """Apply for a licence of ``kind`` for ``holder`` (default you, or ``Organization:id`` of one you administer), to
     issuing ``department`` (optional), with optional ``evidence_ref`` and ``conditions``. Returns ``license``."""
@@ -57,25 +57,25 @@ def license_apply(c, args):
                        args.get("evidence_ref", ""), args.get("conditions", {}))
 
 
-@op("license.apply", delegable=True)
+@op("license.apply", delegable=True, returns="license")
 def license_renew(c, args):
     """Apply to renew the active or expired ``license``, optionally with new ``evidence_ref``. Approving the renewal
     expires the old licence. Returns the new application's ``license``."""
     old = find(License, args["license"])
     if old.status not in ("active", "expired"):
-        raise Fail(f"{old.id} is {old.status}")
+        raise Conflict(f"{old.id} is {old.status}")
     return application(c, old.kind, old.holder, old.issued_by.id if old.issued_by else None,
                        args.get("evidence_ref", old.evidence_ref), {**(old.conditions or {}), "renews": old.id})
 
 
-@op("license.issue", signing=True, parties=holders)
+@op("license.issue", signing=True, parties=holders, returns="license")
 def license_decide(c, args):
     """Issue the applied-for ``license`` if ``approve`` is true, else reject it; issuing ``department`` defaults to
     the one applied to. On approval: ``expires_at`` (default now plus the licence review cycle, 2 years) and extra
     ``conditions``. Returns ``status`` and ``expires_at``."""
     lic = find(License, args["license"])
     if lic.status != "applied":
-        raise Fail(f"{lic.id} is {lic.status}, not an application")
+        raise Conflict(f"{lic.id} is {lic.status}, not an application")
     lic.issued_by = find(Department, args.get("department") or (lic.issued_by.id if lic.issued_by else ""))
     if not args.get("approve"):
         lic.status = "rejected"
@@ -90,23 +90,23 @@ def license_decide(c, args):
     return {"license": lic.id, "status": lic.status, "expires_at": lic.expires_at}
 
 
-@op("license.revoke", signing=True, parties=holders)
+@op("license.revoke", signing=True, parties=holders, returns="license")
 def license_suspend(c, args):
     """Suspend the active ``license``, or with ``resume`` true reinstate a suspended one."""
     lic = find(License, args["license"])
     before, after = ("suspended", "active") if args.get("resume") else ("active", "suspended")
     if lic.status != before:
-        raise Fail(f"{lic.id} is {lic.status}")
+        raise Conflict(f"{lic.id} is {lic.status}")
     lic.status = after
     return {"license": lic.id, "status": after}
 
 
-@op("license.revoke", signing=True, parties=holders)
+@op("license.revoke", signing=True, parties=holders, returns="license")
 def license_revoke(c, args):
     """Revoke the active or suspended ``license`` for good."""
     lic = find(License, args["license"])
     if lic.status not in ("active", "suspended"):
-        raise Fail(f"{lic.id} is {lic.status}")
+        raise Conflict(f"{lic.id} is {lic.status}")
     lic.status = "revoked"
     return {"license": lic.id, "status": lic.status}
 
@@ -115,7 +115,7 @@ def shown(lic):
     return {**view(lic, *SHOWN), "issued_by": lic.issued_by.id if lic.issued_by else "", "valid": valid(lic)}
 
 
-@op(None, read=True, public=True)
+@op(None, read=True, public=True, returns="licenses")
 def license_list(c, args):
     """One page of licences (``from``, ``count``), optionally filtered by ``holder``, ``kind`` and ``status``; ``next``
     continues it. A page can hold fewer matches than ``count``: follow ``next``."""

@@ -73,28 +73,46 @@ with `@op`. Its name is the function name. It takes `c` (the call) and `args` (a
 a dict.
 
 ```python
-from core.db import Fail, find
+from core.db import Conflict, Fail, find
 from core.op import op
 
 
-@op("proposal.vote", delegable=True)
+@op("proposal.vote", delegable=True, returns="vote")
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``."""
-    p = find(Proposal, args["proposal"])          # Fail("unknown Proposal 'P-9'") if missing
+    p = find(Proposal, args["proposal"])          # NotFound("unknown Proposal 'P-9'") if missing
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
+    if p.status != "voting":
+        raise Conflict(f"{p.id} is not open for voting")
     ...
     return {"vote": v.id}
 ```
 
 What an operation does **not** contain: permission checks (Cedar does them), `try/except`
-(dispatch turns `Fail` into an error reply), JSON handling, response classes, or audit code.
+(dispatch turns a refusal into an error reply), JSON handling, response classes, or audit code.
+
+### Refusals
+
+Raise the exception that says why. Dispatch replies `{"ok": false, "error": ..., "kind": ...}`, and
+the `ggg_` methods turn `kind` into the matching `GggError`.
+
+| Raise | `kind` | When |
+|---|---|---|
+| `Fail` | `invalid_argument` | The arguments are wrong, whatever the realm holds |
+| `NotFound` | `not_found` | A record the call needs doesn't exist (`find` raises it) |
+| `Forbidden` | `forbidden` | Not the caller's to do, beyond what Cedar decides: not theirs, not a party |
+| `Conflict` | `conflict` | The realm's current state contradicts it: already done, closed, still open, wrong status |
+| `Unavailable` | `unavailable` | Something the realm needs is not set up |
+
+`tests/ggg/test_refusals.py` fails on a plain `Fail` whose message talks about a record's state or
+its owner.
 
 ### `@op` arguments
 
 ```python
 op(perm, read=False, delegable=False, governed=None, signing=False,
-   parties=None, public=False, perm_for=None)
+   parties=None, public=False, perm_for=None, returns=None)
 ```
 
 | Argument | Meaning |
@@ -107,6 +125,7 @@ op(perm, read=False, delegable=False, governed=None, signing=False,
 | `parties` | `parties(args) -> principals` with a stake in the matter; they may not perform it. |
 | `public` | Anyone may call it, including anonymous callers. |
 | `perm_for` | `perm_for(args) -> permission`, when the permission depends on the arguments. |
+| `returns` | The key of the reply that holds the model's result: a record's id, a page's list, a value, or for a governed operation the id of the record it created. Without it, the whole reply is the result. A `tests/ggg/test_candid.py` test requires it when the `ggg_` method replies with a record, a page or a value. |
 
 ### The call object `c`
 

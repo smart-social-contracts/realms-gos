@@ -86,7 +86,7 @@ def extension_call(c, args):
     if not ext.source:
         raise Fail(f"{ext.id} has no backend")
     if not available(ext, holds(c.user)):
-        raise Fail(f"{ext.id} is not available to you")
+        raise Forbidden(f"{ext.id} is not available to you")
 
     def rpc(name, payload):
         return json.loads(run(dispatch(name, json.dumps(payload), origin="extension", signer=c.user,

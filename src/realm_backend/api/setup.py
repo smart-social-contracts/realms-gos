@@ -5,7 +5,7 @@ import constants
 import ggg
 from core import sandbox
 from api import tasks
-from core.db import Fail, page, view
+from core.db import Conflict, Fail, Unavailable, page, view
 from api.extensions import trust
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
@@ -166,12 +166,12 @@ def setup_state(c, args):
 def setup_step(c, args):
     """One setup step: ``step`` (install, realm, branding, tokens, infrastructure, trust_policy) and its values.
     The values are the fields of the matching realm_configure operation; install takes network, can_test_mode
-    and founder."""
+    and founder. Returns the setup progress, as setup_state."""
     step, values, d = args["step"], {k: v for k, v in args.items() if k != "step"}, draft()
     if Realm["1"].status != "setup":
-        raise Fail("the realm has launched: configuration is governed now")
+        raise Conflict("the realm has launched: configuration is governed now")
     if step == "install" and "install" in d["done"]:
-        raise Fail("the install facts are set once, by the installer")
+        raise Conflict("the install facts are set once, by the installer")
     if step != "install" and step not in FIELDS:
         raise Fail(f"unknown setup step '{step}'")
     if step == "install":
@@ -180,24 +180,25 @@ def setup_step(c, args):
         configure(FIELDS[step], values)
     d["done"] = sorted(set(d["done"]) | {step})
     remember("setup", d)
-    return {"done": d["done"]}
+    return setup_state(c, {})
 
 
-@op("realm.configure")
+@op("realm.configure", returns="realm")
 def setup_launch(c, args):
-    """Open the realm (status ``alpha``). The founder's setup rights end; configuration is governed from now on."""
+    """Open the realm (status ``alpha``). The founder's setup rights end; configuration is governed from now on.
+    Returns ``realm`` and its ``status``."""
     realm, d = Realm["1"], draft()
     if realm.status != "setup":
-        raise Fail("the realm has already launched")
+        raise Conflict("the realm has already launched")
     if not realm.name:
-        raise Fail("name the realm first")
+        raise Conflict("name the realm first")
     if d.get("founder"):
         founder = User[d["founder"]]
         founder.profiles = [p for p in founder.profiles if p.id != "founder"]
     realm.status = "alpha"
     remember("setup", {**d, "launched_at": chain.now()})
     yield from codex.hook("on_stage_change", {"stage": "alpha"})
-    return {"status": realm.status}
+    return {"realm": realm.id, "status": realm.status}
 
 
 @op("realm.configure", governed=launched)
@@ -238,7 +239,7 @@ def text(value):
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-@op("realm.register", governed=launched)
+@op("realm.register", governed=launched, returns="registry")
 def realm_register(c, args):
     """List the realm in a realm registry: ``registry`` (canister id), optional ``url`` and ``backend_url``."""
     realm = Realm["1"]
@@ -273,7 +274,7 @@ def orchestration_decide(c, args):
     if method is None:
         raise Fail("decision is approve or reject")
     if not baton:
-        raise Fail("no Casals baton is configured")
+        raise Unavailable("no Casals baton is configured")
     reply = json.loads((yield from chain.call_text(baton, method, str(args["action_id"]))))
     if reply.get("ok") is False:
         raise Fail(f"the baton refused: {reply.get('error')}")
@@ -282,15 +283,15 @@ def orchestration_decide(c, args):
 
 @op("realm.monitor", read=True)
 def realm_monitor(c, args):
-    """Health figures: status, running and installed versions, counts of operations, events and rows per entity,
-    and the last accepted ``upgrade``."""
+    """Health figures: status, running and installed versions, cycles, stable ``memory`` in bytes, counts of
+    operations, events and rows per entity, and the last accepted ``upgrade``."""
     realm = Realm["1"]
-    return {"status": realm.status, "version": VERSION, "installed_version": realm.installed_version,
-            "operations": len(ops()), "events": Event.max_id(), "rows": {n: getattr(ggg, n).count() for n in COUNTED},
-            "upgrade": realm.manifest_data.get("upgrade", {})}
+    return {"status": realm.status, "version": VERSION, "installed_version": realm.installed_version or VERSION,
+            "cycles": chain.cycles(), "memory": chain.memory(), "operations": len(ops()), "events": Event.max_id(),
+            "rows": {n: getattr(ggg, n).count() for n in COUNTED}, "upgrade": realm.manifest_data.get("upgrade", {})}
 
 
-@op("db.export", read=True)
+@op("db.export", read=True, returns="rows")
 def realm_export(c, args):
     """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it."""
     cls = getattr(ggg, args["entity"], None)

@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, deref, find, next_id, page_by, ref, view
+from core.db import Forbidden, deref, find, next_id, page_by, ref, view
 from ggg import Event, Notification
 from core.op import op, ops
 from api.proposals import appointed
@@ -22,11 +22,11 @@ def inbox(c, args):
     """``recipient`` (default "User:<you>"), which must be you or a department or organization where you hold a seat."""
     recipient = args.get("recipient") or f"User:{c.user}"
     if recipient not in addressed_to(c.user):
-        raise Fail(f"you do not read {recipient}'s notifications")
+        raise Forbidden(f"you do not read {recipient}'s notifications")
     return recipient
 
 
-@op("self.data_view", read=True, delegable=True)
+@op("self.data_view", read=True, delegable=True, returns="notifications")
 def notification_list(c, args):
     """The notifications of ``recipient`` (default "User:<you>"; or "Department:<id>", "Organization:<id>" where
     you hold a seat), oldest first, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1);
@@ -46,14 +46,14 @@ def notification_read(c, args):
     else:
         rows, nxt = [find(Notification, args["notification"])], None
         if rows[0].recipient not in addressed_to(c.user):
-            raise Fail(f"notification {rows[0].id} is not addressed to you")
+            raise Forbidden(f"notification {rows[0].id} is not addressed to you")
     fresh = [n for n in rows if c.user not in n.read_by]
     for n in fresh:
         n.read_by = n.read_by + [c.user]
     return {"read": len(fresh), "next": nxt}
 
 
-@op("notification.send")
+@op("notification.send", returns="notification")
 def notification_send(c, args):
     """Notify ``recipient`` ("User:<id>", "Department:<id>" or "Organization:<id>") with ``title`` and optional
     ``body``, ``href`` and ``topic``; you are the sender. Returns ``notification``."""
@@ -62,7 +62,7 @@ def notification_send(c, args):
                                    args.get("topic", ""), c.user)}
 
 
-@op("realm.monitor", read=True)
+@op("realm.monitor", read=True, returns="events")
 def events(c, args):
     """The audit log, newest first: ``count`` events (default 100, at most 500) from id ``from`` (default the latest)
     down; ``next`` continues it."""

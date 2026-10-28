@@ -26,16 +26,20 @@ class Call:
         return self.user != self.by
 
 
-def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None):
+def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
+       returns=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
     the call into a proposal. parties(args) -> principals with a stake, who may not perform it.
     perm_for(args) -> the permission this call needs, when it depends on the arguments (``perm`` otherwise).
+    returns -> the key of the reply holding the model's result: the record (by id), the list of a page, the value,
+    or for a governed operation the id of the record it created. Without it, the reply itself is the result.
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
-                            "signing": signing, "parties": parties, "public": public, "perm_for": perm_for}
+                            "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
+                            "returns": returns}
         return fn
     return wrap
 
@@ -50,13 +54,17 @@ def ops():
 
 
 def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, proposal=""):
-    """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded."""
+    """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded.
+
+    A refusal replies ``ok`` false with the ``error`` for people and its ``kind`` for programs: GGG's error in
+    snake case (``not_found``, ``forbidden``, ``conflict``, ...), see core.db.Fail."""
     name = fn if isinstance(fn, str) else fn.__name__
     spec = OPS.get(name) or ops().get(name)
     if spec is None:
-        return json.dumps({"ok": False, "error": f"unknown operation '{name}'"})
+        return json.dumps({"ok": False, "error": f"unknown operation '{name}'", "kind": Fail.kind})
     if query and not spec["read"]:
-        return json.dumps({"ok": False, "error": f"{name} changes the realm: call it with run, not read"})
+        return json.dumps({"ok": False, "error": f"{name} changes the realm: call it with run, not read",
+                           "kind": Fail.kind})
     try:
         args = json.loads(arg or "{}") if isinstance(arg, str) else dict(arg)
         by = signer or chain.caller()
@@ -76,11 +84,11 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
             audit(name, user, by, origin, args, out)
         return json.dumps({"ok": True, **out})
     except auth.Denied as e:
-        return json.dumps({"ok": False, "error": str(e), "denied": True})
+        return json.dumps({"ok": False, "error": str(e), "kind": e.kind, "permission": e.permission, "denied": True})
     except Fail as e:
-        return json.dumps({"ok": False, "error": str(e)})
+        return json.dumps({"ok": False, "error": str(e), "kind": e.kind})
     except KeyError as e:
-        return json.dumps({"ok": False, "error": f"missing {e}"})
+        return json.dumps({"ok": False, "error": f"missing {e}", "kind": Fail.kind})
     except Exception as e:
         chain.trap(f"{name}: {e}")
 

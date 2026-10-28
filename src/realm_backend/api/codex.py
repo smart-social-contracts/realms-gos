@@ -2,7 +2,7 @@ import json
 
 from core import chain
 from core import sandbox
-from core.db import Fail, find, first, page, view
+from core.db import Conflict, Fail, find, first, page, view
 from ggg import Codex, Realm
 from core.op import op
 from api import extensions
@@ -61,7 +61,7 @@ def hook(name, context=None):
     return out
 
 
-@op("codex.install", governed=realm_wide)
+@op("codex.install", governed=realm_wide, returns="codex")
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
     The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``."""
@@ -78,7 +78,7 @@ def codex_install(c, args):
         raise Fail(f"a codex may declare at most {sandbox.MAX_ACTIONS} read operations")
     key, current = f"{manifest['id']}@{manifest['version']}", active()
     if current and current.id == key:
-        raise Fail(f"{key} is already active")
+        raise Conflict(f"{key} is already active")
     row = Codex[key] or Codex(id=key)
     row.version, row.checksum, row.manifest, row.source = manifest["version"], digest, manifest, source
     row.capabilities, row.installed_at = manifest.get("capabilities", []), chain.now()
@@ -94,7 +94,7 @@ def codex_uninstall(c, args):
     """Deactivate the active codex; the realm then runs without one."""
     codex = active()
     if codex is None:
-        raise Fail("no codex is installed")
+        raise Conflict("no codex is installed")
     codex.status = "inactive"
     return {"codex": codex.id}
 
@@ -104,7 +104,7 @@ def codex_revert(c, args):
     """Go back to the version the active codex replaced, if this realm still runs its codex API."""
     codex = active()
     if codex is None or not codex.previous:
-        raise Fail("there is no previous codex to revert to")
+        raise Conflict("there is no previous codex to revert to")
     prior = find(Codex, codex.previous)
     runnable(prior.manifest or {})
     codex.status, prior.status = "reverted", "active"

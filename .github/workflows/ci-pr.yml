@@ -77,7 +77,7 @@ jobs:
       - run: |
           pip install -e cli/
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest pytest-cov
       - name: CLI unit tests
         run: pytest -v cli/tests/ || true
       - name: Extension privilege ratchet
@@ -146,9 +146,23 @@ jobs:
         # tests/ggg. Its own process: its fake chain replaces the ggg entities loaded above.
         run: |
           python3 scripts/ggg_candid.py --check
-          pytest -q tests/ggg
+          pytest -q tests/ggg --cov=src/realm_backend --cov-report=
           # Again, each operation through its ggg_ method, every reply checked against ggg.did.
           GGG_MIRROR=strict pytest -q tests/ggg
+      - name: GGG coverage floors
+        # A ratchet, not a target: each floor is the level reached when it was set, so coverage can
+        # only go up. Raise a floor when the number above it grows; ggg_api.py is lowest while the
+        # mirror harness (tests/ggg/mirror.py) still reports mismatches. Generated files are left out.
+        run: |
+          coverage report --include='src/realm_backend/api/*' --fail-under=95
+          coverage report --include='src/realm_backend/ggg_api.py' --fail-under=60
+          coverage report --omit='src/realm_backend/ggg_did.py,src/realm_backend/ggg_methods.py' --skip-covered
+          coverage xml -o coverage-ggg.xml --omit='src/realm_backend/ggg_did.py,src/realm_backend/ggg_methods.py'
+      - name: Upload the GGG coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-ggg
+          path: coverage-ggg.xml
       - name: Host locale parity and sidebar labels
         run: |
           pytest -q tests/backend/test_sidebar_labels.py \

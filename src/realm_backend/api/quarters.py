@@ -4,7 +4,7 @@ import math
 
 from core import chain
 from api import proposals
-from core.db import Fail, each, find, first, next_id, view
+from core.db import Conflict, Fail, Forbidden, each, find, first, next_id, view
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
 from core.op import op, run
@@ -104,19 +104,19 @@ def ask(cid, name, payload):
 def registered(principal):
     q = Quarter[principal]
     if q is None:
-        raise Fail(f"{principal} is not a registered quarter canister")
+        raise Forbidden(f"{principal} is not a registered quarter canister")
     return q
 
 
 def from_capital(c):
     if not federated() or c.by != capital():
-        raise Fail("only this quarter's capital may send this")
+        raise Forbidden("only this quarter's capital may send this")
 
 
 def record(c, args):
     """A quarter's report reaches the capital: population, codex and optionally a federal vote leg."""
     if federated():
-        raise Fail("quarters report to their capital")
+        raise Conflict("quarters report to their capital")
     q = registered(c.by)
     if args.get("leg"):
         from api import federation
@@ -149,17 +149,17 @@ def apply_directory(reply):
     realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index}
 
 
-@op("quarter.register", governed=proposals.realm_wide)
+@op("quarter.register", governed=proposals.realm_wide, returns="quarter")
 def quarter_register(c, args):
     """On the capital, add canister ``quarter`` to the federation, with optional ``name`` (default "Quarter <index>").
     Returns ``quarter`` and its ``index``."""
     cid = args["quarter"]
     if federated():
-        raise Fail("only the capital registers quarters")
+        raise Forbidden("only the capital registers quarters")
     if Quarter[cid] or cid == chain.self_id():
-        raise Fail(f"{cid} is already part of this federation")
+        raise Conflict(f"{cid} is already part of this federation")
     if Quarter.count() >= MAX_QUARTERS:
-        raise Fail(f"a federation has at most {MAX_QUARTERS} quarters")
+        raise Conflict(f"a federation has at most {MAX_QUARTERS} quarters")
     index = max([q.index for q in known()] + [0]) + 1
     Quarter(id=cid, name=args.get("name", f"Quarter {index}"), index=index, last_activity_at=chain.now())
     r = realm()
@@ -171,7 +171,7 @@ def quarter_register(c, args):
 def quarter_deregister(c, args):
     """On the capital, remove ``quarter`` from the federation."""
     if federated():
-        raise Fail("only the capital deregisters quarters")
+        raise Forbidden("only the capital deregisters quarters")
     find(Quarter, args["quarter"]).delete()
 
 
@@ -183,7 +183,7 @@ def quarter_configure(c, args):
     q = find(Quarter, args["quarter"]) if args.get("quarter") else None
     status, rule = args.get("status"), args.get("rule")
     if status and (q is None or status not in MOVES.get(q.status, ())):
-        raise Fail(f"a {q.status if q else 'missing'} quarter cannot become {status}")
+        raise Conflict(f"a {q.status if q else 'missing'} quarter cannot become {status}")
     if rule and (rule.get("kind", RULE["kind"]) not in KINDS or rule.get("absent", "wait") not in ABSENT
                  or not 0 <= int(rule.get("threshold", 50)) < 100):
         raise Fail(f"a federal rule has kind {KINDS}, absent {ABSENT} and a threshold below 100")
@@ -207,7 +207,7 @@ def quarter_secede(c, args):
     """On a quarter, leave the federation: tell the capital, then run as an independent realm. Returns ``left``, the
     former capital."""
     if not federated():
-        raise Fail("only a quarter of a federation can secede")
+        raise Forbidden("only a quarter of a federation can secede")
     old = capital()
     yield from ask(old, "federation_message", {"topic": "quarter.secede", "body": {}})
     r = realm()
@@ -223,7 +223,7 @@ def quarter_join_federation(c, args):
     "capital"). The capital registers this realm separately. Returns ``capital``."""
     r, cid = realm(), args["capital"]
     if r.is_quarter or cid == chain.self_id():
-        raise Fail("this realm already belongs to a federation")
+        raise Conflict("this realm already belongs to a federation")
     r.is_quarter, r.is_capital, r.federation_realm_id = True, False, cid
     # The capital becomes a known quarter so its calls are accepted (I-FED-4).
     Quarter(id=cid, name=args.get("name", "capital"), index=0, status="active")
@@ -255,14 +255,14 @@ def scale_status(c, args):
     return scale()
 
 
-@op("self.change_quarter", delegable=True)
+@op("self.change_quarter", delegable=True, returns="forward")
 def self_change_quarter(c, args):
     """Move your membership to ``quarter``, another active quarter of the federation; here you become a guest.
     Returns ``forward`` and ``home_quarter``."""
     dest, here = args["quarter"], chain.self_id()
     member, user = Member[c.user], User[c.user]
     if member is None or member.status != "active" or user is None:
-        raise Fail("only an active member of this quarter can move")
+        raise Forbidden("only an active member of this quarter can move")
     q = Quarter[dest]
     if q is None or q.status != "active":
         raise Fail(f"{dest} is not an active quarter of this federation")
@@ -299,19 +299,19 @@ def quarter_sync(c, args):
 @op("quarter.sync")
 def quarter_report(c, args):
     """On the capital, record a quarter's ``population``, ``codex_id``, ``codex_version`` and optional federal vote
-    ``leg``. Returns ``drifting``: whether its codex differs from the capital's."""
+    ``leg``. Returns the ``quarter`` and ``drifting``: whether its codex differs from the capital's."""
     q = record(c, args)
-    return {"drifting": drifting(q.codex_version)}
+    return {"quarter": q.id, "drifting": drifting(q.codex_version)}
 
 
 def on_arrive(c, body):
     who = body["user"]
     if digest({"subject": f"User:{who}", "from": c.by, "to": chain.self_id(), "moved_at": body["moved_at"]}) \
             != body["signature"]:
-        raise Fail("the forward's signature does not match")
+        raise Forbidden("the forward's signature does not match")
     m = Member[who]
     if m and m.status == "banned":
-        raise Fail(f"{who} is banned here")
+        raise Forbidden(f"{who} is banned here")
     user = User[who] or User(id=who, nickname=body.get("nickname", ""), avatar=body.get("avatar", ""))
     user.home_quarter, user.profiles = chain.self_id(), [UserProfile["member"]]
     m = m or Member(id=who, joined_at=chain.now())

@@ -42,16 +42,9 @@ MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rub
         ("Fund", "balances"): ("symbol", "amount")}
 # GGG lists of records that Realms GOS keeps as a map from one field to the rest.
 KEYED = {("BidsRevealArgs", "openings"): "bid"}
-# Words of the refusals operations raise as failures rather than through Cedar: they become Forbidden.
-REFUSALS = ("not yours", "not your ", "you are not", "do not administer", "do not manage", "not shared with you",
-            "may not", "not addressed to you", "not available to you")
-# Words of refusals because of a record's state, besides "<id> is <status>": they become Conflict.
-CONFLICTS = ("already", "exists", "still", "not open", "not active", "not a draft", "not being voted", "not final",
-             "not a pending", "not an open", "only a draft", "only an adopted", "only an open", "can only go")
 # Set to a list by the tests: every required field a reply had no value for is added to it.
 STRICT = None
 KINDS = {}
-STATUSES = set()
 
 
 class BadArgument(Exception):
@@ -209,7 +202,7 @@ def to_ggg(x, t):
         return "" if x is None else ident(x)
     if t == "null":
         return None
-    return int(x or 0)
+    return len(x) if isinstance(x, list) else int(x or 0)  # a count, where the operation lists what it counted
 
 
 def record(x, name):
@@ -537,35 +530,18 @@ def run(op, arg_t, arg, reply_t):
         args = request(op, arg_t, arg)
     except BadArgument as e:
         return refused(op, e)
-    before = BEFORE[op](args) if op in BEFORE else None
     out = yield from dispatch(op, json.dumps(args))
-    out = json.loads(out)
-    if before is not None:
-        out["before"] = before
-    return reply(op, args, out, reply_t)
-
-
-def statuses():
-    """Every lifecycle status of the model, as Realms GOS writes it (``voting``, ``in_review``)."""
-    if not STATUSES:
-        STATUSES.update(snake(case) for name, (k, cases) in SCHEMA.items()
-                        if k == "variant" and name.endswith("Status") for case in cases)
-    return STATUSES
+    return reply(op, args, json.loads(out), reply_t)
 
 
 def error(out):
-    message = out.get("error", "")
-    if out.get("denied"):
-        if message == "sign in first":
-            return {"Unauthenticated": None}
+    """The GggError for a refusal: dispatch names its kind (core.db.Fail)."""
+    kind, message = out.get("kind", "invalid_argument"), out.get("error", "")
+    if kind == "forbidden":
         return {"Forbidden": {"permission": out.get("permission"), "message": message}}
-    if message.startswith("unknown ") and "operation" not in message:
-        return {"NotFound": None}
-    if any(m in message for m in CONFLICTS) or any(f" is {s}" in message for s in statuses()):
-        return {"Conflict": message}
-    if message.startswith("only ") or any(m in message for m in REFUSALS):
-        return {"Forbidden": {"permission": None, "message": message}}
-    return {"InvalidArgument": message}
+    if kind in ("not_found", "unauthenticated"):
+        return {camel(kind): None}
+    return {camel(kind): message}
 
 
 def reply(op, args, out, reply_t):
@@ -575,9 +551,7 @@ def reply(op, args, out, reply_t):
         if "NotFound" in err and ok_t.startswith("opt "):
             return {"Ok": None}
         return {"Err": err}
-    raw = BUILD[op](out, args) if op in BUILD else default(op, out, args, unwrap(ok_t))
-    if raw is out and entity(unwrap(ok_t)) and ok_t.startswith("opt "):
-        raw = None  # an optional row the operation did not name: a declined request
+    raw = BUILD[op](out, args) if op in BUILD else result(op, out, ok_t)
     return {"Ok": to_ggg(raw, ok_t)}
 
 
@@ -590,33 +564,19 @@ def load(t, key):
     return cls[str(key)]
 
 
-def default(op, out, args, t):
-    """The reply most operations need: the change made, the row touched, or a page of rows."""
+def result(op, out, t):
+    """The model's result in an operation's reply: under the key its @op ``returns`` names (a record by id, a page's
+    list, a value, the id a governed operation created), or the reply itself."""
+    key, optional, t = ops()[op]["returns"], t.startswith("opt "), unwrap(t)
     if t == "Governed":
-        if out.get("requires_vote"):
-            return {"Proposed": out["proposal"]}
-        return {"Done": next((v for k, v in out.items() if isinstance(v, str) and k != "status"), None)}
-    if entity(t) is not None:
-        word = op.split("_")[0]
-        keys = (OUT_KEY.get(op), snake(t), snake(t).split("_")[-1], word)
-        key = next((out[k] for k in keys if k and isinstance(out.get(k), (str, int, dict))), None)
-        if key is None:
-            key = next((args[k] for k in keys if k and args.get(k)), None)
-        return load(t, key) or out
-    hints = fields(t) if is_record(t) else {}
-    if "items" in hints and "next" in hints:
-        item_t = kind(hints["items"])[1]
-        found = next((v for k, v in out.items() if isinstance(v, list) and k != "items"), out.get("items", []))
-        items = [load(item_t, i) or i for i in found] if entity(item_t) else found
-        nxt = out.get("next")
-        return {**out, "items": items, "next": None if nxt is None else str(nxt)}
-    if t in ("nat", "bool", "text", "blob"):
-        kinds = {"nat": (int,), "bool": (bool,), "text": (str,), "blob": (str, bytes)}[t]
-        found = next((v for v in out.values() if isinstance(v, kinds) and (t == "bool" or not isinstance(v, bool))), None)
-        if found is None and t == "nat":  # a count, where the operation lists what it counted
-            found = next((len(v) for v in out.values() if isinstance(v, list)), None)
-        return found
-    return out
+        return {"Proposed": out["proposal"]} if out.get("requires_vote") else {"Done": out.get(key) if key else None}
+    if key is None:
+        return out
+    if key not in out and STRICT is not None and not optional:
+        STRICT.append(f"{op} returns {key}")
+    if is_record(t) and "items" in fields(t) and "next" in fields(t):
+        return {**out, "items": out.get(key) or [], "next": nxt(out)}
+    return out.get(key)
 
 
 def user_get(p):
@@ -637,14 +597,8 @@ KEY = {"crypto_envelope": "scope", "crypto_derive_key": "transport_public_key", 
        "federal_vote_finalize": "vote", "federal_vote_cancel": "vote", "tax_policy_propose": "policy",
        "allocation_rule_propose": "rule", "representative_remove": "appointment", "document_get": "document",
        "dispute_get": "dispute", "report_view": "report"}
-# Operations whose reply names the row they touched with a key other than the row's type.
-OUT_KEY = {}
 # Operations that take ``limit`` as such, not as a page size.
 KEEP_LIMIT = {"document_delete"}
-
-
-def caller_user(args):
-    return ggg.User[args.get("on_behalf_of") or chain.caller()]
 
 
 def seat_owner(args):
@@ -700,13 +654,6 @@ ARGS = {
 }
 
 
-def snapshot(name, key):
-    def take(args):
-        row = getattr(ggg, name)[args.get(key) or ""]
-        return to_ggg(row, name) if row else None
-    return take
-
-
 def chart(out, args):
     c = out["chart"]
     return {"department": c["department"], "positions": len(c.get("positions", [])), "seats": c.get("seats", 0),
@@ -741,26 +688,13 @@ def local(name, **args):
     return call(name, args, user=chain.caller())
 
 
-def setup_state():
-    return local("setup_state")
-
-
-# Rows an operation deletes, as GGG records taken before it runs.
-BEFORE = {
-    "payment_account_remove": snapshot("PaymentAccount", "account"),
-    "bid_withdraw": snapshot("Bid", "bid"),
-}
 BUILD = {
     "invite_create": lambda o, a: {"invite": o["invite"]["id"], "code": o["invite"]["code"]},
     "me": me,
     "delegation_list": delegations,
-    "profile_update": lambda o, a: caller_user(a),
-    "private_data_update": lambda o, a: caller_user(a),
     "my_invoices": page_of("invoices", lambda i: {"invoice": i["id"], "pay_to": i["pay_to"]}),
     "resolution_query": page_of("verdicts", lambda v: {"verdict": v["id"], "penalties": v.get("penalties", [])}),
     "treasury_view": treasury,
-    "realm_monitor": lambda o, a: {**o, "cycles": chain.cycles(), "memory": chain.memory(),
-                                   "installed_version": o.get("installed_version") or VERSION},
     "department_get": lambda o, a: detail("department", o),
     "organization_get": lambda o, a: detail("organization", o),
     "tender_get": lambda o, a: {"tender": o["tender"], "bids": o["tender"].get("bids", []), "next": None},
@@ -768,20 +702,9 @@ BUILD = {
     "quarter_directory": lambda o, a: directory(o),
     "quarter_sync": lambda o, a: directory(local("quarter_directory")),
     "federal_vote_propose": federal_vote,
-    "payment_account_remove": lambda o, a: o.get("before"),
-    "bid_withdraw": lambda o, a: o.get("before"),
-    "crypto_envelope": lambda o, a: ggg.KeyEnvelope[f"{a['scope']}|{chain.caller()}"],
-    "document_get": lambda o, a: {**o, "document": o["document"]["id"],
-                                  "envelope": ggg.KeyEnvelope[f"{o['scope']}|{chain.caller()}"]},
-    "delegable_operations": lambda o, a: o.get("operations", []),
     "department_chart": chart,
     "proposal_get": proposal_detail,
-    "document_delete": lambda o, a: {"revoked": len(o.get("revoked", [])), "deleted": o.get("deleted", False)},
     "enforcement_record": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
-    "quarter_report": lambda o, a: {**o, "quarter": chain.caller()},
-    "setup_launch": lambda o, a: ggg.Realm["1"],
-    "setup_step": lambda o, a: setup_state(),
-    "evidence_evaluate": lambda o, a: o.get("status") == "admitted",
     "credential_verify": lambda o, a: {"valid": o.get("valid"), **(o.get("checks") or {})},
     "codex_status": lambda o, a: {**o, "checksum": (o.get("codex") or {}).get("id"),
                                   "history": [h["id"] for h in o.get("history", [])], "signing": signing()},

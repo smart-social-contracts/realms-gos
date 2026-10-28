@@ -4,7 +4,7 @@ from core import auth
 from core import chain
 from api import delegation
 from api import orgs
-from core.db import Fail, each, find, next_id, page, view
+from core.db import Conflict, Fail, Forbidden, each, find, next_id, page, view
 from ggg import Appointment, Department, Human, Identity, Invite, Member, Position, Realm, User, UserProfile
 from api import codex
 from core.op import op
@@ -21,7 +21,7 @@ def within(c, perms):
     held = auth.permissions(c.user)
     missing = [] if "all" in held else sorted(set(perms) - held)
     if missing:
-        raise Fail(f"you do not hold {', '.join(missing)}")
+        raise Forbidden(f"you do not hold {', '.join(missing)}")
 
 
 def powers(department):
@@ -78,7 +78,7 @@ def redeemable(code, principal):
     if not inv or inv.revoked or inv.uses >= inv.max_uses or (inv.expires_at and chain.now() >= inv.expires_at):
         raise Fail("this invite code is not valid")
     if principal in inv.redeemed_by:
-        raise Fail("you already used this invite")
+        raise Conflict("you already used this invite")
     return inv
 
 
@@ -90,9 +90,9 @@ def realm_join(c, args):
     member, realm = Member[c.user], Realm["1"]
     inv = redeemable(args["code"], c.user) if args.get("code") else None
     if member and member.status != "active":
-        raise Fail(f"your membership is {member.status}")
+        raise Forbidden(f"your membership is {member.status}")
     if member and inv is None:
-        raise Fail("you are already a member")
+        raise Conflict("you are already a member")
     if inv is None and not (realm and realm.open_registration) and not chain.is_controller(c.user):
         raise Fail("this realm needs an invite code to join")
     if inv and inv.position:
@@ -111,7 +111,7 @@ def user_get(c, args):
     return {"user": card(find(User, args["user"]))}
 
 
-@op("user.view", read=True)
+@op("user.view", read=True, returns="users")
 def user_list(c, args):
     """Users' cards, ``count`` rows at a time (default 100, at most 500) from row ``from`` (default 1).
     Returns ``users`` and ``next``, the ``from`` of the next page (null at the end)."""
@@ -131,25 +131,29 @@ def me(c, args):
     return out
 
 
-@op("self.update_public_profile", delegable=True)
+@op("self.update_public_profile", delegable=True, returns="user")
 def profile_update(c, args):
-    """Change your public ``nickname`` and ``avatar``; a field you leave out stays as it is."""
+    """Change your public ``nickname`` and ``avatar``; a field you leave out stays as it is. Returns ``user``."""
     user = find(User, c.user)
     user.nickname, user.avatar = args.get("nickname", user.nickname), args.get("avatar", user.avatar)
+    return {"user": user.id}
 
 
-@op("self.update_private_data")
+@op("self.update_private_data", returns="user")
 def private_data_update(c, args):
-    """Replace your ``private_data``; it is stored as given, so encrypt it first (vetKeys ciphertext)."""
-    find(User, c.user).private_data = args["private_data"]
+    """Replace your ``private_data``; it is stored as given, so encrypt it first (vetKeys ciphertext). Returns
+    ``user``."""
+    user = find(User, c.user)
+    user.private_data = args["private_data"]
+    return {"user": user.id}
 
 
-@op("user.add", governed=in_charge("user.add"))
+@op("user.add", governed=in_charge("user.add"), returns="user")
 def user_add(c, args):
     """Add ``user`` (a principal not yet known) as an active member with an optional ``nickname``. Returns ``user``.
     An optional ``department`` (one that handles adding users) decides instead of the root department."""
     if User[args["user"]]:
-        raise Fail(f"{args['user']} is already a user")
+        raise Conflict(f"{args['user']} is already a user")
     enroll(args["user"], args.get("nickname", ""))
     return {"user": args["user"]}
 
@@ -161,19 +165,20 @@ def user_import(c, args):
     ids = [u["user"] for u in args["users"]]
     taken = sorted(i for i in set(ids) if User[i]) or sorted({i for i in ids if ids.count(i) > 1})
     if taken:
-        raise Fail(f"already known or repeated: {', '.join(taken)}")
+        raise Conflict(f"already known or repeated: {', '.join(taken)}")
     for u in args["users"]:
         enroll(u["user"], u.get("nickname", ""))
     return {"added": len(ids)}
 
 
-@op("user.edit")
+@op("user.edit", returns="user")
 def user_edit(c, args):
     """Edit ``user``'s ``nickname``, ``avatar`` or ``home_quarter``; only the fields given change."""
     user = find(User, args["user"])
     for field in ("nickname", "avatar", "home_quarter"):
         if field in args:
             setattr(user, field, args[field])
+    return {"user": user.id}
 
 
 @op("user.update_status", governed=in_charge("user.update_status"), parties=subject)
@@ -183,7 +188,7 @@ def user_set_status(c, args):
     Example: ``{"user": "mallory", "status": "suspended"}`` → proposal ``P-9``."""
     m = find(Member, args["user"])
     if args["status"] not in MOVES[m.status]:
-        raise Fail(f"a {m.status} member cannot become {args['status']}")
+        raise Conflict(f"a {m.status} member cannot become {args['status']}")
     m.status = args["status"]
     return {"status": m.status}
 
@@ -194,13 +199,13 @@ def user_remove(c, args):
     An optional ``department`` decides as in user_add."""
     user = find(User, args["user"])
     if any(a.status == "active" for a in each(Appointment, "user", user.id)):
-        raise Fail(f"{user.id} still holds appointments; end them first")
+        raise Conflict(f"{user.id} still holds appointments; end them first")
     if Member[user.id]:
         Member[user.id].delete()
     user.delete()
 
 
-@op("identity.submit", delegable=True)
+@op("identity.submit", delegable=True, returns="identity")
 def identity_submit(c, args):
     """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``issuer``
     and ``ref`` (where the proof is kept). Returns ``identity``, pending until reviewed."""
@@ -214,14 +219,14 @@ def identity_owner(args):
     return {find(Identity, args["identity"]).human.user}
 
 
-@op("identity.review", signing=True, parties=identity_owner)
+@op("identity.review", signing=True, parties=identity_owner, returns="identity")
 def identity_review(c, args):
     """Decide a pending ``identity``: ``status`` verified or rejected. Returns ``status``."""
     i = find(Identity, args["identity"])
     if args["status"] not in ("verified", "rejected") or i.status != "pending":
-        raise Fail(f"{i.id} is {i.status}; it can only go from pending to verified or rejected")
+        raise Conflict(f"{i.id} is {i.status}; it can only go from pending to verified or rejected")
     i.status, i.verified_at = args["status"], chain.now() if args["status"] == "verified" else 0
-    return {"status": i.status}
+    return {"identity": i.id, "status": i.status}
 
 
 def fresh_code(c):
@@ -242,7 +247,7 @@ def invite_create(c, args):
     within(c, (profile.allowed_to or []) + (pos.profile.allowed_to if pos and pos.profile else []))
     code = (args.get("code") or fresh_code(c)).strip().upper()
     if Invite[digest(code)]:
-        raise Fail("this code is taken")
+        raise Conflict("this code is taken")
     lasts = int(args.get("expires_in") or 0)
     expires = int(args.get("expires_at") or 0) or (chain.now() + lasts if lasts else 0)
     Invite(id=digest(code), profile=profile.id, department=department, position=pos.id if pos else "",
@@ -251,16 +256,17 @@ def invite_create(c, args):
     return {"invite": {"id": digest(code), "code": code}}
 
 
-@op("invite.manage")
+@op("invite.manage", returns="invite")
 def invite_revoke(c, args):
     """Revoke ``invite`` (its id, not its code) so nobody can use it any more."""
     inv = find(Invite, args["invite"])
     if inv.revoked:
-        raise Fail("this invite is already revoked")
+        raise Conflict("this invite is already revoked")
     inv.revoked = True
+    return {"invite": inv.id}
 
 
-@op("invite.manage", read=True)
+@op("invite.manage", read=True, returns="invites")
 def invite_list(c, args):
     """Invites with their profile, seat, uses, expiry and whether they are revoked; codes are never shown.
     ``count`` rows at a time (default 100, at most 500) from row ``from`` (default 1). Returns ``invites`` and
@@ -270,12 +276,12 @@ def invite_list(c, args):
                              "revoked", "created_by") for i in rows], "next": nxt}
 
 
-@op("permission.grant", governed=in_charge("permission.grant"))
+@op("permission.grant", governed=in_charge("permission.grant"), returns="profile")
 def profile_create(c, args):
     """Create ``profile`` (a new name) with an optional ``description`` and ``allowed_to``, a list of permissions you
     hold. Returns ``profile``. An optional ``department`` decides as in user_add."""
     if UserProfile[args["profile"]]:
-        raise Fail(f"profile {args['profile']} exists")
+        raise Conflict(f"profile {args['profile']} exists")
     within(c, args.get("allowed_to", []))
     UserProfile(id=args["profile"], description=args.get("description", ""), allowed_to=args.get("allowed_to", []))
     return {"profile": args["profile"]}
@@ -296,7 +302,7 @@ def role_assign(c, args):
     An optional ``department`` decides as in user_add."""
     user, profile = find(User, args["user"]), find(UserProfile, args["profile"])
     if has(user, profile):
-        raise Fail(f"{user.id} already has {profile.id}")
+        raise Conflict(f"{user.id} already has {profile.id}")
     within(c, profile.allowed_to or [])
     give(user, profile)
 
@@ -306,5 +312,5 @@ def role_revoke(c, args):
     """Take ``profile`` away from ``user``. An optional ``department`` decides as in user_add."""
     user, profile = find(User, args["user"]), find(UserProfile, args["profile"])
     if not has(user, profile):
-        raise Fail(f"{user.id} does not have {profile.id}")
+        raise Conflict(f"{user.id} does not have {profile.id}")
     user.profiles = [p for p in user.profiles if p.id != profile.id]

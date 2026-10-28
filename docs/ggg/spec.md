@@ -23,8 +23,19 @@ When the model, this page and the code disagree, the code is wrong.
 
 The canister exposes every operation through two methods: `read(name, args)` for `read` operations
 (queries) and `run(name, args)` for the rest. Both take and return JSON text. Results are
-`{"ok": true, ...}` or `{"ok": false, "error": "..."}`, and `ops_list` lists every operation with its
-permission, flags and description.
+`{"ok": true, ...}` or `{"ok": false, "error": "...", "kind": "..."}`, and `ops_list` lists every
+operation with its permission, flags and description.
+
+A refusal's `kind` is the model's error in snake case: `invalid_argument`, `not_found`, `forbidden`,
+`unauthenticated`, `conflict` or `unavailable`. A refusal by the permission check adds
+`"denied": true` and the `permission` the caller lacks, when holding it would be enough. An operation
+says which kind it means by the exception it raises (`Fail` is a bad argument, `NotFound`,
+`Forbidden`, `Conflict` and `Unavailable` the others, in
+[`core/db.py`](../../src/realm_backend/core/db.py)).
+
+An operation's reply holds the model's result under the key its `@op` names with `returns`: the
+record's id (`"dispute"`), a page's list (`"disputes"`, with `next`), a value, or for a governed
+operation the id of the record it created. Without `returns`, the whole reply is the result.
 
 It also implements [`ggg.did`](../../ggg/ggg.did): every method, as a typed call to the same
 operation ([the `ggg.did` methods](README.md#the-gggdid-methods)). Both interfaces read and write the
@@ -63,12 +74,6 @@ Where the two interfaces cannot say the same thing, the `ggg.did` methods do thi
 - A proposal's `result` is the replayed operation's JSON reply, in `Reply`.
 - A federal vote proposed on a quarter lives on the capital. The quarter replies with what it knows,
   with an empty rule and tally.
-- The operations' refusals are text. A refusal the policy makes is `Forbidden` or `Unauthenticated`.
-  Otherwise the words decide:
-  - "unknown …" is `NotFound`;
-  - a refusal because of a record's status is `Conflict`;
-  - one because of who is asking is `Forbidden`;
-  - anything else is `InvalidArgument`.
 - `ggg_user_get` always answers callers about themselves.
 
 Realms GOS also differs from the model in what it keeps:

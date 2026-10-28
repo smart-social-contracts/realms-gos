@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Fail, deref, each, find, next_id, page, page_by, view, window
+from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, page_by, view, window
 from ggg import (Appeal, Case, Contract, Court, Department, Dispute, Invoice, Judge, Member, Notification, Organization,
                  Penalty, User, Verdict)
 from api.licenses import active
@@ -64,16 +64,16 @@ def of_penalty(args):
 
 def operating(court):
     if court.status != "active":
-        raise Fail(f"court {court.id} is {court.status}")
+        raise Conflict(f"court {court.id} is {court.status}")
     if court.operator.startswith("Organization:") and active(court.operator, "court") is None:
-        raise Fail(f"court {court.id} has no active court licence")
+        raise Conflict(f"court {court.id} has no active court licence")
 
 
 def sitting(case, user):
     for j in case.judges:
         if j.user == user and j.status == "active":
             return j
-    raise Fail(f"you are not a judge assigned to {case.id}")
+    raise Forbidden(f"you are not a judge assigned to {case.id}")
 
 
 def pending(case):
@@ -117,7 +117,7 @@ def notify(recipient, topic, title, body, sender):
     return n.id
 
 
-@op("dispute.create", delegable=True)
+@op("dispute.create", delegable=True, returns="dispute")
 def dispute_file(c, args):
     """File a dispute titled ``title`` against ``respondent`` (an ``Entity:id`` ref, or a user id), with optional
     ``subject`` (e.g. ``Contract:C-9``) and ``description_ref``. Returns ``dispute``.
@@ -129,25 +129,28 @@ def dispute_file(c, args):
     return {"dispute": d.id}
 
 
-@op("dispute.create", delegable=True)
+@op("dispute.create", delegable=True, returns="dispute")
 def dispute_withdraw(c, args):
     """Withdraw ``dispute``, a dispute you filed that has not been accepted or rejected yet."""
     d = find(Dispute, args["dispute"])
-    if d.claimant != c.user or d.status != "filed":
-        raise Fail("only a filed dispute of yours can be withdrawn")
+    if d.claimant != c.user:
+        raise Forbidden(f"{d.id} is not your dispute")
+    if d.status != "filed":
+        raise Conflict(f"{d.id} is {d.status}; only a filed dispute can be withdrawn")
     d.status = "withdrawn"
+    return {"dispute": d.id}
 
 
-@op("dispute.view", read=True, delegable=True)
+@op("dispute.view", read=True, delegable=True, returns="dispute")
 def dispute_get(c, args):
     """Show ``dispute`` in full, if you filed it or act for its respondent. Returns ``dispute``."""
     d = find(Dispute, args["dispute"])
     if c.user not in dispute_people(d):
-        raise Fail(f"{d.id} is not your dispute")
+        raise Forbidden(f"{d.id} is not your dispute")
     return {"dispute": view(d)}
 
 
-@op("dispute.view_all", read=True)
+@op("dispute.view_all", read=True, returns="disputes")
 def dispute_list_all(c, args):
     """List disputes, or only those whose ``status`` is filed, accepted, rejected or withdrawn, ``count`` rows at a time
     (default 100, at most 500) from row ``from`` (default 1). Returns ``disputes`` and ``next``, the ``from`` of the
@@ -158,13 +161,13 @@ def dispute_list_all(c, args):
             "next": nxt}
 
 
-@op("dispute.accept", signing=True, parties=of_dispute)
+@op("dispute.accept", signing=True, parties=of_dispute, returns="case")
 def dispute_accept(c, args):
     """Accept the filed ``dispute`` into ``court`` (an operating court), opening a case between claimant and
     respondent. Returns ``case``."""
     d, court = find(Dispute, args["dispute"]), find(Court, args["court"])
     if d.status != "filed":
-        raise Fail(f"{d.id} is {d.status}")
+        raise Conflict(f"{d.id} is {d.status}")
     operating(court)
     case = Case(id=next_id(Case, "CASE"), court=court, plaintiff=f"User:{d.claimant}", defendant=d.respondent,
                 title=d.title, dispute=d.id, filed_at=chain.now())
@@ -172,41 +175,43 @@ def dispute_accept(c, args):
     return {"case": case.id}
 
 
-@op("dispute.reject", signing=True, parties=of_dispute)
+@op("dispute.reject", signing=True, parties=of_dispute, returns="dispute")
 def dispute_reject(c, args):
     """Reject the filed ``dispute``."""
     d = find(Dispute, args["dispute"])
     if d.status != "filed":
-        raise Fail(f"{d.id} is {d.status}")
+        raise Conflict(f"{d.id} is {d.status}")
     d.status = "rejected"
+    return {"dispute": d.id}
 
 
-@op("dispute.assign", parties=of_case)
+@op("dispute.assign", parties=of_case, returns="case")
 def case_assign(c, args):
     """Assign ``judge`` to ``case`` (filed, assigned or in progress). The judge must sit at the case's court and must
     not be, or act for, a party."""
     case, judge = find(Case, args["case"]), find(Judge, args["judge"])
     if case.status not in ("filed",) + TRIAL:
-        raise Fail(f"{case.id} is {case.status}")
+        raise Conflict(f"{case.id} is {case.status}")
     if judge.status != "active" or judge.court is None or judge.court.id != case.court.id:
         raise Fail(f"{judge.id} does not sit at {case.court.id}")
     if judge.user in case_people(case):
-        raise Fail(f"{judge.id} is a party to {case.id}")
+        raise Forbidden(f"{judge.id} is a party to {case.id}")
     operating(case.court)
     case.judges = [j for j in case.judges if j.id != judge.id] + [judge]
     if case.status == "filed":
         case.status = "assigned"
+    return {"case": case.id}
 
 
-@op("dispute.create", delegable=True)
+@op("dispute.create", delegable=True, returns="evidence")
 def evidence_submit(c, args):
     """As a party to ``case`` (assigned or in progress), submit evidence: ``ref`` (an encrypted reference) and its
     ``hash`` (``sha256:…``). Returns ``evidence``, its id within the case (e.g. ``E-1``)."""
     case = find(Case, args["case"])
     if c.user not in case_people(case):
-        raise Fail(f"only a party to {case.id} submits evidence")
+        raise Forbidden(f"only a party to {case.id} submits evidence")
     if case.status not in TRIAL:
-        raise Fail(f"{case.id} is {case.status}")
+        raise Conflict(f"{case.id} is {case.status}")
     if not args.get("ref") or not str(args.get("hash", "")).startswith("sha256:"):
         raise Fail("evidence is an encrypted reference with its sha256 hash")
     items = case.evidence or []
@@ -216,29 +221,29 @@ def evidence_submit(c, args):
     return {"evidence": item["id"]}
 
 
-@op("evidence.evaluate", signing=True, parties=of_case)
+@op("evidence.evaluate", signing=True, parties=of_case, returns="admitted")
 def evidence_evaluate(c, args):
     """As a judge sitting on ``case``, admit ``evidence`` (e.g. ``E-1``), or exclude it with ``admitted`` false
-    (default true). Returns ``status``: admitted or excluded."""
+    (default true). Returns ``status``, admitted or excluded, and ``admitted``."""
     case = find(Case, args["case"])
     sitting(case, c.user)
     items = case.evidence or []
     match = [i for i in items if i["id"] == args["evidence"]]
     if not match:
-        raise Fail(f"unknown evidence '{args['evidence']}' in {case.id}")
+        raise NotFound(f"unknown evidence '{args['evidence']}' in {case.id}")
     match[0]["status"] = "admitted" if args.get("admitted", True) else "excluded"
     case.evidence = items
-    return {"status": match[0]["status"]}
+    return {"status": match[0]["status"], "admitted": match[0]["status"] == "admitted"}
 
 
-@op("resolution.draft", parties=of_case)
+@op("resolution.draft", parties=of_case, returns="verdict")
 def verdict_draft(c, args):
     """Draft a verdict on ``case`` (assigned or in progress): ``decision``, optional ``reasoning_ref`` and
     ``penalties``, a list of ``{kind, target, amount, symbol, due_at}``; kind is fine (default), restitution,
     community_service, suspension, revocation, injunction, freeze or termination. Returns ``verdict``."""
     case = find(Case, args["case"])
     if case.status not in TRIAL:
-        raise Fail(f"{case.id} is {case.status}")
+        raise Conflict(f"{case.id} is {case.status}")
     terms = [penalty_terms(t) for t in args.get("penalties", [])]
     v = Verdict(id=next_id(Verdict, "VER"), case=case, decision=args["decision"],
                 reasoning_ref=args.get("reasoning_ref", ""))
@@ -247,55 +252,57 @@ def verdict_draft(c, args):
     return {"verdict": v.id}
 
 
-@op("resolution.issue", signing=True, parties=of_verdict)
+@op("resolution.issue", signing=True, parties=of_verdict, returns="verdict")
 def verdict_issue(c, args):
     """As a judge sitting on the case, issue the draft ``verdict``; the parties may appeal it for 14 days.
     Returns ``appealable_until``."""
     v = find(Verdict, args["verdict"])
     if v.status != "draft" or v.case.status not in TRIAL:
-        raise Fail(f"{v.id} cannot be issued")
+        raise Conflict(f"{v.id} cannot be issued")
     judge = sitting(v.case, c.user)
     operating(v.case.court)
     v.issued_by, v.status, v.issued_at = judge, "issued", chain.now()
     v.case.status = "verdict_issued"
-    return {"appealable_until": v.issued_at + APPEAL_WINDOW}
+    return {"verdict": v.id, "appealable_until": v.issued_at + APPEAL_WINDOW}
 
 
-@op("resolution.finalize", signing=True, parties=of_verdict)
+@op("resolution.finalize", signing=True, parties=of_verdict, returns="verdict")
 def verdict_finalize(c, args):
     """Make the issued ``verdict`` final and close its case, once its 14-day appeal window has passed with no appeal
     pending."""
     v = find(Verdict, args["verdict"])
     if v.status != "issued":
-        raise Fail(f"{v.id} is {v.status}")
+        raise Conflict(f"{v.id} is {v.status}")
     if chain.now() < v.issued_at + APPEAL_WINDOW:
-        raise Fail(f"{v.id} can be appealed until {v.issued_at + APPEAL_WINDOW}")
+        raise Conflict(f"{v.id} can be appealed until {v.issued_at + APPEAL_WINDOW}")
     if pending(v.case):
-        raise Fail(f"an appeal against {v.case.id} is pending")
+        raise Conflict(f"an appeal against {v.case.id} is pending")
     v.status = "final"
     v.case.status, v.case.closed_at = "closed", chain.now()
+    return {"verdict": v.id}
 
 
-@op("resolution.link_contract", signing=True, parties=of_verdict)
+@op("resolution.link_contract", signing=True, parties=of_verdict, returns="verdict")
 def verdict_link_contract(c, args):
     """Link ``verdict`` (not overturned) to ``contract`` (not terminated or fulfilled); an active contract becomes
     disputed."""
     v, k = find(Verdict, args["verdict"]), find(Contract, args["contract"])
     if v.status == "overturned" or k.status in ("terminated", "fulfilled"):
-        raise Fail(f"{v.id} cannot be linked to {k.id}")
+        raise Conflict(f"{v.id} cannot be linked to {k.id}")
     v.contract = k.id
     if k.status == "active":
         k.status = "disputed"
+    return {"verdict": v.id}
 
 
-@op("resolution.modify_terms", signing=True, parties=of_verdict)
+@op("resolution.modify_terms", signing=True, parties=of_verdict, returns="verdict")
 def verdict_modify_terms(c, args):
     """As a judge sitting on the case, change a draft or issued ``verdict``'s ``decision``, ``reasoning_ref`` or
     ``penalties`` (a new list replaces them all, as in verdict_draft). Changing an issued verdict restarts its
     14-day appeal window."""
     v = find(Verdict, args["verdict"])
     if v.status not in ("draft", "issued"):
-        raise Fail(f"{v.id} is {v.status} and cannot change")
+        raise Conflict(f"{v.id} is {v.status} and cannot change")
     sitting(v.case, c.user)
     terms = [penalty_terms(t) for t in args["penalties"]] if "penalties" in args else None
     v.decision = args.get("decision", v.decision)
@@ -306,18 +313,19 @@ def verdict_modify_terms(c, args):
         add_penalties(v, terms)
     if v.status == "issued":
         v.issued_at = chain.now()  # changed terms reopen the appeal window
+    return {"verdict": v.id}
 
 
-@op("dispute.create", delegable=True)
+@op("dispute.create", delegable=True, returns="appeal")
 def appeal_file(c, args):
     """As a party, appeal the issued ``verdict`` within 14 days to ``court`` (default the issuing court's parent),
     which must rank above the issuing court; optional ``grounds_ref``. Returns ``appeal`` and ``court``."""
     v = find(Verdict, args["verdict"])
     case = v.case
     if c.user not in case_people(case):
-        raise Fail(f"only a party to {case.id} can appeal")
+        raise Forbidden(f"only a party to {case.id} can appeal")
     if v.status != "issued" or chain.now() > v.issued_at + APPEAL_WINDOW or pending(case):
-        raise Fail(f"{v.id} cannot be appealed")
+        raise Conflict(f"{v.id} cannot be appealed")
     below = v.issued_by.court
     court = find(Court, args["court"]) if args.get("court") else below.parent
     if court is None or LEVELS.get(court.level, 1) <= LEVELS.get(below.level, 1):
@@ -329,17 +337,17 @@ def appeal_file(c, args):
     return {"appeal": a.id, "court": court.id}
 
 
-@op("appeal.allow", signing=True, parties=of_appeal)
+@op("appeal.allow", signing=True, parties=of_appeal, returns="appeal")
 def appeal_decide(c, args):
     """As a judge of the appeal's court, grant or deny ``appeal`` with ``granted`` true or false. Granting needs a new
     ``decision`` (optional ``reasoning_ref``, ``penalties`` as in verdict_draft) and issues a verdict that overturns
     the old one. Returns ``status`` and ``verdict``, the one now in force."""
     a = find(Appeal, args["appeal"])
     if a.status not in PENDING:
-        raise Fail(f"{a.id} is {a.status}")
+        raise Conflict(f"{a.id} is {a.status}")
     judges = [j for j in each(Judge, "user", c.user) if j.status == "active" and j.court and j.court.id == a.court.id]
     if not judges:
-        raise Fail(f"only a judge of {a.court.id} decides {a.id}")
+        raise Forbidden(f"only a judge of {a.court.id} decides {a.id}")
     operating(a.court)
     granted = bool(args["granted"])
     terms = [penalty_terms(t) for t in args.get("penalties", [])]
@@ -353,11 +361,11 @@ def appeal_decide(c, args):
         add_penalties(new, terms)
         a.new_verdict = new.id
     a.case.status = "verdict_issued"
-    return {"status": a.status, "verdict": a.new_verdict or a.verdict}
+    return {"appeal": a.id, "status": a.status, "verdict": a.new_verdict or a.verdict}
 
 
 @op("fine.apply", signing=True, parties=of_penalty,
-    perm_for=lambda args: CARRIED_OUT_WITH[find(Penalty, args["penalty"]).kind])
+    perm_for=lambda args: CARRIED_OUT_WITH[find(Penalty, args["penalty"]).kind], returns="penalty")
 def penalty_execute(c, args):
     """Carry out pending ``penalty`` once its verdict is final: a fine or restitution becomes an invoice (due in 30 days
     unless set), a suspension, revocation or termination changes its target's status, other kinds are only marked
@@ -366,9 +374,9 @@ def penalty_execute(c, args):
     for a freeze, enforcement.record for an injunction or community service."""
     p = find(Penalty, args["penalty"])
     if p.status != "pending":
-        raise Fail(f"{p.id} is {p.status}")
+        raise Conflict(f"{p.id} is {p.status}")
     if p.verdict.status != "final":
-        raise Fail(f"{p.verdict.id} is not final yet")
+        raise Conflict(f"{p.verdict.id} is not final yet")
     target, now = deref(p.target), chain.now()
     if p.kind == "suspension" and isinstance(target, User):
         target = find(Member, target.id)
@@ -386,7 +394,7 @@ def penalty_execute(c, args):
 def enforceable(args):
     v = find(Verdict, args["verdict"])
     if v.status not in ("issued", "final"):
-        raise Fail(f"{v.id} is {v.status}")
+        raise Conflict(f"{v.id} is {v.status}")
     return v
 
 
@@ -398,7 +406,7 @@ def enforcement_record(c, args):
     return {"verdict": v.id, "note": args["note"]}
 
 
-@op("enforcement.escalate")
+@op("enforcement.escalate", returns="notification")
 def enforcement_escalate(c, args):
     """Escalate the enforcement of an issued or final ``verdict``: notify the operator of its court with ``note``.
     Returns ``notification``."""
@@ -408,7 +416,7 @@ def enforcement_escalate(c, args):
                                    args["note"], c.user)}
 
 
-@op("notification.send")
+@op("notification.send", returns="notification")
 def enforcement_notify(c, args):
     """Notify ``to`` (an ``Entity:id`` ref, or a user id) about an issued or final ``verdict``, with optional ``title``
     (default "Verdict <id>") and ``body`` (default the decision). Returns ``notification``."""
@@ -419,7 +427,7 @@ def enforcement_notify(c, args):
                                    args.get("body", v.decision), c.user)}
 
 
-@op("org.create", governed=realm_wide)
+@op("org.create", governed=realm_wide, returns="court")
 def court_create(c, args):
     """Create court ``name`` run by ``operator`` (``Department:id``, or ``Organization:id`` with an active court
     licence), with optional ``level`` (first_instance by default, specialized, appellate or supreme), ``jurisdiction``
@@ -433,20 +441,20 @@ def court_create(c, args):
     parent = find(Court, args["parent"]) if args.get("parent") else None
     lic = active(operator, "court")
     if operator.startswith("Organization:") and lic is None:
-        raise Fail(f"{operator} holds no active court licence")
+        raise Conflict(f"{operator} holds no active court licence")
     court = Court(id=next_id(Court, "COURT"), name=args["name"], operator=operator, level=level,
                   jurisdiction=args.get("jurisdiction", ""), parent=parent, license=lic.id if lic else "")
     return {"court": court.id}
 
 
-@op("org.appoint", governed=realm_wide)
+@op("org.appoint", governed=realm_wide, returns="judge")
 def judge_appoint(c, args):
     """Appoint ``user`` as a judge of ``court``, with optional ``specialization``; one active seat per user and court.
     Returns ``judge``."""
     user, court = find(User, args["user"]), find(Court, args["court"])
     operating(court)
     if any(j.status == "active" and j.court and j.court.id == court.id for j in each(Judge, "user", user.id)):
-        raise Fail(f"{user.id} already sits at {court.id}")
+        raise Conflict(f"{user.id} already sits at {court.id}")
     j = Judge(id=next_id(Judge, "J"), user=user.id, court=court, specialization=args.get("specialization", ""),
               appointed_at=chain.now())
     return {"judge": j.id}
@@ -457,7 +465,7 @@ def judge_revoke(c, args):
     """Revoke the active ``judge``."""
     j = find(Judge, args["judge"])
     if j.status != "active":
-        raise Fail(f"{j.id} is {j.status}")
+        raise Conflict(f"{j.id} is {j.status}")
     j.status = "revoked"
 
 

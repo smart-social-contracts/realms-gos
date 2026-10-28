@@ -3,7 +3,7 @@ import json
 
 from core import candid
 from core import chain
-from core.db import Fail, each, find, first, next_id, page, page_by, view, window
+from core.db import Conflict, Fail, Forbidden, each, find, first, next_id, page, page_by, view, window
 from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
@@ -79,7 +79,7 @@ def period():
     """The fiscal period covering now; refuses if it is closed (I-FIN-5)."""
     p = period_at(chain.now())
     if p is not None and p.status != "open":
-        raise Fail(f"fiscal period {p.id} is {p.status}")
+        raise Conflict(f"fiscal period {p.id} is {p.status}")
     return p
 
 
@@ -193,7 +193,8 @@ def positive(args, key="amount"):
     return amount
 
 
-@op("transfer.create", delegable=True, governed=fund_department, parties=lambda a: {a.get("to", "")})
+@op("transfer.create", delegable=True, governed=fund_department, parties=lambda a: {a.get("to", "")},
+    returns="transfer")
 def transfer_create(c, args):
     """Pay ``amount`` of ``symbol`` (default the realm currency) from ``fund`` to ``to`` (principal, user or org); the
     fund must also cover the ledger fee. Optional ``category`` (default transfer), ``description``, ``contract``.
@@ -202,7 +203,7 @@ def transfer_create(c, args):
     symbol = args.get("symbol") or currency()
     need = amount + find(Token, symbol).fee
     if balance(fund, symbol) < need:
-        raise Fail(f"fund {fund.id} holds {balance(fund, symbol)} {symbol}, less than {need} with the ledger fee")
+        raise Conflict(f"fund {fund.id} holds {balance(fund, symbol)} {symbol}, less than {need} with the ledger fee")
     p = period()
     refs = {"contract": find(Contract, args["contract"])} if args.get("contract") else {}
     t = reserve(p, fund, args["to"], symbol, amount, args.get("category", "transfer"), args.get("description", ""),
@@ -216,7 +217,7 @@ def transfer_revert(c, args):
     A transfer still ``sending`` (its ledger call in flight) cannot be reverted."""
     t = find(Transfer, args["transfer"])
     if t.status != "pending":
-        raise Fail(f"{t.id} is {t.status}; only a pending transfer can be reverted")
+        raise Conflict(f"{t.id} is {t.status}; only a pending transfer can be reverted")
     reverse(t, period(), args.get("reason", "reverted"))
     return {"transfer": t.id, "status": t.status}
 
@@ -290,12 +291,12 @@ def invoice_create(c, args):
     return {"invoice": inv.id, "pay_to": pay_to(inv)}
 
 
-@op("self.invoice_refresh", delegable=True)
+@op("self.invoice_refresh", delegable=True, returns="invoice")
 def invoice_check(c, args):
     """Check the ledger for a payment of ``invoice`` (yours or your organization's). Returns its ``status``."""
     inv = find(Invoice, args["invoice"])
     if not owns(inv, c.user):
-        raise Fail(f"{inv.id} is not yours")
+        raise Forbidden(f"{inv.id} is not yours")
     period()
     return {"invoice": inv.id, "status": (yield from refresh(inv))}
 
@@ -348,7 +349,7 @@ def treasury_view(c, args):
             "nft_tokens": [view(k) for k in NFTToken.load_some(1, REGISTRY)]}
 
 
-@op("treasury.view", read=True)
+@op("treasury.view", read=True, returns="entries")
 def ledger_view(c, args):
     """One page of ledger entries (``from``, ``count``), optionally filtered by ``transaction``, ``symbol``, ``kind``,
     ``fund`` and ``period``; ``next`` continues it. A page can hold fewer matches than ``count``: follow ``next``."""
@@ -365,12 +366,13 @@ def ledger_view(c, args):
                         for e in rows], "next": nxt}
 
 
-@op("treasury.view", read=True)
+@op("treasury.view", read=True, returns="reports")
 def report_view(c, args):
-    """The financial ``report`` in full or, when ``report`` is omitted, a summary of one page of reports (``from``,
-    ``count``); ``next`` continues it."""
+    """The financial ``report`` in full (also as a page of one) or, when ``report`` is omitted, a summary of one
+    page of ``reports`` (``from``, ``count``); ``next`` continues it."""
     if args.get("report"):
-        return {"report": view(find(FinancialReport, args["report"]))}
+        report = view(find(FinancialReport, args["report"]))
+        return {"report": report, "reports": [report], "next": None}
     rows, nxt = page(FinancialReport, args)
     return {"reports": [view(r, "id", "kind", "as_of", "issued_by", "supersedes") for r in rows], "next": nxt}
 
@@ -392,11 +394,11 @@ def treasury_configure(c, args):
 def registered(cls, symbol):
     """The entry for ``symbol`` in the token or NFT registry, added if the registry has room."""
     if cls[symbol] is None and cls.count() >= REGISTRY:
-        raise Fail(f"{cls.__name__} registry is full ({REGISTRY})")
+        raise Conflict(f"{cls.__name__} registry is full ({REGISTRY})")
     return cls[symbol] or cls(id=symbol)
 
 
-@op("treasury.manage", governed=realm_wide)
+@op("treasury.manage", governed=realm_wide, returns="token")
 def token_register(c, args):
     """Register or update the fungible token ``symbol``: its ``ledger`` canister, optional ``indexer``, ``decimals``
     (default 8) and ``fee`` (default 0). Omitted options keep their current value. At most 100 tokens."""
@@ -406,7 +408,7 @@ def token_register(c, args):
     return {"token": t.id}
 
 
-@op("treasury.manage", governed=realm_wide)
+@op("treasury.manage", governed=realm_wide, returns="nft_token")
 def nft_token_register(c, args):
     """Register or update the NFT collection ``symbol`` at ``canister``, with optional ``name``, ``description``,
     ``required_license`` (licence kind needed to mint), ``transferable`` and ``supply_cap``; omitted ones are kept.
@@ -422,30 +424,32 @@ def nft_token_register(c, args):
 
 # --- funds, periods, budgets, allocation ----------------------------------------------------------
 
-@op("org.manage_budget", governed=realm_wide)
+@op("org.manage_budget", governed=realm_wide, returns="fund")
 def fund_create(c, args):
     """Create the fund with code ``fund``, optional ``name``, ``kind`` (default general) and owning ``department``.
     A department owns at most one fund."""
     if Fund[args["fund"]]:
-        raise Fail(f"fund {args['fund']} exists")
+        raise Conflict(f"fund {args['fund']} exists")
     dept = find(Department, args["department"]) if args.get("department") else None
     if dept is not None and dept.fund is not None:
-        raise Fail(f"{dept.id} already owns fund {dept.fund.id}")
+        raise Conflict(f"{dept.id} already owns fund {dept.fund.id}")
     f = Fund(id=args["fund"], name=args.get("name", args["fund"]), kind=args.get("kind", "general"))
     f.department = dept
     return {"fund": f.id}
 
 
-@op("org.manage_budget", governed=realm_wide)
+@op("org.manage_budget", governed=realm_wide, returns="period")
 def period_open(c, args):
     """Open the fiscal ``period`` from ``starts_at`` to ``ends_at`` (seconds), optional ``name``. Periods open in
     order: it starts no earlier than the latest period ends."""
     starts, ends = int(args["starts_at"]), int(args["ends_at"])
-    if FiscalPeriod[args["period"]] or ends <= starts:
-        raise Fail(f"period {args['period']} exists or ends before it starts")
+    if ends <= starts:
+        raise Fail(f"period {args['period']} ends before it starts")
+    if FiscalPeriod[args["period"]]:
+        raise Conflict(f"period {args['period']} exists")
     latest = FiscalPeriod.load_some(FiscalPeriod.max_id(), 1) if FiscalPeriod.max_id() else []
     if latest and starts < latest[0].ends_at:
-        raise Fail(f"starts before fiscal period {latest[0].id} ends")
+        raise Conflict(f"starts before fiscal period {latest[0].id} ends")
     p = FiscalPeriod(id=args["period"], name=args.get("name", args["period"]), starts_at=starts, ends_at=ends)
     return {"period": p.id}
 
@@ -455,7 +459,7 @@ def period_close(c, args):
     """Close the fiscal ``period`` and its adopted budgets. Nothing can be booked while a closed period covers now."""
     p = find(FiscalPeriod, args["period"])
     if p.status != "open":
-        raise Fail(f"{p.id} is {p.status}")
+        raise Conflict(f"{p.id} is {p.status}")
     p.status = "closed"
     for b in p.budgets:
         if b.status == "adopted":
@@ -474,13 +478,13 @@ def supersede(b, status):
             b.actual += old.actual
 
 
-@op("org.manage_budget", governed=fund_department)
+@op("org.manage_budget", governed=fund_department, returns="budget")
 def budget_draft(c, args):
     """Draft a budget for ``fund`` in the open ``period``: ``planned`` amount for ``category``, ``kind`` (default
     expense). Returns ``budget``."""
     fund, p = find(Fund, args["fund"]), find(FiscalPeriod, args["period"])
     if p.status != "open":
-        raise Fail(f"{p.id} is {p.status}")
+        raise Conflict(f"{p.id} is {p.status}")
     b = Budget(id=next_id(Budget, "B"), fund=fund, period=p, category=args["category"],
                slot=slot(fund, p, args["category"]), kind=args.get("kind", "expense"), planned=int(args["planned"]))
     return {"budget": b.id}
@@ -492,18 +496,18 @@ def budget_propose(c, args):
     Spending booked against the replaced budget carries over."""
     b = find(Budget, args["budget"])
     if b.status != "draft" or b.period.status != "open":
-        raise Fail(f"{b.id} is {b.status}; only a draft for an open period can be adopted")
+        raise Conflict(f"{b.id} is {b.status}; only a draft for an open period can be adopted")
     supersede(b, "amended")
     b.status, b.proposal = "adopted", c.proposal
     return {"budget": b.id, "status": b.status}
 
 
-@op("org.manage_budget", governed=budget_department)
+@op("org.manage_budget", governed=budget_department, returns="budget")
 def budget_amend(c, args):
     """Replace the adopted ``budget`` with a new adopted version planning ``planned``. Returns the new ``budget``."""
     old = find(Budget, args["budget"])
     if old.status != "adopted":
-        raise Fail(f"{old.id} is {old.status}; only an adopted budget can be amended")
+        raise Conflict(f"{old.id} is {old.status}; only an adopted budget can be amended")
     b = Budget(id=next_id(Budget, "B"), fund=old.fund, period=old.period, category=old.category, slot=old.slot,
                kind=old.kind, planned=int(args["planned"]), proposal=c.proposal)
     supersede(b, "amended")
@@ -516,7 +520,7 @@ def rule_department(args):
     return owner_of(find(Fund, rule.source_fund if rule else args["source_fund"]))
 
 
-@op("org.manage_budget", governed=rule_department)
+@op("org.manage_budget", governed=rule_department, returns="rule")
 def allocation_rule_draft(c, args):
     """Draft how payments into ``source_fund`` are split: ``rules`` maps fund codes to whole percentages adding up to at
     most 100. Returns ``rule``."""
@@ -534,7 +538,7 @@ def allocation_rule_propose(c, args):
     """Adopt the draft allocation ``rule``, superseding its source fund's adopted rule."""
     r = find(AllocationRule, args["rule"])
     if r.status != "draft":
-        raise Fail(f"{r.id} is {r.status}; only a draft can be adopted")
+        raise Conflict(f"{r.id} is {r.status}; only a draft can be adopted")
     source = find(Fund, r.source_fund)
     old = adopted_rule(source)
     if old:
@@ -553,16 +557,16 @@ def payroll_run(c, args):
     dept, label = find(Department, args["department"]), args["period"]
     fund, symbol = dept.fund, args.get("symbol") or currency()
     if fund is None:
-        raise Fail(f"{dept.id} has no fund")
+        raise Conflict(f"{dept.id} has no fund")
     note = f"payroll {label} {dept.id}"
     if first(Transfer, "payroll", note):
-        raise Fail(f"{dept.id} payroll for {label} already ran")
+        raise Conflict(f"{dept.id} payroll for {label} already ran")
     seats = [(a.user, pos.salary) for pos in dept.positions if pos.salary > 0
              for a in pos.appointments if a.status == "active" and not a.agent]
     total = sum(s for _, s in seats)
     need = total + len(seats) * find(Token, symbol).fee
     if balance(fund, symbol) < need:
-        raise Fail(f"fund {fund.id} holds {balance(fund, symbol)} {symbol}, payroll needs {need}")
+        raise Conflict(f"fund {fund.id} holds {balance(fund, symbol)} {symbol}, payroll needs {need}")
     p = period()
     batch = [reserve(p, fund, user, symbol, salary, "payroll", f"{note}: {user}", payroll=note, user=user)
              for user, salary in seats]
@@ -572,7 +576,7 @@ def payroll_run(c, args):
     return {"transfers": results, "seats": len(batch), "total": total}
 
 
-@op("treasury.manage", signing=True)
+@op("treasury.manage", signing=True, returns="report")
 def report_issue(c, args):
     """Freeze the statements of fiscal ``period`` as a report of ``kind`` (default period_close), with a hash chained
     over its ledger entries in id order, superseding the previous one of that kind. Returns ``report``,
@@ -595,11 +599,11 @@ def account_owner(c, args):
     if not org:
         return f"User:{c.user}"
     if c.user not in (find(Organization, org).admins or []):
-        raise Fail(f"you do not administer {org}")
+        raise Forbidden(f"you do not administer {org}")
     return f"Organization:{org}"
 
 
-@op("self.data_manage", delegable=True)
+@op("self.data_manage", delegable=True, returns="account")
 def payment_account_add(c, args):
     """Add a payout account (``network``, ``address``, optional ``symbol`` and ``label``) for you, or for
     ``organization`` if you administer it. Transfers in ``symbol`` are paid to it. Returns ``account``."""
@@ -608,18 +612,22 @@ def payment_account_add(c, args):
     return {"account": a.id}
 
 
-@op("self.data_manage", delegable=True)
+@op("self.data_manage", delegable=True, returns="account")
 def payment_account_remove(c, args):
-    """Remove your payout ``account``, or with ``organization`` one of an organization you administer."""
+    """Remove your payout ``account``, or with ``organization`` one of an organization you administer. Returns the
+    ``account`` as it was."""
     a = find(PaymentAccount, args["account"])
     if a.owner != account_owner(c, args):
-        raise Fail(f"{a.id} is not yours")
+        raise Forbidden(f"{a.id} is not yours")
+    gone = view(a)
     a.delete()
+    return {"account": gone}
 
 
 # --- court-ordered token actions ------------------------------------------------------------------
 
-@op("token.force_transfer", signing=True, governed=realm_wide, parties=lambda a: {a.get("from", ""), a.get("to", "")})
+@op("token.force_transfer", signing=True, governed=realm_wide, parties=lambda a: {a.get("from", ""), a.get("to", "")},
+    returns="transfer")
 def token_force_transfer(c, args):
     """By court order, move ``amount`` of ``symbol`` from principal ``from`` to principal ``to`` on the token's ledger,
     with optional ``reason`` as memo. Returns ``transfer``, ``status`` and ``ledger_tx``."""
