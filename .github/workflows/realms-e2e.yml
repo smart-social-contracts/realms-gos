@@ -193,6 +193,15 @@ jobs:
           DFX_WARNING: -mainnet_plaintext_identity
         run: python3 tests/integration/test_cross_quarter_live.py
 
+      - name: GGG conformance suite against the demo realm
+        # Read-only, as an anonymous caller: it checks that the realm answers every ggg.did
+        # query and refuses every update. Reads that need a permission are reported as SKIP.
+        if: env.REALM_BACKEND_ID != ''
+        working-directory: realms/ggg/conformance
+        run: |
+          npm ci --omit=dev
+          node bin/ggg-conformance.js --canister "$REALM_BACKEND_ID" --network "$REPLICA_URL"
+
       - name: Show orchestra state on failure
         if: failure()
         working-directory: Casals
