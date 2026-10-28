@@ -102,7 +102,7 @@ class Tender(Record): id: text; title: text; description: text; requester: text;
 class Bid(Record): id: text; tender: text; vendor: text; submitted_at: Timestamp; sealed: bool; payload_ref: text; payload_hash: text; price: Opt[nat]; score: Opt[nat]
 class BidScore(Record): id: text; bid: text; evaluator: Principal; criterion: text; score: nat; scored_at: Timestamp
 class RealmStatus(Variant, total=False): Setup: null; Alpha: null; Beta: null; Production: null; Deprecation: null; Terminated: null
-class Realm(Record): id: text; name: text; manifesto: text; welcome_message: text; status: "RealmStatus"; calendar: Opt[text]; treasury: Opt[text]; accounting_currency: Opt[text]; accounting_currency_decimals: Opt[nat8]; is_quarter: bool; is_capital: bool; federation_realm_id: Opt[text]; federation_codex: Opt[text]; quarter_join_mode: Opt[text]; trusted_principals: Vec[Principal]; require_marketplace_approval: bool; trusted_approvers: Vec[text]; voting_threshold: nat; voting_quorum: nat; open_registration: bool; logo_url: Opt[text]; background_image_url: Opt[text]; installed_version: text; network: text
+class Realm(Record): id: text; name: text; manifesto: text; welcome_message: text; status: "RealmStatus"; calendar: Opt[text]; treasury: Opt[text]; accounting_currency: Opt[text]; accounting_currency_decimals: Opt[nat8]; is_quarter: bool; is_capital: bool; federation_realm_id: Opt[text]; federation_codex: Opt[text]; quarter_join_mode: Opt[text]; trusted_principals: Vec[Principal]; require_marketplace_approval: bool; trusted_approvers: Vec[text]; voting_threshold: nat; voting_quorum: nat; open_registration: bool; logo_url: Opt[text]; background_image_url: Opt[text]; installed_version: text; network: text; member_count: nat
 class Cycle(Record): name: text; every: Duration
 class Calendar(Record): id: text; realm: text; epoch: Duration; fiscal_period: Duration; voting_window: Duration; codex_release_cycle: Opt[Duration]; benefit_cycle: Opt[Duration]; service_payment_cycle: Opt[Duration]; license_review_cycle: Opt[Duration]; custom_cycles: Vec["Cycle"]
 class Registry(Record): id: text; description: text; principal_id: Principal
@@ -308,6 +308,8 @@ class RealmRegisterArgs(Record): registry: Principal; url: Opt[text]; backend_ur
 class RealmUpgradeArgs(Record): version: text; module_hash: blob
 class SetupStep(Variant, total=False): Realm: "RealmConfigureArgs"; Branding: "BrandingArgs"; Tokens: "TokensArgs"; TrustPolicy: "TrustPolicyArgs"
 class SetupState(Record): status: "RealmStatus"; founder: Opt[Principal]; done: Vec[text]; todo: Vec[text]
+class HostInstallArgs(Record): founder: Principal; network: text; registry: Opt[Principal]; test_mode: bool
+class HostInfrastructure(Record): frontend: Opt[Principal]; file_registry: Opt[Principal]; extra: Vec[Tuple[text, Principal]]
 class Monitor(Record): status: "RealmStatus"; installed_version: text; cycles: nat; memory: nat; events: nat
 class ExportArgs(Record): entity: text; cursor: Opt[text]; limit: Opt[nat32]
 class ExportPage(Record): entity: text; items: Vec["Value"]; next: Opt[text]
@@ -510,7 +512,7 @@ SCHEMA["Tender"] = ("record", {"id": "text", "title": "text", "description": "te
 SCHEMA["Bid"] = ("record", {"id": "text", "tender": "text", "vendor": "text", "submitted_at": "Timestamp", "sealed": "bool", "payload_ref": "text", "payload_hash": "text", "price": "opt nat", "score": "opt nat"})
 SCHEMA["BidScore"] = ("record", {"id": "text", "bid": "text", "evaluator": "principal", "criterion": "text", "score": "nat", "scored_at": "Timestamp"})
 SCHEMA["RealmStatus"] = ("variant", {"Setup": "null", "Alpha": "null", "Beta": "null", "Production": "null", "Deprecation": "null", "Terminated": "null"})
-SCHEMA["Realm"] = ("record", {"id": "text", "name": "text", "manifesto": "text", "welcome_message": "text", "status": "RealmStatus", "calendar": "opt text", "treasury": "opt text", "accounting_currency": "opt text", "accounting_currency_decimals": "opt nat8", "is_quarter": "bool", "is_capital": "bool", "federation_realm_id": "opt text", "federation_codex": "opt text", "quarter_join_mode": "opt text", "trusted_principals": "vec principal", "require_marketplace_approval": "bool", "trusted_approvers": "vec text", "voting_threshold": "nat", "voting_quorum": "nat", "open_registration": "bool", "logo_url": "opt text", "background_image_url": "opt text", "installed_version": "text", "network": "text"})
+SCHEMA["Realm"] = ("record", {"id": "text", "name": "text", "manifesto": "text", "welcome_message": "text", "status": "RealmStatus", "calendar": "opt text", "treasury": "opt text", "accounting_currency": "opt text", "accounting_currency_decimals": "opt nat8", "is_quarter": "bool", "is_capital": "bool", "federation_realm_id": "opt text", "federation_codex": "opt text", "quarter_join_mode": "opt text", "trusted_principals": "vec principal", "require_marketplace_approval": "bool", "trusted_approvers": "vec text", "voting_threshold": "nat", "voting_quorum": "nat", "open_registration": "bool", "logo_url": "opt text", "background_image_url": "opt text", "installed_version": "text", "network": "text", "member_count": "nat"})
 SCHEMA["Cycle"] = ("record", {"name": "text", "every": "Duration"})
 SCHEMA["Calendar"] = ("record", {"id": "text", "realm": "text", "epoch": "Duration", "fiscal_period": "Duration", "voting_window": "Duration", "codex_release_cycle": "opt Duration", "benefit_cycle": "opt Duration", "service_payment_cycle": "opt Duration", "license_review_cycle": "opt Duration", "custom_cycles": "vec Cycle"})
 SCHEMA["Registry"] = ("record", {"id": "text", "description": "text", "principal_id": "principal"})
@@ -716,6 +718,8 @@ SCHEMA["RealmRegisterArgs"] = ("record", {"registry": "principal", "url": "opt t
 SCHEMA["RealmUpgradeArgs"] = ("record", {"version": "text", "module_hash": "blob"})
 SCHEMA["SetupStep"] = ("variant", {"Realm": "RealmConfigureArgs", "Branding": "BrandingArgs", "Tokens": "TokensArgs", "TrustPolicy": "TrustPolicyArgs"})
 SCHEMA["SetupState"] = ("record", {"status": "RealmStatus", "founder": "opt principal", "done": "vec text", "todo": "vec text"})
+SCHEMA["HostInstallArgs"] = ("record", {"founder": "principal", "network": "text", "registry": "opt principal", "test_mode": "bool"})
+SCHEMA["HostInfrastructure"] = ("record", {"frontend": "opt principal", "file_registry": "opt principal", "extra": "vec (text, principal)"})
 SCHEMA["Monitor"] = ("record", {"status": "RealmStatus", "installed_version": "text", "cycles": "nat", "memory": "nat", "events": "nat"})
 SCHEMA["ExportArgs"] = ("record", {"entity": "text", "cursor": "opt text", "limit": "opt nat32"})
 SCHEMA["ExportPage"] = ("record", {"entity": "text", "items": "vec Value", "next": "opt text"})
@@ -917,15 +921,16 @@ METHODS = {
     "NotificationsReadReply"), "notification_send": ("NotificationSendArgs", "NotificationReply"), "realm_info":
     (None, "Realm"), "realm_monitor": (None, "MonitorReply"), "realm_export": ("ExportArgs", "ExportPageReply"),
     "setup_state": (None, "SetupStateReply"), "setup_step": ("SetupStep", "SetupStateReply"), "setup_launch": (None,
-    "RealmReply"), "realm_configure": ("RealmConfigureArgs", "GovernedReply"), "realm_configure_branding":
-    ("BrandingArgs", "GovernedReply"), "realm_configure_tokens": ("TokensArgs", "GovernedReply"),
-    "realm_configure_trust_policy": ("TrustPolicyArgs", "GovernedReply"), "realm_register": ("RealmRegisterArgs",
-    "GovernedReply"), "realm_upgrade": ("RealmUpgradeArgs", "GovernedReply"), "crypto_envelope": ("text",
-    "OptKeyEnvelopeReply"), "crypto_scopes": ("ListArgs", "ScopePageReply"), "crypto_access": ("AccessArgs",
-    "PrincipalPageReply"), "document_list": ("DocumentListArgs", "DocumentPageReply"), "document_get": ("text",
-    "OptDocumentAccessReply"), "crypto_public_key": (None, "BlobReply"), "crypto_derive_key": ("blob", "BlobReply"),
-    "crypto_grant": ("KeyGrantArgs", "NatReply"), "crypto_revoke": ("KeyRevokeArgs", "NatReply"), "document_store":
-    ("DocumentStoreArgs", "DocumentStoredReply"), "document_share": ("DocumentShareArgs", "NatReply"),
-    "document_revoke": ("DocumentRevokeArgs", "NatReply"), "document_delete": ("DocumentDeleteArgs",
-    "DocumentDeletedReply")
+    "RealmReply"), "host_install": ("HostInstallArgs", "SetupStateReply"), "host_infrastructure":
+    ("HostInfrastructure", "SetupStateReply"), "realm_configure": ("RealmConfigureArgs", "GovernedReply"),
+    "realm_configure_branding": ("BrandingArgs", "GovernedReply"), "realm_configure_tokens": ("TokensArgs",
+    "GovernedReply"), "realm_configure_trust_policy": ("TrustPolicyArgs", "GovernedReply"), "realm_register":
+    ("RealmRegisterArgs", "GovernedReply"), "realm_upgrade": ("RealmUpgradeArgs", "GovernedReply"),
+    "crypto_envelope": ("text", "OptKeyEnvelopeReply"), "crypto_scopes": ("ListArgs", "ScopePageReply"),
+    "crypto_access": ("AccessArgs", "PrincipalPageReply"), "document_list": ("DocumentListArgs",
+    "DocumentPageReply"), "document_get": ("text", "OptDocumentAccessReply"), "crypto_public_key": (None,
+    "BlobReply"), "crypto_derive_key": ("blob", "BlobReply"), "crypto_grant": ("KeyGrantArgs", "NatReply"),
+    "crypto_revoke": ("KeyRevokeArgs", "NatReply"), "document_store": ("DocumentStoreArgs", "DocumentStoredReply"),
+    "document_share": ("DocumentShareArgs", "NatReply"), "document_revoke": ("DocumentRevokeArgs", "NatReply"),
+    "document_delete": ("DocumentDeleteArgs", "DocumentDeletedReply")
 }

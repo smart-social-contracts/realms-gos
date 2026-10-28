@@ -5,7 +5,7 @@ import constants
 import ggg
 from core import sandbox
 from api import tasks
-from core.db import Conflict, Fail, Unavailable, page, view
+from core.db import Conflict, Fail, Forbidden, Unavailable, page, view
 from api.extensions import trust
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
@@ -167,7 +167,13 @@ def setup_step(c, args):
     """One setup step: ``step`` (install, realm, branding, tokens, infrastructure, trust_policy) and its values.
     The values are the fields of the matching realm_configure operation; install takes network, can_test_mode
     and founder. Returns the setup progress, as setup_state."""
-    step, values, d = args["step"], {k: v for k, v in args.items() if k != "step"}, draft()
+    apply_step(args["step"], {k: v for k, v in args.items() if k != "step"})
+    return setup_state(c, {})
+
+
+def apply_step(step, values, **noted):
+    """Run one setup step and record it as done, with anything ``noted`` alongside."""
+    d = draft()
     if Realm["1"].status != "setup":
         raise Conflict("the realm has launched: configuration is governed now")
     if step == "install" and "install" in d["done"]:
@@ -178,8 +184,44 @@ def setup_step(c, args):
         d["founder"] = install(values)
     else:
         configure(FIELDS[step], values)
+    d.update(noted)
     d["done"] = sorted(set(d["done"]) | {step})
     remember("setup", d)
+
+
+def hosted(c):
+    """Only the realm's host: a controller, or the installer it was created with; ``all`` is not enough."""
+    if not (chain.is_controller(c.by) or c.by == Realm["1"].installer_canister_id):
+        raise Forbidden("only the realm's host does this, during setup")
+
+
+# GGG's names for the canisters Realms GOS keeps as infrastructure fields.
+HOSTED = {"frontend": "frontend_canister_id", "file_registry": "file_registry_canister_id",
+          "realms_gos:marketplace": "marketplace_canister_id", "realms_gos:installer": "installer_canister_id",
+          "realms_gos:baton": "baton_canister_id"}
+
+
+@op("realm.host")
+def host_install(c, args):
+    """The host's install, once and before anything else: the ``founder``, the ``network``, the ``registry`` that
+    lists the realm (kept for realm_register) and whether ``test_mode`` may be turned on. Returns the setup
+    progress, as setup_state."""
+    hosted(c)
+    values = {"founder": args["founder"], "network": args["network"], "can_test_mode": bool(args.get("test_mode"))}
+    apply_step("install", values, **({"registry": args["registry"]} if args.get("registry") else {}))
+    return setup_state(c, {})
+
+
+@op("realm.host")
+def host_infrastructure(c, args):
+    """The canisters the realm works with, from its host during setup: ``frontend``, ``file_registry`` and
+    ``extra`` pairs named ``realms_gos:<role>`` (marketplace, installer, baton). Returns the setup progress."""
+    hosted(c)
+    named = {"frontend": args.get("frontend"), "file_registry": args.get("file_registry"), **dict(args.get("extra") or [])}
+    unknown = sorted(set(named) - set(HOSTED))
+    if unknown:
+        raise Fail(f"this realm keeps no {', '.join(unknown)}")
+    apply_step("infrastructure", {HOSTED[k]: v for k, v in named.items() if v})
     return setup_state(c, {})
 
 

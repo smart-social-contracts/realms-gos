@@ -185,7 +185,7 @@ type Tender = record { id : text; title : text; description : text; requester : 
 type Bid = record { id : text; tender : text; vendor : text; submitted_at : Timestamp; sealed : bool; payload_ref : text; payload_hash : text; price : opt nat; score : opt nat };
 type BidScore = record { id : text; bid : text; evaluator : principal; criterion : text; score : nat; scored_at : Timestamp };
 type RealmStatus = variant { Setup : null; Alpha : null; Beta : null; Production : null; Deprecation : null; Terminated : null };
-type Realm = record { id : text; name : text; manifesto : text; welcome_message : text; status : RealmStatus; calendar : opt text; treasury : opt text; accounting_currency : opt text; accounting_currency_decimals : opt nat8; is_quarter : bool; is_capital : bool; federation_realm_id : opt text; federation_codex : opt text; quarter_join_mode : opt text; trusted_principals : vec principal; require_marketplace_approval : bool; trusted_approvers : vec text; voting_threshold : nat; voting_quorum : nat; open_registration : bool; logo_url : opt text; background_image_url : opt text; installed_version : text; network : text };
+type Realm = record { id : text; name : text; manifesto : text; welcome_message : text; status : RealmStatus; calendar : opt text; treasury : opt text; accounting_currency : opt text; accounting_currency_decimals : opt nat8; is_quarter : bool; is_capital : bool; federation_realm_id : opt text; federation_codex : opt text; quarter_join_mode : opt text; trusted_principals : vec principal; require_marketplace_approval : bool; trusted_approvers : vec text; voting_threshold : nat; voting_quorum : nat; open_registration : bool; logo_url : opt text; background_image_url : opt text; installed_version : text; network : text; member_count : nat };
 type Cycle = record { name : text; every : nat64 };
 type Calendar = record { id : text; realm : text; epoch : nat64; fiscal_period : nat64; voting_window : nat64; codex_release_cycle : opt nat64; benefit_cycle : opt nat64; service_payment_cycle : opt nat64; license_review_cycle : opt nat64; custom_cycles : vec Cycle };
 type Registry = record { id : text; description : text; principal_id : principal };
@@ -388,6 +388,8 @@ type TrustPolicyArgs = record { require_marketplace_approval : opt bool; trusted
 type RealmRegisterArgs = record { registry : principal; url : opt text; backend_url : opt text };
 type RealmUpgradeArgs = record { version : text; module_hash : blob };
 type SetupState = record { status : RealmStatus; founder : opt principal; done : vec text; todo : vec text };
+type HostInstallArgs = record { founder : principal; network : text; registry : opt principal; test_mode : bool };
+type HostInfrastructure = record { frontend : opt principal; file_registry : opt principal; extra : vec record { 0 : text; 1 : principal } };
 type Monitor = record { status : RealmStatus; installed_version : text; cycles : nat; memory : nat; events : nat };
 type ExportArgs = record { entity : text; cursor : opt text; limit : opt nat32 };
 type ExportPage = record { entity : text; items : vec Value; next : opt text };
@@ -709,6 +711,8 @@ service : (text) -> {
   "ggg_setup_state" : () -> (SetupStateReply);
   "ggg_setup_step" : (SetupStep) -> (SetupStateReply);
   "ggg_setup_launch" : () -> (RealmReply);
+  "ggg_host_install" : (HostInstallArgs) -> (SetupStateReply);
+  "ggg_host_infrastructure" : (HostInfrastructure) -> (SetupStateReply);
   "ggg_realm_configure" : (RealmConfigureArgs) -> (GovernedReply);
   "ggg_realm_configure_branding" : (BrandingArgs) -> (GovernedReply);
   "ggg_realm_configure_tokens" : (TokensArgs) -> (GovernedReply);

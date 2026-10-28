@@ -82,7 +82,12 @@ Realms GOS also differs from the model in what it keeps:
 - `realm_configure` and its variants also take Realms GOS settings (`ai_assistant_enabled`,
   `test_mode`, `primary_color`, token and NFT canister ids), which `ggg.did` would carry as
   `realms_gos_` fields, and setup has `install` and `infrastructure` steps of its own
-  (`realm_configure_infrastructure` is a Realms GOS operation, not GGG);
+  (`realm_configure_infrastructure` is a Realms GOS operation, not GGG). They do what GGG's
+  `host_install` and `host_infrastructure` do, which run the same code; the GaaS installer still
+  calls the steps. The host is a controller or the installer the canister was created with, and
+  the marketplace, installer and Casals baton canisters go in `extra` as `realms_gos:marketplace`,
+  `realms_gos:installer` and `realms_gos:baton`. `host_install`'s `registry` is kept for
+  `realm_register`;
 - a federal vote's title is kept inside its action;
 - only the last 2,000 events are kept, and older ones are deleted rather than archived (I-EXT-4).
 

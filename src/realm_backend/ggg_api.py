@@ -244,8 +244,12 @@ def variant(x, name):
 
 # The values a GGG record has where the Realms GOS row has none, or another shape (docs/ggg/spec.md §1).
 def realm_fix(r):
+    from api import quarters
+
     rules = settings()
-    return {"voting_threshold": int(rules.get("threshold", 50)) * 100,
+    # A quarter counts its own members; a capital adds what its quarters last reported.
+    members = quarters.population() + (0 if quarters.federated() else sum(q.population for q in quarters.known()))
+    return {"member_count": members, "voting_threshold": int(rules.get("threshold", 50)) * 100,
             "voting_quorum": int(rules.get("quorum_percent", 0)) * 100,
             "installed_version": get(r, "installed_version") or VERSION,
             "accounting_currency_decimals": get(r, "accounting_currency_decimals") if get(r, "accounting_currency") else None}

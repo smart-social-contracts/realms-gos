@@ -7,7 +7,7 @@ import ggg_methods as g
 import world
 from core import op
 from core.candid import Reader
-from ggg import Department, KeyEnvelope, Mandate, Proposal, Realm, User
+from ggg import Department, KeyEnvelope, Mandate, Proposal, Quarter, Realm, User, UserProfile
 from kit import ok
 from mirror import FakePrincipal as P
 from test_assets import RX, agora, license_clinic, prescribe
@@ -129,3 +129,49 @@ def test_a_caller_is_answered_about_itself():
     assert "Unauthenticated" in g.ggg_user_get(P("alice"))["Err"]
     caller("mallory")
     assert g.ggg_user_get(P("mallory"))["Ok"]["user"]["id"] == "mallory"
+
+
+def install_args(founder="frank", **kw):
+    return {"founder": P(founder), "network": "staging", "registry": None, "test_mode": False, **kw}
+
+
+def test_the_host_installs_the_realm_once_and_names_its_canisters():
+    world.build()
+    caller(fake_chain.ANONYMOUS)
+    assert "Unauthenticated" in do(g.ggg_host_install(install_args()))["Err"]
+    caller("alice")
+    assert "Forbidden" in do(g.ggg_host_install(install_args()))["Err"]
+    User["dana"].profiles = [*User["dana"].profiles, UserProfile["admin"]]  # holds `all`, but is not the host
+    caller("dana")
+    assert "Forbidden" in do(g.ggg_host_install(install_args()))["Err"]
+    caller("ctl")
+    state = do(g.ggg_host_install(install_args(registry=P("registry"), test_mode=True)))["Ok"]
+    assert state["founder"] == "frank" and "install" in state["done"] and "install" not in state["todo"]
+    assert (Realm["1"].network, Realm["1"].can_test_mode) == ("staging", True)
+    assert "Conflict" in do(g.ggg_host_install(install_args()))["Err"]
+    canisters = {"frontend": P("front"), "file_registry": None, "extra": [("realms_gos:baton", P("baton"))]}
+    assert "infrastructure" in do(g.ggg_host_infrastructure(canisters))["Ok"]["done"]
+    assert Realm["1"].frontend_canister_id == "front"
+    assert Realm["1"].manifest_data["casals"]["baton_canister_id"] == "baton"
+    wrong = {"frontend": None, "file_registry": None, "extra": [("monad_gos:oracle", P("x"))]}
+    assert "InvalidArgument" in do(g.ggg_host_infrastructure(wrong))["Err"]
+    ok("setup_step", "frank", step="realm", name="Agora")
+    ok("setup_launch", "frank")
+    caller("ctl")
+    assert "Conflict" in do(g.ggg_host_infrastructure(canisters))["Err"]
+
+
+def test_the_installer_it_was_created_with_is_a_host_too():
+    world.build()
+    Realm["1"].installer_canister_id = "installer"
+    caller("installer")
+    assert do(g.ggg_host_install(install_args()))["Ok"]["founder"] == "frank"
+
+
+def test_a_capital_counts_its_quarters_members():
+    world.build()
+    members = g.ggg_realm_info()["member_count"]
+    assert members > 0
+    Quarter(id="harbor", population=40, status="active")
+    Quarter(id="hills", population=2, status="active")
+    assert g.ggg_realm_info()["member_count"] == members + 42
