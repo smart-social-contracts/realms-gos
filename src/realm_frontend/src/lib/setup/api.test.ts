@@ -9,7 +9,7 @@ const { ops, read, run, registry } = vi.hoisted(() => {
 		ops,
 		read: vi.fn(call),
 		run: vi.fn(call),
-		registry: { listRegistryCodices: vi.fn(), getExtensionManifest: vi.fn() }
+		registry: { listRegistryCodices: vi.fn(), getExtensionManifest: vi.fn(), listRegistryExtensions: vi.fn() }
 	};
 });
 
@@ -40,6 +40,22 @@ vi.mock('$lib/file-registry-client', () => ({
 }));
 
 vi.mock('./ledgerSymbol', () => ({ lookupLedgerSymbol: vi.fn().mockResolvedValue('AAA') }));
+
+import coreExtensions from '../../../../../core-extensions.json';
+
+/** A realm with every core extension but public_dashboard, and a registry that publishes it and zone_selector. */
+function extensionsMissing(missing = ['public_dashboard']) {
+	const installed = coreExtensions.core_extensions.filter((id) => !missing.includes(id));
+	registry.getExtensionManifest.mockResolvedValue({ dependencies: ['voting', 'zone_selector'] });
+	registry.listRegistryExtensions.mockResolvedValue([
+		{ ext_id: 'public_dashboard', versions: ['1.3.12'], latest: '1.3.12', manifest: null },
+		{ ext_id: 'zone_selector', versions: ['1.5.0'], latest: '1.5.0', manifest: null }
+	]);
+	return {
+		extension_list: () => ({ ok: true, extensions: installed.map((id) => ({ id })), next: null }),
+		extension_install: () => ({ ok: true })
+	};
+}
 
 function setupState(overrides: Record<string, unknown> = {}) {
 	return {
@@ -299,6 +315,7 @@ describe('setup draft and launch', () => {
 
 	it('applies the draft step by step, then opens the realm', async () => {
 		useOps({
+			...extensionsMissing(),
 			codex_install: () => ({ ok: true }),
 			setup_step: () => ({ ok: true }),
 			setup_launch: () => ({ ok: true, status: 'alpha' })
@@ -315,6 +332,9 @@ describe('setup draft and launch', () => {
 
 		const calls = run.mock.calls.filter(([name]) => name !== 'setup_state');
 		expect(calls).toEqual([
+			// the missing core extension, then the codex's dependency the realm lacks, each at its latest version
+			['extension_install', { extension: 'public_dashboard', version: '1.3.12' }],
+			['extension_install', { extension: 'zone_selector', version: '1.5.0' }],
 			['codex_install', { codex: 'syntropia', version: '1.0.0' }],
 			[
 				'setup_step',
@@ -329,6 +349,23 @@ describe('setup draft and launch', () => {
 			['setup_step', expect.objectContaining({ step: 'realm', manifesto: 'We share' })],
 			['setup_launch', {}]
 		]);
+	});
+
+	it('stops before the codex when an extension the realm needs is not published', async () => {
+		useOps({ ...extensionsMissing(['public_dashboard', 'vault']), codex_install: () => ({ ok: true }) });
+		const { saveSetupDraft, startSetupLaunch, fetchSetupLaunchStatus } = await import('./api');
+		await saveSetupDraft({ codex: { package: 'syntropia', version: '1.0.0' } });
+
+		await startSetupLaunch();
+		await vi.waitFor(async () => expect((await fetchSetupLaunchStatus()).status).toBe('failed'));
+
+		const launch = await fetchSetupLaunchStatus();
+		expect(launch.steps[0]).toEqual({
+			name: 'install_extensions',
+			status: 'failed',
+			error: "vault is not published in the realm's file registry"
+		});
+		expect(run.mock.calls.map(([name]) => name)).not.toContain('codex_install');
 	});
 
 	it('refuses to launch without a codex', async () => {

@@ -3,8 +3,10 @@ import { read, run, must, type Reply } from '$lib/realm';
 import {
 	getExtensionManifest,
 	getFileRegistryCanisterIds,
-	listRegistryCodices
+	listRegistryCodices,
+	listRegistryExtensions
 } from '$lib/file-registry-client';
+import coreExtensions from '../../../../../core-extensions.json';
 import { lookupLedgerSymbol } from './ledgerSymbol';
 import { catalogTokenOptions, configureTokenPayload, type SharedTokenOption } from './sharedTokens';
 import { LAUNCH_PHASES } from './wizardLogic';
@@ -28,6 +30,8 @@ const COMPLETE_SETUP_TIMEOUT_MS = 5 * 60 * 1_000;
 const LAUNCH_STATUS_POLL_MS = 5_000;
 const HIDDEN_CODICES = new Set(['common', 'westminster', '_common']);
 const DRAFT_KEY = 'realm_setup_draft';
+/** Extensions every realm gets, whatever its codex: the repository's core-extensions.json. */
+const CORE_EXTENSIONS: readonly string[] = coreExtensions.core_extensions;
 
 // SetupStageGate restores portal auth before the wizard mounts; the store may already hold an
 // authenticated actor while backendReady is still waiting on realmInfo.fetch(). Wait for the actor only.
@@ -150,14 +154,18 @@ export async function fetchSetupState(): Promise<SetupState> {
 	};
 }
 
-/** The codices published in the realm's file registry (this build's when the caller cannot see the realm's). */
-export async function listAvailableCodices(): Promise<AvailableCodex[]> {
+/** The realm's file registry (this build's when the caller cannot see the realm's), or '' when it has none. */
+async function setupRegistry(): Promise<string> {
 	const state = await setupRun('setup_state');
 	const registry = (state.ok && state.realm.file_registry_canister_id) || getFileRegistryCanisterIds()[0];
-	if (!registry) {
-		if (state.ok) throw new Error('This realm has no file registry configured');
-		return [];
-	}
+	if (!registry && state.ok) throw new Error('This realm has no file registry configured');
+	return registry || '';
+}
+
+/** The codices published in the realm's file registry (this build's when the caller cannot see the realm's). */
+export async function listAvailableCodices(): Promise<AvailableCodex[]> {
+	const registry = await setupRegistry();
+	if (!registry) return [];
 	const codices = (await listRegistryCodices(registry)).filter((c) => !HIDDEN_CODICES.has(c.codex_id));
 	return Promise.all(
 		codices.map(async (c) => {
@@ -343,9 +351,38 @@ function setLaunchStep(name: string, status: 'running' | 'completed' | 'failed',
 	};
 }
 
+/**
+ * Install the core extensions and the codex's dependencies that the realm does not have yet, each at its newest
+ * published version. The portal installs none (codex and extensions are chosen here), and the codex's hooks and the
+ * realm's pages expect them, so they go in before the codex while the founder may still install extensions.
+ */
+async function installRealmExtensions(codex: { package: string; version: string }): Promise<Reply | null> {
+	const registry = await setupRegistry();
+	if (!registry) return { ok: false, error: 'This realm has no file registry to install extensions from' };
+	const manifest = await getExtensionManifest(registry, codex.package, codex.version);
+	const dependencies = Array.isArray(manifest?.dependencies) ? (manifest.dependencies as string[]) : [];
+	const installed = new Set<string>();
+	for (let from: number | null = 1; from !== null; ) {
+		const page = await setupRead('extension_list', { from, count: 500 });
+		if (!page.ok) return page;
+		for (const ext of page.extensions) installed.add(ext.id);
+		from = page.next ?? null;
+	}
+	const latest = new Map((await listRegistryExtensions(registry)).map((e) => [e.ext_id, e.latest]));
+	for (const id of new Set([...CORE_EXTENSIONS, ...dependencies])) {
+		if (installed.has(id)) continue;
+		const version = latest.get(id);
+		if (!version) return { ok: false, error: `${id} is not published in the realm's file registry` };
+		const reply = await setupRun('extension_install', { extension: id, version });
+		if (!reply.ok) return { ok: false, error: `${id} ${version}: ${reply.error}` };
+	}
+	return null;
+}
+
 async function runLaunch({ draft, assets }: StoredDraft): Promise<void> {
 	const codex = draft.codex!;
 	const phases: Record<string, () => Promise<Reply | null>> = {
+		install_extensions: () => installRealmExtensions(codex),
 		install_codex: async () => {
 			const status = await setupRead('codex_status', { count: 1 });
 			const active = status.ok && status.codex?.id === `${codex.package}@${codex.version}`;

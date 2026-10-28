@@ -31,6 +31,7 @@ export function isSetupCatalogCodex(id: string): boolean {
 }
 
 export const LAUNCH_PHASES = [
+	{ name: 'install_extensions', label: 'Install extensions' },
 	{ name: 'install_codex', label: 'Install codex' },
 	{ name: 'configure_token', label: 'Configure token' },
 	{ name: 'upload_branding', label: 'Upload branding' },
