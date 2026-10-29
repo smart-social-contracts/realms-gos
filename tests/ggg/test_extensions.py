@@ -81,6 +81,38 @@ def test_a_frontend_only_extension_installs_without_a_backend(registry, monkeypa
     assert "has no backend" in call("extension_call", "alice", extension="board", function="x")["error"]
 
 
+def test_install_copies_the_frontend_files_to_the_realms_frontend(registry, monkeypatch):
+    approvals, _ = registry
+    approvals["ext/board/1.0.0"] = {"approved": True, "approver": "market"}
+    bundle = bytes(range(256)) * 600  # binary, and over one 128 KB registry chunk
+    files = {"manifest.json": json.dumps({"name": "board", "version": "1.0.0"}).encode(),
+             "frontend/dist/index.js": bundle, "README.md": b"not copied"}
+
+    def call_text(cid, method, arg=None):
+        if method == "get_namespace_approval_icc":
+            return json.dumps(approvals[arg])
+        if method == "list_files":
+            return json.dumps([{"path": p, "content_type": "application/javascript" if p.endswith(".js") else ""}
+                               for p in files])
+        args = json.loads(arg)
+        start = args.get("offset", 0)
+        chunk = files[args["path"]][start:start + 128 * 1024] if "offset" in args else files[args["path"]]
+        return json.dumps({"content_b64": base64.b64encode(chunk).decode(), "length": len(chunk),
+                           "eof": start + len(chunk) >= len(files[args["path"]])})
+        yield
+
+    monkeypatch.setattr(fake_chain, "call_text", call_text)
+    Realm["1"].frontend_canister_id = "frontend"
+    fake_chain.state["calls"].clear()
+    ok("extension_install", "ctl", extension="board", version="1.0.0")
+    [(cid, method, candid)] = fake_chain.state["calls"]
+    assert (cid, method) == ("frontend", "store")
+    assert 'key = "/ext/board/1.0.0/frontend/dist/index.js"' in candid
+    assert 'content_type = "application/javascript"' in candid
+    escaped = "".join("\\%02x" % b for b in bundle)
+    assert 'content = blob "' + escaped + '"' in candid
+
+
 def test_I_EXT_1_an_extension_calls_only_declared_ops_as_the_caller(registry):
     ok("extension_install", "ctl", extension="voting", version="2.1.0")
     sneaked = ok("extension_call", "alice", extension="voting", function="sneak", args={"title": "x"})["result"]

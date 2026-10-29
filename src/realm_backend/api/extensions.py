@@ -2,6 +2,7 @@ import base64
 import json
 
 from core import chain
+from core.candid import quote
 from core import sandbox
 from core.db import Fail, Forbidden, Unavailable, find, page, view
 from ggg import Department, Extension, Realm, User, UserProfile
@@ -64,6 +65,35 @@ def fetch(namespace, path):
     return base64.b64decode(reply["content_b64"]).decode()
 
 
+def publish_frontend(namespace, prefix):
+    """Copy the registry's ``frontend/**`` files of ``namespace`` into the realm's frontend under ``prefix``, where
+    the realm frontend loads extension bundles from. The realm holds ``Commit`` on its frontend for this. Nothing to
+    do when the realm has no frontend of its own. A generator; returns how many files it copied."""
+    frontend = Realm["1"].frontend_canister_id
+    if not frontend:
+        return 0
+    files = json.loads((yield from chain.call_text(registry(), "list_files", json.dumps({"namespace": namespace}))))
+    copied = 0
+    for entry in files:
+        if not entry["path"].startswith("frontend/"):
+            continue
+        data, offset, eof = b"", 0, False
+        while not eof:  # the registry hands out at most 128 KB per call
+            arg = json.dumps({"namespace": namespace, "path": entry["path"], "offset": offset})
+            reply = json.loads((yield from chain.call_text(registry(), "get_file_chunk", arg)))
+            if "content_b64" not in reply:
+                raise Fail(f"{namespace}/{entry['path']}: {reply.get('error')}")
+            data += base64.b64decode(reply["content_b64"])
+            offset, eof = offset + reply["length"], reply["eof"] or reply["length"] == 0
+        content = data.hex()
+        content = "".join("\\" + content[i:i + 2] for i in range(0, len(content), 2))
+        yield from chain.call(frontend, "store", f"(record {{ key = {quote(prefix + entry['path'])}; "
+                              f"content_type = {quote(entry.get('content_type') or 'application/octet-stream')}; "
+                              f'content_encoding = "identity"; content = blob "{content}"; sha256 = null }})')
+        copied += 1
+    return copied
+
+
 def holds(principal):
     """The profiles and departments through which ``principal`` gets extensions."""
     user = User[principal]
@@ -80,12 +110,14 @@ def available(ext, held):
 def extension_install(c, args):
     """Install or upgrade ``extension`` at ``version`` from the file registry (``ext/<extension>/<version>``).
     Its manifest's ``operations`` are the only realm operations its frontend and backend may call; its
-    ``backend/entry.py`` is installed when the manifest sets ``backend``. Returns ``approved_by``: if the realm
+    ``backend/entry.py`` is installed when the manifest sets ``backend``, and its ``frontend/`` files are copied
+    to the realm's frontend under ``/ext/<extension>/<version>/``. Returns ``approved_by``: if the realm
     requires marketplace approval, its checksum must be pinned or an approver it trusts must have approved it."""
     namespace = f"ext/{args['extension']}/{args['version']}"
     manifest = json.loads((yield from fetch(namespace, "manifest.json")))
     source = (yield from fetch(namespace, "backend/entry.py")) if manifest.get("backend") else ""
     approver = yield from trust(checksum(manifest, source), namespace)
+    yield from publish_frontend(namespace, f"/{namespace}/")
     ext = Extension[args["extension"]] or Extension(
         id=args["extension"], access={"profiles": manifest.get("profiles", ["member"]), "departments": []},
         sidebar={k: manifest[k] for k in SIDEBAR if k in manifest})
