@@ -41,6 +41,10 @@ export interface AssistantListResult {
   'page' : bigint,
   'total_count' : bigint,
 }
+export interface AssistantPage {
+  'listings' : Array<AssistantListing>,
+  'next_cursor' : bigint,
+}
 export interface AssistantListing {
   'categories' : string,
   'eval_report_url' : string,
@@ -145,6 +149,10 @@ export interface CodexListResult {
   'listings' : Array<CodexListing>,
   'page' : bigint,
   'total_count' : bigint,
+}
+export interface CodexPage {
+  'listings' : Array<CodexListing>,
+  'next_cursor' : bigint,
 }
 export interface CodexListing {
   'categories' : string,
@@ -257,6 +265,10 @@ export interface ExtensionListResult {
   'listings' : Array<ExtensionListing>,
   'page' : bigint,
   'total_count' : bigint,
+}
+export interface ExtensionPage {
+  'listings' : Array<ExtensionListing>,
+  'next_cursor' : bigint,
 }
 export interface ExtensionListing {
   'categories' : string,
@@ -865,13 +877,25 @@ export interface _SERVICE {
     [bigint, bigint, boolean],
     AssistantListResult
   >,
+  'list_marketplace_assistants_page' : ActorMethod<
+    [bigint, bigint, boolean],
+    AssistantPage
+  >,
   'list_marketplace_codices' : ActorMethod<
     [bigint, bigint, boolean],
     CodexListResult
   >,
+  'list_marketplace_codices_page' : ActorMethod<
+    [bigint, bigint, boolean],
+    CodexPage
+  >,
   'list_marketplace_extensions' : ActorMethod<
     [bigint, bigint, boolean],
     ExtensionListResult
+  >,
+  'list_marketplace_extensions_page' : ActorMethod<
+    [bigint, bigint, boolean],
+    ExtensionPage
   >,
   'list_pending_audits' : ActorMethod<[], Array<PendingAudit>>,
   'list_reviewers' : ActorMethod<[], Array<string>>,
@@ -885,8 +909,20 @@ export interface _SERVICE {
   'review_listing' : ActorMethod<[string, string, boolean, string], string>,
   'revoke_license' : ActorMethod<[string], GenericResult>,
   'search_assistants' : ActorMethod<[string, boolean], Array<AssistantListing>>,
+  'search_assistants_page' : ActorMethod<
+    [string, bigint, bigint, boolean],
+    AssistantPage
+  >,
   'search_codices' : ActorMethod<[string, boolean], Array<CodexListing>>,
+  'search_codices_page' : ActorMethod<
+    [string, bigint, bigint, boolean],
+    CodexPage
+  >,
   'search_extensions' : ActorMethod<[string, boolean], Array<ExtensionListing>>,
+  'search_extensions_page' : ActorMethod<
+    [string, bigint, bigint, boolean],
+    ExtensionPage
+  >,
   'set_billing_service_principal' : ActorMethod<[string], GenericResult>,
   'set_casals_frontend_canister_id' : ActorMethod<[string], GenericResult>,
   'set_file_registry_canister_id' : ActorMethod<[string], GenericResult>,

@@ -16,7 +16,7 @@ from _cdk import ic
 from api.config import caller_is_admin
 from api.developers import developer_name, is_suspended
 from api.licenses import has_active_license
-from core.models import CodexListingEntity, PurchaseEntity, purchases_of
+from core.models import CodexListingEntity, PurchaseEntity, newest_first, purchases_of
 from ic_python_logging import get_logger
 
 logger = get_logger("api.codices")
@@ -202,25 +202,47 @@ def list_codices(page: int, per_page: int, verified_only: bool) -> Dict:
     }
 
 
+def _visible(c: CodexListingEntity, verified_only: bool) -> bool:
+    if not (c.is_active if c.is_active is not None else True):
+        return False
+    return not verified_only or str(c.verification_status) == "verified"
+
+
+def _matches(c: CodexListingEntity, q: str) -> bool:
+    if not q:
+        return True
+    fields = (c.name, c.description, c.categories, c.codex_id, c.realm_type)
+    return any(q in str(f or "").lower() for f in fields)
+
+
 def search_codices(query: str, verified_only: bool) -> List[Dict]:
     q = (query or "").lower().strip()
-    out = []
-    for c in CodexListingEntity.instances():
-        if not (c.is_active if c.is_active is not None else True):
-            continue
-        if verified_only and str(c.verification_status) != "verified":
-            continue
-        name = str(c.name or "").lower()
-        desc = str(c.description or "").lower()
-        cats = str(c.categories or "").lower()
-        cid = str(c.codex_id or "").lower()
-        rtype = str(c.realm_type or "").lower()
-        if q and (q in name or q in desc or q in cats or q in cid or q in rtype):
-            out.append(_to_dict(c))
-        elif not q:
-            out.append(_to_dict(c))
+    out = [
+        _to_dict(c) for c in CodexListingEntity.instances()
+        if _visible(c, verified_only) and _matches(c, q)
+    ]
     out.sort(key=lambda r: r.get("installs", 0), reverse=True)
     return out
+
+
+def list_codices_page(cursor: int, count: int, verified_only: bool) -> Dict:
+    """One page of listings, newest first, with a bounded read per call
+    (see core.models.newest_first). Returns listings and next_cursor."""
+    items, next_cursor = newest_first(
+        CodexListingEntity, cursor, count, lambda c: _visible(c, verified_only)
+    )
+    return {"listings": [_to_dict(c) for c in items], "next_cursor": next_cursor}
+
+
+def search_codices_page(query: str, cursor: int, count: int, verified_only: bool) -> Dict:
+    """One page of search matches, newest first, with a bounded read per call.
+    A page can be short or empty while next_cursor is non-zero."""
+    q = (query or "").lower().strip()
+    items, next_cursor = newest_first(
+        CodexListingEntity, cursor, count,
+        lambda c: _visible(c, verified_only) and _matches(c, q),
+    )
+    return {"listings": [_to_dict(c) for c in items], "next_cursor": next_cursor}
 
 
 def get_developer_codices(developer: str) -> List[Dict]:

@@ -14,8 +14,9 @@ function extensionThumbnail(ext) {
   return listingScreenshotUrls(ext)[0] || "";
 }
 let items = [];
-let total = 0;
-let page = 1;
+let cursor = 0n; // where the next page starts; 0n once everything is loaded
+let more = false;
+let loadingMore = false;
 let perPage = 24;
 let loading = true;
 let error = "";
@@ -34,7 +35,7 @@ onMount(() => {
   lastUrlQ = searchQuery;
   mounted = true;
 });
-$: if (mounted) void load(page, perPage, verifiedOnly);
+$: if (mounted) void load(verifiedOnly);
 $: if (mounted) adoptUrlQuery($pageStore.url.searchParams);
 $: void refreshLikes($isAuthenticated);
 function adoptUrlQuery(params) {
@@ -43,8 +44,7 @@ function adoptUrlQuery(params) {
   lastUrlQ = q;
   searchQuery = q;
   verifiedOnly = parseVerifiedOnlyParam(params.get("verified"));
-  page = 1;
-  load(page, perPage, verifiedOnly);
+  load(verifiedOnly);
 }
 function syncUrl() {
   if (!browser) return;
@@ -92,30 +92,35 @@ async function refreshLikes(_authed) {
     likedSet = new Set();
   }
 }
-async function load(p, pp, v) {
-  loading = true;
+// The first page, or with `append` the next one; newest first
+async function load(v, append = false) {
+  if (append) {
+    loadingMore = true;
+  } else {
+    loading = true;
+    cursor = 0n;
+  }
   error = "";
   try {
-    if (searchQuery.trim()) {
-      items = await marketplaceClient.searchExtensions(searchQuery.trim(), v);
-      total = items.length;
-    } else {
-      const r = await marketplaceClient.listExtensions(p, pp, v);
-      items = r.listings;
-      total = r.total_count;
-    }
+    const q = searchQuery.trim();
+    const r = q
+      ? await marketplaceClient.searchExtensionsPage(q, cursor, perPage, v)
+      : await marketplaceClient.listExtensionsPage(cursor, perPage, v);
+    items = append ? [...items, ...r.listings] : r.listings;
+    cursor = r.next_cursor;
+    more = cursor !== 0n;
   } catch (e) {
     error = e?.message ?? String(e);
-    items = [];
-    total = 0;
+    if (!append) items = [];
+    more = false;
   } finally {
     loading = false;
+    loadingMore = false;
   }
 }
 function doSearch() {
-  page = 1;
   syncUrl();
-  load(page, perPage, verifiedOnly);
+  load(verifiedOnly);
 }
 </script>
 
@@ -198,14 +203,9 @@ function doSearch() {
     {/each}
   </div>
 
-  {#if !searchQuery && total > perPage}
+  {#if more}
     <div class="pager">
-      <button disabled={page <= 1} on:click={() => (page = Math.max(1, page - 1))}>{$_('pager.prev')}</button>
-      <span>{$_('pager.page_of', { values: { page, total: Math.max(1, Math.ceil(total / perPage)) } })}</span>
-      <button
-        disabled={page * perPage >= total}
-        on:click={() => (page = page + 1)}
-      >{$_('pager.next')}</button>
+      <button disabled={loadingMore} on:click={() => load(verifiedOnly, true)}>{$_('pager.load_more')}</button>
     </div>
   {/if}
 {/if}

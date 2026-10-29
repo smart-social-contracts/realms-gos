@@ -451,6 +451,34 @@ function fallbackCodices(canisterItems: CodexListing[], verifiedOnly: boolean): 
   return listingsOrBuiltinFallback(canisterItems, builtinCodices, verifiedOnly);
 }
 
+/** One page of a paged list or search, newest first. */
+export interface ListingPage<T> {
+  listings: T[];
+  /** Pass back for the next page; 0n once nothing more remains. */
+  next_cursor: bigint;
+}
+
+type RawPage = { listings: any[]; next_cursor: bigint };
+
+// The canister reads a bounded number of rows per call, so one call can come
+// back short while more remain: call again until `count` listings or the end.
+async function fillPage<T>(
+  fetch: (cursor: bigint, count: bigint) => Promise<RawPage>,
+  norm: (raw: any) => T,
+  cursor: bigint,
+  count: number,
+): Promise<ListingPage<T>> {
+  const listings: T[] = [];
+  let next = cursor;
+  for (let call = 0; call < 10; call++) {
+    const r = await fetch(next, BigInt(count - listings.length));
+    listings.push(...r.listings.map(norm));
+    next = r.next_cursor;
+    if (next === 0n || listings.length >= count) break;
+  }
+  return { listings, next_cursor: next };
+}
+
 function matchesQuery(text: string, q: string): boolean {
   const lower = q.toLowerCase();
   return text.toLowerCase().includes(lower);
@@ -548,6 +576,32 @@ export const marketplaceClient = {
     );
     return listingsOrBuiltinFallback([], matches, verifiedOnly);
   },
+  async listExtensionsPage(cursor: bigint, count: number, verifiedOnly = true): Promise<ListingPage<ExtensionListing>> {
+    try {
+      const page = await fillPage(
+        (c, n) => marketplace.list_marketplace_extensions_page(c, n, verifiedOnly), normExt, cursor, count,
+      );
+      if (cursor !== 0n || page.listings.length > 0 || page.next_cursor !== 0n) return page;
+    } catch (e) {
+      if (cursor !== 0n) throw e;
+    }
+    // First page empty or offline: the built-in catalog, never fake Verified
+    return { listings: fallbackExtensions([], verifiedOnly), next_cursor: 0n };
+  },
+  async searchExtensionsPage(q: string, cursor: bigint, count: number, verifiedOnly = true): Promise<ListingPage<ExtensionListing>> {
+    try {
+      const page = await fillPage(
+        (c, n) => marketplace.search_extensions_page(q, c, n, verifiedOnly), normExt, cursor, count,
+      );
+      if (cursor !== 0n || page.listings.length > 0 || page.next_cursor !== 0n) return page;
+    } catch (e) {
+      if (cursor !== 0n) throw e;
+    }
+    const matches = builtinExtensions.filter(
+      (e) => matchesQuery(e.name, q) || matchesQuery(e.description, q) || matchesQuery(e.categories, q),
+    );
+    return { listings: listingsOrBuiltinFallback([], matches, verifiedOnly), next_cursor: 0n };
+  },
   async getMyExtensions(): Promise<ExtensionListing[]> {
     const r = await marketplace.get_my_extensions();
     return (r as any[]).map(normExt);
@@ -598,6 +652,31 @@ export const marketplaceClient = {
     );
     return listingsOrBuiltinFallback([], matches, verifiedOnly);
   },
+  async listCodicesPage(cursor: bigint, count: number, verifiedOnly = true): Promise<ListingPage<CodexListing>> {
+    try {
+      const page = await fillPage(
+        (c, n) => marketplace.list_marketplace_codices_page(c, n, verifiedOnly), normCodex, cursor, count,
+      );
+      if (cursor !== 0n || page.listings.length > 0 || page.next_cursor !== 0n) return page;
+    } catch (e) {
+      if (cursor !== 0n) throw e;
+    }
+    return { listings: fallbackCodices([], verifiedOnly), next_cursor: 0n };
+  },
+  async searchCodicesPage(q: string, cursor: bigint, count: number, verifiedOnly = true): Promise<ListingPage<CodexListing>> {
+    try {
+      const page = await fillPage(
+        (c, n) => marketplace.search_codices_page(q, c, n, verifiedOnly), normCodex, cursor, count,
+      );
+      if (cursor !== 0n || page.listings.length > 0 || page.next_cursor !== 0n) return page;
+    } catch (e) {
+      if (cursor !== 0n) throw e;
+    }
+    const matches = builtinCodices.filter(
+      (c) => matchesQuery(c.name, q) || matchesQuery(c.description, q) || matchesQuery(c.categories, q),
+    );
+    return { listings: listingsOrBuiltinFallback([], matches, verifiedOnly), next_cursor: 0n };
+  },
   async getMyCodices(): Promise<CodexListing[]> {
     const r = await marketplace.get_my_codices();
     return (r as any[]).map(normCodex);
@@ -637,6 +716,16 @@ export const marketplaceClient = {
   async searchAssistants(q: string, verifiedOnly = true): Promise<AssistantListing[]> {
     const r = await marketplace.search_assistants(q, verifiedOnly);
     return (r as any[]).map(normAssistant);
+  },
+  async listAssistantsPage(cursor: bigint, count: number, verifiedOnly = true): Promise<ListingPage<AssistantListing>> {
+    return fillPage(
+      (c, n) => marketplace.list_marketplace_assistants_page(c, n, verifiedOnly), normAssistant, cursor, count,
+    );
+  },
+  async searchAssistantsPage(q: string, cursor: bigint, count: number, verifiedOnly = true): Promise<ListingPage<AssistantListing>> {
+    return fillPage(
+      (c, n) => marketplace.search_assistants_page(q, c, n, verifiedOnly), normAssistant, cursor, count,
+    );
   },
   async getMyAssistants(): Promise<AssistantListing[]> {
     const r = await marketplace.get_my_assistants();

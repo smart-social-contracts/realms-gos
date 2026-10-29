@@ -188,17 +188,29 @@ export const idlFactory = ({ IDL }) => {
     'page' : IDL.Nat64,
     'total_count' : IDL.Nat64,
   });
+  const AssistantPage = IDL.Record({
+    'listings' : IDL.Vec(AssistantListing),
+    'next_cursor' : IDL.Nat64,
+  });
   const CodexListResult = IDL.Record({
     'per_page' : IDL.Nat64,
     'listings' : IDL.Vec(CodexListing),
     'page' : IDL.Nat64,
     'total_count' : IDL.Nat64,
   });
+  const CodexPage = IDL.Record({
+    'listings' : IDL.Vec(CodexListing),
+    'next_cursor' : IDL.Nat64,
+  });
   const ExtensionListResult = IDL.Record({
     'per_page' : IDL.Nat64,
     'listings' : IDL.Vec(ExtensionListing),
     'page' : IDL.Nat64,
     'total_count' : IDL.Nat64,
+  });
+  const ExtensionPage = IDL.Record({
+    'listings' : IDL.Vec(ExtensionListing),
+    'next_cursor' : IDL.Nat64,
   });
   const AdminListing = IDL.Record({
     'updated_at' : IDL.Float64,
@@ -369,14 +381,29 @@ export const idlFactory = ({ IDL }) => {
         [AssistantListResult],
         ['query'],
       ),
+    'list_marketplace_assistants_page' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64, IDL.Bool],
+        [AssistantPage],
+        ['query'],
+      ),
     'list_marketplace_codices' : IDL.Func(
         [IDL.Nat64, IDL.Nat64, IDL.Bool],
         [CodexListResult],
         ['query'],
       ),
+    'list_marketplace_codices_page' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64, IDL.Bool],
+        [CodexPage],
+        ['query'],
+      ),
     'list_marketplace_extensions' : IDL.Func(
         [IDL.Nat64, IDL.Nat64, IDL.Bool],
         [ExtensionListResult],
+        ['query'],
+      ),
+    'list_marketplace_extensions_page' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64, IDL.Bool],
+        [ExtensionPage],
         ['query'],
       ),
     'list_pending_audits' : IDL.Func([], [IDL.Vec(PendingAudit)], ['query']),
@@ -403,14 +430,29 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(AssistantListing)],
         ['query'],
       ),
+    'search_assistants_page' : IDL.Func(
+        [IDL.Text, IDL.Nat64, IDL.Nat64, IDL.Bool],
+        [AssistantPage],
+        ['query'],
+      ),
     'search_codices' : IDL.Func(
         [IDL.Text, IDL.Bool],
         [IDL.Vec(CodexListing)],
         ['query'],
       ),
+    'search_codices_page' : IDL.Func(
+        [IDL.Text, IDL.Nat64, IDL.Nat64, IDL.Bool],
+        [CodexPage],
+        ['query'],
+      ),
     'search_extensions' : IDL.Func(
         [IDL.Text, IDL.Bool],
         [IDL.Vec(ExtensionListing)],
+        ['query'],
+      ),
+    'search_extensions_page' : IDL.Func(
+        [IDL.Text, IDL.Nat64, IDL.Nat64, IDL.Bool],
+        [ExtensionPage],
         ['query'],
       ),
     'set_billing_service_principal' : IDL.Func([IDL.Text], [GenericResult], []),
