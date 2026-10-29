@@ -1,4 +1,9 @@
+import demoNoticeDefaults from './demo_notice_defaults.json';
+
 export type DemoNoticeBodies = Record<string, string>;
+
+/** The host's Legal English notice, shown when the realm stores no English body of its own. */
+export const DEFAULT_DEMO_NOTICE_EN: string = demoNoticeDefaults.en;
 
 export const NOTICE_LOCALE_SLOTS = [
 	'en',
@@ -68,6 +73,17 @@ export function monetaryUnavailableLabel(locale: string): string {
 		return 'No disponible en esta demo';
 	}
 	return 'Not available in this demo';
+}
+
+/** Locale → body: the stored bodies, with English seeded from Legal. Translations are never invented. */
+export function resolveDemoNoticeBodies(stored: unknown): DemoNoticeBodies {
+	const map: DemoNoticeBodies = {};
+	if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+		for (const [loc, body] of Object.entries(stored)) {
+			if (typeof body === 'string') map[loc] = body;
+		}
+	}
+	return { ...map, en: map.en?.trim() ? map.en : DEFAULT_DEMO_NOTICE_EN };
 }
 
 export function resolveDemoNoticeView(

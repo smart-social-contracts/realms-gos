@@ -8,7 +8,7 @@ import { applyBrandingPrimary, DEFAULT_PRIMARY_COLOR, parsePrimaryColor } from '
 import { applyResolvedLocale } from '$lib/i18n';
 import { defaultRealmLanguages } from '$lib/i18n/realmLocales';
 import { userLocale } from '$lib/stores/userLocale';
-import { resolveDemoNoticeEnabled, resolveDisableMonetaryTokens } from '$lib/config/hostTestFlags';
+import { resolveDemoNoticeBodies, resolveDemoNoticeEnabled, resolveDisableMonetaryTokens } from '$lib/config/hostTestFlags';
 
 const STATUS_QUERY_TIMEOUT_MS = 12_000;
 
@@ -168,6 +168,7 @@ const createRealmInfoStore = () => {
 					testModeSkipPassportZkproof: !!flags.test_mode_skip_passport_zkproof,
 					testModeDisableMonetaryTokens: resolveDisableMonetaryTokens(flags.test_mode_disable_monetary_tokens, network),
 					testModeDemoNotice: resolveDemoNoticeEnabled(flags.test_mode_demo_notice, network),
+					demoNoticeBody: resolveDemoNoticeBodies(flags.demo_notice_body),
 					loading: false
 				}));
 				if (browser) {
