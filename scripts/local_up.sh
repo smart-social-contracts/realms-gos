@@ -28,7 +28,8 @@
 #
 # Layout: this repo, Casals, file-registry and gos-as-a-service must be sibling
 # checkouts (the sheets resolve `local:` sources against their own directory).
-# Override with REALMS_DIR / CASALS_DIR / GAAS_DIR / FILE_REGISTRY_DIR. Bindings
+# Override with REALMS_DIR / CASALS_DIR / GAAS_DIR / FILE_REGISTRY_DIR (and GAAS_SHEET for another
+# GaaS sheet, e.g. one tests/e2e/local_sheet.py wrote with local builds). Bindings
 # live in CASALS_HOME (default ~/casals-home). Logs live in LOCAL_UP_LOG_DIR
 # (default ~/casals-logs) so --down does not wipe them.
 set -euo pipefail
@@ -37,6 +38,8 @@ REALMS_DIR="${REALMS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ROOT="$(dirname "$REALMS_DIR")"
 CASALS_DIR="${CASALS_DIR:-$ROOT/Casals}"
 GAAS_DIR="${GAAS_DIR:-$ROOT/gos-as-a-service}"
+# The GaaS sheet; tests/e2e/local_sheet.py in gos-as-a-service writes one that installs local builds.
+GAAS_SHEET="${GAAS_SHEET:-$GAAS_DIR/casals.json}"
 export CASALS_HOME="${CASALS_HOME:-$HOME/casals-home}"
 IDENTITY="${CASALS_E2E_IDENTITY:-local-dev}"
 REALM_NAME="${REALM_NAME:-first-realm}"
@@ -98,12 +101,29 @@ casals() { # casals <sheet-home-name> <args...>  — the CLI with that orchestra
      python3 -m casals_cli.main -e local --identity "$IDENTITY" "$@")
 }
 
+casals_export() { # casals_export <sheet-home-name> <sheet-path>  — {"bindings": {name: id}, ...}
+  # A conductor released before `export` carried bindings (the pinned GaaS one) answers without
+  # them; `show` lists the same canisters, so fall back to it.
+  local home="$1" sheet="$2" out
+  out="$(casals "$home" export "$sheet")"
+  if printf '%s' "$out" | python3 -c 'import json,sys; sys.exit(0 if "bindings" in json.load(sys.stdin) else 1)' 2>/dev/null; then
+    printf '%s\n' "$out"
+    return
+  fi
+  (cd "$CASALS_DIR" && CASALS_HOME="$CASALS_HOME/$home" \
+     python3 -m casals_cli.main --json -e local --identity "$IDENTITY" show "$sheet") | python3 -c '
+import json, sys
+t = sys.stdin.read()
+d = json.loads(t[t.index("{"):])
+print(json.dumps({"bindings": {c["name"]: c["canister_id"] for c in d["canisters"] if c.get("canister_id")}}))'
+}
+
 print_urls() { # print_urls <sheet-home-name> <sheet-path> <title>
   local home="$1" sheet="$2" title="$3"
   [ -f "$CASALS_HOME/$home/$home.local.json" ] || { echo "  ($title: no bindings under $CASALS_HOME/$home)"; return; }
   # `export` is the conductor's view (every stand canister); the conductor's own
   # canisters (casals-frontend, ...) are in the local bindings file.
-  casals "$home" export "$sheet" | python3 -c '
+  casals_export "$home" "$sheet" | python3 -c '
 import json, os, sys
 title, bindings_file = sys.argv[1], sys.argv[2]
 port = os.environ.get("CASALS_REPLICA_PORT") or "8000"
@@ -124,7 +144,7 @@ for name, cid in rows.items():
 
 print_portal_links() { # the wizard, and every realm the installer has minted
   [ -f "$CASALS_HOME/gaas/gaas.local.json" ] || return 0
-  casals gaas export "$GAAS_DIR/casals.json" | python3 -c '
+  casals_export gaas "$GAAS_SHEET" | python3 -c '
 import json, os, sys
 port = os.environ.get("CASALS_REPLICA_PORT") or "8000"
 port = port if port.isdigit() else "8000"
@@ -165,7 +185,7 @@ if [ "$ONLY_URLS" = 1 ]; then
     set +a
   fi
   print_urls realms-product "$REALMS_DIR/casals.json" "Realms product orchestra"
-  print_urls gaas "$GAAS_DIR/casals.json" "GaaS orchestra (portal + installer + realms born through it)"
+  print_urls gaas "$GAAS_SHEET" "GaaS orchestra (portal + installer + realms born through it)"
   print_portal_links
   exit 0
 fi
@@ -177,7 +197,7 @@ say "Preflight"
 [ -f "$CASALS_DIR/casals_cli/main.py" ] || die "Casals checkout not found at $CASALS_DIR (set CASALS_DIR)"
 [ -x "$REALMS_DIR/scripts/up.sh" ] || die "realms scripts/up.sh not found at $REALMS_DIR"
 if [ "$WITH_GAAS" = 1 ]; then
-  [ -f "$GAAS_DIR/casals.json" ] || die "gos-as-a-service checkout not found at $GAAS_DIR (set GAAS_DIR)"
+  [ -f "$GAAS_SHEET" ] || die "GaaS sheet not found at $GAAS_SHEET (set GAAS_DIR or GAAS_SHEET)"
 fi
 need icp     "npm install -g @icp-sdk/icp-cli"
 need ic-wasm "npm install -g @icp-sdk/ic-wasm"
@@ -250,15 +270,15 @@ CASALS_DIR="$CASALS_DIR" "$REALMS_DIR/scripts/up.sh" -e local "${up_flags[@]}"
 
 if [ "$WITH_GAAS" = 1 ]; then
   say "GaaS orchestra: Casals e2e harness"
-  (cd "$CASALS_DIR" && CASALS_HOME="$CASALS_HOME" KEEP=1 \
-     SCENARIOS="${SCENARIOS:-fresh,idempotent,runtime_stand}" \
-     python3 tests/e2e/run_e2e.py "$GAAS_DIR/casals.json")
+  (cd "$CASALS_DIR" && CASALS_HOME="$CASALS_HOME" CASALS_E2E_ROOT="$CASALS_HOME" KEEP=1 \
+     SCENARIOS="${SCENARIOS:-fresh,idempotent}" \
+     python3 tests/e2e/run_e2e.py "$GAAS_SHEET")
 
   if [ "$SKIP_PUBLISH" = 0 ]; then
     say "Publish: packages → GaaS file registry"
     command -v realms >/dev/null 2>&1 || python3 -m pip install -q -e "$REALMS_DIR/cli"
     EXPORT_JSON="$CASALS_HOME/gaas/gaas.local.export.json"
-    (cd "$CASALS_DIR" && CASALS_HOME="$CASALS_HOME/gaas" python3 -m casals_cli.main -e local --identity "$IDENTITY" export "$GAAS_DIR/casals.json") > "$EXPORT_JSON"
+    casals_export gaas "$GAAS_SHEET" > "$EXPORT_JSON"
     FILE_REGISTRY="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("bindings",{}).get("file-registry",""))' "$EXPORT_JSON")"
     NETWORK_URL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("network_url",""))' "$CASALS_HOME/gaas/gaas.local.json")"
     [ -n "$FILE_REGISTRY" ] || die "export has no file-registry binding"
@@ -268,7 +288,7 @@ if [ "$WITH_GAAS" = 1 ]; then
   # A realm is born the way the portal wizard does it: request_deployment on
   # the registry → installer create_stand → the conductor builds the stand from
   # the `Deployments` template → the realm frontend serves /canister_ids.js.
-  if casals gaas export "$GAAS_DIR/casals.json" | python3 -c '
+  if casals_export gaas "$GAAS_SHEET" | python3 -c '
 import json, sys; sys.exit(0 if sys.argv[1] + "-backend" in json.load(sys.stdin).get("bindings", {}) else 1)' "$REALM_NAME"; then
     say "Realm '$REALM_NAME' already exists on the GaaS orchestra; skipping the portal path"
   else
@@ -282,7 +302,7 @@ fi
 say "Ready. Open in the browser (Chrome/Firefox resolve *.localhost; Safari does not):"
 print_urls realms-product "$REALMS_DIR/casals.json" "Realms product orchestra"
 if [ "$WITH_GAAS" = 1 ]; then
-  print_urls gaas "$GAAS_DIR/casals.json" "GaaS orchestra (portal + installer + realms born through it)"
+  print_urls gaas "$GAAS_SHEET" "GaaS orchestra (portal + installer + realms born through it)"
   print_portal_links
 fi
 cat <<EOF

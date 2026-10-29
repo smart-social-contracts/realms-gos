@@ -249,6 +249,22 @@ def product_shell_guard(run):
 
 
 # Controller principal captured at @init / @post_upgrade time.
+def _is_ic_controller(caller_principal: str) -> bool:
+    """``ic.is_controller`` that tolerates ids that are not principals.
+
+    A non-principal id (the ``system`` user, a demo handle) makes the host trap with
+    ``invalid principal``; a trap is not an exception, so ``except Exception`` cannot
+    save the caller. Such ids cannot be canister controllers anyway.
+    """
+    text = str(caller_principal or "")
+    if "-" not in text or not text.replace("-", "").isalnum():
+        return False
+    try:
+        return bool(ic.is_controller(text))
+    except Exception:
+        return False
+
+
 # The controller always bypasses permission checks.
 _controller_principal: str = ""
 
@@ -296,7 +312,7 @@ def _check_access(caller_principal: str, operation: str) -> bool:
     # ...) and the deploying CI principal needs admin to bootstrap even
     # though no explicit User record exists for it after a reinstall.
     try:
-        if ic.is_controller(caller_principal):
+        if _is_ic_controller(caller_principal):
             return True
     except Exception:
         pass
@@ -444,7 +460,7 @@ def is_bootstrap_admin_caller(caller_principal: str, realm) -> bool:
 def _is_controller_or_trusted(caller_principal: str) -> bool:
     """Check if caller is an IC controller, init-time controller, or trusted principal."""
     try:
-        if ic.is_controller(caller_principal):
+        if _is_ic_controller(caller_principal):
             return True
     except Exception:
         pass
