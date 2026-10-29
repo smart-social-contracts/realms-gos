@@ -4,7 +4,7 @@ import math
 
 from core import chain
 from api import proposals
-from core.db import Conflict, Fail, Forbidden, each, find, first, next_id, view
+from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, view
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
 from core.op import op, run
@@ -19,6 +19,8 @@ MOVES = {"setup": {"active"}, "active": {"suspended", "splitting", "merging"}, "
 RULE = {"kind": "majority_of_quarters", "threshold": 50, "absent": "wait"}
 KINDS, ABSENT = ("majority_of_quarters", "majority_of_members"), ("wait", "no", "ignore")
 FIELDS = ("id", "name", "index", "status", "population", "codex_id", "codex_version", "last_sync")
+# Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
+ADOPT_EVERY = 60
 
 
 def realm():
@@ -86,6 +88,8 @@ def published_rule():
 
 
 def scale():
+    """Quarter populations against the capacity per quarter; whether a new quarter is ``wanted``; ``in_flight`` once
+    one is proposed or being built, and the ``pending`` one Casals is building."""
     r = realm()
     n = int((r.manifest_data or {}).get("scaling", {}).get("quarter_capacity")
             or (TEST_CAPACITY if r.network in TEST_NETWORKS else CAPACITY))
@@ -93,7 +97,7 @@ def scale():
     at = math.ceil(SCALE_AT * n)
     return {"populations": pops, "capacity": n, "scale_at": at, "enabled": r.auto_scale_enabled,
             "wanted": r.auto_scale_enabled and max(pops.values()) >= at,
-            "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at}
+            "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at, "pending": pending()}
 
 
 def ask(cid, name, payload):
@@ -129,8 +133,9 @@ def record(c, args):
         q.status = "active"
     r = realm()
     if scale()["wanted"] and not r.scale_in_flight:
-        # Intent only: Casals provisions the canister out of band, then quarter_register clears the flag.
+        # The realm proposes its next quarter itself; the members decide (quarter_add).
         r.scale_in_flight, r.scale_requested_at = True, chain.now()
+        proposals.file_replay("quarter_add", {}, chain.self_id(), chain.self_id(), proposals.root())
     return q
 
 
@@ -153,18 +158,96 @@ def apply_directory(reply):
 def quarter_register(c, args):
     """On the capital, add canister ``quarter`` to the federation, with optional ``name`` (default "Quarter <index>").
     Returns ``quarter`` and its ``index``."""
-    cid = args["quarter"]
     if federated():
         raise Forbidden("only the capital registers quarters")
+    return register(args["quarter"], args.get("name"))
+
+
+def register(cid, name=None):
     if Quarter[cid] or cid == chain.self_id():
         raise Conflict(f"{cid} is already part of this federation")
     if Quarter.count() >= MAX_QUARTERS:
         raise Conflict(f"a federation has at most {MAX_QUARTERS} quarters")
-    index = max([q.index for q in known()] + [0]) + 1
-    Quarter(id=cid, name=args.get("name", f"Quarter {index}"), index=index, last_activity_at=chain.now())
+    index = next_index()
+    Quarter(id=cid, name=name or f"Quarter {index}", index=index, last_activity_at=chain.now())
     r = realm()
     r.is_quarter, r.scale_in_flight = True, False
     return {"quarter": cid, "index": index}
+
+
+def next_index():
+    return max([q.index for q in known()] + [0]) + 1
+
+
+def casals():
+    return (realm().manifest_data or {}).get("casals", {})
+
+
+def pending():
+    return ((realm().manifest_data or {}).get("scaling") or {}).get("pending")
+
+
+def set_pending(value):
+    r = realm()
+    data = r.manifest_data or {}
+    data["scaling"] = {**data.get("scaling", {}), "pending": value}
+    r.manifest_data = data
+
+
+@op("quarter.register", governed=proposals.realm_wide, returns="member")
+def quarter_add(c, args):
+    """On the capital, ask Casals for a new quarter, optionally called ``name``: the next ``<stand>-quarter-<n>``
+    of the stand the realm runs on. Casals builds it on its own; the capital then makes it a quarter and registers
+    it (see ``scale_status``). Returns ``member``, the canister Casals is building."""
+    if federated():
+        raise Forbidden("only the capital adds quarters")
+    cas = casals()
+    if not (cas.get("conductor_canister_id") and cas.get("casals_stand")):
+        raise Unavailable("this realm does not know the Casals conductor and stand it runs on")
+    if pending():
+        raise Conflict(f"{pending()['member']} is still being built")
+    n = next_index()
+    member = f"{cas['casals_stand']}-quarter-{n}"
+    arg = json.dumps({"stand": cas["casals_stand"], "members": [member]})
+    reply = json.loads((yield from chain.call_text(cas["conductor_canister_id"], "stand_grow", arg)) or "{}")
+    if not reply.get("ok"):
+        raise Fail(f"Casals did not add {member}: {reply.get('error') or 'no reply'}")
+    set_pending({"member": member, "name": args.get("name") or f"Quarter {n}", "requested_at": chain.now()})
+    r = realm()
+    r.scale_in_flight, r.scale_requested_at = True, chain.now()
+    chain.set_timer(ADOPT_EVERY, adopt)
+    return {"member": member}
+
+
+def adopt():
+    """Once Casals has built the pending quarter: make it a quarter of this capital (the capital is one of its
+    controllers) and register it. Until then, look again in ADOPT_EVERY seconds."""
+    p = pending()
+    if not p:
+        return
+    cas = casals()
+    try:
+        arg = json.dumps({"stand": cas["casals_stand"]})
+        view_ = json.loads((yield from chain.call_text(cas["conductor_canister_id"], "orchestra_get", arg)) or "{}")
+        row = next((x for x in view_.get("canisters", []) if x.get("name") == p["member"]), None)
+        if row is None or row.get("status") != "ready" or not row.get("canister_id"):
+            chain.set_timer(ADOPT_EVERY, adopt)
+            return
+        joined = json.loads((yield from chain.call_op(row["canister_id"], "quarter_join_federation",
+                                                      {"capital": chain.self_id()})) or "{}")
+        if not joined.get("ok") and "already belongs" not in str(joined.get("error")):
+            raise Fail(f"{p['member']} did not join: {joined.get('error')}")
+        register(row["canister_id"], p["name"])
+        set_pending(None)
+    except Exception as e:
+        set_pending({**p, "error": str(e)[:300]})
+        chain.set_timer(ADOPT_EVERY, adopt)
+
+
+def resume():
+    """Timers do not survive an upgrade: keep looking for a quarter Casals is still building."""
+    if pending():
+        chain.set_timer(ADOPT_EVERY, adopt)
 
 
 @op("quarter.deregister", governed=proposals.realm_wide)

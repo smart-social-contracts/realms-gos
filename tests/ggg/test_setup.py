@@ -129,6 +129,13 @@ def test_orchestration_decide_answers_the_casals_baton():
     denied("orchestration_decide", "alice", action_id=7, decision="approve")
 
 
+def test_the_realm_keeps_its_casals_conductor_and_stand():
+    world.build()
+    ok("realm_configure_infrastructure", "ctl", conductor_canister_id="conductor", casals_stand="agora")
+    assert Realm["1"].manifest_data["casals"] == {"conductor_canister_id": "conductor", "casals_stand": "agora"}
+    assert "casals_stand" not in ok("setup_state", "ctl")["realm"]
+
+
 def test_monitor_and_export():
     world.build()
     mon = ok("realm_monitor", "ctl")

@@ -1,11 +1,11 @@
 import json
 
-from core import auth
+from core import auth, op
 import fake_chain
 from api import quarters
 import world
-from ggg import Codex, Department, Forward, GuestUser, Member, Quarter, Realm, User
-from kit import call, denied, ok
+from ggg import Codex, Department, Forward, GuestUser, Member, Proposal, Quarter, Realm, User
+from kit import call, denied, ok, rows
 
 CAPITAL = fake_chain.SELF
 
@@ -181,3 +181,92 @@ def test_population_counts_active_members_only():
     ok("user_remove", "ctl", user="alice")
     assert ok("scale_status", fake_chain.ANONYMOUS)["populations"][CAPITAL] == len(world.PEOPLE) - 2
     assert quarters.report()["population"] == Member.count_by("status", "active") == len(world.PEOPLE) - 2
+
+
+CONDUCTOR = "conductor"
+
+
+def fire_timers():
+    timers, fake_chain.state["timers"] = fake_chain.state["timers"], []
+    for _, cb in timers:
+        out = cb()
+        if out is not None:
+            op.run(out)
+
+
+def on_casals(*names):
+    capital(*names)
+    r = Realm["1"]
+    r.manifest_data = {**r.manifest_data, "casals": {"conductor_canister_id": CONDUCTOR, "casals_stand": "agora"}}
+
+
+def built(member, cid, status="ready"):
+    fake_chain.state["replies"][(CONDUCTOR, "orchestra_get")] = json.dumps(
+        {"ok": True, "canisters": [{"name": member, "canister_id": cid, "status": status}]})
+
+
+def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
+    on_casals("north")
+    reply(CONDUCTOR, "stand_grow", name="agora", members=["agora-quarter-2"])
+    out = ok("quarter_add", "ctl", name="South")
+    assert out["member"] == "agora-quarter-2"
+    assert fake_chain.state["calls"][-1] == (CONDUCTOR, "stand_grow",
+                                             json.dumps({"stand": "agora", "members": ["agora-quarter-2"]}))
+    s = ok("scale_status", fake_chain.ANONYMOUS)
+    assert s["in_flight"] and s["pending"]["member"] == "agora-quarter-2"
+    assert "still being built" in call("quarter_add", "ctl")["error"]
+    built("agora-quarter-2", "", status="created")
+    fire_timers()
+    assert Quarter.count() == 1 and len(fake_chain.state["timers"]) == 1
+    built("agora-quarter-2", "south-id")
+    reply("south-id", "quarter_join_federation", capital=CAPITAL)
+    fire_timers()
+    assert (fake_chain.state["calls"][-1][:2] == ("south-id", "quarter_join_federation")
+            and json.loads(fake_chain.state["calls"][-1][2]) == {"capital": CAPITAL})
+    south = Quarter["south-id"]
+    assert (south.name, south.index, south.status) == ("South", 2, "setup")
+    s = ok("scale_status", fake_chain.ANONYMOUS)
+    assert not s["in_flight"] and s["pending"] is None and fake_chain.state["timers"] == []
+
+
+def test_quarter_add_refusals_and_a_failed_join_is_retried():
+    capital()
+    assert "conductor and stand" in call("quarter_add", "ctl")["error"]
+    on_casals()
+    fake_chain.state["replies"][(CONDUCTOR, "stand_grow")] = json.dumps({"ok": False, "error": "no such row"})
+    assert "no such row" in call("quarter_add", "ctl")["error"]
+    denied("quarter_add", "alice")
+    reply(CONDUCTOR, "stand_grow")
+    ok("quarter_add", "ctl")
+    built("agora-quarter-1", "east-id")
+    fake_chain.state["replies"][("east-id", "quarter_join_federation")] = json.dumps({"ok": False, "error": "trap"})
+    fire_timers()
+    assert "trap" in ok("scale_status", fake_chain.ANONYMOUS)["pending"]["error"] and Quarter.count() == 0
+    reply("east-id", "quarter_join_federation")
+    fire_timers()
+    assert Quarter["east-id"].index == 1
+
+
+def test_a_quarter_still_being_built_is_looked_for_after_an_upgrade():
+    on_casals()
+    reply(CONDUCTOR, "stand_grow")
+    ok("quarter_add", "ctl")
+    fake_chain.state["timers"].clear()
+    quarters.resume()
+    assert len(fake_chain.state["timers"]) == 1
+
+
+def test_the_realm_proposes_its_next_quarter_when_one_is_wanted(monkeypatch):
+    on_casals("north")
+    r = Realm["1"]
+    r.network, r.auto_scale_enabled = "test", True
+    ok("quarter_report", "north", population=9)
+    filed = [p for p in rows(Proposal) if (p.action or {}).get("op") == "quarter_add"]
+    assert len(filed) == 1 and filed[0].proposer == CAPITAL and filed[0].status == "voting"
+    ok("quarter_report", "north", population=10)
+    assert len([p for p in rows(Proposal) if (p.action or {}).get("op") == "quarter_add"]) == 1
+
+
+def test_a_quarter_cannot_add_quarters(monkeypatch):
+    quarter(monkeypatch, "south", "north")
+    assert "only the capital" in call("quarter_add", "ctl")["error"]

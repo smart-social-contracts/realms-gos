@@ -38,9 +38,11 @@ FIELDS = {
     "tokens": ("accounting_currency", "accounting_currency_decimals", "token_canister_id", "nft_canister_id",
                "shared_tokens_json"),
     "infrastructure": ("frontend_canister_id", "file_registry_canister_id", "marketplace_canister_id",
-                       "installer_canister_id", "baton_canister_id"),
+                       "installer_canister_id", "baton_canister_id", "conductor_canister_id", "casals_stand"),
     "trust_policy": ("require_marketplace_approval", "trusted_approvers", "trusted_principals"),
 }
+# Kept in manifest_data["casals"], not on Realm: the stand Casals built the realm on, its baton and its conductor.
+CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
 HEX = "0123456789abcdef"
 COUNTED = ("User", "Member", "Department", "Organization", "Proposal", "Extension", "Task", "Notification")
 SHELL = """class _Ops:
@@ -72,6 +74,9 @@ def start(installer=""):
         if UserProfile[name] is None:
             UserProfile(id=name, allowed_to=allowed)
     tasks.rearm()
+    from api import quarters
+
+    quarters.resume()
 
 
 @op(None, read=True, public=True)
@@ -130,7 +135,7 @@ def configure(fields, values):
             and realm.network == "ic" and not realm.can_test_mode:
         raise Fail("test flags need a non-production network or can_test_mode set at install")
     for k, v in values.items():
-        if k == "baton_canister_id":
+        if k in CASALS:
             remember("casals", {**realm.manifest_data.get("casals", {}), k: v})
         else:
             setattr(realm, k, v)
@@ -156,7 +161,7 @@ def install(values):
 def setup_state(c, args):
     """Setup progress: the realm's ``status``, its ``founder``, the steps ``done`` and ``todo``, and its settings."""
     realm, d = Realm["1"], draft()
-    fields = [f for group in FIELDS.values() for f in group if f != "baton_canister_id"]
+    fields = [f for group in FIELDS.values() for f in group if f not in CASALS]
     return {"status": realm.status, "founder": d.get("founder", ""), "done": d["done"],
             "todo": [s for s in ("install", *FIELDS) if s not in d["done"]],
             "realm": view(realm, "network", "can_test_mode", *fields)}
@@ -198,7 +203,7 @@ def hosted(c):
 # GGG's names for the canisters Realms GOS keeps as infrastructure fields.
 HOSTED = {"frontend": "frontend_canister_id", "file_registry": "file_registry_canister_id",
           "realms_gos:marketplace": "marketplace_canister_id", "realms_gos:installer": "installer_canister_id",
-          "realms_gos:baton": "baton_canister_id"}
+          "realms_gos:baton": "baton_canister_id", "realms_gos:conductor": "conductor_canister_id"}
 
 
 @op("realm.host")
@@ -267,7 +272,8 @@ def realm_configure_tokens(c, args):
 @op("realm.configure.infrastructure", governed=launched)
 def realm_configure_infrastructure(c, args):
     """Set the canisters the realm uses, any of ``frontend_canister_id``, ``file_registry_canister_id``,
-    ``marketplace_canister_id``, ``installer_canister_id`` and ``baton_canister_id`` (the Casals baton)."""
+    ``marketplace_canister_id``, ``installer_canister_id``, ``baton_canister_id`` (the Casals baton),
+    ``conductor_canister_id`` and ``casals_stand`` (the Casals conductor and the stand it built the realm on)."""
     return configure(FIELDS["infrastructure"], args)
 
 

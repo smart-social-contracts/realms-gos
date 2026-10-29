@@ -159,6 +159,7 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 | `status`, `version` | — (public) | read | Thin summaries of `realm_info` |
 | `token_catalog` | — (public) | read | The ICRC-1 ledgers this GOS ships with, not the realm's registered tokens |
 | `scale_status` | — (public) | read | Quarter populations against this GOS's auto-scale capacity |
+| `quarter_add` (on the capital: Casals grows the realm's stand by <stand>-quarter-<n>, then the capital makes that canister a quarter and registers it; filed by the realm itself once a quarter is wanted) | `quarter.register` | governed | The members vote for a fourth quarter → Casals builds `agora-quarter-4` |
 | `realm_configure_infrastructure` | `realm.configure.infrastructure` | governed | Frontend, file-registry, marketplace, installer and Casals baton canister ids |
 | `realm_export` | `db.export` | read | One page of an entity's rows, as stored, for a backup |
 
