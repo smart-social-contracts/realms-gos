@@ -12,8 +12,8 @@
 name: CI (PR)
 
 on:
-  # pull_request:
-  #   branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -51,7 +51,8 @@ jobs:
         # not environment ids). The CLI is covered too: a `--network` default
         # table there is the same bug one layer up. The only literals allowed
         # are DFINITY system canisters that are the same on every mainnet alias
-        # (Candid UI, Internet Identity, ckBTC ledger + index).
+        # (Candid UI, Internet Identity, the ICP ledger, the ckBTC and ckUSDC
+        # ledgers + indexes).
         run: |
           if grep -rnoE '\b[a-z0-9]{5}(-[a-z0-9]{5}){3,10}-[a-z0-9]{3}\b' \
                scripts .github src/realm_backend src/*/static src/realm_frontend/src cli/realms dfx.json \
@@ -61,7 +62,7 @@ jobs:
                --exclude-dir=node_modules --exclude-dir=tests --exclude-dir=__pycache__ --exclude-dir=declarations --exclude-dir=dist --exclude-dir=cycleops \
                --exclude=test_identity_seed.py --exclude='*.test.ts' --exclude='*.test.js' \
              | grep -v -- '-xxxxx-' \
-             | grep -vE 'rxs6w-5qaaa-aaaah-avp2a-cai|rdmx6-jaaaa-aaaaa-aaadq-cai|mxzaz-hqaaa-aaaar-qaada-cai|n5wcd-faaaa-aaaar-qaaea-cai'; then
+             | grep -vE 'rxs6w-5qaaa-aaaah-avp2a-cai|rdmx6-jaaaa-aaaaa-aaadq-cai|ryjl3-tyaaa-aaaaa-aaaba-cai|mxzaz-hqaaa-aaaar-qaada-cai|n5wcd-faaaa-aaaar-qaaea-cai|xevnm-gaaaa-aaaar-qafnq-cai|xrs4b-hiaaa-aaaar-qafoa-cai'; then
             echo "::error::canister/principal ids belong in casals.json (read them with 'casals export')"; exit 1
           fi
 
@@ -117,15 +118,15 @@ jobs:
                     tests/backend/test_department_table.py \
                     tests/backend/test_no_module_level_re.py \
                     tests/backend/test_stamp_build.py \
-                    tests/backend/test_proposal_dispatch_orchestration.py \
-                    tests/backend/test_delegation.py
-      - name: Tax policy
+                    tests/backend/test_proposal_dispatch_orchestration.py
+      - name: Tax policy and power of attorney
         # Its own process: these load the real ggg entities, which the run
         # above replaces with the CLI's mock module.
         run: |
           pytest -q tests/backend/test_taxation.py \
                     tests/backend/test_tax_bridge.py \
-                    tests/backend/test_agora_tax_assessment.py
+                    tests/backend/test_agora_tax_assessment.py \
+                    tests/backend/test_delegation.py
       - name: Test-flag ratchet
         # Blocking on purpose: these are source and config scans that keep the
         # removed authentication bypass deleted, keep can_test_mode out of the

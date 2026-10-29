@@ -131,14 +131,25 @@ export DFX_NETWORK="$NETWORK"
 cd "$REPO_ROOT"
 
 # Basilisk builds need an isolated venv (see AGENTS.md / publish_build.py).
-VENV="$REPO_ROOT/.venv-basilisk"
+# The marketplace pins its own dependencies (ic-python-db 0.14 for its sorted
+# rankings), so it builds in a venv of its own, as in publish_build.py.
+PINNED="$REPO_ROOT/src/marketplace_backend/requirements.txt"
+if [[ "$FAMILY" == "marketplace" && -f "$PINNED" ]]; then
+    VENV="$REPO_ROOT/.venv-basilisk-marketplace_backend"
+else
+    VENV="$REPO_ROOT/.venv-basilisk"
+fi
 if [[ ! -x "$VENV/bin/python" ]]; then
     echo -e "${YELLOW}Creating basilisk venv at $VENV${NC}"
     python3 -m venv "$VENV"
     "$VENV/bin/pip" install -q --upgrade pip
-    "$VENV/bin/pip" install -q \
-        ic-basilisk==0.15.1 ic-basilisk-toolkit==0.5.3 \
-        ic-python-db==0.12.0 ic-python-logging==0.3.4
+    if [[ "$VENV" == *-marketplace_backend ]]; then
+        "$VENV/bin/pip" install -q -r "$PINNED"
+    else
+        "$VENV/bin/pip" install -q \
+            ic-basilisk==0.15.1 ic-basilisk-toolkit==0.5.3 \
+            ic-python-db==0.12.0 ic-python-logging==0.3.4
+    fi
 fi
 export PATH="$VENV/bin:$PATH"
 
