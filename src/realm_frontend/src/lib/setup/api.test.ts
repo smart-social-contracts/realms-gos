@@ -45,13 +45,8 @@ import coreExtensions from '../../../../../core-extensions.json';
 
 /** A realm with every core extension but public_dashboard, and a registry that publishes it and zone_selector. */
 function extensionsMissing(missing = ['public_dashboard']) {
-	const installed = coreExtensions.core_extensions.filter(
-		(id) => !missing.includes(id) && !coreExtensions.not_ported_to_slim.includes(id)
-	);
-	// passport_verification is not ported to the slim realm: setup leaves it out
-	registry.getExtensionManifest.mockResolvedValue({
-		dependencies: ['voting', 'zone_selector', 'passport_verification']
-	});
+	const installed = coreExtensions.core_extensions.filter((id) => !missing.includes(id));
+	registry.getExtensionManifest.mockResolvedValue({ dependencies: ['voting', 'zone_selector'] });
 	registry.listRegistryExtensions.mockResolvedValue([
 		{ ext_id: 'public_dashboard', versions: ['1.3.12'], latest: '1.3.12', manifest: null },
 		{ ext_id: 'zone_selector', versions: ['1.5.0'], latest: '1.5.0', manifest: null }
