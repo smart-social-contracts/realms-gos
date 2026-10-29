@@ -154,7 +154,7 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 | `extension_install`, `extension_uninstall` | `extension.install`, `extension.uninstall` | governed | Install `procurement` 1.0.3 (marketplace-approved) → vote |
 | `extension_call` | `extension.call` + the extension's declared operation | | The voting extension casts Alice's vote through `proposal_vote` |
 | `extension_set_access`, `sidebar_configure` | `realm.configure` | governed | Show `vault` only to Finance |
-| `extension_list` | `realm.data_view` | read | Alice's sidebar shows `voting`, not `vault` |
+| `extension_list` | — (public) | read | Alice's sidebar shows `voting`, not `vault`; a visitor's shows the public dashboard |
 | `shell` (REPL; calls operations as the caller) | `shell.execute` | | An admin runs `ops.proposal_list({"status": "voting"})` |
 | `status`, `version` | — (public) | read | Thin summaries of `realm_info` |
 | `token_catalog` | — (public) | read | The ICRC-1 ledgers this GOS ships with, not the realm's registered tokens |

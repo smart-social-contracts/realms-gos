@@ -78,7 +78,7 @@ export async function loadSidebar(_backend: unknown, locale: string = 'en'): Pro
 	sidebarLoading.set(true);
 	try {
 		await settleAuthSession();
-		// extension_list needs a signed-in caller; visitors get the public menu.
+		// Visitors get the fixed public menu (Sidebar.svelte).
 		if (!get(isAuthenticated)) return;
 		const rows = await sidebarRows();
 		const manifests: SidebarManifest[] = [];

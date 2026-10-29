@@ -102,8 +102,11 @@ def holds(principal):
 
 
 def available(ext, held):
+    """Whether ``held`` (from ``holds``) gets ``ext``. An extension open to no profile and no department, as one
+    whose manifest lists no ``profiles`` (the public dashboard), is open to everyone, visitors included."""
     access, (profiles, departments) = ext.access or {}, held
-    return bool(profiles & set(access.get("profiles", [])) or departments & set(access.get("departments", [])))
+    wanted, depts = set(access.get("profiles", [])), set(access.get("departments", []))
+    return not (wanted or depts) or bool(profiles & wanted or departments & depts)
 
 
 @op("extension.install", governed=realm_wide)
@@ -153,7 +156,7 @@ def extension_call(c, args):
 @op("realm.configure", governed=realm_wide)
 def extension_set_access(c, args):
     """Who gets ``extension``: ``profiles`` and ``departments``.
-    Both lists replace the current ones; one left out becomes empty."""
+    Both lists replace the current ones; one left out becomes empty. Both empty opens it to everyone."""
     ext = find(Extension, args["extension"])
     profiles, departments = list(args.get("profiles", [])), list(args.get("departments", []))
     for p in profiles:
@@ -171,9 +174,10 @@ def sidebar_configure(c, args):
     ext.sidebar = {**ext.sidebar, **args["sidebar"]}
 
 
-@op("realm.data_view", read=True)
+@op(None, read=True, public=True)
 def extension_list(c, args):
-    """Installed extensions with whether each is available to you, ``count`` rows at a time (default 100, at most
+    """Installed extensions with whether each is available to you (visitors included: the menu and the public
+    dashboard need it), ``count`` rows at a time (default 100, at most
     500) from row ``from`` (default 1). Returns ``extensions`` and ``next``, the ``from`` of the next page (null at the
     end); a page can be short where extensions were uninstalled, so follow ``next``."""
     rows, nxt = page(Extension, args)

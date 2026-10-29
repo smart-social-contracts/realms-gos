@@ -165,6 +165,14 @@ def test_list_pages_follow_next(registry):
     assert rest["extensions"][0]["available"]
 
 
+def test_an_extension_open_to_no_profile_is_open_to_visitors(registry):
+    Extension(id="public_dashboard", version="1.3.12", access={"profiles": [], "departments": []})
+    Extension(id="vault", version="0.3.0", access={"profiles": ["admin"], "departments": []})
+    for who in (fake_chain.ANONYMOUS, "stranger", "alice"):
+        shown = {e["id"]: e["available"] for e in ok("extension_list", who)["extensions"]}
+        assert shown == {"public_dashboard": True, "vault": False}
+
+
 def test_install_is_a_realm_wide_vote(registry):
     world.policy(Department["Administration"], 2, 3)
     out = ok("extension_install", "ctl", extension="voting", version="2.1.0")
@@ -191,7 +199,7 @@ def test_access_sidebar_and_uninstall(registry):
     ok("sidebar_configure", "ctl", extension="voting", sidebar={"category": "Governance", "order": 1})
     assert Extension["voting"].sidebar["category"] == "Governance" and Extension["voting"].sidebar["show_in_sidebar"]
     denied("sidebar_configure", "alice", extension="voting", sidebar={})
-    denied("extension_list", fake_chain.ANONYMOUS)
+    assert [e["available"] for e in ok("extension_list", fake_chain.ANONYMOUS)["extensions"]] == [False]
     denied("extension_uninstall", "alice", extension="voting")
     ok("extension_uninstall", "ctl", extension="voting")
     assert Extension["voting"] is None
