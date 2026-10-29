@@ -352,7 +352,7 @@ from api.verification import (
     request_audit as request_audit_impl,
     set_verification_status as set_verification_status_impl,
 )
-from core.models import backfill_principal_indexes
+from core.models import backfill_principal_indexes, backfill_ranking_indexes
 from ic_python_db import Database
 from ic_python_logging import get_logger
 
@@ -859,6 +859,7 @@ def init_canister(arg: Opt[MarketplaceInitArg] = None) -> void:
 @post_upgrade
 def post_upgrade_canister() -> void:
     backfill_principal_indexes()
+    backfill_ranking_indexes()
     logger.info("Marketplace backend upgraded")
 
 

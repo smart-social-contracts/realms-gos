@@ -167,8 +167,12 @@ jobs:
           python3 scripts/build_base_wasm.py --gzip
           mv .basilisk/realm_backend/realm_backend.wasm.gz ./realm_backend.wasm.gz
           echo "✅ Backend WASM built ($(stat -c%s realm_backend.wasm.gz) bytes)"
+          # The marketplace pins its own dependencies (ic-python-db 0.14 for its
+          # sorted rankings), so it builds in its own environment
+          python3 -m venv /tmp/marketplace-venv
+          /tmp/marketplace-venv/bin/pip install -q -r src/marketplace_backend/requirements.txt
           CANISTER_CANDID_PATH="$(pwd)/src/marketplace_backend/marketplace_backend.did" \
-            python3 -m basilisk marketplace_backend src/marketplace_backend/main.py
+            /tmp/marketplace-venv/bin/python -m basilisk marketplace_backend src/marketplace_backend/main.py
           gzip -kf .basilisk/marketplace_backend/marketplace_backend.wasm
           cp .basilisk/marketplace_backend/marketplace_backend.wasm.gz ./marketplace_backend.wasm.gz
           echo "✅ Marketplace WASM built ($(stat -c%s marketplace_backend.wasm.gz) bytes)"
