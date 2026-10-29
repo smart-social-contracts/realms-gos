@@ -28,7 +28,6 @@ import shutil
 import subprocess
 import sys
 import urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 
 # Patched certified-assets WASM used by all Realms frontend canisters.
@@ -95,46 +94,40 @@ def _run(cmd, cwd=None, env=None):
         sys.exit(f"command failed ({r.returncode}): {' '.join(str(c) for c in cmd)}")
 
 
-def _basilisk_python(root: Path) -> str:
-    """Isolated venv Python — basilisk rejects native packages in the host env."""
-    venv = root / ".venv-basilisk"
+def _basilisk_python(root: Path, canister: str) -> str:
+    """Isolated venv Python — basilisk rejects native packages in the host env.
+
+    A canister that pins its own dependencies (``src/<canister>/requirements.txt``,
+    e.g. the marketplace on a newer ic-python-db) builds in a venv of its own.
+    """
+    pinned = root / "src" / canister / "requirements.txt"
+    if pinned.is_file():
+        venv = root / f".venv-basilisk-{canister}"
+        requirements = ["-r", str(pinned)]
+    else:
+        venv = root / ".venv-basilisk"
+        requirements = _BASILISK_REQUIREMENTS
     py = venv / "bin" / "python"
     if not py.is_file():
         print(f"  creating basilisk venv at {venv}")
         _run([sys.executable, "-m", "venv", str(venv)])
         _run([str(venv / "bin" / "pip"), "install", "-q", "--upgrade", "pip"])
-        _run([str(venv / "bin" / "pip"), "install", "-q", *_BASILISK_REQUIREMENTS])
+        _run([str(venv / "bin" / "pip"), "install", "-q", *requirements])
     return str(py)
 
 
-def _stamp_version_http(root: Path, release_tag: str | None) -> None:
-    """Bake GET /version provenance into backend sources before WASM build.
+def _stamp_build(root: Path, canister: str, release_tag: str | None) -> None:
+    """Bake build provenance (status() and GET /version) into the backend's
+    sources before its WASM build.
 
-    ``sha`` / ``built_at`` are always known at build time. ``version`` is the
-    release tag only — omitted honestly for ``--from-main`` snapshots.
+    Run by the venv that builds the canister, so the dependency versions are
+    the packed ones. ``version`` is the release tag only — omitted honestly for
+    ``--from-main`` snapshots.
     """
-    sha = git_short_sha(root)
-    built_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    files = (
-        root / "src" / "realm_backend" / "api" / "version_http.py",
-        root / "src" / "marketplace_backend" / "api" / "version_http.py",
-    )
-    for path in files:
-        if not path.is_file():
-            continue
-        text = path.read_text()
-        original = text
-        if sha:
-            text = text.replace("SHA_PLACEHOLDER", sha)
-        text = text.replace("BUILT_AT_ISO_PLACEHOLDER", built_at)
-        if release_tag:
-            text = text.replace("VERSION_PLACEHOLDER", release_tag)
-        if text != original:
-            path.write_text(text)
-            print(
-                f"  stamped {path.relative_to(root)} "
-                f"sha={sha} built_at={built_at} version={release_tag or '(omit)'}"
-            )
+    cmd = [_basilisk_python(root, canister), "scripts/stamp_build.py", canister]
+    if release_tag:
+        cmd += ["--version", release_tag]
+    _run(cmd, cwd=root)
 
 
 def _build_realm_backend(root: Path, variant: str = DEFAULT_BUILD_VARIANT) -> Path:
@@ -145,7 +138,7 @@ def _build_realm_backend(root: Path, variant: str = DEFAULT_BUILD_VARIANT) -> Pa
         verify_build_variant,
     )
 
-    bpy = _basilisk_python(root)
+    bpy = _basilisk_python(root, "realm_backend")
     env = {
         **os.environ,
         "CANISTER_CANDID_PATH": str(
@@ -171,7 +164,7 @@ def _build_backend(
 ) -> Path:
     if canister == "realm_backend":
         return _build_realm_backend(root, variant=variant)
-    bpy = _basilisk_python(root)
+    bpy = _basilisk_python(root, canister)
     did = root / "src" / canister / f"{canister}.did"
     env = {**os.environ, "CANISTER_CANDID_PATH": str(did)}
     _run([bpy, "-m", "basilisk", canister, main_py], cwd=root, env=env)
@@ -381,7 +374,7 @@ def main():
         canister, main_py = spec["backend"]
         base_version, _ = parse_build_variant_label(version)
         release_tag = None if args.from_main else f"v{base_version}"
-        _stamp_version_http(root, release_tag)
+        _stamp_build(root, canister, release_tag)
         backend_wasm = _build_backend(
             root, canister, main_py, variant=realm_variant
         )
