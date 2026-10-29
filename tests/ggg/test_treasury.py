@@ -9,7 +9,7 @@ import pytest
 import fake_chain
 from api import treasury
 import world
-from ggg import (AllocationRule, Budget, Delegation, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
+from ggg import (Proposal, AllocationRule, Budget, Delegation, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, Position, Token, Transfer)
 from kit import call, denied, ok, rows
 
@@ -50,9 +50,9 @@ def allocate(**shares):
 
 
 def adopt(proposal, voter="carla"):
-    ok("proposal_vote", voter, proposal=proposal, choice="yes")
-    ok("proposal_finalize", "ctl", proposal=proposal)
-    return ok("proposal_execute", "ctl", proposal=proposal)["result"]
+    """The deciding vote settles the proposal and runs its action; returns the action's reply."""
+    assert ok("proposal_vote", voter, proposal=proposal, choice="yes")["status"] == "executed"
+    return Proposal[proposal].result
 
 
 def funds():

@@ -1,5 +1,7 @@
 import fake_chain
 import world
+from api import proposals
+from core import op
 from ggg import Delegation, Department, Mandate, Proposal, Vote
 from kit import call, denied, later, ok
 
@@ -46,7 +48,7 @@ def test_I_GOV_2_only_eligible_voters_count():
     p = ok("proposal_create", "dana", title="Close the office on Fridays", department="Civil Registry")["proposal"]
     assert "not eligible" in call("proposal_vote", "alice", proposal=p, choice="yes")["error"]
     vote_all(p, "yes", "dana", "bob")
-    assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "accepted"
+    assert Proposal[p].status == "accepted"
 
 
 def test_I_GOV_3_quorum_and_threshold():
@@ -63,8 +65,7 @@ def test_veto():
     world.policy(depts["Civil Registry"], 1, 3, veto=["dana"])
     p = ok("proposal_create", "bob", title="x", department="Civil Registry")["proposal"]
     ok("proposal_vote", "dana", proposal=p, choice="no")
-    later(8 * 86400)
-    assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "rejected"
+    assert Proposal[p].status == "rejected"
 
 
 def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
@@ -146,3 +147,57 @@ def test_withdraw_only_own():
     p = ok("proposal_create", "bob", title="x")["proposal"]
     assert "not your proposal" in call("proposal_withdraw", "alice", proposal=p)["error"]
     ok("proposal_withdraw", "bob", proposal=p)
+
+
+def fire_timers():
+    timers, fake_chain.state["timers"] = fake_chain.state["timers"], []
+    for _, cb in timers:
+        out = cb()
+        if out is not None:
+            op.run(out)
+
+
+def test_a_zero_window_closes_a_vote_once_its_outcome_is_certain_and_runs_its_action():
+    world.build()
+    ok("governance_update", "ctl", voting_window=0)
+    action = {"op": "governance_update", "args": {"threshold": 60}}
+    p = ok("proposal_create", "alice", title="Raise the threshold", action=action)["proposal"]
+    assert Proposal[p].deadline == 0 and fake_chain.state["timers"] == []
+    vote_all(p, "yes", "alice", "bob", "dana")
+    assert Proposal[p].status == "voting"
+    later(30 * 86400)
+    out = ok("proposal_vote", "carla", proposal=p, choice="yes")
+    assert out["status"] == "executed" and Proposal[p].tally["eligible"] == 7
+    assert "not open for voting" in call("proposal_vote", "elena", proposal=p, choice="no")["error"]
+    q = ok("proposal_create", "alice", title="Close the park")["proposal"]
+    vote_all(q, "no", "bob", "dana", "carla")
+    assert Proposal[q].status == "rejected"
+
+
+def test_everyone_voting_decides_an_open_vote():
+    world.build()
+    ok("governance_update", "ctl", voting_window=0)
+    p = ok("proposal_create", "alice", title="x")["proposal"]
+    vote_all(p, "abstain", *world.PEOPLE[:-1])
+    assert Proposal[p].status == "voting"
+    assert ok("proposal_vote", "mallory", proposal=p, choice="yes")["status"] == "accepted"
+
+
+def test_a_timed_vote_settles_itself_at_its_deadline():
+    world.build()
+    action = {"op": "governance_update", "args": {"threshold": 60}}
+    p = ok("proposal_create", "alice", title="Raise the threshold", action=action)["proposal"]
+    vote_all(p, "yes", "alice", "bob")
+    assert fake_chain.state["timers"][-1][0] == 7 * 86400 + 1
+    later(7 * 86400 + 1)
+    fire_timers()
+    assert Proposal[p].status == "executed"
+
+
+def test_deadline_timers_are_set_again_after_an_upgrade():
+    world.build()
+    for title in ("a", "b"):
+        ok("proposal_create", "alice", title=title)
+    fake_chain.state["timers"].clear()
+    proposals.resume()
+    assert len(fake_chain.state["timers"]) == 2

@@ -52,7 +52,10 @@ same rows.
 - a proposal's action is `{op, args}`, an operation name and its JSON arguments;
 - proposal thresholds and quorums, allocation shares and tender rubric weights are whole
   percentages, not basis points, and `governance_update` takes `voting_window` in seconds and
-  `threshold` and `quorum_percent` in percent, kept outside the `Realm` row;
+  `threshold` and `quorum_percent` in percent, kept outside the `Realm` row; a `voting_window` of
+  0 leaves a realm-wide proposal open until its outcome is certain;
+- a proposal settles itself: the deciding vote (or, for a timed one, its deadline) closes it and runs
+  its action at once; `proposal_finalize` and `proposal_execute` remain for a deadline missed;
 - a tender's rubric, an allocation rule, a fund's balances, credential fields and wrapped keys are
   maps where `ggg.did` has lists of pairs;
 - a limit in time may be given as `expires_in` seconds instead of `expires_at`, and a delegation's

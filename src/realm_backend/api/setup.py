@@ -74,8 +74,9 @@ def start(installer=""):
         if UserProfile[name] is None:
             UserProfile(id=name, allowed_to=allowed)
     tasks.rearm()
-    from api import quarters
+    from api import proposals, quarters
 
+    proposals.resume()
     quarters.resume()
 
 

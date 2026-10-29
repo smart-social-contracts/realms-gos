@@ -270,3 +270,18 @@ def test_the_realm_proposes_its_next_quarter_when_one_is_wanted(monkeypatch):
 def test_a_quarter_cannot_add_quarters(monkeypatch):
     quarter(monkeypatch, "south", "north")
     assert "only the capital" in call("quarter_add", "ctl")["error"]
+
+
+def test_the_members_vote_the_realms_own_proposal_and_casals_is_asked():
+    on_casals("north")
+    r = Realm["1"]
+    r.network, r.auto_scale_enabled = "test", True
+    ok("governance_update", "ctl", voting_window=0)
+    ok("quarter_report", "north", population=9)
+    p = next(p for p in rows(Proposal) if (p.action or {}).get("op") == "quarter_add")
+    reply(CONDUCTOR, "stand_grow")
+    for voter in ("alice", "bob", "dana"):
+        ok("proposal_vote", voter, proposal=p.id, choice="yes")
+    assert ok("proposal_vote", "carla", proposal=p.id, choice="yes")["status"] == "executed"
+    assert fake_chain.state["calls"][-1][:2] == (CONDUCTOR, "stand_grow")
+    assert ok("scale_status", fake_chain.ANONYMOUS)["pending"]["member"] == "agora-quarter-2"

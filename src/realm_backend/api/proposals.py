@@ -7,6 +7,8 @@ from core.op import dispatch, op, ops
 
 CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")
+# Proposals whose deadline timers are set again after an upgrade, per message.
+RESUME_PAGE = 100
 
 
 def root():
@@ -26,6 +28,7 @@ def settings():
 
 
 def window():
+    """Seconds a realm-wide proposal stays open. 0: no deadline, it closes as soon as its outcome is certain."""
     cal = Calendar["1"]
     return cal.voting_window if cal else 7 * 86400
 
@@ -34,14 +37,62 @@ def new_proposal(title, user, by, department, action=None, description=""):
     policy = department.policy or {}
     p = Proposal(id=next_id(Proposal, "P"), title=title, description=description, proposer=user,
                  on_behalf_of=user if by != user else "", department=department, action=action,
-                 status="voting", opens_at=chain.now(), deadline=chain.now() + window(),
+                 status="voting", opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
                  threshold=int(settings().get("threshold", 50)),
                  quorum_percent=int(settings().get("quorum_percent", 0) if department.is_root
                                     else policy.get("quorum_percent", 0)))
     p.tally = {c: 0 for c in CHOICES}
     if not department.is_root:
         p.tally = {**p.tally, "required": int(policy.get("m", 1)), "veto": list(policy.get("veto", []))}
+    if p.deadline:
+        arm(p)
     return p
+
+
+def arm(p):
+    chain.set_timer(max(p.deadline - chain.now(), 0) + 1, lambda pid=p.id: expire(pid))
+
+
+def expire(pid):
+    """At its deadline, a proposal still open is settled."""
+    p = Proposal[pid]
+    if p is not None and p.status == "voting":
+        yield from settle(p, True)
+
+
+def resume(start=1):
+    """Timers do not survive an upgrade: set them again for the open proposals with a deadline, a page per message."""
+    rows, nxt = page_by(Proposal, "status", "voting", {"from": start, "count": RESUME_PAGE})
+    for p in rows:
+        if p.deadline:
+            arm(p)
+    if nxt:
+        chain.set_timer(0, lambda n=nxt: resume(n))
+
+
+def close(p, result):
+    tally, size, _ = count(p)
+    p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
+
+
+def run_action(p):
+    p.status = "executed"
+    out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay",
+                              signer=p.action.get("initiator") or p.proposer, proposal=p.id)
+    p.result = json.loads(out)
+    if not p.result.get("ok"):
+        p.status = "failed"
+
+
+def settle(p, final):
+    """Close ``p`` once its outcome is certain (``final``: its deadline has passed) and, if it passed, run its
+    action at once. Returns the outcome, or None while it is still open."""
+    result = outcome(p, final)
+    if result is not None:
+        close(p, result)
+        if result == "accepted" and p.action:
+            yield from run_action(p)
+    return result
 
 
 def file_replay(name, args, user, by, department):
@@ -86,6 +137,15 @@ def outcome(p, final):
         if tally["yes"] >= required:
             return "accepted"
         return "rejected" if final or size - tally["no"] < required else None
+    if not p.deadline and not final:
+        # No deadline: open until certain. Yes alone over the threshold of everyone eligible passes it; enough no
+        # that the rest voting yes could not pass it fails it; once everyone has voted, it is decided as is.
+        turnout = sum(tally.values()) * 100 >= p.quorum_percent * max(size, 1)
+        if tally["yes"] * 100 > p.threshold * max(size, 1) and turnout:
+            return "accepted"
+        if tally["no"] * 100 >= (100 - p.threshold) * max(size, 1):
+            return "rejected"
+        final = sum(tally.values()) >= size
     if not final:
         return None
     decisive = tally["yes"] + tally["no"]
@@ -125,7 +185,7 @@ def proposal_vote(c, args):
     p = find(Proposal, args["proposal"])
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
-    if p.status != "voting" or chain.now() > p.deadline:
+    if p.status != "voting" or (p.deadline and chain.now() > p.deadline):
         raise Conflict(f"{p.id} is not open for voting")
     if not eligible(p, c.user):
         raise Forbidden(f"you are not eligible to vote on {p.id}")
@@ -137,7 +197,9 @@ def proposal_vote(c, args):
     tally[args["choice"]] = tally.get(args["choice"], 0) + 1
     p.tally = tally
     v.choice, v.cast_by, v.cast_at = args["choice"], c.by, chain.now()
-    return {"vote": v.id}
+    # The deciding vote closes the proposal and runs its action.
+    settled = yield from settle(p, False)
+    return {"vote": v.id, **({"status": p.status} if settled else {})}
 
 
 @op("proposal.manage", returns="proposal")
@@ -157,11 +219,10 @@ def proposal_finalize(c, args):
     p = find(Proposal, args["proposal"])
     if p.status != "voting":
         raise Conflict(f"{p.id} is not being voted on")
-    result = outcome(p, chain.now() > p.deadline)
+    result = outcome(p, bool(p.deadline) and chain.now() > p.deadline)
     if result is None:
-        raise Conflict(f"{p.id} is still open until {p.deadline}")
-    tally, size, _ = count(p)
-    p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
+        raise Conflict(f"{p.id} is still open" + (f" until {p.deadline}" if p.deadline else " until its outcome is certain"))
+    close(p, result)
     return {"proposal": p.id, "status": result}
 
 
@@ -171,12 +232,7 @@ def proposal_execute(c, args):
     p = find(Proposal, args["proposal"])
     if p.status != "accepted" or not p.action:
         raise Conflict(f"{p.id} has no accepted action to execute")
-    p.status = "executed"
-    out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay",
-                                 signer=p.action.get("initiator") or p.proposer, proposal=p.id)
-    p.result = json.loads(out)
-    if not p.result.get("ok"):
-        p.status = "failed"
+    yield from run_action(p)
     return {"proposal": p.id, "status": p.status, "result": p.result}
 
 
