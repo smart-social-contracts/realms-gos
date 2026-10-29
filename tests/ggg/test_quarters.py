@@ -205,6 +205,11 @@ def built(member, cid, status="ready"):
         {"ok": True, "canisters": [{"name": member, "canister_id": cid, "status": status}]})
 
 
+def adoptable(cid):
+    for method in ("quarter_join_federation", "setup_step", "quarter_sync"):
+        reply(cid, method)
+
+
 def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
     on_casals("north")
     reply(CONDUCTOR, "stand_grow", name="agora", members=["agora-quarter-2"])
@@ -219,10 +224,13 @@ def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
     fire_timers()
     assert Quarter.count() == 1 and len(fake_chain.state["timers"]) == 1
     built("agora-quarter-2", "south-id")
-    reply("south-id", "quarter_join_federation", capital=CAPITAL)
+    adoptable("south-id")
+    Realm["1"].open_registration = True
     fire_timers()
-    assert (fake_chain.state["calls"][-1][:2] == ("south-id", "quarter_join_federation")
-            and json.loads(fake_chain.state["calls"][-1][2]) == {"capital": CAPITAL})
+    to_south = [(m, json.loads(a)) for cid, m, a in fake_chain.state["calls"] if cid == "south-id"]
+    assert to_south == [("quarter_join_federation", {"capital": CAPITAL}),
+                        ("setup_step", {"step": "realm", "name": "South", "open_registration": True}),
+                        ("quarter_sync", {})]
     south = Quarter["south-id"]
     assert (south.name, south.index, south.status) == ("South", 2, "setup")
     s = ok("scale_status", fake_chain.ANONYMOUS)
@@ -242,7 +250,7 @@ def test_quarter_add_refusals_and_a_failed_join_is_retried():
     fake_chain.state["replies"][("east-id", "quarter_join_federation")] = json.dumps({"ok": False, "error": "trap"})
     fire_timers()
     assert "trap" in ok("scale_status", fake_chain.ANONYMOUS)["pending"]["error"] and Quarter.count() == 0
-    reply("east-id", "quarter_join_federation")
+    adoptable("east-id")
     fire_timers()
     assert Quarter["east-id"].index == 1
 
@@ -285,3 +293,12 @@ def test_the_members_vote_the_realms_own_proposal_and_casals_is_asked():
     assert ok("proposal_vote", "carla", proposal=p.id, choice="yes")["status"] == "executed"
     assert fake_chain.state["calls"][-1][:2] == (CONDUCTOR, "stand_grow")
     assert ok("scale_status", fake_chain.ANONYMOUS)["pending"]["member"] == "agora-quarter-2"
+
+
+def test_a_join_that_fills_the_capital_makes_the_realm_propose_a_quarter():
+    on_casals()
+    r = Realm["1"]
+    r.network, r.auto_scale_enabled, r.open_registration = "test", True, True
+    for n in range(9 - Member.count_by("status", "active")):
+        ok("realm_join", f"newcomer-{n}")
+    assert [p.action["op"] for p in rows(Proposal) if p.action] == ["quarter_add"]

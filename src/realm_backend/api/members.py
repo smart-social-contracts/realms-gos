@@ -102,6 +102,9 @@ def realm_join(c, args):
         give(user, find(UserProfile, inv.profile))
         inv.uses, inv.redeemed_by = inv.uses + 1, inv.redeemed_by + [c.user]
     yield from codex.hook("on_user_register", {"user": c.user})
+    from api import quarters
+
+    quarters.want_quarter()
     return {"user": c.user, "status": Member[c.user].status, "profiles": [p.id for p in user.profiles]}
 
 

@@ -131,12 +131,17 @@ def record(c, args):
     q.last_sync = q.last_activity_at = chain.now()
     if q.status == "setup":
         q.status = "active"
+    want_quarter()
+    return q
+
+
+def want_quarter():
+    """On the capital, once scale_status wants a quarter: the realm proposes its next quarter itself and the members
+    decide (quarter_add). Checked whenever a population changes: a quarter reports, a member joins."""
     r = realm()
-    if scale()["wanted"] and not r.scale_in_flight:
-        # The realm proposes its next quarter itself; the members decide (quarter_add).
+    if not federated() and scale()["wanted"] and not r.scale_in_flight:
         r.scale_in_flight, r.scale_requested_at = True, chain.now()
         proposals.file_replay("quarter_add", {}, chain.self_id(), chain.self_id(), proposals.root())
-    return q
 
 
 def apply_directory(reply):
@@ -233,12 +238,23 @@ def adopt():
         if row is None or row.get("status") != "ready" or not row.get("canister_id"):
             chain.set_timer(ADOPT_EVERY, adopt)
             return
-        joined = json.loads((yield from chain.call_op(row["canister_id"], "quarter_join_federation",
-                                                      {"capital": chain.self_id()})) or "{}")
+        cid = row["canister_id"]
+        joined = json.loads((yield from chain.call_op(cid, "quarter_join_federation", {"capital": chain.self_id()}))
+                            or "{}")
         if not joined.get("ok") and "already belongs" not in str(joined.get("error")):
             raise Fail(f"{p['member']} did not join: {joined.get('error')}")
-        register(row["canister_id"], p["name"])
+        # The quarter takes the capital's registration rule, so the members it is offered to can join it.
+        named = json.loads((yield from chain.call_op(cid, "setup_step", {
+            "step": "realm", "name": p["name"], "open_registration": bool(realm().open_registration)})) or "{}")
+        if not named.get("ok"):
+            raise Fail(f"{p['member']} was not configured: {named.get('error')}")
+        if not Quarter[cid]:
+            register(cid, p["name"])
         set_pending(None)
+        # Its first report makes it active, and joinable (join_targets offers active quarters).
+        synced = json.loads((yield from chain.call_op(cid, "quarter_sync", {})) or "{}")
+        if not synced.get("ok"):
+            Quarter[cid].status = "setup"
     except Exception as e:
         set_pending({**p, "error": str(e)[:300]})
         chain.set_timer(ADOPT_EVERY, adopt)
