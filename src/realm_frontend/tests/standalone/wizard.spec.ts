@@ -284,9 +284,18 @@ function collectErrors(page: Page): string[] {
 	return errors;
 }
 
+// Chromium reports a change of the host's network (a Docker veth coming or going, Wi-Fi) as a failed request.
+const NETWORK_CHANGED = /net::ERR_NETWORK_CHANGED/;
+
 // Waits for the page to load, screenshots it, and soft-fails on loading, error text or console errors.
+// A page whose only errors are host network changes loads once more before it is judged.
 async function checkPage(page: Page, label: string, shot: string, errors: string[]) {
-	const loaded = await settle(page);
+	let loaded = await settle(page);
+	if (errors.length && errors.every((e) => NETWORK_CHANGED.test(e))) {
+		errors.length = 0;
+		await page.reload();
+		loaded = await settle(page);
+	}
 	await page.waitForTimeout(1_500);
 	await snap(page, shot.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, ''));
 	expect.soft(loaded, `${label}: finishes loading`).toBe(true);
