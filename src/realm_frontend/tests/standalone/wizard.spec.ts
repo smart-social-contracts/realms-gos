@@ -4,9 +4,8 @@
 //   npx playwright test -c playwright.standalone.config.ts
 // The founder signs in through the portal bridge, walks every wizard step, launches the realm and
 // lands on its public dashboard. The realm's own state is then checked through its read operations.
-import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { Actor, HttpAgent } from '@dfinity/agent';
-import { LAUNCH_PHASES } from '../../src/lib/setup/wizardLogic';
 import {
 	exposeSigner,
 	founderIdentity,
@@ -15,11 +14,11 @@ import {
 	readOp,
 	type StandaloneRealm
 } from './fixtures/realm';
+import { LAUNCH_TIMEOUT, launchThroughWizard, toolbarButton } from './fixtures/wizard';
 
 const CODEX = process.env.E2E_CODEX || 'syntropia';
 const WELCOME = 'Welcome to the e2e realm, built by the wizard.';
 const MANIFESTO = 'Every step of setup is tested.';
-const LAUNCH_TIMEOUT = 10 * 60 * 1000;
 
 let realm: StandaloneRealm;
 let shots = 0;
@@ -67,26 +66,6 @@ async function ledgerSymbol(ledger: string): Promise<string> {
 	return actor.icrc1_symbol();
 }
 
-/** Accept the demo notice when the realm shows one before `next` (staging and demo networks do). */
-async function passDemoNotice(frame: FrameLocator, next: Locator) {
-	const notice = frame.locator('.demo-notice');
-	await expect(notice.or(next).first()).toBeVisible({ timeout: 120_000 });
-	if (await notice.isVisible()) {
-		expect.soft(await notice.locator('.demo-notice__body[lang="en"]').innerText()).not.toBe('');
-		// The page can remount once sign-in settles, which clears the tick: tick again until it holds.
-		const proceed = frame.getByRole('button', { name: 'Continue' });
-		await expect(async () => {
-			await notice.locator('input[type="checkbox"]').check();
-			await expect(proceed).toBeEnabled({ timeout: 2_000 });
-		}).toPass({ timeout: 60_000 });
-		await proceed.click();
-	}
-}
-
-function toolbarButton(frame: FrameLocator, name: string | RegExp) {
-	return frame.locator('.setup-wizard__actions--toolbar').getByRole('button', { name });
-}
-
 test('the founder sets up and launches a realm through the wizard', async ({ page }) => {
 	test.setTimeout(LAUNCH_TIMEOUT + 5 * 60 * 1000);
 	const founder = founderIdentity(realm);
@@ -103,101 +82,7 @@ test('the founder sets up and launches a realm through the wizard', async ({ pag
 	const { frame, close } = await openInPortal(page, realm, '/setup');
 
 	try {
-		await test.step('welcome', async () => {
-			const begin = frame.locator('.setup-wizard__hero-cta');
-			await passDemoNotice(frame, begin);
-			await expect(begin).toBeVisible({ timeout: 120_000 });
-			await expect(frame.locator('.setup-wizard__hero-title')).toHaveText(realm.name);
-			await snap(page, 'welcome');
-			await begin.click();
-		});
-
-		await test.step(`codex: ${CODEX}`, async () => {
-			const card = frame.locator('label.setup-wizard__codex-card--picker', {
-				has: frame.locator(`input[value="${CODEX}"]`)
-			});
-			await expect(card, `codex ${CODEX} is offered by the registry`).toBeVisible({
-				timeout: 60_000
-			});
-			await card.click();
-			await expect(card).toHaveClass(/setup-wizard__codex-card--selected/);
-			const version = frame.locator('.setup-wizard__codex-detail select');
-			await expect(version).toBeVisible();
-			const versions = await version.locator('option').allTextContents();
-			expect(versions.length).toBeGreaterThan(0);
-			await snap(page, 'codex');
-			await toolbarButton(frame, 'Continue').click();
-		});
-
-		await test.step(`token: custom ledger ${realm.token_ledger} (${symbol})`, async () => {
-			const custom = frame.locator('input[name="token"][value="custom"]');
-			await expect(custom).toBeVisible({ timeout: 30_000 });
-			await custom.check();
-			await frame.locator('#token-canister').fill(realm.token_ledger);
-			await frame.locator('#token-indexer').fill(realm.token_ledger);
-			await expect(frame.locator('.setup-wizard__symbol strong')).toHaveText(symbol, {
-				timeout: 30_000
-			});
-			const next = toolbarButton(frame, 'Continue');
-			await expect(next).toBeEnabled();
-			await snap(page, 'token');
-			await next.click();
-		});
-
-		await test.step('branding', async () => {
-			const welcome = frame.locator('#welcome-message');
-			await expect(welcome).toBeVisible({ timeout: 30_000 });
-			await welcome.fill(WELCOME);
-			await frame.locator('#manifesto').fill(MANIFESTO);
-			await snap(page, 'branding');
-			await toolbarButton(frame, 'Continue').click();
-		});
-
-		await test.step('languages: English and Spanish', async () => {
-			const spanish = frame.locator('label.setup-wizard__codex-card', { hasText: 'es' }).filter({
-				has: frame.locator('p', { hasText: /^es$/ })
-			});
-			await expect(spanish).toBeVisible({ timeout: 30_000 });
-			await spanish.locator('input[type="checkbox"]').check();
-			await frame.locator('#primary-language').selectOption('en');
-			await snap(page, 'languages');
-			await toolbarButton(frame, 'Continue').click();
-		});
-
-		await test.step('review and launch', async () => {
-			const review = frame.locator('.setup-wizard__review-list');
-			await expect(review).toBeVisible({ timeout: 30_000 });
-			await expect(review).toContainText(symbol);
-			await expect(review).toContainText(/English/);
-			await expect(review).toContainText(/Spanish|Español/);
-			await snap(page, 'review');
-			await toolbarButton(frame, 'Launch realm').click();
-
-			const steps = frame.locator('.setup-wizard__launch-step');
-			await expect(steps).toHaveCount(LAUNCH_PHASES.length, { timeout: 30_000 });
-			await snap(page, 'launching');
-			const failed = frame.locator('.setup-wizard__launch-step--failed');
-			const done = frame.locator('.setup-wizard__launch-step--completed');
-			// Once the realm is open the setup page may leave for the dashboard on its own, before
-			// the last step renders completed: then the backend's status is what tells.
-			await expect
-				.poll(
-					async () => {
-						if ((await failed.count()) > 0) {
-							const why = await frame.locator('.setup-wizard__launch-step-error').allTextContents();
-							throw new Error(`launch failed: ${why.join(' | ')}`);
-						}
-						if ((await steps.count()) === 0) {
-							const status = await readOp(realm, 'status');
-							return status.status !== 'setup' ? LAUNCH_PHASES.length : 0;
-						}
-						return done.count();
-					},
-					{ timeout: LAUNCH_TIMEOUT, intervals: [2_000] }
-				)
-				.toBe(LAUNCH_PHASES.length);
-			await snap(page, 'launched');
-		});
+		await launchThroughWizard(page, frame, realm, { codex: CODEX, symbol, welcome: WELCOME, manifesto: MANIFESTO, snap });
 
 		await test.step('the realm is launched (backend)', async () => {
 			const status = await readOp(realm, 'status');
