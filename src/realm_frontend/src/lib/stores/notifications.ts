@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import { read, run, must } from '$lib/realm';
+import { read, run, must, RealmError } from '$lib/realm';
 import { settleAuthSession } from '$lib/auth.js';
 import { isAuthenticated } from '$lib/stores/auth.js';
 
@@ -18,6 +18,9 @@ export interface NotificationItem {
     color?: string;
 }
 
+// Signed in, the realm answers 'sign in first' until the signed actor lands: ask again after these delays.
+const SIGNED_ACTOR_WAIT_MS = [500, 1000, 2000, 4000];
+
 export const notifications = writable<NotificationItem[]>([]);
 export const unreadCount = writable<number>(0);
 
@@ -29,6 +32,27 @@ function setRead(id: string | null, read: boolean) {
     });
 }
 
+async function fetchNotifications(): Promise<NotificationItem[]> {
+    const items: NotificationItem[] = [];
+    let from: number | null = 1;
+    while (from) {
+        const page = await must(read('notification_list', { from, count: 100 }));
+        for (const n of page.notifications) {
+            items.push({
+                id: n.id,
+                title: n.title,
+                message: n.body,
+                timestamp_ms: n.at * 1000,
+                read: n.read,
+                sender: n.sender,
+                href: n.href
+            });
+        }
+        from = page.next;
+    }
+    return items;
+}
+
 export async function loadNotifications() {
     try {
         await settleAuthSession();
@@ -37,22 +61,15 @@ export async function loadNotifications() {
             unreadCount.set(0);
             return;
         }
-        const items: NotificationItem[] = [];
-        let from: number | null = 1;
-        while (from) {
-            const page = await must(read('notification_list', { from, count: 100 }));
-            for (const n of page.notifications) {
-                items.push({
-                    id: n.id,
-                    title: n.title,
-                    message: n.body,
-                    timestamp_ms: n.at * 1000,
-                    read: n.read,
-                    sender: n.sender,
-                    href: n.href
-                });
+        let items: NotificationItem[] = [];
+        for (const wait of [...SIGNED_ACTOR_WAIT_MS, null]) {
+            try {
+                items = await fetchNotifications();
+                break;
+            } catch (error) {
+                if (wait === null || !(error instanceof RealmError && error.message === 'sign in first')) throw error;
+                await new Promise((resolve) => setTimeout(resolve, wait));
             }
-            from = page.next;
         }
         notifications.set(items);
         unreadCount.set(items.filter(n => !n.read).length);
