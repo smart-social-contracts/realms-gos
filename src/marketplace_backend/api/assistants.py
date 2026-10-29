@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from _cdk import ic
 from api.config import caller_is_admin
 from api.developers import developer_name, is_suspended
-from core.models import AssistantListingEntity, PurchaseEntity
+from core.models import AssistantListingEntity, PurchaseEntity, purchases_of
 from ic_python_logging import get_logger
 
 logger = get_logger("api.assistants")
@@ -282,7 +282,7 @@ def buy_assistant(realm_principal: str, assistant_id: str) -> Dict:
     if a is None or not (a.is_active if a.is_active is not None else True):
         return {"success": False, "error": "Assistant not found"}
 
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "assistant"
@@ -307,7 +307,7 @@ def buy_assistant(realm_principal: str, assistant_id: str) -> Dict:
 
 
 def has_purchased_assistant(realm_principal: str, assistant_id: str) -> bool:
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "assistant"

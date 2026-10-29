@@ -13,7 +13,7 @@ from _cdk import ic
 from api.config import caller_is_admin
 from api.developers import developer_name, is_suspended
 from api.licenses import has_active_license
-from core.models import ExtensionListingEntity, PurchaseEntity
+from core.models import ExtensionListingEntity, PurchaseEntity, purchases_of
 from ic_python_logging import get_logger
 
 logger = get_logger("api.extensions")
@@ -253,7 +253,7 @@ def buy_extension(realm_principal: str, extension_id: str) -> Dict:
 
     # Idempotent — repeat buys by the same principal are no-ops, return the
     # existing purchase id. Otherwise the install count would over-inflate.
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "ext"
@@ -278,7 +278,7 @@ def buy_extension(realm_principal: str, extension_id: str) -> Dict:
 
 
 def has_purchased_extension(realm_principal: str, extension_id: str) -> bool:
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "ext"
@@ -290,7 +290,7 @@ def has_purchased_extension(realm_principal: str, extension_id: str) -> bool:
 
 def get_my_purchases(realm_principal: str) -> List[Dict]:
     out = []
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if str(p.realm_principal) != realm_principal:
             continue
         out.append({

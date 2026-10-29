@@ -16,7 +16,7 @@ from _cdk import ic
 from api.config import caller_is_admin
 from api.developers import developer_name, is_suspended
 from api.licenses import has_active_license
-from core.models import CodexListingEntity, PurchaseEntity
+from core.models import CodexListingEntity, PurchaseEntity, purchases_of
 from ic_python_logging import get_logger
 
 logger = get_logger("api.codices")
@@ -240,7 +240,7 @@ def buy_codex(realm_principal: str, codex_id: str) -> Dict:
     if c is None or not (c.is_active if c.is_active is not None else True):
         return {"success": False, "error": "Codex not found"}
 
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "codex"
@@ -265,7 +265,7 @@ def buy_codex(realm_principal: str, codex_id: str) -> Dict:
 
 
 def has_purchased_codex(realm_principal: str, codex_id: str) -> bool:
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "codex"

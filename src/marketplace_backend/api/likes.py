@@ -13,6 +13,7 @@ from core.models import (
     CodexListingEntity,
     ExtensionListingEntity,
     LikeEntity,
+    likes_of,
 )
 from ic_python_logging import get_logger
 
@@ -100,9 +101,7 @@ def has_liked(principal: str, item_kind: str, item_id: str) -> bool:
 
 def my_likes(principal: str) -> List[Dict[str, Any]]:
     out = []
-    for like in LikeEntity.instances():
-        if str(like.principal) != principal:
-            continue
+    for like in likes_of(principal):
         out.append({
             "item_kind": str(like.item_kind),
             "item_id": str(like.item_id),
