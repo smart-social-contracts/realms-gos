@@ -17,6 +17,11 @@ export interface SetupIdentity {
 	primary_language?: string;
 }
 
+export interface SetupGovernance {
+	/** Seconds new realm-wide proposals stay open; 0 keeps them open until their outcome is certain. */
+	voting_window?: number;
+}
+
 export interface SetupLanguages {
 	languages?: string[];
 	primary_language?: string;
@@ -49,6 +54,7 @@ export interface SetupDraft {
 	branding?: SetupDraftBranding | null;
 	identity?: SetupIdentity | null;
 	languages?: SetupLanguages | null;
+	governance?: SetupGovernance | null;
 }
 
 export type SetupLaunchStatus = 'idle' | 'running' | 'failed' | 'completed';

@@ -22,6 +22,11 @@ def realm_wide(args):
     return root()
 
 
+def launched(args):
+    """Governed realm-wide once the realm has launched; during setup the founder sets it directly (I-ADM-2)."""
+    return None if Realm["1"].status == "setup" else root()
+
+
 def settings():
     realm = Realm["1"]
     return (realm.manifest_data or {}).get("governance", {}) if realm else {}
@@ -313,7 +318,7 @@ def contract_terminate(c, args):
     return {"contract": k.id}
 
 
-@op("governance.update", governed=realm_wide)
+@op("governance.update", governed=launched)
 def governance_update(c, args):
     """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``threshold`` (percent of yes
     among yes and no votes a realm-wide proposal must exceed) and ``quorum_percent`` (realm-wide turnout)."""

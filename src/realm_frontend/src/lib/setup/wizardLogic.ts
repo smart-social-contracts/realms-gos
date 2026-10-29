@@ -36,6 +36,7 @@ export const LAUNCH_PHASES = [
 	{ name: 'configure_token', label: 'Configure token' },
 	{ name: 'upload_branding', label: 'Upload branding' },
 	{ name: 'apply_identity', label: 'Apply identity' },
+	{ name: 'configure_governance', label: 'Configure governance' },
 	{ name: 'complete', label: 'Complete setup' }
 ] as const;
 

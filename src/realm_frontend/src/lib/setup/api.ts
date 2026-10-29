@@ -405,6 +405,11 @@ async function runLaunch({ draft, assets }: StoredDraft): Promise<void> {
 				manifesto: draft.identity?.manifesto,
 				welcome_message: draft.identity?.welcome_message
 			}),
+		// The voting window new proposals get (seconds; 0: open until the outcome is certain).
+		configure_governance: async () =>
+			draft.governance?.voting_window == null
+				? null
+				: setupRun('governance_update', { voting_window: draft.governance.voting_window }),
 		complete: () => setupRun('setup_launch')
 	};
 	for (const { name } of LAUNCH_PHASES) {

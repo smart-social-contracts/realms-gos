@@ -111,6 +111,8 @@
 	let backgroundDataUrl = $state('');
 	let welcomeMessage = $state('');
 	let manifesto = $state('');
+	/** Days new realm-wide proposals stay open (7 unless the founder changes it; 0: open until decided). */
+	let votingWindowDays = $state(7);
 	let welcomeMessageTouched = $state(false);
 	let manifestoTouched = $state(false);
 	let leftSetup = $state(false);
@@ -346,6 +348,8 @@
 		if (!manifestoTouched) {
 			manifesto = resolveManifestoFromState(state);
 		}
+		const draftWindow = state?.draft?.governance?.voting_window;
+		if (typeof draftWindow === 'number') votingWindowDays = draftWindow / 86400;
 
 		const draftLanguages = state.draft?.languages;
 		const enabled =
@@ -867,6 +871,12 @@
 					{ refresh: false }
 				);
 			}
+			const days = Number(votingWindowDays);
+			if (!Number.isFinite(days) || days < 0) {
+				error = 'The voting window is a number of days, 0 or more';
+				return;
+			}
+			await persistDraft({ governance: { voting_window: Math.round(days * 86400) } }, { refresh: false });
 			const result = await startSetupLaunch();
 			if (!result.success) {
 				error = result.error || 'Could not start launch';
@@ -1572,6 +1582,27 @@
 								<em>{$_('setup.wizard.review_primary')}: {localeLabel(summaryPrimaryLanguage)}</em>
 							</li>
 							<li>
+								<label for="voting-window-days">
+									{$_('setup.wizard.review_voting_window', { default: 'Voting window (days)' })}
+								</label>
+								<strong>
+									<input
+										id="voting-window-days"
+										class="setup-wizard__review-input"
+										type="number"
+										min="0"
+										step="any"
+										bind:value={votingWindowDays}
+										disabled={!!launchState && !launchIdle}
+									/>
+								</strong>
+								<em>
+									{$_('setup.wizard.review_voting_window_help', {
+										default: '0: a vote stays open until its outcome is certain'
+									})}
+								</em>
+							</li>
+							<li>
 								<span>{$_('setup.wizard.review_color')}</span>
 								<strong class="setup-wizard__review-color">
 									<i style={`background:${primaryColor || '#0b1120'}`}></i>
@@ -2069,6 +2100,13 @@
 		padding: 0;
 		display: grid;
 		gap: 0.75rem;
+	}
+
+	.setup-wizard__review-input {
+		width: 6rem;
+		padding: 0.25rem 0.5rem;
+		border: 1px solid #d1d5db;
+		border-radius: 0.375rem;
 	}
 
 	.setup-wizard__review-list li {

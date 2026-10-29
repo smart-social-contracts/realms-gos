@@ -351,6 +351,29 @@ describe('setup draft and launch', () => {
 		]);
 	});
 
+	it('sets the voting window the founder chose before opening the realm', async () => {
+		useOps({
+			...extensionsMissing([]),
+			codex_install: () => ({ ok: true }),
+			setup_step: () => ({ ok: true }),
+			governance_update: () => ({ ok: true }),
+			setup_launch: () => ({ ok: true, status: 'alpha' })
+		});
+		const { saveSetupDraft, startSetupLaunch, fetchSetupLaunchStatus } = await import('./api');
+		await saveSetupDraft({
+			codex: { package: 'syntropia', version: '1.0.0' },
+			token: 'AAA',
+			governance: { voting_window: 0 }
+		});
+
+		await startSetupLaunch();
+		await vi.waitFor(async () => expect((await fetchSetupLaunchStatus()).status).toBe('completed'));
+
+		const names = run.mock.calls.map(([name]) => name).filter((name) => name !== 'setup_state');
+		expect(names.slice(-2)).toEqual(['governance_update', 'setup_launch']);
+		expect(run.mock.calls.find(([name]) => name === 'governance_update')?.[1]).toEqual({ voting_window: 0 });
+	});
+
 	it('stops before the codex when an extension the realm needs is not published', async () => {
 		useOps({ ...extensionsMissing(['public_dashboard', 'vault']), codex_install: () => ({ ok: true }) });
 		const { saveSetupDraft, startSetupLaunch, fetchSetupLaunchStatus } = await import('./api');

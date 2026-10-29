@@ -59,9 +59,13 @@ def test_I_ADM_2_founder_configures_during_setup_then_it_is_governed():
     assert "cannot configure" in call("setup_step", "frank", step="branding", name="x")["error"]
     assert "name the realm" in call("setup_launch", "frank")["error"]
     ok("setup_step", "frank", step="realm", name="Agora")
+    ok("governance_update", "frank", voting_window=0)
+    assert Realm["1"].calendar.voting_window == 0
     ok("setup_launch", "frank")
+    denied("governance_update", "frank", voting_window=3600)
     out = ok("realm_configure", "ctl", open_registration=True)
     assert out["requires_vote"] and not Realm["1"].open_registration
+    assert ok("governance_update", "ctl", voting_window=3600)["requires_vote"]
     denied("setup_state", "alice")
 
 
