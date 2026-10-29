@@ -151,7 +151,8 @@ jobs:
           RELEASE_TAG: v${{ steps.bump_version.outputs.NEW_VERSION }}
         run: |
           python3 scripts/stamp_build.py realm_backend --version "$RELEASE_TAG"
-          export CANISTER_CANDID_PATH="$(pwd)/src/realm_backend/realm_backend.did"
+          CANISTER_CANDID_PATH="$(pwd)/src/realm_backend/realm_backend.did"
+          export CANISTER_CANDID_PATH
           python3 scripts/build_base_wasm.py --gzip
           mv .basilisk/realm_backend/realm_backend.wasm.gz ./realm_backend.wasm.gz
           echo "✅ Backend WASM built ($(stat -c%s realm_backend.wasm.gz) bytes)"
