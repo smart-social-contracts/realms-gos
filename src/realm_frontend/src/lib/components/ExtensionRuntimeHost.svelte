@@ -356,6 +356,8 @@
 			status = 'ready';
 		} catch (e: any) {
 			cleanupMounted();
+			// The page moved on while this load was in flight (e.g. setup leaving for the dashboard).
+			if (destroyed) return;
 			const denied =
 				e instanceof AccessDeniedError ? { operation: e.operation } : parseAccessError(e);
 			if (denied) {
@@ -393,7 +395,9 @@
 		}
 	});
 
+	let destroyed = false;
 	onDestroy(() => {
+		destroyed = true;
 		cleanupMounted();
 	});
 </script>
