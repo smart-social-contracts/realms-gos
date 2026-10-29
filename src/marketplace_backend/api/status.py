@@ -18,6 +18,12 @@ from ic_python_logging import get_logger
 logger = get_logger("api.status")
 
 
+def _stamped(value: str) -> str:
+    """A value stamped at build time (scripts/stamp_build.py), or "" if this
+    build wasn't stamped."""
+    return "" if "PLACEHOLDER" in value else value
+
+
 def get_status() -> Dict[str, Any]:
     logger.info("Marketplace status check requested")
 
@@ -55,9 +61,9 @@ def get_status() -> Dict[str, Any]:
         pass
 
     return {
-        "version": "VERSION_PLACEHOLDER",
-        "commit": "COMMIT_HASH_PLACEHOLDER",
-        "commit_datetime": "COMMIT_DATETIME_PLACEHOLDER",
+        "version": _stamped("VERSION_PLACEHOLDER"),
+        "commit": _stamped("COMMIT_HASH_PLACEHOLDER"),
+        "commit_datetime": _stamped("COMMIT_DATETIME_PLACEHOLDER"),
         "status": "ok",
         "extensions_count": extensions_count,
         "codices_count": codices_count,
@@ -71,10 +77,14 @@ def get_status() -> Dict[str, Any]:
         "license_duration_seconds": int(cfg.get("license_duration_seconds", 0)),
         "is_caller_controller": is_caller_controller,
         "dependencies": [
-            "ic-basilisk==BASILISK_VERSION_PLACEHOLDER",
-            "ic-basilisk-toolkit==BASILISK_TOOLKIT_VERSION_PLACEHOLDER",
-            "ic-python-db==IC_PYTHON_DB_VERSION_PLACEHOLDER",
-            "ic-python-logging==IC_PYTHON_LOGGING_VERSION_PLACEHOLDER",
+            d
+            for d in (
+                "ic-basilisk==BASILISK_VERSION_PLACEHOLDER",
+                "ic-basilisk-toolkit==IC_BASILISK_TOOLKIT_VERSION_PLACEHOLDER",
+                "ic-python-db==IC_PYTHON_DB_VERSION_PLACEHOLDER",
+                "ic-python-logging==IC_PYTHON_LOGGING_VERSION_PLACEHOLDER",
+            )
+            if _stamped(d)
         ],
         "python_version": sys.version,
     }

@@ -30,6 +30,12 @@ from ggg import (
 from ic_python_logging import get_logger
 
 
+def _stamped(value: str) -> str:
+    """A value stamped at build time (scripts/stamp_build.py), or "" if this
+    build wasn't stamped."""
+    return "" if "PLACEHOLDER" in value else value
+
+
 def _shared_tokens() -> dict:
     try:
         from api.tokens import shared_token_catalog
@@ -108,8 +114,8 @@ def get_status() -> "dict[str, Any]":
         pass
 
     # Extension discovery with version, commit, and datetime from manifests
-    extensions_commit = "EXTENSIONS_COMMIT_HASH_PLACEHOLDER"
-    extensions_commit_datetime = "EXTENSIONS_COMMIT_DATETIME_PLACEHOLDER"
+    extensions_commit = _stamped("EXTENSIONS_COMMIT_HASH_PLACEHOLDER")
+    extensions_commit_datetime = _stamped("EXTENSIONS_COMMIT_DATETIME_PLACEHOLDER")
     extension_entries = []
     try:
         from api.extensions import get_all_extension_manifests
@@ -129,10 +135,10 @@ def get_status() -> "dict[str, Any]":
     except Exception as e:
         logger.warning(f"Could not list extensions: {e}")
 
-    # Static values — placeholders replaced at build time by CI
-    commit_hash = "COMMIT_HASH_PLACEHOLDER"
-    commit_datetime = "COMMIT_DATETIME_PLACEHOLDER"
-    version = "VERSION_PLACEHOLDER"
+    # Static values — placeholders replaced at build time (scripts/stamp_build.py)
+    commit_hash = _stamped("COMMIT_HASH_PLACEHOLDER")
+    commit_datetime = _stamped("COMMIT_DATETIME_PLACEHOLDER")
+    version = _stamped("VERSION_PLACEHOLDER")
     test_mode = False
     test_mode_ii_bypass = False
     test_mode_user_self_registration = False
@@ -171,13 +177,12 @@ def get_status() -> "dict[str, Any]":
         pass
 
     # Prefer version stored in DB (set by set_canister_config / CI post-deploy)
-    if version == "VERSION_PLACEHOLDER":
-        try:
-            _realm = Realm.load("1")
-            if _realm and getattr(_realm, "installed_version", None):
-                version = _realm.installed_version
-        except Exception:
-            pass
+    try:
+        _realm = Realm.load("1")
+        if _realm and getattr(_realm, "installed_version", None):
+            version = _realm.installed_version
+    except Exception:
+        pass
 
     # Skip expensive TaskManager status to stay under instruction limit
     # TaskManager status can be queried via separate endpoint if needed
@@ -371,10 +376,14 @@ def get_status() -> "dict[str, Any]":
 
     # Dependency versions injected at build time (runtime detection doesn't work in WASM)
     dependencies = [
-        "ic-basilisk==BASILISK_VERSION_PLACEHOLDER",
-        "ic-basilisk-toolkit==IC_BASILISK_TOOLKIT_VERSION_PLACEHOLDER",
-        "ic-python-db==IC_PYTHON_DB_VERSION_PLACEHOLDER",
-        "ic-python-logging==IC_PYTHON_LOGGING_VERSION_PLACEHOLDER",
+        d
+        for d in (
+            "ic-basilisk==BASILISK_VERSION_PLACEHOLDER",
+            "ic-basilisk-toolkit==IC_BASILISK_TOOLKIT_VERSION_PLACEHOLDER",
+            "ic-python-db==IC_PYTHON_DB_VERSION_PLACEHOLDER",
+            "ic-python-logging==IC_PYTHON_LOGGING_VERSION_PLACEHOLDER",
+        )
+        if _stamped(d)
     ]
 
     # Return data in the format expected by the Status Candid type
