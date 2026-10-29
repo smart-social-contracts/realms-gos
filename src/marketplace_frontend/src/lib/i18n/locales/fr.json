@@ -87,7 +87,8 @@
   "pager": {
     "prev": "Précédent",
     "next": "Suivant",
-    "page_of": "Page {page} sur {total}"
+    "page_of": "Page {page} sur {total}",
+    "load_more": "Charger plus"
   },
   "extensions": {
     "title": "Extensions",

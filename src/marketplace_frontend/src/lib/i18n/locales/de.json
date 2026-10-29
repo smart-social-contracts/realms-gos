@@ -87,7 +87,8 @@
   "pager": {
     "prev": "Zurück",
     "next": "Weiter",
-    "page_of": "Seite {page} von {total}"
+    "page_of": "Seite {page} von {total}",
+    "load_more": "Mehr laden"
   },
   "extensions": {
     "title": "Erweiterungen",

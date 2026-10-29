@@ -9,8 +9,9 @@ import { isAuthenticated } from "$lib/auth";
 import { marketplaceClient } from "$lib/marketplace-client";
 import { parseVerifiedOnlyParam, setVerifiedOnlySearchParam } from "$lib/verified-filter";
 let items = [];
-let total = 0;
-let page = 1;
+let cursor = 0n; // where the next page starts; 0n once everything is loaded
+let more = false;
+let loadingMore = false;
 let perPage = 24;
 let loading = true;
 let error = "";
@@ -27,7 +28,7 @@ onMount(() => {
   lastUrlQ = searchQuery;
   mounted = true;
 });
-$: if (mounted) void load(page, perPage, verifiedOnly);
+$: if (mounted) void load(verifiedOnly);
 $: if (mounted) adoptUrlQuery($pageStore.url.searchParams);
 $: void refreshLikes($isAuthenticated);
 function adoptUrlQuery(params) {
@@ -36,8 +37,7 @@ function adoptUrlQuery(params) {
   lastUrlQ = q;
   searchQuery = q;
   verifiedOnly = parseVerifiedOnlyParam(params.get("verified"));
-  page = 1;
-  load(page, perPage, verifiedOnly);
+  load(verifiedOnly);
 }
 function syncUrl() {
   if (!browser) return;
@@ -74,30 +74,35 @@ async function refreshLikes(_authed) {
     likedSet = new Set();
   }
 }
-async function load(p, pp, v) {
-  loading = true;
+// The first page, or with `append` the next one; newest first
+async function load(v, append = false) {
+  if (append) {
+    loadingMore = true;
+  } else {
+    loading = true;
+    cursor = 0n;
+  }
   error = "";
   try {
-    if (searchQuery.trim()) {
-      items = await marketplaceClient.searchCodices(searchQuery.trim(), v);
-      total = items.length;
-    } else {
-      const r = await marketplaceClient.listCodices(p, pp, v);
-      items = r.listings;
-      total = r.total_count;
-    }
+    const q = searchQuery.trim();
+    const r = q
+      ? await marketplaceClient.searchCodicesPage(q, cursor, perPage, v)
+      : await marketplaceClient.listCodicesPage(cursor, perPage, v);
+    items = append ? [...items, ...r.listings] : r.listings;
+    cursor = r.next_cursor;
+    more = cursor !== 0n;
   } catch (e) {
     error = e?.message ?? String(e);
-    items = [];
-    total = 0;
+    if (!append) items = [];
+    more = false;
   } finally {
     loading = false;
+    loadingMore = false;
   }
 }
 function doSearch() {
-  page = 1;
   syncUrl();
-  load(page, perPage, verifiedOnly);
+  load(verifiedOnly);
 }
 </script>
 
@@ -163,6 +168,12 @@ function doSearch() {
       />
     {/each}
   </div>
+
+  {#if more}
+    <div class="pager">
+      <button disabled={loadingMore} on:click={() => load(verifiedOnly, true)}>{$_('pager.load_more')}</button>
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -185,4 +196,11 @@ function doSearch() {
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1.25rem; }
   .state { text-align: center; padding: 3rem; color: var(--text-muted); }
   .state.error { color: var(--danger); }
+  .pager {
+    display: flex; gap: 1rem; align-items: center; justify-content: center; padding: 2rem 0;
+  }
+  .pager button {
+    background: var(--surface); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 0.4rem;
+  }
+  .pager button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

@@ -15,7 +15,7 @@ data without those fields reads back as ``None`` and our APIs always
 guard with ``or 0`` / ``or ""``.
 """
 
-from typing import List
+from typing import Callable, List, Tuple
 
 from ic_python_db import (
     Boolean,
@@ -313,6 +313,32 @@ def _all_by(entity_cls, field: str, value: str) -> list:
         page, cursor = entity_cls.find_by(field, value, from_id=cursor, count=100)
         out.extend(page)
     return out
+
+
+# Listings read per call by the paged list and search endpoints, whatever
+# matches: about 1M instructions each, far below a query's 5B budget.
+SCAN_BUDGET = 200
+
+
+def newest_first(entity_cls, cursor: int, count: int, keep: Callable) -> Tuple[list, int]:
+    """Up to ``count`` entities ``keep`` accepts, newest (highest id) first.
+
+    ``cursor`` is the id to continue from, 0 to start at the newest. Returns
+    the entities and the next cursor, 0 once every id has been read. At most
+    SCAN_BUDGET ids are read per call, so when few listings match, a page can
+    come back short, even empty, with a non-zero cursor: call again.
+    """
+    count = max(1, min(int(count or 20), 100))
+    entity_id = int(cursor) if cursor else entity_cls.max_id()
+    found = []
+    for _ in range(SCAN_BUDGET):
+        if entity_id < 1 or len(found) >= count:
+            break
+        entity = entity_cls.load(str(entity_id))
+        entity_id -= 1
+        if entity is not None and keep(entity):
+            found.append(entity)
+    return found, max(entity_id, 0)
 
 
 _INDEX_BACKFILL_KEY = "marketplace_principal_index_v1"
