@@ -1,8 +1,8 @@
-"""Top-N rankings — extensions and codices, by installs and likes.
+"""Top-N rankings of extensions, codices and assistants, by installs and likes.
 
-v1 is pure in-memory: load all active listings, sort by the metric,
-slice. Hundreds of items at most. If we ever exceed that we'll move to
-materialised top-N caches.
+Read from sorted indexes (Entity.top_by): a ranking is one range read plus
+the listings it returns, however many listings exist. Ties in the first
+counter are broken by the second, then by the newer listing.
 """
 
 from typing import Dict, List
@@ -24,67 +24,48 @@ def _clamp_n(n: int) -> int:
     return min(n, 100)
 
 
-def _filter_active_extensions(verified_only: bool) -> List[ExtensionListingEntity]:
-    items = [
-        e for e in ExtensionListingEntity.instances()
-        if (e.is_active if e.is_active is not None else True)
-    ]
-    if verified_only:
-        items = [e for e in items if str(e.verification_status) == "verified"]
-    return items
+# Listings read per ranking call, matching or not: about 1M instructions each,
+# far below a query's 5B budget
+_SCAN_LIMIT = 500
 
 
-def _filter_active_codices(verified_only: bool) -> List[CodexListingEntity]:
-    items = [
-        c for c in CodexListingEntity.instances()
-        if (c.is_active if c.is_active is not None else True)
-    ]
-    if verified_only:
-        items = [c for c in items if str(c.verification_status) == "verified"]
-    return items
+def _top(entity_cls, fields, n: int, verified_only: bool) -> list:
+    def visible(listing) -> bool:
+        if not (listing.is_active if listing.is_active is not None else True):
+            return False
+        return not verified_only or str(listing.verification_status) == "verified"
+
+    listings, _ = entity_cls.top_by(
+        fields, count=_clamp_n(n), where=visible, scan_limit=_SCAN_LIMIT
+    )
+    return listings
 
 
 def top_extensions_by_downloads(n: int, verified_only: bool = False) -> List[Dict]:
-    items = _filter_active_extensions(verified_only)
-    items.sort(key=lambda e: (int(e.installs or 0), int(e.likes or 0)), reverse=True)
-    return [_ext_to_dict(e) for e in items[: _clamp_n(n)]]
+    items = _top(ExtensionListingEntity, ("installs", "likes"), n, verified_only)
+    return [_ext_to_dict(e) for e in items]
 
 
 def top_extensions_by_likes(n: int, verified_only: bool = False) -> List[Dict]:
-    items = _filter_active_extensions(verified_only)
-    items.sort(key=lambda e: (int(e.likes or 0), int(e.installs or 0)), reverse=True)
-    return [_ext_to_dict(e) for e in items[: _clamp_n(n)]]
+    items = _top(ExtensionListingEntity, ("likes", "installs"), n, verified_only)
+    return [_ext_to_dict(e) for e in items]
 
 
 def top_codices_by_downloads(n: int, verified_only: bool = False) -> List[Dict]:
-    items = _filter_active_codices(verified_only)
-    items.sort(key=lambda c: (int(c.installs or 0), int(c.likes or 0)), reverse=True)
-    return [_codex_to_dict(c) for c in items[: _clamp_n(n)]]
+    items = _top(CodexListingEntity, ("installs", "likes"), n, verified_only)
+    return [_codex_to_dict(c) for c in items]
 
 
 def top_codices_by_likes(n: int, verified_only: bool = False) -> List[Dict]:
-    items = _filter_active_codices(verified_only)
-    items.sort(key=lambda c: (int(c.likes or 0), int(c.installs or 0)), reverse=True)
-    return [_codex_to_dict(c) for c in items[: _clamp_n(n)]]
-
-
-def _filter_active_assistants(verified_only: bool) -> List[AssistantListingEntity]:
-    items = [
-        a for a in AssistantListingEntity.instances()
-        if (a.is_active if a.is_active is not None else True)
-    ]
-    if verified_only:
-        items = [a for a in items if str(a.verification_status) == "verified"]
-    return items
+    items = _top(CodexListingEntity, ("likes", "installs"), n, verified_only)
+    return [_codex_to_dict(c) for c in items]
 
 
 def top_assistants_by_downloads(n: int, verified_only: bool = False) -> List[Dict]:
-    items = _filter_active_assistants(verified_only)
-    items.sort(key=lambda a: (int(a.installs or 0), int(a.likes or 0)), reverse=True)
-    return [_assistant_to_dict(a) for a in items[: _clamp_n(n)]]
+    items = _top(AssistantListingEntity, ("installs", "likes"), n, verified_only)
+    return [_assistant_to_dict(a) for a in items]
 
 
 def top_assistants_by_likes(n: int, verified_only: bool = False) -> List[Dict]:
-    items = _filter_active_assistants(verified_only)
-    items.sort(key=lambda a: (int(a.likes or 0), int(a.installs or 0)), reverse=True)
-    return [_assistant_to_dict(a) for a in items[: _clamp_n(n)]]
+    items = _top(AssistantListingEntity, ("likes", "installs"), n, verified_only)
+    return [_assistant_to_dict(a) for a in items]

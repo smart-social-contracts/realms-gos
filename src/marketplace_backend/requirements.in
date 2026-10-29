@@ -1,2 +1,4 @@
 ic-basilisk
 ic-basilisk-toolkit
+# Sorted indexes (Entity.top_by) for the rankings
+ic-python-db>=0.14.0

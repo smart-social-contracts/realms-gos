@@ -39,6 +39,9 @@ class ExtensionListingEntity(Entity, TimestampedMixin):
     ``ext/{extension_id}/{version}``; we only store the pointer + metadata.
     """
     __alias__ = "extension_id"
+    # Rankings read these in order (Entity.top_by), so a "top 20" stays one
+    # range read however many listings exist; each breaks ties by the other
+    __sorted_indexes__ = [("installs", "likes"), ("likes", "installs")]
     __version__ = 2
 
     @classmethod
@@ -87,6 +90,9 @@ class AssistantListingEntity(Entity, TimestampedMixin):
     same trick used by ``CodexListingEntity``.
     """
     __alias__ = "assistant_alias"
+    # Rankings read these in order (Entity.top_by), so a "top 20" stays one
+    # range read however many listings exist; each breaks ties by the other
+    __sorted_indexes__ = [("installs", "likes"), ("likes", "installs")]
 
     assistant_alias               = String(max_length=128)
     assistant_id                  = String(max_length=128)
@@ -130,6 +136,9 @@ class CodexListingEntity(Entity, TimestampedMixin):
     (``"syntropia__membership"``). Helpers are in ``api.codices``.
     """
     __alias__ = "codex_alias"
+    # Rankings read these in order (Entity.top_by), so a "top 20" stays one
+    # range read however many listings exist; each breaks ties by the other
+    __sorted_indexes__ = [("installs", "likes"), ("likes", "installs")]
 
     codex_alias               = String(max_length=128)
     codex_id                  = String(max_length=128)
@@ -339,6 +348,35 @@ def newest_first(entity_cls, cursor: int, count: int, keep: Callable) -> Tuple[l
         if entity is not None and keep(entity):
             found.append(entity)
     return found, max(entity_id, 0)
+
+
+_RANKING_BACKFILL_KEY = "marketplace_ranking_index_v1"
+
+
+def backfill_ranking_indexes() -> None:
+    """Put listings written before the rankings were sorted indexes into them.
+
+    Runs once (a marker in ``_system`` records it). Counters still None are
+    set to 0, which is how the rankings always counted them; a listing with
+    a None counter would otherwise be left out of the index. Called from
+    post_upgrade.
+    """
+    db = Database.get_instance()
+    if db.load("_system", _RANKING_BACKFILL_KEY):
+        return
+    for entity_cls in (ExtensionListingEntity, CodexListingEntity, AssistantListingEntity):
+        cursor = 1
+        while cursor is not None:
+            listings, cursor = entity_cls.page(cursor, 200)
+            for listing in listings:
+                if listing.installs is None:
+                    listing.installs = 0
+                if listing.likes is None:
+                    listing.likes = 0
+        cursor = 1
+        while cursor is not None:
+            cursor = entity_cls.rebuild_sorted_index(from_id=cursor)
+    db.save("_system", _RANKING_BACKFILL_KEY, "1")
 
 
 _INDEX_BACKFILL_KEY = "marketplace_principal_index_v1"
