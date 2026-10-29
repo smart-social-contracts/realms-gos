@@ -1,0 +1,5 @@
+- **Marketplace scales with its tables.** The status counts read one value per table, and purchases and likes are looked up per user through an index, so neither loads a whole table any more; existing rows are indexed once on upgrade.
+- **Marketplace pages.** Extensions, codices and assistants load page by page with a *Load more* button, newest first, and search works the same way. Each call reads a bounded number of listings, however many there are.
+- **Marketplace rankings.** The most downloaded and most liked lists read sorted indexes (ic-python-db 0.14.0), so a top 20 costs the same with any number of listings.
+- **Faster realm frontend.** Sidebar links navigate without reloading the page, boot calls are no longer repeated, and members stay on the right canister after a reload.
+- **Readable realm slugs.** Accented names keep their letters: València becomes `valencia`, not `val-ncia`.
