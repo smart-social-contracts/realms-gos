@@ -62,6 +62,14 @@ export function shouldShowJoinNotice(
 	return demoNotice && !skipTerms;
 }
 
+/** Join shows the Terms & Conditions when there is no demo notice to show in their place. */
+export function shouldShowJoinTerms(
+	demoNotice: boolean,
+	skipTerms: boolean
+): boolean {
+	return !demoNotice && !skipTerms;
+}
+
 /** A custom ledger is the founder's own choice, so only the catalog's monetary tokens are ever disabled. */
 export function isTokenChoiceSelectable(monetary: boolean, monetaryDisabled: boolean): boolean {
 	return !(monetary && monetaryDisabled);
