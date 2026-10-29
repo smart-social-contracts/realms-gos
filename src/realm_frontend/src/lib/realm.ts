@@ -8,6 +8,8 @@
  * ``quarter.read`` / ``quarter.run`` call the active quarter instead (see setActiveQuarter);
  * ``on(actor)`` calls the realm canister behind any other actor (e.g. a join target).
  */
+import { Actor, pollForResponse, requestIdOf } from '@dfinity/agent';
+import { IDL } from '@dfinity/candid';
 // @ts-expect-error canisters.js has no type declarations
 import { backend, quarterBackend } from '$lib/canisters';
 
@@ -16,8 +18,25 @@ export type Reply = { ok: true; [key: string]: any } | { ok: false; error: strin
 /** A refusal from the realm, thrown by ``must``. */
 export class RealmError extends Error {}
 
+const STILL_PROCESSING = 'Call was returned undefined';
+
+/**
+ * The reply of an update call the agent gave up on. A boundary node can answer a long call (an extension install
+ * copying its bundle) with a certificate that still says "processing"; @dfinity/agent 3.4 only polls after a 202
+ * and reports "Call was returned undefined" instead. Poll for the reply as it would.
+ */
+export async function stillProcessing(actor: any, error: any): Promise<string> {
+	const details = error?.cause?.code?.callContext?.httpDetails?.requestDetails;
+	if (!details || !String(error?.message ?? '').includes(STILL_PROCESSING)) throw error;
+	const { reply } = await pollForResponse(Actor.agentOf(actor) as never, Actor.canisterIdOf(actor), requestIdOf(details));
+	return IDL.decode([IDL.Text], reply)[0] as string;
+}
+
 async function call(actor: any, method: 'read' | 'run', name: string, args: object): Promise<Reply> {
-	return JSON.parse(await actor[method](name, JSON.stringify(args ?? {})));
+	const out = await actor[method](name, JSON.stringify(args ?? {})).catch((e: unknown) =>
+		method === 'run' ? stillProcessing(actor, e) : Promise.reject(e)
+	);
+	return JSON.parse(out);
 }
 
 export const read = (name: string, args: object = {}) => call(backend, 'read', name, args);
