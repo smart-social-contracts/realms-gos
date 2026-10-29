@@ -22,27 +22,27 @@ def get_status() -> Dict[str, Any]:
     logger.info("Marketplace status check requested")
 
     try:
-        extensions_count = len(list(ExtensionListingEntity.instances()))
+        extensions_count = ExtensionListingEntity.count()
     except Exception:
         extensions_count = 0
     try:
-        codices_count = len(list(CodexListingEntity.instances()))
+        codices_count = CodexListingEntity.count()
     except Exception:
         codices_count = 0
     try:
-        assistants_count = len(list(AssistantListingEntity.instances()))
+        assistants_count = AssistantListingEntity.count()
     except Exception:
         assistants_count = 0
     try:
-        purchases_count = len(list(PurchaseEntity.instances()))
+        purchases_count = PurchaseEntity.count()
     except Exception:
         purchases_count = 0
     try:
-        likes_count = len(list(LikeEntity.instances()))
+        likes_count = LikeEntity.count()
     except Exception:
         likes_count = 0
     try:
-        licenses_count = len(list(DeveloperLicenseEntity.instances()))
+        licenses_count = DeveloperLicenseEntity.count()
     except Exception:
         licenses_count = 0
 

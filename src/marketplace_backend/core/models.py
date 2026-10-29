@@ -15,8 +15,11 @@ data without those fields reads back as ``None`` and our APIs always
 guard with ``or 0`` / ``or ""``.
 """
 
+from typing import List
+
 from ic_python_db import (
     Boolean,
+    Database,
     Entity,
     Float,
     Integer,
@@ -161,7 +164,7 @@ class PurchaseEntity(Entity):
     __alias__ = "purchase_id"
 
     purchase_id     = String(max_length=128)
-    realm_principal = String(max_length=128)
+    realm_principal = String(max_length=128, indexed=True)
     item_kind       = String(max_length=16)              # "ext" | "codex"
     item_id         = String(max_length=128)
     developer       = String(max_length=128)
@@ -183,7 +186,7 @@ class LikeEntity(Entity):
     __alias__ = "like_id"
 
     like_id    = String(max_length=384)
-    principal  = String(max_length=128)
+    principal  = String(max_length=128, indexed=True)
     item_kind  = String(max_length=16)
     item_id    = String(max_length=128)
     created_at = Float()
@@ -284,3 +287,48 @@ class MarketplaceConfigEntity(Entity):
     # Comma-separated principals who run the marketplace day to day: every
     # listing, every user, every license. Only controllers change this list.
     admins                      = String(max_length=2048)
+
+
+# ---------------------------------------------------------------------------
+# Per-principal lookups
+# ---------------------------------------------------------------------------
+#
+# Purchases and likes are read per principal through a field index, not by
+# loading the whole table: a table scan costs about 1M instructions per row,
+# so it would trap once the table reaches a few thousand rows.
+
+def purchases_of(realm_principal: str) -> List[PurchaseEntity]:
+    """Every purchase made by ``realm_principal``."""
+    return _all_by(PurchaseEntity, "realm_principal", realm_principal)
+
+
+def likes_of(principal: str) -> List[LikeEntity]:
+    """Every like given by ``principal``."""
+    return _all_by(LikeEntity, "principal", principal)
+
+
+def _all_by(entity_cls, field: str, value: str) -> list:
+    out, cursor = [], 1
+    while cursor is not None:
+        page, cursor = entity_cls.find_by(field, value, from_id=cursor, count=100)
+        out.extend(page)
+    return out
+
+
+_INDEX_BACKFILL_KEY = "marketplace_principal_index_v1"
+
+
+def backfill_principal_indexes() -> None:
+    """Index purchases and likes written before their principal was indexed.
+
+    Runs once (a marker in ``_system`` records it); later rows are indexed as
+    they are written. Called from post_upgrade.
+    """
+    db = Database.get_instance()
+    if db.load("_system", _INDEX_BACKFILL_KEY):
+        return
+    for entity_cls, field in ((PurchaseEntity, "realm_principal"), (LikeEntity, "principal")):
+        cursor = 1
+        while cursor is not None:
+            cursor = entity_cls.rebuild_field_index(field, from_id=cursor)
+    db.save("_system", _INDEX_BACKFILL_KEY, "1")
