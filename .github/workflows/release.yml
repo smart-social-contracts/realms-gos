@@ -195,7 +195,9 @@ jobs:
           (cd /tmp/casals && python3 -m casals_cli.bundle "$GITHUB_WORKSPACE/src/realm_frontend/dist" \
              -o "$GITHUB_WORKSPACE/realm_frontend.tar.gz" --manifest "$GITHUB_WORKSPACE/realm_frontend.manifest.json")
           echo "✅ Frontend bundle built ($(stat -c%s realm_frontend.tar.gz) bytes)"
-          (cd src/marketplace_frontend && npm run build && test -f dist/index.html)
+          # Alpha: this one bundle serves every environment, and the account pages
+          # (My Purchases, Upload, Developer) are not open yet. Drop the flag when they are.
+          (cd src/marketplace_frontend && VITE_ACCOUNT_ALPHA=true npm run build && test -f dist/index.html)
           (cd /tmp/casals && python3 -m casals_cli.bundle "$GITHUB_WORKSPACE/src/marketplace_frontend/dist" \
              -o "$GITHUB_WORKSPACE/marketplace_frontend.tar.gz" --manifest "$GITHUB_WORKSPACE/marketplace_frontend.manifest.json")
           echo "✅ Marketplace bundle built ($(stat -c%s marketplace_frontend.tar.gz) bytes)"
