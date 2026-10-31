@@ -84,7 +84,8 @@ It needs sibling checkouts of Casals and file-registry (`CASALS_DIR`, `FILE_REGI
 |---|---|
 | `CASALS_HOME` | Where the first `casals up` wrote `realms-product.production.json` (default `~/.casals`). Without it, `up` sees no conductor. |
 | `DFX_HSM_PIN` | The hardware key behind the identity |
-| `CLOUDFLARE_API_TOKEN` | Zone:Read and DNS:Edit, for the domains phase. Never commit it. |
+| `INFOMANIAK_API_TOKEN` | DNS token for the domains phase on the Infomaniak zones (see [Domains](#domains)). Never commit it. |
+| `CLOUDFLARE_API_TOKEN` | Only for an environment whose `dns.provider` is `cloudflare`: Zone:Read and DNS:Edit. Never commit it. |
 
 With a touch-policy hardware key, pass a short-lived session identity made with
 `icp identity delegation` (one touch) as `--identity`, not the key itself (runbook: "Hardware
@@ -128,9 +129,43 @@ casals -e production --identity <id> upgrade casals.json --content <namespace>  
 
 ```bash
 realms domains check casals.json -e production      # read-only; exit 1 on drift
-realms domains apply casals.json -e production      # Cloudflare records → IC gateway registration → HTTP 200
+realms domains apply casals.json -e production      # DNS records → IC gateway registration → HTTP 200
+realms domains apply casals.json -e production --dry-run   # Infomaniak: print the DNS changes, write nothing
 ```
 
 `apply` is idempotent. For a re-created frontend, run it **before** removing the old canister: the
 gateway checks the new canister's `/.well-known/ic-domains`, and the old one going away is what
 takes the site down.
+
+#### DNS at Infomaniak
+
+`gos.earth`, `realmsgos.org` and `ic-casals.tech` are hosted at Infomaniak; an environment on them has
+`"dns": {"provider": "infomaniak", "zone": "<zone>", "token_env": "INFOMANIAK_API_TOKEN", "ttl": 60}`
+(`zone` is required; the TTL cannot be below 60). `realmsgos.dev` stays on Cloudflare for its tunnels.
+
+For each host, `apply` makes sure the zone holds:
+
+| Record | Value |
+|---|---|
+| `CNAME <host>` | `<host>.icp1.io` |
+| `TXT _canister-id.<host>` | the frontend canister id |
+| `CNAME _acme-challenge.<host>` | `_acme-challenge.<host>.icp2.io` |
+
+An apex host (the host equals the zone) cannot be a CNAME at Infomaniak, so it gets `A 195.5.171.242` and
+`A 212.71.124.188` instead. A record that holds a stale value (a re-minted canister id, say) is updated in
+place. Nothing is ever deleted: Infomaniak records carry no owner, so any other record on the same name is
+left alone and reported, and a stray second `_canister-id` TXT has to be removed by hand in the manager
+(the IC rejects a domain with two).
+
+**The token.** In the Infomaniak manager open *API tokens*
+(<https://manager.infomaniak.com/v3/ng/profile/user/token/list>) → *Create a token*, and give it the
+scopes `dns:read` and `dns:write` (the "DNS" permission of the account's domains) and nothing else. Name it
+after its use (e.g. `realms-domains`). Export it in the shell that runs `scripts/up.sh` or
+`realms domains apply`:
+
+```bash
+export INFOMANIAK_API_TOKEN=...   # never commit it, never put it in a sheet
+```
+
+The sheet's `token_env` names the variable, not the token. Run `--dry-run` first: it reads the zone and
+prints `created` / `updated` / `unchanged` per record without writing or registering anything.

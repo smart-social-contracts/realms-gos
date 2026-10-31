@@ -14,12 +14,11 @@ repo, and is never logged. It needs two permissions on the zone: ``Zone:Read``
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from typing import Any, Iterable
 
 import requests
 
-from realms.cli.dns import DnsRecord
+from realms.cli.dns import DnsRecord, RecordOutcome
 
 CF_API = "https://api.cloudflare.com/client/v4"
 DEFAULT_TOKEN_ENV = "CLOUDFLARE_API_TOKEN"
@@ -35,13 +34,6 @@ PROXIED = False
 
 class CloudflareError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class RecordOutcome:
-    record: DnsRecord
-    action: str  # created | updated | unchanged
-    detail: str = ""
 
 
 def token_from_env(env_var: str = DEFAULT_TOKEN_ENV) -> str | None:
