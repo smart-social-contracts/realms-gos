@@ -13,7 +13,7 @@ Lookups accept the original id; we convert before hitting the entity.
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
-from api.config import caller_is_admin
+from api.config import caller_is_admin, purchase_refusal
 from api.developers import developer_name, is_suspended
 from api.licenses import has_active_license
 from core.models import CodexListingEntity, PurchaseEntity, newest_first, purchases_of
@@ -261,6 +261,10 @@ def buy_codex(realm_principal: str, codex_id: str) -> Dict:
     c = CodexListingEntity[alias]
     if c is None or not (c.is_active if c.is_active is not None else True):
         return {"success": False, "error": "Codex not found"}
+
+    refusal = purchase_refusal(c.price_e8s)
+    if refusal:
+        return refusal
 
     for p in purchases_of(realm_principal):
         if (

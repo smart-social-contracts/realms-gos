@@ -1,14 +1,15 @@
 """Marketplace singleton configuration.
 
 Stores the file_registry canister id, the billing-service principal
-allowed to call ``record_license_payment``, and license pricing.
+allowed to call ``record_license_payment``, license pricing and the
+switch that allows paid purchases.
 
 Canister settings and the admin list are controller-only; the
 marketplace canister's controller list is curated by Smart Social
 Contracts. Admins may manage the reviewer list.
 """
 
-from typing import Dict
+from typing import Dict, Optional
 
 from _cdk import ic
 from core.models import MarketplaceConfigEntity
@@ -267,6 +268,37 @@ def set_license_pricing(usd_cents: int, duration_seconds: int) -> Dict:
         "license_price_usd_cents": cfg.license_price_usd_cents,
         "license_duration_seconds": cfg.license_duration_seconds,
     }
+
+
+# ---------------------------------------------------------------------------
+# Paid purchases
+#
+# Off until billing is live (Alpha): the UI offers no buy button, and this
+# switch makes the canister refuse paid purchases from direct callers too.
+# ---------------------------------------------------------------------------
+
+PURCHASES_COMING_SOON = "Purchases are coming soon"
+
+
+def purchases_enabled() -> bool:
+    return bool(_ensure_config().purchases_enabled)
+
+
+def set_purchases_enabled(enabled: bool) -> Dict:
+    err = _require_admin()
+    if not err["success"]:
+        return err
+    _ensure_config().purchases_enabled = bool(enabled)
+    logger.info(f"set_purchases_enabled -> {bool(enabled)}")
+    return {"success": True, "purchases_enabled": bool(enabled)}
+
+
+def purchase_refusal(price_e8s: int) -> Optional[Dict]:
+    """The error result for buying a listing at ``price_e8s`` while purchases
+    are off, or None when the purchase may go ahead. Free listings always may."""
+    if int(price_e8s or 0) > 0 and not purchases_enabled():
+        return {"success": False, "error": PURCHASES_COMING_SOON}
+    return None
 
 
 def init_config_from_args(file_registry_canister_id: str, billing_service_principal: str) -> None:
