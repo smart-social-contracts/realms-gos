@@ -41,7 +41,13 @@ def _claim_federation_slug(
     manifest, realm_name, network, registry_canister_id,
     frontend_id, backend_id, realm_dir,
 ):
-    """Register federation slug on realm_registry_backend after deploy."""
+    """Register federation slug on realm_registry_backend after deploy.
+
+    The registry only lets the installer or a controller create a new slug, so
+    on staging and production this call is refused (a warning below) unless the
+    dfx identity is a registry controller. GaaS deployments get their slug from
+    the installer.
+    """
     if not (frontend_id and backend_id and registry_canister_id):
         return
     federation = manifest.get("federation") or {}
