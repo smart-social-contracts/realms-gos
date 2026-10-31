@@ -1228,7 +1228,7 @@
 
 		{#if loading}
 			<div class="setup-wizard__loading" role="status">
-				<Spinner size="5" />
+				<Spinner size="5" aria-hidden="true" />
 				<span>{$_('setup.wizard.loading')}</span>
 			</div>
 		{:else}
@@ -1374,7 +1374,7 @@
 							<Label>{$_('setup.wizard.token_symbol')}</Label>
 							<p class="setup-wizard__symbol" aria-live="polite">
 								{#if symbolReading}
-									<Spinner size="4" />
+									<Spinner size="4" aria-hidden="true" />
 									<span class="text-gray-500">Reading from the ledger…</span>
 								{:else if tokenSymbol}
 									<strong>{tokenSymbol}</strong>
