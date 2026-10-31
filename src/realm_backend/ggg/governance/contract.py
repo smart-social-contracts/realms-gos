@@ -1,15 +1,20 @@
-from ic_python_db import Entity, ManyToOne, OneToMany, String, TimestampedMixin
-from ic_python_logging import get_logger
+from ic_python_db import Integer, ManyToOne, OneToMany, String
 
-from ..system.constants import STATUS_MAX_LENGTH
-
-logger = get_logger("entity.contract")
+from core.db import Json, Row
 
 
-class Contract(Entity, TimestampedMixin):
-    name = String()
+class Contract(Row):
+    __alias__ = "id"
+    id = String()
+    title = String(default="")
+    parties = Json([])  # ["Organization:buildco", "Department:infrastructure"]
     mandate = ManyToOne("Mandate", "contracts")
-    status = String(max_length=STATUS_MAX_LENGTH)
-    metadata = String(max_length=256)
+    value = Integer(default=0)
+    symbol = String(default="")
+    terms_ref = String(default="")
+    terms_hash = String(default="")
+    status = String(default="draft")  # draft | active | fulfilled | terminated | disputed
+    starts_at = Integer(default=0)
+    ends_at = Integer(default=0)
+    trades = OneToMany("Trade", "contract")
     ledger_entries = OneToMany("LedgerEntry", "contract")
-    __alias__ = "name"

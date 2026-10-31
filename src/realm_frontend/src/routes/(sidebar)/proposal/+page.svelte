@@ -7,7 +7,7 @@
     Button,
     Badge
   } from 'flowbite-svelte';
-  import { backend } from '$lib/canisters';
+  import { must, read } from '$lib/realm';
 
   let id;
   let organizationId;
@@ -49,17 +49,8 @@
     }
     
     try {
-      console.log('Fetching organization data for ID:', organizationId);
-      const orgData = await backend.get_organization_data(organizationId);
-      
-      if (orgData?.proposals) {
-        proposalData = orgData.proposals.find(p => p.id === id);
-        if (!proposalData) {
-          error = 'Proposal not found';
-        }
-      } else {
-        error = 'No proposals found in organization';
-      }
+      console.log('Fetching proposal:', id);
+      proposalData = (await must(read('proposal_get', { proposal: id }))).proposal;
     } catch (err) {
       console.error('Error loading proposal data:', err);
       error = err.message;

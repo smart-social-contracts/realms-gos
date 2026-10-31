@@ -70,6 +70,16 @@ export interface CallExtensionAsyncMessage extends BridgeEnvelope {
 	args: Record<string, unknown>;
 }
 
+/** A realm operation, called as the user: ``read`` for queries, otherwise run. The host refuses operations the
+ * extension's installed manifest does not declare. */
+export interface CallOperationMessage extends BridgeEnvelope {
+	kind: 'call_operation';
+	id: number;
+	name: string;
+	args: Record<string, unknown>;
+	read: boolean;
+}
+
 export interface NavigateMessage extends BridgeEnvelope {
 	kind: 'navigate';
 	id: number;
@@ -119,6 +129,7 @@ export type ExtToHostMessage =
 	| HelloMessage
 	| CallExtensionMessage
 	| CallExtensionAsyncMessage
+	| CallOperationMessage
 	| NavigateMessage
 	| NotifyMessage
 	| OpenModalMessage

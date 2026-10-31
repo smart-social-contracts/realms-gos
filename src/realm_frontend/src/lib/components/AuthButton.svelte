@@ -15,7 +15,9 @@
 	import { _ } from 'svelte-i18n';
 	import T from '$lib/components/T.svelte';
 	import { IconBuilding, IconCheck, IconCopy, IconLogin, IconUser } from '@tabler/icons-svelte';
-	import { initBackendWithIdentity, backend, setActiveQuarter } from '$lib/canisters';
+	import { initBackendWithIdentity, setActiveQuarter } from '$lib/canisters';
+	import { read } from '$lib/realm';
+	import { userStatusFromMe } from '$lib/utils/federatedMembership';
 	import { copyText } from '$lib/clipboard.js';
 	import QuarterSwitcher from '$lib/components/QuarterSwitcher.svelte';
 	import QuarterIndicator from '$lib/components/QuarterIndicator.svelte';
@@ -126,8 +128,8 @@
 
 	async function loadUserProfilePicture() {
 		try {
-			const response = await backend.get_my_user_status();
-			if (response && response.success && response.data && response.data.userGet) {
+			const response = userStatusFromMe(await read('me'));
+			if (response.success) {
 				const userGet = response.data.userGet;
 				userProfilePictureUrl = userGet.avatar || '';
 				applyUserGetRecord(userGet);

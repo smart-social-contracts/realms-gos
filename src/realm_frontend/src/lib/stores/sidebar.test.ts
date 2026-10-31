@@ -1,4 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const quarterRead = vi.fn();
+vi.mock('$lib/realm', () => ({
+	quarter: { read: (...args: unknown[]) => quarterRead(...args) },
+	must: async (reply: unknown) => reply,
+	RealmError: class extends Error {}
+}));
+vi.mock('$lib/auth.js', () => ({ settleAuthSession: vi.fn() }));
+vi.mock('$lib/stores/auth.js', async () => ({ isAuthenticated: (await import('svelte/store')).writable(false) }));
+
 import { sidebarCacheKey } from '../stores/sidebar';
 
 describe('sidebarCacheKey', () => {
@@ -15,20 +25,26 @@ describe('loadSidebar', () => {
 		const promise = new Promise<T>((r) => (resolve = r));
 		return { promise, resolve };
 	}
-	const reply = (label: string) =>
-		JSON.stringify({ success: true, categories: [{ id: label, label }] });
+	const extensionPage = (id: string) => ({
+		ok: true,
+		extensions: [{ id, available: true, sidebar: { category: 'governance' } }],
+		next: null
+	});
 
 	it('keeps the newest actor result when an older call resolves last', async () => {
 		const { loadSidebar, sidebarConfig } = await import('../stores/sidebar');
+		const { isAuthenticated } = await import('$lib/stores/auth.js');
 		const { get } = await import('svelte/store');
-		const capital = deferred<string>();
-		const quarter = deferred<string>();
-		const first = loadSidebar({ get_sidebar: () => capital.promise });
-		const second = loadSidebar({ get_sidebar: () => quarter.promise });
-		quarter.resolve(reply('member'));
+		(isAuthenticated as any).set(true);
+		const capital = deferred<unknown>();
+		const quarter = deferred<unknown>();
+		quarterRead.mockReturnValueOnce(capital.promise).mockReturnValueOnce(quarter.promise);
+		const first = loadSidebar(null);
+		const second = loadSidebar(null);
+		quarter.resolve(extensionPage('member_dashboard'));
 		await second;
-		capital.resolve(reply('guest'));
+		capital.resolve(extensionPage('guest_page'));
 		await first;
-		expect(get(sidebarConfig)?.categories?.[0]?.id).toBe('member');
+		expect(get(sidebarConfig)?.manifests?.[0]?.id).toBe('member_dashboard');
 	});
 });

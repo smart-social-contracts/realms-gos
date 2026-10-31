@@ -143,8 +143,8 @@ function initializeBackendStore() {
 		backendStore.set(actor);
 		_resolveActorReady();
 
-		// Runtime flags (incl. test_mode_ii_bypass) come from backend status(), not
-		// canister_ids.js. Fetch before auth init so test-mode auto-login is not
+		// Runtime flags (incl. test_mode_ii_bypass) come from realmInfo.fetch(). Fetch
+		// before auth init so test-mode auto-login is not
 		// skipped while status is still loading (which leaves an anonymous actor).
 		const { realmInfo } = await import('$lib/stores/realmInfo');
 		await realmInfo.fetch();
@@ -323,26 +323,6 @@ export async function createQuarterActor(quarterCanisterId, explicitIdentity = n
 	}
 
 	return createActor(quarterCanisterId, { agent }, identity);
-}
-
-/**
- * Rebuild an actor with the join-safe IDL so ``join_realm`` can decode a
- * UserGetRecord that omits ``departments`` (or uses an unexpected type).
- * Same agent / identity / canister as ``strictActor``.
- */
-export async function asJoinSafeActor(strictActor) {
-	if (!strictActor) return strictActor;
-	const [{ Actor }, { joinIdlFactory }] = await Promise.all([
-		import('@dfinity/agent'),
-		import('$lib/joinIdl.js')
-	]);
-	const canisterIdForJoin = Actor.canisterIdOf(strictActor);
-	const agent = Actor.agentOf(strictActor);
-	if (!agent || !canisterIdForJoin) return strictActor;
-	return Actor.createActor(joinIdlFactory, {
-		agent,
-		canisterId: canisterIdForJoin
-	});
 }
 
 // --- Quarter-aware backend store ---

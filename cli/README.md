@@ -155,7 +155,7 @@ Each generated realm folder contains a `manifest.json` describing the realm:
 ```
 
 For the fleet itself (marketplace, file registry, token, NFT, demo realm) see
-`casals.json` and `docs/OPERATIONS.md`; realm manifests live under `examples/demo/`.
+`casals.json` and `docs/deployment/README.md`; realm manifests live under `examples/demo/`.
 
 ### Configuration Schema
 
@@ -243,7 +243,7 @@ ls extensions/
 
 The Realms product orchestra (marketplace, fleet file registry, token, NFT,
 demo realm) is declared in the repo-root `casals.json` and deployed with
-`casals up` from the Casals repo — see `docs/OPERATIONS.md`. The `realms` CLI
+`casals up` from the Casals repo — see `docs/deployment/README.md`. The `realms` CLI
 operates realms that exist; it does not mint or destroy canisters.
 
 ## GUI alternative: the Package Manager extension
@@ -261,8 +261,7 @@ CLI. Once a realm has the package_manager extension installed, an admin
 no longer needs CLI access to the host machine to add or remove
 packages — they can do everything through the browser.
 
-See `docs/reference/EXTENSION_ARCHITECTURE.md → Package Manager Extension`
-for the full feature list, permissions model and caveats.
+See `docs/extensions/README.md` for how extensions are installed and what they may do.
 
 ## Contributing
 

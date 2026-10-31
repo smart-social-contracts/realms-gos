@@ -2,10 +2,36 @@
  * Federated membership probe (issue #156).
  *
  * There is no central principal→quarter index. A returning user's quarter is
- * recovered by probing known canisters with get_my_user_status(). Shared by
+ * recovered by probing known canisters with read('me'). Shared by
  * the profiles store (login auto-route) and /join (prevent accidental
  * double-registration).
  */
+import type { Reply } from '$lib/realm';
+
+/**
+ * ``read('me')`` in the shape of the old get_my_user_status reply (``data.userGet``), which
+ * membership callers read. Fails when the caller is not a user here. ``departments`` is always
+ * empty: ``me`` does not list seats.
+ */
+export function userStatusFromMe(reply: Reply): any {
+	if (!reply.ok) return { success: false, data: { error: reply.error } };
+	const user = reply.user;
+	if (!user.profiles) return { success: false, data: { error: 'not a user of this realm' } };
+	return {
+		success: true,
+		data: {
+			userGet: {
+				principal: user.id,
+				nickname: user.nickname ?? '',
+				avatar: user.avatar ?? '',
+				profiles: user.profiles,
+				departments: [],
+				assigned_quarter: user.home_quarter ?? '',
+				private_data: reply.private_data ?? ''
+			}
+		}
+	};
+}
 
 export type MembershipHit = {
 	canisterId: string;
@@ -96,7 +122,7 @@ export async function verifyAssignedQuarter(primary: MembershipHit): Promise<Mem
 	const { createQuarterActor } = await import('$lib/canisters');
 	try {
 		const actor = await createQuarterActor(assigned);
-		const r = await actor.get_my_user_status();
+		const r = userStatusFromMe(JSON.parse(await actor.read('me', '{}')));
 		if (hasMembership(r)) {
 			return { canisterId: assigned, isCapital: false, response: r, profiles: profilesOf(r) };
 		}
@@ -130,7 +156,7 @@ export async function mapWithConcurrency<T, R>(
 const PROBE_CONCURRENCY = 8;
 
 /**
- * Probe capital + every quarter from get_join_targets for the caller's membership.
+ * Probe capital + every quarter from quarter_directory for the caller's membership.
  * Prefers a valid localStorage home_quarter cache when it still recognizes the caller.
  *
  * `stopAtCachedHit`: when the cached home quarter still recognizes the caller,
@@ -147,26 +173,24 @@ export async function probeFederatedMembership(options?: {
 	const stopAtCachedHit = options?.stopAtCachedHit === true;
 
 	// @ts-ignore
-	const { backend, createQuarterActor } = await import('$lib/canisters');
-
-	if (!backend || typeof backend.get_my_user_status !== 'function') {
-		throw new Error('Backend canister is not properly initialized');
-	}
+	const { createQuarterActor } = await import('$lib/canisters');
+	const { read, must } = await import('$lib/realm');
 
 	const hits: MembershipHit[] = [];
 	let capitalId = '';
+	let selfId = '';
 	let candidates: { canister_id: string; is_capital?: boolean }[] = [];
 
 	try {
-		const raw = await backend.get_join_targets();
-		const targets = typeof raw === 'string' ? JSON.parse(raw) : raw;
-		capitalId = targets?.capital_id || '';
-		candidates = (targets?.quarters || []).filter((q: any) => q && q.canister_id);
-		if (capitalId && !candidates.some((q) => q.canister_id === capitalId)) {
-			candidates.unshift({ canister_id: capitalId, is_capital: true });
-		}
+		const directory = await must(read('quarter_directory'));
+		capitalId = directory.capital;
+		selfId = directory.quarters[0].id;
+		candidates = directory.quarters.map((q: { id: string; capital: boolean }) => ({
+			canister_id: q.id,
+			is_capital: q.capital
+		}));
 	} catch (e) {
-		console.warn('get_join_targets failed during membership probe:', e);
+		console.warn('quarter_directory failed during membership probe:', e);
 		candidates = [{ canister_id: '', is_capital: true }];
 	}
 
@@ -189,9 +213,11 @@ export async function probeFederatedMembership(options?: {
 		const cid = q.canister_id || '';
 		const isCapital = !!(q.is_capital || (capitalId && cid === capitalId) || !cid);
 		try {
-			const actor =
-				!cid || cid === capitalId ? backend : await createQuarterActor(cid);
-			const r = await actor.get_my_user_status();
+			const reply: Reply =
+				!cid || cid === selfId
+					? await read('me')
+					: JSON.parse(await (await createQuarterActor(cid)).read('me', '{}'));
+			const r = userStatusFromMe(reply);
 			if (hasMembership(r)) {
 				return {
 					canisterId: cid || capitalId,

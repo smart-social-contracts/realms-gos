@@ -1,237 +1,196 @@
-"""Crypto API — envelope & group management for realm-level encryption.
+from core import chain
+from core.db import Fail, Forbidden, find, next_id, page_by, view
+from ggg import Department, Document, KeyEnvelope, Realm
+from core.op import op
+from api.proposals import holders, root
 
-Wraps the ic-basilisk-toolkit CryptoService to expose envelope CRUD,
-group management, and scope queries to Candid endpoints in main.py.
-"""
-
-from typing import Any
-
-from ic_basilisk_toolkit.crypto import (
-    CryptoGroup,
-    CryptoGroupMember,
-    CryptoService,
-    KeyEnvelope,
-)
-from ic_python_logging import get_logger
-
-logger = get_logger("api.crypto")
-
-# Singleton — no VetKeyService needed for envelope storage operations.
-# Async operations (init_scope) that need vetKD are driven by the caller.
-_crypto = CryptoService(vetkey_service=None)
+MGMT = "aaaaa-aa"
+CONTEXT = (bytes([len(b"realms")]) + b"realms").hex()  # one root context; recipients differ by vetKD input
 
 
-# ------------------------------------------------------------------
-# Envelope operations
-# ------------------------------------------------------------------
+def blob(hex_text):
+    return "".join("\\" + hex_text[i:i + 2] for i in range(0, len(hex_text), 2))
 
 
-def store_envelope(principal: str, scope: str, wrapped_dek: str) -> dict[str, Any]:
-    """Store (or update) a wrapped DEK envelope for the caller."""
-    logger.info(f"store_envelope: scope={scope!r} principal={principal}")
-    envelope = _crypto.grant_access(scope, principal, wrapped_dek)
-    return {
-        "success": True,
-        "scope": str(envelope.scope),
-        "principal": str(envelope.principal),
-        "wrapped_dek": str(envelope.wrapped_dek),
-    }
+def blob_hex(decoded):
+    """The first blob in a decoded candid reply, as hex."""
+    body, out, i = decoded[decoded.index('blob "') + 6:], bytearray(), 0
+    while body[i] != '"':
+        if body[i] != "\\":
+            out += body[i].encode()
+            i += 1
+        elif body[i + 1] in '\\"':
+            out += body[i + 1].encode()
+            i += 2
+        else:
+            out.append(int(body[i + 1:i + 3], 16))
+            i += 3
+    return out.hex()
 
 
-def get_envelope(principal: str, scope: str) -> dict[str, Any]:
-    """Retrieve the caller's envelope for a scope."""
-    envelope = _crypto.get_envelope(scope, principal)
-    if not envelope:
-        return {"success": False, "error": f"No envelope for scope {scope!r}"}
-    return {
-        "success": True,
-        "scope": str(envelope.scope),
-        "principal": str(envelope.principal),
-        "wrapped_dek": str(envelope.wrapped_dek),
-    }
+def key_id():
+    name = "dfx_test_key" if Realm["1"].network == "local" else "test_key_1"
+    return f'record {{ curve = variant {{ bls12_381_g2 = null }}; name = "{name}" }}'
 
 
-def list_scopes(principal: str) -> dict[str, Any]:
-    """List all scopes the caller has access to."""
-    scopes = _crypto.list_scopes(principal)
-    return {"success": True, "scopes": scopes}
+def managers(scope):
+    """Who may grant and revoke keys at ``scope``: the owner of a ``user:`` scope, the staff of a ``dept:``
+    scope's department, the root department's staff for ``realm:``."""
+    kind, _, rest = scope.partition(":")
+    if kind == "user":
+        return {rest.split(":")[0]}
+    if kind not in ("dept", "realm"):
+        raise Fail(f"unknown scope kind '{kind}'")
+    d = find(Department, rest.split(":")[0]) if kind == "dept" else root()
+    return holders(d) | ({d.head} - {""})
 
 
-def list_envelopes(scope: str) -> dict[str, Any]:
-    """List all envelopes for a scope (principals with access)."""
-    envelopes = _crypto.list_envelopes(scope)
-    return {
-        "success": True,
-        "envelopes": [
-            {
-                "scope": str(e.scope),
-                "principal": str(e.principal),
-                "wrapped_dek": str(e.wrapped_dek),
-            }
-            for e in envelopes
-        ],
-    }
+def manager(scope, principal):
+    if principal not in managers(scope):
+        raise Forbidden(f"you do not manage keys at {scope}")
 
 
-def share_with_principal(
-    scope: str, target_principal: str, wrapped_dek: str
-) -> dict[str, Any]:
-    """Share access to a scope with another principal."""
-    logger.info(f"share: scope={scope!r} -> {target_principal}")
-    envelope = _crypto.grant_access(scope, target_principal, wrapped_dek)
-    return {
-        "success": True,
-        "scope": str(envelope.scope),
-        "principal": str(envelope.principal),
-    }
+def grant(scope, keys, by):
+    for principal, wrapped in keys.items():
+        e = KeyEnvelope[f"{scope}|{principal}"] or KeyEnvelope(id=f"{scope}|{principal}", scope=scope,
+                                                               principal=principal)
+        e.wrapped_dek, e.granted_by, e.at = wrapped, by, chain.now()
+    return sorted(keys)
 
 
-def revoke_principal(scope: str, target_principal: str) -> dict[str, Any]:
-    """Revoke a principal's access to a scope."""
-    logger.info(f"revoke: scope={scope!r} from {target_principal}")
-    deleted = _crypto.revoke_access(scope, target_principal)
-    if not deleted:
-        return {
-            "success": False,
-            "error": f"No envelope found for {target_principal} in scope {scope!r}",
-        }
-    return {"success": True}
+def revoke(scope, principals):
+    for p in principals:
+        e = KeyEnvelope[f"{scope}|{p}"]
+        if e:
+            e.delete()
+    return sorted(principals)
 
 
-def grant_many(scope: str, wrapped_deks: dict[str, str]) -> dict[str, Any]:
-    """Grant access to many principals in a single pass (batch).
-
-    Uses the toolkit's ``grant_many`` when available (single envelope-index
-    snapshot); otherwise falls back to an equivalent local single-pass upsert so
-    this works against older pinned toolkit versions too.
-    """
-    logger.info(f"grant_many: scope={scope!r} ({len(wrapped_deks)} principals)")
-    batch = wrapped_deks or {}
-    if hasattr(_crypto, "grant_many"):
-        count = _crypto.grant_many(scope, batch)
-    else:
-        from ic_basilisk_toolkit.crypto import encode_envelope
-
-        index = {str(e.principal): e for e in _crypto.list_envelopes(scope)}
-        count = 0
-        for principal, dek_hex in batch.items():
-            principal = str(principal)
-            existing = index.get(principal)
-            if existing:
-                if dek_hex:
-                    existing.wrapped_dek = encode_envelope(dek_hex)
-            else:
-                index[principal] = KeyEnvelope(
-                    scope=scope,
-                    principal=principal,
-                    wrapped_dek=encode_envelope(dek_hex or ""),
-                )
-            count += 1
-    return {"success": True, "envelopes_granted": count}
+@op("self.data_manage", returns="public_key")
+def crypto_public_key(c, args):
+    """The realm's vetKD public key: wrap a scope's key for any principal with it (IBE, identity = principal)."""
+    reply = yield from chain.call(MGMT, "vetkd_public_key", f'(record {{ canister_id = null; context = blob '
+                                  f'"{blob(CONTEXT)}"; key_id = {key_id()} }})', 26_000_000_000)
+    return {"public_key": blob_hex(reply)}
 
 
-def revoke_many(scope: str, principals: list[str]) -> dict[str, Any]:
-    """Revoke access for many principals in a single pass (batch)."""
-    logger.info(f"revoke_many: scope={scope!r} ({len(principals)} principals)")
-    targets = principals or []
-    if hasattr(_crypto, "revoke_many"):
-        count = _crypto.revoke_many(scope, targets)
-    else:
-        target_set = {str(p) for p in targets}
-        count = 0
-        for e in list(_crypto.list_envelopes(scope)):
-            if str(e.principal) in target_set:
-                e.delete()
-                count += 1
-    return {"success": True, "envelopes_revoked": count}
+@op("self.data_manage", returns="encrypted_key")
+def crypto_derive_key(c, args):
+    """Your vetKey, encrypted to ``transport_public_key`` (hex). It opens only what was wrapped for you."""
+    reply = yield from chain.call(MGMT, "vetkd_derive_key", f'(record {{ input = blob "{blob(c.user.encode().hex())}"; '
+                                  f'context = blob "{blob(CONTEXT)}"; key_id = {key_id()}; transport_public_key = '
+                                  f'blob "{blob(args["transport_public_key"])}" }})', 54_000_000_000)
+    return {"encrypted_key": blob_hex(reply)}
 
 
-# ------------------------------------------------------------------
-# Group operations
-# ------------------------------------------------------------------
+@op("self.data_manage", returns="granted")
+def crypto_grant(c, args):
+    """Store wrapped keys at ``scope``: ``keys`` maps principal to wrapped key. Replaces earlier wraps."""
+    manager(args["scope"], c.user)
+    return {"granted": grant(args["scope"], args["keys"], c.user)}
 
 
-def group_create(name: str, description: str = "") -> dict[str, Any]:
-    """Create a new crypto group."""
-    try:
-        group = CryptoService.create_group(name, description)
-        return {
-            "success": True,
-            "name": str(group.name),
-            "description": str(group.description),
-        }
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
+@op("self.data_manage", returns="revoked")
+def crypto_revoke(c, args):
+    """Delete the wrapped keys of ``principals`` at ``scope`` (managers only). Returns ``revoked``."""
+    manager(args["scope"], c.user)
+    return {"revoked": revoke(args["scope"], args["principals"])}
 
 
-def group_delete(name: str) -> dict[str, Any]:
-    """Delete a crypto group and all its members."""
-    deleted = CryptoService.delete_group(name)
-    if not deleted:
-        return {"success": False, "error": f"Group {name!r} not found"}
-    return {"success": True}
+@op("self.data_manage", read=True, returns="envelope")
+def crypto_envelope(c, args):
+    """Your wrapped key at ``scope``: nobody can read another principal's envelope."""
+    e = find(KeyEnvelope, f"{args['scope']}|{c.user}")
+    return {"envelope": e.id, "wrapped_dek": e.wrapped_dek, "granted_by": e.granted_by, "at": e.at}
 
 
-def group_add_member(
-    group_name: str, principal: str, role: str = "member"
-) -> dict[str, Any]:
-    """Add a principal to a group."""
-    try:
-        member = CryptoService.add_member(group_name, principal, role)
-        return {
-            "success": True,
-            "group": str(member.group),
-            "principal": str(member.principal),
-            "role": str(member.role),
-        }
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
+@op("self.data_manage", read=True, returns="scopes")
+def crypto_scopes(c, args):
+    """The scopes where you hold a wrapped key, ``count`` at a time (default 100, at most 500) from row ``from``
+    (default 1). Returns ``scopes`` and ``next`` (null at the end)."""
+    rows, nxt = page_by(KeyEnvelope, "principal", c.user, args)
+    return {"scopes": [e.scope for e in rows], "next": nxt}
 
 
-def group_remove_member(group_name: str, principal: str) -> dict[str, Any]:
-    """Remove a principal from a group."""
-    removed = CryptoService.remove_member(group_name, principal)
-    if not removed:
-        return {
-            "success": False,
-            "error": f"{principal} not found in group {group_name!r}",
-        }
-    return {"success": True}
+@op("self.data_manage", read=True, returns="principals")
+def crypto_access(c, args):
+    """Who holds a key at ``scope`` (managers only), ``count`` at a time (default 100, at most 500) from row
+    ``from`` (default 1). Returns ``principals`` and ``next`` (null at the end)."""
+    manager(args["scope"], c.user)
+    rows, nxt = page_by(KeyEnvelope, "scope", args["scope"], args)
+    return {"principals": [e.principal for e in rows], "next": nxt}
 
 
-def group_list() -> dict[str, Any]:
-    """List all crypto groups."""
-    groups = CryptoService.list_groups()
-    return {
-        "success": True,
-        "groups": [
-            {"name": str(g.name), "description": str(g.description)} for g in groups
-        ],
-    }
+def scope_of(doc):
+    return f"dept:{doc.department}:doc:{doc.id}"
 
 
-def group_members(group_name: str) -> dict[str, Any]:
-    """List all members of a group."""
-    members = CryptoService.list_members(group_name)
-    return {
-        "success": True,
-        "members": [
-            {"principal": str(m.principal), "role": str(m.role)} for m in members
-        ],
-    }
+def staff(department, principal):
+    if principal not in managers(f"dept:{department}"):
+        raise Forbidden(f"only {department}'s staff manage its documents")
 
 
-def share_with_group(
-    scope: str, group_name: str, wrapped_deks: dict | None = None
-) -> dict[str, Any]:
-    """Share access to a scope with all members of a group."""
-    logger.info(f"share_with_group: scope={scope!r} group={group_name!r}")
-    count = _crypto.grant_group_access(scope, group_name, wrapped_deks)
-    return {"success": True, "envelopes_created": count}
+@op("document.manage")
+def document_store(c, args):
+    """Store a ``department`` document (or replace ``document``): ``title``, ``ref`` and ``hash`` of its ciphertext,
+    and optional ``keys`` (principal to wrapped key). Returns ``document`` and its key ``scope``."""
+    fields = {"title": args["title"], "ref": args["ref"], "hash": args["hash"], "at": chain.now()}
+    staff(args["department"], c.user)
+    doc = find(Document, args["document"]) if args.get("document") else None
+    if doc and doc.department != args["department"]:
+        raise Fail(f"{doc.id} belongs to {doc.department}")
+    doc = doc or Document(id=next_id(Document, "DOC"), department=args["department"], author=c.user)
+    for k, v in fields.items():
+        setattr(doc, k, v)
+    grant(scope_of(doc), args.get("keys") or {}, c.user)
+    return {"document": doc.id, "scope": scope_of(doc)}
 
 
-def revoke_group(scope: str, group_name: str) -> dict[str, Any]:
-    """Revoke all group members' access to a scope."""
-    logger.info(f"revoke_group: scope={scope!r} group={group_name!r}")
-    count = _crypto.revoke_group_access(scope, group_name)
-    return {"success": True, "envelopes_deleted": count}
+@op("document.manage", returns="granted")
+def document_share(c, args):
+    """Share ``document``: ``keys`` maps principal to wrapped key. Returns ``granted``."""
+    doc = find(Document, args["document"])
+    staff(doc.department, c.user)
+    return {"granted": grant(scope_of(doc), args["keys"], c.user)}
+
+
+@op("document.manage", returns="revoked")
+def document_revoke(c, args):
+    """Delete the wrapped keys of ``principals`` for ``document``. Returns ``revoked``."""
+    doc = find(Document, args["document"])
+    staff(doc.department, c.user)
+    return {"revoked": revoke(scope_of(doc), args["principals"])}
+
+
+@op("document.manage")
+def document_delete(c, args):
+    """Delete ``document``'s wrapped keys, ``count`` per call (default 100, at most 500), then the document itself:
+    call again until ``deleted`` is true. Returns ``revoked`` (this call's principals) and ``deleted``."""
+    doc = find(Document, args["document"])
+    staff(doc.department, c.user)
+    rows, more = page_by(KeyEnvelope, "scope", scope_of(doc), {"count": args.get("count")})
+    for e in rows:
+        e.delete()
+    if more is None:
+        doc.delete()
+    return {"revoked": sorted(e.principal for e in rows), "deleted": more is None}
+
+
+@op("document.manage", read=True, returns="documents")
+def document_list(c, args):
+    """The documents of ``department`` (id, title, hash, author, time), for its staff, ``count`` at a time (default
+    100, at most 500) from row ``from`` (default 1). Returns ``documents`` and ``next`` (null at the end)."""
+    staff(args["department"], c.user)
+    rows, nxt = page_by(Document, "department", args["department"], args)
+    return {"documents": [view(d, "id", "title", "hash", "author", "at") for d in rows], "next": nxt}
+
+
+@op("self.data_view", read=True)
+def document_get(c, args):
+    """The ciphertext reference of ``document`` and your wrapped key: for its department's staff and key holders."""
+    doc = find(Document, args["document"])
+    mine = KeyEnvelope[f"{scope_of(doc)}|{c.user}"]
+    if mine is None and c.user not in managers(f"dept:{doc.department}"):
+        raise Forbidden(f"{doc.id} was not shared with you")
+    return {"document": view(doc), "scope": scope_of(doc), "wrapped_dek": mine.wrapped_dek if mine else "",
+            "envelope": mine.id if mine else None}

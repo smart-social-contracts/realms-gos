@@ -5,22 +5,41 @@ import {
 	type ExtensionManifestInfo,
 } from './extension-manifest';
 
-const { listRuntimeExtensions } = vi.hoisted(() => ({
-	listRuntimeExtensions: vi.fn(),
+const { realmRead, publishedManifest } = vi.hoisted(() => ({
+	realmRead: vi.fn(),
+	publishedManifest: vi.fn(),
 }));
 
-vi.mock('$lib/canisters', () => ({
-	backend: {
-		list_runtime_extensions: listRuntimeExtensions,
+vi.mock('$lib/realm', () => ({
+	read: realmRead,
+	must: async (reply: Promise<Record<string, unknown>>) => {
+		const out = await reply;
+		if (!out.ok) throw new Error(String(out.error));
+		return out;
 	},
 }));
+
+vi.mock('$lib/file-registry-client', () => ({
+	getExtensionManifest: publishedManifest,
+	getFileRegistryCanisterIds: () => ['registry'],
+}));
+
+const DASHBOARD_PAGE = {
+	ok: true,
+	extensions: [
+		{ id: 'member_dashboard', version: '1.0.0', sidebar: {}, access: { profiles: ['member'] } },
+	],
+	next: null,
+};
 
 describe('fetchExtensionManifests', () => {
 	beforeEach(async () => {
 		vi.useFakeTimers();
 		const { clearExtensionManifestCache } = await import('./extension-manifest');
 		clearExtensionManifestCache();
-		listRuntimeExtensions.mockReset();
+		realmRead.mockReset();
+		publishedManifest.mockReset();
+		publishedManifest.mockResolvedValue({ name: 'Member dashboard', runtime: 'sandboxed' });
 	});
 
 	afterEach(async () => {
@@ -30,15 +49,9 @@ describe('fetchExtensionManifests', () => {
 	});
 
 	it('retries after a transient failure instead of caching an empty result forever', async () => {
-		listRuntimeExtensions
+		realmRead
 			.mockRejectedValueOnce(new Error('backend unavailable'))
-			.mockResolvedValueOnce(
-				JSON.stringify({
-					all_manifests: {
-						member_dashboard: { name: 'member_dashboard', runtime: 'sandboxed' },
-					},
-				}),
-			);
+			.mockResolvedValueOnce(DASHBOARD_PAGE);
 
 		const {
 			fetchExtensionManifests: fetchManifests,
@@ -51,13 +64,19 @@ describe('fetchExtensionManifests', () => {
 		await expect(first).resolves.toMatchObject({
 			member_dashboard: { runtime: 'sandboxed' },
 		});
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(2);
+		expect(realmRead).toHaveBeenCalledTimes(2);
 
 		const manifest = await getExtensionManifest('member_dashboard');
-		expect(manifest?.runtime).toBe('sandboxed');
+		expect(manifest).toMatchObject({
+			name: 'Member dashboard',
+			runtime: 'sandboxed',
+			version: '1.0.0',
+			profiles: ['member'],
+		});
+		expect(publishedManifest).toHaveBeenCalledWith('registry', 'member_dashboard', '1.0.0');
 
 		clearExtensionManifestCache();
-		listRuntimeExtensions
+		realmRead
 			.mockRejectedValueOnce(new Error('fail 1'))
 			.mockRejectedValueOnce(new Error('fail 2'))
 			.mockRejectedValueOnce(new Error('fail 3'));
@@ -65,63 +84,64 @@ describe('fetchExtensionManifests', () => {
 		const exhausted = fetchManifests();
 		await vi.advanceTimersByTimeAsync(4000);
 		await expect(exhausted).resolves.toEqual({});
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(5);
+		expect(realmRead).toHaveBeenCalledTimes(5);
 
-		listRuntimeExtensions.mockResolvedValueOnce(
-			JSON.stringify({
-				all_manifests: {
-					member_dashboard: { name: 'member_dashboard', runtime: 'sandboxed' },
-				},
-			}),
-		);
+		realmRead.mockResolvedValueOnce(DASHBOARD_PAGE);
 		const recovered = fetchManifests();
 		await expect(recovered).resolves.toMatchObject({
 			member_dashboard: { runtime: 'sandboxed' },
 		});
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(6);
+		expect(realmRead).toHaveBeenCalledTimes(6);
 	});
 });
 
 describe('getInstalledExtensionVersion', () => {
-	const manifests = (version: string, extra: Record<string, unknown> = {}) =>
-		JSON.stringify({ all_manifests: { voting: { name: 'voting', version }, ...extra } });
+	const extensionPage = (version: string, extra: Record<string, unknown>[] = []) => ({
+		ok: true,
+		extensions: [{ id: 'voting', version, sidebar: {}, access: {} }, ...extra],
+		next: null,
+	});
 
 	beforeEach(async () => {
 		const { clearExtensionManifestCache } = await import('./extension-manifest');
 		clearExtensionManifestCache();
-		listRuntimeExtensions.mockReset();
+		realmRead.mockReset();
+		publishedManifest.mockReset();
+		publishedManifest.mockResolvedValue(null);
 	});
 
 	it('reuses the cached manifests instead of querying per navigation', async () => {
-		listRuntimeExtensions.mockResolvedValue(manifests('1.4.2'));
+		realmRead.mockResolvedValue(extensionPage('1.4.2'));
 		const { getInstalledExtensionVersion, getExtensionManifest } = await import(
 			'./extension-manifest'
 		);
 		await getExtensionManifest('voting');
 		await expect(getInstalledExtensionVersion('voting')).resolves.toBe('1.4.2');
 		await expect(getInstalledExtensionVersion('voting')).resolves.toBe('1.4.2');
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(1);
+		expect(realmRead).toHaveBeenCalledTimes(1);
 	});
 
 	it('refetches once when the extension is missing from the cache', async () => {
-		listRuntimeExtensions
-			.mockResolvedValueOnce(manifests('1.4.2'))
-			.mockResolvedValueOnce(manifests('1.4.2', { vault: { name: 'vault', version: '0.3.0' } }));
+		realmRead
+			.mockResolvedValueOnce(extensionPage('1.4.2'))
+			.mockResolvedValueOnce(
+				extensionPage('1.4.2', [{ id: 'vault', version: '0.3.0', sidebar: {}, access: {} }]),
+			);
 		const { getInstalledExtensionVersion } = await import('./extension-manifest');
 		await getInstalledExtensionVersion('voting');
 		await expect(getInstalledExtensionVersion('vault')).resolves.toBe('0.3.0');
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(2);
+		expect(realmRead).toHaveBeenCalledTimes(2);
 	});
 
 	it('fresh bypasses the cache (upgrade during the session)', async () => {
-		listRuntimeExtensions
-			.mockResolvedValueOnce(manifests('1.4.2'))
-			.mockResolvedValueOnce(manifests('1.5.0'));
+		realmRead
+			.mockResolvedValueOnce(extensionPage('1.4.2'))
+			.mockResolvedValueOnce(extensionPage('1.5.0'));
 		const { getInstalledExtensionVersion } = await import('./extension-manifest');
 		await expect(getInstalledExtensionVersion('voting')).resolves.toBe('1.4.2');
 		await expect(getInstalledExtensionVersion('voting', { fresh: true })).resolves.toBe('1.5.0');
 		await expect(getInstalledExtensionVersion('voting')).resolves.toBe('1.5.0');
-		expect(listRuntimeExtensions).toHaveBeenCalledTimes(2);
+		expect(realmRead).toHaveBeenCalledTimes(2);
 	});
 });
 

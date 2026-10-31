@@ -19,7 +19,7 @@ console.log(`Using Identity Provider: ${II_URL}`);
 // `/.well-known/ii-alternative-origins`). Injected at deploy time via
 // canister_ids.js so the whole federation (every realm + the registry) resolves
 // to ONE principal per human. When unset, login falls back to per-origin
-// principals (legacy behaviour). See issue #233 / QUARTERS.md.
+// principals (legacy behaviour). See issue #233 / docs/project/quarters-design.md.
 const DERIVATION_ORIGIN = globalThis.__CANISTER_IDS?.derivation_origin || '';
 if (DERIVATION_ORIGIN) {
   console.log(`Using II derivationOrigin: ${DERIVATION_ORIGIN}`);
@@ -465,10 +465,34 @@ export async function isAuthenticated() {
 }
 
 let restorePromise = null;
+let settlePromise = null;
 
 /** Reset so a later call re-checks IC session (e.g. after logout). */
 export function resetAuthSessionRestore() {
   restorePromise = null;
+  settlePromise = null;
+}
+
+/**
+ * Restore the session and, inside the portal, wait for a delegation the portal already has
+ * (without asking the visitor to sign in), so later calls are not made anonymously.
+ */
+export function settleAuthSession() {
+  if (!settlePromise) {
+    settlePromise = (async () => {
+      await restoreAuthSession();
+      if (!isEmbeddedInPortal() || getPortalDelegationIdentity()) return;
+      const { waitForPortalDelegation } = await import('$lib/portal-bridge.ts');
+      if (await waitForPortalDelegation({ timeoutMs: 15_000, interactive: false })) {
+        restorePromise = null;
+        await restoreAuthSession();
+      }
+    })().catch((error) => {
+      settlePromise = null;
+      throw error;
+    });
+  }
+  return settlePromise;
 }
 
 /**

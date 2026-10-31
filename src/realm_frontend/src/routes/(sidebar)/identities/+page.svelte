@@ -5,6 +5,7 @@
 	import { Avatar, Button, Card, Heading, Input, Label, P, Spinner, Toggle } from 'flowbite-svelte';
 	import { FingerprintOutline } from 'flowbite-svelte-icons';
 	import { backend, backendReady } from '$lib/canisters';
+	import { must, read, run } from '$lib/realm';
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { isAuthenticated, principal } from '$lib/stores/auth';
@@ -39,7 +40,8 @@
 	// Per-section loading states
 	let publicDataLoaded = $state(false);
 	let privateDataLoaded = $state(false);
-	let identitiesLoading = $state(true);
+	// No realm operation lists identity-provider extensions yet.
+	let identitiesLoading = $state(false);
 	let identityProviders: IdentityProvider[] = $state([]);
 
 	// Public data
@@ -136,12 +138,7 @@
 			sharingLoaded = false;
 			encryptionAvailable = null;
 			encryptionError = '';
-			await Promise.all([
-				loadPublicData(),
-				loadPrivateData(),
-				loadIdentityProviders(),
-				loadSharingStatus()
-			]);
+			await Promise.all([loadPublicData(), loadPrivateData(), loadSharingStatus()]);
 		}
 
 		void (async () => {
@@ -177,11 +174,10 @@
 
 	async function loadPublicData() {
 		try {
-			const statusResponse = await backend.get_my_user_status();
-			if (statusResponse?.success && statusResponse.data?.userGet) {
-				const u = statusResponse.data.userGet;
-				nickname = u.nickname || '';
-				avatarUrl = u.avatar || '';
+			const me = await read('me');
+			if (me.ok) {
+				nickname = me.user.nickname || '';
+				avatarUrl = me.user.avatar || '';
 			}
 		} catch (err) {
 			console.error('Error loading public data:', err);
@@ -200,38 +196,35 @@
 				encryptionError = t('identities.not_signed_in');
 				return;
 			}
-			const statusResponse = await backend.get_my_user_status();
-			if (statusResponse?.success && statusResponse.data?.userGet) {
-				const u = statusResponse.data.userGet;
-				if (u.private_data) {
-					// 1. Preferred: DEK + envelope model (supports sharing).
-					const decrypted = await decryptScopeData<Record<string, string>>(
-						backend,
-						userScope(owner),
-						owner,
-						u.private_data
-					);
-					if (decrypted) {
-						privateData = decrypted;
+			const me = await read('me');
+			if (me.ok && me.private_data) {
+				// 1. Preferred: DEK + envelope model (supports sharing).
+				const decrypted = await decryptScopeData<Record<string, string>>(
+					backend,
+					userScope(owner),
+					owner,
+					me.private_data
+				);
+				if (decrypted) {
+					privateData = decrypted;
+					encryptionAvailable = true;
+				} else {
+					// 2. Legacy: data encrypted directly with the user's vetKey.
+					let legacy: Record<string, string> | null = null;
+					try {
+						legacy = await decryptPrivateData(backend, me.private_data);
+					} catch (decErr) {
+						console.warn('Legacy vetKeys decryption failed:', decErr);
+					}
+					if (legacy) {
+						privateData = legacy;
 						encryptionAvailable = true;
 					} else {
-						// 2. Legacy: data encrypted directly with the user's vetKey.
-						let legacy: Record<string, string> | null = null;
+						// 3. Plaintext / unknown — surface raw JSON if parseable.
 						try {
-							legacy = await decryptPrivateData(backend, u.private_data);
-						} catch (decErr) {
-							console.warn('Legacy vetKeys decryption failed:', decErr);
-						}
-						if (legacy) {
-							privateData = legacy;
-							encryptionAvailable = true;
-						} else {
-							// 3. Plaintext / unknown — surface raw JSON if parseable.
-							try {
-								privateData = JSON.parse(u.private_data);
-							} catch {
-								privateData = {};
-							}
+							privateData = JSON.parse(me.private_data);
+						} catch {
+							privateData = {};
 						}
 					}
 				}
@@ -255,19 +248,32 @@
 			if (!owner) return;
 			const scope = userScope(owner);
 
-			const envResp = await backend.crypto_list_scope_envelopes(scope);
-			const envs = envResp?.data?.envelopeList?.envelopes ?? [];
-			currentlySharedWith = envs
-				.map((e: any) => e.principal_id)
-				.filter((p: string) => p && p !== owner);
-
-			const audResp = await backend.list_share_audiences();
-			if (audResp?.success && audResp.data?.message) {
-				const parsed = JSON.parse(audResp.data.message);
-				audiences = (parsed.audiences ?? []).filter(
-					(a: ShareAudience) => (a.principals?.length ?? 0) > 0
-				);
+			const holders: string[] = [];
+			for (let from: number | null = 1; from; ) {
+				const page = await read('crypto_access', { scope, from, count: 500 });
+				if (!page.ok) break;
+				holders.push(...page.principals);
+				from = page.next;
 			}
+			currentlySharedWith = holders.filter((p) => p !== owner);
+
+			const found: ShareAudience[] = [];
+			for (let from: number | null = 1; from; ) {
+				const page = await must(read('department_list', { from, count: 100 }));
+				const departments = await Promise.all(
+					page.departments.map((d: { id: string }) => must(read('department_get', { department: d.id })))
+				);
+				for (const { department, positions } of departments) {
+					found.push({
+						id: `dept:${department.id}`,
+						label: department.id,
+						type: 'department',
+						principals: positions.flatMap((p: any) => p.holders.map((h: any) => h.user))
+					});
+				}
+				from = page.next;
+			}
+			audiences = found.filter((a) => a.principals.length > 0);
 
 			// An audience is shown as selected if at least one of its members
 			// (other than the owner) currently holds an envelope for this scope.
@@ -294,60 +300,12 @@
 		return Array.from(set);
 	}
 
-	async function loadIdentityProviders() {
-		try {
-			const response = await backend.get_extensions();
-			if (response.success && response.data.extensionsList) {
-				const extensions = response.data.extensionsList.extensions.map((ext: string) => JSON.parse(ext));
-
-				const providerExtensions = extensions.filter(
-					(ext: any) => ext.identity_provider && ext.enabled !== false
-				);
-
-				identityProviders = providerExtensions.map((ext: any) => ({
-					extensionName: ext.name,
-					name: ext.identity_provider.name || ext.name,
-					providerUrl: ext.identity_provider.provider_url || '',
-					logo: ext.identity_provider.logo || '',
-					description: ext.identity_provider.description || ext.description || '',
-					verified: false
-				}));
-
-				Promise.all(
-					providerExtensions.map(async (ext: any, i: number) => {
-						try {
-							// Candid signature is positional: (extension_name, function_name, args)
-							const statusResponse = await backend.extension_sync_call(
-								ext.name,
-								'get_identity_status',
-								'{}'
-							);
-							if (statusResponse.success) {
-								const statusData = JSON.parse(statusResponse.response);
-								if (statusData.verified) {
-									identityProviders[i] = { ...identityProviders[i], verified: true };
-									identityProviders = identityProviders;
-								}
-							}
-						} catch (err) {
-							console.error(`Error checking identity status for ${ext.name}:`, err);
-						}
-					})
-				);
-			}
-		} catch (error) {
-			console.error('Error loading identity providers:', error);
-		} finally {
-			identitiesLoading = false;
-		}
-	}
-
 	async function savePublicProfile() {
 		publicSaving = true;
 		publicMessage = '';
 		try {
-			const response = await backend.update_my_public_profile(nickname.trim(), avatarUrl.trim());
-			if (response?.success) {
+			const response = await run('profile_update', { nickname: nickname.trim(), avatar: avatarUrl.trim() });
+			if (response.ok) {
 				publicMessage = t('identities.public_updated');
 				window.dispatchEvent(new CustomEvent('profilePictureUpdated', {
 					detail: { profilePictureUrl: avatarUrl.trim() }
@@ -372,8 +330,8 @@
 					privateMessage = t('identities.encryption_checking');
 					return;
 				}
-				const response = await backend.update_my_private_data(JSON.stringify(privateData));
-				privateMessage = response?.success
+				const response = await run('private_data_update', { private_data: JSON.stringify(privateData) });
+				privateMessage = response.ok
 					? t('identities.private_saved_unencrypted')
 					: t('identities.private_update_failed');
 				return;
@@ -391,8 +349,8 @@
 			// The owner is always included so the new ciphertext stays self-readable.
 			const plan = await buildSharePlan(backend, [owner, ...recipients], privateData);
 
-			const response = await backend.update_my_private_data(plan.ciphertext);
-			if (!response?.success) {
+			const response = await run('private_data_update', { private_data: plan.ciphertext });
+			if (!response.ok) {
 				privateMessage = t('identities.private_update_failed');
 				return;
 			}

@@ -4,7 +4,7 @@
 ``request_deployment``, poll the installer until it completes on-chain, then
 finish founder setup (codex / token / branding / launch). Use ``--from-stage``
 to resume after a named stage (same idea as ``gaas new --from-phase``).
-No CLI ``enter_setup`` / ``set_canister_config_json``.
+No CLI ``setup_step`` install / infrastructure: the installer does those.
 
 ``--deploy-mode=standalone`` mints ``realm_backend`` + ``realm_frontend`` from a
 Realms GitHub release. No credits, no installer, not listed on any GaaS portal.
@@ -15,8 +15,6 @@ existing descriptor) or ``realms realm create`` (local ``.realms/`` scaffold).
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import os
 import re
@@ -34,6 +32,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import typer
 
 from .. import release_assets
+from ..realm_api import call_op
 from ..utils import console, get_project_root
 from ..runlog import get_run_log
 
@@ -112,14 +111,12 @@ WIZARD_CHROME_EXTENSIONS: Tuple[str, ...] = (
 # whichever symbol the environment gives it.
 DEFAULT_TOKEN_SYMBOLS = ("REALMS", "RLM")
 # The shared-ledger catalog ({symbol: {ledger, indexer, decimals}}) is the
-# realm's: get_setup_state().shared_tokens, handed to it by the installer from
-# the environment's casals.json. The CLI carries no per-network table.
+# realm's: setup_state().realm.shared_tokens_json, handed to it by the installer
+# from the environment's casals.json. The CLI carries no per-network table.
 SharedTokenCatalog = Dict[str, Dict[str, Any]]
 
 POLL_INTERVAL_S = 10
 POLL_TIMEOUT_S = 3600
-LAUNCH_POLL_TIMEOUT_S = 1800
-CODEX_INSTALL_TIMEOUT_S = 40 * 60
 
 # Ordered pipeline stages. ``--from-stage`` accepts the id or a 1-based index.
 GAAS_STAGES: Tuple[Tuple[str, str], ...] = (
@@ -145,15 +142,6 @@ STANDALONE_STAGES: Tuple[Tuple[str, str], ...] = (
     ("members", "Join geister members"),
 )
 POST_DEPLOY_STAGES = frozenset({"setup", "co-admin", "config", "data", "members"})
-
-_IMAGE_MIME = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".svg": "image/svg+xml",
-}
 
 
 class StageError(Exception):
@@ -659,7 +647,7 @@ def check_ic_members_policy(
         return None
     return (
         "On ic, --members requires --open-registration or spec invite_codes "
-        "so geister agents can join_realm."
+        "so geister agents can realm_join."
     )
 
 
@@ -821,28 +809,6 @@ def identity_refuse_message(name: str, network: str) -> str:
         f"  icp identity link web {name} --app {origin}\n"
         f"Confirm against the realm's /canister_ids.js derivation_origin after deploy."
     )
-
-
-def file_to_data_url(path: str) -> str:
-    file_path = Path(path)
-    validate_branding_size(path, file_path.name)
-    mime = _IMAGE_MIME.get(file_path.suffix.lower(), "application/octet-stream")
-    encoded = base64.b64encode(file_path.read_bytes()).decode("ascii")
-    data_url = f"data:{mime};base64,{encoded}"
-    if len(data_url.encode("utf-8")) > BRANDING_MAX_BYTES:
-        raise StageError(
-            "validate",
-            f"{file_path.name} data URL exceeds 1.5 MiB after base64 encoding. "
-            "Use a smaller image.",
-        )
-    return data_url
-
-
-def invite_code_to_checksum(code: str) -> str:
-    text = (code or "").strip()
-    if re.fullmatch(r"[0-9a-fA-F]{64}", text):
-        return text.lower()
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def geister_agent_name(index: int) -> str:
@@ -1251,7 +1217,7 @@ INSTALLER_ACCESS_DENIED_HINT = (
     "The live installer must be an IC controller of the new realm canisters "
     "(the stand_template controllers in casals.json). The realm carries no "
     "installer allowlist, so there is nothing to bake into a new realm-backend "
-    "WASM. CLI bootstrap (enter_setup / set_canister_config_json) "
+    "WASM. CLI bootstrap (setup_step install / infrastructure) "
     "is not used on the GaaS path."
 )
 
@@ -1326,31 +1292,36 @@ def poll_installer_until_ready(
     raise AssertionError("unreachable")
 
 
-def _as_setup_state(raw: Any) -> Dict[str, Any]:
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
-    return raw if isinstance(raw, dict) else {}
+def _realm_op(
+    backend_id: str,
+    name: str,
+    args: Optional[Dict[str, Any]],
+    network: str,
+    identity: str,
+    *,
+    read: bool = False,
+    timeout: int = 300,
+    stage: str = "setup",
+) -> Dict[str, Any]:
+    """Run realm operation ``name``; a failed call or a refusal fails ``stage``."""
+    try:
+        reply = call_op(
+            backend_id, name, args, network=network, identity=identity, read=read, timeout=timeout
+        )
+    except typer.Exit:
+        _fail(stage, f"{name}: the call to {backend_id} failed")
+    if not reply.get("ok"):
+        _fail(stage, reply.get("error") or f"{name} failed")
+    return reply
 
 
 def get_setup_state(
     backend_id: str, network: str, identity: str
 ) -> Dict[str, Any]:
-    raw = _canister_call(
-        backend_id,
-        "get_setup_state",
-        "()",
-        network,
-        identity,
-        query=True,
-        timeout=60,
-    )
-    return _as_setup_state(raw)
+    return call_op(backend_id, "setup_state", network=network, identity=identity, timeout=60)
 
 
-def wait_for_enter_setup(
+def wait_for_founder(
     backend_id: str,
     network: str,
     identity: str,
@@ -1365,41 +1336,38 @@ def wait_for_enter_setup(
         try:
             state = get_setup_state(backend_id, network, identity)
             last = state
-            if state.get("success") and state.get("creator"):
+            if state.get("ok") and state.get("founder"):
                 return state
         except Exception as exc:
             last_err = str(exc)
         time.sleep(POLL_INTERVAL_S)
     if last_err and not last:
-        console.print(f"  enter_setup poll: {last_err}")
+        console.print(f"  setup_state poll: {last_err}")
     return last
 
 
-def ensure_founder_enter_setup(
+def ensure_founder_installed(
     backend_id: str,
     founder: str,
-    registry_id: str,
     environment: str,
     network: str,
     identity: str,
     *,
     timeout_s: int = 90,
 ) -> Dict[str, Any]:
-    """Wait for installer enter_setup; if the founder is still missing, call it."""
-    state = wait_for_enter_setup(
+    """Wait for the installer's setup_step install; if the founder is still missing, send it."""
+    state = wait_for_founder(
         backend_id, network, identity, timeout_s=timeout_s
     )
-    if state.get("creator"):
+    if state.get("founder"):
         return state
-    console.print("  installer did not record founder — calling enter_setup")
-    call_enter_setup(
-        backend_id, founder, registry_id, environment, network, identity
-    )
+    console.print("  installer did not record founder — sending setup_step install")
+    call_setup_install(backend_id, founder, environment, network, identity)
     state = get_setup_state(backend_id, network, identity)
-    if not state.get("creator"):
+    if not state.get("founder"):
         _fail(
             "setup",
-            f"enter_setup did not record founder on {backend_id}",
+            f"setup_step install did not record founder on {backend_id}",
         )
     return state
 
@@ -1414,38 +1382,30 @@ def _canister_id_from_inventory(name: str, network: str) -> str:
         return ""
 
 
+def _live_file_registry_id(network: str) -> str:
+    return _canister_id_from_inventory(
+        "file_registry", network
+    ) or _file_registry_id_or_empty(network)
+
+
 def apply_bootstrap_canister_config(
     backend_id: str,
     frontend_id: str,
     network: str,
     identity: str,
     *,
-    founder: str = "",
     gaas: Optional["GaasConfig"] = None,
 ) -> None:
-    """Write live file_registry / frontend IDs. Installer often cannot (no realm.admin)."""
-    file_registry = _canister_id_from_inventory(
-        "file_registry", network
-    ) or _file_registry_id_or_empty(network)
+    """Write live file_registry / frontend IDs (setup_step infrastructure) when no installer did."""
+    file_registry = _live_file_registry_id(network)
     marketplace = _canister_id_from_inventory("marketplace_backend", network)
-    payload: Dict[str, Any] = {}
+    payload: Dict[str, Any] = {"step": "infrastructure"}
     if frontend_id:
         payload["frontend_canister_id"] = frontend_id
     if file_registry:
         payload["file_registry_canister_id"] = file_registry
     if marketplace:
         payload["marketplace_canister_id"] = marketplace
-    if gaas is not None:
-        if gaas.registry_id:
-            payload["realm_registry_canister_id"] = gaas.registry_id
-        if gaas.can_test_mode is not None:
-            payload["can_test_mode"] = bool(gaas.can_test_mode)
-        if gaas.test_flags:
-            payload["test_flags"] = dict(gaas.test_flags)
-        if gaas.portal_host:
-            payload["portal_origin"] = gaas.portal_host
-    if founder:
-        payload["creator_principal"] = founder
     if not payload.get("file_registry_canister_id"):
         _fail(
             "setup",
@@ -1453,17 +1413,18 @@ def apply_bootstrap_canister_config(
             "canister_ids.json / installer bootstrap)",
         )
     console.print(
-        f"  set_canister_config_json file_registry={payload['file_registry_canister_id']}"
+        f"  setup_step infrastructure file_registry={payload['file_registry_canister_id']}"
     )
-    _setup_json_call(
-        backend_id,
-        "set_canister_config_json",
-        payload,
-        network,
-        identity,
-        timeout=180,
-        stage="setup",
-    )
+    _realm_op(backend_id, "setup_step", payload, network, identity, timeout=180)
+    if gaas is not None and gaas.test_flags:
+        _realm_op(
+            backend_id,
+            "setup_step",
+            {"step": "realm", "test_flags": dict(gaas.test_flags)},
+            network,
+            identity,
+            timeout=180,
+        )
     if gaas is not None and gaas.can_test_mode:
         _disable_marketplace_approval_gate(backend_id, network, identity)
 
@@ -1473,78 +1434,13 @@ def _disable_marketplace_approval_gate(
 ) -> None:
     """GOS file_registry has no ``get_namespace_approval_icc``; setup cannot install."""
     console.print("  require_marketplace_approval=false (registry has no approval API)")
-    raw = _setup_json_call(
+    _realm_op(
         backend_id,
-        "update_realm_config",
-        {"require_marketplace_approval": False},
+        "setup_step",
+        {"step": "trust_policy", "require_marketplace_approval": False},
         network,
         identity,
         timeout=180,
-        stage="setup",
-    )
-    if raw.get("success") is False:
-        _fail(
-            "setup",
-            raw.get("error") or "update_realm_config require_marketplace_approval failed",
-        )
-
-
-def _setup_json_call(
-    backend_id: str,
-    method: str,
-    payload: Any,
-    network: str,
-    identity: str,
-    *,
-    query: bool = False,
-    timeout: int = 300,
-    stage: str = "setup",
-) -> Dict[str, Any]:
-    if payload is None:
-        arg = "()"
-    elif isinstance(payload, str) and payload == "()":
-        arg = "()"
-    else:
-        arg = _candid_text_arg(json.dumps(payload))
-    raw = _canister_call(
-        backend_id, method, arg, network, identity, query=query, timeout=timeout
-    )
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            _fail(stage, f"{method} returned non-JSON: {raw[:300]}")
-    if not isinstance(raw, dict):
-        _fail(stage, f"{method} returned unexpected payload: {raw!r}")
-    if raw.get("success") is False:
-        _fail(stage, raw.get("error") or f"{method} failed")
-    return raw
-
-
-_CO_ADMIN_SHELL = """
-from api.user import user_register
-from core.membership import add_department_member, user_in_department
-from core.org_policy import ensure_root_org, grant_root_authority_over_local_orgs
-from ggg import User
-p = {principal!r}
-user_register(p, "admin")
-root = ensure_root_org()
-grant_root_authority_over_local_orgs()
-u = User[p]
-if u and not user_in_department(u, root):
-    add_department_member(root, u)
-print("ok")
-"""
-
-
-def _co_admin_method_missing(err: str) -> bool:
-    lower = (err or "").lower()
-    return "register_co_admin" in lower and (
-        "no update method" in lower
-        or "has no method" in lower
-        or "not found" in lower
-        or "unknown method" in lower
-        or "ic0536" in lower
     )
 
 
@@ -1566,55 +1462,21 @@ def register_admin_principal(
     network: str,
     identity: str,
 ) -> None:
-    """Give ``principal`` an admin profile in the root org. Idempotent.
-
-    Prefers ``register_co_admin``. If this realm WASM does not have that
-    method yet, falls back to founder ``__shell__`` using existing APIs.
-    """
+    """Give ``principal`` the admin profile (user_add, then role_assign). Idempotent."""
     principal = (principal or "").strip()
     if not principal:
         return
-    console.print(f"  register_co_admin {principal}")
-    try:
-        raw = _canister_call(
-            backend_id,
-            "register_co_admin",
-            f'("{principal}")',
-            network,
-            identity,
-            timeout=180,
-        )
-    except RuntimeError as exc:
-        err = str(exc)
-        if not _co_admin_method_missing(err):
-            _fail("co-admin", err)
-        console.print(
-            "  register_co_admin not on this WASM — falling back to __shell__"
-        )
-        code = _CO_ADMIN_SHELL.format(principal=principal)
-        raw = _canister_call(
-            backend_id,
-            "__shell__",
-            _candid_text_arg(code),
-            network,
-            identity,
-            timeout=180,
-        )
-        text = raw if isinstance(raw, str) else json.dumps(raw)
-        if "ok" not in text.lower() and "success" not in text.lower():
-            _fail("co-admin", f"__shell__ co-admin failed: {text[:400]}")
-        console.print(f"  co-admin {principal} (admin profile + root org, via __shell__)")
-        return
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            _fail("co-admin", f"register_co_admin returned non-JSON: {raw[:300]}")
-    if not isinstance(raw, dict):
-        _fail("co-admin", f"register_co_admin unexpected payload: {raw!r}")
-    if raw.get("success") is False:
-        _fail("co-admin", raw.get("error") or "register_co_admin failed")
-    console.print(f"  co-admin {principal} (admin profile + root org)")
+    console.print(f"  user_add + role_assign admin {principal}")
+    for name, args, done in (
+        ("user_add", {"user": principal}, "is already a user"),
+        ("role_assign", {"user": principal, "profile": "admin"}, "already has admin"),
+    ):
+        reply = call_op(backend_id, name, args, network=network, identity=identity, timeout=180)
+        if not reply.get("ok") and done not in str(reply.get("error")):
+            _fail("co-admin", reply.get("error") or f"{name} failed")
+        if reply.get("requires_vote"):
+            console.print(f"  {name} needs a vote: filed as proposal {reply['proposal']}")
+    console.print(f"  co-admin {principal} (admin profile)")
 
 
 def test_identity_creator_principal() -> str:
@@ -1701,32 +1563,46 @@ def _local_manifest_dependencies(package: str) -> List[str]:
 def _list_runtime_extension_ids(
     backend_id: str, network: str, identity: str
 ) -> set[str]:
+    ids: set[str] = set()
+    cursor = 1
     try:
-        raw = _canister_call(
-            backend_id,
-            "list_runtime_extensions",
-            "()",
-            network,
-            identity,
-            query=True,
-            timeout=60,
-        )
+        while cursor:
+            reply = call_op(
+                backend_id,
+                "extension_list",
+                {"from": cursor, "count": 500},
+                network=network,
+                identity=identity,
+                read=True,
+                timeout=60,
+            )
+            if not reply.get("ok"):
+                return ids
+            ids |= {e["id"] for e in reply["extensions"]}
+            cursor = reply["next"]
     except Exception:
         return set()
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            return set()
-    if not isinstance(raw, dict):
-        return set()
-    ids = raw.get("runtime_extensions") or raw.get("extensions") or []
-    return {str(x).strip() for x in ids if str(x).strip()}
+    return ids
 
 
-def _already_installed(err: str) -> bool:
-    low = (err or "").lower()
-    return "already" in low and ("install" in low or "exist" in low)
+def _latest_version(package: str, network: str, identity: str) -> str:
+    """The newest version of extension or codex ``package`` in the file registry."""
+    registry_id = _live_file_registry_id(network)
+    if not registry_id:
+        _fail("setup", f"cannot resolve the latest {package}: no file_registry id")
+    raw = _canister_call(
+        registry_id,
+        "latest_version",
+        _candid_text_arg(json.dumps({"category": "ext", "item_id": package})),
+        network,
+        identity,
+        query=True,
+        timeout=60,
+    )
+    info = raw if isinstance(raw, dict) else {}
+    if not info.get("latest"):
+        _fail("setup", f"{package}: {info.get('error') or 'no version in the file registry'}")
+    return str(info["latest"])
 
 
 def preinstall_codex_dependencies(
@@ -1735,7 +1611,7 @@ def preinstall_codex_dependencies(
     network: str,
     identity: str,
 ) -> None:
-    """Install extension deps one-by-one so setup_install_codex stays under the ingress window."""
+    """Install extension deps one-by-one before codex_install."""
     deps = _local_manifest_dependencies(package)
     for chrome in WIZARD_CHROME_EXTENSIONS:
         if chrome not in deps:
@@ -1749,34 +1625,17 @@ def preinstall_codex_dependencies(
         console.print(f"  already installed: {skipped} of {len(deps)}")
     if not pending:
         return
-    registry_id = _canister_id_from_inventory(
-        "file_registry", network
-    ) or _file_registry_id_or_empty(network)
-    if not registry_id:
-        _fail("setup", "cannot preinstall codex dependencies: no file_registry id")
     console.print(f"  preinstall {len(pending)} remaining packages for {package}")
     for ext_id in pending:
-        payload = {
-            "registry_canister_id": registry_id,
-            "ext_id": ext_id,
-            "version": "latest",
-        }
-        console.print(f"  install_extension_from_registry {ext_id}")
-        try:
-            _setup_json_call(
-                backend_id,
-                "install_extension_from_registry",
-                payload,
-                network,
-                identity,
-                timeout=300,
-                stage="setup",
-            )
-        except StageError as exc:
-            if _already_installed(exc.message):
-                console.print(f"  {ext_id} already installed")
-                continue
-            raise
+        version = _latest_version(ext_id, network, identity)
+        console.print(f"  extension_install {ext_id} {version}")
+        _realm_op(
+            backend_id,
+            "extension_install",
+            {"extension": ext_id, "version": version},
+            network,
+            identity,
+        )
 
 
 def catalog_token_symbol(symbol: str, catalog: SharedTokenCatalog) -> Optional[str]:
@@ -1820,7 +1679,7 @@ def catalog_token_draft(symbol: str, catalog: SharedTokenCatalog) -> Optional[Di
 
 
 def _token_draft(token: Any, catalog: SharedTokenCatalog) -> Optional[Dict[str, Any]]:
-    """Normalize spec.token for setup_save_draft, resolving catalog symbols."""
+    """Normalize spec.token for setup_step tokens, resolving catalog symbols."""
     if not isinstance(token, dict):
         return None
     canister = str(token.get("canister") or token.get("token_canister_id") or "").strip()
@@ -1839,88 +1698,47 @@ def _token_draft(token: Any, catalog: SharedTokenCatalog) -> Optional[Dict[str, 
 
 def _fetch_setup_state(backend_id: str, network: str, identity: str) -> Dict[str, Any]:
     try:
-        state = _canister_call(
-            backend_id,
-            "get_setup_state",
-            "()",
-            network,
-            identity,
-            query=True,
-            timeout=60,
-        )
-        if isinstance(state, str):
-            state = json.loads(state)
-        return state if isinstance(state, dict) else {}
+        return get_setup_state(backend_id, network, identity)
     except Exception:
         return {}
 
 
 def fetch_shared_token_catalog(backend_id: str, network: str, identity: str) -> SharedTokenCatalog:
-    """The realm's shared-ledger catalog (get_setup_state().shared_tokens)."""
-    catalog = _fetch_setup_state(backend_id, network, identity).get("shared_tokens")
+    """The realm's shared-ledger catalog (setup_state().realm.shared_tokens_json)."""
+    realm = _fetch_setup_state(backend_id, network, identity).get("realm") or {}
+    catalog = realm.get("shared_tokens_json")
     return catalog if isinstance(catalog, dict) else {}
 
 
 def _setup_state_has_token(backend_id: str, network: str, identity: str) -> bool:
-    try:
-        state = _fetch_setup_state(backend_id, network, identity)
-        token = state.get("token")
-        if isinstance(token, dict) and (
-            token.get("token_canister_id")
-            or token.get("symbol")
-            or token.get("ledger")
-        ):
-            return True
-    except Exception:
-        return False
-    return False
+    realm = _fetch_setup_state(backend_id, network, identity).get("realm") or {}
+    return bool(realm.get("token_canister_id"))
 
 
-def call_setup_install_codex(
+def call_codex_install(
     backend_id: str,
     package: str,
     version: Optional[str],
     network: str,
     identity: str,
 ) -> Dict[str, Any]:
-    """Drive the resumable Codex job until ``complete`` / already installed."""
-    install_args: Dict[str, Any] = {"package": package}
-    if version:
-        install_args["version"] = version
-    console.print(f"  setup_install_codex {package}")
-    start = time.time()
-    last = ""
-    while time.time() - start < CODEX_INSTALL_TIMEOUT_S:
-        raw = _setup_json_call(
+    """Install and activate the codex (``latest`` resolved in the file registry); already active is fine."""
+    version = version if version and version != "latest" else _latest_version(package, network, identity)
+    console.print(f"  codex_install {package} {version}")
+    try:
+        reply = call_op(
             backend_id,
-            "setup_install_codex",
-            install_args,
-            network,
-            identity,
+            "codex_install",
+            {"codex": package, "version": version},
+            network=network,
+            identity=identity,
             timeout=600,
         )
-        status = str(raw.get("status") or "")
-        phase = str(raw.get("phase") or raw.get("step") or "")
-        label = f"{status} {phase}".strip() or (
-            "skipped" if raw.get("skipped") else "ok"
-        )
-        if label != last:
-            console.print(f"  setup_install_codex: {label}")
-            last = label
-        if raw.get("skipped") or raw.get("setup_codex"):
-            return raw
-        if status in ("", "complete", "completed"):
-            return raw
-        if status == "in_progress":
-            time.sleep(POLL_INTERVAL_S)
-            continue
-        return raw
-    _fail(
-        "setup",
-        f"Timed out waiting for setup_install_codex ({package}) after "
-        f"{CODEX_INSTALL_TIMEOUT_S}s",
-    )
-    return {}
+    except typer.Exit:
+        _fail("setup", f"codex_install: the call to {backend_id} failed")
+    if not reply.get("ok") and "is already active" not in str(reply.get("error")):
+        _fail("setup", reply.get("error") or "codex_install failed")
+    return reply
 
 
 def run_setup_stage(
@@ -1954,45 +1772,31 @@ def run_setup_stage(
             f"  no token in spec: defaulting to {default_symbol} "
             f"({token_draft['token_canister_id']}), as the setup wizard does"
         )
-    draft: Dict[str, Any] = {
-        "codex": {
-            "package": merged["codex"]["package"],
-        }
-    }
-    if merged["codex"].get("version"):
-        draft["codex"]["version"] = merged["codex"]["version"]
-    identity_block: Dict[str, str] = {}
+    realm_step: Dict[str, Any] = {"step": "realm", "name": merged["name"]}
     if branding.get("manifesto"):
-        identity_block["manifesto"] = branding["manifesto"]
+        realm_step["manifesto"] = branding["manifesto"]
     if branding.get("welcome_message"):
-        identity_block["welcome_message"] = branding["welcome_message"]
-    if identity_block:
-        draft["identity"] = identity_block
-    if token_draft:
-        draft["token"] = token_draft
+        realm_step["welcome_message"] = branding["welcome_message"]
 
-    console.print("  setup_save_draft (codex / identity)")
-    _setup_json_call(backend_id, "setup_save_draft", draft, network, identity)
+    console.print("  setup_step realm (name / identity)")
+    _realm_op(backend_id, "setup_step", realm_step, network, identity)
 
     package = str(merged["codex"]["package"])
     version = merged["codex"].get("version")
     preinstall_codex_dependencies(backend_id, package, network, identity)
-    call_setup_install_codex(backend_id, package, version, network, identity)
+    call_codex_install(backend_id, package, version, network, identity)
 
     if token_draft and token_draft.get("token_canister_id"):
-        console.print(f"  setup_configure_token {token_draft['token_canister_id']}")
-        token_args: Dict[str, Any] = {
-            "token_canister_id": token_draft["token_canister_id"]
+        console.print(f"  setup_step tokens {token_draft['token_canister_id']}")
+        tokens: Dict[str, Any] = {
+            "step": "tokens",
+            "token_canister_id": token_draft["token_canister_id"],
         }
         if token_draft.get("symbol"):
-            token_args["symbol"] = token_draft["symbol"]
+            tokens["accounting_currency"] = token_draft["symbol"]
         if token_draft.get("decimals") is not None:
-            token_args["decimals"] = token_draft["decimals"]
-        if token_draft.get("indexer_canister_id"):
-            token_args["indexer_canister_id"] = token_draft["indexer_canister_id"]
-        _setup_json_call(
-            backend_id, "setup_configure_token", token_args, network, identity, timeout=300
-        )
+            tokens["accounting_currency_decimals"] = token_draft["decimals"]
+        _realm_op(backend_id, "setup_step", tokens, network, identity)
     elif token_draft:
         _fail(
             "setup",
@@ -2002,102 +1806,32 @@ def run_setup_stage(
     else:
         console.print("  treasury token already configured; leaving it as is")
 
-    # setup_save_draft is what the wizard uses (saveSetupDraft in
-    # src/realm_frontend/src/lib/setup/api.ts): it puts the images in the draft
-    # asset store, which is where setup_launch's upload phase reads them from
-    # before writing /custom/logo.png. setup_set_branding stores them under a
-    # different key that the launch phase never looks at.
-    #
-    # One call per asset: a data URL may be up to 1.5 MiB, and two of them plus
-    # envelope would exceed the ~2 MiB ingress limit. The backend merges draft
-    # partials, so splitting is equivalent.
-    branding_parts: List[Dict[str, Any]] = []
-    if branding.get("logo"):
-        branding_parts.append({"logo_data_url": file_to_data_url(branding["logo"])})
-    if branding.get("background"):
-        branding_parts.append(
-            {"background_data_url": file_to_data_url(branding["background"])}
+    images = [key for key in ("logo", "background") if branding.get(key)]
+    if images:
+        console.print(
+            f"  [yellow]{' / '.join(images)} not supported by this realm version "
+            "(it takes image URLs, not files): skipped[/yellow]"
         )
     if branding.get("primary"):
-        branding_parts.append({"colors": {"primary": branding["primary"]}})
-    for part in branding_parts:
-        console.print(f"  setup_save_draft (branding: {', '.join(part)})")
-        _setup_json_call(
+        console.print("  setup_step branding (primary_color)")
+        _realm_op(
             backend_id,
-            "setup_save_draft",
-            {"branding": part},
+            "setup_step",
+            {"step": "branding", "primary_color": branding["primary"]},
             network,
             identity,
-            timeout=300,
         )
 
     console.print("  setup_launch")
-    _setup_json_call(backend_id, "setup_launch", None, network, identity, timeout=300)
-    poll_setup_launch(backend_id, network, identity)
-
-
-def poll_setup_launch(backend_id: str, network: str, identity: str) -> None:
-    start = time.time()
-    last = ""
-    while time.time() - start < LAUNCH_POLL_TIMEOUT_S:
-        raw = _canister_call(
-            backend_id,
-            "get_setup_launch_status",
-            "()",
-            network,
-            identity,
-            query=True,
-            timeout=60,
-        )
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except json.JSONDecodeError:
-                raw = {}
-        launch = (raw or {}).get("launch") if isinstance(raw, dict) else {}
-        if not isinstance(launch, dict):
-            launch = {}
-        status = str(launch.get("status") or "unknown")
-        phase = launch.get("phase") or ""
-        label = f"{status} {phase}".strip()
-        if label != last:
-            console.print(f"  launch: {label}")
-            last = label
-        if status == "completed":
-            return
-        if status == "failed":
-            _fail("setup", launch.get("error") or "setup_launch failed")
-        time.sleep(POLL_INTERVAL_S)
-    _fail("setup", f"Timed out waiting for setup_launch to complete ({backend_id})")
+    _realm_op(backend_id, "setup_launch", None, network, identity)
 
 
 def setup_already_complete(backend_id: str, network: str, identity: str) -> bool:
     try:
-        raw = _canister_call(
-            backend_id,
-            "get_setup_launch_status",
-            "()",
-            network,
-            identity,
-            query=True,
-            timeout=60,
-        )
-        if isinstance(raw, str):
-            raw = json.loads(raw)
-        launch = (raw or {}).get("launch") if isinstance(raw, dict) else {}
-        if isinstance(launch, dict) and launch.get("status") == "completed":
-            return True
-        state = _canister_call(
-            backend_id, "get_setup_state", "()", network, identity, query=True, timeout=60
-        )
-        if isinstance(state, dict) and state.get("setup_completed_at"):
-            return True
-        status = str((state or {}).get("status") or "") if isinstance(state, dict) else ""
-        if status and status not in ("setup", "unknown"):
-            return True
+        reply = call_op(backend_id, "status", network=network, identity=identity, read=True, timeout=60)
     except Exception:
         return False
-    return False
+    return reply.get("status") not in (None, "", "setup")
 
 
 def apply_runtime_config(
@@ -2107,15 +1841,12 @@ def apply_runtime_config(
     identity: str,
 ) -> None:
     config = merged.get("config")
-    open_reg = bool(merged.get("open_registration"))
     realm_cfg: Dict[str, Any] = {}
-    if open_reg:
+    if merged.get("open_registration"):
         realm_cfg["open_registration"] = True
     if realm_cfg:
-        console.print("  update_realm_config (open_registration)")
-        _setup_json_call(
-            backend_id, "update_realm_config", realm_cfg, network, identity, stage="config"
-        )
+        console.print("  realm_configure (open_registration)")
+        _realm_op(backend_id, "realm_configure", realm_cfg, network, identity, stage="config")
 
     if not isinstance(config, dict) or not config:
         return
@@ -2125,40 +1856,24 @@ def apply_runtime_config(
     if auto_scale is None and quarter_capacity is None:
         return
 
-    auto_lit = "True" if (True if auto_scale is None else bool(auto_scale)) else "False"
-    cap_stmt = ""
-    if quarter_capacity is not None:
-        cap_stmt = (
-            "md.setdefault('scaling', {})\n"
-            f"md['scaling']['quarter_capacity'] = {int(quarter_capacity)}\n"
-            "realm.manifest_data = json.dumps(md)\n"
-        )
-    code = (
-        "import json\n"
-        "from ggg import Realm\n"
-        "realm = Realm.load('1')\n"
-        "md = json.loads(getattr(realm, 'manifest_data', '') or '{}')\n"
-        "if not isinstance(md, dict):\n"
-        "    md = {}\n"
-        f"{cap_stmt}"
-        f"realm.auto_scale_enabled = {auto_lit}\n"
-        "print('ok')\n"
+    console.print("  apply config (scaling / auto_scale_enabled)")
+    _realm_op(
+        backend_id,
+        "realm_configure",
+        {"auto_scale_enabled": True if auto_scale is None else bool(auto_scale)},
+        network,
+        identity,
+        stage="config",
     )
-    console.print("  apply config (scaling / auto_scale_enabled) via __shell__")
-    try:
-        raw = _canister_call(
+    if quarter_capacity is not None:
+        _realm_op(
             backend_id,
-            "__shell__",
-            _candid_text_arg(code),
+            "quarter_configure",
+            {"capacity": int(quarter_capacity)},
             network,
             identity,
-            timeout=120,
+            stage="config",
         )
-        text = raw if isinstance(raw, str) else json.dumps(raw)
-        if "ok" not in str(text).lower() and isinstance(raw, dict) and raw.get("success") is False:
-            _fail("config", raw.get("error") or str(raw))
-    except Exception as exc:
-        _fail("config", f"Failed to apply config as founder: {exc}")
 
 
 def import_data_overlay(
@@ -2262,26 +1977,13 @@ def join_geister_members(
             f"(`geister mode local`). {GEISTER_INSTALL_HINT}",
         )
 
-    invite_codes = [invite_code_to_checksum(c) for c in (merged.get("invite_codes") or [])]
+    invite_codes = merged.get("invite_codes") or []
     created: List[Dict[str, str]] = []
     for i in range(count):
         agent_name = geister_agent_name(start + i)
-        checksum = ""
-        if invite_codes:
-            checksum = invite_codes[i % len(invite_codes)]
-        arg = f'("member", "", "{checksum}")'
-        console.print(f"  join_realm as {agent_name}")
-        try:
-            _canister_call(
-                backend_id,
-                "join_realm",
-                arg,
-                network,
-                agent_name,
-                timeout=120,
-            )
-        except Exception as exc:
-            _fail("members", f"join_realm failed for {agent_name}: {exc}")
+        args = {"code": invite_codes[i % len(invite_codes)]} if invite_codes else {}
+        console.print(f"  realm_join as {agent_name}")
+        _realm_op(backend_id, "realm_join", args, network, agent_name, timeout=120, stage="members")
         principal = ""
         try:
             principal = resolve_identity_principal(agent_name)
@@ -2525,20 +2227,23 @@ def _file_registry_id_or_empty(network: str) -> str:
         return ""
 
 
-def call_enter_setup(
+def call_setup_install(
     backend_id: str,
     founder: str,
-    registry_id: str,
     environment: str,
     network: str,
     identity: str,
 ) -> None:
-    arg = f'(principal "{founder}", "{registry_id}", "{environment}")'
-    console.print(f"  enter_setup {backend_id}")
-    try:
-        _canister_call(backend_id, "enter_setup", arg, network, identity, timeout=180)
-    except Exception as exc:
-        raise StageError("deploy", f"enter_setup failed: {exc}") from exc
+    console.print(f"  setup_step install {backend_id}")
+    _realm_op(
+        backend_id,
+        "setup_step",
+        {"step": "install", "network": environment, "founder": founder},
+        network,
+        identity,
+        timeout=180,
+        stage="deploy",
+    )
 
 
 def deploy_standalone_realm(
@@ -2831,10 +2536,9 @@ def new_command(
                     slug=merged["slug"],
                 )
                 portal = f"https://{frontend_id}.icp0.io/"
-                ensure_founder_enter_setup(
+                ensure_founder_installed(
                     backend_id,
                     founder,
-                    _file_registry_id_or_empty(network),
                     network,
                     network,
                     identity,
@@ -2845,7 +2549,6 @@ def new_command(
                     frontend_id,
                     network,
                     identity,
-                    founder=founder,
                 )
                 console.print(f"  portal {portal}")
             elif run_ids & POST_DEPLOY_STAGES:

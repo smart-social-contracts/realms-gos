@@ -1,3 +1,5 @@
+import type { SharedTokenOption } from './sharedTokens';
+
 export type SetupLifecycleStatus = 'setup' | 'alpha' | string;
 
 export type SetupDraftStep = 'welcome' | 'codex' | 'token' | 'branding' | 'languages' | 'review';
@@ -13,6 +15,11 @@ export interface SetupIdentity {
 	welcome_message?: string;
 	languages?: string[];
 	primary_language?: string;
+}
+
+export interface SetupGovernance {
+	/** Seconds new realm-wide proposals stay open; 0 keeps them open until their outcome is certain. */
+	voting_window?: number;
 }
 
 export interface SetupLanguages {
@@ -47,6 +54,7 @@ export interface SetupDraft {
 	branding?: SetupDraftBranding | null;
 	identity?: SetupIdentity | null;
 	languages?: SetupLanguages | null;
+	governance?: SetupGovernance | null;
 }
 
 export type SetupLaunchStatus = 'idle' | 'running' | 'failed' | 'completed';
@@ -81,18 +89,8 @@ export interface SetupState {
 	realm_manifesto?: string;
 	realm_welcome_message?: string;
 	realm_token_canister_id?: string | null;
-	/** Logical GaaS environment (`staging`, `production`, …), not the IC network. */
-	gos_environment?: string | null;
-	/** Product orchestra ids the realm pinned after discovering them through Casals. */
-	fleet?: SetupFleet | null;
-	/** {symbol: {ledger, indexer, decimals}} — the shared ledgers this realm may adopt (from casals.json via the installer). */
-	shared_tokens?: Record<string, { ledger: string; indexer?: string; decimals?: number; name?: string }>;
-}
-
-export interface SetupFleet {
-	conductor?: string;
-	file_registry?: string;
-	token_ledger?: string;
+	/** The tokens the realm offers as its treasury token (``token_catalog``). */
+	token_catalog?: SharedTokenOption[];
 }
 
 export interface AvailableCodex {

@@ -1,79 +1,33 @@
 <script>
   import { onMount } from 'svelte';
-  import { backend } from '$lib/canisters';
+  import { read, must } from '$lib/realm';
 
   let packages = [];
   let loading = true;
   let error = null;
-  let busy = false;
-
-  function parseResult(raw) {
-    if (raw == null) return null;
-    if (typeof raw === 'string') {
-      try {
-        return JSON.parse(raw);
-      } catch (e) {
-        return { success: false, error: raw };
-      }
-    }
-    return raw;
-  }
 
   async function loadPackages() {
     loading = true;
     error = null;
     try {
-      const raw = await backend.list_packages();
-      const data = parseResult(raw);
-      if (!data || data.success === false) {
-        error = (data && data.error) || 'Could not load packages';
-        packages = [];
-      } else {
-        packages = data.packages || [];
+      const rows = [];
+      let from = 1;
+      while (from) {
+        const page = await must(read('extension_list', { from, count: 100 }));
+        rows.push(...page.extensions.map((e) => ({ id: e.id, kind: 'extension', version: e.version, status: e.status })));
+        from = page.next;
       }
+      const { codex } = await must(read('codex_status', { count: 1 }));
+      if (codex) {
+        rows.unshift({ id: codex.id.split('@')[0], kind: 'codex', version: codex.version, status: codex.status });
+      }
+      packages = rows;
     } catch (e) {
       error = e?.message || String(e);
       packages = [];
     } finally {
       loading = false;
     }
-  }
-
-  async function runAction(method, payload) {
-    if (busy) return;
-    busy = true;
-    error = null;
-    try {
-      const raw = await backend[method](JSON.stringify(payload));
-      const data = parseResult(raw);
-      if (!data || data.success === false) {
-        error = (data && data.error) || `${method} failed`;
-      }
-      await loadPackages();
-    } catch (e) {
-      error = e?.message || String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  function lockRow(row) {
-    return runAction('lock_package', { id: row.id });
-  }
-
-  function unlockRow(row) {
-    return runAction('unlock_package', { id: row.id });
-  }
-
-  function transferRow(row) {
-    const owner = window.prompt(
-      `Transfer '${row.id}' to principal or department:`,
-      row.owner || ''
-    );
-    if (owner == null) return;
-    const trimmed = String(owner).trim();
-    if (!trimmed) return;
-    return runAction('transfer_package', { id: row.id, owner: trimmed });
   }
 
   onMount(loadPackages);
@@ -84,15 +38,14 @@
     <div>
       <h3 class="text-xl font-bold text-gray-900 mb-1">Package Manager</h3>
       <p class="text-sm text-gray-600 max-w-2xl">
-        Installed Codex and extensions. Re-install replaces leftover stems.
-        Locked packages can only be replaced by the owner (or root / Congress /
-        <code class="text-xs">codex.revert</code>).
+        Installed Codex and extensions. Locking and transferring packages is not supported by
+        this realm version.
       </p>
     </div>
     <button
       class="text-sm text-gray-700 underline disabled:opacity-50"
       on:click={loadPackages}
-      disabled={busy}
+      disabled={loading}
     >
       Refresh
     </button>
@@ -109,9 +62,7 @@
           <tr>
             <th class="px-3 py-2 font-medium">id</th>
             <th class="px-3 py-2 font-medium">version</th>
-            <th class="px-3 py-2 font-medium">owner</th>
-            <th class="px-3 py-2 font-medium">lock</th>
-            <th class="px-3 py-2 font-medium">actions</th>
+            <th class="px-3 py-2 font-medium">status</th>
           </tr>
         </thead>
         <tbody>
@@ -124,36 +75,7 @@
                 {/if}
               </td>
               <td class="px-3 py-2 text-gray-800">{row.version || '—'}</td>
-              <td class="px-3 py-2 text-gray-800 break-all">{row.owner || '—'}</td>
-              <td class="px-3 py-2">{row.locked ? 'locked' : 'unlocked'}</td>
-              <td class="px-3 py-2">
-                <div class="flex flex-wrap gap-2">
-                  {#if row.locked}
-                    <button
-                      class="text-xs underline disabled:opacity-50"
-                      on:click={() => unlockRow(row)}
-                      disabled={busy}
-                    >
-                      Unlock
-                    </button>
-                  {:else}
-                    <button
-                      class="text-xs underline disabled:opacity-50"
-                      on:click={() => lockRow(row)}
-                      disabled={busy}
-                    >
-                      Lock
-                    </button>
-                  {/if}
-                  <button
-                    class="text-xs underline disabled:opacity-50"
-                    on:click={() => transferRow(row)}
-                    disabled={busy}
-                  >
-                    Transfer
-                  </button>
-                </div>
-              </td>
+              <td class="px-3 py-2 text-gray-800">{row.status || '—'}</td>
             </tr>
           {/each}
         </tbody>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { isAuthenticated } from '$lib/stores/auth';
 	import { hasJoined } from '$lib/stores/profiles';
@@ -20,6 +21,8 @@
 			}
 		}
 		const search = typeof window !== 'undefined' ? window.location.search : '';
+		// The user may have opened another page while sign-in was restoring.
+		if (get(page).url.pathname !== '/') return;
 		if (get(isAuthenticated) && hasJoined()) {
 			const config = get(sidebarConfig);
 			goto(hrefWithPreservedTestIdentityParams(search, config?.defaultPath || '/extensions/public_dashboard'));

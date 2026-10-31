@@ -24,7 +24,7 @@ import {
 	urlTokenToStep
 } from './wizardLogic';
 import type { SetupState } from './types';
-import { sharedTokenOptions, tokenDraftFromChoice } from './sharedTokens';
+import { catalogTokenOptions, tokenDraftFromChoice } from './sharedTokens';
 
 const installedState: SetupState = {
 	status: 'setup',
@@ -347,7 +347,7 @@ describe('wizardLogic', () => {
 
 		const catalogState: SetupState = {
 			...freshState,
-			shared_tokens: { ckEURC: { ledger: 'eeeee-ee', decimals: 6 } }
+			token_catalog: catalogTokenOptions([{ symbol: 'ckEURC', ledger: 'eeeee-ee', decimals: 6 }])
 		};
 
 		it('Launch / Token Continue founder payload writes the draft ledger', () => {
@@ -373,7 +373,7 @@ describe('wizardLogic', () => {
 		});
 
 		it('maps a catalog ckEURC choice to the ledger configure_token reads', () => {
-			const options = sharedTokenOptions(catalogState.shared_tokens);
+			const options = catalogState.token_catalog ?? [];
 			const token = tokenDraftFromChoice('ckEURC', { symbol: '', token_canister_id: '' }, options);
 			expect(token).toEqual({ symbol: 'ckEURC', token_canister_id: 'eeeee-ee', decimals: 6 });
 			expect(

@@ -1,5 +1,6 @@
-import { writable, derived, get } from 'svelte/store';
-import { backendStore, backendActorReady } from '$lib/canisters';
+import { writable, derived } from 'svelte/store';
+import { backendActorReady } from '$lib/canisters';
+import { read } from '$lib/realm';
 
 const STATUS_QUERY_TIMEOUT_MS = 12_000;
 
@@ -43,6 +44,27 @@ export interface QuarterInfo {
 	status: string;
 }
 
+/**
+ * The federation as ``read('quarter_directory')`` reports it. Its first row is this canister; the
+ * list is empty for a realm on its own.
+ */
+export function quarterFederation(reply: Record<string, any>) {
+	const rows: Record<string, any>[] = reply.quarters;
+	const isQuarter = rows[0].id !== reply.capital;
+	return {
+		quarters: (rows.length > 1 ? rows : []).map((q) => ({
+			name: q.name,
+			canister_id: q.id,
+			population: q.population,
+			status: q.status,
+			index: q.index,
+			is_capital: q.capital
+		})),
+		isQuarter,
+		parentRealmCanisterId: isQuarter ? reply.capital : ''
+	};
+}
+
 export interface QuartersState {
 	quarters: QuarterInfo[];
 	isQuarter: boolean;
@@ -71,30 +93,21 @@ const createQuartersStore = () => {
 			// Await the provisional actor, not backendReady — see realmInfo.ts
 			// (backendReady includes auth init, which awaits these fetches).
 			await backendActorReady;
-			const currentActor = get(backendStore);
-				if (!currentActor) {
-					throw new Error('Actor not initialized');
-				}
-
-				const response = await withQueryTimeout(
-					currentActor.status(),
+				const reply = await withQueryTimeout(
+					read('quarter_directory'),
 					STATUS_QUERY_TIMEOUT_MS,
-					'status'
+					'quarter_directory'
 				);
-
-				if (response?.success && response.data.status) {
-					const status = response.data.status;
-					update((state: QuartersState) => ({
-						...state,
-						quarters: status.quarters || [],
-						isQuarter: status.is_quarter || false,
-						isCapital: status.is_capital || false,
-						parentRealmCanisterId: status.parent_realm_canister_id || '',
-						loading: false
-					}));
-				} else {
+				if (!reply?.ok) {
 					throw new Error('Failed to fetch quarter info');
 				}
+				const federation = quarterFederation(reply);
+				update((state: QuartersState) => ({
+					...state,
+					...federation,
+					isCapital: !federation.isQuarter && federation.quarters.length > 0,
+					loading: false
+				}));
 			} catch (error) {
 				console.error('Error fetching quarters:', error);
 				update((state: QuartersState) => ({

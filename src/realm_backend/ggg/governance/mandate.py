@@ -1,10 +1,15 @@
-from ic_python_db import Entity, String, TimestampedMixin
-from ic_python_logging import get_logger
+from ic_python_db import Integer, ManyToOne, OneToMany, String
 
-logger = get_logger("entity.mandate")
+from core.db import Json, Row
 
 
-class Mandate(Entity, TimestampedMixin):
-    __alias__ = "name"
-    name = String(max_length=256)
-    metadata = String(max_length=256)
+class Mandate(Row):
+    __alias__ = "id"
+    id = String()
+    title = String(default="")
+    scope = Json({})
+    executor = ManyToOne("Department", "mandates")
+    proposal = String(default="")
+    status = String(default="active")  # active | completed | revoked | expired
+    expires_at = Integer(default=0)
+    contracts = OneToMany("Contract", "mandate")

@@ -7,7 +7,7 @@
     Button,
     Badge
   } from 'flowbite-svelte';
-  import { backend } from '$lib/canisters';
+  import { must, read } from '$lib/realm';
 
   let id = $page.params.id;
   let organizationId = $page.url.searchParams.get('org');
@@ -198,14 +198,16 @@
     
     try {
       console.log('Fetching proposal data for ID:', id);
-      const proposal = await backend.get_proposal_data(id);
+      const { proposal: p, tally, eligible } = await must(read('proposal_get', { proposal: id }));
+      const proposal = {
+        ...p,
+        author: p.proposer,
+        deadline: p.deadline * 1000,
+        quorum: p.quorum_percent,
+        tokens_total: eligible,
+        vote_counts: { Yay: tally.yes, Nay: tally.no, Abstain: tally.abstain }
+      };
       console.log('Proposal data:', proposal);
-      
-      if (!proposal) {
-        console.log('No proposal found');
-        error = 'Proposal not found';
-        return;
-      }
       
       // Transform the proposal data with mock enhancements
       proposalData = {

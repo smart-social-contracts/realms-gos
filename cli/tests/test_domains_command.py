@@ -57,6 +57,15 @@ class TestCanisterIds:
         d.resolve_canister_ids(targets, sheet=_sheet(), env="production", export_path=export, conductor="", overrides={})
         assert targets[0].canister_id == "aaaaa-aa"
 
+    def test_sectioned_export_is_read(self, tmp_path, monkeypatch):
+        export = tmp_path / "export.json"
+        export.write_text(json.dumps({"ok": True, "sections": [{"name": "Product", "stands": [
+            {"name": "marketplace", "canisters": [{"name": "marketplace-frontend", "canister_id": "ddddd-dd"}]}]}]}))
+        monkeypatch.setattr(d, "export_from_conductor", lambda *a, **k: pytest.fail("conductor queried"))
+        targets = d.domain_targets(_sheet(), "production")
+        d.resolve_canister_ids(targets, sheet=_sheet(), env="production", export_path=export, conductor="", overrides={})
+        assert targets[0].canister_id == "ddddd-dd"
+
     def test_override_wins_over_everything(self, monkeypatch):
         monkeypatch.setattr(d, "export_from_conductor", lambda *a, **k: pytest.fail("conductor queried"))
         targets = d.domain_targets(_sheet(), "production")

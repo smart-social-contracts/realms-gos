@@ -1,17 +1,16 @@
-"""
-Codex Entity — Realms extension of the Basilisk Toolkit Codex.
+from ic_python_db import Integer, String
 
-Base Codex (name, url, checksum, code property, calls) comes from ic-basilisk-toolkit.
-This module adds realms-specific relationships: courts and federation.
-
-See: https://github.com/smart-social-contracts/realms-gos/issues/153
-"""
-
-from ic_python_db import OneToMany, OneToOne
-from ic_basilisk_toolkit.entities import Codex as _BaseCodex
+from core.db import Json, Row
 
 
-class Codex(_BaseCodex):
-    # Realms-specific relationships (not part of Basilisk OS)
-    courts = OneToMany("Court", "codex")
-    federation = OneToOne("Realm", "federation_codex")
+class Codex(Row):
+    __alias__ = "id"
+    id = String()
+    version = String(default="")
+    checksum = String(default="")
+    status = String(default="active", indexed=True)  # active | inactive | reverted
+    manifest = Json({})
+    capabilities = Json([])
+    source = String(default="")
+    installed_at = Integer(default=0)
+    previous = String(default="")

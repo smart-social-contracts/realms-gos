@@ -1,6 +1,9 @@
+import demoNoticeDefaults from './demo_notice_defaults.json';
+
 export type DemoNoticeBodies = Record<string, string>;
 
-export const CUSTOM_TOKEN_CHOICE_ID = 'custom';
+/** The host's Legal English notice, shown when the realm stores no English body of its own. */
+export const DEFAULT_DEMO_NOTICE_EN: string = demoNoticeDefaults.en;
 
 export const NOTICE_LOCALE_SLOTS = [
 	'en',
@@ -24,8 +27,6 @@ export function filledNoticeTranslationCount(
 	const map = bodies && typeof bodies === 'object' ? bodies : {};
 	return noticeTranslationSlots().filter((loc) => String(map[loc] || '').trim()).length;
 }
-
-export const REALMS_TOKEN_ID = 'REALMS';
 
 export function defaultDisableMonetaryTokens(network?: string | null): boolean {
 	const n = (network || '').trim().toLowerCase();
@@ -61,19 +62,9 @@ export function shouldShowJoinNotice(
 	return demoNotice && !skipTerms;
 }
 
-/** The mundus token (REALMS, or RLM in production) is not real money. */
-const NON_MONETARY_TOKEN_IDS = new Set([REALMS_TOKEN_ID, 'RLM']);
-
-export function isMonetaryTokenChoice(choiceId: string): boolean {
-	return !NON_MONETARY_TOKEN_IDS.has((choiceId || '').trim().toUpperCase());
-}
-
-export function isTokenChoiceSelectable(
-	choiceId: string,
-	monetaryDisabled: boolean
-): boolean {
-	if (!monetaryDisabled) return true;
-	return !isMonetaryTokenChoice(choiceId);
+/** A custom ledger is the founder's own choice, so only the catalog's monetary tokens are ever disabled. */
+export function isTokenChoiceSelectable(monetary: boolean, monetaryDisabled: boolean): boolean {
+	return !(monetary && monetaryDisabled);
 }
 
 export function monetaryUnavailableLabel(locale: string): string {
@@ -82,6 +73,17 @@ export function monetaryUnavailableLabel(locale: string): string {
 		return 'No disponible en esta demo';
 	}
 	return 'Not available in this demo';
+}
+
+/** Locale → body: the stored bodies, with English seeded from Legal. Translations are never invented. */
+export function resolveDemoNoticeBodies(stored: unknown): DemoNoticeBodies {
+	const map: DemoNoticeBodies = {};
+	if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+		for (const [loc, body] of Object.entries(stored)) {
+			if (typeof body === 'string') map[loc] = body;
+		}
+	}
+	return { ...map, en: map.en?.trim() ? map.en : DEFAULT_DEMO_NOTICE_EN };
 }
 
 export function resolveDemoNoticeView(
@@ -103,16 +105,4 @@ export function resolveDemoNoticeView(
 		primaryLanguage: primary,
 		showPrimary: Boolean(primaryBody) && primary !== 'en'
 	};
-}
-
-export function catalogChoiceFromLedger(input: {
-	symbol?: string;
-	token_canister_id?: string;
-	match?: { id?: string } | undefined;
-}): string {
-	if (input.match?.id) return input.match.id;
-	const symbol = (input.symbol || '').trim();
-	if (symbol && symbol.toUpperCase() === REALMS_TOKEN_ID) return REALMS_TOKEN_ID;
-	if (input.token_canister_id || symbol) return CUSTOM_TOKEN_CHOICE_ID;
-	return REALMS_TOKEN_ID;
 }

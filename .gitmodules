@@ -5,3 +5,7 @@
 [submodule "codices"]
 	path = codices
 	url = https://github.com/smart-social-contracts/realms-codices.git
+[submodule "ggg"]
+	path = ggg
+	url = https://github.com/smart-social-contracts/ggg.git
+	branch = main

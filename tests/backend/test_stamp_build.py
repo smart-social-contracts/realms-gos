@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-BACKENDS = ("realm_backend", "marketplace_backend")
+# The realm backend has no status.py or version_http.py: its version is stamped into
+# api/setup.py by scripts/pack_realm_backend.py.
+BACKENDS = ("marketplace_backend",)
 
 
 @pytest.fixture

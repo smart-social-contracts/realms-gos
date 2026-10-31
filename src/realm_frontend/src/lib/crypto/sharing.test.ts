@@ -1,5 +1,32 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { bls12_381 } from '@noble/curves/bls12-381';
+
+type Op = (args: Record<string, any>) => unknown;
+
+const { ops } = vi.hoisted(() => ({ ops: {} as Record<string, Op> }));
+
+vi.mock('$lib/canisters', () => ({ quarterBackend: {} }));
+
+vi.mock('$lib/realm', () => {
+	const call = async (name: string, args: Record<string, any> = {}) => ops[name](args);
+	return {
+		read: call,
+		run: call,
+		quarter: { read: call, run: call },
+		must: async (reply: Promise<{ ok: boolean; error?: string }>) => {
+			const out = await reply;
+			if (!out.ok) throw new Error(out.error);
+			return out;
+		}
+	};
+});
+
+/** The realm actor callers pass; the mocked realm client answers for it. */
+const backend = {};
+
+beforeEach(() => {
+	for (const key of Object.keys(ops)) delete ops[key];
+});
 import {
 	augmentedHashToG1,
 	DerivedPublicKey,
@@ -124,7 +151,7 @@ describe('end-to-end DEK + IBE', () => {
 });
 
 describe('scope builders', () => {
-	it('match the backend core/crypto_scopes.py conventions', () => {
+	it('match the backend api/crypto.py conventions', () => {
 		expect(userScope('alice')).toBe('user:alice:private');
 		expect(userScope('alice', 'kyc')).toBe('user:alice:kyc');
 		expect(deptScope('Finance', 'reports')).toBe('dept:Finance:reports');
@@ -136,14 +163,9 @@ describe('buildSharePlan', () => {
 	it('fetches the root key once and wraps for each (deduped) recipient', async () => {
 		const { dpk, vetKeyForIdentity } = makeRootKeypair();
 		let rootCalls = 0;
-		const backend = {
-			async get_sharing_root_public_key() {
-				rootCalls += 1;
-				return {
-					success: true,
-					data: { message: bytesToHex(dpk.publicKeyBytes()) }
-				};
-			}
+		ops.crypto_public_key = () => {
+			rootCalls += 1;
+			return { ok: true, public_key: bytesToHex(dpk.publicKeyBytes()) };
 		};
 
 		const data = { city: 'Lovelace' };
@@ -165,21 +187,19 @@ describe('buildSharePlan', () => {
 describe('grantScopeData', () => {
 	function mockBackend() {
 		const calls: { grant: any[]; revoke: any[] } = { grant: [], revoke: [] };
-		const backend = {
-			async crypto_grant_to_scope_batch(scope: string, json: string) {
-				calls.grant.push({ scope, map: JSON.parse(json) });
-				return { success: true, data: { message: 'ok' } };
-			},
-			async crypto_revoke_from_scope_batch(scope: string, json: string) {
-				calls.revoke.push({ scope, principals: JSON.parse(json) });
-				return { success: true, data: { message: 'ok' } };
-			}
+		ops.crypto_grant = ({ scope, keys }) => {
+			calls.grant.push({ scope, map: keys });
+			return { ok: true, granted: Object.keys(keys) };
 		};
-		return { backend, calls };
+		ops.crypto_revoke = ({ scope, principals }) => {
+			calls.revoke.push({ scope, principals });
+			return { ok: true, revoked: principals };
+		};
+		return { calls };
 	}
 
 	it('grants the full map in one call and skips revoke when nothing to remove', async () => {
-		const { backend, calls } = mockBackend();
+		const { calls } = mockBackend();
 		const scope = deptScope('Finance', 'reports');
 		const granted = await grantScopeData(backend, scope, { [ALICE]: 'aa', [BOB]: 'bb' });
 		expect(granted.sort()).toEqual([ALICE, BOB].sort());
@@ -189,7 +209,7 @@ describe('grantScopeData', () => {
 	});
 
 	it('revokes previous recipients who are no longer granted, honoring keep', async () => {
-		const { backend, calls } = mockBackend();
+		const { calls } = mockBackend();
 		const scope = userScope(ALICE);
 		// Previously ALICE (owner) + BOB + carol; now only ALICE granted.
 		await grantScopeData(
@@ -204,13 +224,9 @@ describe('grantScopeData', () => {
 	});
 
 	it('throws when the grant call reports failure', async () => {
-		const backend = {
-			async crypto_grant_to_scope_batch() {
-				return { success: false, data: { error: 'not allowed' } };
-			}
-		};
+		ops.crypto_grant = () => ({ ok: false, error: 'you do not manage keys at realm:x' });
 		await expect(grantScopeData(backend, realmScope('x'), { [ALICE]: 'aa' })).rejects.toThrow(
-			/not allowed/
+			/do not manage keys/
 		);
 	});
 });
@@ -226,24 +242,20 @@ describe('decryptScopeData', () => {
 		const ciphertext = await aesGcmEncryptWithDek(dek, JSON.stringify(data));
 		const wrapped = `env:v=2:k=${wrapDekForIdentity(dpk, ALICE, dek)}`;
 
-		// Backend mock: serves ALICE's envelope + her derived sharing vetKey.
+		// Realm mock: serves ALICE's envelope + her derived sharing vetKey.
 		const tskHolder: { tpk?: string } = {};
-		const backend = {
-			async crypto_get_my_envelope(s: string) {
-				expect(s).toBe(scope);
-				return { success: true, data: { envelope: { wrapped_dek: wrapped } } };
-			},
-			async get_sharing_root_public_key() {
-				return { success: true, data: { message: bytesToHex(dpk.publicKeyBytes()) } };
-			},
-			async derive_my_sharing_vetkey(tpkHex: string) {
-				tskHolder.tpk = tpkHex;
-				// The real management canister encrypts the vetKey under the transport
-				// key; here we hand back the (unencrypted) vetKey is not possible via
-				// EncryptedVetKey, so we instead verify the wiring by short-circuiting
-				// the encrypted-key path in a follow-up assertion below.
-				return { success: false, data: { error: 'stub' } };
-			}
+		ops.crypto_envelope = ({ scope: s }) => {
+			expect(s).toBe(scope);
+			return { ok: true, wrapped_dek: wrapped, granted_by: ALICE, at: 0 };
+		};
+		ops.crypto_public_key = () => ({ ok: true, public_key: bytesToHex(dpk.publicKeyBytes()) });
+		ops.crypto_derive_key = ({ transport_public_key }) => {
+			tskHolder.tpk = transport_public_key;
+			// The real management canister encrypts the vetKey under the transport
+			// key; handing back the (unencrypted) vetKey is not possible via
+			// EncryptedVetKey, so we instead verify the wiring by short-circuiting
+			// the encrypted-key path in a follow-up assertion below.
+			return { ok: false, error: 'stub' };
 		};
 
 		// With the stubbed derive returning failure, decrypt yields null but must

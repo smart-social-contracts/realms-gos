@@ -51,6 +51,33 @@ def check_dfx_available() -> bool:
         return False
 
 
+def realm_op(
+    canister: str,
+    name: str,
+    args: Optional[Dict[str, Any]] = None,
+    network: str = "local",
+    identity: Optional[str] = None,
+    read: bool = False,
+    cwd: Optional[str] = None,
+    timeout: int = 60,
+) -> Dict[str, Any]:
+    """Run operation ``name`` on the realm ``canister`` with dfx from ``cwd`` (the realm folder, where dfx
+    resolves canister names) and return its reply; a failed call is ``{"ok": False, "error": ...}``."""
+    from ..realm_api import op_arg
+    from .extension import _parse_candid_string
+
+    cmd = ["dfx", "canister", "call", "--network", network]
+    if identity:
+        cmd.extend(["--identity", identity])
+    if read:
+        cmd.append("--query")
+    cmd.extend([canister, "read" if read else "run", op_arg(name, args)])
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+    if result.returncode != 0:
+        return {"ok": False, "error": (result.stderr or result.stdout).strip()}
+    return json.loads(_parse_candid_string(result.stdout))
+
+
 def require_dfx() -> None:
     """Check that dfx is available, exit with user-friendly message if not.
     
@@ -106,9 +133,10 @@ class NavigationState:
 class CursorDatabaseExplorer:
     """Interactive database explorer for Realm entities."""
 
-    def __init__(self, network: str, canister: str, cwd: Optional[str] = None):
+    def __init__(self, network: str, canister: str, cwd: Optional[str] = None, identity: Optional[str] = None):
         self.network = network
         self.canister = canister
+        self.identity = identity
         self.cwd = cwd  # Working directory for dfx commands
         self.state = NavigationState()
         self.app = None
@@ -118,191 +146,64 @@ class CursorDatabaseExplorer:
         self._ggg_classes = self._discover_ggg_classes()
         self._entity_counts = {}
 
-    def call_backend(self, method: str, args: str = "") -> Dict[str, Any]:
-        logger.debug("call_backend")
-
-        """Call backend canister method and return parsed result."""
-        cmd = ["dfx", "canister", "call", "--output", "json"]
-        if self.network != "local":
-            cmd.extend(["--network", self.network])
-        cmd.extend([self.canister, method])
-        if args:
-            # Format args as Candid tuple with proper types
-            if isinstance(args, (list, tuple)):
-                # Handle list/tuple of arguments
-                formatted_parts = []
-                for arg in args:
-                    if isinstance(arg, str):
-                        formatted_parts.append(f'"{arg}"')
-                    else:
-                        formatted_parts.append(str(arg))
-                candid_args = f"({', '.join(formatted_parts)})"
-            else:
-                # Handle string args - assume it's already formatted or a single value
-                candid_args = f'("{args}")'
-            
-            cmd.append(candid_args)
-
-        logger.debug(f"cmd: {' '.join(cmd)}")
-
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, cwd=self.cwd)
-            logger.debug(f"result: {result}")
-            if result.returncode == 0:
-                output = result.stdout.strip()
-
-                if method == "status":
-                    return {"success": True, "data": output}
-
-                # Parse JSON response
-                try:
-                    json_response = json.loads(output)
-                    ret = self._parse_json_response(json_response)
-                    logger.debug(f"Backend result: {ret}")
-                    return ret
-                except json.JSONDecodeError:
-                    logger.error(traceback.format_exc())
-                    # Fallback to Candid parsing for backward compatibility
-                    if output.startswith("(") and output.endswith(")"):
-                        output = output[1:-1]
-                    return self._parse_json_response({"error": "Failed to parse JSON", "items": []})
-            else:
-                return {
-                    "items": [],
-                    "total_items_count": 0,
-                    "total_pages": 1,
-                    "page_num": 0,
-                    "page_size": 10,
-                    "error": result.stderr,
-                }
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            return {
-                "items": [],
-                "total_items_count": 0,
-                "total_pages": 1,
-                "page_num": 0,
-                "page_size": 10,
-                "error": str(e),
-            }
-
-    def _parse_json_response(self, json_response: Any) -> Dict[str, Any]:
-        """Parse JSON response from the new unified API format."""
-        try:
-            if not json_response.get("success", False):
-                error_msg = json_response.get("data", {}).get("error", "Unknown error")
-                return {"error": error_msg, "items": []}
-
-            data = json_response.get("data", {})
-            
-            if "objectsListPaginated" in data:
-                paginated_data = data["objectsListPaginated"]
-                objects_json = paginated_data.get("objects", [])
-                pagination = paginated_data.get("pagination", {})
-                
-                items = []
-                for obj_json in objects_json:
-                    try:
-                        item = json.loads(obj_json)
-                        items.append(item)
-                    except json.JSONDecodeError:
-                        logger.error(f"Failed to parse object JSON: {obj_json}")
-                        continue
-                
-                return {
-                    "items": items,
-                    "page_num": int(pagination.get("page_num", 0)),
-                    "page_size": int(pagination.get("page_size", 10)),
-                    "total_items_count": int(pagination.get("total_items_count", 0)),
-                    "total_pages": int(pagination.get("total_pages", 1)),
-                }
-            
-            elif "objectsList" in data:
-                objects_data = data["objectsList"]
-                objects_json = objects_data.get("objects", [])
-                
-                items = []
-                for obj_json in objects_json:
-                    try:
-                        item = json.loads(obj_json)
-                        items.append(item)
-                    except json.JSONDecodeError:
-                        logger.error(f"Failed to parse object JSON: {obj_json}")
-                        continue
-                
-                return {"items": items}
-            
-            else:
-                logger.error(f"Unexpected response format: {data}")
-                return {"error": "Unexpected response format", "items": []}
-                
-        except Exception as e:
-            logger.error(f"Error parsing JSON response: {e}")
-            return {"error": str(e), "items": []}
+    def call_backend(self, name: str, args: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Run read operation ``name`` on the realm and return its reply."""
+        return realm_op(self.canister, name, args, self.network, self.identity, read=True, cwd=self.cwd, timeout=30)
 
     def list_entities(
         self, entity_type: str, page_num: int = 0, page_size: int = 10
     ) -> Dict[str, Any]:
-        """List entities of given type with pagination."""
-        method = "get_objects_paginated"
-        args = [entity_type, page_num, page_size, "asc"]
-            
-        return self.call_backend(method, args)
+        """One page of an entity's rows (``realm_export``), each with its ``_type`` and ``_id``."""
+        if "::" in entity_type:
+            return {"error": f"{entity_type}: extension entities are not supported by this realm version", "items": []}
+        try:
+            reply = self.call_backend(
+                "realm_export", {"entity": entity_type, "from": page_num * page_size + 1, "count": page_size}
+            )
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            return {"error": str(e), "items": []}
+        if not reply.get("ok"):
+            return {"error": reply.get("error", "Unknown error"), "items": []}
+        more = reply.get("next") is not None
+        return {
+            "items": [{"_type": entity_type, "_id": row.get("id", ""), **row} for row in reply["rows"]],
+            "page_num": page_num,
+            "page_size": page_size,
+            "total_pages": page_num + (2 if more else 1),
+            "more": more,
+        }
+
+    def all_entities(self, entity_type: str, page_size: int = 100):
+        """Every row of ``entity_type``, page by page; raises ``RuntimeError`` on a refused page."""
+        page_num = 0
+        while True:
+            result = self.list_entities(entity_type, page_num, page_size)
+            if "error" in result:
+                raise RuntimeError(result["error"])
+            yield from result["items"]
+            if not result["more"]:
+                return
+            page_num += 1
 
     def find_entities(self, entity_type: str, params: List[tuple]) -> Dict[str, Any]:
-        """Find entities matching given field criteria using Entity.find().
-        
-        Args:
-            entity_type: The entity class name (e.g., "User", "Transfer")
-            params: List of (field_name, field_value) tuples to match
-            
-        Returns:
-            Dict with 'items' list of matching entities
-        """
-        method = "find_objects"
-        # Format as Candid: ("EntityType", vec { record { 0 = "field"; 1 = "value" }; ... })
-        params_candid = "; ".join([f'record {{ 0 = "{k}"; 1 = "{v}" }}' for k, v in params])
-        candid_args = f'("{entity_type}", vec {{ {params_candid} }})'
-        
-        cmd = ["dfx", "canister", "call", "--output", "json"]
-        if self.network != "local":
-            cmd.extend(["--network", self.network])
-        cmd.extend([self.canister, method, candid_args])
-        
+        """Rows of ``entity_type`` whose fields match every ``(field, value)`` in ``params``."""
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=self.cwd)
-            if result.returncode == 0:
-                json_response = json.loads(result.stdout.strip())
-                return self._parse_json_response(json_response)
-            else:
-                return {"error": result.stderr, "items": []}
-        except Exception as e:
+            items = [
+                item for item in self.all_entities(entity_type)
+                if all(v in (str(item.get(k)), json.dumps(item.get(k))) for k, v in params)
+            ]
+        except RuntimeError as e:
             return {"error": str(e), "items": []}
+        return {"items": items}
 
     def get_entity(self, entity_type: str, entity_id: str) -> Dict[str, Any]:
-        """Get a single entity by type and ID. Uses ic-python-db alias resolution."""
-        method = "get_objects"
-        # Format as Candid vec of records: vec { record { 0 = "Type"; 1 = "id" } }
-        candid_args = f'(vec {{ record {{ 0 = "{entity_type}"; 1 = "{entity_id}" }} }})'
-        
-        cmd = ["dfx", "canister", "call", "--output", "json"]
-        if self.network != "local":
-            cmd.extend(["--network", self.network])
-        cmd.extend([self.canister, method, candid_args])
-        
+        """The row of ``entity_type`` whose id is ``entity_id``."""
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, cwd=self.cwd)
-            if result.returncode == 0:
-                json_response = json.loads(result.stdout.strip())
-                parsed = self._parse_json_response(json_response)
-                items = parsed.get("items", [])
-                if items:
-                    return items[0]
-                return {"error": f"Entity '{entity_id}' not found"}
-            else:
-                return {"error": result.stderr}
-        except Exception as e:
+            item = next((i for i in self.all_entities(entity_type) if i.get("_id") == entity_id), None)
+        except RuntimeError as e:
             return {"error": str(e)}
+        return item or {"error": f"Entity '{entity_id}' not found"}
 
     def create_key_bindings(self):
         """Create key bindings for cursor navigation."""
@@ -646,8 +547,11 @@ class CursorDatabaseExplorer:
                 ggg_module = importlib.import_module("realms.ggg")
                 logger.debug("Loaded ggg module from bundled realms.ggg")
 
-            # Get all exported classes from the __all__ list
-            for class_name in getattr(ggg_module, "__all__", []):
+            # The exported classes: the __all__ list, else every entity the module defines (what realm_export takes)
+            names = getattr(ggg_module, "__all__", None) or [
+                n for n, c in vars(ggg_module).items() if inspect.isclass(c) and hasattr(c, "load_some")
+            ]
+            for class_name in names:
                 try:
                     cls = getattr(ggg_module, class_name)
                     if inspect.isclass(cls) and hasattr(cls, "__name__"):
@@ -807,17 +711,16 @@ class CursorDatabaseExplorer:
                 self.state.total_pages = 1
 
     def _fetch_entity_counts(self):
-        """Fetch entity counts once and cache them."""
+        """Fetch entity counts once and cache them: the ones ``realm_monitor`` reports, "?" for the others."""
         if self._entity_counts:
             return  # Already cached
-            
+
+        try:
+            rows = self.call_backend("realm_monitor").get("rows") or {}
+        except Exception:
+            rows = {}
         for class_obj in self._ggg_classes:
-            try:
-                result = self.list_entities(class_obj.__name__, 0, 1)
-                count = result.get("total_items_count", 0) if "error" not in result else 0
-                self._entity_counts[class_obj.__name__] = count
-            except Exception:
-                self._entity_counts[class_obj.__name__] = 0
+            self._entity_counts[class_obj.__name__] = rows.get(class_obj.__name__, "?")
 
     def render_entity_list(self):
         """Render the entity selection menu."""
@@ -995,7 +898,8 @@ class CursorDatabaseExplorer:
     def run(self):
         """Main interactive loop using prompt_toolkit Application."""
         try:
-            self.call_backend("status")
+            if not self.call_backend("status").get("ok"):
+                raise RuntimeError("status refused")
             logger.debug("Connected to backend canister\n")
         except Exception:
             logger.debug("Could not connect to backend canister")
@@ -1028,6 +932,16 @@ class CursorDatabaseExplorer:
         self.app.run()
 
 
+def _connect(explorer: CursorDatabaseExplorer) -> None:
+    try:
+        reply = explorer.call_backend("status")
+    except Exception as e:
+        reply = {"error": str(e)}
+    if not reply.get("ok"):
+        console.print(f"[red]Error: Could not connect to backend canister: {reply.get('error')}[/red]")
+        raise typer.Exit(1)
+
+
 def db_get_command(
     entity_type: str,
     entity_id: Optional[str] = None,
@@ -1053,12 +967,7 @@ def db_get_command(
 
     explorer = CursorDatabaseExplorer(effective_network, effective_canister, cwd=effective_cwd)
     
-    # Test connection
-    try:
-        explorer.call_backend("status")
-    except Exception as e:
-        console.print(f"[red]Error: Could not connect to backend canister: {e}[/red]")
-        raise typer.Exit(1)
+    _connect(explorer)
     
     # Check if this is a namespaced extension entity (e.g., "vault::KnownSubaccount")
     is_extension_entity = "::" in entity_type
@@ -1079,7 +988,6 @@ def db_get_command(
             available = [cls.__name__ for cls in explorer._ggg_classes]
             console.print(f"[red]Error: Entity type '{entity_type}' not found[/red]")
             console.print(f"[yellow]Available entity types: {', '.join(sorted(available))}[/yellow]")
-            console.print(f"[yellow]Tip: For extension entities, use namespace::EntityType (e.g., vault::KnownSubaccount)[/yellow]")
             raise typer.Exit(1)
     
     # Determine the query type name
@@ -1095,30 +1003,12 @@ def db_get_command(
         # Output single entity as JSON
         print(json.dumps(result, indent=2))
     else:
-        # Get all entities (with pagination if needed)
-        all_items = []
-        page_num = 0
-        page_size = 100
-        
-        while True:
-            result = explorer.list_entities(query_type, page_num, page_size)
-            if "error" in result:
-                console.print(f"[red]Error: {result['error']}[/red]")
-                raise typer.Exit(1)
-            
-            items = result.get("items", [])
-            if not items:
-                break
-            
-            all_items.extend(items)
-            
-            # Check if there are more pages
-            total_pages = result.get("total_pages", 1)
-            if page_num >= total_pages - 1:
-                break
-            
-            page_num += 1
-        
+        try:
+            all_items = list(explorer.all_entities(query_type))
+        except RuntimeError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
+
         # Output all entities as JSON array
         print(json.dumps(all_items, indent=2))
 
@@ -1148,12 +1038,7 @@ def db_find_command(
 
     explorer = CursorDatabaseExplorer(effective_network, effective_canister, cwd=effective_cwd)
     
-    # Test connection
-    try:
-        explorer.call_backend("status")
-    except Exception as e:
-        console.print(f"[red]Error: Could not connect to backend canister: {e}[/red]")
-        raise typer.Exit(1)
+    _connect(explorer)
     
     # Check if this is a namespaced extension entity (e.g., "vault::KnownSubaccount")
     is_extension_entity = "::" in entity_type
@@ -1337,11 +1222,7 @@ def db_command(
     # In this case, print a simple list of entity types and counts instead of running the interactive app
     if not sys.stdin.isatty():
         logger.debug("Non-interactive mode detected, printing entity list")
-        try:
-            explorer.call_backend("status")
-        except Exception as e:
-            console.print(f"[red]Error: Could not connect to backend canister: {e}[/red]")
-            raise typer.Exit(1)
+        _connect(explorer)
         
         explorer._fetch_entity_counts()
         

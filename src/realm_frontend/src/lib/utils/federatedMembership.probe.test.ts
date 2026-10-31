@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const member = { success: true, data: { userGet: { profiles: ['member'] } } };
-const stranger = { success: false, data: { error: 'User with principal x not found' } };
+const member = { ok: true, user: { id: 'p', profiles: ['member'] } };
+const stranger = { ok: false, error: 'not a user of this realm' };
 
 const { probed, setActiveQuarter, members } = vi.hoisted(() => ({
 	probed: [] as string[],
@@ -9,30 +9,29 @@ const { probed, setActiveQuarter, members } = vi.hoisted(() => ({
 	members: new Set<string>(),
 }));
 
-function actorFor(id: string) {
-	return {
-		get_my_user_status: async () => {
-			probed.push(id);
-			return members.has(id) ? member : stranger;
-		},
-	};
+function me(id: string) {
+	probed.push(id);
+	return members.has(id) ? member : stranger;
 }
 
+vi.mock('$lib/realm', () => ({
+	read: async (name: string) =>
+		name === 'quarter_directory'
+			? {
+					ok: true,
+					capital: 'cap',
+					quarters: [
+						{ id: 'cap', capital: true },
+						{ id: 'q1', capital: false },
+						{ id: 'q2', capital: false },
+						{ id: 'q3', capital: false },
+					],
+				}
+			: me('cap'),
+	must: async (reply: any) => reply,
+}));
 vi.mock('$lib/canisters', () => ({
-	backend: {
-		...actorFor('cap'),
-		get_join_targets: async () =>
-			JSON.stringify({
-				capital_id: 'cap',
-				quarters: [
-					{ canister_id: 'cap', is_capital: true },
-					{ canister_id: 'q1' },
-					{ canister_id: 'q2' },
-					{ canister_id: 'q3' },
-				],
-			}),
-	},
-	createQuarterActor: async (id: string) => actorFor(id),
+	createQuarterActor: async (id: string) => ({ read: async () => JSON.stringify(me(id)) }),
 	setActiveQuarter,
 }));
 vi.mock('$lib/stores/quarters', async () => {

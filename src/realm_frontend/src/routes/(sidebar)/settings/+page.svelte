@@ -9,12 +9,8 @@
 	import { localizeBackendError } from '$lib/utils/backendError';
 	import { onMount, untrack } from 'svelte';
 	// @ts-ignore
-	import {
-		quarterBackend,
-		quarterBackendStore,
-		createQuarterActor,
-		asJoinSafeActor
-	} from '$lib/canisters.js';
+	import { createQuarterActor, quarterBackendStore } from '$lib/canisters.js';
+	import { must, on, quarter, type Reply } from '$lib/realm';
 	import { profilesLoading } from '$lib/stores/profiles';
 	import { realmInfo } from '$lib/stores/realmInfo';
 	import { activeQuarterId } from '$lib/stores/quarters';
@@ -131,37 +127,29 @@
 	/** Returns false when a newer load superseded this one (its result is dropped). */
 	async function loadUserStatus(): Promise<boolean> {
 		const seq = ++userStatusSeq;
-		const response = await quarterBackend.get_my_user_status();
+		const me = await must(quarter.read('me'));
 		if (seq !== userStatusSeq) return false;
-		if (response && response.success && response.data && response.data.userGet) {
-			const u = response.data.userGet;
-			principal = u.principal;
-			nickname = u.nickname || '';
-			avatarUrl = u.avatar || '';
-			profiles = u.profiles || [];
-			try {
-				privateData = JSON.parse(u.private_data || '{}');
-			} catch {
-				privateData = {};
-			}
-			email = privateData.email || '';
-			emailNotificationsEnabled = privateData.email_notifications_enabled !== false;
-			emailVerified = privateData.email_verified === true;
-			verificationPending = Boolean(email) && !emailVerified;
-			selectedLocale = localeFromPrivateData(privateData);
-			userLocale.set(selectedLocale);
-			applyResolvedLocale({
-				userLocale: selectedLocale,
-				languages: $realmInfo.languages,
-				primaryLanguage: $realmInfo.primaryLanguage
-			});
-			return true;
-		} else {
-			throw new Error(
-				(response && !response.success && response.data?.error) ||
-					'Could not fetch user status: Invalid response format.'
-			);
+		principal = me.user.id;
+		nickname = me.user.nickname || '';
+		avatarUrl = me.user.avatar || '';
+		profiles = me.user.profiles || [];
+		try {
+			privateData = JSON.parse(me.private_data || '{}');
+		} catch {
+			privateData = {};
 		}
+		email = privateData.email || '';
+		emailNotificationsEnabled = privateData.email_notifications_enabled !== false;
+		emailVerified = privateData.email_verified === true;
+		verificationPending = Boolean(email) && !emailVerified;
+		selectedLocale = localeFromPrivateData(privateData);
+		userLocale.set(selectedLocale);
+		applyResolvedLocale({
+			userLocale: selectedLocale,
+			languages: $realmInfo.languages,
+			primaryLanguage: $realmInfo.primaryLanguage
+		});
+		return true;
 	}
 
 	async function refreshUserStatus() {
@@ -183,32 +171,12 @@
 		untrack(() => void refreshUserStatus());
 	});
 
-	function parseExtensionResponse(result: any) {
+	function parseExtensionResponse(reply: Reply) {
 		const tr = (key: string) => get(_)(key);
-		if (!result) {
-			throw new Error(tr('errors.request_failed'));
+		if (!reply.ok) {
+			throw new Error(localizeBackendError(reply.error, tr, 'errors.request_failed'));
 		}
-		if (result.success === false) {
-			const responseStr = result.response ?? '';
-			try {
-				const inner =
-					typeof responseStr === 'string' ? JSON.parse(responseStr) : responseStr;
-				throw new Error(localizeBackendError(inner, tr, 'errors.request_failed'));
-			} catch (e: any) {
-				if (e instanceof Error && e.message !== tr('errors.request_failed')) {
-					throw e;
-				}
-				throw new Error(
-					localizeBackendError(
-						typeof responseStr === 'string' && responseStr ? responseStr : '',
-						tr,
-						'errors.request_failed',
-					),
-				);
-			}
-		}
-		const responseStr = result.response ?? result;
-		const data = typeof responseStr === 'string' ? JSON.parse(responseStr) : responseStr;
+		const data = typeof reply.result === 'string' ? JSON.parse(reply.result) : reply.result;
 		if (data?.success === false) {
 			throw new Error(localizeBackendError(data, tr, 'errors.request_failed'));
 		}
@@ -221,11 +189,11 @@
 			if (!emailIsValid) {
 				throw new Error(get(_)('errors.email_invalid'));
 			}
-			const result = await quarterBackend.extension_sync_call(
-				'notifications',
-				'request_email_verification',
-				JSON.stringify({ email: normalizedEmail })
-			);
+			const result = await quarter.run('extension_call', {
+				extension: 'notifications',
+				function: 'request_email_verification',
+				args: { email: normalizedEmail }
+			});
 			parseExtensionResponse(result);
 			verificationPending = true;
 			emailVerified = false;
@@ -247,11 +215,11 @@
 			if (!code) {
 				throw new Error(get(_)('errors.email_code_required'));
 			}
-			const result = await quarterBackend.extension_sync_call(
-				'notifications',
-				'verify_email_code',
-				JSON.stringify({ code })
-			);
+			const result = await quarter.run('extension_call', {
+				extension: 'notifications',
+				function: 'verify_email_code',
+				args: { code }
+			});
 			parseExtensionResponse(result);
 			emailVerified = true;
 			verificationPending = false;
@@ -283,8 +251,8 @@
 				...privateData,
 				locale: selectedLocale
 			};
-			const response = await quarterBackend.update_my_private_data(JSON.stringify(updated));
-			if (response && response.success) {
+			const response = await quarter.run('private_data_update', { private_data: JSON.stringify(updated) });
+			if (response.ok) {
 				privateData = updated;
 				userLocale.set(selectedLocale);
 				applyResolvedLocale({
@@ -297,10 +265,7 @@
 					body: $_('settings.locale_saved', { default: 'Language preference saved.' })
 				});
 			} else {
-				throw new Error(
-					(response && !response.success && response.data?.error) ||
-						'Could not save language preference.'
-				);
+				throw new Error(response.error || 'Could not save language preference.');
 			}
 		} catch (e: any) {
 			void showBridgeAlert({ body: e.message || 'Failed to save language preference.' });
@@ -316,18 +281,15 @@
 				...privateData,
 				email_notifications_enabled: emailNotificationsEnabled
 			};
-			const response = await quarterBackend.update_my_private_data(JSON.stringify(updated));
-			if (response && response.success) {
+			const response = await quarter.run('private_data_update', { private_data: JSON.stringify(updated) });
+			if (response.ok) {
 				privateData = updated;
 				void showBridgeNotice({
 					title: $_('settings.notification_saved_title'),
 					body: $_('settings.notification_saved_body'),
 				});
 			} else {
-				throw new Error(
-					(response && !response.success && response.data?.error) ||
-						'Could not save notification preference.'
-				);
+				throw new Error(response.error || 'Could not save notification preference.');
 			}
 		} catch (e: any) {
 			void showBridgeAlert({ body: e.message || 'Failed to save notification preference.' });
@@ -370,10 +332,10 @@
 		registeringCanisterId = canisterId;
 		try {
 			const profile = primaryJoinProfile();
-			const actor = await asJoinSafeActor(await createQuarterActor(canisterId));
-			const response = await actor.join_realm(profile, '', '');
-			if (!response?.success) {
-				const err = response?.data?.error || 'Failed to register in this quarter.';
+			const actor = await createQuarterActor(canisterId);
+			const response: Reply = await on(actor).run('realm_join');
+			if (!response.ok) {
+				const err = response.error || 'Failed to register in this quarter.';
 				if (isInviteRequiredError(err)) {
 					void showBridgeAlert({
 						title: $_('settings.quarter_invite_required_title'),

@@ -15,6 +15,9 @@ export interface OpenModalOptions {
 	actions: ModalAction[];
 }
 
+/** A realm operation's reply. */
+export type RealmReply = { ok: true; [key: string]: unknown } | { ok: false; error: string };
+
 export interface CallExtensionAsyncOptions {
 	/** Max wait for task_result after taskId is assigned. Default 60_000 ms. */
 	timeoutMs?: number;
@@ -24,6 +27,10 @@ export interface ExtensionClient {
 	extensionId: string;
 	capabilities: string[];
 	callExtension<T = unknown>(fn: string, args?: Record<string, unknown>): Promise<T>;
+	/** Call a realm read operation as the user; resolves to its reply (``{ ok, ... }``). */
+	read<T = RealmReply>(name: string, args?: Record<string, unknown>): Promise<T>;
+	/** Call a realm operation that changes the realm, as the user; resolves to its reply (``{ ok, ... }``). */
+	run<T = RealmReply>(name: string, args?: Record<string, unknown>): Promise<T>;
 	callExtensionAsync<T = unknown>(
 		fn: string,
 		args?: Record<string, unknown>,
@@ -241,6 +248,12 @@ export async function createExtensionClient(
 		},
 		callExtension<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
 			return sendRequest<T>({ kind: 'call_extension', fn, args });
+		},
+		read<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+			return sendRequest<T>({ kind: 'call_operation', name, args, read: true });
+		},
+		run<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+			return sendRequest<T>({ kind: 'call_operation', name, args, read: false });
 		},
 		async callExtensionAsync<T>(
 			fn: string,

@@ -340,7 +340,7 @@
                 "$self",
                 "$multisig"
               ],
-              "install_arg": "(record { name = \"Realms Token\"; symbol = \"RLM\"; decimals = 8 : nat8; total_supply = 100_000_000_000_000_000 : nat; fee = 10_000 : nat; test = opt false })"
+              "install_arg": "(record { name = \"Realms Token\"; symbol = \"REALMS\"; decimals = 8 : nat8; total_supply = 100_000_000_000_000_000 : nat; fee = 10_000 : nat; test = opt false })"
             }
           ]
         },

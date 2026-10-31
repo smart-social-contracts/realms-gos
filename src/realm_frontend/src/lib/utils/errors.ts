@@ -18,10 +18,12 @@ export class AccessDeniedError extends Error {
 }
 
 /**
- * Detects whether a backend extension_sync_call result (or a caught error)
+ * Detects whether a realm reply, an extension result (or a caught error)
  * represents a permission-denied response and extracts structured info.
  *
- * Canonical JSON:
+ * Realm refusals:
+ *   {"ok":false,"error":"<operation> needs <permission>"}   {"ok":false,"error":"sign in first"}
+ * Extension results:
  *   {"success":false,"error_code":"permission_denied","error":"...","denied_operation":"..."}
  *
  * Returns null when the result is not a permission error.
@@ -42,7 +44,10 @@ export function parseAccessError(
   }
 
   if (resultOrError instanceof Error) {
-    return parseAccessError({ response: resultOrError.message });
+    return (
+      accessErrorFromObject({ ok: false, error: resultOrError.message }) ??
+      parseAccessError({ response: resultOrError.message })
+    );
   }
 
   if (typeof resultOrError === 'string') {
@@ -56,7 +61,14 @@ export function parseAccessError(
   return null;
 }
 
+const REALM_REFUSAL = /^\S+ needs (\S+)$/;
+
 function accessErrorFromObject(obj: Record<string, unknown>): AccessError | null {
+  if (obj.ok === false && typeof obj.error === 'string') {
+    const needs = obj.error.match(REALM_REFUSAL);
+    if (!needs && obj.error !== 'sign in first') return null;
+    return { isAccessDenied: true, operation: needs?.[1] ?? '', message: DEFAULT_PERMISSION_MESSAGE };
+  }
   const code = obj.error_code;
   if (code !== ERROR_CODE_PERMISSION_DENIED && code !== ERROR_CODE_UNAUTHENTICATED) {
     return null;

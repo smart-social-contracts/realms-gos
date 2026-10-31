@@ -22,8 +22,8 @@ export function queryMethodNames(service: { _fields?: Array<[string, { annotatio
 
 /**
  * Wrap an actor so identical query calls issued while one is still in flight
- * share a single request. Boot fans out the same reads (status,
- * get_runtime_flags, get_my_user_status, ...) from many components; queries are
+ * share a single request. Boot fans out the same reads (read('me'),
+ * read('realm_info'), ...) from many components; queries are
  * side-effect free, so sharing the pending result is safe. Updates and calls
  * with non-primitive args pass straight through. Callers must not mutate a
  * shared response object.

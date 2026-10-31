@@ -1,51 +1,20 @@
-from ic_python_db import (
-    Entity,
-    OneToMany,
-    String,
-    TimestampedMixin,
-)
-from ic_python_logging import get_logger
+import hashlib
 
-logger = get_logger("entity.fiscal_period")
+from ic_python_db import Integer, OneToMany, String
+
+from core.db import Json, Row
 
 
-class FiscalPeriodStatus:
-    """Fiscal period lifecycle states."""
-    OPEN = "open"
-    CLOSED = "closed"
-    ARCHIVED = "archived"
-
-
-class FiscalPeriod(Entity, TimestampedMixin):
-    """
-    Fiscal Period - GGG Government Accounting Standard.
-    
-    Defines accounting period boundaries for reporting and budgeting.
-    Typically annual (FY2025) but can be quarterly (2025-Q1) or monthly.
-    
-    Status:
-    - open: Active period, entries can be added
-    - closed: Period ended, no new entries
-    - archived: Historical, read-only
-    """
+class FiscalPeriod(Row):
     __alias__ = "id"
-    id = String(max_length=16)  # e.g., "FY2025", "2025-Q1"
-    name = String(max_length=64)
-    start_date = String(max_length=32)  # ISO format: "2025-01-01"
-    end_date = String(max_length=32)    # ISO format: "2025-12-31"
-    status = String(max_length=16, default=FiscalPeriodStatus.OPEN)
-    ledger_entries = OneToMany("LedgerEntry", "fiscal_period")
-    budgets = OneToMany("Budget", "fiscal_period")
-    financial_reports = OneToMany("FinancialReport", "period")
-
-    def __repr__(self):
-        return f"FiscalPeriod(id={self.id!r}, status={self.status!r})"
-
-    def is_open(self) -> bool:
-        """Check if period accepts new entries."""
-        return self.status == FiscalPeriodStatus.OPEN
-
-    def close(self) -> None:
-        """Close the fiscal period."""
-        self.status = FiscalPeriodStatus.CLOSED
-        logger.info(f"Fiscal period {self.id} closed")
+    id = String()
+    name = String(default="")
+    starts_at = Integer(default=0)
+    ends_at = Integer(default=0)
+    status = String(default="open")  # open | closed | archived
+    # Running statements of its ledger entries, and a sha256 chained over them in id order.
+    statements = Json({"accounts": {}, "fund_balances": {}, "debit": 0, "credit": 0}, max_length=1 << 20)
+    source_hash = String(default=hashlib.sha256(b"").hexdigest())
+    budgets = OneToMany("Budget", "period")
+    ledger_entries = OneToMany("LedgerEntry", "period")
+    reports = OneToMany("FinancialReport", "period")

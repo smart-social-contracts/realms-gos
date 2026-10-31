@@ -1,21 +1,17 @@
 import { writable, derived, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { resolveRealmMarkSrc } from '$lib/branding/realmMark';
-import { backendStore, backendActorReady } from '$lib/canisters';
+import { backendActorReady } from '$lib/canisters';
+import { read } from '$lib/realm';
+import { quarterFederation } from '$lib/stores/quarters';
 import { applyBrandingPrimary, DEFAULT_PRIMARY_COLOR, parsePrimaryColor } from '$lib/theme/brandingPrimary';
 import { applyResolvedLocale } from '$lib/i18n';
-import { coerceRealmLanguages } from '$lib/i18n/realmLocales';
+import { defaultRealmLanguages } from '$lib/i18n/realmLocales';
 import { userLocale } from '$lib/stores/userLocale';
 import { singleFlight } from '$lib/utils/singleFlight';
-import {
-	resolveDemoNoticeEnabled,
-	resolveDisableMonetaryTokens,
-	type DemoNoticeBodies
-} from '$lib/config/hostTestFlags';
+import { resolveDemoNoticeBodies, resolveDemoNoticeEnabled, resolveDisableMonetaryTokens } from '$lib/config/hostTestFlags';
 
-const RUNTIME_FLAGS_TIMEOUT_MS = 12_000;
 const STATUS_QUERY_TIMEOUT_MS = 12_000;
-const JOIN_TARGETS_TIMEOUT_MS = 8_000;
 // Boot mounts call fetch() from the backend init, layout, navbar and setup
 // gate; share one round of queries instead of repeating it per caller.
 const REALM_INFO_FRESH_MS = 5_000;
@@ -135,143 +131,57 @@ const createRealmInfoStore = () => {
 			// backendReady here: initializeBackendStore() awaits this fetch, so
 			// awaiting backendReady would deadlock the boot (circular await).
 			await backendActorReady;
-				const currentActor = get(backendStore);
-				if (!currentActor) {
-					throw new Error('Actor not initialized');
-				}
 
-				// Prefer the lightweight runtime-flags query (fast on large realms).
-				// Full status() may exceed the instruction limit; flags alone are enough
-				// for the join flow (test mode, open registration, branding).
-				let flagsPayload: Record<string, unknown> | null = null;
-				const flagsRaw = await withQueryTimeout(
-					currentActor.get_runtime_flags(),
-					RUNTIME_FLAGS_TIMEOUT_MS,
-					'get_runtime_flags'
-				);
-				if (flagsRaw != null) {
-					try {
-						flagsPayload =
-							typeof flagsRaw === 'string' ? JSON.parse(flagsRaw) : flagsRaw;
-					} catch {
-						flagsPayload = null;
-					}
-				}
-
-				// status() can exceed the instruction limit on large mainnet realms and
-				// never return, which blocked initializeBackendStore → backendReady.
-				let status: Record<string, unknown> | null = null;
-				const response = await withQueryTimeout(
-					currentActor.status(),
-					STATUS_QUERY_TIMEOUT_MS,
-					'status'
-				);
-				if (response?.success && response.data.status) {
-					status = response.data.status as Record<string, unknown>;
-				}
-
-				// status().quarters counts populations by scanning the capital's own
-				// user table, which misses members who joined a quarter directly (they
-				// live in the quarter's table) — sub-quarters show 0 forever. The
-				// join-targets directory carries the synced per-quarter counts plus
-				// index/is_capital, so overlay it. Best-effort: the raw status list
-				// still renders if this query fails.
-				const quarters = (status?.quarters as Array<Record<string, unknown>>) || [];
-				if (quarters.length > 0) {
-					try {
-						const raw = await withQueryTimeout(
-							currentActor.get_join_targets(),
-							JOIN_TARGETS_TIMEOUT_MS,
-							'get_join_targets'
-						);
-						if (raw == null) throw new Error('get_join_targets timed out');
-						const directory = (JSON.parse(raw)?.quarters || []) as Array<
-							Record<string, unknown>
-						>;
-						for (const q of quarters) {
-							const match = directory.find((d) => d.canister_id === q.canister_id);
-							if (!match) continue;
-							q.population = Math.max(Number(q.population ?? 0), Number(match.population ?? 0));
-							if (q.index === undefined && match.index !== undefined) q.index = match.index;
-							if (q.is_capital === undefined && match.is_capital !== undefined)
-								q.is_capital = match.is_capital;
-						}
-					} catch {
-						// keep the unmodified status list
-					}
-				}
-
-				if (status || flagsPayload?.success) {
-					const fromFlags = flagsPayload?.success ? flagsPayload : null;
-					const openFromFlags = fromFlags?.open_registration as boolean | undefined;
-					const openFromStatus = status?.open_registration as boolean | undefined;
-					const primaryColor =
-						parsePrimaryColor(fromFlags?.primary_color) ??
-						parsePrimaryColor(status?.primary_color) ??
-						DEFAULT_PRIMARY_COLOR;
-					const languageConfig = coerceRealmLanguages(
-						fromFlags?.languages ?? status?.languages,
-						fromFlags?.primary_language ?? status?.primary_language
-					);
-					const network =
-						(fromFlags?.network as string) || (status?.network as string) || '';
-					const gosEnvironment =
-						(fromFlags?.gos_environment as string) ||
-						(status?.gos_environment as string) ||
-						'';
-					const noticeBodies = (fromFlags?.demo_notice_body ||
-						status?.demo_notice_body ||
-						{}) as DemoNoticeBodies;
-					update(state => ({
-						...state,
-						name: (fromFlags?.realm_name as string) || (status?.realm_name as string) || '',
-						welcomeMessage: (fromFlags?.realm_welcome_message as string) || (status?.realm_welcome_message as string) || '',
-						manifesto: (fromFlags?.realm_manifesto as string) || (status?.realm_manifesto as string) || '',
-						openRegistration: openFromFlags ?? openFromStatus ?? false,
-						aiAssistantEnabled: (fromFlags?.ai_assistant_enabled as boolean) ?? (status?.ai_assistant_enabled as boolean) !== false,
-						registries: (status?.registries as typeof state.registries) || [],
-						quarters: (status?.quarters as typeof state.quarters) || [],
-						isQuarter: (status?.is_quarter as boolean) || false,
-						parentRealmCanisterId: (status?.parent_realm_canister_id as string) || '',
-						logoUrl: resolveRealmMarkSrc(
-							(fromFlags?.logo_url as string) || (status?.logo_url as string) || ''
-						),
-						backgroundImageUrl: (fromFlags?.background_image_url as string) || (status?.background_image_url as string) || '',
-						primaryColor,
-						languages: languageConfig.languages,
-						primaryLanguage: languageConfig.primary,
-						testMode: (fromFlags?.test_mode as boolean) ?? (status?.test_mode as boolean) ?? false,
-						testModeIIBypass: (fromFlags?.test_mode_ii_bypass as boolean) ?? (status?.test_mode_ii_bypass as boolean) ?? false,
-						testModeUserSelfRegistration: (fromFlags?.test_mode_user_self_registration as boolean) ?? (status?.test_mode_user_self_registration as boolean) ?? false,
-						testModeDemoData: (fromFlags?.test_mode_demo_data as boolean) ?? (status?.test_mode_demo_data as boolean) ?? false,
-						testModeSkipTerms: (fromFlags?.test_mode_skip_terms as boolean) ?? (status?.test_mode_skip_terms as boolean) ?? false,
-						testModeSkipPassportZkproof: (fromFlags?.test_mode_skip_passport_zkproof as boolean) ?? (status?.test_mode_skip_passport_zkproof as boolean) ?? false,
-						testModeDisableMonetaryTokens: resolveDisableMonetaryTokens(
-							(fromFlags?.test_mode_disable_monetary_tokens as boolean | undefined) ??
-								(status?.test_mode_disable_monetary_tokens as boolean | undefined),
-							gosEnvironment
-						),
-						testModeDemoNotice: resolveDemoNoticeEnabled(
-							(fromFlags?.test_mode_demo_notice as boolean | undefined) ??
-								(status?.test_mode_demo_notice as boolean | undefined),
-							gosEnvironment
-						),
-						demoNoticeBody: noticeBodies && typeof noticeBodies === 'object' ? noticeBodies : {},
-						network,
-						loading: false
-					}));
-					if (browser) {
-						applyBrandingPrimary(primaryColor);
-						applyResolvedLocale({
-							userLocale: get(userLocale),
-							languages: languageConfig.languages,
-							primaryLanguage: languageConfig.primary
-						});
-					}
-					return true;
-				} else {
+				// Languages and the AI assistant switch are not public on this realm version: they keep
+				// their defaults.
+				const [info, directory] = await Promise.all([
+					withQueryTimeout(read('realm_info'), STATUS_QUERY_TIMEOUT_MS, 'realm_info'),
+					withQueryTimeout(read('quarter_directory'), STATUS_QUERY_TIMEOUT_MS, 'quarter_directory')
+				]);
+				if (!info?.ok) {
 					throw new Error('Failed to fetch realm info');
 				}
+				const realm = info.realm;
+				const flags = realm.test_flags || {};
+				const network = realm.network || '';
+				const primaryColor = parsePrimaryColor(realm.primary_color) ?? DEFAULT_PRIMARY_COLOR;
+				const languageConfig = defaultRealmLanguages();
+				const federation = directory?.ok
+					? quarterFederation(directory)
+					: { quarters: [], isQuarter: false, parentRealmCanisterId: '' };
+				update(state => ({
+					...state,
+					name: realm.name || '',
+					welcomeMessage: realm.welcome_message || '',
+					manifesto: realm.manifesto || '',
+					openRegistration: realm.open_registration ?? false,
+					...federation,
+					logoUrl: resolveRealmMarkSrc(realm.logo_url || ''),
+					backgroundImageUrl: realm.background_image_url || '',
+					primaryColor,
+					languages: languageConfig.languages,
+					primaryLanguage: languageConfig.primary,
+					network,
+					testMode: !!realm.test_mode,
+					testModeIIBypass: !!flags.test_mode_ii_bypass,
+					testModeUserSelfRegistration: !!flags.test_mode_user_self_registration,
+					testModeDemoData: !!flags.test_mode_demo_data,
+					testModeSkipTerms: !!flags.test_mode_skip_terms,
+					testModeSkipPassportZkproof: !!flags.test_mode_skip_passport_zkproof,
+					testModeDisableMonetaryTokens: resolveDisableMonetaryTokens(flags.test_mode_disable_monetary_tokens, network),
+					testModeDemoNotice: resolveDemoNoticeEnabled(flags.test_mode_demo_notice, network),
+					demoNoticeBody: resolveDemoNoticeBodies(flags.demo_notice_body),
+					loading: false
+				}));
+				if (browser) {
+					applyBrandingPrimary(primaryColor);
+					applyResolvedLocale({
+						userLocale: get(userLocale),
+						languages: languageConfig.languages,
+						primaryLanguage: languageConfig.primary
+					});
+				}
+				return true;
 			} catch (error) {
 				console.error('Error fetching realm info:', error);
 				update(state => ({

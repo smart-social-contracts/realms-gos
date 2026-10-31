@@ -17,6 +17,7 @@ import {
 	type BridgeModalAction,
 } from '$lib/stores/bridge-modal';
 import { parseAccessError, AccessDeniedError } from '$lib/utils/errors';
+import { quarter } from '$lib/realm';
 
 const NAVIGATE_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 
@@ -44,13 +45,15 @@ export interface SandboxManifest {
 	sdk_version?: string;
 	capabilities?: string[];
 	entry_access?: { functions?: Record<string, string> };
+	/** The realm operations the installed extension may call (from the realm, not the published manifest). */
+	operations?: string[];
 }
 
 export interface SandboxBridgeDeps {
 	extensionId: string;
 	manifest: SandboxManifest;
 	callSync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
-	/** Same backend path as in-process `ctx.callAsync` (extension_async_call). */
+	/** Same backend path as in-process `ctx.callAsync` (the realm's extension_call). */
 	callAsync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
 	navigate: (path: string) => Promise<void>;
 	getHostState: () => HostState;
@@ -112,6 +115,8 @@ export class SandboxBridgeService {
 			requiredSdkVersion: deps.manifest.sdk_version ?? BRIDGE_PROTOCOL_VERSION,
 			capabilities,
 			entryAccessFunctions: deps.manifest.entry_access?.functions,
+			operations: deps.manifest.operations ?? [],
+			onCallOperation: (name, args, read) => (read ? quarter.read(name, args) : quarter.run(name, args)),
 			getState: deps.getHostState,
 			onHandshakeComplete: () => {
 				deps.onHandshakeComplete?.();

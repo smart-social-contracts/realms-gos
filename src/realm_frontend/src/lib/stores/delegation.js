@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { backend, quarterBackend, setActiveQuarter, whenBackendSignsAs } from '$lib/canisters.js';
+import { read, run, quarter } from '$lib/realm';
 import { principal } from '$lib/stores/auth';
 import { activeQuarterId } from '$lib/stores/quarters';
 
@@ -18,7 +19,7 @@ function readStored() {
 /** Grantor principal when acting on behalf of another user; null = self. */
 export const actingOnBehalfOf = writable(readStored());
 
-/** Cached delegation lists from list_delegations_json. */
+/** Cached delegation lists from delegation_list. */
 export const delegationsAsDelegate = writable([]);
 export const delegationsAsGrantor = writable([]);
 export const pendingDelegations = writable([]);
@@ -67,43 +68,45 @@ export async function resolveDelegationBackend() {
 	return backend;
 }
 
-function parseJson(raw) {
-	return typeof raw === 'string' ? JSON.parse(raw) : raw;
+function clientFor(actor) {
+	return actor === quarterBackend ? quarter : { read, run };
+}
+
+/** ``{read, run}`` on the canister resolveDelegationBackend picks. */
+export async function resolveDelegationRealm() {
+	return clientFor(await resolveDelegationBackend());
+}
+
+/** A realm reply in the ``{success, data, error}`` shape these functions return. */
+function legacy(reply) {
+	const { ok, error, ...data } = reply;
+	return ok ? { success: true, data } : { success: false, error };
+}
+
+function holds(me, permission) {
+	const held = me.ok ? me.permissions : [];
+	return held.includes('all') || held.includes(permission);
 }
 
 export async function loadDelegations(backendActor) {
-	const backend = backendActor || (await resolveDelegationBackend());
-	if (!backend?.list_delegations_json) return;
+	const realm = backendActor ? clientFor(backendActor) : await resolveDelegationRealm();
 	try {
-		if (!backend.list_delegations_page_json) {
-			const parsed = parseJson(await backend.list_delegations_json());
-			if (!parsed?.success) return;
-			const data = parsed.data || {};
-			delegationsAsDelegate.set(data.as_delegate || []);
-			delegationsAsGrantor.set(data.as_grantor || []);
-			pendingDelegations.set(data.pending_inbox || []);
-			return;
-		}
 		const asGrantor = [];
 		const asDelegate = [];
-		let grantorCursor = 1;
-		let delegateCursor = 1;
-		while (grantorCursor || delegateCursor) {
-			const parsed = parseJson(
-				await backend.list_delegations_page_json(
-					JSON.stringify({
-						grantor_cursor: grantorCursor || 0,
-						delegate_cursor: delegateCursor || 0,
-						count: 100
-					})
-				)
-			);
-			if (!parsed?.success) return;
-			const data = parsed.data || {};
-			asGrantor.push(...(data.as_grantor || []));
-			asDelegate.push(...(data.as_delegate || []));
-			grantorCursor = data.next_grantor_cursor;
-			delegateCursor = data.next_delegate_cursor;
+		let fromGrantor = 1;
+		let fromDelegate = 1;
+		while (fromGrantor || fromDelegate) {
+			// A side already read to its end starts over at row 1 here: its rows are dropped.
+			const page = await realm.read('delegation_list', {
+				from_grantor: fromGrantor,
+				from_delegate: fromDelegate,
+				count: 100
+			});
+			if (!page.ok) return;
+			if (fromGrantor) asGrantor.push(...page.as_grantor);
+			if (fromDelegate) asDelegate.push(...page.as_delegate);
+			fromGrantor = fromGrantor && page.next.grantor;
+			fromDelegate = fromDelegate && page.next.delegate;
 		}
 		delegationsAsDelegate.set(asDelegate);
 		delegationsAsGrantor.set(asGrantor);
@@ -113,54 +116,68 @@ export async function loadDelegations(backendActor) {
 	}
 }
 
-/** Operations the caller holds here and may grant: [{operation, label, description}]. */
+/** Permissions the caller holds here and may grant: [{operation, label, description}], ``operation`` being the permission. */
 export async function loadDelegableOperations() {
-	const backend = await resolveDelegationBackend();
-	if (!backend?.get_delegable_operations_json) return [];
-	const parsed = parseJson(await backend.get_delegable_operations_json());
-	return parsed?.success ? parsed.data || [] : [];
+	const realm = await resolveDelegationRealm();
+	const [ops, me] = await Promise.all([realm.read('delegable_operations'), realm.read('me')]);
+	if (!ops.ok) return [];
+	const byPermission = new Map();
+	for (const { op, permission } of ops.operations) {
+		if (holds(me, permission)) byPermission.set(permission, [...(byPermission.get(permission) || []), op]);
+	}
+	return [...byPermission].map(([operation, names]) => ({
+		operation,
+		label: operation,
+		description: names.join(', ')
+	}));
 }
 
-/** Grant power of attorney from the caller. Times are epoch seconds. */
-export async function grantDelegation({ grantor, delegate, operations, label, description, startsAt, expiresAt }) {
-	const backend = await resolveDelegationBackend();
-	return parseJson(
-		await backend.grant_delegation_json(
-			JSON.stringify({
-				grantor,
-				delegate,
-				scope: { operations },
-				label,
-				description,
-				starts_at: startsAt,
-				expires_at: expiresAt
-			})
-		)
+/** Grant power of attorney from the caller (who is always the grantor). Times are epoch seconds. */
+export async function grantDelegation({ delegate, operations, label, description, startsAt, expiresAt }) {
+	const realm = await resolveDelegationRealm();
+	return legacy(
+		await realm.run('delegation_grant', {
+			delegate,
+			operations,
+			label,
+			description,
+			starts_at: startsAt,
+			expires_at: expiresAt
+		})
 	);
 }
 
-/** A power of attorney request addressed to (or filed by) the caller. */
+/** An open power of attorney request addressed to (or filed by) the caller. */
 export async function loadDelegationRequest(requestId) {
-	const backend = await resolveDelegationBackend();
-	if (!backend?.get_delegation_request_json) {
-		return { success: false, error: 'This realm does not support power of attorney requests yet' };
-	}
-	return parseJson(await backend.get_delegation_request_json(JSON.stringify({ request_id: requestId })));
+	const realm = await resolveDelegationRealm();
+	const [list, me] = await Promise.all([realm.read('delegation_list', { count: 1 }), realm.read('me')]);
+	if (!list.ok) return legacy(list);
+	const request = list.requests.find((r) => r.id === requestId);
+	if (!request) return { success: false, error: 'This request is closed or was not made to you' };
+	const permissions = request.scope.operations.map((operation) => ({
+		operation,
+		label: operation,
+		grantor_holds: holds(me, operation)
+	}));
+	return { success: true, data: { ...request, permissions } };
 }
 
 /** Approve a request, with a subset of its permissions and an expiry no later than asked. */
 export async function approveDelegationRequest(requestId, { operations, expiresAt } = {}) {
-	const backend = await resolveDelegationBackend();
-	return parseJson(
-		await backend.approve_delegation_request_json(
-			JSON.stringify({ request_id: requestId, operations, expires_at: expiresAt })
-		)
+	const realm = await resolveDelegationRealm();
+	return legacy(
+		await realm.run('delegation_request_decide', {
+			request: requestId,
+			approve: true,
+			operations,
+			expires_at: expiresAt
+		})
 	);
 }
 
 export async function declineDelegationRequest(requestId) {
-	const backend = await resolveDelegationBackend();
-	return parseJson(await backend.decline_delegation_request_json(JSON.stringify({ request_id: requestId })));
+	const realm = await resolveDelegationRealm();
+	return legacy(await realm.run('delegation_request_decide', { request: requestId, approve: false }));
 }
 
 /** Active delegations the caller may act under (active, started, not expired). */

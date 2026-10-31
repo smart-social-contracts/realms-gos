@@ -62,33 +62,6 @@ export function fileRegistryBaseUrlFor(canisterId: string): string {
 
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 
-async function resolveInstalledVersion(
-  backend: { get_extension_frontend_info?: (args: string) => Promise<string> },
-  extId: string,
-  fallbackVersion: string,
-): Promise<string> {
-  // Manifest version (from list_runtime_extensions) matches the installed
-  // backend and the same-origin bundle uploaded at runtime-install time.
-  // _source.json can lag after direct runtime-install — prefer manifest.
-  if (fallbackVersion) {
-    return fallbackVersion;
-  }
-  if (typeof backend?.get_extension_frontend_info === 'function') {
-    try {
-      const raw = await backend.get_extension_frontend_info(
-        JSON.stringify({ extension_id: extId }),
-      );
-      const parsed = JSON.parse(raw);
-      if (parsed?.success && parsed.version) {
-        return parsed.version;
-      }
-    } catch (e) {
-      console.warn('[extension-loader] get_extension_frontend_info failed:', e);
-    }
-  }
-  return fallbackVersion;
-}
-
 /**
  * Fetch and dynamically import an extension's compiled frontend bundle,
  * then call its default export to mount it into `target`.
@@ -102,9 +75,7 @@ export async function mountExtension(
   target: HTMLElement,
   ctx: RealmExtensionContext,
 ): Promise<MountResult | void> {
-  const backend: any = ctx?.backend;
-  const ver = await resolveInstalledVersion(backend, extId, version);
-
+  const ver = version;
   const sameOriginPath = `/ext/${extId}/${ver}/frontend/dist/index.js`;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const sameOriginUrl = `${origin}${sameOriginPath}`;

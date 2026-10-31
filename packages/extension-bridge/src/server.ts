@@ -19,7 +19,11 @@ export interface BridgeServerOptions {
 	capabilities: string[];
 	/** Optional entry_access.functions allowlist (fn name → role). */
 	entryAccessFunctions?: Record<string, string>;
+	/** The realm operations the extension's installed manifest declares: the only ones call_operation reaches. */
+	operations?: string[];
 	getState: () => HostState;
+	/** Call a realm operation as the user (``read`` for queries); resolves to its reply. */
+	onCallOperation?: (name: string, args: Record<string, unknown>, read: boolean) => Promise<unknown>;
 	onCallExtension?: (fn: string, args: Record<string, unknown>) => Promise<unknown>;
 	/** Submit an async backend call; must return a task id promptly. Completion is pushed via {@link BridgeServer.pushTaskResult}. */
 	onCallExtensionAsync?: (fn: string, args: Record<string, unknown>) => Promise<{ taskId: string }>;
@@ -193,6 +197,34 @@ export function createBridgeServer(
 				} catch (e) {
 					const message = e instanceof Error ? e.message : String(e);
 					replyError(msg.id, failed(message));
+				} finally {
+					inFlightCallExtension--;
+				}
+				return;
+			}
+
+			case 'call_operation': {
+				const gateErr = !handshakeDone
+					? deny('Handshake not complete')
+					: !allowCallExtension()
+						? rateLimited('call_operation rate limit exceeded')
+						: inFlightCallExtension >= MAX_CONCURRENT_CALL_EXTENSION
+							? rateLimited('Too many concurrent calls')
+							: !(options.operations ?? []).includes(msg.name)
+								? deny(`Operation '${msg.name}' is not declared in the extension manifest`)
+								: !options.onCallOperation
+									? { code: 'unsupported' as const, message: 'call_operation handler not configured' }
+									: null;
+				if (gateErr) {
+					replyError(msg.id, gateErr);
+					return;
+				}
+				inFlightCallExtension++;
+				try {
+					const result = await options.onCallOperation!(msg.name, msg.args ?? {}, msg.read);
+					post({ source: BRIDGE_SOURCE, kind: 'call_result', id: msg.id, result });
+				} catch (e) {
+					replyError(msg.id, failed(e instanceof Error ? e.message : String(e)));
 				} finally {
 					inFlightCallExtension--;
 				}

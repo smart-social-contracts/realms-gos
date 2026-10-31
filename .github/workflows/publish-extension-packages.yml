@@ -1,17 +1,18 @@
-# publish-extension-packages.yml — publish @realmsgos/extension-* to npm @next (experimental).
+# publish-extension-packages.yml — stage @realmsgos/extension-* for npm @next (experimental).
+#
+# The workflow only stages each version (npm stage publish). It goes public once a maintainer
+# approves it with 2FA: npmjs.com → Staged Packages, or `npm stage approve <stage-id>`.
 #
 # Auth (pick one; Trusted Publishing preferred):
 # 1. npm Trusted Publishing (OIDC, keyless — no stored token):
 #    - On npmjs.com, for each package (@realmsgos/extension-bridge, @realmsgos/extension-ui),
 #      add Trusted Publisher: GitHub Actions, repo smart-social-contracts/realms-gos,
-#      workflow filename publish-extension-packages.yml.
-#    - This workflow requests id-token: write; npm publish --provenance uses OIDC automatically.
+#      workflow filename publish-extension-packages.yml. Staging is always allowed;
+#      "Allow npm publish" can stay off.
+#    - This workflow requests id-token: write; npm (11.15.0 or later) uses OIDC automatically.
 # 2. Fallback — repository secret NPM_TOKEN:
 #    - Long-lived automation token written via npm config set (never echoed).
 #    - Used when Trusted Publishing is not configured; OIDC is still attempted first.
-#
-# Publishing is OFF until the repository variable NPM_PUBLISH_ENABLED is set to "true".
-# Until then, matching pushes still build packages but skip publish so CI stays green.
 
 name: Publish extension packages (@next)
 
@@ -74,23 +75,12 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish disabled — setup instructions
-        if: ${{ vars.NPM_PUBLISH_ENABLED != 'true' && steps.skip.outputs.skip != 'true' }}
-        run: |
-          echo "npm publish skipped: repository variable NPM_PUBLISH_ENABLED is not 'true'."
-          echo ""
-          echo "To enable experimental (@next) publishes from main:"
-          echo "  1. Repository Settings → Secrets and variables → Actions → Variables:"
-          echo "     set NPM_PUBLISH_ENABLED=true"
-          echo "  2. Configure npm Trusted Publishing (preferred) on npmjs.com for each package:"
-          echo "     @realmsgos/extension-bridge, @realmsgos/extension-ui"
-          echo "     Publisher: GitHub Actions"
-          echo "     Repository: smart-social-contracts/realms-gos"
-          echo "     Workflow: publish-extension-packages.yml"
-          echo "  3. Or add repository secret NPM_TOKEN (automation token) as fallback."
+      - name: Upgrade npm (npm stage needs 11.15.0 or later)
+        if: ${{ steps.skip.outputs.skip != 'true' }}
+        run: npm install -g npm@^11.15.0
 
       - name: Configure npm auth (NPM_TOKEN fallback)
-        if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' && steps.skip.outputs.skip != 'true' }}
+        if: ${{ steps.skip.outputs.skip != 'true' }}
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -98,9 +88,9 @@ jobs:
             npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
           fi
 
-      - name: Publish to npm (@next)
-        if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' && steps.skip.outputs.skip != 'true' }}
+      - name: Stage for npm (@next), to approve on npmjs.com
+        if: ${{ steps.skip.outputs.skip != 'true' }}
         working-directory: packages/${{ matrix.package_dir }}
         run: |
           npm version "${{ steps.meta.outputs.version }}" --no-git-tag-version
-          npm publish --access public --tag next --provenance
+          npm stage publish --access public --tag next --provenance

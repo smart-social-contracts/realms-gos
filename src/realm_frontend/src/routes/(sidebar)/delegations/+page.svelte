@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { styles, cn } from '$lib/theme/utilities';
+	import { quarter } from '$lib/realm';
 	import { resolveDelegationBackend } from '$lib/stores/delegation.js';
 	import { isAuthenticated, principal } from '$lib/stores/auth';
 	import {
@@ -131,12 +132,9 @@
 		error = '';
 		message = '';
 		try {
-			const actor = await resolveDelegationBackend();
-			const raw = await actor.accept_delegation_json(
-				JSON.stringify({ delegation_id: delegationId })
-			);
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res.success) {
+			await resolveDelegationBackend();
+			const res = await quarter.run('delegation_accept', { delegation: delegationId });
+			if (res.ok) {
 				message = 'Delegation accepted.';
 				await refresh();
 			} else {
@@ -151,12 +149,9 @@
 		error = '';
 		message = '';
 		try {
-			const actor = await resolveDelegationBackend();
-			const raw = await actor.revoke_delegation_json(
-				JSON.stringify({ delegation_id: delegationId })
-			);
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res.success) {
+			await resolveDelegationBackend();
+			const res = await quarter.run('delegation_revoke', { delegation: delegationId });
+			if (res.ok) {
 				message = 'Delegation revoked.';
 				await refresh();
 			} else {

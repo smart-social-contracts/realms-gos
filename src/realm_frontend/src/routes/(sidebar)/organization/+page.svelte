@@ -20,7 +20,7 @@
 		CalendarMonthOutline,
 		ChevronDownOutline
 	} from 'flowbite-svelte-icons';
-	import { backend } from '$lib/canisters';
+	import { must, read } from '$lib/realm';
 	import Traffic from '../../utils/dashboard/Traffic.svelte';
 	import Map from '../../utils/widgets/Map.svelte';
 	import CodeBlock from '../../utils/dashboard/CodeBlock.svelte';
@@ -142,7 +142,7 @@
 		try {
 			console.log('=== ORGANIZATION DATA LOADING START ===');
 			console.log('Fetching organization data for ID:', id);
-			organizationData = await backend.get_organization_data(id);
+			organizationData = (await must(read('organization_get', { organization: id }))).organization;
 			console.log('Raw organization data:', JSON.stringify(organizationData, null, 2));
 
 			// Extract geometry data from tokens

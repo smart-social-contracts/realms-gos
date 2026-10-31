@@ -1,202 +1,75 @@
-# Realms Platform Documentation
+# Realms GOS documentation
 
-Complete documentation for building and deploying governance systems on the Internet Computer.
+Realms GOS is a governance operating system on the [Internet Computer](https://internetcomputer.org).
+A **realm** is one canister (or a federation of canisters) that holds a community's members,
+departments, votes, treasury, land, licences and courts. Its rules are written as code
+(**codices**), and its features come as **extensions**.
 
----
+Everything about the platform is documented here. If a page and the code disagree, the code is
+right and the page is a bug.
 
-## 📖 Start Here
+## Start here
 
-**New to Realms?** Choose your path:
-- **[Non-Technical Introduction](./reference/NON_TECHNICAL_INTRO.md)** - Understand what Realms is and why it exists
-- **[Technical Introduction](./reference/TECHNICAL_INTRO.md)** - Architecture, APIs, and development guide
+| If you want to… | Read |
+|---|---|
+| Run a realm on your machine in 5 minutes | [Getting started](getting-started.md) |
+| Understand how a realm works | [Architecture](architecture/README.md) |
+| Know *why* it is built this way | [Design choices](architecture/design-choices.md) |
+| Look up an entity, an operation or a rule | [GGG spec](ggg/spec.md) |
+| Write an extension | [Extensions](extensions/README.md) |
+| Write a codex (laws as code) | [Codices](codices/README.md) |
+| Deploy or operate the product canisters | [Deployment](deployment/README.md) |
+| Change this repository | [Contributing](development/contributing.md) and [Testing](development/testing.md) |
+| Decode a term | [Glossary](glossary.md) |
 
----
+## Map
 
-## 🚀 Quick Start by Role
-
-### 👤 End Users
-- [Citizen Dashboard](../extensions/citizen_dashboard/README.md) - Manage your account
-- [Governance Tutorial](./reference/GOVERNANCE_TUTORIAL.md) - Vote on proposals
-
-### 👨‍💼 Realm Operators  
-- [Operations](./OPERATIONS.md) - Deploy and upgrade realms (`AGENTS.md` in repo root)
-- [Operations](./OPERATIONS.md) - The product orchestra: build, `casals up`, checks
-- [Realm Registration](./reference/REALM_REGISTRATION_GUIDE.md) - Register with central registry
-- [CLI Reference](./reference/CLI_REFERENCE.md) - All commands
-
-### 🔧 Extension Developers
-- [Extension Guide](../extensions/README.md) - Build extensions
-- [Method Overrides](./reference/METHOD_OVERRIDE_SYSTEM.md) - Override entity methods
-- [Testing Guide](../extensions/_shared/testing/README.md) - Test your extensions
-
-### 💻 Platform Developers
-- [Core Entities](./reference/CORE_ENTITIES.md) - Data model reference
-- [API Reference](./reference/API_REFERENCE.md) - Backend endpoints
-- [Frontend Architecture](./reference/FRONTEND_ARCHITECTURE.md) - Svelte components
-
----
-
-## 📚 Core Documentation
-
-### Platform Fundamentals
-- **[Core Entities](./reference/CORE_ENTITIES.md)** - All 30+ entity types with examples
-- **[API Reference](./reference/API_REFERENCE.md)** - Complete backend API
-- **[CLI Reference](./reference/CLI_REFERENCE.md)** - All command-line tools
-- **[Frontend Architecture](./reference/FRONTEND_ARCHITECTURE.md)** - UI structure and patterns
-
-### Deployment & Operations
-- **[Operations](./OPERATIONS.md)** — Publish-build → rollout deploy path
-- **[Realm Registration](./reference/REALM_REGISTRATION_GUIDE.md)** - Join the registry
-- **[Troubleshooting](./reference/TROUBLESHOOTING.md)** - Common issues
-
-### Advanced Features
-- **[Scheduled Tasks](./reference/SCHEDULED_TASKS.md)** - Task scheduling (via basilisk-toolkit)
-- **[Task System](./reference/TASK_ENTITY.md)** - Batch processing with TaskEntity
-- **[Multi-Step Tasks](./reference/MULTI_STEP_TASKS_IMPLEMENTATION.md)** - Complex workflows
-- **[Method Override System](./reference/METHOD_OVERRIDE_SYSTEM.md)** - Extension method injection
-- **[Governance Tutorial](./reference/GOVERNANCE_TUTORIAL.md)** - Proposals and voting
-
-### Extension Development
-- **[Extension Guide](../extensions/README.md)** - Complete development guide
-- **[Available Extensions](../extensions/)** - 15+ built-in extensions
-- **[Testing Extensions](../extensions/_shared/testing/README.md)** - Test patterns
-
----
-
-## 📖 By Topic
-
-### Entities & Data Model
+```text
+docs/
+├── getting-started.md            realms local: start, publish, set up, call
+├── glossary.md
+├── architecture/
+│   ├── README.md                 canisters, layers, the life of a call
+│   ├── design-choices.md         the criteria behind the design
+│   ├── operations.md             @op, read/run, flags, errors, pagination, audit
+│   ├── authorization.md          Cedar: schema, policies, guardrails, permissions
+│   ├── sandboxing.md             how codices and extensions are contained
+│   ├── governance-and-delegation.md
+│   ├── quarters-and-federation.md
+│   ├── trust-and-registry.md     file registry, marketplace, trust policy
+│   └── frontend.md               the realm UI and the extension bridge
+├── ggg/
+│   ├── README.md                 what GGG is and how to read it
+│   └── spec.md                   the standard: entities, operations, invariants
+├── extensions/
+│   ├── README.md                 what an extension is
+│   ├── manifest.md
+│   ├── backend.md
+│   ├── frontend.md
+│   └── build-test-publish.md
+├── codices/
+│   ├── README.md                 what a codex is
+│   ├── sdk.md                    ggg_sdk reference
+│   └── build-test-publish.md
+├── deployment/README.md          Casals, environments, domains, publishing
+├── development/
+│   ├── contributing.md           style rules and conventions
+│   └── testing.md
+└── project/
+    ├── roadmap.md
+    ├── refactor-plan.md          the plan behind the current backend
+    ├── quarters-design.md        the original design of quarters
+    └── specs/                    feature specs not yet built
 ```
-Users & Identity          Governance              Finance
-├─ User                   ├─ Proposal             ├─ Treasury
-├─ Member                 ├─ Vote                 ├─ Instrument
-├─ Human                  ├─ Mandate              ├─ Balance
-├─ Identity               └─ Codex                ├─ Transfer
-└─ Organization                                   └─ Trade
 
-Tasks & Automation        Services                Registry
-├─ Task                   ├─ Service              ├─ Realm
-├─ TaskSchedule           ├─ License              └─ Registry
-├─ Codex                  ├─ Dispute
-└─ TaskEntity             └─ Permission
-```
-→ [Full Entity Reference](./reference/CORE_ENTITIES.md)
+## Related repositories
 
-### Key APIs
-- **Entity Management** - CRUD operations for all entities
-- **Extension System** - Call extension functions  
-- **Task Scheduling** - Automated workflows
-- **User Management** - Authentication & profiles
-- **Registry** - Realm discovery
-
-→ [Complete API Docs](./reference/API_REFERENCE.md)
-
-### CLI Commands
-```bash
-# Realm Management
-realms realm create          # Create new realm
-realms realm deploy          # Deploy canisters
-realms db import             # Import data
-realms db export             # Export data
-
-# Code Execution (via basilisk-toolkit)
-basilisk-toolkit exec        # Execute code in canister
-basilisk shell               # Interactive canister shell
-
-# Extensions
-realms extension list        # List extensions
-realms extension install     # Install extension
-
-# Registry
-realms registry add          # Register realm
-realms registry list         # List realms
-```
-→ [Full CLI Reference](./reference/CLI_REFERENCE.md)
-
----
-
-## 🎯 Common Tasks
-
-### Deploy a Realm
-```bash
-# 1. Create with demo data
-realms realm create --random --citizens 100 --organizations 10
-
-# 2. Deploy locally
-cd generated_realm
-./scripts/2-deploy-canisters.sh
-
-# 3. Upload data
-./scripts/3-upload-data.sh
-```
-→ [Operations](./OPERATIONS.md) or `AGENTS.md` in repo root
-
-### Create a Governance Proposal
-```python
-from ggg import Proposal, User
-
-proposal = Proposal(
-    proposal_id="tax_reform_2024",
-    title="Reduce Tax Rate to 10%",
-    description="Proposal to reduce realm tax rate",
-    proposer=User["admin"],
-    status="voting",
-    required_threshold=0.51
-)
-```
-→ [Governance Tutorial](./reference/GOVERNANCE_TUTORIAL.md)
-
-### Build an Extension
-```bash
-# 1. Create extension structure
-mkdir -p extensions/my_extension/backend
-mkdir -p extensions/my_extension/frontend
-
-# 2. Add manifest.json
-# 3. Implement backend/entry.py
-# 4. Create frontend components
-
-# 5. Install
-realms extension install-from-source
-```
-→ [Extension Guide](../extensions/README.md)
-
----
-
-## 📋 Implementation Guides
-
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [SCHEDULED_TASKS.md](./reference/SCHEDULED_TASKS.md) | Task scheduling architecture and CLI | ✅ Complete |
-| [TASK_ENTITY.md](./reference/TASK_ENTITY.md) | Batch processing for large datasets | ✅ Complete |
-| [METHOD_OVERRIDE_SYSTEM.md](./reference/METHOD_OVERRIDE_SYSTEM.md) | Extension method injection | ✅ Complete |
-| [MULTI_STEP_TASKS_IMPLEMENTATION.md](./reference/MULTI_STEP_TASKS_IMPLEMENTATION.md) | Complex task workflows | ✅ Complete |
-| [REALM_REGISTRATION_GUIDE.md](./reference/REALM_REGISTRATION_GUIDE.md) | Registry integration | ✅ Complete |
-
----
-
-## 📝 Examples
-
-| Example | Description | Documentation |
-|---------|-------------|---------------|
-| **Demo Mundus** | Multi-realm ecosystem with 3 realms and registry | [EXAMPLE_DEMO.md](./reference/EXAMPLE_DEMO.md) |
-| **File Download** | HTTP outcalls to download files from the internet | [EXAMPLE_FILE_DOWNLOAD.md](./reference/EXAMPLE_FILE_DOWNLOAD.md) |
-
-See the [examples/](../examples/) directory for code samples.
-
----
-
-## 🔗 External Resources
-
-- **Main Repository** - [GitHub](https://github.com/smart-social-contracts/realms-gos)
-- **Realm Registry** - [realmsgos.org](https://realmsgos.org)
-- **Sandbox Realm** - [demo.realmsgos.org](https://demo.realmsgos.org)
-- **Internet Computer** - [internetcomputer.org](https://internetcomputer.org)
-
----
-
-## 🆘 Need Help?
-
-- **Troubleshooting** - [Common issues and solutions](./reference/TROUBLESHOOTING.md)
-- **Examples** - [Code examples](../examples/)
-- **Extensions** - [Extension examples](../extensions/)
+| Repository | What it holds |
+|---|---|
+| [realms-extensions](https://github.com/smart-social-contracts/realms-extensions) | First-party extensions (the `extensions/` submodule) |
+| [realms-codices](https://github.com/smart-social-contracts/realms-codices) | First-party codices (the `codices/` submodule) |
+| [Casals](https://github.com/smart-social-contracts/Casals) | Declarative deployment of canister fleets |
+| [basilisk](https://github.com/smart-social-contracts/basilisk) | The Python CDK the backend runs on (`ic-basilisk` on PyPI) |
+| [ic-basilisk-toolkit](https://github.com/smart-social-contracts/ic-basilisk-toolkit) | Cedar engine, tasks and other canister helpers |
+| [file-registry](https://github.com/smart-social-contracts/file-registry) | The canister that stores published extension and codex files |
+| [ic-python-db](https://github.com/smart-social-contracts/ic-python-db) | The entity database over stable memory |

@@ -52,10 +52,10 @@ npm run build
 ## Documentation
 
 Extension authoring guide:
-https://github.com/smart-social-contracts/realms-gos/blob/main/docs/guide/extension-authoring.md
+https://github.com/smart-social-contracts/realms-gos/blob/main/docs/extensions/build-test-publish.md
 
-Bridge protocol reference:
-https://github.com/smart-social-contracts/realms-gos/blob/main/docs/reference/EXTENSION_SANDBOXING.md
+Bridge reference:
+https://github.com/smart-social-contracts/realms-gos/blob/main/docs/extensions/frontend.md
 
 ## License
 

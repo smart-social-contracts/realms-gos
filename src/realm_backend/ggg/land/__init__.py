@@ -1,11 +1,4 @@
-"""Land module - land parcels and zones."""
+"""Land parcels and zones."""
 
-from .land import Land, LandType, LandStatus
+from .land import Land
 from .zone import Zone
-
-__all__ = [
-    "Land",
-    "LandType",
-    "LandStatus",
-    "Zone",
-]

@@ -3,7 +3,9 @@
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { Alert } from 'flowbite-svelte';
-	import { backend, quarterBackend } from '$lib/canisters';
+	import { quarterBackend } from '$lib/canisters';
+	import { quarter, type Reply } from '$lib/realm';
+	import { getFileRegistryCanisterIds } from '$lib/file-registry-client';
 	import { canisterId as backendCanisterId } from '$lib/declarations/realm_backend';
 	import { principal, isAuthenticated } from '$lib/stores/auth';
 	import { userProfiles } from '$lib/stores/profiles';
@@ -21,10 +23,13 @@
 	} from '$lib/extension-loader';
 	import { isPrivilegedExtension } from '$lib/extension-privileged';
 	import { loadExtensionTranslation } from '$lib/i18n';
-	import { getInfraConfig } from '$lib/utils/infraConfig';
-	import { callExtensionFunction, extensionQueryFunctions } from '$lib/utils/extension-query';
 	import { createMarketplaceExtensionBackend } from '$lib/marketplace-extension-backend';
-	import type { RealmExtensionContext } from '$lib/realm-extension-sdk';
+	import {
+		callRealmExtension,
+		extensionResult,
+		realmExtensionBackend,
+		type RealmExtensionContext
+	} from '$lib/realm-extension-sdk';
 	import {
 		getExtensionManifestWithRetry,
 		getInstalledExtensionVersion
@@ -48,6 +53,7 @@
 	import { sidebarConfig } from '$lib/stores/sidebar';
 	import { extensionLoadingMessage } from '$lib/utils/breadcrumb';
 	import { createHostContext } from '$lib/host-bridge';
+	import { settleAuthSession } from '$lib/auth';
 
 	export let extensionId: string;
 
@@ -115,18 +121,13 @@
 		return () => unsubs.forEach((u) => u());
 	}
 
-	let infraConfig: { fileRegistryCanisterId?: string; marketplaceCanisterId?: string } = {};
+	// The realm does not report its file registry or marketplace: the registry is this build's.
+	const infraConfig: { fileRegistryCanisterId?: string; marketplaceCanisterId?: string } = {
+		fileRegistryCanisterId: getFileRegistryCanisterIds()[0] ?? ''
+	};
 
-	async function resolveInfraConfig() {
-		infraConfig = await getInfraConfig();
-	}
-
-	async function buildContext(
-		id: string,
-		version: string,
-		queryFunctions: ReadonlySet<string>
-	): Promise<RealmExtensionContext> {
-		let extensionBackend: typeof backend = quarterBackend;
+	async function buildContext(id: string, version: string): Promise<RealmExtensionContext> {
+		let extensionBackend: unknown = realmExtensionBackend;
 		let marketplaceAdapter: Awaited<ReturnType<typeof createMarketplaceExtensionBackend>> | null =
 			null;
 		if (
@@ -139,56 +140,39 @@
 			).catch(() => null);
 		}
 		if (id === 'market_place' && marketplaceAdapter) {
-			extensionBackend = marketplaceAdapter as unknown as typeof backend;
+			extensionBackend = marketplaceAdapter;
 		}
 
-		function unwrapCallResult(raw: unknown, label: string): unknown {
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res?.success === false) {
-				const denied = parseAccessError(res);
+		async function callExtension(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
+			let reply: Reply;
+			try {
+				reply = await callRealmExtension(id, fn, args);
+			} catch (e) {
+				const friendly = formatDelegationExpiredError(e);
+				if (friendly) throw new Error(friendly);
+				throw e;
+			}
+			if (!reply.ok) {
+				const denied = parseAccessError(reply);
 				if (denied) {
 					runtimeDenied = denied;
 					throw new AccessDeniedError(denied);
 				}
-				throw new Error(res.response ?? `${label} failed`);
+				throw new Error(reply.error);
 			}
-			if (!res?.response) return res;
-			let inner: unknown;
-			try {
-				inner = JSON.parse(res.response);
-			} catch {
-				return res.response;
-			}
-			return inner;
+			return extensionResult(reply);
 		}
-		async function callSync(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
-			let raw: string;
-			try {
-				raw = (await callExtensionFunction(
-					extensionBackend,
-					id,
-					fn,
-					JSON.stringify(args),
-					queryFunctions
-				)) as string;
-			} catch (e) {
-				const friendly = formatDelegationExpiredError(e);
-				if (friendly) throw new Error(friendly);
-				throw e;
-			}
-			return unwrapCallResult(raw, 'extension_sync_call');
-		}
-		async function callAsync(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
-			let raw: string;
-			try {
-				raw = await extensionBackend.extension_async_call(id, fn, JSON.stringify(args));
-			} catch (e) {
-				const friendly = formatDelegationExpiredError(e);
-				if (friendly) throw new Error(friendly);
-				throw e;
-			}
-			return unwrapCallResult(raw, 'extension_async_call');
-		}
+		const callSync = callExtension;
+		const callAsync = callExtension;
+		const declared = new Set(((await getExtensionManifestWithRetry(id))?.operations as string[]) ?? []);
+		const operation =
+			(read: boolean) =>
+			async (name: string, args: Record<string, unknown> = {}): Promise<Reply> =>
+				!declared.has(name)
+					? { ok: false, error: `${id} does not declare the operation ${name} in its manifest` }
+					: read
+						? quarter.read(name, args)
+						: quarter.run(name, args);
 
 		return {
 			...createHostContext(),
@@ -196,6 +180,8 @@
 			version,
 			backend: extensionBackend,
 			marketplace: marketplaceAdapter,
+			read: operation(true),
+			run: operation(false),
 			callSync,
 			callAsync,
 			principal,
@@ -304,11 +290,12 @@
 		let version: string | undefined;
 
 		try {
+			// A deep link mounts before the portal session is restored: the manifest read would be anonymous.
+			await settleAuthSession();
 			let manifest: Awaited<ReturnType<typeof getExtensionManifestWithRetry>>;
 			[version, manifest] = await Promise.all([
 				getInstalledExtensionVersion(id, { fresh: freshManifests }),
-				getExtensionManifestWithRetry(id),
-				resolveInfraConfig()
+				getExtensionManifestWithRetry(id)
 			]);
 
 			const mountMode = resolveExtensionMountMode(version, manifest, isPrivilegedExtension(id));
@@ -337,14 +324,15 @@
 
 			if (mountMode.kind === 'sandboxed') {
 				sandboxed = true;
-				const ctx = await buildContext(id, version, extensionQueryFunctions(manifest));
+				const ctx = await buildContext(id, version);
 				mounted = await mountSandboxedExtension(id, version, mountEl, {
 					manifest: {
 						sdk_version: manifest?.sdk_version as string | undefined,
 						capabilities: manifest?.capabilities as string[] | undefined,
 						entry_access: manifest?.entry_access as
 							| { functions?: Record<string, string> }
-							| undefined
+							| undefined,
+						operations: manifest?.operations
 					},
 					callSync: ctx.callSync,
 					callAsync: ctx.callAsync,
@@ -365,13 +353,15 @@
 				await (mounted as SandboxMountResult).ready;
 				console.debug(`[extension] Sandboxed bridge ready ${id}@${version}`);
 			} else {
-				const ctx = await buildContext(id, version, extensionQueryFunctions(manifest));
+				const ctx = await buildContext(id, version);
 				mounted = await mountExtension(id, version, mountEl, ctx);
 				console.debug(`[extension] Mounted ${id}@${version}`);
 			}
 			status = 'ready';
 		} catch (e: any) {
 			cleanupMounted();
+			// The page moved on while this load was in flight (e.g. setup leaving for the dashboard).
+			if (destroyed) return;
 			const denied =
 				e instanceof AccessDeniedError ? { operation: e.operation } : parseAccessError(e);
 			if (denied) {
@@ -417,7 +407,9 @@
 		}
 	});
 
+	let destroyed = false;
 	onDestroy(() => {
+		destroyed = true;
 		cleanupMounted();
 	});
 </script>

@@ -1,22 +1,22 @@
 /**
  * Sidebar configuration types and constants.
  *
- * The sidebar is resolved by the backend (get_sidebar endpoint) which merges
- * extension manifests, default category ordering, database overrides, and
- * department visibility rules. The frontend simply renders the result.
+ * The sidebar is built by loadSidebar (stores/sidebar.ts) from the realm's
+ * extension_list: the extensions available to the caller, with each one's
+ * sidebar settings (label, icon, category, order, show).
  */
 
 export interface SidebarNavItem {
 	label: string;
 	icon: string;
 	extensionId?: string;
-	/** Backend get_sidebar uses snake_case. */
+	/** loadSidebar uses snake_case. */
 	extension_id?: string;
 	href: string;
 	tooltip?: string;
 }
 
-/** Slim row from realm_backend.get_sidebar_manifests(). */
+/** Slim row per installed extension, as loadSidebar builds it from extension_list. */
 export interface SidebarManifest {
 	id: string;
 	name?: string;
@@ -39,7 +39,7 @@ export interface SidebarConfig {
 	defaultPath: string;
 	/** Codex extension overrides: base system extension id -> replacement id. */
 	extensionOverrides?: Record<string, string>;
-	/** Same get_sidebar_manifests() list the sidebar paints MY REALM from. */
+	/** The rows the sidebar paints MY REALM from. */
 	manifests?: SidebarManifest[];
 }
 

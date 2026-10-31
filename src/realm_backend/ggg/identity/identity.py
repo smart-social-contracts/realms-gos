@@ -1,10 +1,14 @@
-from ic_python_db import Entity, ManyToOne, OneToOne, String, TimestampedMixin
-from ic_python_logging import get_logger
+from ic_python_db import Integer, ManyToOne, String
 
-logger = get_logger("entity.identity")
+from core.db import Row
 
 
-class Identity(Entity, TimestampedMixin):
-    type = String()
-    metadata = String()
+class Identity(Row):
+    __alias__ = "id"
+    id = String()
     human = ManyToOne("Human", "identities")
+    kind = String(default="")
+    issuer = String(default="")
+    ref = String(default="")
+    status = String(default="pending")  # pending | verified | rejected
+    verified_at = Integer(default=0)

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+	DEFAULT_DEMO_NOTICE_EN,
 	filledNoticeTranslationCount,
 	isTokenChoiceSelectable,
 	monetaryUnavailableLabel,
 	NOTICE_LOCALE_SLOTS,
 	noticeTranslationSlots,
+	resolveDemoNoticeBodies,
 	resolveDemoNoticeEnabled,
 	resolveDemoNoticeView,
 	resolveDisableMonetaryTokens,
@@ -34,13 +36,10 @@ describe('hostTestFlags', () => {
 		expect(shouldShowJoinNotice(false, false)).toBe(false);
 	});
 
-	it('keeps REALMS selectable and grays out monetary choices', () => {
-		expect(isTokenChoiceSelectable('REALMS', true)).toBe(true);
-		expect(isTokenChoiceSelectable('ckBTC', true)).toBe(false);
-		expect(isTokenChoiceSelectable('ckUSDC', true)).toBe(false);
-		expect(isTokenChoiceSelectable('ckEURC', true)).toBe(false);
-		expect(isTokenChoiceSelectable('custom', true)).toBe(false);
-		expect(isTokenChoiceSelectable('ckEURC', false)).toBe(true);
+	it('grays out monetary catalog tokens only when they are disabled', () => {
+		expect(isTokenChoiceSelectable(true, true)).toBe(false);
+		expect(isTokenChoiceSelectable(true, false)).toBe(true);
+		expect(isTokenChoiceSelectable(false, true)).toBe(true);
 	});
 
 	it('uses the specified unavailable labels', () => {
@@ -64,6 +63,16 @@ describe('hostTestFlags', () => {
 		expect(view.showPrimary).toBe(false);
 		expect(view.primary).toBe('');
 		expect(view.english).toBe('English notice.');
+	});
+
+	it('seeds the English notice from Legal when the realm stores none', () => {
+		expect(DEFAULT_DEMO_NOTICE_EN).toMatch(/^Before you continue\./);
+		expect(resolveDemoNoticeBodies(undefined)).toEqual({ en: DEFAULT_DEMO_NOTICE_EN });
+		expect(resolveDemoNoticeBodies({ en: '  ', es: 'Aviso.' })).toEqual({
+			en: DEFAULT_DEMO_NOTICE_EN,
+			es: 'Aviso.'
+		});
+		expect(resolveDemoNoticeBodies({ en: 'Our notice.', fr: 7 })).toEqual({ en: 'Our notice.' });
 	});
 
 	it('treats every notice locale except English as a translation slot', () => {

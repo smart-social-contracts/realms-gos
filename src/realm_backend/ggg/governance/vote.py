@@ -1,14 +1,14 @@
-from ic_python_db import Entity, ManyToOne, String, TimestampedMixin
-from ic_python_logging import get_logger
+from ic_python_db import Integer, ManyToOne, String
 
-logger = get_logger("entity.vote")
+from core.db import Row
 
 
-class Vote(Entity, TimestampedMixin):
-    __owner_field__ = "voter"  # realms#282 — SecureORM ownership stamp/protect
-    """Individual vote entity for tracking votes on proposals"""
-
+class Vote(Row):
+    __alias__ = "id"
+    id = String()
     proposal = ManyToOne("Proposal", "votes")
-    voter = ManyToOne("User", "votes")
-    vote_choice = String(max_length=16)  # 'yes', 'no', 'abstain'
-    metadata = String(max_length=256)
+    proposal_id = String(indexed=True)
+    voter = String(indexed=True)
+    cast_by = String(default="")
+    choice = String(default="")  # yes | no | abstain
+    cast_at = Integer(default=0)

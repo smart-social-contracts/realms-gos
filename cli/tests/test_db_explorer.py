@@ -1,6 +1,5 @@
 import json
-from unittest.mock import Mock, patch, MagicMock
-from io import StringIO
+from unittest.mock import patch, MagicMock
 
 import pytest
 import typer
@@ -15,87 +14,50 @@ from realms.cli.commands.db import (
 )
 
 
+def _candid(reply):
+    """A text reply as dfx prints it."""
+    return "(" + json.dumps(json.dumps(reply)) + ")"
+
+
+def _realm(rows_by_entity, export_error=None):
+    """A ``subprocess.run`` stand-in for ``dfx canister call``: ``status`` and paged ``realm_export``."""
+    calls = []
+
+    def run(cmd, **kwargs):
+        name, args = json.loads("[" + cmd[-1][1:-1] + "]")
+        args = json.loads(args)
+        calls.append((cmd[-2], name, args))
+        if name == "status":
+            reply = {"ok": True, "version": "test"}
+        elif export_error:
+            reply = {"ok": False, "error": export_error}
+        else:
+            rows, start, count = rows_by_entity.get(args["entity"], []), args["from"], args["count"]
+            more = start - 1 + count < len(rows)
+            reply = {"ok": True, "entity": args["entity"], "rows": rows[start - 1:start - 1 + count],
+                     "next": start + count if more else None}
+        return MagicMock(returncode=0, stdout=_candid(reply), stderr="")
+
+    run.calls = calls
+    return run
+
+
 class TestCursorDatabaseExplorer:
-    def test_entity_parsing_users(self):
-        """Test that users entity parsing works correctly."""
+    @pytest.mark.parametrize("entity,row", [
+        ("User", {"id": "user1", "nickname": "Test User"}),
+        ("Organization", {"id": "org1", "description": "Test Org"}),
+        ("Mandate", {"id": "mandate1", "title": "Test Mandate"}),
+    ])
+    def test_list_entities_reads_one_realm_export_page(self, entity, row):
         explorer = CursorDatabaseExplorer("local", "realm_backend")
+        realm = _realm({entity: [row]})
 
-        mock_response = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": ['{"_id": "user1", "name": "Test User"}'],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "10", 
-                        "total_items_count": "1",
-                        "total_pages": "1"
-                    }
-                }
-            }
-        }
+        with patch("subprocess.run", side_effect=realm):
+            result = explorer.list_entities(entity, 0, 10)
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = json.dumps(mock_response)
-
-            result = explorer.list_entities("User", 0, 10)
-            assert len(result["items"]) == 1
-            assert result["items"][0]["_id"] == "user1"
-
-    def test_entity_parsing_organizations(self):
-        """Test that organizations entity parsing works correctly."""
-        explorer = CursorDatabaseExplorer("local", "realm_backend")
-
-        mock_response = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": ['{"_id": "org1", "name": "Test Org"}'],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "10", 
-                        "total_items_count": "1",
-                        "total_pages": "1"
-                    }
-                }
-            }
-        }
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = json.dumps(mock_response)
-
-            result = explorer.list_entities("Organization", 0, 10)
-            assert len(result["items"]) == 1
-            assert result["items"][0]["_id"] == "org1"
-
-    def test_entity_parsing_mandates(self):
-        """Test that mandates entity parsing works correctly."""
-        explorer = CursorDatabaseExplorer("local", "realm_backend")
-
-        mock_response = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": ['{"_id": "mandate1", "title": "Test Mandate"}'],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "10", 
-                        "total_items_count": "1",
-                        "total_pages": "1"
-                    }
-                }
-            }
-        }
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = json.dumps(mock_response)
-
-            result = explorer.list_entities("Mandate", 0, 10)
-            assert len(result["items"]) == 1
-            assert result["items"][0]["_id"] == "mandate1"
+        assert result["items"] == [{"_type": entity, "_id": row["id"], **row}]
+        assert result["total_pages"] == 1
+        assert realm.calls == [("read", "realm_export", {"entity": entity, "from": 1, "count": 10})]
 
     def test_navigation_state_initialization(self):
         """Test NavigationState initialization."""
@@ -205,7 +167,7 @@ class TestCursorDatabaseExplorer:
                 explorer.handle_relationship_drilling()
 
                 assert explorer.state.view_mode == "record_detail"
-                assert explorer.state.entity_type.__name__ == "User"
+                assert explorer.state.entity_type.__name__ == "Organization"
 
     def test_render_entity_list(self):
         """Test entity list rendering."""
@@ -262,168 +224,46 @@ class TestCursorDatabaseExplorer:
 class TestDbGetCommand:
     """Test suite for db_get_command function."""
 
-    def test_get_all_users(self):
-        """Test getting all users returns JSON array."""
-        mock_response = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": [
-                        '{"_id": "1", "_type": "User", "id": "user1", "name": "Test User 1"}',
-                        '{"_id": "2", "_type": "User", "id": "user2", "name": "Test User 2"}'
-                    ],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "100",
-                        "total_items_count": "2",
-                        "total_pages": "1"
-                    }
-                }
-            }
-        }
+    USERS = [{"id": "system", "nickname": "System"}, {"id": "user_000", "nickname": "Member"}]
 
+    def _get(self, realm, *args):
         with patch("realms.cli.commands.db.check_dfx_available", return_value=True), \
-             patch("subprocess.run") as mock_run, \
+             patch("subprocess.run", side_effect=realm), \
              patch("builtins.print") as mock_print:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = json.dumps(mock_response)
+            db_get_command(*args)
+        mock_print.assert_called_once()
+        return json.loads(mock_print.call_args[0][0])
 
-            db_get_command("User", None, "local", "realm_backend")
+    def test_get_all_users(self):
+        parsed = self._get(_realm({"User": self.USERS}), "User", None, "local", "realm_backend")
 
-            # Check that JSON was printed
-            mock_print.assert_called_once()
-            output = mock_print.call_args[0][0]
-            parsed = json.loads(output)
-            
-            assert isinstance(parsed, list)
-            assert len(parsed) == 2
-            assert parsed[0]["_id"] == "1"
-            assert parsed[0]["name"] == "Test User 1"
-            assert parsed[1]["_id"] == "2"
+        assert [u["_id"] for u in parsed] == ["system", "user_000"]
+        assert parsed[1] == {"_type": "User", "_id": "user_000", "id": "user_000", "nickname": "Member"}
 
     def test_get_specific_user_by_id(self):
-        """Test getting a specific user by ID returns single JSON object."""
-        mock_response = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": [
-                        '{"_id": "1", "_type": "User", "id": "system", "user_profile": "admin"}',
-                        '{"_id": "2", "_type": "User", "id": "user_000", "user_profile": "member"}'
-                    ],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "1000",
-                        "total_items_count": "2",
-                        "total_pages": "1"
-                    }
-                }
-            }
-        }
+        parsed = self._get(_realm({"User": self.USERS}), "User", "user_000", "local", "realm_backend")
 
-        with patch("realms.cli.commands.db.check_dfx_available", return_value=True), \
-             patch("subprocess.run") as mock_run, \
-             patch("builtins.print") as mock_print:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = json.dumps(mock_response)
-
-            db_get_command("User", "2", "local", "realm_backend")
-
-            # Check that single JSON object was printed
-            mock_print.assert_called_once()
-            output = mock_print.call_args[0][0]
-            parsed = json.loads(output)
-            
-            assert isinstance(parsed, dict)
-            assert parsed["_id"] == "2"
-            assert parsed["id"] == "user_000"
-            assert parsed["user_profile"] == "member"
+        assert parsed["_id"] == "user_000"
+        assert parsed["nickname"] == "Member"
 
     def test_get_case_insensitive_entity_type(self):
-        """Test that entity type matching is case-insensitive."""
-        mock_response = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": ['{"_id": "t1", "_type": "Transfer", "amount": 100}'],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "100",
-                        "total_items_count": "1",
-                        "total_pages": "1"
-                    }
-                }
-            }
-        }
+        parsed = self._get(_realm({"Transfer": [{"id": "t1", "amount": 100}]}), "transfer", None, "local", "realm_backend")
 
-        with patch("realms.cli.commands.db.check_dfx_available", return_value=True), \
-             patch("subprocess.run") as mock_run, \
-             patch("builtins.print") as mock_print:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = json.dumps(mock_response)
-
-            # Test lowercase entity type
-            db_get_command("transfer", None, "local", "realm_backend")
-
-            mock_print.assert_called_once()
-            output = mock_print.call_args[0][0]
-            parsed = json.loads(output)
-            assert len(parsed) == 1
-            assert parsed[0]["_type"] == "Transfer"
+        assert len(parsed) == 1
+        assert parsed[0]["_type"] == "Transfer"
 
     def test_get_invalid_entity_type(self):
-        """Test error handling for invalid entity type."""
-        mock_response = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": [],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "1",
-                        "total_items_count": "0",
-                        "total_pages": "1"
-                    }
-                }
-            }
-        }
-
         with patch("realms.cli.commands.db.check_dfx_available", return_value=True), \
-             patch("subprocess.run") as mock_run, \
+             patch("subprocess.run", side_effect=_realm({})), \
              pytest.raises(typer.Exit) as exc_info:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = json.dumps(mock_response)
-
             db_get_command("InvalidEntityType", None, "local", "realm_backend")
 
         assert exc_info.value.exit_code == 1
 
     def test_get_entity_id_not_found(self):
-        """Test error handling when specific entity ID is not found."""
-        mock_response = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": [
-                        '{"_id": "1", "_type": "User", "id": "user1"}',
-                        '{"_id": "2", "_type": "User", "id": "user2"}'
-                    ],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "1000",
-                        "total_items_count": "2",
-                        "total_pages": "1"
-                    }
-                }
-            }
-        }
-
         with patch("realms.cli.commands.db.check_dfx_available", return_value=True), \
-             patch("subprocess.run") as mock_run, \
+             patch("subprocess.run", side_effect=_realm({"User": self.USERS})), \
              pytest.raises(typer.Exit) as exc_info:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = json.dumps(mock_response)
-
             db_get_command("User", "999", "local", "realm_backend")
 
         assert exc_info.value.exit_code == 1
@@ -440,103 +280,21 @@ class TestDbGetCommand:
         assert exc_info.value.exit_code == 1
 
     def test_get_with_pagination(self):
-        """Test pagination handling when fetching all entities."""
-        # Mock two pages of results
-        mock_response_page1 = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": [
-                        '{"_id": "1", "_type": "User", "id": "user1"}',
-                        '{"_id": "2", "_type": "User", "id": "user2"}'
-                    ],
-                    "pagination": {
-                        "page_num": "0",
-                        "page_size": "100",
-                        "total_items_count": "3",
-                        "total_pages": "2"
-                    }
-                }
-            }
-        }
+        users = [{"id": f"user{i}"} for i in range(150)]
+        realm = _realm({"User": users})
 
-        mock_response_page2 = {
-            "success": True,
-            "data": {
-                "objectsListPaginated": {
-                    "objects": [
-                        '{"_id": "3", "_type": "User", "id": "user3"}'
-                    ],
-                    "pagination": {
-                        "page_num": "1",
-                        "page_size": "100",
-                        "total_items_count": "3",
-                        "total_pages": "2"
-                    }
-                }
-            }
-        }
+        parsed = self._get(realm, "User", None, "local", "realm_backend")
 
-        with patch("realms.cli.commands.db.check_dfx_available", return_value=True), \
-             patch("subprocess.run") as mock_run, \
-             patch("builtins.print") as mock_print:
-            # First call for status check, then alternating pages
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "status ok"
-            
-            def side_effect(*args, **kwargs):
-                result = MagicMock()
-                result.returncode = 0
-                # Check if this is a status call or entity call
-                if "status" in str(args[0]):
-                    result.stdout = "status ok"
-                else:
-                    # Alternate between page responses based on call count
-                    if mock_run.call_count <= 2:
-                        result.stdout = json.dumps(mock_response_page1)
-                    else:
-                        result.stdout = json.dumps(mock_response_page2)
-                return result
-            
-            mock_run.side_effect = side_effect
-
-            db_get_command("User", None, "local", "realm_backend")
-
-            # Check that all items from both pages were included
-            mock_print.assert_called_once()
-            output = mock_print.call_args[0][0]
-            parsed = json.loads(output)
-            
-            assert isinstance(parsed, list)
-            assert len(parsed) == 3
-            assert parsed[0]["_id"] == "1"
-            assert parsed[1]["_id"] == "2"
-            assert parsed[2]["_id"] == "3"
+        assert [u["_id"] for u in parsed] == [u["id"] for u in users]
+        assert [args for _, name, args in realm.calls if name == "realm_export"] == [
+            {"entity": "User", "from": 1, "count": 100},
+            {"entity": "User", "from": 101, "count": 100},
+        ]
 
     def test_get_backend_error_response(self):
-        """Test handling of backend error responses."""
-        mock_response = {
-            "success": False,
-            "data": {
-                "error": "Backend error occurred"
-            }
-        }
-
         with patch("realms.cli.commands.db.check_dfx_available", return_value=True), \
-             patch("subprocess.run") as mock_run, \
+             patch("subprocess.run", side_effect=_realm({}, export_error="db.export denied")), \
              pytest.raises(typer.Exit) as exc_info:
-            # First call succeeds (status), second fails (entity query)
-            def side_effect(*args, **kwargs):
-                result = MagicMock()
-                result.returncode = 0
-                if "status" in str(args[0]):
-                    result.stdout = "status ok"
-                else:
-                    result.stdout = json.dumps(mock_response)
-                return result
-            
-            mock_run.side_effect = side_effect
-
             db_get_command("User", None, "local", "realm_backend")
 
         assert exc_info.value.exit_code == 1

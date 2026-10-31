@@ -1,20 +1,12 @@
-from ic_python_db import (
-    Entity,
-    Integer,
-    ManyToMany,
-    ManyToOne,
-    OneToMany,
-    OneToOne,
-    String,
-    TimestampedMixin,
-)
-from ic_python_logging import get_logger
+from ic_python_db import ManyToOne, String
 
-logger = get_logger("entity.trade")
+from core.db import Row
 
 
-class Trade(Entity, TimestampedMixin):
+class Trade(Row):
+    __alias__ = "id"
+    id = String()
     contract = ManyToOne("Contract", "trades")
-    metadata = String(max_length=256)
-    transfer_1 = OneToOne("Transfer", "trade")
-    transfer_2 = OneToOne("Transfer", "trade")
+    leg_a = String(default="")
+    leg_b = String(default="")
+    status = String(default="pending")

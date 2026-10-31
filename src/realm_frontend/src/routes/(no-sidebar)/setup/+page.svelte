@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
+	import { hrefWithPreservedTestIdentityParams } from '$lib/test-identity-query.ts';
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
-	import { Button, Heading, Input, Label, P } from 'flowbite-svelte';
+	import { Button, Heading, Input, Label, P, Spinner } from 'flowbite-svelte';
 	import {
 		LAUNCH_STATUS_POLL_MS,
 		applySetupDraftToken,
@@ -41,12 +42,9 @@
 	import {
 		CUSTOM_TOKEN_ID,
 		configureTokenPayload,
-		fetchDefaultTreasuryToken,
 		matchSharedToken,
 		completeCatalogTokenDraft,
-		tokenDraftFromChoice,
-		wizardTokenOptions,
-		type SharedTokenOption
+		tokenDraftFromChoice
 	} from '$lib/setup/sharedTokens';
 	import { lookupLedgerSymbol } from '$lib/setup/ledgerSymbol';
 	import { fileToCompressedDataUrl, urlToCompressedDataUrl } from '$lib/utils/imageDataUrl';
@@ -94,10 +92,7 @@
 	let busy = $state(false);
 	let error = $state('');
 	let setupState = $state<SetupState | null>(null);
-	let defaultToken = $state<SharedTokenOption | null>(null);
-	let defaultTokenError = $state('');
-	let defaultTokenEnvironment = '';
-	const tokenOptions = $derived(wizardTokenOptions(defaultToken));
+	const tokenOptions = $derived(setupState?.token_catalog ?? []);
 	let launchState = $state<SetupLaunchState | null>(null);
 	let codices = $state<AvailableCodex[]>([]);
 	let selectedCodexId = $state('');
@@ -108,6 +103,7 @@
 	let tokenIndexerId = $state('');
 	let tokenChoice = $state('');
 	let symbolLookupTimer: ReturnType<typeof setTimeout> | null = null;
+	let symbolReading = $state(false);
 	let primaryColor = $state('#3b82f6');
 	let logoPreview = $state('');
 	let backgroundPreview = $state('');
@@ -115,6 +111,8 @@
 	let backgroundDataUrl = $state('');
 	let welcomeMessage = $state('');
 	let manifesto = $state('');
+	/** Days new realm-wide proposals stay open (7 unless the founder changes it; 0: open until decided). */
+	let votingWindowDays = $state(7);
 	let welcomeMessageTouched = $state(false);
 	let manifestoTouched = $state(false);
 	let leftSetup = $state(false);
@@ -325,7 +323,6 @@
 			}
 			syncTokenChoice();
 		}
-		void loadDefaultTreasury(state.gos_environment || '');
 
 		const branding = state.draft?.branding ?? state.branding;
 		if (branding) {
@@ -351,6 +348,8 @@
 		if (!manifestoTouched) {
 			manifesto = resolveManifestoFromState(state);
 		}
+		const draftWindow = state?.draft?.governance?.voting_window;
+		if (typeof draftWindow === 'number') votingWindowDays = draftWindow / 86400;
 
 		const draftLanguages = state.draft?.languages;
 		const enabled =
@@ -636,25 +635,12 @@
 		tokenChoice = matched?.id ?? CUSTOM_TOKEN_ID;
 	}
 
-	async function loadDefaultTreasury(environment: string) {
-		const name = environment.trim().toLowerCase();
-		if (!name || defaultTokenEnvironment === name) return;
-		defaultTokenEnvironment = name;
-		try {
-			defaultToken = await fetchDefaultTreasuryToken();
-			defaultTokenError = '';
-		} catch (e) {
-			defaultToken = null;
-			defaultTokenError = e instanceof Error ? e.message : 'Could not load the Realms token';
-		}
-		syncTokenChoice();
-	}
-
 	function scheduleSymbolLookup() {
 		tokenSymbol = '';
 		if (symbolLookupTimer) clearTimeout(symbolLookupTimer);
 		const ledger = tokenCanisterId.trim();
-		if (!ledger.endsWith('-cai')) return;
+		symbolReading = ledger.endsWith('-cai');
+		if (!symbolReading) return;
 		symbolLookupTimer = setTimeout(async () => {
 			try {
 				const symbol = await lookupLedgerSymbol(ledger);
@@ -665,6 +651,8 @@
 				if (tokenCanisterId.trim() !== ledger) return;
 				tokenSymbol = '';
 				error = e instanceof Error ? e.message : 'Could not read the ledger symbol';
+			} finally {
+				if (tokenCanisterId.trim() === ledger) symbolReading = false;
 			}
 		}, 400);
 	}
@@ -712,7 +700,8 @@
 	}
 
 	function selectTokenChoice(id: string) {
-		if (!isTokenChoiceSelectable(id, $testModeDisableMonetaryTokens)) return;
+		const monetary = tokenOptions.find((t) => t.id === id)?.monetary ?? false;
+		if (!isTokenChoiceSelectable(monetary, $testModeDisableMonetaryTokens)) return;
 		tokenChoice = id;
 		if (id === CUSTOM_TOKEN_ID) {
 			tokenSymbol = '';
@@ -882,6 +871,12 @@
 					{ refresh: false }
 				);
 			}
+			const days = Number(votingWindowDays);
+			if (!Number.isFinite(days) || days < 0) {
+				error = 'The voting window is a number of days, 0 or more';
+				return;
+			}
+			await persistDraft({ governance: { voting_window: Math.round(days * 86400) } }, { refresh: false });
 			const result = await startSetupLaunch();
 			if (!result.success) {
 				error = result.error || 'Could not start launch';
@@ -899,9 +894,12 @@
 		}
 	}
 
+	// Not '/': it sends a member (the founder, once launched) to their own dashboard.
 	function goToPublicDashboard() {
 		leftSetup = true;
-		void goto('/', { replaceState: true });
+		void goto(hrefWithPreservedTestIdentityParams(window.location.search, '/extensions/public_dashboard'), {
+			replaceState: true
+		});
 	}
 
 	function generateBrandingFromIdentity() {
@@ -1014,7 +1012,7 @@
 				if (state.status !== 'setup') {
 					leftSetup = true;
 					await setupStateStore.refresh();
-					void goto('/', { replaceState: true });
+					goToPublicDashboard();
 					return;
 				}
 				if (state.launch) {
@@ -1344,9 +1342,6 @@
 					<P class="text-gray-600">
 						{$_('setup.wizard.token_help')}
 					</P>
-					{#if defaultTokenError}
-						<P class="text-sm text-red-700">{defaultTokenError}</P>
-					{/if}
 					<TokenChoiceList
 						options={tokenOptions}
 						selectedId={tokenChoice}
@@ -1361,7 +1356,6 @@
 								id="token-canister"
 								bind:value={tokenCanisterId}
 								placeholder="Ledger canister id"
-								disabled={$testModeDisableMonetaryTokens}
 								oninput={scheduleSymbolLookup}
 							/>
 						</div>
@@ -1371,18 +1365,20 @@
 								id="token-indexer"
 								bind:value={tokenIndexerId}
 								placeholder="Index canister id"
-								disabled={$testModeDisableMonetaryTokens}
 							/>
 						</div>
 						<div class="setup-wizard__field">
-							<Label for="token-symbol">{$_('setup.wizard.token_symbol')}</Label>
-							<Input
-								id="token-symbol"
-								value={tokenSymbol}
-								placeholder="Read from the ledger"
-								readonly
-								disabled={$testModeDisableMonetaryTokens}
-							/>
+							<Label>{$_('setup.wizard.token_symbol')}</Label>
+							<p class="setup-wizard__symbol" aria-live="polite">
+								{#if symbolReading}
+									<Spinner size="4" />
+									<span class="text-gray-500">Reading from the ledger…</span>
+								{:else if tokenSymbol}
+									<strong>{tokenSymbol}</strong>
+								{:else}
+									<span class="text-gray-500">Read from the ledger once you enter its canister id</span>
+								{/if}
+							</p>
 						</div>
 					{/if}
 				</section>
@@ -1584,6 +1580,27 @@
 									{summaryLanguages.map((id) => localeLabel(id)).join(', ') || localeLabel('en')}
 								</strong>
 								<em>{$_('setup.wizard.review_primary')}: {localeLabel(summaryPrimaryLanguage)}</em>
+							</li>
+							<li>
+								<label for="voting-window-days">
+									{$_('setup.wizard.review_voting_window', { default: 'Voting window (days)' })}
+								</label>
+								<strong>
+									<input
+										id="voting-window-days"
+										class="setup-wizard__review-input"
+										type="number"
+										min="0"
+										step="any"
+										bind:value={votingWindowDays}
+										disabled={!!launchState && !launchIdle}
+									/>
+								</strong>
+								<em>
+									{$_('setup.wizard.review_voting_window_help', {
+										default: '0: a vote stays open until its outcome is certain'
+									})}
+								</em>
 							</li>
 							<li>
 								<span>{$_('setup.wizard.review_color')}</span>
@@ -2085,6 +2102,13 @@
 		gap: 0.75rem;
 	}
 
+	.setup-wizard__review-input {
+		width: 6rem;
+		padding: 0.25rem 0.5rem;
+		border: 1px solid #d1d5db;
+		border-radius: 0.375rem;
+	}
+
 	.setup-wizard__review-list li {
 		display: grid;
 		gap: 0.15rem;
@@ -2469,6 +2493,14 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
+	}
+
+	.setup-wizard__symbol {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-height: 1.5rem;
+		font-size: 0.875rem;
 	}
 
 	.setup-wizard__version-select {

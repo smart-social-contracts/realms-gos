@@ -1,9 +1,8 @@
-import { writable } from 'svelte/store';
-// @ts-ignore
-import { backend } from '$lib/canisters';
+import { get, writable } from 'svelte/store';
+import { read, run, must, RealmError } from '$lib/realm';
+import { settleAuthSession } from '$lib/auth.js';
+import { isAuthenticated } from '$lib/stores/auth.js';
 import { singleFlight } from '../utils/singleFlight';
-import { callExtensionFunction, extensionQueryFunctions } from '../utils/extension-query';
-import { peekExtensionManifest } from '../utils/extension-manifest';
 
 export interface NotificationItem {
     id: string;
@@ -20,80 +19,94 @@ export interface NotificationItem {
     color?: string;
 }
 
+// Signed in, the realm answers 'sign in first' until the signed actor lands: ask again after these delays.
+const SIGNED_ACTOR_WAIT_MS = [500, 1000, 2000, 4000];
+
 export const notifications = writable<NotificationItem[]>([]);
 export const unreadCount = writable<number>(0);
 
-// The sidebar layout reloads on mount and on every navigation, so the first
-// render fired two identical (update) calls; share the one in flight.
-const sharedLoad = singleFlight(fetchNotifications);
-
-export function loadNotifications(): Promise<void> {
-    return sharedLoad();
+function setRead(id: string | null, read: boolean) {
+    notifications.update(items => {
+        const updated = items.map(item => (id === null || item.id === id ? { ...item, read } : item));
+        unreadCount.set(updated.filter(n => !n.read).length);
+        return updated;
+    });
 }
 
-async function fetchNotifications(): Promise<void> {
+async function fetchNotifications(): Promise<NotificationItem[]> {
+    const items: NotificationItem[] = [];
+    let from: number | null = 1;
+    while (from) {
+        const page = await must(read('notification_list', { from, count: 100 }));
+        for (const n of page.notifications) {
+            items.push({
+                id: n.id,
+                title: n.title,
+                message: n.body,
+                timestamp_ms: n.at * 1000,
+                read: n.read,
+                sender: n.sender,
+                href: n.href
+            });
+        }
+        from = page.next;
+    }
+    return items;
+}
+
+async function loadOnce() {
     try {
-        console.log('[notifications] Loading notifications...');
-        // Candid signature is positional: (extension_name, function_name, args)
-        const result = await callExtensionFunction(
-            backend,
-            'notifications',
-            'get_notifications',
-            '{}',
-            extensionQueryFunctions(peekExtensionManifest('notifications')),
-        ) as any;
-        console.log('[notifications] Raw result:', result);
-        // ExtensionCallResponse is { response: string, success: bool }
-        const responseStr = result.response || result;
-        console.log('[notifications] Response string:', responseStr);
-        const notificationData = typeof responseStr === 'string' ? JSON.parse(responseStr) : responseStr;
-        console.log('[notifications] Parsed data:', notificationData);
-        console.log('[notifications] Notifications array:', notificationData.notifications);
-        console.log('[notifications] Unread count:', notificationData.unread_count);
-        notifications.set(notificationData.notifications || []);
-        unreadCount.set(notificationData.unread_count || 0);
+        await settleAuthSession();
+        if (!get(isAuthenticated)) {
+            notifications.set([]);
+            unreadCount.set(0);
+            return;
+        }
+        let items: NotificationItem[] = [];
+        for (const wait of [...SIGNED_ACTOR_WAIT_MS, null]) {
+            try {
+                items = await fetchNotifications();
+                break;
+            } catch (error) {
+                if (wait === null || !(error instanceof RealmError && error.message === 'sign in first')) throw error;
+                await new Promise((resolve) => setTimeout(resolve, wait));
+            }
+        }
+        notifications.set(items);
+        unreadCount.set(items.filter(n => !n.read).length);
     } catch (error) {
         console.error('[notifications] Failed to load notifications:', error);
-        // Set empty data on error
         notifications.set([]);
         unreadCount.set(0);
     }
 }
 
+// The sidebar layout reloads on mount and on every navigation, so the first
+// render fired two identical loads; share the one in flight.
+const sharedLoad = singleFlight(loadOnce);
+
+export function loadNotifications(): Promise<void> {
+    return sharedLoad();
+}
+
+/** The realm only records reads: marking a notification unread changes this list until the next load. */
 export async function markAsRead(notificationId: string, read: boolean = true) {
     try {
-        await backend.extension_sync_call(
-            'notifications',
-            'mark_as_read',
-            JSON.stringify({ id: notificationId, read })
-        );
-        
-        notifications.update(items => {
-            const updated = items.map(item => 
-                item.id === notificationId ? { ...item, read } : item
-            );
-            unreadCount.set(updated.filter(n => !n.read).length);
-            return updated;
-        });
+        if (read) await must(run('notification_read', { notification: notificationId }));
     } catch (error) {
         console.error('Failed to update notification read status:', error);
-        notifications.update(items => {
-            const updated = items.map(item => 
-                item.id === notificationId ? { ...item, read } : item
-            );
-            unreadCount.set(updated.filter(n => !n.read).length);
-            return updated;
-        });
     }
+    setRead(notificationId, read);
 }
 
 export async function markAllAsRead() {
-    let unread: NotificationItem[] = [];
-    notifications.update((items) => {
-        unread = items.filter((n) => !n.read);
-        return items;
-    });
-    for (const item of unread) {
-        await markAsRead(item.id, true);
+    try {
+        let from: number | null = 1;
+        while (from) {
+            from = (await must(run('notification_read', { all: true, from, count: 500 }))).next;
+        }
+    } catch (error) {
+        console.error('Failed to mark all notifications as read:', error);
     }
+    setRead(null, true);
 }

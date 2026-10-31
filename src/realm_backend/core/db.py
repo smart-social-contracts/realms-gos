@@ -1,0 +1,129 @@
+import json
+
+from ic_python_db import Entity, String
+
+PAGE, PAGE_MAX = 100, 500
+
+
+class Row(Entity):
+    """An entity whose indexed fields are indexed from creation, defaults included."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        if not kw.get("_loaded"):
+            for name in type(self)._indexed_properties():
+                value = getattr(self, name)
+                if value is not None:
+                    self.db().field_index_add(self._type, name, str(value), self._id)
+
+
+class Fail(Exception):
+    """A refusal the caller should see: raised before anything is written. ``kind`` is GGG's error for it, and
+    the reply carries it: Fail itself is a bad argument, the subclasses below the other reasons."""
+
+    kind = "invalid_argument"
+
+
+class NotFound(Fail):
+    """A record the call needs does not exist."""
+
+    kind = "not_found"
+
+
+class Forbidden(Fail):
+    """The caller may not do this, beyond what the permission check decides: not theirs, not a party."""
+
+    kind = "forbidden"
+
+
+class Conflict(Fail):
+    """The call contradicts the current state: already done, closed, still open, in the wrong status."""
+
+    kind = "conflict"
+
+
+class Unavailable(Fail):
+    """The realm cannot do this yet: something it needs is not set up."""
+
+    kind = "unavailable"
+
+
+class Json(String):
+    # Read gives a copy; write by assignment, in-place edits are not saved.
+    def __init__(self, default=None, **kw):
+        super().__init__(default=json.dumps(default), max_length=kw.pop("max_length", 65536), **kw)
+
+    def __get__(self, obj, t=None):
+        return self if obj is None else json.loads(super().__get__(obj, t) or "null")
+
+    def __set__(self, obj, value):
+        super().__set__(obj, json.dumps(value))
+
+
+def find(cls, key):
+    row = cls[str(key)] if key not in (None, "") else None
+    if row is None:
+        raise NotFound(f"unknown {cls.__name__} '{key}'")
+    return row
+
+
+def next_id(cls, prefix):
+    return f"{prefix}-{cls.max_id() + 1}"
+
+
+def each(cls, field, value):
+    """Every row whose indexed ``field`` equals ``value``, a page at a time: only where the matches are bounded."""
+    cursor = 1
+    while cursor is not None:
+        rows, cursor = cls.find_by(field, value, from_id=cursor, count=PAGE)
+        yield from rows
+
+
+def window(args, most=PAGE_MAX):
+    """``from`` (an id, default 1) and ``count`` (default PAGE, at most ``most``) of a paginated call."""
+    return max(1, int(args.get("from") or 1)), max(1, min(int(args.get("count") or PAGE), most))
+
+
+def page(cls, args, keep=lambda row: True):
+    """One id range of ``cls`` (``from``, ``count``), filtered by ``keep``; ``next`` continues it."""
+    start, count = window(args)
+    rows = [r for r in cls.load_some(start, count) if keep(r)]
+    more = start + count <= cls.max_id()
+    return rows, (start + count if more else None)
+
+
+def page_by(cls, field, value, args, most=PAGE_MAX):
+    """One page of the rows whose indexed ``field`` is ``value`` (``from``, ``count``); ``next`` continues it."""
+    start, count = window(args, most)
+    return cls.find_by(field, value, from_id=start, count=count)
+
+
+def first(cls, field, value):
+    """The row with the lowest id whose indexed ``field`` is ``value``, or None."""
+    rows, _ = cls.find_by(field, value, count=1)
+    return rows[0] if rows else None
+
+
+def ref(row):
+    return f"{type(row).__name__}:{row.id}" if row is not None else ""
+
+
+def deref(text):
+    import ggg
+
+    kind, _, key = (text or "").partition(":")
+    cls = getattr(ggg, kind, None)
+    if not (isinstance(cls, type) and issubclass(cls, Entity)):
+        raise Fail(f"unknown reference '{text}'")
+    return find(cls, key)
+
+
+def view(row, *fields):
+    """A row as plain data: the named fields, or every serializable one."""
+    data = row.serialize()
+    data.pop("_type", None)
+    data.pop("_id", None)
+    for k, v in list(data.items()):
+        if isinstance(v, str) and v[:1] in "[{" and isinstance(getattr(type(row), k, None), Json):
+            data[k] = json.loads(v)
+    return {k: data.get(k) for k in fields} if fields else data

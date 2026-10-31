@@ -168,7 +168,7 @@
       "version": "Version",
       "official_repository": "Official repository",
       "token_title": "Token",
-      "token_help": "Choose the Realms token for this environment, ckBTC, ckUSDC, or your own ICRC-1 ledger.",
+      "token_help": "Choose a token, or add your own ICRC-1 ledger.",
       "token_symbol": "Token symbol",
       "ledger_canister": "Ledger canister ID",
       "index_canister": "Index canister ID",

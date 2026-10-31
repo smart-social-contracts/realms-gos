@@ -1,4 +1,8 @@
-import { backend } from '$lib/canisters';
+import { read, must } from '$lib/realm';
+import {
+	getExtensionManifest as getPublishedManifest,
+	getFileRegistryCanisterIds
+} from '$lib/file-registry-client';
 
 export interface ExtensionManifestInfo {
 	name: string;
@@ -13,8 +17,8 @@ export interface ExtensionManifestInfo {
 	sdk_version?: string;
 	capabilities?: string[];
 	entry_access?: { functions?: Record<string, string> };
-	/** Side-effect-free functions the frontend may call via the `extension_call` query. */
-	query_functions?: string[];
+	/** The realm operations the installed extension may call. */
+	operations?: string[];
 	[key: string]: unknown;
 }
 
@@ -69,10 +73,39 @@ export function parseExtensionIdFromPath(pathname: string): string | null {
 	return match?.[1] ?? null;
 }
 
+/**
+ * Every installed extension: its row in the realm (version, menu settings, access) over the
+ * manifest.json it was published with, which the realm does not return (runtime, sdk_version,
+ * capabilities, description…). That manifest comes from this build's file registry, when it has one.
+ */
 async function fetchExtensionManifestsOnce(): Promise<Record<string, ExtensionManifestInfo>> {
-	const raw = await backend.list_runtime_extensions();
-	const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-	return parsed?.all_manifests ?? {};
+	const rows: Record<string, any>[] = [];
+	let from: number | null = 1;
+	while (from) {
+		const page = await must(read('extension_list', { from, count: 100 }));
+		rows.push(...page.extensions);
+		from = page.next;
+	}
+	const [registry] = getFileRegistryCanisterIds();
+	const manifests = await Promise.all(
+		rows.map(async (e): Promise<[string, ExtensionManifestInfo]> => {
+			const published = registry ? await getPublishedManifest(registry, e.id, e.version) : null;
+			return [
+				e.id,
+				{
+					name: e.id,
+					...published,
+					...e.manifest,
+					...e.sidebar,
+					id: e.id,
+					version: e.version,
+					operations: e.operations ?? [],
+					profiles: e.access?.profiles ?? []
+				}
+			];
+		})
+	);
+	return Object.fromEntries(manifests);
 }
 
 export async function fetchExtensionManifests(): Promise<Record<string, ExtensionManifestInfo>> {
@@ -136,7 +169,7 @@ export async function getExtensionManifestWithRetry(
 
 /**
  * Installed version of an extension from the shared manifest cache, so a
- * navigation does not wait on its own list_runtime_extensions round trip.
+ * navigation does not wait on its own extension_list round trip.
  * A miss (e.g. installed during this session) refetches once; `fresh`
  * bypasses the cache entirely (e.g. retrying after a stale bundle failed).
  */
@@ -149,11 +182,6 @@ export async function getInstalledExtensionVersion(
 	if (version || fresh) return version;
 	clearExtensionManifestCache();
 	return (await fetchExtensionManifests())[extId]?.version;
-}
-
-/** Cached manifest only: never triggers a list_runtime_extensions round trip. */
-export function peekExtensionManifest(extId: string): ExtensionManifestInfo | null {
-	return cache?.[extId] ?? null;
 }
 
 export function clearExtensionManifestCache(): void {

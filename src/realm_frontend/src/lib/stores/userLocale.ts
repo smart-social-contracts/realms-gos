@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { applyResolvedLocale } from '$lib/i18n';
+import { read, must } from '$lib/realm';
 
 /** Personal locale override from user private_data. Empty = use realm primary. */
 export const userLocale = writable('');
@@ -25,20 +26,11 @@ export function applyStoredUserLocale(
 	});
 }
 
-export async function refreshUserLocale(actor: {
-	get_my_user_status?: () => Promise<any>;
-}): Promise<void> {
-	if (!actor?.get_my_user_status) return;
+/** ``_actor`` is ignored: the locale comes from ``read('me')`` on the realm backend. */
+export async function refreshUserLocale(_actor?: unknown): Promise<void> {
 	try {
-		const response = await actor.get_my_user_status();
-		const raw = response?.data?.userGet?.private_data;
-		let parsed: unknown = {};
-		if (typeof raw === 'string' && raw) {
-			parsed = JSON.parse(raw);
-		} else if (raw && typeof raw === 'object') {
-			parsed = raw;
-		}
-		const locale = localeFromPrivateData(parsed);
+		const raw = (await must(read('me'))).private_data;
+		const locale = localeFromPrivateData(typeof raw === 'string' && raw ? JSON.parse(raw) : {});
 		userLocale.set(locale);
 		const { get } = await import('svelte/store');
 		const { realmInfo } = await import('$lib/stores/realmInfo');
