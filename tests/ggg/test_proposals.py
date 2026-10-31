@@ -2,8 +2,13 @@ import fake_chain
 import world
 from api import proposals
 from core import op
-from ggg import Delegation, Department, Mandate, Proposal, Vote
+from ggg import Delegation, Department, Mandate, Proposal, Realm, Vote
 from kit import call, denied, later, ok
+
+
+@op.op("proposal.vote", delegable=True, governed=lambda a: Department["Infrastructure"])
+def t_governed_whoami(c, args):
+    return {"user": c.user, "by": c.by}
 
 
 def vote_all(proposal, choice, *voters):
@@ -81,6 +86,61 @@ def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
     assert Mandate.count() == 1 and Mandate["M-1"].executor.id == "Infrastructure"
     assert "no accepted action" in call("proposal_execute", "ctl", proposal=p)["error"]
     assert Proposal[p].status == "executed"
+
+
+def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
+    world.build()
+    realm_wide = [("mandate_create", {"title": "Road works", "executor": "Infrastructure"}),
+                  ("governance_update", {"threshold": 0, "voting_window": 1})]
+    for name, args in realm_wide:
+        out = call("proposal_create", "carla", title=name, department="Infrastructure", action={"op": name, "args": args})
+        assert not out["ok"] and out["kind"] == "forbidden" and "only a realm-wide proposal" in out["error"]
+    assert call("proposal_create", "carla", title="x", department="Infrastructure",
+                action={"op": "contract_create", "args": {"title": "C"}})["kind"] == "forbidden"
+    assert Proposal.count() == 0
+
+
+def test_a_stored_department_action_outside_the_department_fails_without_running():
+    world.build()
+    for name, args in (("mandate_create", {"title": "Road works"}), ("governance_update", {"threshold": 0})):
+        p = ok("proposal_create", "carla", title=name, department="Infrastructure")["proposal"]
+        Proposal[p].action = {"op": name, "args": args}
+        out = ok("proposal_vote", "carla", proposal=p, choice="yes")
+        assert out["status"] == "failed" and "only a realm-wide proposal" in Proposal[p].result["error"]
+    assert Mandate.count() == 0 and "governance" not in (Realm["1"].manifest_data or {})
+
+
+def test_a_department_proposal_carries_actions_its_department_governs():
+    world.build()
+    Department(id="Roads", parent=Department["Infrastructure"])
+    for parent in ("Infrastructure", "Roads"):
+        action = {"op": "department_create", "args": {"department": f"{parent} crew", "parent": parent}}
+        p = ok("proposal_create", "carla", title="crew", department="Infrastructure", action=action)["proposal"]
+        assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "executed"
+        assert Department[f"{parent} crew"].parent.id == parent
+
+
+def test_a_realm_wide_proposal_carries_any_action():
+    world.build()
+    action = {"op": "mandate_create", "args": {"title": "Road works"}}
+    p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
+    vote_all(p, "yes", *world.PEOPLE)
+    later(8 * 86400)
+    ok("proposal_finalize", "ctl", proposal=p)
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+
+
+def test_a_governed_call_under_power_of_attorney_replays_as_the_grantor():
+    world.build()
+    world.policy(Department["Infrastructure"], 2, 3)
+    Department["Infrastructure"].head = "bob"
+    Delegation(id="d1", grantor="carla", delegate="claude-conn", status="active",
+               scope={"operations": ["proposal.vote"]}, expires_at=fake_chain.now() + 86400)
+    p = ok("t_governed_whoami", "claude-conn", on_behalf_of="carla")["proposal"]
+    assert (Proposal[p].proposer, Proposal[p].on_behalf_of) == ("carla", "carla")
+    vote_all(p, "yes", "carla", "bob")
+    assert Proposal[p].status == "executed"
+    assert Proposal[p].result["user"] == Proposal[p].result["by"] == "carla"
 
 
 def test_an_action_cannot_act_on_behalf_of_a_member():

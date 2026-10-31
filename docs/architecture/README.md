@@ -91,7 +91,7 @@ back every change of the call. Details: [operations](operations.md).
 | Extension backend | `extension_call` → sandbox → `rpc(op, …)` | `extension` | The calling user's permissions and the extension's declared ops |
 | Extension UI | bridge → `read` / `run` | `user` | The declared ops (in the bridge) and the user's permissions |
 | Codex hook | effects returned by the hook | `codex` | The codex's declared capabilities |
-| Passed proposal | replay of its action | `replay` | Nothing more: the vote was the authorization |
+| Passed proposal | replay of its action, as the proposer (the grantor, under power of attorney) | `replay` | Nothing more: the vote was the authorization, within the proposal's department |
 | REPL | `shell` op → sandbox → `ops.<name>()` | `shell` | The caller's permissions |
 | Another quarter | `run` from a registered quarter | `user` | `quarter.sync` |
 

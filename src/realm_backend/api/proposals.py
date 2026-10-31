@@ -39,12 +39,26 @@ def window():
 
 
 def check_action(action):
-    """An action must name a known operation and no ``on_behalf_of``: it runs as the realm's governance, not as a
-    member picked by whoever filed it."""
+    """An action must name a known operation and no ``on_behalf_of``: it runs once accepted as its proposer (see
+    run_action), not as a member picked by whoever filed it."""
     if action.get("op") not in ops():
         raise Fail(f"unknown operation '{action.get('op')}'")
     if "on_behalf_of" in (action.get("args") or {}):
-        raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, under the realm's authority")
+        raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, as its proposer")
+
+
+def check_scope(department, action):
+    """A department's vote only carries actions that department governs, or one under it: the vote of a few seats
+    is not the realm's. A realm-wide proposal (the root department) may carry any action."""
+    if department is None or department.is_root:
+        return
+    governed = (ops().get(action["op"]) or {}).get("governed")
+    governing = governed(action.get("args") or {}) if governed else None
+    while governing is not None:
+        if governing.id == department.id:
+            return
+        governing = governing.parent
+    raise Forbidden(f"{action['op']} is not governed by {department.id}: only a realm-wide proposal can run it")
 
 
 def new_proposal(title, user, by, department, action=None, description=""):
@@ -90,7 +104,13 @@ def close(p, result):
 
 
 def run_action(p):
-    """Run the accepted action as its proposer: the vote is the authority, and the action cannot name anyone else."""
+    """Run the accepted action as its proposer: the vote is the authority, and the action cannot name anyone else.
+    The vote's authority stops at the proposal's department, so an action outside it fails without running."""
+    try:
+        check_scope(p.department, p.action)
+    except Fail as e:
+        p.status, p.result = "failed", {"ok": False, "error": str(e), "kind": e.kind}
+        return
     p.status = "executed"
     out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay", signer=p.proposer,
                               proposal=p.id)
@@ -171,12 +191,14 @@ def outcome(p, final):
 @op("proposal.create", delegable=True, returns="proposal")
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
-    (``{op, args}``, run once accepted). Voting opens at once. Returns ``proposal``.
+    (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
+    governs). Voting opens at once. Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
     if action is not None:
         check_action(action)
+        check_scope(department, action)
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""))
     return {"proposal": p.id}
 

@@ -67,7 +67,7 @@ stateDiagram-v2
 | File | `proposal_create` | `title`, `description`, `department` (default: the realm), optional `action` `{op, args}`. Voting opens at once. |
 | Vote | `proposal_vote` | `choice`: `yes`, `no` or `abstain`. Voting again replaces your vote. Delegable. |
 | Close | `proposal_finalize` | Records accepted or rejected. |
-| Act | `proposal_execute` | Replays the action once, with origin `replay` and the original caller as signer. |
+| Act | `proposal_execute` | Replays the action once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. |
 
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
 it, along with the realm-wide `threshold` and `quorum_percent`.
