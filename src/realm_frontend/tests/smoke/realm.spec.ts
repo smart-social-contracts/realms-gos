@@ -16,10 +16,7 @@ for (const target of loadTargets().filter((t) => t.kind === 'realm')) {
 			// The portal serves the realm's own frontend inside an iframe.
 			const realm = page.frameLocator('iframe');
 			await expect(realm.getByRole('button', { name: SIGN_IN }).first()).toBeVisible();
-			// The dashboard stats come from canister queries, slower than the page shell.
-			await expect(realm.getByText('Proposals', { exact: true }).first()).toBeVisible({
-				timeout: 30_000
-			});
+			await expect(realm.getByText('Proposals', { exact: true }).first()).toBeVisible();
 			await expect(realm.locator(EXTENSION_LINK).first()).toBeAttached();
 			await page.waitForLoadState('networkidle');
 

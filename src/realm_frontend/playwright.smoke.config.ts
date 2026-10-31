@@ -9,6 +9,8 @@ export default defineConfig({
 	forbidOnly: !!process.env.CI,
 	retries: 0,
 	timeout: 2 * 60 * 1000,
+	// Canister-served pages load slowly, most of all on a cold CI runner.
+	expect: { timeout: 30_000 },
 	outputDir: 'test-results/smoke',
 	reporter: [['list'], ['html', { outputFolder: 'playwright-report/smoke', open: 'never' }]],
 	use: {
