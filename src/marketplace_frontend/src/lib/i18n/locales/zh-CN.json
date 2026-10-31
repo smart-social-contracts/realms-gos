@@ -540,6 +540,7 @@
       "noResponse": "Ashoka 没有回复。请稍后再试。",
       "error": "Ashoka 暂时不可用。请稍后再试。",
       "waking": "正在唤醒 Ashoka…",
+      "signedOut": "请登录后向 Ashoka 提问。",
       "suggestions": {
         "gos": "什么是 Realms GOS？",
         "ssc": "什么是 Smart Social Contracts？",

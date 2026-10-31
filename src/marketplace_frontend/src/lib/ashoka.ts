@@ -1,10 +1,16 @@
-/** Ashoka via Geister — general mode (no realm). */
+/** Ashoka via the AI assistant service — general mode (no realm). Needs the user signed in. */
 
-export const GEISTER_HOST = "https://geister-api.realmsgos.dev/";
-export const ASK_URL = `${GEISTER_HOST}api/ask`;
-export const SUGGESTIONS_URL = `${GEISTER_HOST}api/suggestions`;
+import { AI_URL, createAiSession, fetchAsUser } from "./aiSession.ts";
+
+export { SignedOutError } from "./aiSession.ts";
+
+export const ASK_URL = `${AI_URL}api/ask`;
+export const SUGGESTIONS_URL = `${AI_URL}api/suggestions`;
 export const PERSONA = "ashoka";
 export const CHAT_TIMEOUT_MS = 360_000;
+
+// Loaded on first use: auth.ts needs the browser's auth client, which ashoka.test.ts (plain node) cannot import.
+const session = createAiSession(async () => (await import("./auth")).getIdentity());
 
 export type StreamState = {
   text: string;
@@ -70,7 +76,6 @@ export function applyStreamLine(line: string, state: StreamState): void {
 
 export async function askAshoka(opts: {
   question: string;
-  userPrincipal?: string;
   conversationId?: string | null;
   signal?: AbortSignal;
   onUpdate: (state: StreamState) => void;
@@ -86,10 +91,9 @@ export async function askAshoka(opts: {
       title: "Realms GOS",
     },
   };
-  if (opts.userPrincipal) body.user_principal = opts.userPrincipal;
   if (opts.conversationId) body.conversation_id = opts.conversationId;
 
-  const response = await fetch(ASK_URL, {
+  const response = await fetchAsUser(session, ASK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify(body),
@@ -139,22 +143,17 @@ export function parseSuggestions(data: unknown): string[] {
     .slice(0, 5);
 }
 
-export async function fetchAshokaSuggestions(opts: {
-  userPrincipal?: string;
-  signal?: AbortSignal;
-}): Promise<string[]> {
+export async function fetchAshokaSuggestions(opts: { signal?: AbortSignal }): Promise<string[]> {
   const params = new URLSearchParams({
-    user_principal: opts.userPrincipal || "",
     persona: PERSONA,
     network: runtimeNetwork(),
   });
-  const response = await fetch(`${SUGGESTIONS_URL}?${params}`, {
-    headers: { Accept: "application/json" },
-    signal: opts.signal,
-  });
-  if (!response.ok) return [];
   try {
-    return parseSuggestions(await response.json());
+    const response = await fetchAsUser(session, `${SUGGESTIONS_URL}?${params}`, {
+      headers: { Accept: "application/json" },
+      signal: opts.signal,
+    });
+    return response.ok ? parseSuggestions(await response.json()) : [];
   } catch {
     return [];
   }

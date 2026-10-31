@@ -540,6 +540,7 @@
       "noResponse": "Ashoka no respondió. Inténtalo de nuevo en un momento.",
       "error": "Ashoka no está disponible ahora. Inténtalo de nuevo en un momento.",
       "waking": "Despertando a Ashoka…",
+      "signedOut": "Inicia sesión para preguntar a Ashoka.",
       "suggestions": {
         "gos": "¿Qué es Realms GOS?",
         "ssc": "¿Qué son los Smart Social Contracts?",

@@ -53,9 +53,12 @@
 	import { sidebarConfig } from '$lib/stores/sidebar';
 	import { extensionLoadingMessage } from '$lib/utils/breadcrumb';
 	import { createHostContext } from '$lib/host-bridge';
-	import { settleAuthSession } from '$lib/auth';
+	import { getEstablishedIdentity, settleAuthSession } from '$lib/auth';
+	import { createAiSession } from '$lib/ai-session';
 
 	export let extensionId: string;
+
+	const aiSession = createAiSession(getEstablishedIdentity);
 
 	const FULL_BLEED_EXTENSIONS = new Set(['codex_viewer', 'zone_selector', 'land_registry']);
 
@@ -187,6 +190,7 @@
 			principal,
 			isAuthenticated,
 			userProfiles,
+			ai: { session: aiSession },
 			realmInfo,
 			config: {
 				...CONFIG,

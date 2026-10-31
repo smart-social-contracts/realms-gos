@@ -1,9 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { get } from "svelte/store";
   import { _ } from "svelte-i18n";
-  import { principalStore } from "$lib/auth";
-  import { askAshoka, fetchAshokaSuggestions, type StreamState } from "$lib/ashoka";
+  import { askAshoka, fetchAshokaSuggestions, SignedOutError, type StreamState } from "$lib/ashoka";
 
   export let demoUrl: string;
   export let docsUrl: string;
@@ -63,22 +61,20 @@
     await scrollToEnd();
 
     try {
-      const principal = get(principalStore);
-      const reply = await askAshoka({
-        question: trimmed,
-        userPrincipal: principal ? principal.toText() : "",
-        onUpdate: onStream,
-      });
+      const reply = await askAshoka({ question: trimmed, onUpdate: onStream });
       if (!reply) {
         upsertAssistant($_("about.explainer.noResponse"));
       } else {
-        const next = await fetchAshokaSuggestions({
-          userPrincipal: principal ? principal.toText() : "",
-        });
+        const next = await fetchAshokaSuggestions({});
         if (next.length) followUps = next;
       }
     } catch (err) {
-      error = err instanceof Error ? err.message : $_("about.explainer.error");
+      error =
+        err instanceof SignedOutError
+          ? $_("about.explainer.signedOut")
+          : err instanceof Error
+            ? err.message
+            : $_("about.explainer.error");
       const last = messages[messages.length - 1];
       if (last && last.from === "assistant" && !last.text.trim()) {
         messages = messages.slice(0, -1);

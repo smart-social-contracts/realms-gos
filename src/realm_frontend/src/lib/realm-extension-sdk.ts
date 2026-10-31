@@ -160,6 +160,18 @@ export interface RealmExtensionContext {
 	/** The user's profile tags (e.g. ["member", "admin"]). Empty while loading or anonymous. */
 	userProfiles: Readable<string[]>;
 
+	/**
+	 * The AI assistant service. The host signs the user in and keeps the token fresh; an extension
+	 * only gets a token for this service, never a signature. Absent in realm frontends that predate it.
+	 */
+	ai: {
+		/**
+		 * A session token for `Authorization: Bearer`. Pass `{ renew: true }` after a 401.
+		 * Rejects with a "sign in" message when the user is signed out.
+		 */
+		session: (options?: { renew?: boolean }) => Promise<{ token: string; expiresAt: number }>;
+	};
+
 	/** Realm metadata (name, logo, manifesto, quarters, etc.). */
 	realmInfo: Readable<RealmInfo>;
 	/** Host config. Ledger ids are not here: read `backend.read('treasury_view')`. */
