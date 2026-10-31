@@ -446,9 +446,9 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 	});
 });
 
-// gos-as-a-service#58: the job turns "completed", which the portal shows as "your realm is live", while Casals
-// is still uploading the frontend. It runs after the journey above, whose voucher left the founder with credits.
-test.fixme('#58: a realm is live only after its frontend has finished uploading', async ({ page }) => {
+// gos-as-a-service#58: the job turns "completed", which the portal shows as "your realm is live", only once the stand
+// is built: its frontend serves. It runs after the journey above, whose voucher left the founder with credits.
+test('#58: a realm is live only after its frontend has finished uploading', async ({ page }) => {
 	const id = await launchFromPortal(page);
 	let done: Job | undefined;
 	await expect
