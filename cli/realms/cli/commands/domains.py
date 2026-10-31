@@ -32,6 +32,7 @@ from typing import Any, Iterator, Optional
 import requests
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from realms.cli import domain_reg, infomaniak
@@ -442,6 +443,8 @@ def print_outcomes(label: str, outcomes: list[RecordOutcome]) -> None:
     for o in outcomes:
         detail = f" ({o.detail})" if o.detail else ""
         console.print(f"  {label} {o.action:9} {o.record.record_type:11} {o.record.host} = {o.record.value}{detail}")
+        if o.warning:
+            console.print(f"    [yellow]warning: {escape(o.warning)}[/yellow]")
 
 
 def apply_target(

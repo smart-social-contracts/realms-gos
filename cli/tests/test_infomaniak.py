@@ -98,6 +98,18 @@ def _apply(session, host="test.realmsgos.org", canister=CANISTER, **kwargs):
     )
 
 
+class _Failing(_FakeSession):
+    """Answers every call with an error of the given HTTP status."""
+
+    def __init__(self, status):
+        super().__init__()
+        self.status = status
+
+    def request(self, method, url, **kwargs):
+        error = {"code": "not_authorized", "description": "Not authorized."}
+        return _Response({"result": "error", "error": error}, status_code=self.status)
+
+
 class TestCreate:
     def test_empty_zone_gets_the_three_records(self):
         session = _FakeSession()
@@ -269,8 +281,21 @@ class TestNeverDeletes:
         outcomes = _apply(session)
 
         assert session.writes() == []
-        assert "someone-elses-cai" in outcomes[1].detail
+        assert "someone-elses-cai" in outcomes[1].warning
+        assert outcomes[1].detail == ""
         assert "DELETE" not in {m for m, _, _ in session.calls}
+
+    def test_an_aaaa_record_on_the_name_is_reported_not_touched(self):
+        zone = _zone_with() + [
+            {"type": "AAAA", "source": "test", "target": "2001:db8::1", "ttl": 60}
+        ]
+        session = _FakeSession(zone)
+
+        outcomes = _apply(session)
+
+        assert session.writes() == []
+        assert "2001:db8::1" in outcomes[0].warning
+        assert outcomes[1].warning == ""
 
     def test_unrelated_records_are_not_touched(self):
         zone = _zone_with() + [
@@ -311,22 +336,26 @@ class TestErrors:
         ):
             _apply(session)
 
-    def test_a_rejected_token_says_which_scopes_it_needs(self):
-        class Unauthorized(_FakeSession):
-            def request(self, method, url, **kwargs):
-                return _Response(
-                    {
-                        "result": "error",
-                        "error": {
-                            "code": "not_authorized",
-                            "description": "Not authorized.",
-                        },
-                    },
-                    status_code=401,
-                )
+    def test_a_rejected_token_is_named_as_such(self):
+        with pytest.raises(
+            InfomaniakError, match="token rejected: check \\$INFOMANIAK_API_TOKEN"
+        ):
+            _apply(_Failing(401))
 
+    def test_a_token_without_scopes_says_which_it_needs(self):
         with pytest.raises(InfomaniakError, match="dns:read and dns:write"):
-            _apply(Unauthorized())
+            _apply(_Failing(403))
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 502])
+    def test_the_token_never_appears_in_an_error(self, status):
+        with pytest.raises(InfomaniakError) as raised:
+            apply_records(
+                render_dns_records("test.realmsgos.org", CANISTER),
+                token="s3cret-token",
+                zone=ZONE,
+                session=_Failing(status),
+            )
+        assert "s3cret-token" not in str(raised.value)
 
     def test_a_non_json_body_is_an_error(self):
         class Html(_FakeSession):

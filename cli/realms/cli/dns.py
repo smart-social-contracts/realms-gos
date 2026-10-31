@@ -27,6 +27,7 @@ class RecordOutcome:
     record: DnsRecord
     action: str  # created | updated | unchanged
     detail: str = ""
+    warning: str = ""  # something the provider found and left alone
 
 
 def render_dns_records(domain: str, frontend_canister_id: str) -> list[DnsRecord]:

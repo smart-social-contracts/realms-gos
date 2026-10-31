@@ -37,6 +37,11 @@ APEX_ADDRESSES = ("195.5.171.242", "212.71.124.188")
 
 APEX_SOURCE = "."
 
+_AUTH_HINTS = {
+    401: f"token rejected: check ${DEFAULT_TOKEN_ENV} is current",
+    403: "the token needs the dns:read and dns:write scopes on this zone",
+}
+
 
 class InfomaniakError(RuntimeError):
     pass
@@ -136,13 +141,10 @@ class InfomaniakDns:
             ) from None
 
         if payload.get("result") != "success":
-            hint = ""
-            if response.status_code in (401, 403):
-                hint = (
-                    " (the token needs the dns:read and dns:write scopes on this zone)"
-                )
+            hint = _AUTH_HINTS.get(response.status_code, "")
             raise InfomaniakError(
-                f"{method} {path} failed (HTTP {response.status_code}){hint}: {_error_text(payload)}"
+                f"{method} {path} failed (HTTP {response.status_code}): {_error_text(payload)}"
+                f"{f' ({hint})' if hint else ''}"
             )
         return payload
 
@@ -208,10 +210,8 @@ class InfomaniakDns:
 
         if strays:
             left = ", ".join(str(r["target"]) for r in strays)
-            first = outcomes[0]
-            note = f"left other value(s) alone: {left}"
-            outcomes[0] = replace(
-                first, detail=f"{first.detail}; {note}" if first.detail else note
+            outcomes[0] = _with_warning(
+                outcomes[0], f"left other value(s) alone: {left}"
             )
         return outcomes
 
@@ -223,6 +223,11 @@ class InfomaniakDns:
             return RecordOutcome(record, "unchanged")
         self._update(zone, holder["id"], record)
         return RecordOutcome(record, "updated", f"ttl {was} -> {self._ttl}")
+
+
+def _with_warning(outcome: RecordOutcome, warning: str) -> RecordOutcome:
+    both = f"{outcome.warning}; {warning}" if outcome.warning else warning
+    return replace(outcome, warning=both)
 
 
 def _error_text(payload: dict[str, Any]) -> str:
@@ -260,5 +265,17 @@ def apply_records(
             for r in existing
             if r["type"] == record_type and _same_source(r["source"]) == source
         ]
-        outcomes += client.sync_name(zone, source, wanted, current)
+        name_outcomes = client.sync_name(zone, source, wanted, current)
+        # IPv6 clients would follow an AAAA record past the gateway; not ours to remove.
+        ipv6 = [
+            r["target"]
+            for r in existing
+            if r["type"] == "AAAA" and _same_source(r["source"]) == source
+        ]
+        if ipv6 and record_type in ("A", "CNAME"):
+            name_outcomes[0] = _with_warning(
+                name_outcomes[0],
+                f"AAAA record(s) left alone, IPv6 clients will not reach the gateway: {', '.join(ipv6)}",
+            )
+        outcomes += name_outcomes
     return outcomes
