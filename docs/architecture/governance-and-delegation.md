@@ -67,7 +67,7 @@ stateDiagram-v2
 | File | `proposal_create` | `title`, `description`, `department` (default: the realm), optional `action` `{op, args}`. Voting opens at once. |
 | Vote | `proposal_vote` | `choice`: `yes`, `no` or `abstain`. Voting again replaces your vote. Delegable. |
 | Close | `proposal_finalize` | Records accepted or rejected. |
-| Act | `proposal_execute` | Replays the action once, with origin `replay` and the original caller as signer. |
+| Act | `proposal_execute` | Replays the action once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. |
 
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
 it, along with the realm-wide `threshold` and `quorum_percent`.
@@ -80,6 +80,13 @@ it, along with the realm-wide `threshold` and `quorum_percent`.
 | Passes when | turnout ≥ `quorum_percent` and yes > `threshold`% of yes + no (default 50) | yes ≥ `m` |
 | Rejected when | the rule above fails at the deadline | a veto holder votes no, or `m` can no longer be reached |
 | Can close early | no, it waits for the deadline | yes, once the outcome is certain |
+
+A department cannot be deleted while it has a proposal being voted on or waiting to run. Only the root department
+is realm-wide: a proposal whose department is gone has no voters and runs nothing.
+
+A department can only hand out what its own seats hold, but that is enough to be careful with: seating someone in a
+seat whose profile is `admin` makes them admin, and a department holding `role.revoke` or `user.update_status` can act
+on realm admins.
 
 ## Mandates and contracts
 

@@ -5,7 +5,7 @@ from core import chain
 from api import delegation
 from api import orgs
 from core.db import Conflict, Fail, Forbidden, each, find, next_id, page, view
-from ggg import Appointment, Department, Human, Identity, Invite, Member, Position, Realm, User, UserProfile
+from ggg import Appointment, Department, Human, Identity, Invite, Member, Position, Proposal, Realm, User, UserProfile
 from api import codex
 from core.op import op
 from api.proposals import root
@@ -15,10 +15,20 @@ MOVES = {"active": {"inactive", "suspended", "banned"}, "inactive": {"active", "
 
 
 def within(c, perms):
-    """I-ID-3: nobody hands out a permission they do not hold. A codex or an accepted proposal acts for the realm."""
-    if c.origin in ("codex", "replay"):
+    """I-ID-3: nobody hands out a permission they do not hold. A codex or a realm-wide vote acts for the realm; a
+    department's vote holds only what that department does, like org.grant_authority. A proposal whose department
+    was deleted holds nothing: it is refused, never treated as realm-wide."""
+    if c.origin == "codex":
         return
-    held = auth.permissions(c.user)
+    if c.origin == "replay":
+        proposal = Proposal[c.proposal]
+        if proposal is None or proposal.department is None:
+            raise Forbidden("the proposal's department no longer exists")
+        if proposal.department.is_root:
+            return
+        held = powers(proposal.department)
+    else:
+        held = auth.permissions(c.user)
     missing = [] if "all" in held else sorted(set(perms) - held)
     if missing:
         raise Forbidden(f"you do not hold {', '.join(missing)}")

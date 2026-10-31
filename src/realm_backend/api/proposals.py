@@ -7,6 +7,8 @@ from core.op import dispatch, op, ops
 
 CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")
+# Proposals that can still vote or run, so their department must stay.
+PENDING = OPEN + ("accepted",)
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
 
@@ -39,12 +41,32 @@ def window():
 
 
 def check_action(action):
-    """An action must name a known operation and no ``on_behalf_of``: it runs as the realm's governance, not as a
-    member picked by whoever filed it."""
+    """An action must name a known operation and no ``on_behalf_of``: it runs once accepted as its proposer (see
+    run_action), not as a member picked by whoever filed it."""
     if action.get("op") not in ops():
         raise Fail(f"unknown operation '{action.get('op')}'")
     if "on_behalf_of" in (action.get("args") or {}):
-        raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, under the realm's authority")
+        raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, as its proposer")
+
+
+def check_scope(department, action):
+    """A department's vote only carries actions that department governs, or one under it: the vote of a few seats
+    is not the realm's. A realm-wide proposal (the root department) may carry any action. A proposal whose department
+    was deleted (``None``) carries nothing: it never turns realm-wide."""
+    if department is None:
+        raise Forbidden("the proposal's department no longer exists")
+    if department.is_root:
+        return
+    governed = (ops().get(action["op"]) or {}).get("governed")
+    try:
+        governing = governed(action.get("args") or {}) if governed else None
+    except KeyError as e:
+        raise Fail(f"{action['op']} is missing {e}")
+    while governing is not None:
+        if governing.id == department.id:
+            return
+        governing = governing.parent
+    raise Forbidden(f"{action['op']} is not governed by {department.id}: only a realm-wide proposal can run it")
 
 
 def new_proposal(title, user, by, department, action=None, description=""):
@@ -90,7 +112,13 @@ def close(p, result):
 
 
 def run_action(p):
-    """Run the accepted action as its proposer: the vote is the authority, and the action cannot name anyone else."""
+    """Run the accepted action as its proposer: the vote is the authority, and the action cannot name anyone else.
+    The vote's authority stops at the proposal's department, so an action outside it fails without running."""
+    try:
+        check_scope(p.department, p.action)
+    except Fail as e:
+        p.status, p.result = "failed", {"ok": False, "error": str(e), "kind": e.kind}
+        return
     p.status = "executed"
     out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay", signer=p.proposer,
                               proposal=p.id)
@@ -117,10 +145,6 @@ def file_replay(name, args, user, by, department):
     return {"proposal": p.id, "requires_vote": True}
 
 
-def realm_scope(p):
-    return p.department is None or p.department.is_root
-
-
 def seated(principal, department):
     """``principal`` heads ``department`` or holds an active seat in it."""
     return principal == department.head or any(
@@ -128,17 +152,26 @@ def seated(principal, department):
 
 
 def eligible(p, principal):
-    if realm_scope(p):
+    if p.department is None:
+        return False
+    if p.department.is_root:
         m = Member[principal]
         return m is not None and m.status == "active"
     return seated(principal, p.department)
 
 
+def electorate_size(p):
+    if p.department is None:
+        return 0
+    if p.department.is_root:
+        return Member.count_by("status", "active")
+    return len(holders(p.department) | ({p.department.head} - {""}))
+
+
 def count(p):
     """The tally kept as votes are cast, the number of eligible voters and whether a veto holder voted no."""
     tally = {c: int((p.tally or {}).get(c, 0)) for c in CHOICES}
-    size = (Member.count_by("status", "active") if realm_scope(p)
-            else len(holders(p.department) | ({p.department.head} - {""})))
+    size = electorate_size(p)
     vetoes = (Vote[f"{p.id}:{v}"] for v in (p.tally or {}).get("veto", []))
     return tally, size, any(v is not None and v.choice == "no" for v in vetoes)
 
@@ -171,12 +204,14 @@ def outcome(p, final):
 @op("proposal.create", delegable=True, returns="proposal")
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
-    (``{op, args}``, run once accepted). Voting opens at once. Returns ``proposal``.
+    (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
+    governs). Voting opens at once. Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
     if action is not None:
         check_action(action)
+        check_scope(department, action)
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""))
     return {"proposal": p.id}
 

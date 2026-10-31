@@ -1,9 +1,17 @@
+from types import SimpleNamespace
+
 import fake_chain
 import world
-from api import proposals
-from core import op
-from ggg import Delegation, Department, Mandate, Proposal, Vote
+from api import members, proposals
+from core import auth, op
+from core.db import Forbidden
+from ggg import Delegation, Department, Mandate, Position, Proposal, Realm, User, UserProfile, Vote
 from kit import call, denied, later, ok
+
+
+@op.op("proposal.vote", delegable=True, governed=lambda a: Department["Infrastructure"])
+def t_governed_whoami(c, args):
+    return {"user": c.user, "by": c.by}
 
 
 def vote_all(proposal, choice, *voters):
@@ -81,6 +89,155 @@ def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
     assert Mandate.count() == 1 and Mandate["M-1"].executor.id == "Infrastructure"
     assert "no accepted action" in call("proposal_execute", "ctl", proposal=p)["error"]
     assert Proposal[p].status == "executed"
+
+
+def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
+    world.build()
+    realm_wide = [("mandate_create", {"title": "Road works", "executor": "Infrastructure"}),
+                  ("governance_update", {"threshold": 0, "voting_window": 1})]
+    for name, args in realm_wide:
+        out = call("proposal_create", "carla", title=name, department="Infrastructure", action={"op": name, "args": args})
+        assert not out["ok"] and out["kind"] == "forbidden" and "only a realm-wide proposal" in out["error"]
+    assert call("proposal_create", "carla", title="x", department="Infrastructure",
+                action={"op": "contract_create", "args": {"title": "C"}})["kind"] == "forbidden"
+    assert Proposal.count() == 0
+
+
+def test_a_stored_department_action_outside_the_department_fails_without_running():
+    world.build()
+    for name, args in (("mandate_create", {"title": "Road works"}), ("governance_update", {"threshold": 0})):
+        p = ok("proposal_create", "carla", title=name, department="Infrastructure")["proposal"]
+        Proposal[p].action = {"op": name, "args": args}
+        out = ok("proposal_vote", "carla", proposal=p, choice="yes")
+        assert out["status"] == "failed" and "only a realm-wide proposal" in Proposal[p].result["error"]
+    assert Mandate.count() == 0 and "governance" not in (Realm["1"].manifest_data or {})
+
+
+def test_a_stored_department_action_missing_an_argument_fails_without_trapping():
+    world.build()
+    p = ok("proposal_create", "carla", title="x", department="Infrastructure")["proposal"]
+    Proposal[p].action = {"op": "appoint", "args": {}}
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert "missing" in Proposal[p].result["error"]
+
+
+def test_a_department_proposal_carries_actions_its_department_governs():
+    world.build()
+    Department(id="Roads", parent=Department["Infrastructure"])
+    for parent in ("Infrastructure", "Roads"):
+        action = {"op": "department_create", "args": {"department": f"{parent} crew", "parent": parent}}
+        p = ok("proposal_create", "carla", title="crew", department="Infrastructure", action=action)["proposal"]
+        assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "executed"
+        assert Department[f"{parent} crew"].parent.id == parent
+
+
+def pass_department_proposal(op_name, args, department="Infrastructure"):
+    p = ok("proposal_create", "carla", title=op_name, department=department,
+           action={"op": op_name, "args": args})["proposal"]
+    ok("proposal_vote", "carla", proposal=p, choice="yes")
+    return Proposal[p]
+
+
+def test_I_ID_3_a_department_proposal_cannot_open_a_seat_with_permissions_the_department_lacks():
+    world.build()
+    seat = pass_department_proposal("position_create",
+                                    {"department": "Infrastructure", "position": "infra.boss", "profile": "admin"})
+    assert seat.status == "failed" and "you do not hold" in seat.result["error"]
+    assert Position["infra.boss"] is None
+
+
+def test_I_ID_3_a_department_proposal_cannot_assign_a_profile_the_department_lacks():
+    world.build()
+    world.seat("infrastructure.registrar", "carla", Department["Infrastructure"], "role.assign")
+    UserProfile(id="auditor", allowed_to=["role.assign"])
+    assigned = pass_department_proposal("role_assign", {"department": "Infrastructure", "user": "alice",
+                                                        "profile": "auditor"})
+    assert assigned.status == "executed" and "auditor" in [x.id for x in User["alice"].profiles]
+    escalated = pass_department_proposal("role_assign", {"department": "Infrastructure", "user": "carla",
+                                                         "profile": "admin"})
+    assert escalated.status == "failed" and "all" not in auth.permissions("carla")
+
+
+def pending_in_deleted_department(perm, action):
+    """A proposal filed in a sub-department that is then deleted from under it, as before deletion was refused."""
+    world.build()
+    sub = Department(id="Sub", parent=Department["Infrastructure"])
+    world.seat("sub.officer", "carla", sub, perm)
+    p = ok("proposal_create", "carla", title="x", department="Sub", action=action)["proposal"]
+    sub.delete()
+    assert Proposal[p].department is None
+    return p
+
+
+def assert_never_runs(p, voter):
+    assert "not eligible" in call("proposal_vote", voter, proposal=p, choice="yes")["error"]
+    Proposal[p].status = "accepted"
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "failed"
+    assert "no longer exists" in Proposal[p].result["error"]
+    assert call("proposal_vote", "carla", proposal=p, choice="yes")["ok"] is False
+
+
+def test_a_deleted_departments_proposal_does_not_turn_realm_wide_to_assign_admin():
+    p = pending_in_deleted_department(
+        "role.assign", {"op": "role_assign", "args": {"department": "Sub", "user": "carla", "profile": "admin"}})
+    assert_never_runs(p, "carla")
+    assert "all" not in auth.permissions("carla")
+
+
+def test_a_deleted_departments_proposal_does_not_turn_realm_wide_to_make_every_member_admin():
+    p = pending_in_deleted_department(
+        "permission.grant", {"op": "profile_edit", "args": {"department": "Sub", "profile": "member",
+                                                            "allowed_to": ["all"]}})
+    assert_never_runs(p, "mallory")
+    assert "all" not in auth.permissions("mallory")
+
+
+def test_a_replay_of_a_proposal_whose_department_is_gone_holds_no_permission():
+    p = pending_in_deleted_department(
+        "role.assign", {"op": "role_assign", "args": {"department": "Sub", "user": "carla", "profile": "admin"}})
+    replay = SimpleNamespace(origin="replay", proposal=p, user="carla")
+    try:
+        members.within(replay, {"role.assign"})
+    except Forbidden as e:
+        assert "no longer exists" in str(e)
+    else:
+        raise AssertionError("a replay without a department was let through")
+
+
+def test_a_department_with_a_proposal_to_vote_on_or_run_cannot_be_deleted():
+    world.build()
+    Department(id="Sub", parent=Department["Infrastructure"])
+    for status in ("draft", "voting", "accepted"):
+        p = ok("proposal_create", "carla", title="x", department="Sub")["proposal"]
+        Proposal[p].status = status
+        out = call("department_delete", "ctl", department="Sub")
+        assert out["kind"] == "conflict" and "proposals" in out["error"], (status, out)
+        Proposal[p].status = "rejected"
+    ok("department_delete", "ctl", department="Sub")
+    assert Department["Sub"] is None
+
+
+def test_a_realm_wide_proposal_carries_any_action():
+    world.build()
+    action = {"op": "mandate_create", "args": {"title": "Road works"}}
+    p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
+    vote_all(p, "yes", *world.PEOPLE)
+    later(8 * 86400)
+    ok("proposal_finalize", "ctl", proposal=p)
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+
+
+def test_a_governed_call_under_power_of_attorney_replays_as_the_grantor():
+    world.build()
+    world.policy(Department["Infrastructure"], 2, 3)
+    Department["Infrastructure"].head = "bob"
+    Delegation(id="d1", grantor="carla", delegate="claude-conn", status="active",
+               scope={"operations": ["proposal.vote"]}, expires_at=fake_chain.now() + 86400)
+    p = ok("t_governed_whoami", "claude-conn", on_behalf_of="carla")["proposal"]
+    assert (Proposal[p].proposer, Proposal[p].on_behalf_of) == ("carla", "carla")
+    vote_all(p, "yes", "carla", "bob")
+    assert Proposal[p].status == "executed"
+    assert Proposal[p].result["user"] == Proposal[p].result["by"] == "carla"
 
 
 def test_an_action_cannot_act_on_behalf_of_a_member():

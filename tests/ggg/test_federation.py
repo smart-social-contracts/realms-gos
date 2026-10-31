@@ -4,13 +4,19 @@ import fake_chain
 from ic_python_db import Database
 from api import federation
 import world
-from ggg import Delegation, Department, FederalVote, FederalVoteLeg, FederationMessage, Proposal, Realm
+from core import op
+from ggg import Delegation, Department, FederalVote, FederalVoteLeg, FederationMessage, Proposal, Realm, User, UserProfile
 from kit import call, denied, later, ok
 from test_quarters import CAPITAL, capital, quarter, reply
 
 ANON = fake_chain.ANONYMOUS
 QUARTERS = ("north", "south", "harbor")
 ACTION = {"op": "governance_update", "args": {"threshold": 60}}
+
+
+@op.op(None)
+def t_whoami(c, args):
+    return {"user": c.user, "by": c.by}
 
 
 def open_fv(*quarters, rule=None):
@@ -87,6 +93,17 @@ def test_I_FED_4_only_the_capital_opens_votes_on_a_quarter(monkeypatch):
                           body={**body, "deadline": 2})["error"]
     assert ok("federation_message", CAPITAL, topic="federal_vote.open", body=body)["proposal"]
     assert FederalVote.count() == 1
+
+
+def test_a_stored_federal_action_naming_a_member_runs_as_the_realm_itself():
+    v = open_fv(*QUARTERS)
+    FederalVote[v].action = {"op": "t_whoami", "args": {"on_behalf_of": "alice"}}
+    local_vote(v, "yes", "alice", "bob", "dana", "carla")
+    later(8 * 86400)
+    for q in QUARTERS:
+        leg(q, v, "passed", 10, 1)
+    assert ok("federal_vote_finalize", ANON, vote=v)["status"] == "passed"
+    assert FederalVote[v].tally["result"]["user"] == FederalVote[v].tally["result"]["by"] == fake_chain.SELF
 
 
 def test_quarter_settles_and_reports_its_leg(monkeypatch):
@@ -181,3 +198,15 @@ def test_capital_announces_codex_to_its_quarters(monkeypatch):
     quarter(monkeypatch, "north")
     assert ok("federation_message", CAPITAL, topic="codex", body={"id": "agora", "version": "1.5.0"})["drifting"]
     assert Realm["1"].sync_state["codex"]["version"] == "1.5.0"
+
+
+def test_a_passed_federal_vote_can_assign_a_role():
+    v = open_fv(*QUARTERS)
+    UserProfile(id="clerk", allowed_to=["user.view"])
+    FederalVote[v].action = {"op": "role_assign", "args": {"user": "carla", "profile": "clerk"}}
+    local_vote(v, "yes", "alice", "bob", "dana", "carla")
+    later(8 * 86400)
+    for q in QUARTERS:
+        leg(q, v, "passed", 10, 1)
+    assert ok("federal_vote_finalize", ANON, vote=v)["status"] == "passed"
+    assert "clerk" in [p.id for p in User["carla"].profiles], FederalVote[v].tally

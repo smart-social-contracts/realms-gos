@@ -100,8 +100,11 @@ def withdraw(leg):
 
 
 def execute(v):
+    """Replay the passed action on the capital as its local leg's proposal: a realm-wide one, which is the
+    authority a federal vote has (api.members.within needs a proposal to name it)."""
+    own_leg = find(FederalVoteLeg, leg_id(v.id, chain.self_id()))
     out = yield from dispatch(v.action["op"], json.dumps(v.action.get("args", {})), origin="replay",
-                              signer=chain.self_id())
+                              signer=chain.self_id(), proposal=own_leg.proposal_id)
     return json.loads(out)
 
 
