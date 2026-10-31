@@ -3,7 +3,7 @@ from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
 from ggg import Appointment, Authority, Department, Organization, Position, User, UserProfile
 from core.op import op
-from api.proposals import holders, realm_wide, root
+from api.proposals import PENDING, holders, realm_wide, root
 
 ORG_MOVES = {"active": {"suspended", "dissolved"}, "suspended": {"active", "dissolved"}, "dissolved": set()}
 SEAT_FIELDS = ("title", "salary", "salary_period")
@@ -118,12 +118,15 @@ def department_edit(c, args):
 
 @op("org.set_policy", governed=lambda a: dept(a).parent or root())
 def department_delete(c, args):
-    """Delete ``department``; it must not be the root and must have no sub-departments and only closed positions."""
+    """Delete ``department``; it must not be the root and must have no sub-departments, only closed positions and no
+    proposal still to be voted on or run (it would lose its department)."""
     d = dept(args)
     if d.is_root:
         raise Fail("the root department cannot be deleted")
     if list(d.children) or any(p.status != "closed" for p in d.positions):
         raise Conflict(f"{d.id} still has sub-departments or open positions")
+    if any(p.status in PENDING for p in d.proposals):
+        raise Conflict(f"{d.id} still has proposals to vote on or run")
     d.delete()
 
 

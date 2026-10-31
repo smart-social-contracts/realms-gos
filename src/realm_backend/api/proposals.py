@@ -7,6 +7,8 @@ from core.op import dispatch, op, ops
 
 CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")
+# Proposals that can still vote or run, so their department must stay.
+PENDING = OPEN + ("accepted",)
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
 
@@ -49,8 +51,11 @@ def check_action(action):
 
 def check_scope(department, action):
     """A department's vote only carries actions that department governs, or one under it: the vote of a few seats
-    is not the realm's. A realm-wide proposal (the root department) may carry any action."""
-    if department is None or department.is_root:
+    is not the realm's. A realm-wide proposal (the root department) may carry any action. A proposal whose department
+    was deleted (``None``) carries nothing: it never turns realm-wide."""
+    if department is None:
+        raise Forbidden("the proposal's department no longer exists")
+    if department.is_root:
         return
     governed = (ops().get(action["op"]) or {}).get("governed")
     try:
@@ -140,10 +145,6 @@ def file_replay(name, args, user, by, department):
     return {"proposal": p.id, "requires_vote": True}
 
 
-def realm_scope(p):
-    return p.department is None or p.department.is_root
-
-
 def seated(principal, department):
     """``principal`` heads ``department`` or holds an active seat in it."""
     return principal == department.head or any(
@@ -151,17 +152,26 @@ def seated(principal, department):
 
 
 def eligible(p, principal):
-    if realm_scope(p):
+    if p.department is None:
+        return False
+    if p.department.is_root:
         m = Member[principal]
         return m is not None and m.status == "active"
     return seated(principal, p.department)
 
 
+def electorate_size(p):
+    if p.department is None:
+        return 0
+    if p.department.is_root:
+        return Member.count_by("status", "active")
+    return len(holders(p.department) | ({p.department.head} - {""}))
+
+
 def count(p):
     """The tally kept as votes are cast, the number of eligible voters and whether a veto holder voted no."""
     tally = {c: int((p.tally or {}).get(c, 0)) for c in CHOICES}
-    size = (Member.count_by("status", "active") if realm_scope(p)
-            else len(holders(p.department) | ({p.department.head} - {""})))
+    size = electorate_size(p)
     vetoes = (Vote[f"{p.id}:{v}"] for v in (p.tally or {}).get("veto", []))
     return tally, size, any(v is not None and v.choice == "no" for v in vetoes)
 

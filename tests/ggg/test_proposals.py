@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import fake_chain
 import world
-from api import proposals
+from api import members, proposals
 from core import auth, op
+from core.db import Forbidden
 from ggg import Delegation, Department, Mandate, Position, Proposal, Realm, User, UserProfile, Vote
 from kit import call, denied, later, ok
 
@@ -153,6 +156,65 @@ def test_I_ID_3_a_department_proposal_cannot_assign_a_profile_the_department_lac
     escalated = pass_department_proposal("role_assign", {"department": "Infrastructure", "user": "carla",
                                                          "profile": "admin"})
     assert escalated.status == "failed" and "all" not in auth.permissions("carla")
+
+
+def pending_in_deleted_department(perm, action):
+    """A proposal filed in a sub-department that is then deleted from under it, as before deletion was refused."""
+    world.build()
+    sub = Department(id="Sub", parent=Department["Infrastructure"])
+    world.seat("sub.officer", "carla", sub, perm)
+    p = ok("proposal_create", "carla", title="x", department="Sub", action=action)["proposal"]
+    sub.delete()
+    assert Proposal[p].department is None
+    return p
+
+
+def assert_never_runs(p, voter):
+    assert "not eligible" in call("proposal_vote", voter, proposal=p, choice="yes")["error"]
+    Proposal[p].status = "accepted"
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "failed"
+    assert "no longer exists" in Proposal[p].result["error"]
+    assert call("proposal_vote", "carla", proposal=p, choice="yes")["ok"] is False
+
+
+def test_a_deleted_departments_proposal_does_not_turn_realm_wide_to_assign_admin():
+    p = pending_in_deleted_department(
+        "role.assign", {"op": "role_assign", "args": {"department": "Sub", "user": "carla", "profile": "admin"}})
+    assert_never_runs(p, "carla")
+    assert "all" not in auth.permissions("carla")
+
+
+def test_a_deleted_departments_proposal_does_not_turn_realm_wide_to_make_every_member_admin():
+    p = pending_in_deleted_department(
+        "permission.grant", {"op": "profile_edit", "args": {"department": "Sub", "profile": "member",
+                                                            "allowed_to": ["all"]}})
+    assert_never_runs(p, "mallory")
+    assert "all" not in auth.permissions("mallory")
+
+
+def test_a_replay_of_a_proposal_whose_department_is_gone_holds_no_permission():
+    p = pending_in_deleted_department(
+        "role.assign", {"op": "role_assign", "args": {"department": "Sub", "user": "carla", "profile": "admin"}})
+    replay = SimpleNamespace(origin="replay", proposal=p, user="carla")
+    try:
+        members.within(replay, {"role.assign"})
+    except Forbidden as e:
+        assert "no longer exists" in str(e)
+    else:
+        raise AssertionError("a replay without a department was let through")
+
+
+def test_a_department_with_a_proposal_to_vote_on_or_run_cannot_be_deleted():
+    world.build()
+    Department(id="Sub", parent=Department["Infrastructure"])
+    for status in ("draft", "voting", "accepted"):
+        p = ok("proposal_create", "carla", title="x", department="Sub")["proposal"]
+        Proposal[p].status = status
+        out = call("department_delete", "ctl", department="Sub")
+        assert out["kind"] == "conflict" and "proposals" in out["error"], (status, out)
+        Proposal[p].status = "rejected"
+    ok("department_delete", "ctl", department="Sub")
+    assert Department["Sub"] is None
 
 
 def test_a_realm_wide_proposal_carries_any_action():

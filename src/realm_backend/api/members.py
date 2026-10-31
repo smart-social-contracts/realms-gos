@@ -16,12 +16,15 @@ MOVES = {"active": {"inactive", "suspended", "banned"}, "inactive": {"active", "
 
 def within(c, perms):
     """I-ID-3: nobody hands out a permission they do not hold. A codex or a realm-wide vote acts for the realm; a
-    department's vote holds only what that department does, like org.grant_authority."""
+    department's vote holds only what that department does, like org.grant_authority. A proposal whose department
+    was deleted holds nothing: it is refused, never treated as realm-wide."""
     if c.origin == "codex":
         return
     if c.origin == "replay":
         proposal = Proposal[c.proposal]
-        if proposal is None or proposal.department is None or proposal.department.is_root:
+        if proposal is None or proposal.department is None:
+            raise Forbidden("the proposal's department no longer exists")
+        if proposal.department.is_root:
             return
         held = powers(proposal.department)
     else:
