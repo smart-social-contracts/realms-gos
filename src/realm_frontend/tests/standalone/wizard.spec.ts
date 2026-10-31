@@ -11,6 +11,7 @@ import {
 	memberIdentity,
 	openInPortal,
 	readOp,
+	reloadIfInterrupted,
 	type StandaloneRealm
 } from './fixtures/realm';
 import { snap } from './fixtures/snap';
@@ -227,6 +228,7 @@ test('every installed extension opens without errors', async ({ page }) => {
 				await expect
 					.poll(
 						async () => {
+							if (await reloadIfInterrupted(page, frame)) return 'waiting';
 							if (await frame.locator(`[data-extension-id="${id}"]`).count()) return 'mounted';
 							const f = page.frames().find((x) => x.url().startsWith(realm.realm_url));
 							const path = f ? new URL(f.url()).pathname : '';

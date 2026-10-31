@@ -114,6 +114,17 @@ export async function openInPortal(
 	return { frame: page.frameLocator('#realm'), close: host.close };
 }
 
+/**
+ * Chromium reports a change of the host's network (a Docker veth coming or going) as a failed request, and the
+ * realm then shows "Something went wrong": load the page once more. Returns whether it did.
+ */
+export async function reloadIfInterrupted(page: Page, frame: FrameLocator): Promise<boolean> {
+	const refresh = frame.getByRole('button', { name: 'Refresh page' });
+	if (!(await refresh.isVisible().catch(() => false))) return false;
+	await page.reload();
+	return true;
+}
+
 const opsIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
 	IDL.Service({
 		read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']),

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type FrameLocator, type Locator, type Page } from '@playwright/test';
 import type { Ed25519KeyIdentity } from '@dfinity/identity';
-import { exposeSigner, openInPortal, type StandaloneRealm } from './realm';
+import { exposeSigner, openInPortal, reloadIfInterrupted, type StandaloneRealm } from './realm';
 
 /** Where the page's controls are: the extension's mount point, or the iframe a sandboxed extension runs in. The
  * realm's own dialogs are not in it: they are in the realm's frame. */
@@ -39,6 +39,12 @@ export async function openExtension(
 	const { frame, close } = await openInPortal(page, realm, path);
 	if (!path.startsWith('/extensions/')) return { app: frame, frame, close };
 	const mount = frame.locator(`[data-extension-id="${id}"]`);
-	await expect(mount, `${id} is mounted`).toBeAttached({ timeout: 120_000 });
+	await expect
+		.poll(async () => !(await reloadIfInterrupted(page, frame)) && (await mount.count()) > 0, {
+			message: `${id} is mounted`,
+			timeout: 120_000,
+			intervals: [1_000]
+		})
+		.toBe(true);
 	return { app: isSandboxed(id) ? mount.frameLocator('iframe') : mount, frame, close };
 }
