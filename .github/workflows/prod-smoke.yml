@@ -1,0 +1,41 @@
+name: Live-site smoke
+
+# Read-only browser check of the deployed sites (src/realm_frontend/tests/smoke).
+# Runs the same command anyone can run locally: npm run test:smoke.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * *"
+
+jobs:
+  smoke:
+    # Playwright 1.55 has no chromium for ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies and chromium
+        run: |
+          npm install --legacy-peer-deps --ignore-scripts
+          npx playwright install --with-deps chromium
+
+      - name: Smoke test
+        working-directory: src/realm_frontend
+        run: npm run test:smoke
+
+      - name: Upload screenshots, video and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: |
+            src/realm_frontend/test-results/smoke
+            src/realm_frontend/playwright-report/smoke
+          if-no-files-found: ignore
+          retention-days: 14
