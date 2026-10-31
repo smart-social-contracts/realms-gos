@@ -151,8 +151,9 @@ export async function latestVersion(
 /**
  * Return the list of file_registry canister IDs this frontend can browse.
  *
- * Currently the build-time `CANISTER_ID_FILE_REGISTRY` env var (injected by
- * `dfx deploy` / vite-plugin-environment) is the only source.  In the future
+ * The build-time `CANISTER_ID_FILE_REGISTRY` env var (injected by `dfx deploy` /
+ * vite-plugin-environment) comes first, then the `file_registry` the realm's
+ * `canister_ids.js` names at runtime, which a build without the env var relies on.  In the future
  * the realm backend could expose file_registry IDs alongside the existing
  * realm_registry IDs in the status response, at which point this function
  * should merge both sources.
@@ -164,7 +165,8 @@ export async function latestVersion(
 export function getFileRegistryCanisterIds(): string[] {
   const id: string | undefined =
     process.env.CANISTER_ID_FILE_REGISTRY ||
-    (import.meta as any).env?.VITE_FILE_REGISTRY_CANISTER_ID;
+    (import.meta as any).env?.VITE_FILE_REGISTRY_CANISTER_ID ||
+    (globalThis as any).__CANISTER_IDS?.file_registry;
   return id ? [id] : [];
 }
 
