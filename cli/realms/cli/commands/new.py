@@ -23,6 +23,7 @@ import subprocess
 import tempfile
 import time
 import tarfile
+import unicodedata
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -214,7 +215,8 @@ def stage_ids_to_run(
 
 def slugify(name: str) -> str:
     """Port of gos-as-a-service ``deployment-manifest-core.js`` ``slugify``."""
-    slug = re.sub(r"[^a-z0-9]+", "-", (name or "realm").lower())
+    ascii_name = unicodedata.normalize("NFKD", name or "realm").encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower())
     slug = slug.strip("-")[:48]
     return slug or "realm"
 

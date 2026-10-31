@@ -14,7 +14,12 @@
 	import { shouldShowMeSection, visibleSidebarCategories, isRealmMember } from '$lib/utils/sidebar-member-chrome';
 	import { unreadCount } from '$lib/stores/notifications';
 	import { getTablerIcon } from '$lib/utils/tablerIcons';
-	import { activeSidebarFoldIds, sidebarFoldExpandKey, sidebarItemIsActive } from '$lib/utils/sidebar-active';
+	import {
+		activeSidebarFoldIds,
+		navigationTargetKey,
+		sidebarFoldExpandKey,
+		sidebarItemIsActive,
+	} from '$lib/utils/sidebar-active';
 	import { IconLogin, IconLayoutDashboard } from '@tabler/icons-svelte';
 	import SidebarFold from './SidebarFold.svelte';
 	// @ts-ignore
@@ -160,9 +165,7 @@
 
 	afterNavigate((nav) => {
 		document.getElementById('svelte')?.scrollTo({ top: 0 });
-		const from = `${nav.from?.url?.pathname ?? ''}${nav.from?.url?.search ?? ''}`;
-		const to = `${nav.to?.url?.pathname ?? ''}${nav.to?.url?.search ?? ''}`;
-		if (from !== to) {
+		if (navigationTargetKey(nav.from) !== navigationTargetKey(nav.to)) {
 			userHasToggledFolds = false;
 			lastFoldExpandKey = '';
 		}

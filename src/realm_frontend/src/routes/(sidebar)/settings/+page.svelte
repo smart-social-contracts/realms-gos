@@ -7,10 +7,11 @@
 	import { _ } from 'svelte-i18n';
 	import { get } from 'svelte/store';
 	import { localizeBackendError } from '$lib/utils/backendError';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	// @ts-ignore
-	import { createQuarterActor } from '$lib/canisters.js';
+	import { createQuarterActor, quarterBackendStore } from '$lib/canisters.js';
 	import { must, on, quarter, type Reply } from '$lib/realm';
+	import { profilesLoading } from '$lib/stores/profiles';
 	import { realmInfo } from '$lib/stores/realmInfo';
 	import { activeQuarterId } from '$lib/stores/quarters';
 	import {
@@ -121,8 +122,13 @@
 		);
 	}
 
-	async function loadUserStatus() {
+	let userStatusSeq = 0;
+
+	/** Returns false when a newer load superseded this one (its result is dropped). */
+	async function loadUserStatus(): Promise<boolean> {
+		const seq = ++userStatusSeq;
 		const me = await must(quarter.read('me'));
+		if (seq !== userStatusSeq) return false;
 		principal = me.user.id;
 		nickname = me.user.nickname || '';
 		avatarUrl = me.user.avatar || '';
@@ -143,7 +149,27 @@
 			languages: $realmInfo.languages,
 			primaryLanguage: $realmInfo.primaryLanguage
 		});
+		return true;
 	}
+
+	async function refreshUserStatus() {
+		const seq = userStatusSeq + 1;
+		try {
+			if (await loadUserStatus()) userStatusError = '';
+		} catch (e: any) {
+			if (seq === userStatusSeq) userStatusError = e.message || 'Failed to fetch user status.';
+		} finally {
+			if (seq === userStatusSeq) loadingUserStatus = false;
+		}
+	}
+
+	// On reload the capital answers first; members live on their home quarter,
+	// which activates once the membership probe finishes. Re-read the user
+	// record whenever the quarter-aware actor swaps.
+	$effect(() => {
+		$quarterBackendStore;
+		untrack(() => void refreshUserStatus());
+	});
 
 	function parseExtensionResponse(reply: Reply) {
 		const tr = (key: string) => get(_)(key);
@@ -368,15 +394,6 @@
 				} finally {
 					loadingMembership = false;
 				}
-			})(),
-			(async () => {
-				try {
-					await loadUserStatus();
-				} catch (e: any) {
-					userStatusError = e.message || 'Failed to fetch user status.';
-				} finally {
-					loadingUserStatus = false;
-				}
 			})()
 		]);
 	});
@@ -392,7 +409,7 @@
 			</Heading>
 
 			<!-- User Info -->
-			{#if loadingUserStatus}
+			{#if loadingUserStatus || (userStatusError && $profilesLoading)}
 				<div class="mt-4 text-gray-500">{$_('settings.loading_status')}</div>
 			{:else if userStatusError}
 				<div class="mt-4 text-red-500">{userStatusError}</div>

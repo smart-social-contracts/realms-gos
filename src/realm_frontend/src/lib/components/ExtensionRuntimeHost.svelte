@@ -18,7 +18,6 @@
 	import {
 		mountExtension,
 		mountSandboxedExtension,
-		resolveExtensionVersion,
 		type MountResult,
 		type SandboxMountResult
 	} from '$lib/extension-loader';
@@ -31,7 +30,10 @@
 		realmExtensionBackend,
 		type RealmExtensionContext
 	} from '$lib/realm-extension-sdk';
-	import { getExtensionManifestWithRetry } from '$lib/utils/extension-manifest';
+	import {
+		getExtensionManifestWithRetry,
+		getInstalledExtensionVersion
+	} from '$lib/utils/extension-manifest';
 	import { resolveExtensionMountMode } from '$lib/utils/extension-runtime-mode';
 	import { requestBridgeModal, showBridgeNotify } from '$lib/stores/bridge-modal';
 	import type { HostRealmInfo, HostState } from '@realmsgos/extension-bridge';
@@ -279,18 +281,20 @@
 		throw new Error('mount point not ready');
 	}
 
-	async function loadRuntimeExtension(id: string) {
+	async function loadRuntimeExtension(id: string, freshManifests = false): Promise<void> {
 		cleanupMounted();
 		status = 'loading';
 		errorMsg = '';
 		errorRetryable = false;
 		runtimeDenied = null;
+		let version: string | undefined;
 
 		try {
 			// A deep link mounts before the portal session is restored: the manifest read would be anonymous.
 			await settleAuthSession();
-			const [version, manifest] = await Promise.all([
-				resolveExtensionVersion(id),
+			let manifest: Awaited<ReturnType<typeof getExtensionManifestWithRetry>>;
+			[version, manifest] = await Promise.all([
+				getInstalledExtensionVersion(id, { fresh: freshManifests }),
 				getExtensionManifestWithRetry(id)
 			]);
 
@@ -366,6 +370,14 @@
 			} else if (String(e?.message ?? e).includes('SDK version mismatch')) {
 				status = 'sdk_mismatch';
 				errorMsg = String(e?.message ?? e);
+			} else if (
+				!freshManifests &&
+				version !== (await getInstalledExtensionVersion(id, { fresh: true }).catch(() => version))
+			) {
+				// Version came from the session manifest cache and the extension was
+				// upgraded since (new bundle path): retry once with fresh manifests.
+				console.warn('Extension load failed on a stale version; retrying:', e);
+				return loadRuntimeExtension(id, true);
 			} else {
 				console.error('Extension load failed:', e);
 				status = 'error';

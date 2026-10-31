@@ -253,7 +253,9 @@ from api.assistants import (
     get_developer_assistants,
     has_purchased_assistant as has_purchased_assistant_impl,
     list_assistants as list_assistants_impl,
+    list_assistants_page as list_assistants_page_impl,
     search_assistants as search_assistants_impl,
+    search_assistants_page as search_assistants_page_impl,
 )
 from api.codices import (
     buy_codex as buy_codex_impl,
@@ -263,7 +265,9 @@ from api.codices import (
     get_developer_codices,
     has_purchased_codex as has_purchased_codex_impl,
     list_codices as list_codices_impl,
+    list_codices_page as list_codices_page_impl,
     search_codices as search_codices_impl,
+    search_codices_page as search_codices_page_impl,
 )
 from api.admin import (
     list_all_listings as admin_list_listings_impl,
@@ -307,7 +311,9 @@ from api.extensions import (
     get_my_purchases as get_my_purchases_impl,
     has_purchased_extension as has_purchased_extension_impl,
     list_extensions as list_extensions_impl,
+    list_extensions_page as list_extensions_page_impl,
     search_extensions as search_extensions_impl,
+    search_extensions_page as search_extensions_page_impl,
 )
 from api.licenses import (
     check_license as check_license_impl,
@@ -346,6 +352,7 @@ from api.verification import (
     request_audit as request_audit_impl,
     set_verification_status as set_verification_status_impl,
 )
+from core.models import backfill_principal_indexes, backfill_ranking_indexes
 from ic_python_db import Database
 from ic_python_logging import get_logger
 
@@ -469,6 +476,12 @@ class ExtensionListResult(Record):
     per_page: nat64
 
 
+class ExtensionPage(Record):
+    """One page of a newest-first walk; next_cursor is 0 once it is done."""
+    listings: Vec[ExtensionListing]
+    next_cursor: nat64
+
+
 # ----- Codices ---------------------------------------------------------------
 
 class CodexInput(Record):
@@ -517,6 +530,12 @@ class CodexListResult(Record):
     total_count: nat64
     page: nat64
     per_page: nat64
+
+
+class CodexPage(Record):
+    """One page of a newest-first walk; next_cursor is 0 once it is done."""
+    listings: Vec[CodexListing]
+    next_cursor: nat64
 
 
 # ----- Assistants ------------------------------------------------------------
@@ -585,6 +604,12 @@ class AssistantListResult(Record):
     total_count: nat64
     page: nat64
     per_page: nat64
+
+
+class AssistantPage(Record):
+    """One page of a newest-first walk; next_cursor is 0 once it is done."""
+    listings: Vec[AssistantListing]
+    next_cursor: nat64
 
 
 # ----- Purchases / likes -----------------------------------------------------
@@ -833,6 +858,8 @@ def init_canister(arg: Opt[MarketplaceInitArg] = None) -> void:
 
 @post_upgrade
 def post_upgrade_canister() -> void:
+    backfill_principal_indexes()
+    backfill_ranking_indexes()
     logger.info("Marketplace backend upgraded")
 
 
@@ -1245,6 +1272,29 @@ def search_extensions(query_text: text, verified_only: bool) -> Vec[ExtensionLis
 
 
 @query
+def list_marketplace_extensions_page(cursor: nat64, count: nat64, verified_only: bool) -> ExtensionPage:
+    """Newest first, a bounded read per call: start with cursor 0, pass back
+    next_cursor until it is 0. A page can be short while more remain."""
+    try:
+        r = list_extensions_page_impl(int(cursor), int(count), bool(verified_only))
+        return ExtensionPage(listings=[_ext_listing_record(d) for d in r["listings"]], next_cursor=int(r["next_cursor"]))
+    except Exception as e:
+        logger.error(f"list_marketplace_extensions_page: {e}")
+        return ExtensionPage(listings=[], next_cursor=int(0))
+
+
+@query
+def search_extensions_page(query_text: text, cursor: nat64, count: nat64, verified_only: bool) -> ExtensionPage:
+    """Search matches, newest first, a bounded read per call (see list_marketplace_extensions_page)."""
+    try:
+        r = search_extensions_page_impl(query_text, int(cursor), int(count), bool(verified_only))
+        return ExtensionPage(listings=[_ext_listing_record(d) for d in r["listings"]], next_cursor=int(r["next_cursor"]))
+    except Exception as e:
+        logger.error(f"search_extensions_page: {e}")
+        return ExtensionPage(listings=[], next_cursor=int(0))
+
+
+@query
 def get_my_extensions() -> Vec[ExtensionListing]:
     try:
         caller = str(ic.caller())
@@ -1331,6 +1381,29 @@ def search_codices(query_text: text, verified_only: bool) -> Vec[CodexListing]:
     except Exception as e:
         logger.error(f"search_codices: {e}")
         return []
+
+
+@query
+def list_marketplace_codices_page(cursor: nat64, count: nat64, verified_only: bool) -> CodexPage:
+    """Newest first, a bounded read per call: start with cursor 0, pass back
+    next_cursor until it is 0. A page can be short while more remain."""
+    try:
+        r = list_codices_page_impl(int(cursor), int(count), bool(verified_only))
+        return CodexPage(listings=[_codex_listing_record(d) for d in r["listings"]], next_cursor=int(r["next_cursor"]))
+    except Exception as e:
+        logger.error(f"list_marketplace_codices_page: {e}")
+        return CodexPage(listings=[], next_cursor=int(0))
+
+
+@query
+def search_codices_page(query_text: text, cursor: nat64, count: nat64, verified_only: bool) -> CodexPage:
+    """Search matches, newest first, a bounded read per call (see list_marketplace_codices_page)."""
+    try:
+        r = search_codices_page_impl(query_text, int(cursor), int(count), bool(verified_only))
+        return CodexPage(listings=[_codex_listing_record(d) for d in r["listings"]], next_cursor=int(r["next_cursor"]))
+    except Exception as e:
+        logger.error(f"search_codices_page: {e}")
+        return CodexPage(listings=[], next_cursor=int(0))
 
 
 @query
@@ -1429,6 +1502,29 @@ def search_assistants(query_text: text, verified_only: bool) -> Vec[AssistantLis
     except Exception as e:
         logger.error(f"search_assistants: {e}")
         return []
+
+
+@query
+def list_marketplace_assistants_page(cursor: nat64, count: nat64, verified_only: bool) -> AssistantPage:
+    """Newest first, a bounded read per call: start with cursor 0, pass back
+    next_cursor until it is 0. A page can be short while more remain."""
+    try:
+        r = list_assistants_page_impl(int(cursor), int(count), bool(verified_only))
+        return AssistantPage(listings=[_assistant_listing_record(d) for d in r["listings"]], next_cursor=int(r["next_cursor"]))
+    except Exception as e:
+        logger.error(f"list_marketplace_assistants_page: {e}")
+        return AssistantPage(listings=[], next_cursor=int(0))
+
+
+@query
+def search_assistants_page(query_text: text, cursor: nat64, count: nat64, verified_only: bool) -> AssistantPage:
+    """Search matches, newest first, a bounded read per call (see list_marketplace_assistants_page)."""
+    try:
+        r = search_assistants_page_impl(query_text, int(cursor), int(count), bool(verified_only))
+        return AssistantPage(listings=[_assistant_listing_record(d) for d in r["listings"]], next_cursor=int(r["next_cursor"]))
+    except Exception as e:
+        logger.error(f"search_assistants_page: {e}")
+        return AssistantPage(listings=[], next_cursor=int(0))
 
 
 @query

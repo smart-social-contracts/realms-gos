@@ -140,35 +140,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Stamp GET /version provenance (gos-as-a-service#39) before packing WASM.
-      # Unstamped placeholders are omitted honestly at query time — never invent.
-      - name: Stamp /version build provenance
-        if: ${{ inputs.cli_only != true }}
-        run: |
-          SHA=$(git rev-parse --short HEAD)
-          BUILT_AT=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          VERSION="v${{ steps.bump_version.outputs.NEW_VERSION }}"
-          for f in \
-            src/realm_backend/api/version_http.py \
-            src/marketplace_backend/api/version_http.py
-          do
-            sed -i "s/SHA_PLACEHOLDER/${SHA}/g" "$f"
-            sed -i "s/BUILT_AT_ISO_PLACEHOLDER/${BUILT_AT}/g" "$f"
-            sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" "$f"
-          done
-          echo "Stamped /version: sha=${SHA} built_at=${BUILT_AT} version=${VERSION}"
-
       # Build artifacts. The base build defaults to the Cedar template, so the
       # release WASM a new realm pulls from the registry authorizes too.
+      # Before packing, each backend gets its build provenance (status() and
+      # GET /version, gos-as-a-service#39) from scripts/stamp_build.py, run by
+      # the Python that builds it so the dependency versions are the packed ones.
       - name: Build backend WASM
         if: ${{ inputs.cli_only != true }}
+        env:
+          RELEASE_TAG: v${{ steps.bump_version.outputs.NEW_VERSION }}
         run: |
-          export CANISTER_CANDID_PATH="$(pwd)/src/realm_backend/realm_backend.did"
+          python3 scripts/stamp_build.py realm_backend --version "$RELEASE_TAG"
+          CANISTER_CANDID_PATH="$(pwd)/src/realm_backend/realm_backend.did"
+          export CANISTER_CANDID_PATH
           python3 scripts/build_base_wasm.py --gzip
           mv .basilisk/realm_backend/realm_backend.wasm.gz ./realm_backend.wasm.gz
           echo "✅ Backend WASM built ($(stat -c%s realm_backend.wasm.gz) bytes)"
+          # The marketplace pins its own dependencies (ic-python-db 0.14 for its
+          # sorted rankings), so it builds in its own environment
+          python3 -m venv /tmp/marketplace-venv
+          /tmp/marketplace-venv/bin/pip install -q -r src/marketplace_backend/requirements.txt
+          /tmp/marketplace-venv/bin/python scripts/stamp_build.py marketplace_backend --version "$RELEASE_TAG"
           CANISTER_CANDID_PATH="$(pwd)/src/marketplace_backend/marketplace_backend.did" \
-            python3 -m basilisk marketplace_backend src/marketplace_backend/main.py
+            /tmp/marketplace-venv/bin/python -m basilisk marketplace_backend src/marketplace_backend/main.py
           gzip -kf .basilisk/marketplace_backend/marketplace_backend.wasm
           cp .basilisk/marketplace_backend/marketplace_backend.wasm.gz ./marketplace_backend.wasm.gz
           echo "✅ Marketplace WASM built ($(stat -c%s marketplace_backend.wasm.gz) bytes)"

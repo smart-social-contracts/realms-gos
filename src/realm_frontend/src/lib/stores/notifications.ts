@@ -2,6 +2,7 @@ import { get, writable } from 'svelte/store';
 import { read, run, must, RealmError } from '$lib/realm';
 import { settleAuthSession } from '$lib/auth.js';
 import { isAuthenticated } from '$lib/stores/auth.js';
+import { singleFlight } from '../utils/singleFlight';
 
 export interface NotificationItem {
     id: string;
@@ -53,7 +54,7 @@ async function fetchNotifications(): Promise<NotificationItem[]> {
     return items;
 }
 
-export async function loadNotifications() {
+async function loadOnce() {
     try {
         await settleAuthSession();
         if (!get(isAuthenticated)) {
@@ -78,6 +79,14 @@ export async function loadNotifications() {
         notifications.set([]);
         unreadCount.set(0);
     }
+}
+
+// The sidebar layout reloads on mount and on every navigation, so the first
+// render fired two identical loads; share the one in flight.
+const sharedLoad = singleFlight(loadOnce);
+
+export function loadNotifications(): Promise<void> {
+    return sharedLoad();
 }
 
 /** The realm only records reads: marking a notification unread changes this list until the next load. */

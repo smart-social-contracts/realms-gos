@@ -13,7 +13,7 @@ from _cdk import ic
 from api.config import caller_is_admin
 from api.developers import developer_name, is_suspended
 from api.licenses import has_active_license
-from core.models import ExtensionListingEntity, PurchaseEntity
+from core.models import ExtensionListingEntity, PurchaseEntity, newest_first, purchases_of
 from ic_python_logging import get_logger
 
 logger = get_logger("api.extensions")
@@ -216,23 +216,47 @@ def list_extensions(page: int, per_page: int, verified_only: bool) -> Dict:
     }
 
 
+def _visible(e: ExtensionListingEntity, verified_only: bool) -> bool:
+    if not (e.is_active if e.is_active is not None else True):
+        return False
+    return not verified_only or str(e.verification_status) == "verified"
+
+
+def _matches(e: ExtensionListingEntity, q: str) -> bool:
+    if not q:
+        return True
+    fields = (e.name, e.description, e.categories, e.extension_id)
+    return any(q in str(f or "").lower() for f in fields)
+
+
 def search_extensions(query: str, verified_only: bool) -> List[Dict]:
     q = (query or "").lower().strip()
-    results = []
-    for e in ExtensionListingEntity.instances():
-        if not (e.is_active if e.is_active is not None else True):
-            continue
-        if verified_only and str(e.verification_status) != "verified":
-            continue
-        name = str(e.name or "").lower()
-        desc = str(e.description or "").lower()
-        cats = str(e.categories or "").lower()
-        if q and (q in name or q in desc or q in cats or q in str(e.extension_id or "").lower()):
-            results.append(_to_dict(e))
-        elif not q:
-            results.append(_to_dict(e))
-    results.sort(key=lambda r: r.get("installs", 0), reverse=True)
-    return results
+    out = [
+        _to_dict(e) for e in ExtensionListingEntity.instances()
+        if _visible(e, verified_only) and _matches(e, q)
+    ]
+    out.sort(key=lambda r: r.get("installs", 0), reverse=True)
+    return out
+
+
+def list_extensions_page(cursor: int, count: int, verified_only: bool) -> Dict:
+    """One page of listings, newest first, with a bounded read per call
+    (see core.models.newest_first). Returns listings and next_cursor."""
+    items, next_cursor = newest_first(
+        ExtensionListingEntity, cursor, count, lambda e: _visible(e, verified_only)
+    )
+    return {"listings": [_to_dict(e) for e in items], "next_cursor": next_cursor}
+
+
+def search_extensions_page(query: str, cursor: int, count: int, verified_only: bool) -> Dict:
+    """One page of search matches, newest first, with a bounded read per call.
+    A page can be short or empty while next_cursor is non-zero."""
+    q = (query or "").lower().strip()
+    items, next_cursor = newest_first(
+        ExtensionListingEntity, cursor, count,
+        lambda e: _visible(e, verified_only) and _matches(e, q),
+    )
+    return {"listings": [_to_dict(e) for e in items], "next_cursor": next_cursor}
 
 
 def get_developer_extensions(developer: str) -> List[Dict]:
@@ -253,7 +277,7 @@ def buy_extension(realm_principal: str, extension_id: str) -> Dict:
 
     # Idempotent — repeat buys by the same principal are no-ops, return the
     # existing purchase id. Otherwise the install count would over-inflate.
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "ext"
@@ -278,7 +302,7 @@ def buy_extension(realm_principal: str, extension_id: str) -> Dict:
 
 
 def has_purchased_extension(realm_principal: str, extension_id: str) -> bool:
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "ext"
@@ -290,7 +314,7 @@ def has_purchased_extension(realm_principal: str, extension_id: str) -> bool:
 
 def get_my_purchases(realm_principal: str) -> List[Dict]:
     out = []
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if str(p.realm_principal) != realm_principal:
             continue
         out.append({

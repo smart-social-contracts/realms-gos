@@ -58,6 +58,26 @@ async function getRealmAgent(): Promise<HttpAgent> {
 	return new HttpAgent({ verifyQuerySignatures: false });
 }
 
+// Calls a paged marketplace endpoint until it has `count` rows or reaches the
+// end (next_cursor 0): each call reads a bounded number of rows and can come
+// back short while more remain.
+type RawPage = { listings: Record<string, unknown>[]; next_cursor: bigint };
+
+async function collectPages(
+	fetch: (cursor: bigint, count: bigint) => Promise<unknown>,
+	count: number,
+): Promise<Record<string, unknown>[]> {
+	const rows: Record<string, unknown>[] = [];
+	let cursor = 0n;
+	for (let call = 0; call < 10; call++) {
+		const r = (await fetch(cursor, BigInt(count - rows.length))) as RawPage;
+		rows.push(...(r.listings ?? []));
+		cursor = r.next_cursor;
+		if (cursor === 0n || rows.length >= count) break;
+	}
+	return rows;
+}
+
 async function createMarketplaceActor(canisterId: string) {
 	const { idlFactory } = await import('declarations/marketplace_backend');
 	const agent = await getRealmAgent();
@@ -101,9 +121,16 @@ export async function createMarketplaceExtensionBackend(
 
 	return {
 		async list_extensions() {
-			const r = await mp.list_marketplace_extensions(BigInt(1), BigInt(100), false);
-			const listings = (r.listings ?? []).map((e: Record<string, unknown>) => normListing(e));
-			return { listings };
+			// Up to 100 newest. The paged endpoint reads a bounded number of rows
+			// per call; a marketplace canister without it gets the old call.
+			let rows: Record<string, unknown>[];
+			try {
+				rows = await collectPages((c, n) => mp.list_marketplace_extensions_page(c, n, false), 100);
+			} catch {
+				const r = (await mp.list_marketplace_extensions(BigInt(1), BigInt(100), false)) as Partial<RawPage>;
+				rows = r.listings ?? [];
+			}
+			return { listings: rows.map((e) => normListing(e)) };
 		},
 
 		async marketplace_stats() {
@@ -118,9 +145,13 @@ export async function createMarketplaceExtensionBackend(
 		},
 
 		async search_marketplace(query: string) {
-			const results = await mp.search_extensions(query, false);
-			const listings = (results ?? []).map((e: Record<string, unknown>) => normListing(e));
-			return { listings };
+			let rows: Record<string, unknown>[];
+			try {
+				rows = await collectPages((c, n) => mp.search_extensions_page(query, c, n, false), 100);
+			} catch {
+				rows = ((await mp.search_extensions(query, false)) as Record<string, unknown>[]) ?? [];
+			}
+			return { listings: rows.map((e) => normListing(e)) };
 		},
 
 		async get_my_purchases() {

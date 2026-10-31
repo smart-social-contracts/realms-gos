@@ -1,4 +1,0 @@
-- **Tax policy.** A realm's taxes are a versioned tax policy: flat and land taxes (fixed, proportional or progressive brackets), an exemption threshold, a billing period, and who is liable or exempt. Admins edit a draft in the new Tax manager extension and adopt it directly or through a vote. Codices read the policy in force and assess taxes through it; Agora issues the invoices.
-- **Signing in from the portal.** After a portal sign-in, a realm waits for the session instead of giving up on the first "no session" reply, and the join page stays on "Signing you in" until membership is checked.
-- **Valencian.** The welcome step says "Benvingut".
-- **CLI.** `realms extension publish` uploads the runtime frontend build over an older sandbox shell, so a stale `frontend/dist` no longer replaces the extension's page.

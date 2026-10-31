@@ -21,7 +21,6 @@ import type {
   ExtensionMountFn,
 } from './realm-extension-sdk';
 import { SandboxBridgeService, type SandboxBridgeDeps } from './extension-bridge-host';
-import { read, must } from './realm';
 
 export type { MountResult, ExtensionMountFn as MountFn };
 
@@ -62,21 +61,6 @@ export function fileRegistryBaseUrlFor(canisterId: string): string {
 }
 
 const HANDSHAKE_TIMEOUT_MS = 30_000;
-
-/**
- * The installed version of an extension, from the realm's extension_list; undefined when it is
- * not installed.
- */
-export async function resolveExtensionVersion(extId: string): Promise<string | undefined> {
-  let from: number | null = 1;
-  while (from) {
-    const page = await must(read('extension_list', { from, count: 100 }));
-    const row = page.extensions.find((e: { id: string }) => e.id === extId);
-    if (row) return row.version;
-    from = page.next;
-  }
-  return undefined;
-}
 
 /**
  * Fetch and dynamically import an extension's compiled frontend bundle,

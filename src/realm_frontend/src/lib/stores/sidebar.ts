@@ -52,6 +52,8 @@ function labelText(label: unknown, locale: string): string {
 	return map[locale] || map.en || '';
 }
 
+let latestSidebarRequest = 0;
+
 /** The menu rows of the extensions available to the caller, from every page of ``extension_list``. */
 async function sidebarRows() {
 	const rows: { id: string; sidebar: Record<string, any> }[] = [];
@@ -70,6 +72,7 @@ async function sidebarRows() {
  * It asks the active quarter (or the realm), the actor callers pass as ``_backend``.
  */
 export async function loadSidebar(_backend: unknown, locale: string = 'en'): Promise<void> {
+	const request = ++latestSidebarRequest;
 	const cached = readCache(locale);
 	if (cached) {
 		sidebarConfig.set(cached);
@@ -81,6 +84,9 @@ export async function loadSidebar(_backend: unknown, locale: string = 'en'): Pro
 		// Visitors get the fixed public menu (Sidebar.svelte).
 		if (!get(isAuthenticated)) return;
 		const rows = await sidebarRows();
+		// The actor swaps capital → home quarter during boot; the capital's
+		// menu must not overwrite (or be cached over) the member's.
+		if (request !== latestSidebarRequest) return;
 		const manifests: SidebarManifest[] = [];
 		const welcomeItems: SidebarNavItem[] = [];
 		const mundusItems: SidebarNavItem[] = [];
@@ -139,6 +145,7 @@ export async function loadSidebar(_backend: unknown, locale: string = 'en'): Pro
 		sidebarConfig.set(config);
 		writeCache(locale, config);
 	} catch (e) {
+		if (request !== latestSidebarRequest) return;
 		// Signed in but the signed actor is not in quarterBackendStore yet: Sidebar reloads when it lands.
 		if (!(e instanceof RealmError && e.message === 'sign in first')) {
 			console.error('Failed to load sidebar:', e);
@@ -147,6 +154,6 @@ export async function loadSidebar(_backend: unknown, locale: string = 'en'): Pro
 			sidebarConfig.set(cached);
 		}
 	} finally {
-		sidebarLoading.set(false);
+		if (request === latestSidebarRequest) sidebarLoading.set(false);
 	}
 }

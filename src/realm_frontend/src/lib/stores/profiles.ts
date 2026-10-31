@@ -140,8 +140,22 @@ export async function loadUserProfiles() {
     }));
     
     try {
-        const { probeFederatedMembership } = await import('$lib/utils/federatedMembership');
-        const { primary } = await probeFederatedMembership({ activate: true, cache: true });
+        const { probeFederatedMembership, verifyAssignedQuarter, activateMembership } =
+            await import('$lib/utils/federatedMembership');
+        const { primary: found, capitalId } = await probeFederatedMembership({
+            activate: true,
+            cache: true,
+            stopAtCachedHit: true,
+        });
+
+        let primary = found;
+        if (found) {
+            const assigned = await verifyAssignedQuarter(found);
+            if (assigned) {
+                await activateMembership(assigned, capitalId, { cache: true });
+                primary = assigned;
+            }
+        }
 
         if (primary) {
             const userGet = primary.response?.data?.userGet;
@@ -154,24 +168,6 @@ export async function loadUserProfiles() {
                 loading: false
             }));
             console.log('User profiles loaded via federated probe:', profiles, 'departments:', departments, 'quarter:', primary.canisterId);
-
-            // Prefer assigned_quarter from the record when present (may refine cache).
-            const assignedQuarter = primary.response?.data?.userGet?.assigned_quarter;
-            if (assignedQuarter && assignedQuarter !== primary.canisterId) {
-                try {
-                    // @ts-ignore
-                    const { setActiveQuarter } = await import('$lib/canisters');
-                    // @ts-ignore
-                    const { activeQuarterId } = await import('$lib/stores/quarters');
-                    activeQuarterId.set(assignedQuarter);
-                    await setActiveQuarter(assignedQuarter);
-                    if (typeof localStorage !== 'undefined') {
-                        localStorage.setItem('home_quarter', assignedQuarter);
-                    }
-                } catch (qErr) {
-                    console.error('Failed to auto-route to assigned_quarter:', qErr);
-                }
-            }
         } else {
             profileState.update(state => ({
                 ...state,

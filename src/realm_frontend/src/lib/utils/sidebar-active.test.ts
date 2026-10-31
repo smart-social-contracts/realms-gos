@@ -6,6 +6,7 @@ import {
 	FOLD_MUNDUS,
 	FOLD_REALM,
 	activeSidebarFoldIds,
+	navigationTargetKey,
 	sidebarFoldExpandKey,
 	sidebarItemIsActive,
 } from './sidebar-active';
@@ -142,5 +143,19 @@ describe('sidebarFoldExpandKey', () => {
 		expect(before).toBe('/extensions/justice_litigation|member|');
 		expect(after).toBe('/extensions/justice_litigation|member|__section_realm__,public_services');
 		expect(before).not.toBe(after);
+	});
+});
+
+describe('navigationTargetKey', () => {
+	it('tolerates the initial enter navigation (from.url is null)', () => {
+		expect(navigationTargetKey({ url: null })).toBe('');
+		expect(navigationTargetKey(null)).toBe('');
+		expect(navigationTargetKey(undefined)).toBe('');
+	});
+
+	it('joins pathname and search', () => {
+		expect(
+			navigationTargetKey({ url: { pathname: '/extensions/voting', search: '?tab=1' } }),
+		).toBe('/extensions/voting?tab=1');
 	});
 });

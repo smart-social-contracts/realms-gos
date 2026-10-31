@@ -96,6 +96,10 @@ class TestSlugify:
         assert slugify("") == "realm"
         assert slugify("---") == "realm"
 
+    def test_transliterates_accents(self):
+        assert slugify("València") == "valencia"
+        assert slugify("Çà i Ñoño") == "ca-i-nono"
+
 
 class TestSpecFlagMerge:
     def test_flags_override_spec(self, tmp_path: Path):

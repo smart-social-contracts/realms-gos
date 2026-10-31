@@ -3,8 +3,9 @@ import { writable, get } from 'svelte/store';
 import { authClient, initializeAuthClient, login } from '$lib/auth';
 import { getTestModeIIBypass } from '$lib/config.js';
 import { isEmbeddedInPortal } from '$lib/portal-bridge.ts';
+import { queryMethodNames, withConcurrentQueryDedupe } from '$lib/utils/dedupeQueries';
 
-let createActor, canisterId, HttpAgent;
+let rawCreateActor, canisterId, HttpAgent, Actor;
 let importsInitialized = false;
 
 async function initializeImports() {
@@ -22,7 +23,7 @@ async function initializeImports() {
 
 	try {
 		const { createActor: ca, canisterId: cid } = await import('$lib/declarations/realm_backend');
-		createActor = ca;
+		rawCreateActor = ca;
 		if (!canisterId) {
 			canisterId = cid;
 			console.log(`✅ realm_backend from declarations: ${canisterId}`);
@@ -34,12 +35,31 @@ async function initializeImports() {
 
 	const agentModule = await import('@dfinity/agent');
 	HttpAgent = agentModule.HttpAgent;
+	Actor = agentModule.Actor;
 
 	if (!canisterId) {
 		throw new Error('Canister ID not found. Ensure /canister_ids.js is deployed.');
 	}
 
 	importsInitialized = true;
+}
+
+let _queryMethods = null;
+
+// Identity each wrapped actor signs with (null = anonymous). @dfinity/agent 3.x
+// no longer exposes actor._agent, so initBackendWithIdentity tracks it here to
+// avoid rebuilding an identical actor — every backendStore change makes the
+// sidebar, user status, etc. refetch.
+const actorIdentity = new WeakMap();
+
+function createActor(id, options, identity = null) {
+	const actor = rawCreateActor(id, options);
+	if (_queryMethods === null) {
+		_queryMethods = queryMethodNames(Actor.interfaceOf(actor));
+	}
+	const wrapped = withConcurrentQueryDedupe(actor, _queryMethods);
+	actorIdentity.set(wrapped, identity);
+	return wrapped;
 }
 
 function dummyActor() {
@@ -146,7 +166,7 @@ function initializeBackendStore() {
 				if (isLocalDevelopment()) {
 					await agent.fetchRootKey().catch(() => {});
 				}
-				actor = createActor(canisterId, { agent });
+				actor = createActor(canisterId, { agent }, identity);
 				backendStore.set(actor);
 				backendPrincipal.set(identity.getPrincipal().toText());
 				console.log('Backend store initialized with authenticated identity');
@@ -202,7 +222,7 @@ export async function initBackendWithIdentity(explicitIdentity = null) {
 			console.log('Using authenticated identity:', identity.getPrincipal().toText());
 
 			const currentActor = get(backendStore);
-			if (currentActor && currentActor._agent && currentActor._agent._identity === identity) {
+			if (currentActor && actorIdentity.get(currentActor) === identity) {
 				console.log('Backend already initialized with current identity');
 				backendPrincipal.set(identity.getPrincipal().toText());
 				return currentActor;
@@ -221,9 +241,7 @@ export async function initBackendWithIdentity(explicitIdentity = null) {
 			}
 
 			// Create a new actor with the authenticated identity
-			const authenticatedActor = createActor(canisterId, {
-				agent
-			});
+			const authenticatedActor = createActor(canisterId, { agent }, identity);
 
 			// Update the store with the authenticated actor
 			backendStore.set(authenticatedActor);
@@ -233,8 +251,10 @@ export async function initBackendWithIdentity(explicitIdentity = null) {
 			// (possibly anonymous) identity — rebuild it so quarter-routed calls
 			// carry the fresh identity too.
 			if (_currentQuarterId) {
+				const quarterId = _currentQuarterId;
 				try {
-					const quarterActor = await createQuarterActor(_currentQuarterId, identity);
+					const quarterActor = await createQuarterActor(quarterId, identity);
+					if (_currentQuarterId !== quarterId) return authenticatedActor;
 					quarterBackendStore.set(quarterActor);
 					console.log(`🏘️ quarterBackend re-authenticated → quarter ${_currentQuarterId}`);
 				} catch (e) {
@@ -302,7 +322,7 @@ export async function createQuarterActor(quarterCanisterId, explicitIdentity = n
 		await agent.fetchRootKey().catch(() => {});
 	}
 
-	return createActor(quarterCanisterId, { agent });
+	return createActor(quarterCanisterId, { agent }, identity);
 }
 
 // --- Quarter-aware backend store ---
@@ -330,10 +350,14 @@ export async function setActiveQuarter(quarterId) {
 
 	try {
 		const actor = await createQuarterActor(quarterId);
+		// A later switch (e.g. back to the capital) may have landed while this
+		// actor was being built; don't let the slower call overwrite it.
+		if (_currentQuarterId !== quarterId) return;
 		quarterBackendStore.set(actor);
 		console.log(`🏘️ quarterBackend → quarter ${quarterId}`);
 	} catch (e) {
 		console.error('Failed to create quarter actor, falling back to main:', e);
+		if (_currentQuarterId !== quarterId) return;
 		quarterBackendStore.set(get(backendStore) || backend);
 	}
 }

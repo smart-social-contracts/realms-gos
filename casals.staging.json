@@ -128,9 +128,9 @@
       },
       {
         "family": "marketplace-backend",
-        "version": "main",
-        "source": "release:smart-social-contracts/realms-gos@v0.7.0-rc6:marketplace-backend-v0.7.0-rc6.wasm.gz",
-        "sha256": "d85cffe7d7f5865360dced97ccf5cef6c5c8eb9fac844cdcba2ad50f5405f0a7"
+        "version": "0.8.0-rc3",
+        "source": "release:smart-social-contracts/realms-gos@v0.8.0-rc3:marketplace-backend-v0.8.0-rc3.wasm.gz",
+        "sha256": "d50e96b541276f57546a4a80637336e20f8595a989fa95294fa565276deead33"
       },
       {
         "family": "token-backend",
@@ -148,8 +148,8 @@
     "bundles": [
       {
         "path": "frontend/marketplace-assets/main",
-        "source": "release:smart-social-contracts/realms-gos@v0.7.0-rc6:marketplace-frontend-v0.7.0-rc6.tar.gz",
-        "sha256": "a00407534bf4095916caafb6ca6dc68cc4a3b00bd7697d517e8bdbc5eeef0fe9"
+        "source": "release:smart-social-contracts/realms-gos@v0.8.0-rc3:marketplace-frontend-v0.8.0-rc3.tar.gz",
+        "sha256": "d0873e8f23d893955b689e0b02dffd79725158dc97bc6609d2b4317042c6fcd9"
       },
       {
         "path": "frontend/file-registry-assets/main",
@@ -175,7 +175,7 @@
               "name": "marketplace-backend",
               "kind": "backend",
               "mode": "managed",
-              "wasm": "marketplace-backend@main",
+              "wasm": "marketplace-backend@0.8.0-rc3",
               "controllers": [
                 "$self",
                 "$multisig"

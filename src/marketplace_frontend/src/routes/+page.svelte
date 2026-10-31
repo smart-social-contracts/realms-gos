@@ -102,14 +102,15 @@ function syncUrl(k, m, v, cat, lang) {
 }
 async function resolveKindForQuery(q, verified) {
   try {
+    // One match is enough to pick the tab
     const [assistants, extensions, codices] = await Promise.all([
-      marketplaceClient.searchAssistants(q, verified),
-      marketplaceClient.searchExtensions(q, verified),
-      marketplaceClient.searchCodices(q, verified),
+      marketplaceClient.searchAssistantsPage(q, 0n, 1, verified),
+      marketplaceClient.searchExtensionsPage(q, 0n, 1, verified),
+      marketplaceClient.searchCodicesPage(q, 0n, 1, verified),
     ]);
-    if (assistants.length) return "assistant";
-    if (extensions.length) return "ext";
-    if (codices.length) return "codex";
+    if (assistants.listings.length) return "assistant";
+    if (extensions.listings.length) return "ext";
+    if (codices.listings.length) return "codex";
   } catch {
     /* fall through */
   }
@@ -137,15 +138,17 @@ async function load(k, m, v, q) {
   try {
     const query = (q ?? "").trim();
     if (query) {
-      if (k === "ext") items = await marketplaceClient.searchExtensions(query, v);
-      else if (k === "codex") items = await marketplaceClient.searchCodices(query, v);
-      else items = await marketplaceClient.searchAssistants(query, v);
+      // The first page of matches, most installed first
+      const r = k === "ext" ? await marketplaceClient.searchExtensionsPage(query, 0n, 24, v)
+        : k === "codex" ? await marketplaceClient.searchCodicesPage(query, 0n, 24, v)
+        : await marketplaceClient.searchAssistantsPage(query, 0n, 24, v);
+      items = [...r.listings].sort((a, b) => b.installs - a.installs);
     } else if (k === "ext") {
-      items = m === "downloads" ? await marketplaceClient.topExtensionsByDownloads(20, v) : m === "likes" ? await marketplaceClient.topExtensionsByLikes(20, v) : byNewest((await marketplaceClient.listExtensions(1, 20, v)).listings);
+      items = m === "downloads" ? await marketplaceClient.topExtensionsByDownloads(20, v) : m === "likes" ? await marketplaceClient.topExtensionsByLikes(20, v) : byNewest((await marketplaceClient.listExtensionsPage(0n, 20, v)).listings);
     } else if (k === "codex") {
-      items = m === "downloads" ? await marketplaceClient.topCodicesByDownloads(20, v) : m === "likes" ? await marketplaceClient.topCodicesByLikes(20, v) : byNewest((await marketplaceClient.listCodices(1, 20, v)).listings);
+      items = m === "downloads" ? await marketplaceClient.topCodicesByDownloads(20, v) : m === "likes" ? await marketplaceClient.topCodicesByLikes(20, v) : byNewest((await marketplaceClient.listCodicesPage(0n, 20, v)).listings);
     } else {
-      items = m === "downloads" ? await marketplaceClient.topAssistantsByDownloads(20, v) : m === "likes" ? await marketplaceClient.topAssistantsByLikes(20, v) : byNewest((await marketplaceClient.listAssistants(1, 20, v)).listings);
+      items = m === "downloads" ? await marketplaceClient.topAssistantsByDownloads(20, v) : m === "likes" ? await marketplaceClient.topAssistantsByLikes(20, v) : byNewest((await marketplaceClient.listAssistantsPage(0n, 20, v)).listings);
     }
   } catch (e) {
     error = e?.message ?? String(e);

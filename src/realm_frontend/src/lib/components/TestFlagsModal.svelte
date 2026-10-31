@@ -74,7 +74,7 @@
 			const result = await must(
 				run('realm_configure', { test_mode: !!values.test_mode, test_flags: testOnlyFlags() })
 			);
-			await realmInfo.fetch();
+			await realmInfo.fetch({ force: true });
 			message = result.proposal
 				? `Proposal ${result.proposal} filed: the flags change once it is accepted`
 				: 'Test flags updated';

@@ -18,7 +18,8 @@
 	// @ts-ignore
 	import { CONFIG } from '$lib/config.js';
 	import { cn } from '$lib/theme/utilities';
-	import { mountExtension, resolveExtensionVersion, type MountResult } from '$lib/extension-loader';
+	import { mountExtension, type MountResult } from '$lib/extension-loader';
+	import { getInstalledExtensionVersion } from '$lib/utils/extension-manifest';
 	import { loadExtensionTranslation } from '$lib/i18n';
 	import { IconSettings, IconX } from '@tabler/icons-svelte';
 
@@ -210,7 +211,7 @@
 		errorMsg = '';
 
 		try {
-			const version = await resolveExtensionVersion(EXTENSION_ID);
+			const version = await getInstalledExtensionVersion(EXTENSION_ID);
 			if (!version) {
 				status = 'error';
 				errorMsg = get(_)('errors.ai_not_installed');

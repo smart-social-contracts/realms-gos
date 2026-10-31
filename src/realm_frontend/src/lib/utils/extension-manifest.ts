@@ -167,6 +167,23 @@ export async function getExtensionManifestWithRetry(
 	return null;
 }
 
+/**
+ * Installed version of an extension from the shared manifest cache, so a
+ * navigation does not wait on its own extension_list round trip.
+ * A miss (e.g. installed during this session) refetches once; `fresh`
+ * bypasses the cache entirely (e.g. retrying after a stale bundle failed).
+ */
+export async function getInstalledExtensionVersion(
+	extId: string,
+	{ fresh = false }: { fresh?: boolean } = {},
+): Promise<string | undefined> {
+	if (fresh) clearExtensionManifestCache();
+	const version = (await fetchExtensionManifests())[extId]?.version;
+	if (version || fresh) return version;
+	clearExtensionManifestCache();
+	return (await fetchExtensionManifests())[extId]?.version;
+}
+
 export function clearExtensionManifestCache(): void {
 	cache = null;
 	loadPromise = null;

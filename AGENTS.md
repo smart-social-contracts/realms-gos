@@ -48,14 +48,12 @@ realms/
 ├── src/realm_backend/                # Python canister backend
 ├── .github/workflows/
 │   ├── ci-pr.yml / ci-main.yml       # Lint, unit, `casals up` e2e on a local replica (realms-e2e.yml)
-│   ├── release.yml                   # Version bump, GitHub release, PyPI; optional publish to the production file_registry
-│   ├── publish-build.yml             # Build + publish realm artifacts into an environment's file_registry
-│   └── deploy-files.yml              # Publish extensions/codices into file_registry
+│   └── release.yml                   # Version bump, GitHub release, PyPI; optional publish to the production file_registry
 ├── (casals is NOT a submodule — clone smart-social-contracts/casals separately for its CLI; platform provisioner of gos-as-a-service)
 ├── casals.json                       # The product orchestra (marketplace, file registry, token, NFT, demo realm) — `casals up`
 ├── canister_ids.json                 # Operator inventory of live ids, written by `casals export` (never a source of truth in code)
 ├── scripts/
-│   └── publish_build.py              # Build+publish engine used by publish-build.yml / release.yml
+│   └── publish_build.py              # Build+publish engine used by release.yml
 └── docs/                            # The documentation: start at docs/README.md
 ```
 
@@ -88,8 +86,8 @@ below is what the phases do, for a single step.
 | Anything in the orchestra (code, sheet, packages) | `scripts/up.sh -e production …` (docs/deployment/README.md, "One command") |
 | Product canister code (realm backend/frontend, marketplace, token, NFT) | Build (`scripts/up.sh --build-only`; recipes also in `release.yml`), `casals pin`, then `casals up -e production` from the Casals repo |
 | The conductor / file registry / multisig themselves | Same `casals up`; the sheet's `registry.wasms` pins them |
-| Extensions / codices bundles only | `scripts/up.sh -e production --identity prod-identity --publish-only`, or `realms files publish --network ic --registry <fleet-file-registry>` + `realms marketplace publish`, or `deploy-files.yml` |
-| A realm artifact the installer serves to new portal realms | `publish-build.yml` / `scripts/publish_build.py --environment production` (the release workflow can do this too) |
+| Extensions / codices bundles only | `scripts/up.sh -e production --identity prod-identity --publish-only`, or `realms files publish --network ic --registry <fleet-file-registry>` + `realms marketplace publish` |
+| A realm artifact the installer serves to new portal realms | `scripts/publish_build.py --environment production` (the release workflow does this too) |
 | Existing portal-created realms | `realms mundus deploy <descriptor>` — the descriptor's `infra` block names the environment's registry / installer / file registry ids (`realms mundus deploy --help`) |
 | A new realm on a live GOS | `realms new spec.json --gaas-config <gaas new --output-file>` |
 | Registry / wizard UI (`gos.earth`) | [gos-as-a-service](https://github.com/smart-social-contracts/gos-as-a-service): its own `casals.json` + `casals up` |
@@ -102,8 +100,8 @@ replica only.
 A `vX.Y.Z-rcN` release is a build you expect to ship as `vX.Y.Z` unchanged.
 It is not how a fix reaches staging: try changes there with a local build
 (a `local:` row in a working copy of `casals.staging.json`, then
-`casals upgrade --wasm` / `--content`) or a `publish-build.yml` `from_main`
-build, and cut the RC once the change works. Before the next RC, the previous
+`casals upgrade --wasm` / `--content`) or a `scripts/publish_build.py`
+build from main, and cut the RC once the change works. Before the next RC, the previous
 one is signed and published, or deleted. An RC carries the release summary,
 is marked as a pre-release, and is never Latest.
 
@@ -434,12 +432,12 @@ from the table above (same `--source-dir codices/codices/syntropia`).
 | Single-realm dev iteration, registry or installer down | **Direct runtime install** (this section) |
 | The demo stand of `casals.json` | rebuild, then `casals up` (docs/deployment/README.md) |
 | Extension-only change, registry healthy | [Fast Remote Extension Deploy](#fast-remote-extension-deploy-26s) above |
-| Quarters / multi-realm / pre-merge authoritative deploy | `deploy-files` → registry install → `casals up` |
+| Quarters / multi-realm / pre-merge authoritative deploy | `realms files publish` → registry install → `casals up` |
 
 `realms extension resync-frontends` can hit `IC0506` (no reply) when many bundles copy at once. Restore the missing extension with `registry-install` instead.
 
 Direct install only affects the canister you target. It does **not** update
-the file registry catalog — run `deploy-files` before merge so other realms and
+the file registry catalog — run `realms files publish` before merge so other realms and
 quarter bootstrap can pull the new packages.
 
 **Gotchas (learned staging Jul 2026):**
@@ -845,11 +843,11 @@ until updated manually or re-provisioned.
 
 ## Gotchas
 
-1. **`deploy-files` `environment` must match target.** Publishing to `staging` (default) won't be visible to `demo` or `test` realms.
-2. **Any change inside `extensions/` (including manifest.json edits) requires `deploy-files` before installing.** Extensions are pulled from the file registry — if you skip `deploy-files`, the registry still has stale manifests/bundles and the install uses old data. Always: `deploy-files` → wait for green → install / rollout.
+1. **`realms files publish` must target the environment you install into.** Publishing to the `staging` registry won't be visible to `demo` or `test` realms.
+2. **Any change inside `extensions/` (including manifest.json edits) requires `realms files publish` before installing.** Extensions are pulled from the file registry — if you skip `realms files publish`, the registry still has stale manifests/bundles and the install uses old data. Always: `realms files publish` → install / rollout.
 3. **Agora is prone to timeouts.** Retry a single failed realm: `-f targets=agora`.
 4. **`reinstall` wipes all state.** Use `upgrade` unless you want a clean slate.
-5. **Frontend bundles are built by CI.** The `deploy-files` workflow runs `realms files build` to compile `frontend-rt/` sources before publishing. No need to commit `dist/index.js`.
+5. **Frontend bundles are built from source.** Run `realms files build` (`scripts/up.sh` does) to compile `frontend-rt/` before publishing. No need to commit `dist/index.js`.
 6. **Mundus is not “skip the installer.”** It calls `request_deployment` on the realm registry and waits on **realm_installer**. If you meant the direct dfx path, do not write a temp mundus descriptor for a wizard slug.
 7. **A frontend (re)install wipes `/ext/`.** A pending mundus job *or* a direct wizard frontend asset sync will 404 every extension until you `registry-install` / `resync_extension_frontends` / store the missing bundles. `pin_directory` is not on this asset canister.
 8. **`runtime-install` needs `entry.py`.** Frontend-only extensions (`public_dashboard`) use `registry-install`.
@@ -868,7 +866,7 @@ until updated manually or re-provisioned.
   gos-as-a-service (`scripts/fetch_gos_artifacts.py`) — **building registry from
   source in this repo is no longer possible**. **Other infra:** `scripts/infra_dev_deploy.sh`
   or `publish_build.py` for file_registry, marketplace, dashboard. **Extensions:**
-  `deploy-files.yml` to publish bundles into the file registry.
+  `realms files publish` to publish bundles into the file registry.
 - **Visually verify every UI change before reporting back.** After deploying a frontend or extension change, open the page in the browser and confirm the result matches the requirements. Do not report completion until you have checked the deployed page yourself. If the visual check reveals issues, fix and redeploy in a loop until the result is correct.
 - **Do not commit, create a branch, or open a PR unless the user explicitly
   asks.** Operational work (redeploys, `__shell__`, live checks) stays on the

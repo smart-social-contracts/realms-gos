@@ -116,6 +116,7 @@ jobs:
                     tests/backend/test_shell_access_denied.py \
                     tests/backend/test_department_table.py \
                     tests/backend/test_no_module_level_re.py \
+                    tests/backend/test_stamp_build.py \
                     tests/backend/test_proposal_dispatch_orchestration.py \
                     tests/backend/test_delegation.py
       - name: Tax policy

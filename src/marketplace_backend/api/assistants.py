@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from _cdk import ic
 from api.config import caller_is_admin
 from api.developers import developer_name, is_suspended
-from core.models import AssistantListingEntity, PurchaseEntity
+from core.models import AssistantListingEntity, PurchaseEntity, newest_first, purchases_of
 from ic_python_logging import get_logger
 
 logger = get_logger("api.assistants")
@@ -235,26 +235,52 @@ def list_assistants(page: int, per_page: int, verified_only: bool) -> Dict:
     }
 
 
+def _visible(a: AssistantListingEntity, verified_only: bool) -> bool:
+    if not (a.is_active if a.is_active is not None else True):
+        return False
+    return not verified_only or str(a.verification_status) == "verified"
+
+
+def _matches(a: AssistantListingEntity, q: str) -> bool:
+    if not q:
+        return True
+    haystack = " ".join([
+        str(a.name or ""), str(a.description or ""), str(a.categories or ""),
+        str(a.assistant_id or ""), str(a.domains or ""), str(a.base_model or ""),
+        str(a.requested_role or ""), str(a.runtime or ""),
+        str(a.languages or ""),
+    ]).lower()
+    return q in haystack
+
+
 def search_assistants(query: str, verified_only: bool) -> List[Dict]:
     q = (query or "").lower().strip()
-    out = []
-    for a in AssistantListingEntity.instances():
-        if not (a.is_active if a.is_active is not None else True):
-            continue
-        if verified_only and str(a.verification_status) != "verified":
-            continue
-        haystack = " ".join([
-            str(a.name or ""), str(a.description or ""), str(a.categories or ""),
-            str(a.assistant_id or ""), str(a.domains or ""), str(a.base_model or ""),
-            str(a.requested_role or ""), str(a.runtime or ""),
-            str(a.languages or ""),
-        ]).lower()
-        if q and q in haystack:
-            out.append(_to_dict(a))
-        elif not q:
-            out.append(_to_dict(a))
+    out = [
+        _to_dict(a) for a in AssistantListingEntity.instances()
+        if _visible(a, verified_only) and _matches(a, q)
+    ]
     out.sort(key=lambda r: r.get("installs", 0), reverse=True)
     return out
+
+
+def list_assistants_page(cursor: int, count: int, verified_only: bool) -> Dict:
+    """One page of listings, newest first, with a bounded read per call
+    (see core.models.newest_first). Returns listings and next_cursor."""
+    items, next_cursor = newest_first(
+        AssistantListingEntity, cursor, count, lambda a: _visible(a, verified_only)
+    )
+    return {"listings": [_to_dict(a) for a in items], "next_cursor": next_cursor}
+
+
+def search_assistants_page(query: str, cursor: int, count: int, verified_only: bool) -> Dict:
+    """One page of search matches, newest first, with a bounded read per call.
+    A page can be short or empty while next_cursor is non-zero."""
+    q = (query or "").lower().strip()
+    items, next_cursor = newest_first(
+        AssistantListingEntity, cursor, count,
+        lambda a: _visible(a, verified_only) and _matches(a, q),
+    )
+    return {"listings": [_to_dict(a) for a in items], "next_cursor": next_cursor}
 
 
 def get_developer_assistants(developer: str) -> List[Dict]:
@@ -282,7 +308,7 @@ def buy_assistant(realm_principal: str, assistant_id: str) -> Dict:
     if a is None or not (a.is_active if a.is_active is not None else True):
         return {"success": False, "error": "Assistant not found"}
 
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "assistant"
@@ -307,7 +333,7 @@ def buy_assistant(realm_principal: str, assistant_id: str) -> Dict:
 
 
 def has_purchased_assistant(realm_principal: str, assistant_id: str) -> bool:
-    for p in PurchaseEntity.instances():
+    for p in purchases_of(realm_principal):
         if (
             str(p.realm_principal) == realm_principal
             and str(p.item_kind) == "assistant"
