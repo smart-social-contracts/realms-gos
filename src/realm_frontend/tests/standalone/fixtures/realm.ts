@@ -32,6 +32,11 @@ export function founderIdentity(realm: StandaloneRealm): Ed25519KeyIdentity {
 	return Ed25519KeyIdentity.generate(Uint8Array.from(Buffer.from(realm.founder_seed, 'hex')));
 }
 
+/** A second person, with a key of their own, for the specs that need one beside the founder. */
+export function memberIdentity(): Ed25519KeyIdentity {
+	return Ed25519KeyIdentity.generate(new Uint8Array(32).fill(7));
+}
+
 function hostHtml(realm: StandaloneRealm, path: string): string {
 	const sep = path.includes('?') ? '&' : '?';
 	return `<!doctype html>
@@ -112,13 +117,18 @@ export async function openInPortal(
 const readIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
 	IDL.Service({ read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']) });
 
-/** A public read operation of the realm, as anonymous. */
+/** A read operation of the realm, as anonymous or, with ``identity``, as that member. */
 export async function readOp(
 	realm: StandaloneRealm,
 	name: string,
-	args: Record<string, unknown> = {}
+	args: Record<string, unknown> = {},
+	identity?: Ed25519KeyIdentity
 ): Promise<Record<string, unknown>> {
-	const agent = await HttpAgent.create({ host: realm.network_url, shouldFetchRootKey: true });
+	const agent = await HttpAgent.create({
+		host: realm.network_url,
+		identity,
+		shouldFetchRootKey: true
+	});
 	const actor = Actor.createActor<{ read: (n: string, a: string) => Promise<string> }>(
 		readIdl as never,
 		{

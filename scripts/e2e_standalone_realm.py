@@ -42,8 +42,8 @@ from realms.cli.commands.extension import _dfx_call, latest_version  # noqa: E40
 from realms.cli.realm_api import call_op  # noqa: E402
 
 ORCHESTRA = "realms-product"
-CORE_EXTENSIONS = ("public_dashboard", "member_dashboard", "realm_settings", "extensions_manager", "voting",
-                   "census", "admin_dashboard", "vault", "codex_viewer")
+# The realm's own list, so every extension the wizard's launch installs is installed here with its frontend.
+CORE_EXTENSIONS = tuple(json.loads((ROOT / "core-extensions.json").read_text())["core_extensions"])
 ED25519_DER_PREFIX = bytes.fromhex("302a300506032b6570032100")
 ICP_YAML = """\
 # Written by scripts/e2e_standalone_realm.py: a standalone realm on the product's local replica.
