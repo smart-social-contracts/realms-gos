@@ -4,8 +4,6 @@ name: Live-site smoke
 # Runs the same command anyone can run locally: npm run test:smoke.
 
 on:
-  push:
-    branches: [cto/prod-smoke]
   workflow_dispatch:
   schedule:
     - cron: "0 5 * * *"
