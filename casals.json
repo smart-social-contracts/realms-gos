@@ -24,7 +24,7 @@
         "provider": "infomaniak",
         "zone": "realmsgos.org",
         "token_env": "INFOMANIAK_API_TOKEN",
-        "ttl": 60
+        "ttl": 300
       },
       "marketplace_host": "realmsgos.org",
       "casals_host": "casals.realmsgos.org",
