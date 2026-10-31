@@ -104,9 +104,14 @@ jobs:
           icp identity import local-dev --from-pem /tmp/local-dev.pem --storage plaintext
           test "$(icp identity principal --identity local-dev)" = "$(dfx identity get-principal --identity local-dev)"
 
+      # The browser must be the one the pinned @playwright/test wants: install the
+      # workspace first, or npx fetches whatever Playwright is newest.
       - name: Install Playwright chromium
-        working-directory: realms/src/realm_frontend
-        run: npx playwright install --with-deps chromium
+        working-directory: realms
+        run: |
+          npm install --legacy-peer-deps
+          cd src/realm_frontend
+          npx playwright install --with-deps chromium
 
       # The whole journey is one script, so anyone can run it on their own machine
       # (scripts/e2e_gaas.sh): builds, GaaS sheet, local stack, portal test mode, Playwright.
