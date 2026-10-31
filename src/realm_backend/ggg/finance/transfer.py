@@ -15,7 +15,8 @@ class Transfer(Row):
     # sending (ledger call in flight) | pending (call rejected) | completed | failed (ledger refused, fund refunded)
     # | unconfirmed (the ledger's answer is unclear: tokens may have moved, fund not refunded)
     status = String(default="sending")
-    reply = String(default="")  # the ledger's raw answer, or the call's rejection; empty when the ledger refused and the fund was refunded
+    # the ledger's raw answer, or the call's rejection; empty when the ledger refused and the fund was refunded
+    reply = String(default="")
     at = Integer(default=0)
     payroll = String(indexed=True)  # "payroll 2026-11 Infrastructure" on the transfers of a payroll run
     ledger_entries = OneToMany("LedgerEntry", "transfer")

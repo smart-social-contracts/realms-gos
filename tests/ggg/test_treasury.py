@@ -307,6 +307,11 @@ TOKEN_REFUSED = '(record { error = opt "insufficient balance"; block_index = nul
     ("", ("unconfirmed", None)),
     ("not candid at all", ("unconfirmed", None)),
     ('(record { error = opt "x"', ("unconfirmed", None)),
+    ("(variant { Ok = true })", ("unconfirmed", None)),
+    ("(variant { Ok = -1 : int })", ("unconfirmed", None)),
+    ("(record { error = null; block_index = opt true; success = true })", ("unconfirmed", None)),
+    ("(record { error = null; block_index = opt (-1 : int); success = true })", ("unconfirmed", None)),
+    ("(" + "opt " * 2000 + "null)", ("unconfirmed", None)),
 ])
 def test_outcome_trusts_only_a_definite_answer(reply, expected):
     assert treasury.outcome(reply) == expected

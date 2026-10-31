@@ -42,6 +42,11 @@ def balance_of(token, sub):
     return nat(reply)
 
 
+def is_block_index(value):
+    # bool is an int in Python, but ``true`` is not a block index
+    return type(value) is int and value >= 0
+
+
 def outcome(reply):
     """How a ledger answered a payout: ``(status, ledger_tx)``. ``completed``: the ICRC-1 ``Ok``, or an
     ic-python-token record with ``success = true`` and a ``block_index``. ``failed``: ``Err``, or ``success = false``
@@ -49,16 +54,16 @@ def outcome(reply):
     the tokens may have left, so the books must not be reversed until someone checks the ledger."""
     try:
         (answer,) = candid.Reader(reply).args()
-    except (ValueError, IndexError):
+    except Exception:  # a hostile reply can also overflow or recurse; whatever goes wrong, the answer is unclear
         return "unconfirmed", None
     if not isinstance(answer, dict):
         return "unconfirmed", None
     # An unnamed decoder prints a field's hash for its name, so look fields up by hash.
     fields = {candid.idl_hash(k) if isinstance(k, str) else k: v for k, v in answer.items()}
     ok, success, block, error = (fields.get(candid.idl_hash(n)) for n in ("Ok", "success", "block_index", "error"))
-    if isinstance(ok, int):
+    if is_block_index(ok):
         return "completed", str(ok)
-    if success is True and isinstance(block, int):
+    if success is True and is_block_index(block):
         return "completed", str(block)
     if candid.idl_hash("Err") in fields or (success is False and error):
         return "failed", None
