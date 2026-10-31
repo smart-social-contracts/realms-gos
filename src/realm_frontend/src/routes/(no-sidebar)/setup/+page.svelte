@@ -1227,7 +1227,10 @@
 		{/if}
 
 		{#if loading}
-			<P>{$_('setup.wizard.loading')}</P>
+			<div class="setup-wizard__loading" role="status">
+				<Spinner size="5" aria-hidden="true" />
+				<span>{$_('setup.wizard.loading')}</span>
+			</div>
 		{:else}
 			{#if error}
 				<div class="setup-wizard__error" role="alert">{error}</div>
@@ -1371,7 +1374,7 @@
 							<Label>{$_('setup.wizard.token_symbol')}</Label>
 							<p class="setup-wizard__symbol" aria-live="polite">
 								{#if symbolReading}
-									<Spinner size="4" />
+									<Spinner size="4" aria-hidden="true" />
 									<span class="text-gray-500">Reading from the ledger…</span>
 								{:else if tokenSymbol}
 									<strong>{tokenSymbol}</strong>
@@ -2530,6 +2533,20 @@
 	.setup-wizard__actions--toolbar {
 		margin-top: 0;
 		margin-bottom: 1.5rem;
+	}
+
+	.setup-wizard__loading {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.75rem;
+		padding: 2rem 0;
+		color: #5b6478;
+		font-weight: 300;
+	}
+
+	:global(.dark) .setup-wizard__loading {
+		color: #94a3b8;
 	}
 
 	.setup-wizard__error {
