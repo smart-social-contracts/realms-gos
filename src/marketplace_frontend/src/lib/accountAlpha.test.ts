@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { accountPagesAlpha } from './accountAlpha.ts';
 
@@ -19,5 +20,13 @@ describe('accountPagesAlpha', () => {
 		assert.equal(accountPagesAlpha({ envName: 'staging', accountAlpha: 'false' }), false);
 		assert.equal(accountPagesAlpha({ accountAlpha: '1' }), true);
 		assert.equal(accountPagesAlpha({ accountAlpha: '0' }), false);
+	});
+
+	it('is forced on in the released bundle, which has no environment name', () => {
+		const release = readFileSync(
+			new URL('../../../../.github/workflows/release.yml', import.meta.url),
+			'utf8'
+		);
+		assert.match(release, /VITE_ACCOUNT_ALPHA=true npm run build/);
 	});
 });
