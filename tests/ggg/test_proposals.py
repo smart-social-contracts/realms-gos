@@ -1,8 +1,8 @@
 import fake_chain
 import world
 from api import proposals
-from core import op
-from ggg import Delegation, Department, Mandate, Proposal, Realm, Vote
+from core import auth, op
+from ggg import Delegation, Department, Mandate, Position, Proposal, Realm, User, UserProfile, Vote
 from kit import call, denied, later, ok
 
 
@@ -110,6 +110,14 @@ def test_a_stored_department_action_outside_the_department_fails_without_running
     assert Mandate.count() == 0 and "governance" not in (Realm["1"].manifest_data or {})
 
 
+def test_a_stored_department_action_missing_an_argument_fails_without_trapping():
+    world.build()
+    p = ok("proposal_create", "carla", title="x", department="Infrastructure")["proposal"]
+    Proposal[p].action = {"op": "appoint", "args": {}}
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert "missing" in Proposal[p].result["error"]
+
+
 def test_a_department_proposal_carries_actions_its_department_governs():
     world.build()
     Department(id="Roads", parent=Department["Infrastructure"])
@@ -118,6 +126,33 @@ def test_a_department_proposal_carries_actions_its_department_governs():
         p = ok("proposal_create", "carla", title="crew", department="Infrastructure", action=action)["proposal"]
         assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "executed"
         assert Department[f"{parent} crew"].parent.id == parent
+
+
+def pass_department_proposal(op_name, args, department="Infrastructure"):
+    p = ok("proposal_create", "carla", title=op_name, department=department,
+           action={"op": op_name, "args": args})["proposal"]
+    ok("proposal_vote", "carla", proposal=p, choice="yes")
+    return Proposal[p]
+
+
+def test_I_ID_3_a_department_proposal_cannot_open_a_seat_with_permissions_the_department_lacks():
+    world.build()
+    seat = pass_department_proposal("position_create",
+                                    {"department": "Infrastructure", "position": "infra.boss", "profile": "admin"})
+    assert seat.status == "failed" and "you do not hold" in seat.result["error"]
+    assert Position["infra.boss"] is None
+
+
+def test_I_ID_3_a_department_proposal_cannot_assign_a_profile_the_department_lacks():
+    world.build()
+    world.seat("infrastructure.registrar", "carla", Department["Infrastructure"], "role.assign")
+    UserProfile(id="auditor", allowed_to=["role.assign"])
+    assigned = pass_department_proposal("role_assign", {"department": "Infrastructure", "user": "alice",
+                                                        "profile": "auditor"})
+    assert assigned.status == "executed" and "auditor" in [x.id for x in User["alice"].profiles]
+    escalated = pass_department_proposal("role_assign", {"department": "Infrastructure", "user": "carla",
+                                                         "profile": "admin"})
+    assert escalated.status == "failed" and "all" not in auth.permissions("carla")
 
 
 def test_a_realm_wide_proposal_carries_any_action():

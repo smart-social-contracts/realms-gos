@@ -53,7 +53,10 @@ def check_scope(department, action):
     if department is None or department.is_root:
         return
     governed = (ops().get(action["op"]) or {}).get("governed")
-    governing = governed(action.get("args") or {}) if governed else None
+    try:
+        governing = governed(action.get("args") or {}) if governed else None
+    except KeyError as e:
+        raise Fail(f"{action['op']} is missing {e}")
     while governing is not None:
         if governing.id == department.id:
             return
