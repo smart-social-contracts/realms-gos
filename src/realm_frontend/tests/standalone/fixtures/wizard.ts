@@ -40,6 +40,10 @@ export function toolbarButton(frame: FrameLocator, name: string | RegExp) {
 export async function launchThroughWizard(page: Page, frame: FrameLocator, realm: StandaloneRealm, choices: WizardChoices) {
 	const { codex: CODEX, symbol, welcome: WELCOME, manifesto: MANIFESTO, snap } = choices;
 	await test.step('welcome', async () => {
+		// The wizard shows a spinner while it loads, so the page never looks frozen.
+		await expect(frame.locator('.setup-wizard__loading[role="status"]')).toBeVisible({
+			timeout: 60_000
+		});
 		const begin = frame.locator('.setup-wizard__hero-cta');
 		await passDemoNotice(frame, begin);
 		await expect(begin).toBeVisible({ timeout: 120_000 });
@@ -114,6 +118,9 @@ export async function launchThroughWizard(page: Page, frame: FrameLocator, realm
 
 		const steps = frame.locator('.setup-wizard__launch-step');
 		await expect(steps).toHaveCount(LAUNCH_PHASES.length, { timeout: 30_000 });
+		// While the phases run, the launch button is disabled and says so.
+		await expect(frame.getByRole('button', { name: 'Launching…' })).toBeDisabled();
+		await expect(frame.locator('.setup-wizard__launch-step--running')).toHaveCount(1);
 		await snap(page, 'launching');
 		const failed = frame.locator('.setup-wizard__launch-step--failed');
 		const done = frame.locator('.setup-wizard__launch-step--completed');

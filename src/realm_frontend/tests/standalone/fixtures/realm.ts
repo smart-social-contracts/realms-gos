@@ -114,14 +114,19 @@ export async function openInPortal(
 	return { frame: page.frameLocator('#realm'), close: host.close };
 }
 
-const readIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
-	IDL.Service({ read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']) });
+const opsIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+	IDL.Service({
+		read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']),
+		run: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], [])
+	});
 
-/** A read operation of the realm, as anonymous or, with ``identity``, as that member. */
-export async function readOp(
+type OpKind = 'read' | 'run';
+
+async function callOp(
+	kind: OpKind,
 	realm: StandaloneRealm,
 	name: string,
-	args: Record<string, unknown> = {},
+	args: Record<string, unknown>,
 	identity?: Ed25519KeyIdentity
 ): Promise<Record<string, unknown>> {
 	const agent = await HttpAgent.create({
@@ -129,12 +134,29 @@ export async function readOp(
 		identity,
 		shouldFetchRootKey: true
 	});
-	const actor = Actor.createActor<{ read: (n: string, a: string) => Promise<string> }>(
-		readIdl as never,
-		{
-			agent,
-			canisterId: realm.realm_backend
-		}
+	const actor = Actor.createActor<Record<OpKind, (n: string, a: string) => Promise<string>>>(
+		opsIdl as never,
+		{ agent, canisterId: realm.realm_backend }
 	);
-	return JSON.parse(await actor.read(name, JSON.stringify(args)));
+	return JSON.parse(await actor[kind](name, JSON.stringify(args)));
+}
+
+/** A read operation of the realm, as anonymous or, with ``identity``, as that member. */
+export function readOp(
+	realm: StandaloneRealm,
+	name: string,
+	args: Record<string, unknown> = {},
+	identity?: Ed25519KeyIdentity
+) {
+	return callOp('read', realm, name, args, identity);
+}
+
+/** An operation that changes the realm, as ``identity``. */
+export function runOp(
+	realm: StandaloneRealm,
+	name: string,
+	args: Record<string, unknown>,
+	identity: Ed25519KeyIdentity
+) {
+	return callOp('run', realm, name, args, identity);
 }

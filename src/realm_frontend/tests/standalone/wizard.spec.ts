@@ -10,10 +10,12 @@ import {
 	exposeSigner,
 	founderIdentity,
 	loadRealm,
+	memberIdentity,
 	openInPortal,
 	readOp,
 	type StandaloneRealm
 } from './fixtures/realm';
+import { snap } from './fixtures/snap';
 import { LAUNCH_TIMEOUT, launchThroughWizard, toolbarButton } from './fixtures/wizard';
 
 const CODEX = process.env.E2E_CODEX || 'syntropia';
@@ -21,39 +23,10 @@ const WELCOME = 'Welcome to the e2e realm, built by the wizard.';
 const MANIFESTO = 'Every step of setup is tested.';
 
 let realm: StandaloneRealm;
-let shots = 0;
 
 test.beforeAll(() => {
 	realm = loadRealm();
 });
-
-test.beforeEach(() => {
-	shots = 0;
-});
-
-// Numbered screenshots in the test's output folder, also attached to the HTML report.
-// The realm scrolls inside the portal's iframe, so the viewport grows to its content for the shot.
-async function snap(page: Page, label: string) {
-	const name = `${String(++shots).padStart(2, '0')}-${label}.png`;
-	const viewport = page.viewportSize()!;
-	const heights = await Promise.all(
-		page
-			.frames()
-			.map((f) =>
-				f
-					.evaluate(() =>
-						Math.max(...[...document.querySelectorAll('*')].map((e) => e.scrollHeight))
-					)
-					.catch(() => 0)
-			)
-	);
-	const height = Math.min(Math.max(viewport.height, ...heights), 8000);
-	await page.setViewportSize({ width: viewport.width, height });
-	await page.waitForTimeout(300);
-	const body = await page.screenshot({ path: test.info().outputPath(name), fullPage: true });
-	await page.setViewportSize(viewport);
-	await test.info().attach(name, { body, contentType: 'image/png' });
-}
 
 async function ledgerSymbol(ledger: string): Promise<string> {
 	const agent = await HttpAgent.create({ host: realm.network_url, shouldFetchRootKey: true });
@@ -82,7 +55,15 @@ test('the founder sets up and launches a realm through the wizard', async ({ pag
 	const { frame, close } = await openInPortal(page, realm, '/setup');
 
 	try {
-		await launchThroughWizard(page, frame, realm, { codex: CODEX, symbol, welcome: WELCOME, manifesto: MANIFESTO, snap });
+		// A window of zero keeps proposals open until their outcome is certain, so the proposal specs can finish.
+		await launchThroughWizard(page, frame, realm, {
+			codex: CODEX,
+			symbol,
+			welcome: WELCOME,
+			manifesto: MANIFESTO,
+			votingWindowDays: 0,
+			snap
+		});
 
 		await test.step('the realm is launched (backend)', async () => {
 			const status = await readOp(realm, 'status');
@@ -93,6 +74,18 @@ test('the founder sets up and launches a realm through the wizard', async ({ pag
 			expect(info.welcome_message).toBe(WELCOME);
 			expect(info.manifesto).toBe(MANIFESTO);
 			expect(info.accounting_currency).toBe(symbol);
+		});
+
+		// The wizard has no extension step: its launch installs the core extensions and the codex's
+		// dependencies (here already installed with their frontends by e2e_standalone_realm.py).
+		await test.step('every core extension and codex dependency is installed', async () => {
+			const listed = await readOp(realm, 'extension_list', { from: 1, count: 500 }, founder);
+			const installed = (listed.extensions as { id: string }[]).map((e) => e.id);
+			const expected = Object.keys(realm.extensions ?? {});
+			expect(expected, 'the ported extensions are in the realm').toEqual(
+				expect.arrayContaining(['import_export', 'mundus_explorer', 'passport_verification'])
+			);
+			expect(installed).toEqual(expect.arrayContaining(expected));
 		});
 
 		await test.step('the public dashboard', async () => {
@@ -124,6 +117,36 @@ test('after launch /setup sends the founder to the public dashboard', async ({ p
 	}
 	const status = await readOp(realm, 'status');
 	expect(status.status).not.toBe('setup');
+});
+
+test('a second member joins through the Terms step', async ({ page }) => {
+	const member = memberIdentity();
+	await exposeSigner(page, member);
+	const { frame, close } = await openInPortal(page, realm, '/join');
+	try {
+		const agree = frame.locator('#join-terms-agree');
+		const next = frame.getByRole('button', { name: 'Continue' });
+		await expect(agree).toBeVisible({ timeout: 120_000 });
+		await expect(next, 'Continue waits for the terms to be accepted').toBeDisabled();
+		await snap(page, 'terms');
+		await agree.check();
+		await expect(next).toBeEnabled();
+		await next.click();
+
+		// The codex opens registration, so no invitation code is needed.
+		await frame.getByRole('button', { name: 'Join Realm' }).click();
+
+		await expect
+			.poll(async () => (await readOp(realm, 'me', {}, member)).user, {
+				message: 'the second member is in the realm',
+				timeout: 120_000,
+				intervals: [2_000]
+			})
+			.toBeTruthy();
+		await snap(page, 'joined');
+	} finally {
+		await close();
+	}
 });
 
 // Text that means a page is still loading, or that it failed, in the realm or in an extension's own iframe.

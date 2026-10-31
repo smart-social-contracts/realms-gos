@@ -19,10 +19,10 @@ export default defineConfig({
 		headless: true,
 		viewport: { width: 1280, height: 900 }
 	},
-	projects: [
-		{
-			name: 'chromium',
-			use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } }
-		}
-	]
+	// The specs share one realm and run in this order: the wizard launches it, the others use it.
+	projects: ['wizard', 'proposals', 'extensions-ops'].map((name) => ({
+		name,
+		testMatch: `${name}.spec.ts`,
+		use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } }
+	}))
 });

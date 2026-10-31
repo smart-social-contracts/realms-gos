@@ -199,7 +199,8 @@ def main() -> None:
         print(f"setup_step {values['step']}: {reply.get('done')}")
 
     step(step="install", network="local", founder=founder)
-    step(step="realm", name=opts.name)
+    # The passport extension checks with an outside service; its test flag makes the check pass for the UI e2e.
+    step(step="realm", name=opts.name, test_flags={"test_mode_skip_passport_zkproof": True})
     step(step="infrastructure", frontend_canister_id=ids["realm_frontend"], file_registry_canister_id=registry,
          marketplace_canister_id=marketplace)
     # The fleet registry has no namespace-approval API; installs must not wait on marketplace approval.
