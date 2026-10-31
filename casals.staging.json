@@ -7,10 +7,10 @@
       "network": "ic",
       "$comment": "Staging on mainnet. Operator is dev-identity. Hosts are staging.realmsgos.org and casals.staging.realmsgos.org.",
       "dns": {
-        "provider": "cloudflare",
+        "provider": "infomaniak",
         "zone": "realmsgos.org",
-        "token_env": "CLOUDFLARE_API_TOKEN",
-        "ttl": 60
+        "token_env": "INFOMANIAK_API_TOKEN",
+        "ttl": 300
       },
       "marketplace_host": "staging.realmsgos.org",
       "casals_host": "casals.staging.realmsgos.org",

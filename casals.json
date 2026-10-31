@@ -19,12 +19,12 @@
     },
     "production": {
       "network": "ic",
-      "$comment": "operator is prod-identity (YubiKey). Deploy through an icp delegation from it. DNS lives in the Cloudflare zone realmsgos.org; the API token is read from $CLOUDFLARE_API_TOKEN, never written here.",
+      "$comment": "operator is prod-identity (YubiKey). Deploy through an icp delegation from it. DNS lives in the Infomaniak zone realmsgos.org; the API token is read from $INFOMANIAK_API_TOKEN, never written here.",
       "dns": {
-        "provider": "cloudflare",
+        "provider": "infomaniak",
         "zone": "realmsgos.org",
-        "token_env": "CLOUDFLARE_API_TOKEN",
-        "ttl": 60
+        "token_env": "INFOMANIAK_API_TOKEN",
+        "ttl": 300
       },
       "marketplace_host": "realmsgos.org",
       "casals_host": "casals.realmsgos.org",

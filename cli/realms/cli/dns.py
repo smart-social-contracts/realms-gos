@@ -20,6 +20,16 @@ class DnsRecord:
     notes: str = ""
 
 
+@dataclass(frozen=True)
+class RecordOutcome:
+    """What a DNS provider did (or, in a dry run, would do) for one record."""
+
+    record: DnsRecord
+    action: str  # created | updated | unchanged
+    detail: str = ""
+    warning: str = ""  # something the provider found and left alone
+
+
 def render_dns_records(domain: str, frontend_canister_id: str) -> list[DnsRecord]:
     """Render the exact DNS records required for an IC custom domain."""
     domain = domain.rstrip(".").lower()

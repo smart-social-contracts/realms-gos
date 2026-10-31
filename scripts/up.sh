@@ -34,7 +34,8 @@
 #   IC_TOKENS_VERSION    ic-tokens release for token/nft wasms (default 0.1.0)
 #   SCENARIOS            local only: harness scenarios (default fresh,idempotent)
 #   DFX_HSM_PIN          production: PIN of the hardware key behind --identity
-#   CLOUDFLARE_API_TOKEN production: Zone:Read + DNS:Edit on the zone, for the domains phase
+#   INFOMANIAK_API_TOKEN production: dns:read + dns:write on the zone, for the domains phase (the
+#                        variable the sheet's dns.token_env names; CLOUDFLARE_API_TOKEN for a Cloudflare zone)
 #
 # Every phase is idempotent: a second run rebuilds (or --skip-build),
 # `casals up` reporting the orchestra already built, domains in place, 0 changed files / listings, and exits 0.
@@ -116,6 +117,10 @@ EOF
 ORCHESTRA="$(sheet_get 's["name"]')"
 NETWORK="$(sheet_get 'env["network"]')"
 DNS_PROVIDER="$(sheet_get 'env["dns"]["provider"]')"
+DNS_TOKEN_ENV="$(sheet_get 'env["dns"]["token_env"]')"
+if [ -z "$DNS_TOKEN_ENV" ]; then
+  if [ "$DNS_PROVIDER" = infomaniak ]; then DNS_TOKEN_ENV=INFOMANIAK_API_TOKEN; else DNS_TOKEN_ENV=CLOUDFLARE_API_TOKEN; fi
+fi
 BUILD_VARIANT="$(sheet_get 'env.get("build_variant")')"
 if [ -z "$BUILD_VARIANT" ]; then
   if [ "$ENV" = local ]; then BUILD_VARIANT="test"; else BUILD_VARIANT="production"; fi
@@ -170,8 +175,9 @@ else
   if [ "$PUBLISH_ONLY" = 0 ] && [ ! -f "$BINDINGS_FILE" ] && [ "$BOOTSTRAP" = 0 ]; then
     die "no bindings at $BINDINGS_FILE — point CASALS_HOME at the directory of the first \`up\`, or pass --bootstrap to create a brand-new $ENV conductor on purpose"
   fi
-  if [ "$NO_DOMAINS" = 0 ] && [ "$DNS_PROVIDER" != none ] && [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-    die "CLOUDFLARE_API_TOKEN is not set (dns.provider=$DNS_PROVIDER); export it or pass --no-domains"
+  # Only the providers that write records need a token; none and manual just print them.
+  if [ "$NO_DOMAINS" = 0 ] && [[ "$DNS_PROVIDER" =~ ^(cloudflare|infomaniak)$ ]] && [ -z "${!DNS_TOKEN_ENV:-}" ]; then
+    die "$DNS_TOKEN_ENV is not set (dns.provider=$DNS_PROVIDER); export it or pass --no-domains"
   fi
 fi
 # The `realms` product CLI, from this checkout (editable, so a re-run is a no-op check).
@@ -307,7 +313,7 @@ if [ "$PUBLISH_ONLY" = 0 ]; then
   elif [ "$DNS_PROVIDER" = none ] || [ -z "$DNS_PROVIDER" ]; then
     say "Domains: none for -e $ENV (dns.provider=${DNS_PROVIDER:-unset})"
   else
-    say "Domains: realms domains apply (Cloudflare records → IC gateway registration → HTTP 200)"
+    say "Domains: realms domains apply (DNS records → IC gateway registration → HTTP 200)"
     dom_args=(domains apply "$SHEET" -e "$ENV" --export "$EXPORT_JSON")
     [ "$YES" = 1 ] && dom_args+=(--yes)
     (cd "$REALMS_DIR" && CASALS_HOME="$ORCH_HOME" realms "${dom_args[@]}")

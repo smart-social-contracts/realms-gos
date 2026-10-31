@@ -7,10 +7,10 @@
       "network": "ic",
       "$comment": "Test on mainnet. Operator is dev-identity. Hosts are test.realmsgos.org and casals.test.realmsgos.org.",
       "dns": {
-        "provider": "cloudflare",
+        "provider": "infomaniak",
         "zone": "realmsgos.org",
-        "token_env": "CLOUDFLARE_API_TOKEN",
-        "ttl": 60
+        "token_env": "INFOMANIAK_API_TOKEN",
+        "ttl": 300
       },
       "marketplace_host": "test.realmsgos.org",
       "casals_host": "casals.test.realmsgos.org",
