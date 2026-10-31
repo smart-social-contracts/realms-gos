@@ -1,4 +1,8 @@
+import importlib.util
 import json
+from pathlib import Path
+
+import pytest
 
 import fake_chain
 import world
@@ -35,7 +39,33 @@ def test_the_installer_named_at_init_keeps_admin_rights_without_being_a_controll
     denied("setup_step", "other", step="branding", primary_color="#1E6B52")
 
 
-def test_I_ADM_1_test_flags_only_off_production_or_when_allowed_at_install():
+@pytest.fixture
+def test_build(monkeypatch):
+    """The realm as built by ``pack_realm_backend.py --variant test``; the checked-in variant is production."""
+    source = Path(__file__).parents[2] / "scripts" / "build_variants" / "test.py"
+    spec = importlib.util.spec_from_file_location("test_build_variant", source)
+    variant = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(variant)
+    monkeypatch.setattr(setup, "build_variant", variant)
+
+
+@pytest.mark.parametrize("network", ["", "prod", "production", "ic", "ic-1", "staging"])
+def test_I_ADM_1_an_unset_or_unknown_network_is_production(test_build, network):
+    world.build()
+    Realm["1"].network = network
+    assert "test flags" in call("realm_configure", "ctl", test_flags={"fast_clock": True})["error"]
+
+
+def test_I_ADM_1_a_production_build_refuses_test_flags_on_any_network():
+    world.build()
+    for network, can_test_mode in (("local", False), ("test", True), ("", True), ("ic", True)):
+        Realm["1"].network, Realm["1"].can_test_mode = network, can_test_mode
+        assert "test flags" in call("realm_configure", "ctl", test_mode=True)["error"]
+        assert "test flags" in call("realm_configure", "ctl", test_flags={"skip_terms": True})["error"]
+    assert Realm["1"].test_flags == {} and not Realm["1"].test_mode
+
+
+def test_I_ADM_1_test_flags_only_off_production_or_when_allowed_at_install(test_build):
     world.build()
     ok("setup_step", "ctl", step="install", network="ic")
     assert "test flags" in call("realm_configure", "ctl", test_mode=True)["error"]

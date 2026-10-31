@@ -1,5 +1,6 @@
 import hashlib
 import os
+import shutil
 import sys
 
 import pytest
@@ -19,8 +20,21 @@ def principal(name):
 
 
 @pytest.fixture(scope="session")
-def realm():
-    return Canister(str(pack()), installer=principal("installer"))
+def wasm_of(tmp_path_factory):
+    """The realm wasm of a build variant, packed once. Packing rewrites .basilisk in place, so each is copied aside."""
+    built = {}
+
+    def get(variant):
+        if variant not in built:
+            built[variant] = shutil.copy(pack(variant=variant), tmp_path_factory.mktemp(variant) / "realm_backend.wasm")
+        return built[variant]
+
+    return get
+
+
+@pytest.fixture(scope="session")
+def realm(wasm_of):
+    return Canister(wasm_of("production"), installer=principal("installer"))
 
 
 @pytest.fixture(scope="session")

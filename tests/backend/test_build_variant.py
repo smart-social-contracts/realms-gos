@@ -1,4 +1,4 @@
-"""The production WASM must not contain the test-only code paths.
+"""The production wasm must not contain the test-only code paths.
 
 Runtime gating can only ever say "this setting is off". It cannot say "this code
 is not here", so it stays one stale database row, one compromised admin session,
@@ -8,11 +8,11 @@ variants separately is what turns that into a property of the artifact.
 basilisk copies the whole ``src/realm_backend`` tree into the WASM, so the test
 variant is kept in ``scripts/build_variants/`` — outside the packed tree — and
 copied over ``core/build_variant.py`` at pack time. These tests hold that
-arrangement in place. See realms#395.
+arrangement in place; tests/deployed/test_build_variants.py checks the packed
+wasms themselves on PocketIC. See realms-gos#395.
 """
 
 import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
@@ -22,8 +22,7 @@ BACKEND = REPO_ROOT / "src" / "realm_backend"
 VARIANT_SOURCES = REPO_ROOT / "scripts" / "build_variants"
 ACTIVE_VARIANT = BACKEND / "core" / "build_variant.py"
 
-VARIANT_API = ("BUILD_VARIANT", "TEST_BUILD_SENTINEL", "is_test_build",
-               "ii_bypass_available", "test_flags_available")
+VARIANT_API = ("BUILD_VARIANT", "test_flags_allowed")
 
 
 def _load(path: Path, name: str):
@@ -43,6 +42,11 @@ def test_variant():
     return _load(VARIANT_SOURCES / "test.py", "_variant_test")
 
 
+@pytest.fixture(scope="module")
+def packer():
+    return _load(REPO_ROOT / "scripts" / "pack_realm_backend.py", "_packer")
+
+
 def test_both_variants_expose_the_same_api(production, test_variant):
     """A missing symbol in one variant would be an ImportError at runtime."""
     for name in VARIANT_API:
@@ -50,30 +54,56 @@ def test_both_variants_expose_the_same_api(production, test_variant):
         assert hasattr(test_variant, name), f"test variant lacks {name}"
 
 
-def test_production_variant_implements_nothing(production):
+def test_production_variant_allows_no_test_flag(production):
     assert production.BUILD_VARIANT == "production"
-    assert production.is_test_build() is False
-    assert production.ii_bypass_available() is False
-    assert production.test_flags_available() is False
+    for network in ("local", "test", "demo", "ic", ""):
+        for can_test_mode in (False, True):
+            assert production.test_flags_allowed(network, can_test_mode) is False
 
 
-def test_test_variant_enables_the_test_paths(test_variant):
+@pytest.mark.parametrize("network, can_test_mode, allowed", [
+    ("local", False, True),
+    ("test", False, True),
+    ("demo", False, True),
+    (" Local ", False, True),
+    ("", False, False),
+    (None, False, False),
+    ("ic", False, False),
+    ("staging", False, False),
+    ("prod", False, False),
+    ("production", False, False),
+    ("mainnet", False, False),
+    ("ic-1", False, False),
+    ("", True, True),
+    ("ic", True, True),
+])
+def test_test_variant_gate_fails_closed(test_variant, network, can_test_mode, allowed):
+    """Only a named non-production network, or the installer's can_test_mode, opens the gate."""
     assert test_variant.BUILD_VARIANT == "test"
-    assert test_variant.is_test_build() is True
-    assert test_variant.ii_bypass_available() is True
-    assert test_variant.test_flags_available() is True
+    assert test_variant.test_flags_allowed(network, can_test_mode) is allowed
 
 
-def test_only_the_test_variant_carries_the_sentinel(production, test_variant):
-    assert production.TEST_BUILD_SENTINEL == ""
-    assert test_variant.TEST_BUILD_SENTINEL == "REALMS_TEST_BUILD_AUTH_BYPASS"
+def test_only_the_test_variant_defines_the_test_only_symbols(packer):
+    for symbol in packer.TEST_ONLY_SYMBOLS:
+        assert symbol.decode() in (VARIANT_SOURCES / "test.py").read_text()
+        assert symbol.decode() not in (VARIANT_SOURCES / "production.py").read_text()
 
 
-def test_packer_scans_for_the_sentinel_the_test_variant_actually_defines():
-    """If these drift, the scan passes vacuously and proves nothing."""
-    packer = _load(REPO_ROOT / "scripts" / "pack_realm_backend.py", "_packer")
-    test_variant = _load(VARIANT_SOURCES / "test.py", "_variant_test_for_packer")
-    assert packer.TEST_BUILD_SENTINEL.decode() == test_variant.TEST_BUILD_SENTINEL
+def test_the_scan_checks_both_directions(packer, tmp_path):
+    """A scan that could only pass would report a guarantee it is not testing."""
+    marked = tmp_path / "marked.wasm"
+    marked.write_bytes(b"\0asm" + b" ".join(packer.TEST_ONLY_SYMBOLS))
+    clean = tmp_path / "clean.wasm"
+    clean.write_bytes(b"\0asm no test code here")
+    packer.verify_build_variant(marked, "test")
+    packer.verify_build_variant(clean, "production")
+    with pytest.raises(SystemExit):
+        packer.verify_build_variant(marked, "production")
+    with pytest.raises(SystemExit):
+        packer.verify_build_variant(clean, "test")
+
+
+def test_production_is_the_default_build(packer):
     assert packer.DEFAULT_VARIANT == "production", (
         "the unadorned build must be the safe one; a test build has to be asked for"
     )
@@ -91,25 +121,17 @@ def test_the_committed_active_variant_is_production():
     )
 
 
-def test_the_test_variant_is_not_inside_the_packed_source_tree():
+def test_the_test_variant_is_not_inside_the_packed_source_tree(packer):
     """The whole point: what is not selected is not compiled in."""
     packed_copies = [
         p for p in BACKEND.rglob("*.py")
-        if p.read_text().find("REALMS_TEST_BUILD_AUTH_BYPASS") != -1
+        for symbol in packer.TEST_ONLY_SYMBOLS
+        if symbol.decode() in p.read_text()
     ]
     assert not packed_copies, (
-        "the test sentinel appears inside src/realm_backend, so it would be packed "
+        "a test-only symbol appears inside src/realm_backend, so it would be packed "
         "into a production WASM: " + ", ".join(str(p) for p in packed_copies)
     )
-
-
-def test_runtime_gate_consults_the_build_variant():
-    sys.path.insert(0, str(BACKEND))
-    from core.runtime_flags import test_flags_allowed
-
-    # The checked-in variant is production, so no network or override qualifies.
-    assert test_flags_allowed("test", False) is False
-    assert test_flags_allowed("ic", True) is False
 
 
 # --- Frontend variant -------------------------------------------------------

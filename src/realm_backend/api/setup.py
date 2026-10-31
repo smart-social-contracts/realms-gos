@@ -1,6 +1,6 @@
 import json
 
-from core import chain
+from core import build_variant, chain
 import constants
 import ggg
 from core import sandbox
@@ -82,10 +82,11 @@ def start(installer=""):
 
 @op(None, read=True, public=True)
 def status(c, args):
-    """The realm's ``version``, ``status``, ``name``, ``canister`` id and number of ``operations``."""
+    """The realm's ``version``, ``build_variant`` (production or test), ``status``, ``name``, ``canister`` id and
+    number of ``operations``."""
     realm = Realm["1"]
-    return {"version": VERSION, "status": realm.status if realm else "", "name": realm.name if realm else "",
-            "canister": chain.self_id(), "operations": len(ops())}
+    return {"version": VERSION, "build_variant": build_variant.BUILD_VARIANT, "status": realm.status if realm else "",
+            "name": realm.name if realm else "", "canister": chain.self_id(), "operations": len(ops())}
 
 
 @op(None, read=True, public=True)
@@ -133,8 +134,8 @@ def configure(fields, values):
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in HEX for ch in color[1:].lower())):
         raise Fail(f"primary_color must look like #1E6B52, not {color}")
     if (values.get("test_mode") or any((values.get("test_flags") or {}).values())) \
-            and realm.network == "ic" and not realm.can_test_mode:
-        raise Fail("test flags need a non-production network or can_test_mode set at install")
+            and not build_variant.test_flags_allowed(realm.network, realm.can_test_mode):
+        raise Fail("test flags need a test build, on a non-production network or with can_test_mode set at install")
     for k, v in values.items():
         if k in CASALS:
             remember("casals", {**realm.manifest_data.get("casals", {}), k: v})
@@ -253,7 +254,8 @@ def setup_launch(c, args):
 def realm_configure(c, args):
     """Set any of ``name``, ``manifesto``, ``welcome_message``, ``open_registration``, ``ai_assistant_enabled``,
     ``quarter_join_mode``, ``auto_scale_enabled``, ``test_mode`` and ``test_flags``. Returns ``configured``.
-    Test mode and flags need a non-production network or ``can_test_mode`` set at install."""
+    Test mode and flags need a test build, on a non-production network or with ``can_test_mode`` set at install;
+    a production build refuses them."""
     return configure(FIELDS["realm"], args)
 
 

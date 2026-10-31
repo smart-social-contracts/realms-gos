@@ -125,6 +125,9 @@ BUILD_VARIANT="$(sheet_get 'env.get("build_variant")')"
 if [ -z "$BUILD_VARIANT" ]; then
   if [ "$ENV" = local ]; then BUILD_VARIANT="test"; else BUILD_VARIANT="production"; fi
 fi
+case "$ENV:$BUILD_VARIANT" in
+  staging:test|production:test) die "the test build variant is never deployed to $ENV" ;;
+esac
 
 if [ "$ENV" = local ]; then
   IDENTITY="${IDENTITY:-local-dev}"
@@ -208,10 +211,10 @@ if [ "$PUBLISH_ONLY" = 0 ] && [ "$SKIP_BUILD" = 0 ]; then
     note "fetched $w.wasm"
   done
 
-  say "Build: backends (realm_backend, marketplace_backend)"
+  say "Build: backends (realm_backend $BUILD_VARIANT, marketplace_backend)"
   (cd "$REALMS_DIR"
    CANISTER_CANDID_PATH="$PWD/src/realm_backend/realm_backend.did" \
-     python3 scripts/pack_realm_backend.py
+     python3 scripts/pack_realm_backend.py --variant "$BUILD_VARIANT"
    CANISTER_CANDID_PATH="$PWD/src/marketplace_backend/marketplace_backend.did" \
      python3 -m basilisk marketplace_backend src/marketplace_backend/main.py
    ls -l .basilisk/realm_backend/realm_backend.wasm .basilisk/marketplace_backend/marketplace_backend.wasm)

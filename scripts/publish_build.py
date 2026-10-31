@@ -46,6 +46,8 @@ TEST_MAIN_CHANNEL_PREFIX = "main-test"
 TEST_VERSION_SUFFIX = "+test"
 BUILD_VARIANTS = ("production", "test")
 DEFAULT_BUILD_VARIANT = "production"
+# Environments that only ever run the production variant.
+PRODUCTION_LIKE_ENVIRONMENTS = ("staging", "production")
 
 # GaaS stack (realm_registry_backend, realm_installer, realm_registry_frontend)
 # is published from github.com/smart-social-contracts/gos-as-a-service releases.
@@ -130,40 +132,34 @@ def _stamp_build(root: Path, canister: str, release_tag: str | None) -> None:
     _run(cmd, cwd=root)
 
 
-def _build_realm_backend(root: Path, variant: str = DEFAULT_BUILD_VARIANT) -> Path:
-    """Layered base realm_backend WASM (Issue #168 stubs)."""
-    sys.path.insert(0, str(root / "scripts"))
-    from pack_realm_backend import (  # noqa: E402
-        select_build_variant,
-        verify_build_variant,
-    )
-
-    bpy = _basilisk_python(root, "realm_backend")
-    env = {
-        **os.environ,
-        "CANISTER_CANDID_PATH": str(
-            root / "src" / "realm_backend" / "realm_backend.did"
-        ),
-    }
-    select_build_variant(root, variant)
-    try:
-        _run([bpy, "scripts/build_base_wasm.py", "--gzip"], cwd=root, env=env)
-        wasm = root / ".basilisk" / "realm_backend" / "realm_backend.wasm"
-        gz = wasm.with_suffix(wasm.suffix + ".gz")
-        if not gz.is_file():
-            sys.exit(f"build_base_wasm did not produce {gz}")
-        verify_build_variant(wasm, variant)
-    finally:
-        select_build_variant(root, DEFAULT_BUILD_VARIANT)
+def _build_realm_backend(
+    root: Path, variant: str = DEFAULT_BUILD_VARIANT, release_tag: str | None = None
+) -> Path:
+    """The realm_backend wasm of ``variant``, gzipped, with the release tag in its status()."""
+    cmd = [
+        _basilisk_python(root, "realm_backend"),
+        "scripts/pack_realm_backend.py",
+        "--variant",
+        variant,
+        "--gzip",
+    ]
+    if release_tag:
+        cmd += ["--version", release_tag]
+    _run(cmd, cwd=root)
+    gz = root / ".basilisk" / "realm_backend" / "realm_backend.wasm.gz"
     print(f"  backend wasm: {gz} ({gz.stat().st_size:,} bytes)")
     return gz
 
 
 def _build_backend(
-    root: Path, canister: str, main_py: str, variant: str = DEFAULT_BUILD_VARIANT
+    root: Path,
+    canister: str,
+    main_py: str,
+    variant: str = DEFAULT_BUILD_VARIANT,
+    release_tag: str | None = None,
 ) -> Path:
     if canister == "realm_backend":
-        return _build_realm_backend(root, variant=variant)
+        return _build_realm_backend(root, variant=variant, release_tag=release_tag)
     bpy = _basilisk_python(root, canister)
     did = root / "src" / canister / f"{canister}.did"
     env = {**os.environ, "CANISTER_CANDID_PATH": str(did)}
@@ -339,6 +335,8 @@ def main():
     build_variant = args.variant
 
     env = args.environment
+    if build_variant == "test" and env in PRODUCTION_LIKE_ENVIRONMENTS:
+        sys.exit(f"the test build variant is never published to {env}")
     file_registry = (args.file_registry or "").strip() or file_registry_id_for(env)
     if not file_registry:
         sys.exit(
@@ -374,9 +372,10 @@ def main():
         canister, main_py = spec["backend"]
         base_version, _ = parse_build_variant_label(version)
         release_tag = None if args.from_main else f"v{base_version}"
-        _stamp_build(root, canister, release_tag)
+        if canister != "realm_backend":  # the realm's packer stamps its own version
+            _stamp_build(root, canister, release_tag)
         backend_wasm = _build_backend(
-            root, canister, main_py, variant=realm_variant
+            root, canister, main_py, variant=realm_variant, release_tag=release_tag
         )
     if want_frontend:
         frontend_dist = _build_frontend(

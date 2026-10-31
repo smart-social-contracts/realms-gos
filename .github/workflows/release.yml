@@ -59,8 +59,8 @@ jobs:
           node-version: '20'
           cache: npm
 
-      # scripts/build_base_wasm.py embeds candid:service metadata with ic-wasm
-      # (scripts/embed_candid_metadata.py); same install as realms-e2e.yml.
+      # scripts/pack_realm_backend.py --gzip embeds candid:service metadata with
+      # ic-wasm (scripts/embed_candid_metadata.py); same install as realms-e2e.yml.
       - name: Install ic-wasm
         if: ${{ inputs.cli_only != true }}
         run: |
@@ -142,20 +142,24 @@ jobs:
 
       # Build artifacts. The base build defaults to the Cedar template, so the
       # release WASM a new realm pulls from the registry authorizes too.
-      # Before packing, each backend gets its build provenance (status() and
-      # GET /version, gos-as-a-service#39) from scripts/stamp_build.py, run by
-      # the Python that builds it so the dependency versions are the packed ones.
+      # The realm backend comes in two variants (AGENTS.md, "Build variants"):
+      # production, and a test one for test and demo realms that need
+      # deterministic identities. pack_realm_backend.py stamps the release tag
+      # and fails the build if a production wasm holds any test-only code or a
+      # test wasm lacks it. The marketplace gets its build provenance from
+      # scripts/stamp_build.py, run by the Python that builds it so the
+      # dependency versions are the packed ones.
       - name: Build backend WASM
         if: ${{ inputs.cli_only != true }}
         env:
           RELEASE_TAG: v${{ steps.bump_version.outputs.NEW_VERSION }}
         run: |
-          python3 scripts/stamp_build.py realm_backend --version "$RELEASE_TAG"
-          CANISTER_CANDID_PATH="$(pwd)/src/realm_backend/realm_backend.did"
-          export CANISTER_CANDID_PATH
-          python3 scripts/build_base_wasm.py --gzip
+          python3 scripts/pack_realm_backend.py --variant production --version "$RELEASE_TAG" --gzip
           mv .basilisk/realm_backend/realm_backend.wasm.gz ./realm_backend.wasm.gz
           echo "✅ Backend WASM built ($(stat -c%s realm_backend.wasm.gz) bytes)"
+          python3 scripts/pack_realm_backend.py --variant test --version "$RELEASE_TAG" --gzip
+          mv .basilisk/realm_backend/realm_backend.wasm.gz ./realm_backend_test.wasm.gz
+          echo "✅ Test backend WASM built ($(stat -c%s realm_backend_test.wasm.gz) bytes)"
           # The marketplace pins its own dependencies (ic-python-db 0.14 for its
           # sorted rankings), so it builds in its own environment
           python3 -m venv /tmp/marketplace-venv
@@ -232,6 +236,7 @@ jobs:
           }
           for src in \
             realm_backend.wasm.gz \
+            realm_backend_test.wasm.gz \
             realm_backend.did \
             realm_frontend.tar.gz \
             realm_frontend.manifest.json \
@@ -258,7 +263,7 @@ jobs:
           }
           CHECKSUMS="checksums-${RELEASE_TAG}.txt"
           echo "# SHA-256 checksums for release assets" > "$CHECKSUMS"
-          for src in realm_backend.wasm.gz realm_backend.did realm_frontend.tar.gz \
+          for src in realm_backend.wasm.gz realm_backend_test.wasm.gz realm_backend.did realm_frontend.tar.gz \
                      realm_frontend.manifest.json \
                      marketplace_backend.wasm.gz marketplace_frontend.tar.gz \
                      marketplace_frontend.manifest.json \
@@ -281,7 +286,7 @@ jobs:
               man = json.load(open(published.replace(".tar.gz", ".manifest.json")))
               print(f"{man['bundle_sha256']}  {published} (bundle)")
           print("# module sha256 (decompressed wasm; pin this on registry.wasms)")
-          for name in ("realm_backend.wasm.gz", "marketplace_backend.wasm.gz", "token_backend.wasm.gz", "nft_backend.wasm.gz"):
+          for name in ("realm_backend.wasm.gz", "realm_backend_test.wasm.gz", "marketplace_backend.wasm.gz", "token_backend.wasm.gz", "nft_backend.wasm.gz"):
               published = stamped(name)
               data = gzip.decompress(pathlib.Path(published).read_bytes())
               print(f"{hashlib.sha256(data).hexdigest()}  {published} (module)")
@@ -351,6 +356,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             realm-backend-v${{ steps.bump_version.outputs.NEW_VERSION }}.wasm.gz
+            realm-backend-test-v${{ steps.bump_version.outputs.NEW_VERSION }}.wasm.gz
             realm-backend-v${{ steps.bump_version.outputs.NEW_VERSION }}.did
             realm-frontend-v${{ steps.bump_version.outputs.NEW_VERSION }}.tar.gz
             realm-frontend-v${{ steps.bump_version.outputs.NEW_VERSION }}.manifest.json

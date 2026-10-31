@@ -17,7 +17,8 @@ run by hand: patch, minor or major) builds and attaches to a GitHub release:
 
 | Asset | Built by |
 |---|---|
-| `realm-backend-<tag>.wasm.gz` | `scripts/build_base_wasm.py`, the previous backend's recipe (see the note below) |
+| `realm-backend-<tag>.wasm.gz` | `scripts/pack_realm_backend.py --variant production`: the realm for staging and production |
+| `realm-backend-test-<tag>.wasm.gz` | `scripts/pack_realm_backend.py --variant test`: for local, and test or demo realms that need test flags and deterministic identities |
 | `realm-frontend-<tag>.tar.gz` | `npm run build` in `src/realm_frontend`, packed with `casals bundle` |
 | `marketplace-backend-…`, `marketplace-frontend-…` | Basilisk, `npm run build` |
 | `token-backend-…`, `nft-backend-…` | Copied from [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) |
@@ -27,17 +28,15 @@ To build the realm by hand:
 
 ```bash
 pip install -r requirements.txt                     # pinned: a stale ic-python-db builds a wasm that traps at init
-python scripts/pack_realm_backend.py --version 0.9.0
+python scripts/pack_realm_backend.py --version 0.9.0   # --variant test for the test build
 cd src/realm_frontend && npm run build              # REALMS_BUILD_VARIANT=test for a build with test flags
 ```
 
 `pack_realm_backend.py` builds the backend on the Cedar template and fails unless the wasm
 exports `read` and `run` ([Operations](../architecture/operations.md)).
 
-> **Note.** The release workflow still builds with `build_base_wasm.py`, written for the previous
-> backend (it stubs an `extension_packages/` folder this backend no longer has).
-> `pack_realm_backend.py` is the recipe for this backend; switch the workflow to it before the
-> first release from this branch.
+The production wasm holds none of the test-only code, and the packer fails if it does
+([Build variants](../../AGENTS.md#build-variants-production-vs-test-wasm)).
 
 ## The product orchestra
 
