@@ -1,9 +1,13 @@
 import type { Page } from '@playwright/test';
 
 // Collects what must stay empty on a healthy page: console errors, uncaught
-// exceptions, and requests to the page's own origins that failed or got 4xx/5xx.
-// A realm page also loads its canister in an iframe, so every frame's origin
-// counts as "own". Third-party requests (map tiles, fonts) are not ours to fix.
+// exceptions, and requests to our own hosts that failed or got 4xx/5xx.
+// Canister queries and calls go to the IC API hosts (icp-api.io, icp0.io) and the
+// realm's assets to <id>.icp0.io, never to the page's own origin, so those hosts
+// count as ours. Third-party requests (map tiles, fonts) are not ours to fix.
+const OWN_HOSTS = /(^|\.)(icp0\.io|ic0\.app|icp-api\.io)$/;
+const OWN_HOSTNAMES = ['geister-api.realmsgos.dev'];
+
 export function watchPageErrors(page: Page) {
 	const problems: string[] = [];
 	const requests: { url: string; problem: string }[] = [];
@@ -23,11 +27,29 @@ export function watchPageErrors(page: Page) {
 		}
 	});
 
-	return () => {
-		const ownOrigins = new Set(page.frames().map((frame) => new URL(frame.url()).origin));
-		const failedOwnRequests = requests
-			.filter((request) => ownOrigins.has(new URL(request.url).origin))
-			.map((request) => `${request.problem}: ${request.url}`);
-		return [...problems, ...failedOwnRequests];
+	return {
+		errors: () => {
+			const ownHosts = new Set(
+				page
+					.frames()
+					.filter((frame) => frame.url() !== '')
+					.map((frame) => new URL(frame.url()).hostname)
+			);
+			const isOwn = (url: string) => {
+				const { hostname } = new URL(url);
+				return (
+					ownHosts.has(hostname) || OWN_HOSTS.test(hostname) || OWN_HOSTNAMES.includes(hostname)
+				);
+			};
+			const failedOwnRequests = requests
+				.filter((request) => isOwn(request.url))
+				.map((request) => `${request.problem}: ${request.url}`);
+			return [...problems, ...failedOwnRequests];
+		},
+		// Forget what was seen so far, so a late error from one page is not counted against the next.
+		clear: () => {
+			problems.length = 0;
+			requests.length = 0;
+		}
 	};
 }

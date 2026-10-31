@@ -37,3 +37,5 @@ jobs:
           path: |
             src/realm_frontend/test-results/smoke
             src/realm_frontend/playwright-report/smoke
+          if-no-files-found: ignore
+          retention-days: 14

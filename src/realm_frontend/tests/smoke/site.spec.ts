@@ -7,7 +7,7 @@ const SIGN_IN = /^(Sign in|Log In)$/i;
 
 for (const target of loadTargets().filter((t) => t.kind !== 'realm')) {
 	test(`${target.name}: loads without errors and offers sign-in`, async ({ page, request }) => {
-		const collectErrors = watchPageErrors(page);
+		const pageErrors = watchPageErrors(page);
 
 		const response = await page.goto(target.url);
 		expect(response?.status()).toBe(200);
@@ -17,6 +17,6 @@ for (const target of loadTargets().filter((t) => t.kind !== 'realm')) {
 		expect(canisterIds.status(), '/canister_ids.js').toBe(200);
 
 		await expect(page.getByRole('button', { name: SIGN_IN }).first()).toBeVisible();
-		expect(collectErrors()).toEqual([]);
+		expect(pageErrors.errors()).toEqual([]);
 	});
 }

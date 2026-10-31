@@ -8,7 +8,7 @@ const EXTENSION_LINK = 'a[href^="/extensions/"]';
 for (const target of loadTargets().filter((t) => t.kind === 'realm')) {
 	test.describe(target.name, () => {
 		test('public dashboard renders and the extension list shows', async ({ page }) => {
-			const collectErrors = watchPageErrors(page);
+			const pageErrors = watchPageErrors(page);
 
 			const response = await page.goto(target.url);
 			expect(response?.status()).toBe(200);
@@ -20,7 +20,7 @@ for (const target of loadTargets().filter((t) => t.kind === 'realm')) {
 			await expect(realm.locator(EXTENSION_LINK).first()).toBeAttached();
 			await page.waitForLoadState('networkidle');
 
-			expect(collectErrors()).toEqual([]);
+			expect(pageErrors.errors()).toEqual([]);
 		});
 
 		test('every public extension page loads', async ({ page }) => {
@@ -30,14 +30,20 @@ for (const target of loadTargets().filter((t) => t.kind === 'realm')) {
 			const paths = new Set(await links.evaluateAll((a) => a.map((x) => x.getAttribute('href')!)));
 			expect(paths.size).toBeGreaterThan(0);
 
+			const pageErrors = watchPageErrors(page);
+			const realmPath = new URL(target.url).pathname.replace(/\/$/, '');
+
 			for (const path of paths) {
-				const collectErrors = watchPageErrors(page);
-				await page.goto(new URL(`${new URL(target.url).pathname}${path}`, target.url).href);
-				const body = page.frameLocator('iframe').locator('body');
-				await expect(body, path).not.toContainText('Loading...');
-				await expect(body, path).not.toContainText(/error/i);
+				pageErrors.clear();
+				await page.goto(new URL(`${realmPath}${path}`, target.url).href);
 				await page.waitForLoadState('networkidle');
-				expect(collectErrors(), path).toEqual([]);
+				// The iframe body is empty until the extension renders, so wait for its
+				// heading before asserting that nothing is stuck or broken.
+				const extension = page.frameLocator('iframe');
+				await expect(extension.getByRole('heading').first(), path).toBeVisible();
+				await expect(extension.locator('body'), path).not.toContainText('Loading...');
+				await expect(extension.locator('body'), path).not.toContainText(/\berror\b/i);
+				expect(pageErrors.errors(), path).toEqual([]);
 			}
 		});
 	});

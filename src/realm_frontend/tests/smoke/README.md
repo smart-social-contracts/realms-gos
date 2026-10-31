@@ -23,7 +23,7 @@ the sign-in button is visible, no console errors, no failed requests to the site
 
 Every realm in `targets.json`: the public dashboard renders, the sign-in button and the
 extension list show, and each public extension page opens without a stuck "Loading..."
-or error text.
+or the word "error" (the extension pages share no error element, so the whole page body is searched).
 
 ## Other targets
 
