@@ -175,7 +175,8 @@ else
   if [ "$PUBLISH_ONLY" = 0 ] && [ ! -f "$BINDINGS_FILE" ] && [ "$BOOTSTRAP" = 0 ]; then
     die "no bindings at $BINDINGS_FILE — point CASALS_HOME at the directory of the first \`up\`, or pass --bootstrap to create a brand-new $ENV conductor on purpose"
   fi
-  if [ "$NO_DOMAINS" = 0 ] && [ "$DNS_PROVIDER" != none ] && [ -z "${!DNS_TOKEN_ENV:-}" ]; then
+  # Only the providers that write records need a token; none and manual just print them.
+  if [ "$NO_DOMAINS" = 0 ] && [[ "$DNS_PROVIDER" =~ ^(cloudflare|infomaniak)$ ]] && [ -z "${!DNS_TOKEN_ENV:-}" ]; then
     die "$DNS_TOKEN_ENV is not set (dns.provider=$DNS_PROVIDER); export it or pass --no-domains"
   fi
 fi
