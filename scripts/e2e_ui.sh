@@ -11,9 +11,10 @@
 #      orchestra and plays the installer (scripts/e2e_standalone_realm.py): setup
 #      steps, then the core extensions and the codex's dependencies with their
 #      frontends, and
-#   2. runs the Playwright suite in src/realm_frontend/tests/standalone, which logs
-#      in as the founder through the portal bridge and walks the setup wizard
-#      (codex, token, branding, languages, launch) and the launched realm.
+#   2. runs the Playwright suite in src/realm_frontend/tests/standalone (see its README.md):
+#      the founder signs in through the portal bridge and walks the setup wizard (codex,
+#      token, branding, languages, launch), a second member joins, proposals of each kind are
+#      voted and executed, and each extension's main operation is run.
 #
 #   scripts/e2e_ui.sh                       # syntropia
 #   E2E_CODEX=agora scripts/e2e_ui.sh       # another codex

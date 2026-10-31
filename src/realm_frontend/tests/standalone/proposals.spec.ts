@@ -33,7 +33,12 @@ async function proposalStatus(id: string): Promise<string> {
 }
 
 async function installedExtensions(): Promise<Record<string, string>> {
-	const listed = await readOp(realm, 'extension_list', { from: 1, count: 500 }, founderIdentity(realm));
+	const listed = await readOp(
+		realm,
+		'extension_list',
+		{ from: 1, count: 500 },
+		founderIdentity(realm)
+	);
 	const rows = listed.extensions as { id: string; version: string }[];
 	return Object.fromEntries(rows.map((e) => [e.id, e.version]));
 }
@@ -104,9 +109,16 @@ test('an extension install is voted and executed', async ({ page }) => {
 		type: 'upgrade',
 		title: `Install hello_world ${RUN}`,
 		description: 'Install the hello_world extension from the registry.',
-		upgrade: { target: 'extension', packageId: 'hello_world', version: extensionVersion('hello_world') }
+		upgrade: {
+			target: 'extension',
+			packageId: 'hello_world',
+			version: extensionVersion('hello_world')
+		}
 	});
-	expect(await installedExtensions()).toHaveProperty('hello_world', extensionVersion('hello_world'));
+	expect(await installedExtensions()).toHaveProperty(
+		'hello_world',
+		extensionVersion('hello_world')
+	);
 });
 
 test('an extension upgrade is voted and executed', async ({ page }) => {

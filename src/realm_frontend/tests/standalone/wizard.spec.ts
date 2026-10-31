@@ -1,7 +1,5 @@
-// The realm installation wizard, end to end, on a standalone local realm:
-//   scripts/up.sh -e local                       (the product: registry with the codices, marketplace, token)
-//   python3 scripts/e2e_standalone_realm.py      (one realm_backend + realm_frontend, in setup)
-//   npx playwright test -c playwright.standalone.config.ts
+// The realm installation wizard, end to end, on a standalone local realm (see README.md for the commands):
+//   scripts/e2e_ui.sh
 // The founder signs in through the portal bridge, walks every wizard step, launches the realm and
 // lands on its public dashboard. The realm's own state is then checked through its read operations.
 import { expect, test, type Locator, type Page } from '@playwright/test';

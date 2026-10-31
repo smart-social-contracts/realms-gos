@@ -5,7 +5,8 @@ import { expect, type FrameLocator, type Locator, type Page } from '@playwright/
 import type { Ed25519KeyIdentity } from '@dfinity/identity';
 import { exposeSigner, openInPortal, type StandaloneRealm } from './realm';
 
-/** Where the page's controls are: the extension's mount point, or the iframe a sandboxed extension runs in. */
+/** Where the page's controls are: the extension's mount point, or the iframe a sandboxed extension runs in. The
+ * realm's own dialogs are not in it: they are in the realm's frame. */
 export type ExtensionPage = Locator | FrameLocator;
 
 // The Playwright tests run from src/realm_frontend.
@@ -17,19 +18,27 @@ export function extensionVersion(id: string): string {
 }
 
 function isSandboxed(id: string): boolean {
-	return JSON.parse(readFileSync(join(EXTENSIONS_DIR, id, 'manifest.json'), 'utf8')).runtime === 'sandboxed';
+	return (
+		JSON.parse(readFileSync(join(EXTENSIONS_DIR, id, 'manifest.json'), 'utf8')).runtime ===
+		'sandboxed'
+	);
 }
 
-/** Opens `/extensions/<id>` as `identity` in `page`; `close` stops the portal host page. */
+/**
+ * Opens an extension's page as `identity` in `page`; `close` stops the portal host page. An extension that
+ * sends its visitors to a page of the realm (`path`, as notifications does) has the whole page as its own.
+ */
 export async function openExtension(
 	page: Page,
 	realm: StandaloneRealm,
 	identity: Ed25519KeyIdentity,
-	id: string
-): Promise<{ app: ExtensionPage; close: () => Promise<void> }> {
+	id: string,
+	path = `/extensions/${id}`
+): Promise<{ app: ExtensionPage; frame: FrameLocator; close: () => Promise<void> }> {
 	await exposeSigner(page, identity);
-	const { frame, close } = await openInPortal(page, realm, `/extensions/${id}`);
+	const { frame, close } = await openInPortal(page, realm, path);
+	if (!path.startsWith('/extensions/')) return { app: frame, frame, close };
 	const mount = frame.locator(`[data-extension-id="${id}"]`);
 	await expect(mount, `${id} is mounted`).toBeAttached({ timeout: 120_000 });
-	return { app: isSandboxed(id) ? mount.frameLocator('iframe') : mount, close };
+	return { app: isSandboxed(id) ? mount.frameLocator('iframe') : mount, frame, close };
 }

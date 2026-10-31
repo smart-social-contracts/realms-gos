@@ -22,12 +22,18 @@ export function publishNextVersion(realm: StandaloneRealm, dir: string): string 
 	execFileSync(
 		'realms',
 		[
-			'extension', 'publish',
-			'--source-dir', copy,
-			'--registry', realm.file_registry,
-			'--version', version,
-			'--network', realm.network_url,
-			'--identity', realm.identity
+			'extension',
+			'publish',
+			'--source-dir',
+			copy,
+			'--registry',
+			realm.file_registry,
+			'--version',
+			version,
+			'--network',
+			realm.network_url,
+			'--identity',
+			realm.identity
 		],
 		{ stdio: 'inherit' }
 	);

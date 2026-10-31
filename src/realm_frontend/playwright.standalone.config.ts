@@ -9,6 +9,8 @@ export default defineConfig({
 	forbidOnly: !!process.env.CI,
 	retries: 0,
 	timeout: 15 * 60 * 1000,
+	// Canister calls take seconds: a control may take that long to show.
+	expect: { timeout: 30_000 },
 	outputDir: 'test-results/standalone',
 	reporter: [['list'], ['html', { outputFolder: 'playwright-report/standalone', open: 'never' }]],
 	// Kept for every test, passed or not: the run is reviewed afterwards from the report.
