@@ -72,15 +72,8 @@ def _same_source(source: str) -> str:
 
 
 def _same_target(target: str) -> str:
-    """A target as comparable text: the zone editor may quote a TXT value or end a name with a dot."""
+    """A target as comparable text: the API returns a TXT value quoted, and a name may end with a dot."""
     return target.strip().strip('"').rstrip(".").lower()
-
-
-def _write_target(record: DnsRecord) -> str:
-    """A CNAME target is sent as an absolute name so it is not read relative to the zone."""
-    if _record_type(record) == "CNAME":
-        return f"{record.value.rstrip('.')}."
-    return record.value
 
 
 def wanted_records(records: Iterable[DnsRecord], zone: str) -> list[DnsRecord]:
@@ -166,7 +159,7 @@ class InfomaniakDns:
         body = {
             "type": _record_type(record),
             "source": source,
-            "target": _write_target(record),
+            "target": record.value,
             "ttl": self._ttl,
         }
         self._call("POST", f"/2/zones/{zone}/records", json=body)
@@ -174,7 +167,7 @@ class InfomaniakDns:
     def _update(self, zone: str, record_id: int, record: DnsRecord) -> None:
         if self._dry_run:
             return
-        body = {"target": _write_target(record), "ttl": self._ttl}
+        body = {"target": record.value, "ttl": self._ttl}
         self._call("PUT", f"/2/zones/{zone}/records/{record_id}", json=body)
 
     def sync_name(

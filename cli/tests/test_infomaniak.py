@@ -72,7 +72,7 @@ def _zone_with(host="test.realmsgos.org", canister=CANISTER, ttl=60):
     """The three records of ``host`` as the zone would hold them after an apply."""
     source = host[: -len(ZONE) - 1]
     return [
-        {"type": "CNAME", "source": source, "target": f"{host}.icp1.io.", "ttl": ttl},
+        {"type": "CNAME", "source": source, "target": f"{host}.icp1.io", "ttl": ttl},
         {
             "type": "TXT",
             "source": f"_canister-id.{source}",
@@ -82,7 +82,7 @@ def _zone_with(host="test.realmsgos.org", canister=CANISTER, ttl=60):
         {
             "type": "CNAME",
             "source": f"_acme-challenge.{source}",
-            "target": f"_acme-challenge.{host}.icp2.io.",
+            "target": f"_acme-challenge.{host}.icp2.io",
             "ttl": ttl,
         },
     ]
@@ -124,7 +124,7 @@ class TestCreate:
                 {
                     "type": "CNAME",
                     "source": "test",
-                    "target": "test.realmsgos.org.icp1.io.",
+                    "target": "test.realmsgos.org.icp1.io",
                     "ttl": 60,
                 },
             ),
@@ -144,7 +144,7 @@ class TestCreate:
                 {
                     "type": "CNAME",
                     "source": "_acme-challenge.test",
-                    "target": "_acme-challenge.test.realmsgos.org.icp2.io.",
+                    "target": "_acme-challenge.test.realmsgos.org.icp2.io",
                     "ttl": 60,
                 },
             ),
@@ -211,9 +211,9 @@ class TestNoOp:
         assert [o.action for o in outcomes] == ["unchanged"] * 3
         assert session.writes() == []
 
-    def test_a_quoted_txt_and_unquoted_cname_targets_still_match(self):
+    def test_a_quoted_txt_and_dotted_cname_targets_still_match(self):
         zone = _zone_with()
-        zone[0]["target"] = "test.realmsgos.org.icp1.io"
+        zone[0]["target"] = "test.realmsgos.org.icp1.io."
         zone[1]["target"] = f'"{CANISTER}"'
 
         assert [o.action for o in _apply(_FakeSession(zone))] == ["unchanged"] * 3
