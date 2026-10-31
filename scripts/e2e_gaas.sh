@@ -62,7 +62,7 @@ if [ "${SKIP_STACK:-0}" != 1 ]; then
     python3 "$REALMS_DIR/scripts/e2e_gaas_sheet.py" "$GAAS_SHEET"
 
   say "Stack: scripts/local_up.sh --gaas"
-  CASALS_LOCAL_ROOTS="$REALMS_DIR:$CASALS_DIR:$GAAS_DIR" "$REALMS_DIR/scripts/local_up.sh" --gaas --skip-build
+  CASALS_LOCAL_ROOTS="$REALMS_DIR:$CASALS_DIR:$GAAS_DIR" "$REALMS_DIR/scripts/local_up.sh" --gaas --no-realm --skip-build
 fi
 
 say "The portal: test mode and a voucher"
