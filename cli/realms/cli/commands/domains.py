@@ -7,8 +7,9 @@ that block alone ("dns provider not implemented in CLI"): the product CLI owns
 it, for this sheet and for the GaaS portal's alike.
 
 ``check``  — read-only: what DNS, the IC registration and HTTP say vs the sheet.
-``apply``  — put the three records in Cloudflare, register (or re-point) the
-             domain with the IC gateways, wait for it, verify over HTTP.
+``apply``  — put the three records in Cloudflare or Infomaniak, register (or
+             re-point) the domain with the IC gateways, wait for it, verify
+             over HTTP. ``--dry-run`` (Infomaniak) only prints the changes.
 
 Canister ids are never read from a table in this repo. They come from the
 output of ``casals export`` (``--export FILE``) or, failing that, from the
@@ -33,13 +34,19 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from realms.cli import domain_reg
+from realms.cli import domain_reg, infomaniak
 from realms.cli.cloudflare import CloudflareError, apply_records, token_from_env
-from realms.cli.dns import ICP_ACME_GATEWAY, DnsRecord, render_dns_records
+from realms.cli.dns import ICP_ACME_GATEWAY, DnsRecord, RecordOutcome, render_dns_records
+from realms.cli.infomaniak import InfomaniakError
 
 console = Console()
 
-_DNS_PROVIDERS = ("none", "manual", "cloudflare")
+_DNS_PROVIDERS = ("none", "manual", "cloudflare", "infomaniak")
+# What a provider's token must be allowed to do, for the error when it is missing.
+_TOKEN_NEEDS = {
+    "cloudflare": "Cloudflare and needs a token with Zone:Read + DNS:Edit on its zone",
+    "infomaniak": "Infomaniak and needs a token with the dns:read + dns:write scopes",
+}
 DOH = "https://cloudflare-dns.com/dns-query"
 HTTP_TIMEOUT = 30.0
 
@@ -60,7 +67,10 @@ def _dns_settings(env_cfg: dict) -> tuple[str, str, str, int]:
             f"dns.provider must be one of {', '.join(_DNS_PROVIDERS)}, got {dns.get('provider')!r}"
         )
     zone = (dns.get("zone") or "").strip()
-    token_env = (dns.get("token_env") or "CLOUDFLARE_API_TOKEN").strip()
+    if provider == "infomaniak" and not zone:
+        raise ValueError("dns.zone is required when dns.provider is infomaniak")
+    default_token_env = infomaniak.DEFAULT_TOKEN_ENV if provider == "infomaniak" else "CLOUDFLARE_API_TOKEN"
+    token_env = (dns.get("token_env") or default_token_env).strip()
     ttl_raw = dns.get("ttl", 60)
     try:
         ttl = int(ttl_raw)
@@ -74,12 +84,12 @@ def _dns_settings(env_cfg: dict) -> tuple[str, str, str, int]:
 def _check_dns_credentials(env_cfg: dict, host: str) -> None:
     """Fail before touching anything when the provider needs a token we lack."""
     provider, _zone, token_env, _ttl = _dns_settings(env_cfg)
-    if provider != "cloudflare":
+    if provider not in _TOKEN_NEEDS:
         return
     if not token_from_env(token_env):
         raise RuntimeError(
-            f"{token_env} is not set; {host} is on Cloudflare and needs a token with "
-            f"Zone:Read + DNS:Edit on its zone (export it in this shell, never commit it)"
+            f"{token_env} is not set; {host} is on {_TOKEN_NEEDS[provider]} "
+            f"(export it in this shell, never commit it)"
         )
 
 
@@ -428,33 +438,44 @@ def print_records(records: list[DnsRecord]) -> None:
     console.print(table)
 
 
+def print_outcomes(label: str, outcomes: list[RecordOutcome]) -> None:
+    for o in outcomes:
+        detail = f" ({o.detail})" if o.detail else ""
+        console.print(f"  {label} {o.action:9} {o.record.record_type:11} {o.record.host} = {o.record.value}{detail}")
+
+
 def apply_target(
     target: DomainTarget,
     env_cfg: dict,
     *,
     skip_registration: bool,
     registration_timeout: float,
+    dry_run: bool = False,
     session: requests.Session | None = None,
 ) -> bool:
-    """Records → registration → HTTP for one host. Returns True when it ends healthy."""
+    """Records → registration → HTTP for one host. Returns True when it ends healthy.
+
+    A dry run reads the DNS zone and prints what would change; it registers nothing."""
     provider, zone, token_env, ttl = _dns_settings(env_cfg)
     records = render_dns_records(target.host, target.canister_id)
     http = session or requests.Session()
 
     console.print(f"\n[bold]{target.host}[/bold] → {target.canister_name} {target.canister_id}")
-    if provider == "cloudflare":
+    if provider in _TOKEN_NEEDS:
         token = token_from_env(token_env)
         if not token:
             raise RuntimeError(f"{token_env} is not set")
+    if provider == "cloudflare":
         outcomes = apply_records(records, token=token, zone=zone, domain=target.host, ttl=ttl, session=http)
-        for o in outcomes:
-            detail = f" ({o.detail})" if o.detail else ""
-            console.print(f"  cloudflare {o.action:9} {o.record.record_type:11} {o.record.host} = {o.record.value}{detail}")
+        print_outcomes("cloudflare", outcomes)
+    elif provider == "infomaniak":
+        outcomes = infomaniak.apply_records(records, token=token, zone=zone, ttl=ttl, dry_run=dry_run, session=http)
+        print_outcomes("infomaniak (dry run)" if dry_run else "infomaniak", outcomes)
     else:
         console.print(f"  dns.provider is {provider!r}: set these records yourself, then rerun")
         print_records(records)
 
-    if skip_registration:
+    if skip_registration or dry_run:
         return True
 
     console.print("  IC gateway registration:")
@@ -514,7 +535,7 @@ def apply_target(
 
 # ── typer commands ───────────────────────────────────────────────────────────
 
-domains_app = typer.Typer(name="domains", help="Custom domains of a Casals sheet (Cloudflare + IC gateway registration)")
+domains_app = typer.Typer(name="domains", help="Custom domains of a Casals sheet (Cloudflare or Infomaniak DNS + IC gateway registration)")
 
 
 def _common(sheet_path: Path, env: str, export: Optional[Path], conductor: str, canister: list[str], identity: str):
@@ -575,21 +596,26 @@ def domains_apply(
     skip_registration: bool = typer.Option(False, "--skip-registration", help="Only set DNS records"),
     registration_timeout: float = typer.Option(900.0, "--timeout", help="Seconds to wait for the IC gateways"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before writing DNS records"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Infomaniak only: print the DNS changes, write nothing, register nothing"),
 ) -> None:
-    """Point every domain in the sheet at its canister: Cloudflare records, IC gateway registration, HTTP check."""
+    """Point every domain in the sheet at its canister: DNS records, IC gateway registration, HTTP check."""
     try:
         _sheet, env_cfg, targets = _common(sheet_path, env, export, conductor, canister, identity)
         for t in targets:
             _check_dns_credentials(env_cfg, t.host)
+        provider, zone, _token_env, _ttl = _dns_settings(env_cfg)
+        if dry_run and provider != "infomaniak":
+            raise ValueError(f"--dry-run is only implemented for dns.provider infomaniak, not {provider!r}")
     except (ValueError, RuntimeError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2)
 
-    provider, zone, _token_env, _ttl = _dns_settings(env_cfg)
     console.print(f"{len(targets)} domain(s) on {env}; dns.provider={provider}" + (f", zone={zone}" if zone else ""))
     for t in targets:
         console.print(f"  {t.host} → {t.canister_name} {t.canister_id}")
-    if provider == "cloudflare" and not yes and not typer.confirm("Write these records to Cloudflare?", default=False):
+    if provider in _TOKEN_NEEDS and not (yes or dry_run) and not typer.confirm(
+        f"Write these records to {provider.capitalize()}?", default=False
+    ):
         raise typer.Exit(code=1)
 
     healthy = True
@@ -597,8 +623,9 @@ def domains_apply(
         for t in targets:
             healthy &= apply_target(
                 t, env_cfg, skip_registration=skip_registration, registration_timeout=registration_timeout,
+                dry_run=dry_run,
             )
-    except (CloudflareError, domain_reg.DomainRegistrationError, RuntimeError) as exc:
+    except (CloudflareError, InfomaniakError, domain_reg.DomainRegistrationError, RuntimeError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2)
     if not healthy:

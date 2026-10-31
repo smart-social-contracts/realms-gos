@@ -7,9 +7,9 @@
       "network": "ic",
       "$comment": "Demo on mainnet, run as production. Operator is prod-identity (YubiKey), through an icp delegation from it. Hosts are demo.realmsgos.org and casals.demo.realmsgos.org.",
       "dns": {
-        "provider": "cloudflare",
+        "provider": "infomaniak",
         "zone": "realmsgos.org",
-        "token_env": "CLOUDFLARE_API_TOKEN",
+        "token_env": "INFOMANIAK_API_TOKEN",
         "ttl": 60
       },
       "marketplace_host": "demo.realmsgos.org",
