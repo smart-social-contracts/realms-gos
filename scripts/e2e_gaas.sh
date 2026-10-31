@@ -8,9 +8,9 @@
 #
 # What it does:
 #   1. builds the realm (test variant: the portal's test mode needs deterministic identities), the extension
-#      bundles and the Casals conductor,
-#   2. writes a copy of the GaaS sheet whose realm rows are those builds and whose conductor is the built one,
-#      (gos-as-a-service/tests/e2e/local_sheet.py; casals.json installs releases everywhere),
+#      bundles, the Casals conductor, and gos-as-a-service's installer, registry and portal,
+#   2. writes a copy of the GaaS sheet whose rows are those builds (scripts/e2e_gaas_sheet.py; casals.json
+#      installs releases everywhere, and the pinned ones do not work with each other or with the slim realm),
 #   3. scripts/local_up.sh --gaas: the product and GaaS orchestras on the local replica,
 #   4. scripts/e2e_gaas_scale.py: the portal's test mode and a voucher, written to GAAS_JSON,
 #   5. src/realm_frontend/tests/gaas/scale.spec.ts through playwright.gaas.config.ts.
@@ -19,8 +19,8 @@
 # gos-as-a-service, or CASALS_DIR / FILE_REGISTRY_DIR / GAAS_DIR; CASALS_HOME; CASALS_REPLICA_PORT for a replica
 # beside another). E2E_DIR (default /tmp/realms-gaas-e2e) holds the sheet and GAAS_JSON.
 #
-# Casals and gos-as-a-service must be at main: the sheet's conductor release (v0.7.0) does not resolve the
-# sheet's `$canister:` references, and a realm's quarter_add calls the conductor's stand_grow, newer than it.
+# Casals and gos-as-a-service must be at main: the pinned releases do not resolve the sheet's `$canister:`
+# references, and a realm's quarter_add calls the conductor's stand_grow, which they lack.
 set -euo pipefail
 
 REALMS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,16 +42,27 @@ if [ "${SKIP_STACK:-0}" != 1 ]; then
   (cd "$REALMS_DIR" && realms files build)
   make -C "$CASALS_DIR" build-backend
 
+  say "Build: the installer, the registry and the portal of gos-as-a-service"
+  (cd "$GAAS_DIR"
+   for canister in realm_installer realm_registry_backend; do
+     CANISTER_CANDID_PATH="$PWD/src/$canister/$canister.did" python3 -m basilisk "$canister" "src/$canister/main.py"
+   done
+   npm ci --legacy-peer-deps
+   npm run build --workspace=realm_registry_frontend)
+
   say "The GaaS sheet with these builds"
   export GAAS_SHEET="$E2E_DIR/casals.local-build.json"
   REALM_VERSION=e2e \
     REALM_BACKEND_WASM="$REALMS_DIR/.basilisk/realm_backend/realm_backend.wasm" \
     REALM_FRONTEND="$REALMS_DIR/src/realm_frontend/dist" \
     CASALS_BACKEND_WASM="$CASALS_DIR/.basilisk/casals_backend/casals_backend.wasm" \
-    python3 "$GAAS_DIR/tests/e2e/local_sheet.py" "$GAAS_SHEET"
+    INSTALLER_WASM="$GAAS_DIR/.basilisk/realm_installer/realm_installer.wasm" \
+    REGISTRY_WASM="$GAAS_DIR/.basilisk/realm_registry_backend/realm_registry_backend.wasm" \
+    REGISTRY_FRONTEND="$GAAS_DIR/src/realm_registry_frontend/dist" \
+    python3 "$REALMS_DIR/scripts/e2e_gaas_sheet.py" "$GAAS_SHEET"
 
   say "Stack: scripts/local_up.sh --gaas"
-  CASALS_LOCAL_ROOTS="$REALMS_DIR:$CASALS_DIR" "$REALMS_DIR/scripts/local_up.sh" --gaas --skip-build
+  CASALS_LOCAL_ROOTS="$REALMS_DIR:$CASALS_DIR:$GAAS_DIR" "$REALMS_DIR/scripts/local_up.sh" --gaas --skip-build
 fi
 
 say "The portal: test mode and a voucher"

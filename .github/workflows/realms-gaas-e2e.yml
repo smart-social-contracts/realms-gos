@@ -9,9 +9,9 @@ name: Realms GaaS E2E
 # Not part of ci-pr.yml: the stack (product orchestra, GaaS orchestra, a realm built
 # by Casals, a quarter built by Casals) takes about 40 minutes, too long for every
 # PR. It runs nightly and on demand, with the realm backend and frontend of the
-# checked-out ref and the Casals conductor of main; the registry and installer are
-# the releases the sheet of gos-as-a-service pins. The same script runs on a laptop:
-# scripts/e2e_gaas.sh.
+# checked-out ref and the Casals, installer, registry and portal of main (the releases
+# the sheet of gos-as-a-service pins do not work with the slim realm). The same script
+# runs on a laptop: scripts/e2e_gaas.sh.
 on:
   workflow_dispatch:
   schedule:
