@@ -100,6 +100,24 @@ npm run test:unit      # Vitest
 npm run test:e2e       # Playwright
 ```
 
+### The gos.earth journey
+
+One command builds the realm, brings a local GaaS stack up and plays the whole journey in a browser: a visitor
+signs in on the portal, launches a realm (Alpha: credits, no payment), the founder finishes the setup wizard,
+members join through the Terms, a member files a proposal through the voting form, the members vote it and the
+realm's next quarter through, and the next member lands in the new quarter.
+
+```bash
+scripts/e2e_gaas.sh                 # about 25 minutes of stack, then about 15 of browser
+SKIP_STACK=1 scripts/e2e_gaas.sh    # the stack is already up: a fresh voucher and the spec only
+```
+
+It needs sibling checkouts of Casals, file-registry and gos-as-a-service (or `CASALS_DIR`, `FILE_REGISTRY_DIR`,
+`GAAS_DIR`) and the tools of [`scripts/local_up.sh`](../../scripts/local_up.sh). Every test records screenshots and
+video into `src/realm_frontend/test-results/gaas`, and the HTML report is in `playwright-report/gaas`. The
+workflow [`realms-gaas-e2e.yml`](../../.github/workflows/realms-gaas-e2e.yml) runs the same script nightly and on
+demand, and uploads both folders.
+
 ## Not yet in CI
 
 CI ([`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml)) still runs `tests/backend/`,

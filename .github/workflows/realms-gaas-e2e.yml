@@ -1,0 +1,141 @@
+name: Realms GaaS E2E
+
+# The gos.earth journey in a browser, on a local replica: a visitor signs in on the
+# portal, launches a realm (Alpha, credits only), the founder finishes the setup
+# wizard, members join through the Terms, vote a proposal and the next quarter
+# through, and the next member lands in the new quarter
+# (src/realm_frontend/tests/gaas/scale.spec.ts).
+#
+# Not part of ci-pr.yml: the stack (product orchestra, GaaS orchestra, a realm built
+# by Casals, a quarter built by Casals) takes about 40 minutes, too long for every
+# PR. It runs nightly and on demand, with the realm backend and frontend of the
+# checked-out ref and the Casals conductor of main; the registry and installer are
+# the releases the sheet of gos-as-a-service pins. The same script runs on a laptop:
+# scripts/e2e_gaas.sh.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "37 2 * * *"
+
+concurrency:
+  group: realms-gaas-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  DFX_VERSION: "0.32.0"
+  CASALS_VERSION: "main"
+  FILE_REGISTRY_VERSION: "main"
+  GAAS_VERSION: "main"
+  CASALS_HOME: ${{ github.workspace }}/casals-home
+  E2E_DIR: ${{ github.workspace }}/realms-gaas-e2e
+
+jobs:
+  realms-gaas-e2e:
+    # Playwright 1.55 has no chromium for ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      # Sibling checkouts: local_up.sh finds Casals, file-registry and
+      # gos-as-a-service next to the realms checkout.
+      - uses: actions/checkout@v4
+        with:
+          path: realms
+          submodules: recursive
+
+      - name: Checkout Casals (conductor + CLI + e2e harness)
+        uses: actions/checkout@v4
+        with:
+          repository: smart-social-contracts/Casals
+          ref: ${{ env.CASALS_VERSION }}
+          path: Casals
+          submodules: recursive
+
+      - name: Checkout file-registry (fleet file registry wasm)
+        uses: actions/checkout@v4
+        with:
+          repository: smart-social-contracts/file-registry
+          ref: ${{ env.FILE_REGISTRY_VERSION }}
+          path: file-registry
+
+      - name: Checkout gos-as-a-service (the GaaS sheet)
+        uses: actions/checkout@v4
+        with:
+          repository: smart-social-contracts/gos-as-a-service
+          ref: ${{ env.GAAS_VERSION }}
+          path: gos-as-a-service
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dfx
+        run: |
+          curl -fsSL "https://github.com/dfinity/sdk/releases/download/${DFX_VERSION}/dfx-${DFX_VERSION}-x86_64-linux.tar.gz" -o /tmp/dfx.tar.gz
+          tar -xzf /tmp/dfx.tar.gz -C /usr/local/bin
+          rm /tmp/dfx.tar.gz
+          dfx --version
+
+      - name: Install icp-cli and ic-wasm
+        run: |
+          npm install -g @icp-sdk/icp-cli @icp-sdk/ic-wasm
+          icp --version
+
+      - name: Install Python toolchain (Casals CLI + Basilisk + realms)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r Casals/requirements-dev.txt
+          python3 -m pip install -r realms/requirements.txt
+          python3 -m pip install -r gos-as-a-service/requirements-dev.txt
+
+      - name: Create the local-dev identity (dfx + icp)
+        run: |
+          export TERM=xterm
+          export DFX_WARNING=-mainnet_plaintext_identity
+          dfx identity new local-dev --storage-mode plaintext
+          dfx identity export local-dev > /tmp/local-dev.pem
+          icp identity import local-dev --from-pem /tmp/local-dev.pem --storage plaintext
+          test "$(icp identity principal --identity local-dev)" = "$(dfx identity get-principal --identity local-dev)"
+
+      - name: Install Playwright chromium
+        working-directory: realms/src/realm_frontend
+        run: npx playwright install --with-deps chromium
+
+      # The whole journey is one script, so anyone can run it on their own machine
+      # (scripts/e2e_gaas.sh): builds, GaaS sheet, local stack, portal test mode, Playwright.
+      - name: GaaS journey UI e2e (scripts/e2e_gaas.sh)
+        working-directory: realms
+        run: scripts/e2e_gaas.sh
+
+      - name: Upload the UI e2e report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: realms-gaas-ui-e2e
+          path: |
+            realms/src/realm_frontend/playwright-report/gaas
+            realms/src/realm_frontend/test-results/gaas
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Show orchestra state on failure
+        if: failure()
+        working-directory: Casals
+        env:
+          CASALS_HOME: ${{ env.CASALS_HOME }}/gaas
+        run: |
+          export TERM=xterm
+          python3 -m casals_cli.main -e local --identity local-dev show "$E2E_DIR/casals.local-build.json" || true
+          python3 -m casals_cli.main -e local --identity local-dev events "$E2E_DIR/casals.local-build.json" || true
+
+      - name: Stop local replica
+        if: always()
+        working-directory: Casals
+        run: |
+          export TERM=xterm
+          icp network stop -e local || true

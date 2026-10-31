@@ -19,7 +19,8 @@ import secrets
 import subprocess
 from pathlib import Path
 
-FLAGS = {"test_mode": True, "ii_bypass": True, "user_self_registration": True, "skip_terms": True,
+# skip_terms is off, explicitly (the registry keeps the flags of an earlier run): members accept the Terms to join.
+FLAGS = {"test_mode": True, "ii_bypass": True, "user_self_registration": True, "skip_terms": False,
          "disable_card_billing": True}
 
 

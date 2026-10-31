@@ -28,6 +28,11 @@ export function loadRealm(): StandaloneRealm {
 	return JSON.parse(readFileSync(path, 'utf8')) as StandaloneRealm;
 }
 
+/** A local replica signs with a root key the agent must fetch; the live networks' key is built in. */
+export function needsRootKey(networkUrl: string): boolean {
+	return !networkUrl.startsWith('https://');
+}
+
 export function founderIdentity(realm: StandaloneRealm): Ed25519KeyIdentity {
 	return Ed25519KeyIdentity.generate(Uint8Array.from(Buffer.from(realm.founder_seed, 'hex')));
 }
@@ -118,7 +123,10 @@ export async function readOp(
 	name: string,
 	args: Record<string, unknown> = {}
 ): Promise<Record<string, unknown>> {
-	const agent = await HttpAgent.create({ host: realm.network_url, shouldFetchRootKey: true });
+	const agent = await HttpAgent.create({
+		host: realm.network_url,
+		shouldFetchRootKey: needsRootKey(realm.network_url)
+	});
 	const actor = Actor.createActor<{ read: (n: string, a: string) => Promise<string> }>(
 		readIdl as never,
 		{

@@ -1,16 +1,19 @@
-// A realm born in the GaaS portal grows a quarter through a realm-wide vote, end to end on a local stack:
+// The gos.earth journey, end to end on a local stack:
 //   scripts/local_up.sh --gaas                 (Realms product + GaaS orchestras on a local replica)
 //   python3 scripts/e2e_gaas_scale.py          (portal test mode, a voucher; writes GAAS_JSON)
 //   npx playwright test -c playwright.gaas.config.ts
-// The founder launches the realm from the portal and walks the setup wizard, choosing a voting window of zero
-// (open until certain); registration is open and auto-scaling on. Members join until the
-// capital is 90% full, the realm proposes its next quarter, the members vote it through, Casals builds the
-// quarter, the capital adopts it, and the next member to join lands in it.
+// A visitor signs in on the portal and launches a realm (Alpha: credits, no payment); the founder walks the
+// setup wizard, choosing a voting window of zero (open until certain); registration is open and auto-scaling
+// on. Members join through the Terms until the capital is 90% full and the realm proposes its next quarter. A
+// member files a proposal through the voting form, the members vote both through, Casals builds the quarter,
+// the capital adopts it, and the next member to join lands in it.
+//
+// GAAS_JSON may name an https network_url (a live replica: no root key is fetched).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Browser, type FrameLocator, type Page } from '@playwright/test';
 import { Actor, HttpAgent } from '@dfinity/agent';
 import { Ed25519KeyIdentity } from '@dfinity/identity';
-import { exposeSigner, openInPortal, readOp, type StandaloneRealm } from '../standalone/fixtures/realm';
+import { exposeSigner, needsRootKey, openInPortal, readOp, type StandaloneRealm } from '../standalone/fixtures/realm';
 import { LAUNCH_TIMEOUT, launchThroughWizard } from '../standalone/fixtures/wizard';
 
 interface Gaas {
@@ -54,7 +57,33 @@ function seedHex(index: number): string {
 }
 
 async function agentAs(identity?: Ed25519KeyIdentity) {
-	return HttpAgent.create({ host: G.network_url, identity, shouldFetchRootKey: true });
+	return HttpAgent.create({ host: G.network_url, identity, shouldFetchRootKey: needsRootKey(G.network_url) });
+}
+
+/** Whether the asset canister ``canister`` answers /index.html. */
+async function frontendServes(canister: string): Promise<boolean> {
+	const idl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+		IDL.Service({
+			http_request: IDL.Func(
+				[
+					IDL.Record({
+						url: IDL.Text,
+						method: IDL.Text,
+						body: IDL.Vec(IDL.Nat8),
+						headers: IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+						certificate_version: IDL.Opt(IDL.Nat16)
+					})
+				],
+				[IDL.Record({ status_code: IDL.Nat16 })],
+				['query']
+			)
+		});
+	const assets = Actor.createActor<{ http_request: (r: object) => Promise<{ status_code: number }> }>(idl as never, {
+		agent: await agentAs(),
+		canisterId: canister
+	});
+	const out = await assets.http_request({ url: '/index.html', method: 'GET', body: [], headers: [], certificate_version: [] });
+	return out.status_code === 200;
 }
 
 async function redeemVoucher(founder: Ed25519KeyIdentity) {
@@ -95,7 +124,11 @@ async function job(id: string): Promise<Job> {
 	return out.Ok;
 }
 
-/** The portal's launch wizard: platform, basics (the name), subnet, review & deploy. Returns the job id. */
+/**
+ * The portal's launch wizard: platform, basics (the name), subnet, review & deploy. Alpha has no payment step:
+ * the review shows the realm's price in credits and nothing to pay. (A registry in can_test_mode, as on every
+ * local stack, launches without charging them, so the balance is not checked here.) Returns the job id.
+ */
 async function launchFromPortal(page: Page): Promise<string> {
 	await page.goto(`${G.portal_url}/deploy-gos`, { waitUntil: 'networkidle' });
 	const next = page.getByRole('button', { name: 'Continue' });
@@ -117,6 +150,8 @@ async function launchFromPortal(page: Page): Promise<string> {
 		await expect(launch).toBeVisible({ timeout: 3_000 });
 	}).toPass({ timeout: 60_000 });
 	await snap(page, 'portal-review');
+	await expect(page.locator('.deploy-cost')).toHaveText(/Cost: \d+ credits/);
+	await expect(page.getByText(/pay with card|stripe/i), 'Alpha has no payment step').toHaveCount(0);
 	await launch.click();
 	await page.waitForURL(/\/my-dashboard\/deployments\?job=/, { timeout: 120_000 });
 	await snap(page, 'portal-deployment');
@@ -139,7 +174,11 @@ async function readAs(identity: Ed25519KeyIdentity, canister: string, name: stri
 
 /** ``member`` opens ``path`` of the realm in a browser of their own (a portal host signing as them). */
 async function asMember<T>(browser: Browser, seat: number, path: string, run: (page: Page, frame: FrameLocator) => Promise<T>) {
-	const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+	// A browser of their own is not the test's page: it records its video itself.
+	const context = await browser.newContext({
+		viewport: { width: 1280, height: 900 },
+		recordVideo: { dir: test.info().outputPath(`member-${seat}-videos`), size: { width: 1280, height: 900 } }
+	});
 	const page = await context.newPage();
 	try {
 		await exposeSigner(page, testIdentity(seat));
@@ -154,9 +193,48 @@ async function asMember<T>(browser: Browser, seat: number, path: string, run: (p
 	}
 }
 
-/** Member ``seat`` joins through the realm's join page; returns the quarter it joined. */
+/**
+ * The join page of a test-mode realm drops the portal's session and asks which test identity to join as: member
+ * ``seat`` is "Identity seat+1" (the first two are cards, the others are picked by number).
+ */
+async function pickTestIdentity(page: Page, frame: FrameLocator, seat: number) {
+	const picker = frame.locator('#join-custom-identity-number');
+	// Now and then the page stays on "Signing you in": load it again.
+	let attempts = 0;
+	await expect(async () => {
+		if (attempts++) await page.reload();
+		await expect(picker).toBeVisible({ timeout: 30_000 });
+	}).toPass({ timeout: 150_000 });
+	const number = seat + 1;
+	if (number <= 2) {
+		await frame.getByRole('button', { name: new RegExp(`^Identity ${number}`) }).click();
+	} else {
+		await picker.fill(String(number));
+		await frame.getByRole('button', { name: 'Select', exact: true }).click();
+	}
+	await frame.getByRole('button', { name: /^Continue as/ }).click();
+}
+
+/** The Terms step of the join page: Continue stays disabled until the member ticks the agreement. */
+async function acceptTerms(page: Page, frame: FrameLocator, seat: number) {
+	const agree = frame.locator('#join-terms-agree');
+	const proceed = frame.getByRole('button', { name: 'Continue' });
+	await expect(agree).toBeVisible({ timeout: 120_000 });
+	await expect(proceed, 'Continue waits for the agreement').toBeDisabled();
+	if (seat === 1) await snap(page, 'terms');
+	// The page can remount once sign-in settles, which clears the tick: tick again until it holds.
+	await expect(async () => {
+		await agree.check();
+		await expect(proceed).toBeEnabled({ timeout: 2_000 });
+	}).toPass({ timeout: 60_000 });
+	await proceed.click();
+}
+
+/** Member ``seat`` joins through the realm's join page, Terms included; returns the quarter it joined. */
 async function join(browser: Browser, seat: number): Promise<string> {
 	return asMember(browser, seat, '/join', async (page, frame) => {
+		await pickTestIdentity(page, frame, seat);
+		await acceptTerms(page, frame, seat);
 		const quarter = frame.getByText(/JOINING QUARTER/i).locator('xpath=..');
 		const joinButton = frame.getByRole('button', { name: 'Join Realm' });
 		await expect(joinButton).toBeEnabled({ timeout: 120_000 });
@@ -180,19 +258,38 @@ async function join(browser: Browser, seat: number): Promise<string> {
 	});
 }
 
-/** Member ``seat`` votes yes on ``proposal`` in the voting extension. */
-async function voteYes(browser: Browser, seat: number, proposal: string) {
+/** Member ``seat`` files a proposal without an action through the voting extension's form; returns its id. */
+async function submitProposal(browser: Browser, seat: number, title: string): Promise<string> {
 	await asMember(browser, seat, '/extensions/voting', async (page, frame) => {
-		const card = frame.locator(`[data-proposal-id="${proposal}"]`);
-		await expect(card).toBeVisible({ timeout: 120_000 });
-		if (seat === 0) await snap(page, 'vote-open');
-		await card.getByRole('button', { name: 'Yes', exact: true }).click();
-		await expect
-			.poll(async () => {
-				const out = await readAs(testIdentity(0), realm.realm_backend, 'proposal_get', { proposal });
-				return (out.votes ?? []).some((v: any) => v.voter === testIdentity(seat).getPrincipal().toText());
-			}, { message: `member ${seat}'s vote is counted`, timeout: 60_000, intervals: [1_000] })
-			.toBe(true);
+		await frame.getByRole('button', { name: 'Submit Proposal' }).click({ timeout: 120_000 });
+		await frame.locator('#rt-title').fill(title);
+		await frame.locator('#rt-desc').fill(`${title}, filed by member ${seat} through the form.`);
+		await snap(page, 'proposal-form');
+		await frame.locator('form button[type="submit"]').click();
+		await expect(frame.getByText(/submitted — voting is open/)).toBeVisible({ timeout: 60_000 });
+		await snap(page, 'proposal-submitted');
+	});
+	const open = await readAs(testIdentity(seat), realm.realm_backend, 'proposal_list', { status: 'voting' });
+	const filed = (open.proposals ?? []).find((p: any) => p.title === title);
+	expect(filed, `proposal "${title}" is open for voting`).toBeTruthy();
+	return filed.id;
+}
+
+/** Member ``seat`` votes yes on each of ``proposals`` in the voting extension. */
+async function voteYes(browser: Browser, seat: number, proposals: string[]) {
+	await asMember(browser, seat, '/extensions/voting', async (page, frame) => {
+		for (const proposal of proposals) {
+			const card = frame.locator(`[data-proposal-id="${proposal}"]`);
+			await expect(card).toBeVisible({ timeout: 120_000 });
+			if (seat === 0 && proposal === proposals[0]) await snap(page, 'vote-open');
+			await card.getByRole('button', { name: 'Yes', exact: true }).click();
+			await expect
+				.poll(async () => {
+					const out = await readAs(testIdentity(0), realm.realm_backend, 'proposal_get', { proposal });
+					return (out.votes ?? []).some((v: any) => v.voter === testIdentity(seat).getPrincipal().toText());
+				}, { message: `member ${seat}'s vote on ${proposal} is counted`, timeout: 60_000, intervals: [1_000] })
+				.toBe(true);
+		}
 	});
 }
 
@@ -211,6 +308,12 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 	await exposeSigner(page, founder);
 
 	if (REUSE) realm = JSON.parse(readFileSync(REUSE, 'utf8'));
+	if (!REUSE) await test.step('a visitor signs in on the portal', async () => {
+		await page.goto(`${G.portal_url}/my-dashboard`);
+		await expect(page.locator('.principal-text')).toHaveText(founder.getPrincipal().toText(), { timeout: 60_000 });
+		await snap(page, 'portal-signed-in');
+	});
+
 	if (!REUSE) await test.step('the founder launches the realm from the portal', async () => {
 		expect((await redeemVoucher(founder)).success, 'the voucher pays for one realm').toBe(true);
 		const id = await launchFromPortal(page);
@@ -287,18 +390,31 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 		voters = Array.from({ length: seat + 1 }, (_, i) => i);
 	});
 
-	let proposal = '';
-	await test.step('the members vote the quarter through', async () => {
+	let poll = '';
+	await test.step('a member files a proposal through the voting form', async () => {
+		poll = await submitProposal(browser, 1, 'Plant a tree on the main square');
+	});
+
+	await test.step('the members vote the proposals through', async () => {
 		const open = await readAs(founder, realm.realm_backend, 'proposal_list', { status: 'voting' });
-		proposal = (open.proposals ?? []).find((p: any) => String(p.title).startsWith('quarter_add'))?.id ?? '';
-		expect(proposal, 'the realm filed quarter_add').not.toBe('');
-		const filed = await readAs(founder, realm.realm_backend, 'proposal_get', { proposal });
+		const quarterAdd = (open.proposals ?? []).find((p: any) => String(p.title).startsWith('quarter_add'))?.id ?? '';
+		expect(quarterAdd, 'the realm filed quarter_add').not.toBe('');
+		const filed = await readAs(founder, realm.realm_backend, 'proposal_get', { proposal: quarterAdd });
 		expect(filed.proposal.deadline, 'the voting window the founder set (0): open until certain').toBe(0);
 		const needed = Math.floor(voters.length / 2) + 1;
-		for (const seat of voters.slice(0, needed)) await voteYes(browser, seat, proposal);
-		const settled = await readAs(founder, realm.realm_backend, 'proposal_get', { proposal });
-		expect(settled.proposal.status, 'the deciding vote ran quarter_add').toBe('executed');
-		expect(settled.proposal.result?.ok, JSON.stringify(settled.proposal.result)).toBe(true);
+		for (const seat of voters.slice(0, needed)) await voteYes(browser, seat, [quarterAdd, poll]);
+		// The status turns to executed when the action starts: its result lands when the action returns.
+		await expect
+			.poll(
+				async () => {
+					const settled = await readAs(founder, realm.realm_backend, 'proposal_get', { proposal: quarterAdd });
+					return `${settled.proposal.status}: ${JSON.stringify(settled.proposal.result)}`;
+				},
+				{ message: 'the deciding vote ran quarter_add', timeout: 120_000, intervals: [2_000] }
+			)
+			.toMatch(/^executed: .*"ok":true/);
+		const decided = await readAs(founder, realm.realm_backend, 'proposal_get', { proposal: poll });
+		expect(decided.proposal.status, 'the member\'s proposal has no action to run: it is accepted').toBe('accepted');
 	});
 
 	let quarter = '';
@@ -328,6 +444,24 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 	await test.step('the next member to join lands in the new quarter', async () => {
 		expect(await join(browser, LAST_SEAT), 'the next member joins the new quarter').toBe(quarter);
 	});
+});
+
+// gos-as-a-service#58: the job turns "completed", which the portal shows as "your realm is live", while Casals
+// is still uploading the frontend. It runs after the journey above, whose voucher left the founder with credits.
+test.fixme('#58: a realm is live only after its frontend has finished uploading', async ({ page }) => {
+	const id = await launchFromPortal(page);
+	let done: Job | undefined;
+	await expect
+		.poll(
+			async () => {
+				done = await job(id);
+				if (done.status === 'failed') throw new Error(`deployment failed: ${done.error}`);
+				return done.status;
+			},
+			{ message: `job ${id} completes`, timeout: 20 * 60 * 1000, intervals: [1_000] }
+		)
+		.toBe('completed');
+	expect(await frontendServes(done!.frontend_canister_id), 'the realm is live, so its frontend serves').toBe(true);
 });
 
 async function ledgerSymbol(): Promise<string> {
