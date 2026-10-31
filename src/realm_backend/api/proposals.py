@@ -38,6 +38,15 @@ def window():
     return cal.voting_window if cal else 7 * 86400
 
 
+def check_action(action):
+    """An action must name a known operation and no ``on_behalf_of``: it runs as the realm's governance, not as a
+    member picked by whoever filed it."""
+    if action.get("op") not in ops():
+        raise Fail(f"unknown operation '{action.get('op')}'")
+    if "on_behalf_of" in (action.get("args") or {}):
+        raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, under the realm's authority")
+
+
 def new_proposal(title, user, by, department, action=None, description=""):
     policy = department.policy or {}
     p = Proposal(id=next_id(Proposal, "P"), title=title, description=description, proposer=user,
@@ -81,9 +90,10 @@ def close(p, result):
 
 
 def run_action(p):
+    """Run the accepted action as its proposer: the vote is the authority, and the action cannot name anyone else."""
     p.status = "executed"
-    out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay",
-                              signer=p.action.get("initiator") or p.proposer, proposal=p.id)
+    out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay", signer=p.proposer,
+                              proposal=p.id)
     p.result = json.loads(out)
     if not p.result.get("ok"):
         p.status = "failed"
@@ -103,7 +113,7 @@ def settle(p, final):
 def file_replay(name, args, user, by, department):
     """Turn a governed call into a proposal that replays it once accepted."""
     p = new_proposal(f"{name} {json.dumps(args, sort_keys=True)[:120]}", user, by, department,
-                     {"op": name, "args": args, "initiator": by})
+                     {"op": name, "args": args})
     return {"proposal": p.id, "requires_vote": True}
 
 
@@ -165,8 +175,8 @@ def proposal_create(c, args):
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
-    if action is not None and action.get("op") not in ops():
-        raise Fail(f"unknown operation '{action.get('op')}'")
+    if action is not None:
+        check_action(action)
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""))
     return {"proposal": p.id}
 

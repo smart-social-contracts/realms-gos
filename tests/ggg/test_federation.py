@@ -130,6 +130,13 @@ def test_capital_opens_a_vote_proposed_by_a_quarter():
     assert "unknown operation" in call("federal_vote_propose", "alice", title="x", action={"op": "nope"})["error"]
 
 
+def test_a_federal_vote_action_cannot_act_on_behalf_of_a_member():
+    capital()
+    action = {"op": "proposal_vote", "args": {"proposal": "P-1", "choice": "no", "on_behalf_of": "bob"}}
+    assert "on_behalf_of" in denied("federal_vote_propose", "alice", title="x", action=action)
+    assert FederalVote.count() == 0
+
+
 def test_claude_proposes_for_alice():
     capital()
     Delegation(id="d1", grantor="alice", delegate="claude-conn", status="active",
