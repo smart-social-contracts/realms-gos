@@ -13,6 +13,8 @@ name: Realms GaaS E2E
 # the releases the sheet of gos-as-a-service pins. The same script runs on a laptop:
 # scripts/e2e_gaas.sh.
 on:
+  push:
+    branches: [cto/e2e-gaas-ci-trial]
   workflow_dispatch:
   schedule:
     - cron: "37 2 * * *"
