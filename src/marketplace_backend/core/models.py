@@ -267,9 +267,10 @@ class MarketplaceConfigEntity(Entity):
       * ``license_price_usd_cents`` and ``license_duration_seconds`` —
         displayed on the developer page; the billing service uses the
         same pricing when creating a checkout session.
+      * ``purchases_enabled`` — off until paid listings may be bought.
     """
     __alias__ = "id"
-    __version__ = 4
+    __version__ = 5
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
@@ -281,6 +282,8 @@ class MarketplaceConfigEntity(Entity):
             obj.setdefault("casals_frontend_canister_id", "")
         if from_version < 4:
             obj.setdefault("admins", "")
+        if from_version < 5:
+            obj.setdefault("purchases_enabled", False)
         return obj
 
     id                          = String(max_length=16)  # always "config"
@@ -296,6 +299,8 @@ class MarketplaceConfigEntity(Entity):
     # Comma-separated principals who run the marketplace day to day: every
     # listing, every user, every license. Only controllers change this list.
     admins                      = String(max_length=2048)
+    # Paid listings can be bought only while this is on; free ones always can.
+    purchases_enabled           = Boolean()
 
 
 # ---------------------------------------------------------------------------

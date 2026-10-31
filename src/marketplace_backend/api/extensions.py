@@ -10,7 +10,7 @@ frontend). Purchase increments ``installs`` (the new counter that
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
-from api.config import caller_is_admin
+from api.config import caller_is_admin, purchase_refusal
 from api.developers import developer_name, is_suspended
 from api.licenses import has_active_license
 from core.models import ExtensionListingEntity, PurchaseEntity, newest_first, purchases_of
@@ -274,6 +274,10 @@ def buy_extension(realm_principal: str, extension_id: str) -> Dict:
     ext = ExtensionListingEntity[extension_id]
     if ext is None or not (ext.is_active if ext.is_active is not None else True):
         return {"success": False, "error": "Extension not found"}
+
+    refusal = purchase_refusal(ext.price_e8s)
+    if refusal:
+        return refusal
 
     # Idempotent — repeat buys by the same principal are no-ops, return the
     # existing purchase id. Otherwise the install count would over-inflate.

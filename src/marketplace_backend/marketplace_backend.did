@@ -559,6 +559,8 @@ service : (opt MarketplaceInitArg) -> {
   "set_billing_service_principal" : (text) -> (GenericResult);
   "get_license_pricing_q" : () -> (LicensePricingRecord) query;
   "set_license_pricing" : (nat64, nat64) -> (GenericResult);
+  "get_purchases_enabled" : () -> (bool) query;
+  "set_purchases_enabled" : (bool) -> (GenericResult);
   "create_extension" : (ExtensionInput) -> (GenericResult);
   "update_extension" : (ExtensionInput) -> (GenericResult);
   "delist_extension" : (text) -> (GenericResult);

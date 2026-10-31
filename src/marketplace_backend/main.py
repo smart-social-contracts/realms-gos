@@ -290,12 +290,14 @@ from api.config import (
     get_license_pricing,
     get_reviewers,
     init_config_from_args,
+    purchases_enabled,
     remove_admin as remove_admin_impl,
     remove_reviewer as remove_reviewer_impl,
     set_billing_service_principal as set_billing_service_principal_impl,
     set_casals_frontend_canister_id as set_casals_frontend_canister_id_impl,
     set_file_registry_canister_id as set_file_registry_canister_id_impl,
     set_license_pricing as set_license_pricing_impl,
+    set_purchases_enabled as set_purchases_enabled_impl,
 )
 from api.developers import (
     set_developer_name_from_json as set_developer_name_from_json_impl,
@@ -1540,6 +1542,20 @@ def get_my_assistants() -> Vec[AssistantListing]:
 # ===========================================================================
 # Purchases
 # ===========================================================================
+
+
+@query
+def get_purchases_enabled() -> bool:
+    return purchases_enabled()
+
+
+@update
+def set_purchases_enabled(enabled: bool) -> GenericResult:
+    try:
+        r = set_purchases_enabled_impl(enabled)
+        return {"Ok": str(r["purchases_enabled"]).lower()} if r["success"] else {"Err": r["error"]}
+    except Exception as e:
+        return {"Err": str(e)}
 
 
 @update

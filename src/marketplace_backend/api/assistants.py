@@ -14,7 +14,7 @@ realm-side runtime are out of scope for this canister.
 from typing import Any, Dict, List, Optional
 
 from _cdk import ic
-from api.config import caller_is_admin
+from api.config import caller_is_admin, purchase_refusal
 from api.developers import developer_name, is_suspended
 from core.models import AssistantListingEntity, PurchaseEntity, newest_first, purchases_of
 from ic_python_logging import get_logger
@@ -307,6 +307,10 @@ def buy_assistant(realm_principal: str, assistant_id: str) -> Dict:
     a = AssistantListingEntity[alias]
     if a is None or not (a.is_active if a.is_active is not None else True):
         return {"success": False, "error": "Assistant not found"}
+
+    refusal = purchase_refusal(a.price_e8s)
+    if refusal:
+        return refusal
 
     for p in purchases_of(realm_principal):
         if (
