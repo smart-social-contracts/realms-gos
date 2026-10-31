@@ -16,7 +16,8 @@
   import { resolve } from '$app/paths';
   import { realmInfo, realmName as realmNameStore, realmWelcomeMessage, realmManifesto, realmOpenRegistration, realmPrimaryLanguage, testMode, testModeIIBypass, testModeUserSelfRegistration, testModeSkipTerms, testModeDemoNotice, demoNoticeBody } from '$lib/stores/realmInfo';
   import DemoNotice from '$lib/components/DemoNotice.svelte';
-  import { shouldShowJoinNotice } from '$lib/config/hostTestFlags';
+  import JoinTerms from '$lib/components/JoinTerms.svelte';
+  import { shouldShowJoinNotice, shouldShowJoinTerms } from '$lib/config/hostTestFlags';
   import { cn } from '$lib/theme/utilities';
   import { formatQuarterLabel } from '$lib/utils/quarterLabels';
   import { probeFederatedMembership, activateMembership } from '$lib/utils/federatedMembership';
@@ -148,13 +149,18 @@
   }
 
   $: showJoinNotice = shouldShowJoinNotice($testModeDemoNotice, $testModeSkipTerms);
+  $: showJoinTerms = shouldShowJoinTerms($testModeDemoNotice, $testModeSkipTerms);
+  $: showAgreementStep = showJoinNotice || showJoinTerms;
 
   // ── Linear step model for the progress indicator (issue #156) ──────────────
-  // Order: Sign In → Notice → Profile → Welcome. System assigns the quarter;
-  // there is no free pick_quarter step on the open-registration path.
+  // Order: Sign In → Terms (Notice on a demo realm) → Profile → Welcome.
+  // System assigns the quarter; there is no free pick_quarter step on the
+  // open-registration path.
   $: steps = [
     { id: 'auth', labelKey: 'join.step_sign_in' },
-    ...(showJoinNotice ? [{ id: 'terms', labelKey: 'join.step_notice' }] : []),
+    ...(showAgreementStep
+      ? [{ id: 'terms', labelKey: showJoinNotice ? 'join.step_notice' : 'join.step_terms' }]
+      : []),
     { id: 'profile', labelKey: 'join.step_invitation' },
     { id: 'success', labelKey: 'join.step_welcome' },
   ];
@@ -194,14 +200,9 @@
   function stepAfterProbe() {
     // Founders registered at deploy time must not be sent back through invite.
     if (userHasJoined) return 'already_joined';
-    // Demo notice replaces T&C. II bypass does not skip it.
-    if (shouldShowJoinNotice($testModeDemoNotice, $testModeSkipTerms)) {
-      return 'terms';
-    }
-    if ($testModeIIBypass || $testModeSkipTerms) {
-      return 'profile';
-    }
-    return 'profile';
+    // The demo notice replaces the T&C on demo realms. II bypass skips neither;
+    // only the skip_terms flag does.
+    return showAgreementStep ? 'terms' : 'profile';
   }
 
   function membershipQuarterLabel(hit) {
@@ -628,7 +629,7 @@
 
   function handleTermsAccept() {
     if (!agreement) {
-      error = t('join.confirm_notice');
+      error = t(showJoinNotice ? 'join.confirm_notice' : 'join.confirm_terms');
       return;
     }
     error = '';
@@ -1078,11 +1079,15 @@
             </div>
           {/if}
           
-          <DemoNotice
-            bodies={$demoNoticeBody}
-            primaryLanguage={$realmPrimaryLanguage}
-            bind:accepted={agreement}
-          />
+          {#if showJoinNotice}
+            <DemoNotice
+              bodies={$demoNoticeBody}
+              primaryLanguage={$realmPrimaryLanguage}
+              bind:accepted={agreement}
+            />
+          {:else}
+            <JoinTerms bind:accepted={agreement} />
+          {/if}
           
           <div class="flex gap-3">
             {#if prevStepId}

@@ -10,7 +10,8 @@ import {
 	resolveDemoNoticeEnabled,
 	resolveDemoNoticeView,
 	resolveDisableMonetaryTokens,
-	shouldShowJoinNotice
+	shouldShowJoinNotice,
+	shouldShowJoinTerms
 } from './hostTestFlags';
 
 describe('hostTestFlags', () => {
@@ -34,6 +35,13 @@ describe('hostTestFlags', () => {
 		expect(shouldShowJoinNotice(true, false)).toBe(true);
 		expect(shouldShowJoinNotice(true, true)).toBe(false);
 		expect(shouldShowJoinNotice(false, false)).toBe(false);
+	});
+
+	it('shows the join terms only when there is no notice and terms are not skipped', () => {
+		expect(shouldShowJoinTerms(false, false)).toBe(true);
+		expect(shouldShowJoinTerms(false, true)).toBe(false);
+		expect(shouldShowJoinTerms(true, false)).toBe(false);
+		expect(shouldShowJoinTerms(true, true)).toBe(false);
 	});
 
 	it('grays out monetary catalog tokens only when they are disabled', () => {
