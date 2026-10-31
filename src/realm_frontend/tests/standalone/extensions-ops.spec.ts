@@ -63,6 +63,18 @@ async function closeDialog(frame: FrameLocator) {
 	await frame.getByRole('button', { name: 'Close', exact: true }).last().click();
 }
 
+async function installedExtensions(): Promise<Record<string, string>> {
+	const listed = await readOp(
+		realm,
+		'extension_list',
+		{ from: 1, count: 500 },
+		founderIdentity(realm)
+	);
+	return Object.fromEntries(
+		(listed.extensions as { id: string; version: string }[]).map((e) => [e.id, e.version])
+	);
+}
+
 const principalOf = (seed: number) =>
 	Ed25519KeyIdentity.generate(new Uint8Array(32).fill(seed)).getPrincipal().toText();
 
@@ -427,12 +439,35 @@ const ROWS: Row[] = [
 			await app.getByRole('button', { name: 'Encrypt & share' }).click();
 			await expect(app.getByText(title).first()).toBeVisible();
 		}
+	},
+	{
+		id: 'package_manager',
+		path: '/extensions/package_manager',
+		action: 'install an extension from the registry, then uninstall it',
+		expected: 'the realm lists the extension after the install and no longer after the uninstall',
+		run: async ({ page, app }) => {
+			const id = 'hello_sandboxed';
+			const installed = async () => Object.keys(await installedExtensions());
+			await app.getByRole('tab', { name: /Available/ }).click();
+			await app.getByPlaceholder(/Search by name or ID/).fill(id);
+			await app
+				.locator('article', { hasText: id })
+				.getByRole('button', { name: 'Install' })
+				.click();
+			await expect.poll(installed, { timeout: 60_000 }).toContain(id);
+
+			await app.getByRole('tab', { name: /Installed/ }).click();
+			// The page asks to type the package id in a browser prompt.
+			page.once('dialog', (dialog) => dialog.accept(id));
+			await app
+				.locator('article', { hasText: id })
+				.getByRole('button', { name: 'More actions' })
+				.click();
+			await app.getByRole('button', { name: /Uninstall/ }).click();
+			await expect.poll(installed, { timeout: 60_000 }).not.toContain(id);
+		}
 	}
 ];
-
-// Package Manager lists what is installed through ctx.backend.list_runtime_extensions, which this realm
-// does not offer ("t.ctx.backend.list_runtime_extensions is not a function" on its page).
-test.fixme('package_manager: list the installed and available packages', async () => {});
 
 // Choosing a zone is a click on a map of OpenFreeMap tiles, which a headless run cannot place.
 test.fixme('zone_selector: choose my zone on the map', async () => {});

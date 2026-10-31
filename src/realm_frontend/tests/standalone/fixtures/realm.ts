@@ -116,7 +116,8 @@ export async function openInPortal(
 
 /**
  * Chromium reports a change of the host's network (a Docker veth coming or going) as a failed request, and the
- * realm then shows "Something went wrong": load the page once more. Returns whether it did.
+ * realm then shows "Something went wrong" with a "Refresh page" button: load the page once more. Returns whether it
+ * did. Only that page is retried: any other error stays visible to the test that meets it.
  */
 export async function reloadIfInterrupted(page: Page, frame: FrameLocator): Promise<boolean> {
 	const refresh = frame.getByRole('button', { name: 'Refresh page' });

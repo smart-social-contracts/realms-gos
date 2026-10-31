@@ -44,6 +44,16 @@ from realms.cli.realm_api import call_op  # noqa: E402
 ORCHESTRA = "realms-product"
 # The realm's own list, so every extension the wizard's launch installs is installed here with its frontend.
 CORE_EXTENSIONS = tuple(json.loads((ROOT / "core-extensions.json").read_text())["core_extensions"])
+# The ledger the realm's treasury pays through: the standard DFINITY ICRC-1 ledger (scripts/download_wasms.sh fetches
+# it). The founder is its minting account, so what the founder sends from it is minted. To test another ledger,
+# change these two settings (a path under the repository root, and its candid init argument).
+LEDGER_WASM = ".wasm/ledger.wasm"
+LEDGER_INIT = """(variant {{ Init = record {{
+  minting_account = record {{ owner = principal "{founder}" }};
+  transfer_fee = 10_000 : nat; token_symbol = "E2E"; token_name = "E2E token"; decimals = opt (8 : nat8);
+  metadata = vec {{}}; initial_balances = vec {{}};
+  archive_options = record {{ num_blocks_to_archive = 1000 : nat64; trigger_threshold = 2000 : nat64;
+    controller_id = principal "{founder}" }} }} }})"""
 ED25519_DER_PREFIX = bytes.fromhex("302a300506032b6570032100")
 ICP_YAML = """\
 # Written by scripts/e2e_standalone_realm.py: a standalone realm on the product's local replica.
@@ -69,12 +79,7 @@ canisters:
       type: "@dfinity/prebuilt@v2.0.0"
       configuration:
         path: artifacts/ledger.wasm
-    init_args: '(variant {{ Init = record {{
-      minting_account = record {{ owner = principal "{founder}" }};
-      transfer_fee = 10_000 : nat; token_symbol = "E2E"; token_name = "E2E token"; decimals = opt (8 : nat8);
-      metadata = vec {{}}; initial_balances = vec {{}};
-      archive_options = record {{ num_blocks_to_archive = 1000 : nat64; trigger_threshold = 2000 : nat64;
-        controller_id = principal "{founder}" }} }} }})'
+    init_args: '{ledger_init}'
   - name: realm_frontend
     recipe:
       type: "@dfinity/asset-canister@v2.2.0"
@@ -162,7 +167,7 @@ def main() -> None:
         sys.exit(f"the product export has no fleet-file-registry / marketplace-backend: {sorted(export)}")
 
     wasm = ROOT / ".basilisk" / "realm_backend" / "realm_backend.wasm"
-    ledger_wasm = ROOT / ".wasm" / "ledger.wasm"
+    ledger_wasm = ROOT / LEDGER_WASM
     dist = ROOT / "src" / "realm_frontend" / "dist"
     if not ledger_wasm.exists():  # the standard ICRC-1 ledger, which the realm's treasury pays through
         subprocess.run(["bash", "scripts/download_wasms.sh"], cwd=ROOT, check=True, capture_output=True)
@@ -178,7 +183,8 @@ def main() -> None:
     shutil.copytree(dist, project / "frontend")
     # The founder is also the ledger's minting account: what the founder sends from it is minted.
     seed, founder = founder_key()
-    (project / "icp.yaml").write_text(ICP_YAML.format(url=url, founder=founder))
+    ledger_init = LEDGER_INIT.format(founder=founder).replace("\n", " ")
+    (project / "icp.yaml").write_text(ICP_YAML.format(url=url, ledger_init=ledger_init))
 
     ids = {}
     for name in ("realm_backend", "test_ledger", "realm_frontend"):
