@@ -43,9 +43,26 @@ def balance_of(token, sub):
 
 
 def outcome(reply):
-    # 17_724 is how an unnamed candid decoder labels the Ok case.
-    found = candid.number(reply, "Ok =") if "Ok =" in reply else candid.number(reply, "17_724 =")
-    return None if found is None else str(found)
+    """How a ledger answered a payout: ``(status, ledger_tx)``. ``completed``: the ICRC-1 ``Ok``, or an
+    ic-python-token record with ``success = true`` and a ``block_index``. ``failed``: ``Err``, or ``success = false``
+    with an ``error``; only then did the ledger certainly not move the tokens. Anything else is ``unconfirmed``:
+    the tokens may have left, so the books must not be reversed until someone checks the ledger."""
+    try:
+        (answer,) = candid.Reader(reply).args()
+    except (ValueError, IndexError):
+        return "unconfirmed", None
+    if not isinstance(answer, dict):
+        return "unconfirmed", None
+    # An unnamed decoder prints a field's hash for its name, so look fields up by hash.
+    fields = {candid.idl_hash(k) if isinstance(k, str) else k: v for k, v in answer.items()}
+    ok, success, block, error = (fields.get(candid.idl_hash(n)) for n in ("Ok", "success", "block_index", "error"))
+    if isinstance(ok, int):
+        return "completed", str(ok)
+    if success is True and isinstance(block, int):
+        return "completed", str(block)
+    if candid.idl_hash("Err") in fields or (success is False and error):
+        return "failed", None
+    return "unconfirmed", None
 
 
 # --- books ----------------------------------------------------------------------------------------
@@ -161,17 +178,16 @@ def send(t):
     arg = (f"(record {{ to = {account(address(t.to, t.symbol))}; amount = {t.amount} : nat; fee = null; "
            f"memo = opt {blob(t.id.encode())}; from_subaccount = null; created_at_time = null }})")
     try:
-        reply, rejected = (yield from chain.call(token.ledger, "icrc1_transfer", arg)), False
+        reply = yield from chain.call(token.ledger, "icrc1_transfer", arg)
     except Exception as e:
-        reply, rejected = str(e), True
-    tx = None if rejected else outcome(reply)
+        reply, status, tx = str(e), "pending", None
+    else:
+        status, tx = outcome(reply)
     if t.status == "sending":
-        if rejected:
-            t.status = "pending"
-        elif tx is None:
+        if status == "failed":
             reverse(t, period(), reply[:200])
         else:
-            t.status, t.ledger_tx = "completed", tx
+            t.status, t.ledger_tx, t.reply = status, tx or "", reply[:200]
     return {"transfer": t.id, "status": t.status, **({"ledger_tx": tx} if tx else {"error": reply[:200]})}
 
 
@@ -214,7 +230,8 @@ def transfer_create(c, args):
 @op("transfer.delete", governed=lambda a: owner_of(transfer_fund(find(Transfer, a["transfer"]))))
 def transfer_revert(c, args):
     """Revert a pending ``transfer`` (the ledger rejected its call), refunding its fund; optional ``reason``.
-    A transfer still ``sending`` (its ledger call in flight) cannot be reverted."""
+    A transfer still ``sending`` (its ledger call in flight) or ``unconfirmed`` (the ledger's answer was unclear, the
+    tokens may have left) cannot be reverted."""
     t = find(Transfer, args["transfer"])
     if t.status != "pending":
         raise Conflict(f"{t.id} is {t.status}; only a pending transfer can be reverted")
@@ -638,9 +655,9 @@ def token_force_transfer(c, args):
     arg = (f'(record {{ from = {account(args["from"])}; to = {account(args["to"])}; amount = {amount} : nat; '
            f'memo = opt {text(args.get("reason", "")[:64])} }})')
     reply = yield from chain.call(token.ledger, "force_transfer", arg)
-    tx = outcome(reply)
-    if tx is None:
-        t.status = "failed"
+    status, tx = outcome(reply)
+    if status != "completed":
+        t.status, t.reply = status, reply[:200]
         return {"transfer": t.id, "status": t.status, "error": reply[:200]}
     post(p, [("asset", "custody", amount, 0, None), ("asset", "custody", 0, amount, None)], token.id,
          f"court-ordered {t.id}: {args['from']} to {args['to']}", transfer=t)
@@ -656,6 +673,6 @@ def token_freeze(c, args):
     reply = yield from chain.call(token.ledger, method,
                                   f'(record {{ account = {account(args["account"])}; '
                                   f'reason = opt {text(args.get("reason", "")[:64])} }})')
-    if outcome(reply) is None:
-        raise Fail(f"{method} refused: {reply[:200]}")
+    if outcome(reply)[0] != "completed":
+        raise Fail(f"{method} not confirmed: {reply[:200]}")
     return {"account": args["account"], "frozen": method == "freeze_account"}

@@ -287,6 +287,48 @@ def test_transfer_in_flight_cannot_be_reverted(monkeypatch, reply, status, roads
     assert len({e.transaction for e in t.ledger_entries}) == (1 if status == "completed" else 2)
 
 
+TOKEN_PAID = "(record { 1_932_118_984 = null; 624_086_880 = opt (7 : nat); 3_092_129_219 = true })"
+TOKEN_REFUSED = '(record { error = opt "insufficient balance"; block_index = null; success = false })'
+
+
+@pytest.mark.parametrize("reply, expected", [
+    ("(variant { Ok = 9_001 : nat })", ("completed", "9001")),
+    ("(variant { 17_724 = 9 : nat })", ("completed", "9")),
+    ("(variant { Err = variant { InsufficientFunds = record { balance = 1 : nat } } })", ("failed", None)),
+    ("(variant { 3_456_837 = variant { TooOld } })", ("failed", None)),
+    (TOKEN_PAID, ("completed", "7")),
+    ("(record { error = null; block_index = opt (7 : nat); success = true })", ("completed", "7")),
+    (TOKEN_REFUSED, ("failed", None)),
+    ("(record { error = null; block_index = null; success = true })", ("unconfirmed", None)),
+    ("(record { error = null; block_index = null; success = false })", ("unconfirmed", None)),
+    ("(variant { Ok = null })", ("unconfirmed", None)),
+    ("(true)", ("unconfirmed", None)),
+    ("()", ("unconfirmed", None)),
+    ("", ("unconfirmed", None)),
+    ("not candid at all", ("unconfirmed", None)),
+    ('(record { error = opt "x"', ("unconfirmed", None)),
+])
+def test_outcome_trusts_only_a_definite_answer(reply, expected):
+    assert treasury.outcome(reply) == expected
+
+
+@pytest.mark.parametrize("reply, status, roads", [(TOKEN_PAID, "completed", 40), (TOKEN_REFUSED, "failed", 100),
+                                                  ("(record { success = true })", "unconfirmed", 40),
+                                                  ("garbage", "unconfirmed", 40)])
+def test_transfer_booked_by_the_ledgers_answer(reply, status, roads):
+    setup_finance()
+    allocate(ROADS=100)
+    receive(100)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = reply
+    out = ok("transfer_create", "ctl", fund="ROADS", to="buildco", amount=50)
+    t = Transfer["TR-1"]
+    assert (out["status"], t.status, funds()["ROADS"]) == (status, status, roads) and balanced()
+    assert t.reply == ("" if status == "failed" else reply[:200])
+    if status == "unconfirmed":
+        assert "only a pending" in call("transfer_revert", "bob", transfer=t.id)["error"]
+        assert len({e.transaction for e in t.ledger_entries}) == 1
+
+
 def test_ledger_reply_does_not_complete_a_reverted_transfer(monkeypatch):
     setup_finance()
     allocate(ROADS=100)

@@ -102,6 +102,11 @@ class Reader:
     def value(self):
         if self.peek() == '"':
             return self.string().decode()
+        if self.peek() == "(":  # a parenthesised value, as in ``opt (42 : nat)``
+            self.i += 1
+            inner = self.value()
+            self.take(")")
+            return inner
         word = self.word()
         if word in ("record", "variant"):
             return self.fields(word == "variant")
