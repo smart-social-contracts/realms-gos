@@ -7,6 +7,8 @@ export interface ProposalForm {
 	type: 'poll' | 'transaction' | 'upgrade';
 	title: string;
 	description: string;
+	/** The "Transaction" type pays `amount` (ledger base units) of `token` from `fund` to the principal `to`. */
+	transaction?: { fund: string; token: string; amount: string; to: string };
 	/** The "Upgrade" type installs a package: an extension, or a codex. */
 	upgrade?: { target: 'extension' | 'codex'; packageId: string; version: string };
 }
@@ -17,6 +19,12 @@ export async function submitProposal(voting: ExtensionPage, form: ProposalForm):
 	await voting.locator('#rt-type').selectOption(form.type);
 	await voting.locator('#rt-title').fill(form.title);
 	await voting.locator('#rt-desc').fill(form.description);
+	if (form.transaction) {
+		await voting.locator('#rt-fund').selectOption(form.transaction.fund);
+		await voting.locator('#rt-token').selectOption(form.transaction.token);
+		await voting.locator('#rt-amount').fill(form.transaction.amount);
+		await voting.locator('#rt-recipient').fill(form.transaction.to);
+	}
 	if (form.upgrade) {
 		await voting.locator('#rt-upgrade-target').selectOption(form.upgrade.target);
 		await voting.locator('#rt-package').fill(form.upgrade.packageId);

@@ -3,8 +3,8 @@
 // window to zero, so a proposal closes as soon as its outcome is certain):
 //   scripts/e2e_ui.sh
 //
-// Kinds: poll, extension install, extension upgrade, codex install, Realms GOS release, realm-wide
-// (federal) vote. The treasury transaction has no local run, see its fixme.
+// Kinds: poll, extension install, extension upgrade, codex install, role assignment, Realms GOS release, realm-wide
+// (federal) vote, treasury transaction.
 import { expect, test, type Page } from '@playwright/test';
 import { extensionVersion, openExtension } from './fixtures/extension';
 import {
@@ -15,6 +15,7 @@ import {
 	runOp,
 	type StandaloneRealm
 } from './fixtures/realm';
+import { balanceOf, mint } from './fixtures/ledger';
 import { publishNextVersion } from './fixtures/registry';
 import { snap } from './fixtures/snap';
 import { submitProposal, voteYes, type ProposalForm } from './fixtures/voting';
@@ -122,7 +123,11 @@ test('an extension install is voted and executed', async ({ page }) => {
 });
 
 test('an extension upgrade is voted and executed', async ({ page }) => {
-	const newer = publishNextVersion(realm, 'extensions/extensions/hello_world');
+	const newer = publishNextVersion(
+		realm,
+		'extensions/extensions/hello_world',
+		(await installedExtensions()).hello_world
+	);
 	await fileVoteExecute(page, {
 		type: 'upgrade',
 		title: `Upgrade hello_world to ${newer} ${RUN}`,
@@ -133,7 +138,9 @@ test('an extension upgrade is voted and executed', async ({ page }) => {
 });
 
 test('a codex install is voted and executed', async ({ page }) => {
-	const newer = publishNextVersion(realm, 'codices/codices/syntropia');
+	const active = await readOp(realm, 'codex_status', { count: 1 }, founderIdentity(realm));
+	const [, running] = (active.codex as { id: string }).id.split('@');
+	const newer = publishNextVersion(realm, 'codices/codices/syntropia', running);
 	await fileVoteExecute(page, {
 		type: 'upgrade',
 		title: `Install syntropia ${newer} ${RUN}`,
@@ -231,6 +238,32 @@ test('a realm-wide vote is voted and executed', async ({ page }) => {
 	expect(await proposalStatus(ballot)).toBe('accepted');
 });
 
-// The voting form lists funds through treasury_view, which the founder may not call on this realm, and
-// nothing credits the local ledger account of a fund, so a transfer cannot run here.
-test.fixme('a treasury transaction is voted and executed', async () => {});
+// The treasury pays through the realm's ledger. The fund is filled the way it is in life: an invoice is billed and
+// paid into the account the realm names, and the realm books it. (The ledger is the founder's to mint from.)
+test('a treasury transaction is voted and executed', async ({ page }) => {
+	const founder = founderIdentity(realm);
+	const symbol = 'E2E';
+	const run = async (op: string, args: Record<string, unknown>) => {
+		const reply = await runOp(realm, op, args, founder);
+		expect(reply.ok, `${op}: ${reply.error}`).toBe(true);
+		return reply;
+	};
+	await run('token_register', { symbol, ledger: realm.token_ledger, decimals: 8, fee: 10_000 });
+	await run('fund_create', { fund: 'TREASURY' });
+	await run('treasury_configure', { config: { source_fund: 'TREASURY' } });
+	const billed = await run('invoice_create', { payer: realm.founder, amount: 2_000_000, symbol });
+	const payTo = billed.pay_to as { owner: string; subaccount: string };
+	await mint(realm, founder, payTo, 2_000_000n);
+	// What the fund pays out leaves the realm's own account.
+	await mint(realm, founder, { owner: payTo.owner }, 2_000_000n);
+	await run('invoice_refresh', { invoice: billed.invoice });
+
+	const member = memberIdentity().getPrincipal().toText();
+	await fileVoteExecute(page, {
+		type: 'transaction',
+		title: `Pay the member ${RUN}`,
+		description: 'A first payment from the treasury.',
+		transaction: { fund: 'TREASURY', token: symbol, amount: '1000000', to: member }
+	});
+	expect(await balanceOf(realm, { owner: member })).toBe(1_000_000n);
+});

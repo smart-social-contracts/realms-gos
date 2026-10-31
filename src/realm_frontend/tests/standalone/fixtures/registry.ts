@@ -8,12 +8,12 @@ import type { StandaloneRealm } from './realm';
 /** The repo's own checkouts of the extensions and the codices, which the local registry was filled from. */
 const PACKAGES_DIR = join(process.cwd(), '..', '..');
 
-/** Publishes the repo package at `dir` (e.g. `extensions/extensions/hello_world`) once more, one patch version
- * up, to the realm's file registry; returns that version. */
-export function publishNextVersion(realm: StandaloneRealm, dir: string): string {
+/** Publishes the repo package at `dir` (e.g. `extensions/extensions/hello_world`) to the realm's file registry one
+ * patch version above `installed`, the version the realm runs; returns that version. */
+export function publishNextVersion(realm: StandaloneRealm, dir: string, installed: string): string {
 	const manifestFile = (root: string) => join(root, 'manifest.json');
 	const manifest = JSON.parse(readFileSync(manifestFile(join(PACKAGES_DIR, dir)), 'utf8'));
-	const [major, minor, patch] = manifest.version.split('.');
+	const [major, minor, patch] = installed.split('.');
 	const version = `${major}.${minor}.${Number(patch) + 1}`;
 	// The manifest inside the package carries the version the realm installs, so the copy's must change too.
 	const copy = join(mkdtempSync(join(tmpdir(), 'e2e-registry-')), 'package');

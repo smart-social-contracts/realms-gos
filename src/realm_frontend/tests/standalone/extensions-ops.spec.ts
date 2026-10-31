@@ -17,6 +17,7 @@ import {
 	runOp,
 	type StandaloneRealm
 } from './fixtures/realm';
+import { balanceOf } from './fixtures/ledger';
 import { snap } from './fixtures/snap';
 
 let realm: StandaloneRealm;
@@ -140,11 +141,20 @@ const ROWS: Row[] = [
 	{
 		id: 'vault',
 		path: '/extensions/vault',
-		action: 'open the treasury',
-		expected: 'the empty treasury: no token is configured, so no balance',
-		run: async ({ app }) => {
-			await expect(app.getByText('No token configured')).toBeVisible();
-			await expect(app.getByText('No activity yet')).toBeVisible();
+		action: 'send a payment from the treasury fund to the second member',
+		expected: 'the member holds the tokens; the treasury lists the transfer',
+		run: async ({ app, frame }) => {
+			const member = memberIdentity().getPrincipal().toText();
+			const before = await balanceOf(realm, { owner: member });
+			await app.getByRole('button', { name: 'Send', exact: true }).first().click();
+			await app.locator('#v-fund').selectOption('TREASURY');
+			await app.locator('#v-to').fill(member);
+			await app.locator('#v-amount').fill('0.001');
+			await app.getByRole('button', { name: 'Send', exact: true }).last().click();
+			await frame.getByRole('button', { name: 'Send', exact: true }).last().click();
+			await expect
+				.poll(() => balanceOf(realm, { owner: member }), { timeout: 60_000 })
+				.toBe(before + 100_000n);
 		}
 	},
 	{

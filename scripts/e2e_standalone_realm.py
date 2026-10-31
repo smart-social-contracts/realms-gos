@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Deploy one standalone realm (a realm_backend and a realm_frontend) on the replica of a local
+"""Deploy one standalone realm (a realm_backend, a realm_frontend and a test token ledger) on the replica of a local
 `scripts/up.sh -e local` product install, the way an installer does, without Casals.
 
-The script plays the installer: it creates the two canisters, writes the frontend's
+The script plays the installer: it creates the canisters, writes the frontend's
 ``canister_ids.js``, lets the backend publish into the frontend, then runs the installer's setup
 steps: ``install`` (network ``local``, the founder), ``realm`` (the name), ``infrastructure`` (the
 product's file registry and marketplace) and ``trust_policy``. The founder is a fresh Ed25519 key:
@@ -64,6 +64,17 @@ canisters:
       configuration:
         path: artifacts/realm_backend.wasm
     init_args: '("")'
+  - name: test_ledger
+    recipe:
+      type: "@dfinity/prebuilt@v2.0.0"
+      configuration:
+        path: artifacts/ledger.wasm
+    init_args: '(variant {{ Init = record {{
+      minting_account = record {{ owner = principal "{founder}" }};
+      transfer_fee = 10_000 : nat; token_symbol = "E2E"; token_name = "E2E token"; decimals = opt (8 : nat8);
+      metadata = vec {{}}; initial_balances = vec {{}};
+      archive_options = record {{ num_blocks_to_archive = 1000 : nat64; trigger_threshold = 2000 : nat64;
+        controller_id = principal "{founder}" }} }} }})'
   - name: realm_frontend
     recipe:
       type: "@dfinity/asset-canister@v2.2.0"
@@ -146,14 +157,16 @@ def main() -> None:
         for c in stand.get("canisters", []) if c.get("canister_id")}
     url = bindings.get("network_url") or "http://127.0.0.1:8000"
     port = url.rsplit(":", 1)[-1]
-    registry, marketplace, ledger = (export.get(n, "") for n in
-                                     ("fleet-file-registry", "marketplace-backend", "token-backend"))
+    registry, marketplace = (export.get(n, "") for n in ("fleet-file-registry", "marketplace-backend"))
     if not registry or not marketplace:
         sys.exit(f"the product export has no fleet-file-registry / marketplace-backend: {sorted(export)}")
 
     wasm = ROOT / ".basilisk" / "realm_backend" / "realm_backend.wasm"
+    ledger_wasm = ROOT / ".wasm" / "ledger.wasm"
     dist = ROOT / "src" / "realm_frontend" / "dist"
-    for path in (wasm, dist / "index.html"):
+    if not ledger_wasm.exists():  # the standard ICRC-1 ledger, which the realm's treasury pays through
+        subprocess.run(["bash", "scripts/download_wasms.sh"], cwd=ROOT, check=True, capture_output=True)
+    for path in (wasm, ledger_wasm, dist / "index.html"):
         if not path.exists():
             sys.exit(f"{path} is missing: run scripts/up.sh -e local (or its build) first")
 
@@ -161,11 +174,14 @@ def main() -> None:
     shutil.rmtree(project, ignore_errors=True)
     (project / "artifacts").mkdir(parents=True)
     shutil.copy2(wasm, project / "artifacts" / "realm_backend.wasm")
+    shutil.copy2(ledger_wasm, project / "artifacts" / "ledger.wasm")
     shutil.copytree(dist, project / "frontend")
-    (project / "icp.yaml").write_text(ICP_YAML.format(url=url))
+    # The founder is also the ledger's minting account: what the founder sends from it is minted.
+    seed, founder = founder_key()
+    (project / "icp.yaml").write_text(ICP_YAML.format(url=url, founder=founder))
 
     ids = {}
-    for name in ("realm_backend", "realm_frontend"):
+    for name in ("realm_backend", "test_ledger", "realm_frontend"):
         out = icp(project, "canister", "create", name, "-e", "local", "--identity", opts.identity, "-q")
         ids[name] = out.strip().splitlines()[-1].strip()
     print(f"created {ids}")
@@ -181,15 +197,13 @@ def main() -> None:
     (project / "frontend" / "canister_ids.js").write_text(
         f"globalThis.__CANISTER_IDS = {json.dumps(canister_ids)};\n")
 
-    print("icp deploy realm_backend realm_frontend")
+    print("icp deploy realm_backend test_ledger realm_frontend")
     icp(project, "deploy", "-e", "local", "--identity", opts.identity, "--yes")
 
     # The backend writes installed extension frontends into the asset canister.
     icp(project, "canister", "call", ids["realm_frontend"], "grant_permission",
         f'(record {{ to_principal = principal "{ids["realm_backend"]}"; permission = variant {{ Commit }} }})',
         "-e", "local", "--identity", opts.identity)
-
-    seed, founder = founder_key()
 
     def step(**values):
         reply = call_op(ids["realm_backend"], "setup_step", values, network=url, identity=opts.identity,
@@ -229,7 +243,7 @@ def main() -> None:
         "realm_frontend": ids["realm_frontend"],
         "file_registry": registry,
         "marketplace": marketplace,
-        "token_ledger": ledger,
+        "token_ledger": ids["test_ledger"],
         "founder": founder,
         "founder_seed": seed,
         "name": opts.name,

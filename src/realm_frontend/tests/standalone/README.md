@@ -5,8 +5,10 @@ The journey of a realm on realmsgos.org, in a browser, on your own machine and o
 | Spec | What it does |
 |---|---|
 | `wizard.spec.ts` | The founder walks the setup wizard (the spinner shows while it loads and while it launches), the realm launches with every core extension and the codex's dependencies, a second member joins through the Terms step, every installed extension and sidebar page opens without errors. |
-| `proposals.spec.ts` | A proposal of each kind is filed, voted yes by both members and executed: poll, extension install, extension upgrade, codex install, role assignment, Realms GOS release, realm-wide (federal) vote. The treasury transaction is a `fixme` (see the spec). |
+| `proposals.spec.ts` | A proposal of each kind is filed, voted yes by both members and executed: poll, extension install, extension upgrade, codex install, role assignment, Realms GOS release, realm-wide (federal) vote, treasury transaction (the realm gets a standard ICRC-1 ledger the founder mints from, and the treasury is funded through a paid invoice). |
 | `extensions-ops.spec.ts` | One test per extension, from a table of page, action and expected result: its main operation. `fixme` rows say why they cannot run. |
+
+`scripts/e2e_standalone_realm.py` also deploys that test ledger; `scripts/download_wasms.sh` fetches its wasm the first time.
 
 The wizard has no extension step: its launch installs the realm's core extensions (`core-extensions.json`) and the
 codex's dependencies. `scripts/e2e_standalone_realm.py` installs the same list first, frontends included.
