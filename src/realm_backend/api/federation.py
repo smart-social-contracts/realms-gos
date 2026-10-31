@@ -5,7 +5,7 @@ from api import proposals
 from api import quarters
 from core.db import Conflict, Fail, Forbidden, each, find, next_id
 from ggg import FederalVote, FederalVoteLeg, FederationMessage, Proposal, Quarter
-from core.op import GENERATOR, dispatch, op, ops
+from core.op import GENERATOR, dispatch, op
 
 PASSED = ("accepted", "executed")
 
@@ -27,8 +27,7 @@ def ballot(vote, action, deadline, proposer, by):
 
 
 def open_vote(action, proposer, by, origin):
-    if action.get("op") not in ops():
-        raise Fail(f"unknown operation '{action.get('op')}'")
+    proposals.check_action(action)
     rule = quarters.published_rule()
     deadline = chain.now() + rule["window"]
     vid, h = next_id(FederalVote, "FV"), freeze(action, rule, deadline)

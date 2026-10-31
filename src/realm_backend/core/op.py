@@ -68,7 +68,9 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
     try:
         args = json.loads(arg or "{}") if isinstance(arg, str) else dict(arg)
         by = signer or chain.caller()
-        user = args.pop("on_behalf_of", None) or by
+        claimed = args.pop("on_behalf_of", None)
+        # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
+        user = by if origin == "replay" else claimed or by
         auth.authorize(user, by, name, spec, args, origin, declared)
         governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
         if governing is not None and not direct(governing):

@@ -83,6 +83,32 @@ def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
     assert Proposal[p].status == "executed"
 
 
+def test_an_action_cannot_act_on_behalf_of_a_member():
+    world.build()
+    target = ok("proposal_create", "alice", title="Bike lane on Main St")["proposal"]
+    vote = {"op": "proposal_vote", "args": {"proposal": target, "choice": "no"}}
+    out = call("proposal_create", "mallory", title="Vote as alice", action={**vote, "args": {**vote["args"], "on_behalf_of": "alice"}})
+    assert not out["ok"] and "on_behalf_of" in out["error"]
+    assert Proposal.count() == 1
+
+
+def test_a_stored_action_naming_another_member_runs_as_its_proposer_not_that_member():
+    world.build()
+    vote = {"op": "proposal_vote", "args": {"proposal": "P-2", "choice": "no"}}
+    p = ok("proposal_create", "mallory", title="Vote no", action=vote)["proposal"]
+    # A proposal filed before the rule, with the impersonation already in its stored action, both ways.
+    Proposal[p].action = {**vote, "args": {**vote["args"], "on_behalf_of": "alice"}, "initiator": "alice"}
+    vote_all(p, "yes", *world.PEOPLE)
+    later(8 * 86400)
+    ok("proposal_finalize", "ctl", proposal=p)
+    target = ok("proposal_create", "alice", title="Bike lane on Main St")["proposal"]
+    assert target == "P-2"
+    out = ok("proposal_execute", "ctl", proposal=p)
+    assert out["status"] == "executed", out
+    assert Vote[f"{target}:alice"] is None
+    assert Vote[f"{target}:mallory"].choice == "no"
+
+
 def test_I_GOV_4_contract_stays_within_mandate():
     depts = world.build()
     world.grant(depts["Infrastructure"], "contract.create_under_mandate")
