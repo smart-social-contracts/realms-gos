@@ -107,10 +107,10 @@ is marked as a pre-release, and is never Latest.
 
 ### Environments
 
-`local` (a fresh replica, `build_variant: test`, test flags on) and `production`
-(`build_variant: production`, test flags off) — both in `casals.json`. The demo
-stand's `converged_when` asserts the build variant, so a wrong-variant deploy
-never converges.
+`local` (a fresh replica, the test build variant) and `production` (the production
+variant) — both in `casals.json`. A sheet may set `build_variant` on its environment;
+without it `scripts/up.sh` builds `test` for `local` and `production` for the rest.
+See [Build variants](#build-variants-production-vs-test-wasm).
 
 ---
 
@@ -137,19 +137,42 @@ tree ships. The variants therefore live **outside** it, in
 one over `src/realm_backend/core/build_variant.py` before packing and restores
 production afterwards. Whatever was not selected is *absent*, not disabled.
 
-After packing, the WASM is byte-scanned for `REALMS_TEST_BUILD_AUTH_BYPASS`. A
-production build containing it fails; a test build missing it fails too — a
-one-sided check would pass vacuously.
+After packing, the WASM is byte-scanned for the test-only symbols
+(`TEST_ONLY_SYMBOLS` in the packer, defined only in `test.py`). A production build
+containing any of them fails; a test build missing them fails too — a one-sided
+check would pass vacuously. The scan runs in every path that builds a realm wasm
+(`up.sh`, `publish_build.py`, `release.yml`, the PocketIC tests).
 
 | | Production | Test |
 |---|---|---|
-| `is_test_mode()` | always `False` | reads the realm flag |
-| `is_ii_bypass_active()` | always `False` | reads the realm flag |
-| `test_flags_allowed(...)` | always `False` | network-gated |
-| Sentinel in WASM | absent | present |
+| `test_flags_allowed(network, can_test_mode)` | always `False` | `can_test_mode`, or a network in `NON_PRODUCTION_NETWORKS` (`local`, `test`, `demo`); an unset or unknown network is production |
+| Test-only symbols in WASM | absent | present |
 
-`status()` reports `build_variant` and `network`, so you can tell a production
-artifact from a test one without trusting the deploy log.
+`realm_configure` (and the `realm` setup step) refuse `test_mode` and any enabled
+`test_flags` unless `test_flags_allowed`. `can_test_mode` is set only by the install
+step, once, by the realm's host; no endpoint sets it afterwards.
+
+### Which artifact runs where
+
+| Environment | Realm backend | Realm frontend |
+|---|---|---|
+| `production`, `staging` | production | production |
+| `local`, and `test` / `demo` when they need deterministic identities | test | test |
+
+`up.sh` and `publish_build.py` refuse the test variant for `staging` and `production`.
+A release attaches both wasms: `realm-backend-<tag>.wasm.gz` (production) and
+`realm-backend-test-<tag>.wasm.gz` (test). A test build published to a registry is
+labelled `main-test.*` / `<version>+test`, so a production rollout never picks it up.
+
+### Which artifact does a live canister run?
+
+`status()` reports `build_variant`, but that is the canister speaking about itself.
+The proof is the module hash: `icp canister info <id>` (or the IC dashboard) shows
+the installed module's SHA-256, and `checksums-<tag>.txt` of the release lists two
+hashes for each wasm: of the `.wasm.gz` file, and of the decompressed "module"
+(`realm-backend-<tag>` for production, `realm-backend-test-<tag>` for test). The
+canister's hash equals one of them, depending on whether it was installed gzipped. A
+match is the artifact; anything else is a build nobody released.
 
 ### Frontend
 

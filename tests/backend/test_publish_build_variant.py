@@ -67,3 +67,12 @@ def test_build_variant_label_round_trips(publish_build):
         parsed_base, parsed_variant = publish_build.parse_build_variant_label(labeled)
         assert parsed_base == base
         assert parsed_variant == variant
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_the_test_variant_is_never_published_to_staging_or_production(publish_build, monkeypatch, environment):
+    argv = ["publish_build.py", "--environment", environment, "--family", "realm", "--version", "1.0.0",
+            "--variant", "test", "--file-registry", "registry"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="never published"):
+        publish_build.main()

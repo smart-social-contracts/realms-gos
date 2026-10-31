@@ -1,31 +1,19 @@
-"""Build variant: test. GENERATED FILE — do not edit in place.
+"""Build variant: test. The test-only half of ``production.py``; read it first.
 
-Source of truth: ``scripts/build_variants/test.py``. See the production variant
-for how the swap works.
-
-This variant enables the test-only code paths. It must never be deployed to a
-production network. Two things make that visible rather than a matter of
-discipline: ``status()`` reports ``build_variant``, and the WASM contains
-``TEST_BUILD_SENTINEL`` below, which the packer refuses to find in a production
-artifact.
+For deterministic identities and fast clocks on test, demo and local realms. Never deploy it to staging or
+production: ``status`` reports ``build_variant``, and the wasm holds the marker below, which the packer
+refuses to find in a production build.
 """
 
 BUILD_VARIANT = "test"
 
-# Deliberately a literal so it survives into the WASM's data section, where
-# scripts/pack_realm_backend.py can find it by byte-scanning the artifact.
-TEST_BUILD_SENTINEL = "REALMS_TEST_BUILD_AUTH_BYPASS"
+# Literals, so the packer can find them in the wasm's embedded sources.
+TEST_BUILD_MARKER = "REALMS_TEST_BUILD_AUTH_BYPASS"
+# The networks where test flags need no install-time permission. Anything else, an unset network included,
+# counts as production.
+NON_PRODUCTION_NETWORKS = ("local", "test", "demo")
 
 
-def is_test_build() -> bool:
-    return True
-
-
-def ii_bypass_available() -> bool:
-    """Whether Internet Identity may be bypassed with a deterministic keypair."""
-    return True
-
-
-def test_flags_available() -> bool:
-    """Whether runtime test flags may be enabled at all in this build."""
-    return True
+def test_flags_allowed(network, can_test_mode):
+    """Whether test mode and test flags may be set: on a non-production network, or when the installer allowed it."""
+    return bool(can_test_mode) or (network or "").strip().lower() in NON_PRODUCTION_NETWORKS

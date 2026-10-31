@@ -126,17 +126,13 @@ jobs:
           pytest -q tests/backend/test_taxation.py \
                     tests/backend/test_tax_bridge.py \
                     tests/backend/test_agora_tax_assessment.py
-      - name: Test-flag ratchet
-        # Blocking on purpose: these are source and config scans that keep the
-        # removed authentication bypass deleted, keep can_test_mode out of the
-        # unauthenticated test_flags payload, and keep the network gate an
-        # allowlist that fails closed. See realms#395.
+      - name: Build variants
+        # Blocking on purpose: the checked-in variant is production, the test
+        # gate fails closed, and the packer's wasm scan works in both
+        # directions. See realms-gos#395.
         run: |
-          pytest -q tests/backend/test_test_flag_ratchet.py \
-                    tests/backend/test_runtime_flags.py \
-                    tests/backend/test_build_variant.py \
-                    tests/backend/test_descriptor_flag_map.py
-          pytest -q tests/backend/test_access_control.py
+          pytest -q tests/backend/test_build_variant.py \
+                    tests/backend/test_publish_build_variant.py
       - name: Cedar policy drift
         # The embedded policy text the canister runs must mirror the .cedar
         # source files; a stale copy silently changes what a realm enforces.
@@ -182,6 +178,31 @@ jobs:
             src/lib/stores/sidebar.test.ts \
             src/lib/i18n/resolveLocale.test.ts \
             src/lib/utils/backendError.test.ts
+
+  # The packed realm wasms on PocketIC: basilisk stubs typing and struct inside a
+  # canister, so only the built artifact shows how the production and the test
+  # variant behave (production refuses every test flag, realms-gos#395).
+  realm-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: |
+          pip install -r requirements.txt
+          pip install pytest pocket-ic==3.1.2
+      # The dfx cache carries the pocket-ic server the tests drive.
+      - name: Install dfx
+        run: |
+          curl -fsSL "https://github.com/dfinity/sdk/releases/download/${DFX_VERSION}/dfx-${DFX_VERSION}-x86_64-linux.tar.gz" -o /tmp/dfx.tar.gz
+          sudo tar -xzf /tmp/dfx.tar.gz -C /usr/local/bin
+          dfx cache install
+          echo "POCKET_IC_BIN=$(dfx cache show)/pocket-ic" >> "$GITHUB_ENV"
+      - name: Realm wasms on PocketIC
+        run: pytest -q tests/deployed
 
   # casals up from an empty replica + the cross-quarter live suite; the job
   # body is realms-e2e.yml (also runnable by hand via workflow_dispatch).
