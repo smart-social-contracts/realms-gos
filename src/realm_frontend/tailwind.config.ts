@@ -1,10 +1,16 @@
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import type { Config } from 'tailwindcss';
 // import flowbitePlugin from 'flowbite/plugin'
+
+// npm workspaces hoist flowbite-svelte to the repo root, so resolve its real
+// location instead of assuming ./node_modules.
+const flowbiteDir = path.dirname(createRequire(import.meta.url).resolve('flowbite-svelte/package.json'));
 
 export default {
 	content: [
 		'./src/**/*.{html,js,svelte,ts,md}',
-		'./node_modules/flowbite-svelte/**/*.{html,js,svelte,ts}',
+		`${flowbiteDir}/**/*.{html,js,svelte,ts}`,
 		// Dynamically-loaded extensions ship no CSS of their own; scan their
 		// sources so the host keeps the Tailwind classes they use (e.g. button
 		// backgrounds/layout) instead of purging them.
