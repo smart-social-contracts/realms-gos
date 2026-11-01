@@ -19,8 +19,8 @@ export interface StandaloneRealm {
 	founder: string;
 	founder_seed: string;
 	name: string;
-	/** The icp identity that deployed the realm. */
-	identity: string;
+	/** The icp identity that deployed the realm (a standalone realm's file names it). */
+	identity?: string;
 	codex?: string;
 	extensions?: Record<string, string>;
 }
@@ -28,6 +28,11 @@ export interface StandaloneRealm {
 export function loadRealm(): StandaloneRealm {
 	const path = process.env.REALM_JSON || '/tmp/e2e/realm.json';
 	return JSON.parse(readFileSync(path, 'utf8')) as StandaloneRealm;
+}
+
+/** A local replica signs with a root key the agent must fetch; the live networks' key is built in. */
+export function needsRootKey(networkUrl: string): boolean {
+	return !networkUrl.startsWith('https://');
 }
 
 export function founderIdentity(realm: StandaloneRealm): Ed25519KeyIdentity {
@@ -171,7 +176,7 @@ async function callOp(
 	const agent = await HttpAgent.create({
 		host: realm.network_url,
 		identity,
-		shouldFetchRootKey: true
+		shouldFetchRootKey: needsRootKey(realm.network_url)
 	});
 	const actor = Actor.createActor<Record<OpKind, (n: string, a: string) => Promise<string>>>(
 		opsIdl as never,

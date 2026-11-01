@@ -2,8 +2,9 @@
 """Prepare the scaling e2e on a local GaaS stack (`scripts/local_up.sh --gaas`) and write its GAAS_JSON.
 
 Through the GaaS multisig (the deployer is its signer on a local stack) it turns the portal's test mode on
-(Internet Identity bypass: deterministic test identities), and issues a voucher (50 credits, ten realms: the creator identity is the same every run), which the
-spec redeems as the founder before launching the realm from the portal.
+(Internet Identity bypass: deterministic test identities), and issues two vouchers of 50 credits (the creator
+identity is the same every run), which the spec redeems as the founder before launching a realm from the portal:
+one for the journey, one for the #58 check.
 
     python3 scripts/e2e_gaas_scale.py --out /tmp/e2e/gaas.json
     GAAS_JSON=/tmp/e2e/gaas.json npx playwright test -c playwright.gaas.config.ts   (src/realm_frontend)
@@ -19,7 +20,8 @@ import secrets
 import subprocess
 from pathlib import Path
 
-FLAGS = {"test_mode": True, "ii_bypass": True, "user_self_registration": True, "skip_terms": True,
+# skip_terms is off, explicitly (the registry keeps the flags of an earlier run): members accept the Terms to join.
+FLAGS = {"test_mode": True, "ii_bypass": True, "user_self_registration": True, "skip_terms": False,
          "disable_card_billing": True}
 
 
@@ -49,6 +51,14 @@ def through_multisig(project: Path, identity: str, multisig: str, canister: str,
          f'arg_json = "{arg_json}" }} }}, null)')
 
 
+def issue_voucher(project: Path, identity: str, multisig: str, registry: str) -> str:
+    """A new voucher of 50 credits; returns its code."""
+    code = secrets.token_hex(6).upper()
+    checksum = "sha256:" + hashlib.sha256(code.encode()).hexdigest()
+    through_multisig(project, identity, multisig, registry, "issue_voucher", {"checksum": checksum, "credits": 50})
+    return code
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--casals-home", default=os.environ.get("CASALS_HOME") or str(Path.home() / "casals-home"))
@@ -68,9 +78,7 @@ def main():
     if '\\"test_mode_ii_bypass\\":true' not in flags:
         raise SystemExit(f"the portal's test mode did not turn on: {flags}")
 
-    code = secrets.token_hex(6).upper()
-    checksum = "sha256:" + hashlib.sha256(code.encode()).hexdigest()
-    through_multisig(project, args.identity, multisig, registry, "issue_voucher", {"checksum": checksum, "credits": 50})
+    codes = [issue_voucher(project, args.identity, multisig, registry) for _ in range(2)]
 
     out = {
         "network_url": network_url,
@@ -79,7 +87,8 @@ def main():
         "installer": gaas["realm-installer"],
         "conductor": gaas.get("casals-backend", ""),
         "token_ledger": product.get("token-backend", ""),
-        "voucher_code": code,
+        "voucher_code": codes[0],
+        "live_voucher_code": codes[1],
         "realm_name": os.environ.get("SCALE_REALM", f"scale-{secrets.token_hex(2)}"),
     }
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)

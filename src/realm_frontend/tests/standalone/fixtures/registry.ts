@@ -11,6 +11,7 @@ const PACKAGES_DIR = join(process.cwd(), '..', '..');
 /** Publishes the repo package at `dir` (e.g. `extensions/extensions/hello_world`) to the realm's file registry one
  * patch version above `installed`, the version the realm runs; returns that version. */
 export function publishNextVersion(realm: StandaloneRealm, dir: string, installed: string): string {
+	if (!realm.identity) throw new Error('the realm file names no identity to publish with');
 	const manifestFile = (root: string) => join(root, 'manifest.json');
 	const manifest = JSON.parse(readFileSync(manifestFile(join(PACKAGES_DIR, dir)), 'utf8'));
 	const [major, minor, patch] = installed.split('.');
