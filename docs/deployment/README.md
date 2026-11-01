@@ -146,8 +146,9 @@ upgrade between two builds of the same wasm keeps all of them.) Upgrading in pla
 [ic-python-token#4](https://github.com/smart-social-contracts/ic-python-token/issues/4).
 
 There is no live ledger to migrate: the ic-tokens ledgers once deployed for production, demo and test no longer
-exist on the Internet Computer. Each environment gets a fresh ic-python-token ledger at its next build, and the
-order of operations is:
+exist on the Internet Computer. Each environment gets a fresh ic-python-token ledger at its next build. The realms
+on staging still use ic-tokens ledgers and keep the earlier `realm_backend` release until they get a fresh ledger
+([#452](https://github.com/smart-social-contracts/realms-gos/issues/452)). The order of operations is:
 
 1. Create the ledger: an ic-python-token canister (`token-backend` of `casals.local.json`, or `token_backend` of
    `dfx.json`), installed with the environment's init argument. The deployer holds the whole supply.
@@ -156,7 +157,11 @@ order of operations is:
 
 The production, staging, demo and test sheets still pin the ic-tokens `token-backend@0.1.0`. Repoint a sheet's row at
 ic-python-token (as `casals.local.json` does) before that environment's next build, or the build creates another
-ic-tokens ledger. The NFT ledger (`nft-backend`) is not affected: it stays on ic-tokens.
+ic-tokens ledger ([#452](https://github.com/smart-social-contracts/realms-gos/issues/452)). The NFT ledger
+(`nft-backend`) is not affected: it stays on ic-tokens.
+
+A long-lived local replica that already has the `realms-product` orchestra would get its `token-backend` upgraded in
+place by `scripts/up.sh -e local` and lose its balances (see above). Use a fresh replica, the default.
 
 ### Domains
 
