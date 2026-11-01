@@ -228,8 +228,8 @@ test('a realm-wide vote is voted and executed', async ({ page }) => {
 		await snap(page, 'proposed');
 
 		await bothVoteYes(page, ballot);
-		// A page whose translations load late starts the tab over, on its list of votes: the vote is opened again
-		// before it is finalized, and the realm tells whether finalizing worked.
+		// realms-extensions#46: a page whose translations load late starts the tab over, on its list of votes. The vote
+		// is opened again before it is finalized, and the realm tells whether finalizing worked.
 		const finalize = voting.getByRole('button', { name: 'Finalize tally' });
 		await expect(async () => {
 			if ((await proposalStatus(ballot)) !== 'voting') return;
