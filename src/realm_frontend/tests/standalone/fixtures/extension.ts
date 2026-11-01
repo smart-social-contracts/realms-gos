@@ -24,6 +24,15 @@ function isSandboxed(id: string): boolean {
 	);
 }
 
+/** The realm's own words, for a failure message: an error page, a refusal, the page that came instead. */
+export async function realmShows(frame: FrameLocator): Promise<string> {
+	const shown = await frame
+		.locator('body')
+		.innerText({ timeout: 5_000 })
+		.catch(() => '');
+	return `the realm shows: ${shown.replace(/\s+/g, ' ').slice(0, 300)}`;
+}
+
 /**
  * Opens an extension's page as `identity` in `page`; `close` stops the portal host page. An extension that
  * sends its visitors to a page of the realm (`path`, as notifications does) has the whole page as its own.
@@ -45,17 +54,7 @@ export async function openExtension(
 		.poll(mounted, { timeout: 120_000, intervals: [1_000] })
 		.toBe(true)
 		.catch(async (error) => {
-			// The realm's own words say why the page did not come: an error page, a refusal.
-			const shown = await frame
-				.locator('body')
-				.innerText({ timeout: 5_000 })
-				.catch(() => '');
-			throw new Error(
-				`${id} did not mount; the realm shows: ${shown.replace(/\s+/g, ' ').slice(0, 300)}`,
-				{
-					cause: error
-				}
-			);
+			throw new Error(`${id} did not mount; ${await realmShows(frame)}`, { cause: error });
 		});
 	return { app: isSandboxed(id) ? mount.frameLocator('iframe') : mount, frame, close };
 }

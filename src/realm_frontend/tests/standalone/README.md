@@ -2,12 +2,12 @@
 
 The journey of a realm on realmsgos.org, in a browser, on your own machine and on a local replica:
 
-| Spec | What it does |
-|---|---|
-| `wizard.spec.ts` | The founder walks the setup wizard (the spinner shows while it loads and while it launches), the realm launches with every core extension and the codex's dependencies, a second member joins through the Terms step, every installed extension and sidebar page opens without errors. |
-| `proposals.spec.ts` | A proposal of each kind is filed, voted yes by both members and executed: poll, extension install, extension upgrade, codex install, role assignment, Realms GOS release, realm-wide (federal) vote, treasury transaction (the realm gets an ic-python-token ledger in test mode, and the treasury is funded through a paid invoice). |
-| `extensions-ops.spec.ts` | One test per extension, from a table of page, action and expected result: its main operation. `fixme` rows say why they cannot run. |
-| `justice.spec.ts` | The life of a case in the justice extension with real members: a member files against another, the administrator accepts it into a court and assigns the judge, the judge issues the verdict, its effect is read back from the realm, a party appeals and the court above grants it; and a refusal at each step (non-member, party, non-judge). Steps the page has no screen for call the realm's operations as the member who would. |
+| Spec                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wizard.spec.ts`         | The founder walks the setup wizard (the spinner shows while it loads and while it launches), the realm launches with every core extension and the codex's dependencies, a second member joins through the Terms step, every installed extension and sidebar page opens without errors.                                                                                                                                                |
+| `proposals.spec.ts`      | A proposal of each kind is filed, voted yes by both members and executed: poll, extension install, extension upgrade, codex install, role assignment, Realms GOS release, realm-wide (federal) vote, treasury transaction (the realm gets an ic-python-token ledger in test mode, and the treasury is funded through a paid invoice).                                                                                                 |
+| `extensions-ops.spec.ts` | One test per extension, from a table of page, action and expected result: its main operation. `fixme` rows say why they cannot run.                                                                                                                                                                                                                                                                                                   |
+| `justice.spec.ts`        | The life of a case in the justice extension with real members: a member files against another, the administrator accepts it into a court and assigns the judge, the judge issues the verdict, its effect is read back from the realm, a party appeals and the court above grants it; and a refusal at each step (non-member, party, non-judge). Steps the page has no screen for call the realm's operations as the member who would. |
 
 `scripts/e2e_standalone_realm.py` also deploys that test ledger (ic-python-token, downloaded the first time).
 
@@ -31,6 +31,6 @@ To keep another replica running beside it, give the stack its own `CASALS_HOME` 
 (`CASALS_REPLICA_PORT=8371 CASALS_HOME=~/casals-home-e2e scripts/up.sh -e local --yes`, run twice: the first run
 only learns where the replica is), and pass the same `CASALS_HOME` and an `E2E_DIR` to `scripts/e2e_ui.sh`.
 
-Every test records a screenshot, a video and a trace into `test-results/standalone`, and the HTML report goes to
+Every test records a screenshot and a video, and a failed test also a trace, into `test-results/standalone`, and the HTML report goes to
 `playwright-report/standalone` (`npx playwright show-report playwright-report/standalone`). CI runs the same
 commands in the `Realms E2E` workflow and uploads both folders, whether the run passes or not.

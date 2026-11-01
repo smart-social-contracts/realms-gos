@@ -14,6 +14,7 @@ import {
 	reloadIfInterrupted,
 	type StandaloneRealm
 } from './fixtures/realm';
+import { realmShows } from './fixtures/extension';
 import { snap } from './fixtures/snap';
 import { LAUNCH_TIMEOUT, launchThroughWizard, toolbarButton } from './fixtures/wizard';
 
@@ -241,7 +242,10 @@ test('every installed extension opens without errors', async ({ page }) => {
 						},
 						{ message: `${id} opens`, timeout: 120_000, intervals: [1_000] }
 					)
-					.not.toBe('waiting');
+					.not.toBe('waiting')
+					.catch(async (error) => {
+						throw new Error(`${id} did not open; ${await realmShows(frame)}`, { cause: error });
+					});
 				await checkPage(page, id, `extension-${id}`, errors);
 				const denied = await frame.getByText(/access denied|you don't have permission/i).count();
 				expect.soft(denied, `${id}: open to the founder`).toBe(0);
@@ -265,7 +269,10 @@ test('every sidebar page of the launched realm loads without errors', async ({ p
 		const folded = sidebar.locator('.fold-summary[aria-expanded="false"]');
 		for (let attempt = 0; (await folded.count()) > 0; attempt++) {
 			if (attempt >= 40) throw new Error('the sidebar keeps folding its sections');
-			await folded.first().click({ timeout: 5_000 }).catch(() => {});
+			await folded
+				.first()
+				.click({ timeout: 5_000 })
+				.catch(() => {});
 		}
 	}
 	// Opens the realm at / with every sidebar section unfolded; again after a page that loses the sidebar.
