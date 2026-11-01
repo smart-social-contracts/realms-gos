@@ -4,7 +4,7 @@
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import type { FrameLocator, Page } from '@playwright/test';
+import { test, type FrameLocator, type Page } from '@playwright/test';
 import { Actor, HttpAgent } from '@dfinity/agent';
 import { DelegationChain, Ed25519KeyIdentity } from '@dfinity/identity';
 
@@ -19,6 +19,8 @@ export interface StandaloneRealm {
 	founder: string;
 	founder_seed: string;
 	name: string;
+	/** The icp identity that deployed the realm (a standalone realm's file names it). */
+	identity?: string;
 	codex?: string;
 	extensions?: Record<string, string>;
 }
@@ -35,6 +37,11 @@ export function needsRootKey(networkUrl: string): boolean {
 
 export function founderIdentity(realm: StandaloneRealm): Ed25519KeyIdentity {
 	return Ed25519KeyIdentity.generate(Uint8Array.from(Buffer.from(realm.founder_seed, 'hex')));
+}
+
+/** A second person, with a key of their own, for the specs that need one beside the founder. */
+export function memberIdentity(): Ed25519KeyIdentity {
+	return Ed25519KeyIdentity.generate(new Uint8Array(32).fill(7));
 }
 
 function hostHtml(realm: StandaloneRealm, path: string): string {
@@ -103,36 +110,97 @@ export async function exposeSigner(page: Page, identity: Ed25519KeyIdentity): Pr
 	});
 }
 
+// Pages that saw a request fail with ERR_NETWORK_CHANGED since they were last opened, and pages reloaded for it since.
+const networkChanged = new WeakSet<Page>();
+const reloaded = new WeakSet<Page>();
+const watched = new WeakSet<Page>();
+
 /** Open `path` of the realm inside the portal host; returns the realm's frame. */
 export async function openInPortal(
 	page: Page,
 	realm: StandaloneRealm,
 	path: string
 ): Promise<{ frame: FrameLocator; close: () => Promise<void> }> {
+	if (!watched.has(page)) {
+		watched.add(page);
+		page.on('requestfailed', (request) => {
+			if (request.failure()?.errorText.includes('ERR_NETWORK_CHANGED')) networkChanged.add(page);
+		});
+	}
+	networkChanged.delete(page);
+	reloaded.delete(page);
 	const host = await startPortalHost(realm, path);
 	await page.goto(host.url);
 	return { frame: page.frameLocator('#realm'), close: host.close };
 }
 
-const readIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
-	IDL.Service({ read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']) });
+/**
+ * Chromium reports a change of the host's network (a Docker veth coming or going) as a request failed with
+ * ERR_NETWORK_CHANGED, and the realm then shows "Something went wrong" with a "Refresh page" button. That is a
+ * problem of the machine, not of the realm: load the page once more and record that in the report. It does so only
+ * when such a request failed, and once per open of the page, so any other error stays visible to the test that
+ * meets it. Returns whether it reloaded.
+ */
+export async function reloadIfInterrupted(page: Page, frame: FrameLocator): Promise<boolean> {
+	if (!networkChanged.has(page) || reloaded.has(page)) return false;
+	if (
+		!(await frame
+			.getByRole('button', { name: 'Refresh page' })
+			.isVisible()
+			.catch(() => false))
+	)
+		return false;
+	reloaded.add(page);
+	const description = `reloaded ${page.url()}: the host's network changed (ERR_NETWORK_CHANGED)`;
+	test.info().annotations.push({ type: 'workaround', description });
+	console.log(`[workaround] ${description}`);
+	await page.reload();
+	return true;
+}
 
-/** A public read operation of the realm, as anonymous. */
-export async function readOp(
+const opsIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+	IDL.Service({
+		read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']),
+		run: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], [])
+	});
+
+type OpKind = 'read' | 'run';
+
+async function callOp(
+	kind: OpKind,
 	realm: StandaloneRealm,
 	name: string,
-	args: Record<string, unknown> = {}
+	args: Record<string, unknown>,
+	identity?: Ed25519KeyIdentity
 ): Promise<Record<string, unknown>> {
 	const agent = await HttpAgent.create({
 		host: realm.network_url,
+		identity,
 		shouldFetchRootKey: needsRootKey(realm.network_url)
 	});
-	const actor = Actor.createActor<{ read: (n: string, a: string) => Promise<string> }>(
-		readIdl as never,
-		{
-			agent,
-			canisterId: realm.realm_backend
-		}
+	const actor = Actor.createActor<Record<OpKind, (n: string, a: string) => Promise<string>>>(
+		opsIdl as never,
+		{ agent, canisterId: realm.realm_backend }
 	);
-	return JSON.parse(await actor.read(name, JSON.stringify(args)));
+	return JSON.parse(await actor[kind](name, JSON.stringify(args)));
+}
+
+/** A read operation of the realm, as anonymous or, with ``identity``, as that member. */
+export function readOp(
+	realm: StandaloneRealm,
+	name: string,
+	args: Record<string, unknown> = {},
+	identity?: Ed25519KeyIdentity
+) {
+	return callOp('read', realm, name, args, identity);
+}
+
+/** An operation that changes the realm, as ``identity``. */
+export function runOp(
+	realm: StandaloneRealm,
+	name: string,
+	args: Record<string, unknown>,
+	identity: Ed25519KeyIdentity
+) {
+	return callOp('run', realm, name, args, identity);
 }

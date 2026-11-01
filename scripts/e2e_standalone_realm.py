@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Deploy one standalone realm (a realm_backend and a realm_frontend) on the replica of a local
+"""Deploy one standalone realm (a realm_backend, a realm_frontend and a test token ledger) on the replica of a local
 `scripts/up.sh -e local` product install, the way an installer does, without Casals.
 
-The script plays the installer: it creates the two canisters, writes the frontend's
+The script plays the installer: it creates the canisters, writes the frontend's
 ``canister_ids.js``, lets the backend publish into the frontend, then runs the installer's setup
 steps: ``install`` (network ``local``, the founder), ``realm`` (the name), ``infrastructure`` (the
 product's file registry and marketplace) and ``trust_policy``. The founder is a fresh Ed25519 key:
@@ -29,6 +29,7 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.request
 import zlib
 from pathlib import Path
 
@@ -42,8 +43,17 @@ from realms.cli.commands.extension import _dfx_call, latest_version  # noqa: E40
 from realms.cli.realm_api import call_op  # noqa: E402
 
 ORCHESTRA = "realms-product"
-CORE_EXTENSIONS = ("public_dashboard", "member_dashboard", "realm_settings", "extensions_manager", "voting",
-                   "census", "admin_dashboard", "vault", "codex_viewer")
+# The realm's own list, so every extension the wizard's launch installs is installed here with its frontend.
+CORE_EXTENSIONS = tuple(json.loads((ROOT / "core-extensions.json").read_text())["core_extensions"])
+# The ledger the realm's treasury pays through: ic-python-token, the token realms use. Its test mode lets the e2e mint
+# into any account. To test another ledger, change these three settings: where its wasm is downloaded from, the path
+# it is kept at (under the repository root), and its candid init argument.
+LEDGER_URL = "https://github.com/smart-social-contracts/ic-python-token/releases/download/v0.6.0/token_backend.wasm"
+LEDGER_WASM = ".wasm/ic-python-token-v0.6.0.wasm"
+LEDGER_INIT = (
+    '(record { name = "E2E token"; symbol = "E2E"; decimals = 8 : nat8; total_supply = 0 : nat; '
+    "fee = 10_000 : nat; test = opt true })"
+)
 ED25519_DER_PREFIX = bytes.fromhex("302a300506032b6570032100")
 ICP_YAML = """\
 # Written by scripts/e2e_standalone_realm.py: a standalone realm on the product's local replica.
@@ -64,6 +74,12 @@ canisters:
       configuration:
         path: artifacts/realm_backend.wasm
     init_args: '("")'
+  - name: test_ledger
+    recipe:
+      type: "@dfinity/prebuilt@v2.0.0"
+      configuration:
+        path: artifacts/ledger.wasm
+    init_args: '{ledger_init}'
   - name: realm_frontend
     recipe:
       type: "@dfinity/asset-canister@v2.2.0"
@@ -146,14 +162,17 @@ def main() -> None:
         for c in stand.get("canisters", []) if c.get("canister_id")}
     url = bindings.get("network_url") or "http://127.0.0.1:8000"
     port = url.rsplit(":", 1)[-1]
-    registry, marketplace, ledger = (export.get(n, "") for n in
-                                     ("fleet-file-registry", "marketplace-backend", "token-backend"))
+    registry, marketplace = (export.get(n, "") for n in ("fleet-file-registry", "marketplace-backend"))
     if not registry or not marketplace:
         sys.exit(f"the product export has no fleet-file-registry / marketplace-backend: {sorted(export)}")
 
     wasm = ROOT / ".basilisk" / "realm_backend" / "realm_backend.wasm"
+    ledger_wasm = ROOT / LEDGER_WASM
     dist = ROOT / "src" / "realm_frontend" / "dist"
-    for path in (wasm, dist / "index.html"):
+    if not ledger_wasm.exists():
+        ledger_wasm.parent.mkdir(exist_ok=True)
+        urllib.request.urlretrieve(LEDGER_URL, ledger_wasm)
+    for path in (wasm, ledger_wasm, dist / "index.html"):
         if not path.exists():
             sys.exit(f"{path} is missing: run scripts/up.sh -e local (or its build) first")
 
@@ -161,11 +180,12 @@ def main() -> None:
     shutil.rmtree(project, ignore_errors=True)
     (project / "artifacts").mkdir(parents=True)
     shutil.copy2(wasm, project / "artifacts" / "realm_backend.wasm")
+    shutil.copy2(ledger_wasm, project / "artifacts" / "ledger.wasm")
     shutil.copytree(dist, project / "frontend")
-    (project / "icp.yaml").write_text(ICP_YAML.format(url=url))
+    (project / "icp.yaml").write_text(ICP_YAML.format(url=url, ledger_init=LEDGER_INIT))
 
     ids = {}
-    for name in ("realm_backend", "realm_frontend"):
+    for name in ("realm_backend", "test_ledger", "realm_frontend"):
         out = icp(project, "canister", "create", name, "-e", "local", "--identity", opts.identity, "-q")
         ids[name] = out.strip().splitlines()[-1].strip()
     print(f"created {ids}")
@@ -181,7 +201,7 @@ def main() -> None:
     (project / "frontend" / "canister_ids.js").write_text(
         f"globalThis.__CANISTER_IDS = {json.dumps(canister_ids)};\n")
 
-    print("icp deploy realm_backend realm_frontend")
+    print("icp deploy realm_backend test_ledger realm_frontend")
     icp(project, "deploy", "-e", "local", "--identity", opts.identity, "--yes")
 
     # The backend writes installed extension frontends into the asset canister.
@@ -199,7 +219,8 @@ def main() -> None:
         print(f"setup_step {values['step']}: {reply.get('done')}")
 
     step(step="install", network="local", founder=founder)
-    step(step="realm", name=opts.name)
+    # The passport extension checks with an outside service; its test flag makes the check pass for the UI e2e.
+    step(step="realm", name=opts.name, test_flags={"test_mode_skip_passport_zkproof": True})
     step(step="infrastructure", frontend_canister_id=ids["realm_frontend"], file_registry_canister_id=registry,
          marketplace_canister_id=marketplace)
     # The fleet registry has no namespace-approval API; installs must not wait on marketplace approval.
@@ -228,7 +249,7 @@ def main() -> None:
         "realm_frontend": ids["realm_frontend"],
         "file_registry": registry,
         "marketplace": marketplace,
-        "token_ledger": ledger,
+        "token_ledger": ids["test_ledger"],
         "founder": founder,
         "founder_seed": seed,
         "name": opts.name,
