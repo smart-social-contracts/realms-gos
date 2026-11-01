@@ -142,28 +142,21 @@ and nothing reverts it.
 A ledger cannot be moved by upgrading it. Tested on PocketIC: after upgrading the same canister from the
 ic-tokens v0.1.0 wasm to the ic-python-token v0.6.0 wasm, the total supply, the owner, every balance and the
 transaction history were gone, and the ledger answered `Err` to a transfer because every balance was zero. (An
-upgrade between two builds of the same wasm keeps all of them.) The order of operations is:
+upgrade between two builds of the same wasm keeps all of them.) Upgrading in place is tracked in
+[ic-python-token#4](https://github.com/smart-social-contracts/ic-python-token/issues/4).
 
-1. Choose the ledger: a fresh ic-python-token canister (`token-backend` of `casals.local.json`, or `token_backend`
-   of `dfx.json`), installed with the environment's init argument. The deployer holds the whole supply. Any balance
-   people hold on the old ledger has to be issued again on the new one.
+There is no live ledger to migrate: the ic-tokens ledgers once deployed for production, demo and test no longer
+exist on the Internet Computer. Each environment gets a fresh ic-python-token ledger at its next build, and the
+order of operations is:
+
+1. Create the ledger: an ic-python-token canister (`token-backend` of `casals.local.json`, or `token_backend` of
+   `dfx.json`), installed with the environment's init argument. The deployer holds the whole supply.
 2. Point the realm at that ledger.
 3. Only then install the `realm_backend` release that carries this treasury.
 
-A realm that keeps an ic-tokens ledger stays on the earlier `realm_backend` release.
-
-Ledgers deployed from ic-tokens v0.1.0 (wasm sha256 `a1734ad2…461a`). All answer with the old record, and none is
-migrated:
-
-| Environment | Ledger | Where the id is recorded |
-|---|---|---|
-| production | the REALMS token, `token-backend` of `casals.json` (`hqojk-2aaaa-aaaap-quz4a-cai`) | `canister_ids.json` |
-| demo | `xbkkh-syaaa-aaaah-qq3ya-cai` | `dfx.template.json` (`remote`) |
-| test | `nusyl-jiaaa-aaaae-qj6mq-cai` | `dfx.template.json` (`remote`) |
-| staging | `token-backend` of `casals.staging.json` | `casals export casals.staging.json -e staging` |
-
-The staging, demo and test sheets still pin `token-backend@0.1.0`, so a `casals up` there creates another ic-tokens
-ledger. The NFT ledger (`nft-backend`) is not affected: it stays on ic-tokens.
+The production, staging, demo and test sheets still pin the ic-tokens `token-backend@0.1.0`. Repoint a sheet's row at
+ic-python-token (as `casals.local.json` does) before that environment's next build, or the build creates another
+ic-tokens ledger. The NFT ledger (`nft-backend`) is not affected: it stays on ic-tokens.
 
 ### Domains
 
