@@ -145,15 +145,33 @@ async function held(fund: string): Promise<number> {
 	return (await row<Fund>('Fund', fund)).balances[SYMBOL] ?? 0;
 }
 
-/** Passes a realm-wide proposal of `op`: the founder files it and both members vote yes. */
+// Members who join to vote with the founder and the second member.
+const supporters: Ed25519KeyIdentity[] = [];
+
+/** The people who vote yes: a realm-wide proposal needs more than half of the realm's members, and the specs before
+ * this one have made members of their own, so members join until the voters are a majority. */
+async function majority(): Promise<Ed25519KeyIdentity[]> {
+	const active = (await rows<{ status: string }>('Member')).filter((m) => m.status === 'active');
+	let size = active.length;
+	while ((2 + supporters.length) * 2 <= size) {
+		const newcomer = Ed25519KeyIdentity.generate();
+		await done('realm_join', {}, newcomer);
+		supporters.push(newcomer);
+		size += 1;
+	}
+	return [founder(), member, ...supporters];
+}
+
+/** Passes a realm-wide proposal of `op`: the founder files it and a majority of the members vote yes. */
 async function passByVote(title: string, op: string, args: Record<string, unknown>) {
+	const voters = await majority();
 	const filed = await done(
 		'proposal_create',
 		{ title: `${title} ${RUN}`, action: { op, args } },
 		founder()
 	);
 	const id = filed.proposal as string;
-	for (const voter of [founder(), member]) {
+	for (const voter of voters) {
 		const vote = await done('proposal_vote', { proposal: id, choice: 'yes' }, voter);
 		if (vote.status) break;
 	}
