@@ -22,7 +22,7 @@ export default defineConfig({
 		viewport: { width: 1280, height: 900 }
 	},
 	// The specs share one realm and run in this order: the wizard launches it, the others use it.
-	projects: ['wizard', 'proposals', 'extensions-ops'].map((name) => ({
+	projects: ['wizard', 'proposals', 'extensions-ops', 'justice'].map((name) => ({
 		name,
 		testMatch: `${name}.spec.ts`,
 		use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } }
