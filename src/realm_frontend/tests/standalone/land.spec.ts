@@ -314,8 +314,8 @@ test('a parcel is not moved without a court order', async ({ page }) => {
 	}
 });
 
-// No page sends a subject when it files a dispute (justice_litigation's dispute_file call has none), so the court
-// order the land page asks for cannot be had from any screen: the next steps call the operations.
+// realms-extensions#42: no page sends a subject when it files a dispute (justice_litigation's dispute_file call has
+// none), so the court order the land page asks for cannot be had from any screen: the next steps call the operations.
 test.fixme('a member files a dispute about the parcel on the justice page', async () => {});
 
 test('the neighbour files a dispute about the parcel', async () => {
@@ -537,8 +537,8 @@ test('a parcel is not minted as an NFT where the realm has no LAND collection', 
 	expect((await row<Land>('Land', parcel)).token_id).toBe('');
 });
 
-// The page says "unknown NFTToken 'LAND'", the realm's raw lookup error, and offers Mint NFT on every active
-// parcel of a realm that has no LAND collection.
+// realms-extensions#43: the page says "unknown NFTToken 'LAND'", the realm's raw lookup error, and offers Mint NFT on
+// every active parcel of a realm that has no LAND collection.
 test.fixme('the page tells the administrator the realm has no LAND collection', async ({
 	page
 }) => {
@@ -550,6 +550,9 @@ test.fixme('the page tells the administrator the realm has no LAND collection', 
 		await close();
 	}
 });
+
+// realms-extensions#44: the name typed in Register parcel is stored with the parcel but the page never shows it.
+test.fixme('the page shows the name of a registered parcel', async () => {});
 
 // A local realm has no ICRC-7 ledger for its LAND collection (nft_token_register names one), so the mint cannot be
 // run here.
