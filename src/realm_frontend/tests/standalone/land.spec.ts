@@ -32,6 +32,8 @@ test.beforeAll(() => {
 
 // Titles carry the run, so the runs of a realm's rows can be told apart.
 const RUN = Date.now().toString(36);
+// Each run has its own place on the land grid, so a rerun's parcels do not overlap those of the run before.
+const AT = 1000 + (Date.now() % 1000) * 32;
 
 // New people each run, so the spec can run again on the realm it ran on.
 const founder = () => founderIdentity(realm);
@@ -170,7 +172,7 @@ let verdict: string;
 const square: Parcel = {
 	name: `Town square ${RUN}`,
 	kind: 'residential',
-	x: 300,
+	x: AT,
 	y: 300,
 	width: 3,
 	height: 2,
@@ -238,7 +240,12 @@ test('a parcel for someone who is not a member is refused', async ({ page }) => 
 	const { app, close } = await landOf(page, founder());
 	try {
 		await leavesUnchanged(['Land'], async () => {
-			await register(app, { ...square, name: 'The stranger', x: 400, owner: principal(stranger) });
+			await register(app, {
+				...square,
+				name: 'The stranger',
+				x: square.x + 20,
+				owner: principal(stranger)
+			});
 			await expect(app.getByText(/unknown User/)).toBeVisible(REPLY);
 			await snap(page, 'refused');
 		});
@@ -252,7 +259,7 @@ test('a member cannot register a parcel', async ({ page }) => {
 	try {
 		await expect(app.getByText(parcel).first()).toBeVisible();
 		await leavesUnchanged(['Land'], async () => {
-			await register(app, { ...square, name: 'My own', x: 500, owner: principal(owner) });
+			await register(app, { ...square, name: 'My own', x: square.x + 30, owner: principal(owner) });
 			await expect(app.getByText('land_register needs nft.mint')).toBeVisible(REPLY);
 			await snap(page, 'refused');
 		});
@@ -290,7 +297,7 @@ test('the owner cannot move or mark disputed their own parcel', async ({ page })
 	}
 });
 
-test('a member without the permission cannot move a parcel', async () => {
+test('neither a judge nor a stranger can move a parcel', async () => {
 	const order = { land: parcel, to: principal(neighbour), order: 'Verdict:VER-1' };
 	await leavesUnchanged(['Land'], async () => {
 		for (const who of [judge, stranger]) {
@@ -381,7 +388,9 @@ test('the verdict moves neither another parcel nor the parcel to a stranger', as
 			await moveParcel(app, bystander, principal(neighbour), `Verdict:${verdict}`);
 			await expect(
 				app.getByText(
-					new RegExp(`${verdict} does not settle ${bystander} with User:\\S+ as a party`)
+					new RegExp(
+						`${verdict} does not settle ${bystander} with User:${principal(neighbour)} as a party`
+					)
 				)
 			).toBeVisible(REPLY);
 
@@ -519,6 +528,7 @@ test('the administrator ends the dispute', async ({ page }) => {
 	});
 });
 
+// Its message is realms-extensions#43's raw lookup error: the fixme below asks for a clear one.
 test('a parcel is not minted as an NFT where the realm has no LAND collection', async ({
 	page
 }) => {
