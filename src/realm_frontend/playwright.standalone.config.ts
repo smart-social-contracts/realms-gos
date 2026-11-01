@@ -13,9 +13,10 @@ export default defineConfig({
 	expect: { timeout: 30_000 },
 	outputDir: 'test-results/standalone',
 	reporter: [['list'], ['html', { outputFolder: 'playwright-report/standalone', open: 'never' }]],
-	// Kept for every test, passed or not: the run is reviewed afterwards from the report.
+	// Screenshots and videos are kept for every test, passed or not: the run is reviewed afterwards from the report.
 	use: {
-		trace: 'on',
+		// The run has no retries, so 'on-first-retry' would record nothing: a trace is kept for failures only.
+		trace: 'retain-on-failure',
 		screenshot: 'on',
 		video: 'on',
 		headless: true,
