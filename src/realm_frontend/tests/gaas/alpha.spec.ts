@@ -8,9 +8,11 @@
 // redeemed there as well, a principal that skipped the gate cannot ask for a deployment, and the activated
 // applicant launches a realm, which costs its price in credits.
 //
-// The portal ignores invitation mode while the registry's Internet Identity bypass is on, so these tests sign
-// in with a real session: the applicant's key delegates to a session key held in the browser, as Internet
-// Identity would issue it.
+// TEST-ONLY SHORTCUT: these tests skip Internet Identity. The portal turns the invitation gate off while the
+// registry's Internet Identity bypass is on (invitation-state.js of gos-as-a-service), and a local stack has no
+// Internet Identity, so signIn() writes an auth-client session (auth-client-db / ic-keyval, the keys `identity`
+// and `delegation`) straight into the browser's IndexedDB: the applicant's own key delegates to a session key,
+// and the applicant's principal is that key's. The portal then runs its real sign-in path from that session.
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { Actor, HttpAgent } from '@dfinity/agent';
@@ -101,7 +103,11 @@ const storeSession = ({ key, delegation }: { key: string; delegation: string }) 
 /** Signs ``user`` in on the portal, as Internet Identity would: their key delegates to a session key. */
 async function signIn(page: Page, user: Ed25519KeyIdentity) {
 	const session = Ed25519KeyIdentity.generate();
-	const chain = await DelegationChain.create(user, session.getPublicKey(), new Date(Date.now() + SESSION_MS));
+	const chain = await DelegationChain.create(
+		user,
+		session.getPublicKey(),
+		new Date(Date.now() + SESSION_MS)
+	);
 	await page.goto(A.portal_url);
 	await page.evaluate(storeSession, {
 		key: JSON.stringify(session.toJSON()),
@@ -117,17 +123,30 @@ async function submitCode(page: Page, code: string) {
 
 test.describe.configure({ mode: 'serial' });
 
+// Someone else redeems the used code first.
+test.beforeAll(async () => {
+	const other = Ed25519KeyIdentity.generate();
+	expect(await (await registryAs(other)).redeem_invitation_code(A.used_code)).toHaveProperty('Ok');
+});
+
 test('the landing page offers a signed-out visitor the Alpha request link', async ({ page }) => {
 	await page.goto(A.portal_url);
 	const notice = page.getByRole('complementary', { name: 'gos.earth is in Alpha' });
 	await expect(notice).toBeVisible({ timeout: 60_000 });
-	await expect(notice.getByRole('link', { name: REQUEST_LINK })).toHaveAttribute('href', TALLY_FORM);
+	await expect(notice.getByRole('link', { name: REQUEST_LINK })).toHaveAttribute(
+		'href',
+		TALLY_FORM
+	);
 	await snap(page, 'landing-alpha-notice');
 });
 
-test('/deploy-gos asks a signed-out visitor to sign in and says a code is required', async ({ page }) => {
+test('/deploy-gos asks a signed-out visitor to sign in and says a code is required', async ({
+	page
+}) => {
 	await page.goto(`${A.portal_url}/deploy-gos`);
-	await expect(page.getByRole('heading', { name: 'Sign In Required' })).toBeVisible({ timeout: 60_000 });
+	await expect(page.getByRole('heading', { name: 'Sign In Required' })).toBeVisible({
+		timeout: 60_000
+	});
 	await expect(page.getByText(/invitation code is required/)).toBeVisible();
 	await expect(page.getByRole('complementary', { name: 'gos.earth is in Alpha' })).toBeVisible();
 	await snap(page, 'deploy-signed-out');
@@ -136,17 +155,23 @@ test('/deploy-gos asks a signed-out visitor to sign in and says a code is requir
 test('a signed-in applicant who is not activated meets the invitation gate', async ({ page }) => {
 	await signIn(page, applicant);
 	await page.goto(`${A.portal_url}/deploy-gos`);
-	await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible({ timeout: 60_000 });
+	await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible({
+		timeout: 60_000
+	});
 	await expect(page.getByRole('button', { name: 'Submit Code' })).toBeVisible();
 	await expect(page.getByRole('link', { name: REQUEST_LINK })).toHaveAttribute('href', TALLY_FORM);
 	expect(await activationOf(applicant)).toBe('not_activated');
 	await snap(page, 'invitation-gate');
 });
 
-test('the dashboard of an applicant who is not activated asks for a code, not a voucher', async ({ page }) => {
+test('the dashboard of an applicant who is not activated asks for a code, not a voucher', async ({
+	page
+}) => {
 	await signIn(page, applicant);
 	await page.goto(`${A.portal_url}/my-dashboard?tab=billing`);
-	await expect(page.getByRole('heading', { name: 'Enter your invitation code' })).toBeVisible({ timeout: 60_000 });
+	await expect(page.getByRole('heading', { name: 'Enter your invitation code' })).toBeVisible({
+		timeout: 60_000
+	});
 	await expect(page.getByRole('link', { name: REQUEST_LINK })).toHaveAttribute('href', TALLY_FORM);
 	await expect(page.getByRole('heading', { name: 'Redeem Voucher' })).toHaveCount(0);
 	await snap(page, 'dashboard-awaiting-invitation');
@@ -154,25 +179,33 @@ test('the dashboard of an applicant who is not activated asks for a code, not a 
 
 const refusals = [
 	{ what: 'a wrong code', code: () => 'NOT-AN-INVITATION', message: 'Invalid invitation code' },
-	{ what: 'a used code', code: () => A.used_code, message: 'This invitation code has already been used' },
-	{ what: 'an expired code', code: () => A.expired_code, message: 'This invitation code has expired' }
+	{
+		what: 'a used code',
+		code: () => A.used_code,
+		message: 'This invitation code has already been used'
+	},
+	{
+		what: 'an expired code',
+		code: () => A.expired_code,
+		message: 'This invitation code has expired'
+	}
 ];
-
-// Someone else redeems the used code first.
-test.beforeAll(async () => {
-	const other = Ed25519KeyIdentity.generate();
-	expect(await (await registryAs(other)).redeem_invitation_code(A.used_code)).toHaveProperty('Ok');
-});
 
 for (const { what, code, message } of refusals) {
 	test(`${what} is refused with the registry's message and nothing changes`, async ({ page }) => {
 		await signIn(page, applicant);
 		await page.goto(`${A.portal_url}/deploy-gos`);
-		await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible({ timeout: 60_000 });
+		await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible({
+			timeout: 60_000
+		});
 		await submitCode(page, code());
 		await expect(page.locator('.invitation-error')).toHaveText(message, { timeout: 60_000 });
 		await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible();
 		await snap(page, 'refused');
+		// The screen's text for a wrong code is also the portal's fallback: the registry's own reply settles it.
+		expect(await (await registryAs(applicant)).redeem_invitation_code(code())).toEqual({
+			Err: message
+		});
 		expect(await activationOf(applicant), 'still not activated').toBe('not_activated');
 		expect(await creditsOf(applicant), 'credits unchanged').toBe(0);
 	});
@@ -184,7 +217,9 @@ test('a valid code, typed in lower case, activates the account, adds its credits
 }) => {
 	await signIn(page, applicant);
 	await page.goto(`${A.portal_url}/deploy-gos`);
-	await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible({ timeout: 60_000 });
+	await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible({
+		timeout: 60_000
+	});
 	await submitCode(page, A.valid_code.toLowerCase());
 	await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible({ timeout: 60_000 });
 	await expect(page.getByRole('heading', { name: 'Invitation Required' })).toHaveCount(0);
@@ -211,13 +246,17 @@ test('the billing tab offers no card payment', async ({ page }) => {
 	expect(cardRequests, 'no card flow was started').toEqual([]);
 });
 
-test('a code redeemed in the dashboard activates the account and shows the voucher box', async ({ page }) => {
+test('a code redeemed in the dashboard activates the account and shows the voucher box', async ({
+	page
+}) => {
 	const second = Ed25519KeyIdentity.generate();
 	await signIn(page, second);
 	await page.goto(`${A.portal_url}/my-dashboard?tab=billing`);
 	await page.getByPlaceholder('Enter your invitation code').fill(A.dashboard_code);
 	await page.getByRole('button', { name: 'Redeem', exact: true }).click();
-	await expect(page.getByText(`Account activated, ${INVITATION_CREDITS} credits added`)).toBeVisible({ timeout: 60_000 });
+	await expect(
+		page.getByText(`Account activated, ${INVITATION_CREDITS} credits added`)
+	).toBeVisible({ timeout: 60_000 });
 	await expect(page.getByRole('heading', { name: 'Redeem Voucher' })).toBeVisible();
 	await expect(page.getByRole('link', { name: REQUEST_LINK })).toHaveCount(0);
 	await snap(page, 'dashboard-activated');
@@ -228,13 +267,17 @@ test('a code redeemed in the dashboard activates the account and shows the vouch
 test('request_deployment refuses a principal that is not activated', async () => {
 	const stranger = Ed25519KeyIdentity.generate();
 	const reply = JSON.parse(
-		await (await registryAs(stranger)).request_deployment(JSON.stringify({ name: 'no-invitation', network: 'local' }))
+		await (
+			await registryAs(stranger)
+		).request_deployment(JSON.stringify({ name: 'no-invitation', network: 'local' }))
 	);
 	expect(reply.success).toBe(false);
 	expect(reply.error).toMatch(/not activated/);
 });
 
-test('the activated applicant launches a realm, which costs its price in credits', async ({ page }) => {
+test('the activated applicant launches a realm, which costs its price in credits', async ({
+	page
+}) => {
 	test.setTimeout(30 * 60 * 1000);
 	await signIn(page, applicant);
 	await page.goto(`${A.portal_url}/deploy-gos`);
@@ -261,7 +304,9 @@ test('the activated applicant launches a realm, which costs its price in credits
 	await snap(page, 'review');
 	await launch.click();
 	await page.waitForURL(/\/my-dashboard\/deployments\?job=/, { timeout: 120_000 });
-	await expect(page.getByRole('link', { name: /Visit Realm/ })).toBeVisible({ timeout: 20 * 60 * 1000 });
+	await expect(page.getByRole('link', { name: /Visit Realm/ })).toBeVisible({
+		timeout: 20 * 60 * 1000
+	});
 	await snap(page, 'realm-live');
 	expect(await creditsOf(applicant), 'the realm took its price').toBe(INVITATION_CREDITS - price);
 });

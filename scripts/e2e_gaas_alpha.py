@@ -5,7 +5,7 @@ Alpha is how staging and production run: access by invitation code, no card bill
 Through the GaaS multisig (the deployer is its signer on a local stack) this sets the registry the way a
 controller does there (docs/INVITATIONS.md of gos-as-a-service): invitation mode on, card billing off, the
 Internet Identity bypass off (the portal ignores invitation mode while it is on), and credits taken for a
-deployment (can_test_mode off). The flags are read back. Then it creates the invitation codes the spec uses,
+deployment (can_test_mode off). The settings are read back. Then it creates the invitation codes the spec uses,
 as scripts/invite.py does, all of 50 credits: two good ones (one for the invitation gate, one for the dashboard),
 one that has expired, and one more for the spec to use up before it tries it again.
 
@@ -34,6 +34,10 @@ import invite  # noqa: E402  (found through GAAS_DIR)
 # What staging runs: every test flag off but the card billing one.
 FLAGS = {"test_mode": False, "ii_bypass": False, "user_self_registration": False, "skip_terms": False,
          "disable_card_billing": True}
+# Where get_runtime_flags reports each of them.
+RUNTIME_KEY = {"test_mode": "test_mode", "ii_bypass": "test_mode_ii_bypass",
+               "user_self_registration": "test_mode_user_self_registration", "skip_terms": "test_mode_skip_terms",
+               "disable_card_billing": "test_mode_disable_card_billing"}
 CREDITS = 50
 DAY = 86400
 
@@ -48,20 +52,24 @@ def create_invitation(project: Path, identity: str, multisig: str, registry: str
     return code
 
 
+def runtime_flags(project: Path, identity: str, registry: str) -> dict:
+    """The registry's get_runtime_flags, parsed out of icp's Candid text: ("{\\"success\\":true,...}")."""
+    out = call(project, identity, registry, "get_runtime_flags", "()", query=True)
+    text = re.fullmatch(r'\s*\(\s*"(.*)"\s*,?\s*\)\s*', out, re.S).group(1)
+    return json.loads(json.loads(f'"{text}"'))
+
+
 def check_alpha_mode(project: Path, identity: str, registry: str):
-    """Read the flags back: a proposal that the registry refused still counts as executed."""
+    """Read the settings back: a proposal that the registry refused still counts as executed."""
     mode = call(project, identity, registry, "get_invitation_mode", "()", query=True)
-    flags = call(project, identity, registry, "get_runtime_flags", "()", query=True)
+    flags = runtime_flags(project, identity, registry)
     env = call(project, identity, registry, "get_env_config", "()", query=True)
-    expected = {
-        "invitation mode on": '"enabled"' in mode,
-        "card billing off": '\\"test_mode_disable_card_billing\\":true' in flags,
-        "Internet Identity bypass off": '\\"test_mode_ii_bypass\\":false' in flags,
-        "credits taken for a deployment": '\\"can_test_mode\\":false' in env,
-    }
-    missing = [name for name, ok in expected.items() if not ok]
-    if missing:
-        raise SystemExit(f"the registry is not in Alpha mode ({', '.join(missing)}): {mode} {flags} {env}")
+    expected = {f"flag {name}": flags.get(RUNTIME_KEY[name]) is value for name, value in FLAGS.items()}
+    expected["invitation mode on"] = '"enabled"' in mode
+    expected["credits taken for a deployment"] = '\\"can_test_mode\\":false' in env
+    wrong = [name for name, ok in expected.items() if not ok]
+    if wrong:
+        raise SystemExit(f"the registry is not in Alpha mode ({', '.join(wrong)}): {mode} {flags} {env}")
 
 
 def main():

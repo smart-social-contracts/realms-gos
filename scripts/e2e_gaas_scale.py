@@ -7,7 +7,7 @@ identity is the same every run), which the spec redeems as the founder before la
 one for the journey, one for the #58 check.
 
     python3 scripts/e2e_gaas_scale.py --out /tmp/e2e/gaas.json
-    GAAS_JSON=/tmp/e2e/gaas.json npx playwright test -c playwright.gaas.config.ts   (src/realm_frontend)
+    GAAS_JSON=/tmp/e2e/gaas.json npx playwright test -c playwright.gaas.config.ts scale.spec.ts   (src/realm_frontend)
 
 Inputs: ``--casals-home`` (default ``$CASALS_HOME`` or ``~/casals-home``), ``--identity`` (default local-dev).
 """
