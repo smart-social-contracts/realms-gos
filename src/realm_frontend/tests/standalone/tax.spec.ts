@@ -45,6 +45,7 @@ const officer = person(51);
 const outsider = person(52);
 
 const SYMBOL = 'E2E';
+// A seat of the Economy department, which only the syntropia codex seeds.
 const SEAT = 'economy.finance_officer';
 const LEDGER_FEE = 10_000n;
 // What each tax of the policy asks, in the token's smallest unit.
@@ -129,6 +130,7 @@ async function payTo(invoice: Invoice, payer: Ed25519KeyIdentity) {
 	const shown = (
 		mine.invoices as { id: string; pay_to: { owner: string; subaccount: string } }[]
 	).find((i) => i.id === invoice.id);
+	expect(shown, `${invoice.id} is in ${principal(payer)}'s invoices`).toBeDefined();
 	return shown!.pay_to;
 }
 
@@ -227,7 +229,7 @@ test('the finance officer cannot bill a tax the members declare, or one the poli
 });
 
 test('the finance officer assesses the members', async () => {
-	const out = (await done(realm, 'tax_assess', { period: PERIOD }, officer)) as unknown as Assessed;
+	const out = await done<Assessed>(realm, 'tax_assess', { period: PERIOD }, officer);
 	// Residence: everyone but the administrator. Levy: everyone.
 	const members = (await rows<{ id: string; status: string }>(realm, 'Member')).filter(
 		(m) => m.status === 'active'
@@ -253,12 +255,7 @@ test('the finance officer assesses the members', async () => {
 
 test('assessing the same period again bills nobody twice', async () => {
 	await leavesUnchanged(realm, TAX_ROWS, async () => {
-		const out = (await done(
-			realm,
-			'tax_assess',
-			{ period: PERIOD },
-			officer
-		)) as unknown as Assessed;
+		const out = await done<Assessed>(realm, 'tax_assess', { period: PERIOD }, officer);
 		expect(out.count).toBe(0);
 		expect(out.skipped).toBeGreaterThan(0);
 	});
@@ -286,7 +283,8 @@ test('a member pays the residence tax and the treasury receives it', async ({ pa
 		await line.getByRole('button', { name: /Pay/ }).click();
 		await expect(app.getByText(target.owner).first()).toBeVisible();
 		await snap(page, 'how to pay');
-		// The dialog is taller than the window, so its top-right cross is the control that can be reached.
+		// The dialog is taller than the window, so its Close button is out of reach (realms-extensions#41): use the
+		// cross at its top.
 		await app.getByRole('button', { name: '×', exact: true }).click();
 
 		await transfer(realm, resident, target, BigInt(RESIDENCE));

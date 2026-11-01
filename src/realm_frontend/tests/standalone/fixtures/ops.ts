@@ -28,15 +28,15 @@ export async function row<T extends { id: string }>(
 }
 
 /** Calls `op` as `who` and expects the realm to have done it. */
-export async function done(
+export async function done<T = Reply>(
 	realm: StandaloneRealm,
 	op: string,
 	args: Record<string, unknown>,
 	who: Ed25519KeyIdentity
-): Promise<Reply> {
+): Promise<T> {
 	const reply: Reply = await runOp(realm, op, args, who);
 	expect(reply.ok, `${op}: ${reply.error}`).toBe(true);
-	return reply;
+	return reply as T;
 }
 
 /** Calls `op` as `who` and expects the realm to have refused it with a message that says why. */
