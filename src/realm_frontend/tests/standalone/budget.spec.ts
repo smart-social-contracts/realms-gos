@@ -5,13 +5,17 @@
 //
 // The journey: the realm opens a fiscal period and adopts a rule that splits what the treasury receives between two
 // department funds; a payment is made and the funds are credited; a budget is adopted for the Infrastructure fund; the
-// founder spends from the fund on the vault page, within the budget; an overspend is refused; a vote gives the second
-// member the finance role, with which they amend the budget, and a vote takes it away again. After each refusal the
+// founder spends from the fund on the vault page, within the budget; an overspend is refused; the administrator gives
+// the second member the finance role, with which they amend the budget, and takes it away again. After each refusal the
 // realm's rows are what they were.
 //
-// A vote installs the budget_manager extension, but its page cannot run on this realm (see the fixme below), so the
-// steps it should offer are the realm's operations called as the member who would call them. Spending has a page:
-// the vault's. What a step did is read back from the realm, not from the page's text.
+// The realm's decisions are taken by its administrator alone, a 1 of 1 policy, so the role and the extension need no
+// vote here. The specs before this one have made members, and a realm-wide proposal needs more than half of them: the
+// founder and the second member alone can no longer carry a vote. proposals.spec.ts covers the votes.
+//
+// The administrator installs the budget_manager extension, but its page cannot run on this realm (see the fixme
+// below), so the steps it should offer are the realm's operations called as the member who would call them. Spending
+// has a page: the vault's. What a step did is read back from the realm, not from the page's text.
 //
 // The tests share one realm and run in this order. A realm has one fiscal period open at a time: a second run on
 // the same realm books into the first run's period, and its funds keep what the first run left.
@@ -143,22 +147,6 @@ async function adoptedBudget(): Promise<Budget | undefined> {
 /** What `fund` holds of the ledger's token. */
 async function held(fund: string): Promise<number> {
 	return (await row<Fund>('Fund', fund)).balances[SYMBOL] ?? 0;
-}
-
-/** Passes a realm-wide proposal of `op`: the founder files it and both members vote yes. */
-async function passByVote(title: string, op: string, args: Record<string, unknown>) {
-	const filed = await done(
-		'proposal_create',
-		{ title: `${title} ${RUN}`, action: { op, args } },
-		founder()
-	);
-	const id = filed.proposal as string;
-	for (const voter of [founder(), member]) {
-		const vote = await done('proposal_vote', { proposal: id, choice: 'yes' }, voter);
-		if (vote.status) break;
-	}
-	const { proposal } = await readOp(realm, 'proposal_get', { proposal: id }, founder());
-	expect((proposal as { status: string }).status, `${title} ran`).toBe('executed');
 }
 
 // What the journey goes through, one test after the other.
@@ -377,17 +365,14 @@ test('a payment the fund cannot cover is refused and moves nothing', async ({ pa
 	});
 });
 
-test('a vote gives the member the finance role, with which they amend the budget; a vote takes it away', async () => {
+test('the administrator gives the member the finance role, with which they amend the budget, and takes it away', async () => {
 	const profile = 'economy.finance_officer';
 	const amend = { budget, planned: 400_000 };
 	await leavesUnchanged(['Budget'], async () => {
 		await refused('budget_amend', amend, member, /needs org\.manage_budget/);
 	});
 
-	await passByVote('Make the member a finance officer', 'role_assign', {
-		user: principal(member),
-		profile
-	});
+	await done('role_assign', { user: principal(member), profile }, founder());
 	const spentSoFar = (await row<Budget>('Budget', budget)).actual;
 	const amended = await done('budget_amend', amend, member);
 	expect(amended.amends).toBe(budget);
@@ -400,10 +385,7 @@ test('a vote gives the member the finance role, with which they amend the budget
 		status: 'adopted'
 	});
 
-	await passByVote('Take the finance role from the member', 'role_revoke', {
-		user: principal(member),
-		profile
-	});
+	await done('role_revoke', { user: principal(member), profile }, founder());
 	await leavesUnchanged(['Budget'], async () => {
 		await refused(
 			'budget_amend',
@@ -414,12 +396,9 @@ test('a vote gives the member the finance role, with which they amend the budget
 	});
 });
 
-test('a vote installs budget_manager from the registry', async () => {
+test('the administrator installs budget_manager from the registry', async () => {
 	const version = extensionVersion('budget_manager');
-	await passByVote('Install budget_manager', 'extension_install', {
-		extension: 'budget_manager',
-		version
-	});
+	await done('extension_install', { extension: 'budget_manager', version }, founder());
 	const listed = await readOp(realm, 'extension_list', { from: 1, count: 500 }, founder());
 	const installed = (listed.extensions as { id: string; version: string }[]).find(
 		(e) => e.id === 'budget_manager'

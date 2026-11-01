@@ -228,10 +228,19 @@ test('a realm-wide vote is voted and executed', async ({ page }) => {
 		await snap(page, 'proposed');
 
 		await bothVoteYes(page, ballot);
-		const closed = voting.getByText('Realm-wide vote passed.');
+		// A page whose translations load late starts the tab over, on its list of votes: the vote is opened again
+		// before it is finalized, and the realm tells whether finalizing worked.
+		const finalize = voting.getByRole('button', { name: 'Finalize tally' });
 		await expect(async () => {
-			await voting.getByRole('button', { name: 'Finalize tally' }).click();
-			await expect(closed).toBeVisible({ timeout: 5_000 });
+			if ((await proposalStatus(ballot)) !== 'voting') return;
+			if (!(await finalize.isVisible())) {
+				await voting
+					.getByRole('button', { name: 'Open', exact: true })
+					.first()
+					.click({ timeout: 5_000 });
+			}
+			await finalize.click({ timeout: 5_000 });
+			await expect.poll(() => proposalStatus(ballot), { timeout: 10_000 }).not.toBe('voting');
 		}, 'the vote can be finalized once its deadline has passed').toPass({
 			timeout: 120_000,
 			intervals: [5_000]
