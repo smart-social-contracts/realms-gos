@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# e2e_gaas.sh — the gos.earth journey in a browser (GaaS portal, a realm born through it) on a local
-# replica, from a clean checkout to a Playwright report.
+# e2e_gaas.sh — the gos.earth journey in a browser (GaaS portal, a realm born through it), and the same portal
+# as an Alpha visitor sees it (invitation codes, no card billing), on a local replica, from a clean checkout to
+# Playwright reports.
 #
-#   scripts/e2e_gaas.sh                 # build, bring the stack up, run the spec (CI: ~33 min)
+#   scripts/e2e_gaas.sh                 # build, bring the stack up, run both specs
 #   scripts/e2e_gaas.sh --headed        # extra args go to `playwright test`
-#   SKIP_STACK=1 scripts/e2e_gaas.sh    # the stack is already up (a re-run): only prepare the portal, run the spec
+#   SKIP_STACK=1 scripts/e2e_gaas.sh    # the stack is already up (a re-run): only prepare the portal, run the specs
 #
 # What it does:
 #   1. builds the realm (test variant: the portal's test mode needs deterministic identities), the extension
@@ -13,7 +14,10 @@
 #      installs releases everywhere, and the pinned ones do not work with each other or with the slim realm),
 #   3. scripts/local_up.sh --gaas: the product and GaaS orchestras on the local replica,
 #   4. scripts/e2e_gaas_scale.py: the portal's test mode and a voucher, written to GAAS_JSON,
-#   5. src/realm_frontend/tests/gaas/scale.spec.ts through playwright.gaas.config.ts.
+#   5. src/realm_frontend/tests/gaas/scale.spec.ts through playwright.gaas.config.ts,
+#   6. scripts/e2e_gaas_alpha.py: the registry in Alpha mode and its invitation codes, written to ALPHA_JSON,
+#   7. src/realm_frontend/tests/gaas/alpha.spec.ts, reported beside the first (test-results/gaas-alpha,
+#      playwright-report/gaas-alpha). Both run even if the first fails.
 #
 # Layout and environment: as scripts/local_up.sh (sibling checkouts of Casals, file-registry and
 # gos-as-a-service, or CASALS_DIR / FILE_REGISTRY_DIR / GAAS_DIR; CASALS_HOME; CASALS_REPLICA_PORT for a replica
@@ -71,6 +75,18 @@ fi
 say "The portal: test mode and a voucher"
 python3 "$REALMS_DIR/scripts/e2e_gaas_scale.py" --out "$GAAS_JSON"
 
-say "Playwright: the GaaS journey"
 cd "$REALMS_DIR/src/realm_frontend"
-npx playwright test -c playwright.gaas.config.ts "$@"
+status=0
+
+say "Playwright: the GaaS journey"
+npx playwright test -c playwright.gaas.config.ts scale.spec.ts "$@" || status=1
+
+say "The portal in Alpha: invitation mode on, card billing off"
+export ALPHA_JSON="$E2E_DIR/alpha.json"
+python3 "$REALMS_DIR/scripts/e2e_gaas_alpha.py" --out "$ALPHA_JSON"
+
+say "Playwright: the Alpha visitor"
+PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/gaas-alpha \
+  npx playwright test -c playwright.gaas.config.ts alpha.spec.ts --output test-results/gaas-alpha "$@" || status=1
+
+exit $status

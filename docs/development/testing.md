@@ -106,11 +106,14 @@ One command builds the realm, brings a local GaaS stack up and plays the whole j
 signs in on the portal, launches a realm (Alpha: credits, no payment), the founder finishes the setup wizard,
 members join through the Terms, a member files a proposal through the voting form, the members vote it and the
 realm's next quarter through, and the next member lands in the new quarter. A second test launches another realm and
-checks it is live only once its frontend serves (gos-as-a-service#58).
+checks it is live only once its frontend serves (gos-as-a-service#58). The same command then puts the registry in
+Alpha mode (invitation codes, no card billing) and plays the portal as an Alpha visitor sees it: the invitation gate,
+codes that are refused, a code that activates the account, no card payment, and a realm launched for its price in
+credits. [`src/realm_frontend/tests/gaas/README.md`](../../src/realm_frontend/tests/gaas/README.md) lists the specs.
 
 ```bash
-scripts/e2e_gaas.sh                 # about 33 minutes in CI: the stack about 23, the browser about 9
-SKIP_STACK=1 scripts/e2e_gaas.sh    # the stack is already up: a fresh voucher and the spec only
+scripts/e2e_gaas.sh                 # the stack about 30 minutes, the scale spec about 16, the Alpha spec about 4
+SKIP_STACK=1 scripts/e2e_gaas.sh    # the stack is already up: fresh vouchers and codes, and the specs only
 ```
 
 It needs sibling checkouts of Casals, file-registry and gos-as-a-service, both Casals and gos-as-a-service at main
