@@ -254,9 +254,9 @@ test('a non-member cannot file a case', async () => {
 	expect(await rows<Dispute>('Dispute')).toHaveLength(before);
 });
 
-test.fixme('a non-member who tries to file on the page is told why', // The page says "Private filing is not available right now: the realm's key service did not respond", when the
-// realm refused because the visitor is not a member. Nothing is filed.
-async ({ page }) => {
+// realms-extensions#38: the page says "Private filing is not available right now: the realm's key service did not
+// respond" when the realm refused because the visitor is not a member. Nothing is filed.
+test.fixme('a non-member who tries to file on the page is told why', async ({ page }) => {
 	const { app, close } = await justiceOf(page, outsider);
 	try {
 		await app.getByRole('button', { name: 'Create litigation', exact: true }).click();
@@ -364,7 +364,9 @@ test('someone who is not the case judge cannot issue a verdict', async ({ page }
 	await refused('verdict_draft', { case: caseId, decision: 'x' }, defendant, /you are a party/);
 });
 
-test.fixme('a refused verdict leaves nothing behind', async () => { // case moves to in progress. // Execute Verdict drafts the verdict, then issues it: when the issue is refused the draft stays and the
+// realms-extensions#37: Execute Verdict drafts the verdict, then issues it. When the issue is refused the draft stays
+// and the case moves to in progress.
+test.fixme('a refused verdict leaves nothing behind', async () => {
 	const verdicts = (await rows<Verdict>('Verdict')).filter((v) => v.case === caseId);
 	expect(verdicts).toHaveLength(0);
 	expect((await row<Case>('Case', caseId)).status).toBe('assigned');
@@ -388,8 +390,9 @@ test('the judge issues the verdict', async ({ page }) => {
 	expect((await row<Case>('Case', caseId)).status).toBe('verdict_issued');
 });
 
-test.fixme('the case page shows its verdict to the judge', // a member holds it, so the judge who just ruled sees "No verdict yet." (and so do the parties). // The page reads verdicts with resolution_query, which needs resolution.query: neither the judge's seat nor
-async ({ page }) => {
+// realms-extensions#36: the page reads verdicts with resolution_query, which needs resolution.query. Neither the
+// judge's seat nor a member holds it, so the judge who just ruled sees "No verdict yet." (and so do the parties).
+test.fixme('the case page shows its verdict to the judge', async ({ page }) => {
 	const { app, close } = await justiceOf(page, judge);
 	try {
 		await openDispute(app, title);
@@ -449,9 +452,10 @@ test('a verdict with a fine records it and does not carry it out', async ({ page
 		status: 'pending',
 		invoice: ''
 	});
-	expect((await rows<{ payer: string }>('Invoice')).filter((i) => i.payer === fine.target)).toEqual(
-		[]
-	);
+	expect(
+		(await rows<{ reason: string }>('Invoice')).filter((i) => i.reason === `Penalty:${fine.id}`),
+		'no invoice yet'
+	).toEqual([]);
 
 	await refused('penalty_execute', { penalty: fine.id }, founder(), /is not final yet/);
 	await refused(
