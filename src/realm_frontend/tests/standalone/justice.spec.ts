@@ -30,14 +30,15 @@ test.beforeAll(() => {
 	realm = loadRealm();
 });
 
-// Titles are told apart by run, so the spec can be run again on the same realm.
+// Titles carry the run, so the runs of a realm's rows can be told apart.
 const RUN = Date.now().toString(36);
 
 const person = (seed: number) => Ed25519KeyIdentity.generate(new Uint8Array(32).fill(seed));
 const founder = () => founderIdentity(realm);
 const claimant = memberIdentity();
-// The defendant also serves the court as a clerk, so that what refuses them is the rule against a party acting in
-// their own case and not a missing permission.
+// The defendant is also a court clerk, who holds dispute.assign: when case_assign refuses them, it is the rule
+// against a party acting in their own case. (The realm words a party's refusal the same whether or not they hold the
+// permission, so the other refusals below do not tell the two apart.)
 const defendant = person(41);
 const judge = person(42);
 const outsider = person(43);
@@ -125,6 +126,14 @@ async function refused(
 	const reply: Reply = await runOp(realm, op, args, who);
 	expect(reply.ok, `${op} was refused`).toBe(false);
 	expect(reply.error).toMatch(why);
+}
+
+/** Runs `act` and expects the realm's rows of `entities` to be what they were: a refusal changes nothing. */
+async function leavesUnchanged(entities: string[], act: () => Promise<void>) {
+	const snapshot = () => Promise.all(entities.map((entity) => rows(entity)));
+	const before = await snapshot();
+	await act();
+	expect(await snapshot(), `${entities.join(', ')} are unchanged`).toEqual(before);
 }
 
 /** Passes a realm-wide proposal of `op`: the founder files it and every member votes yes. */
@@ -270,15 +279,13 @@ test.fixme('a non-member who tries to file on the page is told why', async ({ pa
 	}
 });
 
-test('only the justice department accepts a case into a court', async ({ page }) => {
-	await refused('dispute_accept', { dispute, court: communityCourt }, claimant, /you are a party/);
-	await refused('dispute_accept', { dispute, court: communityCourt }, defendant, /you are a party/);
-	await refused(
-		'dispute_accept',
-		{ dispute, court: communityCourt },
-		judge,
-		/needs dispute\.accept/
-	);
+test('the parties and a judge cannot accept the case into a court', async ({ page }) => {
+	await leavesUnchanged(['Dispute', 'Case'], async () => {
+		const accept = { dispute, court: communityCourt };
+		await refused('dispute_accept', accept, claimant, /you are a party/);
+		await refused('dispute_accept', accept, defendant, /you are a party/);
+		await refused('dispute_accept', accept, judge, /needs dispute\.accept/);
+	});
 
 	const { app, close } = await justiceOf(page, claimant);
 	try {
@@ -332,10 +339,17 @@ test('a verdict before a judge is assigned is refused', async ({ page }) => {
 });
 
 test('the defendant cannot assign a judge to their own case', async () => {
-	await refused('case_assign', { case: caseId, judge: judgeSeat }, defendant, /you are a party/);
-	await refused('case_assign', { case: caseId, judge: judgeSeat }, claimant, /you are a party/);
-	// A judge of another court cannot be given the case either.
-	await refused('case_assign', { case: caseId, judge: supremeSeat }, founder(), /does not sit at/);
+	await leavesUnchanged(['Case'], async () => {
+		await refused('case_assign', { case: caseId, judge: judgeSeat }, defendant, /you are a party/);
+		await refused('case_assign', { case: caseId, judge: judgeSeat }, claimant, /you are a party/);
+		// A judge of another court cannot be given the case either.
+		await refused(
+			'case_assign',
+			{ case: caseId, judge: supremeSeat },
+			founder(),
+			/does not sit at/
+		);
+	});
 	expect((await row<Case>('Case', caseId)).status).toBe('filed');
 });
 
@@ -360,8 +374,11 @@ test('someone who is not the case judge cannot issue a verdict', async ({ page }
 	expect(verdicts.filter((v) => v.status === 'issued')).toHaveLength(0);
 
 	// The parties are not offered a verdict and the realm would refuse them.
-	await refused('verdict_draft', { case: caseId, decision: 'x' }, claimant, /you are a party/);
-	await refused('verdict_draft', { case: caseId, decision: 'x' }, defendant, /you are a party/);
+	await leavesUnchanged(['Verdict', 'Case'], async () => {
+		const draft = { case: caseId, decision: 'x' };
+		await refused('verdict_draft', draft, claimant, /you are a party/);
+		await refused('verdict_draft', draft, defendant, /you are a party/);
+	});
 });
 
 // realms-extensions#37: Execute Verdict drafts the verdict, then issues it. When the issue is refused the draft stays
@@ -419,7 +436,8 @@ test('a second verdict on a decided case is refused', async ({ page }) => {
 });
 
 // A fine is only carried out once its verdict is final, and a verdict is final 14 days after it was issued. The
-// penalty therefore waits: it is recorded, billed to no one and refused if asked for early.
+// penalty therefore waits: it is recorded, billed to no one and refused if asked for early. The second case runs
+// through the realm's operations because the verdict dialog has no penalty fields.
 test('a verdict with a fine records it and does not carry it out', async ({ page }) => {
 	const filed = await done(
 		'dispute_file',
@@ -465,6 +483,7 @@ test('a verdict with a fine records it and does not carry it out', async ({ page
 		/can be appealed until/
 	);
 	expect((await row<Penalty>('Penalty', fine.id)).status).toBe('pending');
+	expect((await row<Verdict>('Verdict', penaltyVerdict)).status).toBe('issued');
 
 	const { app, close } = await justiceOf(page, founder());
 	try {
@@ -479,19 +498,22 @@ test('a verdict with a fine records it and does not carry it out', async ({ page
 });
 
 test('a party appeals the verdict and the court above grants it', async ({ page }) => {
-	await refused('appeal_file', { verdict: penaltyVerdict }, founder(), /only a party/);
+	await leavesUnchanged(['Appeal', 'Case'], () =>
+		refused('appeal_file', { verdict: penaltyVerdict }, founder(), /only a party/)
+	);
 	const appealed = await done('appeal_file', { verdict: penaltyVerdict }, defendant);
 	const appeal = appealed.appeal as string;
 	expect(appealed.court).toBe(supremeCourt);
 	expect((await row<Case>('Case', penaltyCase)).status).toBe('appealed');
-	await refused('appeal_file', { verdict: penaltyVerdict }, claimant, /cannot be appealed/);
+	await leavesUnchanged(['Appeal', 'Case'], () =>
+		refused('appeal_file', { verdict: penaltyVerdict }, claimant, /cannot be appealed/)
+	);
+	expect((await rows<Appeal>('Appeal')).filter((a) => a.case === penaltyCase)).toHaveLength(1);
 
-	// The judge of the court below does not decide the appeal against their own verdict.
-	await refused(
-		'appeal_decide',
-		{ appeal, granted: true, decision: 'x' },
-		judge,
-		/needs appeal\.allow/
+	// A judge of the court below, who does not hold appeal.allow, cannot decide the appeal. (The rule that only a
+	// judge of the appeal court decides it is not exercised: the permission is checked first.)
+	await leavesUnchanged(['Appeal', 'Verdict', 'Case'], () =>
+		refused('appeal_decide', { appeal, granted: true, decision: 'x' }, judge, /needs appeal\.allow/)
 	);
 	await done('appeal_decide', { appeal, granted: true, decision: 'for the defendant' }, founder());
 
@@ -517,4 +539,10 @@ test('a party appeals the verdict and the court above grants it', async ({ page 
 	} finally {
 		await close();
 	}
+});
+
+// realms-gos#461: the fine of an overturned verdict is still pending, though its verdict can no longer become final.
+test.fixme('the fine of an overturned verdict is no longer pending', async () => {
+	const [fine] = (await rows<Penalty>('Penalty')).filter((p) => p.verdict === penaltyVerdict);
+	expect(fine.status).not.toBe('pending');
 });
