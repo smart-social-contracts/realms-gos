@@ -1,6 +1,6 @@
 // The gos.earth journey, end to end on a local stack. Run it with scripts/e2e_gaas.sh, which builds and
 // brings the stack up and prepares the portal (scripts/e2e_gaas_scale.py writes GAAS_JSON, with a voucher);
-// on a stack that is up, `npx playwright test -c playwright.gaas.config.ts` runs this file alone.
+// on a stack that is up, `npx playwright test -c playwright.gaas.config.ts scale.spec.ts` runs this file alone.
 // A visitor signs in on the portal and launches a realm (Alpha: credits, no payment); the founder walks the
 // setup wizard, choosing a voting window of zero (open until certain); registration is open and auto-scaling
 // on. Members join through the Terms until the capital is 90% full and the realm proposes its next quarter. A
