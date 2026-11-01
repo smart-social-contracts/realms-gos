@@ -244,7 +244,7 @@ test('a realm-wide vote is voted and executed', async ({ page }) => {
 });
 
 // The treasury pays through the realm's ledger. The fund is filled the way it is in life: an invoice is billed and
-// paid into the account the realm names, and the realm books it. (The ledger is the founder's to mint from.)
+// paid into the account the realm names, and the realm books it. (The test ledger lets anyone mint.)
 test('a treasury transaction is voted and executed', async ({ page }) => {
 	const founder = founderIdentity(realm);
 	const symbol = 'E2E';
@@ -258,10 +258,10 @@ test('a treasury transaction is voted and executed', async ({ page }) => {
 	await run('treasury_configure', { config: { source_fund: 'TREASURY' } });
 	const billed = await run('invoice_create', { payer: realm.founder, amount: 2_000_000, symbol });
 	const payTo = billed.pay_to as { owner: string; subaccount: string };
-	await mint(realm, founder, payTo, 2_000_000n);
+	await mint(realm, payTo, 2_000_000n);
 	// WORKAROUND for realms-gos #450: a fund pays out of the realm's own (default) account, and what an invoice
 	// receives sits in its subaccount, which nothing sweeps. Without this second mint the payout would find no tokens.
-	await mint(realm, founder, { owner: payTo.owner }, 2_000_000n);
+	await mint(realm, { owner: payTo.owner }, 2_000_000n);
 	await run('invoice_refresh', { invoice: billed.invoice });
 
 	const member = memberIdentity().getPrincipal().toText();
