@@ -74,6 +74,10 @@ def main():
 
     through_multisig(project, args.identity, multisig, registry, "set_canister_config_json",
                      {"network": "local", "test_flags": FLAGS})
+    # Alpha mode (scripts/e2e_gaas_alpha.py) may be left on by an earlier run of the same stack: no invitation
+    # needed, and no credits taken in test mode, as the local sheet sets them.
+    through_multisig(project, args.identity, multisig, registry, "set_invitation_mode", False)
+    through_multisig(project, args.identity, multisig, registry, "configure", {"can_test_mode": True})
     flags = call(project, args.identity, registry, "get_runtime_flags", "()", query=True)
     if '\\"test_mode_ii_bypass\\":true' not in flags:
         raise SystemExit(f"the portal's test mode did not turn on: {flags}")

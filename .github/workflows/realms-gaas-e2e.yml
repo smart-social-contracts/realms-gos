@@ -4,7 +4,8 @@ name: Realms GaaS E2E
 # portal, launches a realm (Alpha, credits only), the founder finishes the setup
 # wizard, members join through the Terms, vote a proposal and the next quarter
 # through, and the next member lands in the new quarter
-# (src/realm_frontend/tests/gaas/scale.spec.ts).
+# (src/realm_frontend/tests/gaas/scale.spec.ts); then the registry goes into Alpha mode and an applicant meets
+# the invitation gate, redeems codes and launches a realm (alpha.spec.ts).
 #
 # Not part of ci-pr.yml: the stack (product orchestra, GaaS orchestra, a realm built
 # by Casals, a quarter built by Casals) takes about 33 minutes (the stack about 23, Playwright about 9), too long for every
@@ -138,6 +139,8 @@ jobs:
           path: |
             realms/src/realm_frontend/playwright-report/gaas
             realms/src/realm_frontend/test-results/gaas
+            realms/src/realm_frontend/playwright-report/gaas-alpha
+            realms/src/realm_frontend/test-results/gaas-alpha
           if-no-files-found: ignore
           retention-days: 14
 
