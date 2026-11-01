@@ -1,0 +1,381 @@
+{
+  "version": 2,
+  "name": "realms-product",
+  "description": "Realms product orchestra: the marketplace, the fleet file registry (extensions, codices, catalogs), and the RLM token and NFT canisters.",
+  "environments": {
+    "local": {
+      "network": "local",
+      "dns": {
+        "provider": "none"
+      },
+      "marketplace_host": "",
+      "casals_host": "",
+      "principals": {
+        "operator": "$deployer"
+      },
+      "cycles": {
+        "budget_tc": 300
+      }
+    }
+  },
+  "conductor": {
+    "backend": {
+      "wasm": "casals-backend",
+      "kind": "backend",
+      "mode": "managed",
+      "controllers": [
+        "$multisig"
+      ]
+    },
+    "frontend": {
+      "wasm": "casals-frontend",
+      "kind": "frontend",
+      "mode": "managed",
+      "content": "frontend/casals-ui/main",
+      "files": {
+        "/.well-known/casals.json": "{\"orchestra\":\"realms-product\",\"conductor\":\"$self\"}\n"
+      },
+      "controllers": [
+        "$self",
+        "$multisig"
+      ]
+    },
+    "store": {
+      "wasm": "certified-assets@0.3.0",
+      "kind": "frontend",
+      "mode": "managed",
+      "controllers": [
+        "$self",
+        "$multisig"
+      ]
+    },
+    "commanders": [
+      {
+        "principal": "$principal:operator",
+        "permissions": "*"
+      }
+    ],
+    "settings": {
+      "orchestra_name": "realms-product"
+    }
+  },
+  "governance": {
+    "multisig": {
+      "wasm": "orchestration-multisig@1.8.0",
+      "kind": "backend",
+      "mode": "managed",
+      "signers": [
+        "$principal:operator"
+      ],
+      "threshold": 1,
+      "controllers": [
+        "$multisig",
+        "$deployer"
+      ]
+    }
+  },
+  "domains": [
+    {
+      "host": "$env.marketplace_host",
+      "canister": "marketplace-frontend"
+    },
+    {
+      "host": "$env.casals_host",
+      "canister": "casals-frontend"
+    }
+  ],
+  "registry": {
+    "wasms": [
+      {
+        "family": "casals-backend",
+        "version": "main",
+        "source": "release:smart-social-contracts/Casals@v0.7.0:casals_backend.wasm.gz",
+        "sha256": "122722ea253d45502ff13fb79e0b5e02c57bb7c5d1e578ee734c0987171cef3a"
+      },
+      {
+        "family": "certified-assets",
+        "version": "0.3.0",
+        "source": "release:smart-social-contracts/Casals@v0.7.0:certified-assets@0.3.0.wasm.gz",
+        "sha256": "75df75f39763077fd0333b4ac46ba03b2b23ec313fa85f79a2097bd98bb363d1"
+      },
+      {
+        "family": "ic-frontend",
+        "version": "1.0.1",
+        "source": "release:smart-social-contracts/ic-frontend@v1.0.1:ic-frontend@1.0.1.wasm.gz",
+        "sha256": "feec64ef3ae77608b7399866d678532d4956c09121d06e00fb3e3b57d4ad8939"
+      },
+      {
+        "family": "orchestration-multisig",
+        "version": "1.8.0",
+        "source": "release:smart-social-contracts/Casals@v0.7.0:orchestration-multisig@1.8.0.wasm.gz",
+        "sha256": "4e7c720ebfa77d6c75c4a54d7f8af91f532ce1ec2035f014e39a3396201af924"
+      },
+      {
+        "family": "file-registry",
+        "version": "main",
+        "source": "release:smart-social-contracts/file-registry@v0.1.2:file_registry.wasm.gz",
+        "sha256": "9e6d85c8bf4695b38c3ae63b62a2636d54c5849073cc97e98e95415e8d1a7d21"
+      },
+      {
+        "family": "marketplace-backend",
+        "version": "main",
+        "source": "release:smart-social-contracts/realms-gos@v0.7.0:marketplace-backend-v0.7.0.wasm.gz",
+        "sha256": "bd16ee7e3ef9ec7e988b9d81cf4430d880f9439f7019652744f137dc84fc4c7e"
+      },
+      {
+        "family": "token-backend",
+        "version": "0.6.0",
+        "source": "release:smart-social-contracts/ic-python-token@v0.6.0:token_backend.wasm.gz",
+        "sha256": "8a7723ad8a2ff61993d730a2bbd149b40725d4cf564e7e9ba142c84baca1cbc2"
+      },
+      {
+        "family": "nft-backend",
+        "version": "0.1.0",
+        "source": "release:smart-social-contracts/realms-gos@v0.7.0:nft-backend-v0.7.0.wasm.gz",
+        "sha256": "abea08d97de800d4e299545be786dd02c9c6a7d93aaccc3770a08c213dfa484b"
+      }
+    ],
+    "bundles": [
+      {
+        "path": "frontend/marketplace-assets/main",
+        "source": "release:smart-social-contracts/realms-gos@v0.7.0:marketplace-frontend-v0.7.0.tar.gz",
+        "sha256": "268eb829fc67b67600d9eb64414bcab11a2cc590b122a4c8a39161a76dd9bbe6"
+      },
+      {
+        "path": "frontend/file-registry-assets/main",
+        "source": "release:smart-social-contracts/file-registry@v0.1.2:file_registry_frontend.tar.gz",
+        "sha256": "2cfa18a7337d888a9a5f36811bce2447d5685279f900a176ad661bf86f54a55c"
+      },
+      {
+        "path": "frontend/casals-ui/main",
+        "source": "release:smart-social-contracts/Casals@v0.7.0:casals_frontend.tar.gz",
+        "sha256": "394c6325e24139ebace527d0e9347e14700822609a07d29821b3a17d2714a330"
+      }
+    ]
+  },
+  "sections": [
+    {
+      "name": "Product",
+      "description": "Marketplace (realmsgos.org), the fleet file registry, and the RLM token and NFT canisters. Realm stands are minted by GaaS, not by this orchestra.",
+      "stands": [
+        {
+          "name": "marketplace",
+          "canisters": [
+            {
+              "name": "marketplace-backend",
+              "kind": "backend",
+              "mode": "managed",
+              "wasm": "marketplace-backend@main",
+              "controllers": [
+                "$self",
+                "$multisig"
+              ],
+              "config": [
+                {
+                  "method": "set_file_registry_canister_id",
+                  "args": "$canister:fleet-file-registry",
+                  "converged_when": {
+                    "query": "get_file_registry_canister_id_q",
+                    "equals": "$canister:fleet-file-registry"
+                  }
+                },
+                {
+                  "method": "set_casals_frontend_canister_id",
+                  "args": "$canister:casals-frontend",
+                  "converged_when": {
+                    "query": "get_casals_frontend_canister_id_q",
+                    "equals": "$canister:casals-frontend"
+                  }
+                },
+                {
+                  "method": "admin_grant_publisher",
+                  "args": {
+                    "principal": "$principal:operator",
+                    "duration_seconds": 315360000,
+                    "note": "operator (sheet)",
+                    "reviewer": true
+                  },
+                  "converged_when": {
+                    "query": "admin_status",
+                    "contains": {
+                      "licensed": [
+                        "$principal:operator"
+                      ],
+                      "reviewers": [
+                        "$principal:operator"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "$comment": "First-party listings are created by the operator; this is the name the marketplace shows for it.",
+                  "method": "admin_set_developer_name",
+                  "args": {
+                    "principal": "$principal:operator",
+                    "name": "Realms GOS team"
+                  },
+                  "converged_when": {
+                    "query": "admin_status",
+                    "contains": {
+                      "names": [
+                        {
+                          "principal": "$principal:operator",
+                          "name": "Realms GOS team"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "marketplace-frontend",
+              "kind": "frontend",
+              "mode": "managed",
+              "wasm": "ic-frontend@1.0.1",
+              "controllers": [
+                "$self",
+                "$multisig"
+              ],
+              "content": "frontend/marketplace-assets/main",
+              "files": {
+                "/canister_ids.js": "globalThis.__CANISTER_IDS = {\"marketplace_backend\": \"$stand.backend\", \"file_registry\": \"$canister:fleet-file-registry\"};\n"
+              },
+              "health": [
+                {
+                  "http": "/index.html",
+                  "status": 200
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "file-registry",
+          "description": "Fleet registry: extension packages, codices, catalogs, and the approvals the marketplace stamps.",
+          "canisters": [
+            {
+              "name": "fleet-file-registry",
+              "public": true,
+              "kind": "backend",
+              "mode": "managed",
+              "wasm": "file-registry@main",
+              "controllers": [
+                "$self",
+                "$multisig"
+              ],
+              "config": [
+                {
+                  "method": "grant_publish",
+                  "args": {
+                    "namespace": "*",
+                    "principal": "$principal:operator"
+                  },
+                  "converged_when": {
+                    "query": "get_acl",
+                    "contains": {
+                      "*": [
+                        "$principal:operator"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "method": "grant_publish",
+                  "args": {
+                    "namespace": "_approvers",
+                    "principal": "$canister:marketplace-backend"
+                  },
+                  "converged_when": {
+                    "query": "get_acl",
+                    "contains": {
+                      "_approvers": [
+                        "$canister:marketplace-backend"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "method": "grant_publish",
+                  "args": {
+                    "namespace": "_granters",
+                    "principal": "$canister:marketplace-backend"
+                  },
+                  "converged_when": {
+                    "query": "get_acl",
+                    "contains": {
+                      "_granters": [
+                        "$canister:marketplace-backend"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "fleet-file-registry-frontend",
+              "kind": "frontend",
+              "mode": "managed",
+              "wasm": "ic-frontend@1.0.1",
+              "controllers": [
+                "$self",
+                "$multisig"
+              ],
+              "content": "frontend/file-registry-assets/main",
+              "files": {
+                "/canister_ids.js": "globalThis.__CANISTER_IDS = {\"file_registry\": \"$canister:fleet-file-registry\"};\n"
+              },
+              "health": [
+                {
+                  "http": "/index.html",
+                  "status": 200
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "token",
+          "canisters": [
+            {
+              "name": "token-backend",
+              "public": true,
+              "kind": "backend",
+              "mode": "managed",
+              "wasm": "token-backend@0.6.0",
+              "controllers": [
+                "$self",
+                "$multisig"
+              ],
+              "install_arg": "(record { name = \"Realms Token\"; symbol = \"REALMS\"; decimals = 8 : nat8; total_supply = 100_000_000_000_000_000 : nat; fee = 10_000 : nat; test = opt false })"
+            }
+          ]
+        },
+        {
+          "name": "nft",
+          "canisters": [
+            {
+              "name": "nft-backend",
+              "kind": "backend",
+              "mode": "managed",
+              "wasm": "nft-backend@0.1.0",
+              "controllers": [
+                "$self",
+                "$multisig"
+              ],
+              "install_arg": "(record { name = \"Realms NFT\"; symbol = \"RNFT\"; description = opt \"Realms NFT collection\"; supply_cap = null; test = opt false })"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "cycles": {
+    "min_balance_tc": 0.5,
+    "backend": {
+      "min_balance_tc": 1.0
+    },
+    "top_up_from": "$self",
+    "conductor_min_balance_tc": 5.0
+  }
+}

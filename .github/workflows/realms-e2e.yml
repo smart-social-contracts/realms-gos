@@ -1,6 +1,6 @@
 name: Realms E2E
 
-# The whole product orchestra is `casals.json`: the Casals e2e harness builds it
+# The whole product orchestra is `casals.local.json`: the Casals e2e harness builds it
 # from an empty replica with `casals up` and grades it (fresh, idempotent), then
 # the cross-quarter live suite runs against the converged demo realm. This
 # replaces the dfx-driven `ci_install_mundus.py` stages.
@@ -50,7 +50,7 @@ jobs:
           submodules: recursive
 
       # The fleet file registry (realm branding, extensions, catalogs) is the
-      # standalone file-registry canister; casals.json reads its wasm from
+      # standalone file-registry canister; casals.local.json reads its wasm from
       # ../file-registry/.basilisk (sibling checkout).
       - name: Checkout file-registry (fleet file registry wasm)
         uses: actions/checkout@v4
@@ -98,7 +98,7 @@ jobs:
           icp identity import local-dev --from-pem /tmp/local-dev.pem --storage plaintext
           test "$(icp identity principal --identity local-dev)" = "$(dfx identity get-principal --identity local-dev)"
 
-      # ── product wasms and dists referenced by casals.json as `local:` ───────
+      # ── product wasms and dists referenced by casals.local.json as `local:` ───────
       # scripts/up.sh owns the build recipes (fleet file registry wasm + UI,
       # realm backend/frontend as the variant environments.local.build_variant
       # declares, marketplace, token and nft wasms) so that CI, local_up.sh and a
@@ -178,13 +178,13 @@ jobs:
           CASALS_HOME: ${{ env.CASALS_HOME }}/realms-product
         run: |
           export TERM=xterm
-          python3 -m casals_cli.main -e local --identity local-dev export ../realms/casals.json > /tmp/export.json
+          python3 -m casals_cli.main -e local --identity local-dev export ../realms/casals.local.json > /tmp/export.json
           REALM_BACKEND_ID=$(python3 -c 'import json; print(json.load(open("/tmp/export.json")).get("bindings", {}).get("demo-backend", ""))')
           echo "REALM_BACKEND_ID=$REALM_BACKEND_ID" >> "$GITHUB_ENV"
           if [ -n "$REALM_BACKEND_ID" ]; then
             echo "demo-backend = $REALM_BACKEND_ID"
           else
-            echo "::notice::casals.json has no demo-backend; skipping the cross-quarter live tests"
+            echo "::notice::casals.local.json has no demo-backend; skipping the cross-quarter live tests"
           fi
 
       - name: cross-quarter live integration tests
@@ -210,8 +210,8 @@ jobs:
           CASALS_HOME: ${{ env.CASALS_HOME }}/realms-product
         run: |
           export TERM=xterm
-          python3 -m casals_cli.main -e local --identity local-dev show ../realms/casals.json || true
-          python3 -m casals_cli.main -e local --identity local-dev events ../realms/casals.json || true
+          python3 -m casals_cli.main -e local --identity local-dev show ../realms/casals.local.json || true
+          python3 -m casals_cli.main -e local --identity local-dev events ../realms/casals.local.json || true
 
       - name: Stop local replica
         if: always()

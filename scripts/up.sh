@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# up.sh — the Realms product orchestra (casals.json), end-to-end, in one command:
+# up.sh — the Realms product orchestra (casals.local.json, casals.json for production), end-to-end, in one command:
 #
 #   preflight → build → casals up → export → domains → publish → verify
 #
@@ -50,7 +50,6 @@ REALMS_DIR="${REALMS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ROOT="$(dirname "$REALMS_DIR")"
 CASALS_DIR="${CASALS_DIR:-$ROOT/Casals}"
 FILE_REGISTRY_DIR="${FILE_REGISTRY_DIR:-$ROOT/file-registry}"
-SHEET="$REALMS_DIR/casals.json"
 IC_PYTHON_TOKEN_VERSION="${IC_PYTHON_TOKEN_VERSION:-0.6.0}"
 IC_TOKENS_VERSION="${IC_TOKENS_VERSION:-0.1.0}"
 SCENARIOS="${SCENARIOS:-fresh,idempotent}"
@@ -98,6 +97,8 @@ confirm() { # confirm <prompt>  — true with --yes, else ask
 }
 
 [ -n "$ENV" ] || { usage >&2; die "-e/--env is required (local | production)"; }
+# One sheet per environment: the local one pins the ic-python-token wasm that production does not run yet.
+if [ "$ENV" = local ]; then SHEET="$REALMS_DIR/casals.local.json"; else SHEET="$REALMS_DIR/casals.json"; fi
 [ -f "$SHEET" ] || die "sheet not found: $SHEET"
 [ -f "$CASALS_DIR/casals_cli/main.py" ] || die "Casals checkout not found at $CASALS_DIR (set CASALS_DIR)"
 [ -f "$FILE_REGISTRY_DIR/Makefile" ] || die "file-registry checkout not found at $FILE_REGISTRY_DIR (set FILE_REGISTRY_DIR)"
