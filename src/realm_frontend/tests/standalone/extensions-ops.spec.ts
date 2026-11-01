@@ -445,22 +445,23 @@ const ROWS: Row[] = [
 		path: '/extensions/package_manager',
 		action: 'install an extension from the registry, then uninstall it',
 		expected: 'the realm lists the extension after the install and no longer after the uninstall',
-		run: async ({ page, app }) => {
+		run: async ({ page, app, frame }) => {
 			const id = 'hello_sandboxed';
 			const installed = async () => Object.keys(await installedExtensions());
 			await app.getByRole('tab', { name: /Available/ }).click();
 			await app.getByPlaceholder(/Search by name or ID/).fill(id);
 			await app
-				.locator('article', { hasText: id })
+				.getByRole('row', { name: new RegExp(id) })
 				.getByRole('button', { name: 'Install' })
 				.click();
 			await expect.poll(installed, { timeout: 60_000 }).toContain(id);
+			await closeDialog(frame);
 
 			await app.getByRole('tab', { name: /Installed/ }).click();
 			// The page asks to type the package id in a browser prompt.
 			page.once('dialog', (dialog) => dialog.accept(id));
 			await app
-				.locator('article', { hasText: id })
+				.getByRole('row', { name: new RegExp(id) })
 				.getByRole('button', { name: 'More actions' })
 				.click();
 			await app.getByRole('button', { name: /Uninstall/ }).click();
