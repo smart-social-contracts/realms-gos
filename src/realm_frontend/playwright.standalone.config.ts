@@ -21,7 +21,8 @@ export default defineConfig({
 		headless: true,
 		viewport: { width: 1280, height: 900 }
 	},
-	// The specs share one realm and run in this order: the wizard launches it, the others use it.
+	// The specs share one realm, which the wizard spec launches and the others use. That works only because there is
+	// one worker and the projects run in this list's order: a failure of the wizard spec shows up in all of them.
 	projects: ['wizard', 'proposals', 'extensions-ops'].map((name) => ({
 		name,
 		testMatch: `${name}.spec.ts`,

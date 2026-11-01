@@ -134,6 +134,9 @@ test('a second member joins through the Terms step', async ({ page }) => {
 
 		// The codex opens registration, so no invitation code is needed.
 		await frame.getByRole('button', { name: 'Join Realm' }).click();
+		await expect(frame.getByText(/You've successfully joined the realm/)).toBeVisible({
+			timeout: 120_000
+		});
 
 		await expect
 			.poll(async () => (await readOp(realm, 'me', {}, member)).user, {
