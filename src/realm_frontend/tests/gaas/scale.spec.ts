@@ -206,7 +206,7 @@ function noteWorkaround(description: string) {
  */
 async function pickTestIdentity(page: Page, frame: FrameLocator, seat: number) {
 	const picker = frame.locator('#join-custom-identity-number');
-	// Now and then the page stays on "Signing you in" (realms-gos issue "Join page stays on "Signing you in""):
+	// Now and then the page stays on "Signing you in" (realms-gos#449):
 	// load it again, and say so in the report, so the workaround cannot hide how often it happens.
 	let attempts = 0;
 	await expect(async () => {
