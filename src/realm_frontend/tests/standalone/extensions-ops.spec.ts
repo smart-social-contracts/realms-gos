@@ -78,6 +78,9 @@ async function installedExtensions(): Promise<Record<string, string>> {
 const principalOf = (seed: number) =>
 	Ed25519KeyIdentity.generate(new Uint8Array(32).fill(seed)).getPrincipal().toText();
 
+// The department the founder sits in, for the department_docs row.
+let library = '';
+
 const ROWS: Row[] = [
 	{
 		id: 'public_dashboard',
@@ -177,6 +180,9 @@ const ROWS: Row[] = [
 		run: async ({ app }) => {
 			await expect(app.getByText('syntropia').first()).toBeVisible();
 			await expect(app.getByText('Active').first()).toBeVisible();
+			const status = await readOp(realm, 'codex_status', { count: 1 }, founderIdentity(realm));
+			expect(status.codex).toMatchObject({ status: 'active' });
+			expect((status.codex as { id: string }).id).toMatch(/^syntropia@/);
 		}
 	},
 	{
@@ -375,7 +381,13 @@ const ROWS: Row[] = [
 			await app.getByPlaceholder('User ID').fill(realm.founder);
 			await app.getByRole('button', { name: 'Register parcel' }).click();
 			await expect(app.getByText(/Parcel \S+ registered\./)).toBeVisible();
-			expect(await rows('Land')).not.toHaveLength(0);
+			const parcels = await rows('Land');
+			expect(parcels).toContainEqual(
+				expect.objectContaining({
+					owner: `User:${realm.founder}`,
+					metadata: { name: 'Town square' }
+				})
+			);
 		}
 	},
 	{
@@ -414,7 +426,8 @@ const ROWS: Row[] = [
 		// Documents belong to a department: the founder takes a seat in a new one.
 		setup: async () => {
 			const founder = founderIdentity(realm);
-			const department = `Library ${Date.now()}`;
+			library = `Library ${Date.now()}`;
+			const department = library;
 			await runOp(realm, 'department_create', { department }, founder);
 			await runOp(
 				realm,
@@ -438,6 +451,17 @@ const ROWS: Row[] = [
 			await app.getByPlaceholder(/Document body/).fill('The library opens at nine.');
 			await app.getByRole('button', { name: 'Encrypt & share' }).click();
 			await expect(app.getByText(title).first()).toBeVisible();
+			await expect
+				.poll(async () => {
+					const listed = await readOp(
+						realm,
+						'document_list',
+						{ department: library },
+						founderIdentity(realm)
+					);
+					return (listed.documents as { title: string }[]).map((d) => d.title);
+				})
+				.toContain(title);
 		}
 	},
 	{

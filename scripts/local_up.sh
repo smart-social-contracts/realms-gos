@@ -8,7 +8,7 @@
 # converges through the Casals e2e harness, then `realms files publish`.
 # Nothing
 # here touches mainnet or a YubiKey: the identity is the plaintext `local-dev`
-# key, the environment is casals.json `environments.local`. The replica
+# key, the environment is casals.local.json `environments.local`. The replica
 # defaults to icp's implicit `local` network on port 8000. To run beside
 # another replica on the same laptop (a corpus, a second local_up):
 #
@@ -17,6 +17,7 @@
 #   scripts/local_up.sh              # build everything, up, grade, publish the catalog, print URLs
 #   scripts/local_up.sh --gaas       # ... plus the GaaS orchestra (portal, installer, registry)
 #                                    #   and one realm born through the portal path
+#   scripts/local_up.sh --no-realm   # with --gaas: do not mint the first realm (a spec launches its own)
 #   scripts/local_up.sh --skip-build # reuse the last build
 #   scripts/local_up.sh --skip-publish   # provision only (empty registries / marketplace)
 #   scripts/local_up.sh --urls       # only print the URLs of a running stand
@@ -49,11 +50,12 @@ export DFX_WARNING=-mainnet_plaintext_identity
 export CASALS_E2E_ENV=local
 export CASALS_E2E_IDENTITY="$IDENTITY"
 
-WITH_GAAS=0 SKIP_BUILD=0 SKIP_PUBLISH=0 ONLY_URLS=0 DOWN=0
+WITH_GAAS=0 NO_REALM=0 SKIP_BUILD=0 SKIP_PUBLISH=0 ONLY_URLS=0 DOWN=0
 REPLICA_PORT_ARG=""
 for arg in "$@"; do
   case "$arg" in
     --gaas) WITH_GAAS=1 ;;
+    --no-realm) NO_REALM=1 ;;
     --skip-build) SKIP_BUILD=1 ;;
     --skip-publish) SKIP_PUBLISH=1 ;;
     --urls) ONLY_URLS=1 ;;
@@ -184,7 +186,7 @@ if [ "$ONLY_URLS" = 1 ]; then
     . "$CASALS_HOME/.replica/env"
     set +a
   fi
-  print_urls realms-product "$REALMS_DIR/casals.json" "Realms product orchestra"
+  print_urls realms-product "$REALMS_DIR/casals.local.json" "Realms product orchestra"
   print_urls gaas "$GAAS_SHEET" "GaaS orchestra (portal + installer + realms born through it)"
   print_portal_links
   exit 0
@@ -288,7 +290,9 @@ if [ "$WITH_GAAS" = 1 ]; then
   # A realm is born the way the portal wizard does it: request_deployment on
   # the registry → installer create_stand → the conductor builds the stand from
   # the `Deployments` template → the realm frontend serves /canister_ids.js.
-  if casals_export gaas "$GAAS_SHEET" | python3 -c '
+  if [ "$NO_REALM" = 1 ]; then
+    say "No first realm (--no-realm)"
+  elif casals_export gaas "$GAAS_SHEET" | python3 -c '
 import json, sys; sys.exit(0 if sys.argv[1] + "-backend" in json.load(sys.stdin).get("bindings", {}) else 1)' "$REALM_NAME"; then
     say "Realm '$REALM_NAME' already exists on the GaaS orchestra; skipping the portal path"
   else
@@ -300,7 +304,7 @@ fi
 
 # ── URLs ──────────────────────────────────────────────────────────────────────
 say "Ready. Open in the browser (Chrome/Firefox resolve *.localhost; Safari does not):"
-print_urls realms-product "$REALMS_DIR/casals.json" "Realms product orchestra"
+print_urls realms-product "$REALMS_DIR/casals.local.json" "Realms product orchestra"
 if [ "$WITH_GAAS" = 1 ]; then
   print_urls gaas "$GAAS_SHEET" "GaaS orchestra (portal + installer + realms born through it)"
   print_portal_links
@@ -310,7 +314,7 @@ cat <<EOF
   Also:
     scripts/local_up.sh --urls                                       # print these again
     (cd $CASALS_DIR && CASALS_HOME=$CASALS_HOME/realms-product \\
-       python3 -m casals_cli.main -e local --identity $IDENTITY show|plan|oracle $REALMS_DIR/casals.json)
+       python3 -m casals_cli.main -e local --identity $IDENTITY show|plan|oracle $REALMS_DIR/casals.local.json)
     scripts/local_up.sh --down                                       # stop the replica, forget bindings
     tail -f $LOG_DIR/latest.log                                      # same stream as this console
 EOF

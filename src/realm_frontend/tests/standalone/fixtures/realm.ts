@@ -4,7 +4,7 @@
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import type { FrameLocator, Page } from '@playwright/test';
+import { test, type FrameLocator, type Page } from '@playwright/test';
 import { Actor, HttpAgent } from '@dfinity/agent';
 import { DelegationChain, Ed25519KeyIdentity } from '@dfinity/identity';
 
@@ -19,6 +19,8 @@ export interface StandaloneRealm {
 	founder: string;
 	founder_seed: string;
 	name: string;
+	/** The icp identity that deployed the realm (a standalone realm's file names it). */
+	identity?: string;
 	codex?: string;
 	extensions?: Record<string, string>;
 }
@@ -26,6 +28,11 @@ export interface StandaloneRealm {
 export function loadRealm(): StandaloneRealm {
 	const path = process.env.REALM_JSON || '/tmp/e2e/realm.json';
 	return JSON.parse(readFileSync(path, 'utf8')) as StandaloneRealm;
+}
+
+/** A local replica signs with a root key the agent must fetch; the live networks' key is built in. */
+export function needsRootKey(networkUrl: string): boolean {
+	return !networkUrl.startsWith('https://');
 }
 
 export function founderIdentity(realm: StandaloneRealm): Ed25519KeyIdentity {
@@ -103,25 +110,50 @@ export async function exposeSigner(page: Page, identity: Ed25519KeyIdentity): Pr
 	});
 }
 
+// Pages that saw a request fail with ERR_NETWORK_CHANGED since they were last opened, and pages reloaded for it since.
+const networkChanged = new WeakSet<Page>();
+const reloaded = new WeakSet<Page>();
+const watched = new WeakSet<Page>();
+
 /** Open `path` of the realm inside the portal host; returns the realm's frame. */
 export async function openInPortal(
 	page: Page,
 	realm: StandaloneRealm,
 	path: string
 ): Promise<{ frame: FrameLocator; close: () => Promise<void> }> {
+	if (!watched.has(page)) {
+		watched.add(page);
+		page.on('requestfailed', (request) => {
+			if (request.failure()?.errorText.includes('ERR_NETWORK_CHANGED')) networkChanged.add(page);
+		});
+	}
+	networkChanged.delete(page);
+	reloaded.delete(page);
 	const host = await startPortalHost(realm, path);
 	await page.goto(host.url);
 	return { frame: page.frameLocator('#realm'), close: host.close };
 }
 
 /**
- * Chromium reports a change of the host's network (a Docker veth coming or going) as a failed request, and the
- * realm then shows "Something went wrong" with a "Refresh page" button: load the page once more. Returns whether it
- * did. Only that page is retried: any other error stays visible to the test that meets it.
+ * Chromium reports a change of the host's network (a Docker veth coming or going) as a request failed with
+ * ERR_NETWORK_CHANGED, and the realm then shows "Something went wrong" with a "Refresh page" button. That is a
+ * problem of the machine, not of the realm: load the page once more and record that in the report. It does so only
+ * when such a request failed, and once per open of the page, so any other error stays visible to the test that
+ * meets it. Returns whether it reloaded.
  */
 export async function reloadIfInterrupted(page: Page, frame: FrameLocator): Promise<boolean> {
-	const refresh = frame.getByRole('button', { name: 'Refresh page' });
-	if (!(await refresh.isVisible().catch(() => false))) return false;
+	if (!networkChanged.has(page) || reloaded.has(page)) return false;
+	if (
+		!(await frame
+			.getByRole('button', { name: 'Refresh page' })
+			.isVisible()
+			.catch(() => false))
+	)
+		return false;
+	reloaded.add(page);
+	const description = `reloaded ${page.url()}: the host's network changed (ERR_NETWORK_CHANGED)`;
+	test.info().annotations.push({ type: 'workaround', description });
+	console.log(`[workaround] ${description}`);
 	await page.reload();
 	return true;
 }
@@ -144,7 +176,7 @@ async function callOp(
 	const agent = await HttpAgent.create({
 		host: realm.network_url,
 		identity,
-		shouldFetchRootKey: true
+		shouldFetchRootKey: needsRootKey(realm.network_url)
 	});
 	const actor = Actor.createActor<Record<OpKind, (n: string, a: string) => Promise<string>>>(
 		opsIdl as never,

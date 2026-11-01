@@ -21,17 +21,22 @@ import { snap } from './fixtures/snap';
 import { submitProposal, voteYes, type ProposalForm } from './fixtures/voting';
 
 let realm: StandaloneRealm;
-// Titles are told apart by run, so the spec can be run again on the same realm.
+// Titles are told apart by run.
 const RUN = Date.now().toString(36);
 
 test.beforeAll(() => {
 	realm = loadRealm();
 });
 
-async function proposalStatus(id: string): Promise<string> {
+async function proposalOf(id: string) {
 	const reply = await readOp(realm, 'proposal_get', { proposal: id }, founderIdentity(realm));
-	return (reply.proposal as { status: string }).status;
+	return {
+		status: (reply.proposal as { status: string }).status,
+		yes: (reply.tally as { yes: number }).yes
+	};
 }
+
+const proposalStatus = async (id: string) => (await proposalOf(id)).status;
 
 async function installedExtensions(): Promise<Record<string, string>> {
 	const listed = await readOp(
@@ -63,8 +68,8 @@ async function bothVoteYes(page: Page, id: string) {
 	try {
 		await voteYes(founder.app, id);
 		await expect
-			.poll(() => proposalStatus(id), { message: 'one vote of two members leaves it open' })
-			.toBe('voting');
+			.poll(() => proposalOf(id), { message: "the founder's yes is counted and leaves it open" })
+			.toEqual({ status: 'voting', yes: 1 });
 	} finally {
 		await founder.close();
 	}
@@ -172,7 +177,7 @@ test('a role assignment is voted and executed', async ({ page }) => {
 
 // The voting form files no release; the realm files one from any member's proposal. (The managed_services page
 // files it too, but only when the realm's own policy asks a vote for administrators' calls.)
-test('a Realms GOS release is voted and accepted', async ({ page }) => {
+test('a Realms GOS release is voted and executed', async ({ page }) => {
 	const version = `99.0.${Date.now()}`;
 	// The realm accepts a release only if its trust policy approves that module; the local realm asks no approval.
 	const moduleHash = `sha256:${'ab'.repeat(32)}`;
@@ -239,7 +244,7 @@ test('a realm-wide vote is voted and executed', async ({ page }) => {
 });
 
 // The treasury pays through the realm's ledger. The fund is filled the way it is in life: an invoice is billed and
-// paid into the account the realm names, and the realm books it. (The ledger is the founder's to mint from.)
+// paid into the account the realm names, and the realm books it. (The test ledger lets anyone mint.)
 test('a treasury transaction is voted and executed', async ({ page }) => {
 	const founder = founderIdentity(realm);
 	const symbol = 'E2E';
@@ -253,9 +258,10 @@ test('a treasury transaction is voted and executed', async ({ page }) => {
 	await run('treasury_configure', { config: { source_fund: 'TREASURY' } });
 	const billed = await run('invoice_create', { payer: realm.founder, amount: 2_000_000, symbol });
 	const payTo = billed.pay_to as { owner: string; subaccount: string };
-	await mint(realm, founder, payTo, 2_000_000n);
-	// What the fund pays out leaves the realm's own account.
-	await mint(realm, founder, { owner: payTo.owner }, 2_000_000n);
+	await mint(realm, payTo, 2_000_000n);
+	// WORKAROUND for realms-gos #450: a fund pays out of the realm's own (default) account, and what an invoice
+	// receives sits in its subaccount, which nothing sweeps. Without this second mint the payout would find no tokens.
+	await mint(realm, { owner: payTo.owner }, 2_000_000n);
 	await run('invoice_refresh', { invoice: billed.invoice });
 
 	const member = memberIdentity().getPrincipal().toText();

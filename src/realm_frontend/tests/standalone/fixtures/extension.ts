@@ -39,12 +39,23 @@ export async function openExtension(
 	const { frame, close } = await openInPortal(page, realm, path);
 	if (!path.startsWith('/extensions/')) return { app: frame, frame, close };
 	const mount = frame.locator(`[data-extension-id="${id}"]`);
+	const mounted = async () =>
+		!(await reloadIfInterrupted(page, frame)) && (await mount.count()) > 0;
 	await expect
-		.poll(async () => !(await reloadIfInterrupted(page, frame)) && (await mount.count()) > 0, {
-			message: `${id} is mounted`,
-			timeout: 120_000,
-			intervals: [1_000]
-		})
-		.toBe(true);
+		.poll(mounted, { timeout: 120_000, intervals: [1_000] })
+		.toBe(true)
+		.catch(async (error) => {
+			// The realm's own words say why the page did not come: an error page, a refusal.
+			const shown = await frame
+				.locator('body')
+				.innerText({ timeout: 5_000 })
+				.catch(() => '');
+			throw new Error(
+				`${id} did not mount; the realm shows: ${shown.replace(/\s+/g, ' ').slice(0, 300)}`,
+				{
+					cause: error
+				}
+			);
+		});
 	return { app: isSandboxed(id) ? mount.frameLocator('iframe') : mount, frame, close };
 }
