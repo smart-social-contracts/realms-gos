@@ -1,0 +1,7 @@
+[
+	{ "name": "gos.earth portal", "kind": "portal", "url": "https://gos.earth/" },
+	{ "name": "realmsgos.org marketplace", "kind": "marketplace", "url": "https://realmsgos.org/" },
+	{ "name": "staging.gos.earth portal", "kind": "portal", "url": "https://staging.gos.earth/" },
+	{ "name": "staging.realmsgos.org marketplace", "kind": "marketplace", "url": "https://staging.realmsgos.org/" },
+	{ "name": "staging.gos.earth realm valencia", "kind": "realm", "url": "https://staging.gos.earth/r/valencia" }
+]

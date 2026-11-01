@@ -5,7 +5,7 @@ Three things get deployed, by three different tools:
 | What | Where it runs | Tool |
 |---|---|---|
 | A realm for development | Your machine (PocketIC) | `realms local`: see [Getting started](../getting-started.md) |
-| The **product orchestra**: marketplace, fleet file registry, token, NFT | The Internet Computer | [Casals](https://github.com/smart-social-contracts/Casals), from [`casals.json`](../../casals.json), driven by [`scripts/up.sh`](../../scripts/up.sh) |
+| The **product orchestra**: marketplace, fleet file registry, token, NFT | The Internet Computer | [Casals](https://github.com/smart-social-contracts/Casals), from [`casals.json`](../../casals.json) (production) and [`casals.local.json`](../../casals.local.json) (local), driven by [`scripts/up.sh`](../../scripts/up.sh) |
 | Realms that people create | The Internet Computer | The GaaS portal ([gos-as-a-service](https://github.com/smart-social-contracts/gos-as-a-service)); each realm is a stand of the GaaS orchestra |
 
 All three install **release artifacts**, not the checkout.
@@ -21,7 +21,8 @@ run by hand: patch, minor or major) builds and attaches to a GitHub release:
 | `realm-backend-test-<tag>.wasm.gz` | `scripts/pack_realm_backend.py --variant test`: for local, and test or demo realms that need test flags and deterministic identities |
 | `realm-frontend-<tag>.tar.gz` | `npm run build` in `src/realm_frontend`, packed with `casals bundle` |
 | `marketplace-backend-…`, `marketplace-frontend-…` | Basilisk, `npm run build` |
-| `token-backend-…`, `nft-backend-…` | Copied from [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) |
+| `token-backend-…` | Copied from [ic-python-token](https://github.com/smart-social-contracts/ic-python-token) |
+| `nft-backend-…` | Copied from [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) |
 | `checksums-<tag>.txt` | SHA-256 of the above; `realms local` checks downloads against it |
 
 To build the realm by hand:
@@ -40,8 +41,11 @@ The production wasm holds none of the test-only code, and the packer fails if it
 
 ## The product orchestra
 
-[`casals.json`](../../casals.json) is the *sheet*: what should exist, per environment (`local`,
-`production`). Its stands:
+A *sheet* says what should exist in one environment: [`casals.local.json`](../../casals.local.json) for
+`local`, [`casals.json`](../../casals.json) for `production` (the other environments have their own,
+`casals.<env>.json`). They share their stands and differ in the registry rows each environment pins:
+local installs the token from ic-python-token, production still from ic-tokens (see
+[The token ledger](#the-token-ledger)). The stands:
 
 | Stand | Canisters |
 |---|---|
@@ -123,6 +127,41 @@ Once built, the orchestra changes by operations, not by re-applying the sheet:
 casals -e production --identity <id> upgrade casals.json --wasm <family>          # a backend
 casals -e production --identity <id> upgrade casals.json --content <namespace>    # a frontend bundle
 ```
+
+### The token ledger
+
+The realm's treasury reads only the standard ICRC-1 transfer result, `variant { Ok : nat; Err : TransferError }`.
+That is what [ic-python-token](https://github.com/smart-social-contracts/ic-python-token) (v0.6.0 and later)
+answers. The older [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) ledger answers with
+`record { success; block_index; error }`, which the treasury reads as *unconfirmed*. Every payout on such a
+ledger therefore stays `unconfirmed`: its tokens may have left, so it is never refunded and never booked as paid,
+and nothing reverts it.
+
+**Rule: do not install a `realm_backend` with this treasury on a realm whose token ledger is still ic-tokens.**
+
+A ledger cannot be moved by upgrading it. Tested on PocketIC: after upgrading the same canister from the
+ic-tokens v0.1.0 wasm to the ic-python-token v0.6.0 wasm, the total supply, the owner, every balance and the
+transaction history were gone, and the ledger answered `Err` to a transfer because every balance was zero. (An
+upgrade between two builds of the same wasm keeps all of them.) Upgrading in place is tracked in
+[ic-python-token#4](https://github.com/smart-social-contracts/ic-python-token/issues/4).
+
+There is no live ledger to migrate: the ic-tokens ledgers once deployed for production, demo and test no longer
+exist on the Internet Computer. Each environment gets a fresh ic-python-token ledger at its next build. The realms
+on staging still use ic-tokens ledgers and keep the earlier `realm_backend` release until they get a fresh ledger
+([#452](https://github.com/smart-social-contracts/realms-gos/issues/452)). The order of operations is:
+
+1. Create the ledger: an ic-python-token canister (`token-backend` of `casals.local.json`, or `token_backend` of
+   `dfx.json`), installed with the environment's init argument. The deployer holds the whole supply.
+2. Point the realm at that ledger.
+3. Only then install the `realm_backend` release that carries this treasury.
+
+The production, staging, demo and test sheets still pin the ic-tokens `token-backend@0.1.0`. Repoint a sheet's row at
+ic-python-token (as `casals.local.json` does) before that environment's next build, or the build creates another
+ic-tokens ledger ([#452](https://github.com/smart-social-contracts/realms-gos/issues/452)). The NFT ledger
+(`nft-backend`) is not affected: it stays on ic-tokens.
+
+A long-lived local replica that already has the `realms-product` orchestra would get its `token-backend` upgraded in
+place by `scripts/up.sh -e local` and lose its balances (see above). Use a fresh replica, the default.
 
 ### Domains
 

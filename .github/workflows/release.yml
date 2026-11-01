@@ -209,10 +209,10 @@ jobs:
       - name: Fetch token wasm
         if: ${{ inputs.cli_only != true }}
         run: |
-          # The realm token is ic-tokens, not built from this repo.
-          curl -fsSL "https://github.com/smart-social-contracts/ic-tokens/releases/download/v0.1.0/token_backend.wasm.gz" \
+          # The realm token is ic-python-token, not built from this repo.
+          curl -fsSL "https://github.com/smart-social-contracts/ic-python-token/releases/download/v0.6.0/token_backend.wasm.gz" \
             -o token_backend.wasm.gz
-          # nft_backend.wasm on that release is uncompressed.
+          # The NFT is still ic-tokens. Its nft_backend.wasm is uncompressed.
           curl -fsSL "https://github.com/smart-social-contracts/ic-tokens/releases/download/v0.1.0/nft_backend.wasm" \
             -o nft_backend.wasm
           gzip -kf nft_backend.wasm

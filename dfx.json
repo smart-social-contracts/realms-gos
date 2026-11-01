@@ -121,8 +121,8 @@
     },
     "token_backend": {
       "type": "custom",
-      "candid": "https://github.com/smart-social-contracts/ic-tokens/releases/download/v0.1.0/token_backend.did",
-      "wasm": "https://github.com/smart-social-contracts/ic-tokens/releases/download/v0.1.0/token_backend.wasm",
+      "candid": "https://github.com/smart-social-contracts/ic-python-token/releases/download/v0.6.0/token_backend.did",
+      "wasm": "https://github.com/smart-social-contracts/ic-python-token/releases/download/v0.6.0/token_backend.wasm.gz",
       "init_arg": "(record { name = \"Simple Token\"; symbol = \"SMPL\"; decimals = 8 : nat8; total_supply = 100_000_000_000_000_000 : nat; fee = 10_000 : nat; test = opt true })"
     },
     "token_frontend": {
