@@ -7,6 +7,7 @@ The journey of a realm on realmsgos.org, in a browser, on your own machine and o
 | `wizard.spec.ts` | The founder walks the setup wizard (the spinner shows while it loads and while it launches), the realm launches with every core extension and the codex's dependencies, a second member joins through the Terms step, every installed extension and sidebar page opens without errors. |
 | `proposals.spec.ts` | A proposal of each kind is filed, voted yes by both members and executed: poll, extension install, extension upgrade, codex install, role assignment, Realms GOS release, realm-wide (federal) vote, treasury transaction (the realm gets an ic-python-token ledger in test mode, and the treasury is funded through a paid invoice). |
 | `extensions-ops.spec.ts` | One test per extension, from a table of page, action and expected result: its main operation. `fixme` rows say why they cannot run. |
+| `budget.spec.ts` | How the realm's money is budgeted and spent, with real members: a fiscal period opens, an allocation rule splits what the treasury receives between two department funds, a payment is split by it, a budget is adopted for a fund, the founder spends from the fund on the vault page and the budget's actual grows, an overspend is refused, and a vote gives the second member the finance role (and takes it away). Every refusal (no role, bad rule, unknown period, a payment the fund cannot cover) leaves the realm's rows unchanged. The budget_manager page cannot run on this realm (`fixme`), so budgets and rules are the realm's operations called as the member who would. |
 
 `scripts/e2e_standalone_realm.py` also deploys that test ledger (ic-python-token, downloaded the first time).
 
@@ -20,7 +21,7 @@ From the repository root, with `icp`, `node` 20+ and the Python tools `scripts/u
 ```bash
 realms files build            # the extension bundles
 scripts/up.sh -e local --yes  # the product on a local replica (:8000), with every extension and codex published
-scripts/e2e_ui.sh             # a fresh realm, then the three specs, in order (about 20 minutes)
+scripts/e2e_ui.sh             # a fresh realm, then the four specs, in order (about 20 minutes)
 ```
 
 `scripts/e2e_ui.sh` takes `playwright test` arguments, for one spec or one row: `scripts/e2e_ui.sh --project=proposals`,
