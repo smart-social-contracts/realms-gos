@@ -2,9 +2,10 @@
 // scripts/e2e_gaas.sh, which brings the stack up and puts it in Alpha mode (scripts/e2e_gaas_alpha.py writes
 // ALPHA_JSON with the invitation codes); on a stack that is in Alpha mode, `npx playwright test -c
 // playwright.gaas.config.ts alpha.spec.ts` runs this file alone.
-// An applicant who is not activated meets the invitation gate. A wrong, a used and an expired code are refused
-// and change nothing; a good one activates the account with its credits and opens the launch wizard. The billing
-// tab offers no card payment, a principal that skipped the gate cannot ask for a deployment, and the activated
+// An applicant who is not activated meets the invitation gate, and is asked for a code in the dashboard too. A
+// wrong, a used and an expired code are refused and change nothing; a good one, typed in lower case, activates the
+// account with its credits and opens the launch wizard. The billing tab offers no card payment, a code can be
+// redeemed there as well, a principal that skipped the gate cannot ask for a deployment, and the activated
 // applicant launches a realm, which costs its price in credits.
 //
 // The portal ignores invitation mode while the registry's Internet Identity bypass is on, so these tests sign
@@ -21,6 +22,7 @@ interface Alpha {
 	portal_url: string;
 	registry: string;
 	valid_code: string;
+	dashboard_code: string;
 	used_code: string;
 	expired_code: string;
 	realm_name: string;
@@ -29,6 +31,8 @@ interface Alpha {
 const A: Alpha = JSON.parse(readFileSync(process.env.ALPHA_JSON || '/tmp/e2e/alpha.json', 'utf8'));
 const INVITATION_CREDITS = 50;
 const SESSION_MS = 60 * 60 * 1000;
+const REQUEST_LINK = 'Request an invitation';
+const TALLY_FORM = /^https:\/\/tally\.so\//;
 
 let shots = 0;
 async function snap(page: Page, label: string) {
@@ -117,10 +121,7 @@ test('the landing page offers a signed-out visitor the Alpha request link', asyn
 	await page.goto(A.portal_url);
 	const notice = page.getByRole('complementary', { name: 'gos.earth is in Alpha' });
 	await expect(notice).toBeVisible({ timeout: 60_000 });
-	await expect(notice.getByRole('link', { name: 'Request an invitation' })).toHaveAttribute(
-		'href',
-		/^https:\/\/tally\.so\//
-	);
+	await expect(notice.getByRole('link', { name: REQUEST_LINK })).toHaveAttribute('href', TALLY_FORM);
 	await snap(page, 'landing-alpha-notice');
 });
 
@@ -137,8 +138,18 @@ test('a signed-in applicant who is not activated meets the invitation gate', asy
 	await page.goto(`${A.portal_url}/deploy-gos`);
 	await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible({ timeout: 60_000 });
 	await expect(page.getByRole('button', { name: 'Submit Code' })).toBeVisible();
+	await expect(page.getByRole('link', { name: REQUEST_LINK })).toHaveAttribute('href', TALLY_FORM);
 	expect(await activationOf(applicant)).toBe('not_activated');
 	await snap(page, 'invitation-gate');
+});
+
+test('the dashboard of an applicant who is not activated asks for a code, not a voucher', async ({ page }) => {
+	await signIn(page, applicant);
+	await page.goto(`${A.portal_url}/my-dashboard?tab=billing`);
+	await expect(page.getByRole('heading', { name: 'Enter your invitation code' })).toBeVisible({ timeout: 60_000 });
+	await expect(page.getByRole('link', { name: REQUEST_LINK })).toHaveAttribute('href', TALLY_FORM);
+	await expect(page.getByRole('heading', { name: 'Redeem Voucher' })).toHaveCount(0);
+	await snap(page, 'dashboard-awaiting-invitation');
 });
 
 const refusals = [
@@ -167,11 +178,14 @@ for (const { what, code, message } of refusals) {
 	});
 }
 
-test('a valid code activates the account, adds its credits and opens the wizard', async ({ page }) => {
+// The portal upper-cases what is typed: the registry hashes a code exactly as sent, and codes are issued in upper case.
+test('a valid code, typed in lower case, activates the account, adds its credits and opens the wizard', async ({
+	page
+}) => {
 	await signIn(page, applicant);
 	await page.goto(`${A.portal_url}/deploy-gos`);
 	await expect(page.getByRole('heading', { name: 'Invitation Required' })).toBeVisible({ timeout: 60_000 });
-	await submitCode(page, A.valid_code);
+	await submitCode(page, A.valid_code.toLowerCase());
 	await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible({ timeout: 60_000 });
 	await expect(page.getByRole('heading', { name: 'Invitation Required' })).toHaveCount(0);
 	await snap(page, 'wizard-opens');
@@ -186,12 +200,29 @@ test('the billing tab offers no card payment', async ({ page }) => {
 	});
 	await signIn(page, applicant);
 	await page.goto(`${A.portal_url}/my-dashboard?tab=billing`);
-	const topUp = page.locator('.topup-btn');
-	await expect(topUp).toHaveText('Coming soon', { timeout: 60_000 });
-	await expect(topUp).toBeDisabled();
-	await expect(page.getByText(/pay with card|stripe/i)).toHaveCount(0);
-	await snap(page, 'billing-coming-soon');
+	const buy = page.getByRole('button', { name: 'Buy credits' });
+	await expect(buy).toBeDisabled({ timeout: 60_000 });
+	await expect(page.getByText('Not available', { exact: true })).toBeVisible();
+	await expect(page.getByText('No purchases yet')).toBeVisible();
+	await expect(page.getByText(/pay with card|stripe|coming soon/i)).toHaveCount(0);
+	await expect(page.getByRole('heading', { name: 'Redeem Voucher' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Enter your invitation code' })).toHaveCount(0);
+	await snap(page, 'billing-not-available');
 	expect(cardRequests, 'no card flow was started').toEqual([]);
+});
+
+test('a code redeemed in the dashboard activates the account and shows the voucher box', async ({ page }) => {
+	const second = Ed25519KeyIdentity.generate();
+	await signIn(page, second);
+	await page.goto(`${A.portal_url}/my-dashboard?tab=billing`);
+	await page.getByPlaceholder('Enter your invitation code').fill(A.dashboard_code);
+	await page.getByRole('button', { name: 'Redeem', exact: true }).click();
+	await expect(page.getByText(`Account activated, ${INVITATION_CREDITS} credits added`)).toBeVisible({ timeout: 60_000 });
+	await expect(page.getByRole('heading', { name: 'Redeem Voucher' })).toBeVisible();
+	await expect(page.getByRole('link', { name: REQUEST_LINK })).toHaveCount(0);
+	await snap(page, 'dashboard-activated');
+	expect(await activationOf(second)).toBe('activated');
+	expect(await creditsOf(second)).toBe(INVITATION_CREDITS);
 });
 
 test('request_deployment refuses a principal that is not activated', async () => {

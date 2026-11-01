@@ -6,8 +6,8 @@ Through the GaaS multisig (the deployer is its signer on a local stack) this set
 controller does there (docs/INVITATIONS.md of gos-as-a-service): invitation mode on, card billing off, the
 Internet Identity bypass off (the portal ignores invitation mode while it is on), and credits taken for a
 deployment (can_test_mode off). The flags are read back. Then it creates the invitation codes the spec uses,
-as scripts/invite.py does: a good one and one that has expired (both of 50 credits), and one more for the
-spec to use up before it tries it again.
+as scripts/invite.py does, all of 50 credits: two good ones (one for the invitation gate, one for the dashboard),
+one that has expired, and one more for the spec to use up before it tries it again.
 
     python3 scripts/e2e_gaas_alpha.py --out /tmp/e2e/alpha.json
     ALPHA_JSON=/tmp/e2e/alpha.json npx playwright test -c playwright.gaas.config.ts alpha.spec.ts   (src/realm_frontend)
@@ -91,6 +91,7 @@ def main():
         "installer": gaas["realm-installer"],
         "token_ledger": product.get("token-backend", ""),
         "valid_code": create_invitation(project, args.identity, multisig, registry, now + 30 * DAY),
+        "dashboard_code": create_invitation(project, args.identity, multisig, registry, now + 30 * DAY),
         "used_code": create_invitation(project, args.identity, multisig, registry, now + 30 * DAY),
         "expired_code": create_invitation(project, args.identity, multisig, registry, now - DAY),
         "realm_name": os.environ.get("ALPHA_REALM", f"alpha-{secrets.token_hex(2)}"),
