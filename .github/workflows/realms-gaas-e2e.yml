@@ -7,7 +7,7 @@ name: Realms GaaS E2E
 # (src/realm_frontend/tests/gaas/scale.spec.ts).
 #
 # Not part of ci-pr.yml: the stack (product orchestra, GaaS orchestra, a realm built
-# by Casals, a quarter built by Casals) takes about 40 minutes, too long for every
+# by Casals, a quarter built by Casals) takes about 33 minutes (the stack about 23, Playwright about 9), too long for every
 # PR. It runs nightly and on demand, with the realm backend and frontend of the
 # checked-out ref and the Casals, installer, registry and portal of main (the releases
 # the sheet of gos-as-a-service pins do not work with the slim realm). The same script
@@ -16,6 +16,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "37 2 * * *"
+
+permissions:
+  contents: read
 
 concurrency:
   group: realms-gaas-e2e-${{ github.ref }}
@@ -65,6 +68,16 @@ jobs:
           repository: smart-social-contracts/gos-as-a-service
           ref: ${{ env.GAAS_VERSION }}
           path: gos-as-a-service
+
+      # The checkouts at main move: say which commits this run tested.
+      - name: Record the checked-out commits
+        run: |
+          {
+            echo "### Checked-out commits"
+            for checkout in realms Casals file-registry gos-as-a-service; do
+              echo "- ${checkout}: $(git -C "${checkout}" rev-parse HEAD)"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-python@v5
         with:

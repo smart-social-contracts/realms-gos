@@ -2,7 +2,7 @@
 # e2e_gaas.sh — the gos.earth journey in a browser (GaaS portal, a realm born through it) on a local
 # replica, from a clean checkout to a Playwright report.
 #
-#   scripts/e2e_gaas.sh                 # build, bring the stack up (~25 min), run the spec (~10 min)
+#   scripts/e2e_gaas.sh                 # build, bring the stack up, run the spec (CI: ~33 min)
 #   scripts/e2e_gaas.sh --headed        # extra args go to `playwright test`
 #   SKIP_STACK=1 scripts/e2e_gaas.sh    # the stack is already up (a re-run): only prepare the portal, run the spec
 #
@@ -18,6 +18,9 @@
 # Layout and environment: as scripts/local_up.sh (sibling checkouts of Casals, file-registry and
 # gos-as-a-service, or CASALS_DIR / FILE_REGISTRY_DIR / GAAS_DIR; CASALS_HOME; CASALS_REPLICA_PORT for a replica
 # beside another). E2E_DIR (default /tmp/realms-gaas-e2e) holds the sheet and GAAS_JSON.
+#
+# It writes into the sibling checkouts: the builds of Casals (`.basilisk`) and of gos-as-a-service (`.basilisk`,
+# `node_modules`, `dist`, and regenerated .did files), so keep those checkouts free of work in progress.
 #
 # Casals and gos-as-a-service must be at main: the pinned releases do not resolve the sheet's `$canister:`
 # references, and a realm's quarter_add calls the conductor's stand_grow, which they lack.
