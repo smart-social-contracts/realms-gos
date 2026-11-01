@@ -105,17 +105,19 @@ npm run test:e2e       # Playwright
 One command builds the realm, brings a local GaaS stack up and plays the whole journey in a browser: a visitor
 signs in on the portal, launches a realm (Alpha: credits, no payment), the founder finishes the setup wizard,
 members join through the Terms, a member files a proposal through the voting form, the members vote it and the
-realm's next quarter through, and the next member lands in the new quarter.
+realm's next quarter through, and the next member lands in the new quarter. A second test launches another realm and
+checks it is live only once its frontend serves (gos-as-a-service#58).
 
 ```bash
-scripts/e2e_gaas.sh                 # about 25 minutes of stack, then about 15 of browser
+scripts/e2e_gaas.sh                 # about 33 minutes in CI: the stack about 23, the browser about 9
 SKIP_STACK=1 scripts/e2e_gaas.sh    # the stack is already up: a fresh voucher and the spec only
 ```
 
-It needs sibling checkouts of Casals, file-registry and gos-as-a-service (or `CASALS_DIR`, `FILE_REGISTRY_DIR`,
-`GAAS_DIR`) and the tools of [`scripts/local_up.sh`](../../scripts/local_up.sh). Every test records screenshots and
-video into `src/realm_frontend/test-results/gaas`, and the HTML report is in `playwright-report/gaas`. The
-workflow [`realms-gaas-e2e.yml`](../../.github/workflows/realms-gaas-e2e.yml) runs the same script nightly and on
+It needs sibling checkouts of Casals, file-registry and gos-as-a-service, both Casals and gos-as-a-service at main
+(or `CASALS_DIR`, `FILE_REGISTRY_DIR`, `GAAS_DIR`), and the tools of [`scripts/local_up.sh`](../../scripts/local_up.sh).
+It builds in those checkouts (`.basilisk`, `node_modules`, `dist`, regenerated `.did` files in gos-as-a-service), so
+use clean ones. Every test records screenshots and video into `src/realm_frontend/test-results/gaas`, and the HTML report is in `playwright-report/gaas`. A step the
+spec had to repeat (a reloaded join page) is a `workaround` annotation in the report. The workflow [`realms-gaas-e2e.yml`](../../.github/workflows/realms-gaas-e2e.yml) runs the same script nightly and on
 demand, and uploads both folders.
 
 ## Not yet in CI

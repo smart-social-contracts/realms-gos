@@ -1,7 +1,6 @@
-// The gos.earth journey, end to end on a local stack:
-//   scripts/local_up.sh --gaas                 (Realms product + GaaS orchestras on a local replica)
-//   python3 scripts/e2e_gaas_scale.py          (portal test mode, a voucher; writes GAAS_JSON)
-//   npx playwright test -c playwright.gaas.config.ts
+// The gos.earth journey, end to end on a local stack. Run it with scripts/e2e_gaas.sh, which builds and
+// brings the stack up and prepares the portal (scripts/e2e_gaas_scale.py writes GAAS_JSON, with a voucher);
+// on a stack that is up, `npx playwright test -c playwright.gaas.config.ts` runs this file alone.
 // A visitor signs in on the portal and launches a realm (Alpha: credits, no payment); the founder walks the
 // setup wizard, choosing a voting window of zero (open until certain); registration is open and auto-scaling
 // on. Members join through the Terms until the capital is 90% full and the realm proposes its next quarter. A
@@ -24,6 +23,7 @@ interface Gaas {
 	conductor: string;
 	token_ledger: string;
 	voucher_code: string;
+	live_voucher_code: string;
 	realm_name: string;
 }
 
@@ -86,14 +86,14 @@ async function frontendServes(canister: string): Promise<boolean> {
 	return out.status_code === 200;
 }
 
-async function redeemVoucher(founder: Ed25519KeyIdentity) {
+async function redeemVoucher(founder: Ed25519KeyIdentity, code: string) {
 	const idl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
 		IDL.Service({ redeem_voucher: IDL.Func([IDL.Text], [IDL.Text], []) });
 	const registry = Actor.createActor<{ redeem_voucher: (c: string) => Promise<string> }>(idl as never, {
 		agent: await agentAs(founder),
 		canisterId: G.registry
 	});
-	return JSON.parse(await registry.redeem_voucher(G.voucher_code));
+	return JSON.parse(await registry.redeem_voucher(code));
 }
 
 interface Job {
@@ -125,11 +125,12 @@ async function job(id: string): Promise<Job> {
 }
 
 /**
- * The portal's launch wizard: platform, basics (the name), subnet, review & deploy. Alpha has no payment step:
- * the review shows the realm's price in credits and nothing to pay. (A registry in can_test_mode, as on every
- * local stack, launches without charging them, so the balance is not checked here.) Returns the job id.
+ * The portal's launch wizard for a realm called ``realmName``: platform, basics (the name), subnet, review & deploy.
+ * Alpha has no payment step: the review shows the realm's price in credits and nothing to pay. (A registry in
+ * can_test_mode, as on every local stack, launches without taking the credits, so the balance is not checked
+ * here.) Returns the job id.
  */
-async function launchFromPortal(page: Page): Promise<string> {
+async function launchFromPortal(page: Page, realmName: string): Promise<string> {
 	await page.goto(`${G.portal_url}/deploy-gos`, { waitUntil: 'networkidle' });
 	const next = page.getByRole('button', { name: 'Continue' });
 	const name = page.locator('#name');
@@ -138,7 +139,7 @@ async function launchFromPortal(page: Page): Promise<string> {
 		await next.click();
 		await expect(name).toBeVisible({ timeout: 2_000 });
 	}).toPass({ timeout: 60_000 });
-	await name.fill(G.realm_name);
+	await name.fill(realmName);
 	await snap(page, 'portal-basics');
 	await next.click();
 	await next.click();
@@ -193,16 +194,26 @@ async function asMember<T>(browser: Browser, seat: number, path: string, run: (p
 	}
 }
 
+/** A step the test had to repeat: it shows in the report and the log, not only in the video. */
+function noteWorkaround(description: string) {
+	test.info().annotations.push({ type: 'workaround', description });
+	console.log(`workaround: ${description}`);
+}
+
 /**
  * The join page of a test-mode realm drops the portal's session and asks which test identity to join as: member
  * ``seat`` is "Identity seat+1" (the first two are cards, the others are picked by number).
  */
 async function pickTestIdentity(page: Page, frame: FrameLocator, seat: number) {
 	const picker = frame.locator('#join-custom-identity-number');
-	// Now and then the page stays on "Signing you in": load it again.
+	// Now and then the page stays on "Signing you in" (realms-gos issue "Join page stays on "Signing you in""):
+	// load it again, and say so in the report, so the workaround cannot hide how often it happens.
 	let attempts = 0;
 	await expect(async () => {
-		if (attempts++) await page.reload();
+		if (attempts++) {
+			noteWorkaround(`seat ${seat}: reloaded a stuck "Signing you in" page`);
+			await page.reload();
+		}
 		await expect(picker).toBeVisible({ timeout: 30_000 });
 	}).toPass({ timeout: 150_000 });
 	const number = seat + 1;
@@ -223,7 +234,9 @@ async function acceptTerms(page: Page, frame: FrameLocator, seat: number) {
 	await expect(proceed, 'Continue waits for the agreement').toBeDisabled();
 	if (seat === 1) await snap(page, 'terms');
 	// The page can remount once sign-in settles, which clears the tick: tick again until it holds.
+	let ticks = 0;
 	await expect(async () => {
+		if (ticks++) noteWorkaround(`seat ${seat}: ticked the Terms again after the page cleared the tick`);
 		await agree.check();
 		await expect(proceed).toBeEnabled({ timeout: 2_000 });
 	}).toPass({ timeout: 60_000 });
@@ -315,8 +328,8 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 	});
 
 	if (!REUSE) await test.step('the founder launches the realm from the portal', async () => {
-		expect((await redeemVoucher(founder)).success, 'the voucher pays for one realm').toBe(true);
-		const id = await launchFromPortal(page);
+		expect((await redeemVoucher(founder, G.voucher_code)).success, 'the voucher pays for one realm').toBe(true);
+		const id = await launchFromPortal(page, G.realm_name);
 		let done: Job | undefined;
 		await expect
 			.poll(
@@ -446,22 +459,26 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 	});
 });
 
-// gos-as-a-service#58: the job turns "completed", which the portal shows as "your realm is live", only once the stand
-// is built: its frontend serves. It runs after the journey above, whose voucher left the founder with credits.
+// gos-as-a-service#58: the job turns "completed", and the portal shows "Visit Realm", only once the stand is built:
+// its frontend serves. A realm of its own, with a voucher of its own, so this test runs alone too.
 test('#58: a realm is live only after its frontend has finished uploading', async ({ page }) => {
-	const id = await launchFromPortal(page);
-	let done: Job | undefined;
-	await expect
-		.poll(
-			async () => {
-				done = await job(id);
-				if (done.status === 'failed') throw new Error(`deployment failed: ${done.error}`);
-				return done.status;
-			},
-			{ message: `job ${id} completes`, timeout: 20 * 60 * 1000, intervals: [1_000] }
-		)
-		.toBe('completed');
-	expect(await frontendServes(done!.frontend_canister_id), 'the realm is live, so its frontend serves').toBe(true);
+	expect((await redeemVoucher(testIdentity(0), G.live_voucher_code)).success, 'the voucher pays for one realm').toBe(true);
+	const id = await launchFromPortal(page, `${G.realm_name}-live`);
+	const visitRealm = page.getByRole('link', { name: /Visit Realm/ });
+	const deadline = Date.now() + 20 * 60 * 1000;
+	for (;;) {
+		// The job and the portal first, then the frontend: a frontend that serves by now was there before.
+		const current = await job(id);
+		if (current.status === 'failed') throw new Error(`deployment failed: ${current.error}`);
+		const live = current.status === 'completed' || (await visitRealm.isVisible());
+		if (live) {
+			expect(await frontendServes(current.frontend_canister_id), `job ${id} is live: its frontend serves`).toBe(true);
+		}
+		if (current.status === 'completed') break;
+		if (Date.now() > deadline) throw new Error(`job ${id} did not complete`);
+		await page.waitForTimeout(1_000);
+	}
+	await expect(visitRealm, 'the portal shows the completed realm').toBeVisible({ timeout: 60_000 });
 });
 
 async function ledgerSymbol(): Promise<string> {
