@@ -35,9 +35,13 @@ export function toolbarButton(frame: FrameLocator, name: string | RegExp) {
 	return frame.locator('.setup-wizard__actions--toolbar').getByRole('button', { name });
 }
 
-
 /** From the welcome screen to a launched realm: codex, token (``realm.token_ledger``), branding, languages, launch. */
-export async function launchThroughWizard(page: Page, frame: FrameLocator, realm: StandaloneRealm, choices: WizardChoices) {
+export async function launchThroughWizard(
+	page: Page,
+	frame: FrameLocator,
+	realm: StandaloneRealm,
+	choices: WizardChoices
+) {
 	const { codex: CODEX, symbol, welcome: WELCOME, manifesto: MANIFESTO, snap } = choices;
 	await test.step('welcome', async () => {
 		// The wizard shows a spinner while it loads, so the page never looks frozen.
@@ -144,5 +148,4 @@ export async function launchThroughWizard(page: Page, frame: FrameLocator, realm
 			.toBe(LAUNCH_PHASES.length);
 		await snap(page, 'launched');
 	});
-
 }

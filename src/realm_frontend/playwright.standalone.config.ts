@@ -13,9 +13,10 @@ export default defineConfig({
 	expect: { timeout: 30_000 },
 	outputDir: 'test-results/standalone',
 	reporter: [['list'], ['html', { outputFolder: 'playwright-report/standalone', open: 'never' }]],
-	// Kept for every test, passed or not: the run is reviewed afterwards from the report.
+	// Screenshots and videos are kept for every test, passed or not: the run is reviewed afterwards from the report.
 	use: {
-		trace: 'on',
+		// The run has no retries, so 'on-first-retry' would record nothing: a trace is kept for failures only.
+		trace: 'retain-on-failure',
 		screenshot: 'on',
 		video: 'on',
 		headless: true,
@@ -23,7 +24,7 @@ export default defineConfig({
 	},
 	// The specs share one realm, which the wizard spec launches and the others use. That works only because there is
 	// one worker and the projects run in this list's order: a failure of the wizard spec shows up in all of them.
-	projects: ['wizard', 'proposals', 'extensions-ops', 'budget'].map((name) => ({
+	projects: ['wizard', 'proposals', 'extensions-ops', 'justice', 'tax', 'budget'].map((name) => ({
 		name,
 		testMatch: `${name}.spec.ts`,
 		use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } }
