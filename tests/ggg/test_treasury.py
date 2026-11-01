@@ -287,8 +287,9 @@ def test_transfer_in_flight_cannot_be_reverted(monkeypatch, reply, status, roads
     assert len({e.transaction for e in t.ledger_entries}) == (1 if status == "completed" else 2)
 
 
-TOKEN_PAID = "(record { 1_932_118_984 = null; 624_086_880 = opt (7 : nat); 3_092_129_219 = true })"
-TOKEN_REFUSED = '(record { error = opt "insufficient balance"; block_index = null; success = false })'
+# The shape ic-tokens answered with. The treasury no longer reads it: the realm token is ic-python-token.
+OLD_TOKEN_PAID = "(record { 1_932_118_984 = null; 624_086_880 = opt (7 : nat); 3_092_129_219 = true })"
+OLD_TOKEN_REFUSED = '(record { error = opt "insufficient balance"; block_index = null; success = false })'
 
 
 @pytest.mark.parametrize("reply, expected", [
@@ -296,9 +297,9 @@ TOKEN_REFUSED = '(record { error = opt "insufficient balance"; block_index = nul
     ("(variant { 17_724 = 9 : nat })", ("completed", "9")),
     ("(variant { Err = variant { InsufficientFunds = record { balance = 1 : nat } } })", ("failed", None)),
     ("(variant { 3_456_837 = variant { TooOld } })", ("failed", None)),
-    (TOKEN_PAID, ("completed", "7")),
-    ("(record { error = null; block_index = opt (7 : nat); success = true })", ("completed", "7")),
-    (TOKEN_REFUSED, ("failed", None)),
+    (OLD_TOKEN_PAID, ("unconfirmed", None)),
+    ("(record { error = null; block_index = opt (7 : nat); success = true })", ("unconfirmed", None)),
+    (OLD_TOKEN_REFUSED, ("unconfirmed", None)),
     ("(record { error = null; block_index = null; success = true })", ("unconfirmed", None)),
     ("(record { error = null; block_index = null; success = false })", ("unconfirmed", None)),
     ("(variant { Ok = null })", ("unconfirmed", None)),
@@ -317,8 +318,10 @@ def test_outcome_trusts_only_a_definite_answer(reply, expected):
     assert treasury.outcome(reply) == expected
 
 
-@pytest.mark.parametrize("reply, status, roads", [(TOKEN_PAID, "completed", 40), (TOKEN_REFUSED, "failed", 100),
-                                                  ("(record { success = true })", "unconfirmed", 40),
+@pytest.mark.parametrize("reply, status, roads", [("(variant { Ok = 7 : nat })", "completed", 40),
+                                                  ("(variant { Err = variant { BadFee = record { expected_fee = 10 : nat } } })", "failed", 100),
+                                                  (OLD_TOKEN_PAID, "unconfirmed", 40),
+                                                  (OLD_TOKEN_REFUSED, "unconfirmed", 40),
                                                   ("garbage", "unconfirmed", 40)])
 def test_transfer_booked_by_the_ledgers_answer(reply, status, roads):
     setup_finance()

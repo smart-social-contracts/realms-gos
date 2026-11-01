@@ -50,7 +50,7 @@ realms/
 │   ├── ci-pr.yml / ci-main.yml       # Lint, unit, `casals up` e2e on a local replica (realms-e2e.yml)
 │   └── release.yml                   # Version bump, GitHub release, PyPI; optional publish to the production file_registry
 ├── (casals is NOT a submodule — clone smart-social-contracts/casals separately for its CLI; platform provisioner of gos-as-a-service)
-├── casals.json                       # The product orchestra (marketplace, file registry, token, NFT, demo realm) — `casals up`
+├── casals.json, casals.local.json    # The product orchestra (marketplace, file registry, token, NFT, demo realm) for production, for local — `casals up`
 ├── canister_ids.json                 # Operator inventory of live ids, written by `casals export` (never a source of truth in code)
 ├── scripts/
 │   └── publish_build.py              # Build+publish engine used by release.yml
@@ -63,7 +63,7 @@ realms/
 
 ## Deploying Code Changes
 
-Every environment is declared in [`casals.json`](casals.json) and converged by
+Every environment is declared in a sheet ([`casals.json`](casals.json) for production, [`casals.local.json`](casals.local.json) for local) and converged by
 `casals up` (see [`docs/deployment/README.md`](docs/deployment/README.md)). There is no
 per-network table anywhere in this repo: canister ids, controllers, hosts and
 test flags live in the sheet's `environments` block, and the running canisters
@@ -108,7 +108,7 @@ is marked as a pre-release, and is never Latest.
 ### Environments
 
 `local` (a fresh replica, the test build variant) and `production` (the production
-variant) — both in `casals.json`. A sheet may set `build_variant` on its environment;
+variant) — in `casals.local.json` and `casals.json`. A sheet may set `build_variant` on its environment;
 without it `scripts/up.sh` builds `test` for `local` and `production` for the rest.
 See [Build variants](#build-variants-production-vs-test-wasm).
 
