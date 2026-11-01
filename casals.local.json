@@ -126,7 +126,7 @@
         "family": "token-backend",
         "version": "0.6.0",
         "source": "release:smart-social-contracts/ic-python-token@v0.6.0:token_backend.wasm.gz",
-        "sha256": "8a7723ad8a2ff61993d730a2bbd149b40725d4cf564e7e9ba142c84baca1cbc2"
+        "sha256": "4944db4ed1b5670e51912a1fff71a46f905a60da4faede10ac6cf47e33e10950"
       },
       {
         "family": "nft-backend",
