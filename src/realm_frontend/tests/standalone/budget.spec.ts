@@ -9,7 +9,7 @@
 // member the finance role, with which they amend the budget, and a vote takes it away again. After each refusal the
 // realm's rows are what they were.
 //
-// The budget_manager extension is installed, but its page cannot run on this realm (see the fixme below), so the
+// A vote installs the budget_manager extension, but its page cannot run on this realm (see the fixme below), so the
 // steps it should offer are the realm's operations called as the member who would call them. Spending has a page:
 // the vault's. What a step did is read back from the realm, not from the page's text.
 //
@@ -142,7 +142,7 @@ async function adoptedBudget(): Promise<Budget | undefined> {
 
 /** What `fund` holds of the ledger's token. */
 async function held(fund: string): Promise<number> {
-	return ((await row<Fund>('Fund', fund)).balances[SYMBOL] ?? 0) as number;
+	return (await row<Fund>('Fund', fund)).balances[SYMBOL] ?? 0;
 }
 
 /** Passes a realm-wide proposal of `op`: the founder files it and both members vote yes. */
@@ -267,7 +267,9 @@ test('a payment into the treasury is split between the department funds', async 
 	await mint(realm, { owner: payTo.owner }, BigInt(amount));
 	await done('invoice_refresh', { invoice: billed.invoice }, founder());
 
-	expect((await row<{ status: string }>('Invoice', billed.invoice as string)).status).toBe('paid');
+	expect(
+		(await row<{ id: string; status: string }>('Invoice', billed.invoice as string)).status
+	).toBe('paid');
 	expect(await held(ROADS)).toBe(before.roads + 600_000);
 	expect(await held(WELFARE)).toBe(before.welfare + 300_000);
 	expect(await held(SOURCE), 'what no rule gives away stays in the treasury').toBe(
@@ -314,7 +316,9 @@ test('the founder spends from the roads fund on the vault page, within the budge
 	const before = {
 		fund: await held(ROADS),
 		actual: (await row<Budget>('Budget', budget)).actual,
-		payee: await balanceOf(realm, { owner: principal(payee) })
+		payee: await balanceOf(realm, { owner: principal(payee) }),
+		// The fund pays out of the realm's own ledger account.
+		realm: await balanceOf(realm, { owner: realm.realm_backend })
 	};
 
 	const { app, frame, close } = await openExtension(page, realm, founder(), 'vault');
@@ -324,7 +328,7 @@ test('the founder spends from the roads fund on the vault page, within the budge
 		await expect(app.getByText(`Available in ${ROADS}`)).toBeVisible();
 		await snap(page, 'the roads fund and its balance');
 		await app.locator('#v-to').fill(principal(payee));
-		await app.locator('#v-amount').fill('0.002');
+		await app.locator('#v-amount').fill((spent / 1e8).toFixed(8));
 		await app.getByRole('button', { name: 'Send', exact: true }).last().click();
 		await frame.getByRole('button', { name: 'Send', exact: true }).last().click();
 		await expect(app.getByText(/Sent .* to /)).toBeVisible({ timeout: 60_000 });
@@ -337,6 +341,10 @@ test('the founder spends from the roads fund on the vault page, within the budge
 	expect(await held(ROADS), 'the fund pays the amount and the ledger fee').toBe(
 		before.fund - spent - FEE
 	);
+	expect(
+		await balanceOf(realm, { owner: realm.realm_backend }),
+		'the ledger charged the fee the books show'
+	).toBe(before.realm - BigInt(spent + FEE));
 	expect(
 		(await row<Budget>('Budget', budget)).actual,
 		"the budget's actual grew by the payment"
