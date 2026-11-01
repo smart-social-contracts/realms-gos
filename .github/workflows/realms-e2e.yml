@@ -164,7 +164,7 @@ jobs:
             realms/src/realm_frontend/playwright-report/standalone
             realms/src/realm_frontend/test-results/standalone
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7
 
       # ── cross-quarter addressing against the converged demo realm ───────────
       # The harness keeps each orchestra's bindings in <CASALS_HOME>/<sheet name>/.
