@@ -5,7 +5,7 @@ Three things get deployed, by three different tools:
 | What | Where it runs | Tool |
 |---|---|---|
 | A realm for development | Your machine (PocketIC) | `realms local`: see [Getting started](../getting-started.md) |
-| The **product orchestra**: marketplace, fleet file registry, token, NFT | The Internet Computer | [Casals](https://github.com/smart-social-contracts/Casals), from [`casals.json`](../../casals.json), driven by [`scripts/up.sh`](../../scripts/up.sh) |
+| The **product orchestra**: marketplace, fleet file registry, token, NFT | The Internet Computer | [Casals](https://github.com/smart-social-contracts/Casals), from [`casals.json`](../../casals.json) (production) and [`casals.local.json`](../../casals.local.json) (local), driven by [`scripts/up.sh`](../../scripts/up.sh) |
 | Realms that people create | The Internet Computer | The GaaS portal ([gos-as-a-service](https://github.com/smart-social-contracts/gos-as-a-service)); each realm is a stand of the GaaS orchestra |
 
 All three install **release artifacts**, not the checkout.
@@ -41,8 +41,11 @@ The production wasm holds none of the test-only code, and the packer fails if it
 
 ## The product orchestra
 
-[`casals.json`](../../casals.json) is the *sheet*: what should exist, per environment (`local`,
-`production`). Its stands:
+A *sheet* says what should exist in one environment: [`casals.local.json`](../../casals.local.json) for
+`local`, [`casals.json`](../../casals.json) for `production` (the other environments have their own,
+`casals.<env>.json`). They share their stands and differ in the registry rows each environment pins:
+local installs the token from ic-python-token, production still from ic-tokens (see
+[The token ledger](#the-token-ledger)). The stands:
 
 | Stand | Canisters |
 |---|---|
@@ -124,6 +127,43 @@ Once built, the orchestra changes by operations, not by re-applying the sheet:
 casals -e production --identity <id> upgrade casals.json --wasm <family>          # a backend
 casals -e production --identity <id> upgrade casals.json --content <namespace>    # a frontend bundle
 ```
+
+### The token ledger
+
+The realm's treasury reads only the standard ICRC-1 transfer result, `variant { Ok : nat; Err : TransferError }`.
+That is what [ic-python-token](https://github.com/smart-social-contracts/ic-python-token) (v0.6.0 and later)
+answers. The older [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) ledger answers with
+`record { success; block_index; error }`, which the treasury reads as *unconfirmed*. Every payout on such a
+ledger therefore stays `unconfirmed`: its tokens may have left, so it is never refunded and never booked as paid,
+and nothing reverts it.
+
+**Rule: do not install a `realm_backend` with this treasury on a realm whose token ledger is still ic-tokens.**
+
+A ledger cannot be moved by upgrading it. Tested on PocketIC: after upgrading the same canister from the
+ic-tokens v0.1.0 wasm to the ic-python-token v0.6.0 wasm, the total supply, the owner, every balance and the
+transaction history were gone, and the ledger answered `Err` to a transfer because every balance was zero. (An
+upgrade between two builds of the same wasm keeps all of them.) The order of operations is:
+
+1. Choose the ledger: a fresh ic-python-token canister (`token-backend` of `casals.local.json`, or `token_backend`
+   of `dfx.json`), installed with the environment's init argument. The deployer holds the whole supply. Any balance
+   people hold on the old ledger has to be issued again on the new one.
+2. Point the realm at that ledger.
+3. Only then install the `realm_backend` release that carries this treasury.
+
+A realm that keeps an ic-tokens ledger stays on the earlier `realm_backend` release.
+
+Ledgers deployed from ic-tokens v0.1.0 (wasm sha256 `a1734ad2…461a`). All answer with the old record, and none is
+migrated:
+
+| Environment | Ledger | Where the id is recorded |
+|---|---|---|
+| production | the REALMS token, `token-backend` of `casals.json` (`hqojk-2aaaa-aaaap-quz4a-cai`) | `canister_ids.json` |
+| demo | `xbkkh-syaaa-aaaah-qq3ya-cai` | `dfx.template.json` (`remote`) |
+| test | `nusyl-jiaaa-aaaae-qj6mq-cai` | `dfx.template.json` (`remote`) |
+| staging | `token-backend` of `casals.staging.json` | `casals export casals.staging.json -e staging` |
+
+The staging, demo and test sheets still pin `token-backend@0.1.0`, so a `casals up` there creates another ic-tokens
+ledger. The NFT ledger (`nft-backend`) is not affected: it stays on ic-tokens.
 
 ### Domains
 
