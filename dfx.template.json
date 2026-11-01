@@ -86,8 +86,8 @@
     },
     "token_backend": {
       "type": "custom",
-      "candid": "https://github.com/smart-social-contracts/ic-tokens/releases/download/v0.1.0/token_backend.did",
-      "wasm": "https://github.com/smart-social-contracts/ic-tokens/releases/download/v0.1.0/token_backend.wasm",
+      "candid": "https://github.com/smart-social-contracts/ic-python-token/releases/download/v0.6.0/token_backend.did",
+      "wasm": "https://github.com/smart-social-contracts/ic-python-token/releases/download/v0.6.0/token_backend.wasm.gz",
       "remote": {
         "id": {
           "demo": "xbkkh-syaaa-aaaah-qq3ya-cai",

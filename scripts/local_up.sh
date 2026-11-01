@@ -8,7 +8,7 @@
 # converges through the Casals e2e harness, then `realms files publish`.
 # Nothing
 # here touches mainnet or a YubiKey: the identity is the plaintext `local-dev`
-# key, the environment is casals.json `environments.local`. The replica
+# key, the environment is casals.local.json `environments.local`. The replica
 # defaults to icp's implicit `local` network on port 8000. To run beside
 # another replica on the same laptop (a corpus, a second local_up):
 #
@@ -184,7 +184,7 @@ if [ "$ONLY_URLS" = 1 ]; then
     . "$CASALS_HOME/.replica/env"
     set +a
   fi
-  print_urls realms-product "$REALMS_DIR/casals.json" "Realms product orchestra"
+  print_urls realms-product "$REALMS_DIR/casals.local.json" "Realms product orchestra"
   print_urls gaas "$GAAS_SHEET" "GaaS orchestra (portal + installer + realms born through it)"
   print_portal_links
   exit 0
@@ -300,7 +300,7 @@ fi
 
 # ── URLs ──────────────────────────────────────────────────────────────────────
 say "Ready. Open in the browser (Chrome/Firefox resolve *.localhost; Safari does not):"
-print_urls realms-product "$REALMS_DIR/casals.json" "Realms product orchestra"
+print_urls realms-product "$REALMS_DIR/casals.local.json" "Realms product orchestra"
 if [ "$WITH_GAAS" = 1 ]; then
   print_urls gaas "$GAAS_SHEET" "GaaS orchestra (portal + installer + realms born through it)"
   print_portal_links
@@ -310,7 +310,7 @@ cat <<EOF
   Also:
     scripts/local_up.sh --urls                                       # print these again
     (cd $CASALS_DIR && CASALS_HOME=$CASALS_HOME/realms-product \\
-       python3 -m casals_cli.main -e local --identity $IDENTITY show|plan|oracle $REALMS_DIR/casals.json)
+       python3 -m casals_cli.main -e local --identity $IDENTITY show|plan|oracle $REALMS_DIR/casals.local.json)
     scripts/local_up.sh --down                                       # stop the replica, forget bindings
     tail -f $LOG_DIR/latest.log                                      # same stream as this console
 EOF
