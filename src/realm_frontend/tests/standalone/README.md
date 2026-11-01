@@ -8,6 +8,7 @@ The journey of a realm on realmsgos.org, in a browser, on your own machine and o
 | `proposals.spec.ts`      | A proposal of each kind is filed, voted yes by both members and executed: poll, extension install, extension upgrade, codex install, role assignment, Realms GOS release, realm-wide (federal) vote, treasury transaction (the realm gets an ic-python-token ledger in test mode, and the treasury is funded through a paid invoice).                                                                                                 |
 | `extensions-ops.spec.ts` | One test per extension, from a table of page, action and expected result: its main operation. `fixme` rows say why they cannot run.                                                                                                                                                                                                                                                                                                   |
 | `justice.spec.ts`        | The life of a case in the justice extension with real members: a member files against another, the administrator accepts it into a court and assigns the judge, the judge issues the verdict, its effect is read back from the realm, a party appeals and the court above grants it; and a refusal at each step (non-member, party, non-judge). Steps the page has no screen for call the realm's operations as the member who would. |
+| `tax.spec.ts`            | The life of a tax. Realm operations: the administrator seats a finance officer and adopts a policy (root department 1 of 1, no vote), the officer assesses, a member declares revenue. The dashboard: a member pays (the treasury receives it) and an unpaid tax turns overdue. Refusals change nothing. `fixme`: tax_manager page (realms-extensions#40), paid notice (#41), bad amounts (realms-gos#466), waiving (#467).           |
 
 `scripts/e2e_standalone_realm.py` also deploys that test ledger (ic-python-token, downloaded the first time).
 
@@ -21,7 +22,7 @@ From the repository root, with `icp`, `node` 20+ and the Python tools `scripts/u
 ```bash
 realms files build            # the extension bundles
 scripts/up.sh -e local --yes  # the product on a local replica (:8000), with every extension and codex published
-scripts/e2e_ui.sh             # a fresh realm, then the four specs, in order (about 20 minutes)
+scripts/e2e_ui.sh             # a fresh realm, then the five specs, in order (about 20 minutes)
 ```
 
 `scripts/e2e_ui.sh` takes `playwright test` arguments, for one spec or one row: `scripts/e2e_ui.sh --project=proposals`,

@@ -24,7 +24,7 @@ export default defineConfig({
 	},
 	// The specs share one realm, which the wizard spec launches and the others use. That works only because there is
 	// one worker and the projects run in this list's order: a failure of the wizard spec shows up in all of them.
-	projects: ['wizard', 'proposals', 'extensions-ops', 'justice'].map((name) => ({
+	projects: ['wizard', 'proposals', 'extensions-ops', 'justice', 'tax'].map((name) => ({
 		name,
 		testMatch: `${name}.spec.ts`,
 		use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } }
