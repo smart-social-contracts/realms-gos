@@ -173,6 +173,12 @@ async function readAs(identity: Ed25519KeyIdentity, canister: string, name: stri
 	return JSON.parse(await actor.read(name, JSON.stringify(args)));
 }
 
+/** The profiles the realm's own card of ``user`` lists. */
+async function profilesOf(user: Ed25519KeyIdentity): Promise<string[]> {
+	const card = await readAs(user, realm.realm_backend, 'user_get', { user: user.getPrincipal().toText() });
+	return card.user.profiles;
+}
+
 /** ``member`` opens ``path`` of the realm in a browser of their own (a portal host signing as them). */
 async function asMember<T>(browser: Browser, seat: number, path: string, run: (page: Page, frame: FrameLocator) => Promise<T>) {
 	// A browser of their own is not the test's page: it records its video itself.
@@ -355,6 +361,9 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 			name: G.realm_name
 		};
 		expect((await readOp(realm, 'status')).status).toBe('setup');
+		expect(await profilesOf(founder), 'the creator is the administrator from the start').toEqual(
+			expect.arrayContaining(['admin', 'founder'])
+		);
 		writeFileSync(`${process.env.GAAS_JSON || '/tmp/e2e/gaas.json'}.realm.json`, JSON.stringify(realm, null, 1));
 	});
 
@@ -374,6 +383,9 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 			await close();
 		}
 		expect((await readOp(realm, 'status')).status).not.toBe('setup');
+		const profiles = await profilesOf(founder);
+		expect(profiles, 'the creator is still the administrator once the realm has launched').toContain('admin');
+		expect(profiles, 'the launch ends the setup rights').not.toContain('founder');
 	});
 
 	await test.step('auto-scaling is on: a test network scales at 9 of 10', async () => {
