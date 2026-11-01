@@ -23,7 +23,8 @@ flowchart LR
 | `realm_frontend` | [`src/realm_frontend`](../../src/realm_frontend) | The UI (SvelteKit, asset canister). Hosts extension UIs. |
 | `file_registry` | [file-registry](https://github.com/smart-social-contracts/file-registry) | Stores published extensions and codices. |
 | `marketplace_backend` / `_frontend` | [`src/marketplace_*`](../../src) | Lists packages, reviews them, stamps approvals on the registry. |
-| Token and NFT ledgers | [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) | ICRC-1 money and land titles. |
+| Token ledger | [ic-python-token](https://github.com/smart-social-contracts/ic-python-token) | ICRC-1 money. |
+| NFT ledger | [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) | Land titles. |
 
 ## The backend in layers
 

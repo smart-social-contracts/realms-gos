@@ -48,10 +48,10 @@ def is_block_index(value):
 
 
 def outcome(reply):
-    """How a ledger answered a payout: ``(status, ledger_tx)``. ``completed``: the ICRC-1 ``Ok``, or an
-    ic-python-token record with ``success = true`` and a ``block_index``. ``failed``: ``Err``, or ``success = false``
-    with an ``error``; only then did the ledger certainly not move the tokens. Anything else is ``unconfirmed``:
-    the tokens may have left, so the books must not be reversed until someone checks the ledger."""
+    """How a ledger answered a payout: ``(status, ledger_tx)``. The ledger speaks the standard ICRC-1 result.
+    ``completed``: ``Ok`` with the block index. ``failed``: ``Err``; only then did the ledger certainly not move the
+    tokens. Anything else is ``unconfirmed``: the tokens may have left, so the books must not be reversed until
+    someone checks the ledger."""
     try:
         (answer,) = candid.Reader(reply).args()
     except Exception:  # a hostile reply can also overflow or recurse; whatever goes wrong, the answer is unclear
@@ -60,12 +60,10 @@ def outcome(reply):
         return "unconfirmed", None
     # An unnamed decoder prints a field's hash for its name, so look fields up by hash.
     fields = {candid.idl_hash(k) if isinstance(k, str) else k: v for k, v in answer.items()}
-    ok, success, block, error = (fields.get(candid.idl_hash(n)) for n in ("Ok", "success", "block_index", "error"))
+    ok = fields.get(candid.idl_hash("Ok"))
     if is_block_index(ok):
         return "completed", str(ok)
-    if success is True and is_block_index(block):
-        return "completed", str(block)
-    if candid.idl_hash("Err") in fields or (success is False and error):
+    if candid.idl_hash("Err") in fields:
         return "failed", None
     return "unconfirmed", None
 

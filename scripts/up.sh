@@ -31,7 +31,8 @@
 #                        default ~/casals-home); other envs: <CASALS_HOME> itself (default ~/.casals),
 #                        which is where a previous `casals up` wrote <orchestra>.<env>.json.
 #   CASALS_DIR, FILE_REGISTRY_DIR   sibling checkouts (default ../Casals, ../file-registry)
-#   IC_TOKENS_VERSION    ic-tokens release for token/nft wasms (default 0.1.0)
+#   IC_PYTHON_TOKEN_VERSION  ic-python-token release for the token wasm (default 0.6.0)
+#   IC_TOKENS_VERSION    ic-tokens release for the nft wasm (default 0.1.0)
 #   SCENARIOS            local only: harness scenarios (default fresh,idempotent)
 #   DFX_HSM_PIN          production: PIN of the hardware key behind --identity
 #   INFOMANIAK_API_TOKEN production: dns:read + dns:write on the zone, for the domains phase (the
@@ -50,6 +51,7 @@ ROOT="$(dirname "$REALMS_DIR")"
 CASALS_DIR="${CASALS_DIR:-$ROOT/Casals}"
 FILE_REGISTRY_DIR="${FILE_REGISTRY_DIR:-$ROOT/file-registry}"
 SHEET="$REALMS_DIR/casals.json"
+IC_PYTHON_TOKEN_VERSION="${IC_PYTHON_TOKEN_VERSION:-0.6.0}"
 IC_TOKENS_VERSION="${IC_TOKENS_VERSION:-0.1.0}"
 SCENARIOS="${SCENARIOS:-fresh,idempotent}"
 
@@ -202,12 +204,15 @@ if [ "$PUBLISH_ONLY" = 0 ] && [ "$SKIP_BUILD" = 0 ]; then
   (cd "$FILE_REGISTRY_DIR" && make build
    ls -l .basilisk/ic_file_registry/ic_file_registry.wasm frontend/dist/index.html)
 
-  say "Build: ic-tokens wasms (v$IC_TOKENS_VERSION)"
+  say "Build: token wasm (ic-python-token v$IC_PYTHON_TOKEN_VERSION) and nft wasm (ic-tokens v$IC_TOKENS_VERSION)"
   mkdir -p "$REALMS_DIR/.external-wasms"
   for w in token_backend nft_backend; do
     [ -s "$REALMS_DIR/.external-wasms/$w.wasm" ] && { note "have $w.wasm"; continue; }
-    curl -fsSL "https://github.com/smart-social-contracts/ic-tokens/releases/download/v${IC_TOKENS_VERSION}/${w}.wasm" \
-      -o "$REALMS_DIR/.external-wasms/$w.wasm"
+    case "$w" in
+      token_backend) url="https://github.com/smart-social-contracts/ic-python-token/releases/download/v${IC_PYTHON_TOKEN_VERSION}/${w}.wasm" ;;
+      nft_backend)   url="https://github.com/smart-social-contracts/ic-tokens/releases/download/v${IC_TOKENS_VERSION}/${w}.wasm" ;;
+    esac
+    curl -fsSL "$url" -o "$REALMS_DIR/.external-wasms/$w.wasm"
     note "fetched $w.wasm"
   done
 

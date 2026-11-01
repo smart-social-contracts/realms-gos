@@ -21,7 +21,8 @@ run by hand: patch, minor or major) builds and attaches to a GitHub release:
 | `realm-backend-test-<tag>.wasm.gz` | `scripts/pack_realm_backend.py --variant test`: for local, and test or demo realms that need test flags and deterministic identities |
 | `realm-frontend-<tag>.tar.gz` | `npm run build` in `src/realm_frontend`, packed with `casals bundle` |
 | `marketplace-backend-…`, `marketplace-frontend-…` | Basilisk, `npm run build` |
-| `token-backend-…`, `nft-backend-…` | Copied from [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) |
+| `token-backend-…` | Copied from [ic-python-token](https://github.com/smart-social-contracts/ic-python-token) |
+| `nft-backend-…` | Copied from [ic-tokens](https://github.com/smart-social-contracts/ic-tokens) |
 | `checksums-<tag>.txt` | SHA-256 of the above; `realms local` checks downloads against it |
 
 To build the realm by hand:
