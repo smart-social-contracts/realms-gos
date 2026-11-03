@@ -350,7 +350,10 @@
     "quarter_setting_up": "（设置中）",
     "quarter_coordinator_only": "（仅协调员）",
     "capital": "首都",
-    "background_alt": "{name} 背景"
+    "background_alt": "{name} 背景",
+    "signing_in": "正在登录",
+    "signing_out": "正在退出",
+    "signing_in_hint": "请稍候。"
   },
   "identities": {
     "page_title": "我的身份",

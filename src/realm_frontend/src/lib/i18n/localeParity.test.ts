@@ -5,6 +5,11 @@ import de from './locales/de.json';
 import fr from './locales/fr.json';
 import itLocale from './locales/it.json';
 import zhCN from './locales/zh-CN.json';
+import loc_ca from './locales/ca.json';
+import loc_eu from './locales/eu.json';
+import loc_gl from './locales/gl.json';
+import loc_rm from './locales/rm.json';
+import loc_zh_HK from './locales/zh-HK.json';
 import caValencia from './locales/ca-valencia.json';
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
@@ -34,6 +39,11 @@ const locales: Record<string, JsonObject> = {
 	it: itLocale as JsonObject,
 	'zh-CN': zhCN as JsonObject,
 	'ca-valencia': caValencia as JsonObject,
+	'zh-HK': loc_zh_HK as JsonObject,
+	'rm': loc_rm as JsonObject,
+	'gl': loc_gl as JsonObject,
+	'eu': loc_eu as JsonObject,
+	'ca': loc_ca as JsonObject,
 };
 
 describe('locale parity', () => {

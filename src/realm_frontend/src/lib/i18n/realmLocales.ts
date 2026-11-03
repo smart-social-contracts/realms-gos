@@ -7,7 +7,12 @@ export const LOCALE_CATALOG = [
 	{ id: 'fr', name: 'Français' },
 	{ id: 'it', name: 'Italiano' },
 	{ id: 'zh-CN', name: '中文 (简体)' },
-	{ id: 'ca-valencia', name: 'Valencià' }
+	{ id: 'ca-valencia', name: 'Valencià' },
+	{ id: 'ca', name: 'Català' },
+	{ id: 'eu', name: 'Euskara' },
+	{ id: 'gl', name: 'Galego' },
+	{ id: 'rm', name: 'Rumantsch' },
+	{ id: 'zh-HK', name: '繁體中文（香港）' }
 ] as const;
 
 export type CatalogLocaleId = (typeof LOCALE_CATALOG)[number]['id'];

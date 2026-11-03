@@ -6,7 +6,7 @@ import { read } from '$lib/realm';
 import { quarterFederation } from '$lib/stores/quarters';
 import { applyBrandingPrimary, DEFAULT_PRIMARY_COLOR, parsePrimaryColor } from '$lib/theme/brandingPrimary';
 import { applyResolvedLocale } from '$lib/i18n';
-import { defaultRealmLanguages } from '$lib/i18n/realmLocales';
+import { defaultRealmLanguages, coerceRealmLanguages } from '$lib/i18n/realmLocales';
 import { userLocale } from '$lib/stores/userLocale';
 import { resolveDemoNoticeBodies, resolveDemoNoticeEnabled, resolveDisableMonetaryTokens } from '$lib/config/hostTestFlags';
 
@@ -143,7 +143,7 @@ const createRealmInfoStore = () => {
 				const flags = realm.test_flags || {};
 				const network = realm.network || '';
 				const primaryColor = parsePrimaryColor(realm.primary_color) ?? DEFAULT_PRIMARY_COLOR;
-				const languageConfig = defaultRealmLanguages();
+				const languageConfig = coerceRealmLanguages(flags.languages, flags.primary_language);
 				const federation = directory?.ok
 					? quarterFederation(directory)
 					: { quarters: [], isQuarter: false, parentRealmCanisterId: '' };

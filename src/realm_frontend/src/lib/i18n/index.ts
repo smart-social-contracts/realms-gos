@@ -16,6 +16,11 @@ register("de", () => import("./locales/de.json"));
 register("fr", () => import("./locales/fr.json"));
 register("zh-CN", () => import("./locales/zh-CN.json"));
 register("it", () => import("./locales/it.json"));
+register("ca", () => import("./locales/ca.json"));
+register("eu", () => import("./locales/eu.json"));
+register("gl", () => import("./locales/gl.json"));
+register("rm", () => import("./locales/rm.json"));
+register("zh-HK", () => import("./locales/zh-HK.json"));
 register("ca-valencia", () => import("./locales/ca-valencia.json"));
 
 // Helper function to wait for locale to be ready
