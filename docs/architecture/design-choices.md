@@ -49,6 +49,52 @@ Every design decision is weighed against these criteria, roughly in this order:
 Rust also has stable structures, so storage and upgrades alone do not decide the language. Running
 laws as data, and keeping them readable to non-programmers, do.
 
+### Python for the laws people must check
+
+A codex is the realm's law. Whoever answers for a law (councillors, auditors, judges, the public)
+must be able to check what it does, so the codex language is chosen for its readers, not for the
+machine.
+
+- **AI drafts, humans verify.** AI can write a codex, but an accountable person still has to read
+  it before it is voted in. The language should be the one most people can read: Python is the most
+  taught language and reads close to plain English. *(Legitimacy, accessibility.)*
+- **The policy shows, the machinery does not.** The same rule in Python and in Motoko:
+
+  ```python
+  @hook
+  def on_user_register(args):
+      inv = realm.invoice(args["user"], realm.config["fees"]["registration"], "registration")
+      realm.notify(args["user"], "Welcome", "Your invoice: " + inv["invoice"])
+  ```
+
+  ```motoko
+  public func onUserRegister(args : RegisterArgs) : async Result.Result<(), Text> {
+    let fee = switch (config.fees.registration) { case (?f) f; case null return #err("no fee") };
+    let inv = await realm.invoice(args.user, fee, "registration");
+    ignore await realm.notify(args.user, "Welcome", "Your invoice: " # inv.invoice);
+    #ok
+  };
+  ```
+
+  A policymaker can follow the first. In the second, `async`, `switch`, `#ok` and option types say
+  nothing about the policy; Rust adds ownership and lifetimes. *(Accessibility.)*
+- **Governments already do it.** OpenFisca, the rules-as-code engine started by the French
+  government and reused elsewhere for tax and benefit rules, is Python. *(Accessibility, longevity.)*
+- **The law's own words.** Python allows names in any language (`def steuersatz(einkommen):`,
+  `def quota_empadronament(veí):`), so a codex can use the terms of the law it implements. Keep to
+  letters of the Basic Multilingual Plane: the canister's Python rejects astral characters such as
+  emoji. *(Legitimacy, accessibility.)*
+
+The objections, and the answers:
+
+| Objection | Answer |
+|---|---|
+| It costs more instructions on the IC. | Hooks are small and run on events; the work is in the operations they call. Each call is metered (see [sandboxing](sandboxing.md)). *(Cost traded last.)* |
+| Python is dynamic: code can rewrite code. | Each call runs in a fresh subinterpreter that never sees the realm's data or code, and is thrown away after. Layered codices, where one codex links several, will need an install-time check of a readable subset (no `exec`, `eval`, `globals()`, `setattr`, operations named literally). Not built yet. |
+| No types, so errors appear at run time. | Type hints on hook signatures, checked at install against the GGG definitions. Not built yet. |
+| A legal language is clearer. | For narrow rules it can be: Catala was designed with lawyers and trialled by the French tax administration. Each such language is one more thing to learn, with a small community, and a codex does more than compute. Purely declarative rules stay first: Cedar for prohibitions, JSON for parameters. |
+| It ties GGG to Python. | It does not. GGG defines operations in Candid; Python is Realms GOS's codex language, not a GGG requirement. Another GOS may use another language. |
+
 ### One operation registry, one entry point
 
 Every capability is an [operation](operations.md): one Python function with `@op`, declared once.
