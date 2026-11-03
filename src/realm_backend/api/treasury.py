@@ -239,7 +239,8 @@ def positive(args, key="amount"):
 def transfer_create(c, args):
     """Pay ``amount`` of ``symbol`` (default the realm currency) from ``fund`` to ``to`` (principal, user or org); the
     fund must also cover the ledger fee. Optional ``category`` (default transfer), ``description``, ``contract``.
-    Returns ``transfer``, ``status``. Example: ``{"fund": "ROADS", "to": "buildco", "amount": 50000}``."""
+    A payment that takes the adopted budget of its fund and category past its plan is refused: amend the budget to
+    spend more. Returns ``transfer``, ``status``. Example: ``{"fund": "ROADS", "to": "buildco", "amount": 50000}``."""
     fund, amount = find(Fund, args["fund"]), positive(args)
     symbol = args.get("symbol") or currency()
     need = amount + find(Token, symbol).fee
@@ -606,11 +607,12 @@ def payroll_run(c, args):
     seats = [(a.user, pos.salary) for pos in dept.positions if pos.salary > 0
              for a in pos.appointments if a.status == "active" and not a.agent]
     total = sum(s for _, s in seats)
-    need = total + len(seats) * find(Token, symbol).fee
+    fees = len(seats) * find(Token, symbol).fee
+    need = total + fees
     if balance(fund, symbol) < need:
         raise Conflict(f"fund {fund.id} holds {balance(fund, symbol)} {symbol}, payroll needs {need}")
     p = period()
-    refuse_overspend(p, spending(fund, "payroll", total, len(seats) * find(Token, symbol).fee))  # all or none
+    refuse_overspend(p, spending(fund, "payroll", total, fees))  # all or none
     batch = [reserve(p, fund, user, symbol, salary, "payroll", f"{note}: {user}", payroll=note, user=user)
              for user, salary in seats]
     results = []

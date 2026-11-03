@@ -259,11 +259,14 @@ def test_a_voted_payment_past_the_plan_fails_with_its_reason_and_pays_nothing():
 
 def test_a_payroll_past_the_plan_is_refused_before_anyone_is_paid():
     fund_roads_with_budget(1)
-    Position["infrastructure.planning_officer"].salary = 4_000
+    infrastructure = Department["Infrastructure"]
+    world.seat("infrastructure.surveyor", "dana", infrastructure)
+    Position["infrastructure.planning_officer"].salary = Position["infrastructure.surveyor"].salary = 2_000
     ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="payroll", planned=3_999)
     ok("budget_propose", "bob", budget="B-2")
+    entries = LedgerEntry.count()  # the first salary fits the plan: only the check up front keeps it from being paid
     assert "4000 was asked" in call("payroll_run", "bob", department="Infrastructure", period="2026-11")["error"]
-    assert Transfer.count() == 0
+    assert (Transfer.count(), LedgerEntry.count(), Budget["B-2"].actual) == (0, entries, 0)
 
 
 def test_payment_after_an_amendment_that_raises_the_plan_is_allowed():
