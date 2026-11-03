@@ -43,8 +43,8 @@ Every design decision is weighed against these criteria, roughly in this order:
   runtime eval. *(Amendability.)*
 - **Auditable laws.** Every codex is stored with its source, version and checksum, and links to the
   version it replaced, so the rules in force at any time can be shown exactly. *(Legitimacy.)*
-- **Readable by non-specialists.** Python is readable by lawyers and analysts, and LLMs write and
-  review it well. *(Accessibility.)*
+- **Readable by non-specialists.** See [Python for the laws people must check](#python-for-the-laws-people-must-check).
+  *(Accessibility.)*
 
 Rust also has stable structures, so storage and upgrades alone do not decide the language. Running
 laws as data, and keeping them readable to non-programmers, do.
@@ -56,8 +56,8 @@ must be able to check what it does, so the codex language is chosen for its read
 machine.
 
 - **AI drafts, humans verify.** AI can write a codex, but an accountable person still has to read
-  it before it is voted in. The language should be the one most people can read: Python is the most
-  taught language and reads close to plain English. *(Legitimacy, accessibility.)*
+  it before it is voted in. The language should be the one most people can read: Python is one of the
+  most widely taught languages and reads close to plain English. *(Legitimacy, accessibility.)*
 - **The policy shows, the machinery does not.** The same rule in Python and in Motoko:
 
   ```python
@@ -76,21 +76,21 @@ machine.
   };
   ```
 
-  A policymaker can follow the first. In the second, `async`, `switch`, `#ok` and option types say
+  If no fee is configured, the Python hook fails: the realm records the error and marks the codex
+  unhealthy, and the registration itself still goes through. A policymaker can follow the first. In the second, `async`, `switch`, `#ok` and option types say
   nothing about the policy; Rust adds ownership and lifetimes. *(Accessibility.)*
 - **Governments already do it.** OpenFisca, the rules-as-code engine started by the French
   government and reused elsewhere for tax and benefit rules, is Python. *(Accessibility, longevity.)*
 - **The law's own words.** Python allows names in any language (`def steuersatz(einkommen):`,
-  `def quota_empadronament(veí):`), so a codex can use the terms of the law it implements. Keep to
-  letters of the Basic Multilingual Plane: the canister's Python rejects astral characters such as
-  emoji. *(Legitimacy, accessibility.)*
+  `def quota_empadronament(veí):`), so a codex can use the terms of the law it implements.
+  *(Legitimacy, accessibility.)*
 
 The objections, and the answers:
 
 | Objection | Answer |
 |---|---|
 | It costs more instructions on the IC. | Hooks are small and run on events; the work is in the operations they call. Each call is metered (see [sandboxing](sandboxing.md)). *(Cost traded last.)* |
-| Python is dynamic: code can rewrite code. | Each call runs in a fresh subinterpreter that never sees the realm's data or code, and is thrown away after. Layered codices, where one codex links several, will need an install-time check of a readable subset (no `exec`, `eval`, `globals()`, `setattr`, operations named literally). Not built yet. |
+| Python is dynamic: code can rewrite code. | Each call runs in a fresh subinterpreter that never sees the realm's data or code, and is thrown away after. Layered codices (RFC 0001 in gos-transition: a realm's law linked from its own layer and those of its parent, treaties and other sources) will need a check of a readable subset when they are linked (no `exec`, `eval`, `globals()` or `setattr`, and every operation named by a literal string). Not built yet. |
 | No types, so errors appear at run time. | Type hints on hook signatures, checked at install against the GGG definitions. Not built yet. |
 | A legal language is clearer. | For narrow rules it can be: Catala was designed with lawyers and trialled by the French tax administration. Each such language is one more thing to learn, with a small community, and a codex does more than compute. Purely declarative rules stay first: Cedar for prohibitions, JSON for parameters. |
 | It ties GGG to Python. | It does not. GGG defines operations in Candid; Python is Realms GOS's codex language, not a GGG requirement. Another GOS may use another language. |
