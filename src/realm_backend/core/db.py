@@ -3,6 +3,7 @@ import json
 from ic_python_db import Entity, String
 
 PAGE, PAGE_MAX = 100, 500
+DRAFTS = 10  # how many drafts a read view lists, newest first
 
 
 class Row(Entity):
@@ -96,6 +97,12 @@ def page_by(cls, field, value, args, most=PAGE_MAX):
     """One page of the rows whose indexed ``field`` is ``value`` (``from``, ``count``); ``next`` continues it."""
     start, count = window(args, most)
     return cls.find_by(field, value, from_id=start, count=count)
+
+
+def latest(cls, count=PAGE):
+    """The newest ``count`` rows of ``cls``, newest first."""
+    last = cls.max_id()
+    return cls.load_some(max(1, last - count + 1), count)[::-1] if last else []
 
 
 def first(cls, field, value):

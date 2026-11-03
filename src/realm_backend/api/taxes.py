@@ -1,9 +1,9 @@
 from core import chain
-from core.db import PAGE, Conflict, Fail, Forbidden, each, find, first, next_id, page_by, view, window
+from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page_by, view, window
 from ggg import Land, Member, Organization, TaxDeclaration, TaxPolicy, User
 from core.op import op
 from api.proposals import realm_wide
-from api.treasury import currency, new_invoice
+from api.treasury import currency, decimals_of, new_invoice
 
 BASES = ("flat", "land_area", "declared")
 METHODS = ("fixed", "proportional", "progressive")
@@ -167,6 +167,15 @@ def tax_assess(c, args):
             "next": start + count if start + count <= last else None}
 
 
+def declarant_of(c, args):
+    """Who declares: the caller, or the ``organization`` they administer."""
+    if not args.get("organization"):
+        return f"User:{c.user}"
+    if c.user not in (find(Organization, args["organization"]).admins or []):
+        raise Forbidden(f"you do not administer {args['organization']}")
+    return f"Organization:{args['organization']}"
+
+
 @op("tax.declare", delegable=True)
 def tax_declare(c, args):
     """Declare ``amount`` for the self-declared tax ``base`` (its code) and ``period``, once, for yourself or an
@@ -176,11 +185,7 @@ def tax_declare(c, args):
     tax = tax_of(policy, args["base"])
     if tax.get("base") != "declared":
         raise Fail(f"tax '{tax['code']}' is assessed by the realm, not declared")
-    declarant = f"User:{c.user}"
-    if args.get("organization"):
-        if c.user not in (find(Organization, args["organization"]).admins or []):
-            raise Forbidden(f"you do not administer {args['organization']}")
-        declarant = f"Organization:{args['organization']}"
+    declarant = declarant_of(c, args)
     if amount < 0:
         raise Fail("a declared amount cannot be negative")
     if declared(declarant, period, tax["code"]):
@@ -191,19 +196,17 @@ def tax_declare(c, args):
 
 @op("realm.data_view", read=True)
 def tax_policy_view(c, args):
-    """The adopted tax ``policy`` (null before the first), the ``drafts`` among the latest policies, and one page of the
-    ``declarations`` of the caller, or of an ``organization`` they administer (``from``, ``count``); ``next`` continues
-    it. Members read the policy they are taxed under: everything else stays with the declarant."""
-    declarant = f"User:{c.user}"
-    if args.get("organization"):
-        if c.user not in (find(Organization, args["organization"]).admins or []):
-            raise Forbidden(f"you do not administer {args['organization']}")
-        declarant = f"Organization:{args['organization']}"
-    last = TaxPolicy.max_id()
-    latest = TaxPolicy.load_some(max(1, last - PAGE + 1), PAGE) if last else []
+    """The adopted tax ``policy`` (null before the first) with the ``currency`` and ``decimals`` its amounts are in,
+    up to ten newest ``drafts``, and one page of the ``declarations`` of the caller, or of an ``organization`` they
+    administer (``from``, ``count``); ``next`` continues it. Members read the policy they are taxed under: everything
+    else stays with the declarant."""
+    declarant = declarant_of(c, args)
     current = first(TaxPolicy, "status", "adopted")
+    symbol = (current.document.get("symbol") if current else None) or currency()
+    drafts = [p for p in latest(TaxPolicy) if p.status == "draft"][:DRAFTS]
     rows, nxt = page_by(TaxDeclaration, "declarant", declarant, args)
     return {"policy": view(current, "id", "document", "description", "adopted_at", "proposal") if current else None,
-            "drafts": [view(p, "id", "document", "description") for p in latest if p.status == "draft"],
+            "currency": symbol, "decimals": decimals_of(symbol),
+            "drafts": [view(p, "id", "document", "description") for p in drafts],
             "declarations": [view(d, "id", "period", "base", "amount", "status", "invoice") for d in rows],
             "next": nxt}

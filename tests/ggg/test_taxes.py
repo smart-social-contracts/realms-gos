@@ -175,6 +175,16 @@ def test_a_member_reads_the_tax_policy_and_only_their_own_declarations():
     assert all(TaxDeclaration[d["id"]].declarant == "User:alice" for d in mine)
 
 
+def test_tax_policy_view_gives_the_currency_and_decimals_and_caps_the_drafts():
+    setup_finance()
+    seen = ok("tax_policy_view", "mallory")
+    assert (seen["currency"], seen["decimals"]) == ("REALM", 8)
+    drafts = [ok("tax_policy_draft", "bob", document=POLICY)["policy"] for _ in range(12)]
+    assert [d["id"] for d in ok("tax_policy_view", "mallory")["drafts"]] == drafts[:1:-1]  # ten, newest first
+    ok("tax_policy_propose", "bob", policy=drafts[0])
+    assert ok("tax_policy_view", "mallory")["currency"] == "REALM"
+
+
 def test_tax_policy_view_shows_an_organizations_declarations_to_its_administrators_only():
     setup_finance()
     adopt_policy()

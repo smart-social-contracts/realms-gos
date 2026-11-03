@@ -557,10 +557,39 @@ def test_a_member_reads_the_budgets_of_the_funds():
     assert [(x["id"], x["period"], x["planned"], x["actual"]) for x in funds["ROADS"]["budgets"]] == [
         (b, "FY2026", 300_000, 0)]  # the draft is not shown as a budget
     assert draft not in str(seen["funds"])
-    assert [p["id"] for p in seen["periods"]] == ["FY2026"]
+    assert (seen["period"], [p["id"] for p in seen["periods"]]) == ("FY2026", ["FY2026"])
     assert seen["config"]["auto_allocate"] is True
     assert (seen["currency"], seen["decimals"]) == ("REALM", 8)
     assert [r["id"] for r in seen["rule_drafts"]] == [spare]
+
+
+def test_budget_view_reads_one_period_and_only_its_adopted_budgets():
+    setup_finance()
+    b = ok("budget_draft", "bob", fund="ROOT", period="FY2026", category="upkeep", planned=10)["budget"]
+    ok("budget_propose", "bob", budget=b)
+    for planned in range(11, 16):  # five superseded versions of the same line
+        b = ok("budget_amend", "bob", budget=b, planned=planned)["budget"]
+    ok("budget_draft", "bob", fund="ROOT", period="FY2026", category="spare", planned=1)
+    ok("period_open", "bob", period="FY2027", starts_at=FY2026["ends_at"], ends_at=FY2026["ends_at"] + 100)
+    later = ok("budget_draft", "bob", fund="ROOT", period="FY2027", category="roads", planned=99)["budget"]
+    ok("budget_propose", "bob", budget=later)
+
+    def lines(**args):
+        seen = ok("budget_view", "mallory", **args)
+        return seen["period"], [(x["id"], x["period"], x["planned"]) for x in seen["funds"][0]["budgets"]]
+
+    assert lines() == ("FY2026", [(b, "FY2026", 15)])  # the period covering now: the latest version only
+    assert lines(period="FY2027") == ("FY2027", [(later, "FY2027", 99)])
+    assert [p["id"] for p in ok("budget_view", "mallory")["periods"]] == ["FY2026", "FY2027"]
+    assert "unknown FiscalPeriod" in denied("budget_view", "mallory", period="FY1999")
+
+
+def test_budget_view_without_a_period_covering_now_lists_no_budgets():
+    setup_finance()
+    ok("budget_propose", "bob", budget=ok("budget_draft", "bob", fund="ROOT", period="FY2026", category="x", planned=1)["budget"])
+    fake_chain.state["now"] = FY2026["ends_at"] + 1
+    seen = ok("budget_view", "mallory")
+    assert seen["period"] is None and seen["funds"][0]["budgets"] == []
 
 
 def test_budget_view_does_not_show_ledger_entries_and_is_paginated():
