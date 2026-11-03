@@ -154,3 +154,46 @@ def test_tax_declare_rules_and_delegation():
 def test_members_cannot_manage_or_assess_taxes(name):
     world.build()
     assert "needs" in denied(name, "alice")
+
+
+def test_a_member_reads_the_tax_policy_and_only_their_own_declarations():
+    setup_finance()
+    assert ok("tax_policy_view", "mallory")["policy"] is None
+    draft = ok("tax_policy_draft", "bob", document=POLICY)["policy"]
+    seen = ok("tax_policy_view", "mallory")
+    assert (seen["policy"], [d["id"] for d in seen["drafts"]]) == (None, [draft])
+
+    ok("tax_policy_propose", "bob", policy=draft)
+    ok("tax_assess", "bob", period="2026")
+    ok("tax_declare", "alice", period="2026-Q3", base="revenue", amount=100)
+    seen = ok("tax_policy_view", "mallory")
+    assert (seen["policy"]["id"], seen["policy"]["document"], seen["drafts"]) == (draft, POLICY, [])
+    assert [(d["base"], d["status"]) for d in seen["declarations"]] == [("residence", "assessed")]
+
+    mine = ok("tax_policy_view", "alice")["declarations"]
+    assert sorted(d["base"] for d in mine) == ["residence", "revenue"]
+    assert all(TaxDeclaration[d["id"]].declarant == "User:alice" for d in mine)
+
+
+def test_tax_policy_view_shows_an_organizations_declarations_to_its_administrators_only():
+    setup_finance()
+    adopt_policy()
+    ok("tax_declare", "dr-ana", organization="clinic-b", period="2026-Q3", base="revenue", amount=100)
+    assert len(ok("tax_policy_view", "dr-ana", organization="clinic-b")["declarations"]) == 1
+    assert "do not administer" in denied("tax_policy_view", "alice", organization="clinic-b")
+    assert ok("tax_policy_view", "dr-ana")["declarations"] == []
+
+
+def test_tax_policy_view_declarations_are_paginated():
+    setup_finance()
+    adopt_policy()
+    for quarter in range(1, 4):
+        ok("tax_declare", "alice", period=f"2026-Q{quarter}", base="revenue", amount=1)
+    first = ok("tax_policy_view", "alice", count=2)
+    assert len(first["declarations"]) == 2 and first["next"]
+    assert len(ok("tax_policy_view", "alice", count=2, **{"from": first["next"]})["declarations"]) == 1
+
+
+def test_tax_policy_view_needs_a_signed_in_member():
+    world.build()
+    assert "sign in" in denied("tax_policy_view", fake_chain.ANONYMOUS)

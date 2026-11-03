@@ -3,7 +3,7 @@ import json
 
 from core import candid
 from core import chain
-from core.db import Conflict, Fail, Forbidden, each, find, first, next_id, page, page_by, view, window
+from core.db import PAGE, Conflict, Fail, Forbidden, each, find, first, next_id, page, page_by, view, window
 from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
@@ -566,6 +566,37 @@ def allocation_rule_propose(c, args):
     source.allocation_rule = r.id
     r.status, r.proposal = "adopted", c.proposal
     return {"rule": r.id, "status": r.status}
+
+
+@op("realm.data_view", read=True)
+def budget_view(c, args):
+    """How the realm budgets its money, for any member: one page of ``funds`` (``from``, ``count``; ``next`` continues
+    it), each with its ``balances``, its adopted allocation ``rule`` and its adopted ``budgets``; the fiscal ``periods``
+    of those budgets and the one covering now; the treasury ``config``; the accounting ``currency`` with its
+    ``decimals``; and the ``rule_drafts`` among the latest allocation rules. Single ledger entries stay with
+    ``ledger_view``."""
+    rows, nxt = page(Fund, args)
+    periods = {}
+    funds = []
+    for f in rows:
+        budgets = [b for b in f.budgets if b.status == "adopted"]
+        periods.update({b.period.id: b.period for b in budgets})
+        rule = adopted_rule(f)
+        funds.append({**view(f, "id", "name", "kind", "balances"), "department": owner_of(f).id,
+                      "rule": view(rule, "id", "rules") if rule else None,
+                      "budgets": [{**view(b, "id", "category", "kind", "planned", "actual"), "period": b.period.id}
+                                  for b in budgets]})
+    current = period_at(chain.now())
+    if current is not None:
+        periods[current.id] = current
+    last = AllocationRule.max_id()
+    latest = AllocationRule.load_some(max(1, last - PAGE + 1), PAGE) if last else []
+    t, symbol = Treasury["1"], currency()
+    token = Token[symbol] if symbol else None
+    return {"funds": funds, "next": nxt, "currency": symbol, "decimals": token.decimals if token else 0,
+            "periods": [view(p, "id", "name", "starts_at", "ends_at", "status") for p in periods.values()],
+            "config": t.config if t else {},
+            "rule_drafts": [view(r, "id", "source_fund", "rules") for r in latest if r.status == "draft"]}
 
 
 # --- payroll and reports --------------------------------------------------------------------------

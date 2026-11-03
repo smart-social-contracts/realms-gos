@@ -538,3 +538,42 @@ def test_token_register_updates():
     assert (Token["REALM"].ledger, Token["REALM"].fee) == ("new-ledger", 10)
     world.policy(Department["Administration"], 2, 3)
     assert ok("token_register", "bob", symbol="ckETH", ledger="eth")["requires_vote"]
+
+
+def test_a_member_reads_the_budgets_of_the_funds():
+    setup_finance()
+    ok("fund_create", "bob", fund="WELFARE", name="Welfare", kind="special_revenue")
+    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=300_000)["budget"]
+    draft = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="upkeep", planned=5)["budget"]
+    ok("budget_propose", "bob", budget=b)
+    rule = allocate(ROADS=30, WELFARE=20)
+    spare = ok("allocation_rule_draft", "bob", source_fund="ROOT", rules={"ROADS": 10})["rule"]
+
+    seen = ok("budget_view", "mallory")
+    funds = {f["id"]: f for f in seen["funds"]}
+    assert set(funds) == {"ROOT", "ROADS", "WELFARE"}
+    assert funds["ROOT"]["rule"] == {"id": rule, "rules": {"ROADS": 30, "WELFARE": 20}}
+    assert funds["ROADS"]["rule"] is None
+    assert [(x["id"], x["period"], x["planned"], x["actual"]) for x in funds["ROADS"]["budgets"]] == [
+        (b, "FY2026", 300_000, 0)]  # the draft is not shown as a budget
+    assert draft not in str(seen["funds"])
+    assert [p["id"] for p in seen["periods"]] == ["FY2026"]
+    assert seen["config"]["auto_allocate"] is True
+    assert (seen["currency"], seen["decimals"]) == ("REALM", 8)
+    assert [r["id"] for r in seen["rule_drafts"]] == [spare]
+
+
+def test_budget_view_does_not_show_ledger_entries_and_is_paginated():
+    setup_finance()
+    receive(300_000)
+    ok("fund_create", "bob", fund="WELFARE")
+    seen = ok("budget_view", "mallory", count=2)
+    assert len(seen["funds"]) == 2 and seen["next"]
+    assert "entries" not in seen and "transaction" not in str(seen)
+    assert len(ok("budget_view", "mallory", count=2, **{"from": seen["next"]})["funds"]) == 1
+    assert "needs" in denied("ledger_view", "mallory")
+
+
+def test_budget_view_needs_a_signed_in_member():
+    world.build()
+    assert "sign in" in denied("budget_view", fake_chain.ANONYMOUS)

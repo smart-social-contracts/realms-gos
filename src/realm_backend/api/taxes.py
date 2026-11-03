@@ -1,5 +1,5 @@
 from core import chain
-from core.db import Conflict, Fail, Forbidden, each, find, first, next_id, window
+from core.db import PAGE, Conflict, Fail, Forbidden, each, find, first, next_id, page_by, view, window
 from ggg import Land, Member, Organization, TaxDeclaration, TaxPolicy, User
 from core.op import op
 from api.proposals import realm_wide
@@ -187,3 +187,23 @@ def tax_declare(c, args):
         raise Conflict(f"{declarant} has already declared {tax['code']} for {period}")
     d = levy(policy, tax, declarant, period, amount)
     return {"declaration": d.id, "invoice": d.invoice, "owed": owed(tax, amount)}
+
+
+@op("realm.data_view", read=True)
+def tax_policy_view(c, args):
+    """The adopted tax ``policy`` (null before the first), the ``drafts`` among the latest policies, and one page of the
+    ``declarations`` of the caller, or of an ``organization`` they administer (``from``, ``count``); ``next`` continues
+    it. Members read the policy they are taxed under: everything else stays with the declarant."""
+    declarant = f"User:{c.user}"
+    if args.get("organization"):
+        if c.user not in (find(Organization, args["organization"]).admins or []):
+            raise Forbidden(f"you do not administer {args['organization']}")
+        declarant = f"Organization:{args['organization']}"
+    last = TaxPolicy.max_id()
+    latest = TaxPolicy.load_some(max(1, last - PAGE + 1), PAGE) if last else []
+    current = first(TaxPolicy, "status", "adopted")
+    rows, nxt = page_by(TaxDeclaration, "declarant", declarant, args)
+    return {"policy": view(current, "id", "document", "description", "adopted_at", "proposal") if current else None,
+            "drafts": [view(p, "id", "document", "description") for p in latest if p.status == "draft"],
+            "declarations": [view(d, "id", "period", "base", "amount", "status", "invoice") for d in rows],
+            "next": nxt}
