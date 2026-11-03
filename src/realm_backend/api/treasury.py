@@ -122,9 +122,26 @@ def tally(p, e):
     p.source_hash = hashlib.sha256((p.source_hash + line).encode()).hexdigest()
 
 
+def refuse_overspend(p, lines):
+    """An adopted budget's planned amount is a ceiling: refuse lines that would take its actual past it (members
+    amend the budget to spend more). Only spending counts: a reversal frees budget and is never refused."""
+    spent = {}
+    for kind, category, debit, credit, fund in lines:
+        if kind == "expense" and fund is not None and p is not None:
+            key = slot(fund, p, category)
+            spent[key] = spent.get(key, 0) + debit - credit
+    for key, asked in spent.items():
+        for b in each(Budget, "slot", key):
+            if b.status == "adopted" and asked > 0 and b.actual + asked > b.planned:
+                raise Conflict(f"budget {b.id} plans {b.planned} for {b.category} of fund {b.fund.id}, "
+                               f"{b.actual} is spent and {asked} was asked: amend the budget to spend more")
+
+
 def post(p, lines, symbol, description="", **refs):
     """One balanced transaction: lines are (kind, category, debit, credit, fund). The only place entries are
-    booked, so it keeps fund balances, adopted budgets' actuals and the period's statements."""
+    booked, so it keeps fund balances, adopted budgets' actuals and the period's statements, and it refuses
+    what would overspend an adopted budget."""
+    refuse_overspend(p, lines)
     tx = f"T-{LedgerEntry.max_id() + 1}"
     for kind, category, debit, credit, fund in lines:
         e = LedgerEntry(id=f"LE-{LedgerEntry.max_id() + 1}", transaction=tx, kind=kind, category=category,
@@ -161,12 +178,17 @@ def address(to, symbol):
     return to.removeprefix("User:")  # a user without an account is paid at their principal
 
 
+def spending(fund, category, amount, fee):
+    return [("expense", category, amount, 0, fund), ("expense", "ledger_fee", fee, 0, fund)]
+
+
 def reserve(p, fund, to, symbol, amount, category, description="", payroll=None, **refs):
+    fee = find(Token, symbol).fee
+    lines = spending(fund, category, amount, fee) + [("asset", "cash", 0, amount + fee, fund)]
+    refuse_overspend(p, lines)  # post refuses too, but only after the transfer row below is written
     t = Transfer(id=next_id(Transfer, "TR"), sender=f"Fund:{fund.id}", to=to, symbol=symbol, amount=amount,
                  status="sending", at=chain.now(), payroll=payroll)
-    fee = find(Token, symbol).fee
-    post(p, [("expense", category, amount, 0, fund), ("expense", "ledger_fee", fee, 0, fund),
-             ("asset", "cash", 0, amount + fee, fund)], symbol, description or f"{t.id} to {to}", transfer=t, **refs)
+    post(p, lines, symbol, description or f"{t.id} to {to}", transfer=t, **refs)
     return t
 
 
@@ -217,7 +239,8 @@ def positive(args, key="amount"):
 def transfer_create(c, args):
     """Pay ``amount`` of ``symbol`` (default the realm currency) from ``fund`` to ``to`` (principal, user or org); the
     fund must also cover the ledger fee. Optional ``category`` (default transfer), ``description``, ``contract``.
-    Returns ``transfer``, ``status``. Example: ``{"fund": "ROADS", "to": "buildco", "amount": 50000}``."""
+    A payment that takes the adopted budget of its fund and category past its plan is refused: amend the budget to
+    spend more. Returns ``transfer``, ``status``. Example: ``{"fund": "ROADS", "to": "buildco", "amount": 50000}``."""
     fund, amount = find(Fund, args["fund"]), positive(args)
     symbol = args.get("symbol") or currency()
     need = amount + find(Token, symbol).fee
@@ -584,10 +607,12 @@ def payroll_run(c, args):
     seats = [(a.user, pos.salary) for pos in dept.positions if pos.salary > 0
              for a in pos.appointments if a.status == "active" and not a.agent]
     total = sum(s for _, s in seats)
-    need = total + len(seats) * find(Token, symbol).fee
+    fees = len(seats) * find(Token, symbol).fee
+    need = total + fees
     if balance(fund, symbol) < need:
         raise Conflict(f"fund {fund.id} holds {balance(fund, symbol)} {symbol}, payroll needs {need}")
     p = period()
+    refuse_overspend(p, spending(fund, "payroll", total, fees))  # all or none
     batch = [reserve(p, fund, user, symbol, salary, "payroll", f"{note}: {user}", payroll=note, user=user)
              for user, salary in seats]
     results = []

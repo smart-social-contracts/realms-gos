@@ -188,6 +188,96 @@ def test_I_FIN_4_adopted_budgets_rules_and_policies_are_frozen():
     assert "only a draft" in call("allocation_rule_propose", "bob", rule=first)["error"]
 
 
+def fund_roads_with_budget(planned, funds_held=10_000):
+    """ROADS holds ``funds_held`` and has an adopted budget of ``planned`` for its capital payments."""
+    setup_finance()
+    allocate(ROADS=100)
+    receive(funds_held)
+    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=planned)["budget"]
+    ok("budget_propose", "bob", budget=b)
+    ledger_ok()
+    return b
+
+
+def pay_capital(amount, caller="ctl"):
+    return call("transfer_create", caller, fund="ROADS", to="buildco", amount=amount, category="capital")
+
+
+def test_payment_up_to_the_plan_is_allowed_and_one_unit_over_is_refused():
+    b = fund_roads_with_budget(500)
+    assert pay_capital(499)["status"] == "completed"
+    assert pay_capital(1)["status"] == "completed" and Budget[b].actual == 500
+    transfers, entries, held = Transfer.count(), LedgerEntry.count(), funds()["ROADS"]
+
+    refused = pay_capital(1)
+    assert refused["ok"] is False and refused["kind"] == "conflict"
+    for fact in (b, "500 for capital", "500 is spent", "1 was asked"):
+        assert fact in refused["error"]
+    assert (Transfer.count(), LedgerEntry.count(), funds()["ROADS"], Budget[b].actual) == (transfers, entries, held, 500)
+
+
+def test_a_payment_in_one_step_past_the_plan_is_refused_whole():
+    b = fund_roads_with_budget(500)
+    assert "501 was asked" in pay_capital(501)["error"]
+    assert Transfer.count() == 0 and Budget[b].actual == 0
+
+
+def test_payments_the_budget_does_not_cover_are_unaffected():
+    fund_roads_with_budget(500)
+    assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=900)["status"] == "completed"  # no budget
+    assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=100, category="capital")["status"] \
+        == "completed"
+
+
+def test_a_failed_payment_frees_its_budget():
+    b = fund_roads_with_budget(500)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = "(variant { Err = variant { TooOld } })"
+    assert pay_capital(500)["status"] == "failed" and Budget[b].actual == 0
+    ledger_ok()
+    assert pay_capital(500)["status"] == "completed"
+
+
+def test_a_voted_payment_past_the_plan_fails_with_its_reason_and_pays_nothing():
+    depts = setup_finance()
+    allocate(ROADS=100)
+    receive(10_000)
+    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=500)["budget"]
+    ok("budget_propose", "bob", budget=b)
+    ledger_ok()
+    world.grant(depts["Infrastructure"], "transfer.create")
+    world.policy(depts["Infrastructure"], 1, 2)
+
+    p = ok("transfer_create", "carla", fund="ROADS", to="buildco", amount=501, category="capital")["proposal"]
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert Proposal[p].status == "failed" and "501 was asked" in Proposal[p].result["error"]
+    assert (Transfer.count(), Budget[b].actual, funds()["ROADS"]) == (0, 0, 10_000)
+    assert not [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer"]
+
+    within = ok("transfer_create", "carla", fund="ROADS", to="buildco", amount=500, category="capital")["proposal"]
+    assert adopt(within)["status"] == "completed" and Budget[b].actual == 500
+
+
+def test_a_payroll_past_the_plan_is_refused_before_anyone_is_paid():
+    fund_roads_with_budget(1)
+    infrastructure = Department["Infrastructure"]
+    world.seat("infrastructure.surveyor", "dana", infrastructure)
+    Position["infrastructure.planning_officer"].salary = Position["infrastructure.surveyor"].salary = 2_000
+    ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="payroll", planned=3_999)
+    ok("budget_propose", "bob", budget="B-2")
+    entries = LedgerEntry.count()  # the first salary fits the plan: only the check up front keeps it from being paid
+    assert "4000 was asked" in call("payroll_run", "bob", department="Infrastructure", period="2026-11")["error"]
+    assert (Transfer.count(), LedgerEntry.count(), Budget["B-2"].actual) == (0, entries, 0)
+
+
+def test_payment_after_an_amendment_that_raises_the_plan_is_allowed():
+    b = fund_roads_with_budget(500)
+    assert pay_capital(500)["status"] == "completed" and "budget" in pay_capital(1)["error"]
+    new = ok("budget_amend", "bob", budget=b, planned=800)["budget"]
+    assert Budget[new].actual == 500
+    assert pay_capital(300)["status"] == "completed" and Budget[new].actual == 800
+    assert "budget" in pay_capital(1)["error"]
+
+
 def test_governed_budget_is_adopted_by_its_proposal():
     depts = setup_finance()
     world.policy(depts["Infrastructure"], 1, 2)

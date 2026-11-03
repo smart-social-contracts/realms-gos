@@ -462,18 +462,32 @@ test.fixme('the budget page shows the treasury overview and the allocation rule'
 	}
 });
 
-// realms-gos#465: the planned amount of a budget limits nothing: transfer_create checks the fund's balance only, so a
-// payment that takes a budget past its plan goes through.
-test.fixme('a payment past the budget of its category is refused and moves nothing', async () => {
+// realms-gos#465: the planned amount of an adopted budget is a ceiling. To spend more, members amend the budget.
+test('a payment past the budget of its category is refused and moves nothing', async ({ page }) => {
 	const { planned, actual } = (await adoptedBudget())!;
 	const pay = {
 		fund: ROADS,
 		to: principal(payee),
-		amount: Math.max(planned - actual, 0) + 1,
+		amount: planned - actual + 1,
 		symbol: SYMBOL
 	};
-	await leavesUnchanged(['Fund', 'Budget', 'Transfer'], async () => {
-		await refused('transfer_create', pay, founder(), /budget/);
+	const why = new RegExp(`plans ${planned} .* ${actual} is spent and ${pay.amount} was asked`);
+	await leavesUnchanged(['Fund', 'Budget', 'Transfer', 'LedgerEntry'], async () => {
+		await refused('transfer_create', pay, founder(), why);
+
+		const { app, frame, close } = await openExtension(page, realm, founder(), 'vault');
+		try {
+			await app.getByRole('button', { name: 'Send', exact: true }).first().click();
+			await app.locator('#v-fund').selectOption(ROADS);
+			await app.locator('#v-to').fill(principal(payee));
+			await app.locator('#v-amount').fill((pay.amount / 1e8).toFixed(8));
+			await app.getByRole('button', { name: 'Send', exact: true }).last().click();
+			await frame.getByRole('button', { name: 'Send', exact: true }).last().click();
+			await expect(app.getByText(why)).toBeVisible({ timeout: 60_000 });
+			await snap(page, 'refused past the budget');
+		} finally {
+			await close();
+		}
 	});
 });
 
