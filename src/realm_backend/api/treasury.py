@@ -3,7 +3,7 @@ import json
 
 from core import candid
 from core import chain
-from core.db import Conflict, Fail, Forbidden, each, find, first, next_id, page, page_by, view, window
+from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page, page_by, view, window
 from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
@@ -76,6 +76,11 @@ def currency():
         return realm.accounting_currency
     oldest = Token.load_some(1, 1)
     return oldest[0].id if oldest else ""
+
+
+def decimals_of(symbol):
+    token = Token[symbol] if symbol else None
+    return token.decimals if token else 0
 
 
 def owner_of(fund):
@@ -589,6 +594,34 @@ def allocation_rule_propose(c, args):
     source.allocation_rule = r.id
     r.status, r.proposal = "adopted", c.proposal
     return {"rule": r.id, "status": r.status}
+
+
+@op("realm.data_view", read=True)
+def budget_view(c, args):
+    """How the realm budgets its money, for any member: one page of ``funds`` (``from``, ``count``; ``next`` continues
+    it), each with its ``balances``, its adopted allocation ``rule`` and its adopted ``budgets`` in one fiscal
+    ``period`` (an id; default the one covering now, null if none does); the latest fiscal ``periods`` to choose from;
+    the treasury ``config``; the accounting ``currency`` with its ``decimals``; and up to ten newest ``rule_drafts``.
+    Single ledger entries stay with ``ledger_view``."""
+    chosen = find(FiscalPeriod, args["period"]) if args.get("period") else period_at(chain.now())
+    lines = {}  # fund id -> the adopted budgets of the chosen period: one period's lines, however old the funds
+    for b in chosen.budgets if chosen else []:
+        if b.status == "adopted":
+            lines.setdefault(b.fund.id, []).append({**view(b, "id", "category", "kind", "planned", "actual"),
+                                                     "period": chosen.id})
+    rows, nxt = page(Fund, args)
+    funds = []
+    for f in rows:
+        rule = adopted_rule(f)
+        funds.append({**view(f, "id", "name", "kind", "balances"), "department": owner_of(f).id,
+                      "rule": view(rule, "id", "rules") if rule else None, "budgets": lines.get(f.id, [])})
+    t, symbol = Treasury["1"], currency()
+    drafts = [r for r in latest(AllocationRule) if r.status == "draft"][:DRAFTS]
+    return {"funds": funds, "next": nxt, "currency": symbol, "decimals": decimals_of(symbol),
+            "period": chosen.id if chosen else None,
+            "periods": [view(p, "id", "name", "starts_at", "ends_at", "status") for p in reversed(latest(FiscalPeriod))],
+            "config": t.config if t else {},
+            "rule_drafts": [view(r, "id", "source_fund", "rules") for r in drafts]}
 
 
 # --- payroll and reports --------------------------------------------------------------------------
