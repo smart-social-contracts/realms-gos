@@ -92,12 +92,14 @@ def test_a_transfer_and_a_codex_install_take_effect_at_their_time_across_an_upgr
 
     realm.wait(HOUR - 600)
     realm.upgrade()
+    realm.wait(effective_at - 1 - realm.now())
+    assert realm.now() == effective_at - 1  # one second short
     assert root_balance(realm, ctl) == FUNDS and active_codex(realm, ctl) == before
     assert proposal(realm, alice, transfer)["status"] == "execution_scheduled"
     assert proposal(realm, alice, install)["status"] == "execution_scheduled"
 
-    realm.wait(601)
-    assert realm.now() >= effective_at
+    realm.wait(2)
+    assert realm.now() == effective_at + 1
     assert proposal(realm, alice, transfer)["status"] == "executed"
     assert proposal(realm, alice, transfer)["result"]["status"] == "completed"
     assert root_balance(realm, ctl) == FUNDS - 400

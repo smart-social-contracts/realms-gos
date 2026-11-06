@@ -7,6 +7,9 @@ from ggg import Task, TaskExecution, TaskSchedule, TaskStep
 from core.op import dispatch, op, ops
 
 BUSY = ("running", "waiting")
+# The realm's own tasks, such as the run of a scheduled proposal, are named from this prefix and run as the realm. Their
+# only authority is the vote that scheduled them, so nobody creates, changes, runs or removes one by hand.
+OWN = "proposal "
 # The toolkit's TaskSchedule declares no indexed field, so the enabled schedules are kept in this field index.
 ENABLED = (TaskSchedule.get_full_type_name(), "enabled", "1")
 
@@ -15,9 +18,15 @@ def creator(task):
     return json.loads(task.metadata)["creator"]
 
 
+def own(task):
+    return creator(task) == chain.self_id()
+
+
 def owned(c, args):
-    """``task``, if you created it or hold ``all``: its steps run as its creator."""
+    """``task``, if you created it or hold ``all``: its steps run as its creator. Never one of the realm's own."""
     task = find(Task, args["task"])
+    if own(task):
+        raise Forbidden(f"task '{task.name}' is the realm's own: only the vote that scheduled it governs it")
     if c.user != creator(task) and "all" not in auth.permissions(c.user):
         raise Forbidden(f"task '{task.name}' is not yours")
     return task
@@ -121,6 +130,8 @@ def task_create(c, args):
     """Create task ``name`` of ``steps``: ``[{op, args, wait}]``, each run as you, ``wait`` seconds before the next.
     Returns ``task``."""
     steps = checked(args["steps"])
+    if args["name"].startswith(OWN):
+        raise Forbidden(f"task names starting with '{OWN}' are the realm's own")
     if Task[args["name"]]:
         raise Conflict(f"task '{args['name']}' exists")
     task = Task(name=args["name"], metadata=json.dumps({"creator": c.user}), status="pending")

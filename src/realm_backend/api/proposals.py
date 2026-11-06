@@ -128,11 +128,15 @@ def schedule(p):
     """Run the action at ``effective_at`` as a one-step task of the realm's task scheduler, which arms its timer again
     after an upgrade (tasks.rearm). The step runs as the realm itself: the vote is the authority, not the proposer."""
     p.status = "execution_scheduled"
-    task = Task(name=f"proposal {p.id}", metadata=json.dumps({"creator": chain.self_id()}), status="pending")
+    task = Task(name=scheduled_task_name(p), metadata=json.dumps({"creator": chain.self_id()}), status="pending")
     tasks.define(task, [("proposal_run_scheduled", {"proposal": p.id}, 0)])
     s = TaskSchedule(name=f"{task.name}@1", task=task, last_run_at=0, run_at=p.effective_at, repeat_every=0)
     tasks.enable(s, True)
     tasks.arm(s)
+
+
+def scheduled_task_name(p):
+    return f"{tasks.OWN}{p.id}"
 
 
 def run_action(p):
@@ -325,7 +329,9 @@ def proposal_stop(c, args):
     p = find(Proposal, args["proposal"])
     if p.status != "execution_scheduled":
         raise Conflict(f"{p.id} is {p.status}; only a proposal waiting for its effective time can be stopped")
-    tasks.stop(Task[f"proposal {p.id}"])
+    task = Task[scheduled_task_name(p)]
+    if task:
+        tasks.stop(task)
     p.status = "withdrawn"
     return {"proposal": p.id, "status": p.status}
 
