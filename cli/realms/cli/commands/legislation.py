@@ -31,11 +31,31 @@ def legislation_group() -> None:
     """Tools of the layered codex (docs/codices/layered-codex.md §12)."""
 
 
+# Operations the layered codex design names that ggg.did does not carry yet: ggg#2 (codex_activate,
+# procedure_define, budget_extend) and ggg#3 (the links). Remove each as G2 and G3 land in ggg_did.
+INTERIM_OPERATIONS = frozenset(
+    {
+        "codex_activate",
+        "procedure_define",
+        "budget_extend",
+        "sync_source_add",
+        "sync_source_remove",
+        "follower_accept",
+        "follower_remove",
+        "follower_report",
+        "follower_list",
+        "link_notify",
+        "legislation_releases",
+        "legislation_chapter",
+    }
+)
+
+
 def ggg_operations() -> frozenset:
-    """The GGG operation names, from the canister's generated ggg_did.METHODS."""
+    """The GGG operation names: the canister's generated ggg_did.METHODS plus the interim list."""
     from realms.src.realm_backend import ggg_did
 
-    return frozenset(ggg_did.METHODS)
+    return frozenset(ggg_did.METHODS) | INTERIM_OPERATIONS
 
 
 def sources(tree: Path) -> List[str]:
@@ -70,7 +90,7 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
             except Refused as e:
                 problems.append(str(e))
             except ValueError as e:
-                problems.append("%s/calendar.json: %s" % (source, e))
+                problems.append(f"{source}/calendar.json: {e}")
     domains = []
     for source in layers:
         for domain in chapters_of(tree, source):

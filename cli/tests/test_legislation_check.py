@@ -42,7 +42,8 @@ def tree(tmp_path, monkeypatch):
     monkeypatch.setattr(
         legislation,
         "ggg_operations",
-        lambda: frozenset({"user_add", "notification_send"}),
+        lambda: frozenset({"user_add", "notification_send", "realm_join"})
+        | legislation.INTERIM_OPERATIONS,
     )
     root = tmp_path / "legislation"
     for source in ("eu", "eu/es", "eu/es/vc", "eu/es/vc/46250-valencia"):
@@ -117,10 +118,35 @@ def test_the_realm_must_be_a_source_and_the_tree_a_folder(tree):
     assert run(str(tree / "nowhere")).exit_code == 2
 
 
-def test_the_ggg_operation_list_comes_from_the_canisters_interface():
+def test_the_realm_s_own_chapter_may_hook_codex_activate(tree):
+    write(
+        tree,
+        "eu/es/vc/46250-valencia/realm.py",
+        "from realms.legislation import above\nclass Realm(above('realm')):\n"
+        "    def on_codex_activate(self, event):\n        self.ggg.notification_send(recipient='members', body='active')\n"
+        "    def compute_realm_join(self, user, quarters):\n        return quarters[0]\n",
+    )
+    out = run(str(tree), "--realm", "eu/es/vc/46250-valencia")
+    assert out.exit_code == 0, out.output
+    write(
+        tree,
+        "eu/es/realm.py",
+        "from realms.legislation import above\nclass Realm(above('realm')): pass\n",
+    )
+    out = run(str(tree), "--realm", "eu/es/vc/46250-valencia")
+    assert (
+        out.exit_code == 1
+        and "eu/es/realm.py: the realm domain may only be filled in the realm's own layer"
+        in out.output
+    )
+
+
+def test_the_ggg_operation_list_comes_from_the_canisters_interface_plus_the_interim_list():
     pytest.importorskip("basilisk")
     assert {
         "tax_policy_propose",
         "codex_install",
         "realm_join",
+        "codex_activate",
+        "procedure_define",
     } <= legislation.ggg_operations()

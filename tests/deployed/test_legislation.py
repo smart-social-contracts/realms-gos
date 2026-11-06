@@ -1,7 +1,7 @@
 """The canister's copy of ``realms.legislation`` on PocketIC: a layered-codex chapter loads inside the realm
 wasm, through the module the canister bundles, which proves the library needs nothing the canister lacks
-(no CLI dependency, no stubbed stdlib). See docs/codices/layered-codex.md §12 and realms-gos#483.
-"""
+(no CLI dependency, no stubbed stdlib), and the loader's barrier holds where it will run. See
+docs/codices/layered-codex.md §12 and realms-gos#483."""
 
 import json
 
@@ -11,7 +11,7 @@ from pic import CONTROLLER
 
 CODE = '''
 import json
-from realms.legislation import Codex, Event, Refused, working_days
+from realms.legislation import Codex, Event, Refused
 
 ES = """
 from realms.legislation import Ref, above, extension, fixed, months, overridable, pct, working_days
@@ -38,7 +38,7 @@ class Procedure(above("procedure")):
     comment_period = working_days(45)
 
     def on_codex_install(self, event):
-        self.ggg.notification_send(recipient="members", topic="ordinance", title="Nova ordenança", body=str(event.order))
+        self.ggg.notification_send(recipient="members", topic="ordinance", title="Nova ordenança", body=",".join(event.order))
 """
 REFUSED = """
 from realms.legislation import above
@@ -46,6 +46,19 @@ class Procedure(above("procedure")):
     def working_days_after(self, day, n):
         pass
 """
+# What a chapter must not be able to do, in the canister where it will run.
+ESCAPES = {
+    "sdk_internals": "from realms.legislation import codex\\nfrom realms.legislation import above\\nclass Procedure(above('procedure')): pass\\n",
+    "loader": "__loader__.load_module('posix')\\nfrom realms.legislation import above\\nclass Procedure(above('procedure')): pass\\n",
+    "subclasses": "x = ().__class__.__base__.__subclasses__()\\nfrom realms.legislation import above\\nclass Procedure(above('procedure')): pass\\n",
+    "getattr": "x = getattr(object, '__subclasses__')\\nfrom realms.legislation import above\\nclass Procedure(above('procedure')): pass\\n",
+    "vars": "x = vars(object)\\nfrom realms.legislation import above\\nclass Procedure(above('procedure')): pass\\n",
+    "ggg": "from ggg import Member\\nfrom realms.legislation import above\\nclass Procedure(above('procedure')): pass\\n",
+    "metaclass": "from realms.legislation import above\\nclass M(type(above('procedure'))): pass\\n"
+                 "class Procedure(above('procedure'), metaclass=M):\\n    def working_days_after(self, day, n): pass\\n",
+    "mutation": "from realms.legislation import above\\nabove('procedure').bonus = None\\n",
+    "fixed": REFUSED,
+}
 codex = Codex(["eu/es", "x/town"], realm="x/town", operations=["codex_install", "notification_send"])
 codex.load("eu/es", "procedure", ES)
 codex.load("x/town", "procedure", TOWN)
@@ -54,15 +67,17 @@ codex.check()
 context = codex.context(now=7)
 chapter = codex.instance("procedure", context)
 chapter.on_codex_install(Event("alice", {"document": "D-1"}, {"codex": "C-1"}, 7))
-other = Codex(["eu/es", "x/town"], realm="x/town")
-other.load("eu/es", "procedure", ES)
-try:
-    other.load("x/town", "procedure", REFUSED)
-    refusal = None
-except Refused as e:
-    refusal = str(e)
+refusals = {}
+for name, text in ESCAPES.items():
+    other = Codex(["eu/es", "x/town"], realm="x/town")
+    other.load("eu/es", "procedure", ES)
+    try:
+        other.load("x/town", "procedure", text)
+        refusals[name] = "ESCAPED"
+    except Refused as e:
+        refusals[name] = str(e)
 print(json.dumps({"deadline": chapter.default_decision_deadline.to_json(), "bonus": chapter.bonus,
-                  "day": chapter.working_days_after("2026-12-31", 2), "effects": context.effects.queued, "refusal": refusal}))
+                  "day": chapter.working_days_after("2026-12-31", 2), "effects": context.effects.queued, "refusals": refusals}))
 '''
 
 
@@ -92,11 +107,21 @@ def test_a_chapter_loads_through_the_canisters_copy_of_the_library(realm):
                 "recipient": "members",
                 "topic": "ordinance",
                 "title": "Nova ordenança",
-                "body": "['es']",
+                "body": "es",
             },
         ],
     ]
+    refusals = got["refusals"]
     assert (
-        got["refusal"]
+        refusals.pop("fixed")
         == "x/town/procedure.py:4: working_days_after is fixed by eu/es/procedure.py (Ley 39/2015 Art. 30)"
     )
+    assert "ESCAPED" not in refusals.values(), refusals
+    assert "a chapter imports only" in refusals["sdk_internals"]
+    assert "__loader__: no dunder names" in refusals["loader"]
+    assert "no dunder names" in refusals["subclasses"]
+    assert "no dunder attribute access" in refusals["getattr"]
+    assert "NameError" in refusals["vars"]
+    assert "the realm supplies the read-only view" in refusals["ggg"]
+    assert "must use the SDK's metaclass" in refusals["metaclass"]
+    assert "never changes once loaded" in refusals["mutation"]

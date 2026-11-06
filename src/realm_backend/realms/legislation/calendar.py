@@ -32,15 +32,15 @@ def parse_day(day):
         or not all(p.isdigit() and p.isascii() for p in parts)
         or len(parts[0]) != 4
     ):
-        raise LegislationError("a day is written YYYY-MM-DD, not %r" % (day,))
+        raise LegislationError(f"a day is written YYYY-MM-DD, not {day!r}")
     year, month, dom = (int(p) for p in parts)
     if not 1 <= month <= 12 or not 1 <= dom <= _days_in_month(year, month):
-        raise LegislationError("%s is not a date" % day)
+        raise LegislationError(f"{day} is not a date")
     return year, month, dom
 
 
 def format_day(year, month, dom):
-    return "%04d-%02d-%02d" % (year, month, dom)
+    return f"{year:04d}-{month:02d}-{dom:02d}"
 
 
 def _ordinal(year, month, dom):
@@ -101,22 +101,18 @@ class Calendar:
             raise LegislationError("a calendar is an object with weekend and years")
         for name in data.get("weekend") or []:
             if name not in WEEKDAYS:
-                raise LegislationError(
-                    "%r is not a day of the week %s" % (name, WEEKDAYS)
-                )
+                raise LegislationError(f"{name!r} is not a day of the week {WEEKDAYS}")
             self.weekend.add(name)
         for year, entries in (data.get("years") or {}).items():
             if not (isinstance(year, str) and year.isdigit() and len(year) == 4):
                 raise LegislationError(
-                    "a calendar year is written as four digits, not %r" % (year,)
+                    f"a calendar year is written as four digits, not {year!r}"
                 )
             known = self.holidays.setdefault(int(year), set())
             for entry in entries:
                 day = entry.get("date") if isinstance(entry, dict) else None
                 if day is None or parse_day(day)[0] != int(year):
-                    raise LegislationError(
-                        "holiday %r is not a date of %s" % (entry, year)
-                    )
+                    raise LegislationError(f"holiday {entry!r} is not a date of {year}")
                 known.add(day)
 
     def has_year(self, year):
@@ -127,8 +123,7 @@ class Calendar:
         year = parse_day(day)[0]
         if not self.has_year(year):
             raise LegislationError(
-                "the calendar has no entries for %d: a working-day count that reaches it fails closed"
-                % year
+                f"the calendar has no entries for {year}: a working-day count that reaches it fails closed"
             )
         return weekday(day) not in self.weekend and day not in self.holidays[year]
 
@@ -137,8 +132,7 @@ class Calendar:
         stepped one by one over the weekend days and holidays of this calendar."""
         if not isinstance(period, Period):
             raise LegislationError(
-                "calendar.add takes a Period, such as working_days(15), not %r"
-                % (period,)
+                f"calendar.add takes a Period, such as working_days(15), not {period!r}"
             )
         parse_day(day)
         if period.unit == "Day":

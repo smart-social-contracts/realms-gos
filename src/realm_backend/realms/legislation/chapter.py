@@ -5,10 +5,11 @@ A chapter is one class, named after its domain, extending ``above("<domain>")``:
 nearest layer above with a chapter in that domain, or ``Chapter`` at the top. Its members are hooks
 ``on_<op>``, guards ``check_<op>`` and ``compute_<op>`` named after GGG operations, helpers, settings
 and forbids. The metaclass reads each member's mark and refuses what the layer above does not allow,
-in the form the checker prints: ``<source>/<domain>.py:<line>: <reason>``.
+in the form the checker prints: ``<source>/<domain>.py:<line>: <reason>``. Once loaded, a chapter's
+class never changes: its settings are frozen values and attribute assignment is refused.
 """
 
-from realms.legislation.context import GGG, Denial, Domains, Event, Ref
+from realms.legislation.context import GGG, Denial, Domains, Event, Ref, freeze
 from realms.legislation.errors import LegislationError, Refused
 from realms.legislation.marks import EXTENSION, FIXED, Forbid, Method, Setting
 from realms.legislation.periods import Period
@@ -17,8 +18,9 @@ from realms.legislation.periods import Period
 RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
 KINDS = (("on_", "hook"), ("check_", "guard"), ("compute_", "compute"))
 METHODS = ("hook", "guard", "compute", "helper")
-# What CPython itself puts in a class body (3.10 to 3.14), passed through untouched.
-_CLASS_BODY = (
+# What CPython itself reads or puts in a class body (3.10 to 3.14): the only dunder names a chapter's code may hold.
+CLASS_BODY = (
+    "__name__",
     "__module__",
     "__qualname__",
     "__doc__",
@@ -50,7 +52,7 @@ class Load:
 
     @property
     def file(self):
-        return "%s/%s.py" % (self.source, self.domain)
+        return f"{self.source}/{self.domain}.py"
 
 
 def loading():
@@ -78,7 +80,7 @@ def is_data(value):
     """A setting's value: str, int, bool, null, lists or dicts of those, a Period, or a GGG Ref. Never a float."""
     if value is None or isinstance(value, (bool, int, str, Period, Ref)):
         return True
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return all(is_data(v) for v in value)
     if isinstance(value, dict):
         return all(isinstance(k, str) and is_data(v) for k, v in value.items())
@@ -88,26 +90,33 @@ def is_data(value):
 def merge(upper, lower):
     """An extension's values, layer order: lists concatenate without duplicates, sets join, dicts take
     new keys only. Anything else is an error."""
-    if isinstance(upper, list) and isinstance(lower, list):
+    if isinstance(upper, (list, tuple)) and isinstance(lower, (list, tuple)):
         out = []
-        for item in upper + lower:
+        for item in list(upper) + list(lower):
             if item not in out:
                 out.append(item)
         return out
-    if isinstance(upper, set) and isinstance(lower, set):
-        return upper | lower
+    if isinstance(upper, (set, frozenset)) and isinstance(lower, (set, frozenset)):
+        return set(upper) | set(lower)
     if isinstance(upper, dict) and isinstance(lower, dict):
         reused = [k for k in lower if k in upper]
         if reused:
             raise LegislationError(
-                "an extension adds new keys only: %s already set above"
-                % ", ".join(map(repr, reused))
+                f"an extension adds new keys only: {', '.join(map(repr, reused))} already set above"
             )
         return {**upper, **lower}
     raise LegislationError(
-        "extension values merge lists, sets and dicts, not %s and %s"
-        % (type(upper).__name__, type(lower).__name__)
+        f"extension values merge lists, sets and dicts, not {kind(upper)} and {kind(lower)}"
     )
+
+
+def kind(value):
+    """A value's kind as a chapter wrote it: a frozen tuple was a list."""
+    if isinstance(value, (list, tuple)):
+        return "list"
+    if isinstance(value, (set, frozenset)):
+        return "set"
+    return type(value).__name__
 
 
 def above(domain):
@@ -117,8 +126,7 @@ def above(domain):
     load = loading()
     if domain != load.domain:
         raise Refused(
-            'above(%r) in the %s chapter: a chapter extends above("%s")'
-            % (domain, load.domain, load.domain),
+            f'above({domain!r}) in the {load.domain} chapter: a chapter extends above("{load.domain}")',
             line_of(load.text, "class "),
             load.file,
         )
@@ -149,11 +157,11 @@ class Member:
 
     @property
     def file(self):
-        return "%s/%s.py" % (self.source, self.domain)
+        return f"{self.source}/{self.domain}.py"
 
     @property
     def cited(self):
-        return " (%s)" % self.legislation if self.legislation else ""
+        return f" ({self.legislation})" if self.legislation else ""
 
     @property
     def category(self):
@@ -171,7 +179,7 @@ def kind_of(name):
 def as_layer(chapter, source, fn, args, kwargs):
     """Run ``fn`` on ``chapter`` as the layer ``source`` that defined it, so ``self.layer`` and ``uses``
     are those of the layer whose code runs, whatever lower class the instance has."""
-    layers = chapter.__dict__.setdefault("_layers", [])
+    layers = chapter.__dict__.setdefault("__layers__", [])
     layers.append(source)
     try:
         return fn(chapter, *args, **kwargs)
@@ -196,11 +204,10 @@ def extend(name, kind):
     that calls ``super()`` re-enters this method and is refused."""
 
     def run(self, *args, **kwargs):
-        running = self.__dict__.setdefault("_running", set())
+        running = self.__dict__.setdefault("__running__", set())
         if name in running:
             raise LegislationError(
-                "%s is an extension: it must not call super(); every layer's definition runs by itself"
-                % name
+                f"{name} is an extension: it must not call super(); every layer's definition runs by itself"
             )
         running.add(name)
         try:
@@ -235,13 +242,15 @@ def extend(name, kind):
 
 
 class ChapterMeta(type):
-    """Reads a chapter's members and applies the marks of the layer above (layered-codex.md §4.1)."""
+    """Reads a chapter's members and applies the marks of the layer above (layered-codex.md §4.1).
+    A chapter class is built once and never changed afterwards."""
 
     def __new__(meta, name, bases, namespace):
         if not bases:  # Chapter itself
             cls = super().__new__(meta, name, bases, namespace)
-            cls.__members__, cls.__own__, cls.__uses__ = {}, {}, ()
-            cls.__source__ = cls.__domain__ = cls.__file__ = None
+            meta.keep(
+                cls, members={}, own={}, uses=(), source=None, domain=None, file=None
+            )
             return cls
         load = loading()
 
@@ -249,15 +258,17 @@ class ChapterMeta(type):
             raise Refused(reason, line, load.file)
 
         class_line = line_of(load.text, "class ")
+        if meta is not ChapterMeta:
+            refuse(
+                f"{name} must use the SDK's metaclass, not {meta.__name__}", class_line
+            )
         if len(bases) != 1 or bases[0] is not load.base:
             refuse(
-                '%s extends above("%s") and nothing else' % (name, load.domain),
-                class_line,
+                f'{name} extends above("{load.domain}") and nothing else', class_line
             )
         if name != camel(load.domain):
             refuse(
-                "the class of %s is named %s" % (load.file, camel(load.domain)),
-                class_line,
+                f"the class of {load.file} is named {camel(load.domain)}", class_line
             )
         base = bases[0]
         uses = namespace.get("uses", ())
@@ -272,7 +283,7 @@ class ChapterMeta(type):
             )
         own, attrs = {}, {}
         for key, value in namespace.items():
-            if key in _CLASS_BODY or key == "uses":
+            if key in CLASS_BODY or key == "uses":
                 continue
             member = meta.member(key, value, load, refuse)
             upper = base.__members__.get(key)
@@ -280,26 +291,44 @@ class ChapterMeta(type):
                 meta.rule(member, upper, refuse)
             own[key] = member
             attrs[key] = meta.install(member)
-        body = {k: v for k, v in namespace.items() if k in _CLASS_BODY or k == "uses"}
+        body = {k: v for k, v in namespace.items() if k in CLASS_BODY or k == "uses"}
         cls = super().__new__(meta, name, bases, {**body, **attrs})
-        cls.__members__ = {**base.__members__, **own}
-        cls.__own__, cls.__uses__ = own, tuple(uses)
-        cls.__source__, cls.__domain__, cls.__file__ = (
-            load.source,
-            load.domain,
-            load.file,
+        meta.keep(
+            cls,
+            members={**base.__members__, **own},
+            own=own,
+            uses=tuple(uses),
+            source=load.source,
+            domain=load.domain,
+            file=load.file,
         )
         return cls
+
+    @staticmethod
+    def keep(cls, **facts):
+        """The class's own record, set once here: ``__setattr__`` refuses every later change."""
+        for key, value in facts.items():
+            type.__setattr__(cls, f"__{key}__", value)
+
+    def __setattr__(cls, name, value):
+        raise LegislationError(
+            f"{cls.__name__}.{name}: a chapter's class never changes once loaded"
+        )
+
+    def __delattr__(cls, name):
+        raise LegislationError(
+            f"{cls.__name__}.{name}: a chapter's class never changes once loaded"
+        )
 
     @staticmethod
     def member(key, value, load, refuse):
         """One class attribute as a Member, or a refusal."""
         if key.startswith("__"):
-            refuse("%s: a chapter has no dunder members" % key, line_of(load.text, key))
+            refuse(f"{key}: a chapter has no dunder members", line_of(load.text, key))
         if key in API:
             refuse(
-                "%s is reserved by the SDK (self.%s)" % (key, key),
-                line_of(load.text, key, "def " + key),
+                f"{key} is reserved by the SDK (self.{key})",
+                line_of(load.text, key, f"def {key}"),
             )
         mark = legislation = check = op = None
         line = line_of(load.text, key)
@@ -308,8 +337,7 @@ class ChapterMeta(type):
             mark, legislation, check = value.mark, value.legislation, value.check
             if not is_data(raw):
                 refuse(
-                    "%s: a setting's value is JSON data or a Period, never a float, not %r"
-                    % (key, raw),
+                    f"{key}: a setting's value is JSON data or a Period, never a float, not {raw!r}",
                     line,
                 )
         elif isinstance(value, Method):
@@ -319,11 +347,11 @@ class ChapterMeta(type):
         elif isinstance(value, Forbid):
             kind, raw, op, legislation = "forbid", value, value.op, value.legislation
         elif isinstance(value, float):
-            refuse("%s: floats are not allowed in a chapter" % key, line)
+            refuse(f"{key}: floats are not allowed in a chapter", line)
         elif isinstance(value, type):
             refuse(
-                "%s: no nested classes in a chapter" % key,
-                line_of(load.text, "class " + key),
+                f"{key}: no nested classes in a chapter",
+                line_of(load.text, f"class {key}"),
             )
         elif hasattr(value, "__code__"):
             kind, op = kind_of(key)
@@ -332,20 +360,17 @@ class ChapterMeta(type):
             kind, raw = "setting", value
         else:
             refuse(
-                "%s: a member is a method, a setting or a forbid, not %s"
-                % (key, type(value).__name__),
+                f"{key}: a member is a method, a setting or a forbid, not {type(value).__name__}",
                 line,
             )
         if kind in ("hook", "guard", "compute") and not op:
             refuse(
-                "%s names no operation: a %s is on_<operation>, check_<operation> or compute_<operation>"
-                % (key, kind),
+                f"{key} names no operation: a {kind} is on_<operation>, check_<operation> or compute_<operation>",
                 line,
             )
         if op in RESERVED:
             refuse(
-                "%s: %s is reserved; no chapter may hook, guard or forbid it"
-                % (key, op),
+                f"{key}: {op} is reserved; no chapter may hook, guard or forbid it",
                 line,
             )
         if (
@@ -353,13 +378,19 @@ class ChapterMeta(type):
             and load.codex.operations is not None
             and op not in load.codex.operations
         ):
-            refuse("%s must name a GGG operation: %r is not one" % (key, op), line)
-        if not key.startswith("_") and not load.own and legislation is None:
+            refuse(f"{key} must name a GGG operation: {op!r} is not one", line)
+        if kind == "compute" and mark == EXTENSION:
             refuse(
-                '%s needs legislation="...": %s is not the realm\'s own layer'
-                % (key, load.source),
+                f"{key}: a compute_ method cannot be an extension; merging what layers compute is not defined",
                 line,
             )
+        if not key.startswith("_") and not load.own and legislation is None:
+            refuse(
+                f'{key} needs legislation="...": {load.source} is not the realm\'s own layer',
+                line,
+            )
+        if kind == "setting":
+            raw = freeze(raw)
         return Member(key, kind, raw, mark, legislation, check, load, line)
 
     @staticmethod
@@ -368,33 +399,28 @@ class ChapterMeta(type):
         name, line = member.name, member.line
         if upper.kind == "forbid":
             refuse(
-                "%s is a forbid of %s%s: forbids are never overridable"
-                % (name, upper.file, upper.cited),
+                f"{name} is a forbid of {upper.file}{upper.cited}: forbids are never overridable",
                 line,
             )
         if upper.mark == FIXED:
-            refuse("%s is fixed by %s%s" % (name, upper.file, upper.cited), line)
+            refuse(f"{name} is fixed by {upper.file}{upper.cited}", line)
         if member.category != upper.category:
             refuse(
-                "%s is a %s in %s%s: a lower layer cannot make it a %s"
-                % (name, upper.category, upper.file, upper.cited, member.category),
+                f"{name} is a {upper.category} in {upper.file}{upper.cited}: a lower layer cannot make it a {member.category}",
                 line,
             )
         if upper.mark == EXTENSION:
             if member.mark not in (None, EXTENSION):
                 refuse(
-                    "%s is an extension of %s%s: a lower layer adds to it and cannot mark it %s"
-                    % (name, upper.file, upper.cited, member.mark),
+                    f"{name} is an extension of {upper.file}{upper.cited}: a lower layer adds to it and cannot mark it {member.mark}",
                     line,
                 )
             member.mark = EXTENSION
             if member.kind == "setting":
                 try:
-                    member.value = merge(upper.value, member.value)
+                    member.value = freeze(merge(upper.value, member.value))
                 except LegislationError as e:
-                    refuse(
-                        "%s extends %s%s: %s" % (name, upper.file, upper.cited, e), line
-                    )
+                    refuse(f"{name} extends {upper.file}{upper.cited}: {e}", line)
 
     @staticmethod
     def install(member):
@@ -419,26 +445,26 @@ class Chapter(metaclass=ChapterMeta):
     uses = ()
 
     def __init__(self, context):
-        self._context = context
+        self.__context__ = context
 
     @property
     def ggg(self):
-        return GGG(self._context.effects)
+        return GGG(self.__context__.effects)
 
     def deny(self, reason):
         return Denial(reason)
 
     def now(self):
         """The current time, a UTC timestamp, as the realm supplies it."""
-        return self._context.now
+        return self.__context__.now
 
     def approved_by(self, department):
         """Whether the current operation carries ``department``'s approval."""
-        return department in self._context.approvals
+        return department in self.__context__.approvals
 
     @property
     def calendar(self):
-        return self._context.codex.calendar
+        return self.__context__.codex.calendar
 
     @property
     def legislation(self):
@@ -450,7 +476,7 @@ class Chapter(metaclass=ChapterMeta):
 
     def running_layer(self):
         """The source whose method is running: its ``uses`` and its view of other domains apply."""
-        layers = self.__dict__.get("_layers")
+        layers = self.__dict__.get("__layers__")
         return layers[-1] if layers else type(self).__source__
 
 

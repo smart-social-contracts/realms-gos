@@ -21,5 +21,5 @@ class Refused(LegislationError):
     def __str__(self):
         where = self.file or ""
         if where and self.line:
-            where += ":%d" % self.line
-        return "%s: %s" % (where, self.reason) if where else self.reason
+            where = f"{where}:{self.line}"
+        return f"{where}: {self.reason}" if where else self.reason

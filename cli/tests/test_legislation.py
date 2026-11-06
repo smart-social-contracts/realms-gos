@@ -272,7 +272,7 @@ def test_members_are_named_after_ggg_operations():
         "eu",
         "data_protection",
         """
-from realms.legislation import above, extension
+from realms.legislation import above, extension, fixed
 class DataProtection(above("data_protection")):
     @extension(legislation="GDPR Art. 5-6")
     def check_document_share(self, args):
@@ -280,7 +280,7 @@ class DataProtection(above("data_protection")):
     @extension(legislation="GDPR")
     def on_document_share(self, event):
         pass
-    @extension(legislation="GDPR")
+    @fixed(legislation="GDPR")
     def compute_tax_assess(self, entry, subject):
         return []
 """,
@@ -369,7 +369,7 @@ def test_the_class_name_and_the_base_are_checked():
         "tax",
         "from realms.legislation import above\nclass Tax(above('procedure')): pass\n",
     )
-    assert "extends above" in refused(
+    assert "a chapter imports only" in refused(
         c,
         "eu",
         "tax",
@@ -379,7 +379,7 @@ def test_the_class_name_and_the_base_are_checked():
         c,
         "eu",
         "tax",
-        "from realms.legislation import above, Chapter\nclass Tax(above('tax'), Chapter): pass\n",
+        "from realms.legislation import above\nclass Tax(above('tax'), object): pass\n",
     )
     assert "one class per file" in refused(
         c, "eu", "tax", "from realms.legislation import above\nx = above('tax')\n"
@@ -434,7 +434,7 @@ def test_nothing_else_at_module_level_except_sdk_imports_and_constants():
     ],
 )
 def test_imports_only_from_the_sdk_and_ggg(line):
-    assert "imports only from realms.legislation and ggg" in refused(
+    assert "imports only" in refused(
         codex(),
         "eu",
         "tax",
@@ -457,13 +457,23 @@ def test_ggg_entities_are_importable_read_only_through_the_codex_modules():
 
 
 @pytest.mark.parametrize(
-    "builtin", ["exec", "eval", "compile", "globals", "locals", "setattr", "open"]
+    "builtin",
+    [
+        "exec",
+        "eval",
+        "compile",
+        "globals",
+        "locals",
+        "setattr",
+        "open",
+        "vars",
+        "input",
+        "breakpoint",
+        "memoryview",
+    ],
 )
-def test_the_banned_builtins_are_gone(builtin):
-    text = (
-        "from realms.legislation import above\nclass Tax(above('tax')):\n    x = %s\n"
-        % builtin
-    )
+def test_only_the_safe_builtins_exist(builtin):
+    text = f"from realms.legislation import above\nclass Tax(above('tax')):\n    x = {builtin}\n"
     assert "NameError" in refused(codex(), "eu", "tax", text)
 
 
@@ -504,13 +514,13 @@ def test_public_members_above_the_realm_carry_a_citation_and_the_realm_need_not(
     [
         ("    x = 1.5", "floats are not allowed"),
         ("    class Inner: pass", "no nested classes"),
-        ("    __slots__ = ()", "no dunder members"),
+        ("    __slots__ = ()", "no dunder names"),
         ("    now = 3", "reserved by the SDK"),
         ("    def calendar(self): pass", "reserved by the SDK"),
         ("    uses = 'procedure'", "uses lists the domains"),
         ("    uses = ['a', 'a']", "uses lists the domains"),
         (
-            "    x = property(lambda self: 1)",
+            "    x = object()",
             "a member is a method, a setting or a forbid",
         ),
         ("    x = fixed(1.5, legislation='x')", "never a float"),
@@ -687,7 +697,7 @@ class LocalRegime(above("local_regime")):
 
     @extension(legislation="Llei 4/1983; Llei 8/2010")
     def on_codex_install(self, event):
-        event.languages_missing = ["ca-valencia"] if event.order == ["es"] else []
+        event.languages_missing = ["ca-valencia"] if event.order == ("es",) else []
 
     @extension(legislation="x")
     def check_proposal_create(self, args):
@@ -740,7 +750,7 @@ def test_extension_hooks_run_every_layer_top_to_bottom_sharing_the_event():
     ]
     assert ctx.effects.queued[0][1]["recipient"] == {"kind": "external", "id": "AGE"}
     assert ctx.effects.queued[1][1]["title"] == "Nova ordenança (traducció pendent)"
-    assert event.languages_missing == ["ca-valencia"]
+    assert event.languages_missing == ("ca-valencia",)  # sealed after CV's hook
 
 
 def test_a_lower_layer_reads_but_cannot_change_what_a_layer_above_set_on_the_event():
@@ -750,7 +760,7 @@ def test_a_lower_layer_reads_but_cannot_change_what_a_layer_above_set_on_the_eve
         VALENCIA,
         "local_regime",
         "from realms.legislation import above\nclass LocalRegime(above('local_regime')):\n"
-        "    def on_codex_install(self, event):\n        event.order = event.order + ['valencia']\n",
+        "    def on_codex_install(self, event):\n        event.order = ('valencia',)\n",
     )
     with pytest.raises(LegislationError, match="event.order was set by a layer above"):
         c.instance("local_regime", c.context()).on_codex_install(
@@ -785,9 +795,9 @@ def test_extension_helpers_and_settings_merge_in_layer_order():
         "EMSHI",
         "Ajuntament",
     ]  # concatenated, without duplicates
-    assert cls.notified == ["AGE", "GVA", "Ajuntament"]
+    assert cls.notified == ("AGE", "GVA", "Ajuntament")  # frozen: a layer above set it
     assert cls.scopes == {"state": "AGE", "region": "GVA", "town": "Ajuntament"}
-    assert c.resolved_at("local_regime", "eu/es/vc").notified == ["AGE", "GVA"]
+    assert c.resolved_at("local_regime", "eu/es/vc").notified == ("AGE", "GVA")
 
 
 def test_extension_dicts_take_new_keys_only_and_other_types_are_errors():
@@ -1201,13 +1211,13 @@ def test_legislation_resolves_through_every_layer_and_layer_only_down_to_its_own
     chapter = c.instance("local_regime", c.context())
     assert chapter.earliest("2026-12-31") == "2027-01-22"
     assert chapter.languages() == (
-        ["es", "ca-valencia", "en"],
-        ["es"],
+        ("es", "ca-valencia", "en"),
+        ("es",),
     )  # Spain's own view ignores lower layers
-    assert chapter.at_cv() == [
+    assert chapter.at_cv() == (
         "es",
         "ca-valencia",
-    ]  # CV's view: Spain and CV, not València
+    )  # CV's view: Spain and CV, not València
 
 
 def test_only_declared_domains_and_only_public_members():
@@ -1335,3 +1345,188 @@ def test_the_canisters_copy_imports_nothing_from_the_cli_or_the_canister():
     )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "[]"
+
+
+# ── The loader is no sandbox, but it is a barrier (§4 rule 5, §12.2) ─────────
+
+
+@pytest.mark.parametrize(
+    "line, reason",
+    [
+        ("from realms.legislation import codex", "a chapter imports only"),
+        ("from realms.legislation import Codex", "a chapter imports only"),
+        ("from realms.legislation import *", "a chapter imports only"),
+        ("from realms.legislation import above, Chapter", "a chapter imports only"),
+        ("__loader__.load_module('posix')", "__loader__: no dunder names"),
+        ("x = __spec__", "__spec__: no dunder names"),
+        ("x = ().__class__.__base__.__subclasses__()", "no dunder names"),
+        ("x = getattr(object, '__subclasses__')", "no dunder attribute access"),
+        ("x = hasattr(object, '__dict__')", "no dunder attribute access"),
+        ("delattr(object, '__doc__')", "no dunder attribute access"),
+        ("x = getattr(object, '_' + '_class_' + '_')", "no dunder attribute access"),
+        ("import ggg", "the realm supplies the read-only view"),
+        ("from ggg import Member", "the realm supplies the read-only view"),
+    ],
+)
+def test_escapes_are_refused_before_anything_runs(line, reason):
+    text = (
+        line
+        + "\nfrom realms.legislation import above\nclass Tax(above('tax')):\n    x = 1\n"
+    )
+    assert reason in refused(codex(), VALENCIA, "tax", text)
+
+
+def test_dunder_names_are_refused_before_the_file_runs():
+    c = codex()
+    text = "print('side effect')\nfrom realms.legislation import above\nclass Tax(above('tax')):\n    def ok(self): return self.__dict__\n"
+    out = refused(c, VALENCIA, "tax", text)
+    assert (
+        out
+        == "eu/es/vc/46250-valencia/tax.py:4: __dict__: no dunder names in a chapter"
+    )
+    assert "tax" not in c.chapters
+
+
+def test_a_chapter_cannot_subclass_the_metaclass_to_skip_the_marks():
+    c = codex()
+    c.load("eu/es", "register", ES_REGISTER)
+    text = (
+        "from realms.legislation import above\n"
+        "class M(type(above('register'))): pass\n"
+        "class Register(above('register'), metaclass=M):\n"
+        "    def on_user_add(self, event): pass\n"
+    )
+    assert "must use the SDK's metaclass, not M" in refused(
+        c, VALENCIA, "register", text
+    )
+    assert c.resolved("register").__source__ == "eu/es"
+
+
+def test_a_chapter_cannot_change_a_class_above_or_its_own():
+    c = codex()
+    c.load("eu/es", "register", ES_REGISTER)
+    assert "never changes once loaded" in refused(
+        c,
+        VALENCIA,
+        "register",
+        "from realms.legislation import above\nabove('register').authority = None\n",
+    )
+    assert "never changes once loaded" in refused(
+        c,
+        VALENCIA,
+        "register",
+        "from realms.legislation import above\ndel above('register').authority\n",
+    )
+    cls = c.load(
+        VALENCIA,
+        "register",
+        "from realms.legislation import above\nclass Register(above('register')):\n"
+        "    def on_user_remove(self, event):\n        type(self).authority = None\n",
+    )
+    with pytest.raises(LegislationError, match="never changes once loaded"):
+        cls(c.context()).on_user_remove(Event("a", {}, {}, 0))
+    assert cls.authority == Ref("external", "INE")
+
+
+def test_values_a_layer_above_set_are_frozen():
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import above, overridable\nclass Tax(above('tax')):\n"
+        "    codes = overridable(['ibi_urban'], legislation='x')\n"
+        "    bonus = overridable({'general': 1}, legislation='x')\n",
+    )
+    cls = c.load(
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above\nclass Tax(above('tax')):\n"
+        "    def grow(self): self.codes.append('x')\n"
+        "    def change(self): self.bonus['special'] = 2\n"
+        "    def read(self): return self.codes[0], self.bonus.get('general')\n",
+    )
+    chapter = cls(c.context())
+    assert chapter.read() == ("ibi_urban", 1)
+    with pytest.raises(AttributeError):
+        chapter.grow()
+    with pytest.raises(LegislationError, match="set by a layer above"):
+        chapter.change()
+    for value in (days(3), Money(1), Ref("a", "b"), forbid("tax_assess", True)):
+        with pytest.raises(LegislationError, match="never changes"):
+            value.count = 4
+
+
+def test_an_event_s_lists_and_dicts_freeze_on_seal():
+    c = codex()
+    c.load(
+        "eu/es",
+        "local_regime",
+        "from realms.legislation import above, extension\nclass LocalRegime(above('local_regime')):\n"
+        "    @extension(legislation='x')\n    def on_codex_install(self, event):\n        event.notes = ['es']\n"
+        "        event.notes.append('still mine')\n",
+    )
+    cls = c.load(
+        VALENCIA,
+        "local_regime",
+        "from realms.legislation import above\nclass LocalRegime(above('local_regime')):\n"
+        "    def on_codex_install(self, event):\n        event.seen = list(event.notes)\n"
+        "        event.args['document'] = 'D-2'\n",
+    )
+    event = Event("alice", {"document": "D-1"}, {}, 0)
+    with pytest.raises(LegislationError, match="set by a layer above"):
+        cls(c.context()).on_codex_install(event)
+    assert event.notes == ("es", "still mine") and event.seen == ["es", "still mine"]
+    assert event.args == {"document": "D-1"}
+
+
+def test_the_ggg_view_is_the_one_the_realm_supplies_and_nothing_else():
+    """Read-only is the view's doing (D3): the chapter sees exactly the supplied module, never the
+    real ``ggg``, even when one is importable in the process."""
+    real = type(sys)("ggg")
+    real.Member = type(
+        "Member",
+        (),
+        {"delete": lambda self: "gone", "get": classmethod(lambda cls, i: "row")},
+    )
+    view = type(sys)("ggg")
+    view.Member = type("Member", (), {"get": classmethod(lambda cls, i: "row")})
+    text = "from ggg import Member\nfrom realms.legislation import above\nclass Tax(above('tax')):\n    def who(self): return Member\n"
+    sys.modules["ggg"] = real
+    try:
+        assert "the realm supplies the read-only view" in refused(
+            codex(), VALENCIA, "tax", text
+        )
+        c = Codex(LAYERS, realm=VALENCIA, modules={"ggg": view})
+        member = c.load(VALENCIA, "tax", text)(c.context()).who()
+        assert (
+            member is view.Member
+            and member.get(1) == "row"
+            and not hasattr(member, "delete")
+        )
+    finally:
+        del sys.modules["ggg"]
+
+
+def test_a_compute_method_cannot_be_an_extension():
+    assert "compute_ method cannot be an extension" in refused(
+        codex(),
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above, extension\nclass Tax(above('tax')):\n"
+        "    @extension\n    def compute_tax_assess(self, entry, subject): return []\n",
+    )
+
+
+def test_a_check_that_raises_anything_is_refused_with_the_file_and_line():
+    c = codex()
+    c.load(
+        "eu/es",
+        "local_regime",
+        "from realms.legislation import above, overridable, working_days\nclass LocalRegime(above('local_regime')):\n"
+        "    comment_period = overridable(working_days(30), legislation='x', check=lambda v: 45 >= v)\n",
+    )
+    with pytest.raises(Refused) as e:
+        c.check()
+    assert str(e.value).startswith(
+        "eu/es/local_regime.py:3: comment_period = working_days(30) fails the check of eu/es/local_regime.py (x): TypeError:"
+    )

@@ -17,16 +17,21 @@ _WRITTEN = {
 
 
 class Period:
-    """``count`` of ``unit``, as GGG stores a Period. ``to_json()`` is the form a setting's value takes."""
+    """``count`` of ``unit``, as GGG stores a Period. ``to_json()`` is the form a setting's value takes.
+    A Period never changes once written."""
 
     __slots__ = ("count", "unit")
 
     def __init__(self, count, unit):
         if isinstance(count, bool) or not isinstance(count, int):
-            raise LegislationError("a Period's count is an integer, not %r" % (count,))
+            raise LegislationError(f"a Period's count is an integer, not {count!r}")
         if unit not in UNITS:
-            raise LegislationError("%r is not a GGG Period unit %s" % (unit, UNITS))
-        self.count, self.unit = count, unit
+            raise LegislationError(f"{unit!r} is not a GGG Period unit {UNITS}")
+        object.__setattr__(self, "count", count)
+        object.__setattr__(self, "unit", unit)
+
+    def __setattr__(self, name, value):
+        raise LegislationError("a Period never changes: write a new one")
 
     def to_json(self):
         return {"count": self.count, "unit": self.unit}
@@ -36,8 +41,7 @@ class Period:
             return NotImplemented
         if other.unit != self.unit:
             raise UnitMismatch(
-                "%r and %r are not of one unit: Periods compare only within one unit"
-                % (self, other)
+                f"{self!r} and {other!r} are not of one unit: Periods compare only within one unit"
             )
         return other.count
 
@@ -65,7 +69,7 @@ class Period:
         return hash((self.count, self.unit))
 
     def __repr__(self):
-        return "%s(%d)" % (_WRITTEN[self.unit], self.count)
+        return f"{_WRITTEN[self.unit]}({self.count})"
 
 
 def days(count):

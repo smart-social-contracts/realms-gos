@@ -57,14 +57,13 @@ def _mark(mark):
         if callable(value) and not isinstance(value, type):  # @mark with no arguments
             if check is not None or legislation is not None:
                 raise LegislationError(
-                    "a method is marked @%s(legislation=...), a setting %s(value, ...)"
-                    % (mark, mark)
+                    f"a method is marked @{mark}(legislation=...), a setting {mark}(value, ...)"
                 )
             return Method(value, mark, None)
         return Setting(value, mark, legislation, check)
 
     apply.__name__ = mark
-    apply.__doc__ = "Mark a method or a setting %s." % mark
+    apply.__doc__ = f"Mark a method or a setting {mark}."
     return apply
 
 
@@ -78,7 +77,8 @@ class Forbid:
     operation is forbidden, ``each`` the list the rule ranges over.
 
     S1 keeps the rule; the ``F`` expression language, its evaluation and the Cedar it becomes are S2
-    (#484). Forbids are never overridable and never removable."""
+    (#484). Forbids are never overridable, never removable and never change once written.
+    """
 
     __slots__ = ("op", "expression", "each", "legislation")
 
@@ -91,12 +91,16 @@ class Forbid:
             raise LegislationError(
                 'each= names the list the forbid ranges over, such as each="taxes"'
             )
-        self.op, self.expression, self.each, self.legislation = (
-            op,
-            expression,
-            each,
-            legislation,
-        )
+        for name, value in (
+            ("op", op),
+            ("expression", expression),
+            ("each", each),
+            ("legislation", legislation),
+        ):
+            object.__setattr__(self, name, value)
+
+    def __setattr__(self, name, value):
+        raise LegislationError("a forbid never changes")
 
 
 def forbid(op, expression, each=None, legislation=None):
