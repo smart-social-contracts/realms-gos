@@ -90,6 +90,28 @@ def test_another_proposal_stops_a_scheduled_one():
     assert "withdrawn" in call("proposal_stop", "ctl", proposal=p)["error"]
 
 
+@pytest.mark.parametrize("effective_at", [1_790_003_600.5, "1790003600", True, [1_790_003_600]],
+                         ids=["a fraction", "a string", "a bool", "a list"])
+def test_effective_at_is_whole_seconds_or_the_proposal_is_refused(effective_at):
+    world.build()
+    out = call("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=effective_at)
+    assert not out["ok"] and out["kind"] == "invalid_argument" and "whole seconds" in out["error"]
+    assert Proposal.count() == 0
+
+
+def test_a_task_that_already_has_the_name_stops_the_proposal_from_being_accepted():
+    world.build()
+    ok("governance_update", "ctl", voting_window=0)
+    p = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS,
+           effective_at=fake_chain.now() + HOUR)["proposal"]
+    Task(name=f"proposal {p}", metadata='{"creator": "somebody"}', status="pending")  # as no operation can make it
+    vote_yes(p, FOUR[:3])
+    assert call("proposal_vote", "carla", proposal=p, choice="yes")["kind"] == "conflict"
+    assert Proposal[p].status == "voting" and TaskSchedule.count() == 0
+    assert "no accepted action" in call("proposal_execute", "ctl", proposal=p)["error"]
+    assert Mandate.count() == 0
+
+
 def test_a_stop_passes_even_when_the_task_is_gone():
     world.build()
     p = scheduled_proposal()

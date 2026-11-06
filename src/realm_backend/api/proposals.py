@@ -110,24 +110,27 @@ def resume(start=1):
 
 def close(p, result):
     tally, size, _ = count(p)
-    p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
     if result == "accepted" and p.effective_at:
-        wait_for_effective_time(p)
+        result = status_at_effective_time(p)  # before any write: a refusal leaves the proposal open
+    p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
 
 
-def wait_for_effective_time(p):
-    """An accepted proposal takes effect at its ``effective_at``, never before. Voting that ended after that time has
-    missed it: the proposal expires and its action never runs."""
+def status_at_effective_time(p):
+    """The status of a proposal accepted now that states an ``effective_at``: it takes effect then, never before. Voting
+    that ended after that time has missed it: the proposal expires and its action never runs."""
     if chain.now() > p.effective_at:
-        p.status = "expired"
-    elif p.action:
-        schedule(p)
+        return "expired"
+    if not p.action:
+        return "accepted"
+    schedule(p)
+    return "execution_scheduled"
 
 
 def schedule(p):
     """Run the action at ``effective_at`` as a one-step task of the realm's task scheduler, which arms its timer again
     after an upgrade (tasks.rearm). The step runs as the realm itself: the vote is the authority, not the proposer."""
-    p.status = "execution_scheduled"
+    if Task[scheduled_task_name(p)]:
+        raise Conflict(f"task '{scheduled_task_name(p)}' exists")
     task = Task(name=scheduled_task_name(p), metadata=json.dumps({"creator": chain.self_id()}), status="pending")
     tasks.define(task, [("proposal_run_scheduled", {"proposal": p.id}, 0)])
     s = TaskSchedule(name=f"{task.name}@1", task=task, last_run_at=0, run_at=p.effective_at, repeat_every=0)
@@ -229,11 +232,22 @@ def outcome(p, final):
     return "accepted" if turnout and decisive and tally["yes"] * 100 > p.threshold * decisive else "rejected"
 
 
+def effective_at_of(args):
+    """The proposal's ``effective_at``, 0 when it states none. Only whole seconds: a fraction would be cut off and run
+    early (the GGG methods round a time up to the second before they get here)."""
+    value = args.get("effective_at")
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise Fail("effective_at is whole seconds")
+    return value
+
+
 @op("proposal.create", delegable=True, returns="proposal")
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
-    governs). Voting opens at once. Optional ``effective_at`` (seconds, UTC): once accepted, the action runs then
+    governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC): once accepted, the action runs then
     instead (status ``execution_scheduled`` while it waits), and if the vote ends after that time the proposal
     ends ``expired`` and nothing runs. Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
@@ -243,7 +257,7 @@ def proposal_create(c, args):
         check_action(action)
         check_scope(department, action)
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
-                     int(args.get("effective_at") or 0))
+                     effective_at_of(args))
     return {"proposal": p.id}
 
 

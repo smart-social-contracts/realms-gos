@@ -7,8 +7,9 @@ from ggg import Task, TaskExecution, TaskSchedule, TaskStep
 from core.op import dispatch, op, ops
 
 BUSY = ("running", "waiting")
-# The realm's own tasks, such as the run of a scheduled proposal, are named from this prefix and run as the realm. Their
-# only authority is the vote that scheduled them, so nobody creates, changes, runs or removes one by hand.
+# A task the realm created itself, such as the run of a scheduled proposal, runs as the realm and is locked: its only
+# authority is the vote that scheduled it, so nobody changes, runs or removes one by hand. Its creator, the realm, makes
+# it the realm's own (``own``); its name starts with OWN, which task_create refuses, so nobody can take the name first.
 OWN = "proposal "
 # The toolkit's TaskSchedule declares no indexed field, so the enabled schedules are kept in this field index.
 ENABLED = (TaskSchedule.get_full_type_name(), "enabled", "1")
@@ -23,7 +24,8 @@ def own(task):
 
 
 def owned(c, args):
-    """``task``, if you created it or hold ``all``: its steps run as its creator. Never one of the realm's own."""
+    """``task``, if you created it or hold ``all``: its steps run as its creator. Any task the realm created is locked,
+    even to an admin."""
     task = find(Task, args["task"])
     if own(task):
         raise Forbidden(f"task '{task.name}' is the realm's own: only the vote that scheduled it governs it")
