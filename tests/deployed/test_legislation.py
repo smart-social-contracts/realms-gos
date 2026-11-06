@@ -13,7 +13,7 @@ from pic import CONTROLLER
 CODE = '''
 import json
 before = ic.performance_counter(0)
-from realms.legislation import Codex, Event, Refused, plain
+from realms.legislation import Codex, Event, Money, Refused, pct, plain
 imported = ic.performance_counter(0)
 
 ES = """
@@ -67,9 +67,12 @@ try:
     refusal = None
 except Refused as e:
     refusal = str(e)
+# Cent rounding, in the canister, with no float: 1.00 token at 1.5 % rounds to one cent (half away).
+money = Money(10 ** 8, 8).times(pct("1.5")).to_json()
 print(json.dumps({"deadline": chapter.default_decision_deadline.to_json(), "bonus": plain(chapter.bonus),
                   "day": chapter.working_days_after("2026-12-31", 2), "effects": context.effects.queued,
-                  "refusal": refusal, "cost": {"import": imported - before, "load": loaded - imported}}))
+                  "money": money, "refusal": refusal,
+                  "cost": {"import": imported - before, "load": loaded - imported}}))
 '''
 
 
@@ -107,6 +110,7 @@ def test_a_chapter_loads_through_the_canisters_copy_of_the_library(realm):
         got["refusal"]
         == "x/town/procedure.py:4: working_days_after is fixed by eu/es/procedure.py (Ley 39/2015 Art. 30)"
     )
+    assert got["money"] == 2 * 10**6  # 0.015 -> 0.02, rounded to the cent in the wasm
     cost = got["cost"]
     print(
         f"first use: import {cost['import']:,} instructions, two chapters {cost['load']:,}"

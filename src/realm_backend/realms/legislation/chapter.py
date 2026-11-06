@@ -412,6 +412,12 @@ def _rule(member, upper, refuse):
                 member.value = freeze(merge(upper.value, member.value))
             except LegislationError as e:
                 refuse(f"{name} extends {upper.file}{upper.cited}: {e}", line)
+    elif member.mark == EXTENSION:
+        # upper is overridable (or unmarked): a lower layer may lock it fixed, never turn it into an extension.
+        refuse(
+            f"{name} is overridable in {upper.file}{upper.cited}: a lower layer may lock it fixed, not make it an extension",
+            line,
+        )
 
 
 def _install(member):

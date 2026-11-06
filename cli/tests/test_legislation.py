@@ -128,25 +128,51 @@ def test_pct_refuses_floats_and_what_does_not_fit_the_scale(bad):
         pct(bad)
 
 
-def test_money_times_a_rate_rounds_to_the_nearest_cent_half_away_from_zero():
-    assert times(100_000, pct("1.10")) == 1_100  # 1000.00 at 1.10 % is 11.00
-    assert times(2_345, pct("10")) == 235  # 23.45 at 10 %: 2.345 becomes 2.35
-    assert times(-2_345, pct("10")) == -235  # -2.345 becomes -2.35
-    assert times(1_234, pct("10")) == 123  # 1.234 becomes 1.23
-    assert Money(2_345).times(pct("10")) == Money(235)
-    gross = Money(100_000).times(pct("1.10"))
-    net = gross - gross.times(pct("60"))
-    assert net < gross and (net - gross) == Money(-660) and -gross == Money(-1_100)
-    assert int(gross) == 1_100 and gross.to_json() == 1_100
+def test_money_times_a_rate_rounds_to_the_cent_half_away_from_zero():
+    # A token whose smallest unit is the cent (decimals=2): rounding to the cent is to the unit.
+    assert times(100_000, pct("1.10"), 2) == 1_100  # 1000.00 at 1.10 % is 11.00
+    assert (
+        times(2_345, pct("10"), 2) == 235
+    )  # 23.45 at 10 %: 2.345 -> 2.35, away from zero
+    assert times(-2_345, pct("10"), 2) == -235  # -2.345 -> -2.35
+    assert times(1_234, pct("10"), 2) == 123  # 1.234 -> 1.23
+    # A token with 8 decimals: a cent is 10**6 smallest units, and the result is a multiple of it.
+    unit = 10**8  # one currency unit, in the token's smallest units
+    assert times(unit, pct("1.1"), 8) == 10**6  # 0.011 -> 0.01
+    assert times(unit, pct("1.5"), 8) == 2 * 10**6  # 0.015 -> 0.02, half away from zero
+    assert times(unit, pct("2.5"), 8) == 3 * 10**6  # 0.025 -> 0.03
+    assert times(-unit, pct("1.5"), 8) == -2 * 10**6
+    gross = Money(unit, 8).times(pct("1.5"))
+    assert gross == Money(2 * 10**6, 8) and gross.decimals == 8
+    net = gross - gross.times(pct("50"))
+    assert net < gross and int(gross) == 2 * 10**6 and gross.to_json() == 2 * 10**6
+
+
+def test_money_needs_the_tokens_decimals_to_round():
+    with pytest.raises(LegislationError, match="needs the token's decimals"):
+        Money(100).times(pct("10"))  # decimals unknown: it will not guess
+    assert Money(100, 2).times(pct("10")) == Money(10, 2)
+
+
+def test_money_combines_only_within_one_token():
+    assert Money(100, 2) + Money(50, 2) == Money(150, 2)
+    assert (
+        Money(100, 2) - Money(30)
+    ).decimals == 2  # an unknown amount takes the known decimals
+    assert (-Money(100, 2)).decimals == 2
+    with pytest.raises(LegislationError, match="different decimals"):
+        Money(100, 2) + Money(50, 8)
 
 
 def test_money_takes_integers_only_and_no_rounding_argument():
     with pytest.raises(LegislationError):
         Money(1.5)
     with pytest.raises(LegislationError):
-        times(100, 1.5)
+        Money(100, 1.5)  # the token's decimals is an integer
+    with pytest.raises(LegislationError):
+        times(100, 1.5, 2)
     with pytest.raises(TypeError):
-        Money(1).times(pct("10"), rounding="HALF_EVEN")
+        Money(1, 2).times(pct("10"), rounding="HALF_EVEN")
 
 
 # ── The calendar (§3.4, §4.5) ─────────────────────────────────────────────────
@@ -171,7 +197,14 @@ def test_the_calendar_is_the_union_of_the_layers():
 
 
 def test_working_days_step_over_the_weekend_and_the_holidays():
-    cal = Calendar([SPAIN, {"years": {"2026": []}}])
+    cal = Calendar(
+        [
+            {
+                "weekend": ["sat", "sun"],
+                "years": {"2026": [], "2027": [{"date": "2027-01-01"}]},
+            }
+        ]
+    )
     assert (
         cal.add("2026-12-31", working_days(2)) == "2027-01-05"
     )  # Fri 1 Jan holiday, Sat, Sun
@@ -197,9 +230,9 @@ def test_days_months_and_years_are_calendar_arithmetic():
 
 def test_a_count_into_a_year_with_no_entries_fails_closed():
     cal = Calendar([SPAIN])
-    with pytest.raises(LegislationError, match="no entries for 2028"):
+    with pytest.raises(LegislationError, match="entries for 2028"):
         cal.add("2027-12-30", working_days(2))
-    with pytest.raises(LegislationError, match="no entries for 2026"):
+    with pytest.raises(LegislationError, match="entries for 2026"):
         cal.is_working_day("2026-12-31")
     assert (
         cal.add("2027-12-30", days(5)) == "2028-01-04"
@@ -207,6 +240,24 @@ def test_a_count_into_a_year_with_no_entries_fails_closed():
     assert Calendar([{"years": {"2028": []}}]).is_working_day(
         "2028-01-03"
     )  # listed with no holidays: known
+    with pytest.raises(LegislationError, match="working-day count"):
+        Calendar([]).is_working_day("2027-01-04")  # no calendar at all: fails closed
+
+
+def test_a_year_a_lower_layers_calendar_omits_fails_closed():
+    """Every layer that has a calendar must declare the year; otherwise the count fails closed (user, 6 Nov)."""
+    spain = {"weekend": ["sat", "sun"], "years": {"2027": [], "2028": []}}
+    town = {
+        "years": {"2027": [{"date": "2027-01-22"}]}
+    }  # the town's calendar omits 2028
+    cal = Calendar([spain, town])
+    assert cal.is_working_day("2027-01-04") and not cal.is_working_day("2027-01-22")
+    with pytest.raises(
+        LegislationError, match="not every layer's calendar has entries for 2028"
+    ):
+        cal.is_working_day("2028-01-03")  # the town lacks 2028
+    # A layer that ships no calendar.json at all is not one of these: Spain alone still covers 2028.
+    assert Calendar([spain]).is_working_day("2028-01-03")
 
 
 @pytest.mark.parametrize(
@@ -914,6 +965,66 @@ def test_overridable_the_lowest_definition_runs_and_may_call_super():
     )
     assert cls.capital is True and cls(c.context()).ibi_bonus(None) == 15
     assert c.resolved_at("tax", "eu/es").capital is False
+
+
+def test_a_lower_layer_may_lock_overridable_fixed_but_not_turn_it_into_extension():
+    """User, 6 Nov: an overridable member can be locked fixed below, never made an extension."""
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import above, overridable\nclass Tax(above('tax')):\n"
+        "    rate = overridable(5, legislation='x')\n"
+        "    @overridable(legislation='y')\n    def ibi_bonus(self, land): return 1\n",
+    )
+    # Locking it fixed is allowed, on a setting and on a method.
+    c.load(
+        "eu/es/vc",
+        "tax",
+        "from realms.legislation import above, fixed\nclass Tax(above('tax')):\n"
+        "    rate = fixed(7, legislation='z')\n"
+        "    @fixed(legislation='z')\n    def ibi_bonus(self, land): return 2\n",
+    )
+    assert c.resolved("tax").rate == 7
+    assert "rate is fixed by eu/es/vc/tax.py (z)" in refused(
+        c,
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above\nclass Tax(above('tax')):\n    rate = 9\n",
+    )
+    # Turning an overridable member into an extension is refused, file:line.
+    c2 = codex()
+    c2.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import above, overridable\nclass Tax(above('tax')):\n"
+        "    @overridable(legislation='y')\n    def ibi_bonus(self, land): return 1\n",
+    )
+    assert (
+        "ibi_bonus is overridable in eu/es/tax.py (y): a lower layer may lock it fixed, not make it an extension"
+        in refused(
+            c2,
+            VALENCIA,
+            "tax",
+            "from realms.legislation import above, extension\nclass Tax(above('tax')):\n"
+            "    @extension(legislation='w')\n    def ibi_bonus(self, land): return 2\n",
+        )
+    )
+    # A setting with no mark at all (overridable by default) likewise cannot become an extension.
+    c3 = codex()
+    c3.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import above, overridable\nclass Tax(above('tax')):\n"
+        "    codes = overridable(['a'], legislation='y')\n",
+    )
+    assert "a lower layer may lock it fixed, not make it an extension" in refused(
+        c3,
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above, extension\nclass Tax(above('tax')):\n"
+        "    codes = extension(['b'], legislation='w')\n",
+    )
 
 
 def test_no_mark_is_overridable():

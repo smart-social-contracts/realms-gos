@@ -88,22 +88,26 @@ def shift_months(day, count):
 class Calendar(metaclass=Sealed):
     """The weekend days and the holidays, by year, of the layers' ``calendar.json`` files, top to bottom.
 
-    A year has entries when any layer lists it, with or without holidays. Built once from its layers
-    and never changed: ``weekend`` is a frozenset, ``holidays`` a read-only map of year to frozenset.
+    A year is known for working-day counting only when **every** layer that has a ``calendar.json``
+    declares it: if any such layer lacks the year a count reaches, the count fails closed (a layer that
+    ships no calendar at all, such as EMSHI, is not one of these). A declared year may list no
+    holidays. Built once from its layers and never changed: ``weekend`` is a frozenset, ``holidays`` a
+    read-only map of year to frozenset.
     """
 
-    __slots__ = ("weekend", "holidays")
+    __slots__ = ("weekend", "holidays", "_layer_years")
 
     def __init__(self, layers=()):
-        weekend, holidays = set(), {}
+        weekend, holidays, per_layer = set(), {}, []
         for data in layers:
-            self._layer(data, weekend, holidays)
+            per_layer.append(self._layer(data, weekend, holidays))
         object.__setattr__(self, "weekend", frozenset(weekend))
         object.__setattr__(
             self,
             "holidays",
             MappingProxyType({y: frozenset(d) for y, d in holidays.items()}),
         )
+        object.__setattr__(self, "_layer_years", tuple(per_layer))
 
     def __setattr__(self, name, value):
         raise LegislationError(
@@ -112,36 +116,45 @@ class Calendar(metaclass=Sealed):
 
     @staticmethod
     def _layer(data, weekend, holidays):
-        """One parsed ``calendar.json``: ``weekend`` (day names) and ``years`` (``{"2027": [{"date": ...}]}``)."""
+        """One parsed ``calendar.json``: ``weekend`` (day names) and ``years`` (``{"2027": [{"date": ...}]}``).
+        Returns the set of years this layer declares."""
         if not isinstance(data, dict):
             raise LegislationError("a calendar is an object with weekend and years")
         for name in data.get("weekend") or []:
             if name not in WEEKDAYS:
                 raise LegislationError(f"{name!r} is not a day of the week {WEEKDAYS}")
             weekend.add(name)
+        declared = set()
         for year, entries in (data.get("years") or {}).items():
             if not (isinstance(year, str) and year.isdigit() and len(year) == 4):
                 raise LegislationError(
                     f"a calendar year is written as four digits, not {year!r}"
                 )
+            declared.add(int(year))
             known = holidays.setdefault(int(year), set())
             for entry in entries:
                 day = entry.get("date") if isinstance(entry, dict) else None
                 if day is None or parse_day(day)[0] != int(year):
                     raise LegislationError(f"holiday {entry!r} is not a date of {year}")
                 known.add(day)
+        return frozenset(declared)
 
     def has_year(self, year):
-        return year in self.holidays
+        """Whether every calendar-bearing layer declares ``year`` (and there is at least one)."""
+        return bool(self._layer_years) and all(
+            year in years for years in self._layer_years
+        )
 
     def is_working_day(self, day):
-        """Neither a weekend day nor a holiday. Fails closed when the day's year has no entries."""
+        """Neither a weekend day nor a holiday. Fails closed unless every layer's calendar declares the year."""
         year = parse_day(day)[0]
         if not self.has_year(year):
             raise LegislationError(
-                f"the calendar has no entries for {year}: a working-day count that reaches it fails closed"
+                f"not every layer's calendar has entries for {year}: a working-day count that reaches it fails closed"
             )
-        return weekday(day) not in self.weekend and day not in self.holidays[year]
+        return weekday(day) not in self.weekend and day not in self.holidays.get(
+            year, ()
+        )
 
     def add(self, day, period):
         """``day`` plus ``period``: calendar days or months and years date to date; working days
