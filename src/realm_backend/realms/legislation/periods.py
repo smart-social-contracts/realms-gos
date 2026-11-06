@@ -6,6 +6,7 @@ conversion through the calendar, so ``days(45) >= working_days(30)`` raises.
 """
 
 from realms.legislation.errors import LegislationError, UnitMismatch
+from realms.legislation.sealed import Sealed
 
 UNITS = ("Day", "WorkingDay", "Month", "Year")
 _WRITTEN = {
@@ -16,7 +17,7 @@ _WRITTEN = {
 }
 
 
-class Period:
+class Period(metaclass=Sealed):
     """``count`` of ``unit``, as GGG stores a Period. ``to_json()`` is the form a setting's value takes.
     A Period never changes once written."""
 

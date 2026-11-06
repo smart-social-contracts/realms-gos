@@ -391,7 +391,7 @@ def test_the_class_name_and_the_base_are_checked():
         "from realms.legislation import above\nclass Tax(above('tax')): pass\n"
         "First = Tax\nclass Tax(above('tax')): pass\n",
     )
-    assert "is named Tax" in refused(
+    assert "one class per file" in refused(
         c,
         "eu",
         "tax",
@@ -450,7 +450,7 @@ def test_ggg_entities_are_importable_read_only_through_the_codex_modules():
     cls = c.load(
         VALENCIA,
         "tax",
-        "import ggg\nfrom ggg import Member\nfrom realms.legislation import above\n"
+        "from ggg import Member\nfrom realms.legislation import above\n"
         "class Tax(above('tax')):\n    def ibi_bonus(self, land): return Member\n",
     )
     assert cls(c.context()).ibi_bonus(None) is ggg.Member
@@ -513,7 +513,7 @@ def test_public_members_above_the_realm_carry_a_citation_and_the_realm_need_not(
     "text, reason",
     [
         ("    x = 1.5", "floats are not allowed"),
-        ("    class Inner: pass", "no nested classes"),
+        ("    class Inner: pass", "a nested class is not part of the readable subset"),
         ("    __slots__ = ()", "no dunder names"),
         ("    now = 3", "reserved by the SDK"),
         ("    def calendar(self): pass", "reserved by the SDK"),
@@ -601,7 +601,12 @@ def test_chapters_load_top_to_bottom_once_per_layer_and_only_into_known_layers()
 
 def test_a_syntax_error_or_a_crash_names_the_file():
     assert refused(codex(), "eu", "tax", "class Tax(\n").startswith("eu/tax.py:")
-    assert "ZeroDivisionError" in refused(codex(), "eu", "tax", "x = 1 // 0\n")
+    assert "ZeroDivisionError" in refused(
+        codex(),
+        "eu",
+        "tax",
+        "X = 1 // 0\nfrom realms.legislation import above\nclass Tax(above('tax')): pass\n",
+    )
 
 
 # ── Marks (§4.1): each line of the table, and the §5.5 refusal ───────────────
@@ -1355,16 +1360,19 @@ def test_the_canisters_copy_imports_nothing_from_the_cli_or_the_canister():
     [
         ("from realms.legislation import codex", "a chapter imports only"),
         ("from realms.legislation import Codex", "a chapter imports only"),
-        ("from realms.legislation import *", "a chapter imports only"),
+        (
+            "from realms.legislation import *",
+            "an import is not part of the readable subset",
+        ),
         ("from realms.legislation import above, Chapter", "a chapter imports only"),
         ("__loader__.load_module('posix')", "__loader__: no dunder names"),
         ("x = __spec__", "__spec__: no dunder names"),
         ("x = ().__class__.__base__.__subclasses__()", "no dunder names"),
-        ("x = getattr(object, '__subclasses__')", "no dunder attribute access"),
-        ("x = hasattr(object, '__dict__')", "no dunder attribute access"),
-        ("delattr(object, '__doc__')", "no dunder attribute access"),
-        ("x = getattr(object, '_' + '_class_' + '_')", "no dunder attribute access"),
-        ("import ggg", "the realm supplies the read-only view"),
+        ("x = getattr(object, '__subclasses__')", "no dunder names"),
+        ("x = hasattr(object, '__dict__')", "no dunder names"),
+        ("delattr(object, '__doc__')", "no dunder names"),
+        ("x = getattr(object, '_' + '_class_' + '_')", "no dunder names"),
+        ("import ggg", "a chapter imports only"),
         ("from ggg import Member", "the realm supplies the read-only view"),
     ],
 )
@@ -1387,7 +1395,7 @@ def test_dunder_names_are_refused_before_the_file_runs():
     assert "tax" not in c.chapters
 
 
-def test_a_chapter_cannot_subclass_the_metaclass_to_skip_the_marks():
+def test_a_chapter_cannot_give_a_metaclass_to_skip_the_marks():
     c = codex()
     c.load("eu/es", "register", ES_REGISTER)
     text = (
@@ -1396,32 +1404,151 @@ def test_a_chapter_cannot_subclass_the_metaclass_to_skip_the_marks():
         "class Register(above('register'), metaclass=M):\n"
         "    def on_user_add(self, event): pass\n"
     )
-    assert "must use the SDK's metaclass, not M" in refused(
+    assert "'metaclass': not allowed in a chapter" in refused(
         c, VALENCIA, "register", text
     )
+    # Even defined by hand on a single class, so there is no second class to catch instead.
+    fn = (
+        "from realms.legislation import above\n"
+        "def m(n, b, ns):\n    return type(b[0])(n, b, ns)\n"
+        "class Register(above('register'), metaclass=m):\n    def on_user_add(self, event): pass\n"
+    )
+    assert "'metaclass': not allowed in a chapter" in refused(
+        c, VALENCIA, "register", fn
+    )
+    # And the SDK's metaclass is enforced at build time too, for any path the subset check missed.
+    from realms.legislation.chapter import ChapterMeta
+
+    assert ChapterMeta is type(c.resolved("register"))
     assert c.resolved("register").__source__ == "eu/es"
+
+
+@pytest.mark.parametrize(
+    "body, reason",
+    [
+        (
+            "match event:\n            case str():\n                return None",
+            "a match statement",
+        ),
+        ("return (i for i in [1])", "no generators, coroutines or async code"),
+        ("yield 1", "no generators, coroutines or async code"),
+        ("event.inner.field = 1", "sets attributes on self, or on what it was given"),
+        ("type(self).authority = 1", "sets attributes on self"),
+        ("with open('x') as f:\n            pass", "a with statement"),
+        (
+            "try:\n            self.now()\n        except Exception:\n            pass",
+            "a try statement",
+        ),
+        ("global X\n        X = 1", "a del or global statement"),
+        ("del event.result", "deleting an attribute"),
+        ("return days.__class__", "no dunder names in a chapter"),
+        (
+            "return getattr(days, '_' + '_class__')",
+            "no dunder names in a chapter, in strings either",
+        ),
+        ("return event.gi_frame", "no frame or generator attributes"),
+        (
+            "return '{0.__class__}'.format(event)",
+            "no dunder names in a chapter, in strings either",
+        ),
+        (
+            "return '{0.x}'.format(event)",
+            "str.format reads attributes named in the template",
+        ),
+    ],
+)
+def test_a_method_stays_in_the_readable_subset(body, reason):
+    text = (
+        "from realms.legislation import above, days\nclass Tax(above('tax')):\n"
+        f"    def on_tax_assess(self, event):\n        {body}\n"
+    )
+    assert reason in refused(codex(), VALENCIA, "tax", text)
+
+
+@pytest.mark.parametrize(
+    "line, reason",
+    [
+        ("import os", "a chapter imports only"),
+        ("from os import getcwd", "a chapter imports only"),
+        (
+            "from realms.legislation import *",
+            "an import is not part of the readable subset",
+        ),
+        ("match days:\n    case str():\n        X = 1", "a match statement"),
+        ("X = 1\ndef f(): pass", "nothing else at module level"),
+        ("X = days.__module__", "no dunder names in a chapter"),
+        ("above('tax').bonus = 1", "an attribute assignment"),
+    ],
+)
+def test_module_level_stays_in_the_readable_subset(line, reason):
+    text = f"from realms.legislation import above, days\n{line}\nclass Tax(above('tax')):\n    x = 1\n"
+    assert reason in refused(codex(), VALENCIA, "tax", text)
+
+
+def test_a_legitimate_chapter_uses_the_whole_subset():
+    """Loops, comprehensions, conditionals, f-strings, assert, raise, nested helpers, super(), **kwargs,
+    an attribute set on a local and on self: all stay inside the subset and load."""
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import above, overridable\nclass Tax(above('tax')):\n"
+        "    @overridable(legislation='x')\n    def ibi_bonus(self, land):\n        return 1\n",
+    )
+    cls = c.load(
+        VALENCIA,
+        "tax",
+        "from realms.legislation import Ref, above, days\n"
+        "RATES = {'a': 1}\n"
+        "class Tax(above('tax')):\n"
+        "    def ibi_bonus(self, land):\n"
+        "        total = super().ibi_bonus(land)\n"
+        "        for i in range(3):\n"
+        "            total += i\n"
+        "        picked = [v for v in RATES.values() if v > 0]\n"
+        "        seen = {k: v for k, v in RATES.items()}\n"
+        "        label = f'bonus {total!r}'\n"
+        "        assert total >= 0, 'never'\n"
+        "        if not picked:\n"
+        "            raise ValueError('none')\n"
+        "        land.note = label\n"
+        "        self.ggg.notification_send(recipient=Ref('user', 'a'), **{'body': label})\n"
+        "        return total + seen['a'] if picked else 0\n",
+    )
+    land = type("L", (), {})()
+    assert cls(c.context()).ibi_bonus(land) == 5 and land.note == "bonus 4"
 
 
 def test_a_chapter_cannot_change_a_class_above_or_its_own():
     c = codex()
     c.load("eu/es", "register", ES_REGISTER)
-    assert "never changes once loaded" in refused(
-        c,
-        VALENCIA,
-        "register",
-        "from realms.legislation import above\nabove('register').authority = None\n",
+    assert (
+        "an attribute assignment is not part of the readable subset in a module"
+        in refused(
+            c,
+            VALENCIA,
+            "register",
+            "from realms.legislation import above\nabove('register').authority = None\n",
+        )
     )
-    assert "never changes once loaded" in refused(
+    assert "deleting an attribute is not part of the readable subset" in refused(
         c,
         VALENCIA,
         "register",
         "from realms.legislation import above\ndel above('register').authority\n",
     )
-    cls = c.load(
+    assert ".authority = ...: a chapter sets attributes on self" in refused(
+        c,
         VALENCIA,
         "register",
         "from realms.legislation import above\nclass Register(above('register')):\n"
         "    def on_user_remove(self, event):\n        type(self).authority = None\n",
+    )
+    cls = c.load(
+        VALENCIA,
+        "register",
+        "from realms.legislation import above\nclass Register(above('register')):\n"
+        "    def on_user_remove(self, event):\n        cls = type(self)\n        cls.authority = None\n",
     )
     with pytest.raises(LegislationError, match="never changes once loaded"):
         cls(c.context()).on_user_remove(Event("a", {}, {}, 0))
@@ -1449,7 +1576,7 @@ def test_values_a_layer_above_set_are_frozen():
     assert chapter.read() == ("ibi_urban", 1)
     with pytest.raises(AttributeError):
         chapter.grow()
-    with pytest.raises(LegislationError, match="set by a layer above"):
+    with pytest.raises(TypeError):  # a read-only view
         chapter.change()
     for value in (days(3), Money(1), Ref("a", "b"), forbid("tax_assess", True)):
         with pytest.raises(LegislationError, match="never changes"):
@@ -1473,7 +1600,7 @@ def test_an_event_s_lists_and_dicts_freeze_on_seal():
         "        event.args['document'] = 'D-2'\n",
     )
     event = Event("alice", {"document": "D-1"}, {}, 0)
-    with pytest.raises(LegislationError, match="set by a layer above"):
+    with pytest.raises(TypeError):  # a read-only view
         cls(c.context()).on_codex_install(event)
     assert event.notes == ("es", "still mine") and event.seen == ["es", "still mine"]
     assert event.args == {"document": "D-1"}

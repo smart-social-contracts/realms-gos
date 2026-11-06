@@ -17,13 +17,14 @@ path, and a codex whose value fails it is refused.
 """
 
 from realms.legislation.errors import LegislationError
+from realms.legislation.sealed import Sealed
 
 FIXED, EXTENSION, OVERRIDABLE = "fixed", "extension", "overridable"
 MARKS = (FIXED, EXTENSION, OVERRIDABLE)
 _NOTHING = object()
 
 
-class Setting:
+class Setting(metaclass=Sealed):
     """A marked setting, as the class body holds it until the metaclass reads it."""
 
     __slots__ = ("value", "mark", "legislation", "check")
@@ -39,7 +40,7 @@ class Setting:
         )
 
 
-class Method:
+class Method(metaclass=Sealed):
     """A marked method, as the class body holds it until the metaclass reads it."""
 
     __slots__ = ("fn", "mark", "legislation")
@@ -72,7 +73,7 @@ extension = _mark(EXTENSION)
 overridable = _mark(OVERRIDABLE)
 
 
-class Forbid:
+class Forbid(metaclass=Sealed):
     """A forbid: ``op`` is the GGG operation it forbids, ``expression`` the tree that is true when the
     operation is forbidden, ``each`` the list the rule ranges over.
 

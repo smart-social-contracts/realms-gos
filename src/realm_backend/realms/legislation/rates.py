@@ -7,6 +7,7 @@ nearest unit of the currency (the cent), an exact half away from zero, with no o
 """
 
 from realms.legislation.errors import LegislationError
+from realms.legislation.sealed import Sealed
 
 SCALE = 100_000_000  # one, in hundred-millionths: 100 %
 PERCENT = SCALE // 100  # 1 %
@@ -54,7 +55,7 @@ def times(units, rate):
     return quotient if product >= 0 else -quotient
 
 
-class Money:
+class Money(metaclass=Sealed):
     """An amount in the smallest unit of its currency (cents for the euro), as GGG's money is stored.
 
     ``times(rate)`` applies GGG's one rounding rule and takes no rounding argument. Money adds to and

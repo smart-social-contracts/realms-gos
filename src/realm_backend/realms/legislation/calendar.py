@@ -11,6 +11,7 @@ deadline is worse than a clear error.
 
 from realms.legislation.errors import LegislationError
 from realms.legislation.periods import Period
+from realms.legislation.sealed import MappingProxyType, Sealed
 
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _DAYS_IN_MONTH = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
@@ -84,31 +85,46 @@ def shift_months(day, count):
     return format_day(year, month, min(dom, _days_in_month(year, month)))
 
 
-class Calendar:
+class Calendar(metaclass=Sealed):
     """The weekend days and the holidays, by year, of the layers' ``calendar.json`` files, top to bottom.
 
-    A year has entries when any layer lists it, with or without holidays."""
+    A year has entries when any layer lists it, with or without holidays. Built once from its layers
+    and never changed: ``weekend`` is a frozenset, ``holidays`` a read-only map of year to frozenset.
+    """
+
+    __slots__ = ("weekend", "holidays")
 
     def __init__(self, layers=()):
-        self.weekend = set()
-        self.holidays = {}  # year -> set of days
+        weekend, holidays = set(), {}
         for data in layers:
-            self.add_layer(data)
+            self._layer(data, weekend, holidays)
+        object.__setattr__(self, "weekend", frozenset(weekend))
+        object.__setattr__(
+            self,
+            "holidays",
+            MappingProxyType({y: frozenset(d) for y, d in holidays.items()}),
+        )
 
-    def add_layer(self, data):
+    def __setattr__(self, name, value):
+        raise LegislationError(
+            "the realm's calendar never changes: it is the union of the layers' calendar.json"
+        )
+
+    @staticmethod
+    def _layer(data, weekend, holidays):
         """One parsed ``calendar.json``: ``weekend`` (day names) and ``years`` (``{"2027": [{"date": ...}]}``)."""
         if not isinstance(data, dict):
             raise LegislationError("a calendar is an object with weekend and years")
         for name in data.get("weekend") or []:
             if name not in WEEKDAYS:
                 raise LegislationError(f"{name!r} is not a day of the week {WEEKDAYS}")
-            self.weekend.add(name)
+            weekend.add(name)
         for year, entries in (data.get("years") or {}).items():
             if not (isinstance(year, str) and year.isdigit() and len(year) == 4):
                 raise LegislationError(
                     f"a calendar year is written as four digits, not {year!r}"
                 )
-            known = self.holidays.setdefault(int(year), set())
+            known = holidays.setdefault(int(year), set())
             for entry in entries:
                 day = entry.get("date") if isinstance(entry, dict) else None
                 if day is None or parse_day(day)[0] != int(year):

@@ -1,23 +1,23 @@
 """A layered codex as the library builds it: the realm's layers, top to bottom, and every chapter and
 calendar loaded into them.
 
-``Codex.load`` is the loader the realm runs *inside* its subinterpreter sandbox (layered-codex.md §9.3,
-docs/architecture/sandboxing.md): the sandbox isolates the realm's data and code and meters the
-call; this loader enforces the chapter rules of §4 and §12.2. It runs a chapter's file with only the
-built-ins a chapter may use, imports limited to what the SDK publishes and to the read-only ``ggg``
-view the realm supplies, no dunder name anywhere in the code (checked on the compiled code before
-anything runs), one class per file named after the domain, built by the SDK's metaclass, and nothing
-else at module level but imports and constants. The resolver (S3, #485) computes the layers from the
-realm's links and loads the chapters in order; the runtime (D3, #488) instantiates the resolved
-classes around GGG operations and supplies the ``ggg`` view.
+``Codex.load`` is the install-time check and loader of a chapter. In the realm it runs *inside* the
+subinterpreter sandbox (layered-codex.md §9.3, docs/architecture/sandboxing.md), which stays the
+barrier around the realm's data and code and meters the call. Before a chapter's code runs, ``subset``
+checks the compiled code against the readable subset of Python (§4 rule 5, §12.2); then the file runs
+with the built-ins a chapter may use, imports limited to what the SDK publishes and to the read-only
+``ggg`` view the realm supplies, and the class it defines is built by the SDK's metaclass, which
+applies the marks. The resolver (S3, #485) computes the layers from the realm's links and loads the
+chapters in order; the runtime (D3, #488) instantiates the resolved classes around GGG operations and
+supplies the ``ggg`` view.
 """
 
 import builtins
 
+from realms.legislation import subset
 from realms.legislation.calendar import Calendar
 from realms.legislation.chapter import (
     _LOADING,
-    CLASS_BODY,
     Chapter,
     ChapterMeta,
     Load,
@@ -26,6 +26,8 @@ from realms.legislation.chapter import (
 )
 from realms.legislation.context import Context
 from realms.legislation.errors import LegislationError, Refused
+from realms.legislation.sealed import Sealed
+from realms.legislation.subset import FRAME_ATTRIBUTES
 
 SDK, GGG = "realms.legislation", "ggg"
 # The built-ins a chapter may use. Not here, so not there: exec, eval, compile, globals, locals, setattr,
@@ -63,39 +65,17 @@ def domain_id(domain):
     return domain
 
 
-def dunder_names(code):
-    """Every dunder name the compiled chapter reads, writes or looks up as an attribute, other than
-    what CPython puts in a class body. The chapter is refused before it runs if there is one.
-    """
-    found = set()
-
-    def walk(c):
-        found.update(
-            n for n in c.co_names if n.startswith("__") and n not in CLASS_BODY
-        )
-        for const in c.co_consts:
-            if type(const) is type(c):
-                walk(const)
-
-    walk(code)
-    return sorted(found)
-
-
-def line_with(text, token):
-    """The first line of ``text`` holding ``token``, or None."""
-    for number, line in enumerate(text.splitlines(), 1):
-        if token in line:
-            return number
-    return None
-
-
 def no_dunder(fn):
-    """``getattr``, ``hasattr`` and ``delattr`` as a chapter gets them: never for a dunder name."""
+    """``getattr``, ``hasattr`` and ``delattr`` as a chapter gets them: never for a dunder name or a frame's."""
 
     def guarded(obj, name, *rest):
-        if not isinstance(name, str) or name.startswith("__"):
+        if (
+            not isinstance(name, str)
+            or name.startswith("__")
+            or name in FRAME_ATTRIBUTES
+        ):
             raise LegislationError(
-                f"{fn.__name__}({name!r}): no dunder attribute access in a chapter"
+                f"{fn.__name__}({name!r}): no dunder or frame attribute access in a chapter"
             )
         return fn(obj, name, *rest)
 
@@ -103,11 +83,12 @@ def no_dunder(fn):
     return guarded
 
 
-class Codex:
+class Codex(metaclass=Sealed):
     """``layers`` are the source ids of the realm's layer paths, top to bottom; ``realm`` is the realm's own
     source id; ``operations`` the GGG operation names, when known, for the hooks, guards and forbids to be
-    checked against; ``modules`` what a chapter's ``import ggg`` resolves to: the read-only view of GGG's
-    entities the realm supplies (D3, #488). Without one, ``import ggg`` is refused."""
+    checked against; ``modules`` what a chapter's ``from ggg import ...`` resolves to: the read-only view of
+    GGG's entities the realm supplies (D3, #488), any object whose attributes are the entity names with
+    their read methods. Without one, importing ``ggg`` is refused."""
 
     def __init__(self, layers, realm=None, operations=None, modules=None):
         self.layers = tuple(source_id(s) for s in layers)
@@ -179,13 +160,7 @@ class Codex:
             code = compile(text, file, "exec")
         except SyntaxError as e:
             raise Refused(e.msg, e.lineno, file)
-        dunders = dunder_names(code)
-        if dunders:
-            raise Refused(
-                f"{', '.join(dunders)}: no dunder names in a chapter",
-                line_with(text, dunders[0]),
-                file,
-            )
+        imported = subset.check(code, text, file)
         load = Load(self, source, domain, source == self.realm, text)
         space = {"__name__": file, "__builtins__": self._builtins(file)}
         _LOADING.append(load)
@@ -199,7 +174,7 @@ class Codex:
             raise Refused(f"{type(e).__name__}: {e}", None, file)
         finally:
             _LOADING.pop()
-        cls = self._the_chapter(space, load)
+        cls = self._the_chapter(space, load, imported)
         self.chapters.setdefault(domain, []).append(cls)
         return cls
 
@@ -244,19 +219,13 @@ class Codex:
         env["__import__"] = _import
         return env
 
-    def _the_chapter(self, space, load):
+    def _the_chapter(self, space, load, imported):
         """The one class of the file, built by the SDK's metaclass; everything else at module level is
-        an import or a constant."""
-        import realms.legislation as sdk
-
-        sdk.Chapter  # noqa: B018 - a bundled module in the canister fills vars() on first use
-        allowed = list(vars(sdk).values())
-        ggg = self.modules.get(GGG)
-        if ggg is not None:
-            allowed += [ggg] + list(vars(ggg).values())
+        a name an import bound (the SDK's or the ``ggg`` view's, by ``subset``'s check) or a constant.
+        """
         found = []
         for key, value in space.items():
-            if key in ("__name__", "__builtins__", "__doc__"):
+            if key in ("__name__", "__builtins__", "__doc__") or key in imported:
                 continue
             if isinstance(value, ChapterMeta) and value.__file__ == load.file:
                 if type(value) is not ChapterMeta:
@@ -266,7 +235,7 @@ class Codex:
                         load.file,
                     )
                 found.append(value)
-            elif not any(value is v for v in allowed) and not is_data(value):
+            elif not is_data(value):
                 raise Refused(
                     f"{key}: nothing else at module level except imports from the SDK and constants",
                     None,

@@ -1,10 +1,12 @@
 """``realms legislation``: the tools of the layered codex (docs/codices/layered-codex.md §12).
 
 ``check`` loads a ``legislation/`` tree the way the realm does, with the same ``realms.legislation``
-library, and prints every refusal as ``<source>/<domain>.py:<line>: <reason>``. This is the S1 stub:
-it covers what loading enforces (the class, its base and name, imports, marks, citations, settings and
-their ``check=``, hooks and guards named after GGG operations, reserved operations, the calendars).
-The full checker (the ``F`` rules, ``uses`` cycles, cases, Python versus Cedar) comes with S2 and C2.
+library, and prints every refusal as ``<source>/<domain>.py:<line>: <reason>``. Each chapter first
+passes the readable subset on its syntax tree (``subset_ast``, the clear errors for authors), then
+loads, which runs the realm's own bytecode check and the marks. ``from ggg import ...`` resolves to
+inert placeholders named after GGG's entities: the check loads chapters, it never runs their hooks.
+This is the S1 stub: the full checker (the ``F`` rules, ``uses`` cycles, cases, Python versus Cedar)
+comes with S2 and C2.
 
 The layers of a source are its ancestor folders, top to bottom: ``eu/es/vc/46250-valencia`` runs
 ``eu``, ``eu/es``, ``eu/es/vc`` and itself. The links between realms (§3.3, the resolver of S3) are not
@@ -18,7 +20,7 @@ from typing import List, Optional
 import typer
 from rich.console import Console
 
-from realms.legislation import Codex, Refused
+from realms.legislation import Codex, Refused, subset_ast
 
 console = Console()
 legislation_app = typer.Typer(
@@ -58,6 +60,32 @@ def ggg_operations() -> frozenset:
     return frozenset(ggg_did.METHODS) | INTERIM_OPERATIONS
 
 
+def check_view():
+    """``ggg`` as the check sees it: a placeholder class per entity the canister's ``ggg`` package exports.
+    The names come from ``realms/ggg/__init__.py`` (the canister tree, reached through the package).
+    """
+    import ast
+    import types
+
+    import realms
+
+    source = Path(realms.__file__).resolve().parent / "ggg" / "__init__.py"
+    view = types.ModuleType("ggg")
+    for node in ast.parse(source.read_text()).body:
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                setattr(
+                    view,
+                    alias.name,
+                    type(
+                        alias.name,
+                        (),
+                        {"__doc__": "a check-time placeholder: no reads here"},
+                    ),
+                )
+    return view
+
+
 def sources(tree: Path) -> List[str]:
     """Every source id under ``tree``: a folder with a source.json, as ``eu/es/vc``."""
     return sorted(
@@ -80,7 +108,9 @@ def chapters_of(tree: Path, source: str) -> List[str]:
 def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[str]:
     """Load the realm's codex from the tree; the refusals, as the checker prints them."""
     layers = layers_of(realm, known)
-    codex = Codex(layers, realm=realm, operations=operations)
+    codex = Codex(
+        layers, realm=realm, operations=operations, modules={"ggg": check_view()}
+    )
     problems = []
     for source in layers:
         calendar = tree / source / "calendar.json"
@@ -101,8 +131,10 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
             file = tree / source / (domain + ".py")
             if not file.exists():
                 continue
+            text = file.read_text()
             try:
-                codex.load(source, domain, file.read_text())
+                subset_ast.check(text, f"{source}/{domain}.py")
+                codex.load(source, domain, text)
             except Refused as e:
                 problems.append(str(e))
                 break  # the layers below build on this one

@@ -6,39 +6,16 @@ the realm applies the queue after the call, as codex effects work today. A guard
 never changes: lists become tuples, dicts read-only.
 
 The internals these objects carry (the context, the chapter behind a view) sit under dunder names a
-chapter cannot spell: the loader refuses dunder names in a chapter's code (codex.py).
+chapter cannot spell (subset.py), and no class here can be changed once made (sealed.py).
 """
 
 from realms.legislation.errors import LegislationError
 from realms.legislation.periods import Period
 from realms.legislation.rates import Money
+from realms.legislation.sealed import MappingProxyType, Sealed, freeze
 
 
-class Frozen(dict):
-    """A dict a layer above set: read, never changed."""
-
-    def _refuse(self, *args, **kwargs):
-        raise LegislationError(
-            "this value was set by a layer above: read it, never change it"
-        )
-
-    __setitem__ = __delitem__ = __ior__ = clear = pop = popitem = setdefault = (
-        update
-    ) = _refuse
-
-
-def freeze(value):
-    """``value`` with every list a tuple, every set a frozenset and every dict read-only, recursively."""
-    if isinstance(value, dict):
-        return Frozen((k, freeze(v)) for k, v in value.items())
-    if isinstance(value, (list, tuple)):
-        return tuple(freeze(v) for v in value)
-    if isinstance(value, (set, frozenset)):
-        return frozenset(value)
-    return value
-
-
-class Ref:
+class Ref(metaclass=Sealed):
     """GGG's ``Ref``: a reference to any entity by kind and id, ``Ref("external", "INE")``."""
 
     __slots__ = ("kind", "id")
@@ -71,14 +48,14 @@ def plain(value):
         return value.to_json()
     if isinstance(value, Queued):
         return str(value)
-    if isinstance(value, dict):
+    if isinstance(value, (dict, MappingProxyType)):
         return {k: plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple, frozenset, set)):
         return [plain(v) for v in value]
     return value
 
 
-class Denial:
+class Denial(metaclass=Sealed):
     """A guard's refusal: what ``self.deny(reason)`` returns. The operation is refused with ``reason``."""
 
     __slots__ = ("reason",)
@@ -90,7 +67,7 @@ class Denial:
         return f"deny({self.reason!r})"
 
 
-class Queued:
+class Queued(metaclass=Sealed):
     """The reference ``self.ggg.<op>()`` returns: ``queued["invoice"]`` stands for the id the realm will
     create, usable in later effects (``$eff:<n>:<key>``, as today)."""
 
@@ -106,7 +83,7 @@ class Queued:
         return f"$eff:{self.index}"
 
 
-class Effects:
+class Effects(metaclass=Sealed):
     """The GGG operations a call queued, in order, as ``[op, args]`` plain data."""
 
     def __init__(self, operations=None):
@@ -120,7 +97,7 @@ class Effects:
         return Queued(len(self.queued) - 1)
 
 
-class GGG:
+class GGG(metaclass=Sealed):
     """``self.ggg``: any attribute is a GGG operation, called with its arguments, queued as an effect."""
 
     __slots__ = ("__effects__",)
@@ -134,11 +111,12 @@ class GGG:
         return lambda **args: self.__effects__.queue(op, args)
 
 
-class Event:
+class Event(metaclass=Sealed):
     """GGG's ``Event`` as a hook sees it: ``user``, ``args``, ``result`` and ``at``.
 
     Extension hooks share one event down the chain: a layer may add attributes to it, and lower
-    layers can read but not change what a layer above set, down to the lists and dicts in it.
+    layers can read but not change what a layer above set, down to the lists and dicts in it
+    (tuples and read-only views).
     """
 
     FIELDS = ("user", "args", "result", "at")
@@ -163,7 +141,7 @@ class Event:
         object.__setattr__(self, "__sealed__", frozenset(names))
 
 
-class Context:
+class Context(metaclass=Sealed):
     """What one call of the legislation runs with: the codex, the time, the approvals the operation
     carries, and the effects queue every chapter of the call shares."""
 
@@ -172,7 +150,7 @@ class Context:
         self.effects = Effects(operations)
 
 
-class Public:
+class Public(metaclass=Sealed):
     """Another domain's chapter as a caller sees it: public members only."""
 
     __slots__ = ("__chapter__",)
@@ -188,7 +166,7 @@ class Public:
         return getattr(self.__chapter__, name)
 
 
-class Domains:
+class Domains(metaclass=Sealed):
     """``self.legislation`` and ``self.layer``: the declared domains, resolved through the realm's
     layers (``legislation``) or only down to this chapter's own layer (``layer``) (layered-codex.md §4.4).
     """
