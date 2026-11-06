@@ -108,6 +108,7 @@ jobs:
                     tests/backend/test_sandbox_package_bundle.py \
                     tests/backend/department_docs/ \
                     tests/backend/test_time_utils.py \
+                    tests/backend/test_localtime.py \
                     tests/backend/test_call_origin.py \
                     tests/backend/test_ggg_sdk_json_shim.py \
                     tests/backend/test_sidebar_visibility.py \

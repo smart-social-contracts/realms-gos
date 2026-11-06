@@ -4,6 +4,9 @@ Timestamps stay UTC nanoseconds everywhere. A day is a day number (core.civil), 
 its date. The realm keeps the zone file of its own ``Realm.timezone`` and nothing else: ``load`` takes its raw
 bytes, parses them once and keeps the result in memory. Where the bytes come from, and what happens when the
 time zone changes, is for whoever calls ``load``; without a zone file the realm's time is UTC.
+
+The parsed zone is lost on upgrade (and a query discards what it loads), so whoever wires ``load`` must call it
+again in ``post_upgrade``.
 """
 
 from core import tzif

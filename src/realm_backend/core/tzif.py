@@ -16,7 +16,7 @@ class Zone:
     """The offsets (seconds east of UTC) of one time zone.
 
     ``times`` are the UTC seconds of its transitions and ``offsets`` the offset each switches to; ``first`` holds
-    before the first one and ``rule`` (a Rule, or None) from the last one on.
+    before the first one and ``rule`` (a Rule, or None) after the last one.
     """
 
     def __init__(self, times, offsets, first, rule):
@@ -25,7 +25,7 @@ class Zone:
     def offset(self, seconds):
         """The offset at UTC instant ``seconds``. ``bisect`` is a stub in a canister, so the search is by hand."""
         times = self.times
-        if self.rule and (not times or seconds >= times[-1]):
+        if self.rule and (not times or seconds > times[-1]):  # RFC 8536: the footer holds only after the last one
             return self.rule.offset(seconds)
         low, high = 0, len(times)
         while low < high:
@@ -59,11 +59,15 @@ UTC = Zone([], [], 0, Rule(0))
 
 
 def parse(data):
-    """The Zone of a TZif file's bytes. The first block, with 32-bit times, is for old readers and is skipped."""
+    """The Zone of a TZif file's bytes. The first block, with 32-bit times, is for old readers and is skipped.
+
+    A file that is cut short raises ValueError, as a cut footer would move a clock change."""
     if data[:4] != b"TZif" or data[4:5] < b"2":
         raise ValueError("not a TZif file of version 2 or later")
     utc_flags, std_flags, leaps, transitions, types, chars = _counts(data, 0)
     block = 44 + transitions * 5 + types * 6 + chars + leaps * 8 + std_flags + utc_flags
+    if data[block : block + 4] != b"TZif":
+        raise ValueError("TZif file cut short before its second block")
     utc_flags, std_flags, leaps, transitions, types, chars = _counts(data, block)
     at = block + 44
     times = [_number(data, at + 8 * i, 8) for i in range(transitions)]
@@ -72,8 +76,11 @@ def parse(data):
     at += transitions
     offsets = [_number(data, at + 6 * i, 4) for i in range(types)]  # each type: offset, daylight flag, name index
     at += 6 * types + chars + 12 * leaps + std_flags + utc_flags
-    footer = data[at:].decode().strip()
-    return Zone(times, [offsets[kind] for kind in kinds], offsets[0], _posix_rule(footer) if footer else None)
+    footer = data[at:]
+    if footer[:1] != b"\n" or footer[-1:] != b"\n" or footer.count(b"\n") != 2:  # RFC 8536: NL, TZ string, NL
+        raise ValueError("TZif file with a missing or cut footer")
+    text = footer[1:-1].decode()
+    return Zone(times, [offsets[kind] for kind in kinds], offsets[0], _posix_rule(text) if text else None)
 
 
 def _counts(data, at):

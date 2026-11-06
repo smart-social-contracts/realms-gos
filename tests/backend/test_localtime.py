@@ -66,8 +66,8 @@ def test_day_numbers_agree_with_datetime_over_four_centuries():
 
 
 @pytest.mark.parametrize("name", ["Europe_Madrid.slim", "Europe_Madrid.fat", "Australia_Sydney.slim",
-                                  "America_Santiago.slim", "America_Havana.slim", "Europe_Dublin.slim",
-                                  "Asia_Kolkata.slim"])
+                                  "America_Santiago.slim", "America_Havana.slim", "America_Ojinaga.slim",
+                                  "Europe_Dublin.slim", "Asia_Kolkata.slim"])
 def test_offsets_are_those_of_zoneinfo_around_every_switch_for_decades(name):
     data = zone_file(name)
     zone, reference = tzif.parse(data), zoneinfo.ZoneInfo.from_file(io.BytesIO(data))
@@ -83,6 +83,20 @@ def test_offsets_are_those_of_zoneinfo_around_every_switch_for_decades(name):
                 expected = at.astimezone(reference).utcoffset().total_seconds()
                 assert zone.offset(int(at.timestamp())) == expected, (name, at)
         previous = offset
+
+
+def test_the_footer_rule_holds_only_after_the_last_listed_transition():
+    # Ojinaga's last transition, 2022-10-30T08:00Z, goes from Mountain summer time (-6 h) to Central standard time
+    # (-6 h), while its footer, CST6CDT, would still have summer time (-5 h) until 6 November.
+    data = zone_file("America_Ojinaga.slim")
+    zone, reference = tzif.parse(data), zoneinfo.ZoneInfo.from_file(io.BytesIO(data))
+    last = int(datetime(2022, 10, 30, 8, tzinfo=timezone.utc).timestamp())
+    assert zone.times[-1] == last
+    for at in (last - 1, last, last + 1):
+        expected = datetime.fromtimestamp(at, timezone.utc).astimezone(reference).utcoffset().total_seconds()
+        assert zone.offset(at) == expected, at
+    assert zone.offset(last) == -6 * HOUR
+    assert zone.offset(last + 1) == -5 * HOUR
 
 
 @pytest.mark.parametrize("name", ["Europe_Madrid.fat", "Europe_Madrid.slim"])
@@ -201,7 +215,24 @@ def test_a_rule_in_another_form_is_refused_rather_than_misread(text):
         tzif._posix_rule(text)
 
 
-@pytest.mark.parametrize("data", [b"", b"not a zone file", b"TZif" + bytes(40)])
+MADRID = zone_file("Europe_Madrid.slim")
+FOOTER = b"\nCET-1CEST,M3.5.0,M10.5.0/3\n"
+assert MADRID.endswith(FOOTER)
+
+
+@pytest.mark.parametrize("data", [
+    pytest.param(b"", id="empty"),
+    pytest.param(b"not a zone file", id="not tzif"),
+    pytest.param(b"TZif" + bytes(40), id="version 1"),
+    pytest.param(MADRID[:60], id="cut in the first block"),
+    pytest.param(MADRID[:500], id="cut in the second block"),
+    pytest.param(MADRID[: -len(FOOTER)], id="no footer"),
+    pytest.param(MADRID[: -len(FOOTER) + 1], id="only the newline that opens the footer"),
+    pytest.param(MADRID[:-1], id="no newline closing the footer"),
+    # The end of summer time would move from 03:00 to 02:00.
+    pytest.param(MADRID[:-3], id="footer cut to CET-1CEST,M3.5.0,M10.5.0"),
+    pytest.param(MADRID + b"\n", id="something after the footer"),
+])
 def test_a_file_that_is_not_tzif_version_2_or_later_is_refused(data):
     with pytest.raises(ValueError):
         tzif.parse(data)
