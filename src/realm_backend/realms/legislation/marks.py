@@ -1,0 +1,104 @@
+"""Marks on a chapter's members, and forbids (layered-codex.md §4.1, §4.3, §6).
+
+A mark says what lower layers may do with a member: ``fixed`` (only this definition; a lower layer
+may not define the name), ``extension`` (every layer's definition runs, or values merge) or
+``overridable`` (the lowest definition wins, and may call ``super()``). No mark means overridable.
+
+Each mark works both ways a chapter writes it::
+
+    @fixed(legislation="Ley 7/1985 Art. 30")          # on a method
+    def working_days_after(self, day, n): ...
+
+    co_official = fixed(["ca-valencia", "es"], legislation="Estatut Art. 6")      # on a setting
+    comment_period = overridable(working_days(30), legislation="...", check=lambda v: v >= working_days(30))
+
+``check=`` belongs to settings only: it runs at install on the value that wins in the realm's layer
+path, and a codex whose value fails it is refused.
+"""
+
+from realms.legislation.errors import LegislationError
+
+FIXED, EXTENSION, OVERRIDABLE = "fixed", "extension", "overridable"
+MARKS = (FIXED, EXTENSION, OVERRIDABLE)
+_NOTHING = object()
+
+
+class Setting:
+    """A marked setting, as the class body holds it until the metaclass reads it."""
+
+    __slots__ = ("value", "mark", "legislation", "check")
+
+    def __init__(self, value, mark, legislation, check):
+        if check is not None and not callable(check):
+            raise LegislationError("check= is a function of the setting's value")
+        self.value, self.mark, self.legislation, self.check = (
+            value,
+            mark,
+            legislation,
+            check,
+        )
+
+
+class Method:
+    """A marked method, as the class body holds it until the metaclass reads it."""
+
+    __slots__ = ("fn", "mark", "legislation")
+
+    def __init__(self, fn, mark, legislation):
+        self.fn, self.mark, self.legislation = fn, mark, legislation
+
+
+def _mark(mark):
+    def apply(value=_NOTHING, legislation=None, check=None):
+        if value is _NOTHING:  # @mark(legislation=...) on the method below
+            if check is not None:
+                raise LegislationError("check= is for settings, not methods")
+            return lambda fn: Method(fn, mark, legislation)
+        if callable(value) and not isinstance(value, type):  # @mark with no arguments
+            if check is not None or legislation is not None:
+                raise LegislationError(
+                    "a method is marked @%s(legislation=...), a setting %s(value, ...)"
+                    % (mark, mark)
+                )
+            return Method(value, mark, None)
+        return Setting(value, mark, legislation, check)
+
+    apply.__name__ = mark
+    apply.__doc__ = "Mark a method or a setting %s." % mark
+    return apply
+
+
+fixed = _mark(FIXED)
+extension = _mark(EXTENSION)
+overridable = _mark(OVERRIDABLE)
+
+
+class Forbid:
+    """A forbid: ``op`` is the GGG operation it forbids, ``expression`` the tree that is true when the
+    operation is forbidden, ``each`` the list the rule ranges over.
+
+    S1 keeps the rule; the ``F`` expression language, its evaluation and the Cedar it becomes are S2
+    (#484). Forbids are never overridable and never removable."""
+
+    __slots__ = ("op", "expression", "each", "legislation")
+
+    def __init__(self, op, expression, each, legislation):
+        if not isinstance(op, str) or not op:
+            raise LegislationError(
+                'a forbid names a GGG operation, such as forbid("tax_policy_propose", ...)'
+            )
+        if each is not None and (not isinstance(each, str) or not each):
+            raise LegislationError(
+                'each= names the list the forbid ranges over, such as each="taxes"'
+            )
+        self.op, self.expression, self.each, self.legislation = (
+            op,
+            expression,
+            each,
+            legislation,
+        )
+
+
+def forbid(op, expression, each=None, legislation=None):
+    """A rule that refuses GGG operation ``op`` whenever ``expression`` is true (layered-codex.md §6)."""
+    return Forbid(op, expression, each, legislation)

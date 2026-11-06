@@ -15,6 +15,10 @@ from core.op import dispatch, run as drive  # noqa: E402
 # basilisk calls a method by looking its name up among main's globals. Reading ``__all__`` loads the module.
 from ggg_methods import *  # noqa: E402, F401, F403
 
+# basilisk bundles what main imports: the layered codex library ships with the realm, which runs its own copy
+# (docs/codices/layered-codex.md §12). Nothing runs until the runtime loads a chapter through it.
+import realms.legislation  # noqa: E402, F401
+
 
 @init
 def init_(installer: text) -> void:
