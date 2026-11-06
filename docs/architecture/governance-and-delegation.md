@@ -74,7 +74,7 @@ stateDiagram-v2
 | Close | `proposal_finalize` | Records accepted or rejected. |
 | Act | `proposal_execute` | Replays the action once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. |
 
-**A proposal can state when it takes effect.** `proposal_create` takes an optional `effective_at` (seconds, UTC).
+**A proposal can state when it takes effect.** `proposal_create` takes an optional `effective_at` (whole seconds, UTC; a time in the past is refused).
 Once the proposal is accepted its action runs at that time instead of at the vote, and the proposal is
 `execution_scheduled` while it waits. The wait is a one-step task of the realm's task scheduler
 (`task_list` shows it), which is armed again after an upgrade. The time never moves. If the time proves wrong, another

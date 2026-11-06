@@ -56,7 +56,7 @@ same rows.
   0 leaves a realm-wide proposal open until its outcome is certain;
 - a proposal settles itself: the deciding vote (or, for a timed one, its deadline) closes it and runs
   its action at once; `proposal_finalize` and `proposal_execute` remain for a deadline missed;
-- a proposal with an `effective_at` (seconds) runs its action then, not at the vote. While it waits,
+- a proposal with an `effective_at` (whole seconds, not in the past) runs its action then, not at the vote. While it waits,
   its status is `execution_scheduled`, and a one-step task of the realm's task scheduler runs it, which
   the scheduler arms again after an upgrade. A vote that ends after `effective_at` leaves the proposal
   `expired`, and nothing runs. `proposal_stop` ends a waiting proposal as `withdrawn`. Proposals due at

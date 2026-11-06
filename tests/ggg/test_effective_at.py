@@ -99,6 +99,26 @@ def test_effective_at_is_whole_seconds_or_the_proposal_is_refused(effective_at):
     assert Proposal.count() == 0
 
 
+def test_a_past_effective_at_is_refused_at_creation_but_the_present_second_is_not():
+    world.build()
+    now = fake_chain.now()
+    for past in (now - 1, now - HOUR, -1):
+        out = call("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=past)
+        assert not out["ok"] and out["kind"] == "invalid_argument" and "in the past" in out["error"]
+    assert Proposal.count() == 0
+    ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=now)
+    ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=0)  # 0: no time stated
+    assert Proposal.count() == 2
+
+
+def test_a_motion_with_an_effective_at_stays_accepted():
+    world.build()
+    ok("governance_update", "ctl", voting_window=0)
+    p = ok("proposal_create", "alice", title="A resolution", effective_at=fake_chain.now() + HOUR)["proposal"]
+    vote_yes(p)
+    assert Proposal[p].status == "accepted" and Task.count() == 0
+
+
 def test_a_task_that_already_has_the_name_stops_the_proposal_from_being_accepted():
     world.build()
     ok("governance_update", "ctl", voting_window=0)

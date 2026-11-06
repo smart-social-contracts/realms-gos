@@ -234,12 +234,14 @@ def outcome(p, final):
 
 def effective_at_of(args):
     """The proposal's ``effective_at``, 0 when it states none. Only whole seconds: a fraction would be cut off and run
-    early (the GGG methods round a time up to the second before they get here)."""
+    early (the GGG methods round a time up to the second before they get here). Never a time that has passed."""
     value = args.get("effective_at")
     if value is None:
         return 0
     if isinstance(value, bool) or not isinstance(value, int):
         raise Fail("effective_at is whole seconds")
+    if value and value < chain.now():
+        raise Fail("effective_at is in the past")
     return value
 
 
@@ -247,7 +249,7 @@ def effective_at_of(args):
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
-    governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC): once accepted, the action runs then
+    governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
     instead (status ``execution_scheduled`` while it waits), and if the vote ends after that time the proposal
     ends ``expired`` and nothing runs. Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
