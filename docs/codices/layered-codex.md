@@ -562,7 +562,7 @@ class LocalRegime(above("local_regime")):
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def check_proposal_create(self, args):
-        if "Code" not in args.action:                        # only a change of legislation
+        if "Code" not in args.action:                        # only this realm's own change of legislation (see below)
             return None
         # ... elided: the realm's local day (§4.5) of the earliest close of the vote and of args.effective_at
         if args.effective_at is None \
@@ -615,6 +615,12 @@ scheduled one, and a new proposal sets the right date. The realm domain's `on_co
 once per realm when the codex becomes active. The install appears in the realm's official journal
 (§9.6), which reports it and plays no role in when it applies. The event's arguments and result are
 GGG's.
+
+The guard applies to the realm's own ordinances only. A proposal that installs a release from a sync
+source (§11.4) runs no guard of the codex on `proposal_create`: the follower votes only on when to
+install (§2, rule 3), and the source's own legislation set the release's date. A proposal whose action
+is a reserved operation, such as `codex.revert`, runs no legislation at all (§10.4), so this guard can
+neither refuse nor delay a revert.
 
 ### 5.3 Across domains: working days with each level's holidays
 
@@ -1181,6 +1187,9 @@ proposal's `effective_at` (§5.2).
    `sync_source_remove` (no chapter can forbid a follower's leaving).
    - No chapter may forbid them, guard them or hook them. The checker refuses it, and the runtime
      never calls chapters for them.
+   - A proposal whose action is a reserved operation runs no legislation at all: no chapter's guard,
+     forbid or hook runs on its `proposal_create`, its vote or its execution. A guard on
+     `proposal_create`, such as §5.2's, can neither refuse nor delay a revert.
    - No chapter may change the IT team or who defines it.
    - The Cedar `GUARDRAILS` keep them permitted for their holders: no generated forbid targets their
      actions, and the checker guarantees that.
@@ -1213,7 +1222,9 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
 4. **Proposing the install:** anyone with `proposal.create` can press the button. The realm builds
    the change list itself from the release, with no repository tool needed, and opens an ordinary
    install proposal. The release is installed whole (§3.2). It is voted under the realm's normal rules
-   and installed by the normal install task (§9.2).
+   and installed by the normal install task (§9.2). No guard of the codex runs on that
+   `proposal_create`: a statutory wait in the realm's own legislation, such as §5.2's, does not apply to
+   a release whose date the source's legislation set.
 5. **A follower votes when, never whether** (§2, rule 3). Only an install clears the non-compliant
    flag, and it clears it at once.
 6. **Compliance is measured against each sync source's record** and worked out at each check:
