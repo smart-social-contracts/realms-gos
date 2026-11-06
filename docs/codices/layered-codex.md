@@ -8,10 +8,9 @@ for it (the operation names, the links between realms, `effective_at`, the realm
 Period units) is in the GGG repository:
 [What GGG provides for a layered codex](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md).
 
-Status: approved design, November 2026. The implementation is tracked in
-[#480](https://github.com/smart-social-contracts/realms-gos/issues/480) (§14). Until an issue there is
-closed, this page describes what will be built, not what runs. Today's single-file codex
-([Codices](README.md)) keeps working beside it.
+Status: approved design, November 2026. Nothing here is built yet;
+[#480](https://github.com/smart-social-contracts/realms-gos/issues/480) tracks each part (§14). Today's
+single-file codex ([Codices](README.md)) keeps working beside it.
 
 The word is **legislation**, in code, docs and UI. Proper names of legal texts (Ley 39/2015, ...) are
 unchanged.
@@ -26,7 +25,7 @@ unchanged.
   vote. There is no parent.
 - **Domains** are subjects of legislation (tax, procedure, register, water, ...), named by GGG.
 - **A chapter** is one layer's legislation in one domain: one Python file, `<source>/<domain>.py`, in
-  the public repository [realms-codices](https://github.com/smart-social-contracts/realms-codices). It
+  the repository [realms-codices](https://github.com/smart-social-contracts/realms-codices). It
   holds one class. Its methods are named after GGG's own operations: hooks `on_<operation>`, guards
   `check_<operation>` and `compute_<operation>`, plus forbids, settings and helpers.
 - **Within a domain,** each chapter's class extends the chapter one layer up. Marks (`fixed`,
@@ -135,10 +134,11 @@ These are settled. Each later section applies them.
     ([#504](https://github.com/smart-social-contracts/realms-gos/issues/504)). **`effective_at` never
     moves after acceptance.** If it proves too early, another proposal stops the scheduled one, and a
     new proposal sets the right date, so proposers leave a margin.
-27. **Working days are a GGG Period unit.** A working day is a day that is neither a weekend day nor a
-    holiday in the realm's `calendar.json`, taken in the realm's time zone. GGG names the unit and
-    realms count it ([#505](https://github.com/smart-social-contracts/realms-gos/issues/505)); the
-    library gains `working_days(n)`. If the calendar has no entries for a year the count reaches, the
+27. **Working days are a GGG Period unit,** `WorkingDay`, defined on
+    [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7)
+    against the realm's `calendar.json` and time zone. GGG names the unit and realms count it
+    ([#505](https://github.com/smart-social-contracts/realms-gos/issues/505)); the library gains
+    `working_days(n)`. If the calendar has no entries for a year the count reaches, the
     count fails closed. The platform supports working days, and each realm's legislation decides
     whether to use them.
 
@@ -300,9 +300,11 @@ change to its layer; the change list names it `<source>/calendar` (§7), and a r
 
 `self.calendar.add(day, period)` adds a GGG Period to a realm-local day (§4.5). For `working_days(n)` it
 steps over the weekend days and the holidays of the realm's calendar, in the realm's time zone: a
-**working day** is a day that is neither. GGG names the unit `WorkingDay`
-([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)) and the realm counts it
-([#505](https://github.com/smart-social-contracts/realms-gos/issues/505)). If the calendar has no entries
+**working day** is a day that is neither, as
+[GGG defines it](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7).
+GGG names the unit `WorkingDay` ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)) and
+the realm counts it ([#505](https://github.com/smart-social-contracts/realms-gos/issues/505)). If the
+calendar has no entries
 for a year the count reaches, the count fails closed: the realm refuses to compute the date and says so,
 and a guard that depends on it denies.
 
@@ -422,8 +424,11 @@ Year): `days()`, `working_days()`, `months()`, `years()`. The SDK adds none. **N
 with a GGG fact:** the setting is `default_decision_deadline`; `decision_deadline` is the
 `procedure_define` fact.
 
-**Rates** are integers in hundred-millionths: 0.123456 % is 123456, and 1 % is 1 000 000. A chapter
-writes a rate as the legislation writes it, `pct("0.123456")`, and the SDK stores the integer:
+**Rates** are integers in hundred-millionths (0.123456 % is 123456), the scale of GGG's fact schema;
+the rule's text is on
+[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
+A chapter writes a rate as the legislation writes it, `pct("0.123456")`, and the SDK stores the
+integer:
 
 ```python
 large_family_bonus = {"general": pct("60"), "special": pct("90")}    # 60 % and 90 % of the quota
@@ -437,10 +442,11 @@ comment_period = overridable(working_days(30), legislation="Ley 7/1985 Art. 49",
                              check=lambda v: v >= working_days(30))   # a lower layer may lengthen it, never shorten it
 ```
 
-**Working days:** GGG's `Period` has a `WorkingDay` unit, a day that is neither a weekend day nor a
-holiday in the realm's calendar (§3.4), taken in the realm's time zone (§4.5). GGG names the unit; the
-realm counts it, and `working_days(n)` writes it. Each realm's legislation decides whether to use
-working days at all.
+**Working days:** GGG's `Period` has a `WorkingDay` unit, defined on
+[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7);
+the realm's calendar (§3.4) and time zone (§4.5) decide which days count. GGG names the unit; the realm
+counts it, and `working_days(n)` writes it. Each realm's legislation decides whether to use working days
+at all.
 
 **Plenary meetings are out of date in a GOS:** the plenary is the online vote, and a notice period is
 only the gap before the vote opens (`Proposal.opens_at`). The example above is the public comment
@@ -501,12 +507,10 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 | `days(n)`, `working_days(n)`, `months(n)`, `years(n)` | a Period, as GGG writes it: the unit constructors GGG defines, for settings (§4.3); the SDK adds none |
 | `amount.times(rate)` | money times a rate, rounded as GGG says |
 
-**Rounding is one rule, set by GGG:** wherever money is computed from a rate, the result is rounded to
-the nearest cent, and an exact half is rounded away from zero (2.345 € becomes 2.35 €, and −2.345 €
-becomes −2.35 €), as euro legislation requires (Regulation (EC) 1103/97 Art. 5). GGG states it with
-the money kind of its fact schema, so every implementation rounds the same way. `times()` takes no
-rounding argument and a chapter names no rule. Another rule is added to GGG only when a piece of
-legislation needs it.
+**Rounding is one rule, set by GGG:** nearest cent, an exact half away from zero, stated with the money
+kind of GGG's fact schema so that every implementation rounds the same way. The rule's text is on
+[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
+`times()` takes no rounding argument and a chapter names no rule.
 
 **Time zones.** GGG's `Realm.timezone` is an IANA name such as `Europe/Madrid`
 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)). Each realm sets its own and never
@@ -1103,7 +1107,8 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) (see [Authorization](.
    rules for that operation.
 
 Costs, by the Cedar engine's own notes
-([ic-basilisk-toolkit](https://github.com/smart-social-contracts/ic-basilisk-toolkit)):
+([`cedar_api.rs`](https://github.com/smart-social-contracts/basilisk/blob/main/basilisk/compiler/cpython_canister_template/src/cedar_api.rs)
+in basilisk):
 
 - parsing is about 20 M instructions, once per activation;
 - a decision is about 0.7 M instructions, about 0.3 M cycles.
@@ -1348,11 +1353,12 @@ official journal extension belong to Realms GOS.
 
 The tracking issue is [#480](https://github.com/smart-social-contracts/realms-gos/issues/480). Each
 issue carries acceptance criteria from the sections cited. Commits say `Refs #N` and PRs say
-`Closes #N`.
+`Closes #N`. The letter ids (R1, G1, S1, C1, D1, J1) are labels used in the issues, not an order; there
+is no G6.
 
 | Id | Repo | Title | Depends on | Done when |
 |---|---|---|---|---|
-| R1 ([#481](https://github.com/smart-social-contracts/realms-gos/issues/481)) | realms-gos (research) | Cedar analysis tooling for "newly forbidden", "nothing permitted", "never fires" and "overlap" | – | a report with a recommendation and a working sample on the four Spanish rules of §5.6 |
+| R1 ([#481](https://github.com/smart-social-contracts/realms-gos/issues/481)) | realms-gos (research) | Cedar analysis tooling for "newly forbidden", "nothing permitted", "never fires" and "overlap" | – | a report with a recommendation and a working sample on the three forbids of §5.6 and the Art. 21.2 forbid of §4 |
 | R2 ([#482](https://github.com/smart-social-contracts/realms-gos/issues/482)) | realms-gos (research) | Which §4 restrictions the codex sandbox enforces at run time today | – | table of rule → enforced or not, with the code path |
 | G1 ([ggg#1](https://github.com/smart-social-contracts/ggg/issues/1)) | ggg | Domain list | – | versioned list merged |
 | G2 ([ggg#2](https://github.com/smart-social-contracts/ggg/issues/2)) | ggg | The entities, fields and operations that real legislation needs (§13), each added or narrowed; the share arguments name `legislation`; the fact schema's rate scale (hundred-millionths) and unit rule; `each="taxes"` over the saved policy, also at `tax_policy_draft` | G1 | `.did` merged; conformance notes updated |
@@ -1366,7 +1372,7 @@ issue carries acceptance criteria from the sections cited. Commits say `Refs #N`
 | [#505](https://github.com/smart-social-contracts/realms-gos/issues/505) | realms-gos | Count working days in the realm (§3.4, §4.3): start + n working days on the realm's calendar in its time zone, one function in the date module of #503; the library gains `working_days(n)`; a count that reaches a year with no calendar entries fails closed | #503, G8 | PocketIC: a 2-working-day count over a holiday and a weekend, and one across a summer-time change, pass; a count into a year with no entries fails with a clear error |
 | [#499](https://github.com/smart-social-contracts/realms-gos/issues/499) | realms-gos | Test harness for linked realms: scripted peers in `fake_chain`, multi-canister PocketIC, outcall mocking, public fixtures | – | the workflow tests of the change list run on it |
 | S1 ([#483](https://github.com/smart-social-contracts/realms-gos/issues/483)) | realms-gos | `realms.legislation`: `Chapter`, `above`, marks, settings with `check=`, `pct()`, the `self` API, hooks, guards and `compute_` methods by GGG operation name, `on_codex_activate` and `compute_realm_join`, read-only `ggg` entities, `times()`, `self.calendar`; self-contained, no CLI dependency | G2 | unit tests for every line of the §4.1 table, including the §5.5 refusal; the module imports nothing from typer, rich or requests |
-| S2 ([#484](https://github.com/smart-social-contracts/realms-gos/issues/484)) | realms-gos | `realms.legislation`: `F` expressions with `each` and `S.`, `pct()` literals, canonical Cedar output, Python evaluation | S1 | the four rules of §5.6 and the Art. 21.2 rule of §4 produce the Cedar of §5.8; Python and Cedar agree on 10 000 generated fact sets |
+| S2 ([#484](https://github.com/smart-social-contracts/realms-gos/issues/484)) | realms-gos | `realms.legislation`: `F` expressions with `each` and `S.`, `pct()` literals, canonical Cedar output, Python evaluation | S1 | the forbids of §5.6 and §4 produce the Cedar of §5.8; Python and Cedar agree on 10 000 generated fact sets |
 | S3 ([#485](https://github.com/smart-social-contracts/realms-gos/issues/485)) | realms-gos | Resolver: layer paths from the links with the one-chain rule, extension merge, `uses`, depth limit | S1 | examples 5.1–5.7 resolve as described |
 | C1 ([realms-codices#10](https://github.com/smart-social-contracts/realms-codices/issues/10)) | realms-codices | `legislation/` tree, `source.json`, `releases.json` with the `calendar` field, `calendar.json`, README for authors | S3 | the València example chapters present; schema checked in CI |
 | C2 ([realms-codices#11](https://github.com/smart-social-contracts/realms-codices/issues/11)) | realms-codices | `realms legislation check` in realms-codices CI (the command lives in realms-gos `cli/`) | S1, S2, C1 | every rule of §12.1 has a failing and a passing test |
@@ -1384,9 +1390,9 @@ issue carries acceptance criteria from the sections cited. Commits say `Refs #N`
 | D9 ([#494](https://github.com/smart-social-contracts/realms-gos/issues/494)) | realms-gos | End to end: València's layered codex on PocketIC, from change list to running hooks | D2–D7 | one test runs §5's examples on a realm |
 | [#500](https://github.com/smart-social-contracts/realms-gos/issues/500) | realms-gos | Linked realms: `sync_source_add`, `follower_accept`, records, serving chapter bytes, follower reports, leaving through the link event (§11) | G3, D1 | PocketIC: two realms link by both votes, the follower installs a relayed release from the source's capital, reports its layers, and leaves through the link event |
 | [#501](https://github.com/smart-social-contracts/realms-gos/issues/501) | realms-gos | Propagation across a realm's own quarters (§9.5): staging mode, the switch at T (the proposal's `effective_at`), quarter compliance, paused tasks resumed by an admin | D2, #504 | PocketIC: every quarter switches at T; a quarter not ready reads non-compliant; a task interrupted by an upgrade resumes only by an admin |
-| [#502](https://github.com/smart-social-contracts/realms-gos/issues/502) | realms-gos | Districts as zones: `User.home_zone`, `Zone.population`, `compute_realm_join` preferring a zone | G2 | PocketIC: a member with a home zone joins the quarter that holds it while capacity allows, and the least-populated quarter otherwise |
+| [#502](https://github.com/smart-social-contracts/realms-gos/issues/502) | realms-gos | Districts as zones: `User.home_zone`, `Zone.population`, `compute_realm_join` preferring a zone | G2 | PocketIC: a member with a home zone joins the quarter that holds it while capacity allows; capacity decides otherwise |
 | J1 ([realms-extensions#54](https://github.com/smart-social-contracts/realms-extensions/issues/54)) | realms-extensions | Core extension `journal`, the official journal (§9.6): one per realm, daily issues, sync-source releases as entries and, on a sync source, its own releases, JSON served by the canister as the authority, PDF print route with the logo, personal-data rules in config; added to `core-extensions.json` | D7, #503 | a new realm has the journal; an issue opens at local midnight, also across a DST change; a release found by the check appears as an entry; the print route renders; publication changes no `activates_at` |
 
-Suggested order: R1 and R2 in parallel with G1, G4, G5, G7, G8, #499, #503, #504 and #505 → G2 and
-G3 → S1 → S2 and S3 → C1–C3 → D1 → D2 to D4 and #500 → D5 to D7, #501 and J1 → D8 and D9, #502 → C4
-and C5.
+Suggested order: R1 and R2 in parallel with G1, G4, G5, G7, #499, #503 and #504 → G2 and G3 → G8 →
+#505 → S1 → S2 and S3 → C1–C3 → D1 → D2 to D4 and #500 → D5 to D7, #501 and J1 → D8 and D9, #502 →
+C4 and C5.

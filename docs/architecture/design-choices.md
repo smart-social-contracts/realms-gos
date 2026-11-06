@@ -90,7 +90,7 @@ The objections, and the answers:
 | Objection | Answer |
 |---|---|
 | It costs more instructions on the IC. | Hooks are small and run on events; the work is in the operations they call. Each call is metered (see [sandboxing](sandboxing.md)). *(Cost traded last.)* |
-| Python is dynamic: code can rewrite code. | Each call runs in a fresh subinterpreter that never sees the realm's data or code, and is thrown away after. Layered codices (RFC 0001 in gos-transition: a realm's law linked from its own layer and those of its parent, treaties and other sources) will need a check of a readable subset when they are linked (no `exec`, `eval`, `globals()` or `setattr`, and every operation named by a literal string). Not built yet. |
+| Python is dynamic: code can rewrite code. | Each call runs in a fresh subinterpreter that never sees the realm's data or code, and is thrown away after. The [layered codex](../codices/layered-codex.md) adds a check of a readable subset of Python when chapters are installed (no `exec`, `eval`, `globals()` or `setattr`, and every operation named by a literal string). Not built yet. |
 | No types, so errors appear at run time. | Type hints on hook signatures, checked at install against the GGG definitions. Not built yet. |
 | A legal language is clearer. | For narrow rules it can be: Catala was designed with lawyers and trialled by the French tax administration. Each such language is one more thing to learn, with a small community, and a codex does more than compute. Purely declarative rules stay first: Cedar for prohibitions, JSON for parameters. |
 | It ties GGG to Python. | It does not. GGG defines operations in Candid; Python is Realms GOS's codex language, not a GGG requirement. Another GOS may use another language. |
