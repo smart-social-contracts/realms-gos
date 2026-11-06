@@ -61,6 +61,11 @@ capital's directory back. The capital flags a quarter whose codex **drifts** fro
 `federation_message` carries other messages between registered canisters (for example
 `user.arrive` when a member moves).
 
+A realm can also take legislation from other realms it chooses by vote, its **sync sources**, with
+no parent realm. Those links, the releases a sync source publishes, how a follower installs them, and
+how a new codex reaches a realm's own quarters at one switch time are in
+[The layered codex](../codices/layered-codex.md) (not built yet).
+
 ## Federal votes
 
 Some decisions belong to the whole federation. `federal_vote_propose` opens a vote on an action
