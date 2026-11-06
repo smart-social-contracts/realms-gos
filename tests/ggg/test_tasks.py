@@ -1,20 +1,11 @@
 import fake_chain
-from core import op
 from api import setup, tasks
 import world
 from ggg import Event, Notification, Task, TaskExecution, TaskSchedule
-from kit import call, denied, later, ok
+from kit import call, denied, fire_timers, later, ok
 
 DAY = 86400
 CHECK = [{"op": "notification_send", "args": {"recipient": "Department:Finance", "title": "Check overdue invoices"}}]
-
-
-def fire_timers():
-    timers, fake_chain.state["timers"] = fake_chain.state["timers"], []
-    for _, cb in timers:
-        out = cb()
-        if out is not None:
-            op.run(out)
 
 
 def test_story_a_daily_invoice_check():
