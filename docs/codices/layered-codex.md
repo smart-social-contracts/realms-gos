@@ -107,8 +107,8 @@ These are settled. Each later section applies them.
 15. **A revert vote** follows the voting rules of the codex being restored.
 16. **A proposal's change list never changes.** Withdraw and propose again; proposals link, "replaces"
     or "relates to".
-17. **A rate is an integer in hundred-millionths,** written `pct("0.123456")` in chapters. Setting
-    names carry no unit suffix. The calendar is pinned by a release's `calendar` field and set as
+17. **Every ratio is an integer in hundred-millionths,** GGG's one scale; chapters write `pct("0.1")`.
+    Setting names carry no unit suffix. The calendar is pinned by a release's `calendar` field and set as
     `<source>/calendar`.
 18. **No rule** on hook order between domains, and none on lower layers filling settings that forbids
     above read.
@@ -424,11 +424,11 @@ Year): `days()`, `working_days()`, `months()`, `years()`. The SDK adds none. **N
 with a GGG fact:** the setting is `default_decision_deadline`; `decision_deadline` is the
 `procedure_define` fact.
 
-**Rates** are integers in hundred-millionths (0.123456 % is 123456), the scale of GGG's fact schema;
-the rule's text is on
+**Rates**, like every GGG ratio, are integers in hundred-millionths (0.123456 % is 123 456); the
+rule's text is on
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
-A chapter writes a rate as the legislation writes it, `pct("0.123456")`, and the SDK stores the
-integer:
+Integers inside, decimals for people: a chapter writes a rate as the legislation writes it,
+`pct("0.1")`, and the SDK stores the integer:
 
 ```python
 large_family_bonus = {"general": pct("60"), "special": pct("90")}    # 60 % and 90 % of the quota
@@ -441,6 +441,9 @@ in the realm's layer path. A codex whose value fails is refused:
 comment_period = overridable(working_days(30), legislation="Ley 7/1985 Art. 49",
                              check=lambda v: v >= working_days(30))   # a lower layer may lengthen it, never shorten it
 ```
+
+Periods compare only within one unit. `days(45) >= working_days(30)` fails closed, with no conversion
+through the calendar, so a lower layer that sets `comment_period = days(45)` is refused.
 
 **Working days:** GGG's `Period` has a `WorkingDay` unit, defined on
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7);
@@ -1353,7 +1356,10 @@ codex needs from GGG beyond that is specified in the GGG repository,
 - **proposal links** ([ggg#4](https://github.com/smart-social-contracts/ggg/issues/4));
 - **`Realm.timezone`** ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5));
 - **`effective_at`** on proposals ([ggg#6](https://github.com/smart-social-contracts/ggg/issues/6));
-- the **`WorkingDay`** Period unit ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)).
+- the **`WorkingDay`** Period unit ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7));
+- **one scale for every ratio**, hundred-millionths
+  ([ggg#9](https://github.com/smart-social-contracts/ggg/issues/9)), which moves the model's
+  basis-point fields: a breaking change.
 
 Nothing else: the marks, the layered codex, the layout, the change list, the install rules and the
 official journal extension belong to Realms GOS.
@@ -1378,6 +1384,7 @@ is no G6.
 | G5 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)) | ggg | `Realm.timezone`, an IANA name, set by each realm and never inherited (§4.5) | – | `.did` merged; the UI shows the realm's official time; local time is computed by Realms GOS (#503), not by GGG |
 | G7 ([ggg#6](https://github.com/smart-social-contracts/ggg/issues/6)) | ggg | Proposal `effective_at`, UTC ns, optional: once accepted, the action executes at that time, for every kind of proposal (§7) | – | `.did` merged; `ProposalCreateArgs` and `Proposal` carry the field; conformance notes say when an accepted proposal executes |
 | G8 ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)) | ggg | `PeriodUnit` gains `WorkingDay` (§4.3): a day that is neither a weekend day nor a holiday in the realm's calendar, in the realm's time zone; GGG names the unit, realms count it | G2 | `.did` and the schema docs have the unit, defined as above |
+| [ggg#9](https://github.com/smart-social-contracts/ggg/issues/9) | ggg | One scale for every ratio, hundred-millionths (§4.3): the model's basis-point fields (quorum, thresholds, shares, weights) move to it; a breaking change | – | `.did`, the conventions and the conformance suite use the one scale |
 | [#503](https://github.com/smart-social-contracts/realms-gos/issues/503) | realms-gos | Realm-local time in Realms GOS (§4.5): a pure-Python zone-file reader plus date arithmetic; the realm stores only its own zone file as raw bytes (never base64), parsed once and kept in memory; no change to the Python runtime | G5 | a realm with `timezone = "Europe/Madrid"` reports the right local date and offset on both sides of a DST switch, on PocketIC, including in a year after 2037 (the POSIX footer rule); no base64 and no new runtime modules are used |
 | [#504](https://github.com/smart-social-contracts/realms-gos/issues/504) | realms-gos | Proposals execute at `effective_at` (§7, §9.2 step 6, §9.5): every accepted proposal's action runs at that time, or on acceptance without one; a layered-codex install switches then, and quarters switch at that T | G7 | PocketIC: a transfer, a codex install and a settings call each execute at `effective_at` and not before; without it, on acceptance; the install's `on_codex_activate` runs at the switch |
 | [#505](https://github.com/smart-social-contracts/realms-gos/issues/505) | realms-gos | Count working days in the realm (§3.4, §4.3): start + n working days on the realm's calendar in its time zone, one function in the date module of #503; the library gains `working_days(n)`; a count that reaches a year with no calendar entries fails closed | #503, G8 | PocketIC: a 2-working-day count over a holiday and a weekend, and one across a summer-time change, pass; a count into a year with no entries fails with a clear error |
@@ -1404,6 +1411,6 @@ is no G6.
 | [#502](https://github.com/smart-social-contracts/realms-gos/issues/502) | realms-gos | Districts as zones: `User.home_zone`, `Zone.population`, `compute_realm_join` preferring a zone | G2 | PocketIC: a member with a home zone joins the quarter that holds it while capacity allows; capacity decides otherwise |
 | J1 ([realms-extensions#54](https://github.com/smart-social-contracts/realms-extensions/issues/54)) | realms-extensions | Core extension `journal`, the official journal (§9.6): one per realm, daily issues, sync-source releases as entries and, on a sync source, its own releases, JSON served by the canister as the authority, PDF print route with the logo, personal-data rules in config; added to `core-extensions.json` | D7, #503 | a new realm has the journal; an issue opens at local midnight, also across a DST change; a release found by the check appears as an entry; the print route renders; publication changes no `activates_at` |
 
-Suggested order: R1 and R2 in parallel with G1, G4, G5, G7, #499, #503 and #504 → G2 and G3 → G8 →
+Suggested order: R1 and R2 in parallel with G1, G4, G5, G7, ggg#9, #499, #503 and #504 → G2 and G3 → G8 →
 #505 → S1 → S2 and S3 → C1–C3 → D1 → D2 to D4 and #500 → D5 to D7, #501 and J1 → D8 and D9, #502 →
 C4 and C5.
