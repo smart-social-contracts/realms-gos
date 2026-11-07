@@ -2,13 +2,14 @@ import json
 
 from core import chain
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
-from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Vote
+from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Task, TaskSchedule, Vote
+from api import tasks
 from core.op import dispatch, op, ops
 
 CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")
 # Proposals that can still vote or run, so their department must stay.
-PENDING = OPEN + ("accepted",)
+PENDING = OPEN + ("accepted", "execution_scheduled")
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
 
@@ -69,11 +70,12 @@ def check_scope(department, action):
     raise Forbidden(f"{action['op']} is not governed by {department.id}: only a realm-wide proposal can run it")
 
 
-def new_proposal(title, user, by, department, action=None, description=""):
+def new_proposal(title, user, by, department, action=None, description="", effective_at=0):
     policy = department.policy or {}
     p = Proposal(id=next_id(Proposal, "P"), title=title, description=description, proposer=user,
                  on_behalf_of=user if by != user else "", department=department, action=action,
                  status="voting", opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
+                 effective_at=effective_at,
                  threshold=int(settings().get("threshold", 50)),
                  quorum_percent=int(settings().get("quorum_percent", 0) if department.is_root
                                     else policy.get("quorum_percent", 0)))
@@ -108,7 +110,44 @@ def resume(start=1):
 
 def close(p, result):
     tally, size, _ = count(p)
+    if result == "accepted" and p.effective_at:
+        result = status_at_effective_time(p)  # before any write: a refusal leaves the proposal open
     p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
+
+
+def vote_end(p):
+    """When the vote of ``p``, closed now, ended: at its deadline, or earlier, at the deciding vote. Closing it later than
+    that does not move the end: the deadline timer fires a second late, an upgrade arms it again whenever the realm
+    starts, and ``proposal_finalize`` may come days after the deadline."""
+    return min(chain.now(), p.deadline) if p.deadline else chain.now()
+
+
+def status_at_effective_time(p):
+    """The status of a proposal accepted now that states an ``effective_at``: it takes effect then, never before. A vote
+    that ended after that time has missed it: the proposal expires and its action never runs. A vote that ended in time
+    but is closed only after it is accepted, and its action runs at once."""
+    if vote_end(p) > p.effective_at:
+        return "expired"
+    if not p.action or chain.now() >= p.effective_at:
+        return "accepted"
+    schedule(p)
+    return "execution_scheduled"
+
+
+def schedule(p):
+    """Run the action at ``effective_at`` as a one-step task of the realm's task scheduler, which arms its timer again
+    after an upgrade (tasks.rearm). The step runs as the realm itself: the vote is the authority, not the proposer."""
+    if Task[scheduled_task_name(p)]:
+        raise Conflict(f"task '{scheduled_task_name(p)}' exists")
+    task = Task(name=scheduled_task_name(p), metadata=json.dumps({"creator": chain.self_id()}), status="pending")
+    tasks.define(task, [("proposal_run_scheduled", {"proposal": p.id}, 0)])
+    s = TaskSchedule(name=f"{task.name}@1", task=task, last_run_at=0, run_at=p.effective_at, repeat_every=0)
+    tasks.enable(s, True)
+    tasks.arm(s)
+
+
+def scheduled_task_name(p):
+    return f"{tasks.OWN}{p.id}"
 
 
 def run_action(p):
@@ -133,7 +172,7 @@ def settle(p, final):
     result = outcome(p, final)
     if result is not None:
         close(p, result)
-        if result == "accepted" and p.action:
+        if p.status == "accepted" and p.action:
             yield from run_action(p)
     return result
 
@@ -201,18 +240,35 @@ def outcome(p, final):
     return "accepted" if turnout and decisive and tally["yes"] * 100 > p.threshold * decisive else "rejected"
 
 
+def effective_at_of(args):
+    """The proposal's ``effective_at``, 0 when it states none. Only whole seconds: a fraction would be cut off and run
+    early (the GGG methods round a time up to the second before they get here). Never a time that has passed."""
+    value = args.get("effective_at")
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise Fail("effective_at is whole seconds")
+    if value and value < chain.now():
+        raise Fail("effective_at is in the past")
+    return value
+
+
 @op("proposal.create", delegable=True, returns="proposal")
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
-    governs). Voting opens at once. Returns ``proposal``.
+    governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
+    instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier at the deciding
+    vote, whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
+    Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
     if action is not None:
         check_action(action)
         check_scope(department, action)
-    p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""))
+    p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
+                     effective_at_of(args))
     return {"proposal": p.id}
 
 
@@ -265,7 +321,9 @@ def proposal_open(c, args):
 @op("proposal.manage", returns="proposal")
 def proposal_finalize(c, args):
     """Close voting on ``proposal`` and record it as accepted or rejected. Returns ``status``.
-    A realm-wide proposal waits for its deadline; a department's closes early once its outcome is certain."""
+    A realm-wide proposal waits for its deadline; a department's closes early once its outcome is certain. A late close
+    does not move the end of the vote (see ``effective_at`` of ``proposal_create``). Accepted after its ``effective_at``,
+    the action waits for ``proposal_execute``."""
     p = find(Proposal, args["proposal"])
     if p.status != "voting":
         raise Conflict(f"{p.id} is not being voted on")
@@ -273,7 +331,7 @@ def proposal_finalize(c, args):
     if result is None:
         raise Conflict(f"{p.id} is still open" + (f" until {p.deadline}" if p.deadline else " until its outcome is certain"))
     close(p, result)
-    return {"proposal": p.id, "status": result}
+    return {"proposal": p.id, "status": p.status}
 
 
 @op("proposal.manage", returns="proposal")
@@ -282,6 +340,39 @@ def proposal_execute(c, args):
     p = find(Proposal, args["proposal"])
     if p.status != "accepted" or not p.action:
         raise Conflict(f"{p.id} has no accepted action to execute")
+    yield from run_action(p)
+    return {"proposal": p.id, "status": p.status, "result": p.result}
+
+
+def scheduled_department(args):
+    """The department of the proposal to stop: its vote governs the stop, like any action."""
+    return find(Proposal, args["proposal"]).department
+
+
+@op("proposal.manage", governed=scheduled_department, returns="proposal")
+def proposal_stop(c, args):
+    """Stop ``proposal``, accepted and waiting for its ``effective_at``: it ends withdrawn and its action never runs.
+    A proposal stops another by carrying this as its action. Returns ``status``."""
+    p = find(Proposal, args["proposal"])
+    if p.status != "execution_scheduled":
+        raise Conflict(f"{p.id} is {p.status}; only a proposal waiting for its effective time can be stopped")
+    task = Task[scheduled_task_name(p)]
+    if task:
+        tasks.stop(task)
+    p.status = "withdrawn"
+    return {"proposal": p.id, "status": p.status}
+
+
+@op(None, public=True, returns="proposal")
+def proposal_run_scheduled(c, args):
+    """Run the action of ``proposal`` if it waits for its ``effective_at`` and that time has come. Anyone may ask:
+    the vote decided it and the time cannot move. The realm's scheduler calls it at that time; asking again is
+    harmless. Returns ``status`` (executed or failed) and ``result``."""
+    p = find(Proposal, args["proposal"])
+    if p.status != "execution_scheduled":
+        return {"proposal": p.id, "status": p.status, "result": p.result}
+    if chain.now() < p.effective_at:
+        raise Conflict(f"{p.id} takes effect at {p.effective_at}")
     yield from run_action(p)
     return {"proposal": p.id, "status": p.status, "result": p.result}
 
@@ -299,11 +390,12 @@ def proposal_get(c, args):
 
 @op("realm.data_view", read=True, returns="proposals")
 def proposal_list(c, args):
-    """Proposals (id, title, status, deadline, proposer), or only those with ``status`` (e.g. voting), ``count`` at a
-    time (default 100, at most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the
-    end)."""
+    """Proposals (id, title, status, deadline, effective_at, proposer), or only those with ``status`` (e.g. voting),
+    ``count`` at a time (default 100, at most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next``
+    (null at the end)."""
     rows, nxt = page_by(Proposal, "status", args["status"], args) if args.get("status") else page(Proposal, args)
-    return {"proposals": [view(p, "id", "title", "status", "deadline", "proposer") for p in rows], "next": nxt}
+    return {"proposals": [view(p, "id", "title", "status", "deadline", "effective_at", "proposer") for p in rows],
+            "next": nxt}
 
 
 @op("mandate.create", governed=realm_wide, returns="mandate")

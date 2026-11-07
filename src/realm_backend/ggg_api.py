@@ -32,6 +32,9 @@ PERCENT = {("Policy", "quorum"): "quorum_percent", ("Allocation", "share"): "sha
 RENAME = {("DelegationGrantArgs", "scope"): "operations", ("DelegationRequestArgs", "scope"): "operations",
           ("DelegationDecideArgs", "scope"): "operations", ("QuarterRegisterArgs", "canister"): "quarter",
           ("ResolutionQueryArgs", "search"): "text"}
+# GGG times that Realms GOS rounds up to the second, where it rounds every other time down: a time something must not
+# precede (a proposal's effective_at), not one it must not outlast (an expiry, a deadline).
+CEIL = {("ProposalCreateArgs", "effective_at")}
 # GGG lists of pairs that Realms GOS keeps as a map, with the fields holding the key and the value.
 MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rubric"): ("criterion", "weight"),
         ("AllocationRuleDraftArgs", "rules"): ("fund", "share"), ("AllocationRule", "rules"): ("fund", "share"),
@@ -463,6 +466,8 @@ def to_realms(x, t):
                 continue
             if (t, w) in PERCENT:
                 out[PERCENT[t, w]] = int(v) // 100
+            elif (t, w) in CEIL:
+                out[w] = -(-int(v) // NS)
             elif (t, w) in KEYED:
                 key = KEYED[t, w]
                 out[w] = {item[key]: {f: v2 for f, v2 in item.items() if f != key} for item in to_realms(v, ft)}

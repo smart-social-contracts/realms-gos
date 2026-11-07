@@ -60,6 +60,11 @@ stateDiagram-v2
     voting --> rejected: proposal_finalize
     accepted --> executed: proposal_execute
     accepted --> failed: proposal_execute (the action failed)
+    accepted --> execution_scheduled: the proposal has an effective_at still to come
+    accepted --> expired: the vote ended after effective_at
+    execution_scheduled --> executed: at effective_at
+    execution_scheduled --> failed: at effective_at (the action failed)
+    execution_scheduled --> withdrawn: proposal_stop
 ```
 
 | Step | Operation | Notes |
@@ -68,6 +73,17 @@ stateDiagram-v2
 | Vote | `proposal_vote` | `choice`: `yes`, `no` or `abstain`. Voting again replaces your vote. Delegable. |
 | Close | `proposal_finalize` | Records accepted or rejected. |
 | Act | `proposal_execute` | Replays the action once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. |
+
+**A proposal can state when it takes effect.** `proposal_create` takes an optional `effective_at` (whole seconds, UTC; a time in the past is refused).
+Once the proposal is accepted its action runs at that time instead of at the vote, and the proposal is
+`execution_scheduled` while it waits. The wait is a one-step task of the realm's task scheduler
+(`task_list` shows it), which is armed again after an upgrade. The time never moves. If the time proves wrong, another
+proposal carries `proposal_stop` as its action and the scheduled proposal ends `withdrawn`; a new proposal then sets
+the right time. A vote ends at its deadline, or earlier at the deciding vote, and the time it is closed does not
+change that: a timer that fires late, an upgrade or a `proposal_finalize` days after the deadline do not expire a
+proposal. A vote that ends after `effective_at` leaves the proposal `expired` and runs nothing. A vote that ended
+in time but is closed after `effective_at` is accepted and its action runs at once (after `proposal_finalize`, at
+`proposal_execute`). Proposals due in the same second run in no set order.
 
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
 it, along with the realm-wide `threshold` and `quorum_percent`.
