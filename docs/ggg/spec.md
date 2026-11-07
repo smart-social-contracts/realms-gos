@@ -58,9 +58,12 @@ same rows.
   its action at once; `proposal_finalize` and `proposal_execute` remain for a deadline missed;
 - a proposal with an `effective_at` (whole seconds, not in the past) runs its action then, not at the vote. While it waits,
   its status is `execution_scheduled`, and a one-step task of the realm's task scheduler runs it, which
-  the scheduler arms again after an upgrade. A vote that ends after `effective_at` leaves the proposal
-  `expired`, and nothing runs. `proposal_stop` ends a waiting proposal as `withdrawn`. Proposals due at
-  the same second run in no set order;
+  the scheduler arms again after an upgrade. A vote ends at its deadline, or earlier at the deciding vote
+  (I-GOV-7); when it is closed does not matter, so a timer that fires late, an upgrade or a late
+  `proposal_finalize` never moves the end. A vote that ends after `effective_at` leaves the proposal
+  `expired`, and nothing runs. One that ended in time but is closed after `effective_at` is accepted and its
+  action runs at once (after `proposal_finalize`, at `proposal_execute`). `proposal_stop` ends a waiting
+  proposal as `withdrawn`. Proposals due at the same second run in no set order;
 - a tender's rubric, an allocation rule, a fund's balances, credential fields and wrapped keys are
   maps where `ggg.did` has lists of pairs;
 - a limit in time may be given as `expires_in` seconds instead of `expires_at`, and a delegation's

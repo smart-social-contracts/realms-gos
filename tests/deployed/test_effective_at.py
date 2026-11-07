@@ -136,3 +136,29 @@ def test_a_proposal_without_effective_at_runs_when_the_vote_closes(realm, people
     balance = root_balance(realm, ctl)
     paid = file_and_pass(realm, people, "Pay Bob now", pay(realm, people["bob"], 100))
     assert proposal(realm, alice, paid)["status"] == "executed" and root_balance(realm, ctl) == balance - 100
+
+
+@pytest.fixture
+def hour_long_vote(realm, people):
+    """Proposals filed in a test using this stay open for an hour, to their deadline, not just to the deciding vote."""
+    ok(realm, "governance_update", people["ctl"], voting_window=HOUR)
+    yield
+    ok(realm, "governance_update", people["ctl"], voting_window=0)
+
+
+def test_a_vote_that_ended_before_effective_at_is_accepted_though_its_timer_fires_after_it(realm, people, hour_long_vote):
+    ctl, alice = people["ctl"], people["alice"]
+    balance = root_balance(realm, ctl)
+    # The vote ends in an hour, ten minutes before the payment is due.
+    paid = file_and_pass(realm, people, "Pay Bob in time", pay(realm, people["bob"], 100), realm.now() + HOUR + 600)
+    assert proposal(realm, alice, paid)["status"] == "voting"
+    realm.wait(HOUR + 1200)  # one jump: the deadline timer runs ten minutes after the payment was due
+    assert proposal(realm, alice, paid)["status"] == "executed" and root_balance(realm, ctl) == balance - 100
+
+
+def test_a_vote_that_ends_after_effective_at_expires_when_its_timer_fires(realm, people, hour_long_vote):
+    ctl, alice = people["ctl"], people["alice"]
+    balance = root_balance(realm, ctl)
+    late = file_and_pass(realm, people, "Pay Bob too late", pay(realm, people["bob"], 100), realm.now() + 600)
+    realm.wait(HOUR + 1200)
+    assert proposal(realm, alice, late)["status"] == "expired" and root_balance(realm, ctl) == balance

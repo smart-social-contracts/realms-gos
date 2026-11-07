@@ -6,10 +6,11 @@ import ggg_did
 import pytest
 import world
 from api import setup
-from ggg import Mandate, Proposal, Task, TaskSchedule
+from ggg import Department, Mandate, Proposal, Task, TaskSchedule
 from kit import call, fire_timers, later, ok
 
 HOUR = 3600
+WEEK = 7 * 86400  # the realm's voting window until it is changed
 NS = 1_000_000_000
 FOUR = ("alice", "bob", "dana", "carla")  # more than half of the seven members: enough to carry a vote
 ROAD_WORKS = {"op": "mandate_create", "args": {"title": "Road works"}}
@@ -195,6 +196,71 @@ def test_a_deciding_vote_after_effective_at_expires_the_proposal():
     assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "expired"
     fire_timers()
     assert Mandate.count() == 0 and Task.count() == 0
+
+
+def carried_week_long_vote(effective_in):
+    """A proposal for the road works that four voters carry; the realm's week-long vote stays open to its deadline."""
+    p = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS,
+           effective_at=fake_chain.now() + effective_in)["proposal"]
+    vote_yes(p)
+    assert Proposal[p].status == "voting"
+    return p
+
+
+def close_late(how):
+    """The realm closes a vote after its deadline: its timer fires, or an upgrade arms it again, whenever it can."""
+    if how == "upgrade":
+        fake_chain.state["timers"] = []
+        setup.start()
+    fire_timers()
+
+
+@pytest.mark.parametrize("how", ["timer", "upgrade"])
+def test_a_vote_that_ended_before_effective_at_is_accepted_and_runs_at_once_when_closed_after_it(how):
+    world.build()
+    p = carried_week_long_vote(WEEK + HOUR)  # the vote ends an hour before the action is due
+    later(WEEK + 2 * HOUR)  # and the realm closes it an hour after
+    close_late(how)
+    assert Proposal[p].status == "executed" and Mandate.count() == 1 and Task.count() == 0
+
+
+def test_a_vote_that_ended_before_effective_at_and_is_finalized_after_it_waits_to_be_executed():
+    world.build()
+    p = carried_week_long_vote(WEEK + HOUR)
+    later(WEEK + 2 * HOUR)
+    assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "accepted"
+    assert Mandate.count() == 0 and Task.count() == 0  # the time has come: nothing to wait for
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+
+
+@pytest.mark.parametrize("how", ["timer", "upgrade"])
+def test_a_vote_that_ends_after_effective_at_expires_however_late_it_is_closed(how):
+    world.build()
+    p = carried_week_long_vote(HOUR)  # the vote ends six days after the action is due
+    later(WEEK + 2 * HOUR)
+    close_late(how)
+    assert Proposal[p].status == "expired" and Mandate.count() == 0 and Task.count() == 0
+
+
+def test_a_vote_that_ends_at_effective_at_is_in_time_even_when_closed_after_it():
+    world.build()
+    p = carried_week_long_vote(WEEK)  # the deadline and effective_at are the same second
+    later(WEEK + 1)  # the deadline timer fires a second late
+    fire_timers()
+    assert Proposal[p].status == "executed" and Mandate.count() == 1
+
+
+def test_a_departments_early_close_before_effective_at_is_scheduled_though_its_deadline_comes_later():
+    world.build()
+    crew = {"op": "department_create", "args": {"department": "Infrastructure crew", "parent": "Infrastructure"}}
+    p = ok("proposal_create", "carla", title="crew", department="Infrastructure", action=crew,
+           effective_at=fake_chain.now() + HOUR)["proposal"]
+    assert Proposal[p].deadline > Proposal[p].effective_at
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "execution_scheduled"
+    assert Department["Infrastructure crew"] is None
+    later(HOUR)
+    fire_timers()  # the proposal's deadline timer does nothing: it is settled
+    assert Proposal[p].status == "executed" and Department["Infrastructure crew"].parent.id == "Infrastructure"
 
 
 def test_a_proposal_voted_down_stays_rejected_after_effective_at():

@@ -115,12 +115,20 @@ def close(p, result):
     p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
 
 
+def vote_end(p):
+    """When the vote of ``p``, closed now, ended: at its deadline, or earlier, at the deciding vote. Closing it later than
+    that does not move the end: the deadline timer fires a second late, an upgrade arms it again whenever the realm
+    starts, and ``proposal_finalize`` may come days after the deadline."""
+    return min(chain.now(), p.deadline) if p.deadline else chain.now()
+
+
 def status_at_effective_time(p):
-    """The status of a proposal accepted now that states an ``effective_at``: it takes effect then, never before. Voting
-    that ended after that time has missed it: the proposal expires and its action never runs."""
-    if chain.now() > p.effective_at:
+    """The status of a proposal accepted now that states an ``effective_at``: it takes effect then, never before. A vote
+    that ended after that time has missed it: the proposal expires and its action never runs. A vote that ended in time
+    but is closed only after it is accepted, and its action runs at once."""
+    if vote_end(p) > p.effective_at:
         return "expired"
-    if not p.action:
+    if not p.action or chain.now() >= p.effective_at:
         return "accepted"
     schedule(p)
     return "execution_scheduled"
@@ -250,8 +258,9 @@ def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
     governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
-    instead (status ``execution_scheduled`` while it waits), and if the vote ends after that time the proposal
-    ends ``expired`` and nothing runs. Returns ``proposal``.
+    instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier at the deciding
+    vote, whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
+    Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
@@ -312,7 +321,9 @@ def proposal_open(c, args):
 @op("proposal.manage", returns="proposal")
 def proposal_finalize(c, args):
     """Close voting on ``proposal`` and record it as accepted or rejected. Returns ``status``.
-    A realm-wide proposal waits for its deadline; a department's closes early once its outcome is certain."""
+    A realm-wide proposal waits for its deadline; a department's closes early once its outcome is certain. A late close
+    does not move the end of the vote (see ``effective_at`` of ``proposal_create``). Accepted after its ``effective_at``,
+    the action waits for ``proposal_execute``."""
     p = find(Proposal, args["proposal"])
     if p.status != "voting":
         raise Conflict(f"{p.id} is not being voted on")

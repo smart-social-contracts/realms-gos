@@ -79,8 +79,11 @@ Once the proposal is accepted its action runs at that time instead of at the vot
 `execution_scheduled` while it waits. The wait is a one-step task of the realm's task scheduler
 (`task_list` shows it), which is armed again after an upgrade. The time never moves. If the time proves wrong, another
 proposal carries `proposal_stop` as its action and the scheduled proposal ends `withdrawn`; a new proposal then sets
-the right time. A vote that ends after `effective_at` leaves the proposal `expired` and runs nothing. Proposals due
-in the same second run in no set order.
+the right time. A vote ends at its deadline, or earlier at the deciding vote, and the time it is closed does not
+change that: a timer that fires late, an upgrade or a `proposal_finalize` days after the deadline do not expire a
+proposal. A vote that ends after `effective_at` leaves the proposal `expired` and runs nothing. A vote that ended
+in time but is closed after `effective_at` is accepted and its action runs at once (after `proposal_finalize`, at
+`proposal_execute`). Proposals due in the same second run in no set order.
 
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
 it, along with the realm-wide `threshold` and `quorum_percent`.
