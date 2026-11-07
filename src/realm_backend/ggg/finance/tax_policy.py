@@ -1,7 +1,7 @@
 from ic_python_db import Integer, String
 
 from core.db import Json, Row
-from core.ratio import BASIS_POINT
+from core.ratio import upgrade_tax_document
 
 
 class TaxPolicy(Row):
@@ -16,9 +16,5 @@ class TaxPolicy(Row):
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
-        # rate_bp, the old key, shows a rate still in basis points.
-        for tax in (obj.get("document") or {}).get("taxes", []):
-            for rated in [tax, *tax.get("brackets", [])]:
-                if "rate_bp" in rated:
-                    rated["rate"] = rated.pop("rate_bp") * BASIS_POINT
+        obj["document"] = upgrade_tax_document(obj.get("document") or {})  # rate_bp shows a rate in basis points
         return obj

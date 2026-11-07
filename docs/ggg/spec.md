@@ -70,8 +70,8 @@ same rows.
   `UTC` or a zone of the tz database the release bundles (`src/realm_backend/zonedata`, written by
   `scripts/build_zones.py`), else `InvalidArgument`. The realm reads its own zone's file when it is set and
   after an upgrade, never in a query; a change applies from that moment and rewrites nothing;
-- a tender's rubric, an allocation rule, a fund's balances, credential fields and wrapped keys are
-  maps where `ggg.did` has lists of pairs;
+- a tender's rubric, a fund's balances, credential fields and wrapped keys are maps where `ggg.did` has
+  lists of pairs; an allocation rule is the list of `{fund, share}` that `ggg.did` has;
 - a limit in time may be given as `expires_in` seconds instead of `expires_at`, and a delegation's
   permissions are `operations` where the model has `scope`;
 - `mandate_create` takes the approving `proposal` as an argument, and a mandate's limit is

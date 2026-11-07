@@ -3,6 +3,7 @@ import json
 from core import auth, op
 import fake_chain
 from api import quarters
+from core.ratio import ONE
 import world
 from ggg import Codex, Department, Forward, GuestUser, Member, Proposal, Quarter, Realm, User
 from kit import call, denied, ok, rows
@@ -61,7 +62,7 @@ def test_configure_follows_the_quarter_lifecycle():
     ok("quarter_configure", "ctl", quarter="north", status="suspended", name="North")
     assert "cannot become splitting" in call("quarter_configure", "ctl", quarter="north", status="splitting")["error"]
     ok("quarter_configure", "ctl", quarter="north", status="active")
-    assert "threshold" in call("quarter_configure", "ctl", rule={"threshold": 100})["error"]
+    assert "threshold" in call("quarter_configure", "ctl", rule={"threshold": ONE})["error"]
     rule = ok("quarter_configure", "ctl", rule={"absent": "no"}, capacity=500)["rule"]
     assert rule["absent"] == "no" and quarters.scale()["capacity"] == 500
     ok("quarter_deregister", "ctl", quarter="north")

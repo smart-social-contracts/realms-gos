@@ -8,7 +8,7 @@ from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, 
                  LedgerEntry, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
 from core.op import op
-from core.ratio import ONE
+from core.ratio import ONE, PERCENT
 from api.proposals import realm_wide, root
 
 CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate")
@@ -308,8 +308,8 @@ def receive(inv, received):
     category = inv.reason.partition(":")[0].lower() or "invoice"
     lines = [("asset", "cash", inv.amount, 0, source), ("revenue", category, 0, inv.amount, source)]
     rule = adopted_rule(source) if config.get("auto_allocate") else None
-    for code, ratio in ((rule.rules or {}).items() if rule else ()):
-        share = inv.amount * int(ratio) // ONE
+    for allocation in (rule.rules if rule else []):
+        code, share = allocation["fund"], inv.amount * allocation["share"] // ONE
         if share and code != source.id:
             lines += [("asset", "cash", 0, share, source), ("asset", "cash", share, 0, find(Fund, code))]
     kind, _, key = inv.payer.partition(":")
@@ -569,16 +569,32 @@ def rule_department(args):
     return owner_of(find(Fund, rule.source_fund if rule else args["source_fund"]))
 
 
-@op("org.manage_budget", governed=rule_department, returns="rule")
+def shares_of(args):
+    """The ``rules`` of an ``allocation_rule_draft`` call, a list of ``{fund, share}`` as GGG has it, refused if it is
+    not one or its shares are not whole numbers of hundred-millionths adding up to at most 100 %."""
+    rules = args.get("rules")
+    if not isinstance(rules, list):
+        raise Fail("rules is a list of {fund, share}, each share in hundred-millionths: 30 % of WELFARE is "
+                   f'[{{"fund": "WELFARE", "share": {30 * PERCENT}}}]')
+    shares = []
+    for rule in rules:
+        if not isinstance(rule, dict) or not isinstance(rule.get("fund"), str) or type(rule.get("share")) is not int:
+            raise Fail("each rule is a {fund, share}: a fund code and a whole number of hundred-millionths")
+        shares.append({"fund": rule["fund"], "share": rule["share"]})
+    if len({s["fund"] for s in shares}) < len(shares) or any(s["share"] < 0 for s in shares) \
+            or sum(s["share"] for s in shares) > ONE:
+        raise Fail(f"each fund is named once, and the shares are not negative and add up to at most {ONE} (100 %)")
+    return shares
+
+
+@op("org.manage_budget", governed=rule_department, returns="rule", check=shares_of)
 def allocation_rule_draft(c, args):
-    """Draft how payments into ``source_fund`` are split: ``rules`` maps fund codes to shares in hundred-millionths
-    (30 % is 30000000) adding up to at most 100000000. Returns ``rule``."""
-    source, rules = find(Fund, args["source_fund"]), {k: int(v) for k, v in args["rules"].items()}
-    for code in rules:
-        find(Fund, code)
-    if any(v < 0 for v in rules.values()) or sum(rules.values()) > ONE:
-        raise Fail(f"shares must not be negative and add up to at most {ONE} (100 %)")
-    r = AllocationRule(id=next_id(AllocationRule, "AR"), source_fund=source.id, rules=rules)
+    """Draft how payments into ``source_fund`` are split: ``rules`` is a list of ``{fund, share}``, each share in
+    hundred-millionths (30 % is 30000000), adding up to at most 100000000. Returns ``rule``."""
+    source, shares = find(Fund, args["source_fund"]), shares_of(args)
+    for share in shares:
+        find(Fund, share["fund"])
+    r = AllocationRule(id=next_id(AllocationRule, "AR"), source_fund=source.id, rules=shares)
     return {"rule": r.id}
 
 

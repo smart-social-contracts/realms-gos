@@ -1,7 +1,7 @@
 from ic_python_db import Integer, ManyToOne, OneToMany, String
 
 from core.db import Json, Row
-from core.ratio import ONE, PERCENT
+from core.ratio import ONE, PERCENT, upgrade_call
 
 
 class Proposal(Row):
@@ -31,4 +31,7 @@ class Proposal(Row):
         if "quorum_percent" in obj:
             obj["quorum"] = obj.pop("quorum_percent") * PERCENT
             obj["threshold"] = obj.get("threshold", 50) * PERCENT
+            # The action replays when the vote ends, with the arguments the proposal was filed with.
+            if obj.get("action"):
+                obj["action"] = upgrade_call(obj["action"])
         return obj

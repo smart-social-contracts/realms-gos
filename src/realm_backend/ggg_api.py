@@ -33,7 +33,6 @@ RENAME = {("DelegationGrantArgs", "scope"): "operations", ("DelegationRequestArg
 CEIL = {("ProposalCreateArgs", "effective_at")}
 # GGG lists of pairs that Realms GOS keeps as a map, with the fields holding the key and the value.
 MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rubric"): ("criterion", "weight"),
-        ("AllocationRuleDraftArgs", "rules"): ("fund", "share"), ("AllocationRule", "rules"): ("fund", "share"),
         ("CredentialIssueArgs", "fields"): (0, 1), ("CredentialIssued", "header"): (0, 1),
         ("CredentialVerifyArgs", "header"): (0, 1), ("KeyGrantArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentStoreArgs", "keys"): ("principal", "wrapped_dek"),

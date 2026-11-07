@@ -131,16 +131,22 @@ def department_delete(c, args):
     d.delete()
 
 
-@op("org.set_policy", governed=dept)
+def policy_args(args):
+    """``(m, n, quorum, veto)`` of a ``department_set_policy`` call, refused if they make no policy."""
+    refuse_renamed(args, {"quorum_percent": "quorum"})
+    m, n, quorum, veto = int(args["m"]), int(args["n"]), int(args.get("quorum", 0)), args.get("veto", [])
+    if not 1 <= m <= n or not 0 <= quorum <= ONE:
+        raise Fail(f"a policy needs 1 <= m <= n and a quorum between 0 and {ONE} (100 %)")
+    return m, n, quorum, veto
+
+
+@op("org.set_policy", governed=dept, check=policy_args)
 def department_set_policy(c, args):
     """Set how ``department`` approves: ``m`` of ``n`` approvals (1 ≤ m ≤ n), ``quorum`` (the share of its members who
     must vote, 0 to 100000000 hundred-millionths, so 50 % is 50000000; default 0) and ``veto``, principals holding a
     seat in it who can block (default none)."""
-    refuse_renamed(args, {"quorum_percent": "quorum"})
     d = dept(args)
-    m, n, quorum, veto = int(args["m"]), int(args["n"]), int(args.get("quorum", 0)), args.get("veto", [])
-    if not 1 <= m <= n or not 0 <= quorum <= ONE:
-        raise Fail(f"a policy needs 1 <= m <= n and a quorum between 0 and {ONE} (100 %)")
+    m, n, quorum, veto = policy_args(args)
     outsiders = sorted(set(veto) - holders(d))
     if outsiders:
         raise Fail(f"veto holders must hold a seat in {d.id}: {', '.join(outsiders)}")

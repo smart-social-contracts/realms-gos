@@ -455,15 +455,21 @@ def contract_terminate(c, args):
     return {"contract": k.id}
 
 
-@op("governance.update", governed=launched)
-def governance_update(c, args):
-    """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``voting_threshold`` (the share of
-    the yes and no votes the yes votes of a realm-wide proposal must exceed) and ``voting_quorum`` (the share of the
-    members who must vote on it), both in hundred-millionths: 50 % is 50000000."""
+def voting_rules(args):
+    """The ratios of a ``governance_update`` call, refused if they are not between 0 and 100 %, or the old names."""
     refuse_renamed(args, {"threshold": "voting_threshold", "quorum_percent": "voting_quorum"})
     ratios = {k: int(args[k]) for k in ("voting_threshold", "voting_quorum") if k in args}
     if any(not 0 <= v <= ONE for v in ratios.values()):
         raise Fail(f"a threshold and a quorum are between 0 and {ONE} (100 %)")
+    return ratios
+
+
+@op("governance.update", governed=launched, check=voting_rules)
+def governance_update(c, args):
+    """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``voting_threshold`` (the share of
+    the yes and no votes the yes votes of a realm-wide proposal must exceed) and ``voting_quorum`` (the share of the
+    members who must vote on it), both in hundred-millionths: 50 % is 50000000."""
+    ratios = voting_rules(args)
     realm, cal = Realm["1"] or Realm(id="1"), Calendar["1"] or Calendar(id="1")
     if "voting_window" in args:
         cal.voting_window = int(args["voting_window"])
