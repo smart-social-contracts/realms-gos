@@ -44,7 +44,7 @@ def receive(amount, payer="alice"):
 
 
 def allocate(**percents):
-    shares = {fund: percent * PERCENT for fund, percent in percents.items()}
+    shares = [{"fund": fund, "share": percent * PERCENT} for fund, percent in percents.items()]
     rule = ok("allocation_rule_draft", "bob", source_fund="ROOT", rules=shares)["rule"]
     ok("allocation_rule_propose", "bob", rule=rule)
     ok("treasury_configure", "bob", config={"auto_allocate": True})
@@ -639,12 +639,12 @@ def test_a_member_reads_the_budgets_of_the_funds():
     draft = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="upkeep", planned=5)["budget"]
     ok("budget_propose", "bob", budget=b)
     rule = allocate(ROADS=30, WELFARE=20)
-    spare = ok("allocation_rule_draft", "bob", source_fund="ROOT", rules={"ROADS": 10 * PERCENT})["rule"]
+    spare = ok("allocation_rule_draft", "bob", source_fund="ROOT", rules=[{"fund": "ROADS", "share": 10 * PERCENT}])["rule"]
 
     seen = ok("budget_view", "mallory")
     funds = {f["id"]: f for f in seen["funds"]}
     assert set(funds) == {"ROOT", "ROADS", "WELFARE"}
-    assert funds["ROOT"]["rule"] == {"id": rule, "rules": {"ROADS": 30 * PERCENT, "WELFARE": 20 * PERCENT}}
+    assert funds["ROOT"]["rule"] == {"id": rule, "rules": [{"fund": "ROADS", "share": 30 * PERCENT}, {"fund": "WELFARE", "share": 20 * PERCENT}]}
     assert funds["ROADS"]["rule"] is None
     assert [(x["id"], x["period"], x["planned"], x["actual"]) for x in funds["ROADS"]["budgets"]] == [
         (b, "FY2026", 300_000, 0)]  # the draft is not shown as a budget

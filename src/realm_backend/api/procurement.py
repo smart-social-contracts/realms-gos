@@ -54,15 +54,21 @@ def moving(args, before, after):
     return t
 
 
-@op("tender.manage", governed=lambda args: find(Department, args["requester"]), returns="tender")
+def rubric_of(args):
+    """The ``rubric`` of a ``tender_create`` call: criterion weights in hundred-millionths, positive, adding up to 100 %."""
+    rubric = {k: int(w) for k, w in (args.get("rubric") or {}).items()}
+    if not rubric or min(rubric.values()) <= 0 or sum(rubric.values()) != ONE:
+        raise Fail(f"rubric weights must be positive and add up to {ONE} (100 %)")
+    return rubric
+
+
+@op("tender.manage", governed=lambda args: find(Department, args["requester"]), returns="tender", check=rubric_of)
 def tender_create(c, args):
     """Draft a tender ``title`` for department ``requester``, with optional ``description``, the times it ``opens_at``
     and ``closes_at`` (seconds, closing after opening), and ``rubric``, criterion weights in hundred-millionths that
     are positive and add up to 100000000 (e.g. ``{"price": 60000000, "quality": 40000000}`` for 60 % and 40 %).
     Returns ``tender``."""
-    rubric = {k: int(w) for k, w in (args.get("rubric") or {}).items()}
-    if not rubric or min(rubric.values()) <= 0 or sum(rubric.values()) != ONE:
-        raise Fail(f"rubric weights must be positive and add up to {ONE} (100 %)")
+    rubric = rubric_of(args)
     opens, closes = int(args["opens_at"]), int(args["closes_at"])
     if closes <= opens:
         raise Fail("a tender closes after it opens")

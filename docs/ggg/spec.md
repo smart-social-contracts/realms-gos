@@ -66,8 +66,8 @@ same rows.
   `expired`, and nothing runs. One that ended in time but is closed after `effective_at` is accepted and its
   action runs at once (after `proposal_finalize`, at `proposal_execute`). `proposal_stop` ends a waiting
   proposal as `withdrawn`. Proposals due at the same second run in no set order;
-- a tender's rubric, an allocation rule, a fund's balances, credential fields and wrapped keys are
-  maps where `ggg.did` has lists of pairs;
+- a tender's rubric, a fund's balances, credential fields and wrapped keys are maps where `ggg.did` has
+  lists of pairs; an allocation rule is the list of `{fund, share}` that `ggg.did` has;
 - a limit in time may be given as `expires_in` seconds instead of `expires_at`, and a delegation's
   permissions are `operations` where the model has `scope`;
 - `mandate_create` takes the approving `proposal` as an argument, and a mandate's limit is

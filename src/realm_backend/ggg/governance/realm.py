@@ -1,7 +1,7 @@
 from ic_python_db import Boolean, Integer, OneToOne, String
 
 from core.db import Json, Row
-from core.ratio import PERCENT
+from core.ratio import PERCENT, upgrade_federal_rule
 
 
 class Realm(Row):
@@ -53,9 +53,13 @@ class Realm(Row):
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
-        rules = (obj.get("manifest_data") or {}).get("governance", {})
+        manifest = obj.get("manifest_data") or {}
+        rules = manifest.get("governance", {})
         # The old names show a rule still in whole percents.
         for old, new in (("threshold", "voting_threshold"), ("quorum_percent", "voting_quorum")):
             if old in rules:
                 rules[new] = rules.pop(old) * PERCENT
+        federation = manifest.get("federation", {})
+        if "rule" in federation:
+            federation["rule"] = upgrade_federal_rule(federation["rule"])
         return obj
