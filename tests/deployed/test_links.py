@@ -2,22 +2,36 @@
 realm's operations and through GGG's Candid methods, which are what a GGG caller uses."""
 
 import pytest
-from ic.candid import Types, decode, encode
-from ic.principal import Principal
+from ic.candid import Types
 from pic import Canister
 
 LINK = Types.Record({"kind": Types.Variant({"Replaces": Types.Null, "RelatesTo": Types.Null}), "proposal": Types.Text})
-GGG_ERROR = Types.Variant({
-    "NotFound": Types.Null, "Unauthenticated": Types.Null,
-    "Forbidden": Types.Record({"permission": Types.Opt(Types.Text), "message": Types.Text}),
-    "InvalidArgument": Types.Text, "Conflict": Types.Text, "Unavailable": Types.Text,
-    "GenericError": Types.Record({"error_code": Types.Nat, "message": Types.Text})})
-CREATE_ARGS = Types.Record({
+BASE_ARGS = {
     "title": Types.Text, "description": Types.Text, "department": Types.Opt(Types.Text),
-    "action": Types.Variant({"Motion": Types.Null}), "effective_at": Types.Opt(Types.Nat64),
-    "links": Types.Opt(Types.Vec(LINK)), "on_behalf_of": Types.Opt(Types.Principal)})
+    "action": Types.Variant({"Motion": Types.Null}), "effective_at": Types.Opt(Types.Nat64)}
+CREATE_ARGS = Types.Record({**BASE_ARGS, "links": Types.Opt(Types.Vec(LINK)), "on_behalf_of": Types.Opt(Types.Principal)})
+# What a caller built before links existed sends: a record without the field.
+OLD_CREATE_ARGS = Types.Record({**BASE_ARGS, "on_behalf_of": Types.Opt(Types.Principal)})
 GET_ARGS = Types.Record({"id": Types.Text, "cursor": Types.Opt(Types.Text), "limit": Types.Opt(Types.Nat32)})
 PAGE = Types.Record({"items": Types.Vec(LINK), "next": Types.Opt(Types.Text)})
+PROPOSAL = Types.Record({
+    "id": Types.Text, "title": Types.Text, "description": Types.Text, "proposer": Types.Principal,
+    "on_behalf_of": Types.Opt(Types.Principal), "department": Types.Opt(Types.Text),
+    "action": Types.Variant({
+        "Motion": Types.Null, "Call": Types.Record({"method": Types.Text, "arg": Types.Vec(Types.Nat8)}),
+        "Code": Types.Record({"url": Types.Text, "checksum": Types.Text})}),
+    "status": Types.Variant({name: Types.Null for name in (
+        "Draft", "Voting", "Accepted", "ExecutionScheduled", "Rejected", "Expired", "Executed", "Failed", "Withdrawn")}),
+    "opens_at": Types.Opt(Types.Nat64), "deadline": Types.Opt(Types.Nat64), "effective_at": Types.Opt(Types.Nat64),
+    "threshold": Types.Nat, "quorum": Types.Nat,
+    "tally": Types.Record({"yes": Types.Nat, "no": Types.Nat, "abstain": Types.Nat, "eligible": Types.Opt(Types.Nat)}),
+    "result": Types.Opt(Types.Variant({"Reply": Types.Vec(Types.Nat8), "Error": Types.Text})),
+    "links": Types.Vec(LINK)})
+VOTE = Types.Record({
+    "id": Types.Text, "proposal": Types.Text, "voter": Types.Principal, "cast_by": Types.Opt(Types.Principal),
+    "choice": Types.Variant({"Yes": Types.Null, "No": Types.Null, "Abstain": Types.Null}), "cast_at": Types.Nat64})
+DETAIL = Types.Record({"proposal": PROPOSAL, "votes": Types.Vec(VOTE), "next": Types.Opt(Types.Text),
+                       "replaced_by": Types.Opt(Types.Text)})
 
 
 def ok(realm, op, who, query=False, **args):
@@ -26,24 +40,23 @@ def ok(realm, op, who, query=False, **args):
     return out
 
 
-def ggg(realm, method, arg_type, arg, reply_type, who, query):
-    """A GGG method called with Candid, as a GGG caller does; returns the decoded ``Ok`` or ``Err``."""
-    realm.pic.set_sender(Principal.from_str(who))
-    call = realm.pic.query_call if query else realm.pic.update_call
-    reply = decode(bytes(call(realm.id, method, encode([{"type": arg_type, "value": arg}]))),
-                   [Types.Variant({"Ok": reply_type, "Err": GGG_ERROR})])[0]["value"]
-    return reply
-
-
-def create(realm, who, links=None):
+def create(realm, who, links=None, old_caller=False):
     arg = {"title": "x", "description": "", "department": [], "action": {"Motion": None}, "effective_at": [],
-           "links": [] if links is None else [links], "on_behalf_of": []}
-    return ggg(realm, "ggg_proposal_create", CREATE_ARGS, arg, Types.Text, who, query=False)
+           "on_behalf_of": []}
+    if not old_caller:
+        arg["links"] = [] if links is None else [links]
+    return realm.ggg("ggg_proposal_create", OLD_CREATE_ARGS if old_caller else CREATE_ARGS, arg, Types.Text, who)
 
 
 def linked_from(realm, who, proposal, cursor=None, limit=None):
     arg = {"id": proposal, "cursor": [] if cursor is None else [cursor], "limit": [] if limit is None else [limit]}
-    return ggg(realm, "ggg_proposal_linked_from", GET_ARGS, arg, Types.Opt(PAGE), who, query=True)
+    return realm.ggg("ggg_proposal_linked_from", GET_ARGS, arg, Types.Opt(PAGE), who, query=True)
+
+
+def detail(realm, who, proposal):
+    """``ggg_proposal_get`` with Candid: the proposal and its ``replaced_by``."""
+    arg = {"id": proposal, "cursor": [], "limit": []}
+    return realm.ggg("ggg_proposal_get", GET_ARGS, arg, Types.Opt(DETAIL), who, query=True)["Ok"][0]
 
 
 @pytest.fixture(scope="module")
@@ -66,9 +79,12 @@ def test_a_proposal_replaces_a_withdrawn_one_through_candid_and_the_old_one_poin
     related = create(realm, bob)["Ok"]
     new = create(realm, alice, [{"kind": {"Replaces": None}, "proposal": old},
                                 {"kind": {"RelatesTo": None}, "proposal": related}])["Ok"]
-    assert ok(realm, "proposal_get", alice, query=True, proposal=old)["proposal"]["replaced_by"] == new
-    assert ok(realm, "proposal_get", alice, query=True, proposal=new)["proposal"]["links"] == [
-        {"kind": "replaces", "proposal": old}, {"kind": "relates_to", "proposal": related}]
+    replaced, replacing = detail(realm, alice, old), detail(realm, alice, new)
+    assert replaced["replaced_by"] == [new] and replaced["proposal"]["status"] == {"Withdrawn": None}
+    assert replaced["proposal"]["links"] == [] and replacing["replaced_by"] == []
+    assert replacing["proposal"]["links"] == [{"kind": {"Replaces": None}, "proposal": old},
+                                              {"kind": {"RelatesTo": None}, "proposal": related}]
+    assert detail(realm, alice, related)["replaced_by"] == []
     assert linked_from(realm, alice, old)["Ok"] == [{"items": [{"kind": {"Replaces": None}, "proposal": new}],
                                                        "next": []}]
     assert linked_from(realm, alice, related)["Ok"][0]["items"] == [{"kind": {"RelatesTo": None}, "proposal": new}]
@@ -106,3 +122,12 @@ def test_the_links_to_a_proposal_are_a_page_at_a_time_oldest_first_and_an_unknow
             break
     assert seen == linkers
     assert linked_from(realm, alice, "P-999") == {"Ok": []}
+
+
+def test_a_caller_built_before_links_existed_files_a_proposal_without_them(realm, people):
+    """Its ProposalCreateArgs has no `links` field at all, as in GGG's conformance suite: absent means none."""
+    alice = people["alice"]
+    made = create(realm, alice, old_caller=True)["Ok"]
+    seen = detail(realm, alice, made)
+    assert seen["proposal"]["links"] == [] and seen["replaced_by"] == []
+    assert linked_from(realm, alice, made) == {"Ok": [{"items": [], "next": []}]}
