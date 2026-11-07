@@ -3,6 +3,7 @@ from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
 from ggg import Appointment, Authority, Department, Organization, Position, User, UserProfile
 from core.op import op
+from core.ratio import ONE, refuse_renamed
 from api.proposals import PENDING, holders, realm_wide, root
 
 ORG_MOVES = {"active": {"suspended", "dissolved"}, "suspended": {"active", "dissolved"}, "dissolved": set()}
@@ -132,16 +133,18 @@ def department_delete(c, args):
 
 @op("org.set_policy", governed=dept)
 def department_set_policy(c, args):
-    """Set how ``department`` approves: ``m`` of ``n`` approvals (1 ≤ m ≤ n), ``quorum_percent`` (0 to 100, default 0)
-    and ``veto``, principals holding a seat in it who can block (default none)."""
+    """Set how ``department`` approves: ``m`` of ``n`` approvals (1 ≤ m ≤ n), ``quorum`` (the share of its members who
+    must vote, 0 to 100000000 hundred-millionths, so 50 % is 50000000; default 0) and ``veto``, principals holding a
+    seat in it who can block (default none)."""
+    refuse_renamed(args, {"quorum_percent": "quorum"})
     d = dept(args)
-    m, n, quorum, veto = int(args["m"]), int(args["n"]), int(args.get("quorum_percent", 0)), args.get("veto", [])
-    if not 1 <= m <= n or not 0 <= quorum <= 100:
-        raise Fail("a policy needs 1 <= m <= n and a quorum between 0 and 100")
+    m, n, quorum, veto = int(args["m"]), int(args["n"]), int(args.get("quorum", 0)), args.get("veto", [])
+    if not 1 <= m <= n or not 0 <= quorum <= ONE:
+        raise Fail(f"a policy needs 1 <= m <= n and a quorum between 0 and {ONE} (100 %)")
     outsiders = sorted(set(veto) - holders(d))
     if outsiders:
         raise Fail(f"veto holders must hold a seat in {d.id}: {', '.join(outsiders)}")
-    d.policy = {"m": m, "n": n, "quorum_percent": quorum, "veto": list(veto)}
+    d.policy = {"m": m, "n": n, "quorum": quorum, "veto": list(veto)}
 
 
 def seat_view(pos):

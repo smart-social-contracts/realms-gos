@@ -5,6 +5,7 @@ import world
 from api import members, proposals
 from core import auth, op
 from core.db import Forbidden
+from core.ratio import PERCENT
 from ggg import Delegation, Department, Mandate, Position, Proposal, Realm, User, UserProfile, Vote
 from kit import call, denied, later, ok
 
@@ -61,7 +62,7 @@ def test_I_GOV_2_only_eligible_voters_count():
 
 def test_I_GOV_3_quorum_and_threshold():
     world.build()
-    ok("governance_update", "ctl", quorum_percent=50)
+    ok("governance_update", "ctl", voting_quorum=50 * PERCENT)
     p = ok("proposal_create", "alice", title="x")["proposal"]
     vote_all(p, "yes", "alice", "bob")
     later(8 * 86400)
@@ -94,7 +95,7 @@ def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
 def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
     world.build()
     realm_wide = [("mandate_create", {"title": "Road works", "executor": "Infrastructure"}),
-                  ("governance_update", {"threshold": 0, "voting_window": 1})]
+                  ("governance_update", {"voting_threshold": 0, "voting_window": 1})]
     for name, args in realm_wide:
         out = call("proposal_create", "carla", title=name, department="Infrastructure", action={"op": name, "args": args})
         assert not out["ok"] and out["kind"] == "forbidden" and "only a realm-wide proposal" in out["error"]
@@ -105,7 +106,7 @@ def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
 
 def test_a_stored_department_action_outside_the_department_fails_without_running():
     world.build()
-    for name, args in (("mandate_create", {"title": "Road works"}), ("governance_update", {"threshold": 0})):
+    for name, args in (("mandate_create", {"title": "Road works"}), ("governance_update", {"voting_threshold": 0})):
         p = ok("proposal_create", "carla", title=name, department="Infrastructure")["proposal"]
         Proposal[p].action = {"op": name, "args": args}
         out = ok("proposal_vote", "carla", proposal=p, choice="yes")
@@ -343,7 +344,7 @@ def fire_timers():
 def test_a_zero_window_closes_a_vote_once_its_outcome_is_certain_and_runs_its_action():
     world.build()
     ok("governance_update", "ctl", voting_window=0)
-    action = {"op": "governance_update", "args": {"threshold": 60}}
+    action = {"op": "governance_update", "args": {"voting_threshold": 60 * PERCENT}}
     p = ok("proposal_create", "alice", title="Raise the threshold", action=action)["proposal"]
     assert Proposal[p].deadline == 0 and fake_chain.state["timers"] == []
     vote_all(p, "yes", "alice", "bob", "dana")
@@ -368,7 +369,7 @@ def test_everyone_voting_decides_an_open_vote():
 
 def test_a_timed_vote_settles_itself_at_its_deadline():
     world.build()
-    action = {"op": "governance_update", "args": {"threshold": 60}}
+    action = {"op": "governance_update", "args": {"voting_threshold": 60 * PERCENT}}
     p = ok("proposal_create", "alice", title="Raise the threshold", action=action)["proposal"]
     vote_all(p, "yes", "alice", "bob")
     assert fake_chain.state["timers"][-1][0] == 7 * 86400 + 1

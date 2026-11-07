@@ -50,10 +50,12 @@ same rows.
 - statuses are lower-case text;
 - references are `Kind:id`, or a bare id for an organization of that name, or else a user;
 - a proposal's action is `{op, args}`, an operation name and its JSON arguments;
-- proposal thresholds and quorums, allocation shares and tender rubric weights are whole
-  percentages, not basis points, and `governance_update` takes `voting_window` in seconds and
-  `threshold` and `quorum_percent` in percent, kept outside the `Realm` row; a `voting_window` of
-  0 leaves a realm-wide proposal open until its outcome is certain;
+- every ratio is on GGG's scale, an integer in hundred-millionths (100 % is 100 000 000): proposal thresholds
+  and quorums, department quorums, allocation shares, tender rubric weights and tax rates (`rate`). The
+  operations name them as GGG does, without a unit: `governance_update` takes `voting_window` in seconds
+  and `voting_threshold` and `voting_quorum`, kept outside the `Realm` row; a `voting_window` of
+  0 leaves a realm-wide proposal open until its outcome is certain. An argument still sent under its
+  old name (`threshold`, `quorum_percent`, `rate_bp`) is refused, naming the new one;
 - a proposal settles itself: the deciding vote (or, for a timed one, its deadline) closes it and runs
   its action at once; `proposal_finalize` and `proposal_execute` remain for a deadline missed;
 - a proposal with an `effective_at` (whole seconds, not in the past) runs its action then, not at the vote. While it waits,

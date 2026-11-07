@@ -97,7 +97,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
 
 def direct(department):
     p = department.policy or {}
-    return int(p.get("m", 1)) <= 1 and int(p.get("n", 1)) <= 1 and not p.get("quorum_percent") and not p.get("veto")
+    return int(p.get("m", 1)) <= 1 and int(p.get("n", 1)) <= 1 and not p.get("quorum") and not p.get("veto")
 
 
 def audit(name, user, by, origin, args, out):

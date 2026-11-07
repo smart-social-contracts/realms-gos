@@ -31,7 +31,7 @@ def test_steps_run_as_the_creator_and_wait_between():
     world.profile("task-runner", "task.create", "task.run", "task.view", "notification.send")
     world.person("carla", "task-runner")
     steps = [{"op": "notification_send", "args": {"recipient": "User:alice", "title": "Roadworks start"}, "wait": 3600},
-             {"op": "governance_update", "args": {"quorum_percent": 0}}]
+             {"op": "governance_update", "args": {"voting_quorum": 0}}]
     ok("task_create", "carla", name="roadworks", steps=steps)
     out = ok("task_run", "carla", task="roadworks")
     assert out["status"] == "waiting" and Notification.count() == 1
@@ -76,7 +76,7 @@ def test_only_the_creator_acts_on_a_task():
     world.person("mallory", "task-admin")
     ok("task_create", "ctl", name="payroll", steps=CHECK)
     ok("task_create", "carla", name="roadworks", steps=CHECK)
-    grab = [{"op": "governance_update", "args": {"quorum_percent": 0}}]
+    grab = [{"op": "governance_update", "args": {"voting_quorum": 0}}]
     assert "not yours" in denied("task_edit", "mallory", task="payroll", steps=grab)
     for name in ("task_run", "task_schedule", "task_cancel", "task_delete"):
         assert "not yours" in denied(name, "mallory", task="roadworks")

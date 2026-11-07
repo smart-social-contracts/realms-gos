@@ -5,6 +5,7 @@ from core.db import Conflict, Fail, Forbidden, find, next_id, page, view
 from ggg import Bid, BidScore, Contract, Department, Organization, Tender
 from api.justice import people
 from core.op import op
+from core.ratio import ONE, PERCENT
 
 MAX_MARK = 10
 
@@ -41,7 +42,8 @@ def total(bid, rubric):
     marks = {}
     for s in bid.scores:
         marks.setdefault(s.criterion, []).append(s.score)
-    return round(sum(w * sum(marks[k]) / len(marks[k]) for k, w in rubric.items() if k in marks) / MAX_MARK)
+    # A weight in hundred-millionths over PERCENT is its whole percent, so the score is out of 100.
+    return round(sum(w * sum(marks[k]) / len(marks[k]) for k, w in rubric.items() if k in marks) / (MAX_MARK * PERCENT))
 
 
 def moving(args, before, after):
@@ -55,11 +57,12 @@ def moving(args, before, after):
 @op("tender.manage", governed=lambda args: find(Department, args["requester"]), returns="tender")
 def tender_create(c, args):
     """Draft a tender ``title`` for department ``requester``, with optional ``description``, the times it ``opens_at``
-    and ``closes_at`` (seconds, closing after opening), and ``rubric``, criterion weights that are positive and add up
-    to 100 (e.g. ``{"price": 60, "quality": 40}``). Returns ``tender``."""
+    and ``closes_at`` (seconds, closing after opening), and ``rubric``, criterion weights in hundred-millionths that
+    are positive and add up to 100000000 (e.g. ``{"price": 60000000, "quality": 40000000}`` for 60 % and 40 %).
+    Returns ``tender``."""
     rubric = {k: int(w) for k, w in (args.get("rubric") or {}).items()}
-    if not rubric or min(rubric.values()) <= 0 or sum(rubric.values()) != 100:
-        raise Fail("rubric weights must be positive and add up to 100")
+    if not rubric or min(rubric.values()) <= 0 or sum(rubric.values()) != ONE:
+        raise Fail(f"rubric weights must be positive and add up to {ONE} (100 %)")
     opens, closes = int(args["opens_at"]), int(args["closes_at"])
     if closes <= opens:
         raise Fail("a tender closes after it opens")

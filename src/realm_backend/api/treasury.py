@@ -8,6 +8,7 @@ from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, 
                  LedgerEntry, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
 from core.op import op
+from core.ratio import ONE
 from api.proposals import realm_wide, root
 
 CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate")
@@ -307,8 +308,8 @@ def receive(inv, received):
     category = inv.reason.partition(":")[0].lower() or "invoice"
     lines = [("asset", "cash", inv.amount, 0, source), ("revenue", category, 0, inv.amount, source)]
     rule = adopted_rule(source) if config.get("auto_allocate") else None
-    for code, percent in ((rule.rules or {}).items() if rule else ()):
-        share = inv.amount * int(percent) // 100
+    for code, ratio in ((rule.rules or {}).items() if rule else ()):
+        share = inv.amount * int(ratio) // ONE
         if share and code != source.id:
             lines += [("asset", "cash", 0, share, source), ("asset", "cash", share, 0, find(Fund, code))]
     kind, _, key = inv.payer.partition(":")
@@ -570,13 +571,13 @@ def rule_department(args):
 
 @op("org.manage_budget", governed=rule_department, returns="rule")
 def allocation_rule_draft(c, args):
-    """Draft how payments into ``source_fund`` are split: ``rules`` maps fund codes to whole percentages adding up to at
-    most 100. Returns ``rule``."""
+    """Draft how payments into ``source_fund`` are split: ``rules`` maps fund codes to shares in hundred-millionths
+    (30 % is 30000000) adding up to at most 100000000. Returns ``rule``."""
     source, rules = find(Fund, args["source_fund"]), {k: int(v) for k, v in args["rules"].items()}
     for code in rules:
         find(Fund, code)
-    if any(v < 0 for v in rules.values()) or sum(rules.values()) > 100:
-        raise Fail("shares must be non-negative percentages adding up to at most 100")
+    if any(v < 0 for v in rules.values()) or sum(rules.values()) > ONE:
+        raise Fail(f"shares must not be negative and add up to at most {ONE} (100 %)")
     r = AllocationRule(id=next_id(AllocationRule, "AR"), source_fund=source.id, rules=rules)
     return {"rule": r.id}
 

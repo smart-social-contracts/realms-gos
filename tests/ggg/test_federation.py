@@ -5,13 +5,14 @@ from ic_python_db import Database
 from api import federation
 import world
 from core import op
+from core.ratio import PERCENT
 from ggg import Delegation, Department, FederalVote, FederalVoteLeg, FederationMessage, Proposal, Realm, User, UserProfile
 from kit import call, denied, later, ok
 from test_quarters import CAPITAL, capital, quarter, reply
 
 ANON = fake_chain.ANONYMOUS
 QUARTERS = ("north", "south", "harbor")
-ACTION = {"op": "governance_update", "args": {"threshold": 60}}
+ACTION = {"op": "governance_update", "args": {"voting_threshold": 60 * PERCENT}}
 
 
 @op.op(None)
@@ -54,7 +55,7 @@ def test_fv3_passes_with_3_of_4_quarters():
     assert leg("harbor", v, "failed", 40, 90)["ok"]
     out = ok("federal_vote_finalize", ANON, vote=v)
     assert (out["status"], out["yes"], out["no"]) == ("passed", 3, 1)
-    assert Realm["1"].manifest_data["governance"]["threshold"] == 60
+    assert Realm["1"].manifest_data["governance"]["voting_threshold"] == 60 * PERCENT
     sent = [cid for cid, m, a in fake_chain.state["calls"] if a and "federal_vote.result" in a]
     assert sorted(sent) == sorted(QUARTERS)
     assert "already passed" in call("federal_vote_finalize", ANON, vote=v)["error"]
@@ -70,7 +71,7 @@ def test_I_FED_2_rule_and_absence_policy_decide():
     later(8 * 86400)
     out = ok("federal_vote_finalize", ANON, vote=v)
     assert (out["status"], out["yes"], out["no"], out["absent"]) == ("failed", 2, 2, 2)
-    assert Realm["1"].manifest_data.get("governance", {}).get("threshold") is None
+    assert Realm["1"].manifest_data.get("governance", {}).get("voting_threshold") is None
 
 
 def test_I_FED_2_votes_by_members_when_the_rule_says_so():
@@ -127,7 +128,7 @@ def test_quarter_settles_and_reports_its_leg(monkeypatch):
                            body={"vote": "FV-3", "status": "passed", "hash": "x"})["error"]
     ok("federation_message", CAPITAL, topic="federal_vote.result",
        body={"vote": "FV-3", "status": "passed", "hash": body["hash"]})
-    assert FederalVote["FV-3"].status == "passed" and Realm["1"].manifest_data["governance"]["threshold"] == 60
+    assert FederalVote["FV-3"].status == "passed" and Realm["1"].manifest_data["governance"]["voting_threshold"] == 60 * PERCENT
 
 
 def test_propose_from_a_quarter_goes_to_the_capital(monkeypatch):

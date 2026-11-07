@@ -16,11 +16,12 @@ Every realm has a root department, `Administration`, and any number of departmen
 Each department has an approval **policy**, set with `department_set_policy`:
 
 ```json
-{"department": "Civil Registry", "m": 2, "n": 3, "quorum_percent": 0, "veto": ["dana"]}
+{"department": "Civil Registry", "m": 2, "n": 3, "quorum": 0, "veto": ["dana"]}
 ```
 
 - `m` of `n`: how many yes votes the department needs, out of its seats.
-- `quorum_percent`: turnout needed (0 to 100).
+- `quorum`: turnout needed, as a share of the department's voters (0 to 100 000 000; every ratio is in hundred-millionths,
+  so 50 % is 50 000 000 and 0.1 % is 100 000).
 - `veto`: seated members whose *no* rejects the proposal.
 
 A policy is **direct** when `m ≤ 1`, `n ≤ 1`, there is no quorum and no veto. A department with no
@@ -86,14 +87,14 @@ in time but is closed after `effective_at` is accepted and its action runs at on
 `proposal_execute`). Proposals due in the same second run in no set order.
 
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
-it, along with the realm-wide `threshold` and `quorum_percent`.
+it, along with the realm-wide `voting_threshold` and `voting_quorum`, in hundred-millionths.
 
 **Who votes and how it is counted:**
 
 | | Realm-wide proposal (root department) | Department proposal |
 |---|---|---|
 | Eligible voters | every active member | the head and the holders of active seats |
-| Passes when | turnout ≥ `quorum_percent` and yes > `threshold`% of yes + no (default 50) | yes ≥ `m` |
+| Passes when | turnout ≥ `voting_quorum` and yes > `voting_threshold` of yes + no (default 50 %) | yes ≥ `m` |
 | Rejected when | the rule above fails at the deadline | a veto holder votes no, or `m` can no longer be reached |
 | Can close early | no, it waits for the deadline | yes, once the outcome is certain |
 

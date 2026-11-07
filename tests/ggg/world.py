@@ -69,5 +69,5 @@ def build():
     return depts
 
 
-def policy(department, m, n, quorum_percent=0, veto=()):
-    department.policy = {"m": m, "n": n, "quorum_percent": quorum_percent, "veto": list(veto)}
+def policy(department, m, n, quorum=0, veto=()):
+    department.policy = {"m": m, "n": n, "quorum": quorum, "veto": list(veto)}

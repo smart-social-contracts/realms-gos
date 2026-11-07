@@ -8,6 +8,7 @@ import fake_chain
 import ggg_methods
 import world
 from api import setup
+from core.ratio import PERCENT
 from basilisk.wasm_manipulator import extract_methods_from_python, generate_candid_from_methods
 from ggg import Realm
 from kit import ok
@@ -81,13 +82,13 @@ def test_realm_info_converts_to_ggg():
     ok("setup_step", "frank", step="realm", name="Agora", open_registration=True)
     ok("setup_step", "frank", step="tokens", accounting_currency="ckUSDC")
     Realm["1"].trusted_principals = [fake_chain.ANONYMOUS]
-    Realm["1"].manifest_data = {**Realm["1"].manifest_data, "governance": {"threshold": 60, "quorum_percent": 25}}
+    Realm["1"].manifest_data = {**Realm["1"].manifest_data, "governance": {"voting_threshold": 60 * PERCENT, "voting_quorum": 25 * PERCENT}}
     r = ggg_methods.ggg_realm_info()
     assert r["name"] == "Agora" and r["status"] == {"Setup": None} and r["open_registration"]
     assert r["accounting_currency"] == "ckUSDC" and r["accounting_currency_decimals"] == 8
     assert r["calendar"] == "1" and r["federation_realm_id"] is None and r["logo_url"] is None
     assert r["trusted_principals"] == [fake_chain.ANONYMOUS]
-    assert (r["voting_threshold"], r["voting_quorum"]) == (6000, 2500)
+    assert (r["voting_threshold"], r["voting_quorum"]) == (60_000_000, 25_000_000)
     assert r["installed_version"] == setup.VERSION and r["network"] == "ic"
     ok("setup_launch", "frank")
     assert ggg_methods.ggg_realm_info()["status"] == {"Alpha": None}

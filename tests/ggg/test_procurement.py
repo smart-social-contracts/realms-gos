@@ -1,11 +1,12 @@
 import fake_chain
 import world
+from core.ratio import PERCENT
 from ggg import Bid, Contract, Delegation, Department, Event, Organization, Tender
 from kit import call, denied, later, ok
 from api.procurement import seal
 
 DAY = 86400
-RUBRIC = {"price": 60, "quality": 40}
+RUBRIC = {"price": 60 * PERCENT, "quality": 40 * PERCENT}
 
 
 def agora():
@@ -60,7 +61,7 @@ def test_tender_lifecycle_and_authorization():
     world.build()
     denied("tender_create", "alice", title="x", requester="Infrastructure", opens_at=1, closes_at=2, rubric=RUBRIC)
     assert "add up to 100" in denied("tender_create", "carla", title="x", requester="Infrastructure",
-                                     opens_at=1, closes_at=2, rubric={"price": 50})
+                                     opens_at=1, closes_at=2, rubric={"price": 50 * PERCENT})
     t = tender()["tender"]
     denied("tender_open", "alice", tender=t)
     ok("tender_open", "carla", tender=t)
