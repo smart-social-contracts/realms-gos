@@ -1,13 +1,13 @@
 """The IANA time zones this release bundles (realms-gos#511): the package ``zonedata``, which scripts/build_zones.py
 generates from the tz database, one module per zone file.
 
-A realm reads the zone file of its own ``Realm.timezone`` and no other, so the rest costs nothing but the room it
-takes in the wasm. Every upgrade brings the release's tz database along, and with it the current rules.
+A realm reads the zone file of its own ``Realm.timezone`` and no other: the rest takes room in the wasm and a little
+at install, nothing more. Every upgrade brings the release's tz database along, and with it the current rules.
 """
 import sys
 
 import zonedata
-import zonedata._bundle  # noqa: F401  # nothing runs it: it makes the bundler ship every zone
+import zonedata._bundle  # noqa: F401  # never run: the bundler follows its imports, and so ships every zone
 
 
 def known(name):
