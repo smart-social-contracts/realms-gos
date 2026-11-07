@@ -13,7 +13,9 @@ All three install **release artifacts**, not the checkout.
 ## Releases
 
 The *Create Release* workflow ([`.github/workflows/release.yml`](../../.github/workflows/release.yml),
-run by hand: patch, minor or major) builds and attaches to a GitHub release:
+run by hand: patch, minor or major) builds and attaches to a GitHub release. **First, when IANA has published a new
+tz database** (the workflow fails if it has), run `python3 scripts/build_zones.py --release <version>` and commit the
+result: every release bundles the time zones of the realm (`src/realm_backend/zonedata`).
 
 | Asset | Built by |
 |---|---|
