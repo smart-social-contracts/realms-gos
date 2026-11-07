@@ -87,6 +87,16 @@ late, an upgrade or a `proposal_finalize` days after the deadline do not expire 
 `effective_at` is accepted and its action runs at once, by the timer, an upgrade or `proposal_finalize`. Proposals due
 in the same second run in no set order.
 
+**A proposal can link to others.** `proposal_create` takes optional `links`, at most 16 of `{kind, proposal}`: `replaces`
+(this proposal takes the place of an earlier one) or `relates_to` (a plain reference, both ways), each proposal named
+once. The links are fixed at creation, like the action; to change a proposal, its proposer withdraws it and files a new
+one that `replaces` it. A `replaces` target must be a withdrawn proposal filed for the same member (the grantor, for a
+call made under power of attorney), and a withdrawn proposal is replaced once: a second `replaces` of it is a
+`Conflict`, and when the replacement is withdrawn in turn, a new proposal replaces *it*, so the first one stays
+replaced by the second. The other side is readable: `proposal_get` shows the proposal that replaces this one
+(`replaced_by`), and `proposal_linked_from` lists, a page at a time and oldest first, every proposal that links to it
+(`replaces` there reads "replaced by"). Nothing limits how many proposals link to one.
+
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
 it, along with the realm-wide `voting_threshold` and `voting_quorum`, in hundred-millionths.
 

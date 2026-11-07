@@ -1,6 +1,7 @@
 """Proposals and votes, contracts, licences, the realm itself, quarters, federation and codex."""
 
 from .proposal import Proposal
+from .proposal_edge import ProposalEdge
 from .vote import Vote
 from .mandate import Mandate
 from .contract import Contract

@@ -2,7 +2,8 @@ import json
 
 from core import chain
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
-from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Task, TaskSchedule, Vote
+from ggg import (Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, ProposalEdge, Realm, Task,
+                 TaskSchedule, Vote)
 from api import tasks
 from core.op import dispatch, op, ops
 from core.ratio import ONE, refuse_renamed
@@ -11,6 +12,8 @@ CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")
 # Proposals that can still vote or run, so their department must stay.
 PENDING = OPEN + ("accepted", "execution_scheduled")
+MAX_LINKS = 16  # a proposal's own links, so that a reply never outgrows the Internet Computer's limits
+LINK_KINDS = ("replaces", "relates_to")
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
 
@@ -71,14 +74,44 @@ def check_scope(department, action):
     raise Forbidden(f"{action['op']} is not governed by {department.id}: only a realm-wide proposal can run it")
 
 
-def new_proposal(title, user, by, department, action=None, description="", effective_at=0):
+def checked_links(user, links):
+    """The ``links`` of a proposal filed for member ``user``, as stored, or a refusal (ggg I-GOV-10). Nothing is written
+    here: a refused proposal leaves no trace."""
+    links = [] if links is None else links
+    if not isinstance(links, list) or any(
+            not isinstance(link, dict) or link.get("kind") not in LINK_KINDS or not isinstance(link.get("proposal"), str)
+            for link in links):
+        raise Fail(f"links is a list of {{kind, proposal}}, the kind one of {', '.join(LINK_KINDS)}")
+    if len(links) > MAX_LINKS:
+        raise Fail(f"a proposal has at most {MAX_LINKS} links")
+    named = set()
+    for link in links:
+        if link["proposal"] in named:
+            raise Fail(f"the links name proposal {link['proposal']} twice")
+        named.add(link["proposal"])
+        target = find(Proposal, link["proposal"])
+        if link["kind"] == "replaces":
+            if target.proposer != user:  # the member it was filed for: the grantor, when it was filed for one
+                raise Forbidden("only the member it was filed for may replace a withdrawn proposal")
+            if target.status != "withdrawn":
+                raise Conflict(f"{target.id} is {target.status}: a replaced proposal must be withdrawn first")
+            if target.replaced_by:
+                raise Conflict(f"{target.id} is already replaced by {target.replaced_by}")
+    return [{"kind": link["kind"], "proposal": link["proposal"]} for link in links]
+
+
+def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=()):
     policy = department.policy or {}
     p = Proposal(id=next_id(Proposal, "P"), title=title, description=description, proposer=user,
                  on_behalf_of=user if by != user else "", department=department, action=action,
                  status="voting", opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
-                 effective_at=effective_at,
+                 effective_at=effective_at, links=list(links),
                  threshold=int(settings().get("voting_threshold", ONE // 2)),
                  quorum=int(settings().get("voting_quorum", 0) if department.is_root else policy.get("quorum", 0)))
+    for link in links:
+        ProposalEdge(id=next_id(ProposalEdge, "L"), source=p.id, target=link["proposal"], kind=link["kind"])
+        if link["kind"] == "replaces":
+            Proposal[link["proposal"]].replaced_by = p.id
     p.tally = {c: 0 for c in CHOICES}
     if not department.is_root:
         p.tally = {**p.tally, "required": int(policy.get("m", 1)), "veto": list(policy.get("veto", []))}
@@ -262,6 +295,8 @@ def proposal_create(c, args):
     governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
     instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier at the deciding
     vote, whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
+    Optional ``links``, at most 16 of ``{kind, proposal}`` (``replaces`` or ``relates_to``), each proposal named once and
+    fixed at creation: ``replaces`` names a withdrawn proposal of yours that no other proposal replaces yet.
     Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
@@ -269,8 +304,9 @@ def proposal_create(c, args):
     if action is not None:
         check_action(action)
         check_scope(department, action)
+    links = checked_links(c.user, args.get("links"))
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
-                     effective_at_of(args))
+                     effective_at_of(args), links)
     return {"proposal": p.id}
 
 
@@ -284,6 +320,16 @@ def proposal_withdraw(c, args):
         raise Conflict(f"{p.id} is {p.status}; only an open proposal can be withdrawn")
     p.status = "withdrawn"
     return {"proposal": p.id}
+
+
+@op("realm.data_view", read=True, returns="links")
+def proposal_linked_from(c, args):
+    """The links of other proposals to ``proposal``, oldest first, ``count`` at a time (default 100, at most 500) from
+    row ``from`` (default 1): ``links`` (the ``kind`` and the ``proposal`` that carries it; ``replaces`` there reads
+    "replaced by"); ``next`` continues them (null at the end). Nothing limits how many proposals link to one."""
+    p = find(Proposal, args["proposal"])
+    edges, nxt = page_by(ProposalEdge, "target", p.id, args)
+    return {"links": [{"kind": e.kind, "proposal": e.source} for e in edges], "next": nxt}
 
 
 @op("proposal.vote", delegable=True, returns="vote")

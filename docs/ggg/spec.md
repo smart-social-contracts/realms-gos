@@ -69,6 +69,9 @@ same rows.
   `proposal_finalize`, is accepted and its action runs at once. `proposal_stop` ends a waiting proposal
   as `withdrawn`, and `ggg_proposal_stop` replies `Done` without an id when it applies at once, `Proposed`
   with the new proposal's id under a voting policy. Proposals due at the same second run in no set order;
+- a proposal's `links` are `{kind, proposal}` with the kind in lower-case text (`replaces`, `relates_to`) where `ggg.did` has
+  a variant; `proposal_linked_from` is the paged read of the links *to* a proposal, `proposal_get` shows `replaced_by`,
+  and `ProposalEdge` rows (one per link, indexed by the proposal they point to) are what it pages;
 - `Realm.timezone` is `UTC` until the realm sets it with `realm_configure` (or the `realm` setup step). It must be
   `UTC` or a zone of the tz database the release bundles (`src/realm_backend/zonedata`, written by
   `scripts/build_zones.py`), else `InvalidArgument`. The realm reads its own zone's file when it is set and
