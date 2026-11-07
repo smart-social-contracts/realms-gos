@@ -275,7 +275,9 @@ def test_a_department_vote_everyone_has_voted_in_ends_though_its_outcome_was_nev
     p = ok("proposal_create", "dana", title="One approval", department="Civil Registry", action=action)["proposal"]
     ok("proposal_vote", "dana", proposal=p, choice="yes")
     assert Proposal[p].status == "voting"
-    ok("proposal_vote", "bob", proposal=p, choice="abstain")  # a second approval is out of reach: nobody is left
+    # A second approval is still within reach (bob could have said yes), but nobody is left to vote: the vote ends
+    # as everyone has voted, where it used to stay open to its deadline.
+    ok("proposal_vote", "bob", proposal=p, choice="abstain")
     assert Proposal[p].status == "rejected" and Department["Civil Registry"].policy["m"] == 2
 
 

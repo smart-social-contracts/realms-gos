@@ -116,8 +116,8 @@ def close(p, result):
 
 
 def vote_end(p):
-    """When the vote of ``p``, closed now, ended: at its deadline, or earlier, at the deciding vote. Closing it later than
-    that does not move the end: the deadline timer fires a second late, an upgrade arms it again whenever the realm
+    """When the vote of ``p``, closed now, ended: at its deadline, or earlier, at the vote that ended it (the last of the
+    eligible members, or the one that made the outcome certain). Closing it later than that does not move the end: the deadline timer fires a second late, an upgrade arms it again whenever the realm
     starts, and ``proposal_finalize`` may come days after the deadline."""
     return min(chain.now(), p.deadline) if p.deadline else chain.now()
 
@@ -260,8 +260,9 @@ def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
     governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
-    instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier at the deciding
-    vote, whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
+    instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier once every eligible
+    member has voted (or, in a department, or in a realm whose voting window is 0, once the outcome is certain),
+    whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
     Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
@@ -289,7 +290,9 @@ def proposal_withdraw(c, args):
 @op("proposal.vote", delegable=True, returns="vote")
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
-    Voting again replaces your earlier vote."""
+    Voting again replaces your earlier vote, until the vote ends: at its deadline, or once every eligible member has
+    voted (or the outcome is certain, in a department or a realm with no voting window). After that no vote is
+    accepted and none is replaced."""
     p = find(Proposal, args["proposal"])
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
