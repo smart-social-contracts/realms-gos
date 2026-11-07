@@ -73,7 +73,8 @@ def start(installer=""):
     for name, allowed in PROFILES.items():
         if UserProfile[name] is None:
             UserProfile(id=name, allowed_to=allowed)
-    # The parsed zone is gone after an upgrade, and a query could not keep one it parsed: read it here.
+    # The parsed zone is gone after an upgrade, and a query could not keep one it parsed: read it here. A zone the
+    # release lacks traps the upgrade on purpose: tz names only grow, and the realm must not turn UTC without a word.
     if Realm["1"].timezone != "UTC":  # a UTC realm needs no zone file, nor the reader
         localtime.use(Realm["1"].timezone)
     tasks.rearm()
@@ -130,14 +131,20 @@ def remember(key, value):
     realm.manifest_data = {**realm.manifest_data, key: value}
 
 
+def known_timezone(values):
+    """Refuse a ``timezone`` this release has no zone file for. The check of ``realm_configure``, so that a call that
+    cannot succeed is refused before a voting policy turns it into a proposal."""
+    if "timezone" in values and not zones.known(values["timezone"]):
+        raise Fail(f"timezone must be an IANA name such as Europe/Madrid, or UTC; this release has no zone "
+                   f"'{values['timezone']}'")
+
+
 def configure(fields, values):
     realm, color = Realm["1"], values.get("primary_color")
     unknown = sorted(set(values) - set(fields))
     if unknown:
         raise Fail(f"cannot configure {', '.join(unknown)} here")
-    if "timezone" in values and not zones.known(values["timezone"]):
-        raise Fail(f"timezone must be an IANA name such as Europe/Madrid, or UTC; this release has no zone "
-                   f"'{values['timezone']}'")
+    known_timezone(values)
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in HEX for ch in color[1:].lower())):
         raise Fail(f"primary_color must look like #1E6B52, not {color}")
     if (values.get("test_mode") or any((values.get("test_flags") or {}).values())) \
@@ -259,7 +266,7 @@ def setup_launch(c, args):
     return {"realm": realm.id, "status": realm.status}
 
 
-@op("realm.configure", governed=launched)
+@op("realm.configure", governed=launched, check=known_timezone)
 def realm_configure(c, args):
     """Set any of ``name``, ``manifesto``, ``welcome_message``, ``open_registration``, ``ai_assistant_enabled``,
     ``quarter_join_mode``, ``auto_scale_enabled``, ``timezone``, ``test_mode`` and ``test_flags``. Returns

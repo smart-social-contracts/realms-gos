@@ -10,7 +10,7 @@ from api import setup
 from core import localtime, op, tzif
 from core.civil import civil_from_days
 from ggg import Department, Proposal, Realm
-from kit import call, ok
+from kit import call, direct, ok
 
 NS = 10**9
 EVENING = 1_782_943_200 * NS  # 2026-07-01 22:00 UTC: already the 2nd in Madrid, still the 1st in Los Angeles
@@ -93,6 +93,19 @@ def test_changing_the_zone_applies_from_that_moment_and_rewrites_nothing():
     assert local_date() == (2026, 7, 2) and localtime.local_day(EVENING)[1] == 9 * 3600
     after = ok("proposal_get", "alice", proposal=p)["proposal"]
     assert after == before  # its opening and its deadline are UTC instants: the zone does not touch them
+
+
+@pytest.mark.parametrize("name", ["CET", "Europe/Mardid", "europe/madrid", "Madrid"])
+def test_a_bad_name_is_refused_under_a_voting_policy_instead_of_filed(name):
+    launched()
+    world.policy(Department["Administration"], 2, 3)
+    out = direct("realm_configure", "ctl", timezone=name)
+    assert not out["ok"] and out["kind"] == "invalid_argument", out
+    fake_chain.state["caller"] = "ctl"
+    assert "InvalidArgument" in op.run(g.ggg_realm_configure({"timezone": name}))["Err"]
+    assert Proposal.count() == 0 and Realm["1"].timezone == "UTC"
+    out = ok("realm_configure", "ctl", timezone="Europe/Madrid")  # a good name is filed as a proposal
+    assert out["requires_vote"] and Proposal.count() == 1 and Realm["1"].timezone == "UTC"
 
 
 def test_after_launch_the_change_is_a_governed_setting():

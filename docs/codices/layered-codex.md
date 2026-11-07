@@ -521,7 +521,8 @@ inherits it from a layer or a sync source. Timestamps stay UTC nanoseconds, and 
 realm's official time. Realm-local time is computed in Realms GOS
 ([#503](https://github.com/smart-social-contracts/realms-gos/issues/503)): a pure-Python zone-file
 reader plus date arithmetic, with no change to the Python runtime. Every release bundles the IANA tz data
-for every zone, one module per zone file, as raw bytes (never base64), so the rules are refreshed whenever
+for every zone, one module per zone file, as hex text that `bytes.fromhex` decodes (never base64, which costs 17M
+instructions for a few KB), so the rules are refreshed whenever
 a realm is upgraded: there is no upload and no checksum. The realm reads only its own zone, once, when it
 is set and again when the realm starts after an upgrade, never in a query, and keeps the parsed zone in
 memory. A change of `Realm.timezone` applies from that moment: stored times are UTC, so nothing is
