@@ -5,8 +5,8 @@ from api import taxes
 import world
 from core.db import each
 from core.ratio import BASIS_POINT, ONE
-from ggg import Delegation, Department, Invoice, Land, Member, TaxDeclaration, TaxPolicy
-from kit import call, denied, later, ok
+from ggg import Delegation, Department, Invoice, Land, Member, Proposal, TaxDeclaration, TaxPolicy
+from kit import call, denied, ok
 from test_treasury import balance_reply, setup_finance
 
 PROPERTY = {"code": "property", "base": "land_area", "unit_value": 100, "method": "progressive",
@@ -60,9 +60,7 @@ def test_story_agora_taxes():
         p = ok(name, "bob", **args)["proposal"]
         for voter in world.PEOPLE:
             ok("proposal_vote", voter, proposal=p, choice="yes")
-        later(8 * 86400)
-        ok("proposal_finalize", "ctl", proposal=p)
-        assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed"
+        assert Proposal[p].status == "executed"  # the last vote ended the vote and ran the action
     new = TaxPolicy["TAX-POLICY-2"]
     assert (new.status, new.proposal, TaxPolicy[first].status) == ("adopted", p, "superseded")
 

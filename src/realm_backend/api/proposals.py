@@ -217,6 +217,8 @@ def count(p):
 
 def outcome(p, final):
     tally, size, vetoed = count(p)
+    # A vote ends at its deadline, or earlier, the moment every eligible member has voted (ggg I-GOV-7).
+    final = final or (size > 0 and sum(tally.values()) >= size)
     required = (p.tally or {}).get("required")
     if vetoed:
         return "rejected"
@@ -320,18 +322,16 @@ def proposal_open(c, args):
 
 @op("proposal.manage", returns="proposal")
 def proposal_finalize(c, args):
-    """Close voting on ``proposal`` and record it as accepted or rejected. Returns ``status``.
-    A realm-wide proposal waits for its deadline; a department's closes early once its outcome is certain. A late close
-    does not move the end of the vote (see ``effective_at`` of ``proposal_create``). Accepted after its ``effective_at``,
-    the action waits for ``proposal_execute``."""
+    """Close voting on ``proposal`` once its vote has ended, and record it as accepted or rejected. Returns ``status``.
+    A vote ends at its deadline, or earlier once every eligible member has voted or its outcome is certain; closing it
+    late does not move that end (see ``effective_at`` of ``proposal_create``). An accepted action runs at once, unless
+    its ``effective_at`` is still ahead: it runs then. Returns ``result`` when it ran."""
     p = find(Proposal, args["proposal"])
     if p.status != "voting":
         raise Conflict(f"{p.id} is not being voted on")
-    result = outcome(p, bool(p.deadline) and chain.now() > p.deadline)
-    if result is None:
+    if (yield from settle(p, bool(p.deadline) and chain.now() > p.deadline)) is None:
         raise Conflict(f"{p.id} is still open" + (f" until {p.deadline}" if p.deadline else " until its outcome is certain"))
-    close(p, result)
-    return {"proposal": p.id, "status": p.status}
+    return {"proposal": p.id, "status": p.status, **({"result": p.result} if p.result else {})}
 
 
 @op("proposal.manage", returns="proposal")
@@ -349,10 +349,11 @@ def scheduled_department(args):
     return find(Proposal, args["proposal"]).department
 
 
-@op("proposal.manage", governed=scheduled_department, returns="proposal")
+@op("proposal.manage", governed=scheduled_department)
 def proposal_stop(c, args):
     """Stop ``proposal``, accepted and waiting for its ``effective_at``: it ends withdrawn and its action never runs.
-    A proposal stops another by carrying this as its action. Returns ``status``."""
+    A proposal stops another by carrying this as its action. Returns ``status``; it creates no record, so the GGG
+    method replies ``Done`` without an id."""
     p = find(Proposal, args["proposal"])
     if p.status != "execution_scheduled":
         raise Conflict(f"{p.id} is {p.status}; only a proposal waiting for its effective time can be stopped")

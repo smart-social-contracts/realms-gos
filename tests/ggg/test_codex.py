@@ -8,8 +8,8 @@ from api import codex
 import fake_chain
 from core import op
 import world
-from ggg import Codex, Department, Event, Invoice, Realm, Token
-from kit import call, denied, later, ok, rows
+from ggg import Codex, Department, Event, Invoice, Proposal, Realm, Token
+from kit import call, denied, ok, rows
 from test_spec import spec_ops
 
 CODICES = pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices"
@@ -78,11 +78,10 @@ def hook(name, context=None):
 
 
 def vote_through(proposal):
+    """Every member votes yes: the last vote ends the vote and runs the action."""
     for v in world.PEOPLE:
         ok("proposal_vote", v, proposal=proposal, choice="yes")
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=proposal)
-    return ok("proposal_execute", "ctl", proposal=proposal)
+    assert Proposal[proposal].status == "executed", Proposal[proposal].result
 
 
 def test_install_status_uninstall():

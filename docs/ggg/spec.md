@@ -56,16 +56,19 @@ same rows.
   and `voting_threshold` and `voting_quorum`, kept outside the `Realm` row; a `voting_window` of
   0 leaves a realm-wide proposal open until its outcome is certain. An argument still sent under its
   old name (`threshold`, `quorum_percent`, `rate_bp`) is refused, naming the new one;
-- a proposal settles itself: the deciding vote (or, for a timed one, its deadline) closes it and runs
-  its action at once; `proposal_finalize` and `proposal_execute` remain for a deadline missed;
+- a proposal settles itself: the deciding vote, the last vote of every eligible member, or its deadline
+  closes it and runs its action at once; `proposal_finalize` does the same for a deadline missed, and
+  `proposal_execute` stays for a scheduled proposal's time and for GGG;
 - a proposal with an `effective_at` (whole seconds, not in the past) runs its action then, not at the vote. While it waits,
   its status is `execution_scheduled`, and a one-step task of the realm's task scheduler runs it, which
   the scheduler arms again after an upgrade. A vote ends at its deadline, or earlier at the deciding vote
-  (I-GOV-7); when it is closed does not matter, so a timer that fires late, an upgrade or a late
-  `proposal_finalize` never moves the end. A vote that ends after `effective_at` leaves the proposal
-  `expired`, and nothing runs. One that ended in time but is closed after `effective_at` is accepted and its
-  action runs at once (after `proposal_finalize`, at `proposal_execute`). `proposal_stop` ends a waiting
-  proposal as `withdrawn`. Proposals due at the same second run in no set order;
+  or the moment every eligible member has voted (I-GOV-7), and after that no vote is accepted or replaced;
+  when it is closed does not matter, so a timer that fires late, an upgrade or a late `proposal_finalize`
+  never moves the end. A vote that ends after `effective_at` leaves the proposal `expired`, and nothing
+  runs. One that ended in time but is closed after `effective_at`, by the timer, an upgrade or
+  `proposal_finalize`, is accepted and its action runs at once. `proposal_stop` ends a waiting proposal
+  as `withdrawn`, and `ggg_proposal_stop` replies `Done` without an id when it applies at once, `Proposed`
+  with the new proposal's id under a voting policy. Proposals due at the same second run in no set order;
 - `Realm.timezone` is `UTC` until the realm sets it with `realm_configure` (or the `realm` setup step). It must be
   `UTC` or a zone of the tz database the release bundles (`src/realm_backend/zonedata`, written by
   `scripts/build_zones.py`), else `InvalidArgument`. The realm reads its own zone's file when it is set and
@@ -166,7 +169,6 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 |---|---|---|---|
 | `task_create`, `task_edit`, `task_delete`, `task_run`, `task_schedule`, `task_cancel` (only the task's creator, or a controller; a cancelled task stays cancelled) | `task.*` | | Schedule a daily invoice check |
 | `task_list`, `task_logs` | `task.view` | read | Payroll task and its last 3 runs |
-| `proposal_stop` | `proposal.manage` | governed | A proposal that carries it ends `P-12`, accepted and waiting for 1 Jan, as `withdrawn` |
 | `proposal_run_scheduled` (runs the action of a proposal waiting for its effective time once that time has come, else does nothing; the task scheduler calls it) | — (public) | | At `effective_at`, the realm runs `P-12`'s transfer |
 | `ops_list` | — (public) | read | geister reads it to build MCP tools |
 | `orchestration_decide` (approve or reject a Casals baton action for this realm) | `orchestration.approve` | | Approve Casals' action "upgrade North to 0.9.1" |
