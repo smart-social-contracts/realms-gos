@@ -66,6 +66,10 @@ same rows.
   `expired`, and nothing runs. One that ended in time but is closed after `effective_at` is accepted and its
   action runs at once (after `proposal_finalize`, at `proposal_execute`). `proposal_stop` ends a waiting
   proposal as `withdrawn`. Proposals due at the same second run in no set order;
+- `Realm.timezone` is `UTC` until the realm sets it with `realm_configure` (or the `realm` setup step). It must be
+  `UTC` or a zone of the tz database the release bundles (`src/realm_backend/zonedata`, written by
+  `scripts/build_zones.py`), else `InvalidArgument`. The realm reads its own zone's file when it is set and
+  after an upgrade, never in a query; a change applies from that moment and rewrites nothing;
 - a tender's rubric, an allocation rule, a fund's balances, credential fields and wrapped keys are
   maps where `ggg.did` has lists of pairs;
 - a limit in time may be given as `expires_in` seconds instead of `expires_at`, and a delegation's

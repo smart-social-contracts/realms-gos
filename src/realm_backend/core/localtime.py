@@ -1,26 +1,37 @@
 """Realm-local time (realms-gos#503): which day it is in the realm's time zone, and where that day starts and ends.
 
 Timestamps stay UTC nanoseconds everywhere. A day is a day number (core.civil), with ``civil_from_days`` giving
-its date. The realm keeps the zone file of its own ``Realm.timezone`` and nothing else: ``load`` takes its raw
-bytes, parses them once and keeps the result in memory. Where the bytes come from, and what happens when the
-time zone changes, is for whoever calls ``load``; without a zone file the realm's time is UTC.
+its date. The realm keeps the zone of its own ``Realm.timezone`` and nothing else: ``use`` reads its zone file from
+the release's tz database (core.zones), parses it once and keeps the result in memory. Without one the realm's time
+is UTC.
 
-The parsed zone is lost on upgrade (and a query discards what it loads), so whoever wires ``load`` must call it
-again in ``post_upgrade``.
+The parsed zone is lost on upgrade, and a query discards what it loads, so ``use`` runs where the realm starts
+(``setup.start``, in ``init`` and ``post_upgrade``) and where the time zone is set, never in a query. A change of
+time zone applies from the moment it is made: nothing stored is UTC-dependent, so nothing is rewritten.
 """
 
-from core import tzif
+from core import tzif, zones
 
 NS = 1_000_000_000
 DAY = 86400
 
 _zone = tzif.UTC
+_name = "UTC"  # the zone in memory, by name; None when it was loaded from bytes
 
 
 def load(zone_file):
     """Use ``zone_file``, the raw bytes of a TZif file, as the realm's time zone; None goes back to UTC."""
-    global _zone
-    _zone = tzif.parse(zone_file) if zone_file else tzif.UTC
+    global _zone, _name
+    _zone, _name = tzif.parse(zone_file) if zone_file else tzif.UTC, None
+
+
+def use(name):
+    """Use the bundled zone ``name`` (``UTC`` or an IANA name, see core.zones) as the realm's time zone. The zone
+    file is parsed only when ``name`` is not the zone already in memory."""
+    global _name
+    if name != _name:
+        load(zones.zone_file(name) if name != "UTC" else None)
+        _name = name
 
 
 def local_day(ns):

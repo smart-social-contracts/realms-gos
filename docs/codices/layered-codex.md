@@ -215,7 +215,7 @@ The rules:
 | `publisher.realm` | the canister id of the source's own realm, if it has one, else `null` (§8) |
 
 A source carries no time zone and no zone file: a realm's time zone is its own `Realm.timezone`
-(§4.5), never a layer's, and the realm stores only its own zone file.
+(§4.5), never a layer's, and the realm reads only its own zone from the release's tz data.
 
 ### 3.2 `releases.json`
 
@@ -520,8 +520,13 @@ kind of GGG's fact schema so that every implementation rounds the same way. The 
 inherits it from a layer or a sync source. Timestamps stay UTC nanoseconds, and the UI shows the
 realm's official time. Realm-local time is computed in Realms GOS
 ([#503](https://github.com/smart-social-contracts/realms-gos/issues/503)): a pure-Python zone-file
-reader plus date arithmetic, with no change to the Python runtime. The realm stores only its own zone
-file, as raw bytes (never base64), parsed once and kept in memory. The day of a timestamp, for the
+reader plus date arithmetic, with no change to the Python runtime. Every release bundles the IANA tz data
+for every zone, one module per zone file, as raw bytes (never base64), so the rules are refreshed whenever
+a realm is upgraded: there is no upload and no checksum. The realm reads only its own zone, once, when it
+is set and again when the realm starts after an upgrade, never in a query, and keeps the parsed zone in
+memory. A change of `Realm.timezone` applies from that moment: stored times are UTC, so nothing is
+rewritten, and a deadline or an `effective_at` already set does not move; only what is computed in local
+time from then on uses the new zone. It is a governed realm setting. The day of a timestamp, for the
 working-day count of §5.2 or the official journal's daily issue (§9.6), is the realm's local day
 computed this way.
 

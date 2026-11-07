@@ -47,6 +47,7 @@ class Realm(Row):
     primary_color = String(default="")
     installed_version = String(default="")
     network = String(default="")
+    timezone = String(default="UTC")  # an IANA name (core.zones); UTC until the realm sets one
     can_test_mode = Boolean(default=False)
     test_mode = Boolean(default=False)
     test_flags = Json({})  # the test_mode_* switches
