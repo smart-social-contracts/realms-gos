@@ -35,6 +35,14 @@ _INSTALL = Types.Record({
 })
 
 
+# ggg.did's GggError, to decode the reply of a GGG method.
+GGG_ERROR = Types.Variant({
+    "NotFound": Types.Null, "Unauthenticated": Types.Null,
+    "Forbidden": Types.Record({"permission": Types.Opt(Types.Text), "message": Types.Text}),
+    "InvalidArgument": Types.Text, "Conflict": Types.Text, "Unavailable": Types.Text,
+    "GenericError": Types.Record({"error_code": Types.Nat, "message": Types.Text})})
+
+
 class Canister:
     def __init__(self, wasm_path, installer=""):
         self.pic = PocketIC()
@@ -47,7 +55,9 @@ class Canister:
         self._install({"install": None}, encode([{"type": Types.Text, "value": installer}]))
 
     def upgrade(self):
-        """Upgrade the canister to the same wasm: its stable memory stays, its timers are gone until post_upgrade."""
+        """Upgrade the canister to the same wasm, as its controller: its stable memory stays, its timers are gone until
+        post_upgrade."""
+        self.pic.set_sender(Principal.from_str(CONTROLLER))
         self._install({"upgrade": []}, encode([]))
 
     def wait(self, seconds):
@@ -90,6 +100,14 @@ class Canister:
         self.pic.set_sender(Principal.from_str(CONTROLLER))
         reply = self.pic.update_call(self.id, "__shell__", encode([{"type": Types.Text, "value": code}]))
         return decode(bytes(reply))[0]["value"]
+
+    def ggg(self, method, arg_type, arg, ok_type, sender, query=False):
+        """A GGG method called with Candid, as a GGG caller does: ``arg`` of ``arg_type``, replied as
+        ``variant { Ok : ok_type; Err : GggError }``. Returns the decoded ``{"Ok": ...}`` or ``{"Err": ...}``."""
+        self.pic.set_sender(Principal.from_str(sender))
+        call = self.pic.query_call if query else self.pic.update_call
+        reply = call(self.id, method, encode([{"type": arg_type, "value": arg}]))
+        return decode(bytes(reply), [Types.Variant({"Ok": ok_type, "Err": GGG_ERROR})])[0]["value"]
 
     def raw(self, method, payload=b"DIDL\x00\x00", query=True):
         call = self.pic.query_call if query else self.pic.update_call

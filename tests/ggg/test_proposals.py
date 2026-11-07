@@ -93,6 +93,19 @@ def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
     assert Proposal[p].status == "executed"
 
 
+def test_a_proposal_the_previous_release_left_accepted_runs_once_through_proposal_execute():
+    """The release before this one recorded an accepted vote at ``proposal_finalize`` and ran its action at
+    ``proposal_execute``: such a proposal is still in storage."""
+    world.build()
+    action = {"op": "mandate_create", "args": {"title": "Road works"}}
+    p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
+    Proposal[p].status = "accepted"
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+    again = call("proposal_execute", "ctl", proposal=p)
+    assert not again["ok"] and again["kind"] == "conflict" and "no accepted action" in again["error"]
+    assert Mandate.count() == 1
+
+
 def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
     world.build()
     realm_wide = [("mandate_create", {"title": "Road works", "executor": "Infrastructure"}),

@@ -61,9 +61,10 @@ same rows.
   `proposal_execute` stays for a scheduled proposal's time and for GGG;
 - a proposal with an `effective_at` (whole seconds, not in the past) runs its action then, not at the vote. While it waits,
   its status is `execution_scheduled`, and a one-step task of the realm's task scheduler runs it, which
-  the scheduler arms again after an upgrade. A vote ends at its deadline, or earlier at the deciding vote
-  or the moment every eligible member has voted (I-GOV-7), and after that no vote is accepted or replaced;
-  when it is closed does not matter, so a timer that fires late, an upgrade or a late `proposal_finalize`
+  the scheduler arms again after an upgrade. A vote ends at its deadline, or earlier the moment every
+  eligible member has voted (I-GOV-7); Realms GOS has a rule of its own besides, that a department's vote, and any
+  vote of a realm with no voting window, ends as soon as its outcome is certain. After the vote ends no vote is
+  accepted or replaced; when it is closed does not matter, so a timer that fires late, an upgrade or a late `proposal_finalize`
   never moves the end. A vote that ends after `effective_at` leaves the proposal `expired`, and nothing
   runs. One that ended in time but is closed after `effective_at`, by the timer, an upgrade or
   `proposal_finalize`, is accepted and its action runs at once. `proposal_stop` ends a waiting proposal
