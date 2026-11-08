@@ -40,7 +40,8 @@ def settings():
 
 
 def window():
-    """Seconds a realm-wide proposal stays open. 0: no deadline, it closes as soon as its outcome is certain."""
+    """Seconds a proposal stays open. 0: no deadline. A realm-wide proposal closes as soon as its outcome is certain, a
+    department's once it passes (see ``proposal_vote``)."""
     cal = Calendar["1"]
     return cal.voting_window if cal else 7 * 86400
 
@@ -150,8 +151,9 @@ def close(p, result):
 
 def vote_end(p):
     """When the vote of ``p``, closed now, ended: at its deadline, or earlier, at the vote that ended it (the last of the
-    eligible members, or the one that made the outcome certain). Closing it later than that does not move the end: the deadline timer fires a second late, an upgrade arms it again whenever the realm
-    starts, and ``proposal_finalize`` may come days after the deadline."""
+    eligible members, or the one that accepted a department's vote or decided a vote with no deadline). Closing it
+    later than that does not move the end: the deadline timer fires a second late, an upgrade arms it again whenever
+    the realm starts, and ``proposal_finalize`` may come days after the deadline."""
     return min(chain.now(), p.deadline) if p.deadline else chain.now()
 
 
@@ -248,22 +250,37 @@ def count(p):
     return tally, size, any(v is not None and v.choice == "no" for v in vetoes)
 
 
+def quorum_met(p, tally, size):
+    """Whether the votes cast reach the quorum of ``p``."""
+    return sum(tally.values()) * ONE >= p.quorum * max(size, 1)
+
+
+def veto_pending(p):
+    """Whether a veto holder of the department proposal ``p`` who can still vote has yet to vote. One who has left the
+    department cannot, and does not hold the vote open."""
+    return any(Vote[f"{p.id}:{v}"] is None and eligible(p, v) for v in (p.tally or {}).get("veto", []))
+
+
+def department_outcome(p, tally, size, vetoed, final):
+    """A department's vote passes with ``m`` approvals, no veto holder against and the policy's quorum met (ggg
+    I-GOV-3). Before it ends it is accepted only once every veto holder has voted, and it is never rejected: a no
+    can still be replaced (ggg I-GOV-7)."""
+    passes = tally["yes"] >= p.tally["required"] and not vetoed and quorum_met(p, tally, size)
+    if passes and (final or not veto_pending(p)):
+        return "accepted"
+    return "rejected" if final else None
+
+
 def outcome(p, final):
     tally, size, vetoed = count(p)
     # A vote ends at its deadline, or earlier, the moment every eligible member has voted (ggg I-GOV-7).
     final = final or (size > 0 and sum(tally.values()) >= size)
-    required = (p.tally or {}).get("required")
-    if vetoed:
-        return "rejected"
-    if required is not None:
-        if tally["yes"] >= required:
-            return "accepted"
-        return "rejected" if final or size - tally["no"] < required else None
+    if "required" in (p.tally or {}):
+        return department_outcome(p, tally, size, vetoed, final)
     if not p.deadline and not final:
         # No deadline: open until certain. Yes alone over the threshold of everyone eligible passes it; enough no
         # that the rest voting yes could not pass it fails it; once everyone has voted, it is decided as is.
-        turnout = sum(tally.values()) * ONE >= p.quorum * max(size, 1)
-        if tally["yes"] * ONE > p.threshold * max(size, 1) and turnout:
+        if tally["yes"] * ONE > p.threshold * max(size, 1) and quorum_met(p, tally, size):
             return "accepted"
         if tally["no"] * ONE >= (ONE - p.threshold) * max(size, 1):
             return "rejected"
@@ -271,8 +288,8 @@ def outcome(p, final):
     if not final:
         return None
     decisive = tally["yes"] + tally["no"]
-    turnout = sum(tally.values()) * ONE >= p.quorum * max(size, 1)
-    return "accepted" if turnout and decisive and tally["yes"] * ONE > p.threshold * decisive else "rejected"
+    passes = quorum_met(p, tally, size) and decisive and tally["yes"] * ONE > p.threshold * decisive
+    return "accepted" if passes else "rejected"
 
 
 def effective_at_of(args):
@@ -294,7 +311,8 @@ def proposal_create(c, args):
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
     governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
     instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier once every eligible
-    member has voted (or, in a department, or in a realm whose voting window is 0, once the outcome is certain),
+    member has voted (or, in a department, once it has ``m`` approvals, every veto holder has voted, none against, and
+    its quorum is met; or, for a realm-wide proposal in a realm whose voting window is 0, once the outcome is certain),
     whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
     Optional ``links``, at most 16 of ``{kind, proposal}`` (``replaces`` or ``relates_to``), each proposal named once and
     fixed at creation: ``replaces`` names a withdrawn proposal of yours that no other proposal replaces yet.
@@ -337,8 +355,11 @@ def proposal_linked_from(c, args):
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
     Voting again replaces your earlier vote, until the vote ends: at its deadline, or once every eligible member has
-    voted (or the outcome is certain, in a department or a realm with no voting window). After that no vote is
-    accepted and none is replaced."""
+    voted (in a department, once it has ``m`` approvals, every veto holder has voted, none against, and its quorum is
+    met; for a realm-wide proposal in a realm with no voting window, once the outcome is certain). Only an acceptance
+    ends a department's vote early, so a no can be replaced until the deadline, or until every eligible member has
+    voted; in a realm with no voting window a department's vote that cannot pass stays open until it passes, everyone
+    has voted, or its proposer withdraws it. After the vote ends no vote is accepted and none is replaced."""
     p = find(Proposal, args["proposal"])
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
@@ -372,9 +393,9 @@ def proposal_open(c, args):
 @op("proposal.manage", returns="proposal")
 def proposal_finalize(c, args):
     """Close voting on ``proposal`` once its vote has ended, and record it as accepted or rejected. Returns ``status``.
-    A vote ends at its deadline, or earlier once every eligible member has voted or its outcome is certain; closing it
-    late does not move that end (see ``effective_at`` of ``proposal_create``). An accepted action runs at once, unless
-    its ``effective_at`` is still ahead: it runs then. Returns ``result`` when it ran."""
+    A vote ends at its deadline, or earlier as ``proposal_vote`` says; closing it late does not move that end (see
+    ``effective_at`` of ``proposal_create``). An accepted action runs at once, unless its ``effective_at`` is still
+    ahead: it runs then. Returns ``result`` when it ran."""
     p = find(Proposal, args["proposal"])
     if p.status != "voting":
         raise Conflict(f"{p.id} is not being voted on")

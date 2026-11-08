@@ -62,8 +62,11 @@ same rows.
 - a proposal with an `effective_at` (whole seconds, not in the past) runs its action then, not at the vote. While it waits,
   its status is `execution_scheduled`, and a one-step task of the realm's task scheduler runs it, which
   the scheduler arms again after an upgrade. A vote ends at its deadline, or earlier the moment every
-  eligible member has voted (I-GOV-7); Realms GOS has a rule of its own besides, that a department's vote, and any
-  vote of a realm with no voting window, ends as soon as its outcome is certain. After the vote ends no vote is
+  eligible member has voted (I-GOV-7). A department's vote also ends as soon as it has `m` approvals, every veto
+  holder has voted (none against) and its quorum is met. Only an acceptance ends it early: until its deadline, or
+  until everyone has voted, a no can be replaced. Realms GOS has a rule of its own besides: a realm-wide vote in a
+  realm with no voting window ends as soon as its outcome is certain, while a department's vote there, if it cannot
+  pass, stays open until it passes, everyone has voted or its proposer withdraws it. After the vote ends no vote is
   accepted or replaced; when it is closed does not matter, so a timer that fires late, an upgrade or a late `proposal_finalize`
   never moves the end. A vote that ends after `effective_at` leaves the proposal `expired`, and nothing
   runs. One that ended in time but is closed after `effective_at`, by the timer, an upgrade or
