@@ -224,7 +224,10 @@ def task_schedule(c, args):
     """Schedule the operation ``op`` with ``args`` once, at the time ``at`` (seconds; a time that has passed runs it at
     once), with an optional ``reason``. It runs as you, with the permissions you hold then: every guard and rule runs
     again, so it obeys the legislation in force at that time, and a task that is refused ends failed and changes
-    nothing. Its operation's audit event, with origin task, is the task's ``event``. Returns ``task``."""
+    nothing. Its operation's audit event, with origin task, is the task's ``event``. Only a user schedules: the realm
+    and its codex, which act as the canister, are refused. Returns ``task``."""
+    if c.user == chain.self_id():
+        raise Fail("a task is scheduled by a user: the realm and its codex schedule none")
     task = Task(name=f"{SCHEDULED}{Task.max_id() + 1}", metadata=json.dumps({"creator": c.user}), status="pending")
     define(task, checked([args]), args.get("reason"))
     when = TaskSchedule(name=f"{task.name}@1", task=task, last_run_at=0, run_at=int(args["at"]), repeat_every=0)

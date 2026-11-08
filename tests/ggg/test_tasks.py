@@ -1,3 +1,5 @@
+import json
+
 import fake_chain
 import ggg_methods as g
 from api import setup, tasks
@@ -237,6 +239,15 @@ def test_task_schedule_needs_the_permission_a_known_operation_and_object_argumen
     assert "unknown operation" in denied("task_schedule", "carla", op="no_such_op", args={}, at=at)
     assert call("task_schedule", "carla", op="notification_send", args=[1], at=at)["kind"] == "invalid_argument"
     assert Task.count() == 0
+
+
+def test_a_task_is_scheduled_by_a_user_and_not_by_the_realm_or_its_codex():
+    clerk()
+    args = {"op": "notification_send", "args": LAPSE, "at": fake_chain.now() + 10}
+    out = json.loads(op.run(op.dispatch("task_schedule", json.dumps(args), origin="codex", signer=fake_chain.self_id(),
+                                        declared=("task_schedule",))))
+    assert out["kind"] == "invalid_argument" and "scheduled by a user" in out["error"]
+    assert Task.count() == 0 and fake_chain.state["timers"] == []
 
 
 def test_a_task_scheduled_for_a_time_that_has_passed_runs_at_once():

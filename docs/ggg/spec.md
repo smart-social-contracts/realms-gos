@@ -155,7 +155,8 @@ same rows.
   repeat: `task_schedule` makes it, named `TASK-<n>`, and it runs once, through `dispatch` with origin `task`, as the
   user who scheduled it. A task that is refused ends `failed` (it has no event); one that ran keeps the id of the
   operation's own `Event` (`event`). Its `scheduled_by` is `User:<principal>`, or `Realm:1` for a task the realm
-  scheduled itself, such as a proposal's run; no task is scheduled by a department or the codex. `task_list` shows every task of the scheduler as a
+  scheduled itself, such as a proposal's run. `task_schedule` is refused (`InvalidArgument`) when the caller is the
+  canister itself, as a codex's effect is: no task is scheduled by a department or the codex. `task_list` shows every task of the scheduler as a
   `Task` made of its first step and first schedule, and filters by `op` and by `status` (`scheduled`, `run`, `failed`,
   `cancelled`). `task_cancel` of a one-time task that already ran or failed is `Conflict`. A task with several
   steps, or a repeat, is made with `task_create` and `task_add_schedule`;
