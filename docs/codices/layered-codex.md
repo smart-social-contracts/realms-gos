@@ -381,7 +381,9 @@ The rules (the checker enforces them, §12):
 5. **Single inheritance only.** No metaclasses, no class decorators, no nested classes, no `exec`,
    `eval`, `compile`, `globals`, `locals`, `setattr`, `__import__`, `open`, no dunder attribute access
    (`__class__`, `__dict__`, `__bases__`, `__subclasses__`, ...). These are the same restrictions as
-   codex code today ([Design choices](../architecture/design-choices.md)).
+   codex code today ([Design choices](../architecture/design-choices.md)). No default arguments either,
+   on a method, a nested function or a lambda: a chapter's class lives as long as the codex runs, so a
+   default would be state shared by every call.
 
 ### 4.1 Marks
 
@@ -1270,7 +1272,12 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   access, `args.basis.legal_basis`; an argument the call did not give reads None); a guard returns None or
   `self.deny(reason)` and queues no effect. Hooks get GGG's `Event`, one per domain, shared down the layers of
   that domain. Read operations run no legislation, and nor do the effects a chapter queues (origin `codex`):
-  a hook's effect never runs another guard or hook, so chapters cannot cascade.
+  a hook's effect never runs another guard or hook, so chapters cannot cascade. A governed call that becomes a
+  proposal is a `proposal_create` to the legislation: its guards and hooks run on the filing. What a chapter
+  reads of GGG's entities is an allowlist of entities and fields (`VIEWS` in `core/legislation.py`): what
+  legislation needs to decide, never a key, a code, a person's private data, a sealed bid, who voted what, a
+  grant, a payment account or what one member was told; the arguments and results it gets carry no field the
+  audit keeps secret; and no read is answered while the codex loads.
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
     hooks still run;
@@ -1279,7 +1286,10 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   - calls between domains stop at depth 8; the install refuses a `uses` chain that could reach it;
   - a chapter that exhausts the sandbox's instruction budget fails that call; the realm closes the spent
     interpreter, loads the codex again and asks once more, so the calls before it never cost a later one its
-    answer.
+    answer. The reads of one call are metered on the realm's side too: past 2 B instructions they are refused
+    and the call fails, so a chapter that loops on reads costs the caller that much and never the whole message;
+  - a failure on a query path (`compute_realm_join`, asked by `join_targets`) is not kept: a query keeps no
+    writes.
 - **Making "unhealthy" visible.** `LayeredCodex.failures` holds, per chapter file and method, the failure
   count, the last error and when; `ggg_codex_status` shows it as `failures`, and `healthy` is false while it is
   not empty. The flag clears when that method next succeeds. There is no automatic revert. Still to add (D5, D8):
@@ -1297,11 +1307,14 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   guardrails. A layered codex declares no capability list: the GGG page (§1, "Effects are operations") has a
   hook queue GGG operations "which the GOS runs as the realm, under the same permissions as any caller", and
   rule 9 of §2 and the `self` API of §4.5 put no catalogue between a chapter and GGG, so the operation an effect
-  names is the one declared for it. Plainly: **a chapter can do, as the realm, anything the realm itself may do**
-  through a GGG operation, within the realm's own rules (a governed operation it queues still goes to a vote
-  where a vote is needed); the vote that installed the codex is the authority for it. Two exceptions, refused
-  before they run and counted against the chapter: an effect that names a reserved operation (§10.4), and one
-  that carries a `timezone` (§4.5). The security review of #512 and #544 may ask for per-chapter capabilities.
+  names is the one declared for it. Plainly: **a chapter can do, as the realm, anything the realm itself may do
+  directly** through a GGG operation; the vote that installed the codex is the authority for it. **A governed
+  operation it queues is not run: it becomes a proposal the realm files**, decided by the vote that operation
+  needs, as a member's call would be. Effects apply in order and stop at the first that fails; the operation's
+  own audit event precedes theirs. Refused before they run and counted against the chapter: an effect that
+  names a reserved operation (§10.4), one about a proposal or a federal vote whose action is reserved (a stop, a
+  withdrawal, a vote), and one that carries a `timezone` (§4.5). The security review of #512 and #544 may ask
+  for per-chapter capabilities.
 - **Facts:** the facts of a forbid are the operation's args, as GGG supplies them. The settings it
   reads with `S.` were folded in at build.
 - **Costs**, measured on PocketIC (basilisk 0.15.1, the realm's production wasm, 8 November 2026):
@@ -1423,7 +1436,8 @@ proposal's `effective_at` (§5.2).
      never calls chapters for them.
    - A proposal whose action is a reserved operation runs no legislation at all: no chapter's guard,
      forbid or hook runs on its `proposal_create`, its vote or its execution. A guard on
-     `proposal_create`, such as §5.2's, can neither refuse nor delay a revert.
+     `proposal_create`, such as §5.2's, can neither refuse nor delay a revert. The same holds for a
+     federal vote whose action is reserved, its legs in the quarters and the messages that carry it.
    - No chapter may change the IT team or who defines it.
    - The Cedar `GUARDRAILS` keep them permitted for their holders: no generated forbid targets their
      actions, and the checker guarantees that.

@@ -253,6 +253,11 @@ class Check:
     def function(self, node, outer_locals):
         ast = self.ast
         args = node.args
+        if args.defaults or any(d is not None for d in args.kw_defaults):
+            self.refuse(
+                node,
+                "a default argument is state shared by every call: pass the value instead",
+            )
         for arg in (
             args.posonlyargs
             + args.args

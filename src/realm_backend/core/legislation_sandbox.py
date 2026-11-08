@@ -13,7 +13,7 @@ never imports it. Every import is inside a function, so the text is a program, n
 
 import sys
 
-STATE = {}  # "codex": the loaded Codex; "files": every chapter file loaded, for naming the chapter that failed
+STATE = {"ready": False}  # "codex": the Codex; "files": the chapter files loaded; "ready": the load is complete
 
 
 class Finder:
@@ -74,7 +74,7 @@ def ggg_module(entities):
             raise LegislationError("GGG's entities are read-only in a chapter")
 
         def get(self, id):
-            row = rpc("ggg_read", entity=self.__kind__, method="get", id=str(id))  # noqa: F821  the sandbox's builtin
+            row = self._ask(method="get", id=str(id))
             return None if row is None else View(self.__kind__, row)
 
         def each(self):
@@ -86,10 +86,16 @@ def ggg_module(entities):
         def _rows(self, method, **kw):
             found, start = [], 1
             while start is not None:
-                page = rpc("ggg_read", entity=self.__kind__, method=method, start=start, **kw)  # noqa: F821
+                page = self._ask(method=method, start=start, **kw)
                 found += [View(self.__kind__, row) for row in page["rows"]]
                 start = page["next"]
             return tuple(found)
+
+        def _ask(self, **kw):
+            """One read, through the realm: at run time only, never while the codex loads (a class body, a check=)."""
+            if not STATE["ready"]:
+                raise LegislationError("GGG's entities are read when a method runs, not while the codex loads")
+            return rpc("ggg_read", entity=self.__kind__, **kw)  # noqa: F821  the sandbox's builtin
 
         def __repr__(self):
             return f"ggg.{self.__kind__}"
@@ -142,6 +148,7 @@ def finish():
         check_uses(STATE["codex"])
     except LegislationError as e:
         return {"ok": False, "error": str(e)}
+    STATE["ready"] = True
     return {"ok": True, "domains": sorted(STATE["codex"].chapters)}
 
 

@@ -266,9 +266,17 @@ class Check:
                     "import",
                 )
 
+    def no_defaults(self, ops):
+        """A default argument is one object for every call of the method, and the chapter's class lives as long as
+        the codex runs: none, on a method, a nested function or a lambda."""
+        for name, arg in ops:
+            if (name == "MAKE_FUNCTION" and arg and arg & 0x03) or (name == "SET_FUNCTION_ATTRIBUTE" and arg in (1, 2)):
+                self.refuse("a default argument is state shared by every call: pass the value instead", "=")
+
     def class_body(self, code):
         self.common(code, "class body", CLASS_INSTRUCTIONS)
         ops = instructions(code, self.names)
+        self.no_defaults(ops)
         for i, (name, arg) in enumerate(ops):
             if name in ("LOAD_ATTR", "LOAD_METHOD"):
                 # The dunder names a class body may hold (CLASS_BODY) are the ones CPython itself
@@ -292,6 +300,7 @@ class Check:
     def function(self, code):
         self.common(code, "method", FUNCTION_INSTRUCTIONS)
         ops = instructions(code, self.names)
+        self.no_defaults(ops)
         for i, (name, arg) in enumerate(ops):
             if name == "STORE_ATTR" and not self.on_local(code, ops, i):
                 attr = code.co_names[arg]

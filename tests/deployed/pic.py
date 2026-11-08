@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 from ic.candid import Types, decode, encode
@@ -75,8 +76,30 @@ class Canister:
 
     def _management(self, method, typ, value):
         effective = {"CanisterId": base64.b64encode(self.id.bytes).decode()}
-        return self.pic.update_call_with_effective_principal(
-            None, effective, method, encode([{"type": typ, "value": value}]))
+        return self._update(None, effective, method, encode([{"type": typ, "value": value}]))
+
+    def _update(self, canister_id, effective_principal, method, payload):
+        """An update call that waits for its reply however long its round takes. The client's own loop reads the
+        message's status right after a tick, and while a heavy round (installing this wasm, a codex loading) is still
+        running the server answers 409, busy, which the client turns into an error: here a busy answer is waited
+        out. The body and the status reads are the client's own (pocket_ic.PocketIC.update_call_with_effective_principal)."""
+        pic = self.pic
+        canister = canister_id if canister_id else Principal.management_canister()
+        body = {"sender": base64.b64encode(pic.sender.bytes).decode(),
+                "effective_principal": effective_principal if effective_principal else "None",
+                "canister_id": base64.b64encode(canister.bytes).decode(), "method": method,
+                "payload": base64.b64encode(payload).decode()}
+        msg_id = pic._get_ok(pic._instance_post("update/submit_ingress_message", body))
+        for _ in range(200):
+            try:
+                pic.tick()
+                result = pic._ingress_status(msg_id)
+            except (ConnectionError, KeyError):  # the server is busy with the round: ask again
+                time.sleep(0.5)
+                continue
+            if result:
+                return pic._get_ok_data(result)
+        raise ValueError(f"PocketIC did not complete {method} within 200 rounds")
 
     def _install(self, mode, arg):
         hashes = []
@@ -95,13 +118,13 @@ class Canister:
         self.pic.set_sender(Principal.from_str(sender) if sender else Principal.anonymous())
         payload = encode([{"type": Types.Text, "value": name},
                           {"type": Types.Text, "value": json.dumps(args or {})}])
-        call = self.pic.query_call if query else self.pic.update_call
-        return json.loads(decode(bytes(call(self.id, "read" if query else "run", payload)))[0]["value"])
+        reply = self.pic.query_call(self.id, "read", payload) if query else self._update(self.id, None, "run", payload)
+        return json.loads(decode(bytes(reply))[0]["value"])
 
     def shell(self, code):
         """Run Python in the canister as its controller (basilisk's ``__shell__``); returns what it printed."""
         self.pic.set_sender(Principal.from_str(CONTROLLER))
-        reply = self.pic.update_call(self.id, "__shell__", encode([{"type": Types.Text, "value": code}]))
+        reply = self._update(self.id, None, "__shell__", encode([{"type": Types.Text, "value": code}]))
         return decode(bytes(reply))[0]["value"]
 
     def ggg(self, method, arg_type, arg, ok_type, sender, query=False):

@@ -32,7 +32,7 @@ class FederalVoteLeg(Row):
     id = String()
     vote = ManyToOne("FederalVote", "legs")
     quarter = String(default="")
-    proposal_id = String(default="")
+    proposal_id = String(default="", indexed=True)  # the local proposal that is this leg
     outcome = String(default="")
     yes = Integer(default=0)
     no = Integer(default=0)

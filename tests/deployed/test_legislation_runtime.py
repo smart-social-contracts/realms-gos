@@ -211,7 +211,7 @@ t0 = ic.performance_counter(0)
 box = sandbox.Resident(program, legislation._answer, legislation.ACTIONS)
 t1 = ic.performance_counter(0)
 box.call("setup", operations=sorted(set(ops()) | set(legislation.EVENTS)), layers=plan["layers"], realm=plan["realm"],
-         calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=legislation._entities(), facts=None)
+         calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=sorted(legislation.VIEWS), facts=None)
 t2 = ic.performance_counter(0)
 for c in plan["chapters"]:
     box.call("load", source=c["source"], domain=c["domain"], text=texts[c["sha256"]])
@@ -226,6 +226,34 @@ import json
 from core import legislation
 print(json.dumps({"codex": legislation._state["codex"] if isinstance(legislation._state["codex"], str) else None,
                   "loaded": legislation._state["box"] is not None}))
+'''
+# A codex row made active without loading it, as a realm finds one after an upgrade; its chapter cannot load.
+BROKEN = '''
+import json
+from core import layered_codex as store
+from ggg import LayeredCodex
+text = %(text)r
+row = store.store_chapter(store.checksum(text), text)
+entries = {"x/town/procedure": {"source": "x/town", "sha256": row.sha256}}
+for other in LayeredCodex.load_some(1, max(LayeredCodex.max_id(), 1)):
+    if other.status == "active":
+        other.status, previous = "inactive", other.id
+cid = store.codex_id(["x/town"], {"procedure": ["x/town"]}, entries)
+LayeredCodex(id=cid, layers=["x/town"], layer_paths={"procedure": ["x/town"]}, chapters=entries, status="active", previous=previous)
+print(json.dumps({"codex": cid}))
+'''
+DEEP = "from realms.legislation import above\nclass Procedure(above('procedure')):\n    x = " + "-" * 50000 + "1\n"
+READ_LOOP = '''
+from ggg import Member
+from realms.legislation import above
+
+class Register(above("register")):
+    def on_proposal_create(self, event):
+        if event.args["title"] == "read loop":
+            n = 0
+            while True:
+                Member.get("nobody")
+                n += 1
 '''
 
 
@@ -396,3 +424,27 @@ def test_i_the_codex_is_warm_after_an_upgrade(town, people):
     town.upgrade()
     assert run(town, STATE) == {"codex": active, "loaded": True}  # loaded in post_upgrade, before any call
     assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
+
+
+def test_j_a_hook_that_loops_on_reads_fails_alone_and_the_caller_succeeds(town, people):
+    founder = people["founder"]
+    install(town, chapters_of(founder, [(TOWN, "register", READ_LOOP)]))
+    assert ok(town, "proposal_create", founder, title="read loop")["proposal"]
+    error = failures(town, founder)["codex"]["on_proposal_create"]["error"]
+    assert error.startswith("the chapters read for more than") and error.endswith("instructions in one call: the call stops")
+    ok(town, "proposal_create", founder, title="reads fine")
+    assert failures(town, founder) == {}
+
+
+def test_k_an_upgrade_with_a_codex_that_cannot_load_records_it_and_the_realm_fails_closed(town, people):
+    founder = people["founder"]
+    broken = run(town, BROKEN % {"text": DEEP})["codex"]
+    town.wait(RATE_LIMIT)
+    town.upgrade()  # post_upgrade warms the codex: it does not load, and the upgrade still succeeds
+    status = ok(town, "codex_status", founder, query=True)
+    assert status["codex"]["id"] == broken and not status["healthy"]
+    assert status["failures"]["codex"]["load"]["error"].startswith("the codex does not load: sandboxed call raised: MemoryError")
+    assert run(town, STATE) == {"codex": broken, "loaded": False}
+    assert proposal(town, founder, "anything")["error"].startswith("legislation error: the codex sha256:")
+    assert ok(town, "codex_revert", people["ctl"])["codex"]  # reserved: no chapter runs, the realm is back
+    assert ok(town, "codex_status", founder, query=True)["healthy"]

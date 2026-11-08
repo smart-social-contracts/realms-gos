@@ -63,8 +63,14 @@ class Resident:
             return plain(rpc(action, plain(kw)))
 
         if _basilisk_sandbox is None:
-            self.space = {"__name__": "__sandbox__",
-                          "__builtins__": dict(vars(builtins), rpc=lambda action, **kw: handler(None, action, kw))}
+
+            def ask(action, **kw):  # as the native boundary does: the host's error crosses as text, in a RuntimeError
+                try:
+                    return handler(None, action, kw)
+                except Exception as e:
+                    raise RuntimeError(f"rpc failed: {e}")
+
+            self.space = {"__name__": "__sandbox__", "__builtins__": dict(vars(builtins), rpc=ask)}
             exec(compile(program, "sandbox.py", "exec"), self.space)
             return
         digest = _basilisk_sandbox.sha256(program)
