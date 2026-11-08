@@ -469,19 +469,38 @@ def test_one_domain_in_conflict_refuses_the_whole_install():
         plan("town", relays)
 
 
-def test_sources_that_write_in_different_domains_do_not_conflict():
+def test_layers_that_no_relay_orders_against_each_other_are_refused_even_in_different_domains():
     spain = mini("eu/es", "1", ["tax"])
     relays = [
         {"source": "cv", "layers": [spain, mini("eu/es/vc", "1", ["local_regime"])]},
         {"source": "metro", "layers": [spain, mini("eu/es/amv", "1", ["transport"])]},
     ]
+    with pytest.raises(LegislationError) as e:
+        plan("town", relays)
+    assert str(e.value) == (
+        "no sync source orders eu/es/vc and eu/es/amv against each other: the layers a realm "
+        "runs form one chain (layered-codex.md §3.3)"
+    )
+
+
+def test_layers_with_nothing_to_run_do_not_need_an_order():
+    spain = mini("eu/es", "1", ["tax"])
+    relays = [
+        {"source": "cv", "layers": [spain, mini("eu/es/vc", "1", [])]},
+        {"source": "metro", "layers": [spain, mini("eu/es/amv", "1", [])]},
+    ]
     p = plan("town", relays)
-    assert p.paths == {
-        "tax": ["eu/es"],
-        "local_regime": ["eu/es/vc"],
-        "transport": ["eu/es/amv"],
-    }
-    assert p.layers == ["eu/es", "eu/es/vc", "eu/es/amv", "town"]
+    assert p.paths == {"tax": ["eu/es"]} and p.layers == ["eu/es", "town"]
+
+
+def test_layers_ordered_through_a_shared_relay_are_one_chain():
+    a, b, c = mini("a", "1", ["x"]), mini("b", "1", ["y"]), mini("c", "1", ["z"])
+    relays = [
+        {"source": "s1", "layers": [a, c]},
+        {"source": "s2", "layers": [a, b]},
+        {"source": "s3", "layers": [a, b, c]},  # puts b above c
+    ]
+    assert plan("town", relays).layers == ["a", "b", "c", "town"]
 
 
 def test_relays_that_order_two_layers_the_other_way_round_are_refused():

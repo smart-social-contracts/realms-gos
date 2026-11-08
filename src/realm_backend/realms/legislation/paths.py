@@ -16,7 +16,9 @@ and the realm's own layer, which needs no release (§3.2): ``{"chapters": {domai
 A layer is on a domain's path only if its release has a chapter in that domain: empty chapters are
 skipped, so València's tax path is Spain → València (§3.3). The paths the sync sources relay in one
 domain must form one chain, each the start of the longest, which the realm uses. Paths that differ are
-refused unless one extends the other, and the refusal is of the whole install (§2, rule 4).
+refused unless one extends the other, and the refusal is of the whole install (§2, rule 4). The
+layers the sync sources relay must also form one chain across domains: two layers with a chapter or a
+calendar that no relay orders against each other are refused too.
 """
 
 from realms.legislation.codex import domain_id, source_id
@@ -177,29 +179,32 @@ def _arrow(path):
 
 
 def _order(relays):
-    """Every layer the sync sources relay in one order, top to bottom, so ``self.layer`` can say which
-    layer is above which across domains. Each relay's own order is kept; layers no relay orders against
-    each other follow the order they are first listed in. Two relays that order two layers the other
-    way round are refused."""
+    """Every layer the sync sources relay, top to bottom, in the one order they put them in. The layers
+    a realm runs form one chain (§3.3), so ``self.layer`` can say which layer is above which across
+    domains. Refused: two relays that order two layers the other way round, and two layers that no
+    relay orders against each other."""
     runs = [
         [r["source"] for r in relay["layers"] if r["chapters"] or r["calendar"]]
         for relay in relays
     ]
-    before, listed = {}, []
+    before = {}
     for run in runs:
         for position, source in enumerate(run):
-            if source not in before:
-                before[source] = set()
-                listed.append(source)
+            before.setdefault(source, set())
             if position:
                 before[source].add(run[position - 1])
     order = []
-    while len(order) < len(listed):
-        ready = [s for s in listed if s not in order and before[s] <= set(order)]
+    while len(order) < len(before):
+        ready = [s for s in before if s not in order and before[s] <= set(order)]
         if not ready:
-            stuck = [s for s in listed if s not in order]
+            stuck = [s for s in before if s not in order]
             raise LegislationError(
                 f"the sync sources order these layers differently: {', '.join(stuck)}"
+            )
+        if len(ready) > 1:
+            raise LegislationError(
+                f"no sync source orders {' and '.join(ready)} against each other: the layers a realm "
+                "runs form one chain (layered-codex.md §3.3)"
             )
         order.append(ready[0])
     return order

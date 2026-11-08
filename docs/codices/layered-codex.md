@@ -273,6 +273,9 @@ own layer. Each sync source relays its own paths, so a path grows by one layer a
 - **One chain:** when a realm has several sync sources, their paths in one domain must form one
   chain, each the start of the longest, which the realm uses. Paths that differ are refused unless one
   extends the other, and the install fails. València passes, because EMSHI's water path extends CV's.
+  The layers the sync sources relay must also be ordered against each other across domains (every
+  layer with a chapter or a calendar): two that no sync source orders, such as CV and a metropolitan
+  area that both sync from Spain, are refused, so `self.layer` has one order to count by.
 - A CV town that does not sync from EMSHI gets a water path without EMSHI.
 
 ### 3.4 `calendar.json`
@@ -1112,6 +1115,9 @@ chosen sync source, one with an active link, is its record as the releases it ru
   release as in `releases.json` (§3.2) with its `source` added. The order is the source's own layer
   path; a source id does not place it (§3).
 - A layer is on a domain's path only if its entry has a chapter in that domain.
+- The layers of all the records, those with a chapter or a calendar, must form one chain: each record
+  gives an order, the orders must not contradict each other, and every pair of layers must be ordered
+  by some record.
 - The realm's own layer is passed beside them, without a version (§3.2):
   `{"chapters": {domain: sha256}, "calendar": sha256}`.
 - Two sync sources that relay one layer must relay the same release, with the same version and
