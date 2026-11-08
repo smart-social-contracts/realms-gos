@@ -74,7 +74,7 @@ def crypto_public_key(c, args):
     return {"public_key": blob_hex(reply)}
 
 
-@op("self.data_manage", returns="encrypted_key")
+@op("self.data_manage", returns="encrypted_key", secret=("encrypted_key",))
 def crypto_derive_key(c, args):
     """Your vetKey, encrypted to ``transport_public_key`` (hex). It opens only what was wrapped for you."""
     reply = yield from chain.call(MGMT, "vetkd_derive_key", f'(record {{ input = blob "{blob(c.user.encode().hex())}"; '
@@ -83,7 +83,7 @@ def crypto_derive_key(c, args):
     return {"encrypted_key": blob_hex(reply)}
 
 
-@op("self.data_manage", returns="granted")
+@op("self.data_manage", returns="granted", secret=("keys",))
 def crypto_grant(c, args):
     """Store wrapped keys at ``scope``: ``keys`` maps principal to wrapped key. Replaces earlier wraps."""
     manager(args["scope"], c.user)
@@ -130,7 +130,7 @@ def staff(department, principal):
         raise Forbidden(f"only {department}'s staff manage its documents")
 
 
-@op("document.manage")
+@op("document.manage", secret=("keys",))
 def document_store(c, args):
     """Store a ``department`` document (or replace ``document``): ``title``, ``ref`` and ``hash`` of its ciphertext,
     and optional ``keys`` (principal to wrapped key). Returns ``document`` and its key ``scope``."""
@@ -146,7 +146,7 @@ def document_store(c, args):
     return {"document": doc.id, "scope": scope_of(doc)}
 
 
-@op("document.manage", returns="granted")
+@op("document.manage", returns="granted", secret=("keys",))
 def document_share(c, args):
     """Share ``document``: ``keys`` maps principal to wrapped key. Returns ``granted``."""
     doc = find(Document, args["document"])
