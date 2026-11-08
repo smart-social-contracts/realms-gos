@@ -17,11 +17,20 @@ the runtime use the rest of the module: ``Codex`` (build a codex, ``load`` each 
 ``check`` the settings, run the resolved classes with a ``Context``), ``Calendar``, ``Event``,
 ``Money`` and the errors.
 
+A forbid's rule is an ``F`` expression (§6)::
+
+    ibi_urban_cap = forbid("tax_policy_propose",
+        (F.code == "ibi_urban") & F.rate.is_some() & (F.rate > pct("1.10") + when(S.capital, pct("0.07"))),
+        each="taxes", legislation="TRLRHL Art. 72.3")
+
+``Codex.forbids()`` binds every forbid to the realm (its settings folded, its tree checked against
+GGG's fact schema), ``Codex.cedar()`` writes the canonical Cedar of §5.8 and ``Codex.cedar_schema()``
+the schema it validates against; ``BoundForbid.evaluate(facts)`` is the same rule in plain Python.
+
 The module is self-contained: it imports nothing from the CLI or the canister, so the same code runs
 on a laptop and in the realm. In the realm, ``Codex.load`` runs inside the subinterpreter sandbox
-(§9.3), which supplies the read-only ``ggg`` view. S2 (#484) adds the ``F`` expression language of
-forbids and the Cedar it becomes; S3 (#485) the resolver that computes the layers from the realm's
-links.
+(§9.3), which supplies the read-only ``ggg`` view. S3 (#485) adds the resolver that computes the layers
+from the realm's links.
 """
 
 # The ``as`` form marks the re-export; the names a chapter may import are listed in ``__all__`` below.
@@ -39,6 +48,10 @@ from realms.legislation.context import plain as plain
 from realms.legislation.errors import LegislationError as LegislationError
 from realms.legislation.errors import Refused as Refused
 from realms.legislation.errors import UnitMismatch as UnitMismatch
+from realms.legislation.expressions import Expr as Expr
+from realms.legislation.expressions import F as F
+from realms.legislation.expressions import S as S
+from realms.legislation.expressions import when as when
 from realms.legislation.marks import Forbid as Forbid
 from realms.legislation.marks import extension as extension
 from realms.legislation.marks import fixed as fixed
@@ -53,9 +66,11 @@ from realms.legislation.rates import Money as Money
 from realms.legislation.rates import pct as pct
 from realms.legislation.rates import times as times
 
-# What a chapter may import, and nothing else (S2 adds F, S and when).
+# What a chapter may import, and nothing else.
 __all__ = [
+    "F",
     "Ref",
+    "S",
     "above",
     "days",
     "extension",
@@ -64,6 +79,7 @@ __all__ = [
     "months",
     "overridable",
     "pct",
+    "when",
     "working_days",
     "years",
 ]

@@ -86,42 +86,70 @@ class Check:
         self.identifier(node, node.targets[0].id, "module")
         self.constant(node.value)
 
-    def constant(self, node):
-        """A constant expression: literals, containers of them, SDK calls on them, imported SDK names."""
+    def constant(self, node, member=False):
+        """A constant expression: literals, containers of them, SDK calls on them, imported SDK names.
+        A class ``member`` may also hold an ``F`` tree (layered-codex.md §6): ``F.x`` and ``S.x``,
+        their methods (``F.rate.is_some()``), one comparison at a time, and ``~``."""
         ast = self.ast
         if isinstance(node, ast.Constant):
             self.literal(node)
         elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
             for item in node.elts:
-                self.constant(item)
+                self.constant(item, member)
         elif isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values):
-                self.constant(key)
-                self.constant(value)
+                self.constant(key, member)
+                self.constant(value, member)
         elif isinstance(node, ast.UnaryOp) and isinstance(
             node.op, (ast.USub, ast.UAdd)
         ):
-            self.constant(node.operand)
+            self.constant(node.operand, member)
         elif isinstance(node, ast.BinOp):
-            self.constant(node.left)
-            self.constant(node.right)
+            self.constant(node.left, member)
+            self.constant(node.right, member)
         elif isinstance(node, ast.Name):
             self.identifier(node, node.id, "module")
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             self.identifier(node, node.func.id, "module")
             for arg in node.args:
-                self.constant(arg)
+                self.constant(arg, member)
             for keyword in node.keywords:
                 self.keyword(keyword)
                 if isinstance(keyword.value, ast.Lambda):
                     self.function(keyword.value, [])
                 else:
-                    self.constant(keyword.value)
+                    self.constant(keyword.value, member)
+        elif member and self.fact_expression(node):
+            pass
         else:
             self.refuse(
                 node,
                 "a constant expression: literals, lists and dicts of them, and SDK calls on them",
             )
+
+    def fact_expression(self, node):
+        """An ``F`` tree's own forms: ``F.x``, ``F.x.method(...)``, a comparison, ``~x``."""
+        ast = self.ast
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            self.identifier(node, node.value.id, "class body")
+            self.identifier(node, node.attr, "class body")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and not node.keywords
+            and self.fact_expression(node.func.value)
+        ):
+            self.identifier(node, node.func.attr, "class body")
+            for arg in node.args:
+                self.constant(arg, True)
+        elif isinstance(node, ast.Compare) and len(node.ops) == 1:
+            self.constant(node.left, True)
+            self.constant(node.comparators[0], True)
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+            self.constant(node.operand, True)
+        else:
+            return False
+        return True
 
     def chapter_class(self, node):
         ast = self.ast
@@ -160,7 +188,7 @@ class Check:
                 ):
                     self.refuse(member, "a member is one name")
                 self.identifier(member, member.targets[0].id, "class body")
-                self.constant(member.value)
+                self.constant(member.value, member=True)
             elif isinstance(member, ast.FunctionDef):
                 self.method(member)
             else:

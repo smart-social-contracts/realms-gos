@@ -339,6 +339,16 @@ def _member(key, value, load, refuse):
         line = raw.__code__.co_firstlineno
     elif isinstance(value, Forbid):
         kind, raw, op, legislation = "forbid", value, value.op, value.legislation
+        action = f"{op}.{value.each}" if value.each else op
+        if load.codex.facts is not None and action not in load.codex.facts.actions:
+            refuse(
+                (
+                    f'{key}: each="{value.each}" names no list of {op}: the fact schema has no {action}'
+                    if value.each
+                    else f"{key}: the fact schema has no facts for {op}"
+                ),
+                line,
+            )
     elif isinstance(value, float):
         refuse(f"{key}: floats are not allowed in a chapter", line)
     elif isinstance(value, type):

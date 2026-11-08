@@ -78,6 +78,15 @@ jobs:
           pip install -e cli/
           pip install -r requirements.txt
           pip install pytest pytest-cov
+      # The pinned Cedar CLI 4.14.1 (experimental, with symcc) and cvc5 1.3.1 prove that every
+      # generated forbid never errors (docs/codices/layered-codex.md §6 rule 9); without them that
+      # test skips.
+      - name: Cedar analysis tools
+        uses: actions/cache@v4
+        with:
+          path: .cache/cedar-tools
+          key: cedar-tools-cli-4.14.1-cvc5-1.3.1
+      - run: scripts/cedar_tools.sh .cache/cedar-tools >> "$GITHUB_ENV"
       - name: CLI unit tests
         run: pytest -v cli/tests/ || true
       - name: Extension privilege ratchet
