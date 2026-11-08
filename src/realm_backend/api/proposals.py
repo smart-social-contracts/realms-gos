@@ -1,9 +1,9 @@
 import json
 
-from core import chain
+from core import auth, chain
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
-from ggg import (Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, ProposalEdge, Realm, Task,
-                 TaskSchedule, Vote)
+from ggg import (Appointment, Calendar, Contract, Delegation, Department, Mandate, Member, Proposal, ProposalEdge,
+                 Realm, Task, TaskSchedule, Vote)
 from api import tasks
 from core.op import dispatch, op, ops
 from core.ratio import ONE, refuse_renamed
@@ -101,10 +101,37 @@ def checked_links(user, links):
     return [{"kind": link["kind"], "proposal": link["proposal"]} for link in links]
 
 
-def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=()):
+def check_grant(grant_id, grantor, action):
+    """A delegate's governed call, filed as a proposal, runs unless the power of attorney it was filed under has been
+    revoked or replaced, and only if that grant could still make the call: its scope, the member's permissions and
+    standing are checked again. The grant may have expired since, because a vote can outlast it. The vote is the
+    realm's consent to a collective act, not to the member's own acts."""
+    if not grant_id:
+        raise Forbidden("it was filed under power of attorney before this realm recorded grants; file it again")
+    grant, name = find(Delegation, grant_id), action["op"]
+    if grant.status in ("revoked", "declined"):
+        raise Forbidden(f"the power of attorney {grant.id} it was filed under has been revoked or replaced")
+    spec = ops().get(name)
+    if spec is None:
+        raise Fail(f"unknown operation '{name}'")
+    try:
+        auth.authorize(grantor, grant.delegate, name, spec, action.get("args") or {}, grant=grant)
+    except auth.Denied:
+        raise Forbidden(f"the power of attorney {grant.id} it was filed under does not allow {name} now")
+    except KeyError as e:
+        raise Fail(f"{name} is missing {e}")
+
+
+def filer(p):
+    """The delegate that filed ``p`` under a power of attorney, if any."""
+    grant = Delegation[p.filed_under] if p.filed_under else None
+    return grant.delegate if grant else ""
+
+
+def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=(), grant=""):
     policy = department.policy or {}
     p = Proposal(id=next_id(Proposal, "P"), title=title, description=description, proposer=user,
-                 on_behalf_of=user if by != user else "", department=department, action=action,
+                 on_behalf_of=user if by != user else "", filed_under=grant, department=department, action=action,
                  status="voting", opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
                  effective_at=effective_at, links=list(links),
                  threshold=int(settings().get("voting_threshold", ONE // 2)),
@@ -190,6 +217,8 @@ def run_action(p):
     The vote's authority stops at the proposal's department, so an action outside it fails without running."""
     try:
         check_scope(p.department, p.action)
+        if p.on_behalf_of:
+            check_grant(p.filed_under, p.proposer, p.action)
     except Fail as e:
         p.status, p.result = "failed", {"ok": False, "error": str(e), "kind": e.kind}
         return
@@ -212,10 +241,10 @@ def settle(p, final):
     return result
 
 
-def file_replay(name, args, user, by, department):
+def file_replay(name, args, user, by, department, grant=""):
     """Turn a governed call into a proposal that replays it once accepted."""
     p = new_proposal(f"{name} {json.dumps(args, sort_keys=True)[:120]}", user, by, department,
-                     {"op": name, "args": args})
+                     {"op": name, "args": args}, grant=grant)
     return {"proposal": p.id, "requires_vote": True}
 
 
@@ -317,16 +346,19 @@ def proposal_create(c, args):
     nothing runs.
     Optional ``links``, at most 16 of ``{kind, proposal}`` (``replaces`` or ``relates_to``), each proposal named once and
     fixed at creation: ``replaces`` names a withdrawn proposal of yours that no other proposal replaces yet.
+    Under a power of attorney a proposal is a motion: it carries no action.
     Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
     if action is not None:
+        if c.grant:
+            raise Forbidden("a proposal filed under power of attorney is a motion: it carries no action")
         check_action(action)
         check_scope(department, action)
     links = checked_links(c.user, args.get("links"))
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
-                     effective_at_of(args), links)
+                     effective_at_of(args), links, c.grant)
     return {"proposal": p.id}
 
 
@@ -336,6 +368,8 @@ def proposal_withdraw(c, args):
     p = find(Proposal, args["proposal"])
     if p.proposer != c.user:
         raise Forbidden(f"{p.id} is not your proposal")
+    if c.grant and p.filed_under != c.grant:
+        raise Forbidden(f"{p.id} was not filed under this power of attorney")
     if p.status not in OPEN:
         raise Conflict(f"{p.id} is {p.status}; only an open proposal can be withdrawn")
     p.status = "withdrawn"
@@ -367,6 +401,8 @@ def proposal_vote(c, args):
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
     if p.status != "voting" or (p.deadline and chain.now() > p.deadline):
         raise Conflict(f"{p.id} is not open for voting")
+    if c.grant and filer(p) == c.by:
+        raise Forbidden(f"{p.id} was filed by {c.by}: a delegate does not vote on its own proposal")
     if not eligible(p, c.user):
         raise Forbidden(f"you are not eligible to vote on {p.id}")
     key = f"{p.id}:{c.user}"

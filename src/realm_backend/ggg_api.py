@@ -712,7 +712,7 @@ BUILD = {
 
 
 def signing():
-    from api import delegation
-
-    return {"agents": sorted(delegation.signing()), "delegable": sorted(delegation.delegable()),
-            "supervision": "required"}
+    """The signing policy this realm enforces. Its guardrails keep every signing act with a human acting for
+    themselves, whatever a codex says (core.auth.GUARDRAILS), so no signing permission is open to an agent or to a
+    delegate. ``delegable_operations`` lists what a power of attorney can cover."""
+    return {"agents": [], "delegable": [], "supervision": "required"}

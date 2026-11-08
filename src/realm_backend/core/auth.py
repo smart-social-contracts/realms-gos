@@ -104,7 +104,8 @@ def is_banned(principal):
     return bool(member and member.status == "banned")
 
 
-def delegated_scope(grantor, delegate):
+def active_grant(grantor, delegate):
+    """The power of attorney ``delegate`` acts under for ``grantor`` now; Denied when there is none."""
     from ggg import Delegation
 
     now = chain.now()
@@ -113,23 +114,26 @@ def delegated_scope(grantor, delegate):
             if d.expires_at and now >= d.expires_at:
                 d.status = "expired"
             elif d.starts_at <= now:
-                return set((d.scope or {}).get("operations", []))
+                return d
     raise Denied(f"{delegate} holds no active power of attorney from {grantor}")
 
 
-def authorize(user, by, name, spec, args, origin="user", declared=()):
+def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None):
+    """Refuse the call with Denied, or return the id of the power of attorney a delegate acts under ("" for no one).
+    A delegate acts under its active grant from ``user``, or under ``grant`` when one is given."""
     if origin == "replay":
-        return
+        return ""
     if by == chain.ANONYMOUS and not spec["public"]:
         raise SignIn("sign in first")
     held = permissions(user)
+    grant = (grant or active_grant(user, by)) if user != by else None
     needed = spec["perm_for"](args) if spec.get("perm_for") else spec["perm"]
     context = {
         "op": name, "permission": needed or "", "user": user, "signer": by, "origin": origin,
         "read": spec["read"], "public": spec["public"], "signing": spec["signing"],
         "delegable": spec["delegable"], "delegated": user != by,
         "signer_agent": spec["signing"] and is_agent(by),
-        "scope": sorted(delegated_scope(user, by)) if user != by else [],
+        "scope": sorted((grant.scope or {}).get("operations", [])) if grant else [],
         "declared": sorted(declared),
         # A party may be named by principal or as "User:<principal>" (I-ALL-3).
         "parties": sorted({q for p in spec["parties"](args) for q in (p, p.removeprefix("User:"))})
@@ -140,6 +144,7 @@ def authorize(user, by, name, spec, args, origin="user", declared=()):
                 {"uid": {"type": "Realm::Realm", "id": "1"}, "attrs": {}, "parents": []}]
     if not decide(f'Realm::User::"{user}"', 'Realm::Action::"call"', 'Realm::Realm::"1"', entities, context):
         raise Denied(*reason(name, spec, context, held))
+    return grant.id if grant else ""
 
 
 def reason(name, spec, context, held):
