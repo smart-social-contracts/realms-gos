@@ -105,9 +105,9 @@ it, along with the realm-wide `voting_threshold` and `voting_quorum`, in hundred
 | | Realm-wide proposal (root department) | Department proposal |
 |---|---|---|
 | Eligible voters | every active member | the head and the holders of active seats |
-| Passes when | turnout ≥ `voting_quorum` and yes > `voting_threshold` of yes + no (default 50 %) | yes ≥ `m` |
-| Rejected when | the rule above fails at the deadline | a veto holder votes no, or `m` can no longer be reached |
-| Can close early | yes, once every eligible member has voted | yes, once every eligible member has voted or the outcome is certain |
+| Passes when | turnout ≥ `voting_quorum` and yes > `voting_threshold` of yes + no (default 50 %) | yes ≥ `m`, turnout ≥ the policy's `quorum`, and no veto holder voted no |
+| Rejected when | the rule above fails at the end of the vote | the rule above fails at the end of the vote |
+| Can close early | yes, once every eligible member has voted | yes, once every eligible member has voted, or as soon as it passes and every veto holder has voted; never with a rejection, so a no (a veto holder's too) can be replaced until the vote ends |
 
 A department cannot be deleted while it has a proposal being voted on or waiting to run. Only the root department
 is realm-wide: a proposal whose department is gone has no voters and runs nothing.

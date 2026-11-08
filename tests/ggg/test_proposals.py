@@ -74,7 +74,89 @@ def test_veto():
     world.policy(depts["Civil Registry"], 1, 3, veto=["dana"])
     p = ok("proposal_create", "bob", title="x", department="Civil Registry")["proposal"]
     ok("proposal_vote", "dana", proposal=p, choice="no")
+    assert Proposal[p].status == "voting"  # a veto holder's no can be replaced too: it rejects when the vote ends
+    ok("proposal_vote", "bob", proposal=p, choice="yes")  # the approval m asks for, and everyone has voted
     assert Proposal[p].status == "rejected"
+
+
+def civil_registry(m, quorum=0, veto=()):
+    """Civil Registry deciding m of 3, with four voters: dana, bob, and alice and carla in seats of their own."""
+    depts = world.build()
+    for voter in ("alice", "carla"):
+        world.seat(f"civil-registry.{voter}", voter, depts["Civil Registry"])
+    world.policy(depts["Civil Registry"], m, 3, quorum, veto)
+
+
+def department_proposal():
+    return ok("proposal_create", "bob", title="x", department="Civil Registry")["proposal"]
+
+
+def finalized_at_its_deadline(p):
+    later(8 * 86400)
+    return ok("proposal_finalize", "ctl", proposal=p)["status"]
+
+
+def test_I_GOV_7_a_veto_holder_who_has_not_voted_keeps_a_department_vote_open():
+    civil_registry(2, veto=["dana"])
+    p = department_proposal()
+    vote_all(p, "yes", "bob", "alice")
+    assert Proposal[p].status == "voting"  # two approvals, but dana has not voted
+    ok("proposal_vote", "dana", proposal=p, choice="abstain")
+    assert Proposal[p].status == "accepted" and Proposal[p].tally["eligible"] == 4  # carla never voted
+    assert "not open" in call("proposal_vote", "carla", proposal=p, choice="no")["error"]
+
+
+def test_I_GOV_7_a_vetoing_no_keeps_the_vote_open_until_it_ends_and_rejects_it_then():
+    civil_registry(2, veto=["dana"])
+    p = department_proposal()
+    ok("proposal_vote", "dana", proposal=p, choice="no")
+    vote_all(p, "yes", "bob", "alice")
+    assert Proposal[p].status == "voting"  # every veto holder has voted, but against
+    ok("proposal_vote", "dana", proposal=p, choice="yes")  # she changes her mind
+    assert Proposal[p].status == "accepted"
+
+    q = department_proposal()
+    ok("proposal_vote", "dana", proposal=q, choice="no")
+    vote_all(q, "yes", "bob", "alice")
+    assert finalized_at_its_deadline(q) == "rejected"
+
+
+def test_I_GOV_7_a_department_vote_without_veto_holders_ends_at_its_approvals():
+    civil_registry(2)
+    p = department_proposal()
+    ok("proposal_vote", "bob", proposal=p, choice="yes")
+    assert Proposal[p].status == "voting"
+    ok("proposal_vote", "alice", proposal=p, choice="yes")
+    assert Proposal[p].status == "accepted"
+
+
+def test_I_GOV_7_a_no_can_be_replaced_after_approvals_become_impossible():
+    civil_registry(3)
+    p = department_proposal()
+    vote_all(p, "no", "bob", "alice")  # two of the four are left: three approvals are out of reach
+    assert Proposal[p].status == "voting"
+    ok("proposal_vote", "bob", proposal=p, choice="yes")
+    vote_all(p, "yes", "dana", "carla")
+    assert Proposal[p].status == "accepted"
+
+    q = department_proposal()
+    vote_all(q, "no", "bob", "alice")
+    assert finalized_at_its_deadline(q) == "rejected"
+
+
+def test_I_GOV_3_a_departments_quorum_is_enforced():
+    civil_registry(1, quorum=75 * PERCENT)
+    p = department_proposal()
+    ok("proposal_vote", "bob", proposal=p, choice="yes")
+    assert Proposal[p].status == "voting"  # one approval is enough, a quarter of the voters is not
+    ok("proposal_vote", "alice", proposal=p, choice="abstain")
+    assert Proposal[p].status == "voting"
+    ok("proposal_vote", "dana", proposal=p, choice="abstain")  # three of the four
+    assert Proposal[p].status == "accepted"
+
+    q = department_proposal()
+    ok("proposal_vote", "bob", proposal=q, choice="yes")
+    assert finalized_at_its_deadline(q) == "rejected"
 
 
 def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
