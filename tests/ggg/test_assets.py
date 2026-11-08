@@ -3,8 +3,8 @@ import pytest
 import fake_chain
 import world
 from api.assets import quote, value
-from ggg import Case, Codex, Delegation, Dispute, Land, NFTToken, Organization, Verdict, Zone
-from kit import call, denied, later, ok
+from ggg import Case, Codex, Delegation, Dispute, Event, Land, NFTToken, Organization, Verdict, Zone
+from kit import call, denied, later, ok, rows
 
 OK = "(variant { Ok = 4_412 : nat })"
 RX = "health.prescription/1"
@@ -264,3 +264,47 @@ def test_I_AST_5_a_parcel_has_exactly_one_owner():
     ok("land_mint_nft", "ctl", land=other)
     assert f'principal "{fake_chain.SELF}"' in ledger_calls("mint")[0]
     assert {p.owner for p in Land.load_some(1, 10)} == {"User:alice", "Organization:buildco"}
+
+
+def assessor(depts):
+    world.person("hector")
+    world.seat("finance.assessor", "hector", depts["Finance"], "land.assess")
+
+
+def test_the_assessor_sets_the_value_and_area_of_a_parcel_signing_for_it():
+    assessor(agora())
+    land = register()
+    assert Land[land].assessed_value is None and Land[land].area is None and Land[land].assessed_at == 0
+    out = ok("land_assess", "hector", land=land, value=95_000, area=120, reference="CAT-17", legislation="Art. 7")
+    assert out["land"] == land
+    row = Land[land]
+    assert (row.assessed_value, row.area, row.assessed_at, row.assessment_ref) == (95_000, 120, fake_chain.now(), "CAT-17")
+    later(60)
+    ok("land_assess", "hector", land=land, value=96_000)  # a field left out keeps its value
+    assert (row.assessed_value, row.area, row.assessment_ref, row.assessed_at) == (96_000, 120, "CAT-17", fake_chain.now())
+    assert ok("land_list", "bob")["lands"][0]["assessed_value"] == 96_000
+    first = [e for e in rows(Event) if e.op == "land_assess"][0]
+    assert (first.user, first.args["legislation"]) == ("hector", "Art. 7")  # the audit event names the provision
+
+
+def test_an_assessment_sets_something_and_a_revoked_parcel_has_none():
+    assessor(agora())
+    land = register()
+    assert "sets a value, an area or a reference" in denied("land_assess", "hector", land=land)
+    assert "unknown Land" in denied("land_assess", "hector", land="L-99", value=1)
+    Land[land].status = "revoked"
+    assert call("land_assess", "hector", land=land, value=1)["kind"] == "conflict"
+    assert Land[land].assessed_value is None
+
+
+def test_assessing_a_parcel_needs_the_permission_and_cannot_be_delegated_or_left_to_an_agent():
+    depts = agora()
+    assessor(depts)
+    land = register()
+    assert "land.assess" in denied("land_assess", "bob", land=land, value=1)
+    Delegation(id="d1", grantor="hector", delegate="claude-conn", status="active",
+               scope={"operations": ["land.assess"]}, expires_at=fake_chain.now() + 3600)
+    assert "power of attorney" in denied("land_assess", "claude-conn", land=land, value=1, on_behalf_of="hector")
+    world.seat("finance.assessment_bot", "records-bot", depts["Finance"], "land.assess", agent=True, supervisor="hector")
+    assert "human" in denied("land_assess", "records-bot", land=land, value=1)
+    assert Land[land].assessed_value is None

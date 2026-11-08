@@ -108,6 +108,43 @@ same rows.
 - `mandate_create` takes the approving `proposal` as an argument, and a mandate's limit is
   `max_value` inside its `scope`;
 - governed operations reply with the operation's own result or the filed proposal, not `Governed`;
+- a tax policy's `taxes` are `TaxEntry` maps whose `subject` is `User` (every active member), `Land` (the owners of
+  active parcels) or `Declaration` (what the taxpayer declares: `tax_declare` bills it, `tax_assess` does not). An
+  entry charges by its `amount`, its `rate`, or the `brackets` of its `facts` (each an `up_to` and a `rate`, the
+  last open), at most one of them; its other settings are facts too: `unit_value` (land), `exempt_below`,
+  `exempt_profiles` (users), `due_days` and `enabled`. `tax_assess` bills one invoice for each taxpayer, entry and
+  period, with the items the active codex computes for each of their subjects (`compute_tax_assess`) or, when no
+  codex answers, one item from the entry's own charge, rounded to the cent as GGG rounds (the brackets of a
+  progressive tax are added up exactly and the total rounded once). A codex answer that is not invoice items, that
+  comes to less than nothing or more than an amount of money, or that covers some of a payer's subjects and not the
+  others, refuses the call before anyone is billed;
+- an invoice's `items` are lines with a `concept` and a signed `amount`, optionally a `quantity`, a `unit` and the
+  `legislation` that charges it; they sum to the invoice's `amount`, and `invoice_item_add` adds a line to a pending
+  invoice. The invoice of a fine or a restitution has one item, named for the kind of penalty;
+- a budget line is `revenue` or `expense`, a category is one kind within a fund and period (`budget_draft` refuses a
+  line of the other kind with `InvalidArgument`), and `budget_propose` takes every draft line of a period together
+  (so a line drafted after the proposal was filed, and before it was accepted, is adopted with it). `years` is
+  a fact for legislation and is not kept. Realms GOS never marks a draft `proposed`: a governed `*_propose` leaves the
+  draft as it is until the vote accepts it. `budget_extend` copies a period's budget as it stood at the end of the
+  period before into the period as `extended` lines, for each fund that has no extended, proposed or adopted line
+  in it yet (`Conflict` when none is left): of each fund and category the newest line that was adopted or extended
+  (or `closed` with the period), never a line a newer one replaced. An `extended` line stands in for an adopted one:
+  it caps spending, `budget_view` lists it and `period_close` closes it. A proposal for the period replaces
+  (`amended`) every extended line of each fund whose lines it adopts, whether it names the line's category or not,
+  and leaves the other funds' extensions; `closed` means closed with its period, so a category an adopted budget
+  drops does not come back at the next extension. An adopted budget is exhaustive: once a fund has one for the
+  period, spending in a category it has no expense line for is refused, while a fund with only extended lines, or
+  none, spends as before. Only an expense line caps spending, and its actual counts expense only; a revenue line
+  caps nothing, yet a fund whose adopted lines are all revenue has an adopted budget, so it refuses all spending
+  but the ledger's fee. A payment with no category is in the category `transfer` and a payroll in `payroll`, so each needs
+  its line like any other. The ledger's fee on a payment is a mechanical cost of it, not a spending decision, and
+  needs none: the realm books it itself under the category `ledger_fee`, which `transfer_create` and `budget_draft`
+  refuse a caller to name (`InvalidArgument`);
+- a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), and
+  `Treasury.debt_outstanding` is kept as a running total, like fund balances;
+- `codex_activate` makes the pending layered codex, named by its id (its checksum), the active one at once and keeps
+  the codex it replaces as `previous`; `codex_status` shows the pending one as `pending`. An `at` in the future is
+  refused until activations can be scheduled;
 - vetKD public keys, transport keys, wrapped keys and private data are hex text where `ggg.did` has
   `blob`.
 
@@ -216,7 +253,7 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 | `realm_export` | `db.export` | read | One page of an entity's rows, as stored, for a backup. An entity with large rows (`ChapterSource`: up to 256 KB each) returns fewer rows than `count` asks for: follow `next` |
 | `db_convert_indexes` | `db.convert` | | After an upgrade from a release before ic-python-db 0.13: converts the index lists saved as one array each, a batch per call, until `done` (a list too long for one call is skipped and named in `refused`); a new realm, or one already converted, does nothing |
 | `tax_policy_view` | `realm.data_view` | read | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
-| `budget_view` | `realm.data_view` | read | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its adopted budgets |
+| `budget_view` | `realm.data_view` | read | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |
 
 Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.schedule`,
 `task.cancel`, `task.view`, `orchestration.approve`, `shell.execute`.
@@ -240,6 +277,31 @@ What the model replaced in earlier versions of Realms GOS:
   by licensed organizations), `JusticeSystem` (courts stand on their own), `QuarterResident` (no
   central user directory), `RfpTransition` (the `Event` log records transitions), `VendorRecord`
   (derived from awarded tenders).
+- A fund that has an adopted budget refuses spending in a category it has no expense line for: the vault's and the
+  voting extension's payments (category `transfer`) and a codex's payroll (`payroll`) need a line in such a fund,
+  where they needed none before.
+- A budget line whose `kind` the upgrade turned into `expense` may share its fund, period and category with a
+  `revenue` line, which the model now forbids. The upgrade leaves both rows; `budget_extend` carries only the newer of
+  the two into the next period (a slot holds one line), and skips a line whose category the new period already holds
+  as the other kind, even in a draft.
+- A tax policy kept its taxes in `document.taxes`, each with a `base` and a `method`; they are `TaxPolicy.taxes`,
+  typed entries (a flat tax is a tax on `User`, a land tax one on `Land`, a declared tax one on `Declaration`;
+  a fixed tax is an `amount`, a proportional one a `rate`, the settings and brackets are `facts`). Stored
+  policies and drafts waiting in a proposal convert on first read:
+
+  ```
+  before: document = {"symbol": "REALM", "taxes": [{"code": "property", "base": "land_area", "method": "progressive",
+                      "unit_value": 100, "brackets": [{"up_to": 50000, "rate": 400000}, {"up_to": null, "rate": 800000}]},
+                      {"code": "revenue", "base": "declared", "method": "proportional", "rate": 2000000}]}
+  after:  document = {"symbol": "REALM"}
+          taxes    = [{"code": "property", "kind": "tax", "subject": "Land",
+                       "facts": {"unit_value": 100,
+                                 "brackets": [{"up_to": 50000, "rate": 400000}, {"up_to": null, "rate": 800000}]}},
+                      {"code": "revenue", "kind": "tax", "subject": "Declaration", "rate": 2000000, "facts": {}}]
+  ```
+- An invoice of the previous release has one item for its whole amount, named as the ledger names its revenue
+  (`taxdeclaration` for a tax invoice, `invoice` when it has no reason); a budget line whose `kind` was any text is
+  `expense` unless it was `revenue`.
 - New entities: `Event`, `TaxDeclaration`.
 - New permissions: `self.delegate`, `tax.manage`, `tax.assess`, `tax.declare`, `credential.sign`,
   `license.apply`, `tender.manage`, `quarter.sync`.

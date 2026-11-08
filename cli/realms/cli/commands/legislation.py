@@ -33,13 +33,11 @@ def legislation_group() -> None:
     """Tools of the layered codex (docs/codices/layered-codex.md §12)."""
 
 
-# Operations the layered codex design names that ggg.did does not carry yet: ggg#2 (codex_activate,
-# procedure_define, budget_extend) and ggg#3 (the links). Remove each as G2 and G3 land in ggg_did.
+# Operations the layered codex design names that ggg.did does not carry yet: ggg#2 (procedure_define) and ggg#3
+# (the links). Remove each as G2 and G3 land in ggg_did.
 INTERIM_OPERATIONS = frozenset(
     {
-        "codex_activate",
         "procedure_define",
-        "budget_extend",
         "sync_source_add",
         "sync_source_remove",
         "follower_accept",
