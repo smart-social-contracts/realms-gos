@@ -13,7 +13,7 @@ from pic import Canister
 
 CODICES = pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices"
 # The realm wasm of feat/layered-codex before this change, packed from that commit: the test is skipped without it.
-BASELINE_WASM = os.environ.get("BASELINE_WASM")
+PREVIOUS_WASM = os.environ.get("REALM_PREVIOUS_WASM")
 
 LAYERS = ["eu/es", "eu/es/vc"]
 PATHS = {"tax": ["eu/es", "eu/es/vc"]}
@@ -56,10 +56,10 @@ def run(realm, code):
     return out
 
 
-@pytest.mark.skipif(not BASELINE_WASM, reason="BASELINE_WASM is the realm wasm before this change")
+@pytest.mark.skipif(not PREVIOUS_WASM, reason="REALM_PREVIOUS_WASM names no wasm")
 def test_a_legacy_codex_stays_active_and_installable_across_the_upgrade(wasm_of, people):
     founder = people["founder"]
-    realm = new_realm(BASELINE_WASM, people)
+    realm = new_realm(PREVIOUS_WASM, people)
     installed = ok(realm, "codex_install", founder, **codex_of("dominion"))["codex"]
     before = ok(realm, "codex_status", founder, query=True)
 
@@ -182,3 +182,15 @@ def test_a_chapter_stored_again_after_the_upgrade_is_not_stored_twice(written):
                        f"store.store_chapter(store.checksum({SMALL!r}), {SMALL!r})\n"
                        "print(ggg.ChapterSource.count())")
     assert out.strip() == "2"
+
+
+def test_the_export_pages_a_256_kb_chapter_alone(written, people):
+    """Ten of them pass a reply's 2 MB and seven a query's instruction limit: the realm returns one row a page."""
+    seen, start = [], 1
+    while start is not None:
+        out = ok(written, "realm_export", people["ctl"], query=True, entity="ChapterSource", count=500,
+                 **{"from": start})
+        assert len(out["rows"]) == 1
+        seen += [row["sha256"] for row in out["rows"]]
+        start = out["next"]
+    assert seen == [sha256(SMALL), sha256(BIG)]
