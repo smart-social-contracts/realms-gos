@@ -307,6 +307,17 @@ def test_a_department_deleted_after_the_vote_was_filed_leaves_nothing_to_run():
     assert Proposal[p].result["kind"] == "not_found"
 
 
+def test_a_call_on_a_record_that_does_not_exist_is_carried_only_by_a_realm_wide_proposal():
+    """It has no governing department: a department's proposal is refused, the realm's runs and fails (I-GOV-13)."""
+    world.build()
+    action = {"op": "department_set_policy", "args": {"department": "Nowhere", "m": 1, "n": 2}}
+    refused = call("proposal_create", "carla", title="x", department="Infrastructure", action=action)
+    assert refused["kind"] == "not_found" and Proposal.count() == 0
+    p = ok("proposal_create", "alice", title="x", action=action)["proposal"]
+    vote_all(p, "yes", *world.PEOPLE)
+    assert Proposal[p].status == "failed" and Proposal[p].result["kind"] == "not_found"
+
+
 def pass_department_proposal(op_name, args, department="Infrastructure"):
     p = ok("proposal_create", "carla", title=op_name, department=department,
            action={"op": op_name, "args": args})["proposal"]
