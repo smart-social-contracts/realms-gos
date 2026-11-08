@@ -98,11 +98,14 @@ def switch_to(row, replaced):
 
 def switch(waiting):
     """The switch of an install (docs/codices/layered-codex.md §9.2 step 6): the pending ``waiting`` becomes the
-    active codex in place of the current one, kept to revert to. The runtime loads it first: a codex that does not
-    load raises before anything changes. The ``on_codex_activate`` hooks run in the next message (``hooks``): a hook
-    never fails the switch (§9.3), nor the proposal execution or install step that made it."""
+    active codex in place of the current one, kept to revert to, with its ``installed_at`` and, the first time, the
+    realm's own source id (its own layer). The runtime loads it first: a codex that does not load raises before
+    anything changes. The ``on_codex_activate`` hooks run in the next message (``hooks``): a hook never fails the
+    switch (§9.3), nor the proposal execution or install step that made it."""
     legislation.load(waiting)
     switch_to(waiting, active())
+    waiting.installed_at = chain.now()
+    store.remember_source(waiting.layers[-1])
     chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
 
 

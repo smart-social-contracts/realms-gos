@@ -352,3 +352,6 @@ def test_k_the_switch_stands_when_the_realm_hook_traps_after_a_call_it_made(net,
     assert titles == ["about to call"]  # written before the await, so the call was made
     seen = status(town)
     assert seen["codex"]["id"] == expected_id(layer) and seen["failures"] == {} and seen["healthy"]  # no trace of the trap
+    with pytest.raises(Exception, match="vetkd_public_key") as rejected:  # what the hook's call met: the same, directly
+        town.call("crypto_public_key", {}, sender=people["founder"])
+    assert "trap" in str(rejected.value).lower()

@@ -6,7 +6,7 @@ import json
 from core import chain
 from core import sandbox
 from core.db import Conflict, Fail, first, next_id
-from ggg import ChapterSource, InstallJob
+from ggg import ChapterSource, InstallJob, Realm
 
 MAX_CHAPTER = 256 * 1024  # bytes (§7)
 
@@ -39,6 +39,20 @@ def store_chapter(sha256, text):
     if found != sha256:
         raise Fail(f"the text is {found}, not {sha256}")
     return ChapterSource[sha256] or ChapterSource(sha256=sha256, source=text)
+
+
+def own_source():
+    """The realm's own source id (§7): set by the first layered codex that becomes active, from its own layer (the
+    change list's ``realm``, which the vote approved), and fixed afterwards; None before that."""
+    return ((Realm["1"].manifest_data or {}).get("legislation") or {}).get("source")
+
+
+def remember_source(realm):
+    row = Realm["1"]
+    data = row.manifest_data or {}
+    if (data.get("legislation") or {}).get("source") != realm:
+        data["legislation"] = {**(data.get("legislation") or {}), "source": realm}
+        row.manifest_data = data
 
 
 def live_job():

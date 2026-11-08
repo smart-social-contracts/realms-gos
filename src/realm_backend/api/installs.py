@@ -32,7 +32,7 @@ from core import layered_codex as store
 from core import legislation
 from core.db import JSON_MAX, Conflict, Fail, each, find, next_id, view
 from core.op import GENERATOR, op
-from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal, Realm
+from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal
 
 STEPS = ("fetch_change_list", "check_change_list", "fetch_chapters", "check_sources", "build", "switch")
 WAIT = "wait"  # staged: the pending codex waits for its proposal's effective_at, which switches it
@@ -52,20 +52,6 @@ def relays():
     """The records of the realm's sync sources (§8), in the shape ``plan`` takes: none until the realm has links
     (realms-gos#491 reads them)."""
     return []
-
-
-def own_source():
-    """The realm's own source id, set by its first layered install (the change list's ``realm``, which the vote
-    approved) and fixed afterwards; None before that."""
-    return ((Realm["1"].manifest_data or {}).get("legislation") or {}).get("source")
-
-
-def remember_source(realm):
-    row = Realm["1"]
-    data = row.manifest_data or {}
-    if (data.get("legislation") or {}).get("source") != realm:
-        data["legislation"] = {**(data.get("legislation") or {}), "source": realm}
-        row.manifest_data = data
 
 
 def job_of(proposal):
@@ -358,8 +344,6 @@ def finish(job):
         if waiting.status != "pending":
             raise Conflict(f"{waiting.id} is {waiting.status}, not pending")
         codex.switch(waiting)
-        waiting.installed_at = chain.now()
-        remember_source(waiting.layers[-1])
     job.step, job.status, job.finished_at = "switch", "done", chain.now()
 
 
@@ -395,7 +379,7 @@ def prepared(job):
     """The stored change list, parsed and applied to this realm: ``(change list, the realm's source id, its own layer
     after the change)``. Steps 2 to 5 start here; it reads only stored rows, so it answers the same every time."""
     listed = change_list.parse(ChapterSource[job.change_list["checksum"]].source)
-    current, realm = codex.active(), own_source()
+    current, realm = codex.active(), store.own_source()
     realm, own = change_list.apply(listed, realm, current.id if current else None, own_layer(current, realm))
     return listed, realm, own
 

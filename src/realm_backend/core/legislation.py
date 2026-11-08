@@ -35,6 +35,9 @@ import core.legislation_sandbox  # noqa: F401  bundled with the realm for its te
 # the runtime needs the list before that (a test keeps the two equal).
 RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
 ACTIONS = ("ggg_read", "local_day")  # what a chapter may ask the realm, through the sandbox's rpc
+# The operation that switches codices: after it the runtime runs the new codex, so the hooks the dispatcher would
+# run for it are the new codex's, which the switch runs once in a message of its own (``activate``), never the old one's.
+ACTIVATE = "codex_activate"
 # Instructions the realm spends answering one sandbox call's reads, at most: past it the reads are refused and the
 # call fails, so a chapter that loops on reads costs the caller this much and never the whole message.
 READS = 2_000_000_000
@@ -170,7 +173,7 @@ def run(op, call, args, department, perform, record, read=False):
     out = out or {}
     if record is not None:
         record(out)
-    if legislated:
+    if legislated and op != ACTIVATE:  # the switch arms the new codex's on_codex_activate itself (api.codex.switch)
         yield from _hooks(op, args, out, call, department)
     return out
 

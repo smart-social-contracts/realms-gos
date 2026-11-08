@@ -163,7 +163,7 @@ def test_a_realm_installs_its_own_layer_from_a_url_and_the_realm_hook_runs_at_th
     assert seen["job"] == {"id": "J-1", "proposal": "", "step": "switch", "status": "done", "error": "",
                            "started_at": fake_chain.now(), "finished_at": fake_chain.now()}
     assert seen["pending"] is None and seen["healthy"]
-    assert installs.own_source() == "arcadia"
+    assert store.own_source() == "arcadia"
     assert [n["title"] for n in ok("notification_list", "alice")["notifications"]] == ["activated"]
     assert ChapterSource.count() == 4  # the change list and three chapters
     assert [u for kind, u, _ in fake_chain.state["calls"] if kind == "https"] == [
@@ -197,7 +197,7 @@ def test_a_scheduled_install_stages_at_acceptance_and_switches_at_its_time_not_b
     assert seen["codex"] is None and seen["job"]["step"] == "wait" and seen["job"]["status"] == "running"
     assert seen["pending"]["id"] == expected_id(layer) and seen["pending"]["status"] == "pending"
     assert seen["pending"]["activates_at"] == Proposal[p].effective_at and seen["pending"]["proposal"] == p
-    assert installs.own_source() is None  # the realm's id is set when the codex is in force
+    assert store.own_source() is None  # the realm's id is set when the codex is in force
     later(HOUR - 1)
     fire_due()  # nothing is due: the switch waits for its time
     assert active_id() is None and Proposal[p].status == "execution_scheduled"
@@ -209,6 +209,24 @@ def test_a_scheduled_install_stages_at_acceptance_and_switches_at_its_time_not_b
     assert seen["job"]["status"] == "done" and seen["job"]["step"] == "switch"
     fire_due()  # the realm hook, in the message after the switch
     assert ok("notification_list", "alice")["notifications"][-1]["title"] == "activated"
+
+
+def test_an_early_codex_activate_on_a_staged_codex_switches_and_the_job_ends_done_at_its_time(realm):
+    layer = own_layer()
+    p = schedule(change_list(layer))
+    run_job()
+    assert job()["step"] == "wait" and store.own_source() is None
+    ok("codex_activate", "ctl", codex=expected_id(layer))  # the realm decides not to wait for T
+    seen = status()
+    assert seen["codex"]["id"] == expected_id(layer) and seen["codex"]["installed_at"] == fake_chain.now()
+    assert store.own_source() == "arcadia" and seen["job"]["step"] == "wait"
+    fire_due()
+    assert [n["title"] for n in ok("notification_list", "alice")["notifications"]] == ["activated"]
+    later(HOUR)
+    fire_timers()  # T: the switch finds the codex active already, and the job is done
+    assert Proposal[p].status == "executed" and job()["status"] == "done"
+    fire_due()
+    assert [n["title"] for n in ok("notification_list", "alice")["notifications"]] == ["activated"]  # once
 
 
 def test_a_second_install_while_one_runs_is_refused_and_so_is_a_legacy_one(realm):
@@ -460,7 +478,7 @@ def test_the_switch_stands_when_a_hook_traps_after_a_call_it_made(realm):
     fire_due()  # the switch: its message ends with the hooks armed, not run
     seen = status()
     assert seen["codex"]["id"] == expected_id(layer) and seen["job"]["status"] == "done"
-    assert installs.own_source() == "arcadia"
+    assert store.own_source() == "arcadia"
     with pytest.raises(fake_chain.Trap, match="the effect broke after its call"):
         fire_due()  # the hooks' own message traps, and takes nothing of the switch with it
     assert status()["codex"]["id"] == expected_id(layer) and status()["job"]["status"] == "done"
