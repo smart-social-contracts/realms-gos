@@ -4,6 +4,7 @@
 GGG standard (ggg.did) are in ggg_methods.
 """
 from basilisk import Async, StableBTreeMap, init, post_upgrade, query, text, update, void
+from basilisk.canisters.management import HttpResponse, HttpTransformArgs
 from ic_python_db import Database
 
 __basilisk_features__ = ["shell", "browse"]
@@ -45,3 +46,12 @@ def read(name: text, args: text) -> text:
 @update
 def run(name: text, args: text) -> Async[text]:
     return (yield from dispatch(name, args))
+
+
+@query
+def http_transform(args: HttpTransformArgs) -> HttpResponse:
+    """What every node's reply to an HTTPS outcall (core.chain.http_get) is passed through before the replica
+    compares them: the headers differ from node to node, the body must not."""
+    response = args["response"]
+    response["headers"] = []
+    return response

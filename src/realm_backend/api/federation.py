@@ -3,7 +3,7 @@ import json
 from core import chain
 from api import proposals
 from api import quarters
-from core.db import Conflict, Fail, Forbidden, each, find, next_id
+from core.db import PAGE_MAX, Conflict, Fail, Forbidden, each, find, next_id, page
 from ggg import FederalVote, FederalVoteLeg, FederationMessage, Proposal, Quarter
 from core.op import GENERATOR, dispatch, op
 from core.ratio import ONE
@@ -13,6 +13,16 @@ PASSED = ("accepted", "executed")
 
 def leg_id(vote, quarter):
     return f"{vote}:{quarter}"
+
+
+def index_legs():
+    """Index every leg by its proposal: ``FederalVoteLeg.proposal_id`` gained its index with the layered codex
+    runtime, and the legs written before that release need their entries, once, where the realm starts."""
+    start = 1
+    while start is not None:
+        rows, start = page(FederalVoteLeg, {"from": start, "count": PAGE_MAX})
+        for leg in rows:
+            leg.db().field_index_add(leg._type, "proposal_id", leg.proposal_id, leg._id)  # the row id, as Row indexes it
 
 
 def freeze(action, rule, deadline):

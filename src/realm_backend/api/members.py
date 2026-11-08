@@ -17,10 +17,12 @@ MOVES = {"active": {"inactive", "suspended", "banned"}, "inactive": {"active", "
 
 
 def within(c, perms):
-    """I-ID-3: nobody hands out a permission they do not hold. A codex or a realm-wide vote acts for the realm; a
-    department's vote holds only what that department does, like org.grant_authority. A proposal whose department
-    was deleted holds nothing: it is refused, never treated as realm-wide."""
-    if c.origin == "codex":
+    """I-ID-3: nobody hands out a permission they do not hold. A realm-wide vote acts for the realm, and so does a
+    legacy codex's effect (``Call.legacy``, the mark only the legacy hook path sets); a department's vote holds only
+    what that department does, like org.grant_authority; a layered codex holds nothing, so handing out a permission
+    takes a vote, which its effects file as proposals. A proposal whose department was deleted holds nothing: it is
+    refused, never treated as realm-wide."""
+    if c.legacy:
         return
     if c.origin == "replay":
         proposal = Proposal[c.proposal]
@@ -114,7 +116,7 @@ def redeemable(code, principal):
     return inv
 
 
-@op("self.join", check=check_choices)
+@op("self.join", check=check_choices, secret=("code",))
 def realm_join(c, args):
     """Join with an invite ``code`` (needed unless registration is open) and an optional ``nickname``,
     ``language`` (a BCP 47 tag) and ``home_zone`` (a zone of the realm). A member can join again with a code to gain its profile and seat. Returns ``user``, ``status`` and ``profiles``.
@@ -177,7 +179,7 @@ def profile_update(c, args):
     return {"user": user.id}
 
 
-@op("self.update_private_data", returns="user")
+@op("self.update_private_data", returns="user", secret=("private_data",))
 def private_data_update(c, args):
     """Replace your ``private_data``; it is stored as given, so encrypt it first (vetKeys ciphertext). Returns
     ``user``."""
@@ -318,7 +320,7 @@ def fresh_code(c):
     return f"{h[:4]}-{h[4:8]}-{h[8:12]}"
 
 
-@op("invite.manage")
+@op("invite.manage", secret=("code",))
 def invite_create(c, args):
     """Create an invite to ``profile`` (default member) and optionally seat ``position`` of ``department``, only with
     permissions you hold: ``code`` (default generated), ``max_uses`` (default 1), ``expires_at`` or ``expires_in``

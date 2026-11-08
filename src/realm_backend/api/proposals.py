@@ -230,6 +230,10 @@ def close(p, result):
     if result == "accepted" and p.effective_at:
         result = status_at_effective_time(p)  # before any write: a refusal leaves the proposal open
     p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
+    if p.status == "execution_scheduled":
+        from api import installs
+
+        installs.prepare(p)  # a layered codex install stages ahead of its time; no other action has anything to do
 
 
 def vote_end(p):
@@ -297,10 +301,9 @@ def settle(p, final):
     return result
 
 
-def file_replay(name, args, user, by, department, grant=""):
-    """Turn a governed call into a proposal that replays it once accepted."""
-    p = new_proposal(f"{name} {json.dumps(args, sort_keys=True)[:120]}", user, by, department,
-                     {"op": name, "args": args}, grant=grant)
+def file_replay(filing, user, by, grant=""):
+    """File the proposal ``filing`` describes (core.op.filing), to replay its action once accepted."""
+    p = new_proposal(filing["title"], user, by, find(Department, filing["department"]), filing["action"], grant=grant)
     return {"proposal": p.id, "requires_vote": True}
 
 
@@ -563,6 +566,9 @@ def proposal_stop(c, args):
     if task:
         tasks.stop(task)
     p.status = "withdrawn"
+    from api import installs
+
+    installs.discard(p)
     return {"proposal": p.id, "status": p.status}
 
 
