@@ -374,7 +374,8 @@ def main():
         release_tag = None if args.from_main else f"v{base_version}"
         if canister != "realm_backend":  # the realm's packer stamps its own version
             _stamp_build(root, canister, release_tag)
-        # A snapshot has no release tag, so the realm reports its registry label.
+        # A snapshot has no release tag, so the realm reports its registry label,
+        # less the test-variant marker (status() reports build_variant).
         backend_wasm = _build_backend(
             root,
             canister,

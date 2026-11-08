@@ -55,25 +55,27 @@ def verify_build_variant(wasm, variant):
 def snapshot_version():
     """What a build without a release tag reports: the commit it is packed from, or just ``local`` outside git."""
     try:
-        sha = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--short=8", "HEAD"], text=True).strip()
+        sha = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--short=8", "HEAD"], text=True,
+                                      stderr=subprocess.DEVNULL).strip()
     except (OSError, subprocess.CalledProcessError):
         return "local"
     return f"local-{sha}"
 
 
 def stamp_version(source, version):
-    """``api/setup.py``'s source with its version set; fails if the placeholder is gone, as it would ship unstamped."""
+    """``api/setup.py``'s source with its version set; fails if the placeholder is gone: it would ship a stale stamp."""
     if VERSION_PLACEHOLDER not in source:
-        sys.exit(f"api/setup.py has no {VERSION_PLACEHOLDER!r} line to stamp")
+        sys.exit(f"api/setup.py has no {VERSION_PLACEHOLDER!r} line to stamp; "
+                 "restore it: git checkout src/realm_backend/api/setup.py")
     return source.replace(VERSION_PLACEHOLDER, f'VERSION = "{version}"')
 
 
 def pack(version=None, variant=DEFAULT_VARIANT):
     setup = SRC / "api" / "setup.py"
     original = setup.read_text()
-    setup.write_text(stamp_version(original, version or snapshot_version()))
-    select_build_variant(variant)
     try:
+        setup.write_text(stamp_version(original, version or snapshot_version()))
+        select_build_variant(variant)
         env = apply_cedar_template_env()
         env["CANISTER_CANDID_PATH"] = str(SRC / "realm_backend.did")
         subprocess.run([sys.executable, "-m", "basilisk", "realm_backend", str(SRC / "main.py")],

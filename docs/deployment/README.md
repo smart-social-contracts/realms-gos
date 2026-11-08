@@ -38,7 +38,8 @@ exports `read` and `run` ([Operations](../architecture/operations.md)).
 
 It also stamps the version `status` reports: `--version` when given, otherwise `local-<commit>`,
 the commit the wasm is packed from. `publish_build.py --from-main` stamps the
-`main.<unix_ts>.<sha>` label it publishes under, so a realm's version matches its registry tag.
+`main.<unix_ts>.<sha>` label it publishes under, so a realm's version matches its registry tag, less
+the test-variant marker (`status` reports `build_variant`).
 
 The production wasm holds none of the test-only code, and the packer fails if it does
 ([Build variants](../../AGENTS.md#build-variants-production-vs-test-wasm)).

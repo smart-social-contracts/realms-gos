@@ -68,30 +68,50 @@ def test_a_snapshot_outside_git_is_still_not_the_placeholder(packer, monkeypatch
     assert packer.snapshot_version() == "local"
 
 
-@pytest.mark.parametrize("version, built", [("v0.8.0", "v0.8.0"), (None, SNAPSHOT)],
-                         ids=["release tag", "snapshot"])
-def test_packing_builds_with_the_stamped_version_and_restores_the_source(packer, tmp_path, monkeypatch, version, built):
-    """basilisk packs whatever setup.py holds while it runs; afterwards the tracked file is untouched."""
+@pytest.fixture
+def packed_tree(packer, tmp_path, monkeypatch):
+    """The packer pointed at a copy of the backend's setup.py, with everything around basilisk stubbed."""
     src = tmp_path / "realm_backend"
     (src / "api").mkdir(parents=True)
     shutil.copy(BACKEND / "api" / "setup.py", src / "api" / "setup.py")
     shutil.copy(BACKEND / "realm_backend.did", src / "realm_backend.did")
-    versions_packed = []
-
-    def build(*args, **kwargs):
-        versions_packed.append(stamped_version((src / "api" / "setup.py").read_text()))
-
     monkeypatch.setattr(packer, "SRC", src)
     monkeypatch.setattr(packer, "snapshot_version", lambda: SNAPSHOT)
     monkeypatch.setattr(packer, "apply_cedar_template_env", dict)
     monkeypatch.setattr(packer, "select_build_variant", lambda variant: None)
     monkeypatch.setattr(packer, "verify_build_variant", lambda wasm, variant: None)
+    return src / "api" / "setup.py"
+
+
+@pytest.mark.parametrize("version, built", [("v0.8.0", "v0.8.0"), (None, SNAPSHOT)],
+                         ids=["release tag", "snapshot"])
+def test_packing_builds_with_the_stamped_version_and_restores_the_source(
+        packer, packed_tree, monkeypatch, version, built):
+    """basilisk packs whatever setup.py holds while it runs; afterwards the tracked file is untouched."""
+    versions_packed = []
+
+    def build(*args, **kwargs):
+        versions_packed.append(stamped_version(packed_tree.read_text()))
+
     monkeypatch.setattr(packer.subprocess, "run", build)
 
     packer.pack(version=version)
 
     assert versions_packed == [built]
-    assert "VERSION_PLACEHOLDER" in (src / "api" / "setup.py").read_text()
+    assert "VERSION_PLACEHOLDER" in packed_tree.read_text()
+
+
+def test_packing_restores_the_source_when_it_fails_before_the_build(packer, packed_tree, monkeypatch):
+    """A packer that dies after stamping must not leave a stale version in the tracked file."""
+    def no_variant(variant):
+        raise RuntimeError("variant missing")
+
+    monkeypatch.setattr(packer, "select_build_variant", no_variant)
+
+    with pytest.raises(RuntimeError):
+        packer.pack(version="v0.8.0")
+
+    assert "VERSION_PLACEHOLDER" in packed_tree.read_text()
 
 
 def test_the_publish_command_gives_the_packer_its_version(publish_build, tmp_path, monkeypatch):
