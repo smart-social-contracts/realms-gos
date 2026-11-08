@@ -8,6 +8,7 @@ from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, n
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
 from core.op import op, run
+from core.ratio import ONE, PERCENT
 
 CAPACITY, TEST_CAPACITY, TEST_NETWORKS, SCALE_AT = 2000, 10, ("test", "staging", "demo", "local"), 0.9
 GUEST = ["self.data_view", "realm.data_view"]
@@ -16,7 +17,7 @@ MAX_QUARTERS = 500
 STATUSES = ("setup", "active", "suspended", "splitting", "merging")
 MOVES = {"setup": {"active"}, "active": {"suspended", "splitting", "merging"}, "suspended": {"active"},
          "splitting": {"active"}, "merging": {"active"}}
-RULE = {"kind": "majority_of_quarters", "threshold": 50, "absent": "wait"}
+RULE = {"kind": "majority_of_quarters", "threshold": ONE // 2, "absent": "wait"}
 KINDS, ABSENT = ("majority_of_quarters", "majority_of_members"), ("wait", "no", "ignore")
 FIELDS = ("id", "name", "index", "status", "population", "codex_id", "codex_version", "last_sync")
 # Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
@@ -274,18 +275,30 @@ def quarter_deregister(c, args):
     find(Quarter, args["quarter"]).delete()
 
 
-@op("quarter.configure", governed=proposals.realm_wide)
+def federal_rule(args):
+    """The federal vote ``rule`` of a ``quarter_configure`` call, refused if it is not one. A threshold of 1 to 99 is the
+    previous release's whole percent: it would count as almost none, so it is refused, and every threshold under 100 that
+    is stored is an old one (core.ratio.upgrade_federal_rule)."""
+    rule = args.get("rule")
+    if not rule:
+        return
+    threshold = int(rule.get("threshold", RULE["threshold"]))
+    if 0 < threshold < 100:
+        raise Fail(f"the threshold is in hundred-millionths: 60 % is {60 * PERCENT}")
+    if rule.get("kind", RULE["kind"]) not in KINDS or rule.get("absent", "wait") not in ABSENT or not 0 <= threshold < ONE:
+        raise Fail(f"a federal rule has kind {KINDS}, absent {ABSENT} and a threshold below {ONE} (100 %)")
+
+
+@op("quarter.configure", governed=proposals.realm_wide, check=federal_rule)
 def quarter_configure(c, args):
     """Set ``quarter``'s ``name`` or ``status`` (setup→active, active⇄suspended, active→splitting or merging→active),
     and realm-wide ``capacity``, ``auto_scale_enabled``, ``quarter_join_mode``, ``federation_codex`` and the federal
-    vote ``rule``: kind majority_of_quarters or majority_of_members, absent wait, no or ignore, threshold below 100."""
+    vote ``rule``: kind majority_of_quarters or majority_of_members, absent wait, no or ignore, threshold below 100 %
+    (100000000), in hundred-millionths."""
     q = find(Quarter, args["quarter"]) if args.get("quarter") else None
     status, rule = args.get("status"), args.get("rule")
     if status and (q is None or status not in MOVES.get(q.status, ())):
         raise Conflict(f"a {q.status if q else 'missing'} quarter cannot become {status}")
-    if rule and (rule.get("kind", RULE["kind"]) not in KINDS or rule.get("absent", "wait") not in ABSENT
-                 or not 0 <= int(rule.get("threshold", 50)) < 100):
-        raise Fail(f"a federal rule has kind {KINDS}, absent {ABSENT} and a threshold below 100")
     if q is not None:
         q.name, q.status = args.get("name", q.name), status or q.status
     r = realm()

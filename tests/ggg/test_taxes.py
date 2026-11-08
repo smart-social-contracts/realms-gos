@@ -4,14 +4,16 @@ import fake_chain
 from api import taxes
 import world
 from core.db import each
-from ggg import Delegation, Department, Invoice, Land, Member, TaxDeclaration, TaxPolicy
-from kit import call, denied, later, ok
+from core.ratio import BASIS_POINT, ONE
+from ggg import Delegation, Department, Invoice, Land, Member, Proposal, TaxDeclaration, TaxPolicy
+from kit import call, denied, ok
 from test_treasury import balance_reply, setup_finance
 
 PROPERTY = {"code": "property", "base": "land_area", "unit_value": 100, "method": "progressive",
-            "brackets": [{"up_to": 50_000, "rate_bp": 40}, {"up_to": None, "rate_bp": 80}], "due_days": 100}
+            "brackets": [{"up_to": 50_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}],
+            "due_days": 100}
 RESIDENCE = {"code": "residence", "base": "flat", "method": "fixed", "amount": 5, "exempt_profiles": ["exempt"]}
-REVENUE = {"code": "revenue", "base": "declared", "method": "proportional", "rate_bp": 200}
+REVENUE = {"code": "revenue", "base": "declared", "method": "proportional", "rate": 200 * BASIS_POINT}
 POLICY = {"symbol": "REALM", "taxes": [PROPERTY, RESIDENCE, REVENUE]}
 
 
@@ -52,15 +54,13 @@ def test_story_agora_taxes():
     assert TaxDeclaration[tax.reason.split(":")[1]].status == "settled"
 
     world.policy(Department["Administration"], 2, 3)
-    brackets = [{"up_to": 50_000, "rate_bp": 40}, {"up_to": None, "rate_bp": 100}]
+    brackets = [{"up_to": 50_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 100 * BASIS_POINT}]
     raised = {**POLICY, "taxes": [{**PROPERTY, "brackets": brackets}]}
     for name, args in (("tax_policy_draft", {"document": raised}), ("tax_policy_propose", {"policy": "TAX-POLICY-2"})):
         p = ok(name, "bob", **args)["proposal"]
         for voter in world.PEOPLE:
             ok("proposal_vote", voter, proposal=p, choice="yes")
-        later(8 * 86400)
-        ok("proposal_finalize", "ctl", proposal=p)
-        assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed"
+        assert Proposal[p].status == "executed"  # the last vote ended the vote and ran the action
     new = TaxPolicy["TAX-POLICY-2"]
     assert (new.status, new.proposal, TaxPolicy[first].status) == ("adopted", p, "superseded")
 
@@ -86,8 +86,8 @@ def test_reference_calculation():
 def test_policy_is_checked():
     setup_finance()
     bad = [{"taxes": []}, {"taxes": [{**RESIDENCE, "method": "lottery"}]},
-           {"taxes": [{**REVENUE, "rate_bp": 10_001}]},
-           {"taxes": [{**PROPERTY, "brackets": [{"up_to": 5, "rate_bp": 1}]}]},
+           {"taxes": [{**REVENUE, "rate": ONE + 1}]},
+           {"taxes": [{**PROPERTY, "brackets": [{"up_to": 5, "rate": 1}]}]},
            {"taxes": [RESIDENCE, RESIDENCE]}]
     for document in bad:
         assert not call("tax_policy_draft", "bob", document=document)["ok"], document

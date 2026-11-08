@@ -2,14 +2,18 @@ import json
 
 from core import chain
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
-from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Task, TaskSchedule, Vote
+from ggg import (Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, ProposalEdge, Realm, Task,
+                 TaskSchedule, Vote)
 from api import tasks
 from core.op import dispatch, op, ops
+from core.ratio import ONE, refuse_renamed
 
 CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")
 # Proposals that can still vote or run, so their department must stay.
 PENDING = OPEN + ("accepted", "execution_scheduled")
+MAX_LINKS = 16  # a proposal's own links, so that a reply never outgrows the Internet Computer's limits
+LINK_KINDS = ("replaces", "relates_to")
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
 
@@ -70,15 +74,44 @@ def check_scope(department, action):
     raise Forbidden(f"{action['op']} is not governed by {department.id}: only a realm-wide proposal can run it")
 
 
-def new_proposal(title, user, by, department, action=None, description="", effective_at=0):
+def checked_links(user, links):
+    """The ``links`` of a proposal filed for member ``user``, as stored, or a refusal (ggg I-GOV-10). Nothing is written
+    here: a refused proposal leaves no trace."""
+    links = [] if links is None else links
+    if not isinstance(links, list) or any(
+            not isinstance(link, dict) or link.get("kind") not in LINK_KINDS or not isinstance(link.get("proposal"), str)
+            for link in links):
+        raise Fail(f"links is a list of {{kind, proposal}}, the kind one of {', '.join(LINK_KINDS)}")
+    if len(links) > MAX_LINKS:
+        raise Fail(f"a proposal has at most {MAX_LINKS} links")
+    named = set()
+    for link in links:
+        if link["proposal"] in named:
+            raise Fail(f"the links name proposal {link['proposal']} twice")
+        named.add(link["proposal"])
+        target = find(Proposal, link["proposal"])
+        if link["kind"] == "replaces":
+            if target.proposer != user:  # the member it was filed for: the grantor, when it was filed for one
+                raise Forbidden("only the member it was filed for may replace a withdrawn proposal")
+            if target.status != "withdrawn":
+                raise Conflict(f"{target.id} is {target.status}: a replaced proposal must be withdrawn first")
+            if target.replaced_by:
+                raise Conflict(f"{target.id} is already replaced by {target.replaced_by}")
+    return [{"kind": link["kind"], "proposal": link["proposal"]} for link in links]
+
+
+def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=()):
     policy = department.policy or {}
     p = Proposal(id=next_id(Proposal, "P"), title=title, description=description, proposer=user,
                  on_behalf_of=user if by != user else "", department=department, action=action,
                  status="voting", opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
-                 effective_at=effective_at,
-                 threshold=int(settings().get("threshold", 50)),
-                 quorum_percent=int(settings().get("quorum_percent", 0) if department.is_root
-                                    else policy.get("quorum_percent", 0)))
+                 effective_at=effective_at, links=list(links),
+                 threshold=int(settings().get("voting_threshold", ONE // 2)),
+                 quorum=int(settings().get("voting_quorum", 0) if department.is_root else policy.get("quorum", 0)))
+    for link in links:
+        ProposalEdge(id=next_id(ProposalEdge, "L"), source=p.id, target=link["proposal"], kind=link["kind"])
+        if link["kind"] == "replaces":
+            Proposal[link["proposal"]].replaced_by = p.id
     p.tally = {c: 0 for c in CHOICES}
     if not department.is_root:
         p.tally = {**p.tally, "required": int(policy.get("m", 1)), "veto": list(policy.get("veto", []))}
@@ -116,8 +149,8 @@ def close(p, result):
 
 
 def vote_end(p):
-    """When the vote of ``p``, closed now, ended: at its deadline, or earlier, at the deciding vote. Closing it later than
-    that does not move the end: the deadline timer fires a second late, an upgrade arms it again whenever the realm
+    """When the vote of ``p``, closed now, ended: at its deadline, or earlier, at the vote that ended it (the last of the
+    eligible members, or the one that made the outcome certain). Closing it later than that does not move the end: the deadline timer fires a second late, an upgrade arms it again whenever the realm
     starts, and ``proposal_finalize`` may come days after the deadline."""
     return min(chain.now(), p.deadline) if p.deadline else chain.now()
 
@@ -217,6 +250,8 @@ def count(p):
 
 def outcome(p, final):
     tally, size, vetoed = count(p)
+    # A vote ends at its deadline, or earlier, the moment every eligible member has voted (ggg I-GOV-7).
+    final = final or (size > 0 and sum(tally.values()) >= size)
     required = (p.tally or {}).get("required")
     if vetoed:
         return "rejected"
@@ -227,17 +262,17 @@ def outcome(p, final):
     if not p.deadline and not final:
         # No deadline: open until certain. Yes alone over the threshold of everyone eligible passes it; enough no
         # that the rest voting yes could not pass it fails it; once everyone has voted, it is decided as is.
-        turnout = sum(tally.values()) * 100 >= p.quorum_percent * max(size, 1)
-        if tally["yes"] * 100 > p.threshold * max(size, 1) and turnout:
+        turnout = sum(tally.values()) * ONE >= p.quorum * max(size, 1)
+        if tally["yes"] * ONE > p.threshold * max(size, 1) and turnout:
             return "accepted"
-        if tally["no"] * 100 >= (100 - p.threshold) * max(size, 1):
+        if tally["no"] * ONE >= (ONE - p.threshold) * max(size, 1):
             return "rejected"
         final = sum(tally.values()) >= size
     if not final:
         return None
     decisive = tally["yes"] + tally["no"]
-    turnout = sum(tally.values()) * 100 >= p.quorum_percent * max(size, 1)
-    return "accepted" if turnout and decisive and tally["yes"] * 100 > p.threshold * decisive else "rejected"
+    turnout = sum(tally.values()) * ONE >= p.quorum * max(size, 1)
+    return "accepted" if turnout and decisive and tally["yes"] * ONE > p.threshold * decisive else "rejected"
 
 
 def effective_at_of(args):
@@ -258,8 +293,11 @@ def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
     governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
-    instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier at the deciding
-    vote, whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
+    instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier once every eligible
+    member has voted (or, in a department, or in a realm whose voting window is 0, once the outcome is certain),
+    whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
+    Optional ``links``, at most 16 of ``{kind, proposal}`` (``replaces`` or ``relates_to``), each proposal named once and
+    fixed at creation: ``replaces`` names a withdrawn proposal of yours that no other proposal replaces yet.
     Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
@@ -267,8 +305,9 @@ def proposal_create(c, args):
     if action is not None:
         check_action(action)
         check_scope(department, action)
+    links = checked_links(c.user, args.get("links"))
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
-                     effective_at_of(args))
+                     effective_at_of(args), links)
     return {"proposal": p.id}
 
 
@@ -284,10 +323,22 @@ def proposal_withdraw(c, args):
     return {"proposal": p.id}
 
 
+@op("realm.data_view", read=True, returns="links")
+def proposal_linked_from(c, args):
+    """The links of other proposals to ``proposal``, oldest first, ``count`` at a time (default 100, at most 500) from
+    row ``from`` (default 1): ``links`` (the ``kind`` and the ``proposal`` that carries it; ``replaces`` there reads
+    "replaced by"); ``next`` continues them (null at the end). Nothing limits how many proposals link to one."""
+    p = find(Proposal, args["proposal"])
+    edges, nxt = page_by(ProposalEdge, "target", p.id, args)
+    return {"links": [{"kind": e.kind, "proposal": e.source} for e in edges], "next": nxt}
+
+
 @op("proposal.vote", delegable=True, returns="vote")
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
-    Voting again replaces your earlier vote."""
+    Voting again replaces your earlier vote, until the vote ends: at its deadline, or once every eligible member has
+    voted (or the outcome is certain, in a department or a realm with no voting window). After that no vote is
+    accepted and none is replaced."""
     p = find(Proposal, args["proposal"])
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
@@ -320,18 +371,16 @@ def proposal_open(c, args):
 
 @op("proposal.manage", returns="proposal")
 def proposal_finalize(c, args):
-    """Close voting on ``proposal`` and record it as accepted or rejected. Returns ``status``.
-    A realm-wide proposal waits for its deadline; a department's closes early once its outcome is certain. A late close
-    does not move the end of the vote (see ``effective_at`` of ``proposal_create``). Accepted after its ``effective_at``,
-    the action waits for ``proposal_execute``."""
+    """Close voting on ``proposal`` once its vote has ended, and record it as accepted or rejected. Returns ``status``.
+    A vote ends at its deadline, or earlier once every eligible member has voted or its outcome is certain; closing it
+    late does not move that end (see ``effective_at`` of ``proposal_create``). An accepted action runs at once, unless
+    its ``effective_at`` is still ahead: it runs then. Returns ``result`` when it ran."""
     p = find(Proposal, args["proposal"])
     if p.status != "voting":
         raise Conflict(f"{p.id} is not being voted on")
-    result = outcome(p, bool(p.deadline) and chain.now() > p.deadline)
-    if result is None:
+    if (yield from settle(p, bool(p.deadline) and chain.now() > p.deadline)) is None:
         raise Conflict(f"{p.id} is still open" + (f" until {p.deadline}" if p.deadline else " until its outcome is certain"))
-    close(p, result)
-    return {"proposal": p.id, "status": p.status}
+    return {"proposal": p.id, "status": p.status, **({"result": p.result} if p.result else {})}
 
 
 @op("proposal.manage", returns="proposal")
@@ -349,10 +398,11 @@ def scheduled_department(args):
     return find(Proposal, args["proposal"]).department
 
 
-@op("proposal.manage", governed=scheduled_department, returns="proposal")
+@op("proposal.manage", governed=scheduled_department)
 def proposal_stop(c, args):
     """Stop ``proposal``, accepted and waiting for its ``effective_at``: it ends withdrawn and its action never runs.
-    A proposal stops another by carrying this as its action. Returns ``status``."""
+    A proposal stops another by carrying this as its action. Returns ``status``; it creates no record, so the GGG
+    method replies ``Done`` without an id."""
     p = find(Proposal, args["proposal"])
     if p.status != "execution_scheduled":
         raise Conflict(f"{p.id} is {p.status}; only a proposal waiting for its effective time can be stopped")
@@ -455,16 +505,26 @@ def contract_terminate(c, args):
     return {"contract": k.id}
 
 
-@op("governance.update", governed=launched)
+def voting_rules(args):
+    """The ratios of a ``governance_update`` call, refused if they are not between 0 and 100 %, or the old names."""
+    refuse_renamed(args, {"threshold": "voting_threshold", "quorum_percent": "voting_quorum"})
+    ratios = {k: int(args[k]) for k in ("voting_threshold", "voting_quorum") if k in args}
+    if any(not 0 <= v <= ONE for v in ratios.values()):
+        raise Fail(f"a threshold and a quorum are between 0 and {ONE} (100 %)")
+    return ratios
+
+
+@op("governance.update", governed=launched, check=voting_rules)
 def governance_update(c, args):
-    """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``threshold`` (percent of yes
-    among yes and no votes a realm-wide proposal must exceed) and ``quorum_percent`` (realm-wide turnout)."""
+    """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``voting_threshold`` (the share of
+    the yes and no votes the yes votes of a realm-wide proposal must exceed) and ``voting_quorum`` (the share of the
+    members who must vote on it), both in hundred-millionths: 50 % is 50000000."""
+    ratios = voting_rules(args)
     realm, cal = Realm["1"] or Realm(id="1"), Calendar["1"] or Calendar(id="1")
     if "voting_window" in args:
         cal.voting_window = int(args["voting_window"])
     data = realm.manifest_data or {}
-    data["governance"] = {**data.get("governance", {}),
-                          **{k: int(args[k]) for k in ("threshold", "quorum_percent") if k in args}}
+    data["governance"] = {**data.get("governance", {}), **ratios}
     realm.manifest_data = data
 
 

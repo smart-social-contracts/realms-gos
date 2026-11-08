@@ -9,6 +9,7 @@ import pathlib
 
 import mock_ledger
 import pytest
+from ic.candid import Types
 from pic import Canister
 
 CODICES = pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices"
@@ -162,3 +163,53 @@ def test_a_vote_that_ends_after_effective_at_expires_when_its_timer_fires(realm,
     late = file_and_pass(realm, people, "Pay Bob too late", pay(realm, people["bob"], 100), realm.now() + 600)
     realm.wait(HOUR + 1200)
     assert proposal(realm, alice, late)["status"] == "expired" and root_balance(realm, ctl) == balance
+
+
+def test_a_vote_ends_when_everyone_has_voted_and_takes_no_more_votes(realm, people, hour_long_vote):
+    """The realm has three members, the founder and Alice and Bob: two yes votes leave the hour-long vote open."""
+    ctl, alice = people["ctl"], people["alice"]
+    balance = root_balance(realm, ctl)
+    paid = file_and_pass(realm, people, "Pay Bob when all have voted", pay(realm, people["bob"], 50))
+    assert proposal(realm, alice, paid)["status"] == "voting" and root_balance(realm, ctl) == balance
+    last = ok(realm, "proposal_vote", people["founder"], proposal=paid, choice="no")  # the third vote ends it
+    assert last["status"] == "executed" and root_balance(realm, ctl) == balance - 50
+    for voter in ("alice", "founder"):  # no vote is accepted or replaced after the end
+        out = realm.call("proposal_vote", {"proposal": paid, "choice": "no"}, sender=people[voter])
+        assert not out["ok"] and out["kind"] == "conflict" and "not open for voting" in out["error"], out
+    assert proposal(realm, alice, paid)["tally"] == {"yes": 2, "no": 1, "abstain": 0, "eligible": 3}
+
+
+def test_a_late_finalize_runs_an_async_transfer_at_once(realm, people, hour_long_vote):
+    """The deadline timer is lost in an upgrade and armed again one second later: until then the vote has ended but
+    nothing has closed it, and ``proposal_finalize`` does, running the payment, a call to the ledger, as it replies."""
+    ctl, alice = people["ctl"], people["alice"]
+    balance = root_balance(realm, ctl)
+    effective_at = realm.now() + HOUR + 600  # an hour of voting, then ten minutes before the payment is due
+    late = file_and_pass(realm, people, "Pay Bob after a late finalize", pay(realm, people["bob"], 50), effective_at)
+    assert proposal(realm, alice, late)["status"] == "voting"
+    realm.upgrade()  # the timer is lost, and armed again for the deadline
+    realm.pic.advance_time((HOUR + 1200) * 10**9)  # past the deadline and past effective_at, with no round run yet
+    assert proposal(realm, alice, late)["status"] == "voting" and root_balance(realm, ctl) == balance
+    out = ok(realm, "proposal_finalize", ctl, proposal=late)
+    assert out["status"] == "executed" and out["result"]["ok"], out
+    assert proposal(realm, alice, late)["result"]["status"] == "completed" and root_balance(realm, ctl) == balance - 50
+
+
+GOVERNED = Types.Variant({"Done": Types.Opt(Types.Text), "Proposed": Types.Text})
+
+
+def test_ggg_proposal_stop_replies_done_without_an_id_then_proposed_under_a_voting_policy(realm, people):
+    """Last in the file: it gives the root department a voting policy, and nothing after it expects the old one."""
+    ctl, alice = people["ctl"], people["alice"]
+    scheduled = file_and_pass(realm, people, "Pay Bob, to be stopped", pay(realm, people["bob"], 50), realm.now() + HOUR)
+    assert proposal(realm, alice, scheduled)["status"] == "execution_scheduled"
+    assert realm.ggg("ggg_proposal_stop", Types.Text, scheduled, GOVERNED, ctl) == {"Ok": {"Done": []}}  # no id
+    assert proposal(realm, alice, scheduled)["status"] == "withdrawn"
+    assert "Conflict" in realm.ggg("ggg_proposal_stop", Types.Text, scheduled, GOVERNED, ctl)["Err"]
+
+    another = file_and_pass(realm, people, "Pay Bob, to be stopped by a vote", pay(realm, people["bob"], 50),
+                            realm.now() + HOUR)
+    ok(realm, "department_set_policy", ctl, department="Administration", m=2, n=3)
+    filed = realm.ggg("ggg_proposal_stop", Types.Text, another, GOVERNED, ctl)["Ok"]["Proposed"]
+    assert proposal(realm, alice, filed)["action"] == {"op": "proposal_stop", "args": {"proposal": another}}
+    assert proposal(realm, alice, another)["status"] == "execution_scheduled"  # a vote of the department stops it

@@ -27,7 +27,7 @@ class Call:
 
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
-       returns=None):
+       returns=None, check=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -35,11 +35,13 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     perm_for(args) -> the permission this call needs, when it depends on the arguments (``perm`` otherwise).
     returns -> the key of the reply holding the model's result: the record (by id), the list of a page, the value,
     or for a governed operation the id of the record it created. Without it, the reply itself is the result.
+    check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm. It runs
+    before ``governed`` turns the call into a proposal, so a call that cannot succeed files nothing.
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
-                            "returns": returns}
+                            "returns": returns, "check": check}
         return fn
     return wrap
 
@@ -72,6 +74,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
         user = by if origin == "replay" else claimed or by
         auth.authorize(user, by, name, spec, args, origin, declared)
+        if spec["check"]:
+            spec["check"](args)
         governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
         if governing is not None and not direct(governing):
             from api import proposals
@@ -97,7 +101,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
 
 def direct(department):
     p = department.policy or {}
-    return int(p.get("m", 1)) <= 1 and int(p.get("n", 1)) <= 1 and not p.get("quorum_percent") and not p.get("veto")
+    return int(p.get("m", 1)) <= 1 and int(p.get("n", 1)) <= 1 and not p.get("quorum") and not p.get("veto")
 
 
 def audit(name, user, by, origin, args, out):

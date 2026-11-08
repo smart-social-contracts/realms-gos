@@ -52,7 +52,7 @@ const LEDGER_FEE = 10_000n;
 const RESIDENCE = 1_000_000;
 const LEVY = 500_000;
 const REVENUE_DECLARED = 182_000;
-const REVENUE_OWED = 3_640; // 2.00 % (200 basis points) of the declared revenue
+const REVENUE_OWED = 3_640; // 2.00 % (2 000 000 hundred-millionths) of the declared revenue
 
 const POLICY = {
 	symbol: SYMBOL,
@@ -69,7 +69,7 @@ const POLICY = {
 		// Due the moment it is billed, so an unpaid one is overdue at the next check.
 		{ code: 'levy', base: 'flat', method: 'fixed', amount: LEVY, due_days: 0 },
 		// Not billed by the realm: each member declares it.
-		{ code: 'revenue', base: 'declared', method: 'proportional', rate_bp: 200 }
+		{ code: 'revenue', base: 'declared', method: 'proportional', rate: 2_000_000 }
 	]
 };
 

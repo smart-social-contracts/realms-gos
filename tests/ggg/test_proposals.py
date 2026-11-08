@@ -5,6 +5,7 @@ import world
 from api import members, proposals
 from core import auth, op
 from core.db import Forbidden
+from core.ratio import PERCENT
 from ggg import Delegation, Department, Mandate, Position, Proposal, Realm, User, UserProfile, Vote
 from kit import call, denied, later, ok
 
@@ -61,7 +62,7 @@ def test_I_GOV_2_only_eligible_voters_count():
 
 def test_I_GOV_3_quorum_and_threshold():
     world.build()
-    ok("governance_update", "ctl", quorum_percent=50)
+    ok("governance_update", "ctl", voting_quorum=50 * PERCENT)
     p = ok("proposal_create", "alice", title="x")["proposal"]
     vote_all(p, "yes", "alice", "bob")
     later(8 * 86400)
@@ -82,19 +83,33 @@ def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
     out = ok("mandate_create", "ctl", title="Road works", scope={"max_value": 200000}, executor="Infrastructure")
     assert out["requires_vote"] and Mandate.count() == 0
     p = out["proposal"]
-    vote_all(p, "yes", *world.PEOPLE)
+    vote_all(p, "yes", *world.PEOPLE[:4])  # more than half: the week-long vote stays open for the rest
+    assert Proposal[p].status == "voting" and Mandate.count() == 0
     later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
-    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed"
+    # The vote has ended: finalize closes it, and an accepted action runs at once (there is nothing to wait for).
+    assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "executed"
     assert Mandate.count() == 1 and Mandate["M-1"].executor.id == "Infrastructure"
     assert "no accepted action" in call("proposal_execute", "ctl", proposal=p)["error"]
     assert Proposal[p].status == "executed"
 
 
+def test_a_proposal_the_previous_release_left_accepted_runs_once_through_proposal_execute():
+    """The release before this one recorded an accepted vote at ``proposal_finalize`` and ran its action at
+    ``proposal_execute``: such a proposal is still in storage."""
+    world.build()
+    action = {"op": "mandate_create", "args": {"title": "Road works"}}
+    p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
+    Proposal[p].status = "accepted"
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+    again = call("proposal_execute", "ctl", proposal=p)
+    assert not again["ok"] and again["kind"] == "conflict" and "no accepted action" in again["error"]
+    assert Mandate.count() == 1
+
+
 def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
     world.build()
     realm_wide = [("mandate_create", {"title": "Road works", "executor": "Infrastructure"}),
-                  ("governance_update", {"threshold": 0, "voting_window": 1})]
+                  ("governance_update", {"voting_threshold": 0, "voting_window": 1})]
     for name, args in realm_wide:
         out = call("proposal_create", "carla", title=name, department="Infrastructure", action={"op": name, "args": args})
         assert not out["ok"] and out["kind"] == "forbidden" and "only a realm-wide proposal" in out["error"]
@@ -105,7 +120,7 @@ def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
 
 def test_a_stored_department_action_outside_the_department_fails_without_running():
     world.build()
-    for name, args in (("mandate_create", {"title": "Road works"}), ("governance_update", {"threshold": 0})):
+    for name, args in (("mandate_create", {"title": "Road works"}), ("governance_update", {"voting_threshold": 0})):
         p = ok("proposal_create", "carla", title=name, department="Infrastructure")["proposal"]
         Proposal[p].action = {"op": name, "args": args}
         out = ok("proposal_vote", "carla", proposal=p, choice="yes")
@@ -222,9 +237,7 @@ def test_a_realm_wide_proposal_carries_any_action():
     action = {"op": "mandate_create", "args": {"title": "Road works"}}
     p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
     vote_all(p, "yes", *world.PEOPLE)
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
-    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+    assert Proposal[p].status == "executed" and Mandate.count() == 1  # the last vote ended the vote
 
 
 def test_a_governed_call_under_power_of_attorney_replays_as_the_grantor():
@@ -255,13 +268,10 @@ def test_a_stored_action_naming_another_member_runs_as_its_proposer_not_that_mem
     p = ok("proposal_create", "mallory", title="Vote no", action=vote)["proposal"]
     # A proposal filed before the rule, with the impersonation already in its stored action, both ways.
     Proposal[p].action = {**vote, "args": {**vote["args"], "on_behalf_of": "alice"}, "initiator": "alice"}
-    vote_all(p, "yes", *world.PEOPLE)
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
     target = ok("proposal_create", "alice", title="Bike lane on Main St")["proposal"]
     assert target == "P-2"
-    out = ok("proposal_execute", "ctl", proposal=p)
-    assert out["status"] == "executed", out
+    vote_all(p, "yes", *world.PEOPLE)  # the last vote ends the vote and runs the action
+    assert Proposal[p].status == "executed", Proposal[p].result
     assert Vote[f"{target}:alice"] is None
     assert Vote[f"{target}:mallory"].choice == "no"
 
@@ -343,7 +353,7 @@ def fire_timers():
 def test_a_zero_window_closes_a_vote_once_its_outcome_is_certain_and_runs_its_action():
     world.build()
     ok("governance_update", "ctl", voting_window=0)
-    action = {"op": "governance_update", "args": {"threshold": 60}}
+    action = {"op": "governance_update", "args": {"voting_threshold": 60 * PERCENT}}
     p = ok("proposal_create", "alice", title="Raise the threshold", action=action)["proposal"]
     assert Proposal[p].deadline == 0 and fake_chain.state["timers"] == []
     vote_all(p, "yes", "alice", "bob", "dana")
@@ -368,7 +378,7 @@ def test_everyone_voting_decides_an_open_vote():
 
 def test_a_timed_vote_settles_itself_at_its_deadline():
     world.build()
-    action = {"op": "governance_update", "args": {"threshold": 60}}
+    action = {"op": "governance_update", "args": {"voting_threshold": 60 * PERCENT}}
     p = ok("proposal_create", "alice", title="Raise the threshold", action=action)["proposal"]
     vote_all(p, "yes", "alice", "bob")
     assert fake_chain.state["timers"][-1][0] == 7 * 86400 + 1

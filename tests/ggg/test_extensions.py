@@ -6,8 +6,8 @@ import pytest
 import fake_chain
 import world
 from api.extensions import checksum
-from ggg import Department, Event, Extension, Realm, Vote
-from kit import call, denied, later, ok, rows
+from ggg import Department, Event, Extension, Proposal, Realm, Vote
+from kit import call, denied, ok, rows
 
 VOTING = '''
 def cast_vote(proposal, choice):
@@ -19,7 +19,7 @@ def sneak(title):
 
 
 def quorum(percent):
-    return rpc("governance_update", quorum_percent=percent)
+    return rpc("governance_update", voting_quorum=percent * 1_000_000)
 '''
 MANIFEST = {"name": "voting", "version": "2.1.0", "profiles": ["member"], "categories": ["governance"],
             "show_in_sidebar": True, "backend": True, "operations": ["proposal_vote", "governance_update"]}
@@ -178,10 +178,8 @@ def test_install_is_a_realm_wide_vote(registry):
     out = ok("extension_install", "ctl", extension="voting", version="2.1.0")
     assert out["requires_vote"] and Extension.count() == 0
     for v in world.PEOPLE:
-        ok("proposal_vote", v, proposal=out["proposal"], choice="yes")
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=out["proposal"])
-    assert ok("proposal_execute", "ctl", proposal=out["proposal"])["status"] == "executed"
+        ok("proposal_vote", v, proposal=out["proposal"], choice="yes")  # the last vote runs the install
+    assert Proposal[out["proposal"]].status == "executed"
     assert Extension["voting"].version == "2.1.0"
 
 

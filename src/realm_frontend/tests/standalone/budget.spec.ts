@@ -66,7 +66,7 @@ interface Period {
 interface Rule {
 	id: string;
 	source_fund: string;
-	rules: Record<string, number>;
+	rules: { fund: string; share: number }[];
 	status: string;
 }
 interface Budget {
@@ -219,19 +219,21 @@ test('the realm opens a fiscal period, and only the finance role can', async () 
 });
 
 test('the allocation rule is adopted by the finance role only', async () => {
-	const shares = { [ROADS]: 60, [WELFARE]: 30 };
+	// A share is in hundred-millionths: 1 % is 1_000_000.
+	const share = (fund: string, percent: number) => ({ fund, share: percent * 1_000_000 });
+	const shares = [share(ROADS, 60), share(WELFARE, 30)];
 	await leavesUnchanged(['AllocationRule', 'Fund'], async () => {
 		const draft = { source_fund: SOURCE, rules: shares };
 		await refused('allocation_rule_draft', draft, member, /needs org\.manage_budget/);
 		await refused(
 			'allocation_rule_draft',
-			{ source_fund: SOURCE, rules: { [ROADS]: 80, [WELFARE]: 30 } },
+			{ source_fund: SOURCE, rules: [share(ROADS, 80), share(WELFARE, 30)] },
 			founder(),
-			/at most 100/
+			/at most 100000000/
 		);
 		await refused(
 			'allocation_rule_draft',
-			{ source_fund: SOURCE, rules: { [`NOPE-${RUN}`]: 10 } },
+			{ source_fund: SOURCE, rules: [share(`NOPE-${RUN}`, 10)] },
 			founder(),
 			/unknown Fund/
 		);

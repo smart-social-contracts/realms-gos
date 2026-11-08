@@ -1,4 +1,5 @@
 from core import auth
+from core.ratio import PERCENT
 import fake_chain
 import world
 from ggg import Appointment, Authority, Department, Organization, Position, Proposal
@@ -9,13 +10,12 @@ DAY = 86400
 
 def pass_proposal(p, *voters):
     """The deciding vote settles a department's proposal and runs its action; a timed realm-wide one waits for its
-    deadline."""
+    deadline, and then ``proposal_finalize`` closes it and runs it."""
     for v in voters:
         ok("proposal_vote", v, proposal=p, choice="yes")
     if Proposal[p].status == "voting":
         later(8 * DAY)
         ok("proposal_finalize", "ctl", proposal=p)
-        ok("proposal_execute", "ctl", proposal=p)
     assert Proposal[p].status == "executed", Proposal[p].result
 
 
@@ -36,7 +36,7 @@ def test_story_agora_departments_and_clinics():
     ok("position_create", "ctl", department="Infrastructure", position="infrastructure.inspector", title="Inspector",
        headcount=2, salary=2400)
     ok("appoint", "ctl", position="infrastructure.inspector", user="alice")
-    ok("department_set_policy", "ctl", department="Infrastructure", m=2, n=3, quorum_percent=50)
+    ok("department_set_policy", "ctl", department="Infrastructure", m=2, n=3, quorum=50 * PERCENT)
     p = ok("appoint", "ctl", position="infrastructure.inspector", user="bob")["proposal"]
     pass_proposal(p, "carla", "alice")
     assert len([a for a in Position["infrastructure.inspector"].appointments if a.status == "active"]) == 2

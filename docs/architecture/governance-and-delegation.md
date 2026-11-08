@@ -16,11 +16,12 @@ Every realm has a root department, `Administration`, and any number of departmen
 Each department has an approval **policy**, set with `department_set_policy`:
 
 ```json
-{"department": "Civil Registry", "m": 2, "n": 3, "quorum_percent": 0, "veto": ["dana"]}
+{"department": "Civil Registry", "m": 2, "n": 3, "quorum": 0, "veto": ["dana"]}
 ```
 
 - `m` of `n`: how many yes votes the department needs, out of its seats.
-- `quorum_percent`: turnout needed (0 to 100).
+- `quorum`: turnout needed, as a share of the department's voters (0 to 100 000 000; every ratio is in hundred-millionths,
+  so 50 % is 50 000 000 and 0.1 % is 100 000).
 - `veto`: seated members whose *no* rejects the proposal.
 
 A policy is **direct** when `m ≤ 1`, `n ≤ 1`, there is no quorum and no veto. A department with no
@@ -56,10 +57,10 @@ realm directly; after `setup_launch`, configuration is governed by the root depa
 stateDiagram-v2
     [*] --> voting: proposal_create or a governed call
     voting --> withdrawn: proposal_withdraw
-    voting --> accepted: proposal_finalize
-    voting --> rejected: proposal_finalize
-    accepted --> executed: proposal_execute
-    accepted --> failed: proposal_execute (the action failed)
+    voting --> accepted: the vote ends (the last vote, the deadline, proposal_finalize)
+    voting --> rejected: the vote ends
+    accepted --> executed: at once
+    accepted --> failed: at once (the action failed)
     accepted --> execution_scheduled: the proposal has an effective_at still to come
     accepted --> expired: the vote ended after effective_at
     execution_scheduled --> executed: at effective_at
@@ -71,31 +72,42 @@ stateDiagram-v2
 |---|---|---|
 | File | `proposal_create` | `title`, `description`, `department` (default: the realm), optional `action` `{op, args}`. Voting opens at once. |
 | Vote | `proposal_vote` | `choice`: `yes`, `no` or `abstain`. Voting again replaces your vote. Delegable. |
-| Close | `proposal_finalize` | Records accepted or rejected. |
-| Act | `proposal_execute` | Replays the action once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. |
+| Close | `proposal_finalize` | Closes a vote that has ended and records it accepted or rejected; an accepted action runs at once, unless its `effective_at` is ahead. |
+| Act | `proposal_execute` | Replays the action of an accepted proposal that has not run, once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. |
 
 **A proposal can state when it takes effect.** `proposal_create` takes an optional `effective_at` (whole seconds, UTC; a time in the past is refused).
 Once the proposal is accepted its action runs at that time instead of at the vote, and the proposal is
 `execution_scheduled` while it waits. The wait is a one-step task of the realm's task scheduler
 (`task_list` shows it), which is armed again after an upgrade. The time never moves. If the time proves wrong, another
 proposal carries `proposal_stop` as its action and the scheduled proposal ends `withdrawn`; a new proposal then sets
-the right time. A vote ends at its deadline, or earlier at the deciding vote, and the time it is closed does not
-change that: a timer that fires late, an upgrade or a `proposal_finalize` days after the deadline do not expire a
-proposal. A vote that ends after `effective_at` leaves the proposal `expired` and runs nothing. A vote that ended
-in time but is closed after `effective_at` is accepted and its action runs at once (after `proposal_finalize`, at
-`proposal_execute`). Proposals due in the same second run in no set order.
+the right time. A vote ends at its deadline, or earlier at the deciding vote or the moment every eligible member has
+voted, and after that no vote is accepted or replaced. The time it is closed does not change that: a timer that fires
+late, an upgrade or a `proposal_finalize` days after the deadline do not expire a proposal. A vote that ends after
+`effective_at` leaves the proposal `expired` and runs nothing. A vote that ended in time but is closed after
+`effective_at` is accepted and its action runs at once, by the timer, an upgrade or `proposal_finalize`. Proposals due
+in the same second run in no set order.
+
+**A proposal can link to others.** `proposal_create` takes optional `links`, at most 16 of `{kind, proposal}`: `replaces`
+(this proposal takes the place of an earlier one) or `relates_to` (a plain reference, both ways), each proposal named
+once. The links are fixed at creation, like the action; to change a proposal, its proposer withdraws it and files a new
+one that `replaces` it. A `replaces` target must be a withdrawn proposal filed for the same member (the grantor, for a
+call made under power of attorney), and a withdrawn proposal is replaced once: a second `replaces` of it is a
+`Conflict`, and when the replacement is withdrawn in turn, a new proposal replaces *it*, so the first one stays
+replaced by the second. The other side is readable: `proposal_get` shows the proposal that replaces this one
+(`replaced_by`), and `proposal_linked_from` lists, a page at a time and oldest first, every proposal that links to it
+(`replaces` there reads "replaced by"). Nothing limits how many proposals link to one.
 
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
-it, along with the realm-wide `threshold` and `quorum_percent`.
+it, along with the realm-wide `voting_threshold` and `voting_quorum`, in hundred-millionths.
 
 **Who votes and how it is counted:**
 
 | | Realm-wide proposal (root department) | Department proposal |
 |---|---|---|
 | Eligible voters | every active member | the head and the holders of active seats |
-| Passes when | turnout ≥ `quorum_percent` and yes > `threshold`% of yes + no (default 50) | yes ≥ `m` |
+| Passes when | turnout ≥ `voting_quorum` and yes > `voting_threshold` of yes + no (default 50 %) | yes ≥ `m` |
 | Rejected when | the rule above fails at the deadline | a veto holder votes no, or `m` can no longer be reached |
-| Can close early | no, it waits for the deadline | yes, once the outcome is certain |
+| Can close early | yes, once every eligible member has voted | yes, once every eligible member has voted or the outcome is certain |
 
 A department cannot be deleted while it has a proposal being voted on or waiting to run. Only the root department
 is realm-wide: a proposal whose department is gone has no voters and runs nothing.
