@@ -5,8 +5,9 @@ import json
 
 import world
 from api.setup import INDEX_CONVERSION
+from core import db as db_module
 from ic_python_db import Database
-from kit import call, denied, ok
+from kit import denied, ok
 
 from ggg import Member, Proposal, Realm, Vote
 
@@ -71,7 +72,7 @@ def test_members_votes_and_proposals_keep_their_lists_through_the_conversion():
 
     out = ok("db_convert_indexes", "ctl")
 
-    assert out == {"ok": True, "lists": 3, "ids": members + 2 * votes, "done": True}
+    assert out == {"ok": True, "lists": 3, "ids": members + 2 * votes, "done": True, "refused": []}
     for base in bases:
         assert is_converted(base, len(ids[base]))
         assert Database.get_instance()._ix_all(base) == ids[base]
@@ -103,7 +104,7 @@ def test_a_new_realm_is_done_and_scans_nothing(monkeypatch):
     world.build()
     refuse_scans(monkeypatch)
     assert Realm["1"].manifest_data[INDEX_CONVERSION] == {"done": True}
-    assert ok("db_convert_indexes", "ctl") == {"ok": True, "lists": 0, "ids": 0, "done": True}
+    assert ok("db_convert_indexes", "ctl") == {"ok": True, "lists": 0, "ids": 0, "done": True, "refused": []}
 
 
 def test_a_converted_realm_is_done_and_scans_nothing(monkeypatch):
@@ -111,10 +112,10 @@ def test_a_converted_realm_is_done_and_scans_nothing(monkeypatch):
     legacy("_fi:Vote:proposal_id:P-9", range(1, 21))
     forget_the_conversion()
     assert sum(r["lists"] for r in convert_all()) == 1
-    assert Realm["1"].manifest_data[INDEX_CONVERSION] == {"done": True}
+    assert Realm["1"].manifest_data[INDEX_CONVERSION] == {"done": True, "refused": []}
     assert Database.get_instance()._ix_all("_fi:Vote:proposal_id:P-9") == [str(i) for i in range(1, 21)]
     refuse_scans(monkeypatch)
-    assert ok("db_convert_indexes", "ctl") == {"ok": True, "lists": 0, "ids": 0, "done": True}
+    assert ok("db_convert_indexes", "ctl") == {"ok": True, "lists": 0, "ids": 0, "done": True, "refused": []}
 
 
 def test_the_realm_remembers_how_far_it_got():
@@ -129,24 +130,42 @@ def test_the_realm_remembers_how_far_it_got():
     assert first["ids"] == 200 and not first["done"] and Realm["1"].manifest_data[INDEX_CONVERSION]["after"]
     second = ok("db_convert_indexes", "ctl", ids=100)
     assert second["ids"] == 300 and not second["done"]
-    assert ok("db_convert_indexes", "ctl", ids=100) == {"ok": True, "lists": 0, "ids": 0, "done": True}
-    assert Realm["1"].manifest_data[INDEX_CONVERSION] == {"done": True}
+    assert ok("db_convert_indexes", "ctl", ids=100) == {"ok": True, "lists": 0, "ids": 0, "done": True, "refused": []}
+    assert Realm["1"].manifest_data[INDEX_CONVERSION] == {"done": True, "refused": []}
     assert is_converted("_fi:Vote:voter:bb", 200) and is_converted("_fi:Vote:proposal_id:a", 300)
 
 
-def test_a_list_too_long_for_one_call_is_refused_by_name_and_the_rest_waits():
-    """Converting it would take more instructions than an update has: say which list, and convert nothing else."""
+def test_a_list_too_long_for_one_call_is_skipped_and_named_and_the_walk_still_ends():
+    """Converting it would take more instructions than an update has: say which list, and convert the rest."""
     world.build()
     legacy("_fi:Vote:voter:small", range(1, 21))
     legacy("_ri:Proposal:big:votes", range(1, 150_001))
+    legacy("_ri:Proposal:zzzzzzzzz:votes", range(1, 31))
     forget_the_conversion()
 
-    assert ok("db_convert_indexes", "ctl")["lists"] == 1  # the short list goes first, in its own call
-    out = call("db_convert_indexes", "ctl")
+    replies = convert_all()
 
-    assert not out["ok"] and out["kind"] == "unavailable" and "_ri:Proposal:big:votes" in out["error"]
-    assert "150000 ids" in out["error"] and storage().get("_ri:Proposal:big:votes")[:1] == "["
-    assert "after" in Realm["1"].manifest_data[INDEX_CONVERSION]  # not done
+    assert sum(r["lists"] for r in replies) == 2 and sum(r["ids"] for r in replies) == 50
+    assert replies[-1]["done"] and replies[-1]["refused"] == ["_ri:Proposal:big:votes"]
+    assert storage().get("_ri:Proposal:big:votes")[:1] == "[" and is_converted("_ri:Proposal:zzzzzzzzz:votes", 30)
+    # Done, and still saying so
+    assert ok("db_convert_indexes", "ctl") == {"ok": True, "lists": 0, "ids": 0, "done": True,
+                                               "refused": ["_ri:Proposal:big:votes"]}
+
+
+def test_ids_is_held_to_what_a_call_can_convert(monkeypatch):
+    world.build()
+    monkeypatch.setattr(db_module, "CONVERT_BUDGET", db_module.CONVERT_COST_PER_ID * 100)  # 100 ids to a call
+    legacy("_fi:Vote:voter:aa", range(1, 61))
+    legacy("_fi:Vote:voter:bbb", range(1, 61))
+    legacy("_fi:Vote:voter:cccc", range(1, 151))
+    forget_the_conversion()
+
+    first = ok("db_convert_indexes", "ctl", ids=10**9)
+
+    assert (first["lists"], first["ids"], first["done"]) == (1, 60, False)  # not both: 120 ids are more than 100
+    last = convert_all(ids=10**9)[-1]
+    assert last["done"] and last["refused"] == ["_fi:Vote:voter:cccc"]
 
 
 def test_an_id_that_looks_like_an_array_is_not_a_list():
