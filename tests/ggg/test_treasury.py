@@ -125,6 +125,23 @@ def test_I_FIN_1_every_transaction_balances():
     assert balanced() and len({e.transaction for e in rows(LedgerEntry)}) == 4
 
 
+def test_a_delegates_transfer_is_a_proposal_even_where_the_fund_pays_directly():
+    depts = setup_finance()
+    allocate(ROADS=100)
+    receive(1_000)
+    world.grant(depts["Infrastructure"], "transfer.create")
+    ledger_ok()
+    ok("delegation_grant", "carla", delegate="claude-conn", operations=["transfer.create", "proposal.vote"],
+       expires_in=86400)
+    out = ok("transfer_create", "claude-conn", on_behalf_of="carla", fund="ROADS", to="buildco", amount=500)
+    assert out["requires_vote"] and Transfer.count() == 0
+    assert not [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer"]
+    p = out["proposal"]
+    assert "filed" in denied("proposal_vote", "claude-conn", proposal=p, choice="yes", on_behalf_of="carla")
+    assert adopt(p, voter="carla")["status"] == "completed"
+    assert Transfer.count() == 1
+
+
 def test_I_FIN_2_money_leaves_a_fund_only_by_transfer_under_the_owners_policy():
     depts = setup_finance()
     allocate(ROADS=100)
@@ -149,7 +166,7 @@ def test_transfer_create_is_delegable():
                scope={"operations": ["transfer.create"]}, expires_at=fake_chain.now() + 3600)
     ledger_ok()
     out = ok("transfer_create", "claude-conn", fund="ROADS", to="buildco", amount=10, on_behalf_of="carla")
-    assert out["status"] == "completed"
+    assert out["requires_vote"] and Transfer.count() == 0
 
 
 def test_I_FIN_3_invoice_paid_only_when_ledger_shows_amount():

@@ -108,7 +108,7 @@ def execute(v):
     return json.loads(out)
 
 
-@op("federal_vote.propose", delegable=True)
+@op("federal_vote.propose")
 def federal_vote_propose(c, args):
     """Propose a federal vote titled ``title`` on ``action`` (``{"op": …, "args": …}``), held in every active quarter
     under the published rule; a quarter passes it to the capital. Returns ``vote``."""
