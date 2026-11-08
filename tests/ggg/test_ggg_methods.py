@@ -50,13 +50,13 @@ def test_private_data_and_wrapped_keys_are_blobs():
     assert g.ggg_document_get(doc) == {"Ok": None} or "Err" in g.ggg_document_get(doc)
 
 
-def test_a_procedure_keeps_ggg_s_period_unit_tags():
+def test_a_procedure_crosses_with_ggg_s_period_unit_tags():
     health()
     caller("ctl")
     args = {"kind": "business", "initiated_by": "the applicant", "matter": None, "silence": {"Negative": None},
             "decision_deadline": {"count": 30, "unit": {"WorkingDay": None}}, "legislation": None, "facts": None}
     assert do(g.ggg_procedure_define(args)) == {"Ok": {"Done": "business"}}
-    assert Procedure["business"].decision_deadline == {"count": 30, "unit": "WorkingDay"}
+    assert Procedure["business"].decision_deadline == {"count": 30, "unit": "working_day"}
     listed = g.ggg_procedure_list({"cursor": None, "limit": None})["Ok"]["items"]
     assert listed[0]["decision_deadline"] == {"count": 30, "unit": {"WorkingDay": None}}
     assert listed[0]["silence"] == {"Negative": None}

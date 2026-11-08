@@ -165,13 +165,13 @@ def test_a_licence_application_is_dated_by_its_procedure_and_working_days_fail_c
     """The legislation library compiles on first use in the canister: the deadline counts there as in the unit tests."""
     ctl, alice = people["ctl"], people["alice"]
     ok(realm, "procedure_define", ctl, kind="business", initiated_by="the applicant", silence="positive",
-       decision_deadline={"count": 1, "unit": "Day"})
+       decision_deadline={"count": 1, "unit": "day"})
     ok(realm, "license_apply", alice, kind="business")
     licences = ok(realm, "license_list", alice, query=True, holder=f"User:{alice}", kind="business")["licenses"]
     applied = stored(realm, "License", licences[0]["id"])["applied_at"]
     # one day from the day of the application, and that day counts in full: the second midnight after it, in UTC
     assert licences[0]["decision_due"] == (applied // 86400 + 2) * 86400
     ok(realm, "procedure_define", ctl, kind="business", initiated_by="the applicant",
-       decision_deadline={"count": 15, "unit": "WorkingDay"})
+       decision_deadline={"count": 15, "unit": "working_day"})
     refused = realm.call("license_apply", {"kind": "business"}, sender=alice)
     assert not refused["ok"] and refused["kind"] == "unavailable", refused

@@ -119,7 +119,7 @@ def test_I_LIC_2_only_active_unexpired_licences_count():
 
 
 HEALTH = {"kind": "health", "initiated_by": "the applicant", "matter": "licence",
-          "decision_deadline": {"count": 3, "unit": "Month"}, "silence": "positive", "legislation": "Licensing Act 12"}
+          "decision_deadline": {"count": 3, "unit": "month"}, "silence": "positive", "legislation": "Licensing Act 12"}
 
 
 def test_story_the_realm_defines_how_health_licences_are_decided():
@@ -129,12 +129,12 @@ def test_story_the_realm_defines_how_health_licences_are_decided():
     assert ok("procedure_define", "carla", **HEALTH)["procedure"] == "health"
     p = Procedure["health"]
     assert (p.initiated_by, p.matter, p.decision_deadline, p.silence, p.legislation, p.facts) == (
-        "the applicant", "licence", {"count": 3, "unit": "Month"}, "positive", "Licensing Act 12", {})
+        "the applicant", "licence", {"count": 3, "unit": "month"}, "positive", "Licensing Act 12", {})
     ok("procedure_define", "carla", kind="health", initiated_by="the department", facts={"fee": 0})
     p = Procedure["health"]
     assert (p.initiated_by, p.matter, p.decision_deadline, p.silence, p.facts) == ("the department", "", None, "", {"fee": 0})
     ok("procedure_define", "carla", kind="business", initiated_by="the applicant", silence="negative",
-       decision_deadline={"count": 30, "unit": "WorkingDay"})
+       decision_deadline={"count": 30, "unit": "working_day"})
     listed = ok("procedure_list", "alice")
     assert [x["id"] for x in listed["procedures"]] == ["health", "business"] and listed["next"] is None
     assert [x["id"] for x in ok("procedure_list", "alice", count=1)["procedures"]] == ["health"]
@@ -144,8 +144,8 @@ def test_story_the_realm_defines_how_health_licences_are_decided():
 def test_a_procedure_with_no_period_or_a_bad_silence_is_refused_before_anything_is_written():
     """Candid cannot say most of these, so the arguments go to the operation as JSON."""
     agora()
-    for bad in ({"decision_deadline": {"count": 3, "unit": "fortnight"}}, {"decision_deadline": {"count": -1, "unit": "Day"}},
-                {"decision_deadline": {"count": "3", "unit": "Day"}}, {"decision_deadline": {"unit": "Day"}},
+    for bad in ({"decision_deadline": {"count": 3, "unit": "fortnight"}}, {"decision_deadline": {"count": -1, "unit": "day"}},
+                {"decision_deadline": {"count": "3", "unit": "day"}}, {"decision_deadline": {"unit": "day"}},
                 {"silence": "tacit"}):
         out = direct("procedure_define", "ctl", **{**HEALTH, **bad})
         assert not out["ok"] and out["kind"] == "invalid_argument", bad
@@ -187,7 +187,7 @@ def test_a_decision_is_due_at_the_end_of_the_last_day_of_the_deadline(utc):
     """One day from the 21st is the 22nd, and the 22nd counts in full: positive silence applies from the 23rd, never
     during the 22nd."""
     agora()
-    define_deadline(1, "Day")
+    define_deadline(1, "day")
     lic = applied_at(2026, 9, 21, 14, 13)
     assert License[lic].decision_due == at(2026, 9, 23)
     assert License[lic].decision_due > at(2026, 9, 22, 23, 59)
@@ -197,10 +197,10 @@ def test_a_decision_is_due_at_the_end_of_the_last_day_of_the_deadline(utc):
 
 def test_a_deadline_in_months_ends_with_the_last_day_of_the_month_it_reaches(utc):
     agora()
-    define_deadline(3, "Month")
+    define_deadline(3, "month")
     assert License[applied_at(2026, 9, 21, 14, 13)].decision_due == at(2026, 12, 22)
     assert License[applied_at(2026, 11, 30, 9, 0)].decision_due == at(2027, 3, 1)  # February has no 30th: its 28th
-    define_deadline(1, "Year")
+    define_deadline(1, "year")
     assert License[applied_at(2028, 2, 29, 9, 0)].decision_due == at(2029, 3, 1)
 
 
@@ -208,13 +208,13 @@ def test_the_day_is_the_realms_own_not_utc(utc):
     """22:30 UTC on 1 July is already the 2nd in Madrid, where a day is over at 22:00 UTC."""
     agora()
     ok("realm_configure", "ctl", timezone="Europe/Madrid")
-    define_deadline(1, "Day")
+    define_deadline(1, "day")
     assert License[applied_at(2026, 7, 1, 22, 30)].decision_due == at(2026, 7, 3, 22)
 
 
 def test_working_days_fail_closed_while_the_realm_has_no_calendar(utc):
     agora()
-    define_deadline(15, "WorkingDay")
+    define_deadline(15, "working_day")
     out = call("license_apply", "dr-ana", kind="health", holder="Organization:clinic-b", department="Health")
     assert not out["ok"] and out["kind"] == "unavailable" and "2026" in out["error"]
     assert License.max_id() == 0
@@ -230,10 +230,10 @@ def test_a_licence_without_a_procedure_or_a_deadline_has_no_due_date(utc):
 
 def test_a_renewal_is_dated_by_the_procedure_in_force_and_an_earlier_licence_keeps_its_date(utc):
     agora()
-    define_deadline(10, "Day")
+    define_deadline(10, "day")
     first = applied_at(2026, 9, 21, 14, 13)
     ok("license_decide", "hector", license=first, approve=True)
-    define_deadline(20, "Day")
+    define_deadline(20, "day")
     renewal = ok("license_renew", "dr-ana", license=first)["license"]
     assert License[first].decision_due == at(2026, 10, 2)
     assert License[renewal].decision_due == at(2026, 10, 12)

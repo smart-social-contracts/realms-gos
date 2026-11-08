@@ -6,6 +6,8 @@ from api.proposals import realm_wide
 
 SHOWN = ("id", "kind", "holder", "status", "decision_due", "issued_at", "expires_at")
 NS = 10**9  # the chain counts seconds, localtime nanoseconds
+# The operations' text for GGG's PeriodUnit, as the legislation library tags it.
+PERIOD_UNITS = {"day": "Day", "working_day": "WorkingDay", "month": "Month", "year": "Year"}
 
 
 def valid(lic):
@@ -60,7 +62,7 @@ def decision_due(kind, applied_at):
     from realms.legislation.periods import Period
 
     try:
-        _, _, end = localtime.add_period(applied_at * NS, Period(deadline["count"], deadline["unit"]), Layers())
+        _, _, end = localtime.add_period(applied_at * NS, Period(deadline["count"], PERIOD_UNITS[deadline["unit"]]), Layers())
     except LegislationError as e:
         raise Unavailable(f"an application for a {kind} licence cannot be dated: {e}")
     return end // NS
@@ -160,7 +162,6 @@ def license_verify(c, args):
     return {"valid": bool(lic and valid(lic)), "license": shown(lic) if lic else None}
 
 
-PERIOD_UNITS = ("Day", "WorkingDay", "Month", "Year")  # GGG's PeriodUnit, as the legislation library has it
 SILENCES = ("positive", "negative")
 
 
@@ -177,8 +178,8 @@ def valid_procedure(args):
 @op("procedure.define", governed=realm_wide, check=valid_procedure, returns="procedure")
 def procedure_define(c, args):
     """Define, or redefine, how applications for licences of ``kind`` are decided: who starts it (``initiated_by``),
-    optionally the ``matter``, a ``decision_deadline`` (a Period ``{"count": 3, "unit": "Month"}``, the unit Day,
-    WorkingDay, Month or Year), what ``silence`` means (positive grants, negative refuses), the ``legislation`` that says so and
+    optionally the ``matter``, a ``decision_deadline`` (a Period ``{"count": 3, "unit": "month"}``, the unit day,
+    working_day, month or year), what ``silence`` means (positive grants, negative refuses), the ``legislation`` that says so and
     ``facts``. The licence applications that follow take their ``decision_due`` from it. Returns ``procedure``, the
     kind."""
     p = Procedure[args["kind"]] or Procedure(id=args["kind"])
