@@ -34,7 +34,7 @@ class Call:
 
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
-       returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None):
+       returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None, lists=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -55,12 +55,15 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     ``proposal_create``, before the proposal is written: it refuses a call that has nothing to carry and ties the records
     the call will act on to ``proposal``, so that no other proposal takes them.
     releases(args, proposal) -> runs when that proposal ends without the call having run: it frees what ``fixes`` tied.
+    lists -> for each list of GGG's facts that is not one of the call's arguments, ``{list: fn(args)}`` giving its
+    elements (GGG's form), such as the saved policy's entries that ``tax_policy_propose`` names by id; the forbids that
+    range over the list judge each of them.
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,
-                            "secret": tuple(secret), "fixes": fixes, "releases": releases}
+                            "secret": tuple(secret), "fixes": fixes, "releases": releases, "lists": lists or {}}
         return fn
     return wrap
 
@@ -94,6 +97,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
         user = by if origin == "replay" else claimed or by
         grant = auth.authorize(user, by, name, spec, args, origin, declared)
+        auth.refuse_forbidden(user, name, spec, args, proposal)
         ranges.check(name, args)
         if spec["check"]:
             spec["check"](args)

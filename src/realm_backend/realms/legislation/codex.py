@@ -331,6 +331,21 @@ class Codex(metaclass=Sealed):
                     if not passed:
                         raise Refused(why, member.line, member.file)
 
+    def has_forbids(self):
+        """Whether any chapter loaded so far holds a forbid."""
+        return any(
+            member.kind == "forbid"
+            for chain in self.chapters.values()
+            for cls in chain
+            for member in cls.__own__.values()
+        )
+
+    def use_facts(self, facts):
+        """Check the forbids against GGG's fact schema ``facts`` (as ``cedar.FactSchema`` reads it) from now on. The
+        realm gives it to a codex that holds forbids only: building it costs some 400 M instructions in its sandbox.
+        """
+        self.facts = _cedar().FactSchema(facts)
+
     def forbids(self):
         """Every forbid of every chapter, bound to this realm (layered-codex.md §6, §9.4): its ``S.``
         settings read from the domain as it resolves here, and its tree checked against the fact
@@ -358,11 +373,13 @@ class Codex(metaclass=Sealed):
         left open as ``context.settings`` for the analysis (``generic``, §12.3)."""
         return _cedar().policies(self.forbids(), generic)
 
-    def cedar_schema(self, generic=False, context=None):
-        """The Cedar schema the generated policies validate against: every action of the fact schema,
-        with ``context`` (the realm's context fields and their Cedar types) plus ``facts``, and the open
-        ``settings`` in the generic mode."""
-        return _cedar().schema(self.facts, self.forbids() if generic else (), context)
+    def cedar_schema(self, generic=False, context=None, only=None):
+        """The Cedar schema the generated policies validate against: every action of the fact schema (or
+        those ``only`` names), with ``context`` (the realm's context fields and their Cedar types) plus
+        ``facts``, and the open ``settings`` in the generic mode."""
+        return _cedar().schema(
+            self.facts, self.forbids() if generic else (), context, only
+        )
 
     def context(self, now=0, approvals=(), local_day=None):
         """A call's context: the time, the approvals the operation carries and the realm's local-day function."""

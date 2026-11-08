@@ -3,7 +3,8 @@
 Every call to every operation is decided by one [Cedar](https://www.cedarpolicy.com) policy set.
 There is no other check: no `if is_admin` in the operations, and no back door. The schema, the
 policies and the code that builds each request are in
-[`core/auth.py`](../../src/realm_backend/core/auth.py), about 140 lines.
+[`core/auth.py`](../../src/realm_backend/core/auth.py), about 220 lines; the facts of a layered codex's forbids are
+built in [`core/forbids.py`](../../src/realm_backend/core/forbids.py).
 
 ## The request
 
@@ -12,7 +13,8 @@ context?*
 
 - **Principal**: `Realm::User::"<the user>"`, with two attributes: `permissions` (the set the user
   holds, see below) and `banned`.
-- **Action**: `Realm::Action::"call"`. There is only one action; the operation is in the context.
+- **Action**: `Realm::Action::"call"`. The permission decision is always asked on this action; the operation is in
+  the context. A layered codex's forbids are asked on actions of their own, below.
 - **Resource**: `Realm::Realm::"1"`.
 - **Context**: facts about this call.
 
@@ -36,14 +38,14 @@ A call is allowed when at least one `permit` matches and no `forbid` matches.
 
 ```cedar
 // Anyone may call a public operation.
-permit (principal, action == Realm::Action::"call", resource) when { context.public };
+permit (principal, action in Realm::Action::"call", resource) when { context.public };
 
 // A user who holds the permission (or "all") may call the operation.
-permit (principal, action == Realm::Action::"call", resource)
+permit (principal, action in Realm::Action::"call", resource)
   when { principal.permissions.contains("all") || principal.permissions.contains(context.permission) };
 
 // A codex may call the operations it declared.
-permit (principal, action == Realm::Action::"call", resource)
+permit (principal, action in Realm::Action::"call", resource)
   when { context.origin == "codex" && context.declared.contains(context.op) };
 ```
 
@@ -76,6 +78,22 @@ When Cedar says no, `reason()` turns the context into a readable message, such a
 `proposal_vote needs proposal.vote`, `resolution_issue must be done by a human, not an agent` or
 `dispute_accept: you are a party to this matter`.
 
+## The forbids of a layered codex
+
+A [layered codex](../codices/layered-codex.md) can add `forbid` policies, generated from the `forbid(...)` rules
+of its chapters (§6, §9.4). They are loaded after `GUARDRAILS + POLICIES` when the codex becomes the running one,
+parsed once, and name a Cedar action each: the operation (`tax_policy_propose`) or one of its lists
+(`tax_policy_propose.taxes`, `tax_policy_draft.taxes`), all `in [Realm::Action::"call"]`, so the permits and guardrails
+above cover them too. The facts of a forbid are the operation's arguments as GGG defines them
+([`ggg_facts.py`](../../src/realm_backend/ggg_facts.py)) and the facts the operation derives (`derived=` on `@op`).
+
+After the permission decision, `dispatch` calls `auth.refuse_forbidden`, which asks, for the operation, one request
+per forbid-named action (one per element of a list), under the context `origin: "forbids"` that carries only the
+operation and its facts. It asks nothing when no forbid names the operation, so a realm with a legacy codex or
+none decides as before. It follows the replay of an accepted proposal as well, which has no permission decision of its
+own (the vote was it): the forbids of the legislation in force still apply, and a replay one refuses ends the
+proposal `failed`. No forbid can name a reserved operation.
+
 ## Where permissions come from
 
 `permissions(principal)` builds the principal's set fresh for each call:
@@ -101,9 +119,10 @@ removed when the realm launches.
 - **Anonymous callers** are refused with `sign in first` before Cedar runs, unless the operation is
   `public`.
 - **Replays** (a passed proposal running its action, origin `replay`) skip authorization: the vote
-  was the authorization. The original caller was checked when they filed it. A proposal a delegate filed is
-  checked again when it runs: the grant it was filed under must not have been revoked or replaced, and
-  must still be able to make the call (`proposals.check_grant`). An expired grant is enough.
+  was the authorization. The generated forbids of a layered codex still apply to them (above). The original
+  caller was checked when they filed it. A proposal a delegate filed is checked again when it runs: the grant
+  it was filed under must not have been revoked or replaced, and must still be able to make the call
+  (`proposals.check_grant`). An expired grant is enough.
 - **Extensions** call as the user (origin `extension`). They need the user's permission *and*
   the operation in their manifest. An extension can never do more than the user could.
 - **Codices** call as the realm itself (origin `codex`). The third permit lets them through, but
@@ -118,7 +137,8 @@ them is declared `@op(..., signing=True)`, and the guardrails keep agents and de
 ## Testing a rule
 
 The unit tests decide with [`cedarpy`](https://pypi.org/project/cedarpy/), the same Cedar engine,
-loaded with the same `SCHEMA`, `GUARDRAILS` and `POLICIES`. In the canister, `decide` uses
+over the policies and schema in force (`auth.live`: `SCHEMA`, `GUARDRAILS` and `POLICIES`, and the generated forbids
+of the running layered codex). In the canister, `decide` uses
 `ic_basilisk_toolkit.cedar`. A rule is tested by calling an operation. From
 [`tests/ggg/test_kernel.py`](../../tests/ggg/test_kernel.py), where `t_sign` and `t_decide` are test
 operations declared `signing=True` and with `parties`:

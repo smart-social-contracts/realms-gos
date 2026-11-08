@@ -220,7 +220,13 @@ def tax_policy_draft(c, args):
     return {"policy": p.id}
 
 
-@op("tax.manage", governed=realm_wide)
+def saved_entries(args):
+    """The entries of the saved policy ``tax_policy_propose`` names: the list its forbids range over (GGG's
+    ``tax_policy_propose.taxes``)."""
+    return find(TaxPolicy, args["policy"]).taxes
+
+
+@op("tax.manage", governed=realm_wide, lists={"taxes": saved_entries})
 def tax_policy_propose(c, args):
     """Adopt the draft tax ``policy``, superseding the one in force."""
     p = find(TaxPolicy, args["policy"])

@@ -1148,6 +1148,17 @@ def test_the_fact_schema_is_checked():
     )
 
 
+def test_the_schema_declares_only_the_actions_asked_for():
+    """The realm declares the actions its forbids name, not every operation's (§9.4): `call` and those, validating."""
+    c = valencia()
+    named = sorted({action for forbid in c.forbids() for action in forbid.actions})
+    only = c.cedar_schema(only=named)
+    declared = [line.split('"')[1] for line in only.splitlines() if line.startswith("  action")]
+    assert declared == ["call", *named] and set(named) < set(FACTS)
+    assert cedarpy.validate_policies(c.cedar(), only).validation_passed
+    assert len(c.cedar_schema().splitlines()) > len(only.splitlines())
+
+
 def test_names_and_strings_are_written_as_cedar_wants_them():
     c = codex()
     c.load("eu/es", "tax", RESERVED_NAME)

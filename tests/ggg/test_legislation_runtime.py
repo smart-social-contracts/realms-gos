@@ -477,7 +477,7 @@ def test_a_codex_whose_guards_refuse_every_proposal_cannot_block_a_revert():
     assert (LayeredCodex[first.id].status, LayeredCodex[blocker.id].status) == ("active", "reverted")
 
 
-def test_build_returns_the_views_the_errors_and_the_cedar_when_the_facts_are_given():
+def test_build_returns_the_views_the_errors_and_the_cedar():
     chapters = {("eu/es", "procedure"): ES_PROCEDURE, (TOWN, "procedure"): "from realms.legislation import above\n"
                 "class Procedure(above('procedure')):\n    def working_days_after(self, day, n):\n        pass\n"}
     sources = {store.checksum(t): t for t in chapters.values()} | {store.checksum(CALENDAR): CALENDAR}
@@ -491,11 +491,9 @@ def test_build_returns_the_views_the_errors_and_the_cedar_when_the_facts_are_giv
     assert [m["name"] for m in out["views"]["procedure"]["members"]] == ["working_days_after"]
     forbid = ("from realms.legislation import F, above, forbid\nclass Tax(above('tax')):\n"
               "    cap = forbid('tax_policy_propose', (F.code == 'ibi_urban') & F.rate.is_some() & (F.rate > 1100000), each='taxes', legislation='TRLRHL Art. 72.3')\n")
-    facts = {"tax_policy_propose": {"facts": {"policy": "String"}},
-             "tax_policy_propose.taxes": {"facts": {"code": "String", "rate": {"type": "Long", "optional": True, "min": 0, "max": 100000000}}}}
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
                              "chapters": [{"source": TOWN, "domain": "tax", "sha256": store.checksum(forbid)}]},
-                            {store.checksum(forbid): forbid}, facts)
+                            {store.checksum(forbid): forbid})
     assert out["errors"] == [] and '@id("x/town/tax/cap")' in out["cedar"] and "context.facts.rate > 1100000" in out["cedar"]
 
 

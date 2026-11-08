@@ -7,8 +7,8 @@ then runs one step per message:
 2. ``check_change_list``: its rules, by itself and against this realm (core.change_list.apply);
 3. ``fetch_chapters``: each chapter not stored yet, one per message, from its URL or a mirror, kept under its checksum;
 4. ``check_sources``: the chapters against the records of the sync sources (core.change_list.vouch);
-5. ``build``: the layer paths (``plan``), every chapter loaded and checked in a fresh sandbox (core.legislation.build),
-   then the codex row, ``pending``;
+5. ``build``: the layer paths (``plan``), every chapter loaded and checked in a fresh sandbox, the Cedar its forbids
+   become validated by the realm's engine (core.legislation.build), then the codex row, ``pending``;
 6. ``switch``: the new codex active, the previous one kept, the runtime loaded (api.codex.switch); the realm
    domain's ``on_codex_activate`` hooks run in the message after it.
 

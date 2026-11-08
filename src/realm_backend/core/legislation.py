@@ -2,10 +2,12 @@
 resident codex subinterpreter, never in the realm's own interpreter, and the realm asks it around every GGG operation.
 
 - ``build(plan, sources)``: the install's step 5 (§9.2): every chapter of a codex loaded into a fresh sandbox, top
-  to bottom, the in-canister checks of §12.2 run, and the flattened view, the generated Cedar and the errors returned.
-- ``load(codex)``, then ``activate(codex)``: at the switch (§9.2 step 6): the codex becomes the running one, which
-  fails before the switch when it does not load, and then the ``on_codex_activate`` hooks run, once per realm (not
-  in a quarter). A revert, and the realm's start, call ``warm`` instead, which runs no hook and never raises.
+  to bottom, the in-canister checks of §12.2 run, the generated Cedar validated by the realm's Cedar engine, and the
+  flattened view, the Cedar and the errors returned.
+- ``load(codex)``, then ``activate(codex)``: at the switch (§9.2 step 6): the codex becomes the running one, its
+  generated forbids parsed once and put in force (core.auth), which fails before the switch when it does not load, and
+  then the ``on_codex_activate`` hooks run, once per realm (not in a quarter). A revert, and the realm's start, call
+  ``warm`` instead, which runs no hook and never raises.
 - ``run(op, ...)``: around a GGG operation: the guards ``check_<op>`` before it, the hooks ``on_<op>`` after it
   succeeds. ``compute(op, ...)`` answers ``compute_<op>`` when an operation asks during its work.
 
@@ -23,13 +25,14 @@ personal data the audit log keeps out still reaches the legislation that decides
 
 import json
 
-from core import chain
+from core import auth, chain
 from core import civil
 from core import localtime
 from core import sandbox
 from core.db import PAGE, Fail, Forbidden, first, view
 from core.op import GENERATOR, Call, filing, ops
 import core.legislation_sandbox  # noqa: F401  bundled with the realm for its text (core.sandbox.module_source); never run here
+import ggg_facts  # noqa: F401  the same: GGG's fact schema, which the sandbox imports from text
 
 # The operations no chapter may hook, guard or forbid, as realms.legislation.chapter.RESERVED lists them; written here
 # too because the realm compiles the library in its own interpreter only when an install checks a change list, and
@@ -89,7 +92,7 @@ VIEWS = {
     "Verdict": ("id", "case", "issued_by", "decision", "status", "issued_at"),
     "Zone": ("id", "name", "kind", "land", "user", "metadata"),
 }
-LIBRARY, PROGRAM = "realms.legislation", "core.legislation_sandbox"
+LIBRARY, PROGRAM, FACTS = "realms.legislation", "core.legislation_sandbox", "ggg_facts"
 UNKNOWN = object()  # the running codex before the first look in a new heap
 # codex: the id of the codex the runtime runs (None: a legacy codex or none); box: its sandbox, None when it did not
 # load; failing: whether its row records failures, so a success need not read the row to clear one; reads: the
@@ -114,6 +117,7 @@ def warm(codex=UNKNOWN):
         load(codex)
     except Exception as e:  # noqa: BLE001  whatever it is, the realm starts and records it
         _drop()
+        auth.use_forbids(None)
         _state.update(codex=codex.id, failing=bool(codex.failures))
         _record("codex", "load", str(e) if isinstance(e, Fail) else f"{type(e).__name__}: {e}")
 
@@ -123,22 +127,31 @@ def load(codex):
     fresh sandbox, and run no hook. A codex that does not load raises Fail and leaves the running one as it was:
     the install task calls this before the switch, so that a switch to it never happens (§9.2 step 6)."""
     box = _spawn(_plan_of(codex), _texts(codex)) if codex is not None else None
+    try:
+        auth.use_forbids(_generated(box) if box is not None else None)
+    except BaseException:
+        if box is not None:
+            box.close()
+        raise
     _drop()
     _state.update(codex=codex.id if codex is not None else None, box=box, failing=bool(codex.failures) if codex else False)
     if codex is not None:
         _clear(["codex"], "load")
 
 
-def build(plan, sources, facts=None):
+def build(plan, sources):
     """Install step 5 (§9.2): load every chapter of ``plan`` (realms.legislation's ``Plan``, or a dict with its
     ``realm``, ``layers``, ``chapters`` and ``calendars``) from ``sources`` (checksum to text) into a fresh sandbox,
-    top to bottom, and run the in-canister checks (§12.2). Returns ``{"views", "cedar", "errors"}``: the flattened
-    view per domain, the generated Cedar when GGG's fact schema ``facts`` is given (D4 validates it), and the errors
-    (the first refusal; nothing else is loaded after it)."""
+    top to bottom, and run the in-canister checks (§12.2), among them that the realm's Cedar engine accepts the
+    forbids it generates (§9.4). Returns ``{"views", "cedar", "errors"}``: the flattened view per domain, the
+    generated Cedar, and the errors (the first refusal; nothing else is loaded after it)."""
     box = None
     try:
-        box = _spawn(plan if isinstance(plan, dict) else vars(plan), sources, facts)
-        out = {"views": box.call("views"), "cedar": _ok(box.call("cedar"))["cedar"] if facts else None, "errors": []}
+        box = _spawn(plan if isinstance(plan, dict) else vars(plan), sources)
+        generated = _generated(box)
+        if generated is not None:
+            auth.check_forbids(generated)
+        out = {"views": box.call("views"), "cedar": generated["policies"] if generated else "", "errors": []}
     except Fail as e:
         out = {"views": {}, "cedar": None, "errors": [str(e)]}
     except RuntimeError as e:  # the sandbox itself failed on a call: the budget, or a chapter that broke it
@@ -388,12 +401,12 @@ def _ask(fn, kwargs):
     return out
 
 
-def _spawn(plan, sources, facts=None):
+def _spawn(plan, sources):
     """A sandbox with the chapters of ``plan`` loaded from ``sources`` and checked. Raises Fail with the first
     refusal, in the form the checker prints (§5.5)."""
     program, _ = sandbox.module_source(PROGRAM)
-    if sandbox.NATIVE:  # the subinterpreter imports the library from text; a laptop imports it as it is
-        program += f"\nLIBRARY = {sandbox.module_sources(LIBRARY)!r}\n"
+    if sandbox.NATIVE:  # the subinterpreter imports the library and GGG's fact schema from text; a laptop imports them
+        program += f"\nLIBRARY = {({**sandbox.module_sources(LIBRARY), FACTS: sandbox.module_source(FACTS)})!r}\n"
     try:
         box = sandbox.Resident(program, _answer, ACTIONS)
     except RuntimeError as e:
@@ -401,7 +414,7 @@ def _spawn(plan, sources, facts=None):
     try:
         _ok(box.call("setup", operations=sorted(ops()), layers=list(plan["layers"]), realm=plan["realm"],
                      calendars=[[c["source"], _calendar(sources, c)] for c in plan["calendars"]],
-                     entities=sorted(VIEWS), facts=facts))
+                     entities=sorted(VIEWS)))
         for c in plan["chapters"]:
             _ok(box.call("load", source=c["source"], domain=c["domain"], text=_text(sources, c)))
         _ok(box.call("finish"))
@@ -412,6 +425,22 @@ def _spawn(plan, sources, facts=None):
         box.close()
         raise
     return box
+
+
+def _generated(box):
+    """The forbids of the codex loaded in ``box`` as the realm's Cedar engine takes them: ``{"schema", "policies",
+    "targeted", "types"}`` (core.auth.use_forbids), or None when its legislation forbids nothing, so that it costs the
+    engine nothing. Fail when a generated policy names a reserved operation, which the library refuses too (§10.4)."""
+    try:
+        out = _ok(box.call("cedar", context=auth.CONTEXT, secret=_secrets()))
+    except RuntimeError as e:  # the sandbox itself failed on the call
+        raise Fail(f"the codex does not load: {e}")
+    if not out["cedar"]:
+        return None
+    from core.forbids import targets  # compiled when a codex forbids something, not at every start
+
+    return {"schema": out["schema"], "policies": out["cedar"], "types": out["facts"],
+            "targeted": targets(out["cedar"], out["facts"], RESERVED)}
 
 
 def _ok(reply):
@@ -474,6 +503,11 @@ def _public(value, secret):
 def _secret(op):
     spec = ops().get(op)
     return spec["secret"] if spec else ()
+
+
+def _secrets():
+    """What each operation keeps from the legislation (``secret=``), by operation, for those that keep something."""
+    return {name: list(spec["secret"]) for name, spec in ops().items() if spec["secret"]}
 
 
 def _answer(action, kw):
