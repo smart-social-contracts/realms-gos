@@ -11,6 +11,11 @@ __basilisk_features__ = ["shell", "browse"]
 
 Database.init(db_storage=StableBTreeMap[str, str](memory_id=1, max_key_size=256, max_value_size=100_000))
 
+# Before anything reads a row: ic-python-db parses each one with json.loads, which is slow in a canister.
+from core import fastjson  # noqa: E402
+
+fastjson.install()
+
 from api import setup  # noqa: E402
 from core.op import dispatch, run as drive  # noqa: E402
 # basilisk calls a method by looking its name up among main's globals. Reading ``__all__`` loads the module.
