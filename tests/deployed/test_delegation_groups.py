@@ -192,6 +192,9 @@ def test_events_written_before_the_upgrade_read_grant_as_empty(upgraded, people)
     alice = people["alice"]
     events = ok(upgraded, "events", CONTROLLER, query=True, count=500)["events"]
     before = [e for e in events if int(e["id"]) <= upgraded.last_event and e["by"] == people["claude-conn"]]
+    if any(e.get("grant") for e in before):
+        pytest.skip("REALM_PREVIOUS_WASM already records the grant on events (it is from after #587): this test needs "
+                    "a release from before, whose events have none")
     assert before and all(not e.get("grant") for e in before)
     ok(upgraded, "proposal_vote", people["claude-conn"], proposal="P-1", choice="yes", on_behalf_of=alice)
     after = ok(upgraded, "events", CONTROLLER, query=True)["events"][0]

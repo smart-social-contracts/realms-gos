@@ -6,6 +6,7 @@ from ggg import (Appointment, Calendar, Contract, Delegation, Department, Mandat
                  Realm, Task, TaskSchedule, Tender, Vote)
 from api import tasks
 from core.op import dispatch, op, ops
+from core.pending import quoted
 from core.ratio import ONE, refuse_renamed
 
 CHOICES = ("yes", "no", "abstain")
@@ -460,24 +461,43 @@ def effective_at_of(args):
     return value
 
 
+def codex_lines(what):
+    """What a ``codex_install`` action would put in place, as (label, value), by the branch the install itself takes
+    (api.codex): a layered codex by its url and checksum, code sent with the call, or a codex of the registry by its name
+    and version. Everything the proposer wrote is quoted; the checksum of sent code is the realm's own."""
+    from api.extensions import checksum
+
+    if "checksum" in what:
+        return [("Codex source", quoted(what.get("url", ""))), ("Codex checksum", quoted(what["checksum"]))]
+    if "source" in what:
+        manifest, source = what.get("manifest"), what["source"]
+        manifest = manifest if isinstance(manifest, dict) else {}
+        lines = [("Codex source", "the code sent with the proposal")]
+        if isinstance(source, str):
+            lines.append(("Codex checksum", "sha256:" + checksum(manifest, source)))
+        return lines + [("Codex to install", quoted(f"{manifest.get('id')}@{manifest.get('version')}"))]
+    return [("Codex to install", quoted(what.get("codex"))), ("Codex version", quoted(what.get("version")))]
+
+
 def proposing_action(user, args):
-    """What a proposal that carries an action is, in the realm's words: whom it asks and what it would run, with the
-    source, version and checksum of a codex it would install."""
+    """What a proposal that carries an action is, in the realm's words: whom it asks and what it would run, with what a
+    codex install would put in place and the lines of the action's own operation. What the proposer wrote is quoted."""
     action = args.get("action")
     if not action:
         return []
+    what = action.get("args") or {} if isinstance(action, dict) else None
+    if not isinstance(what, dict):
+        raise Fail("an action is {op, args}, with args a record")
     department = find(Department, args["department"]) if args.get("department") else root()
-    what = action.get("args") or {}
-    lines = [{"label": "Scope", "value": "the whole realm" if department.is_root else department.id},
-             {"label": "Action", "value": str(action.get("op"))}]
+    lines = [{"label": "Who votes", "value": "the whole realm" if department.is_root else department.id},
+             {"label": "What it would run", "value": quoted(action.get("op"))}]
     if action.get("op") == "codex_install":
-        source = what.get("url") or what.get("codex") or "the code sent with the proposal"
-        version = what.get("version") or (what.get("manifest") or {}).get("version")
-        lines += [{"label": label, "value": str(value)} for label, value in
-                  (("Codex source", source), ("Codex version", version), ("Codex checksum", what.get("checksum")))
-                  if value]
+        lines += [{"label": label, "value": value} for label, value in codex_lines(what)]
+    nested = ops().get(action.get("op"))
+    if nested and nested["summary"] and action["op"] != "proposal_create":  # a proposal of a proposal is not unrolled
+        lines += nested["summary"](user, what)
     effect = "Files a proposal in your name. The realm votes on it; if it passes, the action runs"
-    return lines + [{"label": "Effect", "value": effect}]
+    return lines + [{"label": "What changes", "value": effect}]
 
 
 @op("proposal.create", returns="proposal", summary=proposing_action)

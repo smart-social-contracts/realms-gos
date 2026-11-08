@@ -6,13 +6,15 @@ from core import chain
 from core import pending
 from core import poa
 from core import ranges
-from core.db import Fail
+from core.db import Fail, Forbidden
 
 OPS = {}
 MODULES = ("actions", "assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "installs", "justice", "licenses",
            "members", "notifications", "orgs", "procurement", "proposals", "quarters", "requests", "setup", "tasks",
            "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
+# Operations that run another operation, named by ``method``, for a member: a log hides that operation's secrets too.
+FORWARDING = ("call_for", "read_for")
 EVENTS_KEPT = 2000
 # The longest the arguments of a call may be, as JSON, for the audit log to keep them: it keeps only their names past it.
 AUDIT_ARGS_MAX = 2000
@@ -102,6 +104,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         args = json.loads(arg or "{}") if isinstance(arg, str) else dict(arg)
         by = signer or chain.caller()
         claimed = args.pop("on_behalf_of", None)
+        if claimed == by and spec["tier"] == "member":  # not even for oneself: a member's own act takes no claim
+            raise Forbidden(f"{name} is the member's own act: it takes no on_behalf_of")
         # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
         user = by if origin == "replay" else claimed or by
         asked = pending.asked_under(user, by, spec, args) if origin == "user" and user != by and not query else None
@@ -149,13 +153,18 @@ def direct(department):
     return int(p.get("m", 1)) <= 1 and int(p.get("n", 1)) <= 1 and not p.get("quorum") and not p.get("veto")
 
 
-def redacted(name, args):
-    """The arguments of a call to ``name``, or its reply, as a log may show them, the audit log and a scheduled task's
-    alike: without the secrets of every call, the operation's ``private`` fields, which hold personal data or key
-    material (I-ALL-5), and its ``secret`` ones."""
-    spec = OPS.get(name) or ops().get(name)
-    hidden = set(SECRET) | set(spec["private"] if spec else ()) | set(spec["secret"] if spec else ())
-    return {k: v for k, v in args.items() if k not in hidden}
+def redacted(name, value, args=None):
+    """The arguments of a call to ``name``, or its reply ``value`` (then ``args`` are the call's arguments), as a log may
+    show them, the audit log and a scheduled task's alike: without the secrets of every call, the operation's ``private``
+    fields, which hold personal data or key material (I-ALL-5), and its ``secret`` ones; for an operation that runs
+    another (``FORWARDING``), the other's as well."""
+    args = value if args is None else args
+    names = {name} | ({str(args.get("method"))} if name in FORWARDING else set())
+    hidden = set(SECRET)
+    for n in names:
+        spec = OPS.get(n) or ops().get(n)
+        hidden |= set(spec["private"]) | set(spec["secret"]) if spec else set()
+    return {k: v for k, v in value.items() if k not in hidden}
 
 
 def acted(name, user, by, origin, args, out, grant, prepared=None):
@@ -173,7 +182,7 @@ def audit(name, user, by, origin, args, out, grant="", prepared_by=""):
     kept = redacted(name, args)
     if len(json.dumps(kept)) > AUDIT_ARGS_MAX:
         kept = {"keys": sorted(kept)}
-    shown = {k: v for k, v in redacted(name, out).items() if isinstance(v, (str, int, bool))}
+    shown = {k: v for k, v in redacted(name, out, args).items() if isinstance(v, (str, int, bool))}
     Event(id=str(Event.max_id() + 1), op=name, user=user, by=by, origin=origin, args=kept, result=shown, at=chain.now(),
           grant=grant or None, prepared_by=prepared_by)
     old = Event[str(Event.max_id() - EVENTS_KEPT)]

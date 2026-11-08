@@ -12,14 +12,15 @@ import ggg_api
 import ggg_delegation
 import ggg_methods as g
 import world
+from api import extensions, federation
 from core import auth, chain, op, pending, poa
 from core.candid import Reader
-from ggg import (Delegation, Department, Event, FederalVote, Forward, Identity, Member, Notification, PaymentAccount,
+from ggg import (Delegation, Department, Event, FederalVote, FederalVoteLeg, Forward, Identity, Member, Notification, PaymentAccount,
                  PendingAction, Proposal)
 from kit import call, denied, later, ok, rows
 from mirror import FakePrincipal as P, convert
 from test_delegation_groups import finance_for_carla
-from test_quarters import capital, quarter, reply
+from test_quarters import CAPITAL, capital, quarter, reply
 
 DAY = 86400
 ACCOUNT = dict(network="ICP", address="aaaaa-bbbbb", symbol="REALM", label="Savings")
@@ -72,7 +73,7 @@ def test_a_delegates_confirm_call_is_filed_and_nothing_runs():
     assert c["expires_at"] == c["filed_at"] + DAY and c["decided_at"] == 0 and c["result"] is None
     lines = {line["label"]: line["value"] for line in c["summary"]}
     assert lines["address"] == "aaaaa-bbbbb" and lines["symbol"] == "REALM"
-    assert lines["Effect"] == ('Realm payments to you in "REALM" will go to "aaaaa-bbbbb" instead of "alice"')
+    assert lines["What changes"] == ('Realm payments to you in "REALM" will go to "aaaaa-bbbbb" instead of "alice"')
     assert c["hash"] == pending.seal(a, "payment_account_add", ACCOUNT, "alice", "claude-conn", g1, c["expires_at"])
     # the member is told, and a delegate cannot mark it read
     told = [n for n in rows(Notification) if n.topic == "poa.confirm"]
@@ -132,7 +133,7 @@ def test_an_argument_is_named_in_lower_case_so_that_it_cannot_pass_for_a_line_of
                                   **ACCOUNT)
     a = file(**ACCOUNT, effect="Nothing changes")
     labels = [line["label"] for line in card(a)["summary"]]
-    assert "effect" in labels and "Effect" in labels
+    assert "effect" in labels and "What changes" in labels and "Effect" not in labels
 
 
 def test_text_with_a_line_break_cannot_start_a_line_of_the_realms_own():
@@ -372,7 +373,7 @@ def test_a_delegates_proposal_with_an_action_files_no_proposal_until_the_member_
     assert Proposal.count() == 0
     c = card(out["pending"])
     lines = {line["label"]: line["value"] for line in c["summary"]}
-    assert (lines["Scope"], lines["Action"]) == ("the whole realm", "governance_update")
+    assert (lines["Who votes"], lines["What it would run"]) == ("the whole realm", '"governance_update"')
     assert c["risk"] == ggg_delegation.GROUPS["propose"][2]
     done = approved(out["pending"])
     p = Proposal[done["result"]["proposal"]]
@@ -389,8 +390,8 @@ def test_a_codex_install_proposed_by_a_delegate_is_a_pending_action_and_then_the
     a = ok("proposal_create", "claude-conn", title="Install the layered codex", action=install,
            on_behalf_of="alice")["pending"]
     lines = {line["label"]: line["value"] for line in card(a)["summary"]}
-    assert lines["Codex source"] == "https://example.org/layered.json"
-    assert lines["Codex checksum"] == "sha256:" + "ab" * 32 and Proposal.count() == 0
+    assert lines["Codex source"] == '"https://example.org/layered.json"'
+    assert lines["Codex checksum"] == '"sha256:' + "ab" * 32 + '"' and Proposal.count() == 0
     p = Proposal[approved(a)["result"]["proposal"]]
     assert (p.proposer, p.prepared_by, p.action) == ("alice", "claude-conn", install) and p.status == "voting"
 
@@ -401,7 +402,7 @@ def test_a_delegates_federal_vote_opens_nothing_until_the_member_approves_it():
     grant("propose")
     a = ok("federal_vote_propose", "claude-conn", title="Adopt tax policy 3", action=ACTION, on_behalf_of="alice")["pending"]
     assert FederalVote.count() == 0 and not [c for c in fake_chain.state["calls"] if "federal_vote.open" in (c[2] or "")]
-    effect = {line["label"]: line["value"] for line in card(a)["summary"]}["Effect"]
+    effect = {line["label"]: line["value"] for line in card(a)["summary"]}["What changes"]
     assert "every quarter" in effect and "as the realm itself" in effect
     done = approved(a)
     vote = FederalVote[done["result"]["vote"]]
@@ -415,7 +416,7 @@ def test_a_delegates_quarter_move_is_never_done_without_the_members_tap(monkeypa
     a = ok("self_change_quarter", "claude-conn", quarter="south", on_behalf_of="alice")["pending"]
     assert Member["alice"] is not None and Forward.count() == 0
     lines = {line["label"]: line["value"] for line in card(a)["summary"]}
-    assert lines["Effect"] == "You become a guest here and your profiles in this quarter are deleted"
+    assert lines["What changes"] == "You become a guest here and your profiles in this quarter are deleted"
     approved(a)
     assert Member["alice"] is None and Forward.count() == 1
 
@@ -436,7 +437,7 @@ def test_removing_a_payout_account_says_where_the_realm_pays_afterwards():
     first, second = (ok("payment_account_add", "alice", **{**ACCOUNT, "address": x})["account"] for x in ("one", "two"))
     a = ok("payment_account_remove", "claude-conn", account=first, on_behalf_of="alice")["pending"]
     lines = {line["label"]: line["value"] for line in card(a)["summary"]}
-    assert lines["Effect"] == 'Realm payments to you in "REALM" will go to "two" instead of "one"'
+    assert lines["What changes"] == 'Realm payments to you in "REALM" will go to "two" instead of "one"'
     approved(a)
     assert PaymentAccount[first] is None and PaymentAccount[second] is not None
 
@@ -446,7 +447,7 @@ def test_a_new_payout_account_behind_an_existing_one_says_so():
     grant("payout")
     ok("payment_account_add", "alice", **ACCOUNT)
     a = file(**{**ACCOUNT, "address": "second"})
-    effect = {line["label"]: line["value"] for line in card(a)["summary"]}["Effect"]
+    effect = {line["label"]: line["value"] for line in card(a)["summary"]}["What changes"]
     assert "keep going to" in effect and "comes after it" in effect
 
 
@@ -486,7 +487,7 @@ def confirm_ops(monkeypatch):
     a reply with a secret, a party to the matter."""
     seen = []
     rows_ = {"t_governed": ("confirm", "payout"), "t_read": ("confirm", "identity"), "t_secret": ("confirm", "payout"),
-             "t_party": ("confirm", "payout")}
+             "t_party": ("confirm", "payout"), "t_direct_secret": ("direct", "profile")}
     for name, (tier, group) in rows_.items():
         monkeypatch.setitem(poa.OWN, name, (tier, group, None, None))
     monkeypatch.setattr(poa, "ENABLED", poa.ENABLED | set(rows_))
@@ -505,7 +506,11 @@ def confirm_ops(monkeypatch):
     def t_secret(c, args):
         return {"id": 7, "code": "S3CRET", "invite": {"id": "I-1", "code": "ABC"}, "nested": [{"private_data": "p"}]}
 
-    @op.op("self.data_manage", parties=lambda a: {a.get("other", "")})
+    @op.op("self.data_manage", secret=("token",))
+    def t_direct_secret(c, args):
+        return {"token": "S3CRET-TOKEN", "n": 1}
+
+    @op.op("self.data_manage", parties=lambda a: {fake_chain.state.get("party", "")})
     def t_party(c, args):
         return {}
 
@@ -518,11 +523,11 @@ def test_an_approved_governed_call_follows_the_members_own_rule(confirm_ops):
     depts = world.build()
     grant("payout")
     a = ok("t_governed", "claude-conn", on_behalf_of="alice")["pending"]
-    assert {line["label"]: line["value"] for line in card(a)["summary"]}["Then"] == "Runs at once"
+    assert {line["label"]: line["value"] for line in card(a)["summary"]}["What happens next"] == "Runs at once"
     assert approved(a)["result"]["ran"] and confirm_ops == [("alice", "alice", "", "claude-conn")]
     world.policy(depts["Infrastructure"], 2, 3)
     b = ok("t_governed", "claude-conn", on_behalf_of="alice")["pending"]
-    assert "Files a proposal under Infrastructure" in {line["label"]: line["value"] for line in card(b)["summary"]}["Then"]
+    assert "Files a proposal under Infrastructure" in {line["label"]: line["value"] for line in card(b)["summary"]}["What happens next"]
     p = Proposal[approved(b)["result"]["proposal"]]
     assert (p.proposer, p.filed_under, p.prepared_by, p.status) == ("alice", "", "claude-conn", "voting")
     assert len(confirm_ops) == 1
@@ -531,12 +536,12 @@ def test_an_approved_governed_call_follows_the_members_own_rule(confirm_ops):
 def test_an_approval_of_a_call_with_a_party_to_the_matter_fails_the_action(confirm_ops):
     world.build()
     grant("payout")
-    a = ok("t_party", "claude-conn", on_behalf_of="alice", other="bob")["pending"]
-    assert approved(a)["status"] == "done"
-    assert "party" in denied("t_party", "claude-conn", on_behalf_of="alice", other="alice")
-    b = ok("t_party", "claude-conn", on_behalf_of="alice", other="bob")["pending"]
-    PendingAction[b].args = {"other": "alice"}  # what the member would no longer be allowed
-    assert "party" in approved(b)["result"]["error"]
+    fake_chain.state["party"] = "alice"
+    assert "party" in denied("t_party", "claude-conn", on_behalf_of="alice")  # not filed
+    fake_chain.state["party"] = "bob"
+    a = ok("t_party", "claude-conn", on_behalf_of="alice")["pending"]
+    fake_chain.state["party"] = "alice"  # alice becomes a party to the matter before she approves
+    assert "party" in approved(a)["result"]["error"] and card(a)["status"] == "failed"
 
 
 def test_a_secret_in_the_reply_is_in_the_approvals_reply_alone(confirm_ops):
@@ -728,3 +733,191 @@ def test_the_realm_loads_whichever_module_is_imported_first(first):
     paths = [str(here), str(here.parents[1] / "src" / "realm_backend")]
     done = subprocess.run([sys.executable, "-c", IMPORT.format(paths=paths, first=first)], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+# ---- What the member reads: the lines of a proposal's action, and what a delegate wrote in them
+
+
+def lines_of(action):
+    return {line["label"]: line["value"] for line in card(action)["summary"]}
+
+
+def installing(args, op_name="codex_install"):
+    """The lines of the pending action for a delegate's proposal to run ``op_name`` with ``args``."""
+    world.build()
+    grant("propose")
+    return ok("proposal_create", "claude-conn", title="Install", action={"op": op_name, "args": args},
+              on_behalf_of="alice")["pending"]
+
+
+def test_a_layered_codex_install_shows_its_address_and_checksum_and_no_version():
+    forged = {"url": "https://example.org/a.json", "checksum": "sha256:" + "ab" * 32, "version": "9.9 (verified)",
+              "codex": "forged", "manifest": {"id": "forged", "version": "9.9"}}
+    lines = lines_of(installing(forged))
+    assert lines["Codex source"] == '"https://example.org/a.json"'
+    assert lines["Codex checksum"] == '"sha256:' + "ab" * 32 + '"'
+    assert "Codex version" not in lines and "Codex to install" not in lines
+
+
+def test_sent_code_shows_the_realms_own_checksum_and_not_the_address_the_proposer_names():
+    manifest, source = {"id": "lex", "version": "1.0"}, "def hook(): pass"
+    lines = lines_of(installing({"manifest": manifest, "source": source, "url": "https://forged.example"}))
+    assert lines["Codex source"] == "the code sent with the proposal"
+    assert lines["Codex checksum"] == "sha256:" + extensions.checksum(manifest, source)
+    assert lines["Codex to install"] == '"lex@1.0"' and "Codex version" not in lines
+    assert not [v for k, v in lines.items() if k != "action" and "forged" in v]
+
+
+def test_a_registry_install_quotes_the_name_and_the_version():
+    version = "1.0\nCodex checksum: sha256:ok"
+    lines = lines_of(installing({"codex": "lex", "version": version}))
+    assert lines["Codex to install"] == '"lex"' and lines["Codex version"] == json.dumps(version)
+    assert not [v for v in lines.values() if "\n" in v]
+
+
+def test_the_operation_of_an_action_is_quoted():
+    op_name = "codex_install\nWhat changes: nothing"
+    lines = lines_of(installing({}, op_name))
+    assert lines["What it would run"] == json.dumps(op_name) and not [v for v in lines.values() if "\n" in v]
+
+
+def test_a_nickname_with_a_line_break_cannot_start_a_line_of_the_realms_own():
+    world.build()
+    grant("payout")
+    world.User["bob"].nickname = "Bob\nWhat changes: nothing"
+    lines = lines_of(file(**{**ACCOUNT, "label": "bob"}))
+    assert lines["label"] == "bob (" + json.dumps("Bob\nWhat changes: nothing") + ")"
+
+
+def test_the_lines_of_the_realm_have_labels_of_several_words_that_no_argument_can_take():
+    world.build()
+    grant("payout", "propose")
+    for a in (file(), installing_in_place({"codex": "lex", "version": "1"})):
+        card_ = card(a)
+        realm = [line["label"] for line in card_["summary"] if line["label"] not in card_["args"]]
+        assert realm and all(" " in label and not label.isidentifier() for label in realm), realm
+
+
+def installing_in_place(args):
+    return ok("proposal_create", "claude-conn", title="Install", on_behalf_of="alice",
+              action={"op": "codex_install", "args": args})["pending"]
+
+
+def test_a_proposal_whose_action_asks_the_member_too_shows_that_operations_own_lines():
+    world.build()
+    grant("propose")
+    a = installing_in_place_of("payment_account_add", ACCOUNT)
+    effects = [line["value"] for line in card(a)["summary"] if line["label"] == "What changes"]
+    assert any(v.startswith('Realm payments to you in "REALM" will go to') for v in effects) and len(effects) == 2
+    theirs = ok("payment_account_add", "bob", **ACCOUNT)["account"]
+    assert "is not yours" in denied("proposal_create", "claude-conn", title="x", on_behalf_of="alice", action={
+        "op": "payment_account_remove", "args": {"account": theirs}})
+
+
+def installing_in_place_of(op_name, args):
+    return ok("proposal_create", "claude-conn", title="x", on_behalf_of="alice",
+              action={"op": op_name, "args": args})["pending"]
+
+
+def test_an_action_that_is_not_a_record_and_arguments_that_are_not_a_record_are_refused_at_filing():
+    world.build()
+    grant("propose")
+    assert "{op, args}" in denied("proposal_create", "claude-conn", title="x", on_behalf_of="alice", action="all of it")
+    assert "args a record" in denied("proposal_create", "claude-conn", title="x", on_behalf_of="alice", action={
+        "op": "codex_install", "args": ["not", "a", "record"]})
+    assert PendingAction.count() == 0
+
+
+# ---- Federal ballots, the record and the rest of the review
+
+
+def test_a_federal_ballot_prepared_by_a_delegate_is_not_voted_by_the_preparer_or_the_members_other_delegates():
+    capital("north")
+    reply("north", "federation_message", proposal="P-1")
+    grant("propose", "vote")
+    grant("vote", delegate="agent-2")
+    grant("vote", grantor="bob", delegate="claude-conn")
+    a = ok("federal_vote_propose", "claude-conn", title="Adopt", action=ACTION, on_behalf_of="alice")["pending"]
+    vote = approved(a)["result"]["vote"]
+    ballot = Proposal[FederalVoteLeg[f"{vote}:{fake_chain.SELF}"].proposal_id]
+    assert (ballot.proposer, ballot.prepared_by, ballot.filed_under) == ("alice", "claude-conn", "")
+    opened = [json.loads(arg) for _, _, arg in fake_chain.state["calls"] if arg and "federal_vote.open" in arg]
+    assert opened and opened[0]["body"]["prepared_by"] == "claude-conn"
+    vote_on = dict(proposal=ballot.id, choice="yes")
+    for member in ("alice", "bob"):
+        assert "filed by claude-conn" in denied("proposal_vote", "claude-conn", on_behalf_of=member, **vote_on)
+    assert "filed by a delegate of alice" in denied("proposal_vote", "agent-2", on_behalf_of="alice", **vote_on)
+    ok("proposal_vote", "alice", **vote_on)
+
+
+def test_a_quarter_records_who_prepared_the_ballot_it_is_told_to_open(monkeypatch):
+    quarter(monkeypatch, "north", "south")
+    body = {"vote": "FV-1", "action": ACTION, "rule": {"kind": "majority_of_quarters"}, "deadline": 1,
+            "proposer": "alice", "origin": CAPITAL, "prepared_by": "claude-conn"}
+    body["hash"] = federation.freeze(body["action"], body["rule"], body["deadline"])
+    out = ok("federation_message", CAPITAL, topic="federal_vote.open", body=body)
+    assert Proposal[out["proposal"]].prepared_by == "claude-conn"
+    assert Proposal[ok("federation_message", CAPITAL, topic="federal_vote.open", body={
+        **body, "vote": "FV-2", "prepared_by": ""})["proposal"]].prepared_by == ""
+
+
+def test_a_quarter_tells_the_capital_who_prepared_the_vote_it_proposes(monkeypatch):
+    quarter(monkeypatch, "north", "south")
+    reply(CAPITAL, "federation_message", vote="FV-1")
+    grant("propose")
+    a = ok("federal_vote_propose", "claude-conn", title="Adopt", action=ACTION, on_behalf_of="alice")["pending"]
+    approved(a)
+    sent = [json.loads(arg) for cid, _, arg in fake_chain.state["calls"] if cid == CAPITAL]
+    assert sent[-1]["topic"] == "federal_vote.propose" and sent[-1]["body"]["prepared_by"] == "claude-conn"
+
+
+@pytest.mark.parametrize("origin", OTHER_ORIGINS)
+def test_collecting_from_another_operation_is_refused(confirm_ops, origin):
+    world.build()
+    grant("identity")
+    a = ok("t_read", "claude-conn", on_behalf_of="alice")["pending"]
+    approved(a)
+    fake_chain.state["caller"] = "claude-conn"
+    out = json.loads(op.run(op.dispatch("action_collect", json.dumps({"action": a}), origin=origin,
+                                        signer="claude-conn", declared=("action_collect",))))
+    assert not out["ok"] and confirm_ops == []
+    assert ok("action_collect", "claude-conn", action=a)["result"]["for"] == "alice"
+
+
+def test_an_approval_refuses_a_record_that_no_longer_matches_its_hash():
+    world.build()
+    grant("payout")
+    a = file()
+    sealed = card(a)["hash"]
+    PendingAction[a].args = {**ACCOUNT, "address": "somewhere-else"}  # what only a hand on the database could do
+    assert "no longer matches its own hash" in denied("action_approve", "alice", action=a, hash=sealed)
+    assert card(a)["status"] == "pending" and PaymentAccount.count() == 0
+
+
+def test_the_audit_log_of_call_for_hides_the_secrets_of_the_operation_it_forwards(confirm_ops):
+    world.build()
+    grant("profile")
+    out = ok("call_for", "claude-conn", method="t_direct_secret", args={}, grantor="alice")
+    assert out["token"] == "S3CRET-TOKEN"  # the delegate gets its reply
+    events = [e for e in rows(Event) if e.op in ("call_for", "t_direct_secret")]
+    assert {e.op for e in events} == {"call_for", "t_direct_secret"}
+    assert "S3CRET-TOKEN" not in json.dumps([(e.args, e.result) for e in events])
+    assert [e.result for e in events if e.op == "call_for"] == [{"n": 1}]
+
+
+def test_the_operations_a_grant_by_groups_reaches_in_this_release_are_those_of_phase_3_and_these_seven():
+    assert poa.ENABLED - poa.LEGACY == {"payment_account_add", "payment_account_remove", "identity_submit",
+                                        "self_change_quarter", "federal_vote_propose", "action_get", "action_list"}
+
+
+def test_a_members_own_act_takes_no_on_behalf_of_not_even_for_oneself():
+    world.build()
+    grant("payout")
+    a = file()
+    sealed = card(a)["hash"]
+    assert "takes no on_behalf_of" in denied("action_approve", "alice", action=a, hash=sealed, on_behalf_of="alice")
+    assert "takes no on_behalf_of" in denied("action_decline", "alice", action=a, on_behalf_of="alice")
+    assert "takes no on_behalf_of" in denied("delegation_revoke_all", "alice", on_behalf_of="alice")
+    fake_chain.state["caller"] = "alice"
+    got = do(g.ggg_action_approve({"action": a, "hash": sealed, "on_behalf_of": P("alice")}))
+    assert "Forbidden" in got["Err"] and card(a)["status"] == "pending" and PaymentAccount.count() == 0

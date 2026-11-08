@@ -113,9 +113,10 @@ def risk_of(name):
 
 
 def summary_of(user, name, spec, args):
-    """The realm's words about the call, a label and a value per line: each argument under its own name, in lower case,
-    then what the operation says of its effect (its ``summary`` hook) under a label that starts with a capital, then
-    where a governed call goes. An argument cannot take a label of the realm's: its name is a lower-case word."""
+    """The realm's words about the call, a label and a value per line: each argument under its own name, a lower-case
+    word, then what the operation says of its effect (its ``summary`` hook) and where a governed call goes, under labels
+    of several words that start with a capital. An argument can never take a label of the realm's: a label of the realm's
+    has a space in it, and an argument's name is a single word."""
     for key in args:
         if not (key.isascii() and key.isidentifier() and key == key.lower()):
             raise Fail(f"'{key}' is not an argument name: they are lower-case words")
@@ -123,7 +124,7 @@ def summary_of(user, name, spec, args):
     if spec["summary"]:
         lines += spec["summary"](user, args)
     if spec["governed"]:
-        lines.append({"label": "Then", "value": consequence(spec["governed"](args))})
+        lines.append({"label": "What happens next", "value": consequence(spec["governed"](args))})
     return lines
 
 
@@ -144,7 +145,7 @@ def shown(key, value, args):
         if not value.isprintable():  # a line break could start a line of the realm's own
             return quoted(value)
         member = User[value] if len(value) <= 64 else None
-        return f"{value} ({member.nickname})" if member and member.nickname else value
+        return f"{value} ({quoted(member.nickname)})" if member and member.nickname else value
     return canonical(value)
 
 
@@ -246,6 +247,8 @@ def approve(c, aid, sent):
         raise Conflict(f"{a.id} is {a.status}")
     if sent != a.hash:
         raise Fail(f"the hash does not match {a.id}: read it again")
+    if seal(a.id, a.method, a.args, a.grantor, a.delegate, a.grant, a.expires_at) != a.hash:
+        raise Conflict(f"{a.id} no longer matches its own hash: the record was changed")
     a.decided_at = chain.now()
     if ops()[a.method]["read"]:  # a read is approved once, and its delegate collects it
         a.status = "approved"
@@ -283,6 +286,8 @@ def collect(c, aid):
     from core.op import audit, dispatch
     from ggg import PendingAction
 
+    if c.origin != "user":
+        raise Forbidden("collecting is the delegate's own call: not from another operation")
     a = settled(find(PendingAction, aid))
     if a.delegate != c.user or c.delegated:
         raise Forbidden(f"{a.id} was not prepared by you")

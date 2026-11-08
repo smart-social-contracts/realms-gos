@@ -1007,14 +1007,14 @@ def adding_account(user, args):
     owner, symbol = account_owner(user, args), args.get("symbol", "")
     who = "you" if owner == f"User:{user}" else owner
     if not symbol:
-        return [{"label": "Effect", "value": "It names no token, so no payment is sent to it"}]
+        return [{"label": "What changes", "value": "It names no token, so no payment is sent to it"}]
     now = address(owner, symbol)
     paid = f"Realm payments to {who} in {quoted(symbol)}"
     if any(a.symbol == symbol for a in each(PaymentAccount, "owner", owner)):
         effect = f"{paid} keep going to {quoted(now)}; this account comes after it"
     else:
         effect = f"{paid} will go to {quoted(args['address'])} instead of {quoted(now)}"
-    return [{"label": "Effect", "value": effect}]
+    return [{"label": "What changes", "value": effect}]
 
 
 def removing_account(user, args):
@@ -1027,8 +1027,8 @@ def removing_account(user, args):
                  a.owner.removeprefix("User:"))
     account = f"{quoted(a.address)} on {quoted(a.network)}" + (f" ({quoted(a.label)})" if a.label else "")
     paid = f"Realm payments to {who} in {quoted(a.symbol) if a.symbol else 'any token'}"
-    return [{"label": "Account", "value": account},
-            {"label": "Effect", "value": f"{paid} will go to {quoted(after)} instead of {quoted(a.address)}"}]
+    return [{"label": "Payout account", "value": account},
+            {"label": "What changes", "value": f"{paid} will go to {quoted(after)} instead of {quoted(a.address)}"}]
 
 
 @op("self.data_manage", returns="account", summary=adding_account)
