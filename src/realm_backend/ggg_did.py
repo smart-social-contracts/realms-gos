@@ -141,7 +141,7 @@ class DispatchStatusConfirmed(Record): at: Timestamp; receipt: Opt[text]
 class Dispatch(Record): id: text; to: text; topic: text; title: text; body: "Value"; document: Opt[text]; codex: Opt[text]; queued_at: Timestamp; status: "DispatchStatus"
 class TaskStatus(Variant, total=False): Scheduled: null; Run: null; Failed: null; Cancelled: null
 class Task(Record): id: text; op: text; args: "Value"; at: Timestamp; reason: Opt[text]; status: "TaskStatus"; scheduled_by: "Ref"; event: Opt[text]
-class Event(Record): id: text; op: text; user: Opt[Principal]; by: Opt[Principal]; agent: bool; supervisor: Opt[Principal]; origin: text; args: "Value"; result: "Value"; at: Timestamp
+class Event(Record): id: text; op: text; user: Opt[Principal]; by: Opt[Principal]; grant: Opt[text]; agent: bool; supervisor: Opt[Principal]; origin: text; args: "Value"; result: "Value"; at: Timestamp
 class KeyEnvelope(Record): id: text; scope: text; principal: Principal; wrapped_dek: blob; granted_by: Principal; at: Timestamp
 class Publication(Record): journal: text; dispatch: text; published_at: Opt[Timestamp]; ref: Opt[text]
 class Published(Record): ref: text; hash: text
@@ -156,6 +156,12 @@ class DelegationListArgs(Record): role: "DelegationListArgsRole"; cursor: Opt[te
 class DelegationListArgsRole(Variant, total=False): Grantor: null; Delegate: null
 class DelegationPage(Record): items: Vec["Delegation"]; requests: Vec["DelegationRequest"]; next: Opt[text]
 class DelegableOperation(Record): operation: text; permission: text
+class DelegationTier(Variant, total=False): Direct: null; Confirm: null
+class TieredOperation(Record): operation: text; permission: text; tier: "DelegationTier"; confirm_if: Opt[text]
+class DelegationGroup(Record): id: text; label: text; summary: text; risk: text; longest: Duration; confirms: bool; operations: Vec["TieredOperation"]
+class DelegationGroupPage(Record): items: Vec["DelegationGroup"]; next: Opt[text]
+class DelegationGroupsArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; on_behalf_of: Opt[Principal]
+class DelegationActivityArgs(Record): delegation: text; cursor: Opt[text]; limit: Opt[nat32]; on_behalf_of: Opt[Principal]
 class MeArgs(Record): on_behalf_of: Opt[Principal]
 class Me(Record): user: "User"; member: Opt["Member"]; permissions: Vec[text]; delegations: Vec["Delegation"]; requests: Vec["DelegationRequest"]
 class JoinArgs(Record): code: Opt[text]; nickname: Opt[text]; language: Opt[text]; home_zone: Opt[text]
@@ -181,6 +187,8 @@ class RoleArgs(Record): user: Principal; profile: text; department: Opt[text]
 class DelegationGrantArgs(Record): delegate: Principal; scope: Vec[text]; starts_at: Opt[Timestamp]; expires_at: Timestamp; label: text; description: text
 class DelegationRequestArgs(Record): grantor: Principal; scope: Vec[text]; starts_at: Opt[Timestamp]; expires_at: Timestamp; label: text; description: text
 class DelegationDecideArgs(Record): request: text; approve: bool; scope: Opt[Vec[text]]; expires_at: Opt[Timestamp]
+class DelegationRevokeAllArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; on_behalf_of: Opt[Principal]
+class DelegationsRevoked(Record): revoked: nat; next: Opt[text]
 class Seat(Record): position: "Position"; holders: Vec["Appointment"]
 class DepartmentDetail(Record): department: "Department"; seats: Vec["Seat"]; next: Opt[text]
 class DepartmentPage(Record): items: Vec["Department"]; next: Opt[text]
@@ -398,6 +406,8 @@ class InvitePageReply(Variant, total=False): Ok: "InvitePage"; Err: "GggError"
 class DelegationPageReply(Variant, total=False): Ok: "DelegationPage"; Err: "GggError"
 class AttributePageReply(Variant, total=False): Ok: "AttributePage"; Err: "GggError"
 class VecDelegableOperationReply(Variant, total=False): Ok: Vec["DelegableOperation"]; Err: "GggError"
+class DelegationGroupPageReply(Variant, total=False): Ok: "DelegationGroupPage"; Err: "GggError"
+class EventPageReply(Variant, total=False): Ok: "EventPage"; Err: "GggError"
 class MeReply(Variant, total=False): Ok: "Me"; Err: "GggError"
 class UserEntryReply(Variant, total=False): Ok: "UserEntry"; Err: "GggError"
 class UserReply(Variant, total=False): Ok: "User"; Err: "GggError"
@@ -409,6 +419,7 @@ class InviteReply(Variant, total=False): Ok: "Invite"; Err: "GggError"
 class DelegationReply(Variant, total=False): Ok: "Delegation"; Err: "GggError"
 class DelegationRequestReply(Variant, total=False): Ok: "DelegationRequest"; Err: "GggError"
 class OptDelegationReply(Variant, total=False): Ok: Opt["Delegation"]; Err: "GggError"
+class DelegationsRevokedReply(Variant, total=False): Ok: "DelegationsRevoked"; Err: "GggError"
 class OptDepartmentDetailReply(Variant, total=False): Ok: Opt["DepartmentDetail"]; Err: "GggError"
 class DepartmentPageReply(Variant, total=False): Ok: "DepartmentPage"; Err: "GggError"
 class ChartReply(Variant, total=False): Ok: "Chart"; Err: "GggError"
@@ -473,7 +484,6 @@ class FederalVoteReply(Variant, total=False): Ok: "FederalVote"; Err: "GggError"
 class OptValueReply(Variant, total=False): Ok: Opt["Value"]; Err: "GggError"
 class CodexViewReply(Variant, total=False): Ok: "CodexView"; Err: "GggError"
 class NotificationPageReply(Variant, total=False): Ok: "NotificationPage"; Err: "GggError"
-class EventPageReply(Variant, total=False): Ok: "EventPage"; Err: "GggError"
 class ExternalPageReply(Variant, total=False): Ok: "ExternalPage"; Err: "GggError"
 class DispatchPageReply(Variant, total=False): Ok: "DispatchPage"; Err: "GggError"
 class TaskPageReply(Variant, total=False): Ok: "TaskPage"; Err: "GggError"
@@ -630,7 +640,7 @@ SCHEMA["DispatchStatus"] = ("variant", {"Queued": "null", "Confirmed": "Dispatch
 SCHEMA["Dispatch"] = ("record", {"id": "text", "to": "text", "topic": "text", "title": "text", "body": "Value", "document": "opt text", "codex": "opt text", "queued_at": "Timestamp", "status": "DispatchStatus"})
 SCHEMA["TaskStatus"] = ("variant", {"Scheduled": "null", "Run": "null", "Failed": "null", "Cancelled": "null"})
 SCHEMA["Task"] = ("record", {"id": "text", "op": "text", "args": "Value", "at": "Timestamp", "reason": "opt text", "status": "TaskStatus", "scheduled_by": "Ref", "event": "opt text"})
-SCHEMA["Event"] = ("record", {"id": "text", "op": "text", "user": "opt principal", "by": "opt principal", "agent": "bool", "supervisor": "opt principal", "origin": "text", "args": "Value", "result": "Value", "at": "Timestamp"})
+SCHEMA["Event"] = ("record", {"id": "text", "op": "text", "user": "opt principal", "by": "opt principal", "grant": "opt text", "agent": "bool", "supervisor": "opt principal", "origin": "text", "args": "Value", "result": "Value", "at": "Timestamp"})
 SCHEMA["KeyEnvelope"] = ("record", {"id": "text", "scope": "text", "principal": "principal", "wrapped_dek": "blob", "granted_by": "principal", "at": "Timestamp"})
 SCHEMA["Publication"] = ("record", {"journal": "text", "dispatch": "text", "published_at": "opt Timestamp", "ref": "opt text"})
 SCHEMA["Published"] = ("record", {"ref": "text", "hash": "text"})
@@ -645,6 +655,12 @@ SCHEMA["DelegationListArgsRole"] = ("variant", {"Grantor": "null", "Delegate": "
 SCHEMA["DelegationListArgs"] = ("record", {"role": "DelegationListArgsRole", "cursor": "opt text", "limit": "opt nat32"})
 SCHEMA["DelegationPage"] = ("record", {"items": "vec Delegation", "requests": "vec DelegationRequest", "next": "opt text"})
 SCHEMA["DelegableOperation"] = ("record", {"operation": "text", "permission": "text"})
+SCHEMA["DelegationTier"] = ("variant", {"Direct": "null", "Confirm": "null"})
+SCHEMA["TieredOperation"] = ("record", {"operation": "text", "permission": "text", "tier": "DelegationTier", "confirm_if": "opt text"})
+SCHEMA["DelegationGroup"] = ("record", {"id": "text", "label": "text", "summary": "text", "risk": "text", "longest": "Duration", "confirms": "bool", "operations": "vec TieredOperation"})
+SCHEMA["DelegationGroupPage"] = ("record", {"items": "vec DelegationGroup", "next": "opt text"})
+SCHEMA["DelegationGroupsArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "on_behalf_of": "opt principal"})
+SCHEMA["DelegationActivityArgs"] = ("record", {"delegation": "text", "cursor": "opt text", "limit": "opt nat32", "on_behalf_of": "opt principal"})
 SCHEMA["MeArgs"] = ("record", {"on_behalf_of": "opt principal"})
 SCHEMA["Me"] = ("record", {"user": "User", "member": "opt Member", "permissions": "vec text", "delegations": "vec Delegation", "requests": "vec DelegationRequest"})
 SCHEMA["JoinArgs"] = ("record", {"code": "opt text", "nickname": "opt text", "language": "opt text", "home_zone": "opt text"})
@@ -670,6 +686,8 @@ SCHEMA["RoleArgs"] = ("record", {"user": "principal", "profile": "text", "depart
 SCHEMA["DelegationGrantArgs"] = ("record", {"delegate": "principal", "scope": "vec text", "starts_at": "opt Timestamp", "expires_at": "Timestamp", "label": "text", "description": "text"})
 SCHEMA["DelegationRequestArgs"] = ("record", {"grantor": "principal", "scope": "vec text", "starts_at": "opt Timestamp", "expires_at": "Timestamp", "label": "text", "description": "text"})
 SCHEMA["DelegationDecideArgs"] = ("record", {"request": "text", "approve": "bool", "scope": "opt vec text", "expires_at": "opt Timestamp"})
+SCHEMA["DelegationRevokeAllArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "on_behalf_of": "opt principal"})
+SCHEMA["DelegationsRevoked"] = ("record", {"revoked": "nat", "next": "opt text"})
 SCHEMA["Seat"] = ("record", {"position": "Position", "holders": "vec Appointment"})
 SCHEMA["DepartmentDetail"] = ("record", {"department": "Department", "seats": "vec Seat", "next": "opt text"})
 SCHEMA["DepartmentPage"] = ("record", {"items": "vec Department", "next": "opt text"})
@@ -887,6 +905,8 @@ SCHEMA["InvitePageReply"] = ("variant", {"Ok": "InvitePage", "Err": "GggError"})
 SCHEMA["DelegationPageReply"] = ("variant", {"Ok": "DelegationPage", "Err": "GggError"})
 SCHEMA["AttributePageReply"] = ("variant", {"Ok": "AttributePage", "Err": "GggError"})
 SCHEMA["VecDelegableOperationReply"] = ("variant", {"Ok": "vec DelegableOperation", "Err": "GggError"})
+SCHEMA["DelegationGroupPageReply"] = ("variant", {"Ok": "DelegationGroupPage", "Err": "GggError"})
+SCHEMA["EventPageReply"] = ("variant", {"Ok": "EventPage", "Err": "GggError"})
 SCHEMA["MeReply"] = ("variant", {"Ok": "Me", "Err": "GggError"})
 SCHEMA["UserEntryReply"] = ("variant", {"Ok": "UserEntry", "Err": "GggError"})
 SCHEMA["UserReply"] = ("variant", {"Ok": "User", "Err": "GggError"})
@@ -898,6 +918,7 @@ SCHEMA["InviteReply"] = ("variant", {"Ok": "Invite", "Err": "GggError"})
 SCHEMA["DelegationReply"] = ("variant", {"Ok": "Delegation", "Err": "GggError"})
 SCHEMA["DelegationRequestReply"] = ("variant", {"Ok": "DelegationRequest", "Err": "GggError"})
 SCHEMA["OptDelegationReply"] = ("variant", {"Ok": "opt Delegation", "Err": "GggError"})
+SCHEMA["DelegationsRevokedReply"] = ("variant", {"Ok": "DelegationsRevoked", "Err": "GggError"})
 SCHEMA["OptDepartmentDetailReply"] = ("variant", {"Ok": "opt DepartmentDetail", "Err": "GggError"})
 SCHEMA["DepartmentPageReply"] = ("variant", {"Ok": "DepartmentPage", "Err": "GggError"})
 SCHEMA["ChartReply"] = ("variant", {"Ok": "Chart", "Err": "GggError"})
@@ -962,7 +983,6 @@ SCHEMA["FederalVoteReply"] = ("variant", {"Ok": "FederalVote", "Err": "GggError"
 SCHEMA["OptValueReply"] = ("variant", {"Ok": "opt Value", "Err": "GggError"})
 SCHEMA["CodexViewReply"] = ("variant", {"Ok": "CodexView", "Err": "GggError"})
 SCHEMA["NotificationPageReply"] = ("variant", {"Ok": "NotificationPage", "Err": "GggError"})
-SCHEMA["EventPageReply"] = ("variant", {"Ok": "EventPage", "Err": "GggError"})
 SCHEMA["ExternalPageReply"] = ("variant", {"Ok": "ExternalPage", "Err": "GggError"})
 SCHEMA["DispatchPageReply"] = ("variant", {"Ok": "DispatchPage", "Err": "GggError"})
 SCHEMA["TaskPageReply"] = ("variant", {"Ok": "TaskPage", "Err": "GggError"})
@@ -988,30 +1008,32 @@ METHODS = {
     "icrc10_supported_standards": (None, "vec Icrc10SupportedStandardsResult"), "user_get": ("principal",
     "OptUserEntryReply"), "user_list": ("ListArgs", "UserPageReply"), "invite_list": ("ListArgs",
     "InvitePageReply"), "delegation_list": ("DelegationListArgs", "DelegationPageReply"), "attribute_list":
-    ("AttributeListArgs", "AttributePageReply"), "delegable_operations": (None, "VecDelegableOperationReply"), "me":
-    ("MeArgs", "MeReply"), "realm_join": ("JoinArgs", "UserEntryReply"), "profile_update": ("ProfileUpdateArgs",
-    "UserReply"), "private_data_update": ("blob", "UserReply"), "user_add": ("UserAddArgs", "GovernedReply"),
-    "user_import": ("UserImportArgs", "GovernedReply"), "user_edit": ("UserEditArgs", "UserReply"),
-    "user_set_status": ("UserSetStatusArgs", "GovernedReply"), "user_remove": ("UserRemoveArgs", "GovernedReply"),
-    "identity_submit": ("IdentitySubmitArgs", "IdentityReply"), "identity_review": ("IdentityReviewArgs",
-    "IdentityReply"), "attribute_submit": ("AttributeSubmitArgs", "AttributeReply"), "attribute_review":
-    ("AttributeReviewArgs", "AttributeReply"), "invite_create": ("InviteCreateArgs", "InviteCreatedReply"),
-    "invite_revoke": ("text", "InviteReply"), "profile_create": ("ProfileCreateArgs", "GovernedReply"),
-    "profile_edit": ("ProfileEditArgs", "GovernedReply"), "role_assign": ("RoleArgs", "GovernedReply"),
-    "role_revoke": ("RoleArgs", "GovernedReply"), "delegation_grant": ("DelegationGrantArgs", "DelegationReply"),
-    "delegation_accept": ("text", "DelegationReply"), "delegation_revoke": ("text", "DelegationReply"),
-    "delegation_request": ("DelegationRequestArgs", "DelegationRequestReply"), "delegation_request_decide":
-    ("DelegationDecideArgs", "OptDelegationReply"), "department_get": ("GetArgs", "OptDepartmentDetailReply"),
-    "department_list": ("ListArgs", "DepartmentPageReply"), "department_chart": ("ChartArgs", "ChartReply"),
-    "organization_get": ("GetArgs", "OptOrganizationDetailReply"), "organization_list": ("OrganizationListArgs",
-    "OrganizationPageReply"), "department_create": ("DepartmentCreateArgs", "GovernedReply"), "department_edit":
-    ("DepartmentEditArgs", "GovernedReply"), "department_delete": ("text", "GovernedReply"),
-    "department_set_policy": ("DepartmentPolicyArgs", "GovernedReply"), "position_create": ("PositionCreateArgs",
-    "GovernedReply"), "position_edit": ("PositionEditArgs", "GovernedReply"), "position_close": ("text",
-    "GovernedReply"), "appoint": ("AppointArgs", "GovernedReply"), "appoint_acting": ("AppointArgs",
-    "GovernedReply"), "appointment_end": ("text", "GovernedReply"), "department_expel": ("ExpelArgs",
-    "GovernedReply"), "authority_grant": ("AuthorityGrantArgs", "GovernedReply"), "authority_revoke": ("text",
-    "GovernedReply"), "organization_register": ("OrganizationRegisterArgs", "OrganizationReply"),
+    ("AttributeListArgs", "AttributePageReply"), "delegable_operations": (None, "VecDelegableOperationReply"),
+    "delegation_groups": ("DelegationGroupsArgs", "DelegationGroupPageReply"), "delegation_activity":
+    ("DelegationActivityArgs", "EventPageReply"), "me": ("MeArgs", "MeReply"), "realm_join": ("JoinArgs",
+    "UserEntryReply"), "profile_update": ("ProfileUpdateArgs", "UserReply"), "private_data_update": ("blob",
+    "UserReply"), "user_add": ("UserAddArgs", "GovernedReply"), "user_import": ("UserImportArgs", "GovernedReply"),
+    "user_edit": ("UserEditArgs", "UserReply"), "user_set_status": ("UserSetStatusArgs", "GovernedReply"),
+    "user_remove": ("UserRemoveArgs", "GovernedReply"), "identity_submit": ("IdentitySubmitArgs", "IdentityReply"),
+    "identity_review": ("IdentityReviewArgs", "IdentityReply"), "attribute_submit": ("AttributeSubmitArgs",
+    "AttributeReply"), "attribute_review": ("AttributeReviewArgs", "AttributeReply"), "invite_create":
+    ("InviteCreateArgs", "InviteCreatedReply"), "invite_revoke": ("text", "InviteReply"), "profile_create":
+    ("ProfileCreateArgs", "GovernedReply"), "profile_edit": ("ProfileEditArgs", "GovernedReply"), "role_assign":
+    ("RoleArgs", "GovernedReply"), "role_revoke": ("RoleArgs", "GovernedReply"), "delegation_grant":
+    ("DelegationGrantArgs", "DelegationReply"), "delegation_accept": ("text", "DelegationReply"),
+    "delegation_revoke": ("text", "DelegationReply"), "delegation_request": ("DelegationRequestArgs",
+    "DelegationRequestReply"), "delegation_request_decide": ("DelegationDecideArgs", "OptDelegationReply"),
+    "delegation_revoke_all": ("DelegationRevokeAllArgs", "DelegationsRevokedReply"), "department_get": ("GetArgs",
+    "OptDepartmentDetailReply"), "department_list": ("ListArgs", "DepartmentPageReply"), "department_chart":
+    ("ChartArgs", "ChartReply"), "organization_get": ("GetArgs", "OptOrganizationDetailReply"), "organization_list":
+    ("OrganizationListArgs", "OrganizationPageReply"), "department_create": ("DepartmentCreateArgs",
+    "GovernedReply"), "department_edit": ("DepartmentEditArgs", "GovernedReply"), "department_delete": ("text",
+    "GovernedReply"), "department_set_policy": ("DepartmentPolicyArgs", "GovernedReply"), "position_create":
+    ("PositionCreateArgs", "GovernedReply"), "position_edit": ("PositionEditArgs", "GovernedReply"),
+    "position_close": ("text", "GovernedReply"), "appoint": ("AppointArgs", "GovernedReply"), "appoint_acting":
+    ("AppointArgs", "GovernedReply"), "appointment_end": ("text", "GovernedReply"), "department_expel":
+    ("ExpelArgs", "GovernedReply"), "authority_grant": ("AuthorityGrantArgs", "GovernedReply"), "authority_revoke":
+    ("text", "GovernedReply"), "organization_register": ("OrganizationRegisterArgs", "OrganizationReply"),
     "organization_edit": ("OrganizationEditArgs", "OrganizationReply"), "representative_add":
     ("RepresentativeAddArgs", "AppointmentReply"), "representative_remove": ("text", "AppointmentReply"),
     "organization_set_status": ("OrganizationStatusArgs", "GovernedReply"), "proposal_get": ("GetArgs",

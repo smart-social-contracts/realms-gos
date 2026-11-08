@@ -286,7 +286,7 @@ def test_I_PRV_1_an_attribute_is_read_only_by_the_person_and_its_reviewers():
     assert {e["op"] for e in ok("events", "dana")["events"]} >= {"attribute_submit", "attribute_review"}
 
 
-def test_attributes_are_submitted_in_person_and_listed_for_a_grantor_by_a_delegate():
+def test_attributes_are_submitted_in_person_and_a_delegate_under_self_data_view_does_not_list_them():
     registry_with_reviewer()
     refused = denied("delegation_grant", "alice", delegate="claude-conn", operations=["attribute.submit"], expires_in=DAY)
     assert "not a delegable" in refused
@@ -294,7 +294,9 @@ def test_attributes_are_submitted_in_person_and_listed_for_a_grantor_by_a_delega
     assert "power of attorney" in denied("attribute_submit", "claude-conn", kind="student", value="yes", ref="x",
                                          on_behalf_of="alice")
     ok("attribute_submit", "alice", kind="student", value="yes", ref="vault:s")
-    assert len(ok("attribute_list", "claude-conn", on_behalf_of="alice")["attributes"]) == 1
+    # A grant of self.data_view was consented as profile, notifications and invoices; attributes are personal data.
+    assert "power of attorney" in denied("attribute_list", "claude-conn", on_behalf_of="alice")
+    assert len(ok("attribute_list", "alice")["attributes"]) == 1
     assert "sign in" in denied("attribute_submit", fake_chain.ANONYMOUS, kind="x", value="y", ref="z")
     assert "sign in" in denied("attribute_list", fake_chain.ANONYMOUS)
 

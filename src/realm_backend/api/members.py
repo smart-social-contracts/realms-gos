@@ -157,7 +157,7 @@ def user_list(c, args):
     return {"users": [card(u) for u in rows], "next": nxt}
 
 
-@op("self.data_view", read=True, delegable=True)
+@op("self.data_view", read=True)
 def me(c, args):
     """Your card, permissions and the first page of your delegations each way (``next`` in it continues them with
     delegation_list), plus your private data when you call it yourself (not as a delegate)."""
@@ -169,7 +169,7 @@ def me(c, args):
     return out
 
 
-@op("self.update_public_profile", delegable=True, check=check_language, returns="user")
+@op("self.update_public_profile", check=check_language, returns="user")
 def profile_update(c, args):
     """Change your public ``nickname`` and ``avatar`` and your ``language`` (a BCP 47 tag); a field you leave out
     stays as it is. Returns ``user``."""
@@ -303,7 +303,7 @@ def attribute_review(c, args):
     return {"attribute": a.id, "status": a.status}
 
 
-@op("self.data_view", read=True, delegable=True, returns="attributes")
+@op("self.data_view", read=True, returns="attributes")
 def attribute_list(c, args):
     """Your own attributes, all or only those of ``kind``, ``count`` rows at a time (default 100, at most 500) from
     row ``from`` (default 1). Returns ``attributes`` and ``next`` (null at the end); a page can hold fewer than

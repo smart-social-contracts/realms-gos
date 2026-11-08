@@ -134,7 +134,7 @@ def tender_get(c, args):
     return {"tender": {**data, "requester": t.requester.id, "bids": [shown(b) for b in t.bids]}}
 
 
-@op("bid.submit", delegable=True, returns="bid")
+@op("bid.submit", returns="bid")
 def bid_submit(c, args):
     """For ``vendor``, an active organization you represent, bid on the open ``tender``: ``payload_ref`` (the encrypted
     bid) and ``payload_hash``, the ``sha256:`` of ``price:nonce``. One bid per vendor and tender. Returns ``bid``."""
@@ -152,7 +152,7 @@ def bid_submit(c, args):
     return {"bid": b.id}
 
 
-@op("bid.submit", delegable=True, returns="bid")
+@op("bid.submit", returns="bid")
 def bid_withdraw(c, args):
     """Withdraw ``bid``, made for a vendor you represent, while its tender still takes bids. Returns the ``bid``
     as it was."""

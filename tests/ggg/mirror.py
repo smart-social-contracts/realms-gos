@@ -77,8 +77,16 @@ def signature(fn):
     return SIGNATURES[fn.__name__]
 
 
+def scoped(a):
+    """A test's ``groups`` as the scope entries GGG takes."""
+    if "groups" not in a:
+        return a
+    return {**{k: v for k, v in a.items() if k != "groups"}, "operations": ["group:" + g for g in a["groups"]]}
+
+
 # The test's JSON arguments, reshaped where ggg_api.ARGS reshapes GGG arguments for the operation.
 UNARGS = {
+    "delegation_grant": scoped, "delegation_request": scoped, "delegation_request_decide": scoped,
     "department_set_policy": lambda a: {"department": a.get("department"),
                                         "policy": {k: a[k] for k in ("m", "n", "quorum", "veto") if k in a}},
     "treasury_configure": lambda a: a.get("config", {}),

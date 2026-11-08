@@ -289,29 +289,33 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 
 ## 5. Operations Realms GOS adds
 
+Flags are the model's (`ggg/model/README.md`, §1): `delegable` is the direct tier of power of attorney and `confirm` asks
+each time. These operations get their tier and group in `core/poa.py` (`OWN`), as the model's get theirs in
+`ggg/delegation.json`. An operation with no flag is the member's own, the founder's or needs no power of attorney.
+
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
-| `task_create`, `task_edit`, `task_delete`, `task_run` (only the task's creator, or a controller; a cancelled task stays cancelled) | `task.*` | | Create a daily invoice check |
-| `task_add_schedule` (a time, and optionally a repeat, for the creator's named task) | `task.schedule` | | Run the invoice check every day from 1 Jan |
-| `task_logs` | `task.view` | read | Payroll task and its last 3 runs |
+| `task_create`, `task_edit`, `task_delete`, `task_run` (only the task's creator, or a controller; a cancelled task stays cancelled) | `task.*` | delegable | Create a daily invoice check |
+| `task_add_schedule` (a time, and optionally a repeat, for the creator's named task) | `task.schedule` | delegable | Run the invoice check every day from 1 Jan |
+| `task_logs` | `task.view` | read, delegable | Payroll task and its last 3 runs |
 | `proposal_run_scheduled` (runs the action of a proposal waiting for its effective time once that time has come, else does nothing; the task scheduler calls it) | — (public) | | At `effective_at`, the realm runs `P-12`'s transfer |
 | `ops_list` | — (public) | read | geister reads it to build MCP tools |
-| `orchestration_decide` (approve or reject a Casals baton action for this realm) | `orchestration.approve` | | Approve Casals' action "upgrade North to 0.9.1" |
-| `extension_install`, `extension_uninstall` | `extension.install`, `extension.uninstall` | governed | Install `procurement` 1.0.3 (marketplace-approved) → vote |
-| `extension_call` | `extension.call` + the extension's declared operation | | The voting extension casts Alice's vote through `proposal_vote` |
-| `extension_set_access`, `sidebar_configure` | `realm.configure` | governed | Show `vault` only to Finance |
+| `orchestration_decide` (approve or reject a Casals baton action for this realm) | `orchestration.approve` | confirm | Approve Casals' action "upgrade North to 0.9.1" |
+| `extension_install`, `extension_uninstall` | `extension.install`, `extension.uninstall` | governed, delegable | Install `procurement` 1.0.3 (marketplace-approved) → vote |
+| `extension_call` | `extension.call` + the extension's declared operation | delegable | The voting extension casts Alice's vote through `proposal_vote` |
+| `extension_set_access`, `sidebar_configure` | `realm.configure` | governed, delegable | Show `vault` only to Finance |
 | `extension_list` | — (public) | read | Alice's sidebar shows `voting`, not `vault`; a visitor's shows the public dashboard |
-| `shell` (REPL; calls operations as the caller) | `shell.execute` | | An admin runs `ops.proposal_list({"status": "voting"})` |
+| `shell` (REPL; calls operations as the caller) | `shell.execute` | delegable | An admin runs `ops.proposal_list({"status": "voting"})` |
 | `status`, `version` | — (public) | read | Thin summaries of `realm_info` |
 | `token_catalog` | — (public) | read | The ICRC-1 ledgers this GOS ships with, not the realm's registered tokens |
 | `scale_status` | — (public) | read | Quarter populations against this GOS's auto-scale capacity |
-| `quarter_add` (on the capital: Casals grows the realm's stand by <stand>-quarter-<n>, then the capital makes that canister a quarter and registers it; filed by the realm itself once a quarter is wanted) | `quarter.register` | governed | The members vote for a fourth quarter → Casals builds `agora-quarter-4` |
-| `realm_configure_infrastructure` | `realm.configure.infrastructure` | governed | Frontend, file-registry, marketplace, installer and Casals baton canister ids |
-| `realm_export` | `db.export` | read | One page of an entity's rows, as stored, for a backup. An entity with large rows (`ChapterSource`: up to 256 KB each) returns fewer rows than `count` asks for: follow `next` |
-| `codex_install_resume` (an admin resumes the install of a layered codex that an upgrade paused: the step it stopped in runs again, for the change list the vote approved; nothing else can change) | `codex.install` | | After an upgrade in the middle of an install, the admin resumes `J-3` |
+| `quarter_add` (on the capital: Casals grows the realm's stand by <stand>-quarter-<n>, then the capital makes that canister a quarter and registers it; filed by the realm itself once a quarter is wanted) | `quarter.register` | governed, delegable | The members vote for a fourth quarter → Casals builds `agora-quarter-4` |
+| `realm_configure_infrastructure` | `realm.configure.infrastructure` | governed, delegable | Frontend, file-registry, marketplace, installer and Casals baton canister ids |
+| `realm_export` | `db.export` | read, delegable | One page of an entity's rows, as stored, for a backup. An entity with large rows (`ChapterSource`: up to 256 KB each) returns fewer rows than `count` asks for: follow `next` |
+| `codex_install_resume` (an admin resumes the install of a layered codex that an upgrade paused: the step it stopped in runs again, for the change list the vote approved; nothing else can change) | `codex.install` | delegable | After an upgrade in the middle of an install, the admin resumes `J-3` |
 | `db_convert_indexes` | `db.convert` | | After an upgrade from a release before ic-python-db 0.13: converts the index lists saved as one array each, a batch per call, until `done` (a list too long for one call is skipped and named in `refused`); a new realm, or one already converted, does nothing |
-| `tax_policy_view` | `realm.data_view` | read | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
-| `budget_view` | `realm.data_view` | read | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |
+| `tax_policy_view` | `realm.data_view` | read, delegable | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
+| `budget_view` | `realm.data_view` | read, delegable | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |
 
 Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.view`,
 `orchestration.approve`, `shell.execute`. (`task.schedule` is the model's; `task.cancel` is no longer used: `task_cancel`

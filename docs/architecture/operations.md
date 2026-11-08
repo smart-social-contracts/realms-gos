@@ -57,7 +57,8 @@ of running.
 ## Discovering operations
 
 `ops_list` is public and returns every operation with its permission, flags and docstring. The
-CLI uses it to choose `read` or `run`; AI tools (MCP) are generated from it.
+CLI uses it to choose `read` or `run`; AI tools (MCP) are generated from it. `delegable` says a power of attorney can
+reach the operation in this release; `delegable_operations` gives the groups it can be granted in.
 
 ```bash
 realms local call ops_list
