@@ -10,7 +10,7 @@ from ic_python_db import ManyToMany, ManyToOne, OneToMany, OneToOne
 
 from api import assets, codex
 from core import layered_codex as store
-from core.db import Conflict, Fail
+from core.db import Conflict, Fail, NotFound
 from ggg import ChapterSource, Codex, InstallJob, LayeredCodex
 from kit import ok
 from test_codex import SOURCE, build, hook, manifest
@@ -230,3 +230,25 @@ def test_the_entities_hold_ids_as_text_and_so_export_as_plain_rows():
     assert [(r["id"], r["layer_paths"], r["proposal"]) for r in exported("LayeredCodex")] == [(lc.id, PATHS, "P-1")]
     assert [r["source"] for r in exported("ChapterSource")] == [CHAPTER]
     assert [(r["id"], r["change_list"]) for r in exported("InstallJob")] == [("J-1", {"url": "u", "checksum": "c"})]
+
+
+def test_the_export_pages_chapter_texts_one_row_at_a_time():
+    # A chapter can be 256 KB: more than a few in a page pass a query's instruction limit or the reply's size.
+    texts = [CHAPTER + f"# {n}\n" for n in range(3)]
+    for text in texts:
+        store.store_chapter(store.checksum(text), text)
+    seen, start = [], 1
+    while start is not None:
+        out = ok("realm_export", "ctl", entity="ChapterSource", count=500, **{"from": start})
+        assert len(out["rows"]) == 1
+        seen += [row["source"] for row in out["rows"]]
+        start = out["next"]
+    assert seen == texts
+    assert len(ok("realm_export", "ctl", entity="LayeredCodex", count=500)["rows"]) == 0  # no cap on the others
+
+
+def test_a_codex_id_without_a_version_is_a_layered_one_and_unknown_ids_are_refused_by_kind():
+    with pytest.raises(NotFound, match="unknown LayeredCodex 'sha256:00'"):
+        codex.find_codex("sha256:00")
+    with pytest.raises(NotFound, match="unknown Codex 'test@9.9.9'"):
+        codex.find_codex("test@9.9.9")

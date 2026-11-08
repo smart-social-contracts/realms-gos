@@ -23,7 +23,8 @@ class Proposal(Row):
     deadline = Integer(default=0)
     effective_at = Integer(default=0)  # seconds; once accepted, the action runs then. 0: on acceptance
     # The rule that decides it (ggg I-GOV-3), fixed at creation: the yes votes exceed (realm-wide) or reach (a department)
-    # ``threshold`` of the votes cast or of the eligible voters (``threshold_of``), with ``quorum`` of them voting.
+    # ``threshold`` of the votes cast or of the eligible voters (``threshold_of``), with ``quorum`` of them voting. A
+    # department's threshold is a share of its policy's n seats (``tally["seats"]``), whoever fills them.
     threshold = Integer(default=ONE // 2)
     quorum = Integer(default=0)
     threshold_of = String(default="cast")  # cast | eligible
@@ -43,8 +44,9 @@ class Proposal(Row):
             # The action replays when the vote ends, with the arguments the proposal was filed with.
             if obj.get("action"):
                 obj["action"] = upgrade_call(obj["action"])
-        # A department's vote took m approvals: its rule is m of n of the eligible seats. A realm-wide one took the
-        # realm's threshold and quorum over the votes cast, which the row already holds, and no casting vote.
+        # A department's vote took m approvals: its rule is m of the n seats of its policy, which is the department's
+        # policy now. A realm-wide one took the realm's threshold and quorum over the votes cast, which the row already
+        # holds, and no casting vote.
         tally = obj.get("tally") or {}
         if "required" in tally:
             from ggg import Department
@@ -52,4 +54,5 @@ class Proposal(Row):
             department = Department.load(obj["department"]) if obj.get("department") else None
             n = max(int(((department.policy if department else None) or {}).get("n", 1)), tally["required"])
             obj["threshold"], obj["threshold_of"] = tally.pop("required") * ONE // n, "eligible"
+            tally["seats"] = n
         return obj

@@ -19,8 +19,10 @@ Each department has an approval **policy**, set with `department_set_policy`:
 {"department": "Civil Registry", "m": 2, "n": 3, "quorum": 0, "veto": ["dana"]}
 ```
 
-- `m` of `n`: how many yes votes the department needs, out of its seats: the proposal's threshold is m/n of the
-  eligible seats, rounded down (2 of 3 is 66 666 666 in hundred-millionths), and the yes votes must reach it.
+- `m` of `n`: how many yes votes the department needs, out of the `n` seats of its policy: a proposal's threshold is m/n,
+  rounded down (2 of 3 is 66 666 666 in hundred-millionths), and the yes votes must reach it, which takes exactly `m` of
+  them. `n` is what the threshold is a share of, whoever sits in the seats: a vacancy never makes a vote easier, and a
+  direct policy (1 of 1) needs one yes however many hold seats.
 - `quorum`: turnout needed, as a share of the department's voters (0 to 100 000 000; every ratio is in hundred-millionths,
   so 50 % is 50 000 000 and 0.1 % is 100 000).
 - `veto`: seated members whose *no* rejects the proposal.
@@ -109,19 +111,21 @@ default rule is the scope's own:
 
 - realm-wide: the realm's `voting_threshold` and `voting_quorum` over the votes `cast`, and the realm's `casting_vote`
   at that moment;
-- a department: m/n of its policy over the `eligible` seats, with the policy's `quorum`, and no casting vote.
+- a department: m/n of its policy's `n` seats, with the policy's `quorum`, and no casting vote.
 
 A proposer may state a stricter rule in `proposal_create`, never a weaker one (`InvalidArgument`): a higher
 `threshold` or `quorum`, or `eligible` where the default is `cast`. A proposal a governed call files takes its scope's
-default rule. The electorate is counted when the vote opens (`tally.eligible`): members who join, or seats that fill,
-afterwards do not change what the rule is measured against.
+default rule. A stricter department threshold `t` needs ceil(`t` · `n`) yes votes. The electorate is counted when the
+vote opens (`tally.eligible`, for the quorum and for the end when everyone has voted), and a department's vote keeps the
+policy's `n` as it was then (`tally.seats`): members who join, seats that fill and later changes to the policy do not
+change what the rule is measured against.
 
 **Who votes and how it is counted:**
 
 | | Realm-wide proposal (root department) | Department proposal |
 |---|---|---|
 | Eligible voters | every active member | the head and the holders of active seats |
-| Passes when | turnout ≥ the stored `quorum` and yes *exceed* the stored `threshold` of yes + no (`cast`) or of all the eligible voters (`eligible`). Under `cast`, a tie exactly at the threshold passes if the casting member is still a member and voted yes | yes *reach* the stored `threshold` of the eligible seats (m under the policy's own rule), turnout ≥ the stored `quorum`, and no veto holder voted no |
+| Passes when | turnout ≥ the stored `quorum` and yes *exceed* the stored `threshold` of yes + no (`cast`) or of all the eligible voters (`eligible`). Under `cast`, a tie exactly at the threshold passes if the casting member is still a member and voted yes | yes *reach* the stored `threshold` of the policy's `n` seats (exactly `m` under the policy's own rule), turnout ≥ the stored `quorum` of the eligible voters, and no veto holder voted no |
 | Rejected when | the rule above fails at the end of the vote | the rule above fails at the end of the vote |
 | Can close early | yes, once every eligible member has voted | yes, once every eligible member has voted, or as soon as it passes and every veto holder who can still vote has voted. Only an acceptance ends it early: until the deadline, or until every eligible member has voted, a no (a veto holder's too) can be replaced, even when the threshold is out of reach |
 

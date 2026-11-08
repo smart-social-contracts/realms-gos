@@ -19,8 +19,9 @@ def _candid(reply):
     return "(" + json.dumps(json.dumps(reply)) + ")"
 
 
-def _realm(rows_by_entity, export_error=None):
-    """A ``subprocess.run`` stand-in for ``dfx canister call``: ``status`` and paged ``realm_export``."""
+def _realm(rows_by_entity, export_error=None, most=None):
+    """A ``subprocess.run`` stand-in for ``dfx canister call``: ``status`` and paged ``realm_export``, which returns at
+    most ``most`` rows a page, as the realm does for an entity with large rows."""
     calls = []
 
     def run(cmd, **kwargs):
@@ -33,6 +34,7 @@ def _realm(rows_by_entity, export_error=None):
             reply = {"ok": False, "error": export_error}
         else:
             rows, start, count = rows_by_entity.get(args["entity"], []), args["from"], args["count"]
+            count = min(count, most or count)
             more = start - 1 + count < len(rows)
             reply = {"ok": True, "entity": args["entity"], "rows": rows[start - 1:start - 1 + count],
                      "next": start + count if more else None}
@@ -58,6 +60,27 @@ class TestCursorDatabaseExplorer:
         assert result["items"] == [{"_type": entity, "_id": row["id"], **row}]
         assert result["total_pages"] == 1
         assert realm.calls == [("read", "realm_export", {"entity": entity, "from": 1, "count": 10})]
+
+    def test_a_page_the_realm_cuts_short_is_filled_by_following_next(self):
+        rows = [{"sha256": f"sha256:{n}"} for n in range(5)]
+        explorer = CursorDatabaseExplorer("local", "realm_backend")
+        realm = _realm({"ChapterSource": rows}, most=1)
+
+        with patch("subprocess.run", side_effect=realm):
+            result = explorer.list_entities("ChapterSource", 1, 2)
+
+        assert [item["sha256"] for item in result["items"]] == ["sha256:2", "sha256:3"]
+        assert result["more"] is True
+        assert [args["from"] for _, _, args in realm.calls if args.get("entity")] == [3, 4]
+
+    def test_every_row_of_an_entity_whose_pages_are_cut_short_is_read_once(self):
+        rows = [{"sha256": f"sha256:{n}"} for n in range(7)]
+        explorer = CursorDatabaseExplorer("local", "realm_backend")
+
+        with patch("subprocess.run", side_effect=_realm({"ChapterSource": rows}, most=2)):
+            items = list(explorer.all_entities("ChapterSource", page_size=3))
+
+        assert [item["sha256"] for item in items] == [row["sha256"] for row in rows]
 
     def test_navigation_state_initialization(self):
         """Test NavigationState initialization."""
