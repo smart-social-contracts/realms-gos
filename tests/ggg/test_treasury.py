@@ -264,6 +264,22 @@ def test_an_adopted_budget_is_exhaustive_so_a_payment_in_a_category_it_has_no_li
         == "completed"  # and the ledger's fee needs no line
 
 
+def test_nobody_names_the_ledgers_fee_as_a_category():
+    fund_roads_with_budget(500)
+    for name, args in (("transfer_create", {"fund": "ROADS", "to": "buildco", "amount": 900}),
+                       ("budget_draft", {"fund": "ROADS", "period": "FY2026", "kind": "expense", "planned": 900})):
+        out = call(name, "ctl", category="ledger_fee", **args)
+        assert out["kind"] == "invalid_argument" and "ledger's fee" in out["error"], (name, out)
+    assert not Transfer.count() and Budget.count() == 1  # the budget line of fund_roads_with_budget
+
+
+def test_the_fee_of_a_payment_is_booked_whatever_the_adopted_budget_says():
+    fund_roads_with_budget(500)
+    assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=100, category="capital")["status"] \
+        == "completed"
+    assert {e.category for e in rows(LedgerEntry) if e.kind == "expense"} == {"capital", "ledger_fee"}
+
+
 def test_a_fund_without_an_adopted_budget_pays_in_any_category():
     setup_finance()
     allocate(ROADS=100)

@@ -208,6 +208,13 @@ def address(to, symbol):
     return to.removeprefix("User:")  # a user without an account is paid at their principal
 
 
+def not_the_fee(args):
+    """The ledger's fee is booked by the realm under its own category, which budgets do not cap: a caller cannot name
+    it for a payment or a budget line, or the payment would spend past an adopted budget."""
+    if args.get("category") == FEE:
+        raise Fail(f"{FEE} is the category of the ledger's fee, which the realm books itself")
+
+
 def spending(fund, category, amount, fee):
     return [("expense", category, amount, 0, fund), ("expense", FEE, fee, 0, fund)]
 
@@ -265,7 +272,7 @@ def positive(args, key="amount"):
 
 
 @op("transfer.create", delegable=True, governed=fund_department, parties=lambda a: {a.get("to", "")},
-    returns="transfer")
+    returns="transfer", check=not_the_fee)
 def transfer_create(c, args):
     """Pay ``amount`` of ``symbol`` (default the realm currency) from ``fund`` to ``to`` (principal, user or org); the
     fund must also cover the ledger fee. Optional ``category`` (default transfer), ``description``, ``contract``.
@@ -618,7 +625,7 @@ def other_kind_in_slot(fund, p, category, kind):
     return next((b for b in each(Budget, "slot", slot(fund, p, category)) if b.kind != kind), None)
 
 
-@op("org.manage_budget", governed=fund_department, returns="budget")
+@op("org.manage_budget", governed=fund_department, returns="budget", check=not_the_fee)
 def budget_draft(c, args):
     """Draft a budget line for ``fund`` in the open ``period``: ``planned`` amount for ``category``, of ``kind``
     ``revenue`` or ``expense``; a category is one kind in a fund and period. Returns ``budget``."""
