@@ -43,7 +43,9 @@ FIELDS = {
 }
 # Kept in manifest_data["casals"], not on Realm: the stand Casals built the realm on, its baton and its conductor.
 CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
-# Kept in manifest_data too: how far db_convert_indexes has got ({"after": key}), or {"done": True}
+# Kept in manifest_data too: how far db_convert_indexes has got, {"after": key, "refused": [key, ...]} while it runs and
+# {"done": True, "refused": [...]} at the end (a new realm: {"done": True}). "refused" names the lists it skipped as
+# too long to convert.
 INDEX_CONVERSION = "index_conversion"
 HEX = "0123456789abcdef"
 COUNTED = ("User", "Member", "Department", "Organization", "Proposal", "Extension", "Task", "Notification")
