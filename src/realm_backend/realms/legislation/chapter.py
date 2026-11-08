@@ -10,7 +10,14 @@ class never changes: its settings are frozen values, attribute assignment is ref
 own classes are sealed the same way.
 """
 
-from realms.legislation.context import GGG, Denial, Domains, Event, Ref
+from realms.legislation.context import (
+    GGG,
+    MAX_DEPTH,
+    Denial,
+    Domains,
+    Event,
+    Ref,
+)
 from realms.legislation.errors import LegislationError, Refused
 from realms.legislation.marks import EXTENSION, FIXED, Forbid, Method, Setting
 from realms.legislation.periods import Period
@@ -172,13 +179,27 @@ def kind_of(name):
 
 def as_layer(chapter, source, fn, args, kwargs):
     """Run ``fn`` on ``chapter`` as the layer ``source`` that defined it, so ``self.layer`` and ``uses``
-    are those of the layer whose code runs, whatever lower class the instance has."""
+    are those of the layer whose code runs, whatever lower class the instance has.
+
+    Every method of every chapter runs through here, so this is where calls between domains are
+    counted: a method of a domain other than the one running is one more nested call, however the
+    caller got hold of it, and the one that would pass ``MAX_DEPTH`` is refused."""
+    context, domain = chapter.__context__, type(chapter).__domain__
+    crossing = bool(context.running) and context.running[-1] != domain
+    if crossing:
+        if context.depth >= MAX_DEPTH:
+            raise LegislationError(f"calls between domains stop at depth {MAX_DEPTH}")
+        context.depth += 1
+    context.running.append(domain)
     layers = chapter.__dict__.setdefault("__layers__", [])
     layers.append(source)
     try:
         return fn(chapter, *args, **kwargs)
     finally:
         layers.pop()
+        context.running.pop()
+        if crossing:
+            context.depth -= 1
 
 
 def bound(fn, source):

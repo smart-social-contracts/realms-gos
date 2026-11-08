@@ -15,7 +15,8 @@ A chapter writes::
 ``__all__`` is exactly what a chapter may import; the loader refuses any other name. The tools and
 the runtime use the rest of the module: ``Codex`` (build a codex, ``load`` each chapter top to bottom,
 ``check`` the settings, run the resolved classes with a ``Context``), ``Calendar``, ``Event``,
-``Money`` and the errors.
+``Money`` and the errors. ``plan`` and ``resolve`` (S3) turn the realm's links into its layer paths
+and its chapters into a loaded codex with a flattened view.
 
 A forbid's rule is an ``F`` expression (§6)::
 
@@ -29,8 +30,7 @@ the schema it validates against; ``BoundForbid.evaluate(facts)`` is the same rul
 
 The module is self-contained: it imports nothing from the CLI or the canister, so the same code runs
 on a laptop and in the realm. In the realm, ``Codex.load`` runs inside the subinterpreter sandbox
-(§9.3), which supplies the read-only ``ggg`` view. S3 (#485) adds the resolver that computes the layers
-from the realm's links.
+(§9.3), which supplies the read-only ``ggg`` view.
 """
 
 # The ``as`` form marks the re-export; the names a chapter may import are listed in ``__all__`` below.
@@ -57,6 +57,8 @@ from realms.legislation.marks import extension as extension
 from realms.legislation.marks import fixed as fixed
 from realms.legislation.marks import forbid as forbid
 from realms.legislation.marks import overridable as overridable
+from realms.legislation.paths import Plan as Plan
+from realms.legislation.paths import plan as plan
 from realms.legislation.periods import Period as Period
 from realms.legislation.periods import days as days
 from realms.legislation.periods import months as months
@@ -65,6 +67,8 @@ from realms.legislation.periods import years as years
 from realms.legislation.rates import Money as Money
 from realms.legislation.rates import pct as pct
 from realms.legislation.rates import times as times
+from realms.legislation.resolver import Resolution as Resolution
+from realms.legislation.resolver import resolve as resolve
 
 # What a chapter may import, and nothing else.
 __all__ = [

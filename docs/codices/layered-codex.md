@@ -245,9 +245,10 @@ One entry per release, newest last:
 ```
 
 - **A release lists all of the source's chapters,** changed or not, and its calendar if it has one.
-  The source adopts it by its own vote. A follower installs a release whole, never only some of its
-  chapters, but downloads only the chapters on its own layer paths: EMSHI's water chapter reaches only
-  the realms that sync from EMSHI.
+  It never lists the `realm` domain, which only the realm's own layer fills (§3). A follower that finds
+  one in a release skips it and reports it. The source adopts the release by its own vote. A follower
+  installs a release whole, never only some of its chapters, but downloads only the chapters on its own
+  layer paths: EMSHI's water chapter reaches only the realms that sync from EMSHI.
 - **The repository file is a convenience copy.** The authority is the source's published record (§8).
 - **The realm's own layer needs no releases:** its proposals are its record.
 - **`calendar.json` is released and pinned like a chapter:** the release's own `calendar` field holds
@@ -268,10 +269,15 @@ own layer. Each sync source relays its own paths, so a path grows by one layer a
 | València | CV and EMSHI | EU → Spain → CV → EMSHI → València |
 
 - EMSHI writes water chapters only, so in every other domain its path equals CV's. Empty chapters are
-  skipped, so València's tax path is Spain → València.
+  skipped, so València's tax path is Spain → València. A layer is on a domain's path only if its
+  release has a chapter in that domain; the table above shows a domain every layer writes in.
 - **One chain:** when a realm has several sync sources, their paths in one domain must form one
   chain, each the start of the longest, which the realm uses. Paths that differ are refused unless one
   extends the other, and the install fails. València passes, because EMSHI's water path extends CV's.
+  Across domains, too, the records of the sync sources must, taken together, put every layer with a
+  chapter or a calendar above or below every other: one order, no ties. Two layers that no record
+  puts in order, such as CV and a metropolitan area that both sync from Spain, are refused, so
+  `self.layer` has one order to count by.
 - A CV town that does not sync from EMSHI gets a water path without EMSHI.
 
 ### 3.4 `calendar.json`
@@ -494,8 +500,11 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 
 - **Only declared domains.** A chapter may only reach domains listed in `uses`. Anything else is an
   error at load time.
-- **No cycles.** If tax uses procedure and procedure uses tax, the checker refuses the cycle. The
-  runtime also stops calls between domains at depth 8.
+- **No cycles.** If tax uses procedure and procedure uses tax, the checker refuses the cycle, and so
+  does the install. The install also refuses a `uses` of the chapter's own domain, or of a domain the
+  realm has no chapter in.
+- **Depth 8.** Calls between domains stop at depth 8 (`MAX_DEPTH` in `realms.legislation.context`):
+  the runtime refuses a ninth nested call, and the install refuses a `uses` chain that could reach it.
 - **What's protected.** `fixed` members of the called domain can't be changed by lower layers, so a
   source that needs a guaranteed answer marks it `fixed`, as `working_days_after` is in §4.
 
@@ -557,9 +566,22 @@ official journal's daily issue (§9.6), is the local day computed this way, on t
   as its own zone. Only the name travels: the quarter's release already holds the data of every zone.
   If the quarter refuses it or cannot be reached, the operation fails and nothing changes.
 
-This is the first of the **settings the realm sets for its quarters**, and the only one so far. Which
-others join it (branding, the welcome text, ...) is an open point, to be decided with the product
-owner.
+**Settings the realm sets for its quarters.** A realm has one face, so its quarters share some settings
+and keep others. The table and the mechanism are in
+[Quarters and federation](../architecture/quarters-and-federation.md#what-the-realm-sets-for-its-quarters).
+
+| Group | Settings | Rule |
+|---|---|---|
+| Identity | the realm's name (each quarter keeps its own quarter label), logo, background image and colours (branding), manifesto, the realm's terms text, lifecycle stage | kept in sync from the capital: the capital owns them, a quarter cannot change them, and a realm-wide vote changes them on the capital, which pushes them to every quarter |
+| Shared foundations | accounting currency, the languages offered | kept in sync from the capital, as above |
+| Local, with a default | time zone (above), welcome message | copied once when a quarter joins, then the quarter's own: the quarter changes it through its own governance, and the realm may set it by a realm-wide vote through `quarter_configure`; a joining realm that already chose a value keeps it |
+| Not pushed as settings | voting rules (window, threshold, quorum) | they belong in the codex, which reaches every quarter at one switch time (§9.5); a pushed setting would bypass the legislation |
+| Not pushed | registration (`quarter_join_mode` is the capital's already, through `quarter_configure`; `open_registration` is each quarter's own), capacity (the capital's already), notification settings, departments, members, treasury | local, or the capital's already |
+
+The capital pushes a changed synced setting to its quarters over `quarter.sync`, and the answer to
+`quarter_sync` carries the current values, so a quarter that missed a push catches up. On a quarter,
+`realm_configure` (and its branding and token variants) and `setup_step` refuse a synced field with `Forbidden`,
+naming the capital.
 
 **Two clocks, with clear jobs.**
 
@@ -1091,6 +1113,36 @@ becomes official only when the source publishes it by its own vote. A sync sourc
 the releases of every layer it relays, as it installed them. The record is what followers check
 against; the official journal (§9.6) is where people read the same releases.
 
+**What the resolver takes.** The library function `realms.legislation.plan(realm, relays, own)` (the
+install task's step 5, `realms legislation resolve`) computes the layer paths from plain data. Each
+chosen sync source, one with an active link, is its record as the releases it runs, in layer order:
+
+```json
+{"source": "eu/es/vc",
+ "layers": [
+   {"source": "eu",       "version": "1.0.0", "chapters": {"data_protection": "sha256:<hex>"}, "calendar": null},
+   {"source": "eu/es",    "version": "2.4.0", "chapters": {"tax": "sha256:<hex>", "procedure": "sha256:<hex>"}, "calendar": "sha256:<hex>"},
+   {"source": "eu/es/vc", "version": "1.1.0", "chapters": {"local_regime": "sha256:<hex>"}, "calendar": "sha256:<hex>"}
+ ]}
+```
+
+- `layers` runs **top to bottom**: the layers the sync source relays, its own layer last. An entry is a
+  release as in `releases.json` (§3.2) with its `source` added. The order is the source's own layer
+  path; a source id does not place it (§3).
+- A layer is on a domain's path only if its entry has a chapter in that domain.
+- Taken together, the records must put every layer with a chapter or a calendar above or below every
+  other: one order, no ties. A record may order two layers through a third (`[a, b]` and `[b, c]` give
+  `a, b, c`), but records that contradict each other, or leave two layers with neither above the
+  other, are refused.
+- A relay's `source` is not the realm itself, and a record that lists its own layer lists it last.
+- The realm's own layer is passed beside them, without a version (§3.2):
+  `{"chapters": {domain: sha256}, "calendar": sha256}`.
+- Two sync sources that relay one layer must relay the same release, with the same version and
+  checksums. Otherwise `plan` refuses (§9.2 step 4).
+- `plan` returns the layer paths, the chapters to fetch (`source`, `domain`, `version`, `sha256`, in the
+  order they load), the calendars and the realm chapters it skipped (§3.2). `resolve` loads them into a
+  codex and gives the flattened view of §5.9 as plain data.
+
 A follower checks each layer from above against one record:
 
 - **its publisher's**, when the follower syncs from the publisher directly;
@@ -1151,9 +1203,11 @@ per message:
      decides which one it installs. **If its legislation does not choose, the install is refused and
      the old codex keeps running.**
 5. **Build:**
-   - compute the new layer paths from the paths the sync sources relay, then the realm's own layer;
+   - compute the new layer paths from the paths the sync sources relay, then the realm's own layer
+     (`plan`, shape in §8);
    - refuse paths that do not form one chain (§3.3);
-   - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`;
+   - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`
+     (`resolve`), and refuse `uses` cycles and chains deeper than 8 (§4.4);
    - run the in-canister checks (§12.2), including every setting's `check=`;
    - generate the Cedar, folding the `S.` settings;
    - parse and validate it against the schema in strict mode (the canister's Cedar engine has the
@@ -1541,7 +1595,7 @@ is no G6.
 | [#500](https://github.com/smart-social-contracts/realms-gos/issues/500) | realms-gos | Linked realms: `sync_source_add`, `follower_accept`, records, serving chapter bytes, follower reports, leaving through the link event (§11) | G3, D1 | PocketIC: two realms link by both votes, the follower installs a relayed release from the source's capital, reports its layers, and leaves through the link event |
 | [#501](https://github.com/smart-social-contracts/realms-gos/issues/501) | realms-gos | Propagation across a realm's own quarters (§9.5): staging mode, the switch at T (the proposal's `effective_at`), quarter compliance, paused tasks resumed by an admin | D2, #504 | PocketIC: every quarter switches at T; a quarter not ready reads non-compliant; a task interrupted by an upgrade resumes only by an admin |
 | [#502](https://github.com/smart-social-contracts/realms-gos/issues/502) | realms-gos | Districts as zones: `User.home_zone`, `Zone.population`, `compute_realm_join` preferring a zone | G2 | PocketIC: a member with a home zone joins the quarter that holds it while capacity allows; capacity decides otherwise |
-| [#528](https://github.com/smart-social-contracts/realms-gos/issues/528) | realms-gos | Quarters in different time zones (§4.5, §9.5, §9.6): a quarter starts on its capital's zone, copied at `quarter_join_federation` unless the joining realm already chose one; `quarter_configure` gains `timezone` with a `check=`, and the capital pushes it to the quarter over `quarter.sync`; realm-wide counts use the capital's zone, local ones the quarter's; J1 uses the capital's, and a quarter's journal shows it | [#511](https://github.com/smart-social-contracts/realms-gos/issues/511), #501, #499, ggg#21 | multi-canister PocketIC: a quarter joins on its capital's zone and keeps it when the capital's changes, and a realm that already chose a zone keeps it on joining; the quarter and a realm-wide vote can each change it, and a malformed name, or a `timezone` with no `quarter`, is refused before any vote; a quarter that refuses or can't be reached leaves everything unchanged; a working-day count over a Madrid/Tokyo date difference uses the capital's zone for a realm-wide vote and the quarter's for its department; a switch at T is the same UTC instant in both; a hook cannot set a zone |
+| [#528](https://github.com/smart-social-contracts/realms-gos/issues/528) | realms-gos | Quarters in different time zones, and the settings the realm sets for its quarters (§4.5, §9.5, §9.6): a quarter starts on its capital's zone, copied at `quarter_join_federation` unless the joining realm already chose one; `quarter_configure` gains `timezone` with a `check=`, and the capital pushes it to the quarter over `quarter.sync`; realm-wide counts use the capital's zone, local ones the quarter's; J1 uses the capital's, and a quarter's journal shows it; the identity and the shared foundations are kept in sync from the capital (pushed on change over `quarter.sync`, carried by `quarter_sync` so a quarter catches up, refused by a quarter's `realm_configure` with `Forbidden` naming the capital); the welcome message is copied at join like the zone and set through `quarter_configure`; a realm with another accounting currency code or decimals cannot join as a quarter; `adopt()` stops copying the name; a quarter in `setup` keeps `setup`, and `adopt()` launches a quarter it builds right after its first sync, and keeps it pending, looking again every `ADOPT_EVERY`, until the sync and the launch have both succeeded, so it takes the capital's stage (a quarter's `setup_launch` is refused with `Conflict` while its capital is in `setup`, and until the quarter's first sync) | [#511](https://github.com/smart-social-contracts/realms-gos/issues/511), #501, #499, ggg#21, ggg#24 (`welcome_message` on `QuarterConfigureArgs`) | multi-canister PocketIC: a quarter joins on its capital's zone and keeps it when the capital's changes, and a realm that already chose a zone keeps it on joining; the quarter and a realm-wide vote can each change it, and a malformed name, or a `timezone` with no `quarter`, is refused before any vote; a quarter that refuses or can't be reached leaves everything unchanged; a working-day count over a Madrid/Tokyo date difference uses the capital's zone for a realm-wide vote and the quarter's for its department; a switch at T is the same UTC instant in both; a hook cannot set a zone; with a capital and two quarters, a realm-wide change of the name, branding, manifesto and accounting currency reaches both, each keeps its own label, a quarter that can't be reached does not undo it and catches up at its next `quarter_sync`, and a quarter's `realm_configure` of a synced field is refused with `Forbidden` before any vote; the welcome message is copied once at join, kept by a realm that had one, and set by `quarter_configure`; a realm with another accounting currency code or decimals is refused at join; a federal vote on a synced field takes effect on the capital and reaches both quarters by the push, with no replay in them; a pushed stage change runs `on_stage_change` in the quarters; a failed first sync of a capital-built quarter is retried and the quarter launches |
 | J1 ([realms-extensions#54](https://github.com/smart-social-contracts/realms-extensions/issues/54)) | realms-extensions | Core extension `journal`, the official journal (§9.6): one per realm, daily issues, sync-source releases as entries and, on a sync source, its own releases, JSON served by the canister as the authority, PDF print route with the logo, personal-data rules in config; added to `core-extensions.json` | D7, #503 | a new realm has the journal; an issue opens at midnight on the capital's clock, also across a DST change; a quarter's journal issues nothing and shows the capital's; a release found by the check appears as an entry; the print route renders; publication changes no `activates_at` |
 
 Suggested order: R1 and R2 in parallel with G1, G4, G5, G7, ggg#9, #499, #503 and #504 → G2 and G3 → G8 →

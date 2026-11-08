@@ -118,6 +118,125 @@ def test_a_chapter_loads_through_the_canisters_copy_of_the_library(realm):
     assert cost["import"] + cost["load"] < 400_000_000, cost
 
 
+RESOLVER_CODE = '''
+import json
+before = ic.performance_counter(0)
+from realms.legislation import Codex, LegislationError, plan, resolve
+imported = ic.performance_counter(0)
+
+SPAIN_PROCEDURE = """
+from realms.legislation import above, fixed, months, overridable, working_days
+
+class Procedure(above("procedure")):
+    default_decision_deadline = overridable(months(3), legislation="Ley 39/2015 Art. 21.3")
+
+    @fixed(legislation="Ley 39/2015 Art. 30")
+    def working_days_after(self, day, n):
+        return self.calendar.add(day, working_days(n))
+"""
+SPAIN_LOCAL_REGIME = """
+from realms.legislation import above, fixed
+
+class LocalRegime(above("local_regime")):
+    uses = ["procedure"]
+
+    @fixed(legislation="Ley 7/1985 Art. 65.2")
+    def earliest(self, day):
+        return self.legislation.procedure.working_days_after(day, 15)
+"""
+TOWN_PROCEDURE = """
+from realms.legislation import above, months
+
+class Procedure(above("procedure")):
+    default_decision_deadline = months(2)
+"""
+chapters = {"sha256:p": SPAIN_PROCEDURE, "sha256:l": SPAIN_LOCAL_REGIME, "sha256:t": TOWN_PROCEDURE}
+calendars = {"sha256:c": {"weekend": ["sat", "sun"], "years": {"2027": [{"date": "2027-01-01", "name": {"es": "Año Nuevo"}}]}}}
+spain = {"source": "eu/es", "version": "2.4.0", "chapters": {"procedure": "sha256:p", "local_regime": "sha256:l"}, "calendar": "sha256:c"}
+cv = {"source": "eu/es/vc", "version": "1.0.0", "chapters": {}, "calendar": None}
+relays = [{"source": "eu/es", "layers": [spain]}, {"source": "eu/es/vc", "layers": [spain, cv]}]
+p = plan("x/town", relays, {"chapters": {"procedure": "sha256:t"}})
+planned = ic.performance_counter(0)
+r = resolve(p, chapters, calendars)
+resolved = ic.performance_counter(0)
+view = r.view("procedure")
+
+
+def steps(n, cycle=False):
+    texts = {}
+    for i in range(n):
+        nxt = (i + 1) % n
+        ends = i == n - 1 and not cycle
+        body = "return 0" if ends else f"return 1 + self.legislation.step{nxt}.call()"
+        texts[f"step{i}"] = (
+            "from realms.legislation import above\\n"
+            f"class Step{i}(above('step{i}')):\\n    uses = {[] if ends else [f'step{nxt}']!r}\\n"
+            f"    def call(self):\\n        {body}\\n"
+        )
+    return texts
+
+
+def refusal(texts):
+    named = {d: "sha256:" + d for d in texts}
+    try:
+        resolve(plan("x/town", [], {"chapters": named}), {named[d]: t for d, t in texts.items()})
+    except LegislationError as e:
+        return str(e)
+
+
+deep = Codex(["x/town"], realm="x/town")
+for domain, text in steps(10).items():
+    deep.load("x/town", domain, text)
+try:
+    deep.instance("step0", deep.context()).call()
+    stopped = None
+except LegislationError as e:
+    stopped = str(e)
+print(json.dumps({
+    "paths": p.paths, "layers": p.layers,
+    "deadline": r.codex.instance("procedure", r.codex.context()).default_decision_deadline.to_json(),
+    "earliest": r.codex.instance("local_regime", r.codex.context()).earliest("2026-12-31"),
+    "view": [(m["name"], [l["source"] for l in m["layers"]]) for m in view["members"]],
+    "cycle": refusal(steps(2, cycle=True)), "too_deep": refusal(steps(10)), "stopped": stopped,
+    "cost": {"import": imported - before, "plan": planned - imported, "resolve": resolved - planned},
+}))
+'''
+
+
+def test_the_resolver_runs_in_the_canister(realm):
+    realm.pic.set_sender(Principal.from_str(CONTROLLER))
+    out = realm.raw(
+        "__shell__", encode([{"type": Types.Text, "value": RESOLVER_CODE}]), query=False
+    )[0]["value"]
+    assert out.startswith("{"), out  # a traceback otherwise
+    got = json.loads(out)
+    assert got["paths"] == {
+        "local_regime": ["eu/es"],
+        "procedure": ["eu/es", "x/town"],
+    }
+    assert got["layers"] == ["eu/es", "x/town"]  # eu/es/vc writes nothing
+    assert got["deadline"] == {"count": 2, "unit": "Month"}
+    assert (
+        got["earliest"] == "2027-01-22"
+    )  # 15 working days, counted by Spain's chapter
+    assert got["view"] == [
+        ["default_decision_deadline", ["eu/es", "x/town"]],
+        ["working_days_after", ["eu/es"]],
+    ]
+    assert got["cycle"] == (
+        "uses cycle: step0 → step1 → step0 "
+        "(x/town/step0.py uses step1; x/town/step1.py uses step0)"
+    )
+    assert got["too_deep"].startswith("uses chain step0 → step1 → ")
+    assert "is 9 calls deep: calls between domains stop at depth 8" in got["too_deep"]
+    assert got["stopped"] == "calls between domains stop at depth 8"
+    cost = got["cost"]
+    print(
+        f"first use: import {cost['import']:,} instructions, plan {cost['plan']:,}, resolve {cost['resolve']:,}"
+    )
+    assert sum(cost.values()) < 400_000_000, cost
+
+
 # ── S2 (realms-gos#484): the Cedar a forbid becomes, generated in the realm ─────────────────────────
 
 RATE = {"type": "Long", "optional": True, "min": 0, "max": 100_000_000}
