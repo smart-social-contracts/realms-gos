@@ -478,8 +478,8 @@ def test_layers_that_no_relay_orders_against_each_other_are_refused_even_in_diff
     with pytest.raises(LegislationError) as e:
         plan("town", relays)
     assert str(e.value) == (
-        "no sync source orders eu/es/vc and eu/es/amv against each other: the layers a realm "
-        "runs form one chain (layered-codex.md §3.3)"
+        "the sync sources' records leave eu/es/vc and eu/es/amv with neither above the other: "
+        "the layers a realm runs form one chain (layered-codex.md §3.3)"
     )
 
 
@@ -503,13 +503,33 @@ def test_layers_ordered_through_a_shared_relay_are_one_chain():
     assert plan("town", relays).layers == ["a", "b", "c", "town"]
 
 
-def test_relays_that_order_two_layers_the_other_way_round_are_refused():
-    a, b = mini("a", "1", ["tax"]), mini("b", "1", ["water"])
+def test_two_records_that_share_a_layer_order_the_rest_through_it():
+    a, b, c = mini("a", "1", ["x"]), mini("b", "1", ["y"]), mini("c", "1", ["z"])
+    relays = [{"source": "b", "layers": [a, b]}, {"source": "c", "layers": [b, c]}]
+    assert plan("town", relays).layers == ["a", "b", "c", "town"]  # a and c: through b
+
+
+def test_relays_that_order_two_layers_the_other_way_round_are_refused_naming_them():
+    a, b, c = mini("a", "1", ["tax"]), mini("b", "1", ["water"]), mini("c", "1", ["x"])
     relays = [
-        {"source": "s1", "layers": [a, b]},
+        {"source": "s1", "layers": [a, b, c]},  # c is in no conflict
         {"source": "s2", "layers": [b, a]},
     ]
-    with pytest.raises(LegislationError, match="order these layers differently: a, b"):
+    with pytest.raises(LegislationError) as e:
+        plan("town", relays)
+    assert str(e.value) == (
+        "the sync sources put these layers in contradicting orders: b → a → b"
+    )
+
+
+def test_a_circle_of_three_orders_is_refused_naming_the_circle():
+    a, b, c = mini("a", "1", ["x"]), mini("b", "1", ["y"]), mini("c", "1", ["z"])
+    relays = [
+        {"source": "s1", "layers": [a, b]},
+        {"source": "s2", "layers": [b, c]},
+        {"source": "s3", "layers": [c, a]},
+    ]
+    with pytest.raises(LegislationError, match="orders: b → c → a → b$"):
         plan("town", relays)
 
 
@@ -549,6 +569,25 @@ def test_a_relay_that_carries_the_realms_own_layer_is_a_cycle():
         plan("town", relays)
 
 
+def test_a_relay_whose_source_is_the_realm_itself_is_refused():
+    with pytest.raises(LegislationError, match="sync source town is this realm itself"):
+        plan("town", [{"source": "town", "layers": [mini("a", "1", ["x"])]}])
+
+
+def test_a_sync_sources_own_layer_comes_last():
+    a, b = mini("a", "1", ["x"]), mini("b", "1", ["y"])
+    assert plan("town", [{"source": "b", "layers": [a, b]}]).layers == [
+        "a",
+        "b",
+        "town",
+    ]
+    assert plan("town", [{"source": "a", "layers": [a]}]).layers == ["a", "town"]
+    with pytest.raises(
+        LegislationError, match="sync source b lists its own layer before the end"
+    ):
+        plan("town", [{"source": "b", "layers": [b, a]}])
+
+
 @pytest.mark.parametrize(
     "relay, reason",
     [
@@ -574,6 +613,58 @@ def test_a_relay_that_carries_the_realms_own_layer_is_a_cycle():
 def test_a_record_that_is_not_the_agreed_shape_is_refused(relay, reason):
     with pytest.raises(LegislationError, match=reason):
         plan("town", [relay])
+
+
+@pytest.mark.parametrize(
+    "mine",
+    [
+        ["x"],
+        "x",
+        {"chapters": {"tax": "sha256:t"}, "version": "9"},
+        {"source": "eu", "chapters": {}},
+    ],
+)
+def test_the_realms_own_layer_is_chapters_and_a_calendar_and_nothing_else(mine):
+    with pytest.raises(LegislationError, match="the realm's own layer is"):
+        plan("town", [], mine)
+
+
+def test_a_relayed_realm_chapter_is_skipped_and_reported():
+    """A release never lists the realm domain; a source that does must not break its followers."""
+    mistaken = mini("eu/es", "1", ["tax", "realm"])
+    p = plan("town", [{"source": "eu/es", "layers": [mistaken]}])
+    assert p.paths == {"tax": ["eu/es"]}
+    assert [c["domain"] for c in p.chapters] == ["tax"]
+    assert p.skipped == [
+        {"source": "eu/es", "domain": "realm", "sha256": "sha256:eu/es:realm"}
+    ]
+    two = plan(
+        "town",
+        [{"source": "a", "layers": [mistaken]}, {"source": "b", "layers": [mistaken]}],
+    )
+    assert len(two.skipped) == 1  # one layer, reported once
+
+
+def test_a_layer_whose_only_chapter_was_a_realm_chapter_runs_nothing():
+    only = mini("eu/es", "1", ["realm"])
+    p = plan("town", [{"source": "eu/es", "layers": [only]}])
+    assert p.paths == {} and p.layers == ["town"] and len(p.skipped) == 1
+
+
+def test_the_realm_domain_is_the_realms_own_and_still_loads():
+    r = resolved(
+        mine=dict(
+            VALENCIA_OWN,
+            chapters={
+                **VALENCIA_OWN["chapters"],
+                "realm": checksum(
+                    "from realms.legislation import above\nclass Realm(above('realm')):\n    pass\n",
+                    CHAPTERS,
+                ),
+            },
+        )
+    )
+    assert r.plan.paths["realm"] == [VALENCIA] and r.plan.skipped == []
 
 
 def test_a_realm_with_no_sync_source_has_its_own_layer_only():
@@ -937,6 +1028,65 @@ def test_a_uses_chain_deeper_than_eight_is_refused_naming_the_chain():
     assert "town/step8.py uses step9" in message
 
 
+PING = """
+from realms.legislation import above, overridable
+class Alpha(above("alpha")):
+    uses = ["beta"]
+    @overridable(legislation="x")
+    def call(self):
+        pong = self.legislation.beta.give()
+        return pong(self.ping, 0)
+    @overridable(legislation="x")
+    def ping(self, other, n):
+        return n if n >= 50 else other(self.ping, n + 1)
+"""
+PONG = """
+from realms.legislation import above, overridable
+class Beta(above("beta")):
+    @overridable(legislation="x")
+    def give(self):
+        return self.pong
+    @overridable(legislation="x")
+    def pong(self, other, n):
+        return other(self.pong, n + 1)
+"""
+
+
+def test_methods_handed_across_domains_still_count_as_calls_between_domains():
+    """Alpha gets beta's bound method once, through ``uses``; then they call each other directly."""
+    codex = Codex(["town"], realm="town")
+    codex.load("town", "alpha", PING)
+    codex.load("town", "beta", PONG)
+    context = codex.context()
+    with pytest.raises(LegislationError, match="calls between domains stop at depth 8"):
+        codex.instance("alpha", context).call()
+    assert context.depth == 0 and context.running == []  # undone as the calls unwind
+
+
+def test_calls_inside_one_domain_are_not_calls_between_domains():
+    own_text = (
+        "from realms.legislation import above\nclass Tax(above('tax')):\n"
+        "    def deep(self, n):\n        return n if n >= 30 else self.deep(n + 1)\n"
+    )
+    codex = Codex(["town"], realm="town")
+    codex.load("town", "tax", own_text)
+    assert codex.instance("tax", codex.context()).deep(0) == 30
+
+
+def test_an_extension_layer_called_from_another_domain_is_one_call_per_layer():
+    r = resolved()
+    context = r.codex.context()
+    local_regime = r.codex.instance("local_regime", context)
+    local_regime.check_proposal_create(
+        SimpleNamespace(
+            action={"Code": {}},
+            earliest_close_day="2026-12-31",
+            effective_day="2027-02-01",
+        )
+    )  # Spain's guard calls procedure's working_days_after: one call at a time
+    assert context.depth == 0 and context.running == []
+
+
 def test_the_runtime_stops_a_call_that_would_be_deeper_than_eight():
     codex = Codex(["town"], realm="town")
     for domain, text in step_chapters(
@@ -946,7 +1096,7 @@ def test_the_runtime_stops_a_call_that_would_be_deeper_than_eight():
     context = codex.context()
     with pytest.raises(LegislationError, match="calls between domains stop at depth 8"):
         codex.instance("step0", context).call()
-    assert context.depth == 0  # the count is undone as the calls unwind
+    assert context.depth == 0 and context.running == []  # undone as the calls unwind
     assert (
         codex.instance("step1", codex.context()).call() == MAX_DEPTH
     )  # one call shorter: allowed

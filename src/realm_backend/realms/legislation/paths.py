@@ -12,19 +12,22 @@ as the releases it runs, top to bottom: the layers it relays and its own layer l
         {"source": "eu/es/vc", "version": "1.1.0", "chapters": {"procedure": "sha256:..."}, "calendar": None}]}
 
 and the realm's own layer, which needs no release (§3.2): ``{"chapters": {domain: sha256}, "calendar": sha256}``.
+A release never lists the ``realm`` domain, which only the realm's own layer fills (§3); a relayed one is
+skipped and reported in ``Plan.skipped``.
 
 A layer is on a domain's path only if its release has a chapter in that domain: empty chapters are
 skipped, so València's tax path is Spain → València (§3.3). The paths the sync sources relay in one
 domain must form one chain, each the start of the longest, which the realm uses. Paths that differ are
 refused unless one extends the other, and the refusal is of the whole install (§2, rule 4). The
-layers the sync sources relay must also form one chain across domains: two layers with a chapter or a
-calendar that no relay orders against each other are refused too.
+layers the sync sources relay must also form one chain across domains: taken together, their records
+must put every layer with a chapter or a calendar above or below every other, with no ties.
 """
 
 from realms.legislation.codex import domain_id, source_id
 from realms.legislation.errors import LegislationError
 
 ARROW = " → "
+REALM = "realm"  # the domain only the realm's own layer fills (§3)
 
 
 class Plan:
@@ -34,20 +37,24 @@ class Plan:
     sources that have a chapter in it, top to bottom. ``chapters``: the chapters on those paths to
     fetch, ``{source, domain, version, sha256}`` for each, a domain at a time, top to bottom (the order
     ``Codex.load`` needs). ``calendars``: ``{source, version, sha256}`` for each layer that has one. The
-    realm's own layer has the version ``None``.
+    realm's own layer has the version ``None``. ``skipped``: the ``realm`` chapters that relayed releases
+    listed and ``plan`` left out, ``{source, domain, sha256}`` each.
     """
 
-    def __init__(self, realm, layers, paths, chapters, calendars):
+    def __init__(self, realm, layers, paths, chapters, calendars, skipped):
         self.realm, self.layers, self.paths = realm, layers, paths
-        self.chapters, self.calendars = chapters, calendars
+        self.chapters, self.calendars, self.skipped = chapters, calendars, skipped
 
 
 def plan(realm, relays, own=None):
     """The ``Plan`` of the realm ``realm`` (its source id) that syncs from ``relays`` and has ``own``."""
     realm = source_id(realm)
     relays = [_relay(relay, realm) for relay in relays]
+    skipped = []
+    for relay in relays:
+        skipped += [s for s in relay["skipped"] if s not in skipped]
     releases = _agreed(relays)
-    releases[realm] = _release(dict(own or {}, source=realm), "the realm's own layer")
+    releases[realm] = _own(realm, own)
     paths = {}
     for domain in sorted({d for r in releases.values() for d in r["chapters"]}):
         relayed = [
@@ -80,17 +87,24 @@ def plan(realm, relays, own=None):
         for source in layers
         if releases[source]["calendar"]
     ]
-    return Plan(realm, layers, paths, chapters, calendars)
+    return Plan(realm, layers, paths, chapters, calendars, skipped)
 
 
 def _relay(relay, realm):
-    """A sync source's record, checked: its releases, each layer once, never this realm's own layer."""
+    """A sync source's record, checked: its releases, each layer once, never this realm's own layer, and
+    the source's own layer, if it lists one, last. The ``realm`` chapters it lists are set aside.
+    """
     if not isinstance(relay, dict) or not isinstance(relay.get("layers"), list):
         raise LegislationError(
             'a sync source is {"source": <source id>, "layers": [<release>, ...]}'
         )
     name = source_id(relay.get("source"))
-    layers = []
+    if name == realm:
+        raise LegislationError(
+            f"sync source {name} is this realm itself: a realm cannot sync from itself, directly or "
+            "through other realms"
+        )
+    layers, skipped = [], []
     for entry in relay["layers"]:
         release = _release(entry, f"sync source {name}", versioned=True)
         if release["source"] == realm:
@@ -102,8 +116,30 @@ def _relay(relay, realm):
             raise LegislationError(
                 f"sync source {name} relays {release['source']} twice"
             )
+        if REALM in release["chapters"]:
+            sha256 = release["chapters"].pop(REALM)
+            skipped.append(
+                {"source": release["source"], "domain": REALM, "sha256": sha256}
+            )
         layers.append(release)
-    return {"source": name, "layers": layers}
+    sources = [r["source"] for r in layers]
+    if name in sources and sources[-1] != name:
+        raise LegislationError(
+            f"sync source {name} lists its own layer before the end: it comes last, below the "
+            "layers it relays"
+        )
+    return {"source": name, "layers": layers, "skipped": skipped}
+
+
+def _own(realm, own):
+    """The realm's own layer, checked, in the shape of a release that has no version."""
+    own = {} if own is None else own
+    if not isinstance(own, dict) or set(own) - {"chapters", "calendar"}:
+        raise LegislationError(
+            'the realm\'s own layer is {"chapters": {domain: sha256}, "calendar": sha256}, with no '
+            "version (layered-codex.md §3.2)"
+        )
+    return _release(dict(own, source=realm), "the realm's own layer")
 
 
 def _release(entry, where, versioned=False):
@@ -179,10 +215,10 @@ def _arrow(path):
 
 
 def _order(relays):
-    """Every layer the sync sources relay, top to bottom, in the one order they put them in. The layers
-    a realm runs form one chain (§3.3), so ``self.layer`` can say which layer is above which across
-    domains. Refused: two relays that order two layers the other way round, and two layers that no
-    relay orders against each other."""
+    """Every layer the sync sources relay, top to bottom, in the one order their records put them in:
+    taken together, the records must put every layer above or below every other, with no ties (§3.3), so
+    ``self.layer`` can say which layer is above which across domains. Refused: records that contradict
+    each other, and layers they leave with neither above the other."""
     runs = [
         [r["source"] for r in relay["layers"] if r["chapters"] or r["calendar"]]
         for relay in relays
@@ -197,14 +233,26 @@ def _order(relays):
     while len(order) < len(before):
         ready = [s for s in before if s not in order and before[s] <= set(order)]
         if not ready:
-            stuck = [s for s in before if s not in order]
             raise LegislationError(
-                f"the sync sources order these layers differently: {', '.join(stuck)}"
+                "the sync sources put these layers in contradicting orders: "
+                f"{ARROW.join(_circle(before, order))}"
             )
         if len(ready) > 1:
             raise LegislationError(
-                f"no sync source orders {' and '.join(ready)} against each other: the layers a realm "
-                "runs form one chain (layered-codex.md §3.3)"
+                f"the sync sources' records leave {' and '.join(ready)} with neither above the other: "
+                "the layers a realm runs form one chain (layered-codex.md §3.3)"
             )
         order.append(ready[0])
     return order
+
+
+def _circle(before, placed):
+    """Layers that follow each other round in a circle, ``a → b → a``: walk back from a layer that
+    cannot be placed, through a layer that must come before it, until one repeats."""
+    path = [next(s for s in before if s not in placed)]
+    while True:
+        previous = sorted(s for s in before[path[-1]] if s not in placed)[0]
+        if previous in path:
+            circle = path[path.index(previous) :][::-1]
+            return circle + circle[:1]
+        path.append(previous)

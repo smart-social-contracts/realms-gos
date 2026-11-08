@@ -245,7 +245,8 @@ One entry per release, newest last:
 ```
 
 - **A release lists all of the source's chapters,** changed or not, and its calendar if it has one.
-  The source adopts it by its own vote. A follower installs a release whole, never only some of its
+  It never lists the `realm` domain, which only the realm's own layer fills (§3). A follower that finds
+  one in a release skips it and reports it. The source adopts the release by its own vote. A follower installs a release whole, never only some of its
   chapters, but downloads only the chapters on its own layer paths: EMSHI's water chapter reaches only
   the realms that sync from EMSHI.
 - **The repository file is a convenience copy.** The authority is the source's published record (§8).
@@ -273,9 +274,10 @@ own layer. Each sync source relays its own paths, so a path grows by one layer a
 - **One chain:** when a realm has several sync sources, their paths in one domain must form one
   chain, each the start of the longest, which the realm uses. Paths that differ are refused unless one
   extends the other, and the install fails. València passes, because EMSHI's water path extends CV's.
-  The layers the sync sources relay must also be ordered against each other across domains (every
-  layer with a chapter or a calendar): two that no sync source orders, such as CV and a metropolitan
-  area that both sync from Spain, are refused, so `self.layer` has one order to count by.
+  Across domains, too, the records of the sync sources must, taken together, put every layer with a
+  chapter or a calendar above or below every other: one order, no ties. Two layers that no record
+  puts in order, such as CV and a metropolitan area that both sync from Spain, are refused, so
+  `self.layer` has one order to count by.
 - A CV town that does not sync from EMSHI gets a water path without EMSHI.
 
 ### 3.4 `calendar.json`
@@ -1115,9 +1117,11 @@ chosen sync source, one with an active link, is its record as the releases it ru
   release as in `releases.json` (§3.2) with its `source` added. The order is the source's own layer
   path; a source id does not place it (§3).
 - A layer is on a domain's path only if its entry has a chapter in that domain.
-- The layers of all the records, those with a chapter or a calendar, must form one chain: each record
-  gives an order, the orders must not contradict each other, and every pair of layers must be ordered
-  by some record.
+- Taken together, the records must put every layer with a chapter or a calendar above or below every
+  other: one order, no ties. A record may order two layers through a third (`[a, b]` and `[b, c]` give
+  `a, b, c`), but records that contradict each other, or leave two layers with neither above the
+  other, are refused.
+- A relay's `source` is not the realm itself, and a record that lists its own layer lists it last.
 - The realm's own layer is passed beside them, without a version (§3.2):
   `{"chapters": {domain: sha256}, "calendar": sha256}`.
 - Two sync sources that relay one layer must relay the same release, with the same version and

@@ -15,7 +15,7 @@ from realms.legislation.rates import Money
 from realms.legislation.sealed import MappingProxyType, Sealed, freeze
 
 # Nested calls from one domain's chapter into another's (layered-codex.md §4.4, §9.3). The resolver
-# refuses a codex whose ``uses`` chain is deeper, and the runtime stops a call that would be.
+# refuses a codex whose ``uses`` chain is deeper, and ``as_layer`` stops a call that would be.
 MAX_DEPTH = 8
 
 
@@ -147,34 +147,18 @@ class Event(metaclass=Sealed):
 
 class Context(metaclass=Sealed):
     """What one call of the legislation runs with: the codex, the time, the approvals the operation
-    carries, the effects queue every chapter of the call shares, and how deep the calls between
-    domains are (``depth``, at most ``MAX_DEPTH``)."""
+    carries, the effects queue every chapter of the call shares, and which domains' methods are running
+    (``running``, outermost first) and how many calls between domains are in progress (``depth``, at
+    most ``MAX_DEPTH``)."""
 
     def __init__(self, codex, now=0, approvals=(), operations=None):
         self.codex, self.now, self.approvals = codex, now, frozenset(approvals)
         self.effects = Effects(operations)
-        self.depth = 0
-
-
-def within_depth(context, method):
-    """``method`` of another domain's chapter, counted as one more call between domains: the call that
-    would be deeper than ``MAX_DEPTH`` is refused."""
-
-    def call(*args, **kwargs):
-        if context.depth >= MAX_DEPTH:
-            raise LegislationError(f"calls between domains stop at depth {MAX_DEPTH}")
-        context.depth += 1
-        try:
-            return method(*args, **kwargs)
-        finally:
-            context.depth -= 1
-
-    return call
+        self.running, self.depth = [], 0
 
 
 class Public(metaclass=Sealed):
-    """Another domain's chapter as a caller sees it: public members only. Its methods count as calls
-    between domains (``MAX_DEPTH``)."""
+    """Another domain's chapter as a caller sees it: public members only."""
 
     __slots__ = ("__chapter__",)
 
@@ -186,10 +170,7 @@ class Public(metaclass=Sealed):
             raise LegislationError(
                 f"{name} is private to its chapter: other chapters cannot call it"
             )
-        member = getattr(self.__chapter__, name)
-        if not callable(member):
-            return member
-        return within_depth(self.__chapter__.__context__, member)
+        return getattr(self.__chapter__, name)
 
 
 class Domains(metaclass=Sealed):
