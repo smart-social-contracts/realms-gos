@@ -146,6 +146,9 @@ Next to the model's fields, the `Realm` row holds:
 |---|---|---|---|
 | `Task`, `TaskStep`, `TaskSchedule`, `TaskExecution`, `Call` | as in `ic-basilisk-toolkit` | Scheduled and multi-step automation. | Monthly payroll on the 1st; last run succeeded |
 | `Extension` | `id` (name), `version`, `status`, `operations` (Json: the only operations its frontend and backend may call), `manifest` (Json), `source` (its backend, when the manifest sets `backend`), `access` (Json: profiles and departments), `sidebar` (Json) | A feature package with its own frontend and, optionally, backend code. | `voting` 2.1.0, for `[member]`, in the Governance menu |
+| `LayeredCodex` | `id` (`sha256:` and the checksum of its layers, layer paths and chapter checksums), `layers`, `layer_paths`, `chapters` (Json: chapter id → source, version, sha256, vouched_by, route, fetched_at, url, size), `previous` (a codex of either kind), `status` (`pending`, `active`, `inactive`, `reverted`), `activates_at`, `installed_at`, `proposal` | A realm's legislation built from the chapters of several sources ([layered codex](../codices/layered-codex.md) §9.1). Active in place of a `Codex`, never beside one. | `sha256:4be1…`, active, tax path EU → Spain → CV |
+| `ChapterSource` | `sha256` (key), `source` | The text of a chapter or calendar, stored once under its checksum; at most 256 KB. | the text of `eu/es/tax` |
+| `InstallJob` | `id`, `proposal`, `change_list` (`{url, checksum}`), `step`, `staged`, `status` (`running`, `paused`, `failed`, `done`), `error`, `started_at`, `finished_at` | One install of a layered codex. At most one job is `running` or `paused`. | `J-1`, running, fetching chapters |
 
 Extensions are callers of their own (see the model's "Callers"): an extension calls operations
 only as the user using it, and only those its manifest declares.

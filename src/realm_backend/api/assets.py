@@ -246,7 +246,7 @@ def zone_clear(c, args):
 
 def schema_of(name):
     """A codex manifest's `credentials` block: {schema: {license, positions, collection, public, after_license}}."""
-    current = codex.active()
+    current = codex.active_legacy()
     rule = current and (current.manifest or {}).get("credentials", {}).get(name)
     if not rule:
         raise Fail(f"no active codex declares the schema '{name}'")
