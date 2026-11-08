@@ -106,11 +106,12 @@ def checked_links(user, links):
     return [{"kind": link["kind"], "proposal": link["proposal"]} for link in links]
 
 
-def check_grant(grant_id, grantor, action):
-    """A delegate's governed call, filed as a proposal, runs unless the power of attorney it was filed under has been
-    revoked or replaced, and only if that grant could still make the call: its scope, the member's permissions and
-    standing are checked again. The grant may have expired since, because a vote can outlast it. The vote is the
-    realm's consent to a collective act, not to the member's own acts."""
+def check_grant(grant_id, grantor, action, filed_at):
+    """A delegate's governed call, filed as a proposal at ``filed_at``, runs unless the power of attorney it was filed
+    under has been revoked or replaced, and only if that grant could still make the call: its scope, the member's
+    permissions and standing are checked again, and the grant's longest duration as it stood at the filing. The grant
+    may have expired since, because a vote can outlast it. The vote is the realm's consent to a collective act, not to
+    the member's own acts."""
     if not grant_id:
         raise Forbidden("it was filed under power of attorney before this realm recorded grants; file it again")
     grant, name = find(Delegation, grant_id), action["op"]
@@ -120,7 +121,7 @@ def check_grant(grant_id, grantor, action):
     if spec is None:
         raise Fail(f"unknown operation '{name}'")
     try:
-        auth.authorize(grantor, grant.delegate, name, spec, action.get("args") or {}, grant=grant)
+        auth.authorize(grantor, grant.delegate, name, spec, action.get("args") or {}, grant=grant, at=filed_at)
     except auth.Denied:
         raise Forbidden(f"the power of attorney {grant.id} it was filed under does not allow {name} now")
     except KeyError as e:
@@ -131,6 +132,13 @@ def filer(p):
     """The delegate that filed ``p`` under a power of attorney, if any."""
     grant = Delegation[p.filed_under] if p.filed_under else None
     return grant.delegate if grant else ""
+
+
+def filed_for(p, member):
+    """Whether a delegate of ``member`` filed ``p``: under a grant of theirs, whoever holds it and whatever its status
+    is now (I-ID-13)."""
+    grant = Delegation[p.filed_under] if p.filed_under else None
+    return bool(grant) and grant.grantor == member
 
 
 def default_rule(department):
@@ -304,7 +312,7 @@ def run_action(p):
     try:
         check_scope(p.department, p.action)
         if p.on_behalf_of:
-            check_grant(p.filed_under, p.proposer, p.action)
+            check_grant(p.filed_under, p.proposer, p.action, p.opens_at)
     except Fail as e:
         end(p, "failed")
         p.result = {"ok": False, "error": str(e), "kind": e.kind}
@@ -450,7 +458,7 @@ def effective_at_of(args):
     return value
 
 
-@op("proposal.create", delegable=True, returns="proposal")
+@op("proposal.create", returns="proposal")
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
@@ -484,7 +492,7 @@ def proposal_create(c, args):
     return {"proposal": p.id}
 
 
-@op("proposal.create", delegable=True, returns="proposal")
+@op("proposal.create", returns="proposal")
 def proposal_withdraw(c, args):
     """Withdraw ``proposal``, a proposal of yours that is still a draft or being voted on."""
     p = find(Proposal, args["proposal"])
@@ -508,7 +516,7 @@ def proposal_linked_from(c, args):
     return {"links": [{"kind": e.kind, "proposal": e.source} for e in edges], "next": nxt}
 
 
-@op("proposal.vote", delegable=True, returns="vote")
+@op("proposal.vote", returns="vote")
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
     Voting again replaces your earlier vote, until the vote ends: at its deadline, or once every eligible member has
@@ -525,7 +533,10 @@ def proposal_vote(c, args):
     if p.status != "voting" or (p.deadline and chain.now() > p.deadline):
         raise Conflict(f"{p.id} is not open for voting")
     if c.grant and filer(p) == c.by:
-        raise Forbidden(f"{p.id} was filed by {c.by}: a delegate does not vote on its own proposal")
+        raise Forbidden(f"{p.id} was filed by {c.by}: a delegate does not vote on its own proposal, for any member")
+    if c.grant and filed_for(p, c.user):
+        raise Forbidden(f"{p.id} was filed by a delegate of {c.user}: a delegate does not vote on what one of the "
+                        "member's delegates filed")
     if not eligible(p, c.user):
         raise Forbidden(f"you are not eligible to vote on {p.id}")
     key = f"{p.id}:{c.user}"

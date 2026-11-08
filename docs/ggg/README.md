@@ -54,7 +54,8 @@ of the reply.
 
 - [`ggg_did.py`](../../src/realm_backend/ggg_did.py),
   [`ggg_methods.py`](../../src/realm_backend/ggg_methods.py) and
-  [`ggg_ranges.py`](../../src/realm_backend/ggg_ranges.py) are generated from the submodule by
+  [`ggg_ranges.py`](../../src/realm_backend/ggg_ranges.py) and
+  [`ggg_delegation.py`](../../src/realm_backend/ggg_delegation.py) are generated from the submodule by
   `python scripts/ggg_candid.py`. Rerun it after updating `ggg`; CI checks they are current.
   - `ggg_did.py` holds the types twice. The `Record` and `Variant` classes are what basilisk reads
     when it builds the canister. `SCHEMA` and `METHODS` are what the code reads at run time, because
@@ -62,6 +63,8 @@ of the reply.
   - `ggg_methods.py` holds one line per method, each a call into `ggg_api`.
   - `ggg_ranges.py` holds the bounds `facts.json` gives each operation's numbers, which
     [`core/ranges.py`](../../src/realm_backend/core/ranges.py) enforces for every call.
+  - `ggg_delegation.py` holds the groups a power of attorney names and every operation's tier, from
+    `delegation.json`, which [`core/poa.py`](../../src/realm_backend/core/poa.py) reads.
 - [`ggg_api.py`](../../src/realm_backend/ggg_api.py) converts in both directions. Most of it is
   generic and driven by the types:
   - nanoseconds and seconds;

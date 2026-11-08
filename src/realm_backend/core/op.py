@@ -3,6 +3,7 @@ import sys
 
 from core import auth
 from core import chain
+from core import poa
 from core import ranges
 from core.db import Fail
 
@@ -44,6 +45,8 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     or for a governed operation the id of the record it created. Without it, the reply itself is the result.
     check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm. It runs
     before ``governed`` turns the call into a proposal, so a call that cannot succeed files nothing.
+    delegable -> only for an operation that GGG's tiers (ggg_delegation) and core.poa.OWN do not classify, a test's: a
+    classified operation is delegable when its tier is direct.
     private -> the arguments that hold personal data or key material: the audit log never keeps them (I-ALL-5).
     derived(args, proposal) -> the facts of the call that are not its arguments, computed from the realm's records (GGG's
     ``derived`` facts, such as the totals of a budget), for the rules that read the call's facts. ``proposal`` is the
@@ -64,6 +67,7 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,
                             "secret": tuple(secret), "fixes": fixes, "releases": releases, "lists": lists or {}}
+        poa.classify(OPS[fn.__name__], fn.__name__)
         return fn
     return wrap
 
@@ -105,7 +109,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         from core import legislation
 
         call = Call(user, by, origin, proposal, grant, legacy)
-        record = None if spec["read"] else (lambda out: audit(name, user, by, origin, args, out))
+        record = None if spec["read"] else (lambda out: acted(name, user, by, origin, args, out, grant))
         # A delegate's governed call is always a proposal: where the department decides directly, the member's own
         # vote is what lets it through. The filing is a proposal_create to the legislation.
         if governing is not None and (grant or not direct(governing)):
@@ -148,17 +152,32 @@ def redacted(name, args):
     return {k: v for k, v in args.items() if k not in hidden}
 
 
-def audit(name, user, by, origin, args, out):
+def acted(name, user, by, origin, args, out, grant):
+    """Record an update, and tell the member if a delegate did it."""
+    audit(name, user, by, origin, args, out, grant)
+    if grant:
+        poa.notice(grant, name, args, out)
+
+
+def audit(name, user, by, origin, args, out, grant=""):
     from ggg import Event
 
     kept = redacted(name, args)
     if len(json.dumps(kept)) > AUDIT_ARGS_MAX:
         kept = {"keys": sorted(kept)}
     shown = {k: v for k, v in redacted(name, out).items() if isinstance(v, (str, int, bool))}
-    Event(id=str(Event.max_id() + 1), op=name, user=user, by=by, origin=origin, args=kept, result=shown, at=chain.now())
+    Event(id=str(Event.max_id() + 1), op=name, user=user, by=by, origin=origin, args=kept, result=shown, at=chain.now(),
+          grant=grant or None)
     old = Event[str(Event.max_id() - EVENTS_KEPT)]
     if old:
         old.delete()
+
+
+def oldest_event():
+    """The oldest event the audit log still holds, or None."""
+    from ggg import Event
+
+    return Event[str(max(1, Event.max_id() - EVENTS_KEPT + 1))]
 
 
 def run(gen):

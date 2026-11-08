@@ -34,7 +34,7 @@ def valid_due(args):
             raise Fail(f"{key} is a time in seconds")
 
 
-@op("request.file", delegable=True, check=valid_filing, private=("body",), secret=("body",), returns="request")
+@op("request.file", check=valid_filing, private=("body",), secret=("body",), returns="request")
 def request_file(c, args):
     """File a request of ``kind`` (the realm's word, such as petition) with a ``body``, for you or for an
     ``organization`` you administer. A body that holds personal data is the id of an encrypted Document, never the
@@ -44,7 +44,7 @@ def request_file(c, args):
     return {"request": r.id}
 
 
-@op("self.data_view", read=True, delegable=True, returns="request")
+@op("self.data_view", read=True, returns="request")
 def request_get(c, args):
     """``request`` (an id), if it is yours or your organization's; any other is not found. Anyone who decides
     requests lists them with request_list. Returns the ``request``."""

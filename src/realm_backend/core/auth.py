@@ -1,9 +1,9 @@
-from core import chain, forbids
+from core import chain, forbids, poa
 from core.db import Fail, Forbidden, each
 
 CONTEXT = {"op": "String", "permission": "String", "user": "String", "signer": "String", "origin": "String",
            "read": "Bool", "public": "Bool", "signing": "Bool", "delegable": "Bool", "delegated": "Bool",
-           "signer_agent": "Bool", "scope": "Set<String>", "declared": "Set<String>", "parties": "Set<String>"}
+           "signer_agent": "Bool", "covered": "Bool", "declared": "Set<String>", "parties": "Set<String>"}
 SCHEMA = """namespace Realm {
   entity User = { permissions: Set<String>, banned: Bool };
   entity Realm;
@@ -24,7 +24,7 @@ GUARDRAILS = """
 forbid (principal, action, resource) when { context.signing && context.signer_agent };
 forbid (principal, action, resource) when { context.delegated && context.signing };
 forbid (principal, action, resource) when { context.delegated && !context.delegable };
-forbid (principal, action, resource) when { context.delegated && !context.scope.contains(context.permission) };
+forbid (principal, action, resource) when { context.delegated && !context.covered };
 forbid (principal, action, resource)
   when { context.parties.contains(context.user) || context.parties.contains(context.signer) };
 forbid (principal, action, resource) when { principal.banned && !context.read };
@@ -164,9 +164,10 @@ def active_grant(grantor, delegate):
     raise Denied(f"{delegate} holds no active power of attorney from {grantor}")
 
 
-def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None):
+def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None, at=None):
     """Refuse the call with Denied, or return the id of the power of attorney a delegate acts under ("" for no one).
-    A delegate acts under its active grant from ``user``, or under ``grant`` when one is given."""
+    A delegate acts under its active grant from ``user``, or under ``grant`` when one is given. The grant's longest
+    duration is measured at ``at`` (default now): the filing of a proposal that carries the call out."""
     if origin == "replay":
         return ""
     if by == chain.ANONYMOUS and not spec["public"]:
@@ -177,9 +178,9 @@ def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None
     context = {
         "op": name, "permission": needed or "", "user": user, "signer": by, "origin": origin,
         "read": spec["read"], "public": spec["public"], "signing": spec["signing"],
-        "delegable": spec["delegable"], "delegated": user != by,
+        "delegable": poa.direct(grant, name, spec, args), "delegated": user != by,
         "signer_agent": spec["signing"] and is_agent(by),
-        "scope": sorted((grant.scope or {}).get("operations", [])) if grant else [],
+        "covered": poa.covered(grant, name, spec, needed, at) if grant else False,
         "declared": sorted(declared),
         # A party may be named by principal or as "User:<principal>" (I-ALL-3).
         "parties": sorted({q for p in spec["parties"](args) for q in (p, p.removeprefix("User:"))})
@@ -218,9 +219,19 @@ def reason(name, spec, context, held):
     if context["signing"] and context["signer_agent"]:
         return f"{name} must be done by a human, not an agent", None
     if context["delegated"]:
-        return f"{name} cannot be done under this power of attorney", None
+        return f"{name} cannot be done under this power of attorney: {why_not(spec, context)}", None
     if context["user"] in context["parties"] or context["signer"] in context["parties"]:
         return f"{name}: you are a party to this matter", None
     if context["origin"] in ("extension", "codex") and name not in context["declared"]:
         return f"{name} is not declared by this {context['origin']}", None
     return f"{name} needs {context['permission']}", context["permission"] or None
+
+
+def why_not(spec, context):
+    """Why a delegate may not do this call: the grant does not reach it, it asks the member each time, it is not the
+    kind of act a delegate does, or the member could not do it now."""
+    if not context["covered"]:
+        return "this grant does not cover it"
+    if not context["delegable"]:
+        return "it asks the member each time" if spec["tier"] == "confirm" or spec["confirm_if"] else "it is not delegable"
+    return "the member may not do it now"

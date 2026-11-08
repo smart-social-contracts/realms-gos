@@ -288,7 +288,7 @@ def declarant_of(c, args):
     return f"Organization:{args['organization']}"
 
 
-@op("tax.declare", delegable=True)
+@op("tax.declare")
 def tax_declare(c, args):
     """Declare ``amount`` for the self-declared tax ``base`` (its code) and ``period``, once, for yourself or an
     ``organization`` you administer, and get billed what it owes. Returns ``declaration``, ``invoice``, ``owed``.
