@@ -669,8 +669,11 @@ def casting_member(principal):
 
 def voting_rules(args):
     """The rules of a ``governance_update`` call, as they are stored: the ratios, refused if they are not between 0 and
-    100 %, or the old names, and the casting vote, refused unless it names an active member."""
+    100 %, or the old names, and the casting vote, refused unless it names an active member. The voting window is kept
+    elsewhere and only checked here, to be a whole number."""
     refuse_renamed(args, {"threshold": "voting_threshold", "quorum_percent": "voting_quorum"})
+    if "voting_window" in args:
+        whole("voting_window", args["voting_window"])
     rules = {k: whole(k, args[k]) for k in ("voting_threshold", "voting_quorum") if k in args}
     if any(not 0 <= v <= ONE for v in rules.values()):
         raise Fail(f"a threshold and a quorum are between 0 and {ONE} (100 %)")
