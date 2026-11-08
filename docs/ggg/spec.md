@@ -56,14 +56,35 @@ same rows.
   and `voting_threshold` and `voting_quorum`, kept outside the `Realm` row; a `voting_window` of
   0 leaves a realm-wide proposal open until its outcome is certain. An argument still sent under its
   old name (`threshold`, `quorum_percent`, `rate_bp`) is refused, naming the new one;
+- every number an operation takes is in the range `ggg/facts.json` gives it (`Ratio` 0 to 100 000 000, `Rate` 0 to
+  10 000 000 000, `Money` 0 to 2^53 − 1, `SignedMoney` ± that, `Period.count` 0 to 1 000 000, a plain number to the
+  Cedar Long maximum), or the call is refused with `InvalidArgument` before anything is written. The bounds are
+  `src/realm_backend/ggg_ranges.py`, generated with the other `ggg.did` files, and a time is bounded in seconds.
+  A text of an integer counts as the number. Two things follow from GGG's ranges: land coordinates are not negative,
+  and an amount of a token with many decimals is limited to 2^53 − 1 of its smallest unit. Not bounded here: the maps
+  that stand for lists of pairs (a tender's rubric weights, bid scores), `expires_in`, which only Realms GOS has, a
+  number inside a variant (except the tokens step of `setup_step`), a derived fact, and `limit`, which is `count` and
+  is capped by the page size;
+- a proposal stores the rule that decides it (I-GOV-3): `kind`, `matter`, `threshold`, `quorum` and `threshold_of`
+  (`cast` or `eligible`, lower case) are arguments of `proposal_create`, a stricter rule than the scope's default is
+  stored and a weaker one refused. The default is the realm's `voting_threshold` and `voting_quorum` over the votes
+  cast for a realm-wide proposal, m/n of the policy (rounded down) with the policy's quorum for a department's; a governed
+  call's proposal takes it. A department's threshold is a share of the policy's `n` seats, kept when the vote opens in
+  `tally.seats`, whoever sits in them: the default needs exactly `m` yes votes, a stricter `t` needs ceil(`t` · `n`), a
+  direct policy needs one, and a vacancy never makes a vote easier (a departure from the model, which words it over the
+  eligible seats). The electorate is counted when the vote opens, in `tally.eligible`, for the quorum and for the end
+  when everyone has voted. The realm's casting vote is set with `governance_update` (`casting_vote`: the principal of an active
+  member or `""`, as `department_edit` names a head, kept with the other voting rules, outside the `Realm` row) and copied onto a realm-wide proposal when it is
+  filed; a department's proposals have none;
 - a proposal settles itself: the deciding vote, the last vote of every eligible member, or its deadline
   closes it and runs its action at once; `proposal_finalize` does the same for a deadline missed, and
   `proposal_execute` stays for a scheduled proposal's time and for GGG;
 - a proposal with an `effective_at` (whole seconds, not in the past) runs its action then, not at the vote. While it waits,
   its status is `execution_scheduled`, and a one-step task of the realm's task scheduler runs it, which
   the scheduler arms again after an upgrade. A vote ends at its deadline, or earlier the moment every
-  eligible member has voted (I-GOV-7). A department's vote also ends as soon as it has `m` approvals, every veto
-  holder who can still vote has voted (none against) and its quorum is met. Only an acceptance ends it early: until
+  eligible member has voted (I-GOV-7). A department's vote also ends as soon as its yes votes reach its stored
+  threshold of the policy's `n` seats (m approvals under the policy's own rule), every veto holder who can still vote has voted (none against)
+  and its quorum is met. Only an acceptance ends it early: until
   its deadline, or until everyone has voted, a no can be replaced. Realms GOS has a rule of its own besides: a
   realm-wide vote in a realm with no voting window ends as soon as its outcome is certain, while a department's vote
   there, if it can't pass on the votes cast so far, stays open until it passes, everyone has voted or its proposer

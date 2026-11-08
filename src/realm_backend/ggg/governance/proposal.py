@@ -6,10 +6,12 @@ from core.ratio import ONE, PERCENT, upgrade_call
 
 class Proposal(Row):
     __alias__ = "id"
-    __version__ = 2  # 2: threshold and quorum in hundred-millionths, not whole percents
+    __version__ = 3  # 2: threshold and quorum in hundred-millionths, not whole percents; 3: the rule is stored
     id = String()
     title = String(default="")
     description = String(default="")
+    kind = String(default="")  # what the proposal is and what it decides, in the realm's words (GGG: kind, matter)
+    matter = String(default="")
     proposer = String(default="")
     on_behalf_of = String(default="")
     filed_under = String(default="")  # the power of attorney a delegate filed it under
@@ -20,8 +22,13 @@ class Proposal(Row):
     opens_at = Integer(default=0)
     deadline = Integer(default=0)
     effective_at = Integer(default=0)  # seconds; once accepted, the action runs then. 0: on acceptance
-    threshold = Integer(default=ONE // 2)  # share of the decisive votes the yes votes must exceed
-    quorum = Integer(default=0)  # share of the electorate that must vote
+    # The rule that decides it (ggg I-GOV-3), fixed at creation: the yes votes exceed (realm-wide) or reach (a department)
+    # ``threshold`` of the votes cast or of the eligible voters (``threshold_of``), with ``quorum`` of them voting. A
+    # department's threshold is a share of its policy's n seats (``tally["seats"]``), whoever fills them.
+    threshold = Integer(default=ONE // 2)
+    quorum = Integer(default=0)
+    threshold_of = String(default="cast")  # cast | eligible
+    casting_vote = String(default="")  # the realm's casting member when it was filed; a realm-wide proposal only
     tally = Json({})
     result = Json(None)
     links = Json([])  # [{"kind": "replaces" | "relates_to", "proposal": id}], fixed at creation like the action
@@ -37,4 +44,15 @@ class Proposal(Row):
             # The action replays when the vote ends, with the arguments the proposal was filed with.
             if obj.get("action"):
                 obj["action"] = upgrade_call(obj["action"])
+        # A department's vote took m approvals: its rule is m of the n seats of its policy, which is the department's
+        # policy now. A realm-wide one took the realm's threshold and quorum over the votes cast, which the row already
+        # holds, and no casting vote.
+        tally = obj.get("tally") or {}
+        if "required" in tally:
+            from ggg import Department
+
+            department = Department.load(obj["department"]) if obj.get("department") else None
+            n = max(int(((department.policy if department else None) or {}).get("n", 1)), tally["required"])
+            obj["threshold"], obj["threshold_of"] = tally.pop("required") * ONE // n, "eligible"
+            tally["seats"] = n
         return obj

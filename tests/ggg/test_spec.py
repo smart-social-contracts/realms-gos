@@ -17,7 +17,8 @@ def spec_ops():
             if line.startswith("| `") and line.count("|") == 5]
     for row in rows:
         names_cell, perm_cell, flag_cell = [c.strip() for c in row.split("|")[1:4]]
-        names = re.findall(r"`([a-z_*]+)`", names_cell)
+        # A parenthesis explains the row; the arguments it names in backticks are not operations.
+        names = re.findall(r"`([a-z_*]+)`", re.sub(r"\([^)]*\)", "", names_cell))
         if not names or ":" in names_cell.split("`")[1]:
             continue
         perms = re.findall(r"`([a-z_]+(?:\.[a-z_*]+)+)`", perm_cell)

@@ -14,6 +14,7 @@ from ggg import Realm
 from kit import ok
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+OWN_TASK_OPERATIONS = ("task_list", "task_schedule", "task_cancel")
 spec = importlib.util.spec_from_file_location("ggg_candid", ROOT / "scripts" / "ggg_candid.py")
 gen = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gen)
@@ -94,6 +95,16 @@ def test_realm_info_converts_to_ggg():
     assert ggg_methods.ggg_realm_info()["status"] == {"Alpha": None}
 
 
+def test_a_period_crosses_as_a_count_and_a_unit_in_both_directions():
+    """A Period is ``{count, unit}`` with the unit in lower-case text in the operations' JSON, as every unit-only variant."""
+    import ggg_api
+
+    for unit, case in (("day", "Day"), ("working_day", "WorkingDay"), ("month", "Month"), ("year", "Year")):
+        period = {"count": 3, "unit": unit}
+        assert ggg_api.to_ggg(period, "Period") == {"count": 3, "unit": {case: None}}
+        assert ggg_api.to_realms({"count": 3, "unit": {case: None}}, "Period") == period
+
+
 def test_every_operation_names_where_its_result_is():
     """A GGG reply that is a record, a page or a value comes from the key its @op ``returns`` names: ggg_api
     does not search the reply for it."""
@@ -102,7 +113,9 @@ def test_every_operation_names_where_its_result_is():
 
     unnamed = []
     for name, (_, reply_t) in ggg_api.METHODS.items():
-        if name in ggg_api.LOCAL or name in ggg_api.BUILD:
+        # test_spec reports a method whose operation is not registered. Realms GOS's own task operations share
+        # three names with GGG's, until the G2 adoption replaces them.
+        if name in ggg_api.LOCAL or name in ggg_api.BUILD or name not in ops() or name in OWN_TASK_OPERATIONS:
             continue
         t = ggg_api.unwrap(ggg_api.fields(reply_t)["Ok"]) if ggg_api.is_variant(reply_t) else reply_t
         page = ggg_api.is_record(t) and {"items", "next"} <= set(ggg_api.fields(t))
