@@ -172,7 +172,7 @@ def codex_revert(c, args):
         runnable(prior.manifest or {})
     codex.status, prior.status = "reverted", "active"
     if isinstance(codex, LayeredCodex) or isinstance(prior, LayeredCodex):
-        legislation.load(prior if isinstance(prior, LayeredCodex) else None)  # a revert runs no on_codex_activate
+        legislation.warm(prior if isinstance(prior, LayeredCodex) else None)  # a revert runs no on_codex_activate
     return {"codex": prior.id}
 
 

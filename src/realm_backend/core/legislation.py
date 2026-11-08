@@ -3,8 +3,9 @@ resident codex subinterpreter, never in the realm's own interpreter, and the rea
 
 - ``build(plan, sources)``: the install's step 5 (§9.2): every chapter of a codex loaded into a fresh sandbox, top
   to bottom, the in-canister checks of §12.2 run, and the flattened view, the generated Cedar and the errors returned.
-- ``activate(codex)``: at the switch (§9.2 step 6): the codex becomes the running one and the ``on_codex_activate``
-  hooks run, once per realm (not in a quarter). A revert calls ``load`` instead, which runs no hook.
+- ``load(codex)``, then ``activate(codex)``: at the switch (§9.2 step 6): the codex becomes the running one, which
+  fails before the switch when it does not load, and then the ``on_codex_activate`` hooks run, once per realm (not
+  in a quarter). A revert, and the realm's start, call ``warm`` instead, which runs no hook and never raises.
 - ``run(op, ...)``: around a GGG operation: the guards ``check_<op>`` before it, the hooks ``on_<op>`` after it
   succeeds. ``compute(op, ...)`` answers ``compute_<op>`` when an operation asks during its work.
 
@@ -48,26 +49,28 @@ def active():
     return first(LayeredCodex, "status", "active")
 
 
-def warm():
-    """Load the active layered codex where the realm starts (init and post_upgrade): the loaded sandbox is gone
-    after an upgrade, and a query could not keep one it loads."""
-    load(active())
+def warm(codex=UNKNOWN):
+    """Run ``codex`` (the active layered codex by default), recording a codex that does not load instead of
+    raising: where the realm cannot stop, at its start (init and post_upgrade, as the loaded sandbox is gone after
+    an upgrade and a query could not keep one it loads) and after a revert. Until a codex that does not load is
+    reverted, every operation its legislation could guard denies."""
+    codex = active() if codex is UNKNOWN else codex
+    try:
+        load(codex)
+    except Fail as e:
+        _drop()
+        _state.update(codex=codex.id, failing=bool(codex.failures))
+        _record("codex", "load", str(e))
 
 
 def load(codex):
     """Make ``codex`` (a LayeredCodex row, or None for none) the one the runtime runs, its chapters loaded into a
-    fresh sandbox. Runs no hook: a revert comes here, an activation through ``activate``. A codex that does not
-    load is recorded under ``codex/load`` and every operation its legislation could guard denies until a revert."""
+    fresh sandbox, and run no hook. A codex that does not load raises Fail and leaves the running one as it was:
+    the install task calls this before the switch, so that a switch to it never happens (§9.2 step 6)."""
+    box = _spawn(_plan_of(codex), _texts(codex)) if codex is not None else None
     _drop()
-    _state["codex"] = codex.id if codex is not None else None
-    if codex is None:
-        return
-    _state["failing"] = bool(codex.failures)
-    try:
-        _state["box"] = _spawn(_plan_of(codex), _texts(codex))
-    except Fail as e:
-        _record("codex", "load", str(e))
-    else:
+    _state.update(codex=codex.id if codex is not None else None, box=box, failing=bool(codex.failures) if codex else False)
+    if codex is not None:
         _clear(["codex"], "load")
 
 
@@ -90,11 +93,10 @@ def build(plan, sources, facts=None):
 
 
 def activate(codex):
-    """At the switch (§9.2 step 6): ``codex`` becomes the running one and every ``on_codex_activate`` hook runs,
-    once per realm: in the capital, not in a quarter. A codex that does not load fails the switch. A generator."""
-    load(codex)
-    if _state["box"] is None:
-        raise Fail(f"{codex.id} does not load: {codex.failures.get('codex', {}).get('load', {}).get('error')}")
+    """At the switch (§9.2 step 6): every ``on_codex_activate`` hook of ``codex`` runs, once per realm: in the
+    capital, not in a quarter. ``codex`` is loaded first unless ``load`` already did. A generator."""
+    if _state["codex"] != codex.id or _state["box"] is None:
+        load(codex)
     from ggg import Realm
 
     if Realm["1"].is_quarter:
@@ -124,10 +126,15 @@ def compute(op, **kwargs):
     layered codex is active. A ``compute_`` method that fails fails the operation asking, and counts."""
     if not _ensure():
         return None
-    outcome = _call("compute", op=op, kwargs=kwargs, now=chain.now(), approvals=[])
+    method = f"compute_{op}"
+    try:
+        outcome = _call("compute", op=op, kwargs=kwargs, now=chain.now(), approvals=[])
+    except Fail as e:
+        _record("codex", method, str(e))
+        raise Fail(f"legislation error: {e}")
+    _clear(["codex"], method)
     if not outcome["found"]:
         return None
-    method = f"compute_{op}"
     if "error" in outcome:
         file = outcome["chapter"] or outcome["files"][-1]
         _record(file, method, outcome["error"])
@@ -139,7 +146,7 @@ def compute(op, **kwargs):
 def _ensure():
     """Whether a layered codex is active, loading it on first use: a new heap, or a query after one."""
     if _state["codex"] is UNKNOWN:
-        load(active())
+        warm()
     return _state["codex"] is not None
 
 
@@ -181,6 +188,7 @@ def _guard(op, args, call, department):
     except Fail as e:
         _record("codex", method, str(e))
         raise Forbidden(f"legislation error: {e}")
+    _clear(["codex"], method)
     for outcome in outcomes:
         if "error" in outcome:
             file = outcome["chapter"] or outcome["files"][-1]
@@ -198,8 +206,9 @@ def _hooks(op, args, result, call, department):
     try:
         outcomes = _call("hooks", op=op, event=event, now=chain.now(), approvals=_approvals(call, department))
     except Fail as e:
-        _record("codex", method, str(e))
+        _record("codex", method, str(e))  # the sandbox itself failed, a spent budget twice over among the causes
         return
+    _clear(["codex"], method)
     for outcome in outcomes:
         if "error" in outcome:
             _record(outcome["chapter"] or outcome["files"][-1], method, outcome["error"])
@@ -244,7 +253,7 @@ def _call(fn, **kwargs):
             raise Fail(f"the codex {_state['codex']} failed: {e}")
     from ggg import LayeredCodex
 
-    load(LayeredCodex[_state["codex"]])
+    warm(LayeredCodex[_state["codex"]])
     if _state["box"] is None:
         raise Fail(f"the codex {_state['codex']} is not loaded")
     try:

@@ -1,8 +1,9 @@
 # Sandboxing
 
-A realm runs two kinds of third-party code: **codex hooks** (the realm's laws) and **extension
-backends** (features). Neither runs in the realm's own interpreter. Each call starts a fresh
-Python **subinterpreter**, gives it a tiny API, meters it, and throws it away.
+A realm runs three kinds of third-party code: **codex hooks** (a legacy codex), the **chapters** of a layered
+codex (the realm's legislation) and **extension backends** (features). None runs in the realm's own
+interpreter. A hook or an extension call starts a fresh Python **subinterpreter**, gives it a tiny API, meters
+it, and throws it away; a layered codex keeps one open across calls (below).
 
 Extension **frontends** are contained separately, in the browser (see the
 [end of this page](#extension-frontends)).
@@ -74,6 +75,28 @@ is easy to test (see [codices](../codices/build-test-publish.md)).
 
 A failing hook never fails the operation that fired it. The realm records the problem, and
 `codex_status` reports the codex as unhealthy until a hook succeeds again.
+
+## Layered codex chapters
+
+The chapters of a [layered codex](../codices/layered-codex.md) run in a subinterpreter too, but one that stays
+open: `core/legislation.py` spawns it once per active codex (after an upgrade, or on first use) with the program
+`core/legislation_sandbox.py` plus the sources of the library `realms.legislation`, which the subinterpreter
+imports from text, since it has no path to import from. The program loads every chapter top to bottom (the
+library's loader checks the readable subset and applies the marks), then answers each call: the guards before a
+GGG operation, the hooks after it, a `compute_` during it. `core/sandbox.py`'s `Resident` is the handle; it is
+closed at a switch of codex, and a call that exhausts the budget closes it too, after which the codex is loaded
+again and asked once more.
+
+| Guarantee | How |
+|---|---|
+| No access to realm data | The same subinterpreter isolation as above. Chapters import a `ggg` module the program builds: one read-only view per entity, whose `get`, `each` and `find` go out through `rpc("ggg_read", ...)` and come back as plain data. |
+| Two ways out | The allow-list is `ggg_read` and `local_day` (the realm's local day of a timestamp). Writes are effects: `self.ggg.<op>(...)` queues `[op, args]`, returned to the realm and applied through `dispatch` with origin `codex`, as a legacy codex's are. |
+| Bounded cost | The budget is per spawn and spans every call on the handle. A spent interpreter is replaced, so a chapter that loops fails its own call only. |
+| Only plain data crosses | Between host and sandbox, the marshaller; between one domain's chapter and another's inside the sandbox, the library's `Public` view (public members only, results that are plain data or the view). |
+
+What the sandbox does not do is keep one chapter from another: the chapters of one codex share the
+interpreter, so the marks, the frozen settings and events and the sealed SDK classes are the library's job
+(realms-gos#512 reviews it).
 
 ## Extension backends
 
