@@ -22,26 +22,26 @@ LOG = []  # what the chapters' effects wrote, through the realm's operations
 
 
 @op.op("treasury.manage")
-def l_act(c, args):
+def t_act(c, args):
     """A governed-by-nothing write the chapters guard and hook."""
     return {"done": args.get("what", "")}
 
 
 @op.op("treasury.manage", governed=proposals.realm_wide)
-def l_approved(c, args):
+def t_approved(c, args):
     """A write the root department decides directly, so its approval is carried."""
     return {"done": "approved"}
 
 
 @op.op("treasury.manage")
-def l_log(c, args):
+def t_log(c, args):
     """The chapters' effect: records what they wrote and who they were."""
     LOG.append((args["text"], c.origin))
     return {"logged": args["text"]}
 
 
 @op.op("realm.data_view", read=True)
-def l_day(c, args):
+def t_day(c, args):
     return {}
 
 
@@ -52,7 +52,7 @@ from realms.legislation import above, extension
 
 class DataProtection(above("data_protection")):
     @extension(legislation="GDPR Art. 6")
-    def check_l_act(self, args):
+    def check_t_act(self, args):
         if args.basis == "consent":
             return self.deny("consent is not a basis between public authorities")
 '''
@@ -61,7 +61,7 @@ from realms.legislation import above, extension
 
 class DataProtection(above("data_protection")):
     @extension(legislation="Ley Orgánica 3/2018 Art. 8")
-    def check_l_act(self, args):
+    def check_t_act(self, args):
         if args.basis == "task" and args.legislation is None:
             return self.deny("name the legislation that sets this public task")
 '''
@@ -70,11 +70,11 @@ from ggg import Member
 from realms.legislation import above
 
 class DataProtection(above("data_protection")):
-    def check_l_act(self, args):
+    def check_t_act(self, args):
         if args.recipient is not None and Member.get(args.recipient) is None:
             return self.deny("a recipient outside the realm needs the Administration")
 
-    def check_l_approved(self, args):
+    def check_t_approved(self, args):
         if not self.approved_by("Administration"):
             return self.deny("the Administration decides this")
 '''
@@ -94,42 +94,42 @@ class LocalRegime(above("local_regime")):
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def check_proposal_create(self, args):
-        if args.action is None or args.action.op != "l_act":
+        if args.action is None or args.action.op != "t_act":
             return None
         earliest = self.legislation.procedure.working_days_after(self.local_day(self.now()), 15)
         if args.effective_at is None or self.local_day(args.effective_at) < earliest:
             return self.deny("an ordinance takes effect at the earliest 15 working days after the vote closes (Art. 65.2)")
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
-    def on_l_act(self, event):
+    def on_t_act(self, event):
         event.order = ["es"]
-        self.ggg.l_log(text="es:" + event.result["done"])
+        self.ggg.t_log(text="es:" + event.result["done"])
 '''
 TOWN_LOCAL_REGIME = '''
 from realms.legislation import above
 
 class LocalRegime(above("local_regime")):
-    def on_l_act(self, event):
-        self.ggg.l_log(text="town:" + ",".join(event.order) + ":" + event.user)
+    def on_t_act(self, event):
+        self.ggg.t_log(text="town:" + ",".join(event.order) + ":" + event.user)
 '''
 TOWN_REALM = '''
 from realms.legislation import above
 
 class Realm(above("realm")):
     def on_codex_activate(self, event):
-        self.ggg.l_log(text="activated " + event.args["codex"][:13])
+        self.ggg.t_log(text="activated " + event.args["codex"][:13])
 
     def compute_realm_join(self, user, quarters):
         return max(quarters, key=lambda q: q.index).id if quarters else None
 
-    def compute_l_day(self, at):
+    def compute_t_day(self, at):
         return self.local_day(at)
 '''
 BROKEN_HOOK = '''
 from realms.legislation import above
 
 class Register(above("register")):
-    def on_l_act(self, event):
+    def on_t_act(self, event):
         if event.args.get("what") == "break the register":
             return 1 // 0
 '''
@@ -137,7 +137,7 @@ BROKEN_GUARD = '''
 from realms.legislation import above
 
 class Water(above("water")):
-    def check_l_act(self, args):
+    def check_t_act(self, args):
         if args.what == "break the water":
             raise ValueError("no water here")
         if args.what == "a view":
@@ -149,7 +149,7 @@ from realms.legislation import above
 class Alpha(above("alpha")):
     uses = ["beta"]
 
-    def check_l_act(self, args):
+    def check_t_act(self, args):
         if args.what == "probe self":
             return self.deny(self.legislation.beta.give_self()._secret())
         if args.what == "probe undeclared":
@@ -264,7 +264,7 @@ def test_activation_runs_on_codex_activate_once_and_a_revert_does_not():
     assert LOG[2:] == []  # no hook on a revert
     assert (LayeredCodex[first.id].status, LayeredCodex[second.id].status) == ("active", "reverted")
     # the first codex is the one running again: its guard answers
-    assert "consent is not a basis" in call("l_act", basis="consent")["error"]
+    assert "consent is not a basis" in call("t_act", basis="consent")["error"]
 
 
 def test_a_quarter_does_not_run_on_codex_activate():
@@ -276,14 +276,14 @@ def test_a_quarter_does_not_run_on_codex_activate():
 def test_the_codex_loads_on_first_use_after_a_new_heap_and_a_legacy_install_unloads_it():
     codex = town()
     legislation._state.update(codex=legislation.UNKNOWN, box=None)  # a new heap: nothing loaded yet
-    assert "consent is not a basis" in call("l_act", basis="consent")["error"]
+    assert "consent is not a basis" in call("t_act", basis="consent")["error"]
     assert legislation._state["codex"] == codex.id
     Realm["1"].require_marketplace_approval = False
     from test_codex import SOURCE, manifest
 
     ok("codex_install", manifest=manifest(), source=SOURCE)
     assert LayeredCodex[codex.id].status == "inactive" and legislation._state["codex"] is None
-    assert ok("l_act", basis="consent")["done"] == ""  # no legislation runs for a legacy codex
+    assert ok("t_act", basis="consent")["done"] == ""  # no legislation runs for a legacy codex
 
 
 def test_a_codex_that_does_not_load_fails_before_the_switch_and_denies_everything_once_it_runs():
@@ -293,16 +293,16 @@ def test_a_codex_that_does_not_load_fails_before_the_switch_and_denies_everythin
     with pytest.raises(Exception, match="floats are not allowed"):
         legislation.load(broken)  # the install task stops here: nothing switched
     assert legislation._state["codex"] == first.id and legislation._state["box"] is not None
-    assert "consent is not a basis" in call("l_act", basis="consent")["error"]
+    assert "consent is not a basis" in call("t_act", basis="consent")["error"]
     # the realm starts (post_upgrade) with a codex that does not load: recorded, and the realm fails closed
     first.status, broken.status = "inactive", "active"
     legislation.warm()
     assert "floats are not allowed" in LayeredCodex[broken.id].failures["codex"]["load"]["error"]
-    error = call("l_act", what="anything")["error"]
+    error = call("t_act", what="anything")["error"]
     assert error.startswith("legislation error: the codex sha256:") and "is not loaded" in error
     assert not ok("codex_status", query=True)["healthy"]
     assert ok("codex_revert")["codex"] == first.id  # reserved: no chapter, no load needed
-    assert ok("l_act", what="anything")["done"] == "anything"
+    assert ok("t_act", what="anything")["done"] == "anything"
 
 
 # ── Guards, hooks and compute around an operation ────────────────────────────────────────────────────────────────
@@ -310,49 +310,49 @@ def test_a_codex_that_does_not_load_fails_before_the_switch_and_denies_everythin
 
 def test_guards_stack_down_the_layers_and_the_first_denial_refuses_the_operation():
     town()
-    assert call("l_act", basis="consent")["error"] == "consent is not a basis between public authorities"
-    assert call("l_act", basis="task")["error"] == "name the legislation that sets this public task"
-    error = call("l_act", basis="task", legislation="Ley 7/1985", recipient="nobody")["error"]
+    assert call("t_act", basis="consent")["error"] == "consent is not a basis between public authorities"
+    assert call("t_act", basis="task")["error"] == "name the legislation that sets this public task"
+    error = call("t_act", basis="task", legislation="Ley 7/1985", recipient="nobody")["error"]
     assert error == "a recipient outside the realm needs the Administration"
-    assert ok("l_act", basis="task", legislation="Ley 7/1985", recipient="alice", what="shared")["done"] == "shared"
-    assert call("l_act", basis="consent")["kind"] == "forbidden"
+    assert ok("t_act", basis="task", legislation="Ley 7/1985", recipient="alice", what="shared")["done"] == "shared"
+    assert call("t_act", basis="consent")["kind"] == "forbidden"
 
 
 def test_a_direct_governed_call_carries_the_departments_approval():
     town()
-    assert ok("l_approved")["done"] == "approved"  # the root department decides directly: approved_by holds
+    assert ok("t_approved")["done"] == "approved"  # the root department decides directly: approved_by holds
 
 
 def test_hooks_run_every_layer_top_to_bottom_with_one_event_and_their_effects_apply_as_the_codex():
     town()
     LOG.clear()  # the activation's own effect
-    ok("l_act", what="adopted", basis="task", legislation="x")
+    ok("t_act", what="adopted", basis="task", legislation="x")
     assert LOG == [("es:adopted", "codex"), ("town:es:ctl", "codex")]
     assert failures() == {} and ok("codex_status", query=True)["healthy"]
 
 
 def test_a_raising_guard_denies_naming_the_chapter_and_counts_until_it_next_succeeds():
     town({(TOWN, "water"): BROKEN_GUARD})
-    error = call("l_act", what="break the water")["error"]
+    error = call("t_act", what="break the water")["error"]
     assert error == "legislation error in x/town/water.py: ValueError: no water here"
-    assert failures() == {"x/town/water.py": {"check_l_act": {"count": 1, "error": "ValueError: no water here", "at": 1790000000}}}
+    assert failures() == {"x/town/water.py": {"check_t_act": {"count": 1, "error": "ValueError: no water here", "at": 1790000000}}}
     assert not ok("codex_status", query=True)["healthy"]
-    call("l_act", what="break the water")
-    assert failures()["x/town/water.py"]["check_l_act"]["count"] == 2
-    error = call("l_act", what="a view")["error"]  # a guard returns None or self.deny(reason), nothing else
-    assert error.startswith("legislation error in x/town/water.py: check_l_act returned Domains")
-    ok("l_act", what="fine")
+    call("t_act", what="break the water")
+    assert failures()["x/town/water.py"]["check_t_act"]["count"] == 2
+    error = call("t_act", what="a view")["error"]  # a guard returns None or self.deny(reason), nothing else
+    assert error.startswith("legislation error in x/town/water.py: check_t_act returned Domains")
+    ok("t_act", what="fine")
     assert failures() == {} and ok("codex_status", query=True)["healthy"]
 
 
 def test_a_raising_hook_never_fails_the_caller_and_counts_against_its_chapter():
     town({(TOWN, "register"): BROKEN_HOOK})
     LOG.clear()
-    assert ok("l_act", what="break the register")["done"] == "break the register"
+    assert ok("t_act", what="break the register")["done"] == "break the register"
     assert LOG == [("es:break the register", "codex"), ("town:es:ctl", "codex")]  # the other domains' hooks still ran
     recorded = failures()
-    assert recorded == {"x/town/register.py": {"on_l_act": {"count": 1, "error": "ZeroDivisionError: integer division or modulo by zero", "at": 1790000000}}}
-    ok("l_act", what="fine")
+    assert recorded == {"x/town/register.py": {"on_t_act": {"count": 1, "error": "ZeroDivisionError: integer division or modulo by zero", "at": 1790000000}}}
+    ok("t_act", what="fine")
     assert failures() == {}
 
 
@@ -361,30 +361,30 @@ def test_a_hooks_effect_that_fails_counts_and_a_reserved_or_time_zone_effect_is_
 from realms.legislation import above
 
 class Register(above("register")):
-    def on_l_act(self, event):
+    def on_t_act(self, event):
         if event.args.get("what") == "revert":
             self.ggg.codex_revert()
         if event.args.get("what") == "zone":
             self.ggg.realm_configure(timezone="Europe/Madrid")
         if event.args.get("what") == "unknown op":
-            self.ggg.l_act(what="nested")
+            self.ggg.t_act(what="nested")
 '''})
-    ok("l_act", what="revert")
-    assert failures()["x/town/register.py"]["on_l_act"]["error"] == "codex_revert: codex_revert is reserved: no chapter may call it"
-    ok("l_act", what="zone")
-    assert failures()["x/town/register.py"]["on_l_act"]["error"] == "realm_configure: a chapter never sets a time zone"
+    ok("t_act", what="revert")
+    assert failures()["x/town/register.py"]["on_t_act"]["error"] == "codex_revert: codex_revert is reserved: no chapter may call it"
+    ok("t_act", what="zone")
+    assert failures()["x/town/register.py"]["on_t_act"]["error"] == "realm_configure: a chapter never sets a time zone"
     assert Realm["1"].timezone == "UTC"
     before = len(LOG)
-    ok("l_act", what="unknown op")
-    assert "on_l_act" not in failures().get("x/town/register.py", {})
-    # the nested l_act ran as the codex: no guard and no hook ran again for it
+    ok("t_act", what="unknown op")
+    assert "on_t_act" not in failures().get("x/town/register.py", {})
+    # the nested t_act ran as the codex: no guard and no hook ran again for it
     assert LOG[before:] == [("es:unknown op", "codex"), ("town:es:ctl", "codex")]
 
 
 def test_compute_answers_through_the_seam_and_places_a_member_in_a_quarter():
     town()
     assert op.run(codex_api.compute("tax_assess", {"entry": {"code": "ibi"}, "subject": "Land:1"})) is None  # no chapter
-    assert op.run(codex_api.compute("l_day", {"at": 1790000000})) == "2026-09-21"
+    assert op.run(codex_api.compute("t_day", {"at": 1790000000})) == "2026-09-21"
     Quarter(id="q-low", name="low", index=1, status="active", population=3)
     Quarter(id="q-high", name="high", index=2, status="active", population=7)
     assert ok("join_targets", "alice", query=True)["default"] == "q-high"  # the codex prefers the higher index
@@ -395,12 +395,12 @@ def test_a_compute_that_fails_fails_the_operation_asking():
 from realms.legislation import above
 
 class Water(above("water")):
-    def compute_l_day(self, at):
+    def compute_t_day(self, at):
         return 1
 '''})
-    with pytest.raises(Exception, match="compute_l_day is defined in realm, water: one domain answers"):
-        op.run(codex_api.compute("l_day", {"at": 1}))
-    assert failures()["x/town/realm.py"]["compute_l_day"]["count"] == 1
+    with pytest.raises(Exception, match="compute_t_day is defined in realm, water: one domain answers"):
+        op.run(codex_api.compute("t_day", {"at": 1}))
+    assert failures()["x/town/realm.py"]["compute_t_day"]["count"] == 1
 
 
 def test_the_local_day_is_the_realms_own():
@@ -408,15 +408,15 @@ def test_the_local_day_is_the_realms_own():
     Realm["1"].timezone = "Europe/Madrid"
     localtime.use("Europe/Madrid")
     late = 1790000000 - 1790000000 % 86400 + 23 * 3600  # 23:00 UTC on 21 September 2026: already the 22nd in Madrid
-    assert op.run(codex_api.compute("l_day", {"at": late})) == "2026-09-22"
+    assert op.run(codex_api.compute("t_day", {"at": late})) == "2026-09-22"
     localtime.use("UTC")
-    assert op.run(codex_api.compute("l_day", {"at": late})) == "2026-09-21"
+    assert op.run(codex_api.compute("t_day", {"at": late})) == "2026-09-21"
 
 
 def test_spains_guard_counts_working_days_from_the_realms_local_day():
     town()
     now = 1790000000  # Monday 21 September 2026, 17:33 UTC
-    args = {"title": "ordinance", "action": {"op": "l_act", "args": {}}}
+    args = {"title": "ordinance", "action": {"op": "t_act", "args": {}}}
     error = call("proposal_create", **args)["error"]
     assert error.startswith("an ordinance takes effect at the earliest 15 working days")
     assert call("proposal_create", effective_at=now + 20 * 86400, **args)["error"] == error  # 11 October: too early
@@ -430,10 +430,10 @@ def test_spains_guard_counts_working_days_from_the_realms_local_day():
 
 def test_what_crosses_a_domain_boundary_is_plain_data_or_the_public_view():
     town({(TOWN, "alpha"): ALPHA, (TOWN, "beta"): BETA, (TOWN, "gamma"): GAMMA})
-    assert call("l_act", what="probe data")["error"] == "beta:gamma"  # alpha reaches beta's public members
-    error = call("l_act", what="probe self")["error"]
+    assert call("t_act", what="probe data")["error"] == "beta:gamma"  # alpha reaches beta's public members
+    error = call("t_act", what="probe self")["error"]
     assert error == "legislation error in x/town/alpha.py: _secret is private to its chapter: other chapters cannot call it"
-    error = call("l_act", what="probe undeclared")["error"]
+    error = call("t_act", what="probe undeclared")["error"]
     assert error == ("legislation error in x/town/alpha.py: legislation is not a public member of x/town/beta.py: "
                      "other chapters reach its members only")
 
@@ -455,11 +455,11 @@ from realms.legislation import above
 class Realm(above("realm")):
     uses = ["step0"]
 
-    def compute_l_day(self, at):
+    def compute_t_day(self, at):
         return self.legislation.step0.depth()
 '''}, layers=[TOWN])
     activate(codex)
-    assert op.run(codex_api.compute("l_day", {"at": 0})) == 7  # realm → step0 → … → step7: eight calls between domains
+    assert op.run(codex_api.compute("t_day", {"at": 0})) == 7  # realm → step0 → … → step7: eight calls between domains
 
 
 # ── Reserved operations (§10.4) ─────────────────────────────────────────────────────────────────────────────────
@@ -469,7 +469,7 @@ def test_a_codex_whose_guards_refuse_every_proposal_cannot_block_a_revert():
     first = town()
     first.status = "inactive"
     blocker = activate(layered({(TOWN, "procedure"): DENY_ALL}, layers=[TOWN], previous=first.id))
-    assert call("proposal_create", "alice", title="x", action={"op": "l_act", "args": {}})["error"] == "nothing may be proposed"
+    assert call("proposal_create", "alice", title="x", action={"op": "t_act", "args": {}})["error"] == "nothing may be proposed"
     pid = ok("proposal_create", "alice", title="revert", action={"op": "codex_revert", "args": {}})["proposal"]
     for voter in world.PEOPLE:
         ok("proposal_vote", voter, proposal=pid, choice="yes")  # no guard on a vote about a reserved operation either
