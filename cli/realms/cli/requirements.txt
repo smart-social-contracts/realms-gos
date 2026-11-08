@@ -4,7 +4,7 @@ ic-basilisk==0.15.1
     #   ic-basilisk-toolkit
 ic-basilisk-toolkit==0.5.3
     # via -r realms/cli/realms/cli/requirements.in
-ic-python-db==0.12.0
+ic-python-db==0.14.0
     # via ic-basilisk-toolkit
 ic-python-logging==0.3.4
     # via ic-basilisk-toolkit

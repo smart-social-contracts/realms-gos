@@ -11,3 +11,4 @@ class UserProfile(Row):
     users = ManyToMany(["User"], "profiles")
     permissions = ManyToMany(["Permission"], "profiles")
     positions = OneToMany("Position", "profile")
+    unlisted = ("users",)  # every member may hold the profile: a User lists its profiles
