@@ -1,0 +1,13 @@
+[
+  {
+    "version": "1.0.0",
+    "published": "2026-09-01",
+    "effective_from": "2026-10-01",
+    "commit": "308bf3244b24118a18103df7eeb69732d6603ccd",
+    "chapters": {
+      "data_protection": "sha256:352b4c51269e0fc0fa947f25b597d9231a56ca82386d85bb4188cd601383e12d"
+    },
+    "calendar": null,
+    "notes": {"en": "First release: data protection (GDPR)", "es": "Primera versión: protección de datos (RGPD)"}
+  }
+]

@@ -33,7 +33,17 @@ class Procedure(above("procedure")):
 def write(tree: Path, path: str, text) -> None:
     file = tree / path
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(json.dumps(text) if isinstance(text, dict) else text)
+    file.write_text(json.dumps(text) if isinstance(text, (dict, list)) else text)
+
+
+def source_json(source: str) -> dict:
+    """The source.json of §3.1 for ``source``."""
+    return {
+        "id": source,
+        "name": {"en": source},
+        "created_by": "an act",
+        "publisher": {"realm": None},
+    }
 
 
 @pytest.fixture
@@ -42,18 +52,21 @@ def tree(tmp_path, monkeypatch):
     monkeypatch.setattr(
         legislation,
         "ggg_operations",
-        lambda: frozenset({"user_add", "notification_send", "realm_join", "codex_activate"})
+        lambda: frozenset(
+            {"user_add", "notification_send", "realm_join", "codex_activate"}
+        )
         | legislation.INTERIM_OPERATIONS,
     )
     root = tmp_path / "legislation"
     for source in ("eu", "eu/es", "eu/es/vc", "eu/es/vc/46250-valencia"):
-        write(root, source + "/source.json", {"id": source})
+        write(root, source + "/source.json", source_json(source))
     write(
         root,
         "eu/es/calendar.json",
         {
             "weekend": ["sat", "sun"],
             "years": {"2027": [{"date": "2027-01-01", "name": {"es": "Año Nuevo"}}]},
+            "legislation": "Ley 39/2015 Art. 30.7",
         },
     )
     write(root, "eu/es/register.py", ES_REGISTER)
@@ -97,20 +110,18 @@ def test_a_settings_check_runs_on_the_winning_value(tree):
     )
 
 
-def test_a_hook_must_name_a_ggg_operation_and_a_calendar_must_parse(tree):
+def test_a_hook_must_name_a_ggg_operation(tree):
     write(
         tree,
         "eu/es/vc/tax.py",
         "from realms.legislation import above, fixed\nclass Tax(above('tax')):\n"
         "    @fixed(legislation='x')\n    def on_user_delete(self, event): pass\n",
     )
-    write(tree, "eu/es/vc/calendar.json", {"weekend": ["saturday"]})
     out = run(str(tree), "--realm", "eu/es/vc")
     assert out.exit_code == 1
     assert (
         "eu/es/vc/tax.py:3: on_user_delete must name a GGG operation" in out.output
     )  # the decorator's line
-    assert "eu/es/vc/calendar.json: 'saturday' is not a day of the week" in out.output
 
 
 def test_the_realm_must_be_a_source_and_the_tree_a_folder(tree):

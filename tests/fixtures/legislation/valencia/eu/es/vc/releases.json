@@ -1,0 +1,14 @@
+[
+  {
+    "version": "1.1.0",
+    "published": "2026-10-15",
+    "effective_from": "2027-01-01",
+    "commit": "308bf3244b24118a18103df7eeb69732d6603ccd",
+    "chapters": {
+      "language": "sha256:e8d64248ae727d105213c5fd07323bf537aae52267fbe72adb63275d9fadb4f3",
+      "local_regime": "sha256:18d7fbb625a3c3d64e86472dcab969756e8b9162b10e40b58c1eedbf3888d5e0"
+    },
+    "calendar": "sha256:7fc8a5217e2b6d4f05bf9dfa6757cef6f55a3faba629a09b5dc3c36acfad7ea0",
+    "notes": {"ca-valencia": "Règim local i llengües oficials, amb els festius de la Comunitat Valenciana", "es": "Régimen local y lenguas oficiales, con los festivos de la Comunitat Valenciana"}
+  }
+]
