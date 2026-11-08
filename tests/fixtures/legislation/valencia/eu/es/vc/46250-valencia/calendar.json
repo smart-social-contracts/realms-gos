@@ -1,0 +1,13 @@
+{
+  "years": {
+    "2026": [
+      {"date": "2026-01-22", "name": {"ca-valencia": "Sant Vicent Màrtir"}},
+      {"date": "2026-04-13", "name": {"ca-valencia": "Sant Vicent Ferrer"}}
+    ],
+    "2027": [
+      {"date": "2027-01-22", "name": {"ca-valencia": "Sant Vicent Màrtir"}},
+      {"date": "2027-04-05", "name": {"ca-valencia": "Sant Vicent Ferrer"}}
+    ]
+  },
+  "legislation": "Calendari de festes locals de València (illustrative dates)"
+}

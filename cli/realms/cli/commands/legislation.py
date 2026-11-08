@@ -1,6 +1,7 @@
 """``realms legislation``: the tools of the layered codex (docs/codices/layered-codex.md §12).
 
-``check`` loads a ``legislation/`` tree the way the realm does, with the same ``realms.legislation``
+``check`` first holds the tree to the layout of §3 (``legislation_layout``, the one place those rules live) and
+stops there if it breaks any. It then loads the tree the way the realm does, with the same ``realms.legislation``
 library, and prints every refusal as ``<source>/<domain>.py:<line>: <reason>``. Each chapter first
 passes the readable subset on its syntax tree (``subset_ast``, the clear errors for authors), then
 loads, which runs the realm's own bytecode check and the marks. ``from ggg import ...`` resolves to
@@ -10,7 +11,8 @@ comes with S2 and C2.
 
 The layers of a source are its ancestor folders, top to bottom: ``eu/es/vc/46250-valencia`` runs
 ``eu``, ``eu/es``, ``eu/es/vc`` and itself. The links between realms (§3.3, the resolver of S3) are not
-read here, so a body beside the line, such as EMSHI, is checked as a realm of its own.
+read here, so a body beside the line, such as EMSHI, is checked as a realm of its own. A realm loads only its
+own ``realm.py``: the one a source above keeps beside its releases is that source's, as ``plan`` skips a relayed one.
 """
 
 import json
@@ -20,7 +22,9 @@ from typing import List, Optional
 import typer
 from rich.console import Console
 
+from realms.cli.commands.legislation_layout import layout_problems
 from realms.legislation import Codex, Refused, subset_ast
+from realms.legislation.paths import REALM
 
 console = Console()
 legislation_app = typer.Typer(
@@ -112,13 +116,8 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
     problems = []
     for source in layers:
         calendar = tree / source / "calendar.json"
-        if calendar.exists():
-            try:
-                codex.calendar_layer(source, json.loads(calendar.read_text()))
-            except Refused as e:
-                problems.append(str(e))
-            except ValueError as e:
-                problems.append(f"{source}/calendar.json: {e}")
+        if calendar.exists():  # its shape passed the layout rules
+            codex.calendar_layer(source, json.loads(calendar.read_text()))
     domains = []
     for source in layers:
         for domain in chapters_of(tree, source):
@@ -127,8 +126,8 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
     for domain in domains:
         for source in layers:
             file = tree / source / (domain + ".py")
-            if not file.exists():
-                continue
+            if not file.exists() or (domain == REALM and source != realm):
+                continue  # a realm chapter is the realm's own; the layers above hold theirs for themselves (§3)
             text = file.read_text()
             try:
                 subset_ast.check(text, f"{source}/{domain}.py")
@@ -143,6 +142,15 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
     return problems
 
 
+def refuse(problems: List[str]) -> None:
+    """Print ``problems``, one a line, and stop with exit code 1; nothing to print, carry on."""
+    for problem in problems:
+        typer.echo(problem)
+    if problems:
+        console.print(f"[red]{len(problems)} refused[/red]")
+        raise typer.Exit(1)
+
+
 @legislation_app.command("check")
 def check_command(
     tree: Path = typer.Argument(
@@ -155,10 +163,11 @@ def check_command(
         help="Check this realm's codex only (its source id, eu/es/vc/46250-valencia)",
     ),
 ) -> None:
-    """Load every realm's chapters as the realm does and report what it refuses."""
+    """Hold the tree to the layout of §3, then load every realm's chapters as the realm does and report what it refuses."""
     if not tree.is_dir():
         console.print(f"[red]{tree} is not a folder[/red]")
         raise typer.Exit(2)
+    refuse(layout_problems(tree))
     known = sources(tree)
     realms = [realm] if realm else known
     if realm and realm not in known:
@@ -172,9 +181,5 @@ def check_command(
     problems = []
     for one in realms:
         problems += check_realm(tree, one, known, operations)
-    for problem in problems:
-        typer.echo(problem)
-    if problems:
-        console.print(f"[red]{len(problems)} refused[/red]")
-        raise typer.Exit(1)
+    refuse(problems)
     console.print(f"[green]ok: {len(realms)} realm(s) checked[/green]")

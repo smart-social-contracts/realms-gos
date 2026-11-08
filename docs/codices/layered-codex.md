@@ -216,7 +216,7 @@ The rules:
 | Field | Rule |
 |---|---|
 | `name` | official names, by language |
-| `created_by` | the act that created the source |
+| `created_by` | the act that created the source; left out when none did, such as a municipality older than any statute |
 | `publisher.realm` | the canister id of the source's own realm, if it has one, else `null` (§8) |
 
 A source carries no time zone and no zone file: a realm's time zone is its own `Realm.timezone`
@@ -519,7 +519,7 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 |---|---|
 | `self.ggg.<op>(**args)` | queues GGG operation `<op>` as an effect, as codex effects work today |
 | `self.deny(reason)` | a guard's refusal |
-| `from ggg import ...` | read-only access to GGG's entities (`Member.each`, `Land.get`, ...) |
+| `from ggg import ...` | read-only access to the fields of GGG's entities that legislation may read: `get(id)`, `each()` and `find(field, value)` on an indexed field. A list reads as a tuple and a mapping as `row["code"]`; values are as the realm stores them (an attribute's status is `verified`, a parcel's owner `User:<id>`) |
 | `Ref(kind, id)` | GGG's `Ref`, e.g. `Ref("external", "INE")` |
 | `self.now()` | the current time, a UTC timestamp, as today |
 | `self.approved_by(department)` | whether the current operation carries that department's approval |
@@ -652,9 +652,9 @@ class LocalRegime(above("local_regime")):
     def check_proposal_create(self, args):
         if "Code" not in args.action:                        # only this realm's own change of legislation (see below)
             return None
-        # ... elided: the realm's local day (§4.5) of the earliest close of the vote and of args.effective_at
+        earliest_close_day = self.local_day(self.now())      # a vote may close as soon as its outcome is certain
         if args.effective_at is None \
-                or effective_day < self.legislation.procedure.working_days_after(earliest_close_day, 15):
+                or self.local_day(args.effective_at) < self.legislation.procedure.working_days_after(earliest_close_day, 15):
             return self.deny("an ordinance takes effect at the earliest 15 working days after the vote closes (Art. 65.2)")
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
@@ -686,8 +686,8 @@ class LocalRegime(above("local_regime")):
 
     def on_codex_install(self, event):
         title = "Nova ordenança" + (" (traducció pendent)" if event.languages_missing else "")
-        for m in Member.each():
-            self.ggg.notification_send(recipient=Ref("user", m.user), topic="ordinance",
+        for m in Member.each():                              # a member's id is its user's id
+            self.ggg.notification_send(recipient=Ref("user", m.id), topic="ordinance",
                 title=title, body=event.result["codex"])
 ```
 
@@ -832,7 +832,7 @@ class Tax(above("tax")):
         if entry.code != "ibi_urban":
             return []
         gross = subject.assessed_value.times(entry.rate)            # nearest cent, half away from zero
-        net = gross - gross.times(self.ibi_bonus(subject))
+        net = gross - gross.times(self.ibi_bonus(subject.owner))
         items = [{"concept": entry.code, "amount": gross, "legislation": "TRLRHL Art. 71.1"}]
         if net < gross:
             items.append({"concept": entry.code + "_bonus", "amount": net - gross,
@@ -840,8 +840,8 @@ class Tax(above("tax")):
         return items
 
     @overridable(legislation="TRLRHL Art. 74")
-    def ibi_bonus(self, land):
-        return 0
+    def ibi_bonus(self, owner):
+        return 0                                        # owner: "User:<id>", as a parcel's owner is written
 
 # legislation/eu/es/vc/46250-valencia/tax.py
 from ggg import Attribute, Human
@@ -851,10 +851,15 @@ class Tax(above("tax")):
     surface_public_transport = True
     large_family_bonus = {"general": pct("60"), "special": pct("90")}      # 60 % and 90 % of the quota
 
-    def ibi_bonus(self, land):
-        owner = Human.for_user(land.owner.id)
-        verified = [a.value for a in Attribute.of(owner, kind="large_family") if a.status == "Verified"]
-        return self.large_family_bonus.get(verified[0], 0) if verified else 0
+    def ibi_bonus(self, owner):
+        kind, _, user = owner.partition(":")
+        if kind != "User":
+            return 0
+        for human in Human.find("user", user):                          # find: an indexed field and the value it has
+            for attribute in Attribute.find("human", human.id):
+                if attribute.kind == "large_family" and attribute.status == "verified":
+                    return self.large_family_bonus.get(attribute.value, 0)
+        return 0
 ```
 
 - **The rate lives in one place:** the entry of the adopted policy, proposed with
@@ -883,9 +888,9 @@ class Water(above("water")):
     @fixed(legislation="EMSHI statutes (illustrative)")
     def on_tax_policy_propose(self, event):
         for entry in TaxPolicy.get(event.args["policy"]).taxes:     # the saved policy's entries
-            if entry.code == "water_supply":
+            if entry["code"] == "water_supply":
                 self.ggg.notification_send(recipient=self.bulk_supplier, topic="tariff",
-                                           title="Water tariff proposed", body=entry.code)
+                                           title="Water tariff proposed", body=entry["code"])
 ```
 
 València's water layer path goes through EMSHI, because València syncs from EMSHI and EMSHI from CV
@@ -1551,6 +1556,13 @@ CI) and [realms-codices#12](https://github.com/smart-social-contracts/realms-cod
 
 It uses Python's parser (`ast`), so it runs only off-chain:
 
+- the layout of §3, which it checks first and stops at if the tree breaks it: folder names, a `source.json`
+  whose `id` is the folder's path, only `<domain>.py` files with a GGG domain, the shapes of `source.json`,
+  `releases.json` and `calendar.json`, and each release against the source's files **at the release's own
+  commit**, which must be in the history of `HEAD` (read with git, so the check needs the full history): all its
+  chapters and its calendar listed, never the `realm` domain, every checksum the sha256 of the bytes. A realm loads
+  only its own `realm.py`: one beside a source's releases is that source's own. realms-codices CI runs this command and
+  has no checker of its own;
 - every rule in §4: file and class names, base, imports, banned constructs, citations, marks, `uses`,
   and that every `on_`, `check_` and `compute_` method names a GGG operation;
 - the `F` expression rules (§6): the operation named, `each` naming the list it ranges over (for
