@@ -171,8 +171,11 @@ class CursorDatabaseExplorer:
                 return {"error": str(e), "items": []}
             if not reply.get("ok"):
                 return {"error": reply.get("error", "Unknown error"), "items": []}
+            following = reply.get("next")
+            if following is not None and following <= start:
+                return {"error": f"{entity_type}: the realm answered next={following} to from={start}", "items": []}
             rows += reply["rows"]
-            start = reply.get("next")
+            start = following
         more = start is not None
         return {
             "items": [{"_type": entity_type, "_id": row.get("id", ""), **row} for row in rows],

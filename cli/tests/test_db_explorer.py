@@ -73,6 +73,22 @@ class TestCursorDatabaseExplorer:
         assert result["more"] is True
         assert [args["from"] for _, _, args in realm.calls if args.get("entity")] == [3, 4]
 
+    def test_a_next_that_does_not_go_forward_is_an_error_and_not_a_loop(self):
+        def stuck(cmd, **kwargs):
+            name, args = json.loads("[" + cmd[-1][1:-1] + "]")
+            args = json.loads(args)
+            reply = {"ok": True, "rows": [{"id": "a"}], "next": args["from"]} if name == "realm_export" \
+                else {"ok": True}
+            return MagicMock(returncode=0, stdout=_candid(reply), stderr="")
+
+        explorer = CursorDatabaseExplorer("local", "realm_backend")
+
+        with patch("subprocess.run", side_effect=stuck) as run:
+            result = explorer.list_entities("User", 0, 5)
+
+        assert result == {"error": "User: the realm answered next=1 to from=1", "items": []}
+        assert run.call_count == 1
+
     def test_every_row_of_an_entity_whose_pages_are_cut_short_is_read_once(self):
         rows = [{"sha256": f"sha256:{n}"} for n in range(7)]
         explorer = CursorDatabaseExplorer("local", "realm_backend")
