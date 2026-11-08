@@ -61,6 +61,13 @@ def too_long(lasts, limit):
         raise Fail(f"a delegation lasts at most {'one year' if limit == YEAR else str(limit // DAY) + ' days'}")
 
 
+def refuse_realm(delegate):
+    """The realm itself holds no power of attorney: the effects of a codex's chapters act as the realm, and would act for
+    the member."""
+    if delegate == chain.self_id():
+        raise Fail("the realm itself cannot hold a power of attorney")
+
+
 def window(args, limit=YEAR):
     starts = int(args.get("starts_at") or 0)
     begin = max(starts, chain.now())
@@ -132,6 +139,7 @@ def delegation_grant(c, args):
     delegate, scope = args["delegate"], scope_of(args)
     if delegate == c.user:
         raise Fail("you cannot delegate to yourself")
+    refuse_realm(delegate)
     check_names(scope, c.user)
     starts, expires = window(args, longest(scope))
     if open_grant(c.user, delegate):
@@ -176,6 +184,7 @@ def delegation_request(c, args):
     find(User, grantor)
     if grantor == c.user:
         raise Fail("you cannot ask yourself")
+    refuse_realm(c.user)
     check_names(scope)
     starts, expires = window(args, longest(scope))
     to_them = list(each(DelegationRequest, "grantor", grantor))

@@ -8,6 +8,7 @@ from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, n
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
 from core.op import filing, op, run
+from core.pending import quoted
 from core.ratio import ONE, PERCENT
 
 CAPACITY, TEST_CAPACITY, TEST_NETWORKS, SCALE_AT = 2000, 10, ("test", "staging", "demo", "local"), 0.9
@@ -370,7 +371,14 @@ def scale_status(c, args):
     return scale()
 
 
-@op("self.change_quarter", returns="forward")
+def moving(user, args):
+    """What a move changes for ``user``: they become a guest here and lose their profiles in this quarter."""
+    dest = Quarter[str(args.get("quarter"))]
+    return ([{"label": "Moves you to", "value": quoted(dest.name)}] if dest and dest.name else []) + [
+        {"label": "What changes", "value": "You become a guest here and your profiles in this quarter are deleted"}]
+
+
+@op("self.change_quarter", returns="forward", summary=moving)
 def self_change_quarter(c, args):
     """Move your membership to ``quarter``, another active quarter of the federation; here you become a guest.
     Returns ``forward`` and ``home_quarter``."""

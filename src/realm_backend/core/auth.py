@@ -71,6 +71,7 @@ def permissions(principal):
     held = {"self.join"}
     user = User[principal]
     if user:
+        held.add("self.confirm")  # every member approves what a delegate prepared for them
         for profile in user.profiles:
             held |= set(profile.allowed_to or [])
         held |= {p.id for p in user.permissions}
@@ -104,6 +105,11 @@ def is_banned(principal):
     return bool(member and member.status == "banned")
 
 
+def in_force(grant, now):
+    """Whether ``grant``, which is active, has begun and not run out at time ``now``."""
+    return grant.starts_at <= now and not (grant.expires_at and now >= grant.expires_at)
+
+
 def active_grant(grantor, delegate):
     """The power of attorney ``delegate`` acts under for ``grantor`` now; Denied when there is none."""
     from ggg import Delegation
@@ -113,7 +119,7 @@ def active_grant(grantor, delegate):
         if d.grantor == grantor and d.status == "active":
             if d.expires_at and now >= d.expires_at:
                 d.status = "expired"
-            elif d.starts_at <= now:
+            elif in_force(d, now):
                 return d
     raise Denied(f"{delegate} holds no active power of attorney from {grantor}")
 

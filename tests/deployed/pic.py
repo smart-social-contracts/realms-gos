@@ -144,6 +144,26 @@ class Canister:
         call = self.pic.query_call if query else self.pic.update_call
         return json.loads(decode(bytes(call(self.id, "read" if query else "run", payload)))[0]["value"])
 
+    def submit(self, name, args=None, sender=None):
+        """Send the update call ``name`` through ``run`` without waiting for its reply, and return its message id: ``finish``
+        collects the replies. Calls sent together run in the same round, in order, so a test can send a second call
+        while the first waits on another canister."""
+        self.pic.set_sender(Principal.from_str(sender) if sender else Principal.anonymous())
+        payload = encode([{"type": Types.Text, "value": name}, {"type": Types.Text, "value": json.dumps(args or {})}])
+        body = {"sender": base64.b64encode(self.pic.sender.bytes).decode(), "effective_principal": "None",
+                "canister_id": base64.b64encode(self.id.bytes).decode(), "method": "run",
+                "payload": base64.b64encode(payload).decode()}
+        return self.pic._get_ok(self.pic._instance_post("update/submit_ingress_message", body))
+
+    def finish(self, *messages):
+        """The decoded JSON replies of the calls ``submit`` sent, once every one of them has completed."""
+        for _ in range(100):
+            self.pic.tick()
+            statuses = [self.pic._ingress_status(m) for m in messages]
+            if all(statuses):
+                return [json.loads(decode(bytes(self.pic._get_ok_data(s)))[0]["value"]) for s in statuses]
+        raise ValueError("the calls did not complete within 100 rounds")
+
     def shell(self, code):
         """Run Python in the canister as its controller (basilisk's ``__shell__``); returns what it printed."""
         self.pic.set_sender(Principal.from_str(CONTROLLER))

@@ -11,7 +11,7 @@ import ggg_api
 import ggg_delegation
 import world
 from core import op, poa
-from ggg import Delegation, Event, Notification, Proposal, Transfer
+from ggg import Delegation, Event, FederalVote, Identity, Member, Notification, PaymentAccount, Proposal, Transfer
 from kit import call, denied, later, ok
 from test_treasury import allocate, ledger_ok, receive, setup_finance
 
@@ -111,7 +111,7 @@ def test_the_legacy_operations_are_those_the_model_lists_as_delegable_before_gro
     file = (ROOT / "ggg" / "model" / "README.md").read_text()
     listed = file.split("A grant whose `scope` names permissions covers only these operations")[1].split(". Not")[0]
     names = {n for n in re.findall(r"`([a-z_]+)`", listed) if n in ggg_delegation.OPERATIONS}
-    assert len(poa.LEGACY) == 24 and poa.LEGACY == names and poa.ENABLED == poa.LEGACY <= set(op.OPS)
+    assert len(poa.LEGACY) == 24 and poa.LEGACY == names and poa.LEGACY <= poa.ENABLED <= set(op.OPS)
 
 
 def test_an_old_grant_of_self_data_view_does_not_reach_attributes():
@@ -140,7 +140,7 @@ def test_grants_that_cannot_be_made():
     assert "name at least one" in denied("delegation_grant", "alice", **base)
     assert "not a group" in denied("delegation_grant", "alice", groups=["vote", "nonsense"], **base)
     assert "not a group" in denied("delegation_grant", "alice", groups=["office:Health"], **base)
-    assert "cannot be granted yet" in denied("delegation_grant", "alice", groups=["payout"], **base)
+    assert "cannot be granted yet" in denied("delegation_grant", "alice", groups=["keys"], **base)
     assert "nothing in money" in denied("delegation_grant", "alice", groups=["money"], **base)
     assert "one year" in denied("delegation_grant", "alice", groups=["vote"], delegate="claude-conn",
                                 expires_in=366 * DAY)
@@ -179,7 +179,7 @@ def test_everything_is_cut_to_90_days_at_use_whatever_the_group_allows(monkeypat
 def test_requests_and_decisions_by_group():
     world.build()
     ask = dict(grantor="alice", expires_in=7 * DAY)
-    assert "cannot be granted yet" in denied("delegation_request", "claude-conn", groups=["payout"], **ask)
+    assert "cannot be granted yet" in denied("delegation_request", "claude-conn", groups=["keys"], **ask)
     assert "not a group" in denied("delegation_request", "claude-conn", groups=["nonsense"], **ask)
     assert "90 days" in denied("delegation_request", "claude-conn", groups=["*"], grantor="alice", expires_in=91 * DAY)
     r = ok("delegation_request", "claude-conn", groups=["vote", "propose"], **ask)["request"]
@@ -208,11 +208,12 @@ def test_a_human_delegate_accepts_a_grant_by_groups():
 
 
 def test_a_proposal_under_a_group_grant_is_a_motion():
+    """With an action it is prepared for the member's approval (test_pending_actions.py): it files no proposal."""
     world.build()
     g = grant("propose")
     for action in ({"op": "me", "args": {}}, {"op": "task_create", "args": {"name": "later", "steps": []}}):
-        error = denied("proposal_create", "claude-conn", title="x", action=action, on_behalf_of="alice")
-        assert "asks the member each time" in error
+        out = ok("proposal_create", "claude-conn", title="x", action=action, on_behalf_of="alice")
+        assert out["pending"] and "proposal" not in out
     assert Proposal.count() == 0
     p = ok("proposal_create", "claude-conn", title="Bike lane", on_behalf_of="alice")["proposal"]
     assert (Proposal[p].proposer, Proposal[p].filed_under) == ("alice", g)
@@ -272,13 +273,15 @@ def test_a_transfer_filed_within_the_limit_runs_after_the_limit_has_passed():
     assert Transfer.count() == 1
 
 
-def test_payout_identity_quarter_moves_and_federal_votes_are_refused_under_everything():
+def test_payout_identity_quarter_moves_and_federal_votes_are_prepared_not_done_under_everything():
     world.build()
     grant("*")
     for name, args in (("payment_account_add", dict(network="ICP", address="other", symbol="REALM")),
                        ("identity_submit", dict(kind="passport")), ("self_change_quarter", dict(quarter="south")),
                        ("federal_vote_propose", dict(title="x", action={"op": "me", "args": {}}))):
-        assert "does not cover" in denied(name, "claude-conn", on_behalf_of="alice", **args), name
+        assert ok(name, "claude-conn", on_behalf_of="alice", **args)["pending"], name
+    assert PaymentAccount.count() == 0 and Identity.count() == 0 and FederalVote.count() == 0
+    assert Member["alice"] is not None
 
 
 # ---- I-ID-13
@@ -507,7 +510,7 @@ def test_revoke_all_is_refused_under_any_grant():
 def test_the_vocabulary_lists_the_groups_the_caller_can_grant():
     depts = world.build()
     groups = {g["id"]: g for g in ok("delegable_operations", "alice")["groups"]}
-    assert list(groups) == ["see", "profile", "vote", "propose", "filings", "justice"]
+    assert list(groups) == ["see", "profile", "vote", "propose", "filings", "justice", "payout", "identity", "membership"]
     vote = groups["vote"]
     label, summary, risk, longest = ggg_delegation.GROUPS["vote"]
     assert (vote["label"], vote["summary"], vote["risk"], vote["longest"]) == (label, summary, risk, longest)
@@ -515,11 +518,11 @@ def test_the_vocabulary_lists_the_groups_the_caller_can_grant():
                                    "confirm_if": None}]
     assert groups["propose"]["confirms"] and not vote["confirms"]
     assert {o["operation"]: o["confirm_if"] for o in groups["propose"]["operations"]} == {
-        "proposal_create": "with_action", "proposal_withdraw": None}
+        "proposal_create": "with_action", "proposal_withdraw": None, "federal_vote_propose": None}
     world.grant(depts["Infrastructure"], "transfer.create")
     assert "money" in [g["id"] for g in ok("delegable_operations", "carla")["groups"]]
     assert "money" in [g["id"] for g in ok("delegation_groups", "carla")["groups"]]
-    assert [g["id"] for g in ok("delegable_operations", "ctl")["groups"]][-1] == "money"
+    assert "money" in [g["id"] for g in ok("delegable_operations", "ctl")["groups"]]
 
 
 def test_the_old_operations_list_stays_what_a_permission_grant_covers():
@@ -533,7 +536,9 @@ def test_the_groups_are_paged():
     first = ok("delegation_groups", "alice", count=4)
     assert [g["id"] for g in first["groups"]] == ["see", "profile", "vote", "propose"] and first["next"] == 5
     rest = ok("delegation_groups", "alice", count=4, **{"from": first["next"]})
-    assert [g["id"] for g in rest["groups"]] == ["filings", "justice"] and rest["next"] is None
+    assert [g["id"] for g in rest["groups"]] == ["filings", "justice", "payout", "identity"] and rest["next"] == 9
+    last = ok("delegation_groups", "alice", count=4, **{"from": rest["next"]})
+    assert [g["id"] for g in last["groups"]] == ["membership"] and last["next"] is None
 
 
 # ---- The tables
