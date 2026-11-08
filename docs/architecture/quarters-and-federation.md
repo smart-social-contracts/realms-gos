@@ -66,10 +66,80 @@ no parent realm. Those links, the releases a sync source publishes, how a follow
 how a new codex reaches a realm's own quarters at one switch time are in
 [The layered codex](../codices/layered-codex.md) (not built yet).
 
+## What the realm sets for its quarters
+
+A realm has one face, so its quarters share some settings and keep others (not built yet:
+[#528](https://github.com/smart-social-contracts/realms-gos/issues/528)).
+
+| Group | Settings | Rule |
+|---|---|---|
+| **Identity** | the realm's name (each quarter keeps its own quarter label), logo and colours, manifesto, the realm's terms text, lifecycle stage | **Kept in sync from the capital** |
+| **Shared foundations** | accounting currency, the languages offered | **Kept in sync from the capital** |
+| **Local, with a default** | time zone, welcome message | **Copied once when a quarter joins,** then the quarter's own |
+| **Not pushed as settings** | voting rules (window, threshold, quorum) | They belong in the codex |
+| **Not pushed** | registration (`quarter_join_mode`) and capacity, which are the capital's already through `quarter_configure`; notification settings, departments, members, treasury | Local |
+
+**Kept in sync from the capital.** The capital owns these values and a quarter cannot change them. A
+realm-wide vote changes them on the capital, with the same operations as today (`realm_configure`,
+`realm_configure_branding`, `realm_configure_tokens`), and the capital pushes them to every quarter.
+The quarter's label is not the realm's name: it is the `name` under which the capital registered the
+quarter, which the quarter learns with the directory, as it learns its `index`. A realm that joins as
+a quarter takes the capital's identity at its first sync, and its former name is not kept as its label
+unless the capital registers it under that name. A quarter that secedes keeps the values it last
+received, and they are its own to change from then on.
+
+One list of synced fields drives the three parts of the mechanism, which uses the capital-to-quarter
+channel the federation already has (`quarter.sync`):
+
+- **Push.** When a call changes a synced field, the capital first writes its own values and then sends
+  the current values of all synced fields to every active quarter with `federation_message` (topic
+  `realm.settings`). A quarter accepts it from its capital only and writes the fields directly. The
+  message always carries the whole set, so a repeated or late one does no harm.
+- **A quarter that fails does not undo the change.** If a quarter is unreachable or refuses, the
+  capital's value stands and the push goes on to the other quarters; each reply is recorded in the
+  `FederationMessage`, as for any message to the quarters. Otherwise one quarter could stop the realm's
+  name from changing. This differs from setting one quarter's zone below, where the quarter is the
+  target and its refusal fails the call.
+- **Catch-up.** The capital's answer to `quarter_sync` carries the same set of values, next to the
+  directory and the codex, and the quarter applies them. A quarter runs `quarter_sync` on a timer and
+  when it starts after an upgrade (today it runs by hand, and once from `adopt()`), so a quarter that
+  missed a push, because it was down, upgrading or suspended, has the current values at its next sync.
+- **Refusal.** On a quarter, `realm_configure`, `realm_configure_branding`, `realm_configure_tokens`
+  and `setup_step` refuse a call that carries a synced field, with `Forbidden` naming the capital. The
+  whole call is refused, before it becomes a proposal, so before any vote on the quarter.
+
+**Local, with a default.** The time zone and the welcome message are copied once, when a quarter joins
+the federation. Only a value still at its default takes the capital's (`UTC` for the zone, empty for
+the welcome message): a joining realm that already chose one keeps it. After that the value is the
+quarter's own, and a later change on the capital does not follow. The quarter changes it through its
+own governance (`realm_configure` on the quarter). The realm may also set it for a quarter by a
+realm-wide vote, with `quarter_configure` on the capital and the `quarter` it names; the capital sends
+it to the quarter as it does a zone (below). A `welcome_message` with no `quarter` is refused before
+any vote, like a `timezone` with none.
+
+**Voting rules are not pushed as settings.** The voting window, threshold and quorum belong in the
+codex, which reaches every quarter at one switch time
+([The layered codex](../codices/layered-codex.md#95-updating-a-realms-own-quarters)). A pushed setting
+would arrive at another moment and bypass the legislation.
+
+**What `adopt()` copies today.** When the capital builds a quarter (`quarter_add`), `adopt()` sets up
+the new quarter with the quarter's `name` and the capital's `open_registration`. Against the table:
+
+- `name`: this stops. The realm's name reaches the quarter by sync, and the label the quarter shows is
+  the one the capital registered. A quarter refuses a synced field in `setup_step` anyway.
+- `open_registration`: this stays, as the starting value of a quarter the capital builds, so that the
+  members it is offered to can join. Registration stays local: a realm that joins on its own keeps its
+  own, and nothing follows after the build.
+
+Open: a quarter still in `setup` is configured by its founder, without votes, and a synced stage of
+`alpha` or later would end that. How a quarter in `setup` takes the capital's stage (for example, at
+its own launch) is settled before the stage sync is built.
+
 ## Time zones in a federation
 
 Quarters can lie in different time zones, and each is a full realm with its own `Realm.timezone`
-(not built yet: [#528](https://github.com/smart-social-contracts/realms-gos/issues/528)).
+(not built yet: [#528](https://github.com/smart-social-contracts/realms-gos/issues/528)). The zone is
+one of the two settings that are local, with a default (above).
 
 - A new quarter **starts on its capital's zone,** copied once by `quarter_join_federation` when the
   joining realm is still on `UTC` (not yet chosen). A realm that already chose a zone keeps it. After
