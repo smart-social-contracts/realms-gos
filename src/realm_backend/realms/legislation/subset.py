@@ -297,11 +297,12 @@ class Check:
             if type(const) is type(code):
                 self.function(const, event_of(const))
 
-    def function(self, code, event=None):
-        """A method, or a function nested in one; ``event`` names the event the enclosing hook was given."""
+    def function(self, code, event=None, nested=False):
+        """A method, or a function nested in one (``nested``); ``event`` names the event the enclosing hook was given."""
         self.common(code, "method", FUNCTION_INSTRUCTIONS)
         ops = instructions(code, self.names)
         self.no_defaults(ops)
+        self.bound_once(code, ops, {"self", event} - {None}, nested)
         for i, (name, arg) in enumerate(ops):
             if name == "STORE_ATTR" and not self.on_self_or_event(code, ops, i, event):
                 attr = code.co_names[arg]
@@ -313,7 +314,29 @@ class Check:
                 self.refuse("an instruction outside the readable subset", code.co_name)
         for const in code.co_consts:
             if type(const) is type(code):
-                self.function(const, event)
+                self.function(const, event, nested=True)
+
+    def bound_once(self, code, ops, names, nested):
+        """``self`` and the event a hook was given are bound once, as the method's own parameters, and never again:
+        a store on either would otherwise be a store on whatever the name was rebound to. So no assignment to them
+        (plain, augmented, a walrus, a loop or comprehension target, nonlocal), no del, and no parameter of a
+        nested function or lambda that reuses the names."""
+        if nested:
+            count = code.co_argcount + code.co_kwonlyargcount + bool(code.co_flags & 4) + bool(code.co_flags & 8)
+            for param in code.co_varnames[:count]:
+                if param in names:
+                    self.refuse(f"{param} is bound once, as the method's parameter: a nested function has no parameter of that name", param)
+        for name, arg in ops:
+            rebound = ()
+            if name in ("STORE_FAST", "STORE_FAST_LOAD_FAST", "DELETE_FAST"):
+                rebound = (code.co_varnames[arg >> 4 if name == "STORE_FAST_LOAD_FAST" else arg],)
+            elif name == "STORE_FAST_STORE_FAST":
+                rebound = (code.co_varnames[arg >> 4], code.co_varnames[arg & 15])
+            elif name in ("STORE_DEREF", "DELETE_DEREF"):
+                rebound = (self.deref_name(code, arg),)
+            for variable in rebound:
+                if variable in names:
+                    self.refuse(f"{variable} is bound once, as the method's parameter, and never rebound or deleted", variable)
 
     @staticmethod
     def attribute_index(name, arg):

@@ -17,7 +17,8 @@ method next succeeds; a failure on a query path (``compute_realm_join`` from ``j
 query keeps no writes. Nothing reverts by itself. Reserved operations (§10.4) run no chapter, nor does a proposal or
 a federal vote about one. Effects go through the codex caller (origin ``codex``) like a legacy codex's, except that
 a governed operation always becomes a proposal the realm files; a chapter's own effects run no legislation again.
-What an operation keeps private (core.op's ``private=``) never reaches a chapter.
+What an operation keeps secret (core.op's ``secret=``: key material and credentials) never reaches a chapter; the
+personal data the audit log keeps out still reaches the legislation that decides on it (I-PRV-1).
 """
 
 import json
@@ -43,8 +44,10 @@ ACTIVATE = "codex_activate"
 READS = 2_000_000_000
 # What a chapter may read of GGG's entities, and nothing else: what legislation needs to decide, never a key, a code,
 # a person's private data, a sealed bid, who voted what, a grant or a payment account, nor what one member was told.
+# Request, Dispatch, Procedure and Loan wait for the security review before they join.
 VIEWS = {
     "Appointment": ("id", "position", "user", "kind", "agent", "supervisor", "started_at", "ended_at", "status"),
+    "Attribute": ("id", "human", "kind", "value", "status", "issuer", "verified_at", "expires_at"),
     "Authority": ("id", "grantor", "target", "operations"),
     "Budget": ("id", "fund", "period", "category", "slot", "kind", "planned", "actual", "status", "proposal"),
     "Calendar": ("id", "epoch", "fiscal_period", "voting_window", "codex_release_cycle", "benefit_cycle",
@@ -54,7 +57,8 @@ VIEWS = {
     "Court": ("id", "name", "operator", "level", "jurisdiction", "parent", "status"),
     "Department": ("id", "description", "parent", "is_root", "head", "policy", "fund"),
     "Dispute": ("id", "claimant", "respondent", "subject", "title", "status", "case"),
-    "Document": ("id", "department", "title", "author", "at"),
+    "Document": ("id", "department", "title", "kind", "languages", "public", "author", "at"),
+    "External": ("id", "name", "kind"),
     "FiscalPeriod": ("id", "name", "starts_at", "ends_at", "status"),
     "Fund": ("id", "name", "kind", "department", "balances", "allocation_rule"),
     "Human": ("id", "user"),
@@ -77,7 +81,7 @@ VIEWS = {
     "Realm": ("id", "name", "status", "accounting_currency", "accounting_currency_decimals", "is_quarter", "is_capital",
               "quarter_join_mode", "open_registration", "timezone"),
     "TaxDeclaration": ("id", "declarant", "period", "base", "amount", "status", "invoice"),
-    "TaxPolicy": ("id", "status", "document", "description", "proposal", "adopted_at"),  # + "taxes" once G2 lands it (§5.7)
+    "TaxPolicy": ("id", "status", "document", "taxes", "description", "proposal", "adopted_at"),
     "Tender": ("id", "title", "description", "requester", "status", "opens_at", "closes_at", "winner", "contract"),
     "Transfer": ("id", "sender", "to", "symbol", "amount", "status", "at"),
     "User": ("id", "nickname", "home_quarter", "profiles"),
@@ -186,7 +190,7 @@ def compute(op, **kwargs):
         return None
     method = f"compute_{op}"
     try:
-        outcome = _call("compute", op=op, kwargs=_public(kwargs, _private(op)), now=chain.now(), approvals=[])
+        outcome = _call("compute", op=op, kwargs=_public(kwargs, _secret(op)), now=chain.now(), approvals=[])
     except Fail as e:
         _record("codex", method, str(e))
         raise Fail(f"legislation error: {e}")
@@ -269,7 +273,7 @@ def _guard(op, args, call, department):
     sandbox that fails, refuses it too (fail closed), naming the chapter, and counts."""
     method = f"check_{op}"
     try:
-        outcomes = _call("guard", op=op, args=_public(args, _private(op)), now=chain.now(),
+        outcomes = _call("guard", op=op, args=_public(args, _secret(op)), now=chain.now(),
                          approvals=_approvals(call, department))
     except Fail as e:
         _record("codex", method, str(e))
@@ -289,8 +293,8 @@ def _hooks(op, args, result, call, department):
     """The hooks ``on_<op>`` after the operation, with GGG's event: one sandbox call per domain, so that each domain
     has the reads budget to itself and a domain that fails never costs another its effects. A hook that raises, or
     an effect that fails, never fails the caller: it counts against the chapter. A generator."""
-    method, private = f"on_{op}", _private(op)
-    event = {"user": call.user, "args": _public(args, private), "result": _public(result, private), "at": chain.now()}
+    method, secret = f"on_{op}", _secret(op)
+    event = {"user": call.user, "args": _public(args, secret), "result": _public(result, secret), "at": chain.now()}
     approvals = _approvals(call, department)
     try:
         domains = _call("hook_domains", op=op)
@@ -322,7 +326,7 @@ def _effects(effects):
     results = []
     for name, args in effects:
         reply = yield from _effect(name, sandbox.resolve(args, results))
-        results.append(_public(reply, _private(name)))
+        results.append(_public(reply, _secret(name)))
         if not reply.get("ok"):
             return [f"{name}: {reply.get('error')}"]
     return []
@@ -455,21 +459,21 @@ def _calendar(sources, entry):
         raise Fail(f"{entry['source']}/calendar.json is not JSON: {e}")
 
 
-def _public(value, private):
-    """``value`` without the keys ``private`` names (an operation's ``private=``, core.op: personal data and key
-    material), at any depth: what crosses into a chapter as that operation's arguments or result."""
-    if not private:
+def _public(value, secret):
+    """``value`` without the keys ``secret`` names (an operation's ``secret=``, core.op: key material and
+    credentials), at any depth: what crosses into a chapter as that operation's arguments or result."""
+    if not secret:
         return value
     if isinstance(value, dict):
-        return {k: _public(v, private) for k, v in value.items() if k not in private}
+        return {k: _public(v, secret) for k, v in value.items() if k not in secret}
     if isinstance(value, list):
-        return [_public(v, private) for v in value]
+        return [_public(v, secret) for v in value]
     return value
 
 
-def _private(op):
+def _secret(op):
     spec = ops().get(op)
-    return tuple(spec["private"]) if spec else ()
+    return spec["secret"] if spec else ()
 
 
 def _answer(action, kw):
