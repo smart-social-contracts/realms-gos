@@ -14,15 +14,42 @@ from core import ranges
 from core.db import Fail
 
 LONG = 2**63  # Cedar's integers are 64-bit: -LONG <= n < LONG
+# The most elements of a list that the forbids judge in one call, a request each. The call that would pass it is
+# refused (invalid_argument) where the list is given, at draft or at propose, so that no replay can be asked for more.
+MAX_ELEMENTS = 500
+# Everything in Cedar's syntax that is not part of a word, for finding the words outside strings.
+PUNCTUATION = str.maketrans({c: " " for c in "(){}[],;.=<>!&|+-*/:@?%^~#$"})
+
+
+def only_forbids(policies):
+    """The heads of the generated ``policies``, as the text after each ``forbid (`` at the start of a line. Fail unless
+    every policy is a forbid written that way: the realm loads this text into its own policy set, so a ``permit`` in
+    it would grant what the realm never did. What the sandbox hands over is read, not trusted, and the engine's API
+    does not list the effects of a policy, so the text is read outside its strings (a citation may say anything): no
+    word ``permit``, and as many ``;`` and ``forbid`` words as heads. A string holds no line break, so a head cannot
+    hide in one. The generator writes Cedar's escapes (``\\\\``, ``\\"``) and nothing else with a backslash before
+    a quote, so removing them leaves the quotes that open and close strings."""
+    parts = policies.replace("\\\\", "").replace('\\"', "").split('"')
+    if len(parts) % 2 == 0 or any("\n" in inside for inside in parts[1::2]):
+        raise Fail("a generated policy has a string that does not close, or breaks a line")
+    outside = " ".join(parts[0::2])
+    words = outside.translate(PUNCTUATION).split()
+    heads = ("\n" + policies).split("\nforbid (")[1:]
+    if "permit" in words:
+        raise Fail("a generated policy permits: the legislation may only forbid")
+    if not len(heads) == words.count("forbid") == outside.count(";"):
+        raise Fail("a generated policy is not a forbid written as the generator writes one")
+    return heads
 
 
 def targets(policies, facts, reserved):
     """The Cedar actions the generated ``policies`` name, by operation: ``{"tax_policy_propose":
     ["tax_policy_propose.taxes"]}``. ``facts`` holds the actions the generator described, and ``reserved`` the
-    operations no chapter may forbid (§10.4). Fail for what the generator must never write: a policy that names no
-    action (it would forbid every operation), the action of a reserved operation, or an action without facts."""
+    operations no chapter may forbid (§10.4). Fail for what the generator must never write: anything but forbids, a
+    policy that names no action (it would forbid every operation), the action of a reserved operation, or an action
+    without facts."""
     named = {}
-    for policy in ("\n" + policies).split("\nforbid (")[1:]:
+    for policy in only_forbids(policies):
         head = policy.split("resource)", 1)[0]
         if "action ==" not in head and "action in [" not in head:
             raise Fail("a generated forbid names no action: it would forbid every operation")
@@ -53,7 +80,11 @@ def requests(name, spec, args, proposal, targeted, types):
             yield action, "its arguments", facts_of(types[action], given, name)
             continue
         field = action[len(name) + 1 :]
-        for i, element in enumerate(elements(field, spec, args, given)):
+        found = elements(field, spec, args, given)
+        if len(found) > MAX_ELEMENTS:
+            raise Fail(f"{name}: {field} has {len(found)} elements; the legislation's forbids judge at most "
+                       f"{MAX_ELEMENTS} in a call")
+        for i, element in enumerate(found):
             yield action, f"{field}[{i}]", facts_of(types[action], element, f"{name}: {field}[{i}]")
 
 

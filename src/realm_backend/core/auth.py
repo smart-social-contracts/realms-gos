@@ -54,7 +54,7 @@ BLANK = {k: "" if t == "String" else False if t == "Bool" else [] for k, t in CO
 BASE = GUARDRAILS + POLICIES
 # What the Cedar engine holds: the realm's own policies, and with a layered codex the generated forbids and the schema
 # they validate against (``forbids``: core.legislation's ``generated``).
-live = {"schema": SCHEMA, "policies": BASE, "forbids": None}
+live = {"schema": SCHEMA, "policies": BASE, "forbids": None, "unloaded": frozenset()}
 
 
 def _canister_load(schema, policies):
@@ -80,18 +80,22 @@ load = _canister_load  # the engine and its parse, which tests replace along wit
 decide = _canister_decide
 
 
-def use_forbids(generated=None):
+def use_forbids(generated=None, unloaded=()):
     """Put the forbids generated for the codex now running (core.legislation's ``generated``), or none, in force.
-    The engine parses them once, here, and every decision after this evaluates them without parsing again (§9.4). Fail
-    when they do not validate: nothing changes."""
+    The engine parses them once, here, and every decision after this evaluates them without parsing again (§9.4); the
+    same forbids again, as when a codex is loaded anew, are not parsed again. Fail when they do not validate: nothing
+    changes. ``unloaded`` names the operations whose forbids are unknown because the codex did not load: they are
+    refused (``refuse_forbidden``)."""
     if generated is None:
         if live["forbids"] is not None:
             live.update(schema=SCHEMA, policies=BASE, forbids=None)
             _canister_decide.loaded = False  # the realm's own policies are parsed again at the next decision
+        live["unloaded"] = frozenset(unloaded)
         return
     policies = BASE + FORBIDS_ONLY + generated["policies"]
-    load(generated["schema"], policies)
-    live.update(schema=generated["schema"], policies=policies, forbids=generated)
+    if not (_canister_decide.loaded and live["policies"] == policies and live["schema"] == generated["schema"]):
+        load(generated["schema"], policies)
+    live.update(schema=generated["schema"], policies=policies, forbids=generated, unloaded=frozenset())
     _canister_decide.loaded = True
 
 
@@ -201,11 +205,15 @@ def refuse_forbidden(user, name, spec, args, proposal):
     ``name``, or none may be asked of it, nothing is. A refusal names the forbids that fired, the id and citation of
     each, found only then."""
     in_force = live["forbids"]
-    if in_force is None:
+    if in_force is None and not live["unloaded"]:
         return
     from core import legislation  # it imports core.op, which imports this module
 
     if legislation.is_reserved(name, args):  # a reserved operation, and a proposal or a vote about one: no forbid (§10.4)
+        return
+    if name in live["unloaded"]:  # a read too: the realm refuses what a forbid it cannot load would have judged
+        raise Denied(f"{name} is forbidden by the legislation, which does not load: revert the codex to use it")
+    if in_force is None:
         return
     entities = [{"uid": {"type": "Realm::User", "id": user}, "attrs": {"permissions": [], "banned": False}, "parents": []},
                 {"uid": {"type": "Realm::Realm", "id": "1"}, "attrs": {}, "parents": []}]

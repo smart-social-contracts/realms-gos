@@ -8,11 +8,11 @@ import pytest
 import world
 from core import auth, forbids, layered_codex as store, legislation, localtime, sandbox
 from core.db import Fail
-from ggg import Budget, LayeredCodex, Proposal, TaxPolicy
+from ggg import Budget, FederalVote, LayeredCodex, Proposal, TaxPolicy
 from kit import call, denied, ok, rows
 from realms.legislation import RESERVED
 from realms.legislation.cedar import FactSchema
-from test_budget_proposal import file_roads_budget, vote
+from test_budget_proposal import file_roads_budget, infrastructure_decides, vote
 from test_legislation_runtime import activate, layered
 from test_treasury import draft, setup_finance
 
@@ -254,7 +254,9 @@ def test_the_forbids_are_parsed_once_when_the_codex_becomes_the_running_one(agor
     for rate in (CAP, CAP + 1, CAP):
         call("tax_policy_draft", "bob", **drafted(entry("ibi_urban", rate)))
     assert len(requests.loads) == 1  # decisions reuse what the engine holds
-    legislation.warm(LayeredCodex[codex.id])  # the realm's start parses the set again, once
+    legislation.warm(LayeredCodex[codex.id])  # a reload of the same forbids finds them parsed already
+    assert len(requests.loads) == 1
+    codex_of({(SPAIN, "tax"): SPAIN_TAX}, previous=codex.id)  # other forbids are parsed, once
     assert len(requests.loads) == 2
 
 
@@ -387,6 +389,178 @@ def test_a_replay_the_forbids_allow_runs_and_a_legacy_realms_replay_is_untouched
     assert Proposal[second].status == "executed"
     replay = requests.asked[before:]
     assert ("budget_propose", {"period": "FY2026", "expense": 200, "revenue": 0}) in replay
+
+
+# ── Who the call acts for, and the proposal a governed call files ────────────────────────────────────────────────
+
+DELEGATES = """
+from realms.legislation import F, above, forbid
+
+class LocalRegime(above("local_regime")):
+    no_delegate_votes = forbid("proposal_vote", F.on_behalf_of.is_some(), legislation="members vote themselves")
+"""
+FILINGS = """
+from realms.legislation import F, above, forbid
+
+class LocalRegime(above("local_regime")):
+    no_infrastructure_filings = forbid("proposal_create", F.department.is_some() & (F.department == "Infrastructure"),
+                                       legislation="Infrastructure files nothing")
+"""
+
+
+def test_a_forbid_reads_the_principal_a_call_acts_for(agora):
+    """`on_behalf_of` is one of the operation's arguments as GGG defines them: a rule can refuse a delegate's vote."""
+    codex_of({("x/town", "local_regime"): DELEGATES})
+    motion = ok("proposal_create", "alice", title="a motion")["proposal"]
+    ok("delegation_grant", "alice", delegate="claude-conn", operations=["proposal.vote"], expires_in=86400)
+    message = denied("proposal_vote", "claude-conn", proposal=motion, choice="yes", on_behalf_of="alice")
+    assert "proposal_vote is forbidden by the legislation: its arguments: refused by " \
+           "x/town/local_regime/no_delegate_votes (members vote themselves)" in message
+    ok("proposal_vote", "alice", proposal=motion, choice="yes")  # her own vote is her own
+
+
+def test_a_governed_call_that_becomes_a_proposal_meets_the_forbids_of_proposal_create(agora):
+    lines = [draft("ROADS", "capital", 300)]
+    infrastructure_decides(agora)  # a vote is needed: bob's call would file a proposal of Infrastructure's
+    codex_of({("x/town", "local_regime"): FILINGS})
+    message = denied("budget_propose", "bob", fund="ROADS", period="FY2026")
+    assert "proposal_create is forbidden by the legislation: its arguments: refused by " \
+           "x/town/local_regime/no_infrastructure_filings" in message
+    assert Proposal.count() == 0 and Budget[lines[0]].status == "draft"  # nothing was filed, nothing fixed
+    root = draft("ROOT", "salaries", 500)  # the realm's own budget is decided directly: no proposal, no forbid
+    assert "proposal" not in ok("budget_propose", "bob", fund="ROOT", period="FY2026")
+    assert Budget[root].status == "adopted"
+
+
+def test_a_federal_vote_that_carries_a_call_the_forbids_refuse_is_refused_when_proposed(agora):
+    codex_of({("x/town", "local_regime"): """
+from realms.legislation import F, above, forbid
+
+class LocalRegime(above("local_regime")):
+    low_threshold = forbid("governance_update", F.voting_threshold.is_some() & (F.voting_threshold > 55000000),
+                           legislation="at most 55 %")
+"""})
+    action = {"op": "governance_update", "args": {"voting_threshold": 60_000_000}}
+    message = denied("federal_vote_propose", "bob", title="Adopt", action=action)
+    assert "governance_update is forbidden by the legislation: its arguments: refused by x/town/local_regime/low_threshold" \
+        in message
+    assert FederalVote.count() == 0
+    action["args"]["voting_threshold"] = 50_000_000
+    assert ok("federal_vote_propose", "bob", title="Adopt", action=action)["vote"]
+
+
+# ── What the realm will load, and what it can say ────────────────────────────────────────────────────────────────
+
+FORBID = 'forbid (principal, action == Realm::Action::"a", resource)\n  when { true };\n'
+
+
+def test_the_realm_loads_forbids_and_nothing_else_from_the_sandbox():
+    facts = {"a": {}}
+    assert forbids.targets("@id(\"x\")\n" + FORBID, facts, RESERVED) == {"a": ["a"]}
+    # what is inside a string is not code, whatever it says; an escaped quote does not close it
+    quoted = '@legislation("a permit (principal, action, resource); \\" forbid (")\n@id("x \\\\")\n' + FORBID
+    assert forbids.targets(quoted, facts, RESERVED) == {"a": ["a"]}
+    for smuggled, why in (
+        ("permit (principal, action, resource);\n", "permits"),
+        ("@id(\"p\")\npermit (principal, action == Realm::Action::\"a\", resource) when { context.public };\n", "permits"),
+        ("forbid(principal, action, resource);\n", "not a forbid written as"),  # a head the scan of heads would miss
+        ("//\nforbid (principal, action, resource) when { true }\n;", "names no action"),
+        ("@id(\"u\n\")\n", "does not close, or breaks a line"),
+        ("@id(\"u)\n", "does not close, or breaks a line"),
+    ):
+        with pytest.raises(Fail, match=why):
+            forbids.targets(FORBID + smuggled, facts, RESERVED)
+
+
+def test_a_codex_whose_generated_cedar_smuggles_a_permit_is_not_loaded_nor_built(agora, monkeypatch):
+    first = valencia()
+    running = dict(auth.live)
+    call_in_box = sandbox.Resident.call
+
+    def smuggles(self, fn, **kwargs):
+        reply = call_in_box(self, fn, **kwargs)
+        if fn == "cedar" and reply["cedar"]:
+            reply["cedar"] += "permit (principal, action, resource);\n"
+        return reply
+
+    monkeypatch.setattr(sandbox.Resident, "call", smuggles)
+    other = layered({(SPAIN, "tax"): SPAIN_TAX}, layers=[SPAIN])
+    with pytest.raises(Fail, match="permits"):
+        legislation.load(other)
+    chapters = {(SPAIN, "tax"): SPAIN_TAX}
+    plan = {"realm": SPAIN, "layers": [SPAIN], "calendars": [],
+            "chapters": [{"source": s, "domain": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
+    built = legislation.build(plan, {store.checksum(t): t for t in chapters.values()})
+    assert any("permits" in e for e in built["errors"])
+    assert auth.live == running and legislation._state["codex"] == first.id
+
+
+def test_the_reason_is_a_courtesy_and_the_sandbox_is_not_trusted_with_it(agora, monkeypatch):
+    valencia()
+    answers = [RuntimeError("boom"), Fail("not loaded"), None, "x", {"id": "a"}, [{"id": 1, "legislation": "c"}],
+               [{"id": "a", "legislation": 3}], ["a"], [{"legislation": "c"}]]
+    for answer in answers:
+        def ask(fn, **kwargs):
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with monkeypatch.context() as m:
+            m.setattr(legislation, "_call", ask)
+            assert legislation.firing("tax_policy_draft.taxes", {}) == []
+            message = denied("tax_policy_draft", "bob", **drafted(entry("ibi_urban", CAP + 1)))
+        assert message.endswith("tax_policy_draft is forbidden by the legislation: taxes[0]"), (answer, message)
+    many = [{"id": "x" * 500, "legislation": None}] * 20
+    with monkeypatch.context() as m:
+        m.setattr(legislation, "_call", lambda fn, **kwargs: many)
+        found = legislation.firing("tax_policy_draft.taxes", {})
+    assert len(found) == 8 and found[0] == {"id": "x" * 200, "legislation": ""}
+
+
+# ── A codex that does not load, and the lists the forbids judge ──────────────────────────────────────────────────
+
+READS = """
+from realms.legislation import F, above, forbid
+
+class Realm(above("realm")):
+    no_big_pages = forbid("user_list", F.limit.is_some() & (F.limit > 100), legislation="pages of at most 100")
+"""
+
+
+def test_while_a_codex_does_not_load_a_read_its_forbids_would_judge_is_refused(agora, monkeypatch):
+    row = codex_of({(SPAIN, "tax"): SPAIN_TAX, ("x/town", "realm"): READS})
+    assert row.forbids == ["tax_policy_draft", "tax_policy_propose", "user_list"]  # kept for the day it does not load
+    assert "forbidden by the legislation" in denied("user_list", "dana", limit=101)
+    ok("user_list", "dana", limit=100)
+    # an upgrade empties the heap, and the codex no longer loads
+    legislation._state.update(codex=legislation.UNKNOWN, box=None, failing=False)
+    auth.use_forbids(None)
+
+    def boom(plan, texts):
+        raise Fail("the library no longer compiles")
+
+    with monkeypatch.context() as m:
+        m.setattr(legislation, "_spawn", boom)
+        legislation.warm()
+        assert "which does not load" in denied("user_list", "dana")  # a read, with no argument that would be refused
+        assert "which does not load" in denied("tax_policy_draft", "bob", **drafted(entry("water", 5)))
+        ok("codex_status", "ctl")  # what no forbid names still reads
+        assert "does not load" not in call("codex_revert", "ctl").get("error", "")  # and a revert is how it ends
+    legislation.warm()  # the library compiles again
+    ok("user_list", "dana", limit=100)
+    assert "forbidden by the legislation" in denied("user_list", "dana", limit=101)
+
+
+def test_a_list_of_more_than_500_elements_is_refused_where_it_is_given(agora):
+    codex_of({(SPAIN, "tax"): SPAIN_TAX})
+    many = [entry(f"tax{i}", 5) for i in range(501)]
+    refused = call("tax_policy_draft", "bob", **drafted(*many))
+    assert refused["kind"] == "invalid_argument" and "has 501 elements" in refused["error"]
+    assert TaxPolicy.count() == 0
+    saved = TaxPolicy(id="TAX-POLICY-9", status="draft", document={"symbol": "REALM"}, taxes=many).id  # drafted before
+    refused = call("tax_policy_propose", "bob", policy=saved)
+    assert refused["kind"] == "invalid_argument" and "has 501 elements" in refused["error"]
+    assert ok("tax_policy_draft", "bob", **drafted(*many[:500]))["policy"]  # 500 are judged, one request each
 
 
 PROPOSALS = """

@@ -137,6 +137,20 @@ unnamed, _ = refused()
 legislation.firing = real
 print(json.dumps({"named": named, "unnamed": unnamed, "message": message}))
 '''
+# The boundary: a policy set the sandbox hands over with a permit smuggled in is refused, one that only says "permit" in a
+# string is not.
+BOUNDARY = '''
+import json
+from core import forbids
+forbid = 'forbid (principal, action == Realm::Action::"a", resource)\\n  when { true };\\n'
+got = {}
+for name, text in (("string", '@legislation("a permit (x);")\\n' + forbid), ("smuggled", forbid + "permit (principal, action, resource);\\n")):
+    try:
+        got[name] = forbids.targets(text, {"a": {}}, ())
+    except Exception as e:
+        got[name] = str(e)
+print(json.dumps(got))
+'''
 IN_FORCE = '''
 from core import auth
 print(auth.live["forbids"] is not None, sorted(auth.live["forbids"]["targeted"]) if auth.live["forbids"] else [])
@@ -174,6 +188,10 @@ def test_c_the_forbids_are_parsed_once_when_the_codex_becomes_the_running_one(ca
     got = install(capital, CODEX, layers=(SPAIN, TOWN), calendars=())
     assert got["failures"] == {}
     assert capital.shell(IN_FORCE).strip() == "True ['tax_policy_draft', 'tax_policy_propose']"
+    stored = capital.shell(f"from ggg import LayeredCodex\nprint(LayeredCodex[{got['codex']!r}].forbids)").strip()
+    assert stored == "['tax_policy_draft', 'tax_policy_propose']"  # kept for a day the codex does not load
+    boundary = run(capital, BOUNDARY)
+    assert boundary["string"] == {"a": ["a"]} and "permits" in boundary["smuggled"], boundary
     capital.filed = filed
     costs.report("install a codex with forbids: load (sandbox, generated Cedar, engine) and activate", got["load"] + got["activate"])
     parts = run(capital, LOAD % {"codex": got["codex"]})

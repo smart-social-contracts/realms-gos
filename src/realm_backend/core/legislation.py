@@ -122,7 +122,8 @@ def warm(codex=UNKNOWN):
         load(codex)
     except Exception as e:  # noqa: BLE001  whatever it is, the realm starts and records it
         _drop()
-        auth.use_forbids(None)
+        # Its forbids are unknown now, but not which operations they name: those are refused until it is reverted.
+        auth.use_forbids(None, unloaded=codex.forbids if isinstance(codex.forbids, list) else ())
         _state.update(codex=codex.id, failing=bool(codex.failures))
         _record("codex", "load", str(e) if isinstance(e, Fail) else f"{type(e).__name__}: {e}")
 
@@ -133,11 +134,14 @@ def load(codex):
     the install task calls this before the switch, so that a switch to it never happens (§9.2 step 6)."""
     box = _spawn(_plan_of(codex), _texts(codex)) if codex is not None else None
     try:
-        auth.use_forbids(_generated(box) if box is not None else None)
+        generated = _generated(box) if box is not None else None
+        auth.use_forbids(generated)
     except BaseException:
         if box is not None:
             box.close()
         raise
+    if codex is not None and codex.forbids != sorted(generated["targeted"] if generated else ()):
+        codex.forbids = sorted(generated["targeted"] if generated else ())
     _drop()
     _state.update(codex=codex.id if codex is not None else None, box=box, failing=bool(codex.failures) if codex else False)
     if codex is not None:
@@ -182,11 +186,19 @@ def activate(codex):
 
 def firing(action, facts):
     """The forbids of the running codex that refuse ``facts`` on Cedar ``action``, ``[{"id", "legislation"}]``, asked of
-    the sandbox once a request has been refused (core.auth.refuse_forbidden). Empty when it cannot say."""
+    the sandbox once a request has been refused (core.auth.refuse_forbidden). The reason is a courtesy and the sandbox
+    is not trusted with it: whatever goes wrong, or comes back that is not a short list of ids and citations, it is
+    empty and the plain reason stands."""
     try:
-        return _call("fired", action=action, facts=facts)
-    except Fail:
+        found = _call("fired", action=action, facts=facts)
+    except Exception:  # noqa: BLE001  the refusal does not depend on it
         return []
+    if not isinstance(found, list) or not all(
+        isinstance(f, dict) and isinstance(f.get("id"), str) and (f.get("legislation") is None or isinstance(f["legislation"], str))
+        for f in found
+    ):
+        return []
+    return [{"id": f["id"][:200], "legislation": (f["legislation"] or "")[:200]} for f in found[:8]]
 
 
 def run(op, call, args, department, perform, record, read=False):

@@ -125,6 +125,8 @@ def federal_vote_propose(c, args):
     """Propose a federal vote titled ``title`` on ``action`` (``{"op": …, "args": …}``), held in every active quarter
     under the published rule; a quarter passes it to the capital. Returns ``vote``."""
     action = {**args["action"], "title": args["title"]}
+    proposals.check_action(action)
+    proposals.refuse_forbidden_action(c.user, action)
     if not quarters.federated():
         return (yield from open_vote(action, c.user, c.by, chain.self_id()))
     reply = yield from quarters.ask(quarters.capital(), "federation_message",

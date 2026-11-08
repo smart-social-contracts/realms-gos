@@ -60,6 +60,13 @@ def check_action(action):
     ranges.check(action["op"], action.get("args") or {})
 
 
+def refuse_forbidden_action(user, action):
+    """The forbids of the legislation hold for the action a proposal or a federal vote carries from the filing, as they
+    do for a governed call that files its own proposal: one that could only fail is never put to the vote. They are
+    asked again when it executes. Call this after ``check_action``, before the action fixes anything."""
+    auth.refuse_forbidden(user, action["op"], ops()[action["op"]], action.get("args") or {}, "")
+
+
 def check_scope(department, action):
     """A department's vote only carries actions that department governs, or one under it: the vote of a few seats
     is not the realm's. A realm-wide proposal (the root department) may carry any action. A proposal whose department
@@ -485,9 +492,7 @@ def proposal_create(c, args):
             raise Forbidden("a proposal filed under power of attorney is a motion: it carries no action")
         check_action(action)
         check_scope(department, action)
-        # The forbids of the legislation hold at filing as they do when a governed call files its proposal, before the
-        # action fixes what it carries; they are asked again when it executes.
-        auth.refuse_forbidden(c.user, action["op"], ops()[action["op"]], action.get("args") or {}, "")
+        refuse_forbidden_action(c.user, action)
     links = checked_links(c.user, args.get("links"))
     stated = {k: args.get(k) for k in ("kind", "matter", "threshold", "quorum", "threshold_of")}
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),

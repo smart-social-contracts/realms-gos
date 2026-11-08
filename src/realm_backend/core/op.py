@@ -101,7 +101,10 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
         user = by if origin == "replay" else claimed or by
         grant = auth.authorize(user, by, name, spec, args, origin, declared)
-        auth.refuse_forbidden(user, name, spec, args, proposal)
+        # The facts of a call are its arguments as GGG defines them, and ``on_behalf_of`` is one: a forbid may refuse a
+        # delegate's vote. ``claimed`` was taken out of ``args`` above, for the operations never read it.
+        stated = {**args, "on_behalf_of": claimed} if claimed else args
+        auth.refuse_forbidden(user, name, spec, stated, proposal)
         ranges.check(name, args)
         if spec["check"]:
             spec["check"](args)
@@ -116,6 +119,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
             from api import proposals
 
             pargs = filing(name, args, governing)
+            auth.refuse_forbidden(user, "proposal_create", OPS["proposal_create"],
+                                  {**pargs, "on_behalf_of": claimed} if claimed else pargs, "")
             out = yield from legislation.run("proposal_create", call, pargs, None,
                                              lambda: proposals.file_replay(pargs, user, by, grant), record)
         else:
