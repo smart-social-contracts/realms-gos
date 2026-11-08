@@ -325,7 +325,7 @@ class Procedure(above("procedure")):
     default_decision_deadline = overridable(months(3), legislation="Ley 39/2015 Art. 21.3")   # a GGG Period
 
     over_six_months = forbid("procedure_define",
-        F.decision_deadline.is_some() & (F.decision_deadline > 6)             # GGG's fact, a Period compared in months
+        F.decision_deadline.is_some() & (F.decision_deadline > months(6))     # GGG's fact, a Period: another unit fails closed (§6)
         & F.longer_deadline_legislation.is_none(),
         legislation="Ley 39/2015 Art. 21.2")
 
@@ -409,7 +409,7 @@ whatever version of the CV chapter is pinned.
 
 ```python
 default_decision_deadline = overridable(months(3), legislation="Ley 39/2015 Art. 21.3")   # in eu/es
-default_decision_deadline = days(60)                                                      # in València
+default_decision_deadline = months(2)                                                     # in València
 co_official = fixed(["ca-valencia", "es"], legislation="Estatut d'Autonomia Art. 6")      # in eu/es/vc
 ```
 
@@ -548,10 +548,12 @@ legislation in force.
 ```python
 # legislation/eu/es/vc/46250-valencia/procedure.py
 class Procedure(above("procedure")):
-    default_decision_deadline = days(60)
+    default_decision_deadline = months(2)
 ```
 
-- **València:** 60 days. Spain's six-month forbid on `procedure_define` still applies.
+- **València:** two months. It is written in months because Spain's Art. 21.2 forbid compares a
+  deadline in months and refuses any other unit (§6). The six-month forbid on `procedure_define` still
+  applies.
 - **A town with no `procedure.py`:** three months, Spain's default (Ley 39/2015 Art. 21.3).
 
 ### 5.2 A chain down the layers
@@ -721,6 +723,10 @@ class Tax(above("tax")):
     services_beyond_art26 = overridable(False, legislation="TRLRHL Art. 72.3")
     rustic_over_80pct = overridable(False, legislation="TRLRHL Art. 72.3")
 
+    ibi_rate_required = forbid("tax_policy_propose",
+        F.code.in_(["ibi_urban", "ibi_rustic"]) & F.rate.is_none(),
+        each="taxes", legislation="TRLRHL Art. 72")
+
     ibi_urban_range = forbid("tax_policy_propose",
         (F.code == "ibi_urban") & F.rate.is_some() & ~F.rate.between(pct("0.40"), pct("1.30")),
         each="taxes", legislation="TRLRHL Art. 72.1, 72.3")
@@ -770,6 +776,10 @@ class Tax(above("tax")):
 
 - **The rate lives in one place:** the entry of the adopted policy, proposed with
   `tax_policy_propose`. The forbids check it. València's chapter holds no rate.
+- **An IBI entry must state its rate:** `ibi_rate_required` forbids an `ibi_urban` or `ibi_rustic` entry
+  with no `rate`. The rate is an optional fact, so the other three forbids test `F.rate.is_some()` (§6,
+  rule 3), and an entry with no rate would pass all of them. The requirement is Spain's legislation,
+  not GGG's: GGG stays generic.
 - **The same forbids run when the draft is saved** (`tax_policy_draft`), so an entry they refuse never
   reaches a proposal.
 - **The settings** `capital`, `surface_public_transport` and the rest are world facts of the realm's
@@ -801,14 +811,19 @@ València's water layer path goes through EMSHI, because València syncs from EM
 ### 5.8 The generated Cedar
 
 From 5.6, inside València. `S.capital` and the other settings are folded to their values in the
-realm's layer path, and the action is GGG's operation. With `each`, Cedar sees one request per list
-element, with the element's fields as facts. The numbers are `rate`'s integers in hundred-millionths:
-`pct("1.10")` is 1100000.
+realm's layer path. A forbid without `each` names GGG's operation. With `each`, it names the per-list
+actions `<operation>.<list>`, here `tax_policy_propose.taxes` and, since the same forbids run at draft,
+`tax_policy_draft.taxes` (§9.4). Cedar sees one request per list element on that action, with the
+element's fields as facts. The numbers are `rate`'s integers in hundred-millionths: `pct("1.10")` is
+1100000.
 
 ```
 @id("eu/es/tax/ibi_urban_cap")
 @legislation("TRLRHL Art. 72.3")
-forbid (principal, action == Realm::Action::"tax_policy_propose", resource)
+forbid (principal,
+        action in [Realm::Action::"tax_policy_propose.taxes",
+                   Realm::Action::"tax_policy_draft.taxes"],
+        resource)
   when { context.facts.code == "ibi_urban"
          && context.facts has rate
          && context.facts.rate > 1100000
@@ -822,6 +837,7 @@ forbid (principal, action == Realm::Action::"tax_policy_propose", resource)
 ```
 tax, as it applies in València (codex sha256:3f1c…), path Spain → València:
   capital, surface_public_transport = true          València   (Spain asks, València fills)
+  ibi_rate_required     forbid                      Spain      TRLRHL Art. 72
   ibi_urban_range       forbid                      Spain      TRLRHL Art. 72.1, 72.3
   ibi_urban_cap         forbid                      Spain      TRLRHL Art. 72.3
                         for València: capital + transport → maximum 1.24 % (1240000)
@@ -844,6 +860,12 @@ tax, as it applies in València (codex sha256:3f1c…), path Spain → València
   `each`, a forbid sees the whole args. For `tax_policy_propose`, whose args hold only a policy id,
   `each="taxes"` is the `taxes` list of the saved TaxPolicy that the id names, and the same forbids run
   when the draft is saved with `tax_policy_draft`.
+  - **The Cedar action.** A forbid with `each` names the action `<operation>.<list>`, e.g.
+    `tax_policy_propose.taxes`, and also `tax_policy_draft.taxes`, since the same forbids run at draft.
+    That action's `facts` are the element's type. A forbid without `each` names the operation, whose
+    `facts` are its args. A Cedar action has one context type, and the operation's own args (for
+    `tax_policy_propose`, only the policy id) are not the element's fields, so the per-element requests
+    need actions of their own.
 - **`expression`** is built from `F` and `S`, and is true when the operation is forbidden.
 
 | Write | Means | Cedar |
@@ -859,6 +881,14 @@ tax, as it applies in València (codex sha256:3f1c…), path Spain → València
 | `F.s.contains("a")` | set fact contains | `s.contains("a")` |
 | `F.x.is_none()`, `F.x.is_some()` | optional fact absent or present | `!(context.facts has x)`, `context.facts has x` |
 | `when(c, a, b=0)` | if c then a else b | `if c then a else b` |
+| `F.p > months(6)` | a Period fact against a Period of the unit the rule names; another unit makes the comparison true | `context.facts.p.unit != "Month" \|\| context.facts.p.count > 6` |
+
+**Periods compare only within one unit** (§4.3), and a forbid fails closed: a deadline in any other unit
+makes the comparison true, so the forbid fires. A deadline must therefore be written in the unit the
+rule uses, because days and months don't convert cleanly: a month is not a fixed number of days, and a
+count of days in legislation is often a count of working days. Art. 21.2 (§4) is in months, so
+`days(60)` is refused unless the call names the legislation that allows a longer deadline, and
+València's default is `months(2)` (§5.1).
 
 The rules:
 
@@ -878,9 +908,13 @@ The rules:
 6. **A forbid does not round.** It compares integers. Rounding happens only where money is computed
    from a rate (§4.5), by GGG's one rule.
 7. **The same tree evaluates in plain Python** (`expr.evaluate(facts)`) for tests. CI checks that
-   Python and Cedar give the same answer on generated facts.
+   Python and Cedar give the same answer on generated facts, among them each literal ±1, 0 and the
+   64-bit extremes: Python integers never overflow, so only such facts show where the two differ.
 8. **Ids and annotations:** each forbid's Cedar `@id` is `"<source>/<domain>/<attribute>"`, plus a
    `@legislation("<citation>")` annotation.
+9. **A forbid never errors.** Cedar skips a policy whose evaluation errors, so an overflowing forbid
+   would allow. `check` proves it for every forbid (`never-errors`, §12.3), and the generator bounds
+   arithmetic on facts by the fact schema's ranges (a value out of range makes the forbid fire).
 
 **When a forbid, when a guard:** use a `forbid` whenever the rule fits the expression language, so
 that it's analysed. Guards (Python methods) are for rules that need loops, other domains, or the
@@ -1106,8 +1140,11 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) (see [Authorization](.
 
 1. **One Cedar action per GGG operation,** named as the operation, e.g.
    `Realm::Action::"tax_policy_propose"`, each `in [Realm::Action::"call"]`. Each action's Cedar
-   context includes `facts`, typed from the operation's args. For a forbid with `each`, one request is
-   made per element.
+   context includes `facts`, typed from the operation's args. A forbid with `each` names the action
+   `<operation>.<list>`, e.g. `tax_policy_propose.taxes`, and also `tax_policy_draft.taxes`, since the
+   same forbids run at draft. Like the others, those actions are `in [Realm::Action::"call"]`; their
+   `facts` are the element's type, and one request is made per element. A forbid without `each` names
+   the operation, whose `facts` are its args (§6).
 2. **Today's `POLICIES`** use `action == Realm::Action::"call"`; they become
    `action in Realm::Action::"call"`. `GUARDRAILS` (`principal, action, resource`) are unchanged.
    `context.op` stays for compatibility.
@@ -1287,7 +1324,9 @@ It uses Python's parser (`ast`), so it runs only off-chain:
 - reserved operations (§10.4);
 - cycles across `uses`, for every realm that a change affects;
 - every chapter's own `cases.json`, if present, run on the resolved domains;
-- **Python versus Cedar agreement:** generated facts are evaluated both ways and must agree.
+- **Python versus Cedar agreement:** generated facts are evaluated both ways and must agree;
+- **Never errors:** the generated Cedar of every forbid is proved never to error (§6, rule 9), with the
+  analysis tool of §12.3.
 
 ### 12.2 In-canister checks (install step 5, no parser)
 
@@ -1314,17 +1353,28 @@ For a change list, it compares the old and new codices:
 
 1. **The generated Cedar** of both, and the diff.
 2. **Newly forbidden and newly allowed, per operation:** for example, "urban IBI between 1.10 % and
-   1.24 % for capitals: newly allowed". This is proven by Cedar analysis, not sampled.
+   1.24 % for capitals: newly allowed". This is proven by Cedar analysis, not sampled. The analysis
+   proves whether anything is newly forbidden or allowed and gives an example request; the range shown
+   is computed from the `F` trees and proved equal to the difference by an equivalence check.
 3. **"Nothing permitted"** for an operation: no request of that operation can be allowed.
 4. **"Never fires"** (a forbid that is always false) and **"overlap"** (a forbid implied by another).
 5. **The flattened view per changed domain** (§5.9), before and after.
 6. **Dependencies:** every realm and domain affected, through `above()` and `uses`.
 7. **Test cases:** run and results.
+8. **Settings folded and open:** for a source's change, the analysis runs for each affected realm, with
+   its settings folded, and once with the settings left open, which gives statements such as "for
+   capitals".
 
-The tool for points 2–4 is the research issue
-[#481](https://github.com/smart-social-contracts/realms-gos/issues/481) (candidates: Cedar's symbolic
-analysis via an SMT solver). If it isn't usable, the fallback is bounded exhaustive testing over the
-facts' value ranges, labelled as such in the report.
+The tool for points 2–4 is Cedar's symbolic compiler, SymCC (`cedar symcc` of the Cedar CLI,
+experimental flavour), with the cvc5 solver, both pinned by version and checksum
+([R1, #481](https://github.com/smart-social-contracts/realms-gos/issues/481)). Answers hold for every
+request GGG's fact schema allows: its ranges and enumerations, which a Cedar schema can't state, are
+added to the analysis as assumption forbids. A query the solver doesn't finish is reported as
+undecided, never as a pass.
+
+The analysis uses the Cedar semantics of the CLI's version (4.14.1), while the canister links
+`cedar-policy` 4.12.0 (basilisk's canister template). The forbids use only core operators, so the
+difference is not expected to matter; the two versions are aligned at basilisk's next bump.
 
 ### 12.4 `realms legislation resolve`: resolver and flattened view
 
@@ -1375,7 +1425,7 @@ is no G6.
 
 | Id | Repo | Title | Depends on | Done when |
 |---|---|---|---|---|
-| R1 ([#481](https://github.com/smart-social-contracts/realms-gos/issues/481)) | realms-gos (research) | Cedar analysis tooling for "newly forbidden", "nothing permitted", "never fires" and "overlap" | – | a report with a recommendation and a working sample on the three forbids of §5.6 and the Art. 21.2 forbid of §4 |
+| R1 ([#481](https://github.com/smart-social-contracts/realms-gos/issues/481)) | realms-gos (research) | Cedar analysis tooling for "newly forbidden", "nothing permitted", "never fires" and "overlap" | – | **Done:** a report with a recommendation (SymCC with cvc5, §12.3) and a working sample on the three forbids of §5.6 and the Art. 21.2 forbid of §4. Its findings are in §5.6, §6, §9.4 and §12.3, and in S2, C2, C4 and D4 below |
 | R2 ([#482](https://github.com/smart-social-contracts/realms-gos/issues/482)) | realms-gos (research) | Which §4 restrictions the codex sandbox enforces at run time today | – | table of rule → enforced or not, with the code path |
 | G1 ([ggg#1](https://github.com/smart-social-contracts/ggg/issues/1)) | ggg | Domain list | – | versioned list merged |
 | G2 ([ggg#2](https://github.com/smart-social-contracts/ggg/issues/2)) | ggg | The entities, fields and operations that real legislation needs (§13), each added or narrowed; the share arguments name `legislation`; the fact schema's rate scale (hundred-millionths) and unit rule; `each="taxes"` over the saved policy, also at `tax_policy_draft` | G1 | `.did` merged; conformance notes updated |
@@ -1390,17 +1440,17 @@ is no G6.
 | [#505](https://github.com/smart-social-contracts/realms-gos/issues/505) | realms-gos | Count working days in the realm (§3.4, §4.3): start + n working days on the realm's calendar in its time zone, one function in the date module of #503; the library gains `working_days(n)`; a count that reaches a year with no calendar entries fails closed | #503, G8 | PocketIC: a 2-working-day count over a holiday and a weekend, and one across a summer-time change, pass; a count into a year with no entries fails with a clear error |
 | [#499](https://github.com/smart-social-contracts/realms-gos/issues/499) | realms-gos | Test harness for linked realms: scripted peers in `fake_chain`, multi-canister PocketIC, outcall mocking, public fixtures | – | the workflow tests of the change list run on it |
 | S1 ([#483](https://github.com/smart-social-contracts/realms-gos/issues/483)) | realms-gos | `realms.legislation`: `Chapter`, `above`, marks, settings with `check=`, `pct()`, the `self` API, hooks, guards and `compute_` methods by GGG operation name, `on_codex_activate` and `compute_realm_join`, read-only `ggg` entities, `times()`, `self.calendar`; self-contained, no CLI dependency | G2 | unit tests for every line of the §4.1 table, including the §5.5 refusal; the module imports nothing from typer, rich or requests |
-| S2 ([#484](https://github.com/smart-social-contracts/realms-gos/issues/484)) | realms-gos | `realms.legislation`: `F` expressions with `each` and `S.`, `pct()` literals, canonical Cedar output, Python evaluation | S1 | the forbids of §5.6 and §4 produce the Cedar of §5.8; Python and Cedar agree on 10 000 generated fact sets |
+| S2 ([#484](https://github.com/smart-social-contracts/realms-gos/issues/484)) | realms-gos | `realms.legislation`: `F` expressions with `each` (one Cedar action per list, §6) and `S.`, `pct()` literals, Period comparisons, canonical Cedar output, a generic output mode for analysis (settings left open, §12.3), Python evaluation | S1 | the forbids of §5.6 and §4 produce the Cedar of §5.8; Python and Cedar agree on 10 000 generated fact sets, among them the literals ±1, 0 and the 64-bit extremes; every forbid passes `never-errors` |
 | S3 ([#485](https://github.com/smart-social-contracts/realms-gos/issues/485)) | realms-gos | Resolver: layer paths from the links with the one-chain rule, extension merge, `uses`, depth limit | S1 | examples 5.1–5.7 resolve as described |
 | C1 ([realms-codices#10](https://github.com/smart-social-contracts/realms-codices/issues/10)) | realms-codices | `legislation/` tree, `source.json`, `releases.json` with the `calendar` field, `calendar.json`, README for authors | S3 | the València example chapters present; schema checked in CI |
-| C2 ([realms-codices#11](https://github.com/smart-social-contracts/realms-codices/issues/11)) | realms-codices | `realms legislation check` in realms-codices CI (the command lives in realms-gos `cli/`) | S1, S2, C1 | every rule of §12.1 has a failing and a passing test |
+| C2 ([realms-codices#11](https://github.com/smart-social-contracts/realms-codices/issues/11)) | realms-codices | `realms legislation check` in realms-codices CI (the command lives in realms-gos `cli/`), including `never-errors` for every forbid (§6, rule 9) | S1, S2, C1 | every rule of §12.1 has a failing and a passing test, among them a forbid that can overflow |
 | C3 ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)) | realms-codices | `realms legislation resolve` and `propose` (the commands live in realms-gos `cli/`) | S3, C1 | change list of §7 produced for the §5.6 bonus change |
-| C4 ([realms-codices#13](https://github.com/smart-social-contracts/realms-codices/issues/13)) | realms-codices | `realms legislation diff`: the analysis report on PRs | R1, C3 | report of §12.3 posted on a sample PR |
+| C4 ([realms-codices#13](https://github.com/smart-social-contracts/realms-codices/issues/13)) | realms-codices | `realms legislation diff`: the analysis report on PRs, by SymCC (the Cedar CLI 4.14.1, experimental flavour) with cvc5 1.3.1, both downloaded by version and checksum | R1, C3 | report of §12.3 posted on a sample PR |
 | C5 ([realms-codices#14](https://github.com/smart-social-contracts/realms-codices/issues/14)) | realms-codices | Review agora, dominion and syntropia as realistic templates (outside this design) | – | review written; follow-up issues opened if any |
 | D1 ([#486](https://github.com/smart-social-contracts/realms-gos/issues/486)) | realms-gos | LayeredCodex, ChapterSource and InstallJob entities; `pending` status and `activates_at`; legacy path kept | S3 | legacy installs still pass their tests |
 | D2 ([#487](https://github.com/smart-social-contracts/realms-gos/issues/487)) | realms-gos | Install task (§9.2): routes, vouching, whole releases, one-chain rule, disagreeing relays refused, steps safe to run twice, failure, one job at a time, timeout, paused job resumed by an admin, switch at the proposal's `effective_at` | D1, #504 | PocketIC test: install, failure at each step leaves the codex unchanged, retry works, a paused job resumes by an admin only |
 | D3 ([#488](https://github.com/smart-social-contracts/realms-gos/issues/488)) | realms-gos | Runtime (§9.3): loading, methods by GGG operation, marks, fail closed guards, `compute_`, `on_codex_activate` at activation | D1, S3, #503 | PocketIC: examples 5.2–5.4 behave as described; §5.2's working-day date is counted from the realm's local day |
-| D4 ([#489](https://github.com/smart-social-contracts/realms-gos/issues/489)) | realms-gos | Cedar per-operation actions and generated forbids with `each` (§9.4), also run at `tax_policy_draft` | S2, D3 | existing auth tests pass; §5.6 forbids enforced at propose and at draft; decision cost measured and recorded |
+| D4 ([#489](https://github.com/smart-social-contracts/realms-gos/issues/489)) | realms-gos | Cedar per-operation actions, per-list actions `<operation>.<list>` and generated forbids with `each` (§9.4), also run at `tax_policy_draft` | S2, D3 | existing auth tests pass; §5.6 forbids enforced at propose and at draft, on `tax_policy_propose.taxes` and `tax_policy_draft.taxes`; decision cost measured and recorded |
 | D5 ([#490](https://github.com/smart-social-contracts/realms-gos/issues/490)) | realms-gos | Revert floor and IT admin team (§10): the form of the admin-defined team is proposed first; `sync_source_remove` reserved. Note: `ggg_codex_revert` takes no argument today and cannot name the codex to restore; §10.1's "any earlier codex" needs one, and a revert does not run `on_codex_activate` | D2 | PocketIC: a codex that forbids everything is still reverted, both ways, under the restored codex's voting rules; no chapter blocks `sync_source_remove` |
 | D6 ([#491](https://github.com/smart-social-contracts/realms-gos/issues/491)) | realms-gos | Public record reads at install and read time: sync sources' published releases (§8) | G3 | install refuses a layer not in the record that vouches for it |
 | D7 ([#492](https://github.com/smart-social-contracts/realms-gos/issues/492)) | realms-gos | Scheduled sync-source checks (admin-set interval, `codex.check_now`), "Propose install", compliance at each check, follower reports as `ReportedLayer` (§11) | D2, D6 | PocketIC: interval change and forced check work; the button's proposal installs the release; past its effective date an older pin reads non-compliant; installing clears it |
