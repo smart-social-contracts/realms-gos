@@ -73,7 +73,7 @@ stateDiagram-v2
 | File | `proposal_create` | `title`, `description`, `department` (default: the realm), optional `action` `{op, args}`. Voting opens at once. |
 | Vote | `proposal_vote` | `choice`: `yes`, `no` or `abstain`. Voting again replaces your vote. Delegable. |
 | Close | `proposal_finalize` | Closes a vote that has ended and records it accepted or rejected; an accepted action runs at once, unless its `effective_at` is ahead. |
-| Act | `proposal_execute` | Replays the action of an accepted proposal that has not run, once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. |
+| Act | `proposal_execute` | Replays the action of an accepted proposal that has not run, once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. A proposal made from a delegate's governed call runs unless its grant was revoked or replaced, and only if the grant could still make that call (see [Delegation](#delegation-power-of-attorney)). |
 
 **A proposal can state when it takes effect.** `proposal_create` takes an optional `effective_at` (whole seconds, UTC; a time in the past is refused).
 Once the proposal is accepted its action runs at that time instead of at the vote, and the proposal is
@@ -107,7 +107,7 @@ it, along with the realm-wide `voting_threshold` and `voting_quorum`, in hundred
 | Eligible voters | every active member | the head and the holders of active seats |
 | Passes when | turnout ≥ `voting_quorum` and yes > `voting_threshold` of yes + no (default 50 %) | yes ≥ `m`, turnout ≥ the policy's `quorum`, and no veto holder voted no |
 | Rejected when | the rule above fails at the end of the vote | the rule above fails at the end of the vote |
-| Can close early | yes, once every eligible member has voted | yes, once every eligible member has voted, or as soon as it passes and every veto holder has voted. Only an acceptance ends it early: until the deadline, or until every eligible member has voted, a no (a veto holder's too) can be replaced, even when `m` is out of reach |
+| Can close early | yes, once every eligible member has voted | yes, once every eligible member has voted, or as soon as it passes and every veto holder who can still vote has voted. Only an acceptance ends it early: until the deadline, or until every eligible member has voted, a no (a veto holder's too) can be replaced, even when `m` is out of reach |
 
 A department cannot be deleted while it has a proposal being voted on or waiting to run. Only the root department
 is realm-wide: a proposal whose department is gone has no voters and runs nothing.
@@ -144,10 +144,22 @@ realms local call proposal_vote '{"proposal": "P-7", "choice": "yes", "on_behalf
 - Either side ends it with `delegation_revoke`.
 - A delegate can ask instead: `delegation_request` (open for one hour, at most 10 open requests
   per person), answered with `delegation_request_decide`.
+- Power of attorney itself, payout accounts, identity proofs, moving to another quarter, federal votes, tasks,
+  keys, the shell and extension calls are never delegable.
+- A proposal a delegate files with `proposal_create` is a motion: it carries no action.
+- A delegate's governed call (a transfer from a fund, say) is always filed as a proposal, even where the
+  department decides directly. The proposal records the grant it was filed under. When it is carried, the call runs
+  unless that grant was revoked or replaced, and only if the grant could still make the call: its scope, the member's
+  permissions and standing are checked again. A grant that has merely expired does not stop it, because a vote can
+  outlast the grant; after the grant has expired, the member stops such a proposal by withdrawing it (or voting no).
+  Otherwise the proposal ends `failed`, with the reason.
+- A delegate does not vote on a proposal it filed, and withdraws only the proposals it filed under its grant.
+- A delegate reads the member's own notifications, not the inboxes of the offices where the member holds a seat.
 
 The guardrails make delegation safe by construction: a delegate can only use permissions the
 grant names, only on `delegable` operations, never on `signing` ones, and never with `all`. The
-audit `Event` records both the grantor (`user`) and the signer (`by`).
+audit `Event` records both the grantor (`user`) and the signer (`by`). `codex_status` reports `agents` and
+`delegable` empty: no signing permission is open to an agent or to a delegate, whatever the codex says.
 
 ## Agents
 

@@ -57,3 +57,43 @@ def test_story(realm, people):
     assert len(ok(realm, "ops_list", None, query=True)["operations"]) >= 200
     assert "call it with run" in refused(realm, "proposal_create", alice, query=True, title="x")
     assert ok(realm, "shell", ctl, expr="ops.proposal_list()")["result"]["proposals"][0]["id"] == p
+
+    # Under power of attorney a proposal is a motion, and its filer neither votes on it nor withdraws others'.
+    ok(realm, "delegation_revoke", alice,
+       delegation=ok(realm, "delegation_list", alice, query=True)["as_grantor"][0]["id"])
+    narrow = dict(delegate=claude, expires_in=24 * 3600,
+                  operations=["proposal.create", "proposal.vote", "self.update_public_profile"])
+    grant = ok(realm, "delegation_grant", alice, **narrow)["delegation"]
+    as_alice = dict(on_behalf_of=alice)
+    assert "motion" in refused(realm, "proposal_create", claude, title="x", action={"op": "me", "args": {}}, **as_alice)
+    motion = ok(realm, "proposal_create", claude, title="Bike lane", **as_alice)["proposal"]
+    assert "filed" in refused(realm, "proposal_vote", claude, proposal=motion, choice="yes", **as_alice)
+    assert "not filed under" in refused(realm, "proposal_withdraw", claude, proposal=p, **as_alice)
+    ok(realm, "proposal_withdraw", claude, proposal=motion, **as_alice)
+
+    # A delegate's governed call is filed as a proposal that carries its grant, and is checked against it when it
+    # runs. The only such call is a fund transfer, which needs a funded fund, so Alice files the proposal herself and
+    # the controller records on it what a delegate's filing records.
+    ok(realm, "governance_update", ctl, voting_window=0)
+
+    def filed_under(grant, title):
+        action = {"op": "profile_update", "args": {"nickname": "Ali"}}
+        q = ok(realm, "proposal_create", alice, title=title, action=action)["proposal"]
+        realm.shell(f"from ggg import Proposal\np = Proposal[{q!r}]\n"
+                    f"p.on_behalf_of = {alice!r}\np.filed_under = {grant!r}")
+        return q
+
+    def carry(proposal):
+        ok(realm, "proposal_vote", alice, proposal=proposal, choice="yes")
+        return ok(realm, "proposal_vote", bob, proposal=proposal, choice="yes")["status"]
+
+    ended = filed_under(grant, "Rename, grant revoked")
+    ok(realm, "delegation_revoke", alice, delegation=grant)
+    assert carry(ended) == "failed"
+    reason = ok(realm, "proposal_get", alice, query=True, proposal=ended)["proposal"]["result"]["error"]
+    assert reason == f"the power of attorney {grant} it was filed under has been revoked or replaced", reason
+    assert ok(realm, "me", alice, query=True)["user"]["nickname"] != "Ali"
+
+    active = ok(realm, "delegation_grant", alice, **narrow)["delegation"]
+    assert carry(filed_under(active, "Rename, grant active")) == "executed"
+    assert ok(realm, "me", alice, query=True)["user"]["nickname"] == "Ali"

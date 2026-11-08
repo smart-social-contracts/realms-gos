@@ -13,15 +13,18 @@ def notify(recipient, title, body="", href="", topic="", sender=""):
                         topic=topic, sender=sender, at=chain.now()).id
 
 
-def addressed_to(principal):
-    """The recipients whose notifications ``principal`` reads: themselves and where they hold a seat."""
-    return {f"User:{principal}"} | {ref(a.position.department or a.position.organization) for a in appointed(principal)}
+def addressed_to(c):
+    """The recipients whose notifications the caller reads: themselves and where they hold a seat. A delegate reads
+    only the member's own: the inboxes of an office belong to the people who hold its seats."""
+    if c.delegated:
+        return {f"User:{c.user}"}
+    return {f"User:{c.user}"} | {ref(a.position.department or a.position.organization) for a in appointed(c.user)}
 
 
 def inbox(c, args):
     """``recipient`` (default "User:<you>"), which must be you or a department or organization where you hold a seat."""
     recipient = args.get("recipient") or f"User:{c.user}"
-    if recipient not in addressed_to(c.user):
+    if recipient not in addressed_to(c):
         raise Forbidden(f"you do not read {recipient}'s notifications")
     return recipient
 
@@ -45,7 +48,7 @@ def notification_read(c, args):
         rows, nxt = page_by(Notification, "recipient", inbox(c, args), args)
     else:
         rows, nxt = [find(Notification, args["notification"])], None
-        if rows[0].recipient not in addressed_to(c.user):
+        if rows[0].recipient not in addressed_to(c):
             raise Forbidden(f"notification {rows[0].id} is not addressed to you")
     fresh = [n for n in rows if c.user not in n.read_by]
     for n in fresh:

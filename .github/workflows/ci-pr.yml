@@ -77,7 +77,20 @@ jobs:
       - run: |
           pip install -e cli/
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov cedarpy==4.12.2
+      # The pinned Cedar CLI 4.14.1 (experimental, with symcc) and cvc5 1.3.1 prove that every
+      # generated forbid never errors (docs/codices/layered-codex.md §6 rule 9); the library's tests
+      # below need them, and cedarpy 4.12 (the canister's Cedar line) for validation and decisions.
+      - name: Cedar analysis tools
+        uses: actions/cache@v4
+        with:
+          path: .cache/cedar-tools
+          key: cedar-tools-cli-4.14.1-cvc5-1.3.1
+      - run: scripts/cedar_tools.sh .cache/cedar-tools >> "$GITHUB_ENV"
+      - name: Layered codex library
+        # Blocking: realms.legislation is the code the realm runs at install, and these tests are
+        # in-process (cedarpy, the pinned CLI), with no canister or DB.
+        run: pytest -q cli/tests/test_legislation*.py
       - name: CLI unit tests
         run: pytest -v cli/tests/ || true
       - name: Extension privilege ratchet

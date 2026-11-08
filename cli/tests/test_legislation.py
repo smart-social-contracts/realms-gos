@@ -285,14 +285,17 @@ def test_a_day_is_written_yyyy_mm_dd():
 # ── A chapter: what the file contains (§4) ────────────────────────────────────
 
 ES_PROCEDURE = """
-from realms.legislation import above, fixed, forbid, months, overridable, working_days
+from realms.legislation import F, above, fixed, forbid, months, overridable, working_days
 
 class Procedure(above("procedure")):
     uses = []
 
     default_decision_deadline = overridable(months(3), legislation="Ley 39/2015 Art. 21.3")
 
-    over_six_months = forbid("procedure_define", "<F tree: S2>", legislation="Ley 39/2015 Art. 21.2")
+    over_six_months = forbid("procedure_define",
+        F.decision_deadline.is_some() & (F.decision_deadline > months(6))
+        & F.longer_deadline_legislation.is_none(),
+        legislation="Ley 39/2015 Art. 21.2")
 
     @fixed(legislation="Ley 39/2015 Art. 30")
     def working_days_after(self, day, n):
@@ -1086,8 +1089,8 @@ def test_forbids_are_never_overridable_and_never_removable():
     c.load(
         "eu/es",
         "tax",
-        "from realms.legislation import above, forbid\nclass Tax(above('tax')):\n"
-        "    ibi_urban_cap = forbid('tax_policy_propose', 'expr', each='taxes', legislation='TRLRHL Art. 72.3')\n",
+        "from realms.legislation import F, above, forbid, pct\nclass Tax(above('tax')):\n"
+        "    ibi_urban_cap = forbid('tax_policy_propose', (F.code == 'ibi_urban') & F.rate.is_some() & (F.rate > pct('1.10')), each='taxes', legislation='TRLRHL Art. 72.3')\n",
     )
     assert refused(
         c,
@@ -1101,8 +1104,8 @@ def test_forbids_are_never_overridable_and_never_removable():
         c,
         VALENCIA,
         "tax",
-        "from realms.legislation import above, forbid\nclass Tax(above('tax')):\n"
-        "    ibi_urban_cap = forbid('tax_policy_propose', 'other')\n",
+        "from realms.legislation import F, above, forbid\nclass Tax(above('tax')):\n"
+        "    ibi_urban_cap = forbid('tax_policy_propose', F.code == 'other')\n",
     )
     assert "forbids are never overridable" in refused(
         c,
@@ -1111,9 +1114,9 @@ def test_forbids_are_never_overridable_and_never_removable():
         "from realms.legislation import above\nclass Tax(above('tax')):\n    def ibi_urban_cap(self): pass\n",
     )
     rule = c.resolved("tax").ibi_urban_cap
-    assert (rule.op, rule.expression, rule.each, rule.legislation) == (
+    assert (rule.op, repr(rule.expression), rule.each, rule.legislation) == (
         "tax_policy_propose",
-        "expr",
+        "((F.code == 'ibi_urban') & F.rate.is_some() & (F.rate > 1100000))",
         "taxes",
         "TRLRHL Art. 72.3",
     )

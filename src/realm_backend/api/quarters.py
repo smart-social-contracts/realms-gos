@@ -367,7 +367,7 @@ def scale_status(c, args):
     return scale()
 
 
-@op("self.change_quarter", delegable=True, returns="forward")
+@op("self.change_quarter", returns="forward")
 def self_change_quarter(c, args):
     """Move your membership to ``quarter``, another active quarter of the federation; here you become a guest.
     Returns ``forward`` and ``home_quarter``."""
