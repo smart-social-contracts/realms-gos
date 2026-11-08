@@ -102,23 +102,20 @@ def checked_links(user, links):
 
 
 def check_grant(grant_id, grantor, action):
-    """A delegate's governed call, filed as a proposal, runs only if the power of attorney it was filed under still
-    stands and could make that call directly: the vote is the realm's consent to a collective act, not to the
-    member's own acts."""
+    """A delegate's governed call, filed as a proposal, runs unless the power of attorney it was filed under has been
+    revoked or replaced, and only if that grant could still make the call: its scope, the member's permissions and
+    standing are checked again. The grant may have expired since, because a vote can outlast it. The vote is the
+    realm's consent to a collective act, not to the member's own acts."""
     if not grant_id:
         raise Forbidden("it was filed under power of attorney before this realm recorded grants; file it again")
     grant, name = find(Delegation, grant_id), action["op"]
-    try:
-        standing = auth.active_grant(grantor, grant.delegate).id == grant.id
-    except auth.Denied:
-        standing = False
-    if not standing:
-        raise Forbidden(f"the power of attorney {grant.id} it was filed under has ended (revoked, expired or replaced)")
+    if grant.status in ("revoked", "declined"):
+        raise Forbidden(f"the power of attorney {grant.id} it was filed under has been revoked or replaced")
     spec = ops().get(name)
     if spec is None:
         raise Fail(f"unknown operation '{name}'")
     try:
-        auth.authorize(grantor, grant.delegate, name, spec, action.get("args") or {})
+        auth.authorize(grantor, grant.delegate, name, spec, action.get("args") or {}, grant=grant)
     except auth.Denied:
         raise Forbidden(f"the power of attorney {grant.id} it was filed under does not allow {name} now")
     except KeyError as e:

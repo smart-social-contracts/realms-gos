@@ -87,12 +87,11 @@ def test_story(realm, people):
         ok(realm, "proposal_vote", alice, proposal=proposal, choice="yes")
         return ok(realm, "proposal_vote", bob, proposal=proposal, choice="yes")["status"]
 
-    ended = filed_under(grant, "Rename, grant ended")
+    ended = filed_under(grant, "Rename, grant revoked")
     ok(realm, "delegation_revoke", alice, delegation=grant)
     assert carry(ended) == "failed"
     reason = ok(realm, "proposal_get", alice, query=True, proposal=ended)["proposal"]["result"]["error"]
-    assert reason == f"the power of attorney {grant} it was filed under has ended (revoked, expired or replaced)", \
-        reason
+    assert reason == f"the power of attorney {grant} it was filed under has been revoked or replaced", reason
     assert ok(realm, "me", alice, query=True)["user"]["nickname"] != "Ali"
 
     active = ok(realm, "delegation_grant", alice, **narrow)["delegation"]

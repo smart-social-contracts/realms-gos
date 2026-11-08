@@ -102,8 +102,8 @@ removed when the realm launches.
   `public`.
 - **Replays** (a passed proposal running its action, origin `replay`) skip authorization: the vote
   was the authorization. The original caller was checked when they filed it. A proposal a delegate filed is
-  checked again when it runs: the grant it was filed under must still stand and be able to make the call
-  directly (`proposals.check_grant`).
+  checked again when it runs: the grant it was filed under must not have been revoked or replaced, and
+  must still be able to make the call (`proposals.check_grant`). An expired grant is enough.
 - **Extensions** call as the user (origin `extension`). They need the user's permission *and*
   the operation in their manifest. An extension can never do more than the user could.
 - **Codices** call as the realm itself (origin `codex`). The third permit lets them through, but

@@ -73,7 +73,7 @@ stateDiagram-v2
 | File | `proposal_create` | `title`, `description`, `department` (default: the realm), optional `action` `{op, args}`. Voting opens at once. |
 | Vote | `proposal_vote` | `choice`: `yes`, `no` or `abstain`. Voting again replaces your vote. Delegable. |
 | Close | `proposal_finalize` | Closes a vote that has ended and records it accepted or rejected; an accepted action runs at once, unless its `effective_at` is ahead. |
-| Act | `proposal_execute` | Replays the action of an accepted proposal that has not run, once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. A proposal made from a delegate's governed call runs only if its grant still stands and could make that call directly (see [Delegation](#delegation-power-of-attorney)). |
+| Act | `proposal_execute` | Replays the action of an accepted proposal that has not run, once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. A proposal made from a delegate's governed call runs unless its grant was revoked or replaced, and only if the grant could still make that call (see [Delegation](#delegation-power-of-attorney)). |
 
 **A proposal can state when it takes effect.** `proposal_create` takes an optional `effective_at` (whole seconds, UTC; a time in the past is refused).
 Once the proposal is accepted its action runs at that time instead of at the vote, and the proposal is
@@ -148,9 +148,10 @@ realms local call proposal_vote '{"proposal": "P-7", "choice": "yes", "on_behalf
   keys, the shell and extension calls are never delegable.
 - A proposal a delegate files with `proposal_create` is a motion: it carries no action.
 - A delegate's governed call (a transfer from a fund, say) is always filed as a proposal, even where the
-  department decides directly. The proposal records the grant it was filed under; when it is carried, the call runs
-  only if that grant still stands and could make the call directly, otherwise the proposal ends `failed`, with the
-  reason.
+  department decides directly. The proposal records the grant it was filed under. When it is carried, the call runs
+  unless that grant was revoked or replaced, and only if the grant could still make the call: its scope, the member's
+  permissions and standing are checked again. A grant that has merely expired does not stop it, because a vote can
+  outlast the grant. Otherwise the proposal ends `failed`, with the reason.
 - A delegate does not vote on a proposal it filed, and withdraws only the proposals it filed under its grant.
 - A delegate reads the member's own notifications, not the inboxes of the offices where the member holds a seat.
 

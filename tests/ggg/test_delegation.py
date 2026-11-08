@@ -234,33 +234,40 @@ def test_a_delegates_governed_call_is_a_proposal_that_runs_under_its_grant():
     assert carry(p)["status"] == "executed" and User["carla"].nickname == "Cara"
 
 
-def test_a_delegates_proposal_fails_when_its_grant_has_ended():
+def test_a_delegates_proposal_fails_when_its_grant_was_revoked():
     infrastructure()
     grant = delegate_to_claude("self.update_public_profile", grantor="carla")
-    revoked = rename_for_carla("Revoked")
+    p = rename_for_carla()
     ok("delegation_revoke", "carla", delegation=grant)
-    replaced_by = delegate_to_claude("self.update_public_profile", grantor="carla")
-    assert replaced_by != grant
-    out = carry(revoked)
+    out = carry(p)
     assert out["status"] == "failed", out
-    assert out["result"]["error"] == (
-        f"the power of attorney {grant} it was filed under has ended (revoked, expired or replaced)")
-    replaced = rename_for_carla("Replaced")
-    ok("delegation_revoke", "carla", delegation=replaced_by)
-    delegate_to_claude("self.update_public_profile", grantor="carla")
-    assert "has ended" in carry(replaced)["result"]["error"]
+    assert out["result"]["error"] == f"the power of attorney {grant} it was filed under has been revoked or replaced"
     assert User["carla"].nickname == "Carla"
 
 
-def test_a_delegates_proposal_fails_if_its_grant_lapses_before_the_vote_is_carried():
+def test_a_delegates_proposal_fails_when_its_grant_was_replaced():
+    infrastructure()
+    grant = delegate_to_claude("self.update_public_profile", grantor="carla")
+    p = rename_for_carla()
+    ask = ok("delegation_request", "claude-conn", grantor="carla", operations=["self.update_public_profile"],
+             expires_in=DAY)["request"]
+    ok("delegation_request_decide", "carla", request=ask, approve=True)
+    assert Delegation[grant].status == "revoked"
+    out = carry(p)
+    assert out["status"] == "failed" and "has been revoked or replaced" in out["result"]["error"], out
+    assert User["carla"].nickname == "Carla"
+
+
+def test_a_delegates_proposal_runs_after_its_grant_has_expired():
     infrastructure()
     grant = delegate_to_claude("self.update_public_profile", grantor="carla", days=2)
     p = rename_for_carla()
     ok("proposal_vote", "carla", proposal=p, choice="yes")
     later(3 * DAY)
-    out = ok("proposal_vote", "bob", proposal=p, choice="yes")
-    assert out["status"] == "failed" and f"the power of attorney {grant} " in Proposal[p].result["error"]
-    assert User["carla"].nickname == "Carla"
+    assert Delegation[grant].expires_at < fake_chain.now()
+    delegate_to_claude("self.update_public_profile", grantor="carla")  # a new grant after the first lapsed
+    assert ok("proposal_vote", "bob", proposal=p, choice="yes")["status"] == "executed"
+    assert User["carla"].nickname == "Cara"
 
 
 def test_a_delegates_proposal_fails_when_its_grant_no_longer_allows_the_call(monkeypatch):
@@ -270,6 +277,28 @@ def test_a_delegates_proposal_fails_when_its_grant_no_longer_allows_the_call(mon
     monkeypatch.setitem(op.OPS["t_governed_rename"], "delegable", False)  # as when an upgrade ends delegating it
     out = carry(p)
     assert out["status"] == "failed" and "does not allow t_governed_rename now" in out["result"]["error"], out
+    assert User["carla"].nickname == "Carla"
+
+
+def test_a_delegates_proposal_fails_when_the_member_no_longer_holds_the_permission():
+    infrastructure()
+    delegate_to_claude("self.update_public_profile", grantor="carla")
+    p = rename_for_carla()
+    ok("proposal_vote", "carla", proposal=p, choice="yes")
+    ok("role_revoke", "ctl", user="carla", profile="member")
+    out = ok("proposal_vote", "bob", proposal=p, choice="yes")
+    assert out["status"] == "failed" and "does not allow t_governed_rename now" in Proposal[p].result["error"]
+    assert User["carla"].nickname == "Carla"
+
+
+def test_a_delegates_proposal_fails_when_the_member_has_been_banned():
+    infrastructure()
+    delegate_to_claude("self.update_public_profile", grantor="carla")
+    p = rename_for_carla()
+    ok("proposal_vote", "carla", proposal=p, choice="yes")
+    ok("user_set_status", "ctl", user="carla", status="banned")
+    out = ok("proposal_vote", "bob", proposal=p, choice="yes")
+    assert out["status"] == "failed" and "does not allow t_governed_rename now" in Proposal[p].result["error"]
     assert User["carla"].nickname == "Carla"
 
 
