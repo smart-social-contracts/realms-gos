@@ -232,7 +232,7 @@ def test_a_budget_is_proposed_per_period_with_its_totals_as_facts(realm, people)
     out = ok(realm, "budget_propose", ctl, period="FY2027", years=2)
     assert (out["revenue"], out["expense"], len(out["budgets"])) == (50 * UNIT, 400 * UNIT, 2)
     seen = ok(realm, "budget_view", people["alice"], query=True, period="FY2027")
-    # The adopted budget stands alone: the extended lines of the period are closed, the replaced one and the other.
+    # Both funds adopted lines, so each fund's budget stands alone: the extended lines are closed, replaced or not.
     assert sorted(b["status"] for f in seen["funds"] for b in f["budgets"]) == ["adopted", "adopted"]
 
 

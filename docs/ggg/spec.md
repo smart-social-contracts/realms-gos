@@ -125,10 +125,11 @@ same rows.
   (so a line drafted after the proposal was filed, and before it was accepted, is adopted with it). `years` is
   a fact for legislation and is not kept. Realms GOS never marks a draft `proposed`: a governed `*_propose` leaves the
   draft as it is until the vote accepts it. `budget_extend` copies a period's budget as it stood at the end of the
-  period before into the period as `extended` lines: of each fund and category the newest line that was adopted or
-  extended (or `closed` with the period), never a line a newer one replaced. An `extended` line stands in for an
-  adopted one: it caps spending, `budget_view` lists it and `period_close` closes it. A proposal for the period
-  replaces the extended line of each fund and category it names and closes every other extended line of the period;
+  period before into the period as `extended` lines, for each fund that has no extended, proposed or adopted line
+  in it yet (`Conflict` when none is left): of each fund and category the newest line that was adopted or extended
+  (or `closed` with the period), never a line a newer one replaced. An `extended` line stands in for an adopted one:
+  it caps spending, `budget_view` lists it and `period_close` closes it. A proposal for the period closes the
+  extended lines of every fund whose lines it adopts, and leaves the other funds' extensions;
 - a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), and
   `Treasury.debt_outstanding` is kept as a running total, like fund balances;
 - `codex_activate` makes the pending layered codex, named by its id (its checksum), the active one at once and keeps

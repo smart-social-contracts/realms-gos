@@ -638,8 +638,9 @@ def check_budget_proposal(args):
 def budget_propose(c, args):
     """Adopt every draft line of the open fiscal ``period`` together; ``years`` says how many periods the plan covers,
     when more than one (a fact for legislation). Each line replaces the adopted or extended line of its fund and
-    category, and the spending booked against that carries over; every extended line of the period closes, replaced or
-    not. Returns ``period``, ``budgets`` and the planned ``revenue`` and ``expense``."""
+    category, and the spending booked against that carries over; every extended line of a fund whose lines it adopts
+    closes, replaced or not, and the extensions of the other funds stand. Returns ``period``, ``budgets`` and the
+    planned ``revenue`` and ``expense``."""
     p, lines = find(FiscalPeriod, args["period"]), proposed_lines(args)
     if p.status != "open" or not lines:
         raise Conflict(f"{p.id} is {p.status}; only draft lines for an open period can be adopted")
@@ -647,8 +648,9 @@ def budget_propose(c, args):
     for b in lines:
         supersede(b, "amended")
         b.status, b.proposal = "adopted", c.proposal
-    for b in p.budgets:  # the budget of the period is now the adopted one: no extended line stands beside it
-        if b.status == "extended":
+    adopted_funds = {b.fund.id for b in lines}
+    for b in p.budgets:  # a fund's adopted budget stands alone: no extended line of the fund stands beside it
+        if b.status == "extended" and b.fund.id in adopted_funds:
             b.status = "closed"
     return {"period": p.id, "budgets": [b.id for b in lines], **totals}
 
@@ -672,19 +674,19 @@ def standing_at_end(p):
 @op("org.manage_budget", returns="extended")
 def budget_extend(c, args):
     """Carry the budget of the period before the open fiscal ``period`` over into it, as ``extended`` lines, without a
-    vote: they hold, and cap spending, until an adopted budget replaces them. Refused with Conflict once the period
-    has an extended, proposed or adopted line (draft lines do not count). The lines carried are those of the earlier
-    period as they stood at its end, adopted, extended or closed with it. Returns ``extended``, how many."""
+    vote, fund by fund: for each fund that has no extended, proposed or adopted line in the period yet (draft lines do
+    not count). They hold, and cap spending, until an adopted budget of the fund replaces them. Refused with Conflict
+    when no fund is left to carry. The lines carried are those of the earlier period as they stood at its end,
+    adopted, extended or closed with it. Returns ``extended``, how many lines."""
     p = find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Conflict(f"{p.id} is {p.status}")
-    held = [b for b in p.budgets if b.status in ("extended", "proposed", "adopted")]
-    if held:
-        raise Conflict(f"{p.id} already has a budget line: {held[0].id} is {held[0].status}")
+    held = {b.fund.id for b in p.budgets if b.status in ("extended", "proposed", "adopted")}
     before = previous_period(p)
-    lines = standing_at_end(before) if before else []
+    lines = [b for b in standing_at_end(before) if b.fund.id not in held] if before else []
     if not lines:
-        raise Conflict(f"the period before {p.id} has no budget to carry over")
+        raise Conflict(f"no fund is left to carry into {p.id}: the period before has no budget for a fund without a line "
+                       f"in it")
     for b in lines:
         Budget(id=next_id(Budget, "B"), fund=b.fund, period=p, category=b.category, slot=slot(b.fund, p, b.category),
                kind=b.kind, planned=b.planned, status="extended")
