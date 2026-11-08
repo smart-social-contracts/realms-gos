@@ -642,43 +642,109 @@ def budget_draft(c, args):
     return {"budget": b.id}
 
 
-def proposed_lines(args):
-    """The lines a budget_propose call proposes: every draft line of its period."""
-    return [b for b in find(FiscalPeriod, args["period"]).budgets if b.status == "draft"]
+def lines_of(p):
+    """The budget lines of fiscal period ``p``, in the order they were drafted."""
+    return sorted(p.budgets, key=lambda b: int(b._id))
 
 
-def budget_totals(args):
-    """The facts of a budget_propose call that are not its arguments (GGG's derived facts): ``revenue`` and ``expense``,
-    the sums of ``planned`` over the lines it proposes of each kind."""
+def draft_lines(args):
+    """The draft lines a budget_propose call proposes: those of the ``fund`` it names, or of every fund when it names
+    none."""
+    fund = args.get("fund")
+    if fund:
+        find(Fund, fund)  # NotFound for a fund the realm does not have, not an empty proposal
+    lines = lines_of(find(FiscalPeriod, args["period"]))
+    return [b for b in lines if b.status == "draft" and (not fund or b.fund.id == fund)]
+
+
+def propose_department(args):
+    """The department that governs a budget_propose call (GGG D19): the owner of the fund it names, the root when it
+    names none, as the budget of the whole realm is the realm's."""
+    return fund_department(args) if args.get("fund") else root()
+
+
+def totals_of(lines):
     totals = {"revenue": 0, "expense": 0}
-    for b in proposed_lines(args):
+    for b in lines:
         totals[b.kind] += b.planned
     return totals
 
 
-def check_budget_proposal(args):
-    """A proposal of a budget the period has no lines for, of no years, or with a total out of range files nothing."""
-    p = find(FiscalPeriod, args["period"])
-    if not proposed_lines(args):
-        raise Conflict(f"{p.id} has no draft budget lines to propose")
+def budget_totals(args, proposal=""):
+    """The facts of a budget_propose call that are not its arguments (GGG's derived facts): ``revenue`` and ``expense``,
+    the sums of ``planned`` over the lines it proposes of each kind: those ``proposal`` fixed when it was filed, if the
+    call is its replay, and otherwise the draft lines it would propose."""
+    return totals_of(fixed_lines(args, proposal) if proposal else draft_lines(args))
+
+
+def check_years(args):
+    """``years`` says how many periods a budget covers: at least one."""
     if args.get("years") is not None and int(args["years"]) < 1:
         raise Fail("a budget covers at least one year")
-    for name, amount in budget_totals(args).items():
+
+
+def refuse_unproposable(args, lines):
+    """A budget with no line to propose, or with a total out of range, is refused before it is filed or adopted."""
+    p, fund = find(FiscalPeriod, args["period"]), args.get("fund")
+    if not lines:
+        raise Conflict(f"{p.id} has no draft budget lines" + (f" of fund {fund}" if fund else "") + " to propose")
+    for name, amount in totals_of(lines).items():
         if amount > MONEY_MAX:
             raise Fail(f"the planned {name} of {p.id} is {amount}, above the largest amount of money {MONEY_MAX}")
 
 
-@op("org.manage_budget", governed=realm_wide, check=check_budget_proposal, derived=budget_totals)
+def fix_lines(args, proposal):
+    """Tie the draft lines of a budget_propose call to ``proposal``, the one that carries it, when it is filed: they are
+    ``proposed``, the vote decides exactly these, and no other proposal takes them (``Conflict`` when no draft line is
+    left)."""
+    check_years(args)
+    lines = draft_lines(args)
+    refuse_unproposable(args, lines)
+    for b in lines:
+        b.status, b.proposal = "proposed", proposal
+
+
+def release_lines(args, proposal):
+    """A proposal that ended without adopting its lines gives them back: ``draft`` with no proposal, to be proposed
+    again."""
+    period = FiscalPeriod[args["period"]] if args.get("period") else None  # a stored action may name no period
+    if period is None:
+        return
+    for b in lines_of(period):
+        if b.status == "proposed" and b.proposal == proposal:
+            b.status, b.proposal = "draft", ""
+
+
+def fixed_lines(args, proposal):
+    """The lines ``proposal`` fixed when it was filed, and that it has not adopted yet."""
+    lines = lines_of(find(FiscalPeriod, args["period"]))
+    return [b for b in lines if b.status == "proposed" and b.proposal == proposal]
+
+
+def carried_lines(c, args):
+    """The lines a budget_propose call adopts: those its proposal fixed when it was filed; a department that decides
+    alone files no proposal, and adopts the draft lines the call names."""
+    return fixed_lines(args, c.proposal) if c.proposal else draft_lines(args)
+
+
+@op("org.manage_budget", governed=propose_department, check=check_years, derived=budget_totals, fixes=fix_lines,
+    releases=release_lines)
 def budget_propose(c, args):
-    """Adopt every draft line of the open fiscal ``period`` together; ``years`` says how many periods the plan covers,
-    when more than one (a fact for legislation). Each line replaces the adopted or extended line of its fund and
-    category, and the spending booked against that carries over; every extended line of a fund whose lines it adopts
-    is replaced (``amended``), whether the new budget names its category or not, and the extensions of the other
-    funds stand. Returns ``period``, ``budgets`` and the planned ``revenue`` and ``expense``."""
-    p, lines = find(FiscalPeriod, args["period"]), proposed_lines(args)
-    if p.status != "open" or not lines:
-        raise Conflict(f"{p.id} is {p.status}; only draft lines for an open period can be adopted")
-    totals = budget_totals(args)
+    """Adopt the draft lines of the open fiscal ``period`` together: those of the ``fund`` it names, whose owner governs
+    the call, or every fund's, which the realm governs. When a vote decides it, the lines are fixed as ``proposed`` when
+    it is filed, and a proposal that ends without adopting them (rejected, expired, withdrawn, stopped or failed) gives
+    them back as drafts. ``years`` says how many periods the plan covers, when more than one (a fact for legislation).
+    The lines are adopted in the order they were drafted, each replacing the adopted or extended line of its fund and
+    category (a later draft replaces an earlier one), and the spending booked against that carries over; every extended
+    line of a fund whose lines it adopts is replaced (``amended``), whether the new budget names its category or not,
+    and the extensions of the other funds stand. Returns ``period``, ``budgets`` and the planned ``revenue`` and
+    ``expense``."""
+    p, lines = find(FiscalPeriod, args["period"]), carried_lines(c, args)
+    if p.status != "open":
+        raise Conflict(f"{p.id} is {p.status}; only the lines of an open period can be adopted")
+    if c.proposal and not lines:  # filed before the lines of a budget were fixed to the proposal that carries them
+        raise Conflict(f"{c.proposal} fixed no budget line when it was filed: propose the budget again")
+    refuse_unproposable(args, lines)
     for b in lines:
         supersede(b)
         b.status, b.proposal = "adopted", c.proposal
@@ -686,7 +752,7 @@ def budget_propose(c, args):
     for b in p.budgets:  # a fund's adopted budget stands alone: no extended line of the fund stands beside it
         if b.status == "extended" and b.fund.id in adopted_funds:
             b.status = "amended"
-    return {"period": p.id, "budgets": [b.id for b in lines], **totals}
+    return {"period": p.id, "budgets": [b.id for b in lines], **totals_of(lines)}
 
 
 def previous_period(p):
@@ -699,7 +765,7 @@ def standing_at_end(p):
     """The budget of period ``p`` as it stood when it ended: of each fund and category, the newest line that was adopted
     or extended (``closed`` once the period is), never one a newer line replaced."""
     newest = {}
-    for b in sorted(p.budgets, key=lambda line: int(line._id)):
+    for b in lines_of(p):
         if b.status in (*IN_FORCE, "closed"):
             newest[b.slot] = b
     return list(newest.values())

@@ -203,7 +203,7 @@ def bid_score(c, args):
     return {"bid": b.id, "score": b.score}
 
 
-def journals_of_notices(args):
+def journals_of_notices(args, proposal=""):
     """The facts of a tender_award call that are not its arguments (GGG's derived facts): ``published_in``, the journals
     of the tender's notices."""
     journals = []

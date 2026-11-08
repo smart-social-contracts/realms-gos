@@ -125,10 +125,16 @@ same rows.
   `legislation` that charges it; they sum to the invoice's `amount`, and `invoice_item_add` adds a line to a pending
   invoice. The invoice of a fine or a restitution has one item, named for the kind of penalty;
 - a budget line is `revenue` or `expense`, a category is one kind within a fund and period (`budget_draft` refuses a
-  line of the other kind with `InvalidArgument`), and `budget_propose` takes every draft line of a period together
-  (so a line drafted after the proposal was filed, and before it was accepted, is adopted with it). `years` is
-  a fact for legislation and is not kept. Realms GOS never marks a draft `proposed`: a governed `*_propose` leaves the
-  draft as it is until the vote accepts it. `budget_extend` copies a period's budget as it stood at the end of the
+  line of the other kind with `InvalidArgument`), and `budget_propose` takes the draft lines of a period together: those
+  of the `fund` it names, which its owner governs under its own policy (the root when no department owns the fund), or
+  every fund's, which the root governs (GGG D19). The pinned `ggg.did` has no `fund` in `BudgetProposeArgs` yet, so
+  `ggg_budget_propose` proposes every fund's lines; the operation takes it. The lines are fixed when the proposal is
+  filed, by the governed call or by `proposal_create`: they are `proposed`, with the proposal, a later `budget_propose`
+  takes only the draft lines left (`Conflict` when there are none), and the vote adopts exactly those, in the order
+  they were drafted, so a later line of a fund, period and category amends an earlier one. A proposal that ends without
+  adopting them (`rejected`, `expired`, `withdrawn`, stopped or `failed`) gives them back as `draft`, with no proposal.
+  A department that decides alone files no proposal and adopts the draft lines at once. `years` is a fact for
+  legislation and is not kept. `budget_extend` copies a period's budget as it stood at the end of the
   period before into the period as `extended` lines, for each fund that has no extended, proposed or adopted line
   in it yet (`Conflict` when none is left): of each fund and category the newest line that was adopted or extended
   (or `closed` with the period), never a line a newer one replaced. An `extended` line stands in for an adopted one:
@@ -337,6 +343,11 @@ What the model replaced in earlier versions of Realms GOS:
 - A fund that has an adopted budget refuses spending in a category it has no expense line for: the vault's and the
   voting extension's payments (category `transfer`) and a codex's payroll (`payroll`) need a line in such a fund,
   where they needed none before.
+- A budget proposal still being voted on at the upgrade was filed when its lines were plain drafts: nothing ties them
+  to it. If it is accepted it fails with `Conflict` ("fixed no budget line") and adopts nothing, rather than adopting
+  every draft of the period, some of which nobody voted on; the drafts wait for a new proposal. If it ends otherwise
+  it frees nothing, and never the lines of a newer proposal. A federal vote that carries `budget_propose` fails the same
+  way, for its local leg files no lines.
 - A budget line whose `kind` the upgrade turned into `expense` may share its fund, period and category with a
   `revenue` line, which the model now forbids. The upgrade leaves both rows; `budget_extend` carries only the newer of
   the two into the next period (a slot holds one line), and skips a line whose category the new period already holds

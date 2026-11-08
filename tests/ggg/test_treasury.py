@@ -346,7 +346,7 @@ def test_governed_budget_is_adopted_by_its_proposal():
     adopt(out["proposal"])
     world.policy(Department["Administration"], 2, 3)  # the budget of the period is the realm's: the root decides
     p = propose(by="dana")["proposal"]
-    assert Budget["B-1"].status == "draft"
+    assert (Budget["B-1"].status, Budget["B-1"].proposal) == ("proposed", p)  # fixed when the proposal is filed
     for voter in world.PEOPLE:
         ok("proposal_vote", voter, proposal=p, choice="yes")
     assert (Budget["B-1"].status, Budget["B-1"].proposal) == ("adopted", p)
