@@ -22,6 +22,8 @@ def _catalog_ids():
 
 
 CATALOG_IDS = _catalog_ids()
+# A catalog that did not parse would make every label "complete".
+assert "en" in CATALOG_IDS, f"no locale ids found in {CATALOG_PATH}"
 
 
 def _load_sidebar_script():
@@ -65,7 +67,7 @@ KNOWN_GAPS = {"realm_settings": "realms-extensions#65"}
 
 def _expect_complete(ext_id, manifest):
     gap = KNOWN_GAPS.get(ext_id)
-    marks = [pytest.mark.xfail(reason=gap)] if gap else []
+    marks = [pytest.mark.xfail(reason=gap, strict=True)] if gap else []
     return pytest.param(ext_id, manifest, id=ext_id, marks=marks)
 
 
