@@ -40,8 +40,14 @@ def test_a_time_is_bounded_in_seconds_because_the_operations_take_seconds():
     assert RANGES["governance_update"]["voting_window"] == (0, LONG // 10**9)
 
 
-def test_a_number_inside_a_variant_is_left_to_the_operation():
-    assert "setup_step" not in RANGES and "outcome" not in RANGES.get("dispatch_confirm", {})
+def test_the_bounds_follow_the_shape_the_operation_takes_where_it_differs_from_ggg_did():
+    assert RANGES["treasury_configure"] == {"config": {"epoch": (0, LONG // 10**9), "anchor_month": (0, 255)}}
+    assert RANGES["setup_step"] == {"accounting_currency_decimals": (0, 255)}  # the tokens step, whose fields are flat
+    assert RANGES["department_set_policy"].keys() == {"m", "n", "quorum"}
+
+
+def test_a_number_inside_any_other_variant_is_left_to_the_operation():
+    assert "outcome" not in RANGES.get("dispatch_confirm", {})
 
 
 def test_a_derived_fact_is_no_argument():
@@ -58,6 +64,9 @@ def test_a_derived_fact_is_no_argument():
     ("invoice_create", {"payer": "User:bob", "amount": 5, "items": [{"concept": "x", "amount": MONEY + 1}]}),
     ("invoice_create", {"payer": "User:bob", "amount": MONEY + 1}),
     ("token_register", {"token": "T", "decimals": 256}),
+    ("treasury_configure", {"config": {"anchor_month": 256}}),
+    ("realm_configure_tokens", {"accounting_currency_decimals": 256}),
+    ("setup_step", {"step": "tokens", "accounting_currency": "DOM", "accounting_currency_decimals": 256}),
 ])
 def test_a_number_out_of_range_is_refused_whatever_the_operation_and_nothing_is_written(name, args):
     world.build()

@@ -29,7 +29,10 @@ METHODS = ROOT / "src" / "realm_backend" / "ggg_methods.py"
 FACTS = ROOT / "ggg" / "facts.json"
 RANGES = ROOT / "src" / "realm_backend" / "ggg_ranges.py"
 NS = 1_000_000_000  # GGG has times in nanoseconds, where Realms GOS' operations take seconds
-FLAT = {"department_set_policy": "policy"}  # Realms GOS takes this record's fields as arguments of their own (ggg_api.ARGS)
+# Where Realms GOS shapes an operation's JSON arguments otherwise than ggg.did does (ggg_api.ARGS, UNFIX):
+FLAT = {"department_set_policy": "policy"}  # a record whose fields are arguments of their own,
+WRAPPED = {"treasury_configure": "config"}  # arguments kept under one key,
+FLAT_CASES = {"setup_step": "step"}  # and a variant whose cases' fields are arguments of their own, the case named by `step`
 ALIASES = ("Timestamp", "Duration")
 PRIMITIVES = {"nat": "nat", "nat8": "nat8", "nat16": "nat16", "nat32": "nat32", "nat64": "nat64", "int": "int",
               "bool": "bool", "text": "text", "blob": "blob", "principal": "Principal", "null": "null"}
@@ -196,7 +199,7 @@ def bounds(fact):
     """What an operation checks of an argument that ``fact`` (a fact of facts.json) describes: ``(min, max)`` for a
     number, a dict of its fields for a record, ``[element]`` for a list, or None where there is no number to bound.
     A time or a duration is bounded in seconds. Not checked: a derived fact, which is no argument, and a number
-    inside a variant, which Realms GOS writes in its own shape (ggg_api.UNFIX)."""
+    inside a variant (but FLAT_CASES), which Realms GOS writes in its own shape (ggg_api.UNFIX)."""
     if "min" in fact and "derived" not in fact:
         scale = NS if fact.get("kind") in ("timestamp", "duration") else 1
         return int(fact["min"]) // scale, int(fact["max"]) // scale
@@ -216,6 +219,11 @@ def ranges_module():
              for op, action in actions.items() if "." not in op}  # "op.list" is the same facts, once per element
     for op, record in FLAT.items():
         table[op] = {**{k: v for k, v in table[op].items() if k != record}, **table[op].get(record, {})}
+    for op, key in WRAPPED.items():
+        table[op] = {key: table[op]}
+    for op, variant in FLAT_CASES.items():
+        for fact in actions[op]["facts"][variant]["cases"].values():
+            table[op].update(bounds(fact) or {})
     version = re.search(r"GGG (\d+\.\d+\.\d+)", DID.read_text()).group(1)
     lines = [
         f'"""The bounds facts.json gives the numbers each operation takes (GGG {version}).',

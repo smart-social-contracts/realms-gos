@@ -62,13 +62,19 @@ same rows.
   Cedar Long maximum), or the call is refused with `InvalidArgument` before anything is written. The bounds are
   `src/realm_backend/ggg_ranges.py`, generated with the other `ggg.did` files, and a time is bounded in seconds.
   A text of an integer counts as the number. Two things follow from GGG's ranges: land coordinates are not negative,
-  and an amount of a token with many decimals is limited to 2^53 − 1 of its smallest unit;
+  and an amount of a token with many decimals is limited to 2^53 − 1 of its smallest unit. Not bounded here: the maps
+  that stand for lists of pairs (a tender's rubric weights, bid scores), `expires_in`, which only Realms GOS has, a
+  number inside a variant (except the tokens step of `setup_step`), a derived fact, and `limit`, which is `count` and
+  is capped by the page size;
 - a proposal stores the rule that decides it (I-GOV-3): `kind`, `matter`, `threshold`, `quorum` and `threshold_of`
   (`cast` or `eligible`, lower case) are arguments of `proposal_create`, a stricter rule than the scope's default is
   stored and a weaker one refused. The default is the realm's `voting_threshold` and `voting_quorum` over the votes
-  cast for a realm-wide proposal, m/n of the policy (rounded down) over the eligible seats with the policy's quorum for
-  a department's; a governed call's proposal takes it. The electorate is counted when the vote opens, in
-  `tally.eligible`. The realm's casting vote is set with `governance_update` (`casting_vote`: the principal of an active
+  cast for a realm-wide proposal, m/n of the policy (rounded down) with the policy's quorum for a department's; a governed
+  call's proposal takes it. A department's threshold is a share of the policy's `n` seats, kept when the vote opens in
+  `tally.seats`, whoever sits in them: the default needs exactly `m` yes votes, a stricter `t` needs ceil(`t` · `n`), a
+  direct policy needs one, and a vacancy never makes a vote easier (a departure from the model, which words it over the
+  eligible seats). The electorate is counted when the vote opens, in `tally.eligible`, for the quorum and for the end
+  when everyone has voted. The realm's casting vote is set with `governance_update` (`casting_vote`: the principal of an active
   member or `""`, as `department_edit` names a head, kept with the other voting rules, outside the `Realm` row) and copied onto a realm-wide proposal when it is
   filed; a department's proposals have none;
 - a proposal settles itself: the deciding vote, the last vote of every eligible member, or its deadline
@@ -78,7 +84,7 @@ same rows.
   its status is `execution_scheduled`, and a one-step task of the realm's task scheduler runs it, which
   the scheduler arms again after an upgrade. A vote ends at its deadline, or earlier the moment every
   eligible member has voted (I-GOV-7). A department's vote also ends as soon as its yes votes reach its stored
-  threshold (m approvals under the policy's own rule), every veto holder who can still vote has voted (none against)
+  threshold of the policy's `n` seats (m approvals under the policy's own rule), every veto holder who can still vote has voted (none against)
   and its quorum is met. Only an acceptance ends it early: until
   its deadline, or until everyone has voted, a no can be replaced. Realms GOS has a rule of its own besides: a
   realm-wide vote in a realm with no voting window ends as soon as its outcome is certain, while a department's vote
@@ -184,6 +190,9 @@ Next to the model's fields, the `Realm` row holds:
 |---|---|---|---|
 | `Task`, `TaskStep`, `TaskSchedule`, `TaskExecution`, `Call` | as in `ic-basilisk-toolkit` | Scheduled and multi-step automation. | Monthly payroll on the 1st; last run succeeded |
 | `Extension` | `id` (name), `version`, `status`, `operations` (Json: the only operations its frontend and backend may call), `manifest` (Json), `source` (its backend, when the manifest sets `backend`), `access` (Json: profiles and departments), `sidebar` (Json) | A feature package with its own frontend and, optionally, backend code. | `voting` 2.1.0, for `[member]`, in the Governance menu |
+| `LayeredCodex` | `id` (`sha256:` and the checksum of its layers, layer paths and chapter checksums), `layers`, `layer_paths`, `chapters` (Json: chapter id → source, version, sha256, vouched_by, route, fetched_at, url, size), `previous` (a codex of either kind), `status` (`pending`, `active`, `inactive`, `reverted`), `activates_at`, `installed_at`, `proposal` | A realm's legislation built from the chapters of several sources ([layered codex](../codices/layered-codex.md) §9.1). Active in place of a `Codex`, never beside one. | `sha256:4be1…`, active, tax path EU → Spain → CV |
+| `ChapterSource` | `sha256` (key), `source` | The text of a chapter or calendar, stored once under its checksum; at most 256 KB. | the text of `eu/es/tax` |
+| `InstallJob` | `id`, `proposal`, `change_list` (`{url, checksum}`), `step`, `staged`, `status` (`running`, `paused`, `failed`, `done`), `error`, `started_at`, `finished_at` | One install of a layered codex. At most one job is `running` or `paused`. | `J-1`, running, fetching chapters |
 
 Extensions are callers of their own (see the model's "Callers"): an extension calls operations
 only as the user using it, and only those its manifest declares.
@@ -227,7 +236,7 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 | `scale_status` | — (public) | read | Quarter populations against this GOS's auto-scale capacity |
 | `quarter_add` (on the capital: Casals grows the realm's stand by <stand>-quarter-<n>, then the capital makes that canister a quarter and registers it; filed by the realm itself once a quarter is wanted) | `quarter.register` | governed | The members vote for a fourth quarter → Casals builds `agora-quarter-4` |
 | `realm_configure_infrastructure` | `realm.configure.infrastructure` | governed | Frontend, file-registry, marketplace, installer and Casals baton canister ids |
-| `realm_export` | `db.export` | read | One page of an entity's rows, as stored, for a backup |
+| `realm_export` | `db.export` | read | One page of an entity's rows, as stored, for a backup. An entity with large rows (`ChapterSource`: up to 256 KB each) returns fewer rows than `count` asks for: follow `next` |
 | `db_convert_indexes` | `db.convert` | | After an upgrade from a release before ic-python-db 0.13: converts the index lists saved as one array each, a batch per call, until `done` (a list too long for one call is skipped and named in `refused`); a new realm, or one already converted, does nothing |
 | `tax_policy_view` | `realm.data_view` | read | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
 | `budget_view` | `realm.data_view` | read | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its adopted budgets |

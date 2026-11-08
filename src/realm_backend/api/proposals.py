@@ -133,8 +133,9 @@ def filer(p):
 
 def default_rule(department):
     """The rule that decides the proposals of ``department`` unless a proposer states a stricter one (ggg I-GOV-3). The
-    realm's own, over the votes cast, with the casting vote of its governed configuration; a department's m of its n
-    seats, rounded down, over the eligible seats, with the policy's quorum."""
+    realm's own, over the votes cast, with the casting vote of its governed configuration; a department's m of the n
+    seats of its policy, rounded down, with the policy's quorum. A department's threshold is a share of its policy's n,
+    never of the seats that happen to be filled: a vacancy does not make a vote easier."""
     if department.is_root:
         rules = settings()
         return {"threshold": int(rules.get("voting_threshold", ONE // 2)), "quorum": int(rules.get("voting_quorum", 0)),
@@ -144,15 +145,24 @@ def default_rule(department):
             "quorum": int(policy.get("quorum", 0)), "threshold_of": "eligible", "casting_vote": ""}
 
 
+def whole(name, value):
+    """``value`` as a whole number, or a refusal naming ``name``: ``int`` raises on a word, and the call would trap."""
+    number = ranges.numeral(value)
+    if not isinstance(number, int):
+        raise Fail(f"{name} is a whole number")
+    return number
+
+
 def stricter_rule(department, stated):
     """The default rule of ``department`` with what ``stated`` (a proposer's ``threshold``, ``quorum``, ``threshold_of``)
     makes stricter. A weaker one is refused: legislation's guards may demand a stricter rule and must not be undone."""
     rule = default_rule(department)
     for name in ("threshold", "quorum"):
         if stated.get(name) is not None:
-            if int(stated[name]) < rule[name]:
-                raise Fail(f"{name} {stated[name]} is weaker than the {rule[name]} that decides {department.id}")
-            rule[name] = int(stated[name])
+            value = whole(name, stated[name])
+            if value < rule[name]:
+                raise Fail(f"{name} {value} is weaker than the {rule[name]} that decides {department.id}")
+            rule[name] = value
     basis = stated.get("threshold_of")
     if basis is not None:
         if basis not in BASES:
@@ -185,11 +195,13 @@ def new_proposal(title, user, by, department, action=None, description="", effec
 
 
 def open_vote(p):
-    """Start the tally and count the eligible voters, who are the ones the rule is measured against: a member who joins
-    or a seat that fills later does not change it (ggg I-GOV-3). A department's veto holders are kept as they are."""
+    """Start the tally and count the eligible voters, for the quorum and for the end when everyone has voted: a member who
+    joins or a seat that fills later does not change it (ggg I-GOV-3). A department's vote keeps the policy's n, which its
+    threshold is a share of (``seats``), and its veto holders, as they are now."""
     p.tally = {**{c: 0 for c in CHOICES}, "eligible": electorate_size(p)}
     if scoped_to_department(p):
-        p.tally = {**p.tally, "veto": list((p.department.policy or {}).get("veto", []))}
+        policy = p.department.policy or {}
+        p.tally = {**p.tally, "seats": int(policy.get("n", 1)), "veto": list(policy.get("veto", []))}
 
 
 def arm(p):
@@ -343,11 +355,11 @@ def veto_pending(p):
 
 
 def department_outcome(p, tally, size, vetoed, final):
-    """A department's vote passes when the yes votes reach its threshold of the eligible seats (m under the policy's own
-    rule), no veto holder is against and the policy's quorum is met (ggg I-GOV-3). Before it ends it is accepted only
-    once every veto holder who can still vote has voted, and it is never rejected: a no can still be replaced (ggg
-    I-GOV-7)."""
-    passes = (tally["yes"] > 0 and tally["yes"] * ONE >= p.threshold * size and not vetoed
+    """A department's vote passes when the yes votes reach its threshold of the policy's n seats (exactly m under the
+    policy's own rule, ceil(threshold * n) under a stricter one), no veto holder is against and the policy's quorum is met
+    among the ``size`` eligible (ggg I-GOV-3). Before it ends it is accepted only once every veto holder who can still
+    vote has voted, and it is never rejected: a no can still be replaced (ggg I-GOV-7)."""
+    passes = (tally["yes"] > 0 and tally["yes"] * ONE >= p.threshold * p.tally["seats"] and not vetoed
               and quorum_met(p, tally, size))
     if passes and (final or not veto_pending(p)):
         return "accepted"
@@ -415,7 +427,7 @@ def proposal_create(c, args):
     governs). Voting opens at once. Optional ``kind`` and ``matter``: what it is and what it decides, in the realm's words.
     Optional ``threshold``, ``quorum`` (hundred-millionths) and ``threshold_of`` (``cast`` or ``eligible``): a rule
     stricter than the scope's own, which decides it, fixed like the action. A realm-wide proposal's default is the
-    realm's threshold and quorum over the votes cast, a department's m of its n seats over the eligible; a weaker rule
+    realm's threshold and quorum over the votes cast, a department's m of the n seats of its policy; a weaker rule
     is refused. Under ``cast`` a tie at the threshold is accepted only if the realm's casting member voted yes.
     Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
     instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier once every eligible
@@ -659,7 +671,7 @@ def voting_rules(args):
     """The rules of a ``governance_update`` call, as they are stored: the ratios, refused if they are not between 0 and
     100 %, or the old names, and the casting vote, refused unless it names an active member."""
     refuse_renamed(args, {"threshold": "voting_threshold", "quorum_percent": "voting_quorum"})
-    rules = {k: int(args[k]) for k in ("voting_threshold", "voting_quorum") if k in args}
+    rules = {k: whole(k, args[k]) for k in ("voting_threshold", "voting_quorum") if k in args}
     if any(not 0 <= v <= ONE for v in rules.values()):
         raise Fail(f"a threshold and a quorum are between 0 and {ONE} (100 %)")
     if args.get("casting_vote") is not None:

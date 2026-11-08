@@ -342,6 +342,8 @@ UNFIX = {
     "ProposalAction": unaction,
     "CodexSource": lambda case, payload: payload,
     "SetupStep": lambda case, payload: {"step": snake(case), **payload},
+    # Named for the first inline `variant { Set : principal; Clear }` in ggg.did (department_edit's head): every copy of
+    # the shape is this class, so governance_update's casting_vote is a principal, or "", as well.
     "DepartmentEditArgsHead": lambda case, payload: payload or "",
 }
 

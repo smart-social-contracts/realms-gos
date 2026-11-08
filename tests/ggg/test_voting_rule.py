@@ -4,6 +4,8 @@ scope's default, and applied as it is stored when the vote ends.
 Agora has seven members. Its default rule is the realm's: yes votes exceed half of the yes and no votes cast.
 """
 
+import pytest
+
 import world
 from core.ratio import ONE, PERCENT
 from ggg import Department, Member, Proposal, Realm
@@ -56,18 +58,18 @@ def test_a_realm_wide_proposal_stores_the_realms_rule_and_its_casting_vote():
     assert rule(file()) == (70 * PERCENT, 25 * PERCENT, "cast", "")
 
 
-def test_a_departments_proposal_stores_m_of_n_rounded_down_over_the_eligible_seats():
+def test_a_departments_proposal_stores_m_of_the_policys_n_rounded_down():
     civil_registry(2, n=3, quorum=50 * PERCENT)
     p = file("Civil Registry")
     assert rule(p) == (66_666_666, 50 * PERCENT, "eligible", "")  # a department has no casting vote
-    assert Proposal[p].tally["eligible"] == 4
+    assert (Proposal[p].tally["seats"], Proposal[p].tally["eligible"]) == (3, 4)  # n, and who may vote
 
 
 def test_a_direct_policy_is_the_same_rule_over_one_seat():
     world.build()
     p = file("Infrastructure")
     assert rule(p) == (ONE, 0, "eligible", "")
-    assert Proposal[p].tally["eligible"] == 1
+    assert (Proposal[p].tally["seats"], Proposal[p].tally["eligible"]) == (1, 1)
 
 
 def test_a_governed_call_files_its_scopes_default_rule():
@@ -107,6 +109,14 @@ def test_a_rule_out_of_range_is_refused_before_anything_is_written():
     for stated in ({"threshold": ONE + 1}, {"quorum": -1}, {"threshold": "100000001"}):
         out = file(**stated)
         assert out["kind"] == "invalid_argument" and "must be between 0 and" in out["error"], stated
+    assert Proposal.count() == 0
+
+
+@pytest.mark.parametrize("word", ["abc", "", [1], 0.5, {"x": 1}])
+def test_a_rule_that_is_no_whole_number_is_refused_not_trapped(word):
+    world.build()
+    for out in (file(threshold=word), file(quorum=word), call("governance_update", "ctl", voting_quorum=word)):
+        assert out["kind"] == "invalid_argument" and "is a whole number" in out["error"], (word, out)
     assert Proposal.count() == 0
 
 
@@ -250,13 +260,44 @@ def test_a_departments_vote_ends_at_its_stored_threshold():
     assert Proposal[raised].status == "accepted"
 
 
-def test_two_of_three_seats_reach_two_thirds_rounded_down():
-    civil_registry(2, n=3, voters=("alice",))
-    p = file("Civil Registry")
-    assert rule(p)[0] == 66_666_666 and Proposal[p].tally["eligible"] == 3
-    vote(p, "yes", "bob")
-    assert Proposal[p].status == "voting"
-    vote(p, "yes", "alice")
+def test_a_departments_threshold_is_a_share_of_the_policys_n_whoever_fills_the_seats():
+    civil_registry(2, n=3)  # four voters, three seats in the policy
+    two, all_three = file("Civil Registry"), file("Civil Registry", threshold=ONE)
+    vote(two, "yes", "bob")
+    assert Proposal[two].status == "voting"
+    vote(two, "yes", "alice")
+    assert Proposal[two].status == "accepted"  # m, exactly
+    vote(all_three, "yes", "bob", "alice")
+    assert Proposal[all_three].status == "voting"
+    vote(all_three, "yes", "dana")
+    assert Proposal[all_three].status == "accepted"  # 100 % of n is 3 yes, not 4
+
+
+def test_a_vacancy_never_makes_a_departments_vote_easier():
+    civil_registry(2, n=4, voters=())  # two seats filled, four in the policy
+    accepted, split = file("Civil Registry"), file("Civil Registry")
+    vote(accepted, "yes", "bob")
+    assert Proposal[accepted].status == "voting"  # one yes is not m
+    vote(accepted, "yes", "dana")
+    assert Proposal[accepted].status == "accepted"
+    vote(split, "yes", "bob")
+    vote(split, "no", "dana")
+    assert Proposal[split].status == "rejected"  # everyone voted and m is out of reach
+
+
+def test_a_threshold_the_filled_seats_cannot_reach_rejects_the_vote():
+    civil_registry(3, n=4, voters=())  # three approvals cannot be had from two seats
+    unreachable = file("Civil Registry")
+    vote(unreachable, "yes", "bob", "dana")
+    assert Proposal[unreachable].status == "rejected"
+
+
+def test_a_direct_policy_needs_one_yes_however_many_hold_seats():
+    depts = world.build()
+    world.seat("infrastructure.second", "bob", depts["Infrastructure"])
+    p = file("Infrastructure")
+    assert Proposal[p].tally["eligible"] == 2
+    vote(p, "yes", "carla")
     assert Proposal[p].status == "accepted"
 
 
@@ -272,17 +313,19 @@ def stored_as_version_2(proposal, **fields):
     db.clear_registry()
 
 
-def test_a_proposal_of_the_last_release_gets_the_rule_it_was_decided_by():
-    civil_registry(2, n=3, quorum=20 * PERCENT, voters=("alice",))
+@pytest.mark.parametrize("voters", [("alice",), ("alice", "carla"), ()], ids=["seats = n", "seats > n", "seats < n"])
+def test_a_proposal_of_the_last_release_gets_the_rule_it_was_decided_by(voters):
+    """It took m approvals, whoever held the seats: it still does."""
+    civil_registry(2, n=3, quorum=20 * PERCENT, voters=voters)
     realm_wide, department = file(), file("Civil Registry")
     stored_as_version_2(realm_wide)
     stored_as_version_2(department, tally={"yes": 0, "no": 0, "abstain": 0, "required": 2, "veto": []},
                         threshold=50 * PERCENT)
     assert rule(realm_wide) == (50 * PERCENT, 0, "cast", "")
     assert rule(department) == (66_666_666, 20 * PERCENT, "eligible", "")
-    assert "required" not in Proposal[department].tally
+    assert "required" not in Proposal[department].tally and Proposal[department].tally["seats"] == 3
     assert Database.get_instance().load("Proposal", Proposal[department]._id)["__version__"] == 3
-    vote(department, "yes", "bob")  # it was open: the seats are counted when it is next read
+    vote(department, "yes", "bob")  # it was open: the electorate is counted when it is next read
     assert Proposal[department].status == "voting"
-    vote(department, "yes", "alice")
+    vote(department, "yes", "dana")
     assert Proposal[department].status == "accepted"

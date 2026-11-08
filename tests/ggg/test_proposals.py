@@ -81,11 +81,11 @@ def test_veto():
 
 
 def civil_registry(m, quorum=0, veto=()):
-    """Civil Registry deciding m of 4, with four voters: dana, bob, and alice and carla in seats of their own."""
+    """Civil Registry deciding m of 3, with four voters: dana, bob, and alice and carla in seats of their own."""
     depts = world.build()
     for voter in ("alice", "carla"):
         world.seat(f"civil-registry.{voter}", voter, depts["Civil Registry"])
-    world.policy(depts["Civil Registry"], m, 4, quorum, veto)
+    world.policy(depts["Civil Registry"], m, 3, quorum, veto)
 
 
 def department_proposal():

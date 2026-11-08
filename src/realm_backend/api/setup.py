@@ -5,7 +5,7 @@ import constants
 import ggg
 from core import sandbox
 from api import tasks
-from core.db import CONVERT_IDS, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
+from core.db import CONVERT_IDS, PAGE_MAX, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
 from api.extensions import trust
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
@@ -377,7 +377,8 @@ READERS = {"Attribute": "attribute.review"}
 
 @op("db.export", read=True, returns="rows")
 def realm_export(c, args):
-    """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it. Exporting ``Attribute``
+    """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it. An entity whose rows are
+    large returns fewer rows than ``count`` asks for: follow ``next``, never compute ``from``. Exporting ``Attribute``
     takes attribute.review as well, since its rows hold personal data in clear."""
     cls = getattr(ggg, args["entity"], None)
     if not (isinstance(cls, type) and issubclass(cls, Entity)):
@@ -385,7 +386,7 @@ def realm_export(c, args):
     reader = READERS.get(args["entity"])
     if reader and not {"all", reader} & auth.permissions(c.user):
         raise Forbidden(f"exporting {args['entity']} needs {reader}")
-    rows, nxt = page(cls, args)
+    rows, nxt = page(cls, args, most=getattr(cls, "export_most", PAGE_MAX))
     return {"entity": args["entity"], "rows": [view(r) for r in rows], "next": nxt}
 
 
