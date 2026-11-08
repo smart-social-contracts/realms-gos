@@ -435,8 +435,8 @@ EVENT_OK = register('''    def on_t_poke(self, event):
 def test_an_attribute_is_set_on_self_or_on_what_the_method_was_given_never_on_a_local(text, line):
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
                              "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
-    assert out["errors"] == [f"x/town/register.py:{line}: .memo = ...: a chapter sets attributes on self, or on what a method "
-                             "was given, never on a local, a class or a call's result"]
+    assert out["errors"] == [f"x/town/register.py:{line}: .memo = ...: a chapter sets attributes on self, or on the event a hook "
+                             "was given, never on anything else"]
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
                              "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:y"}]}, {"sha256:y": EVENT_OK})
     assert out["errors"] == []  # the event a hook was given takes attributes, as §4.1 says
@@ -475,3 +475,83 @@ def test_the_leg_index_is_filled_for_legs_written_before_it_existed():
     federation.index_legs()  # what setup.start runs once, where the realm starts after the upgrade
     assert first(FederalVoteLeg, "proposal_id", leg.proposal_id).id == leg.id
     assert legislation._reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})
+
+
+# ── The third review: a legacy codex keeps acting for the realm; state through a parameter ─────────────────────
+
+
+@op.op("treasury.manage")
+def t_mark(c, args):
+    """Tells whether the call carries the legacy mark: only the legacy hook path can set it."""
+    return {"legacy": c.legacy}
+
+
+def legacy_package(name):
+    import json
+    import pathlib as _pathlib
+
+    folder = _pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices" / name
+    return {"manifest": json.loads((folder / "manifest.json").read_text()),
+            "source": (folder / "backend" / "hooks.py").read_text()}
+
+
+def test_a_legacy_codex_still_seeds_the_permissioned_profiles_of_its_departments():
+    from ggg import Realm, UserProfile
+
+    Realm["1"].require_marketplace_approval = False
+    out = ok("codex_install", **legacy_package("agora"))
+    assert out["init"]["ok"] and [e for e in out["init"]["effects"] if not e["ok"]] == []
+    seeded = [p for p in rows(UserProfile) if p.allowed_to and p.id not in ("member", "admin")]
+    assert seeded and ok("codex_status", query=True)["healthy"]  # the seats' profiles carry their departments' permissions
+
+
+SEED = register('''    def on_t_poke(self, event):
+        if event.args.get("what") == "seed":
+            self.ggg.profile_create(profile="clerk", allowed_to=["proposal.create"])
+        if event.args.get("what") == "mark":
+            self.ggg.invite_create(profile="boss", legacy=True)
+            self.ggg.t_mark(legacy=True)
+''')
+
+
+def test_the_same_effect_from_a_layered_codex_is_a_proposal_and_the_legacy_mark_cannot_be_obtained():
+    from ggg import UserProfile
+
+    UserProfile(id="boss", description="all powers", allowed_to=["all"])
+    activate(layered({(TOWN, "register"): SEED}, layers=[TOWN]))
+    ok("t_poke", what="seed")
+    assert UserProfile["clerk"] is None
+    assert [(p.action["op"], p.proposer) for p in rows(Proposal) if p.action] == [("profile_create", "realm")]
+    ok("t_poke", what="mark")  # an argument named legacy is just an argument: the mark is the dispatcher's
+    assert failures()["x/town/register.py"]["on_t_poke"]["error"] == "invite_create: you do not hold all"
+    assert ok("t_mark")["legacy"] is False  # a member's call carries no mark either
+
+
+KEEP = register('''    def check_t_poke(self, args):
+        self.keep(days, args.what)
+
+    def keep(self, f, value):
+        f.memo = value
+''').replace("from realms.legislation import above", "from realms.legislation import above, days")
+FRESH = register('''    def check_t_poke(self, args):
+        if args.what == "remember":
+            self.memo = "kept"
+        if args.what == "recall":
+            return self.deny("memo: " + str(getattr(self, "memo", None)))
+
+    def on_t_poke(self, event):
+        event.count = getattr(event, "count", 0) + 1
+        self.ggg.notification_send(recipient="User:alice", title="count", body=str(event.count))
+''')
+
+
+def test_a_store_through_a_parameter_is_refused_and_self_and_the_event_outlive_no_call():
+    out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
+                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": KEEP})
+    assert out["errors"] == ["x/town/register.py:8: .memo = ...: a chapter sets attributes on self, or on the event a hook was "
+                             "given, never on anything else"]
+    activate(layered({(TOWN, "register"): FRESH}, layers=[TOWN]))
+    ok("t_poke", what="remember")
+    assert call("t_poke", what="recall")["error"] == "memo: None"  # a fresh instance per call
+    ok("t_poke", what="again")
+    assert notices("count") == ["1", "1"]  # a fresh event per call (the denied recall ran no hook)

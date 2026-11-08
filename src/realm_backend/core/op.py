@@ -16,10 +16,13 @@ GENERATOR = type((lambda: (yield))())
 
 class Call:
     """``user`` is who acts; ``by`` signed the message (the user, or their delegate); ``proposal`` is the
-    accepted proposal whose replay this is, if any; ``grant`` is the power of attorney a delegate acts under."""
+    accepted proposal whose replay this is, if any; ``grant`` is the power of attorney a delegate acts under;
+    ``legacy`` marks an effect of a legacy codex, which acts for the realm (api.members.within): only the legacy
+    hook path (core.sandbox.call) sets it, and a call without it holds nothing of the realm's."""
 
-    def __init__(self, user, by, origin, proposal="", grant=""):
+    def __init__(self, user, by, origin, proposal="", grant="", legacy=False):
         self.user, self.by, self.origin, self.proposal, self.grant = user, by, origin, proposal, grant
+        self.legacy = legacy
 
     @property
     def delegated(self):
@@ -57,8 +60,9 @@ def ops():
     return OPS
 
 
-def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, proposal=""):
-    """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded.
+def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, proposal="", legacy=False):
+    """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded; ``legacy``
+    marks a legacy codex's effect (``Call.legacy``).
 
     A refusal replies ``ok`` false with the ``error`` for people and its ``kind`` for programs: GGG's error in
     snake case (``not_found``, ``forbidden``, ``conflict``, ...), see core.db.Fail."""
@@ -81,7 +85,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
         from core import legislation
 
-        call = Call(user, by, origin, proposal, grant)
+        call = Call(user, by, origin, proposal, grant, legacy)
         record = None if spec["read"] else (lambda out: audit(name, user, by, origin, args, out))
         # A delegate's governed call is always a proposal: where the department decides directly, the member's own
         # vote is what lets it through. The filing is a proposal_create to the legislation.

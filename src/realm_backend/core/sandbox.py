@@ -153,7 +153,7 @@ def call(source, fn, args, context, declared):
         return envelope
     results = []
     for name, kwargs in envelope["effects"]:
-        results.append((yield from apply(name, resolve(kwargs, results), declared)))
+        results.append((yield from apply(name, resolve(kwargs, results), declared, legacy=True)))
     return {"ok": True, "result": resolve(envelope["result"], results),
             "effects": [{"op": e[0], **r} for e, r in zip(envelope["effects"], results)]}
 
@@ -170,10 +170,13 @@ def read(action, args, declared):
                                    declared=declared)))
 
 
-def apply(name, args, declared):
+def apply(name, args, declared, legacy=False):
+    """Run ``name`` as the codex (origin ``codex``, the realm as signer); ``legacy`` marks a legacy codex's effect,
+    which acts for the realm where a layered codex's holds nothing (core.op.Call)."""
     if name not in ops():
         return {"ok": False, "error": f"unknown operation '{name}'"}
-    reply = yield from dispatch(name, json.dumps(args), origin="codex", signer=chain.self_id(), declared=declared)
+    reply = yield from dispatch(name, json.dumps(args), origin="codex", signer=chain.self_id(), declared=declared,
+                                legacy=legacy)
     return json.loads(reply)
 
 

@@ -338,7 +338,7 @@ def test_a_deleted_departments_proposal_does_not_turn_realm_wide_to_make_every_m
 def test_a_replay_of_a_proposal_whose_department_is_gone_holds_no_permission():
     p = pending_in_deleted_department(
         "role.assign", {"op": "role_assign", "args": {"department": "Sub", "user": "carla", "profile": "admin"}})
-    replay = SimpleNamespace(origin="replay", proposal=p, user="carla")
+    replay = SimpleNamespace(origin="replay", proposal=p, user="carla", legacy=False)
     try:
         members.within(replay, {"role.assign"})
     except Forbidden as e:

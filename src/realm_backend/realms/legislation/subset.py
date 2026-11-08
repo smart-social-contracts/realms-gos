@@ -295,24 +295,25 @@ class Check:
                     )
         for const in code.co_consts:
             if type(const) is type(code):
-                self.function(const)
+                self.function(const, event_of(const))
 
-    def function(self, code):
+    def function(self, code, event=None):
+        """A method, or a function nested in one; ``event`` names the event the enclosing hook was given."""
         self.common(code, "method", FUNCTION_INSTRUCTIONS)
         ops = instructions(code, self.names)
         self.no_defaults(ops)
         for i, (name, arg) in enumerate(ops):
-            if name == "STORE_ATTR" and not self.on_parameter(code, ops, i):
+            if name == "STORE_ATTR" and not self.on_self_or_event(code, ops, i, event):
                 attr = code.co_names[arg]
                 self.refuse(
-                    f".{attr} = ...: a chapter sets attributes on self, or on what a method was given, never on a local, a class or a call's result",
+                    f".{attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
                     f".{attr}",
                 )
             if name == "CALL_INTRINSIC_1" and arg not in _INTRINSICS:
                 self.refuse("an instruction outside the readable subset", code.co_name)
         for const in code.co_consts:
             if type(const) is type(code):
-                self.function(const)
+                self.function(const, event)
 
     @staticmethod
     def attribute_index(name, arg):
@@ -321,21 +322,21 @@ class Check:
             return arg >> 1
         return arg
 
-    def on_parameter(self, code, ops, i):
-        """Whether the object the attribute is stored on was just loaded from a parameter of this function: ``self``,
-        or what the method was given (the event a hook adds to). A local assigned from anything else may be an
-        object that outlives the call (an SDK function, the calendar), so a store on it is refused."""
+    def on_self_or_event(self, code, ops, i, event):
+        """Whether the object the attribute is stored on was just loaded as ``self`` or as the event the hook was
+        given (``event``): the two objects a call gets fresh, and so the only ones a store cannot turn into state
+        kept between calls. Anything else, a parameter included, may outlive the call: an SDK function, the
+        calendar, a view, another chapter."""
         if i == 0:
             return False
+        allowed = {"self", event} - {None}
         name, arg = ops[i - 1]
-        count = code.co_argcount + code.co_kwonlyargcount + bool(code.co_flags & 4) + bool(code.co_flags & 8)
-        params = code.co_varnames[:count]
         if name in ("LOAD_FAST", "LOAD_FAST_CHECK"):
-            return arg < len(params)
+            return code.co_varnames[arg] in allowed
         if name == "LOAD_FAST_LOAD_FAST":
-            return (arg & 15) < len(params)
+            return code.co_varnames[arg & 15] in allowed
         if name == "LOAD_DEREF":  # a parameter a nested function also reads is a cell on 3.10
-            return self.deref_name(code, arg) in params
+            return self.deref_name(code, arg) in allowed
         return False
 
     @staticmethod
@@ -437,6 +438,13 @@ class Check:
         if name == "LOAD_BUILD_CLASS":
             return "a nested class"
         return f"an instruction ({name})"
+
+
+def event_of(code):
+    """The name of the event a hook's code object is given: its second parameter, for an ``on_<op>`` method."""
+    if code.co_name.startswith("on_") and code.co_argcount >= 2:
+        return code.co_varnames[1]
+    return None
 
 
 def check(code, text, file):

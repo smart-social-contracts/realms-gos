@@ -15,10 +15,13 @@ MOVES = {"active": {"inactive", "suspended", "banned"}, "inactive": {"active", "
 
 
 def within(c, perms):
-    """I-ID-3: nobody hands out a permission they do not hold. A realm-wide vote acts for the realm; a department's
-    vote holds only what that department does, like org.grant_authority; a codex holds nothing, so handing out a
-    permission takes a vote, which its effects file as proposals. A proposal whose department was deleted holds
-    nothing: it is refused, never treated as realm-wide."""
+    """I-ID-3: nobody hands out a permission they do not hold. A realm-wide vote acts for the realm, and so does a
+    legacy codex's effect (``Call.legacy``, the mark only the legacy hook path sets); a department's vote holds only
+    what that department does, like org.grant_authority; a layered codex holds nothing, so handing out a permission
+    takes a vote, which its effects file as proposals. A proposal whose department was deleted holds nothing: it is
+    refused, never treated as realm-wide."""
+    if c.legacy:
+        return
     if c.origin == "replay":
         proposal = Proposal[c.proposal]
         if proposal is None or proposal.department is None:
