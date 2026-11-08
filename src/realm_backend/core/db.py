@@ -118,9 +118,9 @@ def window(args, most=PAGE_MAX):
     return max(1, int(args.get("from") or 1)), max(1, min(int(args.get("count") or PAGE), most))
 
 
-def page(cls, args, keep=lambda row: True):
-    """One id range of ``cls`` (``from``, ``count``), filtered by ``keep``; ``next`` continues it."""
-    start, count = window(args)
+def page(cls, args, keep=lambda row: True, most=PAGE_MAX):
+    """One id range of ``cls`` (``from``, ``count``, at most ``most``), filtered by ``keep``; ``next`` continues it."""
+    start, count = window(args, most)
     rows = [r for r in cls.load_some(start, count) if keep(r)]
     more = start + count <= cls.max_id()
     return rows, (start + count if more else None)
