@@ -27,6 +27,9 @@ class ChapterSource(Row):
     """The text of a chapter, or of a ``calendar.json``, stored once under its checksum."""
 
     __alias__ = "sha256"
+    # Rows realm_export returns at most in a page: one row can be 256 KB, and a few of them pass a query's instruction
+    # limit or the reply's size.
+    export_most = 1
     sha256 = String()  # sha256:<hex> of the text's UTF-8 bytes
     source = String(default="")
 
