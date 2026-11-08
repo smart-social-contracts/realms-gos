@@ -9,6 +9,7 @@ class Department(Row):
     __version__ = 2  # 2: a policy's quorum in hundred-millionths, not whole percents
     id = String()  # name
     description = String(default="")
+    kind = String(default="")  # what the body is (plenary, committee), for legislation from another source to address
     parent = ManyToOne("Department", "children")
     children = OneToMany("Department", "parent")
     is_root = Boolean(default=False, indexed=True)

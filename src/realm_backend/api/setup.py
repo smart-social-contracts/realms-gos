@@ -1,6 +1,6 @@
 import json
 
-from core import build_variant, chain, legislation, localtime, zones
+from core import auth, build_variant, chain, language, legislation, localtime, zones
 import constants
 import ggg
 from core import sandbox
@@ -22,7 +22,8 @@ PROFILES = {
         "self.join", "self.update_public_profile", "self.update_private_data", "self.change_quarter",
         "self.invoice_refresh", "self.data_view", "self.data_manage", "self.delegate", "realm.data_view",
         "proposal.create", "proposal.vote", "federal_vote.propose", "dispute.create", "dispute.view",
-        "identity.submit", "license.apply", "tax.declare", "bid.submit", "extension.call",
+        "identity.submit", "attribute.submit", "license.apply", "request.file", "tax.declare", "bid.submit",
+        "extension.call",
     ],
     # Held by the founder only while the realm is in setup (I-ADM-2).
     "founder": [
@@ -33,7 +34,7 @@ PROFILES = {
 INSTALL = ("network", "can_test_mode", "founder")
 FIELDS = {
     "realm": ("name", "manifesto", "welcome_message", "open_registration", "ai_assistant_enabled",
-              "quarter_join_mode", "auto_scale_enabled", "timezone", "test_mode", "test_flags"),
+              "quarter_join_mode", "auto_scale_enabled", "timezone", "languages", "test_mode", "test_flags"),
     "branding": ("logo_url", "background_image_url", "primary_color"),
     "tokens": ("accounting_currency", "accounting_currency_decimals", "token_canister_id", "nft_canister_id",
                "shared_tokens_json"),
@@ -115,12 +116,13 @@ def version(c, args):
 @op(None, read=True, public=True)
 def realm_info(c, args):
     """The realm's public profile: name, manifesto, welcome message, status, branding, accounting currency,
-    whether registration is open and whether it is a capital, its network and time zone, and its test mode and test
-    flags."""
+    whether registration is open and whether it is a capital, its network, time zone and languages, and its test mode
+    and test flags."""
     realm = Realm["1"]
     return {"realm": view(realm, "name", "manifesto", "welcome_message", "status", "logo_url",
                           "background_image_url", "primary_color", "accounting_currency",
-                          "open_registration", "is_capital", "network", "timezone", "test_mode", "test_flags") if realm else {}}
+                          "open_registration", "is_capital", "network", "timezone", "languages", "test_mode",
+                          "test_flags") if realm else {}}
 
 
 @op(None, read=True, public=True)
@@ -144,12 +146,15 @@ def remember(key, value):
     realm.manifest_data = {**realm.manifest_data, key: value}
 
 
-def known_timezone(values):
-    """Refuse a ``timezone`` this release has no zone file for. The check of ``realm_configure``, so that a call that
-    cannot succeed is refused before a voting policy turns it into a proposal."""
+def valid_values(values):
+    """Refuse a ``timezone`` this release has no zone file for and ``languages`` that are no BCP 47 tags. The check
+    of ``realm_configure``, so that a call that cannot succeed is refused before a voting policy turns it into a
+    proposal."""
     if "timezone" in values and not zones.known(values["timezone"]):
         raise Fail(f"timezone must be an IANA name such as Europe/Madrid, or UTC; this release has no zone "
                    f"'{values['timezone']}'")
+    if "languages" in values:
+        language.require_all(values["languages"])
 
 
 def configure(fields, values):
@@ -157,7 +162,7 @@ def configure(fields, values):
     unknown = sorted(set(values) - set(fields))
     if unknown:
         raise Fail(f"cannot configure {', '.join(unknown)} here")
-    known_timezone(values)
+    valid_values(values)
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in HEX for ch in color[1:].lower())):
         raise Fail(f"primary_color must look like #1E6B52, not {color}")
     if (values.get("test_mode") or any((values.get("test_flags") or {}).values())) \
@@ -279,10 +284,11 @@ def setup_launch(c, args):
     return {"realm": realm.id, "status": realm.status}
 
 
-@op("realm.configure", governed=launched, check=known_timezone)
+@op("realm.configure", governed=launched, check=valid_values)
 def realm_configure(c, args):
     """Set any of ``name``, ``manifesto``, ``welcome_message``, ``open_registration``, ``ai_assistant_enabled``,
-    ``quarter_join_mode``, ``auto_scale_enabled``, ``timezone``, ``test_mode`` and ``test_flags``. Returns
+    ``quarter_join_mode``, ``auto_scale_enabled``, ``timezone``, ``languages`` (BCP 47 tags, the first the default),
+    ``test_mode`` and ``test_flags``. Returns
     ``configured``. The ``timezone`` is an IANA name such as ``Europe/Madrid`` that this release bundles, or ``UTC``,
     which a realm has until it sets one; the new zone applies from the moment it is set, and nothing stored changes.
     Test mode and flags need a test build, on a non-production network or with ``can_test_mode`` set at install;
@@ -373,13 +379,21 @@ def realm_monitor(c, args):
             "rows": {n: getattr(ggg, n).count() for n in COUNTED}, "upgrade": realm.manifest_data.get("upgrade", {})}
 
 
+# Entities whose rows hold personal data in clear: exporting them takes their readers' permission too (I-PRV-1).
+READERS = {"Attribute": "attribute.review"}
+
+
 @op("db.export", read=True, returns="rows")
 def realm_export(c, args):
     """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it. An entity whose rows are
-    large returns fewer rows than ``count`` asks for: follow ``next``, never compute ``from``."""
+    large returns fewer rows than ``count`` asks for: follow ``next``, never compute ``from``. Exporting ``Attribute``
+    takes attribute.review as well, since its rows hold personal data in clear."""
     cls = getattr(ggg, args["entity"], None)
     if not (isinstance(cls, type) and issubclass(cls, Entity)):
         raise Fail(f"unknown entity '{args['entity']}'")
+    reader = READERS.get(args["entity"])
+    if reader and not {"all", reader} & auth.permissions(c.user):
+        raise Forbidden(f"exporting {args['entity']} needs {reader}")
     rows, nxt = page(cls, args, most=getattr(cls, "export_most", PAGE_MAX))
     return {"entity": args["entity"], "rows": [view(r) for r in rows], "next": nxt}
 

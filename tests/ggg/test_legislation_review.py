@@ -16,9 +16,9 @@ from test_legislation_runtime import LOG, TOWN, TOWN_REALM, activate, layered, t
 from test_legislation_runtime import fresh_realm  # noqa: F401  the autouse fixture
 
 
-@op.op("treasury.manage", secret=("code",))
+@op.op("treasury.manage", private=("code",))
 def t_poke(c, args):
-    """A plain write any chapter may guard or hook; its ``code`` is the caller's secret, in and out."""
+    """A plain write any chapter may guard or hook; its ``code`` is private, in and out."""
     return {"done": args.get("what", ""), "code": "SHOWN-ONCE"}
 
 
@@ -341,7 +341,7 @@ class Tax(above("tax")):
 
 
 def test_a_tax_entrys_code_reaches_compute_tax_assess():
-    """Secrets are an operation's own: tax_assess keeps none, so a tax entry's code is not an invite's code."""
+    """What is private is an operation's own: tax_assess keeps nothing, so a tax entry's code is not an invite's code."""
     activate(layered({(TOWN, "tax"): TAX}, layers=[TOWN]))
     got = op.run(codex_api.compute("tax_assess", {"entry": {"code": "ibi_urban", "rate": 1}, "subject": "Land:1"}))
     assert got == [{"concept": "ibi_urban", "amount": 1}]

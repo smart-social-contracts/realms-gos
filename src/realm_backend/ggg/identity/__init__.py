@@ -1,6 +1,7 @@
 """Members, verified humans, external organizations and delegations."""
 
 from .member import Member
+from .attribute import Attribute
 from .human import Human
 from .identity import Identity
 from .organization import Organization

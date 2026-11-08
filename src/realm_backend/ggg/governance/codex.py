@@ -8,7 +8,7 @@ class Codex(Row):
     id = String()
     version = String(default="")
     checksum = String(default="")
-    status = String(default="active", indexed=True)  # active | inactive | reverted
+    status = String(default="active", indexed=True)  # pending | active | inactive | reverted
     manifest = Json({})
     capabilities = Json([])
     source = String(default="")

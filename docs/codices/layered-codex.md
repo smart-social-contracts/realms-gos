@@ -1279,7 +1279,7 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   reads of GGG's entities is an allowlist of entities and fields (`VIEWS` in `core/legislation.py`): what
   legislation needs to decide, never a key, a code, a person's private data, a sealed bid, who voted what, a
   grant, a payment account or what one member was told; the arguments and results it gets carry nothing the
-  operation keeps secret (`secret=` on the operation: an invite's code, private data, wrapped keys), and neither do
+  operation keeps secret (`private=` on the operation: an invite's code, personal data, wrapped keys), and neither do
   the replies of its effects; and no read is answered while the codex loads.
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'

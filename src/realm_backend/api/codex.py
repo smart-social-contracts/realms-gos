@@ -29,6 +29,11 @@ def active():
     return active_legacy() or first(LayeredCodex, "status", "active")
 
 
+def pending():
+    """The layered codex installed and waiting for ``codex_activate`` or its time, if any; at most one waits at a time."""
+    return first(LayeredCodex, "status", "pending")
+
+
 def find_codex(codex_id):
     """A codex of either kind by its id: ``name@version`` for a legacy one, ``sha256:…`` for a layered one."""
     return find(Codex if "@" in codex_id else LayeredCodex, codex_id)
@@ -83,6 +88,13 @@ def compute(name, context):
     yield  # noqa: unreachable, on purpose
 
 
+def switch_to(row, replaced):
+    """Make ``row`` the active codex in place of ``replaced``, which is kept to revert to."""
+    row.previous, row.status = replaced.id if replaced else "", "active"
+    if replaced:
+        replaced.status = "inactive"
+
+
 @op("codex.install", governed=realm_wide, returns="codex")
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
@@ -104,13 +116,27 @@ def codex_install(c, args):
     row = Codex[key] or Codex(id=key)
     row.version, row.checksum, row.manifest, row.source = manifest["version"], digest, manifest, source
     row.capabilities, row.installed_at = manifest.get("capabilities", []), chain.now()
-    row.previous, row.status = current.id if current else "", "active"
-    if current:
-        current.status = "inactive"
+    switch_to(row, current)
     if isinstance(current, LayeredCodex):
         legislation.load(None)
     init = yield from hook("init")
     return {"codex": key, "init": init}
+
+
+@op("codex.install", governed=realm_wide, returns="codex")
+def codex_activate(c, args):
+    """Make the pending codex, named by its ``codex`` checksum (``sha256:<hex>``), the active one now; the codex it
+    replaces is kept to revert to. Conflict when no codex is pending or it is another one. ``at``, when given, is not
+    in the future: a pending codex is activated at once. Returns ``codex``."""
+    waiting = pending()
+    if waiting is None:
+        raise Conflict("no codex is pending")
+    if args["codex"] != waiting.id:
+        raise Conflict(f"{args['codex']} is not the pending codex")
+    if args.get("at") and int(args["at"]) > chain.now():
+        raise Fail("this realm activates a pending codex at once: at is not in the future")
+    switch_to(waiting, active())
+    return {"codex": waiting.id}
 
 
 @op("codex.uninstall", governed=realm_wide)
@@ -169,10 +195,10 @@ def codex_status(c, args):
     legacy_codex = codex if isinstance(codex, Codex) else None
     failures = codex.failures if isinstance(codex, LayeredCodex) else {}
     rows, nxt = history(args)
-    pending, jobs = first(LayeredCodex, "status", "pending"), latest(InstallJob, 1)
+    waiting, jobs = pending(), latest(InstallJob, 1)
     return {"codex": shown(codex) if codex else None, "healthy": codex is not None and not problem and not failures,
             "problem": problem, "failures": failures, "hooks": (legacy_codex.manifest or {}).get("hooks", []) if legacy_codex else [],
             "config": config(legacy_codex) if legacy_codex else {},
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
-            "pending": shown(pending) if pending else None,
+            "pending": shown(waiting) if waiting else None,
             "job": view(jobs[0], *JOB_SHOWN) if jobs else None}

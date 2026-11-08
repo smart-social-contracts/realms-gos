@@ -8,9 +8,11 @@ what it stored into the current form, for the rows that migrate when they are re
 left waiting (a proposal's action, a federal vote's, a task step), which replay with their old arguments.
 """
 from core.db import Fail
+from core.tax_entries import split_document
 
 ONE = 100_000_000
 PERCENT = ONE // 100
+RATE_MAX = 100 * ONE  # a Rate (a tax rate, a coefficient) may be 100 times a Ratio's 100 %
 BASIS_POINT = ONE // 10_000
 
 
@@ -63,6 +65,8 @@ def upgrade_args(op, args):
         args["quorum"] = args.pop("quorum_percent") * PERCENT
     elif op == "tax_policy_draft" and isinstance(args.get("document"), dict):
         args["document"] = upgrade_tax_document(args["document"])
+        if "taxes" not in args:  # the previous release kept the taxes in the document
+            args["document"], args["taxes"] = split_document(args["document"])
     elif op == "allocation_rule_draft" and isinstance(args.get("rules"), dict):
         args["rules"] = shares_from_percents(args["rules"])
     elif op == "tender_create" and isinstance(args.get("rubric"), dict) and sum(args["rubric"].values()) == 100:

@@ -274,6 +274,50 @@ def test_a_department_proposal_carries_actions_its_department_governs():
         assert Department[f"{parent} crew"].parent.id == parent
 
 
+def set_policy_of_roads(department):
+    """A proposal of ``department`` to set the policy of Roads, a department under Infrastructure."""
+    return call("proposal_create", "carla", title="Roads policy", department=department,
+                action={"op": "department_set_policy", "args": {"department": "Roads", "m": 1, "n": 2}})
+
+
+def test_a_parent_department_carries_a_governed_call_on_a_department_below_it_but_a_sibling_does_not():
+    world.build()
+    Department(id="Roads", parent=Department["Infrastructure"])
+    assert set_policy_of_roads("Infrastructure")["ok"]
+    sibling = set_policy_of_roads("Health")
+    assert sibling["kind"] == "forbidden" and "not governed by Health" in sibling["error"]
+    assert Proposal.count() == 1
+
+
+def test_a_department_moved_after_the_vote_was_filed_is_no_longer_governed_by_its_proposal():
+    world.build()
+    Department(id="Roads", parent=Department["Infrastructure"])
+    p = set_policy_of_roads("Infrastructure")["proposal"]
+    ok("department_edit", "ctl", department="Roads", parent="Health")
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert Proposal[p].result["kind"] == "forbidden" and Department["Roads"].policy["n"] == 1
+
+
+def test_a_department_deleted_after_the_vote_was_filed_leaves_nothing_to_run():
+    world.build()
+    Department(id="Roads", parent=Department["Infrastructure"])
+    p = set_policy_of_roads("Infrastructure")["proposal"]
+    ok("department_delete", "ctl", department="Roads")
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert Proposal[p].result["kind"] == "not_found"
+
+
+def test_a_call_on_a_record_that_does_not_exist_is_carried_only_by_a_realm_wide_proposal():
+    """It has no governing department: a department's proposal is refused, the realm's runs and fails (I-GOV-13)."""
+    world.build()
+    action = {"op": "department_set_policy", "args": {"department": "Nowhere", "m": 1, "n": 2}}
+    refused = call("proposal_create", "carla", title="x", department="Infrastructure", action=action)
+    assert refused["kind"] == "not_found" and Proposal.count() == 0
+    p = ok("proposal_create", "alice", title="x", action=action)["proposal"]
+    vote_all(p, "yes", *world.PEOPLE)
+    assert Proposal[p].status == "failed" and Proposal[p].result["kind"] == "not_found"
+
+
 def pass_department_proposal(op_name, args, department="Infrastructure"):
     p = ok("proposal_create", "carla", title=op_name, department=department,
            action={"op": op_name, "args": args})["proposal"]
@@ -455,7 +499,9 @@ def test_tally_is_kept_as_votes_are_cast_and_replaced():
     assert out["tally"] == {"yes": 1, "no": 1, "abstain": 0} and out["eligible"] == len(world.PEOPLE)
     ok("user_set_status", "ctl", user="mallory", status="suspended")
     assert "not eligible" in call("proposal_vote", "mallory", proposal=p, choice="yes")["error"]
-    assert ok("proposal_get", "alice", proposal=p)["eligible"] == len(world.PEOPLE) - 1
+    assert ok("proposal_get", "alice", proposal=p)["eligible"] == len(world.PEOPLE)  # counted when the vote opened
+    after = ok("proposal_create", "alice", title="z")["proposal"]
+    assert ok("proposal_get", "alice", proposal=after)["eligible"] == len(world.PEOPLE) - 1
     world.policy(depts["Civil Registry"], 1, 2)
     d = ok("proposal_create", "dana", title="y", department="Civil Registry")["proposal"]
     assert ok("proposal_get", "dana", proposal=d)["eligible"] == 2
