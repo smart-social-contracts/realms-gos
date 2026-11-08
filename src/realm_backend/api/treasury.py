@@ -4,7 +4,7 @@ import json
 from core import candid
 from core import chain
 from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page, page_by, view, window
-from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
+from ggg import (AllocationRule, Budget, Contract, Department, External, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, Loan, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
 from ggg.finance.budget import KINDS
@@ -834,6 +834,7 @@ def loan_create(c, args):
     if not symbol:
         raise Conflict("the realm has no accounting currency")
     find(Fund, args["fund"])
+    find(External, args["lender"])
     loan = Loan(id=next_id(Loan, "LOAN"), lender=args["lender"], amount=amount, symbol=symbol,
                 term=period_of(args["term"]), rate=int(args["rate"]), fund=args["fund"], outstanding=amount,
                 facts=args.get("facts") or {})

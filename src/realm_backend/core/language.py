@@ -28,3 +28,16 @@ def require_all(tags):
         raise Fail("languages are a list of BCP 47 tags such as [en, es-ES]")
     for tag in tags:
         require(tag)
+
+
+def pick(translations, tag):
+    """The translation of ``translations`` (each with a ``language``) that reads best in ``tag``: the same tag, else
+    the same primary language (``es`` for ``es-ES``), else None."""
+    if not tag:
+        return None
+    primary = tag.split("-")[0].lower()
+    for same in (lambda t: t.lower() == tag.lower(), lambda t: t.split("-")[0].lower() == primary):
+        found = next((x for x in translations if same(x["language"])), None)
+        if found:
+            return found
+    return None

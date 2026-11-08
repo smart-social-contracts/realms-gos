@@ -1,7 +1,8 @@
 from core import auth, chain, language
 from core.db import Conflict, Fail, Forbidden, deref, find, next_id, page_by, view
-from ggg import Department, Document, KeyEnvelope, Realm
+from ggg import Department, Dispatch, Document, External, KeyEnvelope, Realm
 from core.op import op
+from api.external import queue
 from api.proposals import holders, root
 
 MGMT = "aaaaa-aa"
@@ -182,20 +183,31 @@ def document_share(c, args):
     return {"granted": grant(scope_of(doc), args["keys"], c.user)}
 
 
+def sent_to(doc, journal):
+    """Whether a dispatch of ``doc`` to ``journal`` is queued or confirmed. A failed one may be sent again."""
+    return any(p["journal"] == journal.id and Dispatch[p["dispatch"]].status != "failed" for p in doc.publications)
+
+
 @op("document.manage", returns="document")
 def document_publish(c, args):
     """Make ``document`` public: the content in clear is at ``ref``, with its ``hash``, and anyone reads the record
     with document_get, signed in or not. Publish only what everyone may read: a published copy holds no personal
-    data (I-PRV-1). Publishing the same content again is not an error; other content is a conflict. Publishing to
-    an outside body (``to``) needs one the realm knows."""
+    data (I-PRV-1). Publishing the same content again is not an error; other content is a conflict. With a journal
+    outside the realm in ``to`` (an outside body of kind journal) a dispatch to it is queued, once unless it failed:
+    its confirmation gives the document's publication the journal's date and reference."""
     doc = find(Document, args["document"])
     staff(doc.department, c.user)
-    if args.get("to"):
-        deref(f"External:{args['to']}")
+    journal = find(External, args["to"]) if args.get("to") else None
+    if journal is not None and journal.kind != "journal":
+        raise Fail(f"{journal.id} is not a journal")
     published = {"ref": args["ref"], "hash": args["hash"]}
     if doc.public not in (None, published):
         raise Conflict(f"{doc.id} is already published with other content")
     doc.public = published
+    if journal is not None and not sent_to(doc, journal):
+        sent = queue(journal, "publication", doc.title, published, document=doc.id)
+        doc.publications = doc.publications + [{"journal": journal.id, "dispatch": sent.id, "published_at": None,
+                                                "ref": None}]
     return {"document": doc.id}
 
 

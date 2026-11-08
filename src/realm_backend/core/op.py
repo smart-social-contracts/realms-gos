@@ -7,9 +7,9 @@ from core import ranges
 from core.db import Fail
 
 OPS = {}
-MODULES = ("assets", "codex", "crypto", "delegation", "extensions", "federation", "justice", "licenses", "members",
-           "notifications", "orgs", "procurement", "proposals", "quarters", "requests", "setup", "tasks", "taxes",
-           "treasury")
+MODULES = ("assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "justice", "licenses",
+           "members", "notifications", "orgs", "procurement", "proposals", "quarters", "requests", "setup", "tasks",
+           "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
 EVENTS_KEPT = 2000
 # Basilisk stubs the `types` module.

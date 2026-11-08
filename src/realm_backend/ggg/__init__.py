@@ -9,6 +9,6 @@ from ggg.governance import (Calendar, ChapterSource, Codex, Contract, FederalVot
 from ggg.identity import Attribute, Delegation, DelegationRequest, Human, Identity, Member, Organization
 from ggg.justice import Appeal, Case, Court, Dispute, Judge, Penalty, Verdict
 from ggg.land import Land, Zone
-from ggg.system import (Appointment, Authority, Department, Document, Event, Extension, Invite, KeyEnvelope,
-                        Notification, Permission, Position, User, UserProfile)
+from ggg.system import (Appointment, Authority, Department, Dispatch, Document, Event, Extension, External, Invite,
+                        KeyEnvelope, Notification, Permission, Position, User, UserProfile)
 from ic_basilisk_toolkit.entities import Call, Task, TaskExecution, TaskSchedule, TaskStep  # noqa: F401

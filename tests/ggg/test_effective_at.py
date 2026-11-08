@@ -186,7 +186,8 @@ def test_nobody_creates_a_task_named_like_the_realms_own():
     ("task_cancel", {}),
     ("task_delete", {}),
     ("task_run", {}),
-    ("task_schedule", {"run_at": 1}),
+    ("task_add_schedule", {"run_at": 1}),
+    ("task_reschedule", {"at": 1}),
 ], ids=lambda value: value if isinstance(value, str) else "")
 def test_nobody_changes_the_realms_own_task_not_even_an_admin(name, args):
     world.build()

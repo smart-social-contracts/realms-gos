@@ -13,7 +13,7 @@ from basilisk import Principal  # tests replace it, to accept their names for pr
 
 import ggg
 import ggg_did
-from api import crypto
+from api import crypto, tasks
 from api.proposals import settings
 from api.setup import VERSION
 from core import chain
@@ -251,6 +251,25 @@ def realm_fix(r):
             "accounting_currency_decimals": get(r, "accounting_currency_decimals") if get(r, "accounting_currency") else None}
 
 
+def scheduled_task(t):
+    """A task of the realm's scheduler as GGG's Task, which is one operation at a time: the task's first step and
+    first schedule. The tasks the realm itself schedules, such as a proposal's run, are the realm's."""
+    t = t if isinstance(t, dict) else tasks.summary(t)
+    step, when = (t["steps"] or [{}])[0], (t["schedules"] or [{}])[0]
+    by = "Realm:1" if t["creator"] == chain.self_id() else f"User:{t['creator']}"
+    return {"id": t["name"], "op": step.get("op", ""), "args": step.get("args"), "at": when.get("run_at", 0),
+            "reason": step.get("reason"), "status": tasks.STATUS[t["status"]], "scheduled_by": by,
+            "event": t["event"]}
+
+
+def dispatch_status(d):
+    """A dispatch's status as GGG's variant: confirmed with when and the receipt, or failed with the reason."""
+    status = get(d, "status")
+    if status == "confirmed":
+        return {"Confirmed": {"at": get(d, "outcome_at"), "receipt": get(d, "receipt")}}
+    return {"Failed": get(d, "failure")} if status == "failed" else {"Queued": None}
+
+
 def action(a):
     """A Realms GOS proposal action, ``{op, args}``, as a GGG ProposalAction: a call of the operation's ggg_ method
     with its arguments in Candid. An operation GGG lacks keeps its name, with its JSON arguments."""
@@ -283,8 +302,10 @@ FIX = {
                           "symbol": get(m, "symbol") or scope(m, "symbol")},
     "FederalVote": lambda v: {"title": get(v, "title") or (get(v, "action") or {}).get("title", "")},
     "Event": lambda e: {"agent": bool(get(e, "agent"))},
-    # The ciphertext of a published document stays with its staff and key holders (I-PRV-4), as in crypto.document_get.
-    "Document": lambda d: crypto.CONCEALED if get(d, "public") and not crypto.reads_ciphertext(d, chain.caller()) else {},
+    # The ciphertext of a document stays with its staff and key holders (I-PRV-4), as in crypto.document_get.
+    "Document": lambda d: {} if crypto.reads_ciphertext(d, chain.caller()) else crypto.CONCEALED,
+    "Task": scheduled_task,
+    "Dispatch": lambda d: {"status": dispatch_status(d)},
     "Proposal": lambda p: {"action": action(get(p, "action")),  # a realm-wide proposal names no department
                            "department": None if getattr(get(p, "department"), "is_root", False) else get(p, "department")},
     # The replayed operation's JSON reply stands in for a Candid one.
@@ -709,6 +730,8 @@ BUILD = {
     "department_chart": chart,
     "proposal_get": proposal_detail,
     "enforcement_record": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
+    "external_report": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
+    "notification_send": lambda o, a: {"Dispatch": o["dispatch"]} if "dispatch" in o else {"Notification": o["notification"]},
     "credential_verify": lambda o, a: {"valid": o.get("valid"), **(o.get("checks") or {})},
     "codex_status": lambda o, a: {**o, "checksum": (o.get("codex") or {}).get("id"),
                                   "history": [h["id"] for h in o.get("history", [])], "signing": signing()},

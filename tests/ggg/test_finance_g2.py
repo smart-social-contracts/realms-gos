@@ -5,7 +5,7 @@ import pytest
 import fake_chain
 import world
 from core import op
-from ggg import Budget, Department, FinancialReport, FiscalPeriod, Invoice, Loan, Treasury
+from ggg import Budget, Department, External, FinancialReport, FiscalPeriod, Invoice, Loan, Treasury
 from kit import call, denied, ok
 from test_ratios import stored_as_version_1
 from test_treasury import FY2026, allocate, balance_reply, draft, ledger_ok, one_item, propose, receive, setup_finance
@@ -192,12 +192,18 @@ def test_a_budget_line_of_the_previous_release_has_a_kind_of_revenue_or_expense(
 
 # --- loans ----------------------------------------------------------------------------------------
 
+def setup_lending():
+    """Agora's finance, and Bank A, an outside lender."""
+    setup_finance()
+    External(id="bank-a", name="Bank A", kind="lender", channel="manual")
+
+
 def borrow(amount=500, **more):
     return ok("loan_create", "bob", lender="bank-a", amount=amount, term=TERM, rate=3_200_000, fund="ROADS", **more)
 
 
 def test_story_a_loan_is_the_debt_of_the_realm_until_it_is_repaid():
-    setup_finance()
+    setup_lending()
     loan = borrow(500, facts={"purpose": "roads"})["loan"]
     row = Loan[loan]
     assert (row.lender, row.amount, row.symbol, row.rate, row.fund) == ("bank-a", 500, "REALM", 3_200_000, "ROADS")
@@ -212,7 +218,7 @@ def test_story_a_loan_is_the_debt_of_the_realm_until_it_is_repaid():
 
 
 def test_the_debt_of_the_realm_is_the_sum_of_its_active_loans():
-    setup_finance()
+    setup_lending()
     first, second = borrow(500)["loan"], borrow(200)["loan"]
     ok("loan_repay", "bob", loan=first, amount=100)
     ok("loan_repay", "bob", loan=second, amount=200)
@@ -220,7 +226,7 @@ def test_the_debt_of_the_realm_is_the_sum_of_its_active_loans():
 
 
 def test_a_loan_is_a_record_of_money_that_moves_outside_the_realm():
-    setup_finance()
+    setup_lending()
     receive(100)
     held = ok("treasury_view", "bob")["funds"]
     borrow(500)
@@ -228,7 +234,7 @@ def test_a_loan_is_a_record_of_money_that_moves_outside_the_realm():
 
 
 def test_loan_list_pages_the_loans_and_filters_by_status():
-    setup_finance()
+    setup_lending()
     loans = [borrow(10 * n)["loan"] for n in (1, 2, 3)]
     ok("loan_repay", "bob", loan=loans[1], amount=20)
     first = ok("loan_list", "bob", count=2)
@@ -239,7 +245,7 @@ def test_loan_list_pages_the_loans_and_filters_by_status():
 
 
 def test_a_loan_is_checked_before_it_is_recorded():
-    setup_finance()
+    setup_lending()
     base = {"lender": "bank-a", "amount": 500, "term": TERM, "rate": 1, "fund": "ROADS"}
     for change in ({"amount": 0}, {"fund": "NOWHERE"}, {"term": {"count": 3, "unit": "fortnight"}},
                    {"term": {"count": "3", "unit": "year"}}, {"term": 3}):
@@ -247,8 +253,15 @@ def test_a_loan_is_checked_before_it_is_recorded():
     assert Loan.count() == 0 and Treasury["1"].debt_outstanding == 0
 
 
+def test_a_loan_is_from_an_outside_body_the_realm_knows():
+    setup_lending()
+    out = call("loan_create", "bob", lender="bank-b", amount=500, term=TERM, rate=1, fund="ROADS")
+    assert out["kind"] == "not_found" and "bank-b" in out["error"]
+    assert Loan.count() == 0 and Treasury["1"].debt_outstanding == 0
+
+
 def test_borrowing_is_the_realms_to_decide():
-    setup_finance()
+    setup_lending()
     world.policy(Department["Administration"], 2, 3)
     p = borrow()["proposal"]
     assert Loan.count() == 0
@@ -258,7 +271,7 @@ def test_borrowing_is_the_realms_to_decide():
 
 
 def test_loan_operations_need_their_permissions():
-    setup_finance()
+    setup_lending()
     loan = borrow()["loan"]
     assert "needs org.manage_budget" in denied("loan_create", "alice", lender="b", amount=1, term=TERM, rate=1, fund="ROOT")
     assert "needs org.manage_budget" in denied("loan_repay", "alice", loan=loan, amount=1)

@@ -1,16 +1,24 @@
-from core import chain
-from core.db import Forbidden, deref, find, next_id, page_by, ref, view
-from ggg import Event, Notification
+from core import chain, language
+from core.db import Fail, Forbidden, deref, find, next_id, page_by, ref, view
+from ggg import Event, External, Notification, User
 from core.op import op, ops
+from api.external import queue
 from api.proposals import appointed
 
 SHOWN = ("id", "topic", "title", "body", "href", "sender", "at")
 
 
-def notify(recipient, title, body="", href="", topic="", sender=""):
+def notify(recipient, title, body="", href="", topic="", sender="", translations=()):
     """Leave a notification for ``recipient`` ("User:alice", "Department:Health", "Organization:clinic-b")."""
     return Notification(id=next_id(Notification, "N"), recipient=recipient, title=title, body=body, href=href,
-                        topic=topic, sender=sender, at=chain.now()).id
+                        topic=topic, sender=sender, at=chain.now(), translations=list(translations)).id
+
+
+def in_reader_language(n, reader):
+    """``n`` as ``reader`` reads it: the title and body in their language, when the notification has one."""
+    user = User[reader]
+    found = language.pick(n.translations, user.language if user else "")
+    return {"title": found["title"], "body": found.get("body") or n.body} if found else {}
 
 
 def addressed_to(c):
@@ -36,7 +44,8 @@ def notification_list(c, args):
     ``unread`` keeps only those you have not read. Returns ``notifications`` and ``next`` (null at the end)."""
     rows, nxt = page_by(Notification, "recipient", inbox(c, args), args)
     rows = [n for n in rows if not (args.get("unread") and c.user in n.read_by)]
-    return {"notifications": [{**view(n, *SHOWN), "read": c.user in n.read_by} for n in rows], "next": nxt}
+    return {"notifications": [{**view(n, *SHOWN), **in_reader_language(n, c.user), "read": c.user in n.read_by}
+                              for n in rows], "next": nxt}
 
 
 @op("self.data_manage", delegable=True)
@@ -56,13 +65,30 @@ def notification_read(c, args):
     return {"read": len(fresh), "next": nxt}
 
 
-@op("notification.send", returns="notification")
+def valid_translations(args):
+    translations = args.get("translations") or []
+    if not (isinstance(translations, list) and all(isinstance(t, dict) for t in translations)):
+        raise Fail("translations are a list of {language, title, body}")
+    for t in translations:
+        language.require(t.get("language"))
+        if not (isinstance(t.get("title"), str) and t["title"]) or not isinstance(t.get("body", ""), str):
+            raise Fail("a translation has a title, and a body in text")
+
+
+@op("notification.send", check=valid_translations)
 def notification_send(c, args):
-    """Notify ``recipient`` ("User:<id>", "Department:<id>" or "Organization:<id>") with ``title`` and optional
-    ``body``, ``href`` and ``topic``; you are the sender. Returns ``notification``."""
+    """Notify ``recipient`` ("User:<id>", "Department:<id>", "Organization:<id>" or "External:<id>") with ``title`` and
+    optional ``body``, ``href`` and ``topic``; you are the sender. ``translations`` (``[{language, title, body}]``) give
+    each reader the notice in their language, else the title and body above. A notice to an outside body is queued as a
+    dispatch for an operator to deliver, and a ``body`` that holds personal data must be the id of an encrypted
+    Document, never the data. Returns ``notification``, or ``dispatch`` for an outside body."""
+    kind, _, key = args["recipient"].partition(":")
+    if kind == "External":
+        body = {"text": args.get("body", "")}
+        return {"dispatch": queue(find(External, key), args.get("topic", ""), args["title"], body).id}
     deref(args["recipient"])
     return {"notification": notify(args["recipient"], args["title"], args.get("body", ""), args.get("href", ""),
-                                   args.get("topic", ""), c.user)}
+                                   args.get("topic", ""), c.user, args.get("translations") or [])}
 
 
 @op("realm.monitor", read=True, returns="events")
