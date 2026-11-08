@@ -1,9 +1,11 @@
 name: Realms E2E
 
 # The whole product orchestra is `casals.local.json`: the Casals e2e harness builds it
-# from an empty replica with `casals up` and grades it (fresh, idempotent), then
-# the cross-quarter live suite runs against the converged demo realm. This
-# replaces the dfx-driven `ci_install_mundus.py` stages.
+# from an empty replica with `casals up` and grades it (fresh, idempotent), then one
+# extension is put on the marketplace and verified, and the standalone realm UI suite
+# runs in a browser. When the sheet has a demo-backend, the cross-quarter live suite and
+# the GGG conformance suite also run against it. This replaces the dfx-driven
+# `ci_install_mundus.py` stages.
 
 # Called from ci-pr.yml (after lint + unit) and ci-main.yml.
 on:
