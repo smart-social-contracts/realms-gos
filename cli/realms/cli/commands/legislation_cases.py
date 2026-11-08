@@ -1,4 +1,4 @@
-"""The test cases of a chapter (docs/codices/layered-codex.md §12.1, §12.3): ``<source>/<domain>.cases.json``, beside
+"""The test cases of a chapter (docs/codices/layered-codex.md §12.1): ``<source>/<domain>.cases.json``, beside
 the chapter it tests, run by ``realms legislation check`` on the codex of the realm they name.
 
 A case is an object with a ``name``, an optional ``realm`` (a source id; the chapter's own source by default, seen
@@ -87,6 +87,10 @@ def guard_case(codex: Codex, domain: str, case: dict):
 
 def forbid_case(codex: Codex, case: dict):
     action = f"{case['forbid']}.{case['each']}" if case.get("each") else case["forbid"]
+    if (
+        action not in codex.facts.actions
+    ):  # no forbid could fire on it, and a case that never runs must fail
+        return f"the fact schema has no {action}"
     fired = sorted(
         f.id
         for f in codex.forbids()
@@ -96,29 +100,43 @@ def forbid_case(codex: Codex, case: dict):
 
 
 def compute_case(case: dict, reload: Callable):
-    """The realm's sandbox program, in this process, answering ``compute_<op>`` with GGG's entities read from the
-    case's ``records``: the same code the realm runs, so the subject is the parcel's view and money carries the
-    token's decimals."""
-    sandbox = importlib.import_module(SANDBOX)
-    records = case["records"]
-    entities = sorted(set(records) | set(MONEY))
-    sandbox.rpc = reads_from(records)
-    codex = reload(sandbox.ggg_module(entities, MONEY))
-    sandbox.STATE.update(
-        codex=codex, files=set(), entities=frozenset(entities), ready=True
-    )
-    outcome = sandbox.compute(
-        case["compute"],
-        case["args"],
-        case.get("now", 0),
-        case.get("approvals", ()),
-        case["decimals"],
-    )
+    outcome = in_sandbox(case, reload)
     if not outcome["found"]:
         return f"no chapter has compute_{case['compute']}"
     if "error" in outcome:
         return f"raised: {outcome['error']}"
     return differs(case["returns"], outcome["result"], "returns")
+
+
+def in_sandbox(case: dict, reload: Callable) -> dict:
+    """``compute_<op>`` answered by the realm's sandbox program, in this process, with GGG's entities read from the
+    case's ``records``: the same code the realm runs, so the subject is the parcel's view and money carries the
+    token's decimals. The program is a module shared by every case, so its globals are put back as they were.
+    """
+    sandbox = importlib.import_module(SANDBOX)
+    records = case["records"]
+    entities = sorted(set(records) | set(MONEY))
+    state, rpc = dict(sandbox.STATE), getattr(sandbox, "rpc", None)
+    try:
+        sandbox.rpc = reads_from(records)
+        codex = reload(sandbox.ggg_module(entities, MONEY))
+        sandbox.STATE.update(
+            codex=codex, files=set(), entities=frozenset(entities), ready=True
+        )
+        return sandbox.compute(
+            case["compute"],
+            case["args"],
+            case.get("now", 0),
+            case.get("approvals", ()),
+            case["decimals"],
+        )
+    finally:
+        sandbox.STATE.clear()
+        sandbox.STATE.update(state)
+        if rpc is None:
+            del sandbox.rpc
+        else:
+            sandbox.rpc = rpc
 
 
 def reads_from(records: dict):

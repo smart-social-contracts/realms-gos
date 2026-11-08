@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -969,3 +970,128 @@ def test_the_money_fields_a_case_reads_are_the_realms():
         and getattr(node.targets[0], "id", None) == "MONEY"
     )
     assert MONEY == realms
+
+
+# ── A forbid case (§12.1), and a case that could never run ──
+
+CAP_CHAPTER = """from realms.legislation import F, S, above, forbid, overridable, pct, when
+
+class Tax(above('tax')):
+    capital = overridable(False, legislation='TRLRHL Art. 72.3')
+    surface_public_transport = overridable(False, legislation='TRLRHL Art. 72.3')
+
+    ibi_urban_cap = forbid('tax_policy_propose',
+        (F.code == 'ibi_urban') & F.rate.is_some() & (F.rate > pct('1.10')
+            + when(S.capital, pct('0.07')) + when(S.surface_public_transport, pct('0.07'))),
+        each='taxes', legislation='TRLRHL Art. 72.3')
+"""
+VALENCIA_CAP = "from realms.legislation import above\n\nclass Tax(above('tax')):\n    capital = True\n    surface_public_transport = True\n"
+
+
+def cap_case(rate, fires, **more):
+    return {
+        "name": f"{rate}",
+        "realm": VALENCIA,
+        "forbid": "tax_policy_propose",
+        "each": "taxes",
+        "facts": {"code": "ibi_urban", "rate": rate},
+        "fires": fires,
+        **more,
+    }
+
+
+def test_a_forbid_case_names_the_forbids_that_fire_on_the_facts_in_the_realm(tree):
+    write(tree, "eu/es/tax.py", CAP_CHAPTER)
+    write(tree, f"{VALENCIA}/tax.py", VALENCIA_CAP)
+    cap = ["eu/es/tax/ibi_urban_cap"]
+    write(
+        tree,
+        "eu/es/tax.cases.json",
+        [cap_case(1_240_000, []), cap_case(1_240_001, cap)],
+    )  # §12.1's example
+    assert case_run(tree, VALENCIA) == (0, "ok: 1 realm(s) checked\n")
+    # in Spain itself, which has neither the capital nor the transport, 1.10 % is the cap
+    write(
+        tree,
+        "eu/es/tax.cases.json",
+        [
+            cap_case(1_100_000, [], realm="eu/es"),
+            cap_case(1_100_001, cap, realm="eu/es"),
+        ],
+    )
+    assert case_run(tree, "eu/es")[0] == 0
+
+
+def test_a_forbid_case_that_fires_otherwise_than_written_is_reported(tree):
+    write(tree, "eu/es/tax.py", CAP_CHAPTER)
+    write(tree, f"{VALENCIA}/tax.py", VALENCIA_CAP)
+    write(tree, "eu/es/tax.cases.json", [cap_case(1_240_001, [])])
+    code, output = case_run(tree, VALENCIA)
+    assert code == 1
+    assert "case \"1240001\": fires ['eu/es/tax/ibi_urban_cap'], written []" in output
+
+
+@pytest.mark.parametrize(
+    "case, where, expected",
+    [
+        (
+            cap_case(1, [], realm="eu/es/vc/46250-valencai"),
+            "eu/es",
+            "realm eu/es/vc/46250-valencai is not a source at or below eu/es",
+        ),
+        (
+            cap_case(1, [], realm="eu/es"),
+            "eu/es/vc",
+            "realm eu/es is not a source at or below eu/es/vc",
+        ),
+        (
+            cap_case(1, [], realm="eu/fr"),
+            "eu/es",
+            "realm eu/fr is not a source at or below eu/es",
+        ),
+    ],
+)
+def test_a_case_whose_realm_could_not_run_it_is_refused(tree, case, where, expected):
+    write(tree, f"{where}/tax.py", CAP_CHAPTER)
+    write(tree, f"{where}/tax.cases.json", [case])
+    code, output = case_run(tree, where)
+    assert code == 1 and f"{where}/tax.cases.json: case '1': {expected}" in output
+    write(tree, f"{where}/tax.cases.json", [{**case, "realm": where}])
+    assert case_run(tree, where)[0] == 0
+
+
+@pytest.mark.parametrize(
+    "change, expected",
+    [
+        (
+            {"forbid": "tax_policy_propos"},
+            "the fact schema has no tax_policy_propos.taxes",
+        ),
+        ({"each": "taxs"}, "the fact schema has no tax_policy_propose.taxs"),
+    ],
+)
+def test_a_forbid_case_on_an_operation_or_list_the_fact_schema_lacks_is_refused(
+    tree, change, expected
+):
+    write(tree, "eu/es/tax.py", CAP_CHAPTER)
+    write(tree, "eu/es/tax.cases.json", [{**cap_case(1, [], realm="eu/es"), **change}])
+    code, output = case_run(tree)
+    assert code == 1 and expected in output
+    write(tree, "eu/es/tax.cases.json", [cap_case(1, [], realm="eu/es")])
+    assert case_run(tree)[0] == 0
+
+
+def test_a_banned_built_in_is_refused_in_a_setting_too(tree):
+    for setting in ("    rate = open('x')\n", "    rate = eval\n"):
+        name = setting.split("=")[1].split("(")[0].strip()
+        refused_with(tree, tax_chapter(setting), f"{name}: not allowed in a chapter")
+
+
+def test_check_without_cedarpy_says_what_to_install(tree, monkeypatch):
+    monkeypatch.setitem(
+        sys.modules, "cedarpy", None
+    )  # an import of it fails, as where it is not installed
+    write(tree, "eu/es/tax.py", FORBID_HEAD + IBI_CAP)
+    out = run(str(tree), "--realm", "eu/es")
+    assert out.exit_code == 2 and "pip install 'cedarpy==4.12.2'" in out.output
+    assert run(str(tree), "--realm", "eu/es", "--no-analysis").exit_code == 0

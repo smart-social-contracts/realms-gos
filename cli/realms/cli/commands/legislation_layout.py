@@ -9,7 +9,7 @@ The rules:
 - a source is a folder with a ``source.json`` (§3.1), whose ``id`` is the folder's path under the tree;
 - the only ``.py`` files in a source are ``<domain>.py``, ``<domain>`` a GGG domain;
 - ``calendar.json`` (§3.4) and ``releases.json`` (§3.2) have the shapes the design shows;
-- ``<domain>.cases.json`` (§12.3) tests the chapter ``<domain>.py`` beside it, and has the shape of
+- ``<domain>.cases.json`` (§12.1) tests the chapter ``<domain>.py`` beside it, and has the shape of
   ``legislation_cases``;
 - a release lists all of its source's chapters and its calendar, never the ``realm`` domain (which only a realm's own
   layer fills, §3: a ``realm.py`` beside a ``releases.json`` is the realm's own and no release carries it), and every
@@ -44,13 +44,16 @@ HEX = frozenset("0123456789abcdef")
 
 def layout_problems(tree: Path) -> List[str]:
     """Every way ``tree`` breaks the layout, folder by folder, top to bottom."""
-    problems = []
-    for folder in [tree] + sorted(p for p in tree.rglob("*") if p.is_dir()):
-        problems += folder_problems(tree, folder)
+    problems, folders = [], [tree] + sorted(p for p in tree.rglob("*") if p.is_dir())
+    sources = {
+        shown(tree, f) for f in folders[1:] if (f / "source.json").is_file()
+    }  # the realms a case may name
+    for folder in folders:
+        problems += folder_problems(tree, folder, sources)
     return problems
 
 
-def folder_problems(tree: Path, folder: Path) -> List[str]:
+def folder_problems(tree: Path, folder: Path, sources: set) -> List[str]:
     problems = []
     if folder != tree:
         try:
@@ -73,7 +76,12 @@ def folder_problems(tree: Path, folder: Path) -> List[str]:
     problems += chapter_problems(tree, files)
     for name in sorted(files):
         if name.endswith(CASES_SUFFIX):
-            problems += json_problems(tree, files[name], cases_reasons)
+            problems += json_problems(
+                tree,
+                files[name],
+                lambda data: cases_reasons(data)
+                or realm_reasons(data, source, sources),
+            )
     if "calendar.json" in files:
         problems += json_problems(tree, files["calendar.json"], calendar_reasons)
     if "releases.json" in files:
@@ -156,7 +164,7 @@ def calendar_reasons(data) -> List[str]:
 
 
 def cases_reasons(data) -> List[str]:
-    """§12.3, ``<domain>.cases.json``: a list of cases, each with a name, one kind of test and what it expects."""
+    """§12.1, ``<domain>.cases.json``: a list of cases, each with a name, one kind of test and what it expects."""
     if not isinstance(data, list):
         return ["a list of cases"]
     reasons = []
@@ -164,6 +172,21 @@ def cases_reasons(data) -> List[str]:
         label = f"case {case.get('name')!r}" if isinstance(case, dict) else "a case"
         reasons += [f"{label}: {r}" for r in case_reasons(case)]
     return reasons
+
+
+def realm_reasons(cases: list, source: str, sources: set) -> List[str]:
+    """A case runs in the codex of its ``realm``, which has the chapter's source among its layers: a source in the
+    tree, the chapter's own or one below it. Any other realm would never run the case, and a case that never runs
+    must fail."""
+    return [
+        f"case {case['name']!r}: realm {case['realm']} is not a source at or below {source}"
+        for case in cases
+        if "realm" in case
+        and not (
+            case["realm"] in sources
+            and (case["realm"] == source or case["realm"].startswith(source + "/"))
+        )
+    ]
 
 
 def case_reasons(case) -> List[str]:

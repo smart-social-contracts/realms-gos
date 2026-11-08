@@ -127,9 +127,9 @@ class Check:
             self.constant(node.left, member)
             self.constant(node.right, member)
         elif isinstance(node, ast.Name):
-            self.identifier(node, node.id, "module")
+            self.name(node, node.id, "module")
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            self.identifier(node, node.func.id, "module")
+            self.name(node, node.func.id, "module")
             for arg in node.args:
                 self.constant(arg, member)
             for keyword in node.keywords:
@@ -421,9 +421,7 @@ class Check:
         if isinstance(node, ast.Constant):
             self.literal(node)
         elif isinstance(node, ast.Name):
-            self.identifier(node, node.id, "method")
-            if node.id in BANNED_NAMES:
-                self.refuse(node, f"{node.id}: not allowed in a chapter")
+            self.name(node, node.id, "method")
         elif isinstance(node, ast.Attribute):
             self.identifier(node, node.attr, "method")
             if node.attr in FORMAT_METHODS:
@@ -518,6 +516,12 @@ class Check:
                 if text is not None and type(number) is int and 0 <= number and len(text) * number <= 4096:
                     return text * number
         return None
+
+    def name(self, node, name, scope):
+        """A name a chapter reads: an identifier, and not one of the banned built-ins."""
+        self.identifier(node, name, scope)
+        if name in BANNED_NAMES:
+            self.refuse(node, f"{name}: not allowed in a chapter")
 
     def identifier(self, node, name, scope):
         if name in FRAME_ATTRIBUTES:
