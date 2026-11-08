@@ -6,7 +6,7 @@ import json
 from core import chain
 from core import sandbox
 from core.db import Conflict, Fail, first, next_id
-from ggg import ChapterSource, InstallJob
+from ggg import ChapterSource, InstallJob, Realm
 
 MAX_CHAPTER = 256 * 1024  # bytes (§7)
 
@@ -41,6 +41,20 @@ def store_chapter(sha256, text):
     return ChapterSource[sha256] or ChapterSource(sha256=sha256, source=text)
 
 
+def own_source():
+    """The realm's own source id (§7): set by the first layered codex that becomes active, from its own layer (the
+    change list's ``realm``, which the vote approved), and fixed afterwards; None before that."""
+    return ((Realm["1"].manifest_data or {}).get("legislation") or {}).get("source")
+
+
+def remember_source(realm):
+    row = Realm["1"]
+    data = row.manifest_data or {}
+    if (data.get("legislation") or {}).get("source") != realm:
+        data["legislation"] = {**(data.get("legislation") or {}), "source": realm}
+        row.manifest_data = data
+
+
 def live_job():
     """The install job that is running or paused, if there is one."""
     return first(InstallJob, "status", "running") or first(InstallJob, "status", "paused")
@@ -48,8 +62,7 @@ def live_job():
 
 def start_job(proposal, change_list):
     """Begin the install of ``change_list`` (``{url, checksum}``) for ``proposal``. Refused while another job is
-    running or paused: a paused one waits for an admin (§9.2)."""
-    live = live_job()
-    if live is not None:
-        raise Conflict(f"an install is {live.status}")
+    running or paused (a paused one waits for an admin, a staged one for its switch time, §9.2)."""
+    if live_job() is not None:
+        raise Conflict("an install is running")
     return InstallJob(id=next_id(InstallJob, "J"), proposal=proposal, change_list=change_list, started_at=chain.now())

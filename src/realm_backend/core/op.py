@@ -7,7 +7,7 @@ from core import ranges
 from core.db import Fail
 
 OPS = {}
-MODULES = ("assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "justice", "licenses",
+MODULES = ("assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "installs", "justice", "licenses",
            "members", "notifications", "orgs", "procurement", "proposals", "quarters", "requests", "setup", "tasks",
            "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}

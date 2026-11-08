@@ -1,6 +1,7 @@
 import json
 
 from core import chain
+from core import layered_codex as store
 from core import legislation
 from core import sandbox
 from core.db import Conflict, Fail, find, first, latest, view, window
@@ -95,10 +96,40 @@ def switch_to(row, replaced):
         replaced.status = "inactive"
 
 
+def switch(waiting):
+    """The switch of an install (docs/codices/layered-codex.md §9.2 step 6): the pending ``waiting`` becomes the
+    active codex in place of the current one, kept to revert to, with its ``installed_at`` and, the first time, the
+    realm's own source id (its own layer). The runtime loads it first: a codex that does not load raises before
+    anything changes. The ``on_codex_activate`` hooks run in the next message (``hooks``): a hook never fails the
+    switch (§9.3), nor the proposal execution or install step that made it."""
+    legislation.load(waiting)
+    switch_to(waiting, active())
+    waiting.installed_at = chain.now()
+    store.remember_source(waiting.layers[-1])
+    chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
+
+
+def hooks(codex_id):
+    """The ``on_codex_activate`` hooks of the codex just switched to, once per realm, unless it was switched away
+    from again before this message ran. A generator: a hook's effects may call other canisters."""
+    row = LayeredCodex[codex_id]
+    if row is not None and row.status == "active":
+        yield from legislation.activate(row)
+
+
 @op("codex.install", governed=realm_wide, returns="codex")
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
-    The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``."""
+    The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``.
+    A change list's ``url`` and ``checksum`` (``sha256:<hex>``, GGG's Code action) install a layered codex instead:
+    the install task fetches, checks and builds it step by step (api.installs), and the call returns its ``job``; a
+    proposal with an ``effective_at`` stages it at acceptance and switches at that time. One install at a time."""
+    if "checksum" in args:
+        from api import installs  # it imports this module
+
+        return installs.begin(c, args)
+    if store.live_job() is not None:
+        raise Conflict("an install is running")
     if "source" in args:
         manifest, source, namespace = args["manifest"], args["source"], None
     else:
@@ -126,8 +157,9 @@ def codex_install(c, args):
 @op("codex.install", governed=realm_wide, returns="codex")
 def codex_activate(c, args):
     """Make the pending codex, named by its ``codex`` checksum (``sha256:<hex>``), the active one now; the codex it
-    replaces is kept to revert to. Conflict when no codex is pending or it is another one. ``at``, when given, is not
-    in the future: a pending codex is activated at once. Returns ``codex``."""
+    replaces is kept to revert to, and its ``on_codex_activate`` hooks run in the next message. Conflict when no codex
+    is pending or it is another one. ``at``, when given, is not in the future: a pending codex is activated at once.
+    Returns ``codex``."""
     waiting = pending()
     if waiting is None:
         raise Conflict("no codex is pending")
@@ -135,7 +167,7 @@ def codex_activate(c, args):
         raise Conflict(f"{args['codex']} is not the pending codex")
     if args.get("at") and int(args["at"]) > chain.now():
         raise Fail("this realm activates a pending codex at once: at is not in the future")
-    switch_to(waiting, active())
+    switch(waiting)
     return {"codex": waiting.id}
 
 
@@ -189,16 +221,17 @@ def codex_status(c, args):
     ``next``, the ``from`` of the next page (null at the end). The history lists the legacy codices, then the layered
     ones. A layered codex shows its layers, layer paths and chapters (source, version, checksum, who vouched for it,
     route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
-    ``job`` the latest install job with its step, status and error."""
+    ``job`` the install job running or paused, else the latest, with its step, status and error."""
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
     legacy_codex = codex if isinstance(codex, Codex) else None
     failures = codex.failures if isinstance(codex, LayeredCodex) else {}
     rows, nxt = history(args)
-    waiting, jobs = pending(), latest(InstallJob, 1)
+    waiting, newest = pending(), latest(InstallJob, 1)
+    job = store.live_job() or (newest[0] if newest else None)
     return {"codex": shown(codex) if codex else None, "healthy": codex is not None and not problem and not failures,
             "problem": problem, "failures": failures, "hooks": (legacy_codex.manifest or {}).get("hooks", []) if legacy_codex else [],
             "config": config(legacy_codex) if legacy_codex else {},
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
             "pending": shown(waiting) if waiting else None,
-            "job": view(jobs[0], *JOB_SHOWN) if jobs else None}
+            "job": view(job, *JOB_SHOWN) if job else None}
