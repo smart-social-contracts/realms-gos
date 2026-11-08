@@ -613,6 +613,11 @@ def supersede(b):
             b.actual += old.actual
 
 
+def other_kind_in_slot(fund, p, category, kind):
+    """A line of the other kind in the slot of ``fund``, ``p`` and ``category``, whatever its status, if any."""
+    return next((b for b in each(Budget, "slot", slot(fund, p, category)) if b.kind != kind), None)
+
+
 @op("org.manage_budget", governed=fund_department, returns="budget")
 def budget_draft(c, args):
     """Draft a budget line for ``fund`` in the open ``period``: ``planned`` amount for ``category``, of ``kind``
@@ -622,9 +627,9 @@ def budget_draft(c, args):
         raise Conflict(f"{p.id} is {p.status}")
     if args["kind"] not in KINDS:
         raise Fail(f"kind is one of {', '.join(KINDS)}")
-    other = [b for b in each(Budget, "slot", slot(fund, p, args["category"])) if b.kind != args["kind"]]
+    other = other_kind_in_slot(fund, p, args["category"], args["kind"])
     if other:  # a line's slot has no kind: a category is revenue or expense, not both
-        raise Fail(f"{args['category']} is a {other[0].kind} category of fund {fund.id} in {p.id}, not {args['kind']}")
+        raise Fail(f"{args['category']} is a {other.kind} category of fund {fund.id} in {p.id}, not {args['kind']}")
     b = Budget(id=next_id(Budget, "B"), fund=fund, period=p, category=args["category"],
                slot=slot(fund, p, args["category"]), kind=args["kind"], planned=int(args["planned"]))
     return {"budget": b.id}
@@ -699,13 +704,15 @@ def budget_extend(c, args):
     vote, fund by fund: for each fund that has no extended, proposed or adopted line in the period yet (draft lines do
     not count). They hold, and cap spending, until an adopted budget of the fund replaces them. Refused with Conflict
     when no fund is left to carry. The lines carried are those of the earlier period as they stood at its end,
-    adopted, extended or closed with it. Returns ``extended``, how many lines."""
+    adopted, extended or closed with it, except a line whose category the period already holds as the other kind,
+    even in a draft. Returns ``extended``, how many lines."""
     p = find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Conflict(f"{p.id} is {p.status}")
     held = {b.fund.id for b in p.budgets if b.status in ("extended", "proposed", "adopted")}
     before = previous_period(p)
-    lines = [b for b in standing_at_end(before) if b.fund.id not in held] if before else []
+    lines = [b for b in standing_at_end(before)
+             if b.fund.id not in held and not other_kind_in_slot(b.fund, p, b.category, b.kind)] if before else []
     if not lines:
         raise Conflict(f"no fund is left to carry into {p.id}: the period before has no budget for a fund without a line "
                        f"in it")
