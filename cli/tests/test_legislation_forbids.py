@@ -400,15 +400,50 @@ def literals(node, found):
     return found
 
 
+def endpoints(forbid, found):
+    """The folded value of every comparison side and between() bound that reads no fact (1240000 for
+    València's urban cap), and the count of every Period a rule names or a setting holds.
+    """
+    from realms.legislation import expressions as e
+    from realms.legislation.cedar import children
+
+    def reads_a_fact(node):
+        return isinstance(node, e.Fact) or any(reads_a_fact(c) for c in children(node))
+
+    def value(node):
+        got = e._eval(node, e.Env({}, dict(forbid.settings), None), False)
+        period = e.as_period(got)
+        if period is not None:
+            found.append(period[0])
+        elif isinstance(got, int) and not isinstance(got, bool):
+            found.append(got)
+
+    def walk(node):
+        if isinstance(node, e.Compare):
+            for side in (node.left, node.right):
+                if not reads_a_fact(side):
+                    value(side)
+        if isinstance(node, e.Between):
+            value(node.low)
+            value(node.high)
+        for child in children(node):
+            walk(child)
+
+    walk(forbid.expression)
+    return found
+
+
 class Draw:
-    """Generated values: around every literal, 0, the 64-bit extremes, the range's edges and beyond, and
-    random values inside and outside the range."""
+    """Generated values: around every literal, every Period count and every folded comparison endpoint
+    (±1), 0, the 64-bit extremes, the range's edges and beyond, and random values inside and outside
+    the range."""
 
     def __init__(self, seed, forbids):
         self.random = random.Random(seed)
         pool = []
         for f in forbids:
             literals(f.expression, pool)
+            endpoints(f, pool)
             pool.extend(
                 v
                 for v in f.settings.values()
@@ -559,6 +594,19 @@ def test_the_generated_facts_reach_the_edges_and_both_decisions():
         1_100_001,
         1_300_000,
         1_300_001,
+    } <= set(draw.ints)
+    # Folded comparison endpoints and Period counts, each ±1.
+    assert {
+        1_240_000,
+        1_239_999,
+        1_240_001,
+        1_010_000,
+        1_009_999,
+        5,
+        6,
+        7,
+        1,
+        2,
     } <= set(draw.ints)
     on_action = [f for f in c.forbids() if "document_share" in f.actions]
     facts = [draw.facts(c.facts.actions["document_share"]) for _ in range(1000)]
@@ -1011,10 +1059,6 @@ def test_rule_4_s_reads_a_setting_of_the_chapters_own_domain():
         ("F.urgent & F.pages", "F.pages is a Long, not a condition"),
         ("F.nothing == 1", "document_share has no fact nothing"),
         ("F.nothing.is_some()", "document_share has no fact nothing"),
-        (
-            "when(F.urgent, 1, 'a') == F.pages",
-            "both branches are of one kind, not Long and String",
-        ),
     ],
 )
 def test_types_are_checked_against_the_fact_schema(expression, reason):
@@ -1182,3 +1226,202 @@ def test_a_number_setting_inside_arithmetic_is_folded_in_the_realm_and_open_in_t
     assert cedarpy.validate_policies(
         c.cedar(generic=True), c.cedar_schema(generic=True)
     ).validation_passed
+
+
+# ── The review of #546: conditions keep their polarity, arithmetic never leaves a check ───────────
+
+
+@pytest.mark.parametrize(
+    "expression, reason",
+    [
+        # A2, A3: a Period comparison "negated" by == False or != True lost its polarity.
+        (
+            "F.decision_deadline.is_some() & ((F.decision_deadline > months(6)) == False)",
+            "is a condition: conditions combine with &, | and ~",
+        ),
+        (
+            "F.decision_deadline.is_some() & ((F.decision_deadline > months(6)) != True)",
+            "is a condition: conditions combine with &, | and ~",
+        ),
+        (
+            "(F.longer_deadline_legislation.is_some() == True)",
+            "is a condition: conditions combine",
+        ),
+        (
+            "(F.longer_deadline_legislation.is_none() & True) == False",
+            "is a condition: conditions combine",
+        ),
+        # A4: a Period comparison as a when() branch, under ~.
+        (
+            "F.decision_deadline.is_some() & ~when(True, F.decision_deadline > months(6), False)",
+            "the branches of when() are integers",
+        ),
+        (
+            "when(True, 'a', 'b') == F.longer_deadline_legislation",
+            "the branches of when() are integers",
+        ),
+        (
+            "when(True, 1, 0) == True",
+            "True and False compare with a Bool fact or setting only",
+        ),
+        ("(F.decision_deadline > months(6)) + 1 > 1", "is a condition, not a number"),
+    ],
+)
+def test_a_condition_is_never_an_operand_so_it_keeps_its_polarity(expression, reason):
+    text = (
+        "from realms.legislation import F, S, above, forbid, months, when\nclass Procedure(above('procedure')):\n"
+        f"    rule = forbid('procedure_define', {expression}, legislation='x')\n"
+    )
+    assert reason in refused(text, domain="procedure")
+
+
+@pytest.mark.parametrize(
+    "expression, reason",
+    [
+        # B1, B2: the same for bounded arithmetic.
+        (
+            "F.rate.is_some() & F.surcharge.is_some() & ((F.rate + F.surcharge > 5) == False)",
+            "is a condition: conditions combine",
+        ),
+        (
+            "F.rate.is_some() & F.surcharge.is_some() & ~when(True, F.rate + F.surcharge > 5, False)",
+            "the branches of when() are integers",
+        ),
+        # C1, C2: arithmetic inside contains() was neither bounded nor checked.
+        (
+            "~F.tags.contains(F.unbounded + 1)",
+            "contains() takes a literal or a setting",
+        ),
+        ("~F.tags.contains(F.pages + 1)", "contains() takes a literal or a setting"),
+        ("F.tags.contains(F.kind)", "contains() takes a literal or a setting"),
+        # C3: a between() bound that overflows.
+        (
+            "F.pages.between(0, when(True, 9223372036854775807) + 1)",
+            "may overflow Cedar's 64-bit integer",
+        ),
+        (
+            "F.pages.between(0, 9223372036854775807 + 1)",
+            "does not fit Cedar's 64-bit integer",
+        ),
+        ("when(F.urgent, 1, 'a') == F.pages", "the branches of when() are integers"),
+        (
+            "when(F.urgent, True, False) == F.urgent",
+            "the branches of when() are integers",
+        ),
+        # D1: a bounded fact established only inside the when() it is read in.
+        (
+            "F.pages > when(F.rate.is_some(), F.rate, 0) + 1",
+            "F.rate is optional: compare it after F.rate.is_some() in the same & chain",
+        ),
+        ("F.pages > when(F.rate.is_some(), F.rate, 0)", "F.rate is optional"),
+        # Bool compares only a fact or a setting with a literal.
+        (
+            "F.urgent == F.urgent",
+            "a Bool fact or setting compares with True or False only",
+        ),
+        ("F.urgent > True", "a Bool fact or setting compares with True or False only"),
+    ],
+)
+def test_arithmetic_never_leaves_the_checks_and_bounded_facts_are_present(
+    expression, reason
+):
+    assert reason in refused(
+        forbid_chapter(f"forbid('document_share', {expression}, legislation='x')")
+    )
+
+
+def test_c4_a_lower_realms_setting_cannot_switch_off_an_upper_forbid_by_overflow():
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import F, S, above, forbid, overridable\nclass Tax(above('tax')):\n"
+        "    cap = overridable(100, legislation='x')\n"
+        "    rule = forbid('document_share', F.pages.between(0, S.cap + 1), legislation='x')\n",
+    )
+    assert "context.facts.pages <= 100 + 1" in c.cedar()
+    c.load(
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above\nclass Tax(above('tax')):\n    cap = 9223372036854775807\n",
+    )
+    with pytest.raises(Refused, match="may overflow Cedar's 64-bit integer"):
+        c.cedar()  # the realm's codex is refused at install, so the forbid is never skipped
+
+
+def test_a_bool_fact_or_setting_compares_with_true_or_false():
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import F, S, above, forbid, overridable\nclass Tax(above('tax')):\n"
+        "    strict = overridable(True, legislation='x')\n"
+        "    rule = forbid('document_share', (F.urgent == True) & (S.strict != False) & ~(False == F.urgent), legislation='x')\n",
+    )
+    rule = c.forbids()[0]
+    assert rule.cedar().endswith(
+        "  when { context.facts.urgent == true\n         && true != false\n         && !(context.facts.urgent == false) };"
+    )
+    assert cedarpy.validate_policies(c.cedar(), c.cedar_schema()).validation_passed
+    assert rule.evaluate({"urgent": True}) and not rule.evaluate({"urgent": False})
+    assert "context.settings.tax.strict != false" in rule.cedar(generic=True)
+
+
+def test_contains_takes_a_literal_or_a_setting():
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import F, S, above, forbid, overridable\nclass Tax(above('tax')):\n"
+        "    secret = overridable('secret', legislation='x')\n"
+        "    rule = forbid('document_share', F.tags.contains(S.secret) | F.tags.contains('top'), legislation='x')\n",
+    )
+    rule = c.forbids()[0]
+    assert (
+        'context.facts.tags.contains("secret")\n         || context.facts.tags.contains("top")'
+        in rule.cedar()
+    )
+    assert "context.facts.tags.contains(context.settings.tax.secret)" in rule.cedar(
+        generic=True
+    )
+    assert rule.evaluate({"tags": ["secret"]}) and not rule.evaluate({"tags": ["x"]})
+
+
+@pytest.mark.parametrize(
+    "member, reason",
+    [
+        (
+            "forbid('tax_policy_propose', F.code == 'a' and F.rate.is_some(), each='taxes', legislation='x')",
+            "use &, | and ~ in a forbid",
+        ),
+        (
+            "forbid('tax_policy_propose', not F.rate.is_some(), each='taxes', legislation='x')",
+            "use &, | and ~ in a forbid",
+        ),
+        (
+            "forbid('tax_policy_propose', 1 < F.rate < 5, each='taxes', legislation='x')",
+            "use &, | and ~ in a forbid",
+        ),
+        (
+            "forbid('tax_policy_propose', F.rate is None, each='taxes', legislation='x')",
+            "use &, | and ~ in a forbid",
+        ),
+        (
+            "forbid('tax_policy_propose', F.code in ['a'], each='taxes', legislation='x')",
+            "use &, | and ~ in a forbid",
+        ),
+        (
+            "forbid('tax_policy_propose', (1 if F.rate.is_some() else 0) > 0, each='taxes', legislation='x')",
+            "write when(c, a, b) in a forbid",
+        ),
+    ],
+)
+def test_the_syntax_tree_check_tells_authors_what_the_realm_refuses(member, reason):
+    """``realms legislation check`` runs the syntax-tree check first: its message is the one an author
+    reads. The realm's bytecode check refuses the same chapters."""
+    text = f"from realms.legislation import F, above, forbid\nclass Tax(above('tax')):\n    rule = {member}\n"
+    with pytest.raises(Refused) as e:
+        subset_ast.check(text, "eu/es/tax.py")
+    assert reason in str(e.value)
+    with pytest.raises(Refused):
+        codex().load("eu/es", "tax", text)

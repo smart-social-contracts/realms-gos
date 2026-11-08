@@ -121,3 +121,38 @@ def test_a_runtime_mutation_fails_and_changes_no_shared_state(name):
         chapter.on_codex_install(Event("a", {}, result, 0))
     assert c.calendar.weekend == frozenset({"sat", "sun"})  # unchanged
     assert result == {"codex": "C-1"}  # the event a layer above set is unchanged
+
+
+# A class body may read attributes now, for the F trees of forbids (realms-gos#484). The dunder names
+# a class body may hold are the ones CPython writes there, as names: read as attributes they reach
+# another class. ``above('procedure').__annotations__.update(...)`` wrote into Spain's chapter class.
+CLASS_BODY_ATTACKS = {
+    "upper_annotations_update": H
+    + "class Procedure(above('procedure')):\n"
+    + "    v = above('procedure').__annotations__.update({'planted': 1})\n",
+    "sdk_annotations_update": H
+    + "class Procedure(above('procedure')):\n"
+    + "    v = days.__annotations__.update({'n': 1})\n",
+    "module_read": H
+    + "class Procedure(above('procedure')):\n    v = above.__module__\n",
+    "private_attribute": H
+    + "class Procedure(above('procedure')):\n    v = days._private\n",
+    "method_dunder": H
+    + "class Procedure(above('procedure')):\n    v = Ref('a', 'b').__class__\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(CLASS_BODY_ATTACKS))
+def test_a_class_body_reads_no_private_or_dunder_attribute(name):
+    from realms.legislation import subset_ast
+
+    c = _codex()
+    upper = c.chapters["procedure"][0]
+    with pytest.raises(Refused, match="no private or dunder attribute|no dunder names"):
+        c.load("x/town", "procedure", CLASS_BODY_ATTACKS[name])
+    with pytest.raises(Refused, match="no private or dunder attribute|no dunder names"):
+        subset_ast.check(CLASS_BODY_ATTACKS[name], "x/town/procedure.py")
+    assert "__annotations__" not in vars(upper) and "planted" not in str(vars(upper))
+    from realms.legislation import days
+
+    assert not getattr(days, "__annotations__", {})

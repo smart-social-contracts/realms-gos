@@ -17,6 +17,16 @@ from realms.legislation.subset import (
 )
 
 MARKS = ("fixed", "extension", "overridable")
+NO_PLAIN_BOOL = "use &, | and ~ in a forbid; see legislation/README.md"
+
+
+def _comparisons():
+    import ast
+
+    return (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
+
+
+COMPARISONS_AST = _comparisons()
 
 
 class Check:
@@ -121,28 +131,47 @@ class Check:
                     self.constant(keyword.value, member)
         elif member and self.fact_expression(node):
             pass
+        elif member and isinstance(node, (ast.BoolOp, ast.Compare)):
+            self.refuse(node, NO_PLAIN_BOOL)  # and, or, a chained comparison (rule 2)
+        elif member and isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            self.refuse(node, NO_PLAIN_BOOL)
+        elif member and isinstance(node, ast.IfExp):
+            self.refuse(node, "write when(c, a, b) in a forbid, not a if c else b")
         else:
+            if (
+                member
+            ):  # the dunder message first, for authors: above('x').__annotations__...
+                for sub in ast.walk(node):
+                    if isinstance(sub, ast.Attribute):
+                        self.attribute(sub, sub.attr)
             self.refuse(
                 node,
                 "a constant expression: literals, lists and dicts of them, and SDK calls on them",
             )
 
     def fact_expression(self, node):
-        """An ``F`` tree's own forms: ``F.x``, ``F.x.method(...)``, a comparison, ``~x``."""
+        """An ``F`` tree's own forms: ``F.x``, ``F.x.method(...)``, one of the six comparisons, ``~x``.
+        No attribute read in a class body starts with ``_``: the dunder names a class body may hold
+        are the ones CPython writes there, as names, never attributes of another class.
+        """
         ast = self.ast
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             self.identifier(node, node.value.id, "class body")
-            self.identifier(node, node.attr, "class body")
+            self.attribute(node, node.attr)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and not node.keywords
             and self.fact_expression(node.func.value)
         ):
-            self.identifier(node, node.func.attr, "class body")
+            self.attribute(node, node.func.attr)
             for arg in node.args:
                 self.constant(arg, True)
-        elif isinstance(node, ast.Compare) and len(node.ops) == 1:
+        elif (
+            isinstance(node, ast.Compare)
+            and len(node.ops) == 1
+            and isinstance(node.ops[0], COMPARISONS_AST)
+        ):
             self.constant(node.left, True)
             self.constant(node.comparators[0], True)
         elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
@@ -389,6 +418,13 @@ class Check:
             if keyword.arg == "metaclass":
                 self.refuse(keyword, "'metaclass': not allowed in a chapter")
             self.identifier(keyword, keyword.arg, "method")
+
+    def attribute(self, node, name):
+        if name.startswith("_"):
+            self.refuse(
+                node, f".{name}: no private or dunder attribute is read in a class body"
+            )
+        self.identifier(node, name, "method")
 
     def identifier(self, node, name, scope):
         if name in FRAME_ATTRIBUTES:

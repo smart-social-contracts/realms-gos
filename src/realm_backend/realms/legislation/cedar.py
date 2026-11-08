@@ -377,13 +377,9 @@ class Check(metaclass=Sealed):
             return "Bool"
         if isinstance(node, If):
             self.boolean(node.cond, present, True)
-            then = self.typeof(node.then, present | established(node.cond), in_when)
-            otherwise = self.typeof(node.otherwise, present, in_when)
-            if then != otherwise:
-                raise LegislationError(
-                    f"when(): both branches are of one kind, not {then} and {otherwise}"
-                )
-            return then
+            self.long(node.then, present | established(node.cond), in_when, "when()")
+            self.long(node.otherwise, present, in_when, "when()")
+            return "Long"
         if isinstance(node, Arith):
             for _, term in node.terms:
                 self.long(term, present, in_when, "arithmetic")
@@ -429,9 +425,11 @@ class Check(metaclass=Sealed):
             raise LegislationError(f"{node!r} is a {kind}, not a condition")
 
     def long(self, node, present, in_when, where):
+        """An integer expression that cannot overflow: every bound, term and branch goes through here."""
         kind = self.typeof(node, present, in_when)
         if kind != "Long":
             raise LegislationError(f"{where} needs integers: {node!r} is a {kind}")
+        self.interval(node)
 
     @staticmethod
     def same(got, wanted, where):
@@ -466,6 +464,20 @@ class Check(metaclass=Sealed):
             return "Bool"
         if node.op in ("==", "!=") and left.startswith("Set<"):
             raise LegislationError(f"{node!r}: a set fact is tested with contains()")
+        if "Bool" in (left, right):
+            # A Bool fact or setting against true or false, and nothing else: a condition is never an
+            # operand (expressions.py), so every condition keeps its polarity.
+            sides = (node.left, node.right)
+            if not (
+                left == right == "Bool"
+                and node.op in ("==", "!=")
+                and any(isinstance(s, Literal) for s in sides)
+                and any(isinstance(s, (Fact, Setting)) for s in sides)
+            ):
+                raise LegislationError(
+                    f"{node!r}: a Bool fact or setting compares with True or False only"
+                )
+            return "Bool"
         if node.op not in ("==", "!=") or node.bounded:
             self.same(left, "Long", repr(node))
             self.same(right, "Long", repr(node))
@@ -480,6 +492,12 @@ class Check(metaclass=Sealed):
                     raise LegislationError(
                         f"F.{name} is read inside arithmetic, but the fact schema gives it no range: "
                         f"the forbid could overflow (rule 9)"
+                    )
+                if self.action.facts[name].optional and name not in present:
+                    # The bounds are written before the comparison, outside any `if` that
+                    # established the fact: strict validation would refuse them too.
+                    raise LegislationError(
+                        f"F.{name} is optional: compare it after F.{name}.is_some() in the same & chain (rule 3)"
                     )
         self.interval(node.left)
         self.interval(node.right)

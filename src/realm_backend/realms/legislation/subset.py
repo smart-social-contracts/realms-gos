@@ -270,6 +270,15 @@ class Check:
         self.common(code, "class body", CLASS_INSTRUCTIONS)
         ops = instructions(code, self.names)
         for i, (name, arg) in enumerate(ops):
+            if name in ("LOAD_ATTR", "LOAD_METHOD"):
+                # The dunder names a class body may hold (CLASS_BODY) are the ones CPython itself
+                # writes, as names; read as attributes they reach another class (`__annotations__`).
+                attr = code.co_names[self.attribute_index(name, arg)]
+                if attr.startswith("_"):
+                    self.refuse(
+                        f".{attr}: no private or dunder attribute is read in a class body",
+                        attr,
+                    )
             if name == "STORE_NAME":
                 stored = code.co_names[arg]
                 if stored == "__doc__" and (i == 0 or ops[i - 1][0] != "LOAD_CONST"):
@@ -295,6 +304,13 @@ class Check:
         for const in code.co_consts:
             if type(const) is type(code):
                 self.function(const)
+
+    @staticmethod
+    def attribute_index(name, arg):
+        """The ``co_names`` index a LOAD_ATTR carries: from 3.12 its low bit says "method call"."""
+        if name == "LOAD_ATTR" and sys.version_info >= (3, 12):
+            return arg >> 1
+        return arg
 
     def on_local(self, code, ops, i):
         """Whether the object the attribute is stored on was just loaded from a local variable of this

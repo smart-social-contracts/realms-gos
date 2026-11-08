@@ -192,7 +192,13 @@ class Fact(Expr):
         return Not(Has(self))
 
     def contains(self, value):
-        """The set fact holds ``value``."""
+        """The set fact holds ``value``: a str or int literal, or a setting ``S.x``."""
+        if not isinstance(value, Setting) and (
+            isinstance(value, (Expr, bool)) or not isinstance(value, (str, int))
+        ):
+            raise LegislationError(
+                "contains() takes a literal or a setting, not arithmetic or a condition"
+            )
         return Contains(self, literal(value, "a value"))
 
     def in_(self, items):
@@ -283,6 +289,19 @@ class Compare(Expr):
                 raise LegislationError(
                     "compare a fact with one value; a list belongs in F.x.in_([...])"
                 )
+            if is_condition(side):
+                raise LegislationError(
+                    f"{side!r} is a condition: conditions combine with &, | and ~, they are not compared"
+                )
+        for side, other in ((left, right), (right, left)):
+            if (
+                isinstance(side, Literal)
+                and isinstance(side.value, bool)
+                and not isinstance(other, (Fact, Setting))
+            ):
+                raise LegislationError(
+                    "True and False compare with a Bool fact or setting only: F.urgent == True"
+                )
         period = any(
             isinstance(s, Literal) and isinstance(s.value, Period)
             for s in (left, right)
@@ -314,6 +333,9 @@ class Arith(Expr):
     __slots__ = ("terms",)
 
     def __init__(self, left, op, right):
+        for term in (left, right):
+            if is_condition(term):
+                raise LegislationError(f"{term!r} is a condition, not a number")
         terms = left.terms if isinstance(left, Arith) else (("+", left),)
         object.__setattr__(self, "terms", terms + ((op, right),))
 
@@ -379,10 +401,25 @@ class If(Expr):
                 raise LegislationError(
                     "arithmetic on facts can't be compared in the condition of when(): it has no polarity there"
                 )
+        then, otherwise = (
+            literal(then, "a branch of when()"),
+            literal(otherwise, "a branch of when()"),
+        )
+        for branch in (then, otherwise):
+            if is_condition(branch) or (
+                isinstance(branch, Literal)
+                and (
+                    isinstance(branch.value, bool) or not isinstance(branch.value, int)
+                )
+            ):
+                raise LegislationError(
+                    f"{branch!r}: the branches of when() are integers (a rate, a count), as in "
+                    'when(S.capital, pct("0.07"))'
+                )
         for name, value in (
             ("cond", cond),
-            ("then", literal(then, "a branch of when()")),
-            ("otherwise", literal(otherwise, "a branch of when()")),
+            ("then", then),
+            ("otherwise", otherwise),
         ):
             object.__setattr__(self, name, value)
 
@@ -439,6 +476,16 @@ class Between(Expr):
 
     def __repr__(self):
         return f"{self.fact!r}.between({self.low!r}, {self.high!r})"
+
+
+# The nodes that are conditions (Bool), as opposed to values: each sits under &, | and ~ only, so its
+# polarity is the parity of the ~ above it. A condition is never an operand of a comparison, a term of
+# arithmetic or a branch of when(), where it would have no polarity.
+CONDITIONS = (Compare, And, Or, Not, Has, In, Contains, Between)
+
+
+def is_condition(node):
+    return isinstance(node, CONDITIONS)
 
 
 def when(cond, then, otherwise=0):
