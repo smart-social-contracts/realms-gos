@@ -17,6 +17,9 @@ from realms.legislation.subset import (
 )
 
 MARKS = ("fixed", "extension", "overridable")
+# The built-ins §4 (rule 5) bans, with __import__, which the dunder rule refuses. A chapter does not get them, so a
+# call fails when it runs; the author is told at the line instead.
+BANNED_NAMES = ("exec", "eval", "compile", "globals", "locals", "setattr", "open")
 NO_PLAIN_BOOL = "use &, | and ~ in a forbid; see legislation/README.md"
 
 
@@ -247,9 +250,21 @@ class Check:
                 decorator,
                 "a method is decorated with a mark (fixed, extension, overridable) and nothing else",
             )
+        if any(self.is_extension(d) for d in node.decorator_list):
+            self.no_super(node)
         names = [a.arg for a in node.args.posonlyargs + node.args.args]
         event = names[1] if node.name.startswith("on_") and len(names) >= 2 else None
         self.function(node, [], frozenset({"self", event} - {None}))
+
+    def is_extension(self, decorator):
+        called = decorator.func if isinstance(decorator, self.ast.Call) else decorator
+        return isinstance(called, self.ast.Name) and called.id == "extension"
+
+    def no_super(self, node):
+        """Every layer's definition of an extension runs, so none calls the one above (§4.1)."""
+        for child in self.ast.walk(node):
+            if isinstance(child, self.ast.Name) and child.id == "super":
+                self.refuse(child, f"{node.name} is an extension: every layer's definition runs, so it does not call super()")
 
     # ── methods and lambdas ──
 
@@ -401,6 +416,8 @@ class Check:
             self.literal(node)
         elif isinstance(node, ast.Name):
             self.identifier(node, node.id, "method")
+            if node.id in BANNED_NAMES:
+                self.refuse(node, f"{node.id}: not allowed in a chapter")
         elif isinstance(node, ast.Attribute):
             self.identifier(node, node.attr, "method")
             if node.attr in FORMAT_METHODS:

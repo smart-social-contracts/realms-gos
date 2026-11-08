@@ -23,8 +23,9 @@ import typer
 from rich.console import Console
 
 from realms.cli.commands.legislation_layout import layout_problems
-from realms.legislation import Codex, Refused, subset_ast
+from realms.legislation import Codex, LegislationError, Refused, subset_ast
 from realms.legislation.paths import REALM
+from realms.legislation.resolver import check_uses
 
 console = Console()
 legislation_app = typer.Typer(
@@ -137,7 +138,9 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
                 break  # the layers below build on this one
     try:
         codex.check()
-    except Refused as e:
+        if not problems:  # `uses` is read from a codex that loaded whole: a chapter that did not load would be a false "no such domain"
+            check_uses(codex)
+    except LegislationError as e:
         problems.append(str(e))
     return problems
 
@@ -181,5 +184,5 @@ def check_command(
     problems = []
     for one in realms:
         problems += check_realm(tree, one, known, operations)
-    refuse(problems)
+    refuse(list(dict.fromkeys(problems)))  # a layer's refusal shows once, though every realm below it runs the layer
     console.print(f"[green]ok: {len(realms)} realm(s) checked[/green]")
