@@ -32,6 +32,8 @@ OWN = {
     "realm_export": ("direct", "admin", None, None),
     "quarter_add": ("direct", "admin", None, None),
     "orchestration_decide": ("confirm", "admin", None, None),
+    # Resuming an install the realm voted for changes nothing the vote did not approve: as codex_install is.
+    "codex_install_resume": ("direct", "setup", "admin", None),
     "extension_install": ("direct", "setup", "admin", None),
     "extension_uninstall": ("direct", "setup", "admin", None),
     "extension_set_access": ("direct", "setup", "admin", None),

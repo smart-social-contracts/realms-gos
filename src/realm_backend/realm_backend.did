@@ -859,6 +859,7 @@ service : (text) -> {
   "ggg_document_delete" : (DocumentDeleteArgs) -> (DocumentDeletedReply);
   "read" : (text, text) -> (text) query;
   "run" : (text, text) -> (text);
+  "http_transform" : (HttpTransformArgs) -> (HttpResponse) query;
   "__shell__" : (text) -> (text);
   "__browse__" : (text) -> (text) query;
   "__get_candid_interface_tmp_hack" : () -> (text) query;

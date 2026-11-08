@@ -34,7 +34,7 @@ def valid_due(args):
             raise Fail(f"{key} is a time in seconds")
 
 
-@op("request.file", check=valid_filing, private=("body",), returns="request")
+@op("request.file", check=valid_filing, private=("body",), secret=("body",), returns="request")
 def request_file(c, args):
     """File a request of ``kind`` (the realm's word, such as petition) with a ``body``, for you or for an
     ``organization`` you administer. A body that holds personal data is the id of an encrypted Document, never the
@@ -85,7 +85,7 @@ def request_set_due(c, args):
     return {"request": r.id}
 
 
-@op("request.decide", parties=filed_by, private=("reply",), returns="request")
+@op("request.decide", parties=filed_by, private=("reply",), secret=("reply",), returns="request")
 def request_decide(c, args):
     """Decide the filed ``request``: ``decision`` is the realm's word for the outcome (granted, refused,
     refused_by_silence), with an optional ``reply``; a reply that holds personal data is the id of an encrypted

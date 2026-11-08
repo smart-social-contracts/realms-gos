@@ -1,7 +1,8 @@
 """Stand-in for ``chain`` in unit tests: a clock, a caller, controllers and recorded calls.
 
 Calls to other canisters are answered by a scripted peer (``peer``), or, for a canister that is not one, by
-``state["replies"]``, a fixed reply per ``(canister, method)``.
+``state["replies"]``, a fixed reply per ``(canister, method)``. HTTPS outcalls are answered from ``state["web"]``
+(``serve``); a URL nobody serves is a 404.
 """
 
 import json
@@ -18,7 +19,8 @@ class Trap(BaseException):
 
 def reset():
     state.clear()
-    state.update(caller=ANONYMOUS, controllers={"ctl"}, now=1_790_000_000, timers=[], calls=[], replies={}, peers={})
+    state.update(caller=ANONYMOUS, controllers={"ctl"}, now=1_790_000_000, timers=[], calls=[], replies={}, peers={},
+                 web={})
 
 
 def caller():
@@ -35,6 +37,12 @@ def self_id():
 
 def now():
     return state["now"]
+
+
+def instructions():
+    """Stands in for the instruction counter: a million more every time it is read."""
+    state["instructions"] = state.get("instructions", 0) + 1_000_000
+    return state["instructions"]
 
 
 def candid_encode(text):
@@ -148,4 +156,23 @@ def call_op(cid, name, args):
     is handed ``args`` itself; a canister that is no peer answers with ``state["replies"][(cid, name)]``, or with the
     empty text if there is none."""
     return send(cid, name, json.dumps(args), args, "")
+    yield
+
+
+def serve(url, body, status=200):
+    """Answer the realm's HTTPS outcalls for ``url`` with ``body`` (bytes); serve it again to change the bytes. A
+    ``rejects(...)`` fails the call, as a server that cannot be reached does."""
+    state["web"][url] = body if isinstance(body, Failure) else (status, body)
+
+
+def http_get(url, max_bytes):
+    """An HTTPS outcall, answered from ``serve``; recorded in ``state["calls"]`` as ``("https", url, max_bytes)``."""
+    state["calls"].append(("https", url, max_bytes))
+    answer = state["web"].get(url, (404, b"not found"))
+    if isinstance(answer, Failure):
+        raise Exception(f"GET {url} failed: {answer.message}")
+    status, body = answer
+    if len(body) > max_bytes:  # the replica refuses a reply above max_response_bytes before the canister sees it
+        raise Exception(f"GET {url} failed: the reply is above {max_bytes} bytes")
+    return status, body
     yield

@@ -39,6 +39,7 @@ class Check:
         except SyntaxError as e:
             raise Refused(e.msg, e.lineno, file)
         self.imported = set()
+        self.allowed = []  # per function being visited: the names a store may target (self, a hook's event)
 
     def refuse(self, node, reason):
         raise Refused(reason, getattr(node, "lineno", None), self.file)
@@ -246,13 +247,21 @@ class Check:
                 decorator,
                 "a method is decorated with a mark (fixed, extension, overridable) and nothing else",
             )
-        self.function(node, [])
+        names = [a.arg for a in node.args.posonlyargs + node.args.args]
+        event = names[1] if node.name.startswith("on_") and len(names) >= 2 else None
+        self.function(node, [], frozenset({"self", event} - {None}))
 
     # ── methods and lambdas ──
 
-    def function(self, node, outer_locals):
+    def function(self, node, outer_locals, allowed=None):
+        """A method (``allowed`` names what a store may target), or a function nested in one, which inherits it."""
         ast = self.ast
         args = node.args
+        if args.defaults or any(d is not None for d in args.kw_defaults):
+            self.refuse(
+                node,
+                "a default argument is state shared by every call: pass the value instead",
+            )
         for arg in (
             args.posonlyargs
             + args.args
@@ -262,13 +271,41 @@ class Check:
             self.identifier(arg, arg.arg, "method")
         bound = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
         bound.update(a.arg for a in (args.vararg, args.kwarg) if a)
-        if isinstance(node, ast.Lambda):
-            self.expression(node.body, bound)
-            return
+        if allowed is None:  # a function nested in a method: its parameters may not reuse the protected names
+            for name in bound & (self.allowed[-1] if self.allowed else frozenset()):
+                self.refuse(node, f"{name} is bound once, as the method's parameter: a nested function has no parameter of that name")
+        self.allowed.append(allowed if allowed is not None else self.allowed[-1] if self.allowed else frozenset())
+        if allowed is not None:
+            self.bound_once(node, allowed)
+        try:
+            if isinstance(node, ast.Lambda):
+                self.expression(node.body, bound)
+                return
+            for statement in node.body:
+                bound.update(self.assigned(statement))
+            for statement in node.body:
+                self.statement(statement, bound)
+        finally:
+            self.allowed.pop()
+
+    def bound_once(self, node, names):
+        """``self`` and the event a hook was given are bound once, as the method's own parameters, and never again:
+        no assignment to them (plain, augmented, a walrus, a loop or comprehension target, nonlocal), no del."""
+        ast = self.ast
         for statement in node.body:
-            bound.update(self.assigned(statement))
-        for statement in node.body:
-            self.statement(statement, bound)
+            for child in ast.walk(statement):
+                rebound = ()
+                if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                    rebound = (child.id,)
+                elif isinstance(child, (ast.Global, ast.Nonlocal)):
+                    rebound = tuple(child.names)
+                elif isinstance(child, ast.ExceptHandler) and child.name:
+                    rebound = (child.name,)
+                elif isinstance(child, ast.alias):
+                    rebound = (child.asname or child.name,)
+                for name in rebound:
+                    if name in names:
+                        self.refuse(child, f"{name} is bound once, as the method's parameter, and never rebound or deleted")
 
     def assigned(self, node):
         """Names a statement binds in its function, so attribute stores on them are on locals."""
@@ -338,10 +375,10 @@ class Check:
             self.identifier(node, node.id, "method")
         elif isinstance(node, ast.Attribute):
             self.identifier(node, node.attr, "method")
-            if not (isinstance(node.value, ast.Name) and node.value.id in local):
+            if not (isinstance(node.value, ast.Name) and self.allowed and node.value.id in self.allowed[-1]):
                 self.refuse(
                     node,
-                    f".{node.attr} = ...: a chapter sets attributes on self, or on what it was given, never on a class or a call's result",
+                    f".{node.attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
                 )
         elif isinstance(node, ast.Subscript):
             self.expression(node, local)
