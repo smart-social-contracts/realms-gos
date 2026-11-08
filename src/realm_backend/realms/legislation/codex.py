@@ -65,6 +65,17 @@ def domain_id(domain):
     return domain
 
 
+def one_argument_type(obj, *rest):
+    """``type(x)`` as a chapter gets it. ``type(name, bases, dict)`` is refused: it builds a class
+    outside the class statement the subset allows, an int or str subclass with a ``__str__`` of its
+    own among them, and its dict's keys dodge the dunder rule as computed strings."""
+    if rest:
+        raise LegislationError(
+            "type(name, bases, dict) is not allowed in a chapter: a chapter defines one class, with class"
+        )
+    return type(obj)
+
+
 def no_dunder(fn):
     """``getattr``, ``hasattr`` and ``delattr`` as a chapter gets them: never for a dunder name or a frame's."""
 
@@ -83,14 +94,37 @@ def no_dunder(fn):
     return guarded
 
 
+def chapter_line(error, file):
+    """The line of ``file`` that ``error`` was raised from, read off its traceback, so a refusal from
+    inside the class body (a forbid's expression, rule 2) points at the member; None if none.
+    """
+    tb, line = error.__traceback__, None
+    while tb is not None:
+        if tb.tb_frame.f_code.co_filename == file:
+            line = tb.tb_lineno
+        tb = tb.tb_next
+    return line
+
+
+def _cedar():
+    """The Cedar generator, imported when a codex is built or installed: hooks and guards never need
+    it, and compiling a bundled module costs the realm tens of millions of instructions on first use.
+    """
+    from realms.legislation import cedar
+
+    return cedar
+
+
 class Codex(metaclass=Sealed):
     """``layers`` are the source ids of the realm's layer paths, top to bottom; ``realm`` is the realm's own
     source id; ``operations`` the GGG operation names, when known, for the hooks, guards and forbids to be
     checked against; ``modules`` what a chapter's ``from ggg import ...`` resolves to: the read-only view of
     GGG's entities the realm supplies (D3, #488), any object whose attributes are the entity names with
-    their read methods. Without one, importing ``ggg`` is refused."""
+    their read methods. Without one, importing ``ggg`` is refused. ``facts`` is GGG's fact schema, as
+    ``cedar.FactSchema`` reads it: the forbids are checked against it, and the Cedar is generated from it.
+    """
 
-    def __init__(self, layers, realm=None, operations=None, modules=None):
+    def __init__(self, layers, realm=None, operations=None, modules=None, facts=None):
         self.layers = tuple(source_id(s) for s in layers)
         if len(set(self.layers)) != len(self.layers):
             raise LegislationError("a source appears once in the layers")
@@ -98,6 +132,7 @@ class Codex(metaclass=Sealed):
             self.index(realm)
         self.realm = realm
         self.operations = None if operations is None else frozenset(operations)
+        self.facts = None if facts is None else _cedar().FactSchema(facts)
         self.modules = dict(modules or {})
         self.chapters = {}  # domain -> classes, top to bottom
         self.calendars = {}  # source -> its calendar.json
@@ -169,9 +204,9 @@ class Codex(metaclass=Sealed):
         except Refused:
             raise
         except LegislationError as e:
-            raise Refused(str(e), None, file)
+            raise Refused(str(e), chapter_line(e, file), file)
         except Exception as e:
-            raise Refused(f"{type(e).__name__}: {e}", None, file)
+            raise Refused(f"{type(e).__name__}: {e}", chapter_line(e, file), file)
         finally:
             _LOADING.pop()
         cls = self._the_chapter(space, load, imported)
@@ -216,6 +251,7 @@ class Codex(metaclass=Sealed):
             if isinstance(v, type) and issubclass(v, BaseException)
         )
         env.update((f.__name__, no_dunder(f)) for f in (getattr, hasattr, delattr))
+        env["type"] = one_argument_type
         env["__import__"] = _import
         return env
 
@@ -294,6 +330,39 @@ class Codex(metaclass=Sealed):
                         raise Refused(f"{why}: {detail}", member.line, member.file)
                     if not passed:
                         raise Refused(why, member.line, member.file)
+
+    def forbids(self):
+        """Every forbid of every chapter, bound to this realm (layered-codex.md §6, §9.4): its ``S.``
+        settings read from the domain as it resolves here, and its tree checked against the fact
+        schema. In a fixed order, so the Cedar is canonical: layers top to bottom, domains by name,
+        and each chapter's forbids as written. A forbid the checks refuse raises ``Refused``.
+        """
+        if self.facts is None:
+            raise LegislationError(
+                "binding forbids needs GGG's fact schema: Codex(..., facts=...)"
+            )
+        bound = []
+        for source in self.layers:
+            for domain in sorted(self.chapters):
+                for cls in self.chapters[domain]:
+                    if cls.__source__ != source:
+                        continue
+                    resolved = self.resolved(domain)
+                    for member in cls.__own__.values():
+                        if member.kind == "forbid":
+                            bound.append(_cedar().bind(member, resolved, self.facts))
+        return bound
+
+    def cedar(self, generic=False):
+        """The generated Cedar of every forbid (§5.8): settings folded to their values in this realm, or
+        left open as ``context.settings`` for the analysis (``generic``, §12.3)."""
+        return _cedar().policies(self.forbids(), generic)
+
+    def cedar_schema(self, generic=False, context=None):
+        """The Cedar schema the generated policies validate against: every action of the fact schema,
+        with ``context`` (the realm's context fields and their Cedar types) plus ``facts``, and the open
+        ``settings`` in the generic mode."""
+        return _cedar().schema(self.facts, self.forbids() if generic else (), context)
 
     def context(self, now=0, approvals=()):
         """A call's context: the time and the approvals the operation carries."""

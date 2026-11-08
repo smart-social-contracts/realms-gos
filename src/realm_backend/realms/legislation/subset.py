@@ -116,13 +116,15 @@ _CONTAINERS = ("BUILD_LIST", "BUILD_TUPLE", "BUILD_SET", "BUILD_MAP", "BUILD_CON
                "LIST_TO_TUPLE")  # fmt: skip
 _RETURNS = ("RETURN_VALUE", "RETURN_CONST")
 
-MODULE_OPS = frozenset(_BOOKKEEPING + _CALLS + _ARITHMETIC + _CONTAINERS + _RETURNS + (
+MODULE_INSTRUCTIONS = frozenset(_BOOKKEEPING + _CALLS + _ARITHMETIC + _CONTAINERS + _RETURNS + (
     "LOAD_CONST", "LOAD_NAME", "STORE_NAME", "IMPORT_NAME", "IMPORT_FROM", "LOAD_BUILD_CLASS", "MAKE_FUNCTION",
     "SET_FUNCTION_ATTRIBUTE"))  # fmt: skip
-CLASS_OPS = frozenset(_BOOKKEEPING + _CALLS + _ARITHMETIC + _CONTAINERS + _RETURNS + (
+# A class body also reads attributes and compares, for the F trees of forbids (F.code == "ibi_urban");
+# it still stores none (STORE_ATTR), and the dunder rule still applies to every name.
+CLASS_INSTRUCTIONS = frozenset(_BOOKKEEPING + _CALLS + _ARITHMETIC + _CONTAINERS + _RETURNS + (
     "LOAD_CONST", "LOAD_NAME", "STORE_NAME", "MAKE_FUNCTION", "SET_FUNCTION_ATTRIBUTE", "MAKE_CELL",
-    "COPY_FREE_VARS", "LOAD_CLOSURE", "LOAD_FAST"))  # fmt: skip
-FUNCTION_OPS = frozenset(_BOOKKEEPING + _CALLS + _ARITHMETIC + _CONTAINERS + _RETURNS + (
+    "COPY_FREE_VARS", "LOAD_CLOSURE", "LOAD_FAST", "LOAD_ATTR", "COMPARE_OP"))  # fmt: skip
+FUNCTION_INSTRUCTIONS = frozenset(_BOOKKEEPING + _CALLS + _ARITHMETIC + _CONTAINERS + _RETURNS + (
     "LOAD_CONST", "LOAD_GLOBAL", "LOAD_ATTR", "LOAD_SUPER_ATTR", "STORE_ATTR", "LOAD_FAST", "LOAD_FAST_CHECK",
     "LOAD_FAST_AND_CLEAR", "LOAD_FAST_LOAD_FAST", "STORE_FAST", "STORE_FAST_LOAD_FAST", "STORE_FAST_STORE_FAST",
     "DELETE_FAST", "LOAD_DEREF", "STORE_DEREF", "DELETE_DEREF", "LOAD_CLOSURE", "MAKE_CELL", "COPY_FREE_VARS",
@@ -205,7 +207,7 @@ class Check:
     # ── scopes ──
 
     def module(self, code):
-        self.common(code, "module", MODULE_OPS)
+        self.common(code, "module", MODULE_INSTRUCTIONS)
         ops = instructions(code, self.names)
         classes = sum(1 for name, _ in ops if name == "LOAD_BUILD_CLASS")
         if classes != 1:
@@ -265,9 +267,18 @@ class Check:
                 )
 
     def class_body(self, code):
-        self.common(code, "class body", CLASS_OPS)
+        self.common(code, "class body", CLASS_INSTRUCTIONS)
         ops = instructions(code, self.names)
         for i, (name, arg) in enumerate(ops):
+            if name in ("LOAD_ATTR", "LOAD_METHOD"):
+                # The dunder names a class body may hold (CLASS_BODY) are the ones CPython itself
+                # writes, as names; read as attributes they reach another class (`__annotations__`).
+                attr = code.co_names[self.attribute_index(name, arg)]
+                if attr.startswith("_"):
+                    self.refuse(
+                        f".{attr}: no private or dunder attribute is read in a class body",
+                        attr,
+                    )
             if name == "STORE_NAME":
                 stored = code.co_names[arg]
                 if stored == "__doc__" and (i == 0 or ops[i - 1][0] != "LOAD_CONST"):
@@ -279,7 +290,7 @@ class Check:
                 self.function(const)
 
     def function(self, code):
-        self.common(code, "method", FUNCTION_OPS)
+        self.common(code, "method", FUNCTION_INSTRUCTIONS)
         ops = instructions(code, self.names)
         for i, (name, arg) in enumerate(ops):
             if name == "STORE_ATTR" and not self.on_local(code, ops, i):
@@ -293,6 +304,13 @@ class Check:
         for const in code.co_consts:
             if type(const) is type(code):
                 self.function(const)
+
+    @staticmethod
+    def attribute_index(name, arg):
+        """The ``co_names`` index a LOAD_ATTR carries: from 3.12 its low bit says "method call"."""
+        if name == "LOAD_ATTR" and sys.version_info >= (3, 12):
+            return arg >> 1
+        return arg
 
     def on_local(self, code, ops, i):
         """Whether the object the attribute is stored on was just loaded from a local variable of this

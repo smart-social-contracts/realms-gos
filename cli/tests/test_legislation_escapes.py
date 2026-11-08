@@ -121,3 +121,171 @@ def test_a_runtime_mutation_fails_and_changes_no_shared_state(name):
         chapter.on_codex_install(Event("a", {}, result, 0))
     assert c.calendar.weekend == frozenset({"sat", "sun"})  # unchanged
     assert result == {"codex": "C-1"}  # the event a layer above set is unchanged
+
+
+# A class body may read attributes now, for the F trees of forbids (realms-gos#484). The dunder names
+# a class body may hold are the ones CPython writes there, as names: read as attributes they reach
+# another class. ``above('procedure').__annotations__.update(...)`` wrote into Spain's chapter class.
+CLASS_BODY_ATTACKS = {
+    "upper_annotations_update": H
+    + "class Procedure(above('procedure')):\n"
+    + "    v = above('procedure').__annotations__.update({'planted': 1})\n",
+    "sdk_annotations_update": H
+    + "class Procedure(above('procedure')):\n"
+    + "    v = days.__annotations__.update({'n': 1})\n",
+    "module_read": H
+    + "class Procedure(above('procedure')):\n    v = above.__module__\n",
+    "private_attribute": H
+    + "class Procedure(above('procedure')):\n    v = days._private\n",
+    "method_dunder": H
+    + "class Procedure(above('procedure')):\n    v = Ref('a', 'b').__class__\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(CLASS_BODY_ATTACKS))
+def test_a_class_body_reads_no_private_or_dunder_attribute(name):
+    from realms.legislation import subset_ast
+
+    c = _codex()
+    upper = c.chapters["procedure"][0]
+    with pytest.raises(Refused, match="no private or dunder attribute|no dunder names"):
+        c.load("x/town", "procedure", CLASS_BODY_ATTACKS[name])
+    with pytest.raises(Refused, match="no private or dunder attribute|no dunder names"):
+        subset_ast.check(CLASS_BODY_ATTACKS[name], "x/town/procedure.py")
+    assert "__annotations__" not in vars(upper) and "planted" not in str(vars(upper))
+    from realms.legislation import days
+
+    assert not getattr(days, "__annotations__", {})
+
+
+# The second review of #546: a lower layer must not be able to change an upper layer's forbid. The
+# list of F.code.in_([...]) was a Python list inside the tree, so `.remove()` on it passed every
+# check; the nodes hold tuples now, and every node and Period refuses attribute assignment.
+ES_FORBIDS = (
+    "from realms.legislation import F, above, forbid, months, pct\n"
+    "class Procedure(above('procedure')):\n"
+    "    codes = forbid('codex_install', F.code.in_(['a', 'b']) & F.rate.is_none(), legislation='x')\n"
+    "    deadline = forbid('codex_install', F.d.is_some() & (F.d > months(6)), legislation='x')\n"
+)
+UPPER_FORBID_ATTACKS = {
+    "class body: remove a code from the upper forbid's list": H
+    + "class Procedure(above('procedure')):\n"
+    + "    v = next(iter(above('procedure').codes.expression.children)).values.value.remove('b')\n",
+    "lambda: remove a code": H
+    + "class Procedure(above('procedure')):\n"
+    + "    v = (lambda: above('procedure').codes.expression.children[0].values.value.remove('b'))()\n",
+    "Period count via a local": H
+    + "class Procedure(above('procedure')):\n"
+    + "    def _h(self):\n        p = above('procedure').deadline.expression.children[1].right.value\n        p.count = 600\n"
+    + "    x = _h(None)\n",
+    "Forbid.expression via a local": H
+    + "class Procedure(above('procedure')):\n"
+    + "    def _h(self):\n        f = above('procedure').deadline\n        f.expression = False\n    x = _h(None)\n",
+    "Expr node via a local": H
+    + "class Procedure(above('procedure')):\n"
+    + "    def _h(self):\n        n = above('procedure').deadline.expression\n        n.children = ()\n    x = _h(None)\n",
+    "Literal value via a local": H
+    + "class Procedure(above('procedure')):\n"
+    + "    def _h(self):\n        p = above('procedure').deadline.expression.children[1].right\n        p.value = None\n    x = _h(None)\n",
+}
+
+
+def _forbid_codex():
+    c = Codex(["eu/es", "x/town"], realm="x/town", operations=["codex_install"])
+    c.load("eu/es", "procedure", ES_FORBIDS)
+    return c
+
+
+@pytest.mark.parametrize("name", sorted(UPPER_FORBID_ATTACKS))
+def test_a_lower_layer_cannot_change_an_upper_forbid(name):
+    c = _forbid_codex()
+    upper = c.chapters["procedure"][0]
+    before = repr(upper.codes.expression), repr(upper.deadline.expression)
+    with pytest.raises(Refused):
+        c.load("x/town", "procedure", UPPER_FORBID_ATTACKS[name])
+    assert (repr(upper.codes.expression), repr(upper.deadline.expression)) == before
+    assert upper.codes.expression.children[0].values.value == ("a", "b")
+
+
+def test_a_hook_cannot_change_an_upper_forbid_at_run_time():
+    from realms.legislation import Event
+
+    c = _forbid_codex()
+    cls = c.load(
+        "x/town",
+        "procedure",
+        H + "class Procedure(above('procedure')):\n"
+        "    def on_codex_install(self, event):\n"
+        "        above('procedure').codes.expression.children[0].values.value.remove('b')\n",
+    )
+    with pytest.raises((LegislationError, AttributeError)):
+        cls(c.context()).on_codex_install(Event("a", {}, {}, 0))
+    assert c.chapters["procedure"][0].codes.expression.children[0].values.value == (
+        "a",
+        "b",
+    )
+
+
+# The third review of #546: Cedar injection through a setting. The builtin ``type`` in its
+# three-argument form built an int or str subclass with a ``__str__`` or ``__iter__`` of its own
+# (the dunder spelled as U + U + 'str' + U + U), S1 accepted it as data, and the generator wrote
+# ``str(value)`` into the Cedar: ``rate > 1 && false``, or a whole policy under Spain's @id. A
+# chapter's ``type`` now takes one argument, and every door of the SDK and the generator takes the
+# exact types only.
+INJECTION_SPAIN = (
+    "from realms.legislation import F, S, above, forbid, overridable, pct\n"
+    "class Tax(above('tax')):\n"
+    "    cap = overridable(pct('1.30'), legislation='x')\n"
+    "    name = overridable('ibi_urban', legislation='x')\n"
+    "    ibi_urban_cap = forbid('tax_policy_propose', (F.code == S.name) & F.rate.is_some() & (F.rate > S.cap),"
+    " each='taxes', legislation='x')\n"
+)
+INJECTIONS = {
+    "int subclass with its own __str__, as a setting": "from realms.legislation import above\nU = '_'\nclass Tax(above('tax')):\n"
+    "    cap = type('E', (int,), {U + U + 'str' + U + U: lambda self: '1 && false'})(1300000)\n",
+    "int subclass, a whole policy injected": "from realms.legislation import above\nU = '_'\nclass Tax(above('tax')):\n"
+    "    cap = type('E', (int,), {U + U + 'str' + U + U: lambda self: '0 && false };\\nforbid (principal, action, resource) when { false'})(1300000)\n",
+    "str subclass with its own __iter__, as a setting": "from realms.legislation import above\nU = '_'\nclass Tax(above('tax')):\n"
+    "    name = type('E', (str,), {U + U + 'iter' + U + U: lambda self: iter('nothing')})('ibi_urban')\n",
+    "Period count from an int subclass": "from realms.legislation import above, months\nU = '_'\nclass Tax(above('tax')):\n"
+    "    cap = months(type('E', (int,), {U + U + 'str' + U + U: lambda self: '6 && false'})(6))\n",
+    "own literal: str subclass in a forbid": "from realms.legislation import F, above, forbid\nU = '_'\nclass Tax(above('tax')):\n"
+    "    mine = forbid('tax_policy_propose', F.code == type('E', (str,), {U + U + 'iter' + U + U: lambda self: iter('x')})('y'), each='taxes')\n",
+    "own literal: int subclass injecting Spain's @id": "from realms.legislation import F, above, forbid\nU = '_'\nclass Tax(above('tax')):\n"
+    "    mine = forbid('tax_policy_propose', F.rate.is_some() & (F.rate > type('E', (int,), {U + U + 'str' + U + U: "
+    "lambda self: '0 };\\n@id(\"eu/es/tax/ibi_urban_cap\")\\nforbid (principal, action, resource) when { false'})(5)), each='taxes')\n",
+    "the metaclass called directly": "from realms.legislation import above\nclass Tax(above('tax')):\n"
+    "    x = (lambda: type(above('tax'))('Tax', (above('tax'),), {'capital': True}))()\n",
+    "legislation= from a str subclass": "from realms.legislation import above, overridable\nU = '_'\nclass Tax(above('tax')):\n"
+    "    capital = overridable(True, legislation=type('E', (str,), {U + U + 'iter' + U + U: lambda self: iter('x')})('y'))\n",
+}
+RATE = {"type": "Long", "optional": True, "min": 0, "max": 100_000_000}
+TAX_FACTS = {
+    "tax_policy_propose.taxes": {
+        "facts": {"code": "String", "rate": RATE},
+        "also": ["tax_policy_draft.taxes"],
+    },
+    "tax_policy_draft.taxes": {"facts": {"code": "String", "rate": RATE}},
+}
+
+
+@pytest.mark.parametrize("name", sorted(INJECTIONS))
+def test_no_cedar_is_injected_through_a_setting_or_a_literal(name):
+    c = Codex(
+        ["eu/es", "x/town"],
+        realm="x/town",
+        operations=["tax_policy_propose", "tax_policy_draft"],
+        facts=TAX_FACTS,
+    )
+    c.load("eu/es", "tax", INJECTION_SPAIN)
+    before = c.cedar()
+    with pytest.raises(
+        Refused,
+        match="type\\(name, bases, dict\\) is not allowed in a chapter|no nested classes",
+    ):
+        c.load("x/town", "tax", INJECTIONS[name])
+    assert c.cedar() == before and before.count('@id("eu/es/tax/ibi_urban_cap")') == 1
+    assert (
+        "context.facts.rate > 1300000 };" in before
+        and 'context.facts.code == "ibi_urban"' in before
+    )

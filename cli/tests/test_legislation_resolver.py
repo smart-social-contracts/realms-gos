@@ -38,10 +38,10 @@ OPERATIONS = (
 # ── The sources of §5, as the repository holds them ──────────────────────────
 
 EU_DATA_PROTECTION = """
-from realms.legislation import above, extension, forbid
+from realms.legislation import F, above, extension, forbid
 
 class DataProtection(above("data_protection")):
-    no_basis = forbid("document_share", "<F tree: S2>", legislation="GDPR Art. 6")
+    no_basis = forbid("document_share", F.basis.is_none(), legislation="GDPR Art. 6")
 
     @extension(legislation="GDPR Art. 5-6")
     def check_document_share(self, args):
@@ -73,14 +73,16 @@ class DataProtection(above("data_protection")):
 """
 
 ES_PROCEDURE = """
-from realms.legislation import above, fixed, forbid, months, overridable, working_days
+from realms.legislation import F, above, fixed, forbid, months, overridable, working_days
 
 class Procedure(above("procedure")):
     uses = []
 
     default_decision_deadline = overridable(months(3), legislation="Ley 39/2015 Art. 21.3")
 
-    over_six_months = forbid("procedure_define", "<F tree: S2>", legislation="Ley 39/2015 Art. 21.2")
+    over_six_months = forbid("procedure_define",
+        F.decision_deadline.is_some() & (F.decision_deadline > months(6)) & F.longer_deadline_legislation.is_none(),
+        legislation="Ley 39/2015 Art. 21.2")
 
     @fixed(legislation="Ley 39/2015 Art. 30")
     def working_days_after(self, day, n):
@@ -174,7 +176,7 @@ class Register(above("register")):
 """
 
 ES_TAX = """
-from realms.legislation import above, fixed, forbid, overridable
+from realms.legislation import F, S, above, fixed, forbid, overridable, pct, when
 
 class Tax(above("tax")):
     capital = overridable(False, legislation="TRLRHL Art. 72.3")
@@ -182,10 +184,22 @@ class Tax(above("tax")):
     services_beyond_art26 = overridable(False, legislation="TRLRHL Art. 72.3")
     rustic_over_80pct = overridable(False, legislation="TRLRHL Art. 72.3")
 
-    ibi_rate_required = forbid("tax_policy_propose", "<F tree: S2>", each="taxes", legislation="TRLRHL Art. 72")
-    ibi_urban_range = forbid("tax_policy_propose", "<F tree: S2>", each="taxes", legislation="TRLRHL Art. 72.1, 72.3")
-    ibi_urban_cap = forbid("tax_policy_propose", "<F tree: S2>", each="taxes", legislation="TRLRHL Art. 72.3")
-    ibi_rustic_cap = forbid("tax_policy_propose", "<F tree: S2>", each="taxes", legislation="TRLRHL Art. 72.3")
+    ibi_rate_required = forbid("tax_policy_propose",
+        F.code.in_(["ibi_urban", "ibi_rustic"]) & F.rate.is_none(),
+        each="taxes", legislation="TRLRHL Art. 72")
+    ibi_urban_range = forbid("tax_policy_propose",
+        (F.code == "ibi_urban") & F.rate.is_some() & ~F.rate.between(pct("0.40"), pct("1.30")),
+        each="taxes", legislation="TRLRHL Art. 72.1, 72.3")
+    ibi_urban_cap = forbid("tax_policy_propose",
+        (F.code == "ibi_urban") & F.rate.is_some() & (F.rate > pct("1.10")
+            + when(S.capital, pct("0.07")) + when(S.surface_public_transport, pct("0.07"))
+            + when(S.services_beyond_art26, pct("0.06"))),
+        each="taxes", legislation="TRLRHL Art. 72.3")
+    ibi_rustic_cap = forbid("tax_policy_propose",
+        (F.code == "ibi_rustic") & F.rate.is_some() & (F.rate > pct("0.90")
+            + when(S.capital, pct("0.06")) + when(S.surface_public_transport, pct("0.05"))
+            + when(S.services_beyond_art26, pct("0.06")) + when(S.rustic_over_80pct, pct("0.15"))),
+        each="taxes", legislation="TRLRHL Art. 72.3")
 
     @fixed(legislation="TRLRHL Arts. 61, 65, 71 and 74")
     def compute_tax_assess(self, entry, subject):
