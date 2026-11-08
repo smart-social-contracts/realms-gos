@@ -81,9 +81,6 @@ VIEWS = {
     "Verdict": ("id", "case", "issued_by", "decision", "status", "issued_at"),
     "Zone": ("id", "name", "kind", "land", "user", "metadata"),
 }
-# GGG operations the runtime raises as events itself, before an operation of that name exists in this realm: the
-# switch to a codex is GGG's codex_activate (§9.2 step 6), which the install task performs.
-EVENTS = ("codex_activate",)
 LIBRARY, PROGRAM = "realms.legislation", "core.legislation_sandbox"
 UNKNOWN = object()  # the running codex before the first look in a new heap
 # codex: the id of the codex the runtime runs (None: a legacy codex or none); box: its sandbox, None when it did not
@@ -392,7 +389,7 @@ def _spawn(plan, sources, facts=None):
     except RuntimeError as e:
         raise Fail(f"the codex sandbox did not start: {e}")
     try:
-        _ok(box.call("setup", operations=sorted(set(ops()) | set(EVENTS)), layers=list(plan["layers"]), realm=plan["realm"],
+        _ok(box.call("setup", operations=sorted(ops()), layers=list(plan["layers"]), realm=plan["realm"],
                      calendars=[[c["source"], _calendar(sources, c)] for c in plan["calendars"]],
                      entities=sorted(VIEWS), facts=facts))
         for c in plan["chapters"]:

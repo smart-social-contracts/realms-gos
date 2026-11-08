@@ -211,7 +211,7 @@ program += f"\\nLIBRARY = {sandbox.module_sources(legislation.LIBRARY)!r}\\n"
 t0 = ic.performance_counter(0)
 box = sandbox.Resident(program, legislation._answer, legislation.ACTIONS)
 t1 = ic.performance_counter(0)
-box.call("setup", operations=sorted(set(ops()) | set(legislation.EVENTS)), layers=plan["layers"], realm=plan["realm"],
+box.call("setup", operations=sorted(ops()), layers=plan["layers"], realm=plan["realm"],
          calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=sorted(legislation.VIEWS), facts=None)
 t2 = ic.performance_counter(0)
 for c in plan["chapters"]:
