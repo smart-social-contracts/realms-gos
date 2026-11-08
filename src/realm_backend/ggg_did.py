@@ -285,7 +285,7 @@ class QuarterRegisterArgs(Record): canister: Principal; name: Opt[text]
 class QuarterConfigureArgs(Record): quarter: Opt[text]; name: Opt[text]; status: Opt["QuarterStatus"]; quarter_join_mode: Opt[text]; federation_codex: Opt[text]; rule: Opt["Value"]
 class JoinFederationArgs(Record): capital: Principal; name: Opt[text]
 class ChangeQuarterArgs(Record): quarter: text
-class FederalVoteProposeArgs(Record): title: text; action: "ProposalAction"; on_behalf_of: Opt[Principal]
+class FederalVoteProposeArgs(Record): title: text; action: "ProposalAction"
 class FederationMessageArgs(Record): topic: text; body: "Value"; to: Opt[text]
 class SigningPolicy(Record): agents: Vec[text]; delegable: Vec[text]; supervision: "SigningPolicySupervision"
 class SigningPolicySupervision(Variant, total=False): Required: null; Optional: null
@@ -692,7 +692,7 @@ SCHEMA["QuarterRegisterArgs"] = ("record", {"canister": "principal", "name": "op
 SCHEMA["QuarterConfigureArgs"] = ("record", {"quarter": "opt text", "name": "opt text", "status": "opt QuarterStatus", "quarter_join_mode": "opt text", "federation_codex": "opt text", "rule": "opt Value"})
 SCHEMA["JoinFederationArgs"] = ("record", {"capital": "principal", "name": "opt text"})
 SCHEMA["ChangeQuarterArgs"] = ("record", {"quarter": "text"})
-SCHEMA["FederalVoteProposeArgs"] = ("record", {"title": "text", "action": "ProposalAction", "on_behalf_of": "opt principal"})
+SCHEMA["FederalVoteProposeArgs"] = ("record", {"title": "text", "action": "ProposalAction"})
 SCHEMA["FederationMessageArgs"] = ("record", {"topic": "text", "body": "Value", "to": "opt text"})
 SCHEMA["SigningPolicySupervision"] = ("variant", {"Required": "null", "Optional": "null"})
 SCHEMA["SigningPolicy"] = ("record", {"agents": "vec text", "delegable": "vec text", "supervision": "SigningPolicySupervision"})

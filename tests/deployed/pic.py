@@ -66,6 +66,12 @@ class Canister:
         call = self.pic.query_call if query else self.pic.update_call
         return json.loads(decode(bytes(call(self.id, "read" if query else "run", payload)))[0]["value"])
 
+    def shell(self, code):
+        """Run Python in the canister as its controller (basilisk's ``__shell__``); returns what it printed."""
+        self.pic.set_sender(Principal.from_str(CONTROLLER))
+        reply = self.pic.update_call(self.id, "__shell__", encode([{"type": Types.Text, "value": code}]))
+        return decode(bytes(reply))[0]["value"]
+
     def raw(self, method, payload=b"DIDL\x00\x00", query=True):
         call = self.pic.query_call if query else self.pic.update_call
         return decode(bytes(call(self.id, method, payload)))

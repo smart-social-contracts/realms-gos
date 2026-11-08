@@ -92,7 +92,7 @@ back every change of the call. Details: [operations](operations.md).
 | Extension backend | `extension_call` → sandbox → `rpc(op, …)` | `extension` | The calling user's permissions and the extension's declared ops |
 | Extension UI | bridge → `read` / `run` | `user` | The declared ops (in the bridge) and the user's permissions |
 | Codex hook | effects returned by the hook | `codex` | The codex's declared capabilities |
-| Passed proposal | replay of its action, as the proposer (the grantor, under power of attorney) | `replay` | Nothing more: the vote was the authorization, within the proposal's department. A delegate's proposal also needs its grant to be active and to cover the action |
+| Passed proposal | replay of its action, as the proposer (the grantor, under power of attorney) | `replay` | Nothing more: the vote was the authorization, within the proposal's department. A proposal from a delegate's governed call also needs its grant to still stand and cover the call |
 | REPL | `shell` op → sandbox → `ops.<name>()` | `shell` | The caller's permissions |
 | Another quarter | `run` from a registered quarter | `user` | `quarter.sync` |
 
