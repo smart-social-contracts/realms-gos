@@ -286,16 +286,21 @@ def test_the_codex_loads_on_first_use_after_a_new_heap_and_a_legacy_install_unlo
     assert ok("l_act", basis="consent")["done"] == ""  # no legislation runs for a legacy codex
 
 
-def test_a_codex_that_does_not_load_denies_every_guarded_operation_until_a_revert():
+def test_a_codex_that_does_not_load_fails_before_the_switch_and_denies_everything_once_it_runs():
     first = town()
-    first.status = "inactive"
     broken = layered({(TOWN, "procedure"): "from realms.legislation import above\nclass Procedure(above('procedure')):\n"
-                      "    x = 1.5\n"}, layers=[TOWN], previous=first.id, status="active")
-    with pytest.raises(Exception, match="does not load"):
-        op.run(legislation.activate(broken))
-    assert "floats are not allowed" in broken.failures["codex"]["load"]["error"]
+                      "    x = 1.5\n"}, layers=[TOWN], previous=first.id)
+    with pytest.raises(Exception, match="floats are not allowed"):
+        legislation.load(broken)  # the install task stops here: nothing switched
+    assert legislation._state["codex"] == first.id and legislation._state["box"] is not None
+    assert "consent is not a basis" in call("l_act", basis="consent")["error"]
+    # the realm starts (post_upgrade) with a codex that does not load: recorded, and the realm fails closed
+    first.status, broken.status = "inactive", "active"
+    legislation.warm()
+    assert "floats are not allowed" in LayeredCodex[broken.id].failures["codex"]["load"]["error"]
     error = call("l_act", what="anything")["error"]
     assert error.startswith("legislation error: the codex sha256:") and "is not loaded" in error
+    assert not ok("codex_status", query=True)["healthy"]
     assert ok("codex_revert")["codex"] == first.id  # reserved: no chapter, no load needed
     assert ok("l_act", what="anything")["done"] == "anything"
 
