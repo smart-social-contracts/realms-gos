@@ -97,6 +97,7 @@ def test_story_agora_finance():
     assert [i["amount"] for i in ok("my_invoices", "bob")["invoices"]] == [10]
 
     b = draft("ROADS", "capital", 300_000)
+    draft("ROADS", "payroll", 4_000)  # an adopted budget is exhaustive: the salaries below need their line
     propose()
     ok("payment_account_add", "bob", organization="buildco", network="ICP", address="buildco-wallet", symbol="REALM")
 
@@ -254,11 +255,21 @@ def test_a_payment_in_one_step_past_the_plan_is_refused_whole():
     assert Transfer.count() == 0 and Budget[b].actual == 0
 
 
-def test_payments_the_budget_does_not_cover_are_unaffected():
+def test_an_adopted_budget_is_exhaustive_so_a_payment_in_a_category_it_has_no_line_for_is_refused():
     fund_roads_with_budget(500)
-    assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=900)["status"] == "completed"  # no budget
+    out = call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=900)  # the category is transfer
+    assert out["kind"] == "conflict" and "no line for transfer" in out["error"]
+    assert not Transfer.count()
     assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=100, category="capital")["status"] \
-        == "completed"
+        == "completed"  # and the ledger's fee needs no line
+
+
+def test_a_fund_without_an_adopted_budget_pays_in_any_category():
+    setup_finance()
+    allocate(ROADS=100)
+    receive(10_000)
+    ledger_ok()
+    assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=900)["status"] == "completed"
 
 
 def test_a_failed_payment_frees_its_budget():

@@ -16,6 +16,7 @@ CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate")
 REGISTRY = 100  # tokens, and NFT collections, a realm can register: treasury_view lists them all
 REFRESH = 20  # invoices one invoice_refresh checks, one ledger call each
 MONEY_MAX = 2**53 - 1  # GGG's Money
+FEE = "ledger_fee"  # the category of the ledger's fee on a payment: a cost of paying, not a budgeted one
 IN_FORCE = ("adopted", "extended")  # the statuses of a budget line that caps spending
 ITEM_FIELDS = ("concept", "amount", "quantity", "unit", "legislation")
 PERIOD_UNITS = ("day", "working_day", "month", "year")
@@ -133,19 +134,31 @@ def tally(p, e):
     p.source_hash = hashlib.sha256((p.source_hash + line).encode()).hexdigest()
 
 
+def has_adopted_budget(fund, p):
+    return any(b.status == "adopted" and b.fund.id == fund.id for b in p.budgets)
+
+
 def refuse_overspend(p, lines):
-    """An adopted budget's planned amount is a ceiling: refuse lines that would take its actual past it (members
-    amend the budget to spend more). Only spending counts: a reversal frees budget and is never refused."""
+    """A budget line's planned amount is a ceiling: refuse lines that would take its actual past it (members amend the
+    budget to spend more). An adopted budget is exhaustive: once a fund has one for the period, spending in a category it
+    has no line for is refused too (not the ledger's fee). Only spending counts: a reversal frees budget and is never
+    refused."""
     spent = {}
     for kind, category, debit, credit, fund in lines:
         if kind == "expense" and fund is not None and p is not None:
             key = slot(fund, p, category)
-            spent[key] = spent.get(key, 0) + debit - credit
-    for key, asked in spent.items():
-        for b in each(Budget, "slot", key):
-            if b.status in IN_FORCE and asked > 0 and b.actual + asked > b.planned:
+            spent[key] = (fund, category, spent.get(key, (None, None, 0))[2] + debit - credit)
+    for key, (fund, category, asked) in spent.items():
+        if asked <= 0:
+            continue
+        in_force = [b for b in each(Budget, "slot", key) if b.status in IN_FORCE]
+        for b in in_force:
+            if b.actual + asked > b.planned:
                 raise Conflict(f"budget {b.id} plans {b.planned} for {b.category} of fund {b.fund.id}, "
                                f"{b.actual} is spent and {asked} was asked: amend the budget to spend more")
+        if not in_force and category != FEE and has_adopted_budget(fund, p):
+            raise Conflict(f"the adopted budget of fund {fund.id} for {p.id} has no line for {category}: amend the "
+                           f"budget to spend on it")
 
 
 def post(p, lines, symbol, description="", **refs):
@@ -190,7 +203,7 @@ def address(to, symbol):
 
 
 def spending(fund, category, amount, fee):
-    return [("expense", category, amount, 0, fund), ("expense", "ledger_fee", fee, 0, fund)]
+    return [("expense", category, amount, 0, fund), ("expense", FEE, fee, 0, fund)]
 
 
 def reserve(p, fund, to, symbol, amount, category, description="", payroll=None, **refs):
@@ -585,12 +598,12 @@ def budget_department(args):
     return owner_of(find(Budget, args["budget"]).fund)
 
 
-def supersede(b, status):
-    """Replace the line of the same slot that is in force: an adopted one becomes ``status``, an extended one closes.
-    Spending booked against it carries over."""
+def supersede(b):
+    """Replace the line of the same slot that is in force, adopted or extended: it becomes ``amended``, and the spending
+    booked against it carries over."""
     for old in each(Budget, "slot", b.slot):
         if old.id != b.id and old.status in IN_FORCE:
-            old.status = status if old.status == "adopted" else "closed"
+            old.status = "amended"
             b.actual += old.actual
 
 
@@ -639,19 +652,19 @@ def budget_propose(c, args):
     """Adopt every draft line of the open fiscal ``period`` together; ``years`` says how many periods the plan covers,
     when more than one (a fact for legislation). Each line replaces the adopted or extended line of its fund and
     category, and the spending booked against that carries over; every extended line of a fund whose lines it adopts
-    closes, replaced or not, and the extensions of the other funds stand. Returns ``period``, ``budgets`` and the
-    planned ``revenue`` and ``expense``."""
+    is replaced (``amended``), whether the new budget names its category or not, and the extensions of the other
+    funds stand. Returns ``period``, ``budgets`` and the planned ``revenue`` and ``expense``."""
     p, lines = find(FiscalPeriod, args["period"]), proposed_lines(args)
     if p.status != "open" or not lines:
         raise Conflict(f"{p.id} is {p.status}; only draft lines for an open period can be adopted")
     totals = budget_totals(args)
     for b in lines:
-        supersede(b, "amended")
+        supersede(b)
         b.status, b.proposal = "adopted", c.proposal
     adopted_funds = {b.fund.id for b in lines}
     for b in p.budgets:  # a fund's adopted budget stands alone: no extended line of the fund stands beside it
         if b.status == "extended" and b.fund.id in adopted_funds:
-            b.status = "closed"
+            b.status = "amended"
     return {"period": p.id, "budgets": [b.id for b in lines], **totals}
 
 
@@ -701,7 +714,7 @@ def budget_amend(c, args):
         raise Conflict(f"{old.id} is {old.status}; only an adopted budget can be amended")
     b = Budget(id=next_id(Budget, "B"), fund=old.fund, period=old.period, category=old.category, slot=old.slot,
                kind=old.kind, planned=int(args["planned"]), proposal=c.proposal)
-    supersede(b, "amended")
+    supersede(b)
     b.status = "adopted"
     return {"budget": b.id, "amends": old.id}
 

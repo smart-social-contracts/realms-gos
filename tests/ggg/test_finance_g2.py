@@ -185,7 +185,7 @@ def test_an_extended_line_caps_spending_until_an_adopted_budget_replaces_it():
     assert extended.actual == 300
     new = draft("ROADS", "capital", 500, period="FY2027")
     propose("FY2027")
-    assert (extended.status, Budget[new].status, Budget[new].actual) == ("closed", "adopted", 300)
+    assert (extended.status, Budget[new].status, Budget[new].actual) == ("amended", "adopted", 300)
     assert pay(200)["status"] == "completed"
 
 
@@ -199,17 +199,51 @@ def test_budget_extend_carries_the_funds_that_have_no_line_yet():
     assert call("budget_extend", "bob", period="FY2027")["kind"] == "conflict"  # no fund is left
 
 
-def test_a_proposal_closes_the_extended_lines_of_the_funds_it_adopts_and_no_others():
+def test_a_proposal_replaces_the_extended_lines_of_the_funds_it_adopts_and_no_others():
     agora_budget()
     ok("budget_extend", "bob", period="FY2027")
     draft("ROOT", "fees", 40, kind="revenue", period="FY2027")  # the root fund's budget names one slot
     propose("FY2027")
     assert sorted((b[0], b[1], b[5]) for b in lines_of("FY2027")) == [
-        ("ROADS", "capital", "extended"), ("ROOT", "fees", "adopted"), ("ROOT", "property_tax", "closed"),
-        ("ROOT", "salaries", "closed")]
+        ("ROADS", "capital", "extended"), ("ROOT", "fees", "adopted"), ("ROOT", "property_tax", "amended"),
+        ("ROOT", "salaries", "amended")]
     seen = ok("budget_view", "mallory", period="FY2027")
     assert [(f["id"], b["category"], b["status"]) for f in seen["funds"] for b in f["budgets"]] == [
         ("ROOT", "fees", "adopted"), ("ROADS", "capital", "extended")]
+
+
+def test_an_adopted_budget_is_exhaustive_for_its_fund_and_an_extended_one_is_not():
+    agora_budget()  # ROADS has an adopted line for capital in FY2026 and no other
+    allocate(ROADS=100)
+    receive(10_000)
+    ledger_ok()
+
+    def pay(category):
+        return call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=5, category=category)
+
+    refused = pay("upkeep")
+    assert refused["kind"] == "conflict" and "no line for upkeep" in refused["error"]
+    assert pay("capital")["status"] == "completed"
+    ok("budget_extend", "bob", period="FY2027")
+    fake_chain.state["now"] = FY2027["starts_at"] + 1
+    assert pay("upkeep")["status"] == "completed"  # only extended lines: a category without a line is free
+    assert pay("capital")["status"] == "completed"
+
+
+def test_a_category_the_adopted_budget_drops_does_not_come_back_at_the_next_extension():
+    setup_finance()
+    draft("ROADS", "capital", 300)
+    draft("ROADS", "upkeep", 50)
+    propose()
+    open_next_period()
+    ok("period_open", "bob", period="FY2028", starts_at=FY2027["ends_at"], ends_at=FY2027["ends_at"] + 100)
+    assert ok("budget_extend", "bob", period="FY2027")["extended"] == 2
+    draft("ROADS", "capital", 400, period="FY2027")  # the adopted budget of FY2027 drops upkeep
+    propose("FY2027")
+    assert sorted((b[1], b[3], b[5]) for b in lines_of("FY2027")) == [
+        ("capital", 300, "amended"), ("capital", 400, "adopted"), ("upkeep", 50, "amended")]
+    assert ok("budget_extend", "bob", period="FY2028")["extended"] == 1
+    assert lines_of("FY2028") == [("ROADS", "capital", "expense", 400, 0, "extended")]
 
 
 def test_the_budget_view_shows_the_extended_lines_in_force():
