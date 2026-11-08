@@ -104,14 +104,16 @@ def compile_zones(zic, tzdata_zi, names, form, directory):
 
 
 def verify(slim, fat):
-    """Read every slim zone file with the realm's TZif reader and compare it with the fat file of the same zone, at each of
-    its transitions and the second before and after. A fat file lists its transitions up to 2037; the slim file gets
-    the later years from the POSIX TZ string, which the reader works out. Returns the names that differ."""
+    """Read every slim zone file with the realm's TZif reader and compare it with the fat file of the same zone, at each
+    transition of either and the second before and after, so that a transition only the slim file has cannot pass. A fat
+    file lists its transitions up to 2037; the slim file gets the later years from the POSIX TZ string, which the reader
+    works out. Returns the names that differ."""
     wrong = []
     for name, data in slim.items():
         try:
             small, large = tzif.parse(data), tzif.parse(fat[name])
-            instants = [t + d for t in large.times for d in (-1, 0, 1)] + [0, 1_000_000_000, 2_000_000_000]
+            transitions = set(small.times) | set(large.times)
+            instants = [t + d for t in transitions for d in (-1, 0, 1)] + [0, 1_000_000_000, 2_000_000_000]
             if any(small.offset(t) != large.offset(t) for t in instants):
                 wrong.append(name)
         except Exception:  # a file the reader cannot read is as wrong as one it reads differently
