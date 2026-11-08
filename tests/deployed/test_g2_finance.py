@@ -238,6 +238,8 @@ def test_a_budget_is_proposed_per_period_with_its_totals_as_facts(realm, people)
 def test_a_loan_is_the_debt_of_the_realm_until_repaid(realm, people):
     ctl = people["ctl"]
     term = {"count": 10, "unit": "year"}
+    ok(realm, "external_add", ctl, external="bank-a", name="Bank A", kind="lender", channel="manual")
+    assert refused(realm, "loan_create", ctl, lender="bank-b", amount=UNIT, term=term, rate=1, fund="ROADS")["kind"] == "not_found"
     loan = ok(realm, "loan_create", ctl, lender="bank-a", amount=500 * UNIT, term=term, rate=3_200_000, fund="ROADS")["loan"]
     assert debt(realm) == 500 * UNIT
     ok(realm, "loan_repay", ctl, loan=loan, amount=80 * UNIT)
