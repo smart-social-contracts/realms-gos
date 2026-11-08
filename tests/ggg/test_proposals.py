@@ -83,13 +83,27 @@ def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
     out = ok("mandate_create", "ctl", title="Road works", scope={"max_value": 200000}, executor="Infrastructure")
     assert out["requires_vote"] and Mandate.count() == 0
     p = out["proposal"]
-    vote_all(p, "yes", *world.PEOPLE)
+    vote_all(p, "yes", *world.PEOPLE[:4])  # more than half: the week-long vote stays open for the rest
+    assert Proposal[p].status == "voting" and Mandate.count() == 0
     later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
-    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed"
+    # The vote has ended: finalize closes it, and an accepted action runs at once (there is nothing to wait for).
+    assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "executed"
     assert Mandate.count() == 1 and Mandate["M-1"].executor.id == "Infrastructure"
     assert "no accepted action" in call("proposal_execute", "ctl", proposal=p)["error"]
     assert Proposal[p].status == "executed"
+
+
+def test_a_proposal_the_previous_release_left_accepted_runs_once_through_proposal_execute():
+    """The release before this one recorded an accepted vote at ``proposal_finalize`` and ran its action at
+    ``proposal_execute``: such a proposal is still in storage."""
+    world.build()
+    action = {"op": "mandate_create", "args": {"title": "Road works"}}
+    p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
+    Proposal[p].status = "accepted"
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+    again = call("proposal_execute", "ctl", proposal=p)
+    assert not again["ok"] and again["kind"] == "conflict" and "no accepted action" in again["error"]
+    assert Mandate.count() == 1
 
 
 def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
@@ -223,9 +237,7 @@ def test_a_realm_wide_proposal_carries_any_action():
     action = {"op": "mandate_create", "args": {"title": "Road works"}}
     p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
     vote_all(p, "yes", *world.PEOPLE)
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
-    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+    assert Proposal[p].status == "executed" and Mandate.count() == 1  # the last vote ended the vote
 
 
 def test_a_governed_call_under_power_of_attorney_replays_as_the_grantor():
@@ -256,13 +268,10 @@ def test_a_stored_action_naming_another_member_runs_as_its_proposer_not_that_mem
     p = ok("proposal_create", "mallory", title="Vote no", action=vote)["proposal"]
     # A proposal filed before the rule, with the impersonation already in its stored action, both ways.
     Proposal[p].action = {**vote, "args": {**vote["args"], "on_behalf_of": "alice"}, "initiator": "alice"}
-    vote_all(p, "yes", *world.PEOPLE)
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
     target = ok("proposal_create", "alice", title="Bike lane on Main St")["proposal"]
     assert target == "P-2"
-    out = ok("proposal_execute", "ctl", proposal=p)
-    assert out["status"] == "executed", out
+    vote_all(p, "yes", *world.PEOPLE)  # the last vote ends the vote and runs the action
+    assert Proposal[p].status == "executed", Proposal[p].result
     assert Vote[f"{target}:alice"] is None
     assert Vote[f"{target}:mallory"].choice == "no"
 

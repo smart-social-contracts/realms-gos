@@ -132,6 +132,7 @@ def tax_policy_draft(c, args):
     has a unique code, a base (flat, land_area or declared) and a method: fixed (amount), proportional (rate,
     in hundred-millionths: 1 % is 1000000) or progressive (brackets of up_to and rate, the last with up_to null).
     Returns ``policy``."""
+    # The document was checked by dispatch, before a governed call became a proposal: ``check=`` above.
     p = TaxPolicy(id=next_id(TaxPolicy, "TAX-POLICY"), document=args["document"],
                   description=args.get("description", ""))
     return {"policy": p.id}

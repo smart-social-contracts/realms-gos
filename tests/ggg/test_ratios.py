@@ -277,3 +277,14 @@ def test_the_federal_rule_is_on_the_new_scale():
     out = ok("quarter_configure", "ctl", rule={"threshold": 60 * PERCENT})
     assert out["rule"]["threshold"] == 60 * PERCENT
     assert not call("quarter_configure", "ctl", rule={"threshold": ONE})["ok"]
+
+
+def test_an_old_federal_threshold_is_refused_even_when_the_call_is_governed():
+    world.build()
+    world.policy(Department["Administration"], 2, 3)
+    for threshold in (1, 60, 99):
+        out = direct("quarter_configure", "ctl", rule={"threshold": threshold})
+        assert not out["ok"] and out["kind"] == "invalid_argument" and "hundred-millionths" in out["error"], out
+    assert Proposal.count() == 0
+    assert "proposal" in direct("quarter_configure", "ctl", rule={"threshold": 60 * PERCENT})  # filed: it is a vote
+    assert "proposal" in direct("quarter_configure", "ctl", rule={"threshold": 0})

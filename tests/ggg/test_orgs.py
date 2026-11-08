@@ -10,13 +10,12 @@ DAY = 86400
 
 def pass_proposal(p, *voters):
     """The deciding vote settles a department's proposal and runs its action; a timed realm-wide one waits for its
-    deadline."""
+    deadline, and then ``proposal_finalize`` closes it and runs it."""
     for v in voters:
         ok("proposal_vote", v, proposal=p, choice="yes")
     if Proposal[p].status == "voting":
         later(8 * DAY)
         ok("proposal_finalize", "ctl", proposal=p)
-        ok("proposal_execute", "ctl", proposal=p)
     assert Proposal[p].status == "executed", Proposal[p].result
 
 

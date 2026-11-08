@@ -2,10 +2,11 @@
 
 import fake_chain
 import ggg_api
-import ggg_did
+import ggg_methods
 import pytest
 import world
 from api import setup
+from core import op
 from ggg import Department, Mandate, Proposal, Task, TaskSchedule
 from kit import call, fire_timers, later, ok
 
@@ -224,13 +225,69 @@ def test_a_vote_that_ended_before_effective_at_is_accepted_and_runs_at_once_when
     assert Proposal[p].status == "executed" and Mandate.count() == 1 and Task.count() == 0
 
 
-def test_a_vote_that_ended_before_effective_at_and_is_finalized_after_it_waits_to_be_executed():
+def test_a_vote_that_ended_before_effective_at_and_is_finalized_after_it_runs_at_once():
     world.build()
     p = carried_week_long_vote(WEEK + HOUR)
     later(WEEK + 2 * HOUR)
-    assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "accepted"
-    assert Mandate.count() == 0 and Task.count() == 0  # the time has come: nothing to wait for
-    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+    out = ok("proposal_finalize", "ctl", proposal=p)  # as GGG does (I-GOV-7): the time has come, nothing to wait for
+    assert out["status"] == "executed" and out["result"]["ok"]
+    assert Mandate.count() == 1 and Task.count() == 0
+    assert "no accepted action" in call("proposal_execute", "ctl", proposal=p)["error"]
+
+
+def test_a_vote_that_ended_before_effective_at_and_is_finalized_before_it_is_scheduled():
+    world.build()
+    p = carried_week_long_vote(WEEK + 2 * HOUR)
+    later(WEEK + HOUR)  # the deadline has passed, the time has not come
+    assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "execution_scheduled"
+    assert Mandate.count() == 0
+    later(HOUR)
+    fire_timers()
+    assert Proposal[p].status == "executed" and Mandate.count() == 1
+
+
+def test_a_vote_that_everyone_has_voted_in_ends_then_even_when_a_week_was_open():
+    world.build()
+    p = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS)["proposal"]
+    assert Proposal[p].deadline - Proposal[p].opens_at == WEEK
+    vote_yes(p, ("alice", "bob", "dana", "carla", "dr-ana", "elena"))
+    assert Proposal[p].status == "voting" and Mandate.count() == 0
+    assert ok("proposal_vote", "mallory", proposal=p, choice="no")["status"] == "executed"  # the seventh vote ends it
+    assert Mandate.count() == 1
+    for voter in ("alice", "mallory"):  # no vote is accepted or replaced after the end
+        out = call("proposal_vote", voter, proposal=p, choice="no")
+        assert not out["ok"] and out["kind"] == "conflict" and "not open for voting" in out["error"], out
+    assert Proposal[p].tally["yes"] == 6 and Proposal[p].tally["no"] == 1
+
+
+def test_a_vote_that_everyone_has_voted_against_is_rejected_at_the_last_vote():
+    world.build()
+    p = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS)["proposal"]
+    for voter in world.PEOPLE:
+        ok("proposal_vote", voter, proposal=p, choice="no")
+    assert Proposal[p].status == "rejected" and Mandate.count() == 0
+
+
+def test_a_department_vote_everyone_has_voted_in_ends_though_its_outcome_was_never_certain():
+    world.build()
+    world.policy(Department["Civil Registry"], 2, 3)  # two approvals; its two members are dana and bob
+    action = {"op": "department_set_policy", "args": {"department": "Civil Registry", "m": 1, "n": 1}}
+    p = ok("proposal_create", "dana", title="One approval", department="Civil Registry", action=action)["proposal"]
+    ok("proposal_vote", "dana", proposal=p, choice="yes")
+    assert Proposal[p].status == "voting"
+    # A second approval is still within reach (bob could have said yes), but nobody is left to vote: the vote ends
+    # as everyone has voted, where it used to stay open to its deadline.
+    ok("proposal_vote", "bob", proposal=p, choice="abstain")
+    assert Proposal[p].status == "rejected" and Department["Civil Registry"].policy["m"] == 2
+
+
+def test_a_vote_everyone_has_voted_in_after_effective_at_expires():
+    world.build()
+    p = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=fake_chain.now() + HOUR)["proposal"]
+    vote_yes(p, ("alice", "bob", "dana", "carla", "dr-ana", "elena"))
+    later(2 * HOUR)  # the time the action was due has passed
+    assert ok("proposal_vote", "mallory", proposal=p, choice="yes")["status"] == "expired"
+    assert Mandate.count() == 0
 
 
 @pytest.mark.parametrize("how", ["timer", "upgrade"])
@@ -271,10 +328,7 @@ def test_a_proposal_voted_down_stays_rejected_after_effective_at():
     assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "rejected"
 
 
-def test_a_time_with_a_fraction_of_a_second_is_rounded_up_so_it_never_runs_early(monkeypatch):
-    # The pinned ggg.did has no effective_at yet: give the schema the field as ggg#6 does.
-    record = dict(ggg_did.SCHEMA["ProposalCreateArgs"][1], effective_at="opt Timestamp")
-    monkeypatch.setitem(ggg_did.SCHEMA, "ProposalCreateArgs", ("record", record))
+def test_a_time_with_a_fraction_of_a_second_is_rounded_up_so_it_never_runs_early():
     world.build()
     ok("governance_update", "ctl", voting_window=0)
     at = fake_chain.now() + HOUR
@@ -304,3 +358,43 @@ def test_the_listing_and_the_proposal_show_effective_at():
     at = Proposal[p].effective_at
     assert ok("proposal_list", "alice", status="execution_scheduled")["proposals"][0]["effective_at"] == at
     assert ok("proposal_get", "alice", proposal=p)["proposal"]["effective_at"] == at
+
+
+def stop_by_ggg(proposal, caller="ctl"):
+    """``ggg_proposal_stop``, run to its reply as the canister drives its generator."""
+    fake_chain.state["caller"] = caller
+    return op.run(ggg_methods.ggg_proposal_stop(proposal))
+
+
+def test_ggg_proposal_stop_replies_done_without_an_id_when_it_applies_at_once():
+    world.build()
+    p = scheduled_proposal()
+    assert stop_by_ggg(p) == {"Ok": {"Done": None}}  # it creates no record, so there is no id to give
+    assert Proposal[p].status == "withdrawn"
+    assert "Conflict" in stop_by_ggg(p)["Err"]  # only a proposal waiting for its time can be stopped
+
+
+def test_ggg_proposal_stop_replies_proposed_with_the_new_proposals_id_under_a_voting_policy():
+    world.build()
+    p = scheduled_proposal()
+    world.policy(Department["Administration"], 2, 3)
+    out = stop_by_ggg(p)
+    stop = out["Ok"]["Proposed"]
+    assert stop != p and Proposal[stop].action == {"op": "proposal_stop", "args": {"proposal": p}}
+    assert Proposal[stop].department.id == "Administration" and Proposal[p].status == "execution_scheduled"
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=stop, choice="yes")
+    assert Proposal[stop].status == "executed" and Proposal[p].status == "withdrawn"
+
+
+def test_a_stop_proposal_that_runs_after_its_target_is_no_longer_scheduled_fails():
+    world.build()
+    p = scheduled_proposal()
+    world.policy(Department["Administration"], 2, 3)
+    stop = stop_by_ggg(p)["Ok"]["Proposed"]
+    later(HOUR)
+    fire_timers()  # the scheduled proposal runs first
+    assert Proposal[p].status == "executed"
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=stop, choice="yes")
+    assert Proposal[stop].status == "failed" and "only a proposal waiting" in Proposal[stop].result["error"]
