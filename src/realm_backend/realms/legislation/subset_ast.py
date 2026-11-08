@@ -9,9 +9,12 @@ in agreement on what they refuse.
 from realms.legislation.errors import Refused
 from realms.legislation.subset import (
     CLASS_BODY,
+    FLOAT_NAMES,
     FORMAT_METHODS,
     FRAME_ATTRIBUTES,
     GGG,
+    NO_DIVISION,
+    NO_FLOAT,
     SDK,
     sdk_names,
 )
@@ -116,6 +119,7 @@ class Check:
         ):
             self.constant(node.operand, member)
         elif isinstance(node, ast.BinOp):
+            self.operator(node)
             self.constant(node.left, member)
             self.constant(node.right, member)
         elif isinstance(node, ast.Name):
@@ -327,6 +331,7 @@ class Check:
                 self.target(target, local)
             self.expression(node.value, local)
         elif isinstance(node, ast.AugAssign):
+            self.operator(node)
             self.target(node.target, local)
             self.expression(node.value, local)
         elif isinstance(node, ast.Return):
@@ -439,6 +444,8 @@ class Check:
             self.target(node.target, local)
             self.expression(node.value, local)
         elif isinstance(node, simple):
+            if isinstance(node, ast.BinOp):
+                self.operator(node)
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, ast.expr):
                     self.expression(child, local)
@@ -463,14 +470,23 @@ class Check:
             )
         self.identifier(node, name, "method")
 
+    def operator(self, node):
+        """A binary or augmented operation: `/` is refused, it makes a float."""
+        if isinstance(node.op, self.ast.Div):
+            self.refuse(node, NO_DIVISION)
+
     def identifier(self, node, name, scope):
         if name in FRAME_ATTRIBUTES:
             self.refuse(node, f"{name}: no frame or generator attributes in a chapter")
+        if name in FLOAT_NAMES:
+            self.refuse(node, f"{name}: {NO_FLOAT}")
         if name.startswith("__") and not (scope == "class body" and name in CLASS_BODY):
             self.refuse(node, f"{name}: no dunder names in a chapter")
 
     def literal(self, node):
         value = node.value
+        if isinstance(value, (float, complex)):
+            self.refuse(node, f"{value!r}: {NO_FLOAT}")
         if isinstance(value, str):
             if "__" in value:
                 self.refuse(

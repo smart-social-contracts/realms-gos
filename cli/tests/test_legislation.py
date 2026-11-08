@@ -28,6 +28,7 @@ from realms.legislation import (
     months,
     overridable,
     pct,
+    subset_ast,
     times,
     working_days,
     years,
@@ -164,6 +165,16 @@ def test_money_combines_only_within_one_token():
         Money(100, 2) + Money(50, 8)
 
 
+@pytest.mark.parametrize("decimals", [-1, 256, 10**9, 2.0, True, "2"])
+def test_a_token_s_decimals_stay_within_ggg_s_bound(decimals):
+    """A chapter's Money(1, 10**9) would make the realm raise ten to a billion: the bound is GGG's own, 0 to 255."""
+    with pytest.raises(LegislationError, match="from 0 to 255"):
+        Money(1, decimals)
+    with pytest.raises(LegislationError, match="from 0 to 255"):
+        times(1, pct("1"), decimals)
+    assert Money(1, 255).decimals == 255 and Money(1, 0).decimals == 0
+
+
 def test_money_takes_integers_only_and_no_rounding_argument():
     with pytest.raises(LegislationError):
         Money(1.5)
@@ -173,6 +184,50 @@ def test_money_takes_integers_only_and_no_rounding_argument():
         times(100, 1.5, 2)
     with pytest.raises(TypeError):
         Money(1, 2).times(pct("10"), rounding="HALF_EVEN")
+
+
+def test_a_chapter_does_money_with_the_sdks_money_and_so_gets_the_realms_rounding():
+    c = codex()
+    cls = c.load(
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above, Money, pct\nclass Tax(above('tax')):\n"
+        "    def share(self, units, decimals, rate):\n        return Money(units, decimals).times(rate)\n",
+    )
+    tax = cls(c.context())
+    assert tax.share(2_345, 2, pct("10")) == Money(times(2_345, pct("10"), 2), 2) == Money(235, 2)
+    assert tax.share(-2_345, 2, pct("10")) == Money(-235, 2)
+    with pytest.raises(LegislationError, match="integer amount"):
+        tax.share(23.45, 2, pct("10"))  # whole units of the token, never a float
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        "    def quota(self, value):\n        return value * 0.2\n",
+        "    def quota(self, value):\n        return float(value)\n",
+        "    def quota(self, value):\n        return value / 5\n",
+        "    def quota(self, value):\n        value /= 5\n        return value\n",
+        "    share = fixed(1.5, legislation='x')\n",
+    ],
+)
+def test_no_float_arithmetic_on_money_in_either_checker(member):
+    text = "from realms.legislation import above, fixed\nclass Tax(above('tax')):\n" + member
+    with pytest.raises(Refused, match="no floats|no `/`"):
+        codex().load(VALENCIA, "tax", text)  # the bytecode check, which the realm runs
+    with pytest.raises(Refused, match="no floats|no `/`"):
+        subset_ast.check(text, "eu/es/vc/46250-valencia/tax.py")  # the syntax tree, for authors
+
+
+def test_a_whole_number_quotient_and_a_rate_in_a_string_are_not_floats():
+    c = codex()
+    cls = c.load(
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above, pct\nclass Tax(above('tax')):\n    half = pct('0.5')\n"
+        "    def split(self, value):\n        return value // 2, value % 2\n",
+    )
+    assert cls(c.context()).split(7) == (3, 1) and cls.half == 500_000
 
 
 # ── The calendar (§3.4, §4.5) ─────────────────────────────────────────────────
@@ -472,7 +527,7 @@ def test_nothing_else_at_module_level_except_sdk_imports_and_constants():
         c,
         "eu/es",
         "tax",
-        "from realms.legislation import above\nX = 1.5\nclass Tax(above('tax')): pass\n",
+        "from realms.legislation import above\nX = object()\nclass Tax(above('tax')): pass\n",
     )
 
 
@@ -566,7 +621,8 @@ def test_public_members_above_the_realm_carry_a_citation_and_the_realm_need_not(
 @pytest.mark.parametrize(
     "text, reason",
     [
-        ("    x = 1.5", "floats are not allowed"),
+        ("    x = 1.5", "no floats in a chapter"),
+        ("    x = pow(2, -1)", "floats are not allowed"),  # no literal for the subset check to see: the loader's own
         ("    class Inner: pass", "a nested class is not part of the readable subset"),
         ("    __slots__ = ()", "no dunder names"),
         ("    now = 3", "reserved by the SDK"),
@@ -577,7 +633,8 @@ def test_public_members_above_the_realm_carry_a_citation_and_the_realm_need_not(
             "    x = object()",
             "a member is a method, a setting or a forbid",
         ),
-        ("    x = fixed(1.5, legislation='x')", "never a float"),
+        ("    x = fixed(1.5, legislation='x')", "no floats in a chapter"),
+        ("    x = fixed(pow(2, -1), legislation='x')", "never a float"),
         ("    x = fixed({1: 'a'}, legislation='x')", "never a float"),
         (
             "    x = fixed(legislation='x', check=lambda v: True)",
@@ -1571,6 +1628,12 @@ def test_a_chapter_cannot_give_a_metaclass_to_skip_the_marks():
             "return '{0.x}'.format(event)",
             "str.format reads attributes named in the template",
         ),
+        ("return 0.2", "no floats in a chapter"),
+        ("return 2j", "no floats in a chapter"),
+        ("return float(event.at)", "float: no floats in a chapter"),
+        ("return complex(event.at)", "complex: no floats in a chapter"),
+        ("return event.at / 2", "no `/` in a chapter"),
+        ("x = event.at\n        x /= 2\n        return x", "no `/` in a chapter"),
     ],
 )
 def test_a_method_stays_in_the_readable_subset(body, reason):

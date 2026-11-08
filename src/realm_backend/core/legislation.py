@@ -65,7 +65,8 @@ VIEWS = {
     "Identity": ("id", "human", "kind", "issuer", "status", "verified_at"),
     "Invoice": ("id", "payer", "amount", "symbol", "due_at", "status", "reason", "paid_at"),
     "Judge": ("id", "user", "court", "specialization", "status", "appointed_at"),
-    "Land": ("id", "x", "y", "width", "height", "cell", "kind", "owner", "status", "token_id", "metadata", "zones"),
+    "Land": ("id", "x", "y", "width", "height", "cell", "kind", "owner", "status", "token_id", "metadata", "zones",
+             "assessed_value", "area"),
     "LayeredCodex": ("id", "layers", "layer_paths", "status", "activates_at", "installed_at"),
     "LedgerEntry": ("id", "kind", "category", "debit", "credit", "symbol", "fund", "period", "at", "description"),
     "License": ("id", "kind", "holder", "issued_by", "status", "applied_at", "issued_at", "expires_at", "conditions"),
@@ -89,6 +90,9 @@ VIEWS = {
     "Verdict": ("id", "case", "issued_by", "decision", "status", "issued_at"),
     "Zone": ("id", "name", "kind", "land", "user", "metadata"),
 }
+# The fields of VIEWS that are an amount of money. A chapter reads them as a ``Money``, which rounds as GGG does, in
+# the decimals of the token the call works in (a ``compute_`` is told them); the other calls do not know them.
+MONEY = {"Land": ("assessed_value",)}
 LIBRARY, PROGRAM = "realms.legislation", "core.legislation_sandbox"
 UNKNOWN = object()  # the running codex before the first look in a new heap
 # codex: the id of the codex the runtime runs (None: a legacy codex or none); box: its sandbox, None when it did not
@@ -182,15 +186,17 @@ def run(op, call, args, department, perform, record, read=False):
     return out
 
 
-def compute(op, **kwargs):
+def compute(op, decimals=None, **kwargs):
     """The running codex's answer to ``compute_<op>`` for ``kwargs``, or None when no chapter defines it or no
-    layered codex is active. A ``compute_`` method that fails fails the operation asking, and counts, except on a
-    query path (``join_targets``), where nothing written stays."""
+    layered codex is active. ``decimals`` is the token the answer is in: the amounts the chapter reads are ``Money``
+    of it, so that its rates round to that token's cent. A ``compute_`` method that fails fails the operation asking,
+    and counts, except on a query path (``join_targets``), where nothing written stays."""
     if not _ensure():
         return None
     method = f"compute_{op}"
     try:
-        outcome = _call("compute", op=op, kwargs=_public(kwargs, _secret(op)), now=chain.now(), approvals=[])
+        outcome = _call("compute", op=op, kwargs=_public(kwargs, _secret(op)), decimals=decimals, now=chain.now(),
+                        approvals=[])
     except Fail as e:
         _record("codex", method, str(e))
         raise Fail(f"legislation error: {e}")
@@ -401,7 +407,7 @@ def _spawn(plan, sources, facts=None):
     try:
         _ok(box.call("setup", operations=sorted(ops()), layers=list(plan["layers"]), realm=plan["realm"],
                      calendars=[[c["source"], _calendar(sources, c)] for c in plan["calendars"]],
-                     entities=sorted(VIEWS), facts=facts))
+                     entities=sorted(VIEWS), money=MONEY, facts=facts))
         for c in plan["chapters"]:
             _ok(box.call("load", source=c["source"], domain=c["domain"], text=_text(sources, c)))
         _ok(box.call("finish"))

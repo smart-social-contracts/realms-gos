@@ -116,7 +116,8 @@ same rows.
   entry charges by its `amount`, its `rate`, or the `brackets` of its `facts` (each an `up_to` and a `rate`, the
   last open), at most one of them; its other settings are facts too: `unit_value` (land), `exempt_below`,
   `exempt_profiles` (users), `due_days` and `enabled`. `tax_assess` bills one invoice for each taxpayer, entry and
-  period, with the items the active codex computes for each of their subjects (`compute_tax_assess`) or, when no
+  period, with the items the active codex computes for each of their subjects (`compute_tax_assess`, which gets the
+  view of the subject's row, a parcel's `assessed_value` a `Money` in the invoice token's decimals) or, when no
   codex answers, one item from the entry's own charge, rounded to the cent as GGG rounds (the brackets of a
   progressive tax are added up exactly and the total rounded once). A codex answer that is not invoice items, that
   comes to less than nothing or more than an amount of money, or that covers some of a payer's subjects and not the

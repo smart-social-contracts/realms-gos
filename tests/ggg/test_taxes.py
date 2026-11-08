@@ -292,7 +292,7 @@ def test_tax_assess_passes_the_entry_and_the_subject_to_the_codex(monkeypatch):
 
     monkeypatch.setattr(codex, "compute", compute)
     ok("tax_assess", "bob", period="2026", tax="residence")
-    assert seen[0] == {"entry": TAXES[1], "subject": "User:alice"}
+    assert seen[0] == {"entry": TAXES[1], "subject": "User:alice", "decimals": CENTS}  # the token the items are in
     assert {c["subject"] for c in seen} == {f"User:{p}" for p in world.PEOPLE}
 
 

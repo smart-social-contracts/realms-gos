@@ -10,12 +10,15 @@ import json
 import pytest
 
 from api import codex as codex_api
-from api import proposals
+from api import proposals, taxes
 from core import layered_codex as store
 from core import legislation, localtime, op
+from core.db import each
 
-from ggg import Codex, LayeredCodex, Quarter, Realm
+from ggg import Attribute, Codex, Human, Invoice, Land, LayeredCodex, Quarter, Realm
 from kit import call, ok, rows
+from test_taxes import adopt_policy, setup_taxes
+from test_treasury import setup_finance
 import world
 
 LOG = []  # what the chapters' effects wrote, through the realm's operations
@@ -290,14 +293,14 @@ def test_a_codex_that_does_not_load_fails_before_the_switch_and_denies_everythin
     first = town()
     broken = layered({(TOWN, "procedure"): "from realms.legislation import above\nclass Procedure(above('procedure')):\n"
                       "    x = 1.5\n"}, layers=[TOWN], previous=first.id)
-    with pytest.raises(Exception, match="floats are not allowed"):
+    with pytest.raises(Exception, match="no floats in a chapter"):
         legislation.load(broken)  # the install task stops here: nothing switched
     assert legislation._state["codex"] == first.id and legislation._state["box"] is not None
     assert "consent is not a basis" in call("t_act", basis="consent")["error"]
     # the realm starts (post_upgrade) with a codex that does not load: recorded, and the realm fails closed
     first.status, broken.status = "inactive", "active"
     legislation.warm()
-    assert "floats are not allowed" in LayeredCodex[broken.id].failures["codex"]["load"]["error"]
+    assert "no floats in a chapter" in LayeredCodex[broken.id].failures["codex"]["load"]["error"]
     error = call("t_act", what="anything")["error"]
     assert error.startswith("legislation error: the codex sha256:") and "is not loaded" in error
     assert not ok("codex_status", query=True)["healthy"]
@@ -460,6 +463,163 @@ class Realm(above("realm")):
 '''}, layers=[TOWN])
     activate(codex)
     assert op.run(codex_api.compute("t_day", {"at": 0})) == 7  # realm → step0 → … → step7: eight calls between domains
+
+
+# ── compute_tax_assess: §5.6's IBI on a parcel the codex reads, rounded as GGG rounds ───────────────────────────────
+
+# Spain's quota, as the design writes it (§5.6): GGG hands the subject as the view Land.get gives, and its assessed
+# value is a Money in the invoice token's decimals.
+ES_TAX = '''
+from realms.legislation import above, fixed, overridable
+
+class Tax(above("tax")):
+    @fixed(legislation="TRLRHL Arts. 61, 65, 71 and 74")
+    def compute_tax_assess(self, entry, subject):
+        if entry.code != "ibi_urban":
+            return []
+        gross = subject.assessed_value.times(entry.rate)            # nearest cent, half away from zero
+        net = gross - gross.times(self.ibi_bonus(subject))
+        items = [{"concept": entry.code, "amount": gross, "legislation": "TRLRHL Art. 71.1"}]
+        if net < gross:
+            items.append({"concept": entry.code + "_bonus", "amount": net - gross, "legislation": "TRLRHL Art. 74"})
+        return items
+
+    @overridable(legislation="TRLRHL Art. 74")
+    def ibi_bonus(self, land):
+        return 0
+'''
+# València's bonus: the large-family title a reviewer verified, read with find() (the design's Human.for_user and
+# Attribute.of are the same two lookups).
+VALENCIA_TAX = '''
+from ggg import Attribute, Human
+from realms.legislation import above, pct
+
+class Tax(above("tax")):
+    large_family_bonus = {"general": pct("60"), "special": pct("90")}
+
+    def ibi_bonus(self, land):
+        kind, _, user = land.owner.partition(":")
+        for human in (Human.find("user", user) if kind == "User" else ()):
+            for attribute in Attribute.find("human", human.id):
+                if attribute.kind == "large_family" and attribute.status == "verified":
+                    return self.large_family_bonus.get(attribute.value, 0)
+        return 0
+'''
+IBI = {"code": "ibi_urban", "kind": "tax", "subject": "Land", "rate": 10_000_000, "facts": {}}  # 10 %: a half cent is easy to hit
+
+
+def ibi_codex():
+    return activate(layered({("eu/es", "tax"): ES_TAX, (TOWN, "tax"): VALENCIA_TAX}, layers=["eu/es", TOWN]))
+
+
+def large_family(user, value="general", status="verified"):
+    Human(id=f"h-{user}", user=user)
+    Attribute(id=f"a-{user}", human=f"h-{user}", kind="large_family", value=value, status=status)
+
+
+def ibi_items(payer):
+    return [(i["concept"], i["amount"]) for invoice in each(Invoice, "payer", payer) for i in invoice.items]
+
+
+def test_compute_tax_assess_gives_the_ibi_and_the_verified_large_family_bonus():
+    setup_taxes()  # REALM has two decimals: a cent is a unit
+    Land(id="L-1", owner="User:alice", width=10, height=12, assessed_value=20_000_000, area=120)  # 200 000.00
+    large_family("alice")
+    ibi_codex()
+    adopt_policy([{**IBI, "rate": 1_240_000}])  # 1.24 %
+    assert ok("tax_assess", "bob", period="2026")["count"] == 1
+    assert ibi_items("User:alice") == [("ibi_urban", 248_000), ("ibi_urban_bonus", -148_800)]  # 2 480.00 less 60 %
+    assert Invoice[1].amount == 99_200 == sum(amount for _, amount in ibi_items("User:alice"))
+    assert Invoice[1].items[0]["legislation"] == "TRLRHL Art. 71.1"
+
+
+def test_compute_tax_assess_rounds_a_half_cent_away_from_zero_and_only_a_verified_title_counts():
+    setup_taxes()
+    for owner in ("bob", "dana", "carla"):
+        Land(id=f"L-{owner}", owner=f"User:{owner}", width=1, height=1, assessed_value=2_345, area=1)  # 23.45
+    large_family("dana")
+    large_family("carla", status="pending")
+    ibi_codex()
+    adopt_policy([IBI])  # 10 %: 2.345, a half
+    ok("tax_assess", "bob", period="2026")
+    assert ibi_items("User:bob") == [("ibi_urban", 235)]  # 2.35, where banker's rounding would give 2.34
+    assert ibi_items("User:carla") == [("ibi_urban", 235)]  # a title not yet verified is none
+    assert ibi_items("User:dana") == [("ibi_urban", 235), ("ibi_urban_bonus", -141)]  # 60 % of 2.35 is 1.41
+    # the host's own reference calculation rounds it the same way: one implementation
+    assert taxes.owed({**IBI, "facts": {}}, 2_345, 2) == 235
+
+
+def test_the_cent_is_the_invoice_tokens_whatever_its_decimals():
+    setup_finance()  # REALM has eight decimals: a cent is 10**6 units
+    Land(id="L-1", owner="User:alice", width=1, height=1, assessed_value=10**8, area=1)  # one whole unit
+    ibi_codex()
+    adopt_policy([{**IBI, "rate": 1_500_000}])  # 1.5 %: 0.015 is a half cent
+    ok("tax_assess", "bob", period="2026")
+    assert ibi_items("User:alice") == [("ibi_urban", 2_000_000)]  # 0.02
+    assert taxes.owed({**IBI, "rate": 1_500_000, "facts": {}}, 10**8, 8) == 2_000_000
+
+
+def test_compute_tax_assess_reads_the_subject_as_the_view_land_get_gives():
+    setup_taxes()
+    Land(id="L-1", owner="User:alice", width=10, height=12, assessed_value=20_000_000, area=120)
+    Land(id="L-2", owner="User:alice", width=1, height=1)  # never assessed
+    activate(layered({(TOWN, "tax"): '''
+from realms.legislation import above
+
+class Tax(above("tax")):
+    def compute_tax_assess(self, entry, subject):
+        value = subject.assessed_value
+        return [subject.id, subject.owner, subject.area, value if value is None else value.decimals, value, entry.rate]
+'''}, layers=[TOWN]))
+    seen = op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-1", "decimals": 2}))
+    assert seen == ["L-1", "User:alice", 120, 2, 20_000_000, 10_000_000]
+    unassessed = op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-2", "decimals": 2}))
+    assert unassessed == ["L-2", "User:alice", None, None, None, 10_000_000]
+    with pytest.raises(Exception, match="'Land:L-9' is not found"):
+        op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-9", "decimals": 2}))
+    with pytest.raises(Exception, match="'Token:REALM': a chapter does not read Token"):
+        op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Token:REALM", "decimals": 2}))
+
+
+def test_a_tax_on_users_gets_the_view_of_the_user_it_taxes():
+    setup_taxes()
+    activate(layered({(TOWN, "tax"): '''
+from realms.legislation import above
+
+class Tax(above("tax")):
+    def compute_tax_assess(self, entry, subject):
+        return [{"concept": entry.code, "amount": len(subject.id)}]
+'''}, layers=[TOWN]))
+    adopt_policy([{"code": "residence", "kind": "fee", "subject": "User", "amount": 5, "facts": {}}])
+    ok("tax_assess", "bob", period="2026")
+    assert ibi_items("User:alice") == [("residence", 5)] and ibi_items("User:dr-ana") == [("residence", 6)]
+
+
+def test_an_amount_read_outside_a_compute_does_not_know_its_decimals():
+    setup_taxes()
+    Land(id="L-1", owner="User:alice", width=1, height=1, assessed_value=100, area=1)
+    town({(TOWN, "tax"): '''
+from ggg import Land
+from realms.legislation import above, pct
+
+class Tax(above("tax")):
+    def check_t_act(self, args):
+        if args.what == "round":
+            return self.deny(str(Land.get("L-1").assessed_value.times(pct("10"))))
+'''})
+    assert "needs the token's decimals" in call("t_act", what="round")["error"]
+
+
+def test_a_chapter_that_divides_does_not_load():
+    broken = layered({(TOWN, "tax"): '''
+from realms.legislation import above
+
+class Tax(above("tax")):
+    def compute_tax_assess(self, entry, subject):
+        return [{"concept": entry.code, "amount": subject.area / 3}]
+'''}, layers=[TOWN])
+    with pytest.raises(Exception, match="no `/` in a chapter"):
+        legislation.load(broken)
 
 
 # ── Reserved operations (§10.4) ─────────────────────────────────────────────────────────────────────────────────

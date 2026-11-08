@@ -387,6 +387,9 @@ The rules (the checker enforces them, §12):
    bound once, as the method's parameters, and never rebound, deleted or reused as a nested function's
    parameter. A chapter's class lives as long as the codex runs, so a default or an attribute on an SDK
    object, a parameter or a view would be state shared by every call.
+6. **No floats.** Money is whole units of the token and a rate is `pct("1.10")`, so a chapter holds no float
+   literal, calls no `float()` or `complex()`, and writes no `/` or `/=`, which make a float of two integers
+   (`//` divides whole numbers). A share of money is `amount.times(rate)`, rounded by GGG's one rule (§4.5).
 
 ### 4.1 Marks
 
@@ -528,12 +531,19 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 | `self.local_day(at)` | the realm's local day of UTC timestamp `at`, `YYYY-MM-DD`, computed by the realm from its own time zone (below): the day a working-day count starts from (§5.2) |
 | `pct("1.10")` | a rate literal, stored as the integer in hundred-millionths (§4.3) |
 | `days(n)`, `working_days(n)`, `months(n)`, `years(n)` | a Period, as GGG writes it: the unit constructors GGG defines, for settings (§4.3); the SDK adds none |
+| `Money(units, decimals)` | an amount in the token's smallest unit: it adds, compares and `times(rate)`; an amount GGG hands a chapter (a parcel's `assessed_value`, below) is one |
 | `amount.times(rate)` | money times a rate, rounded as GGG says |
 
 **Rounding is one rule, set by GGG:** nearest cent, an exact half away from zero, stated with the money
 kind of GGG's fact schema so that every implementation rounds the same way. The rule's text is on
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
 `times()` takes no rounding argument and a chapter names no rule.
+
+**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row,
+the object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. The amounts of a view are `Money` in the
+decimals of the token the invoice is in, which GGG hands the call: `subject.assessed_value.times(entry.rate)` rounds
+to that token's cent. Outside a compute the decimals are unknown, and `times()` refuses to guess. The realm's own tax
+code rounds with the same function (`realms.legislation.rates.times`): there is one implementation.
 
 **Time zones.** GGG's `Realm.timezone` is an IANA name such as `Europe/Madrid`
 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)). Timestamps stay UTC nanoseconds,
@@ -869,7 +879,8 @@ class Tax(above("tax")):
   own layer (§4.3), read by Spain's forbids through `S.` and fixed per realm at build. They never come
   from whoever proposes the rate.
 - **The amount** is computed by `compute_tax_assess`, which GGG calls for each entry and subject, page
-  by page. GGG's rounding rule applies to `times()`.
+  by page. The subject is the view of the parcel (`Land.get`'s, with its `assessed_value` and `area`), whose
+  `assessed_value` is a `Money` in the invoice token's decimals (§4.5), and GGG's rounding rule applies to `times()`.
 
 ### 5.7 A body beside the line
 

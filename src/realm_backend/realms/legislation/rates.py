@@ -20,6 +20,7 @@ PERCENT = SCALE // 100  # 1 %
 RATE_DECIMALS = (
     6  # digits after the point a percentage may carry: 0.123456 % is 123 456
 )
+MAX_DECIMALS = 255  # a token's decimals, as GGG bounds them (token_register); a chapter's Money takes no more
 
 
 def pct(text):
@@ -53,9 +54,9 @@ def cent(decimals):
     """One cent, in the token's smallest units: ``10 ** (decimals - 2)``. A token with fewer than two
     decimals cannot express a cent finer than its own unit, so rounding falls back to that unit.
     """
-    if type(decimals) is not int or decimals < 0:
+    if type(decimals) is not int or not 0 <= decimals <= MAX_DECIMALS:
         raise LegislationError(
-            f"a token's decimals is a non-negative integer, not {decimals!r}"
+            f"a token's decimals is an integer from 0 to {MAX_DECIMALS}, not {decimals!r}"
         )
     return 10 ** (decimals - 2) if decimals >= 2 else 1
 

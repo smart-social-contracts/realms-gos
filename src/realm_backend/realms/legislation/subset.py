@@ -61,6 +61,12 @@ FRAME_ATTRIBUTES = frozenset(
 )
 # str.format and str.format_map walk attributes named in the template: a chapter writes f-strings.
 FORMAT_METHODS = frozenset(("format", "format_map"))
+# Money is an integer in the token's smallest unit and a rate an integer in hundred-millionths (rule 12): a chapter
+# computes with whole numbers and Money, and a float on money would round where GGG's one rule does not. So no float
+# or complex number, no float() or complex(), and no `/`, which makes a float of two integers.
+FLOAT_NAMES = frozenset(("float", "complex"))
+NO_FLOAT = "no floats in a chapter: money is whole units of the token, a rate is pct(\"1.10\"), a share of money is Money.times(rate)"
+NO_DIVISION = "no `/` in a chapter, it makes a float: use // on whole numbers, or Money.times(rate) for a share of money"
 GENERATOR_FLAGS = (
     0x20 | 0x80 | 0x100 | 0x200
 )  # CO_GENERATOR, CO_COROUTINE, CO_ITERABLE_COROUTINE, CO_ASYNC_GENERATOR
@@ -175,6 +181,20 @@ def strings(const):
     if isinstance(const, (tuple, frozenset)):
         return [s for item in const for s in strings(item)]
     return []
+
+
+def inexact(const):
+    """Every float or complex number inside a constant: itself, or in a tuple or frozenset."""
+    if isinstance(const, (float, complex)):
+        return [const]
+    if isinstance(const, (tuple, frozenset)):
+        return [number for item in const for number in inexact(item)]
+    return []
+
+
+def divides(name, arg):
+    """Whether an instruction is `/` or `/=`: BINARY_OP's argument 11 and 24 on 3.11 and later."""
+    return name in ("BINARY_TRUE_DIVIDE", "INPLACE_TRUE_DIVIDE") or (name == "BINARY_OP" and arg in (11, 24))
 
 
 def sdk_names():
@@ -387,11 +407,15 @@ class Check:
                     )
                 if s in FRAME_ATTRIBUTES or s == "metaclass":
                     self.refuse(f"{s!r}: not allowed in a chapter", s)
+            for number in inexact(const):
+                self.refuse(f"{number!r}: {NO_FLOAT}", repr(number))
         for name in code.co_names:
             if name in FRAME_ATTRIBUTES:
                 self.refuse(
                     f"{name}: no frame or generator attributes in a chapter", name
                 )
+            if name in FLOAT_NAMES:
+                self.refuse(f"{name}: {NO_FLOAT}", name)
             if name in FORMAT_METHODS:
                 self.refuse(
                     f"{name}: write an f-string, str.format reads attributes named in the template",
@@ -414,6 +438,8 @@ class Check:
                     f"{self.what(name, arg)} is not part of the readable subset in a {scope}",
                     code.co_name,
                 )
+            if divides(name, arg):
+                self.refuse(NO_DIVISION, code.co_name)
         for const in code.co_consts:
             if type(const) is type(code) and const.co_flags & GENERATOR_FLAGS:
                 self.refuse(

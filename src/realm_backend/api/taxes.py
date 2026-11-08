@@ -174,7 +174,8 @@ def assessment(entry, payer, base, decimals):
     or, when no codex answers, the charge of the entry's own rate, amount or brackets on ``base``."""
     answers = {}
     for subject in subjects_of(entry, payer):
-        answers[subject] = yield from codex.compute("tax_assess", {"entry": entry, "subject": subject})
+        answers[subject] = yield from codex.compute("tax_assess", {"entry": entry, "subject": subject,
+                                                                     "decimals": decimals})
     if all(answer is None for answer in answers.values()):
         return reference_items(entry, base, decimals)
     items = []
