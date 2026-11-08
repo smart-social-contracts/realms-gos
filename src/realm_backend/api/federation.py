@@ -29,21 +29,22 @@ def freeze(action, rule, deadline):
     return quarters.digest({"action": action, "rule": rule, "deadline": deadline})
 
 
-def ballot(vote, action, deadline, proposer, by):
-    """The local leg of a federal vote: a realm-wide proposal with no action of its own."""
+def ballot(vote, action, deadline, proposer, by, prepared_by=""):
+    """The local leg of a federal vote: a realm-wide proposal with no action of its own. ``prepared_by`` is the delegate
+    whose pending action the proposer approved: it does not vote on the leg, nor do the proposer's other delegates."""
     p = proposals.new_proposal(f"{vote}: {action.get('title') or action['op']}", proposer, by, proposals.root(),
-                               None, f"Local leg of federal vote {vote}")
+                               None, f"Local leg of federal vote {vote}", prepared_by=prepared_by)
     p.deadline = deadline
     return p
 
 
-def open_vote(action, proposer, by, origin):
+def open_vote(action, proposer, by, origin, prepared_by=""):
     proposals.check_action(action)
     rule = quarters.published_rule()
     deadline = chain.now() + rule["window"]
     vid, h = next_id(FederalVote, "FV"), freeze(action, rule, deadline)
     body = {"vote": vid, "action": action, "rule": rule, "deadline": deadline, "hash": h, "proposer": proposer,
-            "origin": origin}
+            "origin": origin, "prepared_by": prepared_by}
     legs = {}
     for cid in [q.id for q in each(Quarter, "status", "active")]:
         reply = yield from quarters.ask(cid, "federation_message", {"topic": "federal_vote.open", "body": body})
@@ -51,7 +52,7 @@ def open_vote(action, proposer, by, origin):
             raise Fail(f"{cid} refused {vid}: {reply.get('error')}")
         legs[cid] = reply["proposal"]
     v = FederalVote(id=vid, origin_quarter=origin, action=action, rule=rule, hash=h, deadline=deadline)
-    legs[chain.self_id()] = ballot(vid, action, deadline, proposer, by).id
+    legs[chain.self_id()] = ballot(vid, action, deadline, proposer, by, prepared_by).id
     for cid, pid in legs.items():
         FederalVoteLeg(id=leg_id(vid, cid), vote=v, quarter=cid, proposal_id=pid, hash=h)
     return {"vote": vid, "hash": h, "deadline": deadline, "quarters": len(legs)}
@@ -120,7 +121,14 @@ def execute(v):
     return json.loads(out)
 
 
-@op("federal_vote.propose")
+def proposing(user, args):
+    """What a federal vote does: its action runs in every quarter, as the realm itself, if it passes."""
+    effect = ("The vote opens in every quarter of the federation. If it passes, its action runs in each of them as the "
+              "realm itself, not as you")
+    return [{"label": "What changes", "value": effect}]
+
+
+@op("federal_vote.propose", summary=proposing)
 def federal_vote_propose(c, args):
     """Propose a federal vote titled ``title`` on ``action`` (``{"op": …, "args": …}``), held in every active quarter
     under the published rule; a quarter passes it to the capital. Returns ``vote``."""
@@ -128,9 +136,10 @@ def federal_vote_propose(c, args):
     proposals.check_action(action)
     proposals.refuse_forbidden_action(c.user, action)
     if not quarters.federated():
-        return (yield from open_vote(action, c.user, c.by, chain.self_id()))
+        return (yield from open_vote(action, c.user, c.by, chain.self_id(), c.prepared_by))
     reply = yield from quarters.ask(quarters.capital(), "federation_message",
-                                    {"topic": "federal_vote.propose", "body": {"action": action, "proposer": c.user}})
+                                    {"topic": "federal_vote.propose",
+                                     "body": {"action": action, "proposer": c.user, "prepared_by": c.prepared_by}})
     if not reply.get("ok"):
         raise Fail(f"the capital refused the vote: {reply.get('error')}")
     return {"vote": reply["vote"]}
@@ -184,7 +193,7 @@ def federal_vote_finalize(c, args):
 def on_propose(c, body):
     if quarters.federated():
         raise Forbidden("federal votes are opened by the capital")
-    return (yield from open_vote(body["action"], body["proposer"], c.by, c.by))
+    return (yield from open_vote(body["action"], body["proposer"], c.by, c.by, body.get("prepared_by", "")))
 
 
 def on_open(c, body):
@@ -195,7 +204,7 @@ def on_open(c, body):
         raise Conflict(f"{body['vote']} is already open here")
     v = FederalVote(id=body["vote"], origin_quarter=body["origin"], action=body["action"], rule=body["rule"],
                     hash=body["hash"], deadline=body["deadline"])
-    p = ballot(v.id, v.action, v.deadline, body["proposer"], c.by)
+    p = ballot(v.id, v.action, v.deadline, body["proposer"], c.by, body.get("prepared_by", ""))
     FederalVoteLeg(id=leg_id(v.id, chain.self_id()), vote=v, quarter=chain.self_id(), proposal_id=p.id, hash=v.hash)
     return {"proposal": p.id}
 

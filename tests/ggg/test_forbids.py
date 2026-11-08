@@ -6,9 +6,9 @@ same on the real wasm and measures what it costs."""
 import pytest
 
 import world
-from core import auth, forbids, layered_codex as store, legislation, localtime, sandbox
+from core import auth, forbids, layered_codex as store, legislation, localtime, op, sandbox
 from core.db import Fail
-from ggg import Budget, FederalVote, LayeredCodex, Proposal, TaxPolicy
+from ggg import Budget, FederalVote, LayeredCodex, PaymentAccount, PendingAction, Proposal, TaxPolicy
 from kit import call, denied, ok, rows
 from realms.legislation import RESERVED
 from realms.legislation.cedar import FactSchema
@@ -551,7 +551,7 @@ def test_while_a_codex_does_not_load_a_read_its_forbids_would_judge_is_refused(a
     assert "forbidden by the legislation" in denied("user_list", "dana", limit=101)
 
 
-def test_a_list_of_more_than_500_elements_is_refused_where_it_is_given(agora):
+def test_a_list_of_more_than_500_elements_is_refused_where_it_is_given(agora, monkeypatch):
     codex_of({(SPAIN, "tax"): SPAIN_TAX})
     many = [entry(f"tax{i}", 5) for i in range(501)]
     refused = call("tax_policy_draft", "bob", **drafted(*many))
@@ -560,7 +560,51 @@ def test_a_list_of_more_than_500_elements_is_refused_where_it_is_given(agora):
     saved = TaxPolicy(id="TAX-POLICY-9", status="draft", document={"symbol": "REALM"}, taxes=many).id  # drafted before
     refused = call("tax_policy_propose", "bob", policy=saved)
     assert refused["kind"] == "invalid_argument" and "has 501 elements" in refused["error"]
-    assert ok("tax_policy_draft", "bob", **drafted(*many[:500]))["policy"]  # 500 are judged, one request each
+    assert forbids.MAX_ELEMENTS == 500
+    monkeypatch.setattr(forbids, "MAX_ELEMENTS", 3)  # the limit itself, without 500 requests
+    assert "has 4 elements" in denied("tax_policy_draft", "bob", **drafted(*many[:4]))
+    assert ok("tax_policy_draft", "bob", **drafted(*many[:3]))["policy"]
+
+
+NO_ACCOUNTS = """
+from realms.legislation import F, above, forbid
+
+class LocalRegime(above("local_regime")):
+    no_accounts = forbid("payment_account_add", F.symbol.is_some() & (F.symbol == "REALM"),
+                              legislation="no account in REALM")
+"""
+
+
+def test_a_forbid_refuses_a_pending_action_when_it_is_prepared_and_when_it_is_approved(agora):
+    from test_pending_actions import ACCOUNT, approved, file, grant
+
+    grant("payout")
+    waiting = file()  # prepared before the forbid exists
+    codex_of({("x/town", "local_regime"): NO_ACCOUNTS})
+    message = denied("payment_account_add", "claude-conn", on_behalf_of="alice", **ACCOUNT)
+    assert "payment_account_add is forbidden by the legislation: its arguments: refused by " \
+           "x/town/local_regime/no_accounts (no account in REALM)" in message
+    assert PendingAction.count() == 1  # a forbidden action is never prepared
+    done = approved(waiting)  # the approval runs the call as the member, and the forbid holds then too
+    assert done["status"] == "failed" and "refused by x/town/local_regime/no_accounts" in done["result"]["error"]
+    assert PaymentAccount.count() == 0
+
+
+def test_an_approved_call_states_the_member_it_acts_for(agora, monkeypatch):
+    """The call a delegate prepares and the member approves is the delegate's: its facts name the member as
+    `on_behalf_of` when it is prepared and when it is approved, and the member's own call names no one."""
+    from test_pending_actions import approved, grant
+
+    monkeypatch.setitem(op.ops()["proposal_vote"], "tier", "confirm")  # no operation of this release has a fact to read
+    motion = ok("proposal_create", "alice", title="a motion")["proposal"]
+    grant("vote")
+    waiting = ok("proposal_vote", "claude-conn", on_behalf_of="alice", proposal=motion, choice="yes")["pending"]
+    codex_of({("x/town", "local_regime"): DELEGATES})
+    message = denied("proposal_vote", "claude-conn", on_behalf_of="alice", proposal=motion, choice="yes")
+    assert "refused by x/town/local_regime/no_delegate_votes" in message and PendingAction.count() == 1
+    done = approved(waiting)
+    assert done["status"] == "failed" and "refused by x/town/local_regime/no_delegate_votes" in done["result"]["error"]
+    ok("proposal_vote", "alice", proposal=motion, choice="yes")  # her own vote is her own
 
 
 PROPOSALS = """
