@@ -128,7 +128,7 @@ def proposing(user, args):
     return [{"label": "What changes", "value": effect}]
 
 
-@op("federal_vote.propose", summary=proposing)
+@op("federal_vote.propose", summary=proposing, title="Propose a federal vote")
 def federal_vote_propose(c, args):
     """Propose a federal vote titled ``title`` on ``action`` (``{"op": …, "args": …}``), held in every active quarter
     under the published rule; a quarter passes it to the capital. Returns ``vote``."""

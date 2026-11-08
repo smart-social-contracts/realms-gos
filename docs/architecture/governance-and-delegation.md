@@ -258,7 +258,8 @@ The delegate prepares it, and only the member's own approval runs it. The code i
    result `{pending: id}` and the grant. A call that asks the member each time, made through the operation's own typed
    method (not through `call_for`) with `on_behalf_of`, is refused, saying to use `ggg_call_for`, because the method's
    reply has no place for a pending action.
-2. **The record.** It holds the exact `method` and `args`, never edited. `summary` (a label and a value per line) and
+2. **The record.** It holds the exact `method` and `args`, never edited. A card also carries `title`, the operation's
+   plain name ("Add a payout account"), which the realm writes beside the operation (`title=`). `summary` (a label and a value per line) and
    `risk` are the realm's own words, written from the stored arguments and the operation's `summary` hook, never from
    text the delegate supplies: each argument appears under its own lower-case name, the lines the realm adds start with
    a capital, and the delegate's text inside them is quoted. Only `note` is the delegate's, and a client shows it apart.

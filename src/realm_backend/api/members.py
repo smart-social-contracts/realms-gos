@@ -253,7 +253,7 @@ def person(user):
     return next(each(Human, "user", user), None) or Human(id=next_id(Human, "H"), user=user)
 
 
-@op("identity.submit", returns="identity")
+@op("identity.submit", returns="identity", title="Submit an identity proof")
 def identity_submit(c, args):
     """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``category`` (a
     subdivision of the kind), ``issuer``, ``expires_at`` and ``ref`` (where the proof is kept). Returns ``identity``,

@@ -163,10 +163,19 @@ def consequence(department):
     return f"Files a proposal under {department.id}; the realm votes"
 
 
+def title_of(name):
+    """The plain name of operation ``name`` that heads its action, written beside the operation: the realm's, never the
+    delegate's. An operation without one shows its own name."""
+    from core.op import ops
+
+    spec = ops().get(name)
+    return (spec and spec["title"]) or name
+
+
 def card(a, result=None):
     """An action as a client reads it. ``result`` replaces the stored one: the approval's own reply carries what is not
     kept (``blank``)."""
-    return {**view(a, *CARD), "result": a.result if result is None else result}
+    return {**view(a, *CARD), "title": title_of(a.method), "result": a.result if result is None else result}
 
 
 # ---- States

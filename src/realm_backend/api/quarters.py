@@ -378,7 +378,7 @@ def moving(user, args):
         {"label": "What changes", "value": "You become a guest here and your profiles in this quarter are deleted"}]
 
 
-@op("self.change_quarter", returns="forward", summary=moving)
+@op("self.change_quarter", returns="forward", summary=moving, title="Move to another quarter")
 def self_change_quarter(c, args):
     """Move your membership to ``quarter``, another active quarter of the federation; here you become a guest.
     Returns ``forward`` and ``home_quarter``."""

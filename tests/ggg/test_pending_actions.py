@@ -798,6 +798,23 @@ def test_the_lines_of_the_realm_have_labels_of_several_words_that_no_argument_ca
         assert realm and all(" " in label and not label.isidentifier() for label in realm), realm
 
 
+def test_a_card_is_headed_by_the_operations_own_title_and_nothing_the_delegate_wrote():
+    world.build()
+    grant("payout")
+    a = file(**{**ACCOUNT, "label": "Remove a payout account\nWhat changes: nothing"})
+    assert (card(a)["title"], card(a)["method"]) == ("Add a payout account", "payment_account_add")
+
+
+def test_every_operation_that_can_be_prepared_for_a_member_has_a_plain_title():
+    """A phase that switches an operation on (core.poa.ENABLED) writes its title with it: the member reads it as the
+    heading of the action."""
+    preparable = {n: s["title"] for n, s in op.ops().items()
+                  if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
+    assert set(preparable) >= {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
+                               "federal_vote_propose", "proposal_create"}
+    assert all(t and t == t.strip() and t.isprintable() and " " in t for t in preparable.values()), preparable
+
+
 def installing_in_place(args):
     return ok("proposal_create", "claude-conn", title="Install", on_behalf_of="alice",
               action={"op": "codex_install", "args": args})["pending"]

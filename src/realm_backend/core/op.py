@@ -39,7 +39,8 @@ class Call:
 
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
-       returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None, summary=None):
+       returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None, summary=None,
+       title=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -64,12 +65,15 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     releases(args, proposal) -> runs when that proposal ends without the call having run: it frees what ``fixes`` tied.
     summary(user, args) -> lines (``{label, value}``) about what the call does for ``user``, in the realm's words, for an
     operation that asks the member each time (core.pending): the member reads them before approving.
+    title -> the operation's plain name as the member reads it, the heading of a pending action ("Add a payout
+    account"). The realm writes it, never the delegate; an operation that can be prepared for the member has one.
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,
-                            "secret": tuple(secret), "fixes": fixes, "releases": releases, "summary": summary}
+                            "secret": tuple(secret), "fixes": fixes, "releases": releases, "summary": summary,
+                            "title": title}
         poa.classify(OPS[fn.__name__], fn.__name__)
         return fn
     return wrap
