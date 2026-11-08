@@ -1,5 +1,5 @@
-from core import chain
-from core.db import Fail, Forbidden, find, next_id, page_by, view
+from core import auth, chain, language
+from core.db import Conflict, Fail, Forbidden, deref, find, next_id, page_by, view
 from ggg import Department, Document, KeyEnvelope, Realm
 from core.op import op
 from api.proposals import holders, root
@@ -130,11 +130,17 @@ def staff(department, principal):
         raise Forbidden(f"only {department}'s staff manage its documents")
 
 
-@op("document.manage")
+def stored_languages(args):
+    language.require_all(args["languages"])
+
+
+@op("document.manage", check=stored_languages, private=("keys",))
 def document_store(c, args):
-    """Store a ``department`` document (or replace ``document``): ``title``, ``ref`` and ``hash`` of its ciphertext,
-    and optional ``keys`` (principal to wrapped key). Returns ``document`` and its key ``scope``."""
-    fields = {"title": args["title"], "ref": args["ref"], "hash": args["hash"], "at": chain.now()}
+    """Store a ``department`` document (or replace ``document``): ``title``, ``languages`` (BCP 47 tags), ``ref`` and
+    ``hash`` of its ciphertext, optional ``kind`` (minutes, an ordinance), ``facts`` (what legislation reads about
+    it) and ``keys`` (principal to wrapped key). Returns ``document`` and its key ``scope``."""
+    fields = {"title": args["title"], "kind": args.get("kind", ""), "languages": args["languages"],
+              "ref": args["ref"], "hash": args["hash"], "facts": args.get("facts") or {}, "at": chain.now()}
     staff(args["department"], c.user)
     doc = find(Document, args["document"]) if args.get("document") else None
     if doc and doc.department != args["department"]:
@@ -146,12 +152,47 @@ def document_store(c, args):
     return {"document": doc.id, "scope": scope_of(doc)}
 
 
-@op("document.manage", returns="granted")
+RECIPIENTS = ("User", "Organization", "External")
+
+
+def recipient_of(args):
+    """The ``recipient`` of a share, which must exist, and the ``basis`` it states, if any, which must say its legal
+    basis and purpose."""
+    recipient, basis = args["recipient"], args.get("basis")
+    if recipient.partition(":")[0] not in RECIPIENTS:
+        raise Fail(f"a document is shared with a User, an Organization or an External, not {recipient}")
+    deref(recipient)
+    if basis is not None and not (basis.get("legal_basis") and basis.get("purpose")):
+        raise Fail("a basis states its legal_basis and its purpose")
+
+
+@op("document.manage", private=("keys",), returns="granted")
 def document_share(c, args):
-    """Share ``document``: ``keys`` maps principal to wrapped key. Returns ``granted``."""
+    """Share ``document`` with ``recipient`` (``User:id``, ``Organization:id`` or ``External:id``), who must exist:
+    ``keys`` maps principal to wrapped key (for an External, the principal that delivers to it). State the ``basis``
+    (``legal_basis``, ``purpose``, optional ``legislation`` and ``special_category``) and any ``facts`` legislation
+    reads; the audit log keeps them with the recipient. Returns ``granted``."""
     doc = find(Document, args["document"])
     staff(doc.department, c.user)
+    recipient_of(args)
     return {"granted": grant(scope_of(doc), args["keys"], c.user)}
+
+
+@op("document.manage", returns="document")
+def document_publish(c, args):
+    """Make ``document`` public: the content in clear is at ``ref``, with its ``hash``, and anyone reads the record
+    with document_get, signed in or not. Publish only what everyone may read: a published copy holds no personal
+    data (I-PRV-1). Publishing the same content again is not an error; other content is a conflict. Publishing to
+    an outside body (``to``) needs one the realm knows."""
+    doc = find(Document, args["document"])
+    staff(doc.department, c.user)
+    if args.get("to"):
+        deref(f"External:{args['to']}")
+    published = {"ref": args["ref"], "hash": args["hash"]}
+    if doc.public not in (None, published):
+        raise Conflict(f"{doc.id} is already published with other content")
+    doc.public = published
+    return {"document": doc.id}
 
 
 @op("document.manage", returns="revoked")
@@ -178,19 +219,33 @@ def document_delete(c, args):
 
 @op("document.manage", read=True, returns="documents")
 def document_list(c, args):
-    """The documents of ``department`` (id, title, hash, author, time), for its staff, ``count`` at a time (default
-    100, at most 500) from row ``from`` (default 1). Returns ``documents`` and ``next`` (null at the end)."""
+    """The documents of ``department``, for its staff, all or only those of ``kind`` and ``language``, ``count`` at a
+    time (default 100, at most 500) from row ``from`` (default 1). Returns ``documents`` and ``next`` (null at the
+    end); a page can hold fewer than ``count`` when a filter is given: follow ``next``."""
     staff(args["department"], c.user)
     rows, nxt = page_by(Document, "department", args["department"], args)
-    return {"documents": [view(d, "id", "title", "hash", "author", "at") for d in rows], "next": nxt}
+    wanted = [d for d in rows if args.get("kind") in (None, d.kind)
+              and (not args.get("language") or language.listed(d.languages, args["language"]))]
+    return {"documents": [view(d) for d in wanted], "next": nxt}
 
 
-@op("self.data_view", read=True)
+def stranger_view(doc):
+    """What anyone reads of a published document: its public copy, not its ciphertext or what legislation reads about
+    its sharing (I-PRV-4)."""
+    return {**view(doc), "ref": "", "hash": "", "facts": {}}
+
+
+@op("self.data_view", read=True, public=True)
 def document_get(c, args):
-    """The ciphertext reference of ``document`` and your wrapped key: for its department's staff and key holders."""
+    """``document`` with its key scope and your wrapped key, for its department's staff and key holders. Anyone, signed
+    in or not, reads a published document: its public copy, title, kind and languages, without the ciphertext."""
     doc = find(Document, args["document"])
     mine = KeyEnvelope[f"{scope_of(doc)}|{c.user}"]
     if mine is None and c.user not in managers(f"dept:{doc.department}"):
-        raise Forbidden(f"{doc.id} was not shared with you")
+        if not doc.public:
+            if c.user == chain.ANONYMOUS:
+                raise auth.SignIn("sign in first")
+            raise Forbidden(f"{doc.id} was not shared with you")
+        return {"document": stranger_view(doc), "scope": scope_of(doc), "wrapped_dek": "", "envelope": None}
     return {"document": view(doc), "scope": scope_of(doc), "wrapped_dek": mine.wrapped_dek if mine else "",
             "envelope": mine.id if mine else None}

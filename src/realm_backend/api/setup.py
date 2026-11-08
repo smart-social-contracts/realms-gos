@@ -22,7 +22,8 @@ PROFILES = {
         "self.join", "self.update_public_profile", "self.update_private_data", "self.change_quarter",
         "self.invoice_refresh", "self.data_view", "self.data_manage", "self.delegate", "realm.data_view",
         "proposal.create", "proposal.vote", "federal_vote.propose", "dispute.create", "dispute.view",
-        "identity.submit", "license.apply", "tax.declare", "bid.submit", "extension.call",
+        "identity.submit", "attribute.submit", "license.apply", "request.file", "tax.declare", "bid.submit",
+        "extension.call",
     ],
     # Held by the founder only while the realm is in setup (I-ADM-2).
     "founder": [

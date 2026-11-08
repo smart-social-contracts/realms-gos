@@ -40,7 +40,8 @@ def test_private_data_and_wrapped_keys_are_blobs():
     stored = do(g.ggg_document_store({"document": None, "department": "Health", "keys": [], **REPORT}))["Ok"]
     doc = stored["document"]["id"]
     assert stored["scope"] == f"dept:Health:doc:{doc}"
-    shared = do(g.ggg_document_share({"document": doc, "keys": [{"principal": P("dr-ana"), "wrapped_dek": b"\x0a"}]}))
+    shared = do(g.ggg_document_share({"document": doc, "recipient": {"kind": "User", "id": "dr-ana"},
+                                      "keys": [{"principal": P("dr-ana"), "wrapped_dek": b"\x0a"}]}))
     assert shared == {"Ok": 1}
     caller("dr-ana")
     got = g.ggg_document_get(doc)["Ok"]

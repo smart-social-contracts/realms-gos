@@ -5,8 +5,9 @@ from core import chain
 from api import delegation
 from api import assets, orgs
 from core import language
-from core.db import Conflict, Fail, Forbidden, each, find, next_id, page, view
-from ggg import Appointment, Department, Human, Identity, Invite, Member, Position, Proposal, Realm, User, UserProfile
+from core.db import Conflict, Fail, Forbidden, each, find, next_id, page, page_by, view
+from ggg import (Appointment, Attribute, Department, Human, Identity, Invite, Member, Position, Proposal, Realm, User,
+                 UserProfile)
 from api import codex
 from core.op import op
 from api.proposals import root
@@ -245,13 +246,19 @@ def user_remove(c, args):
     user.delete()
 
 
+def person(user):
+    """The Human behind ``user``, made on the first identity or attribute they submit."""
+    return next(each(Human, "user", user), None) or Human(id=next_id(Human, "H"), user=user)
+
+
 @op("identity.submit", returns="identity")
 def identity_submit(c, args):
-    """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``issuer``
-    and ``ref`` (where the proof is kept). Returns ``identity``, pending until reviewed."""
-    human = next(each(Human, "user", c.user), None) or Human(id=next_id(Human, "H"), user=c.user)
-    i = Identity(id=next_id(Identity, "ID"), human=human, kind=args["kind"], issuer=args.get("issuer", ""),
-                 ref=args.get("ref", ""))
+    """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``category`` (a
+    subdivision of the kind), ``issuer``, ``expires_at`` and ``ref`` (where the proof is kept). Returns ``identity``,
+    pending until reviewed."""
+    i = Identity(id=next_id(Identity, "ID"), human=person(c.user), kind=args["kind"],
+                 category=args.get("category", ""), issuer=args.get("issuer", ""), ref=args.get("ref", ""),
+                 expires_at=int(args.get("expires_at") or 0))
     return {"identity": i.id}
 
 
@@ -267,6 +274,43 @@ def identity_review(c, args):
         raise Conflict(f"{i.id} is {i.status}; it can only go from pending to verified or rejected")
     i.status, i.verified_at = args["status"], chain.now() if args["status"] == "verified" else 0
     return {"identity": i.id, "status": i.status}
+
+
+@op("attribute.submit", private=("kind", "value"), returns="attribute")
+def attribute_submit(c, args):
+    """Submit a certified attribute of your own person for review: ``kind`` (such as large_family), ``value`` (such
+    as general), ``ref`` (where the proof is kept) and optional ``issuer`` and ``expires_at``. Returns ``attribute``,
+    pending until reviewed. Its kind and value are personal data (I-PRV-1): only you, whoever holds
+    attribute.review and the codex read them, and the audit log does not keep them."""
+    a = Attribute(id=next_id(Attribute, "ATTR"), human=person(c.user).id, kind=args["kind"], value=args["value"],
+                  issuer=args.get("issuer", ""), ref=args["ref"], expires_at=int(args.get("expires_at") or 0))
+    return {"attribute": a.id}
+
+
+def attribute_owner(args):
+    return {Human[find(Attribute, args["attribute"]).human].user}
+
+
+@op("attribute.review", signing=True, parties=attribute_owner, returns="attribute")
+def attribute_review(c, args):
+    """Decide a pending ``attribute``: ``status`` verified or rejected. Returns ``attribute`` and ``status``."""
+    a = find(Attribute, args["attribute"])
+    if args["status"] not in ("verified", "rejected") or a.status != "pending":
+        raise Conflict(f"{a.id} is {a.status}; it can only go from pending to verified or rejected")
+    a.status, a.verified_at = args["status"], chain.now() if args["status"] == "verified" else 0
+    return {"attribute": a.id, "status": a.status}
+
+
+@op("self.data_view", read=True, delegable=True, returns="attributes")
+def attribute_list(c, args):
+    """Your own attributes, all or only those of ``kind``, ``count`` rows at a time (default 100, at most 500) from
+    row ``from`` (default 1). Returns ``attributes`` and ``next`` (null at the end); a page can hold fewer than
+    ``count`` when ``kind`` is given: follow ``next``."""
+    human = next(each(Human, "user", c.user), None)
+    if human is None:
+        return {"attributes": [], "next": None}
+    rows, nxt = page_by(Attribute, "human", human.id, args)
+    return {"attributes": [view(a) for a in rows if args.get("kind") in (None, a.kind)], "next": nxt}
 
 
 def fresh_code(c):

@@ -7,7 +7,8 @@ from core.db import Fail
 
 OPS = {}
 MODULES = ("assets", "codex", "crypto", "delegation", "extensions", "federation", "justice", "licenses", "members",
-           "notifications", "orgs", "procurement", "proposals", "quarters", "setup", "tasks", "taxes", "treasury")
+           "notifications", "orgs", "procurement", "proposals", "quarters", "requests", "setup", "tasks", "taxes",
+           "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
 EVENTS_KEPT = 2000
 # Basilisk stubs the `types` module.
@@ -27,7 +28,7 @@ class Call:
 
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
-       returns=None, check=None):
+       returns=None, check=None, private=()):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -37,11 +38,12 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     or for a governed operation the id of the record it created. Without it, the reply itself is the result.
     check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm. It runs
     before ``governed`` turns the call into a proposal, so a call that cannot succeed files nothing.
+    private -> the arguments that hold personal data or key material: the audit log never keeps them (I-ALL-5).
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
-                            "returns": returns, "check": check}
+                            "returns": returns, "check": check, "private": private}
         return fn
     return wrap
 
@@ -89,7 +91,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
                 out = yield from out
             out = out or {}
         if not spec["read"]:
-            audit(name, user, by, origin, args, out)
+            audit(name, user, by, origin, args, out, spec["private"])
         return json.dumps({"ok": True, **out})
     except auth.Denied as e:
         return json.dumps({"ok": False, "error": str(e), "kind": e.kind, "permission": e.permission, "denied": True})
@@ -106,10 +108,10 @@ def direct(department):
     return int(p.get("m", 1)) <= 1 and int(p.get("n", 1)) <= 1 and not p.get("quorum") and not p.get("veto")
 
 
-def audit(name, user, by, origin, args, out):
+def audit(name, user, by, origin, args, out, private=()):
     from ggg import Event
 
-    kept = {k: v for k, v in args.items() if k not in SECRET}
+    kept = {k: v for k, v in args.items() if k not in SECRET and k not in private}
     if len(json.dumps(kept)) > 2000:
         kept = {"keys": sorted(kept)}
     Event(id=str(Event.max_id() + 1), op=name, user=user, by=by, origin=origin, args=kept,

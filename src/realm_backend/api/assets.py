@@ -6,8 +6,7 @@ from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Rea
 from api import codex
 from api.licenses import active, principals
 from core.op import op
-from api.proposals import realm_wide
-from api.setup import launched
+from api.proposals import launched, realm_wide
 
 LAND = "LAND"
 PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id")

@@ -1,7 +1,8 @@
 from core import chain
-from core.db import Conflict, Forbidden, deref, each, find, next_id, page, page_by, view
-from ggg import Calendar, Department, License, Organization
+from core.db import Conflict, Fail, Forbidden, deref, each, find, next_id, page, page_by, view
+from ggg import Calendar, Department, License, Organization, Procedure
 from core.op import op
+from api.proposals import realm_wide
 
 SHOWN = ("id", "kind", "holder", "status", "issued_at", "expires_at")
 
@@ -32,10 +33,13 @@ def holders(args):
     return principals(find(License, args["license"]).holder)
 
 
+def administers(org, user):
+    return org.status == "active" and user in (org.admins or [])
+
+
 def applicant(ref, user):
     entity = deref(ref)
-    org = isinstance(entity, Organization)
-    if not (ref == f"User:{user}" or org and entity.status == "active" and user in (entity.admins or [])):
+    if not (ref == f"User:{user}" or isinstance(entity, Organization) and administers(entity, user)):
         raise Forbidden(f"you cannot apply for {ref}")
 
 
@@ -130,3 +134,39 @@ def license_verify(c, args):
     Returns ``valid`` and the ``license``."""
     lic = find(License, args["license"]) if args.get("license") else active(args["holder"], args["kind"])
     return {"valid": bool(lic and valid(lic)), "license": shown(lic) if lic else None}
+
+
+PERIOD_UNITS = ("day", "working_day", "month", "year")
+SILENCES = ("positive", "negative")
+
+
+def valid_procedure(args):
+    """Refuse a deadline that is no Period, or a silence that is neither positive nor negative."""
+    deadline = args.get("decision_deadline")
+    if deadline is not None and not (
+            isinstance(deadline.get("count"), int) and deadline["count"] >= 0 and deadline.get("unit") in PERIOD_UNITS):
+        raise Fail(f"a decision_deadline is a count of {', '.join(PERIOD_UNITS)}, such as 3 months")
+    if args.get("silence") not in (None, *SILENCES):
+        raise Fail(f"silence is {' or '.join(SILENCES)}")
+
+
+@op("procedure.define", governed=realm_wide, check=valid_procedure, returns="procedure")
+def procedure_define(c, args):
+    """Define, or redefine, how applications for licences of ``kind`` are decided: who starts it (``initiated_by``),
+    optionally the ``matter``, a ``decision_deadline`` (a Period ``{"count": 3, "unit": "month"}`` of day, working_day,
+    month or year), what ``silence`` means (positive grants, negative refuses), the ``legislation`` that says so and
+    ``facts``. The licence applications that follow take their ``decision_due`` from it. Returns ``procedure``, the
+    kind."""
+    p = Procedure[args["kind"]] or Procedure(id=args["kind"])
+    p.initiated_by, p.matter = args["initiated_by"], args.get("matter", "")
+    p.decision_deadline, p.silence = args.get("decision_deadline"), args.get("silence", "")
+    p.legislation, p.facts = args.get("legislation", ""), args.get("facts") or {}
+    return {"procedure": p.id}
+
+
+@op("realm.data_view", read=True, returns="procedures")
+def procedure_list(c, args):
+    """The realm's procedures, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1). Returns
+    ``procedures`` and ``next`` (null at the end)."""
+    rows, nxt = page(Procedure, args)
+    return {"procedures": [view(p) for p in rows], "next": nxt}

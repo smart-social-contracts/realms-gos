@@ -19,6 +19,7 @@ When the model, this page and the code disagree, the code is wrong.
 | Authorization (I-ALL-1) | Cedar decides every call |
 | Guardrails (I-ALL-2) | the `GUARDRAILS` Cedar policies in [`core/auth.py`](../../src/realm_backend/core/auth.py) |
 | Private content (§13) | vetKeys, with the [`api/crypto.py`](../../src/realm_backend/api/crypto.py) operations |
+| Personal data in clear (I-PRV-1) | an attribute's `kind` and `value` are read by `attribute_list` (the person's own) and by the reviewer's `attribute_review` reply; no operation lists another person's. An `@op`'s `private` arguments are left out of the audit log (I-ALL-5): an attribute's kind and value, a request's `body` and `reply`, a share's wrapped `keys` |
 | Signing policy (§11) | not read yet: Realms GOS applies the model's defaults. A Cedar guardrail refuses `signing` operations to agents, and no delegation covers a `signing` permission |
 
 The canister exposes every operation through two methods: `read(name, args)` for `read` operations
@@ -80,6 +81,8 @@ same rows.
   `UTC` or a zone of the tz database the release bundles (`src/realm_backend/zonedata`, written by
   `scripts/build_zones.py`), else `InvalidArgument`. The realm reads its own zone's file when it is set and
   after an upgrade, never in a query; a change applies from that moment and rewrites nothing;
+- a procedure's `decision_deadline` is `{count, unit}` with the unit in lower-case text (`day`, `working_day`,
+  `month`, `year`), and its `silence` is `positive` or `negative`;
 - a tender's rubric, a fund's balances, credential fields and wrapped keys are maps where `ggg.did` has
   lists of pairs; an allocation rule is the list of `{fund, share}` that `ggg.did` has;
 - a limit in time may be given as `expires_in` seconds instead of `expires_at`, and a delegation's
@@ -101,7 +104,14 @@ Where the two interfaces cannot say the same thing, the `ggg.did` methods do thi
 - A proposal's `result` is the replayed operation's JSON reply, in `Reply`.
 - A federal vote proposed on a quarter lives on the capital. The quarter replies with what it knows,
   with an empty rule and tally.
-- `ggg_user_get` always answers callers about themselves.
+- `ggg_user_get` always answers callers about themselves;
+- `document_get` is public. For a published document it answers anyone with the record of its public copy:
+  the title, kind, languages, `public` and `publications`, but not the ciphertext `ref` and `hash` nor the
+  `facts` (I-PRV-4). Staff and key holders get the whole record, and for a document not published anyone else
+  is refused;
+- a request's `body` and `reply`, and a dispatch's `body`, are not checked for personal data, which the realm
+  cannot see: whoever files or decides puts personal data in an encrypted `Document` and names its id there;
+- `request_get` answers `NotFound` for a request that is not the caller's, as for one that does not exist.
 
 Realms GOS also differs from the model in what it keeps:
 
@@ -123,7 +133,11 @@ Realms GOS also differs from the model in what it keeps:
 `UserProfile.extensions` and `Department.extensions` (→ `Extension`*) say which extensions a
 profile or a department sees.
 
-Indexed lookup keys, kept so that no lookup scans a collection: `Delegation.link` (grantor and
+`Zone.defined` tells a zone of the realm (`zone_define`, which members name as their `home_zone`) from a member's
+home cell, and `Zone.population` is a running total of the members whose `home_zone` it is, kept by joining,
+`user_edit` and `user_remove`.
+
+Indexed lookup keys, kept so that no lookup scans a collection: `Attribute.human`, `Delegation.link` (grantor and
 delegate while pending or active), `Vote.proposal_id`, `Budget.slot` (`fund:period:category`),
 `Land.cell` (`x//16:y//16`) and `TaxDeclaration.key` (declarant, base and period). `KeyEnvelope.scope`,
 `KeyEnvelope.principal` and `Transfer.payroll` are indexed too, and a `KeyEnvelope`'s id is

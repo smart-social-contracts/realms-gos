@@ -11,6 +11,11 @@ def well_formed(tag):
         and all(1 <= len(p) <= 8 and p.isascii() and p.isalnum() for p in rest)
 
 
+def listed(tags, wanted):
+    """Whether ``wanted`` is one of ``tags``; tags compare without regard to case."""
+    return wanted.lower() in [tag.lower() for tag in tags]
+
+
 def require(tag):
     """Refuse a ``tag`` that is not a BCP 47 tag."""
     if not well_formed(tag):

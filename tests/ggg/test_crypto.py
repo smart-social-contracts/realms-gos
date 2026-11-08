@@ -1,9 +1,10 @@
 import fake_chain
 import world
-from ggg import Document, KeyEnvelope
+from ggg import Document, Event, KeyEnvelope
 from kit import call, denied, ok
 
-REPORT = {"title": "Inspection report, Clinic B", "ref": "files/health/DOC-1.enc", "hash": "sha256:ab12"}
+REPORT = {"title": "Inspection report, Clinic B", "ref": "files/health/DOC-1.enc", "hash": "sha256:ab12",
+          "languages": ["en"]}
 
 
 def health():
@@ -17,7 +18,7 @@ def test_story_health_shares_an_encrypted_report_with_clinic_b():
     out = ok("document_store", "carla", department="Health", keys={"carla": "env:carla"}, **REPORT)
     doc, scope = out["document"], out["scope"]
     assert scope == f"dept:Health:doc:{doc}"
-    ok("document_share", "carla", document=doc, keys={"dr-ana": "env:ana"})
+    ok("document_share", "carla", document=doc, recipient="User:dr-ana", keys={"dr-ana": "env:ana"})
     got = ok("document_get", "dr-ana", document=doc)
     assert (got["wrapped_dek"], got["document"]["ref"], got["document"]["hash"]) == ("env:ana", REPORT["ref"], "sha256:ab12")
     assert "not shared with you" in call("document_get", "bob", document=doc)["error"]
@@ -35,13 +36,13 @@ def test_documents_are_managed_by_the_departments_staff():
     depts = health()
     world.seat("finance.clerk", "bob", depts["Finance"], "document.manage")
     doc = ok("document_store", "carla", department="Health", **REPORT)["document"]
-    assert "Health's staff" in call("document_share", "bob", document=doc, keys={"bob": "env"})["error"]
+    assert "Health's staff" in call("document_share", "bob", document=doc, recipient="User:bob", keys={"bob": "env"})["error"]
     assert "Health's staff" in call("document_store", "bob", department="Health", **REPORT)["error"]
     assert "belongs to Health" in call("document_store", "bob", department="Finance", document=doc, **REPORT)["error"]
     denied("document_store", "dr-ana", department="Health", **REPORT)
     denied("document_list", "alice", department="Health")
     denied("document_get", fake_chain.ANONYMOUS, document=doc)
-    ok("document_share", "carla", document=doc, keys={"dr-ana": "env:ana"})
+    ok("document_share", "carla", document=doc, recipient="User:dr-ana", keys={"dr-ana": "env:ana"})
     denied("document_delete", "dr-ana", document=doc)
     ok("document_delete", "carla", document=doc)
     assert KeyEnvelope[f"dept:Health:doc:{doc}|dr-ana"] is None and Document[doc] is None
@@ -99,3 +100,83 @@ def test_vetkd_public_key_and_sign_in():
     for name, args in [("crypto_public_key", {}), ("crypto_derive_key", {"transport_public_key": "00"}),
                        ("crypto_grant", {"scope": "user:x:y", "keys": {}}), ("crypto_scopes", {})]:
         denied(name, fake_chain.ANONYMOUS, **args)
+
+
+def test_a_document_has_a_kind_languages_and_facts_and_replaces_them():
+    health()
+    doc = ok("document_store", "carla", department="Health", kind="report", facts={"given_freely": True},
+             **{**REPORT, "languages": ["en", "es-ES"]})["document"]
+    row = Document[doc]
+    assert (row.kind, row.languages, row.facts, row.public, row.publications) == (
+        "report", ["en", "es-ES"], {"given_freely": True}, None, [])
+    ok("document_store", "carla", department="Health", document=doc, **{**REPORT, "languages": ["ca"]})
+    assert (Document[doc].kind, Document[doc].languages, Document[doc].facts) == ("", ["ca"], {})
+    for languages in (["english"], "en", [5], [""]):
+        out = call("document_store", "carla", department="Health", **{**REPORT, "languages": languages})
+        assert not out["ok"] and out["kind"] == "invalid_argument", languages
+    assert call("document_store", "carla", department="Health", title="x", ref="r", hash="h")["kind"] == "invalid_argument"
+    assert Document.max_id() == 1
+
+
+def test_document_list_filters_by_kind_and_language():
+    health()
+    reports = ok("document_store", "carla", department="Health", kind="report", **{**REPORT, "languages": ["en", "es-ES"]})
+    minutes = ok("document_store", "carla", department="Health", kind="minutes", **{**REPORT, "languages": ["ca"]})
+    plain = ok("document_store", "carla", department="Health", **REPORT)
+
+    def listed(**filters):
+        return [d["id"] for d in ok("document_list", "carla", department="Health", **filters)["documents"]]
+
+    assert listed() == [reports["document"], minutes["document"], plain["document"]]
+    assert listed(kind="minutes") == [minutes["document"]]
+    assert listed(language="ES-es") == [reports["document"]]
+    assert listed(language="en") == [reports["document"], plain["document"]]
+    assert listed(kind="report", language="ca") == []
+
+
+def test_a_share_names_its_recipient_basis_and_facts():
+    health()
+    doc = ok("document_store", "carla", department="Health", **REPORT)["document"]
+    basis = {"legal_basis": "a public health duty", "purpose": "inspection follow-up", "special_category": False}
+    out = ok("document_share", "carla", document=doc, recipient="Organization:clinic-b", basis=basis,
+             facts={"given_freely": False}, keys={"dr-ana": "env:ana", "records-bot": "env:bot"})
+    assert out["granted"] == ["dr-ana", "records-bot"]
+    event = Event[str(Event.max_id())]
+    assert event.args["recipient"] == "Organization:clinic-b" and event.args["basis"] == basis
+    assert "keys" not in event.args
+    ok("document_share", "carla", document=doc, recipient="User:alice", keys={"alice": "env:alice"})
+    for recipient in ("User:nobody", "Organization:nowhere", "Document:" + doc, "alice", "External:statistics-office"):
+        out = call("document_share", "carla", document=doc, recipient=recipient, keys={"bob": "x"})
+        assert not out["ok"] and out["kind"] in ("invalid_argument", "not_found"), recipient
+    assert "legal_basis" in call("document_share", "carla", document=doc, recipient="User:alice", keys={},
+                                  basis={"purpose": "x"})["error"]
+    assert KeyEnvelope[f"dept:Health:doc:{doc}|bob"] is None
+
+
+def test_I_PRV_4_anyone_reads_a_published_document_but_not_its_ciphertext():
+    health()
+    doc = ok("document_store", "carla", department="Health", kind="report", facts={"source": "inspection"},
+             **REPORT)["document"]
+    assert "sign in" in denied("document_get", fake_chain.ANONYMOUS, document=doc)
+    assert "not shared" in denied("document_get", "alice", document=doc)
+    assert "document.manage" in denied("document_publish", "alice", document=doc, ref="pub/report.pdf",
+                                       hash="sha256:cd34")
+    out = ok("document_publish", "carla", document=doc, ref="pub/report.pdf", hash="sha256:cd34")
+    assert out["document"] == doc and Document[doc].public == {"ref": "pub/report.pdf", "hash": "sha256:cd34"}
+    for reader in (fake_chain.ANONYMOUS, "alice"):
+        got = ok("document_get", reader, document=doc)
+        assert got["document"]["public"] == {"ref": "pub/report.pdf", "hash": "sha256:cd34"}
+        assert (got["document"]["title"], got["document"]["kind"]) == (REPORT["title"], "report")
+        assert (got["document"]["ref"], got["document"]["hash"], got["document"]["facts"]) == ("", "", {})
+        assert got["wrapped_dek"] == "" and got["envelope"] is None
+    staff = ok("document_get", "carla", document=doc)["document"]
+    assert (staff["ref"], staff["hash"], staff["facts"]) == (REPORT["ref"], REPORT["hash"], {"source": "inspection"})
+    ok("document_publish", "carla", document=doc, ref="pub/report.pdf", hash="sha256:cd34")
+    assert "other content" in denied("document_publish", "carla", document=doc, ref="pub/other.pdf", hash="sha256:ee")
+
+
+def test_a_document_is_published_to_an_outside_body_only_when_the_realm_knows_it():
+    health()
+    doc = ok("document_store", "carla", department="Health", **REPORT)["document"]
+    out = call("document_publish", "carla", document=doc, to="gazette", ref="pub/r.pdf", hash="sha256:cd34")
+    assert not out["ok"] and "gazette" in out["error"] and Document[doc].public is None

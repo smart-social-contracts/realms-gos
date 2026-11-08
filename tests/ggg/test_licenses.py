@@ -1,7 +1,7 @@
 import fake_chain
 import world
-from ggg import Delegation, License, Organization
-from kit import call, denied, later, ok
+from ggg import Delegation, License, Organization, Procedure, Proposal
+from kit import call, denied, direct, later, ok
 from api.licenses import active
 
 YEAR = 365 * 86400
@@ -111,3 +111,45 @@ def test_I_LIC_2_only_active_unexpired_licences_count():
     renewal = ok("license_renew", "dr-ana", license=lic)["license"]
     ok("license_decide", "hector", license=renewal, approve=True)
     assert active("Organization:clinic-b", "health").id == renewal and License[lic].status == "expired"
+
+
+HEALTH = {"kind": "health", "initiated_by": "the applicant", "matter": "licence",
+          "decision_deadline": {"count": 3, "unit": "month"}, "silence": "positive", "legislation": "Licensing Act 12"}
+
+
+def test_story_the_realm_defines_how_health_licences_are_decided():
+    depts = agora()
+    world.seat("health.drafter", "carla", depts["Infrastructure"], "procedure.define")
+    assert "procedure.define" in denied("procedure_define", "alice", **HEALTH)
+    assert ok("procedure_define", "carla", **HEALTH)["procedure"] == "health"
+    p = Procedure["health"]
+    assert (p.initiated_by, p.matter, p.decision_deadline, p.silence, p.legislation, p.facts) == (
+        "the applicant", "licence", {"count": 3, "unit": "month"}, "positive", "Licensing Act 12", {})
+    ok("procedure_define", "carla", kind="health", initiated_by="the department", facts={"fee": 0})
+    p = Procedure["health"]
+    assert (p.initiated_by, p.matter, p.decision_deadline, p.silence, p.facts) == ("the department", "", None, "", {"fee": 0})
+    ok("procedure_define", "carla", kind="business", initiated_by="the applicant", silence="negative",
+       decision_deadline={"count": 30, "unit": "working_day"})
+    listed = ok("procedure_list", "alice")
+    assert [x["id"] for x in listed["procedures"]] == ["health", "business"] and listed["next"] is None
+    assert [x["id"] for x in ok("procedure_list", "alice", count=1)["procedures"]] == ["health"]
+    assert "sign in" in denied("procedure_list", fake_chain.ANONYMOUS)
+
+
+def test_a_procedure_with_no_period_or_a_bad_silence_is_refused_before_anything_is_written():
+    """Candid cannot say most of these, so the arguments go to the operation as JSON."""
+    agora()
+    for bad in ({"decision_deadline": {"count": 3, "unit": "fortnight"}}, {"decision_deadline": {"count": -1, "unit": "day"}},
+                {"decision_deadline": {"count": "3", "unit": "day"}}, {"decision_deadline": {"unit": "day"}},
+                {"silence": "tacit"}):
+        out = direct("procedure_define", "ctl", **{**HEALTH, **bad})
+        assert not out["ok"] and out["kind"] == "invalid_argument", bad
+    assert Procedure["health"] is None
+
+
+def test_defining_a_procedure_is_governed_by_the_root_department():
+    depts = agora()
+    world.policy(depts["Infrastructure"].parent, 2, 3)
+    out = ok("procedure_define", "ctl", **HEALTH)
+    assert out["requires_vote"] and Procedure["health"] is None
+    assert Proposal[out["proposal"]].action["op"] == "procedure_define"
