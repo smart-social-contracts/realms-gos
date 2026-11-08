@@ -111,7 +111,7 @@ def test_the_legacy_operations_are_those_the_model_lists_as_delegable_before_gro
     file = (ROOT / "ggg" / "model" / "README.md").read_text()
     listed = file.split("A grant whose `scope` names permissions covers only these operations")[1].split(". Not")[0]
     names = {n for n in re.findall(r"`([a-z_]+)`", listed) if n in ggg_delegation.OPERATIONS}
-    assert len(poa.LEGACY) == 24 and poa.LEGACY == names and poa.ENABLED == poa.LEGACY <= set(op.OPS)
+    assert len(poa.LEGACY) == 24 and poa.LEGACY == names and poa.LEGACY <= poa.ENABLED <= set(op.OPS)
 
 
 def test_an_old_grant_of_self_data_view_does_not_reach_attributes():

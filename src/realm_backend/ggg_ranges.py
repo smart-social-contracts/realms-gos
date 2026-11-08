@@ -11,6 +11,7 @@ RANGES = {
     "attribute_list": {"limit": (0, 4294967295)},
     "delegation_groups": {"limit": (0, 4294967295)},
     "delegation_activity": {"limit": (0, 4294967295)},
+    "action_list": {"limit": (0, 4294967295)},
     "identity_submit": {"expires_at": (0, 9223372036)},
     "attribute_submit": {"expires_at": (0, 9223372036)},
     "invite_create": {"max_uses": (0, 9223372036854775807), "expires_at": (0, 9223372036)},

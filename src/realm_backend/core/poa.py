@@ -63,8 +63,10 @@ LEGACY = frozenset((
     "bid_submit", "bid_withdraw", "notification_list", "notification_read"))
 
 # The operations a grant by groups can reach in this release. Each phase of the rollout adds its own; the last
-# deletes the gate.
-ENABLED = LEGACY
+# deletes the gate. The five that phase 0 closed come back as pending actions (core.pending), and the member's
+# own pending actions are read like any other record.
+ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
+                    "federal_vote_propose", "action_get", "action_list"}
 
 # Whether the arguments of a call make an operation ask each time. They are read only under a grant by groups: a
 # grant made before groups keeps the behaviour phase 0 gave its operations (proposal_create refuses an action itself).
@@ -126,7 +128,8 @@ def grant_groups(grant):
 
 def longest(group, everything):
     """How long, in seconds, a grant may last since its start and still reach ``group``. Under "everything" no group
-    goes past 90 days; an operation of no group is reached by "everything" alone."""
+    goes past 90 days. A direct operation of no group (``extension_call``, whose inner calls each need a group of their
+    own) is reached by "everything" alone."""
     seconds = GROUPS[group][3] if group else EVERYTHING["longest"]
     return min(seconds, EVERYTHING["longest"]) if everything else seconds
 
@@ -155,13 +158,20 @@ def covered(grant, name, spec, permission, at=None):
     return (at or chain.now()) - max(grant.starts_at, grant.accepted_at) < longest(group, everything)
 
 
+def asks(grant, spec, args):
+    """Whether the call of ``spec`` with ``args`` asks the member each time under ``grant``: its tier is confirm, or
+    its tier is direct and the arguments make it ask. Only a grant by groups asks: what an old grant does not cover
+    is refused, never prepared."""
+    if grant is None or grant_groups(grant) is None:
+        return False
+    return spec["tier"] == "confirm" or bool(spec["confirm_if"] and CONDITIONS[spec["confirm_if"]](args))
+
+
 def direct(grant, name, spec, args):
     """Whether the call runs at once under ``grant``, rather than waiting for the member: its tier is direct, this
     release has switched it on (GGG's flag alone opens nothing), and, under a grant by groups, the arguments do not
     make it ask each time."""
-    by_groups = grant is not None and grant_groups(grant) is not None
-    asks = by_groups and spec["confirm_if"] and CONDITIONS[spec["confirm_if"]](args)
-    return spec["delegable"] and reachable(name, spec) and not asks
+    return spec["delegable"] and reachable(name, spec) and not asks(grant, spec, args)
 
 
 def enabled_by_group():

@@ -16,7 +16,7 @@ import ggg_did
 from api import crypto, tasks
 from api.proposals import settings
 from api.setup import VERSION
-from core import chain
+from core import chain, pending
 from core.candid import Principal as ParsedPrincipal, Reader, idl_hash, quote
 from core.op import dispatch, ops, run as drive
 from core.ratio import ONE
@@ -28,7 +28,9 @@ STANDARDS = (("ICRC-10", "https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-1
 # GGG fields Realms GOS names otherwise.
 RENAME = {("DelegationGrantArgs", "scope"): "operations", ("DelegationRequestArgs", "scope"): "operations",
           ("DelegationDecideArgs", "scope"): "operations", ("QuarterRegisterArgs", "canister"): "quarter",
-          ("ResolutionQueryArgs", "search"): "text"}
+          ("ResolutionQueryArgs", "search"): "text",
+          # The member a delegate calls for is not who the call_for operation acts as: the delegate acts as itself.
+          ("CallForArgs", "on_behalf_of"): "grantor", ("ReadForArgs", "on_behalf_of"): "grantor"}
 # GGG times that Realms GOS rounds up to the second, where it rounds every other time down: a time something must not
 # precede (a proposal's effective_at), not one it must not outlast (an expiry, a deadline).
 CEIL = {("ProposalCreateArgs", "effective_at")}
@@ -296,11 +298,17 @@ def action(a):
     op, args = a["op"], a.get("args") or {}
     if op == "codex_install" and args.get("checksum"):
         return {"Code": {"url": args.get("url", ""), "checksum": args["checksum"]}}
+    return {"Call": call_record(op, args)}
+
+
+def call_record(op, args):
+    """An operation's call as GGG's ``Call``: its ggg_ method with its arguments in Candid. An operation GGG lacks keeps
+    its name, with its JSON arguments."""
     if op not in METHODS:
-        return {"Call": {"method": op, "arg": json.dumps(args, sort_keys=True).encode()}}
+        return {"method": op, "arg": json.dumps(args, sort_keys=True).encode()}
     arg_t = METHODS[op][0]
     text = f"({to_candid(ggg_args(op, args), arg_t)})" if arg_t else "()"
-    return {"Call": {"method": f"ggg_{op}", "arg": chain.candid_encode(text)}}
+    return {"method": f"ggg_{op}", "arg": chain.candid_encode(text)}
 
 
 def scope(row, key):
@@ -309,6 +317,30 @@ def scope(row, key):
 
 
 GROUP = "group:"
+
+
+def pending_action(a):
+    """A pending action's call, in Candid, and, once the call ran, its reply, Candid-encoded with the method's own type."""
+    method, args, result = get(a, "method"), get(a, "args"), get(a, "result")
+    ran = get(a, "status") == "done" and result and result.get("ok")
+    return {"call": call_record(method, args),
+            "result": encoded(method, args, {k: v for k, v in result.items() if k != "ok"}) if ran else None}
+
+
+def encoded(op, args, out):
+    """The reply ``out`` of operation ``op`` called with ``args`` as GGG's ``Ok`` value, Candid-encoded with the method's own
+    type."""
+    reply_t = METHODS[op][1]
+    value = reply(op, args, {"ok": True, **out}, reply_t)["Ok"]
+    return chain.candid_encode(f"({to_candid(value, fields(reply_t)['Ok'])})")
+
+
+class Shown:
+    """A record built from what a reply holds, not from the row: the approval of a pending action shows the reply with its
+    secrets, which the row never keeps."""
+
+    def __init__(self, fields):
+        self.__dict__.update(fields)
 
 
 def named(row):
@@ -338,6 +370,7 @@ FIX = {
     "DelegableOperation": lambda d: {"operation": get(d, "operation") or get(d, "op")},
     "Delegation": lambda d: {"scope": named(d)},
     "DelegationRequest": lambda d: {"scope": named(d)},
+    "PendingAction": lambda a: pending_action(a),
     "Policy": lambda p: {"m": get(p, "m") or 1, "n": get(p, "n") or 1, "veto": get(p, "veto") or [],
                          "quorum": int(get(p, "quorum") or 0)},
     "UserEntry": lambda e: entry(get(e, "user") or e),
@@ -560,6 +593,16 @@ def refused(op, e):
     return {"Err": {"InvalidArgument": str(e)}}
 
 
+def asks_call_for(op, args):
+    """GGG D28: a call in its confirm form that a delegate makes through its own method is refused, for the method's reply
+    has no place for a pending action: it is filed with ``call_for``. None if the call is not one."""
+    behalf = args.get("on_behalf_of")
+    if behalf and pending.asked_under(behalf, chain.caller(), ops()[op], args):
+        return {"Err": {"Forbidden": {"permission": None,
+                                      "message": f"{op} needs the member's approval: file it with ggg_call_for"}}}
+    return None
+
+
 def read(op, arg_t, arg, reply_t):
     if op in LOCAL:
         return LOCAL[op](arg)
@@ -569,7 +612,8 @@ def read(op, arg_t, arg, reply_t):
         args = request(op, arg_t, arg)
     except BadArgument as e:
         return refused(op, e)
-    return reply(op, args, json.loads(drive(dispatch(op, json.dumps(args), query=True))), reply_t)
+    return asks_call_for(op, args) or reply(op, args, json.loads(drive(dispatch(op, json.dumps(args), query=True))),
+                                            reply_t)
 
 
 def run(op, arg_t, arg, reply_t):
@@ -579,6 +623,9 @@ def run(op, arg_t, arg, reply_t):
         args = request(op, arg_t, arg)
     except BadArgument as e:
         return refused(op, e)
+    filed = asks_call_for(op, args)
+    if filed:
+        return filed
     out = yield from dispatch(op, json.dumps(args))
     return reply(op, args, json.loads(out), reply_t)
 
@@ -715,7 +762,17 @@ ARGS = {
     "representative_remove": lambda a, g: seat_owner(a),
     "delegation_list": lambda a, g: {"from_" + a.get("role", "delegate"): a.get("from"), "count": a.get("count")},
     "notification_read": lambda a, g: {**a, "all": True} if "notification" not in a else a,
+    "call_for": lambda a, g: called_for(a), "read_for": lambda a, g: called_for(a),
 }
+
+
+def called_for(args):
+    """call_for's and read_for's arguments as the operations take them: the operation a ggg_ method stands for and its
+    arguments, decoded with the method's own type."""
+    if not args["method"].startswith("ggg_") or args["method"].removeprefix("ggg_") not in METHODS:
+        raise BadArgument(f"this realm has no method {args['method']}")
+    call = unaction("Call", {"method": args["method"], "arg": args["arg"]})
+    return {**{k: v for k, v in args.items() if k not in ("method", "arg")}, "method": call["op"], "args": call["args"]}
 
 
 def chart(out, args):
@@ -753,7 +810,20 @@ def local(name, **args):
     return call(name, args, user=chain.caller())
 
 
+def called(out, args):
+    """call_for's reply as GGG's: the pending action the call became, the proposal it filed, or the method's own reply."""
+    if "approve_link" in out:
+        return {"Pending": ggg.PendingAction[out["pending"]]}
+    if out.get("requires_vote"):
+        return {"Proposed": out["proposal"]}
+    return {"Done": encoded(args["method"], args["args"], out)}
+
+
 BUILD = {
+    "call_for": called,
+    "read_for": lambda o, a: encoded(a["method"], a["args"], o),
+    "action_approve": lambda o, a: Shown(o["action"]),
+    "action_collect": lambda o, a: encoded(o["method"], o["args"], {k: v for k, v in o["result"].items() if k != "ok"}),
     "invite_create": lambda o, a: {"invite": o["invite"]["id"], "code": o["invite"]["code"]},
     "me": me,
     "delegation_list": delegations,

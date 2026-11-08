@@ -129,16 +129,16 @@ def check_grant(grant_id, grantor, action, filed_at):
 
 
 def filer(p):
-    """The delegate that filed ``p`` under a power of attorney, if any."""
+    """The delegate that filed ``p`` under a power of attorney, or prepared it for the member who approved it, if any."""
     grant = Delegation[p.filed_under] if p.filed_under else None
-    return grant.delegate if grant else ""
+    return grant.delegate if grant else p.prepared_by
 
 
 def filed_for(p, member):
     """Whether a delegate of ``member`` filed ``p``: under a grant of theirs, whoever holds it and whatever its status
-    is now (I-ID-13)."""
+    is now, or prepared it as a pending action the member approved (I-ID-13)."""
     grant = Delegation[p.filed_under] if p.filed_under else None
-    return bool(grant) and grant.grantor == member
+    return grant.grantor == member if grant else bool(p.prepared_by) and p.proposer == member
 
 
 def default_rule(department):
@@ -205,15 +205,16 @@ def end(p, status):
 
 
 def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=(), grant="",
-                 stated=None):
+                 stated=None, prepared_by=""):
     """File a proposal. ``stated``: the proposer's ``kind``, ``matter`` and stricter rule; a proposal filed without
-    it takes the default rule of its scope."""
+    it takes the default rule of its scope. ``prepared_by``: the delegate whose pending action the proposer approved."""
     stated = stated or {}
     rule = stricter_rule(department, stated)
     pid = next_id(Proposal, "P")
     fix_records(action, pid)  # the last refusal: a refused proposal leaves no trace
     p = Proposal(id=pid, title=title, description=description, proposer=user,
-                 on_behalf_of=user if by != user else "", filed_under=grant, department=department, action=action,
+                 on_behalf_of=user if by != user else "", filed_under=grant, prepared_by=prepared_by,
+                 department=department, action=action,
                  kind=stated.get("kind") or "", matter=stated.get("matter") or "", status="voting",
                  opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
                  effective_at=effective_at, links=list(links), **rule)
@@ -336,9 +337,10 @@ def settle(p, final):
     return result
 
 
-def file_replay(filing, user, by, grant=""):
+def file_replay(filing, user, by, grant="", prepared_by=""):
     """File the proposal ``filing`` describes (core.op.filing), to replay its action once accepted."""
-    p = new_proposal(filing["title"], user, by, find(Department, filing["department"]), filing["action"], grant=grant)
+    p = new_proposal(filing["title"], user, by, find(Department, filing["department"]), filing["action"], grant=grant,
+                     prepared_by=prepared_by)
     return {"proposal": p.id, "requires_vote": True}
 
 
@@ -458,7 +460,27 @@ def effective_at_of(args):
     return value
 
 
-@op("proposal.create", returns="proposal")
+def proposing_action(user, args):
+    """What a proposal that carries an action is, in the realm's words: whom it asks and what it would run, with the
+    source, version and checksum of a codex it would install."""
+    action = args.get("action")
+    if not action:
+        return []
+    department = find(Department, args["department"]) if args.get("department") else root()
+    what = action.get("args") or {}
+    lines = [{"label": "Scope", "value": "the whole realm" if department.is_root else department.id},
+             {"label": "Action", "value": str(action.get("op"))}]
+    if action.get("op") == "codex_install":
+        source = what.get("url") or what.get("codex") or "the code sent with the proposal"
+        version = what.get("version") or (what.get("manifest") or {}).get("version")
+        lines += [{"label": label, "value": str(value)} for label, value in
+                  (("Codex source", source), ("Codex version", version), ("Codex checksum", what.get("checksum")))
+                  if value]
+    return lines + [{"label": "Effect", "value": "Files a proposal in your name. The realm votes on it; if it passes, "
+                                                  "the action runs"}]
+
+
+@op("proposal.create", returns="proposal", summary=proposing_action)
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
@@ -488,7 +510,7 @@ def proposal_create(c, args):
     links = checked_links(c.user, args.get("links"))
     stated = {k: args.get(k) for k in ("kind", "matter", "threshold", "quorum", "threshold_of")}
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
-                     effective_at_of(args), links, c.grant, stated)
+                     effective_at_of(args), links, c.grant, stated, c.prepared_by)
     return {"proposal": p.id}
 
 

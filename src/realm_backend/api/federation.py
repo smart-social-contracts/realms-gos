@@ -120,7 +120,13 @@ def execute(v):
     return json.loads(out)
 
 
-@op("federal_vote.propose")
+def proposing(user, args):
+    """What a federal vote does: its action runs in every quarter, as the realm itself, if it passes."""
+    return [{"label": "Effect", "value": "The vote opens in every quarter of the federation. If it passes, its action runs "
+                                         "in each of them as the realm itself, not as you"}]
+
+
+@op("federal_vote.propose", summary=proposing)
 def federal_vote_propose(c, args):
     """Propose a federal vote titled ``title`` on ``action`` (``{"op": …, "args": …}``), held in every active quarter
     under the published rule; a quarter passes it to the capital. Returns ``vote``."""

@@ -370,7 +370,14 @@ def scale_status(c, args):
     return scale()
 
 
-@op("self.change_quarter", returns="forward")
+def moving(user, args):
+    """What a move changes for ``user``: they become a guest here and lose their profiles in this quarter."""
+    dest = Quarter[str(args.get("quarter"))]
+    return ([{"label": "Destination", "value": dest.name}] if dest and dest.name else []) + [
+        {"label": "Effect", "value": "You become a guest here and your profiles in this quarter are deleted"}]
+
+
+@op("self.change_quarter", returns="forward", summary=moving)
 def self_change_quarter(c, args):
     """Move your membership to ``quarter``, another active quarter of the federation; here you become a guest.
     Returns ``forward`` and ``home_quarter``."""

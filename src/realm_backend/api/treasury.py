@@ -992,30 +992,57 @@ def loan_list(c, args):
 
 # --- payment accounts -----------------------------------------------------------------------------
 
-def account_owner(c, args):
+def account_owner(user, args):
     org = args.get("organization")
     if not org:
-        return f"User:{c.user}"
-    if c.user not in (find(Organization, org).admins or []):
+        return f"User:{user}"
+    if user not in (find(Organization, org).admins or []):
         raise Forbidden(f"you do not administer {org}")
     return f"Organization:{org}"
 
 
-@op("self.data_manage", returns="account")
+def adding_account(user, args):
+    """What a payout account added for ``user`` changes: the realm pays an owner at the first account that names the token."""
+    owner, symbol = account_owner(user, args), args.get("symbol", "")
+    who = "you" if owner == f"User:{user}" else owner
+    if not symbol:
+        return [{"label": "Effect", "value": "It names no token, so no payment is sent to it"}]
+    now = address(owner, symbol)
+    if any(a.symbol == symbol for a in each(PaymentAccount, "owner", owner)):
+        return [{"label": "Effect", "value": f"Realm payments to {who} in {symbol} keep going to {now}; this account "
+                                              "comes after it"}]
+    return [{"label": "Effect", "value": f"Realm payments to {who} in {symbol} will go to {args['address']} instead of "
+                                          f"{now}"}]
+
+
+def removing_account(user, args):
+    """What removing a payout account of ``user`` changes: where the realm pays the owner in that token afterwards."""
+    a = find(PaymentAccount, args["account"])
+    if a.owner != account_owner(user, args):
+        raise Forbidden(f"{a.id} is not yours")
+    who = "you" if a.owner == f"User:{user}" else a.owner
+    after = next((b.address for b in each(PaymentAccount, "owner", a.owner) if b.symbol == a.symbol and b.id != a.id),
+                 a.owner.removeprefix("User:"))
+    return [{"label": "Account", "value": f"{a.address} on {a.network}" + (f" ({a.label})" if a.label else "")},
+            {"label": "Effect", "value": f"Realm payments to {who} in {a.symbol or 'any token'} will go to {after} "
+                                          f"instead of {a.address}"}]
+
+
+@op("self.data_manage", returns="account", summary=adding_account)
 def payment_account_add(c, args):
     """Add a payout account (``network``, ``address``, optional ``symbol`` and ``label``) for you, or for
     ``organization`` if you administer it. Transfers in ``symbol`` are paid to it. Returns ``account``."""
-    a = PaymentAccount(id=next_id(PaymentAccount, "PA"), owner=account_owner(c, args), network=args["network"],
+    a = PaymentAccount(id=next_id(PaymentAccount, "PA"), owner=account_owner(c.user, args), network=args["network"],
                        address=args["address"], symbol=args.get("symbol", ""), label=args.get("label", ""))
     return {"account": a.id}
 
 
-@op("self.data_manage", returns="account")
+@op("self.data_manage", returns="account", summary=removing_account)
 def payment_account_remove(c, args):
     """Remove your payout ``account``, or with ``organization`` one of an organization you administer. Returns the
     ``account`` as it was."""
     a = find(PaymentAccount, args["account"])
-    if a.owner != account_owner(c, args):
+    if a.owner != account_owner(c.user, args):
         raise Forbidden(f"{a.id} is not yours")
     gone = view(a)
     a.delete()
