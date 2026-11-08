@@ -543,15 +543,16 @@ kind of GGG's fact schema so that every implementation rounds the same way. The 
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
 `times()` takes no rounding argument and a chapter names no rule.
 
-**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row,
-the object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
+**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row, the
+object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
 currency (GGG's model), and it reaches the chapter as a `Money` of that currency's decimals, so that
-`subject.assessed_value.times(entry.rate)` rounds to its cent. A codex therefore computes a tax on land only when it
-is billed in the accounting currency, and `tax_assess` refuses the call otherwise; a tax on land in another token has
-its own rate, amount or brackets. Only a `compute_` method knows the token: anywhere else an amount read is a `Money`
-without decimals, and `times()` says so instead of guessing. A chapter's own amounts are `Money(units, decimals)`,
-the decimals those of the amounts it read (`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the
-same kind, `sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
+`subject.assessed_value.times(entry.rate)` rounds to its cent. Every amount a chapter reads is in it, so a codex
+computes a tax only when it is billed in the accounting currency, whatever the tax's subject: `tax_assess` refuses a
+codex's answer for one billed in another token, and such a tax has its own rate, amount or brackets. Only a `compute_`
+method knows the token: anywhere else an amount read is a `Money` without decimals, and `times()` says so instead of
+guessing. A chapter's own amounts are `Money(units, decimals)`, the decimals those of the amounts it read
+(`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the same kind:
+`sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
 (`realms.legislation.rates.times`): there is one implementation.
 
 **Round once.** GGG rounds an amount where it is complete (D23), not at each step: a tax by brackets adds the exact
@@ -909,8 +910,8 @@ class Tax(above("tax")):
   from whoever proposes the rate.
 - **The amount** is computed by `compute_tax_assess`, which GGG calls for each entry and subject, page
   by page. The subject is the view of the parcel (`Land.get`'s, with its `assessed_value` and `area`), whose
-  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax on land computed by a
-  codex is billed in (§4.5), and GGG's rounding rule applies to `times()`.
+  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax computed by a codex is
+  billed in (§4.5), and GGG's rounding rule applies to `times()`.
 
 ### 5.7 A body beside the line
 
