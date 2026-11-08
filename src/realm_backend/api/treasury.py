@@ -289,8 +289,9 @@ def invoice_item(item):
         raise Fail(f"an invoice item has {', '.join(ITEM_FIELDS)}")
     if not isinstance(item.get("concept"), str) or not item["concept"]:
         raise Fail("an invoice item names its concept")
-    if type(item.get("amount")) is not int:
-        raise Fail(f"item '{item['concept']}': amount is a whole number of the token's smallest unit")
+    if type(item.get("amount")) is not int or abs(item["amount"]) > MONEY_MAX:
+        raise Fail(f"item '{item['concept']}': amount is a whole number of the token's smallest unit, at most "
+                   f"{MONEY_MAX} either way")
     quantity = item.get("quantity")
     if quantity is not None and (type(quantity) is not int or quantity < 0):
         raise Fail(f"item '{item['concept']}': quantity is a whole number, not negative")
@@ -311,12 +312,18 @@ def total(items):
     return sum(item["amount"] for item in items)
 
 
-def new_invoice(payer, items, symbol, due_at, reason="", facts=None):
-    """A pending invoice for the sum of its ``items``, which is never negative (I-FIN-7)."""
-    find(Token, symbol)
+def checked_total(items):
+    """The sum of the ``items`` of an invoice, which is never negative (I-FIN-7) and is an amount of money."""
     amount = total(items)
     if not 0 <= amount <= MONEY_MAX:
         raise Fail(f"the items of an invoice sum to {amount}, which is not an amount of money")
+    return amount
+
+
+def new_invoice(payer, items, symbol, due_at, reason="", facts=None):
+    """A pending invoice for the sum of its ``items``."""
+    find(Token, symbol)
+    amount = checked_total(items)
     return Invoice(id=next_id(Invoice, "INV"), payer=payer_ref(payer), amount=amount, items=items, facts=facts or {},
                    symbol=symbol, due_at=int(due_at), reason=reason, status="pending")
 
@@ -631,8 +638,8 @@ def check_budget_proposal(args):
 def budget_propose(c, args):
     """Adopt every draft line of the open fiscal ``period`` together; ``years`` says how many periods the plan covers,
     when more than one (a fact for legislation). Each line replaces the adopted or extended line of its fund and
-    category, and the spending booked against that carries over. Returns ``period``, ``budgets`` and the planned
-    ``revenue`` and ``expense``."""
+    category, and the spending booked against that carries over; every extended line of the period closes, replaced or
+    not. Returns ``period``, ``budgets`` and the planned ``revenue`` and ``expense``."""
     p, lines = find(FiscalPeriod, args["period"]), proposed_lines(args)
     if p.status != "open" or not lines:
         raise Conflict(f"{p.id} is {p.status}; only draft lines for an open period can be adopted")
@@ -640,6 +647,9 @@ def budget_propose(c, args):
     for b in lines:
         supersede(b, "amended")
         b.status, b.proposal = "adopted", c.proposal
+    for b in p.budgets:  # the budget of the period is now the adopted one: no extended line stands beside it
+        if b.status == "extended":
+            b.status = "closed"
     return {"period": p.id, "budgets": [b.id for b in lines], **totals}
 
 
@@ -647,6 +657,16 @@ def previous_period(p):
     """The fiscal period opened just before ``p``, if any. Periods open in order, so their rows do."""
     n = int(p._id) - 1
     return FiscalPeriod.load_some(n, 1)[0] if n >= 1 else None
+
+
+def standing_at_end(p):
+    """The budget of period ``p`` as it stood when it ended: of each fund and category, the newest line that was adopted
+    or extended (``closed`` once the period is), never one a newer line replaced."""
+    newest = {}
+    for b in sorted(p.budgets, key=lambda line: int(line._id)):
+        if b.status in (*IN_FORCE, "closed"):
+            newest[b.slot] = b
+    return list(newest.values())
 
 
 @op("org.manage_budget", returns="extended")
@@ -662,7 +682,7 @@ def budget_extend(c, args):
     if held:
         raise Conflict(f"{p.id} already has a budget line: {held[0].id} is {held[0].status}")
     before = previous_period(p)
-    lines = [b for b in before.budgets if b.status in (*IN_FORCE, "closed")] if before else []
+    lines = standing_at_end(before) if before else []
     if not lines:
         raise Conflict(f"the period before {p.id} has no budget to carry over")
     for b in lines:
@@ -834,6 +854,8 @@ def loan_create(c, args):
     if not symbol:
         raise Conflict("the realm has no accounting currency")
     find(Fund, args["fund"])
+    if treasury_row().debt_outstanding + amount > MONEY_MAX:
+        raise Fail(f"the debt of the realm would pass the largest amount of money, {MONEY_MAX}")
     loan = Loan(id=next_id(Loan, "LOAN"), lender=args["lender"], amount=amount, symbol=symbol,
                 term=period_of(args["term"]), rate=int(args["rate"]), fund=args["fund"], outstanding=amount,
                 facts=args.get("facts") or {})

@@ -127,6 +127,20 @@ def test_budget_extend_is_refused_once_the_period_has_an_extended_or_adopted_lin
     assert call("budget_extend", "bob", period="FY2028")["kind"] == "conflict"  # an adopted line
 
 
+def test_budget_extend_carries_the_line_in_force_when_the_period_ended_and_never_a_replaced_one():
+    agora_budget()
+    ok("budget_extend", "bob", period="FY2027")
+    draft("ROADS", "capital", 500, period="FY2027")  # 500 over the 300 carried
+    propose("FY2027")
+    ok("period_open", "bob", period="FY2028", starts_at=FY2027["ends_at"], ends_at=FY2027["ends_at"] + 100)
+    assert ok("budget_extend", "bob", period="FY2028")["extended"] == 3
+    capital = [line for line in lines_of("FY2028") if line[:2] == ("ROADS", "capital")]
+    assert capital == [("ROADS", "capital", "expense", 500, 0, "extended")]
+    ok("period_close", "bob", period="FY2027")  # and the same once the period is closed
+    ok("period_open", "bob", period="FY2029", starts_at=FY2027["ends_at"] + 100, ends_at=FY2027["ends_at"] + 200)
+    assert ok("budget_extend", "bob", period="FY2029")["extended"] == 3 and len(FiscalPeriod["FY2029"].budgets) == 3
+
+
 def test_draft_lines_stand_in_no_way_of_budget_extend():
     agora_budget()
     draft("ROOT", "salaries", 800, period="FY2027")
@@ -172,6 +186,17 @@ def test_an_extended_line_caps_spending_until_an_adopted_budget_replaces_it():
     propose("FY2027")
     assert (extended.status, Budget[new].status, Budget[new].actual) == ("closed", "adopted", 300)
     assert pay(200)["status"] == "completed"
+
+
+def test_a_proposal_for_the_period_closes_every_extended_line_of_it():
+    agora_budget()
+    ok("budget_extend", "bob", period="FY2027")
+    draft("ROADS", "capital", 500, period="FY2027")  # the only slot the new budget names
+    propose("FY2027")
+    assert sorted((b[1], b[5]) for b in lines_of("FY2027")) == [
+        ("capital", "adopted"), ("capital", "closed"), ("property_tax", "closed"), ("salaries", "closed")]
+    seen = ok("budget_view", "mallory", period="FY2027")
+    assert [(b["category"], b["status"]) for f in seen["funds"] for b in f["budgets"]] == [("capital", "adopted")]
 
 
 def test_the_budget_view_shows_the_extended_lines_in_force():
@@ -245,6 +270,17 @@ def test_a_loan_is_checked_before_it_is_recorded():
                    {"term": {"count": "3", "unit": "year"}}, {"term": 3}):
         assert not call("loan_create", "bob", **{**base, **change})["ok"], change
     assert Loan.count() == 0 and Treasury["1"].debt_outstanding == 0
+
+
+def test_the_debt_of_the_realm_stays_an_amount_of_money():
+    setup_finance()
+    most = 2**53 - 1
+    borrow(most - 100)
+    assert "largest amount of money" in denied("loan_create", "bob", lender="bank-b", amount=101, term=TERM, rate=1,
+                                               fund="ROADS")
+    assert Loan.count() == 1 and Treasury["1"].debt_outstanding == most - 100
+    borrow(100)
+    assert Treasury["1"].debt_outstanding == most
 
 
 def test_borrowing_is_the_realms_to_decide():

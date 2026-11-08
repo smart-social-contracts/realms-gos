@@ -211,7 +211,7 @@ def test_tax_assess_bills_the_items_of_the_migrated_policy_rounded_to_the_cent(r
     assert (again["count"], again["skipped"]) == (0, 3)
 
 
-def test_tax_declare_rounds_a_progressive_tax_to_the_cent_in_each_bracket(realm, people):
+def test_tax_declare_adds_up_the_brackets_of_a_progressive_tax_and_rounds_the_total_once(realm, people):
     declared = ok(realm, "tax_declare", people["ctl"], period="2026", base="turnover", amount=1_000 * UNIT + 5 * 10**7)
     # 2 % of 1 000 units, and 3 % of 0.5 unit: 1.5 cents, which is 2.
     assert declared["owed"] == 20 * UNIT + 2 * 10**6
@@ -232,7 +232,8 @@ def test_a_budget_is_proposed_per_period_with_its_totals_as_facts(realm, people)
     out = ok(realm, "budget_propose", ctl, period="FY2027", years=2)
     assert (out["revenue"], out["expense"], len(out["budgets"])) == (50 * UNIT, 400 * UNIT, 2)
     seen = ok(realm, "budget_view", people["alice"], query=True, period="FY2027")
-    assert sorted(b["status"] for f in seen["funds"] for b in f["budgets"]) == ["adopted", "adopted", "extended"]  # the replaced line is closed
+    # The adopted budget stands alone: the extended lines of the period are closed, the replaced one and the other.
+    assert sorted(b["status"] for f in seen["funds"] for b in f["budgets"]) == ["adopted", "adopted"]
 
 
 def test_a_loan_is_the_debt_of_the_realm_until_repaid(realm, people):

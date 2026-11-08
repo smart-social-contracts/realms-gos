@@ -104,7 +104,13 @@ def test_a_rate_charges_to_the_cent_and_an_exact_half_goes_away_from_zero():
     assert taxes.owed({**REVENUE, "rate": 1_500_000}, unit, 8) == 2_000_000  # 0.015 -> 0.02
     assert taxes.owed({**REVENUE, "rate": 1_100_000}, unit, 8) == 1_000_000  # 0.011 -> 0.01
     brackets = {"brackets": [{"up_to": 1_000, "rate": 15 * PERCENT}, {"up_to": None, "rate": 25 * PERCENT}]}
-    assert taxes.owed({**PROPERTY, "facts": brackets}, 1_010, CENTS) == 150 + 3  # each bracket to the cent: 2.5 -> 3
+    assert taxes.owed({**PROPERTY, "facts": brackets}, 1_010, CENTS) == 150 + 3  # 152.5 -> 153
+
+
+def test_the_brackets_of_a_progressive_tax_add_up_exactly_and_round_once():
+    halves = {"brackets": [{"up_to": 10, "rate": 25 * PERCENT}, {"up_to": None, "rate": 25 * PERCENT}]}
+    # 10 units at 25 % are 2.5 and the next 10 are 2.5: 5 exactly, where rounding each bracket would make 3 and 3.
+    assert taxes.owed({**PROPERTY, "facts": halves}, 20, CENTS) == 5
 
 
 def test_policy_is_checked():
@@ -301,13 +307,59 @@ def test_a_codex_that_computes_nothing_leaves_no_invoice(monkeypatch):
 
 @pytest.mark.parametrize("answer", ["five", {"concept": "x", "amount": 5}, [{"concept": "x", "amount": 5.5}],
                                     [{"concept": "", "amount": 5}], [{"concept": "x", "amount": 5, "tip": 1}],
-                                    [{"concept": "x", "amount": -5}]])
+                                    [{"concept": "x", "amount": -5}], [{"concept": "x", "amount": 2**53}],
+                                    [{"concept": "x", "amount": -2**53 - 1}, {"concept": "y", "amount": 2**53 + 6}]])
 def test_a_codex_answer_that_is_not_invoice_items_bills_nobody(monkeypatch, answer):
     setup_taxes()
     adopt_policy([RESIDENCE])
     monkeypatch.setattr(codex, "compute", codex_answering(answer))
     assert not call("tax_assess", "bob", period="2026")["ok"]
     assert Invoice.count() == 0 and TaxDeclaration.count() == 0
+
+
+def codex_answering_by_subject(answers, billed_meanwhile=None):
+    """A ``codex.compute`` that answers each subject as ``answers`` says (``None`` for those it lacks). Asked for
+    ``billed_meanwhile``'s subject, it also files the declaration another call would have, as a call can between two
+    answers."""
+    def compute(name, context):
+        if context["subject"] == billed_meanwhile:
+            TaxDeclaration(id="TD-other", declarant="User:alice", period="2026", base="residence",
+                           key="User:alice|residence|2026", status="settled")
+        return answers.get(context["subject"])
+        yield
+    return compute
+
+
+def test_one_bad_answer_bills_nobody_even_the_payers_asked_before_it(monkeypatch):
+    setup_taxes()
+    adopt_policy([RESIDENCE])
+    good = [{"concept": "residence", "amount": 5}]
+    monkeypatch.setattr(codex, "compute", codex_answering_by_subject({"User:alice": good, "User:bob": "five"}))
+    assert not call("tax_assess", "bob", period="2026")["ok"]
+    assert Invoice.count() == 0 and TaxDeclaration.count() == 0
+
+
+def test_a_codex_that_answers_some_subjects_of_a_payer_and_not_the_others_bills_nobody(monkeypatch):
+    setup_taxes()
+    Land(id="L-1", owner="User:alice", width=1, height=1)
+    Land(id="L-2", owner="User:alice", width=1, height=1)
+    adopt_policy([PROPERTY])
+    good = [{"concept": "property", "amount": 5}]
+    monkeypatch.setattr(codex, "compute", codex_answering_by_subject({"Land:L-1": good}))
+    out = call("tax_assess", "bob", period="2026")
+    assert not out["ok"] and "Land:L-2" in out["error"]
+    assert Invoice.count() == 0 and TaxDeclaration.count() == 0
+
+
+def test_a_payer_billed_while_the_codex_was_asked_is_not_billed_again(monkeypatch):
+    setup_taxes()
+    adopt_policy([RESIDENCE])
+    good = [{"concept": "residence", "amount": 5}]
+    answers = {f"User:{p}": good for p in world.PEOPLE}
+    monkeypatch.setattr(codex, "compute", codex_answering_by_subject(answers, billed_meanwhile="User:mallory"))
+    out = ok("tax_assess", "bob", period="2026")
+    assert out["skipped"] == 1 and out["count"] == len(world.PEOPLE) - 1
+    assert not invoices_of("User:alice")
 
 
 def test_without_an_answer_the_codex_leaves_the_entry_its_own_charge(monkeypatch):
