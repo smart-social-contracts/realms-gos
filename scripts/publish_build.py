@@ -133,9 +133,9 @@ def _stamp_build(root: Path, canister: str, release_tag: str | None) -> None:
 
 
 def _build_realm_backend(
-    root: Path, variant: str = DEFAULT_BUILD_VARIANT, release_tag: str | None = None
+    root: Path, variant: str = DEFAULT_BUILD_VARIANT, version: str | None = None
 ) -> Path:
-    """The realm_backend wasm of ``variant``, gzipped, with the release tag in its status()."""
+    """The realm_backend wasm of ``variant``, gzipped, with ``version`` in its status()."""
     cmd = [
         _basilisk_python(root, "realm_backend"),
         "scripts/pack_realm_backend.py",
@@ -143,8 +143,8 @@ def _build_realm_backend(
         variant,
         "--gzip",
     ]
-    if release_tag:
-        cmd += ["--version", release_tag]
+    if version:
+        cmd += ["--version", version]
     _run(cmd, cwd=root)
     gz = root / ".basilisk" / "realm_backend" / "realm_backend.wasm.gz"
     print(f"  backend wasm: {gz} ({gz.stat().st_size:,} bytes)")
@@ -156,10 +156,10 @@ def _build_backend(
     canister: str,
     main_py: str,
     variant: str = DEFAULT_BUILD_VARIANT,
-    release_tag: str | None = None,
+    version: str | None = None,
 ) -> Path:
     if canister == "realm_backend":
-        return _build_realm_backend(root, variant=variant, release_tag=release_tag)
+        return _build_realm_backend(root, variant=variant, version=version)
     bpy = _basilisk_python(root, canister)
     did = root / "src" / canister / f"{canister}.did"
     env = {**os.environ, "CANISTER_CANDID_PATH": str(did)}
@@ -374,8 +374,14 @@ def main():
         release_tag = None if args.from_main else f"v{base_version}"
         if canister != "realm_backend":  # the realm's packer stamps its own version
             _stamp_build(root, canister, release_tag)
+        # A snapshot has no release tag, so the realm reports its registry label,
+        # less the test-variant marker (status() reports build_variant).
         backend_wasm = _build_backend(
-            root, canister, main_py, variant=realm_variant, release_tag=release_tag
+            root,
+            canister,
+            main_py,
+            variant=realm_variant,
+            version=release_tag or base_version,
         )
     if want_frontend:
         frontend_dist = _build_frontend(
