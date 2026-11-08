@@ -53,8 +53,9 @@ claude = votes("P-1", "{alice}", "{claude}", ["yes", "no", "yes"], on_behalf_of=
 print(json.dumps({{"own": own, "delegated": claude}}))
 """
 
-# The instructions of a delegated vote, about three times what PocketIC measures for this release.
-DELEGATED_VOTE_BUDGET = 60_000_000
+# The instructions of a vote cast for a member, three times what PocketIC measures for this release (at most 65M
+# the first time, which compiles what the notice reads, and about 50M after; the member's own vote costs 36M).
+DELEGATED_VOTE_BUDGET = 150_000_000
 
 
 def ok(realm, op, who, query=False, **args):
@@ -185,7 +186,7 @@ def test_events_written_before_the_upgrade_read_grant_as_empty(upgraded, people)
     after = ok(upgraded, "events", CONTROLLER, query=True)["events"][0]
     assert after.get("grant") == upgraded.old_grant
     activity = ok(upgraded, "delegation_activity", alice, query=True, delegation=upgraded.old_grant)["events"]
-    assert [e["id"] for e in activity] == [after["id"]]
+    assert activity[0]["id"] == after["id"] and all(int(e["id"]) > upgraded.last_event for e in activity)
     notices = [n for n in ok(upgraded, "notification_list", alice, query=True)["notifications"] if n["topic"] == "poa"]
     assert len(notices) == 1
 

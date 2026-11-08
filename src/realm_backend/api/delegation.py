@@ -58,7 +58,7 @@ def longest(scope):
 
 def too_long(lasts, limit):
     if lasts > limit:
-        raise Fail(f"a delegation lasts at most {'one year' if limit == YEAR else f'{limit // DAY} days'}")
+        raise Fail(f"a delegation lasts at most {'one year' if limit == YEAR else str(limit // DAY) + ' days'}")
 
 
 def window(args, limit=YEAR):

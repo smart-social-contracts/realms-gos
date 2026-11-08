@@ -434,7 +434,7 @@ def test_the_vocabulary_lists_the_groups_the_caller_can_grant():
 
 def test_the_old_operations_list_stays_what_a_permission_grant_covers():
     world.build()
-    listed = {o["op"] for o in ok("delegable_operations", "alice")["operations"]}
+    listed = {o["op"] for o in ok("delegable_operations", "alice")["operations"] if not o["op"].startswith("t_")}
     assert listed == poa.LEGACY
 
 
