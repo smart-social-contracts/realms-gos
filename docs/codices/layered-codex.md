@@ -881,18 +881,30 @@ tax, as it applies in València (codex sha256:3f1c…), path Spain → València
 | `F.s.contains("a")` | set fact contains | `s.contains("a")` |
 | `F.x.is_none()`, `F.x.is_some()` | optional fact absent or present | `!(context.facts has x)`, `context.facts has x` |
 | `when(c, a, b=0)` | if c then a else b | `if c then a else b` |
-| `F.p > months(6)` | a Period fact against a Period of the unit the rule names; another unit makes the comparison true | `context.facts.p.unit != "Month" \|\| context.facts.p.count > 6` |
+| `F.p > months(6)` | a Period fact against a Period of the unit the rule names; another unit makes the comparison true (polarity below) | `context.facts.p.unit != "Month" \|\| context.facts.p.count > 6` |
 
-**Periods compare only within one unit** (§4.3), and a forbid fails closed: a deadline in any other unit
-makes the comparison true, so the forbid fires. A deadline must therefore be written in the unit the
-rule uses, because days and months don't convert cleanly: a month is not a fixed number of days, and a
-count of days in legislation is often a count of working days. Art. 21.2 (§4) is in months, so
-`days(60)` is refused unless the call names the legislation that allows a longer deadline, and
-València's default is `months(2)` (§5.1).
+**Periods compare only within one unit** (§4.3), and a forbid fails closed: a Period comparison is true,
+in the forbid's sense (it counts towards the forbid firing), for a deadline in any other unit. A
+deadline must therefore be written in the unit the rule uses, because days and months don't convert
+cleanly: a month is not a fixed number of days, and a count of days in legislation is often a count of
+working days. Art. 21.2 (§4) is in months, so `days(60)` is refused unless the call names the
+legislation that allows a longer deadline, and València's default is `months(2)` (§5.1).
 
-The generator pushes a negation inside a Period comparison, so `~(F.p > months(6))` becomes
-`context.facts.p.unit != "Month" || context.facts.p.count <= 6`, and another unit still makes the
-forbid fire. A forbid over a Period therefore fires for every other unit, negated or not.
+The generator writes a Period comparison by its polarity, the number of `~` above it. Under an even
+number, it is the row above. Under an odd number, it writes `p.unit == "Month" && p.count > 6` and
+keeps the `!` above it, so `~(F.p > months(6))` is `!(p.unit == "Month" && p.count > 6)`, that is,
+`p.unit != "Month" || p.count <= 6`. The same holds under other facts:
+
+```
+~(F.d.is_some() & (F.d >= months(1)))
+!(context.facts has d && (context.facts.d.unit == "Month" && context.facts.d.count >= 1))
+```
+
+A Period comparison is therefore true, in the forbid's sense, for every other unit, negated or not. The
+Python evaluation follows the same rule (rule 7).
+
+A Period comparison can't be the condition of `when()`: inside arithmetic it has no polarity, so another
+unit could raise a cap.
 
 The rules:
 
@@ -917,7 +929,7 @@ The rules:
 8. **Ids and annotations:** each forbid's Cedar `@id` is `"<source>/<domain>/<attribute>"`, plus a
    `@legislation("<citation>")` annotation.
 9. **A forbid never errors.** Cedar skips a policy whose evaluation errors, so an overflowing forbid
-   would allow. `check` proves it for every forbid (`never-errors`, §12.3), and the generator bounds
+   would allow. `check` proves it for every forbid (`never-errors`, §12.1), and the generator bounds
    arithmetic on facts by the fact schema's ranges (a value out of range makes the forbid fire).
 
 **When a forbid, when a guard:** use a `forbid` whenever the rule fits the expression language, so
@@ -1153,8 +1165,8 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) (see [Authorization](.
    `action in Realm::Action::"call"`. `GUARDRAILS` (`principal, action, resource`) are unchanged.
    `context.op` stays for compatibility.
 3. **Load order:** `GUARDRAILS + POLICIES + generated forbids of every chapter`, parsed once per codex
-   activation. The generated rules name their operation in the head, so a decision only evaluates
-   rules for that operation.
+   activation. The generated rules name their action in the head (the operation, or
+   `<operation>.<list>`), so a decision only evaluates rules for that action.
 
 Costs, by the Cedar engine's own notes
 ([`cedar_api.rs`](https://github.com/smart-social-contracts/basilisk/blob/main/basilisk/compiler/cpython_canister_template/src/cedar_api.rs)
@@ -1403,7 +1415,7 @@ codex needs from GGG beyond that is specified in the GGG repository,
 - the **entities, fields and operations real legislation needs**
   ([ggg#2](https://github.com/smart-social-contracts/ggg/issues/2)), among them the `compute_` hook
   kind, forbids that range over a list (`each`), the `Pending` codex status with `codex_activate`, the
-  fact schema's rate scale (hundred-millionths) and rounding rule, and `Period` as a count and a unit;
+  fact schema's rate scale (hundred-millionths), rounding rule, and ranges and allowed values, and `Period` as a count and a unit;
 - the **links between realms** ([ggg#3](https://github.com/smart-social-contracts/ggg/issues/3)):
   sync sources, followers, `ReportedLayer`, the published record, the `follower_compliance` fact and
   the link event a sync source hooks;
@@ -1429,10 +1441,10 @@ is no G6.
 
 | Id | Repo | Title | Depends on | Done when |
 |---|---|---|---|---|
-| R1 ([#481](https://github.com/smart-social-contracts/realms-gos/issues/481)) | realms-gos (research) | Cedar analysis tooling for "newly forbidden", "nothing permitted", "never fires" and "overlap" | – | **Done:** a report with a recommendation (SymCC with cvc5, §12.3) and a working sample on the three forbids of §5.6 and the Art. 21.2 forbid of §4. Its findings are in §5.6, §6, §9.4 and §12.3, and in S2, C2, C4 and D4 below |
+| R1 ([#481](https://github.com/smart-social-contracts/realms-gos/issues/481)) | realms-gos (research) | Cedar analysis tooling for "newly forbidden", "nothing permitted", "never fires" and "overlap" | – | **Done:** a report with a recommendation (SymCC with cvc5, §12.3) and a working sample on the three IBI range and cap forbids of §5.6 and the Art. 21.2 forbid of §4. Its findings are in §5.6, §6, §9.4 and §12.3, and in S2, C2, C4 and D4 below |
 | R2 ([#482](https://github.com/smart-social-contracts/realms-gos/issues/482)) | realms-gos (research) | Which §4 restrictions the codex sandbox enforces at run time today | – | table of rule → enforced or not, with the code path |
 | G1 ([ggg#1](https://github.com/smart-social-contracts/ggg/issues/1)) | ggg | Domain list | – | versioned list merged |
-| G2 ([ggg#2](https://github.com/smart-social-contracts/ggg/issues/2)) | ggg | The entities, fields and operations that real legislation needs (§13), each added or narrowed; the share arguments name `legislation`; the fact schema's rate scale (hundred-millionths) and unit rule; `each="taxes"` over the saved policy, also at `tax_policy_draft` | G1 | `.did` merged; conformance notes updated |
+| G2 ([ggg#2](https://github.com/smart-social-contracts/ggg/issues/2)) | ggg | The entities, fields and operations that real legislation needs (§13), each added or narrowed; the share arguments name `legislation`; the fact schema's rate scale (hundred-millionths), unit rule, and ranges and allowed values; `each="taxes"` over the saved policy, also at `tax_policy_draft` | G1 | `.did` merged; conformance notes updated |
 | G3 ([ggg#3](https://github.com/smart-social-contracts/ggg/issues/3)) | ggg | Links between realms, with `follower_compliance`, `ReportedLayer {version, checksum}` and the link event a sync source hooks | – | types, operations and the link invariants merged; the install rules (vouching record, whole releases, one chain) are Realms GOS's (D2) |
 | G4 ([ggg#4](https://github.com/smart-social-contracts/ggg/issues/4)) | ggg | Proposal links: "replaces" and "relates to" (§7) | – | `.did` merged; a withdrawn proposal can be replaced by a new one that links to it |
 | G5 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)) | ggg | `Realm.timezone`, an IANA name, set by each realm and never inherited (§4.5) | – | `.did` merged; the UI shows the realm's official time; local time is computed by Realms GOS (#503), not by GGG |
@@ -1444,7 +1456,7 @@ is no G6.
 | [#505](https://github.com/smart-social-contracts/realms-gos/issues/505) | realms-gos | Count working days in the realm (§3.4, §4.3): start + n working days on the realm's calendar in its time zone, one function in the date module of #503; the library gains `working_days(n)`; a count that reaches a year with no calendar entries fails closed | #503, G8 | PocketIC: a 2-working-day count over a holiday and a weekend, and one across a summer-time change, pass; a count into a year with no entries fails with a clear error |
 | [#499](https://github.com/smart-social-contracts/realms-gos/issues/499) | realms-gos | Test harness for linked realms: scripted peers in `fake_chain`, multi-canister PocketIC, outcall mocking, public fixtures | – | the workflow tests of the change list run on it |
 | S1 ([#483](https://github.com/smart-social-contracts/realms-gos/issues/483)) | realms-gos | `realms.legislation`: `Chapter`, `above`, marks, settings with `check=`, `pct()`, the `self` API, hooks, guards and `compute_` methods by GGG operation name, `on_codex_activate` and `compute_realm_join`, read-only `ggg` entities, `times()`, `self.calendar`; self-contained, no CLI dependency | G2 | unit tests for every line of the §4.1 table, including the §5.5 refusal; the module imports nothing from typer, rich or requests |
-| S2 ([#484](https://github.com/smart-social-contracts/realms-gos/issues/484)) | realms-gos | `realms.legislation`: `F` expressions with `each` (one Cedar action per list, §6) and `S.`, `pct()` literals, Period comparisons, canonical Cedar output, a generic output mode for analysis (settings left open, §12.3), Python evaluation | S1 | the forbids of §5.6 and §4 produce the Cedar of §5.8; Python and Cedar agree on 10 000 generated fact sets, among them the literals ±1, 0 and the 64-bit extremes; every forbid passes `never-errors`; a negated Period comparison still fires for another unit |
+| S2 ([#484](https://github.com/smart-social-contracts/realms-gos/issues/484)) | realms-gos | `realms.legislation`: `F` expressions with `each` (one Cedar action per list, §6) and `S.`, `pct()` literals, Period comparisons, canonical Cedar output, a generic output mode for analysis (settings left open, §12.3), Python evaluation | S1 | the forbids of §5.6 and §4 produce the Cedar of §5.8; Python and Cedar agree on 10 000 generated fact sets, among them the literals ±1, 0 and the 64-bit extremes; every forbid passes `never-errors`; a Period comparison is true for another unit, alone or under `~` with other facts, and one in `when()` is refused |
 | S3 ([#485](https://github.com/smart-social-contracts/realms-gos/issues/485)) | realms-gos | Resolver: layer paths from the links with the one-chain rule, extension merge, `uses`, depth limit | S1 | examples 5.1–5.7 resolve as described |
 | C1 ([realms-codices#10](https://github.com/smart-social-contracts/realms-codices/issues/10)) | realms-codices | `legislation/` tree, `source.json`, `releases.json` with the `calendar` field, `calendar.json`, README for authors | S3 | the València example chapters present; schema checked in CI |
 | C2 ([realms-codices#11](https://github.com/smart-social-contracts/realms-codices/issues/11)) | realms-codices | `realms legislation check` in realms-codices CI (the command lives in realms-gos `cli/`), including `never-errors` for every forbid (§6, rule 9) | S1, S2, C1 | every rule of §12.1 has a failing and a passing test, among them a forbid that can overflow |
