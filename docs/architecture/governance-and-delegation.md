@@ -186,10 +186,11 @@ every group, those the member gains later included, and every operation a later 
 - The limits are read when a call is made, not only when the grant is: a stricter limit binds a grant made before it.
 - **The rollout.** `ENABLED` in `core/poa.py` lists the operations a grant by groups can reach in this release. The
   classification arrives whole, the code in phases, so an operation that is not enabled is refused whatever its
-  tier. This release enables the 25 operations that were delegable once phase 0 had closed its holes.
-- **Grants made before groups** name permissions (`operations`) and keep covering exactly those 25 operations (`LEGACY`),
+  tier. This release enables the 24 operations that were delegable once phase 0 had closed its holes.
+- **Grants made before groups** name permissions (`operations`) and keep covering exactly those 24 operations (`LEGACY`),
   with the behaviour they had then: a proposal with an action stays refused, and payout accounts, identity proofs,
-  quarter moves and federal votes stay refused. A later release never widens them.
+  quarter moves and federal votes stay refused. A later release never widens them. `attribute_list` is not among them: a
+  grant of `self.data_view` was consented as profile, notifications and invoices, and attributes are personal data.
 
 ### Rules for a delegate
 
@@ -206,8 +207,9 @@ every group, those the member gains later included, and every operation a later 
 - A proposal a delegate files with `proposal_create` is a motion: it carries no action.
 - A delegate's governed call (a transfer from a fund, say) is always filed as a proposal, even where the
   department decides directly. The proposal records the grant it was filed under. When it is carried, the call runs
-  unless that grant was revoked or replaced, and only if the grant could still make the call: its scope, its limits,
-  the member's permissions and standing are checked again. A grant that has merely expired does not stop it, because a
+  unless that grant was revoked or replaced, and only if the grant could still make the call: its scope, its limits (the
+  grant's longest duration is measured at the filing, not at the vote), the member's permissions and standing are
+  checked again. A grant that has merely expired does not stop it, because a
   vote can outlast the grant; after the grant has expired, the member stops such a proposal by withdrawing it (or
   voting no). Otherwise the proposal ends `failed`, with the reason.
 - A delegate never votes on a proposal it filed, whichever grantor it votes for: a delegate that holds grants from
@@ -221,12 +223,14 @@ every group, those the member gains later included, and every operation a later 
 
 - After a delegate's update succeeds, the member gets a notification with topic `poa`: "‹name› did ‹what›", linked
   to the proposal it concerns or else to the Power of attorney page. ‹name› is the grant's label, or else the
-  delegate's principal. A delegate's acts within an hour share one notice (`Delegation.notice` and `notice_acts`): it keeps a count and the last ten acts, and is unread again each time. Reads send nothing, and marking
-  notices read leaves none.
+  delegate's principal. A delegate's acts within an hour share one notice (`Delegation.notice` and `notice_acts`): it
+  keeps a count and the last ten acts, and is unread again each time. Reads send nothing, and marking notices read
+  leaves none.
 - A delegate never marks a `poa` notice read: by id it is refused, and with `all` it is left unread.
 - The audit `Event` of a delegated act names the grant it ran under (`Event.grant`, indexed). `delegation_activity`
-  pages the events of one grant, newest first, to its grantor and its delegate. The audit log keeps its last
-  2,000 events, so the reply says how far back it reaches (`since`); the `poa` notices are the lasting record.
+  pages the events of one grant, newest first, to its grantor and to its delegate, who needs no permission of its own
+  for that grant (an AI connection has none). The audit log keeps its last 2,000 events, so the reply says how far
+  back it reaches (`since`); the `poa` notices are the lasting record.
 
 The guardrails make delegation safe by construction: a delegate can only do what its grant covers, only on `direct`
 operations, never on `signing` ones, and never with `all`. The audit `Event` records both the grantor (`user`) and the

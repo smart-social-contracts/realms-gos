@@ -51,10 +51,11 @@ OWN = {
 }
 
 # The operations that were delegable once phase 0 had closed its holes (GGG lists them, the model's "Power of
-# attorney"). A grant that names permissions covers exactly these, with the behaviour they had then, however many
-# operations later releases make delegable.
+# attorney"), less attribute_list: a grant of self.data_view was consented as "profile, notifications and invoices", and
+# attributes are personal data. A grant that names permissions covers exactly these, with the behaviour they had then,
+# however many operations later releases make delegable.
 LEGACY = frozenset((
-    "me", "profile_update", "attribute_list", "zone_set", "zone_clear", "proposal_create", "proposal_withdraw",
+    "me", "profile_update", "zone_set", "zone_clear", "proposal_create", "proposal_withdraw",
     "proposal_vote", "transfer_create", "invoice_check", "my_invoices", "tax_declare", "license_apply", "license_renew",
     "request_file", "request_get", "dispute_file", "dispute_withdraw", "dispute_get", "evidence_submit", "appeal_file",
     "bid_submit", "bid_withdraw", "notification_list", "notification_read"))
@@ -110,6 +111,11 @@ def is_legacy(name, spec):
     return name in LEGACY or (spec["tier"] is None and spec["delegable"])
 
 
+def reachable(name, spec):
+    """Whether a grant can reach ``name`` in this release: it is enabled, or legacy."""
+    return name in ENABLED or is_legacy(name, spec)
+
+
 def grant_groups(grant):
     """The groups ``grant`` names, or None if it names permissions."""
     scope = grant.scope or {}
@@ -132,9 +138,9 @@ def longest_grant(groups):
     return min(limits)
 
 
-def covered(grant, name, spec, permission):
-    """Whether ``grant`` reaches the call of ``name``, which needs ``permission``. The limits are read now, so a
-    stricter one binds a grant made before it."""
+def covered(grant, name, spec, permission, at=None):
+    """Whether ``grant`` reaches the call of ``name``, which needs ``permission``, at time ``at`` (default now). The
+    limits are read when the call is made, so a stricter one binds a grant made before it."""
     groups = grant_groups(grant)
     if groups is None:
         return is_legacy(name, spec) and permission in (grant.scope or {}).get("operations", ())
@@ -144,7 +150,7 @@ def covered(grant, name, spec, permission):
     if not everything and group not in groups:
         return False
     # The grant counts from when it began to act: its start, or its acceptance if that came later.
-    return chain.now() - max(grant.starts_at, grant.accepted_at) < longest(group, everything)
+    return (at or chain.now()) - max(grant.starts_at, grant.accepted_at) < longest(group, everything)
 
 
 def direct(grant, name, spec, args):
@@ -153,7 +159,7 @@ def direct(grant, name, spec, args):
     make it ask each time."""
     by_groups = grant is not None and grant_groups(grant) is not None
     asks = by_groups and spec["confirm_if"] and CONDITIONS[spec["confirm_if"]](args)
-    return spec["delegable"] and (name in ENABLED or is_legacy(name, spec)) and not asks
+    return spec["delegable"] and reachable(name, spec) and not asks
 
 
 def enabled_by_group():

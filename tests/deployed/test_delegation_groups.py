@@ -126,6 +126,16 @@ def test_a_vote_under_a_group_grant_goes_through_ggg_proposal_vote(realm, people
     assert notices and notices[0]["title"] == f"{claude} did proposal_vote P-1"
 
 
+def test_the_delegate_of_a_grant_reads_its_activity_with_no_permission_of_its_own(realm, people):
+    alice, bob, claude = people["alice"], people["bob"], people["claude-conn"]
+    mine = [g for g in ok(realm, "delegation_list", alice, query=True)["as_grantor"] if g["delegate"] == claude][-1]["id"]
+    page = ok(realm, "delegation_activity", claude, query=True, delegation=mine)
+    assert page["events"] and {e["grant"] for e in page["events"]} == {mine}
+    other = ok(realm, "delegation_grant", bob, delegate=people["mallory"], groups=["vote"], expires_in=DAY)
+    error = refused(realm, "delegation_activity", claude, query=True, delegation=other["delegation"])
+    assert "needs self.data_view" in error
+
+
 def test_a_plain_member_reads_the_groups_she_can_grant(realm, people):
     out = realm.ggg("ggg_delegation_groups", GROUPS_ARGS, {"cursor": [], "limit": [], "on_behalf_of": []},
                     GROUP_PAGE, people["bob"], query=True)
@@ -170,7 +180,7 @@ def test_a_grant_made_before_groups_works_as_it_did(upgraded, people):
                                on_behalf_of=alice)
     assert "does not cover" in refused(upgraded, "profile_update", claude, nickname="Ali", on_behalf_of=alice)
     listed = {o["op"] for o in ok(upgraded, "delegable_operations", alice, query=True)["operations"]}
-    assert "proposal_vote" in listed and "payment_account_add" not in listed and len(listed) == 25
+    assert "proposal_vote" in listed and "payment_account_add" not in listed and len(listed) == 24
     card = [g for g in ok(upgraded, "delegation_list", alice, query=True)["as_grantor"]
             if g["id"] == upgraded.old_grant][0]
     assert card["scope"] == {"operations": ["proposal.vote", "proposal.create"]} and card["status"] == "active"

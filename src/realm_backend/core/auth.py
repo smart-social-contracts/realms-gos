@@ -118,9 +118,10 @@ def active_grant(grantor, delegate):
     raise Denied(f"{delegate} holds no active power of attorney from {grantor}")
 
 
-def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None):
+def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None, at=None):
     """Refuse the call with Denied, or return the id of the power of attorney a delegate acts under ("" for no one).
-    A delegate acts under its active grant from ``user``, or under ``grant`` when one is given."""
+    A delegate acts under its active grant from ``user``, or under ``grant`` when one is given. The grant's longest
+    duration is measured at ``at`` (default now): the filing of a proposal that carries the call out."""
     if origin == "replay":
         return ""
     if by == chain.ANONYMOUS and not spec["public"]:
@@ -133,7 +134,7 @@ def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None
         "read": spec["read"], "public": spec["public"], "signing": spec["signing"],
         "delegable": poa.direct(grant, name, spec, args), "delegated": user != by,
         "signer_agent": spec["signing"] and is_agent(by),
-        "covered": poa.covered(grant, name, spec, needed) if grant else False,
+        "covered": poa.covered(grant, name, spec, needed, at) if grant else False,
         "declared": sorted(declared),
         # A party may be named by principal or as "User:<principal>" (I-ALL-3).
         "parties": sorted({q for p in spec["parties"](args) for q in (p, p.removeprefix("User:"))})

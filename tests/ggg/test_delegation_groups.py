@@ -109,9 +109,25 @@ def test_everything_covers_exactly_the_enabled_operations(name, monkeypatch):
 
 def test_the_legacy_operations_are_those_the_model_lists_as_delegable_before_groups():
     file = (ROOT / "ggg" / "model" / "README.md").read_text()
-    listed = file.split("A grant whose `scope` names permissions covers only the operations")[1].split("Under such a grant")[0]
+    listed = file.split("A grant whose `scope` names permissions covers only these operations")[1].split(". Not")[0]
     names = {n for n in re.findall(r"`([a-z_]+)`", listed) if n in ggg_delegation.OPERATIONS}
-    assert poa.LEGACY == names and poa.ENABLED == poa.LEGACY <= set(op.OPS)
+    assert len(poa.LEGACY) == 24 and poa.LEGACY == names and poa.ENABLED == poa.LEGACY <= set(op.OPS)
+
+
+def test_an_old_grant_of_self_data_view_does_not_reach_attributes():
+    """It was consented as profile, notifications and invoices; attributes are personal data."""
+    world.build()
+    assert "attribute_list" not in poa.LEGACY
+    Delegation(id="D-old", grantor="alice", delegate="claude-conn", status="active", expires_at=fake_chain.now() + DAY,
+               scope={"operations": ["self.data_view"]})
+    assert "does not cover" in denied("attribute_list", "claude-conn", on_behalf_of="alice")
+    ok("me", "claude-conn", on_behalf_of="alice")
+
+
+def test_ops_list_says_which_operations_a_power_of_attorney_reaches_now():
+    flags = {o["name"]: o["delegable"] for o in ok("ops_list", fake_chain.ANONYMOUS)["operations"]}
+    assert flags["proposal_vote"] and not flags["proposal_list"] and not flags["attribute_list"]
+    assert not flags["delegation_revoke_all"] and not flags["status"]
 
 
 # ---- What a grant cannot say
@@ -238,11 +254,22 @@ def test_a_transfer_filed_under_a_group_grant_fails_once_the_grant_is_revoked():
 def test_a_transfer_filed_under_a_group_grant_fails_when_a_limit_has_tightened(monkeypatch):
     finance_for_carla()
     grant("money", grantor="carla")
+    later(3 * DAY)
     p = file_transfer()
+    # The grant was three days old when it filed the transfer, which a limit of a day would not have allowed.
     monkeypatch.setitem(poa.GROUPS, "money", (*poa.GROUPS["money"][:3], DAY))
-    later(2 * DAY)
     assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
     assert "does not allow transfer_create now" in Proposal[p].result["error"]
+
+
+def test_a_transfer_filed_within_the_limit_runs_after_the_limit_has_passed():
+    finance_for_carla()
+    grant("money", grantor="carla", days=90)
+    later(89 * DAY)
+    p = file_transfer()
+    later(2 * DAY)  # the vote ends on day 91, past the grant's 90 days
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "executed"
+    assert Transfer.count() == 1
 
 
 def test_payout_identity_quarter_moves_and_federal_votes_are_refused_under_everything():
@@ -411,6 +438,30 @@ def test_the_grantor_and_the_delegate_page_a_grants_activity_newest_first():
         assert [e["op"] for e in rest["events"]] == ["profile_update"] and rest["next"] is None
     assert "not yours" in denied("delegation_activity", "carla", delegation=g)
     assert "unknown" in denied("delegation_activity", "alice", delegation="D-99")
+
+
+def test_the_delegate_of_a_grant_reads_its_activity_without_a_permission_of_its_own():
+    world.build()
+    mine = grant("profile")  # claude-conn is an AI connection: no profile, so no permission
+    others = grant("profile", grantor="bob", delegate="agent-2")
+    ok("profile_update", "claude-conn", nickname="Ali", on_behalf_of="alice")
+    ok("profile_update", "agent-2", nickname="Bobby", on_behalf_of="bob")
+    page = ok("delegation_activity", "claude-conn", delegation=mine)
+    assert [e["op"] for e in page["events"]] == ["profile_update"] and page["events"][0]["user"] == "alice"
+    assert "needs self.data_view" in denied("delegation_activity", "claude-conn", delegation=others)
+    assert "needs self.data_view" in denied("delegation_activity", "agent-3", delegation=mine)
+    assert "sign in" in denied("delegation_activity", fake_chain.ANONYMOUS, delegation=mine)
+
+
+def test_the_activity_count_is_clamped_like_every_page():
+    world.build()
+    g = grant("profile", delegate="bob")
+    ok("delegation_accept", "bob", delegation=g)
+    for i in range(3):
+        ok("profile_update", "bob", nickname=f"Ali{i}", on_behalf_of="alice")
+    page = ok("delegation_activity", "alice", delegation=g, count=1)
+    assert len(page["events"]) == 1 and page["next"]
+    assert len(ok("delegation_activity", "alice", delegation=g, count=10_000)["events"]) == 3
 
 
 def test_the_activity_says_how_far_back_the_log_reaches(monkeypatch):

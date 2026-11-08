@@ -104,11 +104,12 @@ def checked_links(user, links):
     return [{"kind": link["kind"], "proposal": link["proposal"]} for link in links]
 
 
-def check_grant(grant_id, grantor, action):
-    """A delegate's governed call, filed as a proposal, runs unless the power of attorney it was filed under has been
-    revoked or replaced, and only if that grant could still make the call: its scope, the member's permissions and
-    standing are checked again. The grant may have expired since, because a vote can outlast it. The vote is the
-    realm's consent to a collective act, not to the member's own acts."""
+def check_grant(grant_id, grantor, action, filed_at):
+    """A delegate's governed call, filed as a proposal at ``filed_at``, runs unless the power of attorney it was filed
+    under has been revoked or replaced, and only if that grant could still make the call: its scope, the member's
+    permissions and standing are checked again, and the grant's longest duration as it stood at the filing. The grant
+    may have expired since, because a vote can outlast it. The vote is the realm's consent to a collective act, not to
+    the member's own acts."""
     if not grant_id:
         raise Forbidden("it was filed under power of attorney before this realm recorded grants; file it again")
     grant, name = find(Delegation, grant_id), action["op"]
@@ -118,7 +119,7 @@ def check_grant(grant_id, grantor, action):
     if spec is None:
         raise Fail(f"unknown operation '{name}'")
     try:
-        auth.authorize(grantor, grant.delegate, name, spec, action.get("args") or {}, grant=grant)
+        auth.authorize(grantor, grant.delegate, name, spec, action.get("args") or {}, grant=grant, at=filed_at)
     except auth.Denied:
         raise Forbidden(f"the power of attorney {grant.id} it was filed under does not allow {name} now")
     except KeyError as e:
@@ -281,7 +282,7 @@ def run_action(p):
     try:
         check_scope(p.department, p.action)
         if p.on_behalf_of:
-            check_grant(p.filed_under, p.proposer, p.action)
+            check_grant(p.filed_under, p.proposer, p.action, p.opens_at)
     except Fail as e:
         p.status, p.result = "failed", {"ok": False, "error": str(e), "kind": e.kind}
         return

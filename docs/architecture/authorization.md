@@ -76,7 +76,7 @@ forbid (principal, action, resource)
 `context.delegable` says the call's tier is direct, the release has switched the operation on, and, under a grant by
 groups, its arguments do not make it ask each time. `context.covered` says the grant reaches the call: it names the
 operation's group (or everything), the group's longest duration has not passed since the grant began, or, for a
-grant made before groups, the operation is one of the 22 it covers and its permission is named. Both are computed by
+grant made before groups, the operation is one of the 24 it covers and its permission is named. Both are computed by
 [`core/poa.py`](../../src/realm_backend/core/poa.py); see
 [Delegation](governance-and-delegation.md#delegation-power-of-attorney).
 

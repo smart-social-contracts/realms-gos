@@ -265,16 +265,23 @@ def delegation_groups(c, args):
     return {"groups": groups[start - 1:start - 1 + count], "next": start + count if len(groups) >= start + count else None}
 
 
-@op("self.data_view", read=True, returns="events")
+def activity_permission(args):
+    """The delegate of a grant reads that grant's activity as itself, with no permission of its own: an AI connection
+    has no profile. Anyone else needs ``self.data_view``."""
+    d = Delegation[str(args.get("delegation", ""))]
+    return "self.join" if d and chain.caller() == d.delegate else "self.data_view"
+
+
+@op("self.data_view", read=True, perm_for=activity_permission, returns="events")
 def delegation_activity(c, args):
     """The events recorded under ``delegation``, a grant of yours or to you, newest first: ``count`` (default 100, at
     most 500) with an id up to ``from`` (default the latest); ``next`` continues them (null at the end). The audit log
     keeps its last events only: ``since`` is the time of the oldest it still holds, and the ``poa`` notices are the
-    lasting record."""
+    lasting record. The delegate of the grant reads its events without a permission of its own, and no others."""
     d = find(Delegation, args["delegation"])
     if c.user not in (d.grantor, d.delegate):
         raise Forbidden(f"{d.id} is not yours")
-    last, count = int(args.get("from") or Event.max_id()), min(int(args.get("count") or 100), 500)
+    last, count = int(args.get("from") or Event.max_id()), paging(args)[1]
     newest = [e for e in reversed(list(each(Event, "grant", d.id))) if int(e.id) <= last]
     oldest = oldest_event()
     return {"events": [view(e) for e in newest[:count]], "since": oldest.at if oldest else 0,

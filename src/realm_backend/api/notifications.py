@@ -112,7 +112,8 @@ def events(c, args):
 
 @op(None, read=True, public=True)
 def ops_list(c, args):
-    """Every operation with its permission, flags and description."""
-    return {"operations": [{"name": name, "perm": s["perm"], "read": s["read"], "delegable": s["delegable"],
+    """Every operation with its permission, flags and description. ``delegable`` says a power of attorney can reach it in
+    this release (the groups it can be granted in are in ``delegable_operations``)."""
+    return {"operations": [{"name": name, "perm": s["perm"], "read": s["read"], "delegable": poa.reachable(name, s),
                             "governed": s["governed"] is not None, "signing": s["signing"], "public": s["public"],
                             "doc": (s["fn"].__doc__ or "").strip()} for name, s in sorted(ops().items())]}
