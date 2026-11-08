@@ -252,7 +252,7 @@ def test_tax_policy_view_needs_a_signed_in_member():
 
 def codex_answering(answer, asked=None):
     """A ``codex.compute`` that answers every question with ``answer``, noting what it was asked."""
-    def compute(name, context):
+    def compute(name, context, decimals=None):
         if asked is not None:
             asked.append((name, context["entry"]["code"], context["subject"]))
         return answer
@@ -285,15 +285,15 @@ def test_tax_assess_passes_the_entry_and_the_subject_to_the_codex(monkeypatch):
     adopt_policy([RESIDENCE])
     seen = []
 
-    def compute(name, context):
-        seen.append(context)
+    def compute(name, context, decimals=None):
+        seen.append((context, decimals))
         return [{"concept": "residence", "amount": 5}]
         yield
 
     monkeypatch.setattr(codex, "compute", compute)
     ok("tax_assess", "bob", period="2026", tax="residence")
-    assert seen[0] == {"entry": TAXES[1], "subject": "User:alice"}
-    assert {c["subject"] for c in seen} == {f"User:{p}" for p in world.PEOPLE}
+    assert seen[0] == ({"entry": TAXES[1], "subject": "User:alice"}, CENTS)  # and the decimals of the token it is billed in
+    assert {c["subject"] for c, _ in seen} == {f"User:{p}" for p in world.PEOPLE}
 
 
 def test_a_codex_that_computes_nothing_leaves_no_invoice(monkeypatch):
@@ -321,7 +321,7 @@ def codex_answering_by_subject(answers, billed_meanwhile=None):
     """A ``codex.compute`` that answers each subject as ``answers`` says (``None`` for those it lacks). Asked for
     ``billed_meanwhile``'s subject, it also files the declaration another call would have, as a call can between two
     answers."""
-    def compute(name, context):
+    def compute(name, context, decimals=None):
         if context["subject"] == billed_meanwhile:
             TaxDeclaration(id="TD-other", declarant="User:alice", period="2026", base="residence",
                            key="User:alice|residence|2026", status="settled")

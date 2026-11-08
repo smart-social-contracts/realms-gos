@@ -82,10 +82,11 @@ def hook(name, context=None):
     return out
 
 
-def compute(name, context):
+def compute(name, context, decimals=None):
     """The active codex's answer to GGG's ``compute_<name>`` for ``context`` (its keyword arguments), None when no
-    chapter defines it. A generator, for the operations that drive it with ``yield from``."""
-    return legislation.compute(name, **context)
+    chapter defines it. ``decimals`` is the token the answer is in (core.legislation.compute). A generator, for the
+    operations that drive it with ``yield from``."""
+    return legislation.compute(name, decimals=decimals, **context)
     yield  # noqa: unreachable, on purpose
 
 

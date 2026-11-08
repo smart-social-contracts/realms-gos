@@ -9,9 +9,13 @@ in agreement on what they refuse.
 from realms.legislation.errors import Refused
 from realms.legislation.subset import (
     CLASS_BODY,
+    FLOAT_NAMES,
     FORMAT_METHODS,
     FRAME_ATTRIBUTES,
     GGG,
+    NO_DIVISION,
+    NO_FLOAT,
+    NO_POWER,
     SDK,
     sdk_names,
 )
@@ -119,6 +123,7 @@ class Check:
         ):
             self.constant(node.operand, member)
         elif isinstance(node, ast.BinOp):
+            self.operator(node)
             self.constant(node.left, member)
             self.constant(node.right, member)
         elif isinstance(node, ast.Name):
@@ -342,6 +347,7 @@ class Check:
                 self.target(target, local)
             self.expression(node.value, local)
         elif isinstance(node, ast.AugAssign):
+            self.operator(node)
             self.target(node.target, local)
             self.expression(node.value, local)
         elif isinstance(node, ast.Return):
@@ -456,6 +462,8 @@ class Check:
             self.target(node.target, local)
             self.expression(node.value, local)
         elif isinstance(node, simple):
+            if isinstance(node, ast.BinOp):
+                self.operator(node)
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, ast.expr):
                     self.expression(child, local)
@@ -480,21 +488,62 @@ class Check:
             )
         self.identifier(node, name, "method")
 
+    def operator(self, node):
+        """A binary or augmented operation: `/` and `**` are refused, they make floats; and a string the compiler
+        would fold from constants (`'_' + '_globals_' + '_'`) is checked as the string it becomes, as the bytecode
+        check sees it."""
+        ast = self.ast
+        if isinstance(node.op, ast.Div):
+            self.refuse(node, NO_DIVISION)
+        if isinstance(node.op, ast.Pow):
+            self.refuse(node, NO_POWER)
+        folded = self.folded(node) if isinstance(node, ast.BinOp) else None
+        if folded is not None:
+            self.text(node, folded)
+
+    def folded(self, node):
+        """The string a constant expression of strings folds to: ``'a' + 'b'``, ``'ab' * 2`` or ``2 * 'ab'``, up to the
+        4096 characters the compiler folds. None for any other expression."""
+        ast = self.ast
+        if isinstance(node, ast.Constant):
+            return node.value if isinstance(node.value, str) else None
+        if not isinstance(node, ast.BinOp):
+            return None
+        if isinstance(node.op, ast.Add):
+            left, right = self.folded(node.left), self.folded(node.right)
+            return left + right if left is not None and right is not None and len(left) + len(right) <= 4096 else None
+        if isinstance(node.op, ast.Mult):
+            for text, count in ((node.left, node.right), (node.right, node.left)):
+                text, number = self.folded(text), count.value if isinstance(count, ast.Constant) else None
+                if text is not None and type(number) is int and 0 <= number and len(text) * number <= 4096:
+                    return text * number
+        return None
+
     def identifier(self, node, name, scope):
         if name in FRAME_ATTRIBUTES:
             self.refuse(node, f"{name}: no frame or generator attributes in a chapter")
+        if name in FLOAT_NAMES:
+            self.refuse(node, f"{name}: {NO_FLOAT}")
         if name.startswith("__") and not (scope == "class body" and name in CLASS_BODY):
             self.refuse(node, f"{name}: no dunder names in a chapter")
 
     def literal(self, node):
         value = node.value
+        if isinstance(value, (float, complex)):
+            self.refuse(node, f"{value!r}: {NO_FLOAT}")
         if isinstance(value, str):
-            if "__" in value:
-                self.refuse(
-                    node, f"{value!r}: no dunder names in a chapter, in strings either"
-                )
-            if value in FRAME_ATTRIBUTES or value == "metaclass":
-                self.refuse(node, f"{value!r}: not allowed in a chapter")
+            self.text(node, value)
+
+    def text(self, node, value):
+        """A string of the chapter, written or folded from constants."""
+        if "__" in value:
+            self.refuse(
+                node, f"{value!r}: no dunder names in a chapter, in strings either"
+            )
+        if value in FRAME_ATTRIBUTES or value == "metaclass":
+            self.refuse(node, f"{value!r}: not allowed in a chapter")
+        if value in FLOAT_NAMES:
+            self.refuse(node, f"{value}: {NO_FLOAT}")
 
 
 def check(text, file):

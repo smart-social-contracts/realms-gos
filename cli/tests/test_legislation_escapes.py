@@ -281,7 +281,7 @@ def test_no_cedar_is_injected_through_a_setting_or_a_literal(name):
     before = c.cedar()
     with pytest.raises(
         Refused,
-        match="type\\(name, bases, dict\\) is not allowed in a chapter|no nested classes",
+        match="type\\(name, bases, dict\\) is not allowed in a chapter|no nested classes|type\\(\\) of a class is not allowed",
     ):
         c.load("x/town", "tax", INJECTIONS[name])
     assert c.cedar() == before and before.count('@id("eu/es/tax/ibi_urban_cap")') == 1
