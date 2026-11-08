@@ -3,7 +3,7 @@ import json
 from core import auth, chain, ranges
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
 from ggg import (Appointment, Calendar, Contract, Delegation, Department, Mandate, Member, Proposal, ProposalEdge,
-                 Realm, Task, TaskSchedule, Vote)
+                 Realm, Task, TaskSchedule, Tender, Vote)
 from api import tasks
 from core.op import dispatch, op, ops
 from core.ratio import ONE, refuse_renamed
@@ -623,10 +623,25 @@ def mandate_assign_executor(c, args):
     find(Mandate, args["mandate"]).executor = find(Department, args["executor"])
 
 
+def origin_of(args):
+    """The ``kind``, ``procedure`` and ``tender`` of a new contract. One made from a tender takes the tender's kind
+    and procedure, and cannot name others."""
+    kind, procedure, tender = args.get("kind", ""), args.get("procedure", ""), args.get("tender", "")
+    if tender:
+        t = find(Tender, tender)
+        for name, given, own in (("kind", kind, t.kind), ("procedure", procedure, t.procedure)):
+            if given and own and given != own:
+                raise Fail(f"a contract from {t.id} has the {name} {own}, not {given}")
+        kind, procedure = kind or t.kind, procedure or t.procedure
+    return {"kind": kind, "procedure": procedure, "tender": tender}
+
+
 @op("contract.create_under_mandate", returns="contract")
 def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
-    now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``. Returns ``contract``.
+    now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``, and what is contracted
+    (``kind``: works, supplies, services), by which ``procedure`` and from which ``tender``, whose kind and procedure
+    the contract takes. Returns ``contract``.
     Under a mandate, the mandate must be active, ``value`` within its ``max_value``, the contract must end before the
     mandate expires, and you must head or hold an active seat in the mandate's executor department."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
@@ -642,7 +657,7 @@ def contract_create(c, args):
         if m.expires_at and int(args.get("ends_at", 0)) > m.expires_at:
             raise Fail(f"the contract outlasts mandate {m.id}")
     k = Contract(id=next_id(Contract, "C"), title=args["title"], parties=args.get("parties", []), mandate=m,
-                 value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency,
+                 **origin_of(args), value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency,
                  terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
                  starts_at=int(args.get("starts_at", chain.now())), ends_at=int(args.get("ends_at", 0)))
     return {"contract": k.id}

@@ -77,7 +77,7 @@ def versions(saved):
     return {key: row["__version__"] for key, row in saved.items()}
 
 
-CURRENT = {"Proposal:P-1": 3, "Department:Finance": 2, "Realm:1": 2, "AllocationRule:AR-1": 2, "Tender:T-1": 2,
+CURRENT = {"Proposal:P-1": 3, "Department:Finance": 2, "Realm:1": 2, "AllocationRule:AR-1": 2, "Tender:T-1": 3,
            "TaxPolicy:TAX-POLICY-1": 3, "Proposal:P-2": 3}
 
 

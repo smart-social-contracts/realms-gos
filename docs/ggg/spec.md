@@ -19,6 +19,7 @@ When the model, this page and the code disagree, the code is wrong.
 | Authorization (I-ALL-1) | Cedar decides every call |
 | Guardrails (I-ALL-2) | the `GUARDRAILS` Cedar policies in [`core/auth.py`](../../src/realm_backend/core/auth.py) |
 | Private content (§13) | vetKeys, with the [`api/crypto.py`](../../src/realm_backend/api/crypto.py) operations |
+| Personal data in clear (I-PRV-1) | an attribute's `kind` and `value` are read by `attribute_list` (the person's own) and by the reviewer's `attribute_review` reply; no operation lists another person's, and `realm_export` of `Attribute` takes `attribute.review` besides `db.export`. An `@op`'s `private` arguments are left out of the audit log (I-ALL-5): an attribute's kind and value, a request's `body` and `reply`, a share's wrapped `keys` |
 | Signing policy (§11) | not read yet: Realms GOS applies the model's defaults. A Cedar guardrail refuses `signing` operations to agents, and no delegation covers a `signing` permission |
 
 The canister exposes every operation through two methods: `read(name, args)` for `read` operations
@@ -101,6 +102,8 @@ same rows.
   `UTC` or a zone of the tz database the release bundles (`src/realm_backend/zonedata`, written by
   `scripts/build_zones.py`), else `InvalidArgument`. The realm reads its own zone's file when it is set and
   after an upgrade, never in a query; a change applies from that moment and rewrites nothing;
+- a procedure's `decision_deadline` is `{count, unit}` with the unit in lower-case text (`day`, `working_day`,
+  `month`, `year`), and its `silence` is `positive` or `negative`;
 - a tender's rubric, a fund's balances, credential fields and wrapped keys are maps where `ggg.did` has
   lists of pairs; an allocation rule is the list of `{fund, share}` that `ggg.did` has;
 - a limit in time may be given as `expires_in` seconds instead of `expires_at`, and a delegation's
@@ -140,13 +143,40 @@ same rows.
   its line like any other. The ledger's fee on a payment is a mechanical cost of it, not a spending decision, and
   needs none: the realm books it itself under the category `ledger_fee`, which `transfer_create` and `budget_draft`
   refuse a caller to name (`InvalidArgument`);
-- a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), and
-  `Treasury.debt_outstanding` is kept as a running total, like fund balances;
+- a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), its `lender`
+  an `External` the realm knows (`NotFound` otherwise), and `Treasury.debt_outstanding` is kept as a running total,
+  like fund balances;
 - `codex_activate` makes the pending layered codex, named by its id (its checksum), the active one at once and keeps
   the codex it replaces as `previous`; `codex_status` shows the pending one as `pending`. An `at` in the future is
   refused until activations can be scheduled;
 - vetKD public keys, transport keys, wrapped keys and private data are hex text where `ggg.did` has
-  `blob`.
+  `blob`;
+- a dispatch's outcome is `{"Confirmed": {"at", "receipt"}}` or `{"Failed": reason}`; its status is `queued`,
+  `confirmed` or `failed`, with `outcome_at`, `receipt` and `failure` beside it. `external_add` is refused for the id
+  `realm`, which `tender_notice` uses for the realm's own journal, and a `channel` is `manual` or an `https://` URL.
+  `notification_send` to an `External` queues a dispatch (its `body` is `{"text": body}`) and answers `dispatch` where it answers `notification` to
+  anyone else; its `translations` are kept with a notification, and `notification_list` shows each reader the one in
+  their `User.language` (the same tag, else the same primary language), else the title and body sent. A dispatch to an
+  outside body carries no translations. `document_publish` with an outside journal in `to` queues one dispatch
+  (`topic` `publication`, `body` the clear copy's `ref` and `hash`) and adds a `Publication` to the document that its
+  confirmation fills; a second call queues again only when the first dispatch failed. `external_report` is audited as
+  its `Event`, whose arguments the audit log keeps up to `AUDIT_ARGS_MAX` (2000) characters of JSON: a longer report is
+  refused, and a long body belongs in the file its `evidence_ref` names;
+- GGG's `Task` is a task of the realm's scheduler (`ic-basilisk-toolkit`'s) with one step and one schedule that does not
+  repeat: `task_schedule` makes it, named `TASK-<n>`, and it runs once, through `dispatch` with origin `task`, as the
+  user who scheduled it. Only a user calling for themselves schedules: a codex, an extension, the replay of a proposal
+  or another task is refused with `InvalidArgument`, as is an operation that only reads. A task that is refused ends
+  `failed` (it has no event); one that ran keeps the id of the operation's own `Event` (`event`). Its `scheduled_by` is
+  `User:<principal>`, or `Realm:1` for a task the realm scheduled itself, such as a proposal's run. `task_list` shows
+  every task of the scheduler as a `Task` made of its first step and first schedule, with the step's arguments as the
+  audit log keeps them (without the secrets and the operation's private arguments), and filters by `op` and by `status`
+  (`scheduled`, `run`, `failed`, `cancelled`). `task_cancel` of a task `task_schedule` made that already ran or failed
+  is `Conflict`; any other task cancels. A task with several steps, or a repeat, is made with `task_create` and
+  `task_add_schedule`;
+- a tender's `kind`, `procedure` and `estimated_value` are optional on `tender_create`; `tender_notice` appends a
+  notice to the tender in the order recorded, and the derived fact `published_in` of `tender_award` is the journals of
+  its notices, each once. A contract made from a tender (`contract_create` with `tender`, or `tender_award`) takes its
+  kind and procedure, and `contract_create` refuses others.
 
 Where the two interfaces cannot say the same thing, the `ggg.did` methods do this:
 
@@ -159,7 +189,19 @@ Where the two interfaces cannot say the same thing, the `ggg.did` methods do thi
 - A proposal's `result` is the replayed operation's JSON reply, in `Reply`.
 - A federal vote proposed on a quarter lives on the capital. The quarter replies with what it knows,
   with an empty rule and tally.
-- `ggg_user_get` always answers callers about themselves.
+- `ggg_user_get` always answers callers about themselves;
+- `document_get` is public. For a published document it answers anyone with the record of its public copy:
+  the title, kind, languages, `public` and `publications`, but not the ciphertext `ref` and `hash` nor the
+  `facts` (I-PRV-4). Staff and key holders get the whole record, and for a document not published anyone else
+  is refused. `ggg_document_get` does the same: the `Document` record conceals those three fields for any reader who
+  is neither staff nor a key holder, whichever reply carries it;
+- `License.decision_due` is set when the application is made, from the `Procedure` of its kind, as the end of the
+  last day of the deadline on the realm's clock (`localtime.add_period`): that day counts in full, so positive silence
+  applies from the next. A deadline in `WorkingDay`s needs the calendar of the layers the realm runs; a realm with none
+  refuses the application with `Unavailable`;
+- a request's `body` and `reply`, and a dispatch's `body`, are not checked for personal data, which the realm
+  cannot see: whoever files or decides puts personal data in an encrypted `Document` and names its id there;
+- `request_get` answers `NotFound` for a request that is not the caller's, as for one that does not exist.
 
 Realms GOS also differs from the model in what it keeps:
 
@@ -176,13 +218,21 @@ Realms GOS also differs from the model in what it keeps:
 - a federal vote's title is kept inside its action;
 - only the last 2,000 events are kept, and older ones are deleted rather than archived (I-EXT-4).
 
+A realm created before attributes and requests existed keeps the `member` profile it stored, which lacks
+`attribute.submit` and `request.file`: its admins add both with `profile_edit` (`profile: member`, `allowed_to` the
+current list plus those two), or its members cannot submit attributes or file requests.
+
 ## 2. Fields Realms GOS adds to model entities
 
 `UserProfile.extensions` and `Department.extensions` (→ `Extension`*) say which extensions a
 profile or a department sees.
 
-Indexed lookup keys, kept so that no lookup scans a collection: `Delegation.link` (grantor and
-delegate while pending or active), `Vote.proposal_id`, `Budget.slot` (`fund:period:category`),
+`Zone.defined` tells a zone of the realm (`zone_define`, which members name as their `home_zone`) from a member's
+home cell, and `Zone.population` is a running total of the members whose `home_zone` it is, kept by joining,
+`user_edit` and `user_remove`.
+
+Indexed lookup keys, kept so that no lookup scans a collection: `Attribute.human`, `Delegation.link` (grantor and
+delegate while pending or active), `Dispatch.to` and `Dispatch.status`, `Vote.proposal_id`, `Budget.slot` (`fund:period:category`),
 `Land.cell` (`x//16:y//16`) and `TaxDeclaration.key` (declarant, base and period). `KeyEnvelope.scope`,
 `KeyEnvelope.principal` and `Transfer.payroll` are indexed too, and a `KeyEnvelope`'s id is
 `scope|principal`. Totals such as fund balances and period statements are kept as running totals.
@@ -202,7 +252,7 @@ Next to the model's fields, the `Realm` row holds:
 
 | Entity | Fields | Notes | Example |
 |---|---|---|---|
-| `Task`, `TaskStep`, `TaskSchedule`, `TaskExecution`, `Call` | as in `ic-basilisk-toolkit` | Scheduled and multi-step automation. | Monthly payroll on the 1st; last run succeeded |
+| `Task`, `TaskStep`, `TaskSchedule`, `TaskExecution`, `Call` | as in `ic-basilisk-toolkit` | Scheduled and multi-step automation. GGG's `Task` is one of these with a single step and a single schedule (see §1). | Monthly payroll on the 1st; last run succeeded |
 | `Extension` | `id` (name), `version`, `status`, `operations` (Json: the only operations its frontend and backend may call), `manifest` (Json), `source` (its backend, when the manifest sets `backend`), `access` (Json: profiles and departments), `sidebar` (Json) | A feature package with its own frontend and, optionally, backend code. | `voting` 2.1.0, for `[member]`, in the Governance menu |
 | `LayeredCodex` | `id` (`sha256:` and the checksum of its layers, layer paths and chapter checksums), `layers`, `layer_paths`, `chapters` (Json: chapter id → source, version, sha256, vouched_by, route, fetched_at, url, size), `previous` (a codex of either kind), `status` (`pending`, `active`, `inactive`, `reverted`), `activates_at`, `installed_at`, `proposal` | A realm's legislation built from the chapters of several sources ([layered codex](../codices/layered-codex.md) §9.1). Active in place of a `Codex`, never beside one. | `sha256:4be1…`, active, tax path EU → Spain → CV |
 | `ChapterSource` | `sha256` (key), `source` | The text of a chapter or calendar, stored once under its checksum; at most 256 KB. | the text of `eu/es/tax` |
@@ -235,8 +285,9 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
-| `task_create`, `task_edit`, `task_delete`, `task_run`, `task_schedule`, `task_cancel` (only the task's creator, or a controller; a cancelled task stays cancelled) | `task.*` | | Schedule a daily invoice check |
-| `task_list`, `task_logs` | `task.view` | read | Payroll task and its last 3 runs |
+| `task_create`, `task_edit`, `task_delete`, `task_run` (only the task's creator, or a controller; a cancelled task stays cancelled) | `task.*` | | Create a daily invoice check |
+| `task_add_schedule` (a time, and optionally a repeat, for the creator's named task) | `task.schedule` | | Run the invoice check every day from 1 Jan |
+| `task_logs` | `task.view` | read | Payroll task and its last 3 runs |
 | `proposal_run_scheduled` (runs the action of a proposal waiting for its effective time once that time has come, else does nothing; the task scheduler calls it) | — (public) | | At `effective_at`, the realm runs `P-12`'s transfer |
 | `ops_list` | — (public) | read | geister reads it to build MCP tools |
 | `orchestration_decide` (approve or reject a Casals baton action for this realm) | `orchestration.approve` | | Approve Casals' action "upgrade North to 0.9.1" |
@@ -255,8 +306,9 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 | `tax_policy_view` | `realm.data_view` | read | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
 | `budget_view` | `realm.data_view` | read | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |
 
-Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.schedule`,
-`task.cancel`, `task.view`, `orchestration.approve`, `shell.execute`.
+Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.view`,
+`orchestration.approve`, `shell.execute`. (`task.schedule` is the model's; `task.cancel` is no longer used: `task_cancel`
+needs `task.schedule`, and `task_list` needs `realm.monitor`.)
 
 ## 6. Invariants Realms GOS adds
 

@@ -6,7 +6,7 @@ from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Rea
 from api import codex
 from api.licenses import active, principals
 from core.op import op
-from api.proposals import realm_wide
+from api.proposals import launched, realm_wide
 
 LAND = "LAND"
 PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id", "assessed_value", "area",
@@ -178,7 +178,7 @@ def land_map(c, args):
         raise Fail(f"a map viewport is 1 to {VIEW} cells wide and high")
     zones, more = page(Zone, args, lambda z: z.land is None)
     return {"parcels": [view(p, *PARCEL) for p in parcels_in(x, y, w, h)],
-            "zones": [view(z, "id", "name", "kind") for z in zones], "next": more}
+            "zones": [view(z, "id", "name", "kind", "population") for z in zones], "next": more}
 
 
 @op("nft.mint", returns="token_id")
@@ -245,6 +245,8 @@ def land_unfreeze(c, args):
 def zone_set(c, args):
     """Make ``zone`` (an h3 cell) your home, with optional ``name`` and ``kind``; it replaces your previous home."""
     zone = Zone[args["zone"]]
+    if zone and zone.defined:
+        raise Fail(f"zone {zone.id} is a zone of the realm, not a cell to make your home")
     if zone and zone.user not in ("", c.user):
         raise Forbidden(f"zone {zone.id} is someone else's home")
     for old in [z for z in each(Zone, "user", c.user) if z.id != args["zone"]]:
@@ -252,6 +254,44 @@ def zone_set(c, args):
     zone = zone or Zone(id=args["zone"])
     zone.user, zone.name, zone.kind = c.user, args.get("name", zone.name), args.get("kind", zone.kind)
     return {"zone": zone.id}
+
+
+@op("realm.configure", governed=launched, returns="zone")
+def zone_define(c, args):
+    """Define ``zone``, such as a district, that members name as their home zone: its ``name`` and ``kind``. The
+    same id again redefines it. Returns ``zone``."""
+    zone = Zone[args["zone"]]
+    if zone and not zone.defined:
+        raise Conflict(f"zone {zone.id} is a member's home cell")
+    zone = zone or Zone(id=args["zone"], defined=True)
+    zone.name, zone.kind = args["name"], args["kind"]
+    return {"zone": zone.id}
+
+
+def defined_zone(zone_id):
+    """The zone of the realm called ``zone_id``; a member's home cell, or no zone at all, is a bad argument."""
+    zone = Zone[zone_id]
+    if zone is None or not zone.defined:
+        raise Fail(f"'{zone_id}' is no zone of the realm: define it with zone_define")
+    return zone
+
+
+def move_home(user, zone_id):
+    """Make the zone of the realm ``zone_id`` the home zone of ``user``, counting them there and no longer where
+    they were."""
+    zone = defined_zone(zone_id)
+    if user.home_zone != zone.id:
+        leave_home(user)
+        zone.population += 1
+        user.home_zone = zone.id
+
+
+def leave_home(user):
+    """Take ``user`` out of the population of their home zone, if they have one."""
+    home = Zone[user.home_zone] if user.home_zone else None
+    if home:
+        home.population -= 1
+        user.home_zone = ""
 
 
 @op("self.data_manage", delegable=True, returns="zone")
