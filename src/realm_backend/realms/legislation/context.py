@@ -25,7 +25,7 @@ class Ref(metaclass=Sealed):
     __slots__ = ("kind", "id")
 
     def __init__(self, kind, id):
-        if not isinstance(kind, str) or not isinstance(id, str):
+        if type(kind) is not str or type(id) is not str:
             raise LegislationError("Ref(kind, id) takes two strings")
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "id", id)

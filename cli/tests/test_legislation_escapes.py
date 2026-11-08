@@ -224,3 +224,68 @@ def test_a_hook_cannot_change_an_upper_forbid_at_run_time():
         "a",
         "b",
     )
+
+
+# The third review of #546: Cedar injection through a setting. The builtin ``type`` in its
+# three-argument form built an int or str subclass with a ``__str__`` or ``__iter__`` of its own
+# (the dunder spelled as U + U + 'str' + U + U), S1 accepted it as data, and the generator wrote
+# ``str(value)`` into the Cedar: ``rate > 1 && false``, or a whole policy under Spain's @id. A
+# chapter's ``type`` now takes one argument, and every door of the SDK and the generator takes the
+# exact types only.
+INJECTION_SPAIN = (
+    "from realms.legislation import F, S, above, forbid, overridable, pct\n"
+    "class Tax(above('tax')):\n"
+    "    cap = overridable(pct('1.30'), legislation='x')\n"
+    "    name = overridable('ibi_urban', legislation='x')\n"
+    "    ibi_urban_cap = forbid('tax_policy_propose', (F.code == S.name) & F.rate.is_some() & (F.rate > S.cap),"
+    " each='taxes', legislation='x')\n"
+)
+INJECTIONS = {
+    "int subclass with its own __str__, as a setting": "from realms.legislation import above\nU = '_'\nclass Tax(above('tax')):\n"
+    "    cap = type('E', (int,), {U + U + 'str' + U + U: lambda self: '1 && false'})(1300000)\n",
+    "int subclass, a whole policy injected": "from realms.legislation import above\nU = '_'\nclass Tax(above('tax')):\n"
+    "    cap = type('E', (int,), {U + U + 'str' + U + U: lambda self: '0 && false };\\nforbid (principal, action, resource) when { false'})(1300000)\n",
+    "str subclass with its own __iter__, as a setting": "from realms.legislation import above\nU = '_'\nclass Tax(above('tax')):\n"
+    "    name = type('E', (str,), {U + U + 'iter' + U + U: lambda self: iter('nothing')})('ibi_urban')\n",
+    "Period count from an int subclass": "from realms.legislation import above, months\nU = '_'\nclass Tax(above('tax')):\n"
+    "    cap = months(type('E', (int,), {U + U + 'str' + U + U: lambda self: '6 && false'})(6))\n",
+    "own literal: str subclass in a forbid": "from realms.legislation import F, above, forbid\nU = '_'\nclass Tax(above('tax')):\n"
+    "    mine = forbid('tax_policy_propose', F.code == type('E', (str,), {U + U + 'iter' + U + U: lambda self: iter('x')})('y'), each='taxes')\n",
+    "own literal: int subclass injecting Spain's @id": "from realms.legislation import F, above, forbid\nU = '_'\nclass Tax(above('tax')):\n"
+    "    mine = forbid('tax_policy_propose', F.rate.is_some() & (F.rate > type('E', (int,), {U + U + 'str' + U + U: "
+    "lambda self: '0 };\\n@id(\"eu/es/tax/ibi_urban_cap\")\\nforbid (principal, action, resource) when { false'})(5)), each='taxes')\n",
+    "the metaclass called directly": "from realms.legislation import above\nclass Tax(above('tax')):\n"
+    "    x = (lambda: type(above('tax'))('Tax', (above('tax'),), {'capital': True}))()\n",
+    "legislation= from a str subclass": "from realms.legislation import above, overridable\nU = '_'\nclass Tax(above('tax')):\n"
+    "    capital = overridable(True, legislation=type('E', (str,), {U + U + 'iter' + U + U: lambda self: iter('x')})('y'))\n",
+}
+RATE = {"type": "Long", "optional": True, "min": 0, "max": 100_000_000}
+TAX_FACTS = {
+    "tax_policy_propose.taxes": {
+        "facts": {"code": "String", "rate": RATE},
+        "also": ["tax_policy_draft.taxes"],
+    },
+    "tax_policy_draft.taxes": {"facts": {"code": "String", "rate": RATE}},
+}
+
+
+@pytest.mark.parametrize("name", sorted(INJECTIONS))
+def test_no_cedar_is_injected_through_a_setting_or_a_literal(name):
+    c = Codex(
+        ["eu/es", "x/town"],
+        realm="x/town",
+        operations=["tax_policy_propose", "tax_policy_draft"],
+        facts=TAX_FACTS,
+    )
+    c.load("eu/es", "tax", INJECTION_SPAIN)
+    before = c.cedar()
+    with pytest.raises(
+        Refused,
+        match="type\\(name, bases, dict\\) is not allowed in a chapter|no nested classes",
+    ):
+        c.load("x/town", "tax", INJECTIONS[name])
+    assert c.cedar() == before and before.count('@id("eu/es/tax/ibi_urban_cap")') == 1
+    assert (
+        "context.facts.rate > 1300000 };" in before
+        and 'context.facts.code == "ibi_urban"' in before
+    )

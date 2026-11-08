@@ -85,16 +85,18 @@ class Forbid(metaclass=Sealed):
     __slots__ = ("op", "expression", "each", "legislation")
 
     def __init__(self, op, expression, each, legislation):
-        if not isinstance(op, str) or not op:
+        if type(op) is not str or not op:
             raise LegislationError(
                 'a forbid names a GGG operation, such as forbid("tax_policy_propose", ...)'
             )
+        if legislation is not None and type(legislation) is not str:
+            raise LegislationError('legislation="..." is a string')
         if not isinstance(expression, (Expr, bool)):
             raise LegislationError(
                 "a forbid's expression is built from F, S and when(), such as "
                 '(F.code == "ibi_urban") & F.rate.is_some() & (F.rate > pct("1.10"))'
             )
-        if each is not None and (not isinstance(each, str) or not each):
+        if each is not None and (type(each) is not str or not each):
             raise LegislationError(
                 'each= names the list the forbid ranges over, such as each="taxes"'
             )

@@ -44,7 +44,7 @@ def literal(value, what="a literal"):
     that fits Cedar's 64-bit integer."""
     if isinstance(value, Expr):
         return value
-    if isinstance(value, (bool, int, str, Period)):
+    if type(value) in (bool, int, str, Period):
         return Literal(value)
     if value is None:
         raise LegislationError(
@@ -159,31 +159,34 @@ class Literal(Expr):
     __slots__ = ("value",)
 
     def __init__(self, value):
-        if isinstance(value, (list, tuple)):
+        kind = type(value)
+        if kind in (list, tuple):
             value = tuple(value)
-            kinds = {bool if isinstance(v, bool) else type(v) for v in value}
+            kinds = {type(v) for v in value}
             if (
                 not value
                 or kinds not in ({str}, {int})
-                or not all(isinstance(v, str) or fits(v) for v in value)
+                or not all(type(v) is str or fits(v) for v in value)
             ):
                 raise LegislationError(
                     "a list holds strings, or integers that fit Cedar's 64-bit integer, at least one"
                 )
-        elif isinstance(value, bool) or isinstance(value, str):
+        elif kind in (bool, str):
             pass
-        elif isinstance(value, int):
+        elif kind is int:
             if not fits(value):
                 raise LegislationError(
                     f"{value} does not fit Cedar's 64-bit integer (rule 1)"
                 )
-        elif isinstance(value, Period):
+        elif kind is Period:
             if not fits(value.count):
                 raise LegislationError(
                     f"{value!r}: a Period's count must fit Cedar's 64-bit integer"
                 )
         else:
-            raise LegislationError(f"{value!r} is not a literal a forbid can hold")
+            raise LegislationError(
+                f"{value!r} is not a literal a forbid can hold: its type is {kind.__name__}"
+            )
         object.__setattr__(self, "value", value)
 
     def __repr__(self):
@@ -192,7 +195,7 @@ class Literal(Expr):
 
 def named(name, what):
     """A fact's or a setting's name: a non-empty string that does not start with ``_``."""
-    if not isinstance(name, str) or not name or name.startswith("_"):
+    if type(name) is not str or not name or name.startswith("_"):
         raise LegislationError(f"{name!r} is not the name of {what}")
     return name
 

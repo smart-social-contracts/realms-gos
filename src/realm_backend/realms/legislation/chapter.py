@@ -74,13 +74,16 @@ def line_of(text, *starts):
 
 
 def is_data(value):
-    """A setting's value: str, int, bool, null, lists or dicts of those, a Period, or a GGG Ref. Never a float."""
-    if value is None or isinstance(value, (bool, int, str, Period, Ref)):
+    """A setting's value: str, int, bool, null, lists or dicts of those, a Period, or a GGG Ref. Never
+    a float, and never a subclass: an int or str with a ``__str__`` or ``__iter__`` of its own would
+    write what it likes into the generated Cedar, so only the exact types are data."""
+    kind = type(value)
+    if value is None or kind in (bool, int, str, Period, Ref):
         return True
-    if isinstance(value, (list, tuple)):
+    if kind in (list, tuple):
         return all(is_data(v) for v in value)
-    if isinstance(value, (dict, MappingProxyType)):
-        return all(isinstance(k, str) and is_data(v) for k, v in value.items())
+    if kind in (dict, MappingProxyType):
+        return all(type(k) is str and is_data(v) for k, v in value.items())
     return False
 
 
@@ -404,6 +407,11 @@ def _member(key, value, load, refuse):
     if kind == "compute" and mark == EXTENSION:
         refuse(
             f"{key}: a compute_ method cannot be an extension; merging what layers compute is not defined",
+            line,
+        )
+    if legislation is not None and type(legislation) is not str:
+        refuse(
+            f'{key}: legislation="..." is a string, not {type(legislation).__name__}',
             line,
         )
     if not key.startswith("_") and not load.own and legislation is None:

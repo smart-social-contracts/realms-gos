@@ -19,11 +19,14 @@ class Sealed(type):
 
 
 def freeze(value):
-    """``value`` with every list a tuple, every set a frozenset and every dict a read-only view, recursively."""
-    if isinstance(value, (dict, MappingProxyType)):
+    """``value`` with every list a tuple, every set a frozenset and every dict a read-only view,
+    recursively. Only the exact types: a subclass with methods of its own is not data, and
+    ``is_data`` refuses it."""
+    kind = type(value)
+    if kind in (dict, MappingProxyType):
         return MappingProxyType({k: freeze(v) for k, v in value.items()})
-    if isinstance(value, (list, tuple)):
+    if kind in (list, tuple):
         return tuple(freeze(v) for v in value)
-    if isinstance(value, (set, frozenset)):
+    if kind in (set, frozenset):
         return frozenset(value)
     return value

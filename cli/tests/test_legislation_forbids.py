@@ -1572,3 +1572,135 @@ def test_negative_literal_terms_and_the_64_bit_minimum_validate():
         {"pages": 1, "unbounded": 0}
     )
     assert not rule.evaluate({"pages": 3, "unbounded": I64_MIN})
+
+
+# ── The third review of #546: exact types at every door, no str() of an untrusted object ──────────
+
+
+class _Int(int):
+    def __str__(self):
+        return "1 && false"
+
+    __repr__ = __str__
+
+
+class _Str(str):
+    def __iter__(self):
+        return iter("nothing")
+
+    def __str__(self):
+        return "nothing"
+
+
+class _List(list):
+    pass
+
+
+def test_type_in_a_chapter_takes_one_argument():
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import F, above, forbid\nclass Tax(above('tax')):\n"
+        "    rule = forbid('tax_policy_propose', type(F.code)('code') == 'a', each='taxes', legislation='x')\n",
+    )
+    assert "no nested classes" in refused(
+        "from realms.legislation import above\nclass Tax(above('tax')):\n    kind = type(1)\n"
+    )
+    assert "type(name, bases, dict) is not allowed in a chapter" in refused(
+        "from realms.legislation import above\nclass Tax(above('tax')):\n    x = type('E', (int,), {})(1)\n"
+    )
+
+
+def test_the_sdk_and_the_generator_take_the_exact_types_only():
+    from realms.legislation import Period, Ref, pct
+    from realms.legislation.cedar import Writer, quoted, value_type
+    from realms.legislation.chapter import is_data
+    from realms.legislation.expressions import Literal
+    from realms.legislation.sealed import freeze
+
+    for bad in (
+        _Int(5),
+        _Str("x"),
+        _List([1]),
+        [_Int(5)],
+        (_Str("x"),),
+        {"a": _Int(1)},
+        {_Str("k"): 1},
+    ):
+        assert not is_data(bad), bad
+    assert is_data({"a": [1, "b", True, None, months(1), Ref("a", "b")]})
+    assert (
+        type(freeze(_List([1]))) is _List
+    )  # not data: left alone, and is_data refuses it
+    for bad, reason in (
+        (lambda: Literal(_Int(5)), "its type is _Int"),
+        (lambda: Literal(_Str("x")), "its type is _Str"),
+        (lambda: Literal((_Str("x"),)), "a list holds strings"),
+        (lambda: value_type(_Int(5), "S.cap"), "its type is _Int"),
+        (lambda: value_type([_Str("a")], "S.codes"), "its type is _Str"),
+        (lambda: quoted(_Str("x")), "its type is _Str"),
+        (lambda: Writer.literal(_Int(5)), "its type is _Int"),
+        (lambda: Writer.literal(_Str("x")), "its type is _Str"),
+        (lambda: Period(_Int(6), "Month"), "a Period's count is an integer"),
+        (lambda: Period(6, _Str("Month")), "is not a GGG Period unit"),
+        (lambda: Ref(_Str("a"), "b"), "takes two strings"),
+        (lambda: pct(_Str("1.10")), "write a rate as a string"),
+        (
+            lambda: forbid(_Str("tax_policy_propose"), True),
+            "a forbid names a GGG operation",
+        ),
+        (
+            lambda: forbid("tax_policy_propose", True, legislation=_Str("x")),
+            'legislation="..." is a string',
+        ),
+        (
+            lambda: forbid("tax_policy_propose", True, each=_Str("taxes")),
+            "each= names the list",
+        ),
+    ):
+        with pytest.raises(LegislationError, match=reason):
+            bad()
+    assert (
+        Writer.literal(5) == "5"
+        and Writer.literal(True) == "true"
+        and Writer.literal(("a", "b")) == '["a","b"]'
+    )
+
+
+def test_an_injected_setting_is_refused_when_the_forbid_is_bound():
+    """Had a subclass got past the loader, binding refuses it: nothing is ever written with str()."""
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        "from realms.legislation import F, S, above, forbid, overridable, pct\nclass Tax(above('tax')):\n"
+        "    cap = overridable(pct('1.30'), legislation='x')\n    name = overridable('ibi_urban', legislation='x')\n"
+        "    rule = forbid('tax_policy_propose', (F.code == S.name) & F.rate.is_some() & (F.rate > S.cap), each='taxes', legislation='x')\n",
+    )
+    assert "context.facts.rate > 1300000 };" in c.cedar()
+    cls = c.resolved("tax")
+    type.__setattr__(
+        cls, "cap", _Int(1300000)
+    )  # the test's own bypass of the sealed class
+    with pytest.raises(
+        Refused,
+        match="S.cap = 1 && false: not a value a forbid can read, its type is _Int",
+    ):
+        c.cedar()
+    type.__setattr__(cls, "cap", 1300000)
+    type.__setattr__(cls, "name", _Str("ibi_urban"))
+    with pytest.raises(Refused, match="its type is _Str"):
+        c.cedar()
+
+
+def test_two_forbids_never_share_an_id():
+    from realms.legislation.cedar import policies
+
+    c = valencia()
+    bound = c.forbids()
+    assert policies(bound) == c.cedar()
+    with pytest.raises(
+        LegislationError, match="two forbids share the id eu/es/tax/ibi_urban_cap"
+    ):
+        policies(bound + [bound[3]])

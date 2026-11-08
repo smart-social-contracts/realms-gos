@@ -71,7 +71,11 @@ _ESCAPES = {
 
 
 def quoted(text):
-    """A Cedar string literal."""
+    """A Cedar string literal, of an exact str: a subclass could iterate as it likes."""
+    if type(text) is not str:
+        raise LegislationError(
+            f"{text!r} is not a string: its type is {type(text).__name__}"
+        )
     out = []
     for ch in text:
         if ch in _ESCAPES:
@@ -109,20 +113,23 @@ def has(record, name):
 
 
 def value_type(value, what):
-    """The Cedar type of a literal or a folded setting's value, or a refusal."""
-    if isinstance(value, bool):
+    """The Cedar type of a literal or a folded setting's value, or a refusal. Exact types only: an
+    int or str subclass with a ``__str__`` or ``__iter__`` of its own would write Cedar of its own.
+    """
+    kind = type(value)
+    if kind is bool:
         return "Bool"
-    if isinstance(value, int):
+    if kind is int:
         if not fits(value):
             raise LegislationError(
                 f"{what} = {value}: does not fit Cedar's 64-bit integer"
             )
         return "Long"
-    if isinstance(value, str):
+    if kind is str:
         return "String"
-    if isinstance(value, Period):
+    if kind is Period:
         return "Period"
-    if isinstance(value, (list, tuple)):
+    if kind in (list, tuple):
         kinds = {value_type(v, what) for v in value}
         if kinds not in ({"String"}, {"Long"}):
             raise LegislationError(
@@ -131,11 +138,13 @@ def value_type(value, what):
         return "Set<%s>" % kinds.pop()
     if value is None:
         raise LegislationError(f"{what} is not set in this realm (None)")
-    if isinstance(value, (dict, MappingProxyType)):
+    if kind in (dict, MappingProxyType):
         raise LegislationError(
             f"{what} is a dict: a forbid reads a scalar, a list or a Period setting"
         )
-    raise LegislationError(f"{what} = {value!r}: not a value a forbid can read")
+    raise LegislationError(
+        f"{what} = {value!r}: not a value a forbid can read, its type is {kind.__name__}"
+    )
 
 
 class FactType(metaclass=Sealed):
@@ -582,25 +591,29 @@ class Writer(metaclass=Sealed):
 
     @staticmethod
     def literal(value):
-        if isinstance(value, bool):
+        """The Cedar text of an exact bool, int, str or tuple; never ``str()`` of an unknown object."""
+        kind = type(value)
+        if kind is bool:
             return "true" if value else "false"
-        if isinstance(value, int):
-            return str(value)
-        if isinstance(value, str):
+        if kind is int:
+            return int.__repr__(value)
+        if kind is str:
             return quoted(value)
-        if isinstance(value, (list, tuple)):
+        if kind in (list, tuple):
             return "[" + ",".join(Writer.literal(v) for v in value) + "]"
-        raise LegislationError(f"{value!r} has no Cedar literal")
+        raise LegislationError(
+            f"{value!r} has no Cedar literal: its type is {kind.__name__}"
+        )
 
     def period(self, node):
         """The ``unit`` and ``count`` texts of the Period a rule names: a literal, or an open setting."""
         if isinstance(node, Literal):
-            return quoted(node.value.unit), str(node.value.count)
+            return quoted(node.value.unit), Writer.literal(node.value.count)
         if self.generic:
             path = attribute(attribute("context.settings", self.domain), node.name)
             return f"{path}.unit", f"{path}.count"
         value = self.settings[node.name]
-        return quoted(value.unit), str(value.count)
+        return quoted(value.unit), Writer.literal(value.count)
 
     def value(self, node, negated):
         """An operand: a fact, a setting, a literal, an ``if`` in parentheses, or a chain."""
@@ -772,8 +785,9 @@ class BoundForbid(metaclass=Sealed):
 
 
 def plain_setting(value):
-    """A frozen setting value as the generator reads it: a tuple for a list, a Period kept."""
-    return tuple(value) if isinstance(value, list) else value
+    """A frozen setting value as the generator reads it: a tuple for a list, a Period kept; the
+    exact types only (``value_type`` refuses the rest when the forbid is checked)."""
+    return tuple(value) if type(value) is list else value
 
 
 def bind(member, resolved, schema):
@@ -807,7 +821,13 @@ def bind(member, resolved, schema):
 
 
 def policies(forbids, generic=False):
-    """The policy set of every bound forbid, in their order, one blank line between policies."""
+    """The policy set of every bound forbid, in their order, one blank line between policies. Two
+    forbids never share an ``@id``."""
+    seen = set()
+    for forbid in forbids:
+        if forbid.id in seen:
+            raise LegislationError(f"two forbids share the id {forbid.id}")
+        seen.add(forbid.id)
     return "\n\n".join(f.cedar(generic) for f in forbids) + ("\n" if forbids else "")
 
 

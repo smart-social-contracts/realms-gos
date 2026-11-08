@@ -65,6 +65,17 @@ def domain_id(domain):
     return domain
 
 
+def one_argument_type(obj, *rest):
+    """``type(x)`` as a chapter gets it. ``type(name, bases, dict)`` is refused: it builds a class
+    outside the class statement the subset allows, an int or str subclass with a ``__str__`` of its
+    own among them, and its dict's keys dodge the dunder rule as computed strings."""
+    if rest:
+        raise LegislationError(
+            "type(name, bases, dict) is not allowed in a chapter: a chapter defines one class, with class"
+        )
+    return type(obj)
+
+
 def no_dunder(fn):
     """``getattr``, ``hasattr`` and ``delattr`` as a chapter gets them: never for a dunder name or a frame's."""
 
@@ -240,6 +251,7 @@ class Codex(metaclass=Sealed):
             if isinstance(v, type) and issubclass(v, BaseException)
         )
         env.update((f.__name__, no_dunder(f)) for f in (getattr, hasattr, delattr))
+        env["type"] = one_argument_type
         env["__import__"] = _import
         return env
 

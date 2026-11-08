@@ -303,6 +303,10 @@ class Procedure(above("procedure")):
         & F.longer_deadline_legislation.is_none(),
         legislation="Ley 39/2015 Art. 21.2")
 """
+INJECTION = (
+    "from realms.legislation import above, months\nU = '_'\nclass Procedure(above('procedure')):\n"
+    "    default_decision_deadline = months(type('E', (int,), {U + U + 'str' + U + U: lambda self: '6 && false'})(6))\n"
+)
 CEDAR_CODE = """
 import json
 from realms.legislation import Codex
@@ -325,6 +329,11 @@ def decide(action, facts):
     context = dict(blank, op=action, facts=facts)
     return cedar.is_authorized('Realm::User::"u"', 'Realm::Action::"%%s"' %% action, 'Realm::Realm::"1"', entities, context)
 
+try:  # the review of #546: a setting built from an int subclass with its own __str__
+    codex.load("eu/es/vc/46250-valencia", "procedure", %(injection)r)
+    injection = "LOADED"
+except Exception as e:
+    injection = f"{type(e).__name__}: {e}"
 decisions, error = {}, None
 try:
     # Strict validation by the realm's own Cedar engine, then a few decisions. The permit stands in for
@@ -344,13 +353,14 @@ except Exception as e:
     error = f"{type(e).__name__}: {e}"
 finally:
     cedar.load(auth.SCHEMA, auth.GUARDRAILS + auth.POLICIES)  # the realm's own policy set again
-print(json.dumps({"cedar": policies, "schema": schema, "decisions": decisions, "error": error,
+print(json.dumps({"cedar": policies, "schema": schema, "decisions": decisions, "error": error, "injection": injection,
                   "cost": {"generate": generated - before, "load": loaded - generated, "decide": decided - loaded} if error is None else None}))
 """ % {
     "facts": FACTS,
     "es_tax": ES_TAX,
     "valencia_tax": VALENCIA_TAX,
     "es_procedure": ES_PROCEDURE,
+    "injection": INJECTION,
 }
 
 
@@ -382,6 +392,9 @@ def test_the_realm_generates_the_same_cedar_as_a_laptop_and_its_engine_validates
     assert out.startswith("{"), out  # a traceback otherwise
     got = json.loads(out)
     assert got["error"] is None, got["error"]
+    assert (
+        "type(name, bases, dict) is not allowed in a chapter" in got["injection"]
+    ), got["injection"]
     assert got["cedar"] == laptop.cedar()
     assert (
         '@id("eu/es/tax/ibi_urban_cap")' in got["cedar"]
