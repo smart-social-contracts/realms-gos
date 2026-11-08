@@ -246,9 +246,9 @@ One entry per release, newest last:
 
 - **A release lists all of the source's chapters,** changed or not, and its calendar if it has one.
   It never lists the `realm` domain, which only the realm's own layer fills (§3). A follower that finds
-  one in a release skips it and reports it. The source adopts the release by its own vote. A follower installs a release whole, never only some of its
-  chapters, but downloads only the chapters on its own layer paths: EMSHI's water chapter reaches only
-  the realms that sync from EMSHI.
+  one in a release skips it and reports it. The source adopts the release by its own vote. A follower
+  installs a release whole, never only some of its chapters, but downloads only the chapters on its own
+  layer paths: EMSHI's water chapter reaches only the realms that sync from EMSHI.
 - **The repository file is a convenience copy.** The authority is the source's published record (§8).
 - **The realm's own layer needs no releases:** its proposals are its record.
 - **`calendar.json` is released and pinned like a chapter:** the release's own `calendar` field holds
@@ -1127,8 +1127,8 @@ chosen sync source, one with an active link, is its record as the releases it ru
 - Two sync sources that relay one layer must relay the same release, with the same version and
   checksums. Otherwise `plan` refuses (§9.2 step 4).
 - `plan` returns the layer paths, the chapters to fetch (`source`, `domain`, `version`, `sha256`, in the
-  order they load) and the calendars. `resolve` loads them into a codex and gives the flattened view
-  of §5.9 as plain data.
+  order they load), the calendars and the realm chapters it skipped (§3.2). `resolve` loads them into a
+  codex and gives the flattened view of §5.9 as plain data.
 
 A follower checks each layer from above against one record:
 

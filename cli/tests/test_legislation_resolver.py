@@ -1073,7 +1073,7 @@ def test_calls_inside_one_domain_are_not_calls_between_domains():
     assert codex.instance("tax", codex.context()).deep(0) == 30
 
 
-def test_an_extension_layer_called_from_another_domain_is_one_call_per_layer():
+def test_a_guard_that_calls_another_domain_leaves_the_count_as_it_found_it():
     r = resolved()
     context = r.codex.context()
     local_regime = r.codex.instance("local_regime", context)
