@@ -13,6 +13,7 @@ from basilisk import Principal  # tests replace it, to accept their names for pr
 
 import ggg
 import ggg_did
+from api import crypto
 from api.proposals import settings
 from api.setup import VERSION
 from core import chain
@@ -282,6 +283,8 @@ FIX = {
                           "symbol": get(m, "symbol") or scope(m, "symbol")},
     "FederalVote": lambda v: {"title": get(v, "title") or (get(v, "action") or {}).get("title", "")},
     "Event": lambda e: {"agent": bool(get(e, "agent"))},
+    # The ciphertext of a published document stays with its staff and key holders (I-PRV-4), as in crypto.document_get.
+    "Document": lambda d: crypto.CONCEALED if get(d, "public") and not crypto.reads_ciphertext(d, chain.caller()) else {},
     "Proposal": lambda p: {"action": action(get(p, "action")),  # a realm-wide proposal names no department
                            "department": None if getattr(get(p, "department"), "is_root", False) else get(p, "department")},
     # The replayed operation's JSON reply stands in for a Candid one.

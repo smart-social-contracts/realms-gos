@@ -23,13 +23,22 @@ def filed_by(args):
     return principals(find(Request, args["request"]).by)
 
 
-@op("request.file", delegable=True, private=("body",), returns="request")
+def valid_filing(args):
+    if not (isinstance(args["kind"], str) and args["kind"]):
+        raise Fail("a request has a kind")
+
+
+def valid_due(args):
+    for key in ("due_at", "extension_limit"):
+        if args.get(key) is not None and type(args[key]) is not int:
+            raise Fail(f"{key} is a time in seconds")
+
+
+@op("request.file", delegable=True, check=valid_filing, private=("body",), returns="request")
 def request_file(c, args):
     """File a request of ``kind`` (the realm's word, such as petition) with a ``body``, for you or for an
     ``organization`` you administer. A body that holds personal data is the id of an encrypted Document, never the
     data; the audit log keeps neither. Returns ``request``, filed."""
-    if not args["kind"]:
-        raise Fail("a request has a kind")
     r = Request(id=next_id(Request, "REQ"), kind=args["kind"], by=filer(c.user, args.get("organization")),
                 body=args["body"], filed_at=chain.now())
     return {"request": r.id}
@@ -38,11 +47,11 @@ def request_file(c, args):
 @op("self.data_view", read=True, delegable=True, returns="request")
 def request_get(c, args):
     """``request`` (an id), if it is yours or your organization's; any other is not found. Anyone who decides
-    requests lists them with request_list."""
+    requests lists them with request_list. Returns the ``request``."""
     r = find(Request, args["request"])
     if c.user not in principals(r.by):
         raise NotFound(f"unknown Request '{r.id}'")
-    return {"request": r.id}
+    return {"request": view(r)}
 
 
 @op("request.decide", read=True, returns="requests")
@@ -62,7 +71,7 @@ def open_request(args):
     return r
 
 
-@op("request.decide", parties=filed_by, returns="request")
+@op("request.decide", parties=filed_by, check=valid_due, returns="request")
 def request_set_due(c, args):
     """Set or move the deadline ``due_at`` of the filed ``request``, never past its ``extension_limit``. The limit
     can be given once, with the first deadline or later; a second one is a conflict."""
@@ -82,7 +91,7 @@ def request_decide(c, args):
     refused_by_silence), with an optional ``reply``; a reply that holds personal data is the id of an encrypted
     Document. A decided request is final."""
     r = open_request(args)
-    if not args["decision"]:
+    if not (isinstance(args["decision"], str) and args["decision"]):
         raise Fail("a decision says what was decided")
     r.status, r.decision, r.reply, r.decided_at = "decided", args["decision"], args.get("reply", ""), chain.now()
     return {"request": r.id}

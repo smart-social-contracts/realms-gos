@@ -20,6 +20,20 @@ SUBMIT_ARGS = Types.Record({"kind": Types.Text, "value": Types.Text, "issuer": T
 LIST_ARGS = Types.Record({"kind": Types.Opt(Types.Text), "cursor": Types.Opt(Types.Text),
                           "limit": Types.Opt(Types.Nat32), "on_behalf_of": Types.Opt(Types.Principal)})
 PAGE = Types.Record({"items": Types.Vec(ATTRIBUTE), "next": Types.Opt(Types.Text)})
+VALUE = Types.Rec()
+VALUE.fill(Types.Variant({"Nat": Types.Nat, "Int": Types.Int, "Text": Types.Text, "Blob": Types.Vec(Types.Nat8),
+                          "Array": Types.Vec(VALUE), "Map": Types.Vec(Types.Tuple(Types.Text, VALUE))}))
+PUBLISHED = Types.Record({"ref": Types.Text, "hash": Types.Text})
+DOCUMENT = Types.Record({
+    "id": Types.Text, "department": Types.Text, "title": Types.Text, "kind": Types.Opt(Types.Text),
+    "languages": Types.Vec(Types.Text), "ref": Types.Text, "hash": Types.Text, "author": Types.Principal,
+    "at": Types.Nat64, "facts": VALUE, "public": Types.Opt(PUBLISHED),
+    "publications": Types.Vec(Types.Record({"journal": Types.Text, "dispatch": Types.Text,
+                                            "published_at": Types.Opt(Types.Nat64), "ref": Types.Opt(Types.Text)}))})
+ENVELOPE = Types.Record({"id": Types.Text, "scope": Types.Text, "principal": Types.Principal,
+                         "wrapped_dek": Types.Vec(Types.Nat8), "granted_by": Types.Principal, "at": Types.Nat64})
+ACCESS = Types.Record({"document": DOCUMENT, "scope": Types.Text, "envelope": Types.Opt(ENVELOPE)})
+ANONYMOUS = "2vxsx-fae"
 
 CELL = "871f1d489ffffff"
 # The fields this release added to what the last one stored: its rows do not have them.
@@ -143,6 +157,17 @@ def test_a_document_is_published_and_anyone_reads_its_public_copy(realm, people)
     assert anyone["document"]["public"] == {"ref": "pub/report.pdf", "hash": "sha256:cd34"}
     assert (anyone["document"]["ref"], anyone["document"]["hash"]) == ("", "")
     assert ok(realm, "document_get", alice, query=True, document="DOC-1")["document"]["ref"] == "inline:x"
+
+
+def test_the_ggg_method_gives_a_stranger_only_the_public_copy_of_a_published_document(realm, people):
+    """ggg_document_get rebuilds the record from the stored row: it must still leave out the ciphertext (I-PRV-4)."""
+    published = {"ref": "pub/report.pdf", "hash": "sha256:cd34"}
+    for reader in (ANONYMOUS, people["bob"]):
+        got = realm.ggg("ggg_document_get", Types.Text, "DOC-1", Types.Opt(ACCESS), reader, query=True)["Ok"][0]
+        assert got["document"]["public"] == [published] and got["envelope"] == []
+        assert (got["document"]["ref"], got["document"]["hash"], got["document"]["facts"]) == ("", "", {"Map": []})
+    staff = realm.ggg("ggg_document_get", Types.Text, "DOC-1", Types.Opt(ACCESS), people["alice"], query=True)["Ok"][0]
+    assert (staff["document"]["ref"], staff["document"]["hash"]) == ("inline:x", "sha256:ab12")
 
 
 def test_an_attribute_is_submitted_listed_and_reviewed_through_the_ggg_methods(realm, people):

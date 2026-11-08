@@ -146,7 +146,8 @@ def test_a_procedure_with_no_period_or_a_bad_silence_is_refused_before_anything_
     agora()
     for bad in ({"decision_deadline": {"count": 3, "unit": "fortnight"}}, {"decision_deadline": {"count": -1, "unit": "day"}},
                 {"decision_deadline": {"count": "3", "unit": "day"}}, {"decision_deadline": {"unit": "day"}},
-                {"silence": "tacit"}):
+                {"decision_deadline": "soon"}, {"decision_deadline": {"count": 3, "unit": ["day"]}},
+                {"decision_deadline": {"count": True, "unit": "day"}}, {"silence": "tacit"}):
         out = direct("procedure_define", "ctl", **{**HEALTH, **bad})
         assert not out["ok"] and out["kind"] == "invalid_argument", bad
     assert Procedure["health"] is None

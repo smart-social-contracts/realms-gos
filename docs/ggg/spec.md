@@ -19,7 +19,7 @@ When the model, this page and the code disagree, the code is wrong.
 | Authorization (I-ALL-1) | Cedar decides every call |
 | Guardrails (I-ALL-2) | the `GUARDRAILS` Cedar policies in [`core/auth.py`](../../src/realm_backend/core/auth.py) |
 | Private content (§13) | vetKeys, with the [`api/crypto.py`](../../src/realm_backend/api/crypto.py) operations |
-| Personal data in clear (I-PRV-1) | an attribute's `kind` and `value` are read by `attribute_list` (the person's own) and by the reviewer's `attribute_review` reply; no operation lists another person's. An `@op`'s `private` arguments are left out of the audit log (I-ALL-5): an attribute's kind and value, a request's `body` and `reply`, a share's wrapped `keys` |
+| Personal data in clear (I-PRV-1) | an attribute's `kind` and `value` are read by `attribute_list` (the person's own) and by the reviewer's `attribute_review` reply; no operation lists another person's, and `realm_export` of `Attribute` takes `attribute.review` besides `db.export`. An `@op`'s `private` arguments are left out of the audit log (I-ALL-5): an attribute's kind and value, a request's `body` and `reply`, a share's wrapped `keys` |
 | Signing policy (§11) | not read yet: Realms GOS applies the model's defaults. A Cedar guardrail refuses `signing` operations to agents, and no delegation covers a `signing` permission |
 
 The canister exposes every operation through two methods: `read(name, args)` for `read` operations
@@ -123,7 +123,8 @@ Where the two interfaces cannot say the same thing, the `ggg.did` methods do thi
 - `document_get` is public. For a published document it answers anyone with the record of its public copy:
   the title, kind, languages, `public` and `publications`, but not the ciphertext `ref` and `hash` nor the
   `facts` (I-PRV-4). Staff and key holders get the whole record, and for a document not published anyone else
-  is refused;
+  is refused. `ggg_document_get` does the same: the `Document` record conceals those three fields for any reader who
+  is neither staff nor a key holder, whichever reply carries it;
 - `License.decision_due` is set when the application is made, from the `Procedure` of its kind, as the end of the
   last day of the deadline on the realm's clock (`localtime.add_period`): that day counts in full, so positive silence
   applies from the next. A deadline in `WorkingDay`s needs the calendar of the layers the realm runs; a realm with none
@@ -146,6 +147,10 @@ Realms GOS also differs from the model in what it keeps:
   `realm_register`;
 - a federal vote's title is kept inside its action;
 - only the last 2,000 events are kept, and older ones are deleted rather than archived (I-EXT-4).
+
+A realm created before attributes and requests existed keeps the `member` profile it stored, which lacks
+`attribute.submit` and `request.file`: its admins add both with `profile_edit` (`profile: member`, `allowed_to` the
+current list plus those two), or its members cannot submit attributes or file requests.
 
 ## 2. Fields Realms GOS adds to model entities
 

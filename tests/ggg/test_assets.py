@@ -116,8 +116,8 @@ def test_the_realm_defines_zones_that_members_can_name_as_home():
     ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
     ok("zone_define", "ctl", zone="riverside", name="Riverside North", kind="district")
     zone = Zone["riverside"]
-    assert (zone.name, zone.kind, zone.defined, zone.population, zone.user) == ("Riverside North", "district", True,
-                                                                                  0, "")
+    shown = (zone.name, zone.kind, zone.defined, zone.population, zone.user)
+    assert shown == ("Riverside North", "district", True, 0, "")
     ok("zone_set", "alice", zone="871f1d489ffffff")
     assert "home cell" in call("zone_define", "ctl", zone="871f1d489ffffff", name="x", kind="y")["error"]
     assert "zone of the realm" in call("zone_set", "bob", zone="riverside")["error"]

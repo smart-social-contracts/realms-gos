@@ -1,7 +1,7 @@
 import fake_chain
 import world
 from ggg import Document, Event, KeyEnvelope
-from kit import call, denied, ok
+from kit import call, denied, direct, ok
 
 REPORT = {"title": "Inspection report, Clinic B", "ref": "files/health/DOC-1.enc", "hash": "sha256:ab12",
           "languages": ["en"]}
@@ -148,8 +148,8 @@ def test_a_share_names_its_recipient_basis_and_facts():
     for recipient in ("User:nobody", "Organization:nowhere", "Document:" + doc, "alice", "External:statistics-office"):
         out = call("document_share", "carla", document=doc, recipient=recipient, keys={"bob": "x"})
         assert not out["ok"] and out["kind"] in ("invalid_argument", "not_found"), recipient
-    assert "legal_basis" in call("document_share", "carla", document=doc, recipient="User:alice", keys={},
-                                  basis={"purpose": "x"})["error"]
+    refused = call("document_share", "carla", document=doc, recipient="User:alice", keys={}, basis={"purpose": "x"})
+    assert "legal_basis" in refused["error"]
     assert KeyEnvelope[f"dept:Health:doc:{doc}|bob"] is None
 
 
@@ -180,3 +180,15 @@ def test_a_document_is_published_to_an_outside_body_only_when_the_realm_knows_it
     doc = ok("document_store", "carla", department="Health", **REPORT)["document"]
     out = call("document_publish", "carla", document=doc, to="gazette", ref="pub/r.pdf", hash="sha256:cd34")
     assert not out["ok"] and "gazette" in out["error"] and Document[doc].public is None
+
+
+def test_json_arguments_of_the_wrong_type_are_refused_not_trapped():
+    """Candid cannot say these, so the arguments go to the operations as JSON."""
+    health()
+    doc = ok("document_store", "carla", department="Health", **REPORT)["document"]
+    for args in ({"recipient": 5}, {"recipient": ["User:alice"]}, {"recipient": "User:alice", "basis": "a duty"},
+                 {"recipient": "User:alice", "basis": ["a duty"]}):
+        out = direct("document_share", "carla", document=doc, keys={}, **args)
+        assert not out["ok"] and out["kind"] == "invalid_argument", args
+    out = direct("document_list", "carla", department="Health", language=5)
+    assert not out["ok"] and out["kind"] == "invalid_argument"

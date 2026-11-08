@@ -1,7 +1,7 @@
 import fake_chain
 import world
 from ggg import Delegation, Department, Event, Request
-from kit import call, denied, later, ok
+from kit import call, denied, direct, later, ok
 
 DAY = 86400
 BODY = {"asks_for": "the minor contracts of last year"}
@@ -26,7 +26,9 @@ def test_story_bob_asks_for_information_and_the_clerk_grants_it():
     assert (row.kind, row.by, row.body, row.status, row.filed_at) == (
         "access_to_information", "User:bob", BODY, "filed", fake_chain.now())
     assert row.due_at == 0 and row.extension_limit == 0
-    assert ok("request_get", "bob", request=r)["request"] == r
+    got = ok("request_get", "bob", request=r)["request"]
+    assert (got["id"], got["kind"], got["by"], got["body"], got["status"]) == (
+        r, "access_to_information", "User:bob", BODY, "filed")
     due = fake_chain.now() + 30 * DAY
     ok("request_set_due", "clerk", request=r, due_at=due)
     later(10 * DAY)
@@ -50,11 +52,11 @@ def test_a_request_is_filed_by_the_caller_or_an_organization_they_administer():
 def test_a_member_reads_only_their_own_requests():
     registry()
     mine, theirs = file_request("bob"), file_request("alice")
-    assert ok("request_get", "bob", request=mine)["request"] == mine
+    assert ok("request_get", "bob", request=mine)["request"]["id"] == mine
     assert call("request_get", "bob", request=theirs)["kind"] == "not_found"
     assert call("request_get", "bob", request="REQ-99")["kind"] == "not_found"
     admin = file_request("dr-ana", organization="clinic-b")
-    assert ok("request_get", "dr-ana", request=admin)["request"] == admin
+    assert ok("request_get", "dr-ana", request=admin)["request"]["by"] == "Organization:clinic-b"
     assert call("request_get", "bob", request=admin)["kind"] == "not_found"
     assert "sign in" in denied("request_get", fake_chain.ANONYMOUS, request=mine)
 
@@ -65,7 +67,7 @@ def test_a_delegate_files_and_reads_for_the_grantor():
                scope={"operations": ["request.file", "self.data_view"]}, expires_at=fake_chain.now() + 3600)
     r = ok("request_file", "claude-conn", kind="petition", body=BODY, on_behalf_of="bob")["request"]
     assert Request[r].by == "User:bob"
-    assert ok("request_get", "claude-conn", request=r, on_behalf_of="bob")["request"] == r
+    assert ok("request_get", "claude-conn", request=r, on_behalf_of="bob")["request"]["id"] == r
     assert call("request_decide", "claude-conn", request=r, decision="granted", on_behalf_of="clerk")["denied"]
 
 
@@ -89,8 +91,8 @@ def test_I_LIC_3_the_extension_limit_is_set_once_and_the_deadline_never_passes_i
     registry()
     r = file_request()
     now = fake_chain.now()
-    assert "pass its extension limit" in denied("request_set_due", "clerk", request=r, due_at=now + 20 * DAY,
-                                                 extension_limit=now + 10 * DAY)
+    too_late = denied("request_set_due", "clerk", request=r, due_at=now + 20 * DAY, extension_limit=now + 10 * DAY)
+    assert "pass its extension limit" in too_late
     assert (Request[r].due_at, Request[r].extension_limit) == (0, 0)
     ok("request_set_due", "clerk", request=r, due_at=now + 10 * DAY, extension_limit=now + 30 * DAY)
     assert call("request_set_due", "clerk", request=r, due_at=now + 12 * DAY,
@@ -135,3 +137,17 @@ def test_I_PRV_1_the_audit_log_keeps_neither_the_body_nor_the_reply_of_a_request
     assert {e["op"] for e in log} == {"request_file", "request_decide"}
     assert "Elm" not in str([(e["args"], e["result"]) for e in log])
     assert Event[str(Event.max_id())].args == {"request": r, "decision": "granted"}
+
+
+def test_json_arguments_of_the_wrong_type_are_refused_not_trapped():
+    """Candid cannot say these, so the arguments go to the operations as JSON."""
+    registry()
+    r = file_request()
+    calls = (("request_file", "bob", {"kind": 5, "body": {}}), ("request_file", "bob", {"kind": ["x"], "body": {}}),
+             ("request_set_due", "clerk", {"request": r, "due_at": "soon"}),
+             ("request_set_due", "clerk", {"request": r, "due_at": 5, "extension_limit": [1]}),
+             ("request_decide", "clerk", {"request": r, "decision": 5}))
+    for name, who, args in calls:
+        out = direct(name, who, **args)
+        assert not out["ok"] and out["kind"] == "invalid_argument", (name, args)
+    assert Request[r].status == "filed" and Request.max_id() == 1

@@ -1,6 +1,6 @@
 import json
 
-from core import build_variant, chain, language, localtime, zones
+from core import auth, build_variant, chain, language, localtime, zones
 import constants
 import ggg
 from core import sandbox
@@ -371,12 +371,20 @@ def realm_monitor(c, args):
             "rows": {n: getattr(ggg, n).count() for n in COUNTED}, "upgrade": realm.manifest_data.get("upgrade", {})}
 
 
+# Entities whose rows hold personal data in clear: exporting them takes their readers' permission too (I-PRV-1).
+READERS = {"Attribute": "attribute.review"}
+
+
 @op("db.export", read=True, returns="rows")
 def realm_export(c, args):
-    """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it."""
+    """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it. Exporting ``Attribute``
+    takes attribute.review as well, since its rows hold personal data in clear."""
     cls = getattr(ggg, args["entity"], None)
     if not (isinstance(cls, type) and issubclass(cls, Entity)):
         raise Fail(f"unknown entity '{args['entity']}'")
+    reader = READERS.get(args["entity"])
+    if reader and not {"all", reader} & auth.permissions(c.user):
+        raise Forbidden(f"exporting {args['entity']} needs {reader}")
     rows, nxt = page(cls, args)
     return {"entity": args["entity"], "rows": [view(r) for r in rows], "next": nxt}
 

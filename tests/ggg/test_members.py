@@ -288,8 +288,8 @@ def test_I_PRV_1_an_attribute_is_read_only_by_the_person_and_its_reviewers():
 
 def test_attributes_are_submitted_in_person_and_listed_for_a_grantor_by_a_delegate():
     registry_with_reviewer()
-    assert "not a delegable" in denied("delegation_grant", "alice", delegate="claude-conn",
-                                        operations=["attribute.submit"], expires_in=DAY)
+    refused = denied("delegation_grant", "alice", delegate="claude-conn", operations=["attribute.submit"], expires_in=DAY)
+    assert "not a delegable" in refused
     ok("delegation_grant", "alice", delegate="claude-conn", operations=["self.data_view"], expires_in=DAY)
     assert "power of attorney" in denied("attribute_submit", "claude-conn", kind="student", value="yes", ref="x",
                                          on_behalf_of="alice")
@@ -305,3 +305,17 @@ def test_an_agent_cannot_review_attributes():
                agent=True, supervisor="dana")
     a = ok("attribute_submit", "alice", kind="student", value="yes", ref="vault:s")["attribute"]
     assert "human" in denied("attribute_review", "review-bot", attribute=a, status="verified")
+
+
+def test_I_PRV_1_exporting_attributes_takes_the_reviewers_permission_too():
+    registry_with_reviewer()
+    world.seat("civil-registry.exporter", "carla", Department["Civil Registry"], "db.export")
+    world.seat("civil-registry.reviewing-exporter", "elena", Department["Civil Registry"], "db.export",
+               "attribute.review")
+    ok("attribute_submit", "alice", kind="disability", value="33 percent", ref="vault:x")
+    assert "attribute.review" in denied("realm_export", "carla", entity="Attribute")
+    assert ok("realm_export", "carla", entity="Member")["rows"]
+    rows = ok("realm_export", "elena", entity="Attribute")["rows"]
+    assert [(r["kind"], r["value"]) for r in rows] == [("disability", "33 percent")]
+    assert ok("realm_export", "ctl", entity="Attribute")["rows"] == rows
+    assert "db.export" in denied("realm_export", "hector", entity="Attribute")

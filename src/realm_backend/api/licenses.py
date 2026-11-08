@@ -169,7 +169,8 @@ def valid_procedure(args):
     """Refuse a deadline that is no Period, or a silence that is neither positive nor negative."""
     deadline = args.get("decision_deadline")
     if deadline is not None and not (
-            isinstance(deadline.get("count"), int) and deadline["count"] >= 0 and deadline.get("unit") in PERIOD_UNITS):
+            isinstance(deadline, dict) and type(deadline.get("count")) is int and deadline["count"] >= 0
+            and isinstance(deadline.get("unit"), str) and deadline["unit"] in PERIOD_UNITS):
         raise Fail(f"a decision_deadline is a count of {', '.join(PERIOD_UNITS)}, such as 3 months")
     if args.get("silence") not in (None, *SILENCES):
         raise Fail(f"silence is {' or '.join(SILENCES)}")

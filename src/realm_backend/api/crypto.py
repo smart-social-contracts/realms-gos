@@ -159,10 +159,10 @@ def recipient_of(args):
     """The ``recipient`` of a share, which must exist, and the ``basis`` it states, if any, which must say its legal
     basis and purpose."""
     recipient, basis = args["recipient"], args.get("basis")
-    if recipient.partition(":")[0] not in RECIPIENTS:
+    if not isinstance(recipient, str) or recipient.partition(":")[0] not in RECIPIENTS:
         raise Fail(f"a document is shared with a User, an Organization or an External, not {recipient}")
     deref(recipient)
-    if basis is not None and not (basis.get("legal_basis") and basis.get("purpose")):
+    if basis is not None and not (isinstance(basis, dict) and basis.get("legal_basis") and basis.get("purpose")):
         raise Fail("a basis states its legal_basis and its purpose")
 
 
@@ -223,16 +223,22 @@ def document_list(c, args):
     time (default 100, at most 500) from row ``from`` (default 1). Returns ``documents`` and ``next`` (null at the
     end); a page can hold fewer than ``count`` when a filter is given: follow ``next``."""
     staff(args["department"], c.user)
+    if args.get("language"):
+        language.require(args["language"])
     rows, nxt = page_by(Document, "department", args["department"], args)
     wanted = [d for d in rows if args.get("kind") in (None, d.kind)
               and (not args.get("language") or language.listed(d.languages, args["language"]))]
     return {"documents": [view(d) for d in wanted], "next": nxt}
 
 
-def stranger_view(doc):
-    """What anyone reads of a published document: its public copy, not its ciphertext or what legislation reads about
-    its sharing (I-PRV-4)."""
-    return {**view(doc), "ref": "", "hash": "", "facts": {}}
+# What a reader without the key sees in place of a published document's ciphertext reference, hash and facts (I-PRV-4).
+CONCEALED = {"ref": "", "hash": "", "facts": {}}
+
+
+def reads_ciphertext(doc, principal):
+    """Whether ``principal`` reads the ciphertext reference, hash and facts of ``doc``: its department's staff and the
+    holders of its key. Anyone else reads only the public copy of a published document."""
+    return KeyEnvelope[f"{scope_of(doc)}|{principal}"] is not None or principal in managers(f"dept:{doc.department}")
 
 
 @op("self.data_view", read=True, public=True)
@@ -240,12 +246,12 @@ def document_get(c, args):
     """``document`` with its key scope and your wrapped key, for its department's staff and key holders. Anyone, signed
     in or not, reads a published document: its public copy, title, kind and languages, without the ciphertext."""
     doc = find(Document, args["document"])
-    mine = KeyEnvelope[f"{scope_of(doc)}|{c.user}"]
-    if mine is None and c.user not in managers(f"dept:{doc.department}"):
+    if not reads_ciphertext(doc, c.user):
         if not doc.public:
             if c.user == chain.ANONYMOUS:
                 raise auth.SignIn("sign in first")
             raise Forbidden(f"{doc.id} was not shared with you")
-        return {"document": stranger_view(doc), "scope": scope_of(doc), "wrapped_dek": "", "envelope": None}
+        return {"document": {**view(doc), **CONCEALED}, "scope": scope_of(doc), "wrapped_dek": "", "envelope": None}
+    mine = KeyEnvelope[f"{scope_of(doc)}|{c.user}"]
     return {"document": view(doc), "scope": scope_of(doc), "wrapped_dek": mine.wrapped_dek if mine else "",
             "envelope": mine.id if mine else None}

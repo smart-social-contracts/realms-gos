@@ -50,6 +50,28 @@ def test_private_data_and_wrapped_keys_are_blobs():
     assert g.ggg_document_get(doc) == {"Ok": None} or "Err" in g.ggg_document_get(doc)
 
 
+def test_I_PRV_4_the_ggg_method_gives_a_stranger_only_the_public_copy_of_a_published_document():
+    health()
+    caller("carla")
+    stored = do(g.ggg_document_store({"document": None, "department": "Health", "facts": {"Map": [("source", {"Text": "x"})]},
+                                      "keys": [{"principal": P("dr-ana"), "wrapped_dek": b"\x0a"}], **REPORT}))["Ok"]
+    doc = stored["document"]["id"]
+    do(g.ggg_document_publish({"document": doc, "to": None, "ref": "pub/report.pdf", "hash": "sha256:cd34"}))
+    public = {"ref": "pub/report.pdf", "hash": "sha256:cd34"}
+    for reader in (fake_chain.ANONYMOUS, "alice"):
+        caller(reader)
+        got = g.ggg_document_get(doc)["Ok"]["document"]
+        assert got["public"] == public and got["title"] == REPORT["title"]
+        assert (got["ref"], got["hash"], got["facts"]) == ("", "", {"Map": []}), reader
+    for reader in ("carla", "dr-ana"):  # the department's staff, and a holder of the key
+        caller(reader)
+        got = g.ggg_document_get(doc)["Ok"]["document"]
+        assert (got["ref"], got["hash"]) == (REPORT["ref"], REPORT["hash"]), reader
+    assert g.ggg_document_get(doc)["Ok"]["document"]["facts"] == {"Map": [("source", {"Text": "x"})]}
+    caller("carla")
+    assert do(g.ggg_document_publish({"document": doc, "to": None, **public}))["Ok"]["ref"] == REPORT["ref"]
+
+
 def test_a_procedure_crosses_with_ggg_s_period_unit_tags():
     health()
     caller("ctl")
