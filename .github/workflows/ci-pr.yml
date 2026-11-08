@@ -131,7 +131,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: src/realm_frontend/package-lock.json
+          cache-dependency-path: package-lock.json
       - name: Host frontend i18n tests
         working-directory: src/realm_frontend
         run: |
