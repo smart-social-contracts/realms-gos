@@ -187,3 +187,14 @@ def test_auth():
     for name in ("department_get", "department_list", "department_chart", "organization_get", "organization_list"):
         assert "sign in" in denied(name, fake_chain.ANONYMOUS, department="Health", organization="clinic-b")
         ok(name, "mallory", department="Health", organization="clinic-b")
+
+
+def test_a_department_has_a_kind_that_legislation_can_address():
+    depts = world.build()
+    ok("department_create", "ctl", department="Council", kind="plenary")
+    assert Department["Council"].kind == "plenary" and depts["Finance"].kind == ""
+    ok("department_edit", "ctl", department="Finance", kind="committee")
+    ok("department_edit", "ctl", department="Finance", description="Money")
+    assert Department["Finance"].kind == "committee" and Department["Finance"].description == "Money"
+    assert ok("department_get", "ctl", department="Council")["department"]["kind"] == "plenary"
+    assert {d["id"]: d["kind"] for d in ok("department_list", "ctl")["departments"]}["Finance"] == "committee"

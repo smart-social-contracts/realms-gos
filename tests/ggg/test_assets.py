@@ -3,7 +3,7 @@ import pytest
 import fake_chain
 import world
 from api.assets import quote, value
-from ggg import Case, Codex, Delegation, Dispute, Land, NFTToken, Organization, Verdict, Zone
+from ggg import Case, Codex, Delegation, Department, Dispute, Land, NFTToken, Organization, Verdict, Zone
 from kit import call, denied, later, ok
 
 OK = "(variant { Ok = 4_412 : nat })"
@@ -108,6 +108,31 @@ def test_zones_are_chosen_by_their_user():
     assert "sign in" in denied("zone_clear", fake_chain.ANONYMOUS, zone="x")
     ok("zone_clear", "alice", zone="871f1d48bffffff")
     assert [z["id"] for z in ok("land_map", "bob")["zones"]] == ["871f1d489ffffff", "871f1d48bffffff"]
+
+
+def test_the_realm_defines_zones_that_members_can_name_as_home():
+    agora()
+    assert "realm.configure" in denied("zone_define", "alice", zone="riverside", name="Riverside", kind="district")
+    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    ok("zone_define", "ctl", zone="riverside", name="Riverside North", kind="district")
+    zone = Zone["riverside"]
+    assert (zone.name, zone.kind, zone.defined, zone.population, zone.user) == ("Riverside North", "district", True,
+                                                                                  0, "")
+    ok("zone_set", "alice", zone="871f1d489ffffff")
+    assert "home cell" in call("zone_define", "ctl", zone="871f1d489ffffff", name="x", kind="y")["error"]
+    assert "zone of the realm" in call("zone_set", "bob", zone="riverside")["error"]
+    assert [z["id"] for z in ok("land_map", "bob")["zones"]] == ["riverside", "871f1d489ffffff"]
+
+
+def test_defining_a_zone_is_governed_once_the_realm_has_launched():
+    agora()
+    world.policy(Department["Administration"], 2, 3)
+    ok("setup_step", "ctl", step="install", network="local", founder="frank")
+    ok("setup_step", "frank", step="realm", name="Agora")
+    ok("zone_define", "frank", zone="riverside", name="Riverside", kind="district")
+    ok("setup_launch", "frank")
+    out = ok("zone_define", "ctl", zone="hillside", name="Hillside", kind="district")
+    assert out["requires_vote"] and Zone["hillside"] is None
 
 
 def test_story_dr_ana_prescribes_and_a_pharmacy_verifies():

@@ -3,8 +3,9 @@ import hashlib
 from core import auth
 import fake_chain
 import world
-from ggg import Appointment, Delegation, Event, Identity, Invite, Member, Position, Proposal, Realm, User, UserProfile
-from kit import denied, later, ok
+from ggg import (Appointment, Delegation, Event, Identity, Invite, Member, Position, Proposal, Realm, User, UserProfile,
+                 Zone)
+from kit import call, denied, later, ok
 
 DAY = 86400
 
@@ -170,3 +171,59 @@ def test_identity_review_is_signed_by_a_human_not_the_owner():
     Appointment(id="bot", user="registry-bot", agent=True, position=Position["civil-registry.head"])
     assert "human" in denied("identity_review", "registry-bot", identity=i, status="verified")
     assert UserProfile["member"] is not None and Delegation.count() == 0
+
+
+def define_districts():
+    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    ok("zone_define", "ctl", zone="hillside", name="Hillside", kind="district")
+
+
+def test_a_member_states_language_and_home_zone_when_joining():
+    world.build()
+    define_districts()
+    Realm["1"].open_registration = True
+    ok("realm_join", "zoe", language="es-ES", home_zone="riverside")
+    assert (User["zoe"].language, User["zoe"].home_zone) == ("es-ES", "riverside")
+    assert Zone["riverside"].population == 1
+    card = ok("user_get", "dana", user="zoe")["user"]
+    assert (card["language"], card["home_zone"]) == ("es-ES", "riverside")
+
+
+def test_joining_with_a_bad_language_or_zone_is_refused_before_anything_is_written():
+    world.build()
+    define_districts()
+    ok("zone_set", "alice", zone="871f1d489ffffff")
+    Realm["1"].open_registration = True
+    for args in ({"language": "english please"}, {"language": ""}, {"home_zone": "nowhere"},
+                 {"home_zone": "871f1d489ffffff"}):
+        out = call("realm_join", "zoe", **args)
+        assert not out["ok"] and out["kind"] == "invalid_argument", (args, out)
+    assert User["zoe"] is None and Member["zoe"] is None
+    assert Zone["riverside"].population == 0
+
+
+def test_a_member_changes_their_own_language_and_a_clerk_moves_their_home_zone():
+    world.build()
+    define_districts()
+    Realm["1"].open_registration = True
+    ok("realm_join", "zoe", home_zone="riverside")
+    ok("profile_update", "zoe", language="ca")
+    assert User["zoe"].language == "ca"
+    assert call("profile_update", "zoe", language="x")["kind"] == "invalid_argument"
+    ok("user_edit", "dana", user="zoe", home_zone="hillside", language="es")
+    assert (User["zoe"].home_zone, User["zoe"].language) == ("hillside", "es")
+    assert (Zone["riverside"].population, Zone["hillside"].population) == (0, 1)
+    ok("user_edit", "dana", user="zoe", home_zone="hillside")
+    assert Zone["hillside"].population == 1
+    assert call("user_edit", "dana", user="zoe", home_zone="nowhere")["kind"] == "invalid_argument"
+    assert User["zoe"].home_zone == "hillside"
+
+
+def test_a_removed_member_leaves_the_population_of_their_zone():
+    world.build()
+    define_districts()
+    ok("zone_define", "ctl", zone="other", name="Other", kind="district")
+    ok("user_add", "ctl", user="zoe")
+    ok("user_edit", "ctl", user="zoe", home_zone="other")
+    ok("user_remove", "ctl", user="zoe")
+    assert Zone["other"].population == 0
