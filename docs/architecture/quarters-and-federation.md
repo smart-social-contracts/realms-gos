@@ -131,9 +131,10 @@ the new quarter with the quarter's `name` and the capital's `open_registration`.
   members it is offered to can join. Registration stays local: a realm that joins on its own keeps its
   own, and nothing follows after the build.
 
-Open: a quarter still in `setup` is configured by its founder, without votes, and a synced stage of
-`alpha` or later would end that. How a quarter in `setup` takes the capital's stage (for example, at
-its own launch) is settled before the stage sync is built.
+**The stage and `setup`.** A quarter that has not launched is in `setup`, configured by its founder
+without votes, and the sync does not end that: the quarter applies the other synced fields and leaves
+its stage alone. At its own launch (`setup_launch`) it takes the capital's stage instead of `alpha`, and
+from then on the stage is kept in sync like the rest.
 
 ## Time zones in a federation
 
