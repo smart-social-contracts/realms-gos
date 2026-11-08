@@ -132,8 +132,10 @@ same rows.
   (`amended`) every extended line of each fund whose lines it adopts, whether it names the line's category or not,
   and leaves the other funds' extensions; `closed` means closed with its period, so a category an adopted budget
   drops does not come back at the next extension. An adopted budget is exhaustive: once a fund has one for the
-  period, spending in a category it has no line for is refused (the ledger's fee excepted), while a fund with only
-  extended lines, or none, spends as before;
+  period, spending in a category it has no line for is refused, while a fund with only extended lines, or none,
+  spends as before. A payment with no category is in the category `transfer` and a payroll in `payroll`, so each needs
+  its line like any other. The ledger's fee on a payment is a mechanical cost of it, not a spending decision, and
+  needs none;
 - a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), and
   `Treasury.debt_outstanding` is kept as a running total, like fund balances;
 - `codex_activate` makes the pending layered codex, named by its id (its checksum), the active one at once and keeps
