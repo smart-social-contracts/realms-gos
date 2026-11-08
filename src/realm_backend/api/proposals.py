@@ -263,8 +263,8 @@ def veto_pending(p):
 
 def department_outcome(p, tally, size, vetoed, final):
     """A department's vote passes with ``m`` approvals, no veto holder against and the policy's quorum met (ggg
-    I-GOV-3). Before it ends it is accepted only once every veto holder has voted, and it is never rejected: a no
-    can still be replaced (ggg I-GOV-7)."""
+    I-GOV-3). Before it ends it is accepted only once every veto holder who can still vote has voted, and it is never
+    rejected: a no can still be replaced (ggg I-GOV-7)."""
     passes = tally["yes"] >= p.tally["required"] and not vetoed and quorum_met(p, tally, size)
     if passes and (final or not veto_pending(p)):
         return "accepted"
@@ -358,8 +358,8 @@ def proposal_vote(c, args):
     voted (in a department, once it has ``m`` approvals, every veto holder has voted, none against, and its quorum is
     met; for a realm-wide proposal in a realm with no voting window, once the outcome is certain). Only an acceptance
     ends a department's vote early, so a no can be replaced until the deadline, or until every eligible member has
-    voted; in a realm with no voting window a department's vote that cannot pass stays open until it passes, everyone
-    has voted, or its proposer withdraws it. After the vote ends no vote is accepted and none is replaced."""
+    voted; in a realm with no voting window a department's vote that can't pass on the votes cast so far stays open
+    until it passes, everyone has voted, or its proposer withdraws it. After the vote ends no vote is accepted and none is replaced."""
     p = find(Proposal, args["proposal"])
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
