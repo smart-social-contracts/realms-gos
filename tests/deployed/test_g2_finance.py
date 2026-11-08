@@ -1,15 +1,19 @@
 """A realm that holds taxes, budgets and invoices in the form of the last release keeps them across an upgrade to GGG's
 G2 finance (realms-gos#547), and the new finance works on the real wasm.
 
-The rows the last release saved are written back through the controller's ``__shell__``, as in test_ratio_migration: an
-entity migrates when it is read from storage, and only an upgrade, which empties the canister's heap, makes the next read
-come from there.
+The upgrade is from the previous release's own wasm, named by ``REALM_PREVIOUS_WASM`` (skipped when unset), or from this
+release's, whose rows are written back through the controller's ``__shell__`` as the last release saved them, which CI can
+always build. An entity migrates when it is read from storage, and only an upgrade, which empties the canister's heap,
+makes the next read come from there.
 """
 
 import json
+import os
 
 import pytest
 from pic import Canister
+
+PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
 
 BASIS_POINT = 10_000
 UNIT = 10**8  # one token of the realm's currency, which has 8 decimals: a cent is 10**6 of the smallest unit
@@ -91,15 +95,45 @@ def debt(realm):
     return int(run(realm, 'import ggg; print(ggg.Treasury["1"].debt_outstanding)'))
 
 
+def versions_of(saved, wanted):
+    return {key: wanted[key.split(":")[0]] for key in saved if key.split(":")[0] in wanted}
+
+
 def versions(realm):
     return {key: row["__version__"] for key, row in rows(realm).items() if key.split(":")[0] in VERSION}
 
 
-@pytest.fixture(scope="module")
-def realm(wasm_of, people):
-    """A realm with an adopted tax policy, two budget lines, two invoices and a parcel, saved as the last release saved
-    them, then upgraded."""
-    realm = Canister(wasm_of("production"), installer=people["installer"])
+def seed_previous(realm, ctl, alice):
+    """The budget, invoices and tax policy through the operations of the last release, which took a budget line of any
+    kind, one line at a time, an invoice without items and the taxes in the document."""
+    ok(realm, "budget_draft", ctl, fund="ROADS", period="FY2026", category="capital", kind="capital", planned=300 * UNIT)
+    ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2026", category="property_tax", kind="revenue", planned=900 * UNIT)
+    ok(realm, "budget_propose", ctl, budget="B-1")
+    ok(realm, "budget_propose", ctl, budget="B-2")
+    for amount in (120 * UNIT, 7 * UNIT):
+        ok(realm, "invoice_create", ctl, payer=alice, amount=amount, reason="TaxDeclaration:TD-1" if amount > UNIT * 100 else "")
+    ok(realm, "tax_policy_draft", ctl, document=OLD_DOCUMENT)
+
+
+def seed_current(realm, ctl, alice):
+    """The same through this release's operations; the rows are then written back as the last release saved them."""
+    ok(realm, "budget_draft", ctl, fund="ROADS", period="FY2026", category="capital", kind="expense", planned=300 * UNIT)
+    ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2026", category="property_tax", kind="revenue", planned=900 * UNIT)
+    ok(realm, "budget_propose", ctl, period="FY2026")
+    for amount in (120 * UNIT, 7 * UNIT):
+        ok(realm, "invoice_create", ctl, payer=alice, amount=amount, items=[{"concept": "fee", "amount": amount}],
+           reason="TaxDeclaration:TD-1" if amount > UNIT * 100 else "")
+    ok(realm, "tax_policy_draft", ctl, document=DOCUMENT, taxes=ENTRIES)
+
+
+@pytest.fixture(scope="module", params=[
+    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
+    "rewritten"])
+def realm(request, wasm_of, people):
+    """A realm with an adopted tax policy, two budget lines, two invoices and a parcel, in the form of the last release,
+    then upgraded."""
+    current = wasm_of("production")
+    realm = Canister(PREVIOUS if request.param == "previous" else current, installer=people["installer"])
     ctl, founder, alice = people["ctl"], people["founder"], people["alice"]
     ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
     ok(realm, "setup_step", founder, step="realm", name="Agora", open_registration=True)
@@ -112,25 +146,22 @@ def realm(wasm_of, people):
     ok(realm, "fund_create", ctl, fund="ROADS")
     ok(realm, "period_open", ctl, **FY2026)
     ok(realm, "period_open", ctl, **FY2027)
-    ok(realm, "budget_draft", ctl, fund="ROADS", period="FY2026", category="capital", kind="expense", planned=300 * UNIT)
-    ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2026", category="property_tax", kind="revenue", planned=900 * UNIT)
-    ok(realm, "budget_propose", ctl, period="FY2026")
-    for amount in (120 * UNIT, 7 * UNIT):
-        ok(realm, "invoice_create", ctl, payer=alice, amount=amount, items=[{"concept": "fee", "amount": amount}],
-           reason="TaxDeclaration:TD-1" if amount > UNIT * 100 else "")
+    (seed_previous if request.param == "previous" else seed_current)(realm, ctl, alice)
     ok(realm, "land_register", ctl, owner=alice, x=0, y=0)
-    ok(realm, "tax_policy_draft", ctl, document=DOCUMENT, taxes=ENTRIES)
     ok(realm, "tax_policy_propose", ctl, policy="TAX-POLICY-1")
-    # What a new realm saves: the rows are of this release's shape, and the old rows below are those of the last.
-    assert versions(realm) == {key: VERSION[key.split(":")[0]] for key in versions(realm)} != {}
-    realm.old_rows = json.loads(run(realm, SAVE_OLD))  # read before anything loads, and so migrates, them
-    realm.upgrade()
+    if request.param == "previous":
+        realm.old_rows = rows(realm)  # as the last release saved them: nothing has loaded, and so migrated, them yet
+    else:
+        # What a new realm saves: the rows are of this release's shape, and the old rows below are those of the last.
+        assert versions(realm) == {key: VERSION[key.split(":")[0]] for key in versions(realm)} != {}
+        realm.old_rows = json.loads(run(realm, SAVE_OLD))
+    realm.upgrade(current)
     return realm
 
 
 def test_the_rows_start_in_the_form_of_the_last_release(realm):
     old = realm.old_rows
-    assert {row["__version__"] for row in old.values()} == {1}
+    assert all(old[key]["__version__"] < number for key, number in versions_of(old, VERSION).items())
     assert old["TaxPolicy:TAX-POLICY-1"]["document"] == OLD_DOCUMENT and "taxes" not in old["TaxPolicy:TAX-POLICY-1"]
     assert old["Budget:B-1"]["kind"] == "capital" and "items" not in old["Invoice:INV-1"]
     assert "debt_outstanding" not in old["Treasury:1"] and "assessed_value" not in old["Land:L-1"]
@@ -228,6 +259,28 @@ def test_activating_a_codex_needs_a_pending_one(realm, people):
     out = refused(realm, "codex_activate", people["ctl"], codex="sha256:" + "0" * 64)
     assert out["kind"] == "conflict" and "no codex is pending" in out["error"]
     assert ok(realm, "codex_status", people["alice"], query=True)["pending"] is None
+
+
+def test_a_number_outside_its_range_is_refused_before_anything_is_written(realm, people):
+    ctl = people["ctl"]
+    loan = {"lender": "bank-a", "amount": UNIT, "term": {"count": 10, "unit": "year"}, "rate": 1, "fund": "ROADS"}
+    loans = ok(realm, "loan_list", ctl, query=True)["loans"]
+    for change in ({"term": {"count": 1_000_001, "unit": "year"}}, {"amount": 2**53}, {"rate": 10_000_000_001}):
+        assert refused(realm, "loan_create", ctl, **{**loan, **change})["kind"] == "invalid_argument", change
+    assert ok(realm, "loan_list", ctl, query=True)["loans"] == loans
+    item = {"concept": "x", "amount": 2**53}
+    assert refused(realm, "invoice_item_add", ctl, invoice="INV-2", item=item)["kind"] == "invalid_argument"
+
+
+def test_a_budget_whose_total_is_out_of_range_is_refused_and_files_nothing(realm, people):
+    ctl = people["ctl"]
+    ok(realm, "period_open", ctl, period="FY2028", starts_at=FY2027["ends_at"], ends_at=FY2027["ends_at"] + 100)
+    for category, planned in (("property_tax", 2**53 - 1), ("fees", 1)):
+        ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2028", category=category, kind="revenue", planned=planned)
+    out = refused(realm, "budget_propose", ctl, period="FY2028")
+    assert out["kind"] == "invalid_argument" and "largest amount" in out["error"]
+    seen = ok(realm, "budget_view", people["alice"], query=True, period="FY2028")
+    assert [b for f in seen["funds"] for b in f["budgets"]] == []  # nothing is in force
 
 
 def test_a_second_upgrade_changes_nothing(realm, people):
