@@ -3,11 +3,14 @@ GGG's Candid method, never weaker than the scope's default, applied as stored, d
 tie, and migrated for the proposals the last release left open. Numbers outside the range GGG gives them are refused.
 """
 
+import os
+
 import pytest
 from ic.candid import Types
 from ic.principal import Principal
 from pic import CONTROLLER, Canister
 
+PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
 PERCENT = 1_000_000
 ONE = 100 * PERCENT
 LINK = Types.Record({"kind": Types.Variant({"Replaces": Types.Null, "RelatesTo": Types.Null}), "proposal": Types.Text})
@@ -60,11 +63,9 @@ def get(realm, who, proposal):
     return ok(realm, "proposal_get", who, query=True, proposal=proposal)["proposal"]
 
 
-@pytest.fixture(scope="module")
-def realm(wasm_of, people):
+def launch(realm, people):
     """A launched realm of four members, the founder, Alice, Bob and Mallory, and the Council department, which decides 2
     of 4 with the four of them in its seats."""
-    realm = Canister(wasm_of("production"), installer=people["installer"])
     ctl, founder = people["ctl"], people["founder"]
     ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
     ok(realm, "setup_step", founder, step="realm", name="Agora", open_registration=True)
@@ -78,6 +79,12 @@ def realm(wasm_of, people):
     for member in members + [founder]:
         ok(realm, "appoint", ctl, position="council.member", user=member)
     ok(realm, "department_set_policy", ctl, department="Council", m=2, n=4)
+
+
+@pytest.fixture(scope="module")
+def realm(wasm_of, people):
+    realm = Canister(wasm_of("production"), installer=people["installer"])
+    launch(realm, people)
     return realm
 
 
@@ -166,8 +173,8 @@ def test_a_periods_count_beyond_a_million_is_refused_in_the_wasm(realm):
 
 # ---- An upgrade
 
+# Saves a proposal as the last release did: version 2, without the rule fields.
 ROWS = '''
-import json
 from ic_python_db import Database
 import ggg
 
@@ -181,22 +188,46 @@ def as_last_release_saved(proposal, **fields):
 '''
 
 
-def test_the_proposals_of_the_last_release_are_decided_by_the_rule_they_were_filed_under(realm, people):
-    alice, bob, mallory = (people[n] for n in ("alice", "bob", "mallory"))
+@pytest.fixture(scope="module", params=[
+    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
+    "rewritten"])
+def upgraded(request, wasm_of, people):
+    """A realm with a realm-wide and a department proposal open, filed under the last release's rules, then upgraded:
+    by the previous release's own wasm, named by ``REALM_PREVIOUS_WASM`` (skipped when unset), or by this release's, whose
+    two rows are rewritten as that release saved them, which CI can always build."""
+    current = wasm_of("production")
+    realm = Canister(PREVIOUS if request.param == "previous" else current, installer=people["installer"])
+    launch(realm, people)
+    alice = people["alice"]
     ok(realm, "governance_update", people["ctl"], voting_threshold=60 * PERCENT, voting_quorum=10 * PERCENT)
-    open_realm_wide, open_department = file(realm, alice), file(realm, alice, "Council")
-    vote(realm, alice, open_department, "yes")
-    out = realm.shell(ROWS + (
-        f"as_last_release_saved('{open_realm_wide}', tally={{'yes': 0, 'no': 0, 'abstain': 0}})\n"
-        f"as_last_release_saved('{open_department}', threshold=3000000, tally={{'yes': 1, 'no': 0, 'abstain': 0, "
-        f"'required': 2, 'veto': []}})\n"))
-    assert "Traceback" not in out, out
-    realm.upgrade()  # the heap is emptied: the next read comes from storage, and migrates the row
-    plain, department = get(realm, alice, open_realm_wide), get(realm, alice, open_department)
-    assert (plain["threshold"], plain["quorum"], plain["threshold_of"], plain["casting_vote"]) == (
+    wide, department = (ok(realm, "proposal_create", alice, title=t, **d)["proposal"] for t, d in (
+        ("wide", {}), ("department", {"department": "Council"})))
+    vote(realm, alice, department, "yes")
+    if request.param == "rewritten":
+        out = realm.shell(ROWS + (
+            f"as_last_release_saved('{wide}')\n"
+            f"as_last_release_saved('{department}', threshold=3000000, tally={{'yes': 1, 'no': 0, 'abstain': 0, "
+            f"'required': 2, 'veto': []}})\n"))
+        assert "Traceback" not in out, out
+    realm.upgrade(current)  # the heap is emptied: the next read comes from storage, and migrates the row
+    realm.open = wide, department
+    return realm
+
+
+def test_the_proposals_of_the_last_release_are_decided_by_the_rule_they_were_filed_under(upgraded, people):
+    alice, bob = people["alice"], people["bob"]
+    wide, department = upgraded.open
+    row = get(upgraded, alice, wide)
+    assert (row["threshold"], row["quorum"], row["threshold_of"], row["casting_vote"]) == (
         60 * PERCENT, 10 * PERCENT, "cast", "")
-    assert (department["threshold"], department["threshold_of"]) == (50 * PERCENT, "eligible")
-    assert "required" not in department["tally"] and department["tally"]["yes"] == 1
-    vote(realm, bob, open_department, "yes")  # m was 2, and 2 of the 4 seats reach half of them
-    assert get(realm, alice, open_department)["status"] == "accepted"
-    ok(realm, "governance_update", people["ctl"], voting_threshold=50 * PERCENT, voting_quorum=0)
+    row = get(upgraded, alice, department)
+    assert (row["threshold"], row["quorum"], row["threshold_of"]) == (50 * PERCENT, 0, "eligible")
+    assert "required" not in row["tally"] and row["tally"]["yes"] == 1
+    vote(upgraded, bob, department, "yes")  # m was 2, and 2 of the 4 seats reach half of them
+    assert get(upgraded, alice, department)["status"] == "accepted"
+    for who in ("founder", "bob", "mallory"):
+        vote(upgraded, people[who], wide, "yes")
+    vote(upgraded, alice, wide, "yes")  # every member said yes: the vote is over
+    assert get(upgraded, alice, wide)["status"] == "accepted"
+    new = ok(upgraded, "proposal_create", alice, title="new", threshold_of="eligible")["proposal"]
+    assert get(upgraded, alice, new)["threshold_of"] == "eligible"
