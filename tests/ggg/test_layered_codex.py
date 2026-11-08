@@ -6,6 +6,7 @@ import hashlib
 import json
 
 import pytest
+from ic_python_db import ManyToMany, ManyToOne, OneToMany, OneToOne
 
 from api import assets, codex
 from core import layered_codex as store
@@ -212,3 +213,20 @@ def test_the_history_lists_the_legacy_codices_then_the_layered_ones_a_page_at_a_
     assert [h["status"] for h in rest["history"]] == ["active"]
     assert [h["id"] for h in ok("codex_status", "alice", count=2, **{"from": 3})["history"]] == ids
 
+
+def test_the_entities_hold_ids_as_text_and_so_export_as_plain_rows():
+    # ic-python-db refuses to serialize a relation of more than MAX_UNPAGED rows (core.db.Row.unlisted), which would
+    # trap realm_export: a relation on these entities would need that care.
+    relations = (ManyToOne, OneToMany, OneToOne, ManyToMany)
+    for entity in (LayeredCodex, ChapterSource, InstallJob):
+        assert not [name for name, prop in vars(entity).items() if isinstance(prop, relations)]
+    lc = layered(status="active", proposal="P-1")
+    store.store_chapter(store.checksum(CHAPTER), CHAPTER)
+    store.start_job("P-1", {"url": "u", "checksum": "c"})
+
+    def exported(entity):
+        return ok("realm_export", "ctl", entity=entity, count=500)["rows"]
+
+    assert [(r["id"], r["layer_paths"], r["proposal"]) for r in exported("LayeredCodex")] == [(lc.id, PATHS, "P-1")]
+    assert [r["source"] for r in exported("ChapterSource")] == [CHAPTER]
+    assert [(r["id"], r["change_list"]) for r in exported("InstallJob")] == [("J-1", {"url": "u", "checksum": "c"})]
