@@ -141,7 +141,8 @@ same rows.
   caps nothing, yet a fund whose adopted lines are all revenue has an adopted budget, so it refuses all spending
   but the ledger's fee. A payment with no category is in the category `transfer` and a payroll in `payroll`, so each needs
   its line like any other. The ledger's fee on a payment is a mechanical cost of it, not a spending decision, and
-  needs none;
+  needs none: the realm books it itself under the category `ledger_fee`, which `transfer_create` and `budget_draft`
+  refuse a caller to name (`InvalidArgument`);
 - a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), its `lender`
   an `External` the realm knows (`NotFound` otherwise), and `Treasury.debt_outstanding` is kept as a running total,
   like fund balances;
