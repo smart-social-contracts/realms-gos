@@ -16,7 +16,8 @@ class Budget(Row):
     kind = String(default="expense")  # revenue | expense
     planned = Integer(default=0)
     actual = Integer(default=0)
-    # draft | proposed | adopted | amended | closed; extended: copied from the previous period by budget_extend
+    # draft | proposed | adopted | amended | closed; extended: copied from the previous period by budget_extend.
+    # Amended is replaced by a newer version, adopted or extended; closed is closed with its period.
     status = String(default="draft")
     proposal = String(default="")
 

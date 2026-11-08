@@ -124,15 +124,24 @@ same rows.
 - an invoice's `items` are lines with a `concept` and a signed `amount`, optionally a `quantity`, a `unit` and the
   `legislation` that charges it; they sum to the invoice's `amount`, and `invoice_item_add` adds a line to a pending
   invoice. The invoice of a fine or a restitution has one item, named for the kind of penalty;
-- a budget line is `revenue` or `expense`, and `budget_propose` takes every draft line of a period together
+- a budget line is `revenue` or `expense`, a category is one kind within a fund and period (`budget_draft` refuses a
+  line of the other kind with `InvalidArgument`), and `budget_propose` takes every draft line of a period together
   (so a line drafted after the proposal was filed, and before it was accepted, is adopted with it). `years` is
   a fact for legislation and is not kept. Realms GOS never marks a draft `proposed`: a governed `*_propose` leaves the
   draft as it is until the vote accepts it. `budget_extend` copies a period's budget as it stood at the end of the
   period before into the period as `extended` lines, for each fund that has no extended, proposed or adopted line
   in it yet (`Conflict` when none is left): of each fund and category the newest line that was adopted or extended
   (or `closed` with the period), never a line a newer one replaced. An `extended` line stands in for an adopted one:
-  it caps spending, `budget_view` lists it and `period_close` closes it. A proposal for the period closes the
-  extended lines of every fund whose lines it adopts, and leaves the other funds' extensions;
+  it caps spending, `budget_view` lists it and `period_close` closes it. A proposal for the period replaces
+  (`amended`) every extended line of each fund whose lines it adopts, whether it names the line's category or not,
+  and leaves the other funds' extensions; `closed` means closed with its period, so a category an adopted budget
+  drops does not come back at the next extension. An adopted budget is exhaustive: once a fund has one for the
+  period, spending in a category it has no expense line for is refused, while a fund with only extended lines, or
+  none, spends as before. Only an expense line caps spending, and its actual counts expense only; a revenue line
+  caps nothing, yet a fund whose adopted lines are all revenue has an adopted budget, so it refuses all spending
+  but the ledger's fee. A payment with no category is in the category `transfer` and a payroll in `payroll`, so each needs
+  its line like any other. The ledger's fee on a payment is a mechanical cost of it, not a spending decision, and
+  needs none;
 - a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), its `lender`
   an `External` the realm knows (`NotFound` otherwise), and `Treasury.debt_outstanding` is kept as a running total,
   like fund balances;
@@ -319,6 +328,9 @@ What the model replaced in earlier versions of Realms GOS:
   by licensed organizations), `JusticeSystem` (courts stand on their own), `QuarterResident` (no
   central user directory), `RfpTransition` (the `Event` log records transitions), `VendorRecord`
   (derived from awarded tenders).
+- A fund that has an adopted budget refuses spending in a category it has no expense line for: the vault's and the
+  voting extension's payments (category `transfer`) and a codex's payroll (`payroll`) need a line in such a fund,
+  where they needed none before.
 - A tax policy kept its taxes in `document.taxes`, each with a `base` and a `method`; they are `TaxPolicy.taxes`,
   typed entries (a flat tax is a tax on `User`, a land tax one on `Land`, a declared tax one on `Declaration`;
   a fixed tax is an `amount`, a proportional one a `rate`, the settings and brackets are `facts`). Stored
