@@ -476,8 +476,8 @@ def proposing_action(user, args):
         lines += [{"label": label, "value": str(value)} for label, value in
                   (("Codex source", source), ("Codex version", version), ("Codex checksum", what.get("checksum")))
                   if value]
-    return lines + [{"label": "Effect", "value": "Files a proposal in your name. The realm votes on it; if it passes, "
-                                                  "the action runs"}]
+    effect = "Files a proposal in your name. The realm votes on it; if it passes, the action runs"
+    return lines + [{"label": "Effect", "value": effect}]
 
 
 @op("proposal.create", returns="proposal", summary=proposing_action)

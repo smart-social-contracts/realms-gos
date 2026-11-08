@@ -9,6 +9,7 @@ from ggg import (AllocationRule, Budget, Contract, Department, External, Financi
                  Transfer, Treasury)
 from ggg.finance.budget import KINDS
 from core.op import op
+from core.pending import quoted
 from core.ratio import ONE, PERCENT
 from api.proposals import realm_wide, root
 
@@ -1008,11 +1009,12 @@ def adding_account(user, args):
     if not symbol:
         return [{"label": "Effect", "value": "It names no token, so no payment is sent to it"}]
     now = address(owner, symbol)
+    paid = f"Realm payments to {who} in {quoted(symbol)}"
     if any(a.symbol == symbol for a in each(PaymentAccount, "owner", owner)):
-        return [{"label": "Effect", "value": f"Realm payments to {who} in {symbol} keep going to {now}; this account "
-                                              "comes after it"}]
-    return [{"label": "Effect", "value": f"Realm payments to {who} in {symbol} will go to {args['address']} instead of "
-                                          f"{now}"}]
+        effect = f"{paid} keep going to {quoted(now)}; this account comes after it"
+    else:
+        effect = f"{paid} will go to {quoted(args['address'])} instead of {quoted(now)}"
+    return [{"label": "Effect", "value": effect}]
 
 
 def removing_account(user, args):
@@ -1023,9 +1025,10 @@ def removing_account(user, args):
     who = "you" if a.owner == f"User:{user}" else a.owner
     after = next((b.address for b in each(PaymentAccount, "owner", a.owner) if b.symbol == a.symbol and b.id != a.id),
                  a.owner.removeprefix("User:"))
-    return [{"label": "Account", "value": f"{a.address} on {a.network}" + (f" ({a.label})" if a.label else "")},
-            {"label": "Effect", "value": f"Realm payments to {who} in {a.symbol or 'any token'} will go to {after} "
-                                          f"instead of {a.address}"}]
+    account = f"{quoted(a.address)} on {quoted(a.network)}" + (f" ({quoted(a.label)})" if a.label else "")
+    paid = f"Realm payments to {who} in {quoted(a.symbol) if a.symbol else 'any token'}"
+    return [{"label": "Account", "value": account},
+            {"label": "Effect", "value": f"{paid} will go to {quoted(after)} instead of {quoted(a.address)}"}]
 
 
 @op("self.data_manage", returns="account", summary=adding_account)

@@ -112,9 +112,13 @@ def risk_of(name):
 
 
 def summary_of(user, name, spec, args):
-    """The realm's words about the call, a label and a value per line: each argument, then what the operation says of its
-    effect (its ``summary`` hook), then where a governed call goes."""
-    lines = [{"label": label(key), "value": shown(key, value, args)} for key, value in sorted(args.items())]
+    """The realm's words about the call, a label and a value per line: each argument under its own name, in lower case,
+    then what the operation says of its effect (its ``summary`` hook) under a label that starts with a capital, then
+    where a governed call goes. An argument cannot take a label of the realm's: its name is a lower-case word."""
+    for key in args:
+        if not (key.isascii() and key.isidentifier() and key == key.lower()):
+            raise Fail(f"'{key}' is not an argument name: they are lower-case words")
+    lines = [{"label": key, "value": shown(key, value, args)} for key, value in sorted(args.items())]
     if spec["summary"]:
         lines += spec["summary"](user, args)
     if spec["governed"]:
@@ -122,8 +126,9 @@ def summary_of(user, name, spec, args):
     return lines
 
 
-def label(key):
-    return key.replace("_", " ").capitalize()
+def quoted(text):
+    """Text the delegate supplied, inside a sentence of the realm's: quoted, so that it cannot pass for the realm's words."""
+    return json.dumps(str(text))
 
 
 def shown(key, value, args):

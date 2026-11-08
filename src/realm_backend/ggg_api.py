@@ -329,10 +329,11 @@ def pending_action(a):
 
 def encoded(op, args, out):
     """The reply ``out`` of operation ``op`` called with ``args`` as GGG's ``Ok`` value, Candid-encoded with the method's own
-    type."""
-    reply_t = METHODS[op][1]
-    value = reply(op, args, {"ok": True, **out}, reply_t)["Ok"]
-    return chain.candid_encode(f"({to_candid(value, fields(reply_t)['Ok'])})")
+    type. An operation GGG lacks replies in JSON, as its arguments are."""
+    if op not in METHODS:
+        return json.dumps(out, sort_keys=True).encode()
+    ok_t = fields(METHODS[op][1])["Ok"]
+    return chain.candid_encode(f"({to_candid(ok_value(op, args, out, ok_t), ok_t)})")
 
 
 class Shown:
@@ -648,10 +649,15 @@ def reply(op, args, out, reply_t):
             return {"Ok": None}
         return {"Err": err}
     try:
-        raw = BUILD[op](out, args) if op in BUILD else result(op, out, ok_t)
-        return {"Ok": to_ggg(raw, ok_t)}
+        return {"Ok": ok_value(op, args, out, ok_t)}
     finally:
         STAFF.clear()
+
+
+def ok_value(op, args, out, ok_t):
+    """The ``Ok`` value of type ``ok_t`` that GGG replies for the reply ``out`` of operation ``op``."""
+    raw = BUILD[op](out, args) if op in BUILD else result(op, out, ok_t)
+    return to_ggg(raw, ok_t)
 
 
 def load(t, key):
