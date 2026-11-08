@@ -3,7 +3,7 @@
     "version": "1.1.0",
     "published": "2026-10-15",
     "effective_from": "2027-01-01",
-    "commit": "308bf3244b24118a18103df7eeb69732d6603ccd",
+    "commit": "398ca632573ee86ee7ecfc36a2e2a817d9350e78",
     "chapters": {
       "language": "sha256:e8d64248ae727d105213c5fd07323bf537aae52267fbe72adb63275d9fadb4f3",
       "local_regime": "sha256:18d7fbb625a3c3d64e86472dcab969756e8b9162b10e40b58c1eedbf3888d5e0"

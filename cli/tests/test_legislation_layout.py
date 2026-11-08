@@ -168,7 +168,7 @@ def test_a_folder_name_of_lowercase_letters_digits_and_hyphens_is_kept(tree):
 # ── The .py files of a source ─────────────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("name", ["foo.py", "Tax.py", "__init__.py", "tax-law.py"])
+@pytest.mark.parametrize("name", ["foo.py", "Tax.py", "__init__.py", "local-regime.py"])
 def test_a_py_file_that_is_not_a_ggg_domain_is_refused(tree, name):
     write(tree, f"eu/es/{name}", "")
     breaks(tree, f"eu/es/{name}: {name[:-3]} is not a GGG domain")
@@ -227,6 +227,19 @@ def test_source_json_names_the_folder_in_id(tree):
 def test_source_json_needs_names_an_act_and_a_publisher(tree, changes, expected):
     write(tree, "eu/es/source.json", source_json("eu/es", **changes))
     breaks(tree, f"eu/es/source.json: {expected}")
+
+
+def test_source_json_leaves_out_the_act_when_none_created_the_source(tree):
+    """A municipality older than any statute has no act to name; one that is named must be text."""
+    without = source_json("eu/es")
+    del without["created_by"]
+    write(tree, "eu/es/source.json", without)
+    assert problems(tree) == []
+    write(tree, "eu/es/source.json", source_json("eu/es", created_by=None))
+    breaks(
+        tree,
+        "eu/es/source.json: created_by is the act that created the source; leave it out when none did",
+    )
 
 
 def test_source_json_keeps_a_publisher_with_a_realm_of_its_own(tree):
@@ -317,7 +330,6 @@ def one_release(tree, **changes):
         ({"version": ""}, "version is text"),
         ({"published": "2026-13-01"}, "published is a day"),
         ({"effective_from": "soon"}, "effective_from is a day"),
-        ({"effective_from": "2025-12-31"}, "effective_from is before published"),
         ({"commit": "abc123"}, "commit is the 40 hex digits"),
         ({"commit": "A" * 40}, "commit is the 40 hex digits"),
         ({"chapters": {}}, "chapters is {domain: sha256:<hex>}"),
@@ -338,6 +350,11 @@ def test_a_release_has_the_fields_of_the_design(tree, changes, expected):
     breaks(
         tree, f"eu/releases.json: release {changes.get('version', '1.0.0')}: {expected}"
     )
+
+
+def test_a_stand_in_release_published_after_its_legislation_took_effect_is_kept(tree):
+    one_release(tree, published="2026-06-01", effective_from="2026-01-01")
+    assert problems(tree) == []
 
 
 def test_a_release_without_notes_or_a_calendar_is_kept(tree):
@@ -370,6 +387,25 @@ def test_releases_go_newest_last_and_a_version_is_released_once(tree):
     breaks(tree, "eu/releases.json: releases are newest last: published goes up")
     write(tree, "eu/releases.json", [first, dict(second, version="1.0.0")])
     breaks(tree, "eu/releases.json: a version is released twice")
+
+
+def test_published_days_are_compared_as_days_not_as_text(tree):
+    at = git(tree, "rev-parse", "HEAD")
+    january = release(tree, "eu", at, published="2026-1-10", effective_from="2026-2-1")
+    february = release(
+        tree,
+        "eu",
+        at,
+        version="1.1.0",
+        published="2026-02-01",
+        effective_from="2026-3-1",
+    )
+    write(
+        tree, "eu/releases.json", [january, february]
+    )  # as text, "2026-1-10" sorts after "2026-02-01"
+    assert problems(tree) == []
+    write(tree, "eu/releases.json", [february, january])
+    breaks(tree, "eu/releases.json: releases are newest last: published goes up")
 
 
 # ── releases.json against the files at its commit ─────────────────────────────────────────────────────────────────
@@ -421,23 +457,18 @@ def test_a_release_never_lists_the_realm_domain(tree):
     )
 
 
-def test_a_chapter_the_release_does_not_hold_is_the_realm_domain_left_out(tree):
-    # eu/es has a realm chapter at the commit: the release leaves it out, and that is not a missing chapter
+def test_a_realm_chapter_beside_releases_is_the_sources_own_and_no_release_carries_it(
+    tree,
+):
+    # Spain publishes releases and is a realm too: its realm.py is not a missing chapter, and it is not listed
     write(tree, "eu/es/realm.py", chapter("realm"))
     at = commit(tree.parent)
     write(tree, "eu/es/releases.json", [release(tree, "eu/es", at)])
-    assert [p for p in problems(tree) if "does not list" in p] == []
-
-
-def test_a_realm_chapter_is_kept_in_a_realms_own_layer_and_refused_beside_releases(
-    tree,
-):
-    assert problems(tree) == []  # València: a realm chapter and no releases.json
-    write(tree, "eu/es/realm.py", chapter("realm"))
-    breaks(
-        tree,
-        "eu/es/realm.py: the realm domain may only be filled in the realm's own layer",
+    assert (
+        "realm"
+        not in json.loads((tree / "eu/es/releases.json").read_text())[0]["chapters"]
     )
+    assert problems(tree) == []
 
 
 def test_every_checksum_is_the_sha256_of_the_file_at_the_releases_commit(tree):
@@ -466,6 +497,29 @@ def test_a_chapter_edited_after_its_release_is_a_proposal_in_progress_not_a_brok
     )
     commit(tree.parent)
     assert problems(tree) == []
+
+
+def test_a_commit_outside_the_history_of_head_is_refused(tree):
+    """A side branch, and a commit left dangling when its branch was deleted, hold bytes the tree's history never had."""
+    repo = tree.parent
+    git(repo, "checkout", "-q", "-b", "side")
+    (tree / "eu/data_protection.py").write_text(
+        chapter("data_protection") + "\n# a side branch\n"
+    )
+    side = commit(repo)
+    git(repo, "checkout", "-q", "-")
+    release_ = json.loads((tree / "eu/releases.json").read_text())
+    release_[0]["commit"] = side
+    release_[0]["chapters"]["data_protection"] = (
+        "sha256:"
+        + sha256(
+            (chapter("data_protection") + "\n# a side branch\n").encode()
+        ).hexdigest()
+    )
+    write(tree, "eu/releases.json", release_)
+    breaks(tree, f"release 1.0.0: commit {side[:7]} is not in the history of HEAD")
+    git(repo, "branch", "-D", "side")
+    breaks(tree, f"release 1.0.0: commit {side[:7]} is not in the history of HEAD")
 
 
 def test_a_commit_the_checkout_does_not_have_is_reported(tree):

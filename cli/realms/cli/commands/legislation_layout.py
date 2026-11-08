@@ -9,12 +9,12 @@ The rules:
 - a source is a folder with a ``source.json`` (§3.1), whose ``id`` is the folder's path under the tree;
 - the only ``.py`` files in a source are ``<domain>.py``, ``<domain>`` a GGG domain;
 - ``calendar.json`` (§3.4) and ``releases.json`` (§3.2) have the shapes the design shows;
-- a source with a ``releases.json`` publishes releases, and the ``realm`` domain only the realm's own layer fills
-  (§3), a layer that publishes none: ``realm.py`` is refused beside a ``releases.json``;
-- a release lists all of its source's chapters and its calendar, never the ``realm`` domain, and every checksum is
-  the sha256 of the file's bytes **at the release's own commit**, which is where a follower fetches them from
-  (§7). The tree holds only the current files, so history is read with git; a chapter edited after its release
-  is a proposal in progress, not a broken release.
+- a release lists all of its source's chapters and its calendar, never the ``realm`` domain (which only a realm's own
+  layer fills, §3: a ``realm.py`` beside a ``releases.json`` is the realm's own and no release carries it), and every
+  checksum is the sha256 of the file's bytes **at the release's own commit**, which is where a follower fetches them
+  from (§7). The commit must be in the history of ``HEAD``: a commit on a side branch or a fork is not what the
+  tree's history vouches for. The tree holds only the current files, so history is read with git; a chapter edited
+  after its release is a proposal in progress, not a broken release.
 """
 
 import json
@@ -79,17 +79,11 @@ def folder_problems(tree: Path, folder: Path) -> List[str]:
 
 
 def chapter_problems(tree: Path, files: dict) -> List[str]:
-    problems = [
+    return [
         f"{shown(tree, files[name])}: {name[:-3]} is not a GGG domain ({', '.join(GGG_DOMAINS)})"
         for name in sorted(files)
         if name.endswith(".py") and name[:-3] not in GGG_DOMAINS
     ]
-    if "realm.py" in files and "releases.json" in files:
-        problems.append(
-            f"{shown(tree, files['realm.py'])}: the realm domain may only be filled in the realm's own layer, "
-            "and this source publishes releases"
-        )
-    return problems
 
 
 # ── The shape of each JSON file ──────────────────────────────────────────────────────────────────────────────────
@@ -105,16 +99,19 @@ def json_problems(tree: Path, file: Path, reasons_of: Callable) -> List[str]:
 
 
 def source_reasons(data, source: str) -> List[str]:
-    """§3.1: ``id`` (the folder's path), ``name`` by language, ``created_by`` and ``publisher.realm``."""
+    """§3.1: ``id`` (the folder's path), ``name`` by language, ``created_by`` (left out when no act created the source)
+    and ``publisher.realm``."""
     if not isinstance(data, dict):
-        return ["an object with id, name, created_by and publisher"]
+        return ["an object with id, name and publisher"]
     reasons = []
     if data.get("id") != source:
         reasons.append(f"id is {data.get('id')!r}, but the folder is {source}")
     if not by_language(data.get("name")):
         reasons.append('name is the official names by language, {"es": "..."}')
-    if not is_text(data.get("created_by")):
-        reasons.append("created_by is the act that created the source")
+    if "created_by" in data and not is_text(data["created_by"]):
+        reasons.append(
+            "created_by is the act that created the source; leave it out when none did"
+        )
     publisher = data.get("publisher")
     if not (
         isinstance(publisher, dict)
@@ -160,8 +157,6 @@ def release_reasons(release) -> List[str]:
         )
         if r
     ]
-    if not reasons and release["effective_from"] < release["published"]:
-        reasons.append("effective_from is before published")
     commit = release.get("commit")
     if not (isinstance(commit, str) and len(commit) == 40 and set(commit) <= HEX):
         reasons.append("commit is the 40 hex digits of a git commit")
@@ -202,7 +197,8 @@ def releases_reasons(data) -> List[str]:
     versions = [r["version"] for r in data]
     if len(set(versions)) != len(versions):
         reasons.append("a version is released twice")
-    if [r["published"] for r in data] != sorted(r["published"] for r in data):
+    published = [parse_day(r["published"]) for r in data]
+    if published != sorted(published):
         reasons.append("releases are newest last: published goes up")
     return reasons
 
@@ -254,6 +250,8 @@ def release_history_reasons(tree: Path, source: str, release: dict) -> List[str]
     listed, and each checksum the sha256 of that file's bytes."""
     commit, short = release["commit"], release["commit"][:7]
     try:
+        if not is_ancestor(tree, commit):
+            return [f"commit {short} is not in the history of HEAD"]
         names = names_at(tree, commit, source)
     except LegislationError as e:
         return [f"commit {short} cannot be read ({e}); check out the full history"]
@@ -295,19 +293,34 @@ def bytes_at(tree: Path, commit: str, source: str, name: str) -> bytes:
     return git(tree, "show", f"{commit}:./{source}/{name}")
 
 
+def is_ancestor(tree: Path, commit: str) -> bool:
+    """Whether ``commit`` is ``HEAD`` or in its history. A commit git does not have is a ``LegislationError``."""
+    done = run_git(tree, "merge-base", "--is-ancestor", commit, "HEAD")
+    if done.returncode > 1:  # 1 is "not an ancestor"; anything else is git failing
+        raise LegislationError(refusal(done))
+    return done.returncode == 0
+
+
 def git(tree: Path, *args: str) -> bytes:
     """git's output, run from ``tree`` so that ``./`` paths are the tree's. A refusal is a ``LegislationError``."""
+    done = run_git(tree, *args)
+    if done.returncode:
+        raise LegislationError(refusal(done))
+    return done.stdout
+
+
+def run_git(tree: Path, *args: str) -> subprocess.CompletedProcess:
     try:
-        done = subprocess.run(["git", "-C", str(tree), *args], capture_output=True)
+        return subprocess.run(["git", "-C", str(tree), *args], capture_output=True)
     except FileNotFoundError:
         raise LegislationError("git is not installed")
-    if done.returncode:
-        raise LegislationError(
-            done.stderr.decode().strip().splitlines()[-1]
-            if done.stderr
-            else "git failed"
-        )
-    return done.stdout
+
+
+def refusal(done: subprocess.CompletedProcess) -> str:
+    """The last line git said on stderr."""
+    return (
+        done.stderr.decode().strip().splitlines()[-1] if done.stderr else "git failed"
+    )
 
 
 def shown(tree: Path, path: Path) -> str:

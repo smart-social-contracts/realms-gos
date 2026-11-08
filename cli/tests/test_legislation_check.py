@@ -139,17 +139,19 @@ def test_the_realm_s_own_chapter_may_hook_codex_activate(tree):
     )
     out = run(str(tree), "--realm", "eu/es/vc/46250-valencia")
     assert out.exit_code == 0, out.output
+
+
+def test_a_realm_loads_its_own_realm_chapter_and_not_the_one_a_source_above_keeps(tree):
+    """Spain is a realm too, so it keeps a realm.py beside its releases; València, which runs Spain's chapters, does not
+    load it (as the resolver skips a relayed realm chapter, §3)."""
     write(
         tree,
         "eu/es/realm.py",
-        "from realms.legislation import above\nclass Realm(above('realm')): pass\n",
+        "from realms.legislation import above\nclass Realm(above('realm')):\n    x = 1.5\n",  # a floating point number: refused
     )
-    out = run(str(tree), "--realm", "eu/es/vc/46250-valencia")
-    assert (
-        out.exit_code == 1
-        and "eu/es/realm.py: the realm domain may only be filled in the realm's own layer"
-        in out.output
-    )
+    assert run(str(tree), "--realm", "eu/es/vc/46250-valencia").exit_code == 0
+    out = run(str(tree), "--realm", "eu/es")
+    assert out.exit_code == 1 and "eu/es/realm.py" in out.output
 
 
 def test_the_ggg_operation_list_comes_from_the_canisters_interface_plus_the_interim_list():

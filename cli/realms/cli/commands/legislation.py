@@ -11,7 +11,8 @@ comes with S2 and C2.
 
 The layers of a source are its ancestor folders, top to bottom: ``eu/es/vc/46250-valencia`` runs
 ``eu``, ``eu/es``, ``eu/es/vc`` and itself. The links between realms (§3.3, the resolver of S3) are not
-read here, so a body beside the line, such as EMSHI, is checked as a realm of its own.
+read here, so a body beside the line, such as EMSHI, is checked as a realm of its own. A realm loads only its
+own ``realm.py``: the one a source above keeps beside its releases is that source's, as ``plan`` skips a relayed one.
 """
 
 import json
@@ -23,6 +24,7 @@ from rich.console import Console
 
 from realms.cli.commands.legislation_layout import layout_problems
 from realms.legislation import Codex, Refused, subset_ast
+from realms.legislation.paths import REALM
 
 console = Console()
 legislation_app = typer.Typer(
@@ -124,8 +126,8 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
     for domain in domains:
         for source in layers:
             file = tree / source / (domain + ".py")
-            if not file.exists():
-                continue
+            if not file.exists() or (domain == REALM and source != realm):
+                continue  # a realm chapter is the realm's own; the layers above hold theirs for themselves (§3)
             text = file.read_text()
             try:
                 subset_ast.check(text, f"{source}/{domain}.py")

@@ -216,7 +216,7 @@ The rules:
 | Field | Rule |
 |---|---|
 | `name` | official names, by language |
-| `created_by` | the act that created the source |
+| `created_by` | the act that created the source; left out when none did, such as a municipality older than any statute |
 | `publisher.realm` | the canister id of the source's own realm, if it has one, else `null` (§8) |
 
 A source carries no time zone and no zone file: a realm's time zone is its own `Realm.timezone`
@@ -1558,10 +1558,11 @@ It uses Python's parser (`ast`), so it runs only off-chain:
 
 - the layout of §3, which it checks first and stops at if the tree breaks it: folder names, a `source.json`
   whose `id` is the folder's path, only `<domain>.py` files with a GGG domain, the shapes of `source.json`,
-  `releases.json` and `calendar.json`, `realm.py` only beside no `releases.json`, and each release against the
-  source's files **at the release's own commit** (read with git, so the check needs the full history): all its
-  chapters and its calendar listed, never the `realm` domain, every checksum the sha256 of the bytes. realms-codices
-  CI runs this command and has no checker of its own;
+  `releases.json` and `calendar.json`, and each release against the source's files **at the release's own
+  commit**, which must be in the history of `HEAD` (read with git, so the check needs the full history): all its
+  chapters and its calendar listed, never the `realm` domain, every checksum the sha256 of the bytes. A realm loads
+  only its own `realm.py`: one beside a source's releases is that source's own. realms-codices CI runs this command and
+  has no checker of its own;
 - every rule in §4: file and class names, base, imports, banned constructs, citations, marks, `uses`,
   and that every `on_`, `check_` and `compute_` method names a GGG operation;
 - the `F` expression rules (§6): the operation named, `each` naming the list it ranges over (for

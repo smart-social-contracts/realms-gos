@@ -3,11 +3,11 @@
     "version": "2.4.0",
     "published": "2026-11-02",
     "effective_from": "2027-01-01",
-    "commit": "308bf3244b24118a18103df7eeb69732d6603ccd",
+    "commit": "398ca632573ee86ee7ecfc36a2e2a817d9350e78",
     "chapters": {
       "data_protection": "sha256:c88a657b741a332f5e63c97d2a06bc859833a5de371161005c2f5625d37f47bb",
       "language": "sha256:0f13de1ea79d9c311bdd2adeb33204e214ed01eb1ed65f98896c22bc7197c8d4",
-      "local_regime": "sha256:6c594e8d5d23d24e202d0ca16206c10594a55bbcb161de477b9bdeb6a2c4f397",
+      "local_regime": "sha256:1a9fcecab3866cc77008528371aeaf7b72360f6ecd81ba877210b3e194935624",
       "procedure": "sha256:9aad335a653d319127e147585287778ec8b96bc5a60a4f867905df487260da87",
       "register": "sha256:fb56a3e6460e72ea8849d8d343aa2816933053ddbf9d8c91e8d9274e53e56fc6",
       "tax": "sha256:0af5a1da7b42451e2506502195ccd07049c6aa4670fc86e2f8e406972ba1d27d"
