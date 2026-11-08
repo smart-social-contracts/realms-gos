@@ -51,31 +51,31 @@ const LEDGER_FEE = 10_000n;
 // What each tax of the policy asks, in the token's smallest unit.
 const RESIDENCE = 1_000_000;
 const LEVY = 500_000;
-const REVENUE_DECLARED = 182_000;
-const REVENUE_OWED = 3_640; // 2.00 % (2 000 000 hundred-millionths) of the declared revenue
+// Money computed from a rate is rounded to the cent, which is a million units of this 8-decimal token, so the declared
+// revenue is whole cents too.
+const REVENUE_DECLARED = 182_000 * 1_000_000;
+const REVENUE_OWED = 3_640 * 1_000_000; // 2.00 % (2 000 000 hundred-millionths) of the declared revenue
 
-const POLICY = {
-	symbol: SYMBOL,
-	taxes: [
-		// Due in 30 days; the administrators are exempt.
-		{
-			code: 'residence',
-			base: 'flat',
-			method: 'fixed',
-			amount: RESIDENCE,
-			exempt_profiles: ['admin'],
-			due_days: 30
-		},
-		// Due the moment it is billed, so an unpaid one is overdue at the next check.
-		{ code: 'levy', base: 'flat', method: 'fixed', amount: LEVY, due_days: 0 },
-		// Not billed by the realm: each member declares it.
-		{ code: 'revenue', base: 'declared', method: 'proportional', rate: 2_000_000 }
-	]
-};
+const DOCUMENT = { symbol: SYMBOL };
+const TAXES = [
+	// Due in 30 days; the administrators are exempt.
+	{
+		code: 'residence',
+		kind: 'tax',
+		subject: 'User',
+		amount: RESIDENCE,
+		facts: { exempt_profiles: ['admin'], due_days: 30 }
+	},
+	// Due the moment it is billed, so an unpaid one is overdue at the next check.
+	{ code: 'levy', kind: 'tax', subject: 'User', amount: LEVY, facts: { due_days: 0 } },
+	// Not billed by the realm: each member declares it.
+	{ code: 'revenue', kind: 'tax', subject: 'Declaration', rate: 2_000_000, facts: {} }
+];
 
 interface TaxPolicy {
 	id: string;
-	document: typeof POLICY;
+	document: typeof DOCUMENT;
+	taxes: typeof TAXES;
 	description: string;
 	status: string;
 	adopted_at: number;
@@ -152,7 +152,7 @@ test('assessing before a policy is adopted is refused', async () => {
 });
 
 test('only an administrator drafts and adopts a policy, only the finance seat assesses', async () => {
-	const draft = { document: POLICY, description: `Refused ${RUN}` };
+	const draft = { document: DOCUMENT, taxes: TAXES, description: `Refused ${RUN}` };
 	await leavesUnchanged(realm, TAX_ROWS, async () => {
 		for (const who of [resident, officer, outsider]) {
 			await refused(realm, 'tax_policy_draft', draft, who, /needs tax\.manage/);
@@ -171,9 +171,15 @@ test('only an administrator drafts and adopts a policy, only the finance seat as
 });
 
 test('a policy that is not valid does not become a draft', async () => {
-	const bad = { symbol: SYMBOL, taxes: [{ code: 'lottery', base: 'flat', method: 'lottery' }] };
+	const bad = [{ code: 'lottery', kind: 'tax', subject: 'Planet', amount: 1, facts: {} }];
 	await leavesUnchanged(realm, TAX_ROWS, async () => {
-		await refused(realm, 'tax_policy_draft', { document: bad }, founder(), /method one of/);
+		await refused(
+			realm,
+			'tax_policy_draft',
+			{ document: DOCUMENT, taxes: bad },
+			founder(),
+			/subject must be one of/
+		);
 	});
 });
 
@@ -181,12 +187,13 @@ test('the administrator drafts the policy and adopts it', async () => {
 	const drafted = await done(
 		realm,
 		'tax_policy_draft',
-		{ document: POLICY, description: `Taxes ${RUN}` },
+		{ document: DOCUMENT, taxes: TAXES, description: `Taxes ${RUN}` },
 		founder()
 	);
 	policy = drafted.policy as string;
 	expect(await row<TaxPolicy>(realm, 'TaxPolicy', policy)).toMatchObject({
-		document: POLICY,
+		document: DOCUMENT,
+		taxes: TAXES,
 		description: `Taxes ${RUN}`,
 		status: 'draft'
 	});
@@ -392,22 +399,21 @@ test.fixme('the member is told the invoice is paid', async ({ page }) => {
 	}
 });
 
-// realms-gos#466: a tax document is checked only for its codes, bases, methods and rates (api/taxes.py check): an
-// amount that is negative or not a number, and a due date in the past, are drafted, and once adopted a text amount
-// makes every tax_assess trap ("invalid literal for int()") instead of answering with a refusal.
-test.fixme('a tax document with an amount that cannot be billed is refused', async () => {
-	const fixed = { code: 'x', base: 'flat', method: 'fixed' };
-	const documents = [
-		{ ...fixed, amount: -5 },
-		{ ...fixed, amount: 'abc' },
-		{ ...fixed, amount: 5, due_days: -3 }
+// realms-gos#466: a tax entry is checked only for its code, kind, subject and charge (api/taxes.py draft_of): a due
+// date in the past is drafted, and once adopted a text one makes every tax_assess trap ("invalid literal for int()")
+// instead of answering with a refusal.
+test.fixme('a tax with a due date that cannot be billed is refused', async () => {
+	const fixed = { code: 'x', kind: 'tax', subject: 'User', amount: 5 };
+	const entries = [
+		{ ...fixed, facts: { due_days: -3 } },
+		{ ...fixed, facts: { due_days: 'abc' } }
 	];
 	await leavesUnchanged(realm, TAX_ROWS, async () => {
-		for (const tax of documents) {
+		for (const tax of entries) {
 			await refused(
 				realm,
 				'tax_policy_draft',
-				{ document: { symbol: SYMBOL, taxes: [tax] } },
+				{ document: DOCUMENT, taxes: [tax] },
 				founder(),
 				/amount|due_days/
 			);

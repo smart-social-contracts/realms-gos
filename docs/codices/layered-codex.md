@@ -1167,17 +1167,33 @@ never needs the record, except to check compliance (§11).
 New entities, beside today's `Codex` ([`api/codex.py`](../../src/realm_backend/api/codex.py)):
 
 ```
-LayeredCodex { id = sha256 of its canonical JSON; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, route, fetched_at, url, size}};
+LayeredCodex { id; layers; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, route, fetched_at, url, size}};
            previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal }
 ChapterSource { sha256 (key); source text }            the downloaded bytes, stored once
-InstallJob { id; proposal; change_list {url, checksum}; step; staged; error; started_at }
+InstallJob { id; proposal; change_list {url, checksum}; step; staged; status: running | paused | failed | done; error; started_at; finished_at }
 ```
 
 `pending` is a codex installed but not yet in force (GGG's `Pending` codex status, §13);
 `activates_at` is its switch time, the adopting proposal's `effective_at`.
 
-Canonical JSON means sorted keys, no spaces and UTF-8. The codex checksum is what `replaces` refers
-to.
+`layers` is every source with a chapter or a calendar, top to bottom (`plan`'s `layers`, §8), and
+`layer_paths` each domain's path (`plan`'s `paths`). Both are stored: the paths alone do not place a
+layer that has only a calendar, or two layers that share no domain, and `resolve` needs the one order
+(§3.3) to load the codex again after an upgrade.
+
+**The id** is `sha256:` and the hex sha256 of the canonical JSON of
+`{"layers": ..., "layer_paths": ..., "chapters": {chapter id → sha256}}`. Canonical JSON means sorted
+keys, no spaces and UTF-8. The id names the legislation and nothing else: a chapter's version, who
+vouched for it, the route, the fetch time and the URL, and `previous`, `status`, `activates_at`,
+`installed_at` and `proposal`, are this realm's own history and stay out of it. So a capital and each of
+its quarters, which fetch the texts themselves, at their own time and by their own route (§9.5), have
+the same id; it does not change when the codex goes from `pending` to `active`; and it is what `replaces`
+refers to and what calls between quarters carry.
+
+A `ChapterSource` is keyed by `sha256:` and the hex sha256 of its text's UTF-8 bytes, the form the
+records of §8 use for a chapter. A text above 256 KB, or one whose checksum is not its key, is refused.
+`previous` is a codex id of either kind (`name@version` for a legacy codex, `sha256:…` for a layered
+one), so the history of §10.5 runs through both.
 
 **The legacy path stays:** `codex_install` with `manifest` and `source`, or with `codex` and `version`
 from the file registry, keeps working for agora, dominion and syntropia. A change-list URL selects the

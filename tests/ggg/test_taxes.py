@@ -1,24 +1,34 @@
 import pytest
 
 import fake_chain
-from api import taxes
+from api import codex, taxes
 import world
 from core.db import each
-from core.ratio import BASIS_POINT, ONE
-from ggg import Delegation, Department, Invoice, Land, Member, Proposal, TaxDeclaration, TaxPolicy
+from core.ratio import BASIS_POINT, PERCENT, RATE_MAX
+from ggg import Delegation, Department, Invoice, Land, Member, Proposal, TaxDeclaration, TaxPolicy, Token
 from kit import call, denied, ok
+from test_ratios import stored_as_version_1
 from test_treasury import balance_reply, setup_finance
 
-PROPERTY = {"code": "property", "base": "land_area", "unit_value": 100, "method": "progressive",
-            "brackets": [{"up_to": 50_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}],
-            "due_days": 100}
-RESIDENCE = {"code": "residence", "base": "flat", "method": "fixed", "amount": 5, "exempt_profiles": ["exempt"]}
-REVENUE = {"code": "revenue", "base": "declared", "method": "proportional", "rate": 200 * BASIS_POINT}
-POLICY = {"symbol": "REALM", "taxes": [PROPERTY, RESIDENCE, REVENUE]}
+# The taxes of Agora as typed entries: who is taxed (subject), what is charged (amount, rate or brackets) and the
+# settings legislation reads (facts).
+PROPERTY = {"code": "property", "kind": "tax", "subject": "Land",
+            "facts": {"unit_value": 100, "due_days": 100,
+                      "brackets": [{"up_to": 50_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}]}}
+RESIDENCE = {"code": "residence", "kind": "fee", "subject": "User", "amount": 5, "facts": {"exempt_profiles": ["exempt"]}}
+REVENUE = {"code": "revenue", "kind": "tax", "subject": "Declaration", "rate": 200 * BASIS_POINT, "facts": {}}
+DOCUMENT = {"symbol": "REALM"}
+TAXES = [PROPERTY, RESIDENCE, REVENUE]
+CENTS = 2  # the decimals the amounts below are in: 120 is 1.20
 
 
-def adopt_policy(document=POLICY, by="bob"):
-    p = ok("tax_policy_draft", by, document=document, description="Agora taxes")["policy"]
+def setup_taxes():
+    setup_finance()
+    Token["REALM"].decimals = CENTS
+
+
+def adopt_policy(taxes=TAXES, document=DOCUMENT, by="bob"):
+    p = ok("tax_policy_draft", by, document=document, taxes=taxes, description="Agora taxes")["policy"]
     ok("tax_policy_propose", by, policy=p)
     return p
 
@@ -28,11 +38,11 @@ def invoices_of(payer):
 
 
 def owed_on(area):
-    return taxes.owed(PROPERTY, area * PROPERTY["unit_value"])
+    return taxes.owed(PROPERTY, area * PROPERTY["facts"]["unit_value"], CENTS)
 
 
 def test_story_agora_taxes():
-    setup_finance()
+    setup_taxes()
     Land(id="L-1", owner="User:alice", width=10, height=30)
     Land(id="L-2", owner="User:bob", width=20, height=40)
     first = adopt_policy()
@@ -55,8 +65,9 @@ def test_story_agora_taxes():
 
     world.policy(Department["Administration"], 2, 3)
     brackets = [{"up_to": 50_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 100 * BASIS_POINT}]
-    raised = {**POLICY, "taxes": [{**PROPERTY, "brackets": brackets}]}
-    for name, args in (("tax_policy_draft", {"document": raised}), ("tax_policy_propose", {"policy": "TAX-POLICY-2"})):
+    raised = [{**PROPERTY, "facts": {**PROPERTY["facts"], "brackets": brackets}}]
+    drafted = {"document": DOCUMENT, "taxes": raised}
+    for name, args in (("tax_policy_draft", drafted), ("tax_policy_propose", {"policy": "TAX-POLICY-2"})):
         p = ok(name, "bob", **args)["proposal"]
         for voter in world.PEOPLE:
             ok("proposal_vote", voter, proposal=p, choice="yes")
@@ -66,46 +77,69 @@ def test_story_agora_taxes():
 
 
 def test_I_FIN_4_adopted_tax_policy_is_frozen():
-    setup_finance()
+    setup_taxes()
     p = adopt_policy()
     assert "only a draft" in call("tax_policy_propose", "bob", policy=p)["error"]
-    q = adopt_policy({"taxes": [RESIDENCE]})
+    q = adopt_policy([RESIDENCE])
     assert (TaxPolicy[p].status, TaxPolicy[q].status) == ("superseded", "adopted")
-    assert TaxPolicy[p].document == POLICY
+    assert (TaxPolicy[p].document, TaxPolicy[p].taxes) == (DOCUMENT, TAXES)
 
 
 def test_reference_calculation():
-    assert taxes.owed(RESIDENCE, 1) == 5
-    assert taxes.owed(REVENUE, 182_000) == 3_640
-    assert taxes.owed(PROPERTY, 30_000) == 120
-    assert taxes.owed(PROPERTY, 80_000) == 200 + 240
-    assert taxes.owed({**REVENUE, "exempt_below": 10_000}, 9_999) == 0
-    assert taxes.owed(PROPERTY, 0) == 0
+    assert taxes.owed(RESIDENCE, 1, CENTS) == 5
+    assert taxes.owed(REVENUE, 182_000, CENTS) == 3_640
+    assert taxes.owed(PROPERTY, 30_000, CENTS) == 120
+    assert taxes.owed(PROPERTY, 80_000, CENTS) == 200 + 240
+    assert taxes.owed({**REVENUE, "facts": {"exempt_below": 10_000}}, 9_999, CENTS) == 0
+    assert taxes.owed(PROPERTY, 0, CENTS) == 0
+    assert taxes.owed({**REVENUE, "rate": 120 * PERCENT}, 1_000, CENTS) == 1_200  # a rate may pass 100 %
+    assert taxes.owed({"code": "x", "kind": "tax", "subject": "User", "facts": {}}, 1_000, CENTS) == 0  # a codex's
+
+
+def test_a_rate_charges_to_the_cent_and_an_exact_half_goes_away_from_zero():
+    tenth = {**REVENUE, "rate": 10 * PERCENT}
+    assert taxes.owed(tenth, 2_345, CENTS) == 235  # 2.345 -> 2.35
+    assert taxes.owed(tenth, 2_344, CENTS) == 234  # 2.344 -> 2.34
+    unit = 10**8  # one token of an 8-decimal currency: a cent is a million smallest units
+    assert taxes.owed({**REVENUE, "rate": 1_500_000}, unit, 8) == 2_000_000  # 0.015 -> 0.02
+    assert taxes.owed({**REVENUE, "rate": 1_100_000}, unit, 8) == 1_000_000  # 0.011 -> 0.01
+    brackets = {"brackets": [{"up_to": 1_000, "rate": 15 * PERCENT}, {"up_to": None, "rate": 25 * PERCENT}]}
+    assert taxes.owed({**PROPERTY, "facts": brackets}, 1_010, CENTS) == 150 + 3  # each bracket to the cent: 2.5 -> 3
 
 
 def test_policy_is_checked():
-    setup_finance()
-    bad = [{"taxes": []}, {"taxes": [{**RESIDENCE, "method": "lottery"}]},
-           {"taxes": [{**REVENUE, "rate": ONE + 1}]},
-           {"taxes": [{**PROPERTY, "brackets": [{"up_to": 5, "rate": 1}]}]},
-           {"taxes": [RESIDENCE, RESIDENCE]}]
-    for document in bad:
-        assert not call("tax_policy_draft", "bob", document=document)["ok"], document
+    setup_taxes()
+    brackets = [{"up_to": 5, "rate": 1}]
+    bad = [[], [RESIDENCE, RESIDENCE], [{**RESIDENCE, "code": ""}],
+           [{**RESIDENCE, "subject": "Planet"}], [{**RESIDENCE, "kind": ""}], [{**RESIDENCE, "method": "lottery"}],
+           [{**RESIDENCE, "facts": ["not", "a", "map"]}],
+           [{**RESIDENCE, "rate": 1}], [{**PROPERTY, "rate": 1}],  # two ways to charge
+           [{**REVENUE, "rate": RATE_MAX + 1}], [{**RESIDENCE, "amount": -1}],
+           [{**PROPERTY, "facts": {"brackets": brackets}}]]  # brackets that never end
+    for entries in bad:
+        assert not call("tax_policy_draft", "bob", document=DOCUMENT, taxes=entries)["ok"], entries
+    assert not call("tax_policy_draft", "bob", document=["symbol"], taxes=TAXES)["ok"]
     assert TaxPolicy.count() == 0
 
 
+def test_a_rate_may_pass_a_hundred_percent_and_a_tax_may_leave_its_charge_to_the_codex():
+    setup_taxes()
+    adopt_policy([{**REVENUE, "rate": 150 * PERCENT}, {**RESIDENCE, "code": "by_codex", "amount": None}])
+    assert [t.get("rate") or t.get("amount") for t in TaxPolicy["TAX-POLICY-1"].taxes] == [150 * PERCENT, None]
+
+
 def test_flat_tax_skips_exempt_and_inactive_members():
-    setup_finance()
+    setup_taxes()
     world.profile("exempt")
     world.person("elena", "exempt")
     Member["mallory"].status = "suspended"
-    adopt_policy({"taxes": [RESIDENCE]})
+    adopt_policy([RESIDENCE])
     ok("tax_assess", "bob", period="2026", tax="residence")
     assert not invoices_of("User:elena") and not invoices_of("User:mallory") and invoices_of("User:alice") == {5}
 
 
 def test_tax_assess_runs_in_batches_and_bills_nobody_twice():
-    setup_finance()
+    setup_taxes()
     Land(id="L-1", owner="User:alice", width=10, height=30)
     Land(id="L-2", owner="User:bob", width=20, height=40)
     Land(id="L-3", owner="User:alice", width=10, height=10)
@@ -122,7 +156,7 @@ def test_tax_assess_runs_in_batches_and_bills_nobody_twice():
 
 
 def test_tax_assess_leaves_self_declared_taxes_to_tax_declare():
-    setup_finance()
+    setup_taxes()
     Land(id="L-1", owner="User:alice", width=10, height=30)
     adopt_policy()
     assert "self-declared" in call("tax_assess", "bob", period="2026", tax="revenue")["error"]
@@ -132,12 +166,12 @@ def test_tax_assess_leaves_self_declared_taxes_to_tax_declare():
 
 
 def test_tax_assess_needs_an_adopted_policy():
-    setup_finance()
+    setup_taxes()
     assert "no tax policy" in call("tax_assess", "bob", period="2026")["error"]
 
 
 def test_tax_declare_rules_and_delegation():
-    setup_finance()
+    setup_taxes()
     adopt_policy()
     assert "assessed by the realm" in call("tax_declare", "alice", period="2026", base="property", amount=1)["error"]
     assert "do not administer" in call("tax_declare", "alice", organization="clinic-b", period="2026",
@@ -157,9 +191,9 @@ def test_members_cannot_manage_or_assess_taxes(name):
 
 
 def test_a_member_reads_the_tax_policy_and_only_their_own_declarations():
-    setup_finance()
+    setup_taxes()
     assert ok("tax_policy_view", "mallory")["policy"] is None
-    draft = ok("tax_policy_draft", "bob", document=POLICY)["policy"]
+    draft = ok("tax_policy_draft", "bob", document=DOCUMENT, taxes=TAXES)["policy"]
     seen = ok("tax_policy_view", "mallory")
     assert (seen["policy"], [d["id"] for d in seen["drafts"]]) == (None, [draft])
 
@@ -167,7 +201,8 @@ def test_a_member_reads_the_tax_policy_and_only_their_own_declarations():
     ok("tax_assess", "bob", period="2026")
     ok("tax_declare", "alice", period="2026-Q3", base="revenue", amount=100)
     seen = ok("tax_policy_view", "mallory")
-    assert (seen["policy"]["id"], seen["policy"]["document"], seen["drafts"]) == (draft, POLICY, [])
+    assert (seen["policy"]["id"], seen["policy"]["document"], seen["policy"]["taxes"]) == (draft, DOCUMENT, TAXES)
+    assert seen["drafts"] == []
     assert [(d["base"], d["status"]) for d in seen["declarations"]] == [("residence", "assessed")]
 
     mine = ok("tax_policy_view", "alice")["declarations"]
@@ -176,17 +211,17 @@ def test_a_member_reads_the_tax_policy_and_only_their_own_declarations():
 
 
 def test_tax_policy_view_gives_the_currency_and_decimals_and_caps_the_drafts():
-    setup_finance()
+    setup_taxes()
     seen = ok("tax_policy_view", "mallory")
-    assert (seen["currency"], seen["decimals"]) == ("REALM", 8)
-    drafts = [ok("tax_policy_draft", "bob", document=POLICY)["policy"] for _ in range(12)]
+    assert (seen["currency"], seen["decimals"]) == ("REALM", CENTS)
+    drafts = [ok("tax_policy_draft", "bob", document=DOCUMENT, taxes=TAXES)["policy"] for _ in range(12)]
     assert [d["id"] for d in ok("tax_policy_view", "mallory")["drafts"]] == drafts[:1:-1]  # ten, newest first
     ok("tax_policy_propose", "bob", policy=drafts[0])
     assert ok("tax_policy_view", "mallory")["currency"] == "REALM"
 
 
 def test_tax_policy_view_shows_an_organizations_declarations_to_its_administrators_only():
-    setup_finance()
+    setup_taxes()
     adopt_policy()
     ok("tax_declare", "dr-ana", organization="clinic-b", period="2026-Q3", base="revenue", amount=100)
     assert len(ok("tax_policy_view", "dr-ana", organization="clinic-b")["declarations"]) == 1
@@ -195,7 +230,7 @@ def test_tax_policy_view_shows_an_organizations_declarations_to_its_administrato
 
 
 def test_tax_policy_view_declarations_are_paginated():
-    setup_finance()
+    setup_taxes()
     adopt_policy()
     for quarter in range(1, 4):
         ok("tax_declare", "alice", period=f"2026-Q{quarter}", base="revenue", amount=1)
@@ -207,3 +242,112 @@ def test_tax_policy_view_declarations_are_paginated():
 def test_tax_policy_view_needs_a_signed_in_member():
     world.build()
     assert "sign in" in denied("tax_policy_view", fake_chain.ANONYMOUS)
+
+
+def codex_answering(answer, asked=None):
+    """A ``codex.compute`` that answers every question with ``answer``, noting what it was asked."""
+    def compute(name, context):
+        if asked is not None:
+            asked.append((name, context["entry"]["code"], context["subject"]))
+        return answer
+        yield  # a generator, as the real one is
+    return compute
+
+
+def test_tax_assess_bills_the_items_the_codex_computes_for_each_subject_of_a_payer(monkeypatch):
+    setup_taxes()
+    Land(id="L-1", owner="User:alice", width=10, height=30)
+    Land(id="L-2", owner="User:alice", width=1, height=1)
+    Land(id="L-3", owner="User:bob", width=1, height=1)
+    adopt_policy([PROPERTY])
+    asked = []
+    items = [{"concept": "property", "amount": 150, "legislation": "Art. 71"},
+             {"concept": "property_bonus", "amount": -30, "legislation": "Art. 74"}]
+    monkeypatch.setattr(codex, "compute", codex_answering(items, asked))
+    out = ok("tax_assess", "bob", period="2026")
+    assert asked == [("tax_assess", "property", s) for s in ("Land:L-1", "Land:L-2", "Land:L-3")]
+    assert out["count"] == 2  # one invoice for each owner, whatever the number of parcels
+    alice = next(i for i in each(Invoice, "payer", "User:alice"))
+    assert alice.amount == 2 * 120 and alice.items == items + items
+    assert sum(i["amount"] for i in alice.items) == alice.amount
+    assert Invoice[out["invoices"][1]].amount == 120
+    assert TaxDeclaration.count() == 2
+
+
+def test_tax_assess_passes_the_entry_and_the_subject_to_the_codex(monkeypatch):
+    setup_taxes()
+    adopt_policy([RESIDENCE])
+    seen = []
+
+    def compute(name, context):
+        seen.append(context)
+        return [{"concept": "residence", "amount": 5}]
+        yield
+
+    monkeypatch.setattr(codex, "compute", compute)
+    ok("tax_assess", "bob", period="2026", tax="residence")
+    assert seen[0] == {"entry": TAXES[1], "subject": "User:alice"}
+    assert {c["subject"] for c in seen} == {f"User:{p}" for p in world.PEOPLE}
+
+
+def test_a_codex_that_computes_nothing_leaves_no_invoice(monkeypatch):
+    setup_taxes()
+    adopt_policy([RESIDENCE])
+    monkeypatch.setattr(codex, "compute", codex_answering([]))
+    out = ok("tax_assess", "bob", period="2026")
+    assert out["count"] == 0 and Invoice.count() == 0
+    assert {d.status for d in each(TaxDeclaration, "key", "User:alice|residence|2026")} == {"settled"}
+
+
+@pytest.mark.parametrize("answer", ["five", {"concept": "x", "amount": 5}, [{"concept": "x", "amount": 5.5}],
+                                    [{"concept": "", "amount": 5}], [{"concept": "x", "amount": 5, "tip": 1}],
+                                    [{"concept": "x", "amount": -5}]])
+def test_a_codex_answer_that_is_not_invoice_items_bills_nobody(monkeypatch, answer):
+    setup_taxes()
+    adopt_policy([RESIDENCE])
+    monkeypatch.setattr(codex, "compute", codex_answering(answer))
+    assert not call("tax_assess", "bob", period="2026")["ok"]
+    assert Invoice.count() == 0 and TaxDeclaration.count() == 0
+
+
+def test_without_an_answer_the_codex_leaves_the_entry_its_own_charge(monkeypatch):
+    setup_taxes()
+    adopt_policy([RESIDENCE])
+    monkeypatch.setattr(codex, "compute", codex_answering(None))
+    ok("tax_assess", "bob", period="2026")
+    assert invoices_of("User:alice") == {5} and Invoice[1].items == [{"concept": "residence", "amount": 5}]
+
+
+def test_an_assessment_in_a_currency_of_eight_decimals_is_rounded_to_the_cent():
+    setup_finance()  # REALM has 8 decimals: a cent is 10**6 smallest units
+    Land(id="L-1", owner="User:alice", width=1, height=1)
+    adopt_policy([{"code": "ibi", "kind": "tax", "subject": "Land", "rate": 1_500_000, "facts": {"unit_value": 10**8}}])
+    ok("tax_assess", "bob", period="2026")
+    (invoice,) = each(Invoice, "payer", "User:alice")
+    assert invoice.amount == 2_000_000 == sum(i["amount"] for i in invoice.items)  # 0.015 is 0.02
+
+
+def test_a_tax_policy_of_the_previous_release_migrates_to_typed_entries():
+    setup_taxes()
+    old = {"symbol": "REALM", "taxes": [
+        {"code": "property", "base": "land_area", "unit_value": 100, "method": "progressive", "due_days": 100,
+         "brackets": [{"up_to": 50_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}]},
+        {"code": "residence", "label": "Residence", "base": "flat", "method": "fixed", "amount": 5,
+         "exempt_profiles": ["exempt"]},
+        {"code": "revenue", "base": "declared", "method": "proportional", "rate": 200 * BASIS_POINT}]}
+    TaxPolicy(id="TAX-POLICY-1", document=old, status="adopted")
+    stored_as_version_1(TaxPolicy, "TAX-POLICY-1", drop=("taxes",))
+    policy = TaxPolicy["TAX-POLICY-1"]
+    assert policy.document == {"symbol": "REALM"}
+    assert policy.taxes == [PROPERTY, {**RESIDENCE, "kind": "tax", "facts": {"label": "Residence",
+                                                                             "exempt_profiles": ["exempt"]}}, REVENUE]
+    Land(id="L-1", owner="User:alice", width=10, height=30)
+    ok("tax_assess", "bob", period="2026")  # the migrated policy is assessed as the old one was
+    assert invoices_of("User:alice") == {120, 5}
+
+
+def test_a_draft_left_waiting_in_the_previous_form_is_refused_with_where_the_taxes_went():
+    setup_taxes()
+    old = {"taxes": [{"code": "residence", "base": "flat", "method": "fixed", "amount": 5}]}
+    assert "taxes" in denied("tax_policy_draft", "bob", document=old)
+    assert TaxPolicy.count() == 0

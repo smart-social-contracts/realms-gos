@@ -9,7 +9,8 @@ from core.op import op
 from api.proposals import launched, realm_wide
 
 LAND = "LAND"
-PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id")
+PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id", "assessed_value", "area",
+          "assessed_at", "assessment_ref")
 CELL = 16  # the side of a spatial index cell, and the most a parcel spans
 VIEW = 32  # the most a map viewport spans
 
@@ -195,6 +196,27 @@ def land_mint_nft(c, args):
     return {"land": land.id, "token_id": token_id}
 
 
+@op("land.assess", signing=True, returns="land")
+def land_assess(c, args):
+    """Set what the assessor decided for the parcel ``land``, signing for it: its ``value`` in the accounting
+    currency, its ``area`` in square metres, and the ``reference`` of the entry in the assessor's register. A field
+    left out keeps its value; ``legislation`` (the provision followed) is kept in the audit event. Returns ``land``."""
+    land = find(Land, args["land"])
+    changes = {k: args[k] for k in ("value", "area", "reference") if args.get(k) is not None}
+    if not changes:
+        raise Fail("an assessment sets a value, an area or a reference")
+    if land.status == "revoked":
+        raise Conflict(f"{land.id} is {land.status}")
+    if "value" in changes:
+        land.assessed_value = int(changes["value"])
+    if "area" in changes:
+        land.area = int(changes["area"])
+    if "reference" in changes:
+        land.assessment_ref = changes["reference"]
+    land.assessed_at = chain.now()
+    return {"land": land.id}
+
+
 def freeze(args, on):
     land = find(Land, args["land"])
     if land.status != ("active" if on else "disputed"):
@@ -286,7 +308,7 @@ def zone_clear(c, args):
 
 def schema_of(name):
     """A codex manifest's `credentials` block: {schema: {license, positions, collection, public, after_license}}."""
-    current = codex.active()
+    current = codex.active_legacy()
     rule = current and (current.manifest or {}).get("credentials", {}).get(name)
     if not rule:
         raise Fail(f"no active codex declares the schema '{name}'")
