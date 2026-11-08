@@ -285,7 +285,7 @@ class JoinTargets(Record): default: Opt[text]; targets: Vec[text]; mode: Opt[tex
 class QuarterReportArgs(Record): population: nat; codex_id: Opt[text]; codex_version: Opt[text]; leg: Opt["FederalVoteLeg"]
 class QuarterReport(Record): quarter: text; drifting: bool
 class QuarterRegisterArgs(Record): canister: Principal; name: Opt[text]
-class QuarterConfigureArgs(Record): quarter: Opt[text]; name: Opt[text]; status: Opt["QuarterStatus"]; quarter_join_mode: Opt[text]; federation_codex: Opt[text]; rule: Opt["Value"]
+class QuarterConfigureArgs(Record): quarter: Opt[text]; name: Opt[text]; status: Opt["QuarterStatus"]; quarter_join_mode: Opt[text]; federation_codex: Opt[text]; rule: Opt["Value"]; timezone: Opt[text]
 class JoinFederationArgs(Record): capital: Principal; name: Opt[text]
 class ChangeQuarterArgs(Record): quarter: text; on_behalf_of: Opt[Principal]
 class FederalVoteProposeArgs(Record): title: text; action: "ProposalAction"; on_behalf_of: Opt[Principal]
@@ -696,7 +696,7 @@ SCHEMA["JoinTargets"] = ("record", {"default": "opt text", "targets": "vec text"
 SCHEMA["QuarterReportArgs"] = ("record", {"population": "nat", "codex_id": "opt text", "codex_version": "opt text", "leg": "opt FederalVoteLeg"})
 SCHEMA["QuarterReport"] = ("record", {"quarter": "text", "drifting": "bool"})
 SCHEMA["QuarterRegisterArgs"] = ("record", {"canister": "principal", "name": "opt text"})
-SCHEMA["QuarterConfigureArgs"] = ("record", {"quarter": "opt text", "name": "opt text", "status": "opt QuarterStatus", "quarter_join_mode": "opt text", "federation_codex": "opt text", "rule": "opt Value"})
+SCHEMA["QuarterConfigureArgs"] = ("record", {"quarter": "opt text", "name": "opt text", "status": "opt QuarterStatus", "quarter_join_mode": "opt text", "federation_codex": "opt text", "rule": "opt Value", "timezone": "opt text"})
 SCHEMA["JoinFederationArgs"] = ("record", {"capital": "principal", "name": "opt text"})
 SCHEMA["ChangeQuarterArgs"] = ("record", {"quarter": "text", "on_behalf_of": "opt principal"})
 SCHEMA["FederalVoteProposeArgs"] = ("record", {"title": "text", "action": "ProposalAction", "on_behalf_of": "opt principal"})
