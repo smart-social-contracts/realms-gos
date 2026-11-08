@@ -1,6 +1,6 @@
-"""The harness for linked realms (links.py, outcalls.py, costs.py) on the real wasm: realms of one wasm on one PocketIC
-instance call each other, a governed call waits for its time across an upgrade of one canister, HTTPS outcalls are
-answered from a table, and instruction costs are reported (realms-gos#499).
+"""The harness for linked realms (network.py, outcalls.py, costs.py) on the real wasm: realms of one wasm on one
+PocketIC instance call each other, a governed call waits for its time across an upgrade of one canister, HTTPS
+outcalls are answered from a table, and instruction costs are reported (realms-gos#499).
 
 The realms are built once for the module and the tests below use them in order.
 """
@@ -9,7 +9,7 @@ import json
 
 import pytest
 from costs import Costs
-from links import Network
+from network import Network
 
 HOUR = 3600
 URL = "https://legislation.example.test/arcadia/tax.py"
@@ -62,7 +62,9 @@ def quarter_names(realm):
 
 
 def fetch(net, realm, url):
-    """What the realm's outcall for ``url`` came back with, ``[status, body]``, or the error it saw; None while waiting."""
+    """What the realm's outcall for ``url`` came back with, ``[status, body]``, or the error it saw; None while waiting.
+
+    The outcall is made by a timer, as the install task will make it."""
     out = realm.shell(FETCH.format(url=url))
     assert "Traceback" not in out, out
     net.wait(2)
@@ -130,8 +132,29 @@ def test_an_outcall_nobody_answers_stays_pending_until_the_url_is_served(net, ca
     assert net.web.pending() == []
 
 
+def test_an_outcall_nobody_answers_is_rejected_after_sixty_seconds_of_instance_time(net, capital):
+    silent = "https://legislation.example.test/silent-for-good.py"
+    net.web.no_answer(silent)
+    assert fetch(net, capital, silent) is None
+    net.wait(30)
+    assert json.loads(capital.shell(FETCHED.format(url=silent))) is None and len(net.web.pending()) == 1
+    net.wait(40)
+    assert net.web.pending() == []
+    assert json.loads(capital.shell(FETCHED.format(url=silent))) == (
+        "http_request on aaaaa-aa failed: Rejection code 2, Canister http request timed out")
+
+
+def test_an_outcall_for_more_bytes_than_max_response_bytes_fails(net, capital):
+    big = "https://legislation.example.test/big.py"
+    net.web.serve(big, b"x" * 1001)  # the request in FETCH allows 1000
+    assert "exceeds size limit of 1000 bytes" in fetch(net, capital, big)
+    net.web.serve(big, b"x" * 1000)
+    assert fetch(net, capital, big) == [200, "x" * 1000]
+
+
 def test_a_realm_reports_what_a_quarter_report_costs(costs, capital, north):
-    report = f'import json\nfrom core import op\nop.run(op.dispatch("quarter_report", json.dumps({{"population": 3}}), signer="{north.cid}"))'
+    report = (f'import json\nfrom core import op\n'
+              f'op.run(op.dispatch("quarter_report", json.dumps({{"population": 3}}), signer="{north.cid}"))')
     spent = costs.measure(capital, "quarter report, handled by the capital", report)
     assert 0 < spent < 1_000_000_000
     assert costs.samples["quarter report, handled by the capital"][-1] == spent

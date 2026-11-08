@@ -144,6 +144,8 @@ def call_text(cid, method, arg=None):
 
 
 def call_op(cid, name, args):
-    """Recorded as ``(cid, name, json)``, like call_text, with replies keyed by ``(cid, name)``."""
+    """Run operation ``name`` on another realm. ``state["calls"]`` records ``(cid, name, json)``, like call_text. A peer
+    is handed ``args`` itself; a canister that is no peer answers with ``state["replies"][(cid, name)]``, or with the
+    empty text if there is none."""
     return send(cid, name, json.dumps(args), args, "")
     yield
