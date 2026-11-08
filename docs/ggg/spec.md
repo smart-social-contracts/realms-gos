@@ -132,8 +132,10 @@ same rows.
   (`amended`) every extended line of each fund whose lines it adopts, whether it names the line's category or not,
   and leaves the other funds' extensions; `closed` means closed with its period, so a category an adopted budget
   drops does not come back at the next extension. An adopted budget is exhaustive: once a fund has one for the
-  period, spending in a category it has no line for is refused, while a fund with only extended lines, or none,
-  spends as before. A payment with no category is in the category `transfer` and a payroll in `payroll`, so each needs
+  period, spending in a category it has no expense line for is refused, while a fund with only extended lines, or
+  none, spends as before. Only an expense line caps spending, and its actual counts expense only; a revenue line
+  caps nothing, yet a fund whose adopted lines are all revenue has an adopted budget, so it refuses all spending
+  but the ledger's fee. A payment with no category is in the category `transfer` and a payroll in `payroll`, so each needs
   its line like any other. The ledger's fee on a payment is a mechanical cost of it, not a spending decision, and
   needs none;
 - a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), and
@@ -273,6 +275,9 @@ What the model replaced in earlier versions of Realms GOS:
   by licensed organizations), `JusticeSystem` (courts stand on their own), `QuarterResident` (no
   central user directory), `RfpTransition` (the `Event` log records transitions), `VendorRecord`
   (derived from awarded tenders).
+- A fund that has an adopted budget refuses spending in a category it has no expense line for: the vault's and the
+  voting extension's payments (category `transfer`) and a codex's payroll (`payroll`) need a line in such a fund,
+  where they needed none before.
 - A tax policy kept its taxes in `document.taxes`, each with a `base` and a `method`; they are `TaxPolicy.taxes`,
   typed entries (a flat tax is a tax on `User`, a land tax one on `Land`, a declared tax one on `Declaration`;
   a fixed tax is an `amount`, a proportional one a `rate`, the settings and brackets are `facts`). Stored

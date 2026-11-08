@@ -134,7 +134,13 @@ def tally(p, e):
     p.source_hash = hashlib.sha256((p.source_hash + line).encode()).hexdigest()
 
 
+def caps_spending(b):
+    """A line caps spending when it is in force and plans an expense: a revenue line caps nothing."""
+    return b.status in IN_FORCE and b.kind == "expense"
+
+
 def has_adopted_budget(fund, p):
+    """The fund has an adopted line in the period, of either kind: its budget is adopted."""
     return any(b.status == "adopted" and b.fund.id == fund.id for b in p.budgets)
 
 
@@ -151,14 +157,14 @@ def refuse_overspend(p, lines):
     for key, (fund, category, asked) in spent.items():
         if asked <= 0:
             continue
-        in_force = [b for b in each(Budget, "slot", key) if b.status in IN_FORCE]
+        in_force = [b for b in each(Budget, "slot", key) if caps_spending(b)]
         for b in in_force:
             if b.actual + asked > b.planned:
                 raise Conflict(f"budget {b.id} plans {b.planned} for {b.category} of fund {b.fund.id}, "
                                f"{b.actual} is spent and {asked} was asked: amend the budget to spend more")
         if not in_force and category != FEE and has_adopted_budget(fund, p):
-            raise Conflict(f"the adopted budget of fund {fund.id} for {p.id} has no line for {category}: amend the "
-                           f"budget to spend on it")
+            raise Conflict(f"the adopted budget of fund {fund.id} for {p.id} has no expense line for {category}: amend "
+                           f"the budget to spend on it")
 
 
 def post(p, lines, symbol, description="", **refs):
@@ -179,7 +185,7 @@ def post(p, lines, symbol, description="", **refs):
         tally(p, e)
         if kind == "expense" and fund is not None:
             for b in each(Budget, "slot", slot(fund, p, category)):
-                if b.status in IN_FORCE:
+                if caps_spending(b):
                     b.actual += debit - credit
     return tx
 

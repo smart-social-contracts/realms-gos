@@ -222,12 +222,36 @@ def test_an_adopted_budget_is_exhaustive_for_its_fund_and_an_extended_one_is_not
         return call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=5, category=category)
 
     refused = pay("upkeep")
-    assert refused["kind"] == "conflict" and "no line for upkeep" in refused["error"]
+    assert refused["kind"] == "conflict" and "no expense line for upkeep" in refused["error"]
     assert pay("capital")["status"] == "completed"
     ok("budget_extend", "bob", period="FY2027")
     fake_chain.state["now"] = FY2027["starts_at"] + 1
     assert pay("upkeep")["status"] == "completed"  # only extended lines: a category without a line is free
     assert pay("capital")["status"] == "completed"
+
+
+def test_a_revenue_line_caps_no_spending_and_a_fund_with_only_revenue_lines_has_an_adopted_budget():
+    setup_finance()
+    ok("fund_create", "bob", fund="WELFARE")
+    allocate(ROADS=50, WELFARE=50)
+    receive(10_000)
+    ledger_ok()
+    fees = draft("ROADS", "fees", 40, kind="revenue")
+    capital = draft("ROADS", "capital", 300)
+    propose()
+
+    def pay(category, amount=30):
+        return call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=amount, category=category)
+
+    refused = pay("fees")  # the line for fees plans revenue: it is not a line to spend from
+    assert refused["kind"] == "conflict" and "no expense line for fees" in refused["error"]
+    assert pay("capital")["status"] == "completed"
+    assert (Budget[fees].actual, Budget[capital].actual) == (0, 30)
+    # A fund whose adopted budget is revenue alone refuses all spending but the ledger's fee, which is never refused.
+    draft("WELFARE", "taxes", 900, kind="revenue")
+    propose()
+    out = call("transfer_create", "ctl", fund="WELFARE", to="buildco", amount=5, category="salaries")
+    assert out["kind"] == "conflict" and "no expense line for salaries" in out["error"]
 
 
 def test_a_category_the_adopted_budget_drops_does_not_come_back_at_the_next_extension():
