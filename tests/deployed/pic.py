@@ -1,7 +1,8 @@
 """A realm canister on PocketIC, for tests that need the real wasm.
 
 The wasm is larger than one ingress message, so it is installed the way dfx does it:
-gzipped, uploaded in chunks to the canister itself, then installed from the chunks.
+gzipped, uploaded in chunks to a canister's chunk store, then installed from the chunks.
+Realms of one PocketIC instance (tests/deployed/links.py) upload it once and install from the same store.
 """
 
 import base64
@@ -18,6 +19,7 @@ from pocket_ic import PocketIC
 os.environ.setdefault("POCKET_IC_BIN", os.path.expanduser("~/.cache/dfinity/versions/0.31.0/pocket-ic"))
 
 CHUNK = 1_000_000
+UPGRADE_ATTEMPTS = 10
 CONTROLLER = "kber3-kmjak-kngoi-c3iyv-ix4le-p27yv-3fzmi-vnnab-xtjtf-ndfta-wqe"
 _HASH = Types.Record({"hash": Types.Vec(Types.Nat8)})
 _UPLOAD = Types.Record({"canister_id": Types.Principal, "chunk": Types.Vec(Types.Nat8)})
@@ -44,24 +46,61 @@ GGG_ERROR = Types.Variant({
     "GenericError": Types.Record({"error_code": Types.Nat, "message": Types.Text})})
 
 
+def _management(pic, canister, method, typ, value):
+    """A call to the management canister about ``canister``, from the sender of ``pic`` (the controller)."""
+    effective = {"CanisterId": base64.b64encode(canister.bytes).decode()}
+    return pic.update_call_with_effective_principal(None, effective, method, encode([{"type": typ, "value": value}]))
+
+
+def _new_canister(pic):
+    """An empty canister of the controller, with cycles for a lifetime of tests."""
+    pic.set_sender(Principal.from_str(CONTROLLER))
+    canister = pic.create_canister(settings={"controllers": [[Principal.from_str(CONTROLLER).bytes]],
+                                             "compute_allocation": [], "memory_allocation": [],
+                                             "freezing_threshold": []})
+    pic.add_cycles(canister, 10**15)
+    return canister
+
+
+class Wasm:
+    """A wasm gzipped and uploaded, in chunks, to the chunk store of a canister of its own on ``pic``. Any canister
+    of that PocketIC installs it from there, so a test that needs several uploads it once."""
+
+    def __init__(self, pic, path):
+        self.holder = _new_canister(pic)
+        data = gzip.compress(Path(path).read_bytes())
+        self.digest = hashlib.sha256(data).digest()
+        self.hashes = []
+        for i in range(0, len(data), CHUNK):
+            reply = _management(pic, self.holder, "upload_chunk", _UPLOAD,
+                                {"canister_id": self.holder.bytes, "chunk": data[i:i + CHUNK]})
+            self.hashes.append({"hash": decode(bytes(reply), _HASH)[0]["value"]["hash"]})
+
+
 class Canister:
-    def __init__(self, wasm_path, installer=""):
-        self.pic = PocketIC()
-        self.pic.set_sender(Principal.from_str(CONTROLLER))
-        self.id = self.pic.create_canister(settings={"controllers": [[Principal.from_str(CONTROLLER).bytes]],
-                                                     "compute_allocation": [], "memory_allocation": [],
-                                                     "freezing_threshold": []})
-        self.pic.add_cycles(self.id, 10**15)
-        self.wasm = gzip.compress(open(wasm_path, "rb").read())
+    def __init__(self, wasm_path, installer="", pic=None, wasm=None):
+        """A canister running ``wasm_path`` on a PocketIC instance of its own, or on ``pic`` when given, installing
+        the already uploaded ``wasm`` if there is one."""
+        self.pic = pic or PocketIC()
+        self.id = _new_canister(self.pic)
+        self.wasm = wasm or Wasm(self.pic, wasm_path)
         self._install({"install": None}, encode([{"type": Types.Text, "value": installer}]))
 
     def upgrade(self, wasm_path=None):
         """Upgrade the canister to ``wasm_path`` (the wasm it has by default), as its controller: its stable memory stays,
-        its timers are gone until post_upgrade."""
-        self.pic.set_sender(Principal.from_str(CONTROLLER))
+        its timers are gone until post_upgrade.
+
+        The replica refuses an install soon after another of an 11 MB wasm (``CanisterInstallCodeRateLimited``), and
+        what lets it through is rounds run, which an upgrade right after the install has not had: wait and ask again."""
         if wasm_path:
-            self.wasm = gzip.compress(Path(wasm_path).read_bytes())
-        self._install({"upgrade": []}, encode([]))
+            self.wasm = Wasm(self.pic, wasm_path)
+        for attempt in range(UPGRADE_ATTEMPTS):
+            try:
+                return self._install({"upgrade": []}, encode([]))
+            except ValueError as refused:
+                if "CanisterInstallCodeRateLimited" not in str(refused) or attempt == UPGRADE_ATTEMPTS - 1:
+                    raise
+                self.wait(60)
 
     def wait(self, seconds):
         """Let ``seconds`` pass on the replica's clock and run what falls due, timers and the calls they make."""
@@ -73,20 +112,11 @@ class Canister:
         """The replica's clock, in seconds."""
         return self.pic.get_time()["nanos_since_epoch"] // 10**9
 
-    def _management(self, method, typ, value):
-        effective = {"CanisterId": base64.b64encode(self.id.bytes).decode()}
-        return self.pic.update_call_with_effective_principal(
-            None, effective, method, encode([{"type": typ, "value": value}]))
-
     def _install(self, mode, arg):
-        hashes = []
-        for i in range(0, len(self.wasm), CHUNK):
-            reply = self._management("upload_chunk", _UPLOAD,
-                                     {"canister_id": self.id.bytes, "chunk": self.wasm[i:i + CHUNK]})
-            hashes.append({"hash": decode(bytes(reply), _HASH)[0]["value"]["hash"]})
-        self._management("install_chunked_code", _INSTALL, {
-            "mode": mode, "target_canister": self.id.bytes, "store_canister": [],
-            "chunk_hashes_list": hashes, "wasm_module_hash": hashlib.sha256(self.wasm).digest(),
+        self.pic.set_sender(Principal.from_str(CONTROLLER))
+        _management(self.pic, self.id, "install_chunked_code", _INSTALL, {
+            "mode": mode, "target_canister": self.id.bytes, "store_canister": [self.wasm.holder.bytes],
+            "chunk_hashes_list": self.wasm.hashes, "wasm_module_hash": self.wasm.digest,
             "arg": arg, "sender_canister_version": [],
         })
 
