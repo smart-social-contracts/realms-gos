@@ -151,7 +151,8 @@ realms local call proposal_vote '{"proposal": "P-7", "choice": "yes", "on_behalf
   department decides directly. The proposal records the grant it was filed under. When it is carried, the call runs
   unless that grant was revoked or replaced, and only if the grant could still make the call: its scope, the member's
   permissions and standing are checked again. A grant that has merely expired does not stop it, because a vote can
-  outlast the grant. Otherwise the proposal ends `failed`, with the reason.
+  outlast the grant; after the grant has expired, the member stops such a proposal by withdrawing it (or voting no).
+  Otherwise the proposal ends `failed`, with the reason.
 - A delegate does not vote on a proposal it filed, and withdraws only the proposals it filed under its grant.
 - A delegate reads the member's own notifications, not the inboxes of the offices where the member holds a seat.
 
