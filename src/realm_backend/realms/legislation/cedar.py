@@ -43,6 +43,7 @@ from realms.legislation.expressions import (
     Not,
     Or,
     Setting,
+    _facts_in_arithmetic,
     condition,
     fits,
 )
@@ -385,6 +386,8 @@ class Check(metaclass=Sealed):
                 self.long(term, present, in_when, "arithmetic")
             return "Long"
         if isinstance(node, Contains):
+            if not isinstance(node.value, (Literal, Setting)):
+                raise LegislationError("contains() takes a literal or a setting")
             kind = self.fact(node.fact, present)
             if not kind.startswith("Set<"):
                 raise LegislationError(
@@ -397,6 +400,8 @@ class Check(metaclass=Sealed):
             )
             return "Bool"
         if isinstance(node, In):
+            if not isinstance(node.values, (Literal, Setting)):
+                raise LegislationError("in_() takes a list of values or a list setting")
             kind = self.fact(node.fact, present)
             if kind not in ("String", "Long"):
                 raise LegislationError(
@@ -413,6 +418,10 @@ class Check(metaclass=Sealed):
                 self.fact(node.fact, present), "Long", f"F.{node.fact.name}.between()"
             )
             for bound in (node.low, node.high):
+                if _facts_in_arithmetic(bound, True):
+                    raise LegislationError(
+                        "between() takes literals and settings as bounds, not facts"
+                    )
                 self.long(bound, present, in_when, "between()")
             return "Bool"
         if isinstance(node, Compare):
@@ -763,10 +772,8 @@ class BoundForbid(metaclass=Sealed):
 
 
 def plain_setting(value):
-    """A frozen setting value as the generator reads it: tuples back to lists, Periods kept."""
-    if isinstance(value, tuple):
-        return list(value)
-    return value
+    """A frozen setting value as the generator reads it: a tuple for a list, a Period kept."""
+    return tuple(value) if isinstance(value, list) else value
 
 
 def bind(member, resolved, schema):

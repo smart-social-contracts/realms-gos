@@ -156,3 +156,71 @@ def test_a_class_body_reads_no_private_or_dunder_attribute(name):
     from realms.legislation import days
 
     assert not getattr(days, "__annotations__", {})
+
+
+# The second review of #546: a lower layer must not be able to change an upper layer's forbid. The
+# list of F.code.in_([...]) was a Python list inside the tree, so `.remove()` on it passed every
+# check; the nodes hold tuples now, and every node and Period refuses attribute assignment.
+ES_FORBIDS = (
+    "from realms.legislation import F, above, forbid, months, pct\n"
+    "class Procedure(above('procedure')):\n"
+    "    codes = forbid('codex_install', F.code.in_(['a', 'b']) & F.rate.is_none(), legislation='x')\n"
+    "    deadline = forbid('codex_install', F.d.is_some() & (F.d > months(6)), legislation='x')\n"
+)
+UPPER_FORBID_ATTACKS = {
+    "class body: remove a code from the upper forbid's list": H
+    + "class Procedure(above('procedure')):\n"
+    + "    v = next(iter(above('procedure').codes.expression.children)).values.value.remove('b')\n",
+    "lambda: remove a code": H
+    + "class Procedure(above('procedure')):\n"
+    + "    v = (lambda: above('procedure').codes.expression.children[0].values.value.remove('b'))()\n",
+    "Period count via a local": H
+    + "class Procedure(above('procedure')):\n"
+    + "    def _h(self):\n        p = above('procedure').deadline.expression.children[1].right.value\n        p.count = 600\n"
+    + "    x = _h(None)\n",
+    "Forbid.expression via a local": H
+    + "class Procedure(above('procedure')):\n"
+    + "    def _h(self):\n        f = above('procedure').deadline\n        f.expression = False\n    x = _h(None)\n",
+    "Expr node via a local": H
+    + "class Procedure(above('procedure')):\n"
+    + "    def _h(self):\n        n = above('procedure').deadline.expression\n        n.children = ()\n    x = _h(None)\n",
+    "Literal value via a local": H
+    + "class Procedure(above('procedure')):\n"
+    + "    def _h(self):\n        p = above('procedure').deadline.expression.children[1].right\n        p.value = None\n    x = _h(None)\n",
+}
+
+
+def _forbid_codex():
+    c = Codex(["eu/es", "x/town"], realm="x/town", operations=["codex_install"])
+    c.load("eu/es", "procedure", ES_FORBIDS)
+    return c
+
+
+@pytest.mark.parametrize("name", sorted(UPPER_FORBID_ATTACKS))
+def test_a_lower_layer_cannot_change_an_upper_forbid(name):
+    c = _forbid_codex()
+    upper = c.chapters["procedure"][0]
+    before = repr(upper.codes.expression), repr(upper.deadline.expression)
+    with pytest.raises(Refused):
+        c.load("x/town", "procedure", UPPER_FORBID_ATTACKS[name])
+    assert (repr(upper.codes.expression), repr(upper.deadline.expression)) == before
+    assert upper.codes.expression.children[0].values.value == ("a", "b")
+
+
+def test_a_hook_cannot_change_an_upper_forbid_at_run_time():
+    from realms.legislation import Event
+
+    c = _forbid_codex()
+    cls = c.load(
+        "x/town",
+        "procedure",
+        H + "class Procedure(above('procedure')):\n"
+        "    def on_codex_install(self, event):\n"
+        "        above('procedure').codes.expression.children[0].values.value.remove('b')\n",
+    )
+    with pytest.raises((LegislationError, AttributeError)):
+        cls(c.context()).on_codex_install(Event("a", {}, {}, 0))
+    assert c.chapters["procedure"][0].codes.expression.children[0].values.value == (
+        "a",
+        "b",
+    )

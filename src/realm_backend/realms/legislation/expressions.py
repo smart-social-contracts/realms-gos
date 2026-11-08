@@ -44,17 +44,7 @@ def literal(value, what="a literal"):
     that fits Cedar's 64-bit integer."""
     if isinstance(value, Expr):
         return value
-    if isinstance(value, bool) or isinstance(value, (str, Period)):
-        if isinstance(value, Period) and not fits(value.count):
-            raise LegislationError(
-                f"{value!r}: a Period's count must fit Cedar's 64-bit integer"
-            )
-        return Literal(value)
-    if isinstance(value, int):
-        if not fits(value):
-            raise LegislationError(
-                f"{value} does not fit Cedar's 64-bit integer (rule 1)"
-            )
+    if isinstance(value, (bool, int, str, Period)):
         return Literal(value)
     if value is None:
         raise LegislationError(
@@ -93,9 +83,7 @@ def values(items, what="in_()"):
         raise LegislationError(
             f"{what} takes a list of str or a list of int, not {list(items)!r}"
         )
-    for v in items:
-        literal(v, "a value")
-    return Literal(list(items))
+    return Literal(tuple(items))
 
 
 class Expr(metaclass=Sealed):
@@ -163,13 +151,63 @@ class Expr(metaclass=Sealed):
 
 
 class Literal(Expr):
+    """A value a rule names: an int that fits Cedar's 64-bit integer, a str, a bool, a Period, or a
+    tuple of str or of int (for ``in_()``). Every node checks its own arguments here, not only in the
+    method that builds it, so a node made another way holds nothing a chapter could not write.
+    """
+
     __slots__ = ("value",)
 
     def __init__(self, value):
+        if isinstance(value, (list, tuple)):
+            value = tuple(value)
+            kinds = {bool if isinstance(v, bool) else type(v) for v in value}
+            if (
+                not value
+                or kinds not in ({str}, {int})
+                or not all(isinstance(v, str) or fits(v) for v in value)
+            ):
+                raise LegislationError(
+                    "a list holds strings, or integers that fit Cedar's 64-bit integer, at least one"
+                )
+        elif isinstance(value, bool) or isinstance(value, str):
+            pass
+        elif isinstance(value, int):
+            if not fits(value):
+                raise LegislationError(
+                    f"{value} does not fit Cedar's 64-bit integer (rule 1)"
+                )
+        elif isinstance(value, Period):
+            if not fits(value.count):
+                raise LegislationError(
+                    f"{value!r}: a Period's count must fit Cedar's 64-bit integer"
+                )
+        else:
+            raise LegislationError(f"{value!r} is not a literal a forbid can hold")
         object.__setattr__(self, "value", value)
 
     def __repr__(self):
         return repr(self.value)
+
+
+def named(name, what):
+    """A fact's or a setting's name: a non-empty string that does not start with ``_``."""
+    if not isinstance(name, str) or not name or name.startswith("_"):
+        raise LegislationError(f"{name!r} is not the name of {what}")
+    return name
+
+
+def expr(node, what):
+    """``node`` if it is an expression node, else a refusal: the constructors take nodes only."""
+    if not isinstance(node, Expr):
+        raise LegislationError(f"{node!r} is not an expression, as {what} must be")
+    return node
+
+
+def a_fact(node, what):
+    if not isinstance(node, Fact):
+        raise LegislationError(f"{what} is for a fact, F.x, not {node!r}")
+    return node
 
 
 class Fact(Expr):
@@ -178,7 +216,7 @@ class Fact(Expr):
     __slots__ = ("name",)
 
     def __init__(self, name):
-        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "name", named(name, "a fact"))
 
     def __repr__(self):
         return f"F.{self.name}"
@@ -193,12 +231,6 @@ class Fact(Expr):
 
     def contains(self, value):
         """The set fact holds ``value``: a str or int literal, or a setting ``S.x``."""
-        if not isinstance(value, Setting) and (
-            isinstance(value, (Expr, bool)) or not isinstance(value, (str, int))
-        ):
-            raise LegislationError(
-                "contains() takes a literal or a setting, not arithmetic or a condition"
-            )
         return Contains(self, literal(value, "a value"))
 
     def in_(self, items):
@@ -218,7 +250,7 @@ class Setting(Expr):
     __slots__ = ("name",)
 
     def __init__(self, name):
-        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "name", named(name, "a setting"))
 
     def __repr__(self):
         return f"S.{self.name}"
@@ -284,8 +316,12 @@ class Compare(Expr):
     __slots__ = ("op", "left", "right", "period", "bounded")
 
     def __init__(self, op, left, right):
-        for side in (left, right):
-            if isinstance(side, Literal) and isinstance(side.value, list):
+        if op not in COMPARISONS:
+            raise LegislationError(
+                f"{op!r} is not one of the comparisons {COMPARISONS}"
+            )
+        for side in (expr(left, "an operand"), expr(right, "an operand")):
+            if isinstance(side, Literal) and isinstance(side.value, tuple):
                 raise LegislationError(
                     "compare a fact with one value; a list belongs in F.x.in_([...])"
                 )
@@ -333,7 +369,9 @@ class Arith(Expr):
     __slots__ = ("terms",)
 
     def __init__(self, left, op, right):
-        for term in (left, right):
+        if op not in ("+", "-"):
+            raise LegislationError(f"{op!r} is not + or -")
+        for term in (expr(left, "a term"), expr(right, "a term")):
             if is_condition(term):
                 raise LegislationError(f"{term!r} is a condition, not a number")
         terms = left.terms if isinstance(left, Arith) else (("+", left),)
@@ -356,6 +394,7 @@ class And(Expr):
     __slots__ = ("children",)
 
     def __init__(self, left, right):
+        expr(left, "an operand of &"), expr(right, "an operand of &")
         children = left.children if isinstance(left, And) else (left,)
         object.__setattr__(self, "children", children + (right,))
 
@@ -367,6 +406,7 @@ class Or(Expr):
     __slots__ = ("children",)
 
     def __init__(self, left, right):
+        expr(left, "an operand of |"), expr(right, "an operand of |")
         children = left.children if isinstance(left, Or) else (left,)
         object.__setattr__(self, "children", children + (right,))
 
@@ -378,7 +418,7 @@ class Not(Expr):
     __slots__ = ("child",)
 
     def __init__(self, child):
-        object.__setattr__(self, "child", child)
+        object.__setattr__(self, "child", expr(child, "the operand of ~"))
 
     def __repr__(self):
         return f"~{self.child!r}"
@@ -433,17 +473,27 @@ class Has(Expr):
     __slots__ = ("fact",)
 
     def __init__(self, fact):
-        object.__setattr__(self, "fact", fact)
+        object.__setattr__(self, "fact", a_fact(fact, "is_some()"))
 
     def __repr__(self):
         return f"{self.fact!r}.is_some()"
 
 
 class Contains(Expr):
+    """``F.s.contains(v)``: ``v`` is a str or int literal, or a setting; never arithmetic, which would
+    run unbounded and unchecked here."""
+
     __slots__ = ("fact", "value")
 
     def __init__(self, fact, value):
-        object.__setattr__(self, "fact", fact)
+        if not (
+            isinstance(value, Setting)
+            or (isinstance(value, Literal) and type(value.value) in (str, int))
+        ):
+            raise LegislationError(
+                "contains() takes a literal or a setting, not arithmetic or a condition"
+            )
+        object.__setattr__(self, "fact", a_fact(fact, "contains()"))
         object.__setattr__(self, "value", value)
 
     def __repr__(self):
@@ -451,10 +501,17 @@ class Contains(Expr):
 
 
 class In(Expr):
+    """``F.x.in_([...])``: ``values`` is a tuple literal of str or of int, or a setting."""
+
     __slots__ = ("fact", "values")
 
     def __init__(self, fact, values):
-        object.__setattr__(self, "fact", fact)
+        if not (
+            isinstance(values, Setting)
+            or (isinstance(values, Literal) and isinstance(values.value, tuple))
+        ):
+            raise LegislationError("in_() takes a list of values or a list setting")
+        object.__setattr__(self, "fact", a_fact(fact, "in_()"))
         object.__setattr__(self, "values", values)
 
     def __repr__(self):
@@ -465,12 +522,12 @@ class Between(Expr):
     __slots__ = ("fact", "low", "high")
 
     def __init__(self, fact, low, high):
-        for bound in (low, high):
-            if _facts_in_arithmetic(bound, True):
+        for bound in (expr(low, "a bound"), expr(high, "a bound")):
+            if _facts_in_arithmetic(bound, True) or is_condition(bound):
                 raise LegislationError(
-                    "between() takes literals and settings as bounds, not facts"
+                    "between() takes literals and settings as bounds, not facts or conditions"
                 )
-        object.__setattr__(self, "fact", fact)
+        object.__setattr__(self, "fact", a_fact(fact, "between()"))
         object.__setattr__(self, "low", low)
         object.__setattr__(self, "high", high)
 

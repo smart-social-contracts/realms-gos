@@ -392,7 +392,7 @@ def literals(node, found):
     if isinstance(node, e.Literal):
         found.extend(
             v
-            for v in (node.value if isinstance(node.value, list) else [node.value])
+            for v in (node.value if isinstance(node.value, tuple) else [node.value])
             if isinstance(v, (int, str)) and not isinstance(v, bool)
         )
     for child in children(node):
@@ -941,7 +941,7 @@ def test_rule_1_literals_are_int_str_bool_and_lists_of_those():
         F.x.in_([])
     with pytest.raises(LegislationError, match="a list of str or a list of int"):
         F.x.in_(["a", 1])
-    assert repr(F.x.in_(["a", "b"])) == "F.x.in_(['a', 'b'])"
+    assert repr(F.x.in_(["a", "b"])) == "F.x.in_(('a', 'b'))"
     assert (
         repr(~(F.a + 1 - 2 > 3) & (F.b == "c") | F.d.between(1, 2))
         == "((~((F.a + 1 - 2) > 3) & (F.b == 'c')) | F.d.between(1, 2))"
@@ -1425,3 +1425,150 @@ def test_the_syntax_tree_check_tells_authors_what_the_realm_refuses(member, reas
     assert reason in str(e.value)
     with pytest.raises(Refused):
         codex().load("eu/es", "tax", text)
+
+
+# ── The second review of #546: every rule lives in the node's constructor, no node is mutable ─────
+
+
+@pytest.mark.parametrize(
+    "expression, reason",
+    [
+        # Nodes built through type() (around the methods that build them) refuse the same.
+        (
+            "~type(F.tags.contains('a'))(F.tags, F.unbounded + 1)",
+            "contains() takes a literal or a setting",
+        ),
+        (
+            "~type(F.tags.contains('a'))(F.tags, F.pages + 1)",
+            "contains() takes a literal or a setting",
+        ),
+        (
+            "type(F.pages.in_([1]))(F.pages, F.tags)",
+            "in_() takes a list of values or a list setting",
+        ),
+        (
+            "type(F.pages.in_([1]))(F.kind, F.pages.in_([1]).values)",
+            "F.kind.in_(): Set<String> and Set<Long> do not compare",
+        ),
+        (
+            "F.pages > type((F.pages > 1).right)(2 ** 70)",
+            "does not fit Cedar's 64-bit integer",
+        ),
+        (
+            "F.pages > type((F.pages > 1).right)([1, 'a'])",
+            "a list holds strings, or integers",
+        ),
+        (
+            "F.pages > type((F.pages > 1).right)(None)",
+            "is not a literal a forbid can hold",
+        ),
+        (
+            "type(F.pages.between(0, 1))(F.pages, F.unbounded + 1, (F.pages > 5).right)",
+            "between() takes literals and settings as bounds, not facts",
+        ),
+        (
+            "type(F.pages.between(0, 1))(F.pages, F.urgent | F.urgent, (F.pages > 5).right)",
+            "between() takes literals and settings as bounds, not facts or conditions",
+        ),
+        (
+            "type(F.pages.between(0, 1))(S.x, (F.pages > 0).right, (F.pages > 5).right)",
+            "between() is for a fact",
+        ),
+        ("type(F.pages.is_some())(S.x)", "is_some() is for a fact"),
+        ("type(F.pages > 1)('<>', F.pages, F.pages)", "is not one of the comparisons"),
+        (
+            "type(F.pages > 1)('>', F.pages, 3)",
+            "is not an expression, as an operand must be",
+        ),
+        ("type(F.pages + 1)(F.pages, '*', F.pages) > 1", "is not + or -"),
+        (
+            "type(F.urgent & F.urgent)(F.urgent, True)",
+            "is not an expression, as an operand of & must be",
+        ),
+        ("type(~F.urgent)(1)", "is not an expression, as the operand of ~ must be"),
+        ("type(F.pages)('_private') > 1", "is not the name of a fact"),
+        ("type(S.x)('') > 1", "is not the name of a setting"),
+        # when() branches and between() bounds that are not integers are refused at bind.
+        ("F.pages > when(True, S.minimum_retention)", "when() needs integers"),
+        ("F.pages > when(True, S.strict)", "when() needs integers"),
+        ("F.pages > when(F.urgent, F.urgent)", "when() needs integers"),
+        (
+            "F.pages > when(True, F.rate.is_some())",
+            "the branches of when() are integers",
+        ),
+        ("F.pages.between(True, 5)", "between() needs integers"),
+    ],
+)
+def test_a_node_built_any_other_way_refuses_what_its_method_refuses(expression, reason):
+    text = (
+        "from realms.legislation import F, S, above, forbid, months, overridable, when\n"
+        "class DataProtection(above('data_protection')):\n"
+        "    minimum_retention = overridable(months(6), legislation='x')\n"
+        "    strict = overridable(True, legislation='x')\n"
+        f"    rule = forbid('document_share', {expression}, legislation='x')\n"
+    )
+    assert reason in refused(text, domain="data_protection")
+
+
+def test_list_literals_and_folded_list_settings_are_tuples():
+    c = with_edges()
+    required = [f for f in c.forbids() if f.id.endswith("ibi_rate_required")][0]
+    assert required.expression.children[0].values.value == ("ibi_urban", "ibi_rustic")
+    assert isinstance(required.expression.children[0].values.value, tuple)
+    tagged = [f for f in c.forbids() if f.id.endswith("tagged")][0]
+    assert tagged.settings["sensitive"] == ("health", "religion") and isinstance(
+        tagged.settings["sensitive"], tuple
+    )
+    assert '["health","religion"].contains(context.facts.kind)' in tagged.cedar()
+    with pytest.raises(LegislationError, match="never changes"):
+        required.expression.children[0].values.value = ("ibi_urban",)
+    with pytest.raises(AttributeError):
+        required.expression.children[0].values.value.remove("ibi_rustic")
+
+
+def test_a_fact_at_the_whole_64_bit_range_in_arithmetic():
+    """A fact whose range is all of i64 can be added to 0 (the sum fits), not subtracted from 0."""
+    facts = dict(FACTS)
+    facts["document_share"] = {
+        "facts": dict(
+            FACTS["document_share"]["facts"],
+            wide={"type": "Long", "min": I64_MIN, "max": I64_MAX},
+        )
+    }
+    c = Codex(LAYERS, realm=VALENCIA, operations=OPERATIONS, facts=facts)
+    c.load(
+        "eu/es",
+        "tax",
+        forbid_chapter("forbid('document_share', F.wide + 0 > 1, legislation='x')"),
+    )
+    assert (
+        f"when {{ context.facts.wide < {I64_MIN} || context.facts.wide > {I64_MAX} || context.facts.wide + 0 > 1 }};"
+        in c.cedar()
+    )
+    assert "may overflow" in refused(
+        forbid_chapter("forbid('document_share', 0 - F.wide > 1, legislation='x')"),
+        c=Codex(LAYERS, realm=VALENCIA, operations=OPERATIONS, facts=facts),
+    )
+    assert cedarpy.validate_policies(c.cedar(), c.cedar_schema()).validation_passed
+
+
+def test_negative_literal_terms_and_the_64_bit_minimum_validate():
+    c = codex()
+    c.load(
+        "eu/es",
+        "tax",
+        forbid_chapter(
+            f"forbid('document_share', (F.pages + -5 - -3 > 0) & (F.unbounded > {I64_MIN}), legislation='x')"
+        ),
+    )
+    text = c.cedar()
+    assert (
+        "context.facts.pages + -5 - -3 > 0" in text
+        and f"context.facts.unbounded > {I64_MIN}" in text
+    )
+    assert cedarpy.validate_policies(text, c.cedar_schema()).validation_passed
+    rule = c.forbids()[0]
+    assert rule.evaluate({"pages": 3, "unbounded": 0}) and not rule.evaluate(
+        {"pages": 1, "unbounded": 0}
+    )
+    assert not rule.evaluate({"pages": 3, "unbounded": I64_MIN})
