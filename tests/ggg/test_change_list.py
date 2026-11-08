@@ -47,7 +47,7 @@ def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and
     (json.dumps({"kind": change_list.KIND, "format": 2, "realm": "t"}), "not {\"kind\""),
     (text(realm=""), "realm names"),
     (text(replaces=5), "replaces is"),
-    (text(set=[entry(f"town/tax", mirrors=[]) for _ in range(51)]), "at most 50 chapters"),
+    (text(set=[entry("town/tax") for _ in range(51)]), "at most 50 chapters"),
     (text(set=[entry("town/tax"), entry("town/tax")]), "twice"),
     (text(set=[{**entry("town/tax"), "url": "http://x"}]), "over https"),
     (text(set=[{**entry("town/tax"), "mirrors": ["ftp://x"]}]), "over https"),
@@ -67,7 +67,7 @@ def test_what_parse_refuses(bad, match):
 
 
 def test_the_domain_list_is_gggs():
-    listed = json.load(open(ROOT / "ggg" / "domains.json"))["domains"]
+    listed = json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
     assert tuple(d["id"] for d in listed) == change_list.DOMAINS
 
 
@@ -105,12 +105,14 @@ def test_set_and_remove_give_the_realms_own_layer_after_the_change():
 
 
 @pytest.mark.parametrize("kw, match", [
-    (dict(remove=["eu/es/tax"]), "only the realm's own layer, town, may be emptied"),
-    (dict(remove=["town/water"]), "no such chapter"),
-    (dict(set=[entry("eu/es/tax")]), "layer from above: it is installed whole, as a release"),
-    (dict(set=[entry("eu/es/tax")], release={"source": "town", "version": "1"}), "own layer has no releases"),
-    (dict(set=[entry("eu/es/tax")], remove=["town/tax"], release={"source": "eu/es", "version": "1"}), "remove is empty"),
-    (dict(set=[entry("eu/es/tax"), entry("eu/tax")], release={"source": "eu/es", "version": "1"}), "eu/tax is not part of the release of eu/es"),
+    ({"remove": ["eu/es/tax"]}, "only the realm's own layer, town, may be emptied"),
+    ({"remove": ["town/water"]}, "no such chapter"),
+    ({"set": [entry("eu/es/tax")]}, "layer from above: it is installed whole, as a release"),
+    ({"set": [entry("eu/es/tax")], "release": {"source": "town", "version": "1"}}, "own layer has no releases"),
+    ({"set": [entry("eu/es/tax")], "remove": ["town/tax"], "release": {"source": "eu/es", "version": "1"}},
+     "remove is empty"),
+    ({"set": [entry("eu/es/tax"), entry("eu/tax")], "release": {"source": "eu/es", "version": "1"}},
+     "eu/tax is not part of the release of eu/es"),
 ])
 def test_what_apply_refuses(kw, match):
     refused(applied, replaces=SHA["codex"], match=match, **kw)

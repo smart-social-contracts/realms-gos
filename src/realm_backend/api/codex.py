@@ -98,18 +98,11 @@ def switch_to(row, replaced):
 
 def switch(waiting):
     """The switch of an install (docs/codices/layered-codex.md §9.2 step 6): the pending ``waiting`` becomes the
-    active codex in place of the current one, kept to revert to, and the runtime loads it and runs its
-    ``on_codex_activate`` hooks. A codex the runtime cannot load leaves everything as it was. A generator."""
-    current = active()
-    switch_to(waiting, current)
-    try:
-        yield from legislation.activate(waiting)
-    except Fail:
-        waiting.status, waiting.previous = "pending", ""
-        if current is not None:
-            current.status = "active"
-        legislation.load(current if isinstance(current, LayeredCodex) else None)
-        raise
+    active codex in place of the current one, kept to revert to, and its ``on_codex_activate`` hooks run. The
+    runtime loads it first: a codex that does not load raises before anything changes. A generator."""
+    legislation.load(waiting)
+    switch_to(waiting, active())
+    yield from legislation.activate(waiting)
 
 
 @op("codex.install", governed=realm_wide, returns="codex")

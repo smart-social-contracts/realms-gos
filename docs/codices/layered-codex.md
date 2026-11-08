@@ -1205,9 +1205,15 @@ new path. A realm runs either a legacy codex or a layered codex, never both.
 `codex_install` with a change-list URL starts an `InstallJob` and returns. A timer then runs one step
 per message:
 
-1. **Fetch the change list** by HTTPS outcall (`basilisk.io.wget`), from the first URL whose sha256
-   matches the proposal's checksum.
-2. **Check the change list:** `realm`, `replaces`, chapter ids, the release rule, and limits.
+1. **Fetch the change list** by HTTPS outcall (at most 64 KB, https only), from the first URL whose sha256
+   matches the proposal's checksum. The realm exports the `http_transform` query the outcall names, which
+   drops the reply's headers so that every node sees the same reply.
+2. **Check the change list:** `realm`, `replaces`, chapter ids, the release rule, and limits. `realm` is the
+   realm's own source id: the first layered install sets it from the change list (the vote approved it), every
+   later one must name the same, and an id that is a layer of one of its sync sources is refused. `replaces`
+   is the active codex's id as `codex_status` shows it (a layered codex's checksum, a legacy codex's
+   `name@version`), or null when none is active. A chapter from a layer above comes only as a release of
+   that layer, whole.
 3. **Fetch each chapter,** one or a few per message, by the route available: a canister call to the
    sync source's capital, or an HTTPS outcall to a URL. Check size and sha256, then store it in
    `ChapterSource`. The realm skips the download if `ChapterSource` already has that sha256.
@@ -1231,7 +1237,12 @@ per message:
      validator).
 6. **Switch:** the switch time is the adopting proposal's `effective_at`; without one, the switch
    happens on acceptance. Until then the new codex is `pending`, with steps 1 to 5 done ahead of the
-   time, as a quarter stages ahead of T (§9.5). At the switch, in one message, set the new codex
+   time, as a quarter stages ahead of T (§9.5): acceptance starts the job, which runs steps 1 to 5 and
+   leaves the codex `pending` with `activates_at` = `effective_at`; the proposal's scheduled execution
+   at that time is the switch. If the job is not done by then, the switch fails, the proposal ends
+   `failed` and the old codex keeps running (proposers leave a margin, rule 26). A proposal stopped with
+   `proposal_stop` discards its pending codex and its staging. Without `effective_at` the job runs on
+   acceptance and switches as soon as step 5 is done. At the switch, in one message, set the new codex
    active and keep the previous one; the realm loads the parsed policy set and the realm domain's
    `on_codex_activate` hook runs once per realm, not in each quarter and not on a revert.
    **Legislation applies when the proposal passes and its changes are executed,** which is at that
@@ -1244,7 +1255,9 @@ The job's other rules:
   unchanged. Executing the same proposal again is safe.
 - **Safe to run twice:** every step can run again after a canister upgrade. Staging is keyed by
   checksum, and the switch checks the active codex first. A job caught mid-way by an upgrade stays
-  paused until an admin of the realm resumes it by hand; the step it stopped in then runs again.
+  paused until an admin of the realm resumes it by hand with `codex_install_resume { job }` (permission
+  `codex.install`, not governed: it only re-runs the step the job stopped in and cannot change what the
+  vote approved); the step it stopped in then runs again.
 - **One job at a time:** a second install while one runs is refused with `Conflict("an install is
   running")`.
 - **Timeout:** a job not finished within 24 hours fails.

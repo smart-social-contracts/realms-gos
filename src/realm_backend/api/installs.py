@@ -36,6 +36,9 @@ TIMEOUT = 24 * 3600
 TIMED_OUT = "not done within 24 hours"
 MAX_CHANGE_LIST = 64 * 1024
 MAX_CHAPTER = store.MAX_CHAPTER
+# The replica counts a reply's headers and its framing against max_response_bytes, not only its body: room for them,
+# so that a chapter of exactly 256 KB arrives. The body itself is held to the limit (``decoded``).
+HEADROOM = 8 * 1024
 HEX = "0123456789abcdef"
 
 
@@ -186,7 +189,10 @@ def expire(job_id):
 
 
 def fail(job, reason):
-    """The job ends here: its reason is recorded, the codex it staged is dropped and the active codex is untouched."""
+    """The job ends here: its reason is recorded, the codex it staged is dropped and the active codex is untouched.
+    A job that has ended keeps its reason: the late reply to an outcall it made changes nothing."""
+    if job.status not in ("running", "paused"):
+        return
     waiting = LayeredCodex[job.staged["codex"]] if job.staged.get("codex") else None
     if waiting is not None and waiting.status == "pending":
         if job.staged.get("was"):  # a row this legislation had before the install: back to what it was
@@ -338,10 +344,11 @@ RUN = {"fetch_change_list": fetch_change_list, "check_change_list": check_change
 
 
 def fetched(url, most):
-    """``(status, body)`` of a GET of ``url`` by HTTPS outcall; a call that fails is a Fail naming the URL."""
+    """``(status, body)`` of a GET of ``url`` by HTTPS outcall, for a body of at most ``most`` bytes; a call that fails
+    is a Fail naming the URL."""
     try:
-        return (yield from chain.http_get(url, most))
-    except Exception as e:
+        return (yield from chain.http_get(url, most + HEADROOM))
+    except Exception as e:  # a failed call is a plain Exception, as chain.call raises it
         raise Fail(f"{url}: {e}")
 
 

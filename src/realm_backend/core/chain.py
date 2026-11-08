@@ -88,7 +88,7 @@ def http_get(url, max_bytes):
 
     request = {"url": url, "max_response_bytes": max_bytes, "method": {"get": None},
                "headers": [{"name": "Accept-Encoding", "value": "identity"}], "body": None,
-               "transform": {"function": (ic.id(), "http_transform"), "context": bytes()}}
+               "transform": {"function": (ic.id(), "http_transform"), "context": b""}}
     reply = yield management_canister.http_request(request).with_cycles(http_cycles(len(url) + 100, max_bytes))
     if "Ok" not in reply:
         raise Exception(f"GET {url} failed: {reply}")

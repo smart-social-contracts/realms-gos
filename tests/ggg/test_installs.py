@@ -232,7 +232,7 @@ def test_a_change_list_nobody_serves_or_one_above_64_kb(realm):
     del fake_chain.state["web"][LIST_URL]
     failing(args, f"{LIST_URL}: HTTP 404")
     fake_chain.serve(LIST_URL, b"x" * (64 * 1024 + 1))
-    failing(args, "above 65536 bytes")
+    failing(args, f"{LIST_URL}: 65537 bytes is above 64 KB")
     assert active_id() is None
 
 
@@ -274,7 +274,7 @@ def test_a_chapter_whose_bytes_changed_then_the_same_change_list_once_they_are_b
 
 def test_a_mirror_serves_what_the_first_url_does_not(realm):
     layer = own_layer()
-    args = change_list(layer)
+    change_list(layer)
     listed = json.loads(fake_chain.state["web"][LIST_URL][1])
     listed["set"][0]["mirrors"] = [WEB + "mirror/tax.py"]
     text = json.dumps(listed).encode()
@@ -402,6 +402,6 @@ def test_a_switch_whose_codex_cannot_load_leaves_the_active_codex_and_the_runtim
     fire_due()
     seen = status()
     assert seen["codex"]["id"] == expected_id(first) and seen["codex"]["status"] == "active"
-    assert seen["job"]["status"] == "failed" and "does not load" in seen["job"]["error"]
+    assert seen["job"]["status"] == "failed" and seen["job"]["error"] == "no room"
     assert legislation._state["codex"] == expected_id(first) and legislation._state["box"] is not None
     assert LayeredCodex.count() == 1

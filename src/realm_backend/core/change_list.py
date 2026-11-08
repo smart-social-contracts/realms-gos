@@ -75,15 +75,25 @@ def _entry(entry):
             "size": size}
 
 
+def library():
+    """``realms.legislation``, loaded whole before any of its modules is used: in the realm, a bundled module runs
+    when something first reads it, and the package's own import order is the one that resolves the imports between
+    its modules (a submodule read first would run the package in the middle of its own load)."""
+    import realms.legislation
+
+    realms.legislation.plan  # noqa: B018  the read that runs the package
+    return realms.legislation
+
+
 def chapter_id(chapter):
     """``(source, domain)`` of the chapter id ``<source id>/<domain>``, the domain one of GGG's or ``calendar``."""
+    errors = library().LegislationError
     from realms.legislation.codex import source_id
-    from realms.legislation.errors import LegislationError
 
     source, _, domain = (chapter if isinstance(chapter, str) else "").rpartition("/")
     try:
         source_id(source)
-    except LegislationError as e:
+    except errors as e:
         raise Fail(f"{chapter!r} is not a chapter id: {e}")
     if domain != CALENDAR and domain not in DOMAINS:
         raise Fail(f"{chapter!r} is not a chapter id: {domain!r} is not a GGG domain, nor calendar")
@@ -143,12 +153,10 @@ def vouch(change_list, realm, relays, own):
     ``realm`` chapter it lists is skipped, §3.2), with the record's checksums. Returns the ``Plan`` and, for every
     chapter and calendar of the new codex, the source whose record vouches for it: its publisher's, when the realm
     syncs from the publisher directly, else the sync source that relays it; the realm's own are the realm's."""
-    from realms.legislation.errors import LegislationError
-    from realms.legislation.paths import plan
-
+    legislation = library()
     try:
-        planned = plan(realm, relays, own)
-    except LegislationError as e:
+        planned = legislation.plan(realm, relays, own)
+    except legislation.LegislationError as e:
         raise Fail(str(e))
     vouchers = {realm: realm}
     for relay in relays:
