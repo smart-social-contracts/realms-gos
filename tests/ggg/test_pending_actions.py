@@ -557,7 +557,7 @@ def test_a_secret_in_the_reply_is_in_the_approvals_reply_alone(confirm_ops):
 def test_an_approved_read_is_collected_once_by_its_delegate_and_stores_nothing(confirm_ops):
     world.build()
     grant("identity")
-    a = ok("t_read", "claude-conn", on_behalf_of="alice")["pending"]
+    a = ok("call_for", "claude-conn", method="t_read", args={}, grantor="alice")["pending"]  # a read, filed as an update
     assert "needs the member's approval" in denied("read_for", "claude-conn", method="t_read", args={}, grantor="alice")
     assert "is pending" in denied("action_collect", "claude-conn", action=a)
     done = approved(a)
