@@ -245,9 +245,10 @@ One entry per release, newest last:
 ```
 
 - **A release lists all of the source's chapters,** changed or not, and its calendar if it has one.
-  The source adopts it by its own vote. A follower installs a release whole, never only some of its
-  chapters, but downloads only the chapters on its own layer paths: EMSHI's water chapter reaches only
-  the realms that sync from EMSHI.
+  It never lists the `realm` domain, which only the realm's own layer fills (§3). A follower that finds
+  one in a release skips it and reports it. The source adopts the release by its own vote. A follower
+  installs a release whole, never only some of its chapters, but downloads only the chapters on its own
+  layer paths: EMSHI's water chapter reaches only the realms that sync from EMSHI.
 - **The repository file is a convenience copy.** The authority is the source's published record (§8).
 - **The realm's own layer needs no releases:** its proposals are its record.
 - **`calendar.json` is released and pinned like a chapter:** the release's own `calendar` field holds
@@ -268,10 +269,15 @@ own layer. Each sync source relays its own paths, so a path grows by one layer a
 | València | CV and EMSHI | EU → Spain → CV → EMSHI → València |
 
 - EMSHI writes water chapters only, so in every other domain its path equals CV's. Empty chapters are
-  skipped, so València's tax path is Spain → València.
+  skipped, so València's tax path is Spain → València. A layer is on a domain's path only if its
+  release has a chapter in that domain; the table above shows a domain every layer writes in.
 - **One chain:** when a realm has several sync sources, their paths in one domain must form one
   chain, each the start of the longest, which the realm uses. Paths that differ are refused unless one
   extends the other, and the install fails. València passes, because EMSHI's water path extends CV's.
+  Across domains, too, the records of the sync sources must, taken together, put every layer with a
+  chapter or a calendar above or below every other: one order, no ties. Two layers that no record
+  puts in order, such as CV and a metropolitan area that both sync from Spain, are refused, so
+  `self.layer` has one order to count by.
 - A CV town that does not sync from EMSHI gets a water path without EMSHI.
 
 ### 3.4 `calendar.json`
@@ -494,8 +500,11 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 
 - **Only declared domains.** A chapter may only reach domains listed in `uses`. Anything else is an
   error at load time.
-- **No cycles.** If tax uses procedure and procedure uses tax, the checker refuses the cycle. The
-  runtime also stops calls between domains at depth 8.
+- **No cycles.** If tax uses procedure and procedure uses tax, the checker refuses the cycle, and so
+  does the install. The install also refuses a `uses` of the chapter's own domain, or of a domain the
+  realm has no chapter in.
+- **Depth 8.** Calls between domains stop at depth 8 (`MAX_DEPTH` in `realms.legislation.context`):
+  the runtime refuses a ninth nested call, and the install refuses a `uses` chain that could reach it.
 - **What's protected.** `fixed` members of the called domain can't be changed by lower layers, so a
   source that needs a guaranteed answer marks it `fixed`, as `working_days_after` is in §4.
 
@@ -1104,6 +1113,36 @@ becomes official only when the source publishes it by its own vote. A sync sourc
 the releases of every layer it relays, as it installed them. The record is what followers check
 against; the official journal (§9.6) is where people read the same releases.
 
+**What the resolver takes.** The library function `realms.legislation.plan(realm, relays, own)` (the
+install task's step 5, `realms legislation resolve`) computes the layer paths from plain data. Each
+chosen sync source, one with an active link, is its record as the releases it runs, in layer order:
+
+```json
+{"source": "eu/es/vc",
+ "layers": [
+   {"source": "eu",       "version": "1.0.0", "chapters": {"data_protection": "sha256:<hex>"}, "calendar": null},
+   {"source": "eu/es",    "version": "2.4.0", "chapters": {"tax": "sha256:<hex>", "procedure": "sha256:<hex>"}, "calendar": "sha256:<hex>"},
+   {"source": "eu/es/vc", "version": "1.1.0", "chapters": {"local_regime": "sha256:<hex>"}, "calendar": "sha256:<hex>"}
+ ]}
+```
+
+- `layers` runs **top to bottom**: the layers the sync source relays, its own layer last. An entry is a
+  release as in `releases.json` (§3.2) with its `source` added. The order is the source's own layer
+  path; a source id does not place it (§3).
+- A layer is on a domain's path only if its entry has a chapter in that domain.
+- Taken together, the records must put every layer with a chapter or a calendar above or below every
+  other: one order, no ties. A record may order two layers through a third (`[a, b]` and `[b, c]` give
+  `a, b, c`), but records that contradict each other, or leave two layers with neither above the
+  other, are refused.
+- A relay's `source` is not the realm itself, and a record that lists its own layer lists it last.
+- The realm's own layer is passed beside them, without a version (§3.2):
+  `{"chapters": {domain: sha256}, "calendar": sha256}`.
+- Two sync sources that relay one layer must relay the same release, with the same version and
+  checksums. Otherwise `plan` refuses (§9.2 step 4).
+- `plan` returns the layer paths, the chapters to fetch (`source`, `domain`, `version`, `sha256`, in the
+  order they load), the calendars and the realm chapters it skipped (§3.2). `resolve` loads them into a
+  codex and gives the flattened view of §5.9 as plain data.
+
 A follower checks each layer from above against one record:
 
 - **its publisher's**, when the follower syncs from the publisher directly;
@@ -1164,9 +1203,11 @@ per message:
      decides which one it installs. **If its legislation does not choose, the install is refused and
      the old codex keeps running.**
 5. **Build:**
-   - compute the new layer paths from the paths the sync sources relay, then the realm's own layer;
+   - compute the new layer paths from the paths the sync sources relay, then the realm's own layer
+     (`plan`, shape in §8);
    - refuse paths that do not form one chain (§3.3);
-   - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`;
+   - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`
+     (`resolve`), and refuse `uses` cycles and chains deeper than 8 (§4.4);
    - run the in-canister checks (§12.2), including every setting's `check=`;
    - generate the Cedar, folding the `S.` settings;
    - parse and validate it against the schema in strict mode (the canister's Cedar engine has the
