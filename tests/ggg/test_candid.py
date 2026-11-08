@@ -14,6 +14,7 @@ from ggg import Realm
 from kit import ok
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+OWN_TASK_OPERATIONS = ("task_list", "task_schedule", "task_cancel")
 spec = importlib.util.spec_from_file_location("ggg_candid", ROOT / "scripts" / "ggg_candid.py")
 gen = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gen)
@@ -102,7 +103,9 @@ def test_every_operation_names_where_its_result_is():
 
     unnamed = []
     for name, (_, reply_t) in ggg_api.METHODS.items():
-        if name in ggg_api.LOCAL or name in ggg_api.BUILD:
+        # test_spec reports a method whose operation is not registered. Realms GOS's own task operations share
+        # three names with GGG's, until the G2 adoption replaces them.
+        if name in ggg_api.LOCAL or name in ggg_api.BUILD or name not in ops() or name in OWN_TASK_OPERATIONS:
             continue
         t = ggg_api.unwrap(ggg_api.fields(reply_t)["Ok"]) if ggg_api.is_variant(reply_t) else reply_t
         page = ggg_api.is_record(t) and {"items", "next"} <= set(ggg_api.fields(t))
