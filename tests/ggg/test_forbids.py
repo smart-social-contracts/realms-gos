@@ -197,11 +197,19 @@ def test_a_forbid_on_an_operation_with_a_secret_reads_the_facts_that_are_left(ag
 def test_an_entry_the_forbids_refuse_is_refused_at_draft_and_at_propose(agora):
     saved = ok("tax_policy_draft", "bob", **drafted(entry("ibi_urban", CAP + 1)))["policy"]  # before the legislation
     valencia()
-    assert "forbidden by the legislation: taxes[0]" in denied("tax_policy_propose", "bob", policy=saved)
+    assert "forbidden by the legislation: taxes[0]: refused by eu/es/tax/ibi_urban_cap" in denied(
+        "tax_policy_propose", "bob", policy=saved)
     assert TaxPolicy[saved].status == "draft"
-    for refused in (entry("ibi_urban", CAP + 1), entry("ibi_urban"), entry("ibi_urban", 399_999), entry("ibi_rustic")):
+    # a proposal that carries the adoption is refused when it is filed, before any vote, and again if it were not
+    files = denied("proposal_create", "bob", title="adopt", action={"op": "tax_policy_propose", "args": {"policy": saved}})
+    assert "tax_policy_propose is forbidden by the legislation: taxes[0]: refused by eu/es/tax/ibi_urban_cap" in files
+    assert Proposal.count() == 0
+    for refused, by in ((entry("ibi_urban", CAP + 1), "eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)"),
+                        (entry("ibi_urban"), "eu/es/tax/ibi_rate_required (TRLRHL Art. 72)"),
+                        (entry("ibi_urban", 399_999), "eu/es/tax/ibi_urban_range (TRLRHL Art. 72.1, 72.3)"),
+                        (entry("ibi_rustic"), "eu/es/tax/ibi_rate_required (TRLRHL Art. 72)")):
         message = denied("tax_policy_draft", "bob", **drafted(entry("water", 5), refused))
-        assert "forbidden by the legislation: taxes[1]" in message
+        assert f"forbidden by the legislation: taxes[1]: refused by {by}" in message  # the forbid that fired, no other
     assert TaxPolicy.count() == 1  # nothing was saved
 
 
@@ -326,12 +334,28 @@ def test_a_forbid_reads_the_facts_the_operation_derives(agora, requests):
     draft("ROADS", "capital", 600)
     draft("ROADS", "upkeep", 700)
     out, asked = requests.during("budget_propose", "bob", fund="ROADS", period="FY2026")
-    assert "forbidden by the legislation: its arguments" in out["error"]
+    assert "forbidden by the legislation: its arguments: refused by x/town/treasury/expense_cap (a budget spends at most 1000)" \
+        in out["error"]
     assert asked[-1] == ("budget_propose", {"period": "FY2026", "expense": 1300, "revenue": 0})
     assert {b.status for b in rows(Budget)} == {"draft"}  # nothing was adopted
     draft("ROOT", "salaries", 500)
     assert ok("budget_propose", "bob", fund="ROOT", period="FY2026")["expense"] == 500
     assert requests.asked[-1] == ("budget_propose", {"period": "FY2026", "expense": 500, "revenue": 0})
+
+
+def test_a_proposal_that_carries_a_call_the_forbids_refuse_is_refused_at_filing_and_fixes_nothing(agora):
+    """proposal_create files the action it carries as a governed call files its own: the forbids are asked first, so a
+    proposal that could only fail is never put to the vote, and the lines it would fix stay drafts."""
+    codex_of({("x/town", "treasury"): BUDGET_CAP})
+    lines = [draft("ROADS", "capital", 900), draft("ROADS", "upkeep", 600)]
+    message = denied("proposal_create", "carla", title="Roads budget", department="Infrastructure",
+                     action={"op": "budget_propose", "args": {"fund": "ROADS", "period": "FY2026"}})
+    assert "budget_propose is forbidden by the legislation: its arguments: refused by x/town/treasury/expense_cap" in message
+    assert Proposal.count() == 0 and [(Budget[b].status, Budget[b].proposal) for b in lines] == [("draft", ""), ("draft", "")]
+    cheaper = draft("ROOT", "salaries", 500)  # another fund's lines, within the cap, are filed
+    filed = ok("proposal_create", "carla", title="Salaries", action={"op": "budget_propose",
+                                                                       "args": {"fund": "ROOT", "period": "FY2026"}})
+    assert Budget[cheaper].status == "proposed" and Budget[cheaper].proposal == filed["proposal"]
 
 
 def test_a_forbid_installed_between_filing_and_execution_refuses_the_execution_and_frees_the_lines(agora):
@@ -384,8 +408,9 @@ def test_a_reserved_operation_and_a_proposal_about_one_meet_no_forbid(agora, req
     assert "forbidden by the legislation" in denied("proposal_vote", "bob", proposal=other, choice="yes")
 
     revert = {"op": "codex_revert", "args": {}}
-    blocked = ok("proposal_create", "alice", title="blocked", action=revert)["proposal"]  # filing: no forbid
     before = len(requests.asked)
+    blocked = ok("proposal_create", "alice", title="blocked", action=revert)["proposal"]  # filing: no forbid
+    assert {action for action, _ in requests.asked[before:]} == {"call"}
     for voter in world.PEOPLE:  # voting and executing: none either
         call("proposal_vote", voter, proposal=blocked, choice="yes")
     assert Proposal[blocked].status in ("executed", "failed")

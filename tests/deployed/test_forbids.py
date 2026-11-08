@@ -113,6 +113,30 @@ t2 = ic.performance_counter(0)
 auth.load(auth.live["schema"], policies)
 print(json.dumps({"hand_over": t1 - t0, "engine": t2 - t1, "schema": len(schema)}))
 '''
+# What a refusal costs, with and without naming the forbid that fired (one more call to the sandbox, only then).
+REFUSAL = '''
+import json
+from core import auth, chain, legislation, op
+name, args = %(name)r, %(args)r
+spec, me = op.ops()[name], chain.caller()
+
+
+def refused():
+    before = ic.performance_counter(0)
+    try:
+        auth.refuse_forbidden(me, name, spec, args, "")
+        message = ""
+    except auth.Denied as e:
+        message = str(e)
+    return ic.performance_counter(0) - before, message
+
+
+named, message = refused()
+real, legislation.firing = legislation.firing, lambda action, facts: []
+unnamed, _ = refused()
+legislation.firing = real
+print(json.dumps({"named": named, "unnamed": unnamed, "message": message}))
+'''
 IN_FORCE = '''
 from core import auth
 print(auth.live["forbids"] is not None, sorted(auth.live["forbids"]["targeted"]) if auth.live["forbids"] else [])
@@ -174,6 +198,10 @@ def test_d_the_entries_the_forbids_refuse_are_refused_at_draft_and_at_propose(ca
     saved = ok(capital, "tax_policy_draft", "ctl", **drafted(entry("ibi_urban", CAP), entry("water", 5)))["policy"]
     refused = call(capital, "tax_policy_propose", "ctl", policy=capital.legacy)  # saved before the legislation
     assert not refused["ok"] and "tax_policy_propose is forbidden by the legislation: taxes[0]" in refused["error"]
+    assert "refused by eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)" in refused["error"]
+    files = call(capital, "proposal_create", "founder", title="adopt",  # the proposal that would carry it is refused too
+                 action={"op": "tax_policy_propose", "args": {"policy": capital.legacy}})
+    assert not files["ok"] and "taxes[0]: refused by eu/es/tax/ibi_urban_cap" in files["error"], files
     capital.saved = saved
     assert ok(capital, "tax_policy_propose", "ctl", policy=saved)["status"] == "adopted"
 
@@ -197,7 +225,20 @@ def test_e_a_decision_reuses_what_the_engine_holds(capital, costs):
     costs.report("forbids check of a proposal of a saved policy of 2 entries", saved["forbids"])
 
 
-def test_f_a_forbid_installed_between_filing_and_execution_refuses_the_execution(capital):
+def test_f_naming_the_forbid_costs_something_only_when_a_request_is_refused(capital, costs):
+    refused = run(capital, REFUSAL % {"name": "tax_policy_draft",
+                                      "args": drafted(entry("ibi_urban", CAP), entry("ibi_urban", CAP + 1))})
+    assert refused["message"].endswith("taxes[1]: refused by eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)"), refused
+    extra = refused["named"] - refused["unnamed"]
+    print(f"a refused draft of 2 entries: {refused['named']:,} instructions, of which naming the forbid {extra:,}")
+    assert 0 < extra < 50_000_000, refused
+    costs.report("a refused draft of 2 entries, forbid named", refused["named"])
+    costs.report("naming the forbids that refused an element (the sandbox, only on a refusal)", extra)
+    allowed = measure(capital, "tax_policy_draft", drafted(entry("ibi_urban", CAP), entry("water", 5)))
+    assert allowed["forbids"] < refused["named"]  # an allowed call never asks the sandbox
+
+
+def test_g_a_forbid_installed_between_filing_and_execution_refuses_the_execution(capital):
     ok(capital, "proposal_vote", "bob", proposal=capital.filed, choice="yes")  # the vote that carries it
     proposal = ok(capital, "proposal_get", "founder", query=True, proposal=capital.filed)["proposal"]
     assert proposal["status"] == "failed", proposal
@@ -206,7 +247,7 @@ def test_f_a_forbid_installed_between_filing_and_execution_refuses_the_execution
     assert capital.legacy in [d["id"] for d in drafts]  # still a draft: the policy in force is the one adopted before
 
 
-def test_g_the_forbids_are_in_force_again_after_an_upgrade(capital):
+def test_h_the_forbids_are_in_force_again_after_an_upgrade(capital):
     capital.wait(600)  # the replica refuses an upgrade right after the install of the wasm
     capital.upgrade()
     assert capital.shell(IN_FORCE).strip() == "True ['tax_policy_draft', 'tax_policy_propose']"
@@ -215,7 +256,7 @@ def test_g_the_forbids_are_in_force_again_after_an_upgrade(capital):
     assert ok(capital, "tax_policy_draft", "ctl", **drafted(entry("ibi_urban", CAP)))["policy"]
 
 
-def test_h_a_codex_without_forbids_costs_the_engine_and_the_fact_schema_nothing(capital, costs):
+def test_i_a_codex_without_forbids_costs_the_engine_and_the_fact_schema_nothing(capital, costs):
     """The next codex forbids nothing: the realm's own policies come back, and its load never reads GGG's fact schema."""
     got = install(capital, [(TOWN, "tax", TOWN_TAX)], layers=(TOWN,), calendars=(), previous="")
     assert capital.shell(IN_FORCE).strip() == "False []"
@@ -226,7 +267,7 @@ def test_h_a_codex_without_forbids_costs_the_engine_and_the_fact_schema_nothing(
     assert ok(capital, "tax_policy_draft", "ctl", **drafted(entry("ibi_urban", CAP + 1)))["policy"]
 
 
-def test_i_a_codex_that_goes_takes_its_forbids_with_it(capital):
+def test_j_a_codex_that_goes_takes_its_forbids_with_it(capital):
     install(capital, CODEX, layers=(SPAIN, TOWN), calendars=())
     assert capital.shell(IN_FORCE).strip() == "True ['tax_policy_draft', 'tax_policy_propose']"
     ok(capital, "codex_uninstall", "ctl")

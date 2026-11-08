@@ -1413,9 +1413,15 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`
    (`ggg_api.ggg_args`: renamed arguments, nanoseconds, variants) plus the facts the operation derives (`derived=` on
    `@op`), and one request per element for each list a forbid ranges over: the element of the argument, or, where the
    list is not an argument, what `lists=` on `@op` gives (`tax_policy_propose`: the saved policy's entries). Any
-   refusal is a `Denied` that names the list and the position of the element (`taxes[1]`). An operation no forbid
-   names is decided once, on `call`, as before.
-5. **The replay of an accepted proposal** meets the same forbids, with no permit or guardrail in the way: the vote
+   refusal is a `Denied` that names the list and the position of the element, and the forbids that fired:
+   `taxes[1]: refused by eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)`. The engine says only allow or deny, so the
+   names are found after the refusal, by asking the sandbox, whose bound forbids evaluate the same facts in plain
+   Python as Cedar does (§6, rule 7); an allowed call never pays for it. An operation no forbid names is decided once,
+   on `call`, as before.
+5. **A proposal that carries an action** (`proposal_create`) is refused when it is filed if a forbid refuses the
+   action's call, as a governed call is when it files its proposal: it is never put to the vote, and the records its
+   action would fix (a budget's draft lines) stay as they were.
+6. **The replay of an accepted proposal** meets the same forbids, with no permit or guardrail in the way: the vote
    was the permission, but the forbids of the legislation in force when it executes still hold. The facts it
    derives are computed for that proposal (`derived(args, proposal)`: a budget's totals are those of the lines
    the proposal fixed). A replay a forbid refuses ends the proposal `failed` with the forbid's reason, and
@@ -1436,6 +1442,7 @@ instructions and a decision at about 0.7 M:
 | the forbids of a draft of 1 / 2 / 5 / 20 entries | 5.6 / 10.8 / 26.7 / 108.5 M |
 | the forbids of a proposal of a saved policy of 2 entries (it reads the policy too) | 14.2 M |
 | the forbids of a realm with no layered codex | 8 k |
+| naming the forbids behind a refusal (one call to the sandbox), only when a request is refused | 0.9 M |
 | install step 5 (`build`) of a codex with these forbids, in all | 1,675 M |
 | a codex with these forbids, loaded and activated: the sandbox 1,062 M, the Cedar 428 M, the engine 96 M, in all (the sandbox of a codex without forbids: 1,045 M) | 1,602 M |
 

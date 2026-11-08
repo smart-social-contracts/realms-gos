@@ -198,7 +198,8 @@ def refuse_forbidden(user, name, spec, args, proposal):
     """Refuse the call with Denied when a forbid of the running codex's legislation fires on its facts (§6, §9.4): one
     request on the operation's action, and one per element of each list a forbid ranges over. It follows ``authorize``
     for every origin, a replay among them, where ``proposal`` is the proposal being executed. With no forbid on
-    ``name``, or none may be asked of it, nothing is."""
+    ``name``, or none may be asked of it, nothing is. A refusal names the forbids that fired, the id and citation of
+    each, found only then."""
     in_force = live["forbids"]
     if in_force is None:
         return
@@ -211,7 +212,13 @@ def refuse_forbidden(user, name, spec, args, proposal):
     for action, label, facts in forbids.requests(name, spec, args, proposal, in_force["targeted"], in_force["types"]):
         context = {**BLANK, "op": name, "origin": "forbids", "facts": facts}
         if not decide(f'Realm::User::"{user}"', f'Realm::Action::"{action}"', 'Realm::Realm::"1"', entities, context):
-            raise Denied(f"{name} is forbidden by the legislation: {label}")
+            raise Denied(f"{name} is forbidden by the legislation: {label}{refused_by(legislation.firing(action, facts))}")
+
+
+def refused_by(firing):
+    """``: refused by <id> (<citation>)`` for the forbids that fired (core.legislation.firing), or nothing."""
+    by = ", ".join(f["id"] + (f" ({f['legislation']})" if f["legislation"] else "") for f in firing)
+    return f": refused by {by}" if by else ""
 
 
 def reason(name, spec, context, held):

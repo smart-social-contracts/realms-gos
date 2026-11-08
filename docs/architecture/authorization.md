@@ -102,7 +102,9 @@ per forbid-named action (one per element of a list), under the context `origin: 
 operation and its facts. It asks nothing when no forbid names the operation, so a realm with a legacy codex or
 none decides as before. It follows the replay of an accepted proposal as well, which has no permission decision of its
 own (the vote was it): the forbids of the legislation in force still apply, and a replay one refuses ends the
-proposal `failed`. No forbid can name a reserved operation, and none is asked of a reserved operation or of a
+proposal `failed`. `proposal_create` asks them of the action it carries when it files, so a proposal that could only
+fail is never put to the vote. A refusal names the forbids that fired, their ids and citations
+(`taxes[1]: refused by eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)`). No forbid can name a reserved operation, and none is asked of a reserved operation or of a
 proposal about one.
 
 ## Where permissions come from

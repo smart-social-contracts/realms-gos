@@ -14,7 +14,8 @@ never imports it. Every import is inside a function, so the text is a program, n
 
 import sys
 
-STATE = {"ready": False}  # "codex": the Codex; "files": the chapter files loaded; "ready": the load is complete
+# "codex": the Codex; "files": the chapter files loaded; "ready": the load is complete; "forbids": its bound forbids
+STATE = {"ready": False}
 
 
 class Finder:
@@ -185,7 +186,7 @@ def cedar(context, secret):
 
     try:
         codex.use_facts(readable(FACTS, secret))
-        bound = codex.forbids()
+        bound = STATE["forbids"] = codex.forbids()
         named = sorted({action for forbid in bound for action in forbid.actions})
         return {
             "ok": True,
@@ -195,6 +196,20 @@ def cedar(context, secret):
         }
     except LegislationError as e:
         return {"ok": False, "error": str(e)}
+
+
+def fired(action, facts):
+    """The forbids on Cedar ``action`` that refuse ``facts``, as ``{"id", "legislation"}``, for the reason a refusal
+    gives. The library evaluates a forbid in plain Python as Cedar does (§6 rule 7, which its tests check), so the
+    realm's engine is not asked again; a forbid it cannot evaluate here is left out."""
+    out = []
+    for forbid in STATE.get("forbids", ()):
+        try:
+            if action in forbid.actions and forbid.evaluate(facts):
+                out.append({"id": forbid.id, "legislation": forbid.legislation})
+        except Exception:  # a reason is a courtesy: the refusal stands without it
+            continue
+    return out
 
 
 def context(now, approvals):

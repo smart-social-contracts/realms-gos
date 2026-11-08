@@ -175,6 +175,15 @@ def activate(codex):
     yield from _hooks("codex_activate", {"codex": codex.id}, {"codex": codex.id}, Call(realm, realm, "codex"), None)
 
 
+def firing(action, facts):
+    """The forbids of the running codex that refuse ``facts`` on Cedar ``action``, ``[{"id", "legislation"}]``, asked of
+    the sandbox once a request has been refused (core.auth.refuse_forbidden). Empty when it cannot say."""
+    try:
+        return _call("fired", action=action, facts=facts)
+    except Fail:
+        return []
+
+
 def run(op, call, args, department, perform, record, read=False):
     """Run GGG operation ``op`` for ``call`` with ``args`` under the legislation: its guards first, then ``perform()``
     (the operation itself, or the filing of the proposal that carries a governed call), then ``record(out)``, the
