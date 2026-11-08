@@ -387,6 +387,13 @@ The rules (the checker enforces them, §12):
    bound once, as the method's parameters, and never rebound, deleted or reused as a nested function's
    parameter. A chapter's class lives as long as the codex runs, so a default or an attribute on an SDK
    object, a parameter or a view would be state shared by every call.
+6. **No floats.** Money is whole units of the token and a rate is `pct("1.10")`, so a chapter holds no float
+   literal, calls no `float()` or `complex()`, and writes no `/` or `/=`, which make a float of two integers
+   (`//` divides whole numbers). It writes no `**`, `**=` or `pow()` either: a negative power is a float and a
+   negative base to a fractional power a complex number, and the power can come at run time, where no check of a
+   constant would hold; a chapter needs no power. The names `float`, `complex` and `pow` are neither read nor bound
+   anywhere in a chapter, and `type(x)` of a float or a complex number is refused, so the data a chapter reads
+   cannot hand it the class either. A share of money is `amount.times(rate)`, rounded by GGG's one rule (§4.5).
 
 ### 4.1 Marks
 
@@ -528,12 +535,39 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 | `self.local_day(at)` | the realm's local day of UTC timestamp `at`, `YYYY-MM-DD`, computed by the realm from its own time zone (below): the day a working-day count starts from (§5.2) |
 | `pct("1.10")` | a rate literal, stored as the integer in hundred-millionths (§4.3) |
 | `days(n)`, `working_days(n)`, `months(n)`, `years(n)` | a Period, as GGG writes it: the unit constructors GGG defines, for settings (§4.3); the SDK adds none |
+| `Money(units, decimals)` | an amount in the token's smallest unit: it adds, compares and `times(rate)`; an amount GGG hands a chapter (a parcel's `assessed_value`, below) is one |
 | `amount.times(rate)` | money times a rate, rounded as GGG says |
 
 **Rounding is one rule, set by GGG:** nearest cent, an exact half away from zero, stated with the money
 kind of GGG's fact schema so that every implementation rounds the same way. The rule's text is on
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
 `times()` takes no rounding argument and a chapter names no rule.
+
+**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row,
+the object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
+currency (GGG's model), and it reaches the chapter as a `Money` of that currency's decimals, so that
+`subject.assessed_value.times(entry.rate)` rounds to its cent. A codex therefore computes a tax on land only when it
+is billed in the accounting currency, and `tax_assess` refuses the call otherwise; a tax on land in another token has
+its own rate, amount or brackets. Only a `compute_` method knows the token: anywhere else an amount read is a `Money`
+without decimals, and `times()` says so instead of guessing. A chapter's own amounts are `Money(units, decimals)`,
+the decimals those of the amounts it read (`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the
+same kind, `sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
+(`realms.legislation.rates.times`): there is one implementation.
+
+**Round once.** GGG rounds an amount where it is complete (D23), not at each step: a tax by brackets adds the exact
+products of each bracket, whole numbers in hundred-millionths of a unit, and rounds the total once. Rounding each
+bracket and adding the cents gives another total. A tax of 0.1 % on the first 25.00 and 0.3 % above, on 40.00, is
+2.5 cents and 4.5 cents: 7 cents rounded once, and 8 when each is rounded first. A chapter writes it the same way:
+
+```python
+def brackets_tax(self, value, brackets):       # value: a Money; brackets: up_to and rate, the last up_to None
+    exact, lower = 0, 0                        # whole numbers, in hundred-millionths of a unit: nothing rounded yet
+    for bracket in brackets:
+        upper = value.units if bracket["up_to"] is None else min(value.units, bracket["up_to"])
+        exact += max(upper - lower, 0) * bracket["rate"]
+        lower = max(lower, upper)
+    return Money(exact, value.decimals).times(1)    # the one rounding, of the total
+```
 
 **Time zones.** GGG's `Realm.timezone` is an IANA name such as `Europe/Madrid`
 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)). Timestamps stay UTC nanoseconds,
@@ -874,7 +908,9 @@ class Tax(above("tax")):
   own layer (§4.3), read by Spain's forbids through `S.` and fixed per realm at build. They never come
   from whoever proposes the rate.
 - **The amount** is computed by `compute_tax_assess`, which GGG calls for each entry and subject, page
-  by page. GGG's rounding rule applies to `times()`.
+  by page. The subject is the view of the parcel (`Land.get`'s, with its `assessed_value` and `area`), whose
+  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax on land computed by a
+  codex is billed in (§4.5), and GGG's rounding rule applies to `times()`.
 
 ### 5.7 A body beside the line
 

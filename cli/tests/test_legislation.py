@@ -28,6 +28,7 @@ from realms.legislation import (
     months,
     overridable,
     pct,
+    subset_ast,
     times,
     working_days,
     years,
@@ -164,6 +165,88 @@ def test_money_combines_only_within_one_token():
         Money(100, 2) + Money(50, 8)
 
 
+@pytest.mark.parametrize("decimals", [-1, 256, 10**9, 2.0, True, "2"])
+def test_a_token_s_decimals_stay_within_ggg_s_bound(decimals):
+    """A chapter's Money(1, 10**9) would make the realm raise ten to a billion: the bound is GGG's own, 0 to 255."""
+    with pytest.raises(LegislationError, match="from 0 to 255"):
+        Money(1, decimals)
+    with pytest.raises(LegislationError, match="from 0 to 255"):
+        times(1, pct("1"), decimals)
+    assert Money(1, 255).decimals == 255 and Money(1, 0).decimals == 0
+
+
+def test_money_compares_within_one_token_only_as_it_adds():
+    assert Money(100, 2) == Money(100, 2) and Money(100) == Money(100, 2) and Money(1, 2) < Money(2)
+    for compare in (lambda a, b: a == b, lambda a, b: a < b, lambda a, b: a <= b, lambda a, b: a > b, lambda a, b: a >= b):
+        with pytest.raises(LegislationError, match="different decimals"):
+            compare(Money(1, 2), Money(1, 8))
+    assert Money(1, 2) != 1 and not Money(1, 2) == 1  # nothing but Money is its equal
+
+
+def test_money_is_false_when_it_is_nothing_and_never_changes_not_even_by_delete():
+    assert not Money(0, 2) and Money(1, 2) and Money(-1)
+    money = Money(5, 2)
+    with pytest.raises(LegislationError, match="never changes"):
+        del money.units
+    with pytest.raises(LegislationError, match="never changes"):
+        money.units = 6
+    assert money.units == 5
+
+
+def test_a_sum_of_money_needs_a_start_of_money():
+    amounts = [Money(1, 2), Money(2, 2)]
+    assert sum(amounts, Money(0, 2)) == Money(3, 2)
+    with pytest.raises(TypeError):
+        sum(amounts)  # the start, 0, is no Money
+
+
+def test_only_the_sdks_own_classes_are_plain_data_and_a_chapter_cannot_make_a_subclass():
+    """A Money subclass would bring a to_json of its own; `type()` of a class would hand a chapter the way to one."""
+    from realms.legislation.context import is_result, plain
+
+    evil = type(Money)("Evil", (Money,), {"to_json": lambda self: {"pwned": 1}})(1, 2)  # what the metaclass allows
+    assert plain(evil) is evil and not is_result(evil) and plain(Money(1, 2)) == 1 and is_result(Money(1, 2))
+    c = codex()
+    tax = c.load(VALENCIA, "tax", "from realms.legislation import above, Money\nclass Tax(above('tax')):\n"
+                 "    def meta(self):\n        return type(Money)\n"
+                 "    def kind(self, x):\n        return type(x)\n"
+                 "    def make(self):\n        return type('C', (), {})\n")(c.context())
+    with pytest.raises(LegislationError, match="of a class is not allowed"):
+        tax.meta()  # the metaclass of the SDK's classes
+    for number in (1.5, 2j):
+        with pytest.raises(LegislationError, match="of a float is not allowed"):
+            tax.kind(number)  # the data a chapter reads can hold a float: its class would build more
+    assert tax.kind(1) is int and tax.kind("a") is str
+    with pytest.raises(LegislationError, match="type\\(name, bases, dict\\)"):
+        tax.make()
+
+
+def test_a_tax_by_brackets_rounds_its_total_once():
+    """Rule 12 and GGG's D23, as a chapter writes it: add the exact products, round the sum (docs §4.5)."""
+    c = codex()
+    cls = c.load(
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above, Money\nclass Tax(above('tax')):\n"
+        "    def brackets_tax(self, value, brackets):\n"
+        "        exact, lower = 0, 0\n"
+        "        for bracket in brackets:\n"
+        "            upper = value.units if bracket['up_to'] is None else min(value.units, bracket['up_to'])\n"
+        "            exact += max(upper - lower, 0) * bracket['rate']\n"
+        "            lower = max(lower, upper)\n"
+        "        return Money(exact, value.decimals).times(1)\n",
+    )
+    from realms.legislation.context import Args
+
+    brackets = tuple(Args(b) for b in ({"up_to": 2_500, "rate": pct("0.1")}, {"up_to": None, "rate": pct("0.3")}))
+    tax = cls(c.context())
+    # 40.00: 2.5 cents on the first 25.00 and 4.5 above is 7.0, where each rounded first is 3 + 5
+    assert tax.brackets_tax(Money(4_000, 2), brackets) == Money(7, 2)
+    assert times(2_500, pct("0.1"), 2) + times(1_500, pct("0.3"), 2) == 8
+    assert tax.brackets_tax(Money(2_000, 2), brackets) == Money(2, 2)  # within the first bracket: 2.0
+    assert tax.brackets_tax(Money(0, 2), brackets) == Money(0, 2)
+
+
 def test_money_takes_integers_only_and_no_rounding_argument():
     with pytest.raises(LegislationError):
         Money(1.5)
@@ -173,6 +256,78 @@ def test_money_takes_integers_only_and_no_rounding_argument():
         times(100, 1.5, 2)
     with pytest.raises(TypeError):
         Money(1, 2).times(pct("10"), rounding="HALF_EVEN")
+
+
+def test_a_chapter_does_money_with_the_sdks_money_and_so_gets_the_realms_rounding():
+    c = codex()
+    cls = c.load(
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above, Money, pct\nclass Tax(above('tax')):\n"
+        "    def share(self, units, decimals, rate):\n        return Money(units, decimals).times(rate)\n",
+    )
+    tax = cls(c.context())
+    assert tax.share(2_345, 2, pct("10")) == Money(times(2_345, pct("10"), 2), 2) == Money(235, 2)
+    assert tax.share(-2_345, 2, pct("10")) == Money(-235, 2)
+    with pytest.raises(LegislationError, match="integer amount"):
+        tax.share(23.45, 2, pct("10"))  # whole units of the token, never a float
+
+
+def method(*lines):
+    return "    def quota(self, value):\n" + "".join(f"        {line}\n" for line in lines)
+
+
+REFUSED_BY_BOTH = {
+    "a float": method("return value * 0.2"),
+    "float()": method("return float(value)"),
+    "complex()": method("return complex(value)"),
+    "/": method("return value / 5"),
+    "/=": method("value /= 5", "return value"),
+    "**": method("return value ** 2"),
+    "** with a power known only at run time": method("n = value - 100", "return 10 ** n"),
+    "**=": method("value **= 2", "return value"),
+    "pow()": method("return pow(value, 2)"),
+    "a float in a class body": "    share = fixed(1.5, legislation='x')\n",
+    "a local named float": method("float = 3", "return float"),
+    "a parameter named complex": "    def quota(self, complex):\n        return complex\n",
+    "a keyword named pow": method("return dict(pow=1)"),
+    "pow looked up as a string": method("return getattr(value, 'pow')"),
+    "a nested function named pow": method("def pow(a):", "    return a", "return pow(value)"),
+    "a lambda parameter named float": method("return (lambda float: float)(value)"),
+}
+
+
+@pytest.mark.parametrize("form", sorted(REFUSED_BY_BOTH))
+def test_no_float_arithmetic_on_money_in_either_checker(form):
+    """`/`, `**` and pow() make floats (a negative power, even one known only at run time, is one), and float(),
+    complex() and the names float, complex and pow are refused wherever a chapter binds or reads them."""
+    text = "from realms.legislation import above, fixed\nclass Tax(above('tax')):\n" + REFUSED_BY_BOTH[form]
+    with pytest.raises(Refused, match="no floats|no `/`|no `\\*\\*`"):
+        codex().load(VALENCIA, "tax", text)  # the bytecode check, which the realm runs
+    with pytest.raises(Refused, match="no floats|no `/`|no `\\*\\*`"):
+        subset_ast.check(text, "eu/es/vc/46250-valencia/tax.py")  # the syntax tree, for authors
+
+
+def test_the_syntax_tree_check_folds_constant_strings_as_the_compiler_does():
+    """A dunder spelled from parts is one string to the bytecode check, and now to the syntax-tree check."""
+    for spelling in ("'_' + '_globals_' + '_'", "'__glo' + 'bals__'", "'_' * 2 + 'globals' + '_' * 2", "2 * '_' + 'globals__'"):
+        text = ("from realms.legislation import above\nclass Tax(above('tax')):\n    def quota(self, value):\n"
+                f"        return getattr(value, {spelling})\n")
+        with pytest.raises(Refused, match="no dunder names"):
+            codex().load(VALENCIA, "tax", text)
+        with pytest.raises(Refused, match="no dunder names"):
+            subset_ast.check(text, "eu/es/vc/46250-valencia/tax.py")
+
+
+def test_a_whole_number_quotient_and_a_rate_in_a_string_are_not_floats():
+    c = codex()
+    cls = c.load(
+        VALENCIA,
+        "tax",
+        "from realms.legislation import above, pct\nclass Tax(above('tax')):\n    half = pct('0.5')\n"
+        "    def split(self, value):\n        return value // 2, value % 2\n",
+    )
+    assert cls(c.context()).split(7) == (3, 1) and cls.half == 500_000
 
 
 # ── The calendar (§3.4, §4.5) ─────────────────────────────────────────────────
@@ -472,7 +627,7 @@ def test_nothing_else_at_module_level_except_sdk_imports_and_constants():
         c,
         "eu/es",
         "tax",
-        "from realms.legislation import above\nX = 1.5\nclass Tax(above('tax')): pass\n",
+        "from realms.legislation import above\nX = object()\nclass Tax(above('tax')): pass\n",
     )
 
 
@@ -566,7 +721,7 @@ def test_public_members_above_the_realm_carry_a_citation_and_the_realm_need_not(
 @pytest.mark.parametrize(
     "text, reason",
     [
-        ("    x = 1.5", "floats are not allowed"),
+        ("    x = 1.5", "no floats in a chapter"),
         ("    class Inner: pass", "a nested class is not part of the readable subset"),
         ("    __slots__ = ()", "no dunder names"),
         ("    now = 3", "reserved by the SDK"),
@@ -577,7 +732,7 @@ def test_public_members_above_the_realm_carry_a_citation_and_the_realm_need_not(
             "    x = object()",
             "a member is a method, a setting or a forbid",
         ),
-        ("    x = fixed(1.5, legislation='x')", "never a float"),
+        ("    x = fixed(1.5, legislation='x')", "no floats in a chapter"),
         ("    x = fixed({1: 'a'}, legislation='x')", "never a float"),
         (
             "    x = fixed(legislation='x', check=lambda v: True)",
@@ -1571,6 +1726,12 @@ def test_a_chapter_cannot_give_a_metaclass_to_skip_the_marks():
             "return '{0.x}'.format(event)",
             "str.format reads attributes named in the template",
         ),
+        ("return 0.2", "no floats in a chapter"),
+        ("return 2j", "no floats in a chapter"),
+        ("return float(event.at)", "float: no floats in a chapter"),
+        ("return complex(event.at)", "complex: no floats in a chapter"),
+        ("return event.at / 2", "no `/` in a chapter"),
+        ("x = event.at\n        x /= 2\n        return x", "no `/` in a chapter"),
     ],
 )
 def test_a_method_stays_in_the_readable_subset(body, reason):
