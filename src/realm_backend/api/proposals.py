@@ -16,8 +16,6 @@ MAX_LINKS = 16  # a proposal's own links, so that a reply never outgrows the Int
 LINK_KINDS = ("replaces", "relates_to")
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
-# Run as the member, a filing inside a delegate's proposal would leave no trace of the delegate.
-FILINGS = ("proposal_create", "federal_vote_propose")
 
 
 def root():
@@ -104,22 +102,25 @@ def checked_links(user, links):
 
 
 def check_grant(grant_id, grantor, action):
-    """A delegate's proposal carries only an operation its grant could call directly, and runs only while that grant
-    is active: the vote is the realm's consent to a collective act, not to the member's own acts."""
-    grant, name = Delegation[grant_id] if grant_id else None, action["op"]
-    if grant is None:
-        raise Forbidden(f"a proposal under power of attorney cannot carry {name}: the grant is not on record")
+    """A delegate's governed call, filed as a proposal, runs only if the power of attorney it was filed under still
+    stands and could make that call directly: the vote is the realm's consent to a collective act, not to the
+    member's own acts."""
+    if not grant_id:
+        raise Forbidden("it was filed under power of attorney before this realm recorded grants; file it again")
+    grant, name = find(Delegation, grant_id), action["op"]
+    try:
+        standing = auth.active_grant(grantor, grant.delegate).id == grant.id
+    except auth.Denied:
+        standing = False
+    if not standing:
+        raise Forbidden(f"the power of attorney {grant.id} it was filed under has ended (revoked, expired or replaced)")
     spec = ops().get(name)
     if spec is None:
         raise Fail(f"unknown operation '{name}'")
     try:
-        if auth.active_grant(grantor, grant.delegate).id != grant.id:
-            raise auth.Denied(f"{grant.id} has ended")
-        if name in FILINGS:
-            raise auth.Denied(f"{name} files a proposal of its own")
         auth.authorize(grantor, grant.delegate, name, spec, action.get("args") or {})
-    except auth.Denied as e:
-        raise Forbidden(f"a proposal under power of attorney {grant.id} cannot carry {name}: {e}")
+    except auth.Denied:
+        raise Forbidden(f"the power of attorney {grant.id} it was filed under does not allow {name} now")
     except KeyError as e:
         raise Fail(f"{name} is missing {e}")
 
@@ -348,15 +349,16 @@ def proposal_create(c, args):
     nothing runs.
     Optional ``links``, at most 16 of ``{kind, proposal}`` (``replaces`` or ``relates_to``), each proposal named once and
     fixed at creation: ``replaces`` names a withdrawn proposal of yours that no other proposal replaces yet.
+    Under a power of attorney a proposal is a motion: it carries no action.
     Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
     department = find(Department, args["department"]) if args.get("department") else root()
     action = args.get("action")
     if action is not None:
+        if c.grant:
+            raise Forbidden("a proposal filed under power of attorney is a motion: it carries no action")
         check_action(action)
         check_scope(department, action)
-        if c.grant:
-            check_grant(c.grant, c.user, action)
     links = checked_links(c.user, args.get("links"))
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
                      effective_at_of(args), links, c.grant)
