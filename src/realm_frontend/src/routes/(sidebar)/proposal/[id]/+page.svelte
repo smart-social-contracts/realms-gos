@@ -203,7 +203,7 @@
         ...p,
         author: p.proposer,
         deadline: p.deadline * 1000,
-        quorum: p.quorum_percent,
+        quorum: p.quorum / 1_000_000, // the realm counts ratios in hundred-millionths; here a percentage, decimals kept
         tokens_total: eligible,
         vote_counts: { Yay: tally.yes, Nay: tally.no, Abstain: tally.abstain }
       };

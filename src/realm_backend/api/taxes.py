@@ -2,18 +2,24 @@ from core import chain
 from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page_by, view, window
 from ggg import Land, Member, Organization, TaxDeclaration, TaxPolicy, User
 from core.op import op
+from core.ratio import ONE
 from api.proposals import realm_wide
 from api.treasury import currency, decimals_of, new_invoice
 
 BASES = ("flat", "land_area", "declared")
 METHODS = ("fixed", "proportional", "progressive")
-MAX_BP = 10_000
 
 
 def rate(value, where):
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_BP:
-        raise Fail(f"{where}: rate_bp must be a whole number of basis points between 0 and {MAX_BP}")
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= ONE:
+        raise Fail(f"{where}: rate must be a whole number of hundred-millionths between 0 and {ONE} (100 %)")
     return value
+
+
+def refuse_rate_bp(rated, where):
+    """A tax or bracket still written in basis points: its rate would be missing, or read as a tiny one."""
+    if "rate_bp" in rated:
+        raise Fail(f"{where}: rate_bp is now rate, in hundred-millionths: 1 % is {ONE // 100}")
 
 
 def check(document):
@@ -27,8 +33,9 @@ def check(document):
         codes.add(code)
         if tax.get("base", "flat") not in BASES or tax.get("method", "fixed") not in METHODS:
             raise Fail(f"tax '{code}': base must be one of {BASES}, method one of {METHODS}")
+        refuse_rate_bp(tax, code)
         if tax.get("method") == "proportional":
-            rate(tax.get("rate_bp"), code)
+            rate(tax.get("rate"), code)
         if tax.get("method") == "progressive":
             brackets = tax.get("brackets") or []
             if not brackets or brackets[-1].get("up_to") is not None:
@@ -37,24 +44,25 @@ def check(document):
             if bounds != sorted(set(bounds)) or any(not isinstance(b, int) or b <= 0 for b in bounds):
                 raise Fail(f"tax '{code}': bracket bounds must be increasing positive integers")
             for b in brackets:
-                rate(b.get("rate_bp"), code)
+                refuse_rate_bp(b, code)
+                rate(b.get("rate"), code)
     return document
 
 
 def owed(tax, value):
-    """The reference calculation: what a taxable ``value`` owes under one tax (integer, rates in bp)."""
+    """The reference calculation: what a taxable ``value`` owes under one tax (integer, rates in hundred-millionths)."""
     if value <= 0 or value < int(tax.get("exempt_below") or 0):
         return 0
     method = tax.get("method", "fixed")
     if method == "fixed":
         return int(tax.get("amount") or 0)
     if method == "proportional":
-        return value * int(tax["rate_bp"]) // MAX_BP
+        return value * int(tax["rate"]) // ONE
     total, lower = 0, 0
     for b in tax["brackets"]:
         upper = value if b.get("up_to") is None else min(value, b["up_to"])
         if upper > lower:
-            total += (upper - lower) * int(b["rate_bp"]) // MAX_BP
+            total += (upper - lower) * int(b["rate"]) // ONE
         if b.get("up_to") is None or value <= b["up_to"]:
             break
         lower = b["up_to"]
@@ -118,12 +126,13 @@ def taxable(tax, payer):
                                                if p.status == "active")
 
 
-@op("tax.manage", governed=realm_wide, returns="policy")
+@op("tax.manage", governed=realm_wide, returns="policy", check=lambda args: check(args["document"]))
 def tax_policy_draft(c, args):
     """Draft a tax policy from ``document`` (optional symbol, list of taxes) and optional ``description``. Each tax
-    has a unique code, a base (flat, land_area or declared) and a method: fixed (amount), proportional (rate_bp,
-    basis points) or progressive (brackets of up_to and rate_bp, the last with up_to null). Returns ``policy``."""
-    p = TaxPolicy(id=next_id(TaxPolicy, "TAX-POLICY"), document=check(args["document"]),
+    has a unique code, a base (flat, land_area or declared) and a method: fixed (amount), proportional (rate,
+    in hundred-millionths: 1 % is 1000000) or progressive (brackets of up_to and rate, the last with up_to null).
+    Returns ``policy``."""
+    p = TaxPolicy(id=next_id(TaxPolicy, "TAX-POLICY"), document=args["document"],
                   description=args.get("description", ""))
     return {"policy": p.id}
 

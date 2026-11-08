@@ -75,7 +75,7 @@ the federation's **rule** (set with `quarter_configure`):
 | Rule field | Values | Default |
 |---|---|---|
 | `kind` | `majority_of_quarters` (each quarter's result counts once) or `majority_of_members` (votes are pooled) | `majority_of_quarters` |
-| `threshold` | percent that must be exceeded | 50 |
+| `threshold` | share that must be exceeded, in hundred-millionths (100 % is 100000000) | 50000000 |
 | `absent` | what a quarter that did not report means: `wait`, `no` or `ignore` | `wait` |
 
 `federal_vote_finalize` settles a quarter's leg and reports it; on the capital, it decides the vote

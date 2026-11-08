@@ -65,7 +65,6 @@ of the reply.
   - `principal` and text;
   - variants and lower-case statuses;
   - `Ref` and `Kind:id`;
-  - basis points and percentages;
   - `cursor`/`limit` and `from`/`count`;
   - lists of pairs and maps.
 

@@ -3,8 +3,8 @@
 Each call converts the GGG arguments to the operation's JSON, runs the operation (so permissions, governance
 and the audit log apply as for ``read`` and ``run``), and builds the GGG reply, mostly from the rows the
 operation touched. The conversion follows the types of ggg_did: GGG has nanoseconds, principals, variants,
-references as records and ratios in basis points, where Realms GOS has seconds, text, lower-case text,
-``Kind:id`` and percentages. Types are ggg_did.SCHEMA's type expressions (``"opt vec Ref"``): the canister's
+references as records, where Realms GOS has seconds, text, lower-case text and ``Kind:id``. Ratios are
+in hundred-millionths on both sides. Types are ggg_did.SCHEMA's type expressions (``"opt vec Ref"``): the canister's
 Python keeps no types at run time. tests/ggg/test_candid.py checks the methods against ggg.did.
 """
 import json
@@ -18,16 +18,12 @@ from api.setup import VERSION
 from core import chain
 from core.candid import Principal as ParsedPrincipal, Reader, idl_hash, quote
 from core.op import dispatch, ops, run as drive
+from core.ratio import ONE
 from ggg_did import METHODS, SCHEMA
 
 NS = 1_000_000_000
 STANDARDS = (("ICRC-10", "https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md"),
              ("GGG", f"https://github.com/smart-social-contracts/ggg/blob/v{ggg_did.VERSION}/ggg.did"))
-# GGG fields in basis points, and the Realms GOS field holding the same ratio in percent.
-PERCENT = {("Policy", "quorum"): "quorum_percent", ("Allocation", "share"): "share", ("Criterion", "weight"): "weight",
-           ("Proposal", "threshold"): "threshold", ("Proposal", "quorum"): "quorum_percent",
-           ("GovernanceUpdateArgs", "voting_threshold"): "threshold",
-           ("GovernanceUpdateArgs", "voting_quorum"): "quorum_percent"}
 # GGG fields Realms GOS names otherwise.
 RENAME = {("DelegationGrantArgs", "scope"): "operations", ("DelegationRequestArgs", "scope"): "operations",
           ("DelegationDecideArgs", "scope"): "operations", ("QuarterRegisterArgs", "canister"): "quarter",
@@ -37,7 +33,6 @@ RENAME = {("DelegationGrantArgs", "scope"): "operations", ("DelegationRequestArg
 CEIL = {("ProposalCreateArgs", "effective_at")}
 # GGG lists of pairs that Realms GOS keeps as a map, with the fields holding the key and the value.
 MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rubric"): ("criterion", "weight"),
-        ("AllocationRuleDraftArgs", "rules"): ("fund", "share"), ("AllocationRule", "rules"): ("fund", "share"),
         ("CredentialIssueArgs", "fields"): (0, 1), ("CredentialIssued", "header"): (0, 1),
         ("CredentialVerifyArgs", "header"): (0, 1), ("KeyGrantArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentStoreArgs", "keys"): ("principal", "wrapped_dek"),
@@ -214,9 +209,6 @@ def record(x, name):
     for w, ft in fields(name).items():
         if w in fixed:
             raw = fixed[w]
-        elif (name, w) in PERCENT:
-            raw = get(x, PERCENT[name, w])
-            raw = None if raw is None else int(raw) * 100
         else:
             raw = get(x, RENAME.get((name, w), w))
         if (name, w) in KEYED and isinstance(raw, dict):
@@ -252,8 +244,8 @@ def realm_fix(r):
     rules = settings()
     # A quarter counts its own members; a capital adds what its quarters last reported.
     members = quarters.population() + (0 if quarters.federated() else sum(q.population for q in quarters.known()))
-    return {"member_count": members, "voting_threshold": int(rules.get("threshold", 50)) * 100,
-            "voting_quorum": int(rules.get("quorum_percent", 0)) * 100,
+    return {"member_count": members, "voting_threshold": int(rules.get("voting_threshold", ONE // 2)),
+            "voting_quorum": int(rules.get("voting_quorum", 0)),
             "installed_version": get(r, "installed_version") or VERSION,
             "accounting_currency_decimals": get(r, "accounting_currency_decimals") if get(r, "accounting_currency") else None}
 
@@ -299,7 +291,7 @@ FIX = {
     "Delegation": lambda d: {"scope": scope(d, "operations") or []},
     "DelegationRequest": lambda d: {"scope": scope(d, "operations") or []},
     "Policy": lambda p: {"m": get(p, "m") or 1, "n": get(p, "n") or 1, "veto": get(p, "veto") or [],
-                         "quorum": int(get(p, "quorum_percent") or 0) * 100},
+                         "quorum": int(get(p, "quorum") or 0)},
     "UserEntry": lambda e: entry(get(e, "user") or e),
     "Verdict": lambda v: {"issued_by": get(v, "issued_by") or ""},
     "License": lambda lic: {"issued_by": get(lic, "issued_by") or ""},
@@ -464,9 +456,7 @@ def to_realms(x, t):
             v = x.get(w)
             if v is None:
                 continue
-            if (t, w) in PERCENT:
-                out[PERCENT[t, w]] = int(v) // 100
-            elif (t, w) in CEIL:
+            if (t, w) in CEIL:
                 out[w] = -(-int(v) // NS)
             elif (t, w) in KEYED:
                 key = KEYED[t, w]

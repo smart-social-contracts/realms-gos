@@ -5,6 +5,7 @@ from core import chain
 from core.db import PAGE, PAGE_MAX, Conflict, Fail, Forbidden, find, page, view
 from ggg import Task, TaskExecution, TaskSchedule, TaskStep
 from core.op import dispatch, op, ops
+from core.ratio import upgrade_call
 
 BUSY = ("running", "waiting")
 # A task the realm created itself, such as the run of a scheduled proposal, runs as the realm and is locked: its only
@@ -69,7 +70,7 @@ def execute(task, start=0, ex=None):
                              started_at=chain.now(), result="")
     task.status, steps, out = "running", ordered(task), {}
     for i in range(start, len(steps)):
-        call = json.loads(steps[i].action)
+        call = upgrade_call(json.loads(steps[i].action))  # a step stored by the previous release has its arguments
         reply = yield from dispatch(call["op"], json.dumps(call["args"]), origin="task", signer=creator(task))
         out = json.loads(reply)
         steps[i].status = "completed" if out["ok"] else "failed"

@@ -6,6 +6,7 @@ from api import quarters
 from core.db import Conflict, Fail, Forbidden, each, find, next_id
 from ggg import FederalVote, FederalVoteLeg, FederationMessage, Proposal, Quarter
 from core.op import GENERATOR, dispatch, op
+from core.ratio import ONE
 
 PASSED = ("accepted", "executed")
 
@@ -88,7 +89,7 @@ def count(v):
     else:
         yes = sum(leg.outcome == "passed" for leg in reported)
         no = len(reported) - yes + (absent if rule["absent"] == "no" else 0)
-    status = "passed" if yes * 100 > int(rule["threshold"]) * (yes + no) else "failed"
+    status = "passed" if yes * ONE > int(rule["threshold"]) * (yes + no) else "failed"
     return status, {"yes": yes, "no": no, "absent": absent, "quarters": len(legs)}
 
 

@@ -5,6 +5,7 @@ from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, n
 from ggg import Appointment, Calendar, Contract, Department, Mandate, Member, Proposal, Realm, Task, TaskSchedule, Vote
 from api import tasks
 from core.op import dispatch, op, ops
+from core.ratio import ONE, refuse_renamed
 
 CHOICES = ("yes", "no", "abstain")
 OPEN = ("draft", "voting")
@@ -76,9 +77,8 @@ def new_proposal(title, user, by, department, action=None, description="", effec
                  on_behalf_of=user if by != user else "", department=department, action=action,
                  status="voting", opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
                  effective_at=effective_at,
-                 threshold=int(settings().get("threshold", 50)),
-                 quorum_percent=int(settings().get("quorum_percent", 0) if department.is_root
-                                    else policy.get("quorum_percent", 0)))
+                 threshold=int(settings().get("voting_threshold", ONE // 2)),
+                 quorum=int(settings().get("voting_quorum", 0) if department.is_root else policy.get("quorum", 0)))
     p.tally = {c: 0 for c in CHOICES}
     if not department.is_root:
         p.tally = {**p.tally, "required": int(policy.get("m", 1)), "veto": list(policy.get("veto", []))}
@@ -227,17 +227,17 @@ def outcome(p, final):
     if not p.deadline and not final:
         # No deadline: open until certain. Yes alone over the threshold of everyone eligible passes it; enough no
         # that the rest voting yes could not pass it fails it; once everyone has voted, it is decided as is.
-        turnout = sum(tally.values()) * 100 >= p.quorum_percent * max(size, 1)
-        if tally["yes"] * 100 > p.threshold * max(size, 1) and turnout:
+        turnout = sum(tally.values()) * ONE >= p.quorum * max(size, 1)
+        if tally["yes"] * ONE > p.threshold * max(size, 1) and turnout:
             return "accepted"
-        if tally["no"] * 100 >= (100 - p.threshold) * max(size, 1):
+        if tally["no"] * ONE >= (ONE - p.threshold) * max(size, 1):
             return "rejected"
         final = sum(tally.values()) >= size
     if not final:
         return None
     decisive = tally["yes"] + tally["no"]
-    turnout = sum(tally.values()) * 100 >= p.quorum_percent * max(size, 1)
-    return "accepted" if turnout and decisive and tally["yes"] * 100 > p.threshold * decisive else "rejected"
+    turnout = sum(tally.values()) * ONE >= p.quorum * max(size, 1)
+    return "accepted" if turnout and decisive and tally["yes"] * ONE > p.threshold * decisive else "rejected"
 
 
 def effective_at_of(args):
@@ -455,16 +455,26 @@ def contract_terminate(c, args):
     return {"contract": k.id}
 
 
-@op("governance.update", governed=launched)
+def voting_rules(args):
+    """The ratios of a ``governance_update`` call, refused if they are not between 0 and 100 %, or the old names."""
+    refuse_renamed(args, {"threshold": "voting_threshold", "quorum_percent": "voting_quorum"})
+    ratios = {k: int(args[k]) for k in ("voting_threshold", "voting_quorum") if k in args}
+    if any(not 0 <= v <= ONE for v in ratios.values()):
+        raise Fail(f"a threshold and a quorum are between 0 and {ONE} (100 %)")
+    return ratios
+
+
+@op("governance.update", governed=launched, check=voting_rules)
 def governance_update(c, args):
-    """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``threshold`` (percent of yes
-    among yes and no votes a realm-wide proposal must exceed) and ``quorum_percent`` (realm-wide turnout)."""
+    """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``voting_threshold`` (the share of
+    the yes and no votes the yes votes of a realm-wide proposal must exceed) and ``voting_quorum`` (the share of the
+    members who must vote on it), both in hundred-millionths: 50 % is 50000000."""
+    ratios = voting_rules(args)
     realm, cal = Realm["1"] or Realm(id="1"), Calendar["1"] or Calendar(id="1")
     if "voting_window" in args:
         cal.voting_window = int(args["voting_window"])
     data = realm.manifest_data or {}
-    data["governance"] = {**data.get("governance", {}),
-                          **{k: int(args[k]) for k in ("threshold", "quorum_percent") if k in args}}
+    data["governance"] = {**data.get("governance", {}), **ratios}
     realm.manifest_data = data
 
 

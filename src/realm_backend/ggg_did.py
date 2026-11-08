@@ -35,13 +35,15 @@ class AppointmentKind(Variant, total=False): Substantive: null; Acting: null
 class AppointmentStatus(Variant, total=False): Active: null; Ended: null
 class Appointment(Record): id: text; position: text; user: Principal; kind: "AppointmentKind"; agent: bool; supervisor: Opt[Principal]; started_at: Timestamp; ended_at: Opt[Timestamp]; status: "AppointmentStatus"; source_quarter: Opt[text]
 class Authority(Record): id: text; grantor: text; target: "Ref"; operations: Vec[text]
-class ProposalStatus(Variant, total=False): Draft: null; Voting: null; Accepted: null; Rejected: null; Expired: null; Executed: null; Failed: null; Withdrawn: null
+class ProposalStatus(Variant, total=False): Draft: null; Voting: null; Accepted: null; ExecutionScheduled: null; Rejected: null; Expired: null; Executed: null; Failed: null; Withdrawn: null
 class ProposalAction(Variant, total=False): Motion: null; Call: "ProposalActionCall"; Code: "ProposalActionCode"
 class ProposalActionCall(Record): method: text; arg: blob
 class ProposalActionCode(Record): url: text; checksum: text
 class ProposalResult(Variant, total=False): Reply: blob; Error: text
+class ProposalLinkKind(Variant, total=False): Replaces: null; RelatesTo: null
+class ProposalLink(Record): kind: "ProposalLinkKind"; proposal: text
 class Tally(Record): yes: nat; no: nat; abstain: nat; eligible: Opt[nat]
-class Proposal(Record): id: text; title: text; description: text; proposer: Principal; on_behalf_of: Opt[Principal]; department: Opt[text]; action: "ProposalAction"; status: "ProposalStatus"; opens_at: Opt[Timestamp]; deadline: Opt[Timestamp]; threshold: nat; quorum: nat; tally: "Tally"; result: Opt["ProposalResult"]
+class Proposal(Record): id: text; title: text; description: text; proposer: Principal; on_behalf_of: Opt[Principal]; department: Opt[text]; action: "ProposalAction"; status: "ProposalStatus"; opens_at: Opt[Timestamp]; deadline: Opt[Timestamp]; effective_at: Opt[Timestamp]; threshold: nat; quorum: nat; tally: "Tally"; result: Opt["ProposalResult"]; links: Vec["ProposalLink"]
 class VoteChoice(Variant, total=False): Yes: null; No: null; Abstain: null
 class Vote(Record): id: text; proposal: text; voter: Principal; cast_by: Opt[Principal]; choice: "VoteChoice"; cast_at: Timestamp
 class MandateStatus(Variant, total=False): Active: null; Completed: null; Revoked: null; Expired: null
@@ -102,7 +104,7 @@ class Tender(Record): id: text; title: text; description: text; requester: text;
 class Bid(Record): id: text; tender: text; vendor: text; submitted_at: Timestamp; sealed: bool; payload_ref: text; payload_hash: text; price: Opt[nat]; score: Opt[nat]
 class BidScore(Record): id: text; bid: text; evaluator: Principal; criterion: text; score: nat; scored_at: Timestamp
 class RealmStatus(Variant, total=False): Setup: null; Alpha: null; Beta: null; Production: null; Deprecation: null; Terminated: null
-class Realm(Record): id: text; name: text; manifesto: text; welcome_message: text; status: "RealmStatus"; calendar: Opt[text]; treasury: Opt[text]; accounting_currency: Opt[text]; accounting_currency_decimals: Opt[nat8]; is_quarter: bool; is_capital: bool; federation_realm_id: Opt[text]; federation_codex: Opt[text]; quarter_join_mode: Opt[text]; trusted_principals: Vec[Principal]; require_marketplace_approval: bool; trusted_approvers: Vec[text]; voting_threshold: nat; voting_quorum: nat; open_registration: bool; logo_url: Opt[text]; background_image_url: Opt[text]; installed_version: text; network: text; member_count: nat
+class Realm(Record): id: text; name: text; manifesto: text; welcome_message: text; status: "RealmStatus"; calendar: Opt[text]; treasury: Opt[text]; accounting_currency: Opt[text]; accounting_currency_decimals: Opt[nat8]; is_quarter: bool; is_capital: bool; federation_realm_id: Opt[text]; federation_codex: Opt[text]; quarter_join_mode: Opt[text]; trusted_principals: Vec[Principal]; require_marketplace_approval: bool; trusted_approvers: Vec[text]; voting_threshold: nat; voting_quorum: nat; open_registration: bool; logo_url: Opt[text]; background_image_url: Opt[text]; installed_version: text; network: text; timezone: text; member_count: nat
 class Cycle(Record): name: text; every: Duration
 class Calendar(Record): id: text; realm: text; epoch: Duration; fiscal_period: Duration; voting_window: Duration; codex_release_cycle: Opt[Duration]; benefit_cycle: Opt[Duration]; service_payment_cycle: Opt[Duration]; license_review_cycle: Opt[Duration]; custom_cycles: Vec["Cycle"]
 class Registry(Record): id: text; description: text; principal_id: Principal
@@ -174,10 +176,11 @@ class OrganizationRegisterArgs(Record): organization: text; description: text
 class OrganizationEditArgs(Record): organization: text; description: Opt[text]; admins: Opt[Vec[Principal]]
 class RepresentativeAddArgs(Record): organization: text; position: text; user: Principal; agent: bool; supervisor: Opt[Principal]; title: Opt[text]; profile: Opt[text]; headcount: Opt[nat]
 class OrganizationStatusArgs(Record): organization: text; status: "OrganizationStatus"
-class ProposalDetail(Record): proposal: "Proposal"; votes: Vec["Vote"]; next: Opt[text]
+class ProposalDetail(Record): proposal: "Proposal"; votes: Vec["Vote"]; next: Opt[text]; replaced_by: Opt[text]
+class ProposalLinkPage(Record): items: Vec["ProposalLink"]; next: Opt[text]
 class ProposalListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; status: Opt["ProposalStatus"]
 class ProposalPage(Record): items: Vec["Proposal"]; next: Opt[text]
-class ProposalCreateArgs(Record): title: text; description: text; department: Opt[text]; action: "ProposalAction"; on_behalf_of: Opt[Principal]
+class ProposalCreateArgs(Record): title: text; description: text; department: Opt[text]; action: "ProposalAction"; effective_at: Opt[Timestamp]; links: Opt[Vec["ProposalLink"]]; on_behalf_of: Opt[Principal]
 class ProposalVoteArgs(Record): proposal: text; choice: "VoteChoice"; on_behalf_of: Opt[Principal]
 class ProposalWithdrawArgs(Record): proposal: text; on_behalf_of: Opt[Principal]
 class MandateCreateArgs(Record): title: text; scope: "Value"; max_value: Opt[nat]; symbol: Opt[text]; executor: Opt[text]; expires_at: Opt[Timestamp]
@@ -300,7 +303,7 @@ class CodexSourceRegistry(Record): codex: text; version: text
 class NotificationReadArgs(Record): notification: Opt[text]; recipient: Opt["Ref"]; cursor: Opt[text]; limit: Opt[nat32]; on_behalf_of: Opt[Principal]
 class NotificationsRead(Record): read: nat; next: Opt[text]
 class NotificationSendArgs(Record): recipient: "Ref"; title: text; body: Opt[text]; href: Opt[text]; topic: Opt[text]
-class RealmConfigureArgs(Record): name: Opt[text]; manifesto: Opt[text]; welcome_message: Opt[text]; open_registration: Opt[bool]; quarter_join_mode: Opt[text]
+class RealmConfigureArgs(Record): name: Opt[text]; manifesto: Opt[text]; welcome_message: Opt[text]; open_registration: Opt[bool]; quarter_join_mode: Opt[text]; timezone: Opt[text]
 class BrandingArgs(Record): logo_url: Opt[text]; background_image_url: Opt[text]
 class TokensArgs(Record): accounting_currency: Opt[text]; accounting_currency_decimals: Opt[nat8]
 class TrustPolicyArgs(Record): require_marketplace_approval: Opt[bool]; trusted_approvers: Opt[Vec[text]]; trusted_principals: Opt[Vec[Principal]]
@@ -350,6 +353,7 @@ class OrganizationPageReply(Variant, total=False): Ok: "OrganizationPage"; Err: 
 class OrganizationReply(Variant, total=False): Ok: "Organization"; Err: "GggError"
 class AppointmentReply(Variant, total=False): Ok: "Appointment"; Err: "GggError"
 class OptProposalDetailReply(Variant, total=False): Ok: Opt["ProposalDetail"]; Err: "GggError"
+class OptProposalLinkPageReply(Variant, total=False): Ok: Opt["ProposalLinkPage"]; Err: "GggError"
 class ProposalPageReply(Variant, total=False): Ok: "ProposalPage"; Err: "GggError"
 class TextReply(Variant, total=False): Ok: text; Err: "GggError"
 class VoteReply(Variant, total=False): Ok: "Vote"; Err: "GggError"
@@ -442,13 +446,15 @@ SCHEMA["AppointmentKind"] = ("variant", {"Substantive": "null", "Acting": "null"
 SCHEMA["AppointmentStatus"] = ("variant", {"Active": "null", "Ended": "null"})
 SCHEMA["Appointment"] = ("record", {"id": "text", "position": "text", "user": "principal", "kind": "AppointmentKind", "agent": "bool", "supervisor": "opt principal", "started_at": "Timestamp", "ended_at": "opt Timestamp", "status": "AppointmentStatus", "source_quarter": "opt text"})
 SCHEMA["Authority"] = ("record", {"id": "text", "grantor": "text", "target": "Ref", "operations": "vec text"})
-SCHEMA["ProposalStatus"] = ("variant", {"Draft": "null", "Voting": "null", "Accepted": "null", "Rejected": "null", "Expired": "null", "Executed": "null", "Failed": "null", "Withdrawn": "null"})
+SCHEMA["ProposalStatus"] = ("variant", {"Draft": "null", "Voting": "null", "Accepted": "null", "ExecutionScheduled": "null", "Rejected": "null", "Expired": "null", "Executed": "null", "Failed": "null", "Withdrawn": "null"})
 SCHEMA["ProposalActionCall"] = ("record", {"method": "text", "arg": "blob"})
 SCHEMA["ProposalActionCode"] = ("record", {"url": "text", "checksum": "text"})
 SCHEMA["ProposalAction"] = ("variant", {"Motion": "null", "Call": "ProposalActionCall", "Code": "ProposalActionCode"})
 SCHEMA["ProposalResult"] = ("variant", {"Reply": "blob", "Error": "text"})
+SCHEMA["ProposalLinkKind"] = ("variant", {"Replaces": "null", "RelatesTo": "null"})
+SCHEMA["ProposalLink"] = ("record", {"kind": "ProposalLinkKind", "proposal": "text"})
 SCHEMA["Tally"] = ("record", {"yes": "nat", "no": "nat", "abstain": "nat", "eligible": "opt nat"})
-SCHEMA["Proposal"] = ("record", {"id": "text", "title": "text", "description": "text", "proposer": "principal", "on_behalf_of": "opt principal", "department": "opt text", "action": "ProposalAction", "status": "ProposalStatus", "opens_at": "opt Timestamp", "deadline": "opt Timestamp", "threshold": "nat", "quorum": "nat", "tally": "Tally", "result": "opt ProposalResult"})
+SCHEMA["Proposal"] = ("record", {"id": "text", "title": "text", "description": "text", "proposer": "principal", "on_behalf_of": "opt principal", "department": "opt text", "action": "ProposalAction", "status": "ProposalStatus", "opens_at": "opt Timestamp", "deadline": "opt Timestamp", "effective_at": "opt Timestamp", "threshold": "nat", "quorum": "nat", "tally": "Tally", "result": "opt ProposalResult", "links": "vec ProposalLink"})
 SCHEMA["VoteChoice"] = ("variant", {"Yes": "null", "No": "null", "Abstain": "null"})
 SCHEMA["Vote"] = ("record", {"id": "text", "proposal": "text", "voter": "principal", "cast_by": "opt principal", "choice": "VoteChoice", "cast_at": "Timestamp"})
 SCHEMA["MandateStatus"] = ("variant", {"Active": "null", "Completed": "null", "Revoked": "null", "Expired": "null"})
@@ -509,7 +515,7 @@ SCHEMA["Tender"] = ("record", {"id": "text", "title": "text", "description": "te
 SCHEMA["Bid"] = ("record", {"id": "text", "tender": "text", "vendor": "text", "submitted_at": "Timestamp", "sealed": "bool", "payload_ref": "text", "payload_hash": "text", "price": "opt nat", "score": "opt nat"})
 SCHEMA["BidScore"] = ("record", {"id": "text", "bid": "text", "evaluator": "principal", "criterion": "text", "score": "nat", "scored_at": "Timestamp"})
 SCHEMA["RealmStatus"] = ("variant", {"Setup": "null", "Alpha": "null", "Beta": "null", "Production": "null", "Deprecation": "null", "Terminated": "null"})
-SCHEMA["Realm"] = ("record", {"id": "text", "name": "text", "manifesto": "text", "welcome_message": "text", "status": "RealmStatus", "calendar": "opt text", "treasury": "opt text", "accounting_currency": "opt text", "accounting_currency_decimals": "opt nat8", "is_quarter": "bool", "is_capital": "bool", "federation_realm_id": "opt text", "federation_codex": "opt text", "quarter_join_mode": "opt text", "trusted_principals": "vec principal", "require_marketplace_approval": "bool", "trusted_approvers": "vec text", "voting_threshold": "nat", "voting_quorum": "nat", "open_registration": "bool", "logo_url": "opt text", "background_image_url": "opt text", "installed_version": "text", "network": "text", "member_count": "nat"})
+SCHEMA["Realm"] = ("record", {"id": "text", "name": "text", "manifesto": "text", "welcome_message": "text", "status": "RealmStatus", "calendar": "opt text", "treasury": "opt text", "accounting_currency": "opt text", "accounting_currency_decimals": "opt nat8", "is_quarter": "bool", "is_capital": "bool", "federation_realm_id": "opt text", "federation_codex": "opt text", "quarter_join_mode": "opt text", "trusted_principals": "vec principal", "require_marketplace_approval": "bool", "trusted_approvers": "vec text", "voting_threshold": "nat", "voting_quorum": "nat", "open_registration": "bool", "logo_url": "opt text", "background_image_url": "opt text", "installed_version": "text", "network": "text", "timezone": "text", "member_count": "nat"})
 SCHEMA["Cycle"] = ("record", {"name": "text", "every": "Duration"})
 SCHEMA["Calendar"] = ("record", {"id": "text", "realm": "text", "epoch": "Duration", "fiscal_period": "Duration", "voting_window": "Duration", "codex_release_cycle": "opt Duration", "benefit_cycle": "opt Duration", "service_payment_cycle": "opt Duration", "license_review_cycle": "opt Duration", "custom_cycles": "vec Cycle"})
 SCHEMA["Registry"] = ("record", {"id": "text", "description": "text", "principal_id": "principal"})
@@ -581,10 +587,11 @@ SCHEMA["OrganizationRegisterArgs"] = ("record", {"organization": "text", "descri
 SCHEMA["OrganizationEditArgs"] = ("record", {"organization": "text", "description": "opt text", "admins": "opt vec principal"})
 SCHEMA["RepresentativeAddArgs"] = ("record", {"organization": "text", "position": "text", "user": "principal", "agent": "bool", "supervisor": "opt principal", "title": "opt text", "profile": "opt text", "headcount": "opt nat"})
 SCHEMA["OrganizationStatusArgs"] = ("record", {"organization": "text", "status": "OrganizationStatus"})
-SCHEMA["ProposalDetail"] = ("record", {"proposal": "Proposal", "votes": "vec Vote", "next": "opt text"})
+SCHEMA["ProposalDetail"] = ("record", {"proposal": "Proposal", "votes": "vec Vote", "next": "opt text", "replaced_by": "opt text"})
+SCHEMA["ProposalLinkPage"] = ("record", {"items": "vec ProposalLink", "next": "opt text"})
 SCHEMA["ProposalListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "status": "opt ProposalStatus"})
 SCHEMA["ProposalPage"] = ("record", {"items": "vec Proposal", "next": "opt text"})
-SCHEMA["ProposalCreateArgs"] = ("record", {"title": "text", "description": "text", "department": "opt text", "action": "ProposalAction", "on_behalf_of": "opt principal"})
+SCHEMA["ProposalCreateArgs"] = ("record", {"title": "text", "description": "text", "department": "opt text", "action": "ProposalAction", "effective_at": "opt Timestamp", "links": "opt vec ProposalLink", "on_behalf_of": "opt principal"})
 SCHEMA["ProposalVoteArgs"] = ("record", {"proposal": "text", "choice": "VoteChoice", "on_behalf_of": "opt principal"})
 SCHEMA["ProposalWithdrawArgs"] = ("record", {"proposal": "text", "on_behalf_of": "opt principal"})
 SCHEMA["MandateCreateArgs"] = ("record", {"title": "text", "scope": "Value", "max_value": "opt nat", "symbol": "opt text", "executor": "opt text", "expires_at": "opt Timestamp"})
@@ -707,7 +714,7 @@ SCHEMA["CodexSource"] = ("variant", {"Package": "CodexSourcePackage", "Registry"
 SCHEMA["NotificationReadArgs"] = ("record", {"notification": "opt text", "recipient": "opt Ref", "cursor": "opt text", "limit": "opt nat32", "on_behalf_of": "opt principal"})
 SCHEMA["NotificationsRead"] = ("record", {"read": "nat", "next": "opt text"})
 SCHEMA["NotificationSendArgs"] = ("record", {"recipient": "Ref", "title": "text", "body": "opt text", "href": "opt text", "topic": "opt text"})
-SCHEMA["RealmConfigureArgs"] = ("record", {"name": "opt text", "manifesto": "opt text", "welcome_message": "opt text", "open_registration": "opt bool", "quarter_join_mode": "opt text"})
+SCHEMA["RealmConfigureArgs"] = ("record", {"name": "opt text", "manifesto": "opt text", "welcome_message": "opt text", "open_registration": "opt bool", "quarter_join_mode": "opt text", "timezone": "opt text"})
 SCHEMA["BrandingArgs"] = ("record", {"logo_url": "opt text", "background_image_url": "opt text"})
 SCHEMA["TokensArgs"] = ("record", {"accounting_currency": "opt text", "accounting_currency_decimals": "opt nat8"})
 SCHEMA["TrustPolicyArgs"] = ("record", {"require_marketplace_approval": "opt bool", "trusted_approvers": "opt vec text", "trusted_principals": "opt vec principal"})
@@ -757,6 +764,7 @@ SCHEMA["OrganizationPageReply"] = ("variant", {"Ok": "OrganizationPage", "Err": 
 SCHEMA["OrganizationReply"] = ("variant", {"Ok": "Organization", "Err": "GggError"})
 SCHEMA["AppointmentReply"] = ("variant", {"Ok": "Appointment", "Err": "GggError"})
 SCHEMA["OptProposalDetailReply"] = ("variant", {"Ok": "opt ProposalDetail", "Err": "GggError"})
+SCHEMA["OptProposalLinkPageReply"] = ("variant", {"Ok": "opt ProposalLinkPage", "Err": "GggError"})
 SCHEMA["ProposalPageReply"] = ("variant", {"Ok": "ProposalPage", "Err": "GggError"})
 SCHEMA["TextReply"] = ("variant", {"Ok": "text", "Err": "GggError"})
 SCHEMA["VoteReply"] = ("variant", {"Ok": "Vote", "Err": "GggError"})
@@ -849,10 +857,11 @@ METHODS = {
     "organization_edit": ("OrganizationEditArgs", "OrganizationReply"), "representative_add":
     ("RepresentativeAddArgs", "AppointmentReply"), "representative_remove": ("text", "AppointmentReply"),
     "organization_set_status": ("OrganizationStatusArgs", "GovernedReply"), "proposal_get": ("GetArgs",
-    "OptProposalDetailReply"), "proposal_list": ("ProposalListArgs", "ProposalPageReply"), "proposal_create":
-    ("ProposalCreateArgs", "TextReply"), "proposal_vote": ("ProposalVoteArgs", "VoteReply"), "proposal_withdraw":
-    ("ProposalWithdrawArgs", "ProposalReply"), "proposal_open": ("text", "ProposalReply"), "proposal_finalize":
-    ("text", "ProposalReply"), "proposal_execute": ("text", "ProposalReply"), "mandate_create":
+    "OptProposalDetailReply"), "proposal_linked_from": ("GetArgs", "OptProposalLinkPageReply"), "proposal_list":
+    ("ProposalListArgs", "ProposalPageReply"), "proposal_create": ("ProposalCreateArgs", "TextReply"),
+    "proposal_vote": ("ProposalVoteArgs", "VoteReply"), "proposal_withdraw": ("ProposalWithdrawArgs",
+    "ProposalReply"), "proposal_open": ("text", "ProposalReply"), "proposal_finalize": ("text", "ProposalReply"),
+    "proposal_execute": ("text", "ProposalReply"), "proposal_stop": ("text", "GovernedReply"), "mandate_create":
     ("MandateCreateArgs", "GovernedReply"), "mandate_revoke": ("MandateRevokeArgs", "GovernedReply"),
     "mandate_assign_executor": ("MandateExecutorArgs", "GovernedReply"), "contract_create": ("ContractCreateArgs",
     "ContractReply"), "contract_terminate": ("text", "ContractReply"), "governance_update": ("GovernanceUpdateArgs",

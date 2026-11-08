@@ -19,7 +19,7 @@ def sneak(title):
 
 
 def quorum(percent):
-    return rpc("governance_update", quorum_percent=percent)
+    return rpc("governance_update", voting_quorum=percent * 1_000_000)
 '''
 MANIFEST = {"name": "voting", "version": "2.1.0", "profiles": ["member"], "categories": ["governance"],
             "show_in_sidebar": True, "backend": True, "operations": ["proposal_vote", "governance_update"]}
