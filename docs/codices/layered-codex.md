@@ -1399,7 +1399,8 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`
      what it loads today.
    - **No generated forbid may target a reserved operation (§10.4).** The library refuses it when the chapter loads;
      the realm checks the policies it is about to load as well (`core.forbids.targets`), and refuses a policy that
-     names an action without facts or no action at all (that would forbid every operation).
+     names an action without facts or no action at all (that would forbid every operation). And no forbid is asked of
+     a reserved operation, nor of the `proposal_create`, the vote or the execution of a proposal about one.
 4. **The requests of a call.** The permission decision is what it was: one request on `call`, before anything else. A
    call whose operation a generated forbid names then makes, under the context `origin: "forbids"` (nothing in it but
    the operation and its facts; one `permit` for that origin is loaded with the forbids, so that only a forbid can

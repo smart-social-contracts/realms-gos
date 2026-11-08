@@ -181,7 +181,7 @@ def run(op, call, args, department, perform, record, read=False):
     audit of the operation, then its hooks, whose effects are audited after it. ``department`` is the one deciding
     a governed call directly, if any. A read runs no legislation. A generator, as the operation and the effects may
     call other canisters."""
-    legislated = not read and call.origin != "codex" and not _reserved(op, args) and _ensure()
+    legislated = not read and call.origin != "codex" and not is_reserved(op, args) and _ensure()
     if legislated:
         _guard(op, args, call, department)
     out = perform()
@@ -225,7 +225,7 @@ def _ensure():
     return _state["codex"] is not None
 
 
-def _reserved(op, args):
+def is_reserved(op, args):
     """Whether ``op`` is a reserved operation, or about one (§10.4): a proposal or a federal vote whose action is
     reserved, their votes, legs, messages and stops. No chapter runs for them."""
     if op in RESERVED:
@@ -350,7 +350,7 @@ def _effect(name, args):
     department's policy, never a direct call; a reserved operation, an operation about a proposal or a vote on one,
     and an effect that would set a time zone (§4.5) are refused; whatever else fails is the chapter's failure,
     never the caller's."""
-    if name in RESERVED or _reserved(name, args):
+    if name in RESERVED or is_reserved(name, args):
         return {"ok": False, "error": f"{name} is about a reserved operation: no chapter may call it"}
     if "timezone" in args:
         return {"ok": False, "error": "a chapter never sets a time zone"}

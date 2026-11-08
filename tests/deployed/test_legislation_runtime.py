@@ -460,7 +460,7 @@ from core.db import first
 from ggg import FederalVote, FederalVoteLeg
 leg = next(iter(FederalVote[%(vote)r].legs))
 print(json.dumps({"proposal": leg.proposal_id, "indexed": first(FederalVoteLeg, "proposal_id", leg.proposal_id) is not None,
-                  "reserved": legislation._reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})}))
+                  "reserved": legislation.is_reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})}))
 '''
 
 

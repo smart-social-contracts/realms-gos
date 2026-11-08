@@ -362,17 +362,30 @@ def test_a_replay_the_forbids_allow_runs_and_a_legacy_realms_replay_is_untouched
     assert ("budget_propose", {"period": "FY2026", "expense": 200, "revenue": 0}) in replay
 
 
-def test_a_reserved_operations_replay_and_calls_ask_no_forbid(agora, requests):
-    codex_of({(SPAIN, "tax"): SPAIN_TAX})
-    assert "codex_revert" in legislation.RESERVED
-    for name in legislation.RESERVED:
-        assert name not in auth.live["forbids"]["targeted"]
-    out, asked = requests.during("codex_revert", "ctl")
-    assert [action for action, _ in asked] == ["call"] and out["kind"] != "forbidden"
-    # a reserved operation's proposal runs on replay with no forbid either
-    proposal = ok("proposal_create", "alice", title="revert", action={"op": "codex_revert", "args": {}})["proposal"]
+PROPOSALS = """
+from realms.legislation import F, above, forbid
+
+class LocalRegime(above("local_regime")):
+    no_blocked = forbid("proposal_create", F.title == "blocked", legislation="x")
+    no_yes = forbid("proposal_vote", F.choice == "Yes", legislation="x")
+"""
+
+
+def test_a_reserved_operation_and_a_proposal_about_one_meet_no_forbid(agora, requests):
+    """§10.4: no chapter's forbid runs on a reserved operation, nor on the proposal_create, the vote or the execution
+    of a proposal whose action is one. The same forbids on proposal_create and proposal_vote hold for any other."""
+    codex_of({("x/town", "local_regime"): PROPOSALS, (SPAIN, "tax"): SPAIN_TAX})
+    assert set(auth.live["forbids"]["targeted"]) >= {"proposal_create", "proposal_vote"}
+    assert "forbidden by the legislation" in denied("proposal_create", "alice", title="blocked")
+    other = ok("proposal_create", "alice", title="a motion")["proposal"]
+    assert "forbidden by the legislation" in denied("proposal_vote", "bob", proposal=other, choice="yes")
+
+    revert = {"op": "codex_revert", "args": {}}
+    blocked = ok("proposal_create", "alice", title="blocked", action=revert)["proposal"]  # filing: no forbid
     before = len(requests.asked)
-    for voter in world.PEOPLE:
-        call("proposal_vote", voter, proposal=proposal, choice="yes")
-    assert Proposal[proposal].status in ("executed", "failed")
+    for voter in world.PEOPLE:  # voting and executing: none either
+        call("proposal_vote", voter, proposal=blocked, choice="yes")
+    assert Proposal[blocked].status in ("executed", "failed")
     assert {action for action, _ in requests.asked[before:]} == {"call"}
+    out, asked = requests.during("codex_revert", "ctl")  # the operation itself
+    assert [action for action, _ in asked] == ["call"] and out["kind"] != "forbidden"

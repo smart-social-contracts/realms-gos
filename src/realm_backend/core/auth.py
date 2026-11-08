@@ -197,9 +197,13 @@ def refuse_forbidden(user, name, spec, args, proposal):
     """Refuse the call with Denied when a forbid of the running codex's legislation fires on its facts (§6, §9.4): one
     request on the operation's action, and one per element of each list a forbid ranges over. It follows ``authorize``
     for every origin, a replay among them, where ``proposal`` is the proposal being executed. With no forbid on
-    ``name`` nothing is asked."""
+    ``name``, or none may be asked of it, nothing is."""
     in_force = live["forbids"]
     if in_force is None:
+        return
+    from core import legislation  # it imports core.op, which imports this module
+
+    if legislation.is_reserved(name, args):  # a reserved operation, and a proposal or a vote about one: no forbid (§10.4)
         return
     entities = [{"uid": {"type": "Realm::User", "id": user}, "attrs": {"permissions": [], "banned": False}, "parents": []},
                 {"uid": {"type": "Realm::Realm", "id": "1"}, "attrs": {}, "parents": []}]
