@@ -157,8 +157,7 @@ def release_reasons(release) -> List[str]:
         )
         if r
     ]
-    commit = release.get("commit")
-    if not (isinstance(commit, str) and len(commit) == 40 and set(commit) <= HEX):
+    if not is_commit(release.get("commit")):
         reasons.append("commit is the 40 hex digits of a git commit")
     chapters = release.get("chapters")
     if not isinstance(chapters, dict) or not chapters:
@@ -222,6 +221,11 @@ def by_language(value) -> bool:
         and bool(value)
         and all(is_text(k) and is_text(v) for k, v in value.items())
     )
+
+
+def is_commit(value) -> bool:
+    """The 40 hex digits of a git commit: the only form a tool passes to git, so that no name, option or path does."""
+    return isinstance(value, str) and len(value) == 40 and set(value) <= HEX
 
 
 def is_checksum(value) -> bool:
@@ -299,6 +303,11 @@ def is_ancestor(tree: Path, commit: str) -> bool:
     if done.returncode > 1:  # 1 is "not an ancestor"; anything else is git failing
         raise LegislationError(refusal(done))
     return done.returncode == 0
+
+
+def commit_of(tree: Path, rev: str) -> str:
+    """The 40 hex digits of the commit ``rev`` names, so that a URL built from it is for that commit and no other."""
+    return git(tree, "rev-parse", "--verify", f"{rev}^{{commit}}").decode().strip()
 
 
 def git(tree: Path, *args: str) -> bytes:
