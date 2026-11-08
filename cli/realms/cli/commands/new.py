@@ -50,7 +50,9 @@ PEM_DEPLOY_IDENTITY_NAMES = frozenset({"deployer", "my_dev_identity_1"})
 ANONYMOUS_PRINCIPAL = "2vxsx-fae"
 _PRINCIPAL_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)+$")
 
-BRANDING_MAX_BYTES = 1_572_864  # ~1.5 MiB (matches core.setup.BRANDING_DATA_URL_MAX_BYTES)
+# 700 KiB: as a data URL it is at most 955,762 characters, and the realm refuses an image above 960,000 (IMAGE_MAX in
+# api/setup.py).
+BRANDING_MAX_BYTES = 700 * 1024
 MANIFESTO_MAX_CHARS = 256
 WELCOME_MAX_CHARS = 1024
 NAME_MIN_CHARS = 3
@@ -627,7 +629,7 @@ def validate_branding_size(path: str, label: str) -> None:
     if size > BRANDING_MAX_BYTES:
         raise StageError(
             "validate",
-            f"{label} exceeds 1.5 MiB ({size} bytes). Each image must be ≤ 1.5 MiB.",
+            f"{label} exceeds 700 KiB ({size} bytes). Each image must be ≤ 700 KiB.",
         )
 
 

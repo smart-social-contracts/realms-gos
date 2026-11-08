@@ -16,8 +16,8 @@ from pic import Canister
 # The realm wasm before this change, packed from feat/layered-codex: the test of the upgrade is skipped without it.
 PREVIOUS_WASM = os.environ.get("REALM_PREVIOUS_WASM")
 RATE_LIMIT = 600  # seconds the replica wants between install_code messages as dear as installing this wasm
-IMAGE_MAX = 1_000_000  # api.setup.IMAGE_MAX, written out: a test that follows its constant would follow a wrong one
-# realm_info with both images at the most allowed costs 0.33 billion instructions (measured on PocketIC); a query may
+IMAGE_MAX = 960_000  # api.setup.IMAGE_MAX, written out: a test that follows its constant would follow a wrong one
+# realm_info with both images at the most allowed costs 0.31 billion instructions (measured on PocketIC); a query may
 # use 5 billion. At the stub's price of a character, 4,500 instructions, the same call costs 9 billion.
 REALM_INFO_BUDGET = 500_000_000
 # A query reply passes 3 MiB at the most: the images and the rest must fit.
@@ -53,13 +53,14 @@ def launched(wasm, people, image=""):
     return realm
 
 
-IMAGE = "data:image/png;base64," + "Ab+/" * 249_994 + "=="  # IMAGE_MAX characters
+IMAGE = "data:image/png;base64," + "Ab+/" * 239_994 + "=="  # IMAGE_MAX characters
 assert len(IMAGE) == IMAGE_MAX
 
 
 @pytest.fixture(scope="module")
 def full(wasm_of, people):
-    """A launched realm with the largest images the realm accepts."""
+    """A launched realm with the largest images the realm accepts. Its setup_step answers with both of them, in the 2 MiB
+    an update's reply may have."""
     return launched(wasm_of("production"), people, IMAGE)
 
 
@@ -70,10 +71,10 @@ def test_the_canister_runs_the_fast_json(full):
 
 
 def test_realm_info_with_the_largest_images_costs_a_fraction_of_a_query(full, costs):
-    spent = costs.measure(full, "realm_info, two images of 1 million characters", (
+    spent = costs.measure(full, "realm_info, two images of 960,000 characters", (
         "from core.op import dispatch, run as drive\n"
         "reply = drive(dispatch('realm_info', '{}', query=True))\n"
-        "assert len(reply) > 2_000_000, len(reply)"))
+        "assert len(reply) > 1_900_000, len(reply)"))
     assert spent < REALM_INFO_BUDGET
 
 
@@ -88,8 +89,40 @@ def test_an_image_above_the_limit_is_refused_and_the_limit_is_accepted(wasm_of, 
     founder = people["founder"]
     ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
     refused = realm.call("setup_step", {"step": "branding", "logo_url": "x" * (IMAGE_MAX + 1)}, sender=founder)
-    assert not refused["ok"] and "logo_url is above 1,000,000 characters" in refused["error"]
+    assert not refused["ok"] and "logo_url is above 960,000 characters" in refused["error"]
     ok(realm, "setup_step", founder, step="branding", logo_url="x" * IMAGE_MAX)
+
+
+DECODE = '''
+import json
+texts = ["[1,", "", "x", '{"a":}', '"abc', '{\\n  "a": 1,\\n  "b": }', "[1] tail"]
+out = {}
+for text in texts:
+    try:
+        json.loads(text)
+        out[text] = "read"
+    except json.JSONDecodeError as e:
+        out[text] = [isinstance(e, ValueError), e.pos, e.lineno, e.colno, str(e)]
+try:
+    json.loads(None)
+except TypeError as e:
+    out["None"] = str(e)
+print(json.dumps(out))
+'''
+
+
+def test_a_malformed_text_is_reported_in_the_canister_as_cpython_reports_it(full):
+    """The same exceptions, positions, lines and columns, and messages that CPython's own json gives, which D2 shows
+    to the authors of a codex."""
+    expected = {}
+    for text in ["[1,", "", "x", '{"a":}', '"abc', '{\n  "a": 1,\n  "b": }']:
+        with pytest.raises(json.JSONDecodeError) as raised:
+            json.loads(text)
+        e = raised.value
+        expected[text] = [True, e.pos, e.lineno, e.colno, str(e)]
+    expected["[1] tail"] = "read"
+    expected["None"] = "the JSON object must be str, bytes or bytearray, not NoneType"
+    assert json.loads(run(full, DECODE)) == expected
 
 
 # What the stub writes, which the canister's dumps must write byte for byte. The text is made on the host, with

@@ -50,10 +50,19 @@ def test_loads_is_as_lenient_as_the_stub():
     assert fastjson.loads('{"c": "line\nbreak"}') == {"c": "line\nbreak"}
 
 
-@pytest.mark.parametrize("text", ["", "   ", "x", "[1,"])
-def test_loads_refuses_what_is_not_json_with_a_value_error(text):
-    with pytest.raises(ValueError):
+@pytest.mark.parametrize("text", ["", "   ", "x", "[1,", "[\n  1,\n  "])
+def test_loads_refuses_what_is_not_json_as_cpython_does(text):
+    with pytest.raises(json.JSONDecodeError) as stub:
+        json.loads(text)
+    with pytest.raises(fastjson.JSONDecodeError) as fast:
         fastjson.loads(text)
+    assert str(fast.value) == str(stub.value) and fast.value.pos == stub.value.pos
+    assert (fast.value.lineno, fast.value.colno) == (stub.value.lineno, stub.value.colno)
+
+
+def test_loads_wants_a_text():
+    with pytest.raises(TypeError, match="must be str, bytes or bytearray, not NoneType"):
+        fastjson.loads(None)
 
 
 def test_install_leaves_cpythons_own_json_alone():

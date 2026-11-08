@@ -375,9 +375,9 @@ def new(
     codex_version: Optional[str] = typer.Option(
         None, "--codex-version", help="Codex version (omit for registry latest)"
     ),
-    logo: Optional[str] = typer.Option(None, "--logo", help="Logo image path (≤ 1.5 MiB)"),
+    logo: Optional[str] = typer.Option(None, "--logo", help="Logo image path (≤ 700 KiB)"),
     background: Optional[str] = typer.Option(
-        None, "--background", help="Background image path (≤ 1.5 MiB)"
+        None, "--background", help="Background image path (≤ 700 KiB)"
     ),
     primary: Optional[str] = typer.Option(None, "--primary", help="Primary color #RRGGBB"),
     manifesto: Optional[str] = typer.Option(
