@@ -52,11 +52,56 @@ def plain(value):
         return value.to_json()
     if isinstance(value, Queued):
         return str(value)
+    if isinstance(value, Args):
+        return plain(value.__data__)
     if isinstance(value, (dict, MappingProxyType)):
         return {k: plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple, frozenset, set)):
         return [plain(v) for v in value]
     return value
+
+
+class Args(metaclass=Sealed):
+    """An operation's arguments as a guard or a ``compute_`` method reads them: ``args.basis.legal_basis``,
+    ``"checksum" in args.action.args``, ``args["recipient"]``. Read-only, down to the lists and dicts in it; a
+    dict inside is an ``Args`` too. An argument the call did not give reads None, as GGG's optional fields do.
+    """
+
+    __slots__ = ("__data__",)
+
+    def __init__(self, data):
+        if type(data) not in (dict, MappingProxyType):
+            raise LegislationError(
+                f"Args wraps a dict of arguments, not {type(data).__name__}"
+            )
+        object.__setattr__(self, "__data__", freeze(data))
+
+    def __setattr__(self, name, value):
+        raise LegislationError("an operation's arguments never change")
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self[name] if name in self.__data__ else None
+
+    def __getitem__(self, key):
+        value = self.__data__[key]
+        return Args(value) if type(value) is MappingProxyType else value
+
+    def __contains__(self, key):
+        return key in self.__data__
+
+    def __iter__(self):
+        return iter(self.__data__)
+
+    def __len__(self):
+        return len(self.__data__)
+
+    def get(self, key, default=None):
+        return self[key] if key in self.__data__ else default
+
+    def __repr__(self):
+        return f"Args({plain(self.__data__)!r})"
 
 
 class Denial(metaclass=Sealed):
@@ -147,18 +192,50 @@ class Event(metaclass=Sealed):
 
 class Context(metaclass=Sealed):
     """What one call of the legislation runs with: the codex, the time, the approvals the operation
-    carries, the effects queue every chapter of the call shares, and which domains' methods are running
-    (``running``, outermost first) and how many calls between domains are in progress (``depth``, at
-    most ``MAX_DEPTH``)."""
+    carries, the effects queue every chapter of the call shares, the realm's local-day function, and which
+    domains' methods are running (``running``, outermost first) and how many calls between domains are in
+    progress (``depth``, at most ``MAX_DEPTH``)."""
 
-    def __init__(self, codex, now=0, approvals=(), operations=None):
+    def __init__(self, codex, now=0, approvals=(), operations=None, local_day=None):
         self.codex, self.now, self.approvals = codex, now, frozenset(approvals)
         self.effects = Effects(operations)
         self.running, self.depth = [], 0
+        self.local_day = local_day  # the realm's: a UTC timestamp to its local day, YYYY-MM-DD (layered-codex.md §4.5)
+
+
+def is_result(value):
+    """What a method may hand to another domain: a setting's kind of data (chapter.is_data), a Money, or
+    lists and dicts of those."""
+    from realms.legislation.chapter import is_data
+
+    if isinstance(value, Money):
+        return True
+    kind = type(value)
+    if kind in (list, tuple):
+        return all(is_result(v) for v in value)
+    if kind in (dict, MappingProxyType):
+        return all(type(k) is str and is_result(v) for k, v in value.items())
+    return is_data(value)
+
+
+def crossing(value, file):
+    """``value``, as it leaves the chapter of ``file`` for another domain: plain data passes, a chapter instance
+    is seen through ``Public``, and anything else (a method, a view of other domains, an object a chapter
+    made) is refused (realms-gos#543)."""
+    from realms.legislation.chapter import Chapter
+
+    if isinstance(value, Chapter):
+        return Public(value)
+    if isinstance(value, Public) or not is_result(value):
+        raise LegislationError(
+            f"{file} returned {type(value).__name__}: only plain data crosses a domain boundary"
+        )
+    return value
 
 
 class Public(metaclass=Sealed):
-    """Another domain's chapter as a caller sees it: public members only."""
+    """Another domain's chapter as a caller sees it: its public members only, never the ``self`` API, and
+    what its methods return goes through ``crossing``."""
 
     __slots__ = ("__chapter__",)
 
@@ -166,11 +243,24 @@ class Public(metaclass=Sealed):
         self.__chapter__ = chapter
 
     def __getattr__(self, name):
+        chapter = self.__chapter__
+        cls = type(chapter)
         if name.startswith("_"):
             raise LegislationError(
                 f"{name} is private to its chapter: other chapters cannot call it"
             )
-        return getattr(self.__chapter__, name)
+        if name not in cls.__members__:
+            raise LegislationError(
+                f"{name} is not a public member of {cls.__file__}: other chapters reach its members only"
+            )
+        value = getattr(chapter, name)
+        if not callable(value):
+            return value  # a setting: frozen data
+
+        def call(*args, **kwargs):
+            return crossing(value(*args, **kwargs), cls.__file__)
+
+        return call
 
 
 class Domains(metaclass=Sealed):

@@ -12,10 +12,81 @@ try:
 except ImportError:  # unit tests: no subinterpreters, hooks run in a fresh namespace instead
     _basilisk_sandbox = None
 
+NATIVE = _basilisk_sandbox is not None  # whether subinterpreters exist here (the canister), or the fallbacks run
 BUDGET = 10_000_000  # bytecode instructions per call, metered by the sandbox (deterministic)
 MAX_ACTIONS = 32  # _basilisk_sandbox traps on a longer allow-list
 LOADER = ("import sys\n_sdk = type(sys)('ggg_sdk')\nexec(compile(%r, 'ggg_sdk.py', 'exec'), _sdk.__dict__)\n"
           "sys.modules['ggg_sdk'] = _sdk\n" % sdk.SOURCE)
+
+
+def module_source(name):
+    """The source text of the bundled module ``name``, and whether it is a package. Neither runs the module.
+
+    The canister keeps every bundled module's source on its lazy module object (never read an attribute of one: that
+    would compile and run it); on a laptop the source is read from the file."""
+    module = sys.modules.get(name)
+    if module is None:  # a laptop, before the module was imported
+        __import__(name)
+        module = sys.modules[name]
+    source = vars(module).get("_bsrc")
+    if source is None:
+        with open(module.__file__) as f:
+            source = f.read()
+    return source, "__path__" in vars(module)
+
+
+def module_sources(package):
+    """``{name: (source, is_package)}`` of ``package``, its parents and everything bundled under it: what a
+    subinterpreter needs to import the package from text, as it has no path to import from."""
+    names = {n for n in sys.modules if n == package or n.startswith(package + ".")}
+    if len(names) <= 1:  # a laptop, before the submodules were imported: they are files
+        import pkgutil
+
+        __import__(package)
+        names = {package} | {m.name for m in pkgutil.walk_packages(sys.modules[package].__path__, package + ".")}
+    parents = {n.rpartition(".")[0] for n in names} - {""}
+    return {name: module_source(name) for name in sorted(names | parents)}
+
+
+class Resident:
+    """A subinterpreter kept open across calls: ``program`` runs once at spawn, then ``call(fn, **kwargs)`` runs
+    its top-level functions with plain data in and out, until ``close``. Inside, ``rpc(action, **kw)`` reaches
+    ``rpc(action, kw)`` here for the actions in ``allowed``. The budget is per spawn, cumulative over the calls:
+    a call that exhausts it fails with ``BudgetExceeded`` in its error text, and the interpreter is spent.
+
+    Without ``_basilisk_sandbox`` (unit tests), the same program runs in a fresh namespace, unmetered."""
+
+    def __init__(self, program, rpc, allowed=(), budget=BUDGET):
+        self.handle = self.space = None
+
+        def handler(_, action, kw):
+            return plain(rpc(action, plain(kw)))
+
+        if _basilisk_sandbox is None:
+            self.space = {"__name__": "__sandbox__",
+                          "__builtins__": dict(vars(builtins), rpc=lambda action, **kw: handler(None, action, kw))}
+            exec(compile(program, "sandbox.py", "exec"), self.space)
+            return
+        digest = _basilisk_sandbox.sha256(program)
+        _basilisk_sandbox.approve_hash(digest)
+        try:
+            self.handle = _basilisk_sandbox.spawn_subinterpreter(program, digest, "", tuple(allowed), handler, budget)
+        finally:
+            _basilisk_sandbox.revoke_hash(digest)
+
+    def call(self, fn, **kwargs):
+        """``fn(**kwargs)`` inside; raises RuntimeError with the error's text when the call itself fails."""
+        if self.space is not None:
+            try:
+                return plain(self.space[fn](**plain(kwargs)))
+            except Exception as e:
+                raise RuntimeError(f"sandboxed call raised: {type(e).__name__}: {e}")
+        return plain(_basilisk_sandbox.call_in_subinterpreter(self.handle, fn, plain(kwargs)))
+
+    def close(self):
+        if self.handle is not None:
+            _basilisk_sandbox.close_subinterpreter(self.handle)
+        self.handle = self.space = None
 
 
 def sha256(text):

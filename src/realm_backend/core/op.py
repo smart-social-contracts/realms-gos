@@ -84,10 +84,9 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
 
             out = proposals.file_replay(name, args, user, by, governing, grant)
         else:
-            out = spec["fn"](Call(user, by, origin, proposal, grant), args)
-            if isinstance(out, GENERATOR):
-                out = yield from out
-            out = out or {}
+            from core import legislation
+
+            out = yield from legislation.run(name, spec, Call(user, by, origin, proposal, grant), args, governing)
         if not spec["read"]:
             audit(name, user, by, origin, args, out)
         return json.dumps({"ok": True, **out})

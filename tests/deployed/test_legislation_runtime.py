@@ -1,0 +1,373 @@
+"""The layered codex runtime on the real wasm (docs/codices/layered-codex.md §9.3, realms-gos#488): the chapters of the
+active codex run in the codex subinterpreter, loaded once from ``ChapterSource`` and warmed again after an upgrade;
+around a GGG operation the guards deny first, the hooks' effects apply after, and the failures count per chapter and
+method. §5.2's working-day count starts from the realm's local day, on its own time zone. Nothing installs a layered
+codex yet, so the rows are written through the controller's ``__shell__`` and activated through the runtime, as the
+install task will (D2). The costs the design asks for (§9.3) are printed.
+"""
+
+import json
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import pytest
+from test_layered_codex import RATE_LIMIT, ok, sha256
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "realm_backend"))
+from realms.legislation.calendar import Calendar  # noqa: E402
+from realms.legislation.periods import working_days  # noqa: E402
+
+TOWN = "x/town"
+MADRID = ZoneInfo("Europe/Madrid")
+CALENDAR = {"weekend": ["sat", "sun"], "years": {
+    str(year): [{"date": f"{year}-01-01", "name": {"es": "Año Nuevo"}}, {"date": f"{year}-10-12", "name": {"es": "Fiesta Nacional"}},
+                {"date": f"{year}-12-25", "name": {"es": "Navidad"}}] for year in range(2025, 2031)}}
+EU_DP = '''
+from realms.legislation import above, extension
+
+class DataProtection(above("data_protection")):
+    @extension(legislation="GDPR Art. 6")
+    def check_proposal_create(self, args):
+        if args.title == "consent":
+            return self.deny("consent is not a basis between public authorities")
+'''
+ES_DP = '''
+from realms.legislation import above, extension
+
+class DataProtection(above("data_protection")):
+    @extension(legislation="Ley Orgánica 3/2018 Art. 8")
+    def check_proposal_create(self, args):
+        if args.title == "task":
+            return self.deny("name the legislation that sets this public task")
+'''
+TOWN_DP = '''
+from ggg import Member
+from realms.legislation import above
+
+class DataProtection(above("data_protection")):
+    def check_proposal_create(self, args):
+        if args.title == "outsider" and Member.get(args.description) is None:
+            return self.deny("a recipient outside the realm needs the Administration")
+'''
+ES_PROCEDURE = '''
+from realms.legislation import above, fixed, working_days
+
+class Procedure(above("procedure")):
+    @fixed(legislation="Ley 39/2015 Art. 30")
+    def working_days_after(self, day, n):
+        return self.calendar.add(day, working_days(n))
+'''
+ES_LOCAL_REGIME = '''
+from realms.legislation import above, extension
+
+class LocalRegime(above("local_regime")):
+    uses = ["procedure"]
+
+    @extension(legislation="Ley 7/1985 Art. 65.2")
+    def check_proposal_create(self, args):
+        if args.action is None or args.action.op != "codex_install" or "checksum" not in args.action.args:
+            return None  # only this realm's own change of legislation
+        earliest = self.legislation.procedure.working_days_after(self.local_day(self.now()), 15)
+        if args.effective_at is None or self.local_day(args.effective_at) < earliest:
+            return self.deny("an ordinance takes effect at the earliest 15 working days after the vote closes (Art. 65.2)")
+
+    @extension(legislation="Ley 7/1985 Art. 65.2")
+    def on_proposal_create(self, event):
+        event.order = ["es"]
+        self.ggg.notification_send(recipient="User:" + event.user, topic="ordinance", title="Comunicació d'acord",
+                                   body=event.result["proposal"])
+'''
+TOWN_LOCAL_REGIME = '''
+from realms.legislation import above
+
+class LocalRegime(above("local_regime")):
+    def on_proposal_create(self, event):
+        self.ggg.notification_send(recipient="User:" + event.user, topic="ordinance",
+                                   title="Nova ordenança:" + ",".join(event.order), body=event.result["proposal"])
+'''
+TOWN_REALM = '''
+from realms.legislation import above
+
+class Realm(above("realm")):
+    def on_codex_activate(self, event):
+        self.ggg.notification_send(recipient="User:%(founder)s", topic="codex", title="activated", body=event.args["codex"])
+
+    def compute_realm_join(self, user, quarters):
+        return max(quarters, key=lambda q: q.index).id if quarters else None
+'''
+TOWN_WATER = '''
+from realms.legislation import above
+
+class Water(above("water")):
+    def check_proposal_create(self, args):
+        if args.title == "break the water":
+            raise ValueError("no water here")
+'''
+TOWN_REGISTER = '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def on_proposal_create(self, event):
+        if event.args["title"] == "break the register":
+            return 1 // 0
+        if event.args["title"] == "loop":
+            n = 0
+            while True:
+                n += 1
+'''
+ALPHA = '''
+from realms.legislation import above
+
+class Alpha(above("alpha")):
+    uses = ["beta"]
+
+    def check_proposal_create(self, args):
+        if args.title == "probe self":
+            return self.deny(self.legislation.beta.give_self()._secret())
+        if args.title == "probe undeclared":
+            return self.deny(str(self.legislation.beta.legislation.gamma))
+'''
+BETA = '''
+from realms.legislation import above
+
+class Beta(above("beta")):
+    uses = ["gamma"]
+
+    def give_self(self):
+        return self
+
+    def _secret(self):
+        return "the secret"
+'''
+GAMMA = "from realms.legislation import above\nclass Gamma(above('gamma')):\n    pass\n"
+DENY_ALL = '''
+from realms.legislation import above
+
+class Procedure(above("procedure")):
+    def check_proposal_create(self, args):
+        return self.deny("nothing may be proposed")
+'''
+INSTALL = '''
+import json
+from core import layered_codex as store, legislation
+from core.op import run
+from ggg import LayeredCodex
+chapters, calendars, layers, previous = %(chapters)r, %(calendars)r, %(layers)r, %(previous)r
+entries, paths = {}, {}
+for source, domain, text in chapters:
+    entries[f"{source}/{domain}"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
+    paths.setdefault(domain, []).append(source)
+for source, text in calendars:
+    entries[f"{source}/calendar"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
+cid = store.codex_id(layers, paths, entries)
+for other in LayeredCodex.load_some(1, max(LayeredCodex.max_id(), 1)):
+    if other.status == "active":
+        other.status = "inactive"
+codex = LayeredCodex[cid] or LayeredCodex(id=cid, layers=layers, layer_paths=paths, chapters=entries, installed_at=1)
+codex.status, codex.previous = "active", previous
+before = ic.performance_counter(0)
+legislation.load(codex)
+loaded = ic.performance_counter(0)
+run(legislation.activate(codex))
+print(json.dumps({"codex": cid, "load": loaded - before, "activate": ic.performance_counter(0) - loaded,
+                  "failures": codex.failures}))
+'''
+MEASURE = '''
+import json
+from core import chain, legislation
+t0 = ic.performance_counter(0)
+guards = legislation._call("guard", op="proposal_create", args={"title": "measure", "action": None}, now=chain.now(), approvals=[])
+t1 = ic.performance_counter(0)
+hooks = legislation._call("hooks", op="proposal_create", now=chain.now(), approvals=[],
+                          event={"user": %(founder)r, "args": {"title": "measure"}, "result": {"proposal": "P-0"}, "at": chain.now()})
+t2 = ic.performance_counter(0)
+print(json.dumps({"guard": t1 - t0, "hook": t2 - t1, "guards": len(guards), "hooks": len(hooks),
+                  "effects": sum(len(h.get("effects", [])) for h in hooks)}))
+'''
+BUILD = '''
+import json
+from core import layered_codex as store, legislation
+chapters, calendars = %(chapters)r, %(calendars)r
+sources = {store.checksum(t): t for *_, t in chapters} | {store.checksum(t): t for _, t in calendars}
+plan = {"realm": %(realm)r, "layers": %(layers)r,
+        "chapters": [{"source": s, "domain": d, "sha256": store.checksum(t)} for s, d, t in chapters],
+        "calendars": [{"source": s, "sha256": store.checksum(t)} for s, t in calendars]}
+before = ic.performance_counter(0)
+out = legislation.build(plan, sources)
+print(json.dumps({"cost": ic.performance_counter(0) - before, "errors": out["errors"], "domains": sorted(out["views"])}))
+'''
+STATE = '''
+import json
+from core import legislation
+print(json.dumps({"codex": legislation._state["codex"] if isinstance(legislation._state["codex"], str) else None,
+                  "loaded": legislation._state["box"] is not None}))
+'''
+
+
+def run(realm, code):
+    out = realm.shell(code)
+    assert "Traceback" not in out, out
+    return json.loads(out[out.index("{"):])
+
+
+def chapters_of(founder, extra=()):
+    """The running example: the EU's and Spain's data protection, Spain's procedure and local regime, the town's own."""
+    return [("eu", "data_protection", EU_DP), ("eu/es", "data_protection", ES_DP), ("eu/es", "procedure", ES_PROCEDURE),
+            ("eu/es", "local_regime", ES_LOCAL_REGIME), (TOWN, "data_protection", TOWN_DP),
+            (TOWN, "local_regime", TOWN_LOCAL_REGIME), (TOWN, "realm", TOWN_REALM % {"founder": founder})] + list(extra)
+
+
+def install(realm, chapters, layers=("eu", "eu/es", TOWN), calendars=(("eu/es", json.dumps(CALENDAR)),), previous=""):
+    return run(realm, INSTALL % {"chapters": chapters, "calendars": list(calendars), "layers": list(layers), "previous": previous})
+
+
+def proposal(realm, who, title, **more):
+    return realm.call("proposal_create", {"title": title, **more}, sender=who)
+
+
+def titles(realm, who):
+    return [n["title"] for n in ok(realm, "notification_list", who, query=True)["notifications"]]
+
+
+def failures(realm, who):
+    return ok(realm, "codex_status", who, query=True)["failures"]
+
+
+@pytest.fixture(scope="module")
+def town(wasm_of, people):
+    """A realm in setup on Madrid time, whose founder files proposals; the town's layered codex active."""
+    from test_layered_codex import Canister
+
+    realm = Canister(wasm_of("production"), installer=people["installer"])
+    founder = people["founder"]
+    ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
+    ok(realm, "setup_step", founder, step="realm", name="Town", open_registration=True, timezone="Europe/Madrid")
+    ok(realm, "setup_step", founder, step="trust_policy", require_marketplace_approval=False)
+    ok(realm, "setup_step", founder, step="tokens", accounting_currency="DOM", accounting_currency_decimals=8)
+    ok(realm, "realm_join", founder)
+    return realm
+
+
+def test_a_activation_loads_the_chapters_once_and_runs_on_codex_activate(town, people):
+    founder = people["founder"]
+    got = install(town, chapters_of(founder, [(TOWN, "water", TOWN_WATER), (TOWN, "register", TOWN_REGISTER)]))
+    assert got["failures"] == {}
+    assert titles(town, founder) == ["activated"]
+    print(f"load (spawn, library, 9 chapters): {got['load']:,} instructions; activate (hook and effect): {got['activate']:,}")
+    assert got["load"] < 2_000_000_000, got
+
+
+def test_b_guards_deny_down_the_layers_and_hooks_notify_as_the_codex(town, people):
+    founder = people["founder"]
+    assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
+    assert proposal(town, founder, "task")["error"] == "name the legislation that sets this public task"
+    assert proposal(town, founder, "outsider", description="nobody")["error"] == "a recipient outside the realm needs the Administration"
+    pid = ok(town, "proposal_create", founder, title="outsider", description=founder)["proposal"]
+    assert titles(town, founder)[-2:] == ["Comunicació d'acord", "Nova ordenança:es"]  # Spain's hook, then the town's
+    notice = ok(town, "notification_list", founder, query=True)["notifications"][-1]
+    assert notice["body"] == pid
+    measured = run(town, MEASURE % {"founder": founder})
+    print(f"one guard call ({measured['guards']} domains): {measured['guard']:,} instructions; "
+          f"one hook call ({measured['hooks']} domains, {measured['effects']} effects queued): {measured['hook']:,}")
+    assert measured["guard"] < 100_000_000 and measured["hook"] < 100_000_000, measured
+
+
+def test_c_spains_guard_counts_working_days_from_the_realms_local_day(town, people):
+    founder = people["founder"]
+    calendar = Calendar([CALENDAR])
+    # To 23:00 UTC on a day whose next day is a working day: the realm, on Madrid time, is already in that next day.
+    now = datetime.fromtimestamp(town.now(), timezone.utc)
+    day = now.replace(hour=23, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    while day.weekday() > 3 or not calendar.is_working_day((day + timedelta(days=1)).strftime("%Y-%m-%d")):
+        day += timedelta(days=1)
+    town.wait(int(day.timestamp()) - town.now())
+    utc_day, madrid_day = day.strftime("%Y-%m-%d"), day.astimezone(MADRID).strftime("%Y-%m-%d")
+    assert madrid_day > utc_day
+    by_utc, by_madrid = (calendar.add(d, working_days(15)) for d in (utc_day, madrid_day))
+    assert by_madrid > by_utc
+
+    def midnight_in_madrid(text):
+        return int(datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=MADRID).timestamp())
+
+    ordinance = {"title": "ordinance", "action": {"op": "codex_install", "args": {"url": "https://example.org/c.json", "checksum": sha256("x")}}}
+    early = "an ordinance takes effect at the earliest 15 working days after the vote closes (Art. 65.2)"
+    assert proposal(town, founder, **ordinance)["error"] == early
+    assert proposal(town, founder, effective_at=midnight_in_madrid(by_utc), **ordinance)["error"] == early  # counted on UTC it would pass
+    assert ok(town, "proposal_create", founder, effective_at=midnight_in_madrid(by_madrid), **ordinance)["proposal"]
+
+
+def test_d_a_raising_guard_denies_naming_the_chapter_and_a_raising_hook_never_fails_the_caller(town, people):
+    founder = people["founder"]
+    assert proposal(town, founder, "break the water")["error"] == "legislation error in x/town/water.py: ValueError: no water here"
+    recorded = failures(town, founder)
+    assert recorded["x/town/water.py"]["check_proposal_create"]["count"] == 1
+    assert not ok(town, "codex_status", founder, query=True)["healthy"]
+    pid = ok(town, "proposal_create", founder, title="break the register")["proposal"]  # the hook fails, the proposal stands
+    assert ok(town, "proposal_get", founder, query=True, proposal=pid)["proposal"]["status"] == "voting"
+    recorded = failures(town, founder)
+    assert recorded["x/town/register.py"]["on_proposal_create"]["error"] == "ZeroDivisionError: integer division or modulo by zero"
+    assert "x/town/water.py" not in recorded  # the guard succeeded this time: its entry cleared
+    ok(town, "proposal_create", founder, title="fine")
+    assert failures(town, founder) == {} and ok(town, "codex_status", founder, query=True)["healthy"]
+
+
+def test_e_a_hook_that_exhausts_the_budget_fails_alone_and_the_codex_reloads(town, people):
+    founder = people["founder"]
+    assert ok(town, "proposal_create", founder, title="loop")["proposal"]
+    error = failures(town, founder)["x/town/register.py"]["on_proposal_create"]["error"]
+    assert "BudgetExceeded" in error, error
+    assert run(town, STATE)["loaded"]  # the spent interpreter was replaced
+    assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
+    assert "x/town/register.py" in failures(town, founder)  # the loop still counts until the hook next succeeds
+    ok(town, "proposal_create", founder, title="fine again")
+    assert failures(town, founder) == {}
+
+
+def test_f_what_crosses_a_domain_boundary_is_plain_data_or_the_public_view(town, people):
+    founder = people["founder"]
+    install(town, chapters_of(founder, [(TOWN, "alpha", ALPHA), (TOWN, "beta", BETA), (TOWN, "gamma", GAMMA)]))
+    assert proposal(town, founder, "probe self")["error"] == (
+        "legislation error in x/town/alpha.py: _secret is private to its chapter: other chapters cannot call it")
+    assert proposal(town, founder, "probe undeclared")["error"] == (
+        "legislation error in x/town/alpha.py: legislation is not a public member of x/town/beta.py: other chapters reach its members only")
+
+
+def test_g_build_refuses_a_chain_deeper_than_eight_and_reports_the_valencia_example(town, people):
+    founder = people["founder"]
+    steps = []
+    for i in range(10):
+        uses = f'    uses = ["step{i + 1}"]\n' if i < 9 else ""
+        steps.append((TOWN, f"step{i}", f"from realms.legislation import above\nclass Step{i}(above('step{i}')):\n{uses}    pass\n"))
+    got = run(town, BUILD % {"chapters": steps, "calendars": [], "realm": TOWN, "layers": [TOWN]})
+    assert got["errors"][0].startswith("uses chain step0 → step1") and "calls between domains stop at depth 8" in got["errors"][0]
+    got = run(town, BUILD % {"chapters": chapters_of(founder), "calendars": [("eu/es", json.dumps(CALENDAR))],
+                             "realm": TOWN, "layers": ["eu", "eu/es", TOWN]})
+    assert got["errors"] == [] and got["domains"] == ["data_protection", "local_regime", "procedure", "realm"]
+    print(f"one build of the example (7 chapters, a calendar, the views): {got['cost']:,} instructions")
+    assert got["cost"] < 2_000_000_000, got
+
+
+def test_h_a_codex_that_refuses_every_proposal_cannot_block_a_revert_which_runs_no_hook(town, people):
+    founder = people["founder"]
+    previous = run(town, STATE)["codex"]
+    before = titles(town, founder)
+    install(town, [(TOWN, "procedure", DENY_ALL)], layers=[TOWN], calendars=(), previous=previous)
+    assert proposal(town, founder, "anything")["error"] == "nothing may be proposed"
+    pid = ok(town, "proposal_create", founder, title="revert", action={"op": "codex_revert", "args": {}})["proposal"]
+    ok(town, "proposal_vote", founder, proposal=pid, choice="yes")  # the only member: the vote ends and the action runs
+    assert ok(town, "proposal_get", founder, query=True, proposal=pid)["proposal"]["status"] == "executed"
+    assert ok(town, "codex_status", founder, query=True)["codex"]["id"] == previous
+    assert run(town, STATE) == {"codex": previous, "loaded": True}
+    assert titles(town, founder) == before  # no on_codex_activate on a revert
+    assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
+
+
+def test_i_the_codex_is_warm_after_an_upgrade(town, people):
+    founder = people["founder"]
+    active = run(town, STATE)["codex"]
+    town.wait(RATE_LIMIT)
+    town.upgrade()
+    assert run(town, STATE) == {"codex": active, "loaded": True}  # loaded in post_upgrade, before any call
+    assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"

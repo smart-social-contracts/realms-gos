@@ -1,6 +1,6 @@
 import json
 
-from core import build_variant, chain, localtime, zones
+from core import build_variant, chain, legislation, localtime, zones
 import constants
 import ggg
 from core import sandbox
@@ -82,6 +82,7 @@ def start(installer=""):
     # release lacks traps the upgrade on purpose: tz names only grow, and the realm must not turn UTC without a word.
     if Realm["1"].timezone != "UTC":  # a UTC realm needs no zone file, nor the reader
         localtime.use(Realm["1"].timezone)
+    legislation.warm()  # the active layered codex's sandbox is gone after an upgrade, and a query could not keep one
     tasks.rearm()
     from api import proposals, quarters
 

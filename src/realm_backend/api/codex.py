@@ -1,6 +1,7 @@
 import json
 
 from core import chain
+from core import legislation
 from core import sandbox
 from core.db import Conflict, Fail, find, first, latest, view, window
 from ggg import Codex, InstallJob, LayeredCodex, Realm
@@ -75,6 +76,13 @@ def hook(name, context=None):
     return out
 
 
+def compute(name, context):
+    """The active codex's answer to GGG's ``compute_<name>`` for ``context`` (its keyword arguments), None when no
+    chapter defines it. A generator, for the operations that drive it with ``yield from``."""
+    return legislation.compute(name, **context)
+    yield  # noqa: unreachable, on purpose
+
+
 @op("codex.install", governed=realm_wide, returns="codex")
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
@@ -99,6 +107,8 @@ def codex_install(c, args):
     row.previous, row.status = current.id if current else "", "active"
     if current:
         current.status = "inactive"
+    if isinstance(current, LayeredCodex):
+        legislation.load(None)
     init = yield from hook("init")
     return {"codex": key, "init": init}
 
@@ -110,6 +120,8 @@ def codex_uninstall(c, args):
     if codex is None:
         raise Conflict("no codex is installed")
     codex.status = "inactive"
+    if isinstance(codex, LayeredCodex):
+        legislation.load(None)
     return {"codex": codex.id}
 
 
@@ -123,6 +135,8 @@ def codex_revert(c, args):
     if isinstance(prior, Codex):
         runnable(prior.manifest or {})
     codex.status, prior.status = "reverted", "active"
+    if isinstance(codex, LayeredCodex) or isinstance(prior, LayeredCodex):
+        legislation.load(prior if isinstance(prior, LayeredCodex) else None)  # a revert runs no on_codex_activate
     return {"codex": prior.id}
 
 
@@ -143,8 +157,9 @@ def history(args):
 
 @op("realm.data_view", read=True)
 def codex_status(c, args):
-    """The active codex, whether it is healthy (its last hook succeeded), its hooks and configuration, and one page
-    of the install ``history``: ``count`` installs (default 100, at most 500) from row ``from`` (default 1), with
+    """The active codex, whether it is healthy (a legacy codex: its last hook succeeded; a layered codex: no chapter's
+    method is failing, see ``failures``: per chapter and method, the count, the last error and when), its hooks and
+    configuration, and one page of the install ``history``: ``count`` installs (default 100, at most 500) from row ``from`` (default 1), with
     ``next``, the ``from`` of the next page (null at the end). The history lists the legacy codices, then the layered
     ones. A layered codex shows its layers, layer paths and chapters (source, version, checksum, who vouched for it,
     route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
@@ -152,10 +167,11 @@ def codex_status(c, args):
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
     legacy_codex = codex if isinstance(codex, Codex) else None
+    failures = codex.failures if isinstance(codex, LayeredCodex) else {}
     rows, nxt = history(args)
     pending, jobs = first(LayeredCodex, "status", "pending"), latest(InstallJob, 1)
-    return {"codex": shown(codex) if codex else None, "healthy": codex is not None and not problem,
-            "problem": problem, "hooks": (legacy_codex.manifest or {}).get("hooks", []) if legacy_codex else [],
+    return {"codex": shown(codex) if codex else None, "healthy": codex is not None and not problem and not failures,
+            "problem": problem, "failures": failures, "hooks": (legacy_codex.manifest or {}).get("hooks", []) if legacy_codex else [],
             "config": config(legacy_codex) if legacy_codex else {},
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
             "pending": shown(pending) if pending else None,

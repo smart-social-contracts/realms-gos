@@ -358,6 +358,9 @@ def join_targets(c, args):
     chosen = run(runtime.hook("assign_quarter", {"user": c.user, "quarters": pool}))
     if chosen and chosen.get("ok") and (chosen.get("result") or {}).get("quarter") in [q["id"] for q in pool]:
         best = chosen["result"]["quarter"]
+    placed = run(runtime.compute("realm_join", {"user": c.user, "quarters": pool}))  # a layered codex's compute_realm_join
+    if placed in [q["id"] for q in pool]:
+        best = placed
     return {"default": best, "targets": [q["id"] for q in pool], "mode": realm().quarter_join_mode}
 
 
