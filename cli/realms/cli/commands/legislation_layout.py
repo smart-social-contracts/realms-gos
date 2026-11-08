@@ -301,6 +301,11 @@ def is_ancestor(tree: Path, commit: str) -> bool:
     return done.returncode == 0
 
 
+def commit_of(tree: Path, rev: str) -> str:
+    """The 40 hex digits of the commit ``rev`` names, so that a URL built from it is for that commit and no other."""
+    return git(tree, "rev-parse", "--verify", f"{rev}^{{commit}}").decode().strip()
+
+
 def git(tree: Path, *args: str) -> bytes:
     """git's output, run from ``tree`` so that ``./`` paths are the tree's. A refusal is a ``LegislationError``."""
     done = run_git(tree, *args)

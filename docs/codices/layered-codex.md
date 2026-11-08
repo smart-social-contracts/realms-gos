@@ -1628,11 +1628,39 @@ difference is not expected to matter; the two versions are aligned at basilisk's
 Given a realm's links and a commit, it prints the layer paths, the flattened view and the generated
 Cedar, with the same `realms.legislation` code the canister runs.
 
+Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
+`realms legislation resolve [TREE] --realm <source id> [--commit REV] [--sync-source ID]... [--record FILE]... [--own FILE] [--facts FILE]`.
+
+- **Records.** A sync source's record (§8) is the tree's own `releases.json` (`--sync-source`: the newest release of
+  the source and of each source above it) or a file in the shape of §8 (`--record`). Reading them from the sync
+  sources' realms comes with the published record (D6, [#491](https://github.com/smart-social-contracts/realms-gos/issues/491)).
+- **Files.** The tree is read with git, never from the working copy: a relayed layer at the commit its release
+  names, the realm's own layer (its folder, or the layer in `--own`) at `--commit`, and every file against the
+  checksum its record lists.
+- **Output.** The codex id (§9.1), the layers, each domain's layer path and flattened view, and the Cedar of every
+  forbid when `--facts` gives GGG's fact schema. It calls no network.
+
 ### 12.5 `realms legislation propose`
 
 Given the realm, the chapters to set or remove, and a commit, it writes the change list (with
 `replaces` read from the realm's `ggg_codex_status`) and the report. It prints the `Code { url;
 checksum }` to submit.
+
+Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
+`realms legislation propose [TREE] --realm <source id> --commit REV --set <chapter>... --remove <chapter>... --url URL --out FILE`,
+with `--replaces <codex id | none>` or `--network` and `--canister`, and optionally `--summary LANG=TEXT`,
+`--report FILE --report-url URL`, `--identity` and `--repo OWNER/NAME`.
+
+- **The file.** The change list as canonical JSON (§9.1: sorted keys, no spaces, UTF-8, no newline at the end),
+  so the checksum a proposal pins is the checksum of the file. Each chapter's URL names the commit in full, and its
+  sha256 and size are those of the bytes at that commit. `--url` is where the change list will be served.
+- **`replaces`** is given, or read from the realm's `codex_status` when `--network` and `--canister` are given.
+  No network is reached otherwise, and there is no default network.
+- **Refused.** What the realm would refuse (§7): a chapter outside the realm's own layer (a layer from above comes
+  as a release), a name that is not a GGG domain or `calendar`, a chapter of 0 bytes or above 256 KB, more than 50
+  chapters, a change list above 64 KB, an address that is not https.
+- **The report** (§12.3, C4) is attached, not written: `--report` is the file and `--report-url` where it is served.
+- **Output.** The `Code { url; checksum }` to submit.
 
 ---
 

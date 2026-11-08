@@ -75,6 +75,19 @@ def test_what_parse_refuses(bad, match):
     refused(change_list.parse, bad, match=match)
 
 
+def test_the_change_list_of_the_bonus_change_is_one_the_realm_accepts():
+    """The file ``realms legislation propose`` writes for València's tax chapter (cli/tests checks it byte for byte)."""
+    golden = (ROOT / "tests/fixtures/legislation/bonus-change.json").read_text().replace("<commit>", "0" * 40)
+    parsed = change_list.parse(golden)
+    chapter = parsed["set"][0]
+    assert (parsed["realm"], chapter["chapter"], chapter["source"], chapter["domain"]) == (
+        "eu/es/vc/46250-valencia", "eu/es/vc/46250-valencia/tax", "eu/es/vc/46250-valencia", "tax")
+    assert chapter["urls"][0].endswith("/legislation/eu/es/vc/46250-valencia/tax.py") and chapter["size"] == 853
+    realm, own = change_list.apply(parsed, parsed["realm"], parsed["replaces"], {"chapters": {}, "calendar": None})
+    assert own == {"chapters": {"tax": chapter["sha256"]}, "calendar": None}
+    assert parsed["summary"]["es"] == "IBI 2027: bonificación por familia numerosa"
+
+
 def test_the_domain_list_is_gggs():
     listed = json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
     assert tuple(d["id"] for d in listed) == change_list.DOMAINS
