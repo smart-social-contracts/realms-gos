@@ -29,12 +29,16 @@ To build the realm by hand:
 
 ```bash
 pip install -r requirements.txt                     # pinned: a stale ic-python-db builds a wasm that traps at init
-python scripts/pack_realm_backend.py --version 0.9.0   # --variant test for the test build
+python scripts/pack_realm_backend.py --version v0.9.0  # --variant test for the test build
 cd src/realm_frontend && npm run build              # REALMS_BUILD_VARIANT=test for a build with test flags
 ```
 
 `pack_realm_backend.py` builds the backend on the Cedar template and fails unless the wasm
 exports `read` and `run` ([Operations](../architecture/operations.md)).
+
+It also stamps the version `status` reports: `--version` when given, otherwise `local-<commit>`,
+the commit the wasm is packed from. `publish_build.py --from-main` stamps the
+`main.<unix_ts>.<sha>` label it publishes under, so a realm's version matches its registry tag.
 
 The production wasm holds none of the test-only code, and the packer fails if it does
 ([Build variants](../../AGENTS.md#build-variants-production-vs-test-wasm)).

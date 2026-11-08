@@ -129,10 +129,12 @@ jobs:
       - name: Build variants
         # Blocking on purpose: the checked-in variant is production, the test
         # gate fails closed, and the packer's wasm scan works in both
-        # directions. See realms-gos#395.
+        # directions. See realms-gos#395. The same packer stamps the version
+        # status() reports (realms-gos#551).
         run: |
           pytest -q tests/backend/test_build_variant.py \
-                    tests/backend/test_publish_build_variant.py
+                    tests/backend/test_publish_build_variant.py \
+                    tests/backend/test_realm_version_stamp.py
       - name: Cedar policy drift
         # The embedded policy text the canister runs must mirror the .cedar
         # source files; a stale copy silently changes what a realm enforces.

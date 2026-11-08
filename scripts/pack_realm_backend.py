@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Build the realm backend wasm on the Cedar template and check it exports ``read`` and ``run``.
 
-    python3 scripts/pack_realm_backend.py [--version X.Y.Z] [--variant production|test] [--gzip]
+    python3 scripts/pack_realm_backend.py [--version vX.Y.Z] [--variant production|test] [--gzip]
+
+The version ``status()`` reports is stamped into ``api/setup.py`` before packing: ``--version`` when given, otherwise
+``local-<commit>`` (the commit the wasm is packed from), so a wasm never reports the placeholder.
 
 basilisk packs the whole ``src/realm_backend`` tree, so test-only code left in that tree would ship to
 production even if no setting could reach it. The two variants therefore live in ``scripts/build_variants/``,
@@ -24,6 +27,7 @@ ENDPOINTS = ('service : (text) -> {', '"read" : (text, text) -> (text) query;', 
 VARIANTS = ("production", "test")
 DEFAULT_VARIANT = "production"
 ACTIVE_VARIANT = SRC / "core" / "build_variant.py"
+VERSION_PLACEHOLDER = 'VERSION = "VERSION_PLACEHOLDER"'
 # Defined only in scripts/build_variants/test.py: a wasm that contains them is a test build.
 TEST_ONLY_SYMBOLS = (b"REALMS_TEST_BUILD_AUTH_BYPASS", b"NON_PRODUCTION_NETWORKS")
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -48,11 +52,26 @@ def verify_build_variant(wasm, variant):
         sys.exit(f"a {variant} wasm must contain the test-only symbols {expected}, but contains {found}")
 
 
+def snapshot_version():
+    """What a build without a release tag reports: the commit it is packed from, or just ``local`` outside git."""
+    try:
+        sha = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--short=8", "HEAD"], text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "local"
+    return f"local-{sha}"
+
+
+def stamp_version(source, version):
+    """``api/setup.py``'s source with its version set; fails if the placeholder is gone, as it would ship unstamped."""
+    if VERSION_PLACEHOLDER not in source:
+        sys.exit(f"api/setup.py has no {VERSION_PLACEHOLDER!r} line to stamp")
+    return source.replace(VERSION_PLACEHOLDER, f'VERSION = "{version}"')
+
+
 def pack(version=None, variant=DEFAULT_VARIANT):
     setup = SRC / "api" / "setup.py"
     original = setup.read_text()
-    if version:
-        setup.write_text(original.replace('VERSION = "VERSION_PLACEHOLDER"', f'VERSION = "{version}"'))
+    setup.write_text(stamp_version(original, version or snapshot_version()))
     select_build_variant(variant)
     try:
         env = apply_cedar_template_env()
@@ -81,7 +100,7 @@ def release_gzip(wasm):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version")
+    parser.add_argument("--version", help="the release tag, e.g. v0.8.0 (default: local-<commit>)")
     parser.add_argument("--variant", choices=VARIANTS, default=DEFAULT_VARIANT)
     parser.add_argument("--gzip", action="store_true", help="embed the candid metadata and gzip, as a release does")
     args = parser.parse_args()
