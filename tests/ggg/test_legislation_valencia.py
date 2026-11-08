@@ -11,10 +11,12 @@ from pathlib import Path
 import pytest
 
 from core import legislation, op
-from ggg import Department, Document, External, Member, TaxPolicy
+from core.db import each
+from ggg import Department, Document, External, Invoice, Land, Member, TaxPolicy
 from kit import call, ok
 import world
 from test_legislation_runtime import activate, fresh_realm, layered  # noqa: F401  the autouse fixture
+from test_taxes import adopt_policy, setup_taxes
 
 TREE = Path(__file__).resolve().parents[1] / "fixtures/legislation/valencia"
 VALENCIA = "eu/es/vc/46250-valencia"
@@ -72,10 +74,15 @@ def submit_title(user, value, verify=True):
         ok("attribute_review", "hector", attribute=attribute, status="verified")
 
 
-@pytest.fixture
-def codex():
+def reviewer():
+    """Hector, who verifies attributes."""
     world.seat("civil-registry.reviewer", "hector", Department["Civil Registry"], "attribute.review")
     world.person("hector")
+
+
+@pytest.fixture
+def codex():
+    reviewer()
     return valencia()
 
 
@@ -95,6 +102,25 @@ def test_no_bonus_without_a_verified_title_of_a_known_kind_held_by_a_person(code
     ok("attribute_submit", "dana", kind="student", value="general", ref="vault:dana")
     assert [bonus(f"User:{who}") for who in ("alice", "bob", "dana", "carla")] == ["0", "0", "0", "0"]
     assert bonus("Organization:buildco") == "0"
+
+
+def items_of(payer):
+    return [(i["concept"], i["amount"]) for invoice in each(Invoice, "payer", payer) for i in invoice.items]
+
+
+def test_the_ibi_is_assessed_on_the_parcels_value_less_the_verified_large_family_bonus():
+    setup_taxes()  # the invoice token has two decimals: a cent is a unit
+    reviewer()
+    Land(id="L-1", owner="User:alice", width=10, height=12, assessed_value=20_000_000, area=120)  # 200 000.00
+    Land(id="L-2", owner="User:bob", width=10, height=12, assessed_value=20_000_000, area=120)
+    Land(id="L-3", owner="User:carla", width=1, height=1)  # never assessed: no IBI yet
+    submit_title("alice", "general")
+    valencia()
+    adopt_policy([{"code": "ibi_urban", "kind": "tax", "subject": "Land", "rate": 1_240_000, "facts": {}}])  # 1.24 %
+    assert ok("tax_assess", "bob", period="2026")["count"] == 2
+    assert items_of("User:alice") == [("ibi_urban", 248_000), ("ibi_urban_bonus", -148_800)]  # 2 480.00 less 60 %
+    assert items_of("User:bob") == [("ibi_urban", 248_000)]
+    assert items_of("User:carla") == []
 
 
 # ── Local regime (§5.2): the guard on a change of legislation and the hooks that run when it is installed ────────

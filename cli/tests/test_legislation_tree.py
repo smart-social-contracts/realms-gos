@@ -20,6 +20,7 @@ OPERATIONS = (
     "notification_send",
     "procedure_define",
     "proposal_create",
+    "tax_assess",
     "tax_policy_propose",
     "user_add",
 )
@@ -76,12 +77,13 @@ def valencia():
     )
 
 
-def test_every_checksum_in_the_trees_releases_names_a_file_of_the_tree():
+def test_every_checksum_in_the_newest_release_of_a_source_names_a_file_of_the_tree():
+    """The files are the newest release's; an earlier release's bytes are in git history, at its commit."""
     chapters, calendars = files_by_checksum()
     for release_file in TREE.rglob("releases.json"):
-        for release in json.loads(release_file.read_text()):
-            assert set(release["chapters"].values()) <= set(chapters)
-            assert release["calendar"] is None or release["calendar"] in calendars
+        release = json.loads(release_file.read_text())[-1]
+        assert set(release["chapters"].values()) <= set(chapters)
+        assert release["calendar"] is None or release["calendar"] in calendars
 
 
 def test_valencias_layer_paths_are_what_its_sync_sources_relay_then_its_own_layer(
@@ -149,3 +151,4 @@ def test_the_flattened_view_of_tax_shows_which_layer_sets_what(valencia):
     assert members["ibi_urban_cap"] == ["eu/es"]
     assert members["capital"] == ["eu/es", VALENCIA]
     assert members["ibi_bonus"] == ["eu/es", VALENCIA]
+    assert members["compute_tax_assess"] == ["eu/es"]

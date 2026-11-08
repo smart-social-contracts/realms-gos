@@ -1,0 +1,18 @@
+[
+  {"name": "Spain asks for no bonus by default", "call": "ibi_bonus", "args": ["User:alice"], "returns": 0},
+  {"name": "Spain: 1.10 % is the most for a town that is not a capital", "forbid": "tax_policy_propose", "each": "taxes",
+   "facts": {"code": "ibi_urban", "rate": 1100000}, "fires": []},
+  {"name": "Spain: more than 1.10 % is forbidden for a town that is not a capital", "forbid": "tax_policy_propose", "each": "taxes",
+   "facts": {"code": "ibi_urban", "rate": 1100001}, "fires": ["eu/es/tax/ibi_urban_cap"]},
+  {"name": "Spain: a rate below 0.40 % is forbidden", "forbid": "tax_policy_propose", "each": "taxes",
+   "facts": {"code": "ibi_urban", "rate": 399999}, "fires": ["eu/es/tax/ibi_urban_range"]},
+  {"name": "Spain: an IBI entry states its rate", "forbid": "tax_policy_propose", "each": "taxes",
+   "facts": {"code": "ibi_rustic"}, "fires": ["eu/es/tax/ibi_rate_required"]},
+  {"name": "València is a capital with surface public transport: 1.24 %", "realm": "eu/es/vc/46250-valencia",
+   "forbid": "tax_policy_propose", "each": "taxes", "facts": {"code": "ibi_urban", "rate": 1240000}, "fires": []},
+  {"name": "València: more than 1.24 % is forbidden", "realm": "eu/es/vc/46250-valencia",
+   "forbid": "tax_policy_propose", "each": "taxes", "facts": {"code": "ibi_urban", "rate": 1240001},
+   "fires": ["eu/es/tax/ibi_urban_cap"]},
+  {"name": "València forgives 60 % and 90 % of the quota to large families", "realm": "eu/es/vc/46250-valencia",
+   "call": "large_family_bonus", "returns": {"general": 60000000, "special": 90000000}}
+]
