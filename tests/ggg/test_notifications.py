@@ -64,6 +64,23 @@ def test_notifications_are_delegable_and_sending_needs_the_permission():
     assert "unknown" in call("notification_send", "ctl", recipient="User:nobody", title="hi")["error"]
 
 
+def test_a_delegate_reads_only_the_members_own_inbox():
+    world.build()
+    ok("notification_send", "ctl", recipient="User:bob", title="Your shift")
+    office = ok("notification_send", "ctl", recipient="Department:Civil Registry",
+                title="Office closed")["notification"]
+    Delegation(id="d1", grantor="bob", delegate="claude-conn", status="active",
+               scope={"operations": ["self.data_view", "self.data_manage"]}, expires_at=fake_chain.now() + 3600)
+    acting = dict(on_behalf_of="bob")
+    assert [n["title"] for n in ok("notification_list", "claude-conn", **acting)["notifications"]] == ["Your shift"]
+    assert "do not read" in denied("notification_list", "claude-conn", recipient="Department:Civil Registry", **acting)
+    assert "do not read" in denied("notification_read", "claude-conn", all=True, recipient="Department:Civil Registry",
+                                   **acting)
+    assert "not addressed to you" in denied("notification_read", "claude-conn", notification=office, **acting)
+    assert [n["title"] for n in ok("notification_list", "bob", recipient="Department:Civil Registry")
+            ["notifications"]] == ["Office closed"]
+
+
 def test_events_newest_first_and_paginated():
     world.build()
     for i in range(5):

@@ -154,12 +154,16 @@ def test_a_federal_vote_action_cannot_act_on_behalf_of_a_member():
     assert FederalVote.count() == 0
 
 
-def test_claude_proposes_for_alice():
+def test_a_delegate_cannot_carry_a_federal_vote():
     capital()
-    Delegation(id="d1", grantor="alice", delegate="claude-conn", status="active",
-               scope={"operations": ["federal_vote.propose"]}, expires_at=fake_chain.now() + 60)
-    v = ok("federal_vote_propose", "claude-conn", title="x", action=ACTION, on_behalf_of="alice")["vote"]
-    assert Proposal[FederalVoteLeg[f"{v}:{CAPITAL}"].proposal_id].proposer == "alice"
+    assert "not a delegable" in denied("delegation_grant", "alice", delegate="claude-conn",
+                                       operations=["federal_vote.propose"], expires_in=60)
+    # A grant made while federal votes were delegable no longer covers them, with or without the right to vote.
+    Delegation(id="d1", grantor="alice", delegate="claude-conn", status="active", expires_at=fake_chain.now() + 60,
+               scope={"operations": ["federal_vote.propose", "proposal.vote"]})
+    assert "power of attorney" in denied("federal_vote_propose", "claude-conn", title="x", action=ACTION,
+                                         on_behalf_of="alice")
+    assert FederalVote.count() == 0 and Proposal.count() == 0
 
 
 def test_cancel_is_governed_and_withdraws_every_leg():
