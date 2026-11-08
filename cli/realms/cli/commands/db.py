@@ -117,6 +117,8 @@ class NavigationState:
     entity_type: str = ""
     page_num: int = 0
     page_size: int = 10
+    page_starts: List[int] = None  # the row each page so far starts at, the current page's last
+    next_start: Optional[int] = None  # where the page after the current one starts, None at the end
     current_items: List[Dict] = None
     selected_item: Optional[Dict] = None
     cursor_position: int = 0
@@ -124,6 +126,8 @@ class NavigationState:
     navigation_stack: List[Dict] = None
 
     def __post_init__(self):
+        if self.page_starts is None:
+            self.page_starts = [1]
         if self.current_items is None:
             self.current_items = []
         if self.navigation_stack is None:
@@ -151,48 +155,49 @@ class CursorDatabaseExplorer:
         return realm_op(self.canister, name, args, self.network, self.identity, read=True, cwd=self.cwd, timeout=30)
 
     def list_entities(
-        self, entity_type: str, page_num: int = 0, page_size: int = 10
+        self, entity_type: str, start: int = 1, page_size: int = 10
     ) -> Dict[str, Any]:
-        """One page of an entity's rows (``realm_export``), each with its ``_type`` and ``_id``.
+        """One page of an entity's rows (``realm_export``) from row ``start``, each with its ``_type`` and ``_id``,
+        and ``next``: the ``start`` of the page after it, None at the end.
 
-        The realm returns fewer rows than asked for when an entity's rows are large, and says where to go on in
-        ``next``: the page is filled by following it, never by computing where the next call starts.
+        Rows can be missing from the ids (deleted ones), and the realm returns fewer rows than asked for when an
+        entity's rows are large. It says where to go on in ``next``, so the page is filled by following it and the
+        next page starts at the ``next`` that comes back, never at a computed row.
         """
         if "::" in entity_type:
             return {"error": f"{entity_type}: extension entities are not supported by this realm version", "items": []}
-        rows, start = [], page_num * page_size + 1
-        while start is not None and len(rows) < page_size:
+        rows, following = [], start
+        while following is not None and len(rows) < page_size:
             try:
                 reply = self.call_backend(
-                    "realm_export", {"entity": entity_type, "from": start, "count": page_size - len(rows)}
+                    "realm_export", {"entity": entity_type, "from": following, "count": page_size - len(rows)}
                 )
             except Exception as e:
                 logger.error(traceback.format_exc())
                 return {"error": str(e), "items": []}
             if not reply.get("ok"):
                 return {"error": reply.get("error", "Unknown error"), "items": []}
+            answer = reply.get("next")
+            if answer is not None and answer <= following:
+                return {"error": f"{entity_type}: the realm answered next={answer} to from={following}", "items": []}
             rows += reply["rows"]
-            start = reply.get("next")
-        more = start is not None
+            following = answer
         return {
             "items": [{"_type": entity_type, "_id": row.get("id", ""), **row} for row in rows],
-            "page_num": page_num,
+            "start": start,
             "page_size": page_size,
-            "total_pages": page_num + (2 if more else 1),
-            "more": more,
+            "next": following,
         }
 
     def all_entities(self, entity_type: str, page_size: int = 100):
         """Every row of ``entity_type``, page by page; raises ``RuntimeError`` on a refused page."""
-        page_num = 0
-        while True:
-            result = self.list_entities(entity_type, page_num, page_size)
+        start = 1
+        while start is not None:
+            result = self.list_entities(entity_type, start, page_size)
             if "error" in result:
                 raise RuntimeError(result["error"])
             yield from result["items"]
-            if not result["more"]:
-                return
-            page_num += 1
+            start = result["next"]
 
     def find_entities(self, entity_type: str, params: List[tuple]) -> Dict[str, Any]:
         """Rows of ``entity_type`` whose fields match every ``(field, value)`` in ``params``."""
@@ -258,16 +263,15 @@ class CursorDatabaseExplorer:
         def page_up(event):
             if self.state.page_num > 0:
                 self.state.page_num -= 1
+                self.state.page_starts.pop()
                 self.refresh_data()
                 event.app.invalidate()
 
         @kb.add("pagedown")
         def page_down(event):
-            if (
-                hasattr(self.state, "total_pages")
-                and self.state.page_num < self.state.total_pages - 1
-            ):
+            if self.state.next_start is not None:
                 self.state.page_num += 1
+                self.state.page_starts.append(self.state.next_start)
                 self.refresh_data()
                 event.app.invalidate()
 
@@ -293,6 +297,7 @@ class CursorDatabaseExplorer:
                 self.state.entity_type = selected_entity
                 self.state.view_mode = "record_list"
                 self.state.cursor_position = 0
+                self.state.page_num, self.state.page_starts = 0, [1]
                 self.refresh_data()
         elif self.state.view_mode == "record_list":
             if self.state.cursor_position < len(self.state.current_items):
@@ -379,7 +384,7 @@ class CursorDatabaseExplorer:
                         break
                 
                 if related_class:
-                    result = self.list_entities(related_class.__name__, 0, 100)
+                    result = self.list_entities(related_class.__name__, 1, 100)
                     if "items" in result and result["items"]:
                         # Find the specific item by ID or alias
                         related_items = [
@@ -444,7 +449,7 @@ class CursorDatabaseExplorer:
                     # Try to fetch full entity details for each related item
                     full_items = []
                     try:
-                        result = self.list_entities(related_class.__name__, 0, 100)
+                        result = self.list_entities(related_class.__name__, 1, 100)
                         if "items" in result and result["items"]:
                             # Match related items with full entity data
                             for rel_item in rel_items:
@@ -493,7 +498,7 @@ class CursorDatabaseExplorer:
                     
                     if rel_id:
                         try:
-                            result = self.list_entities(related_class.__name__, 0, 100)
+                            result = self.list_entities(related_class.__name__, 1, 100)
                             if "items" in result and result["items"]:
                                 found_item = next(
                                     (item for item in result["items"] if item.get("_id") == str(rel_id)),
@@ -706,17 +711,20 @@ class CursorDatabaseExplorer:
         elif self.state.view_mode == "record_list" and self.state.entity_type:
             logger.info(f"Fetching data for entity type: {self.state.entity_type}")
             result = self.list_entities(
-                self.state.entity_type.__name__, self.state.page_num, self.state.page_size
+                self.state.entity_type.__name__, self.state.page_starts[-1], self.state.page_size
             )
             logger.info(f"Backend result: {result}")
             if "error" not in result and "items" in result:
                 self.state.current_items = result["items"]
-                self.state.total_pages = result.get("total_pages", 1)
+                self.state.next_start = result["next"]
+                # Pages are reached one after another, so only the ones seen are counted, and one more if there is one
+                self.state.total_pages = self.state.page_num + (1 if result["next"] is None else 2)
                 logger.info(f"Loaded {len(result['items'])} items")
             else:
                 logger.error(f"Failed to load data: {result}")
                 self.state.current_items = []
-                self.state.total_pages = 1
+                self.state.next_start = None
+                self.state.total_pages = self.state.page_num + 1
 
     def _fetch_entity_counts(self):
         """Fetch entity counts once and cache them: the ones ``realm_monitor`` reports, "?" for the others."""
