@@ -24,9 +24,9 @@ class Period(metaclass=Sealed):
     __slots__ = ("count", "unit")
 
     def __init__(self, count, unit):
-        if isinstance(count, bool) or not isinstance(count, int):
+        if type(count) is not int:
             raise LegislationError(f"a Period's count is an integer, not {count!r}")
-        if unit not in UNITS:
+        if type(unit) is not str or unit not in UNITS:
             raise LegislationError(f"{unit!r} is not a GGG Period unit {UNITS}")
         object.__setattr__(self, "count", count)
         object.__setattr__(self, "unit", unit)

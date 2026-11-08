@@ -27,7 +27,7 @@ def pct(text):
 
     Takes the decimal as a string (or an integer), never a float. More than six decimals do not fit
     the scale and are refused rather than rounded."""
-    if isinstance(text, bool) or not isinstance(text, (str, int)):
+    if type(text) not in (str, int):
         raise LegislationError(f'write a rate as a string, pct("1.10"), not {text!r}')
     text = str(text).strip()
     sign, digits = 1, text
@@ -53,7 +53,7 @@ def cent(decimals):
     """One cent, in the token's smallest units: ``10 ** (decimals - 2)``. A token with fewer than two
     decimals cannot express a cent finer than its own unit, so rounding falls back to that unit.
     """
-    if isinstance(decimals, bool) or not isinstance(decimals, int) or decimals < 0:
+    if type(decimals) is not int or decimals < 0:
         raise LegislationError(
             f"a token's decimals is a non-negative integer, not {decimals!r}"
         )
@@ -66,7 +66,7 @@ def times(units, rate, decimals):
 
     The result is a multiple of ``cent(decimals)`` smallest units."""
     for value in (units, rate):
-        if isinstance(value, bool) or not isinstance(value, int):
+        if type(value) is not int:
             raise LegislationError(f"money times a rate takes integers, not {value!r}")
     step = cent(decimals)
     product = units * rate
@@ -87,7 +87,7 @@ class Money(metaclass=Sealed):
     __slots__ = ("units", "decimals")
 
     def __init__(self, units, decimals=None):
-        if isinstance(units, bool) or not isinstance(units, int):
+        if type(units) is not int:
             raise LegislationError(
                 f"money is an integer amount in the smallest unit, not {units!r}"
             )

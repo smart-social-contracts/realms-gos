@@ -14,6 +14,10 @@ from realms.legislation.periods import Period
 from realms.legislation.rates import Money
 from realms.legislation.sealed import MappingProxyType, Sealed, freeze
 
+# Nested calls from one domain's chapter into another's (layered-codex.md §4.4, §9.3). The resolver
+# refuses a codex whose ``uses`` chain is deeper, and ``as_layer`` stops a call that would be.
+MAX_DEPTH = 8
+
 
 class Ref(metaclass=Sealed):
     """GGG's ``Ref``: a reference to any entity by kind and id, ``Ref("external", "INE")``."""
@@ -21,7 +25,7 @@ class Ref(metaclass=Sealed):
     __slots__ = ("kind", "id")
 
     def __init__(self, kind, id):
-        if not isinstance(kind, str) or not isinstance(id, str):
+        if type(kind) is not str or type(id) is not str:
             raise LegislationError("Ref(kind, id) takes two strings")
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "id", id)
@@ -143,11 +147,14 @@ class Event(metaclass=Sealed):
 
 class Context(metaclass=Sealed):
     """What one call of the legislation runs with: the codex, the time, the approvals the operation
-    carries, and the effects queue every chapter of the call shares."""
+    carries, the effects queue every chapter of the call shares, and which domains' methods are running
+    (``running``, outermost first) and how many calls between domains are in progress (``depth``, at
+    most ``MAX_DEPTH``)."""
 
     def __init__(self, codex, now=0, approvals=(), operations=None):
         self.codex, self.now, self.approvals = codex, now, frozenset(approvals)
         self.effects = Effects(operations)
+        self.running, self.depth = [], 0
 
 
 class Public(metaclass=Sealed):

@@ -65,6 +65,8 @@ jobs:
             echo "::error::canister/principal ids belong in casals.json (read them with 'casals export')"; exit 1
           fi
 
+  # The unit gate (tests/ggg, tests/backend, the ratchet and the GGG checks) is tests.yml, which runs on every
+  # pull request; this job keeps what only the full bring-up needs: the layered codex library, the CLI, the frontend.
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -78,49 +80,21 @@ jobs:
           pip install -e cli/
           pip install -r requirements.txt
           pip install pytest pytest-cov cedarpy==4.12.2
+      # The pinned Cedar CLI 4.14.1 (experimental, with symcc) and cvc5 1.3.1 prove that every
+      # generated forbid never errors (docs/codices/layered-codex.md §6 rule 9); the library's tests
+      # below need them, and cedarpy 4.12 (the canister's Cedar line) for validation and decisions.
+      - name: Cedar analysis tools
+        uses: actions/cache@v4
+        with:
+          path: .cache/cedar-tools
+          key: cedar-tools-cli-4.14.1-cvc5-1.3.1
+      - run: scripts/cedar_tools.sh .cache/cedar-tools >> "$GITHUB_ENV"
+      - name: Layered codex library
+        # Blocking: realms.legislation is the code the realm runs at install, and these tests are
+        # in-process (cedarpy, the pinned CLI), with no canister or DB.
+        run: pytest -q cli/tests/test_legislation*.py
       - name: CLI unit tests
         run: pytest -v cli/tests/ || true
-      - name: Extension sandbox ratchet
-        # Blocking on purpose: the list of extensions that still import host modules may only shrink.
-        run: python3 scripts/declare_extension_runtime.py --check
-      - name: tests/backend
-        # The whole directory, not a list: a test added there runs. Source scans and contracts of the
-        # extensions, codices and build variants, with no canister or DB. The build-variant tests are blocking
-        # on purpose: the checked-in variant is production, the test gate fails closed, and the packer's wasm
-        # scan works in both directions (realms-gos#395). marketplace/ has its own step until the realm backend pins ic-python-db 0.14.0 as well (realms-gos#541).
-        run: pytest -q tests/backend --ignore=tests/backend/marketplace
-      - name: Marketplace (temporary)
-        # Its own environment: the marketplace canister pins ic-python-db 0.14.0. Remove this step and
-        # the --ignore above once #541 has merged.
-        run: |
-          python -m venv /tmp/marketplace-env
-          /tmp/marketplace-env/bin/pip install -r src/marketplace_backend/requirements.txt pytest
-          /tmp/marketplace-env/bin/pytest -q tests/backend/marketplace
-      - name: GGG interface
-        # The generated GGG methods must match ggg/ggg.did, and every operation must pass
-        # tests/ggg. Its own process: its fake chain replaces the ggg entities loaded above.
-        run: |
-          python3 scripts/ggg_candid.py --check
-          # The bundled time zones are what the pinned tz database gives: it is downloaded, checked against its sha512
-          # and built here (needs make and a C compiler).
-          python3 scripts/build_zones.py --check
-          pytest -q tests/ggg --cov=src/realm_backend --cov-report=
-          # Again, each operation through its ggg_ method, every reply checked against ggg.did.
-          GGG_MIRROR=strict pytest -q tests/ggg
-      - name: GGG coverage floors
-        # A ratchet, not a target: each floor is the level reached when it was set, so coverage can
-        # only go up. Raise a floor when the number above it grows; ggg_api.py is lowest while the
-        # mirror harness (tests/ggg/mirror.py) still reports mismatches. Generated files are left out.
-        run: |
-          coverage report --include='src/realm_backend/api/*' --fail-under=95
-          coverage report --include='src/realm_backend/ggg_api.py' --fail-under=60
-          coverage report --omit='src/realm_backend/ggg_did.py,src/realm_backend/ggg_methods.py' --skip-covered
-          coverage xml -o coverage-ggg.xml --omit='src/realm_backend/ggg_did.py,src/realm_backend/ggg_methods.py'
-      - name: Upload the GGG coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-ggg
-          path: coverage-ggg.xml
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}

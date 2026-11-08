@@ -17,6 +17,7 @@ path, and a codex whose value fails it is refused.
 """
 
 from realms.legislation.errors import LegislationError
+from realms.legislation.expressions import Expr
 from realms.legislation.sealed import Sealed
 
 FIXED, EXTENSION, OVERRIDABLE = "fixed", "extension", "overridable"
@@ -74,21 +75,28 @@ overridable = _mark(OVERRIDABLE)
 
 
 class Forbid(metaclass=Sealed):
-    """A forbid: ``op`` is the GGG operation it forbids, ``expression`` the tree that is true when the
-    operation is forbidden, ``each`` the list the rule ranges over.
+    """A forbid: ``op`` is the GGG operation it forbids, ``expression`` the ``F`` tree that is true
+    when the operation is forbidden (expressions.py), ``each`` the list the rule ranges over.
 
-    S1 keeps the rule; the ``F`` expression language, its evaluation and the Cedar it becomes are S2
-    (#484). Forbids are never overridable, never removable and never change once written.
+    Forbids are never overridable, never removable and never change once written. The Cedar they
+    become, and their binding to a realm's settings and fact schema, is ``cedar.py``.
     """
 
     __slots__ = ("op", "expression", "each", "legislation")
 
     def __init__(self, op, expression, each, legislation):
-        if not isinstance(op, str) or not op:
+        if type(op) is not str or not op:
             raise LegislationError(
                 'a forbid names a GGG operation, such as forbid("tax_policy_propose", ...)'
             )
-        if each is not None and (not isinstance(each, str) or not each):
+        if legislation is not None and type(legislation) is not str:
+            raise LegislationError('legislation="..." is a string')
+        if not isinstance(expression, (Expr, bool)):
+            raise LegislationError(
+                "a forbid's expression is built from F, S and when(), such as "
+                '(F.code == "ibi_urban") & F.rate.is_some() & (F.rate > pct("1.10"))'
+            )
+        if each is not None and (type(each) is not str or not each):
             raise LegislationError(
                 'each= names the list the forbid ranges over, such as each="taxes"'
             )

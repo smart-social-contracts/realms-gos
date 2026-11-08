@@ -10,7 +10,14 @@ class never changes: its settings are frozen values, attribute assignment is ref
 own classes are sealed the same way.
 """
 
-from realms.legislation.context import GGG, Denial, Domains, Event, Ref
+from realms.legislation.context import (
+    GGG,
+    MAX_DEPTH,
+    Denial,
+    Domains,
+    Event,
+    Ref,
+)
 from realms.legislation.errors import LegislationError, Refused
 from realms.legislation.marks import EXTENSION, FIXED, Forbid, Method, Setting
 from realms.legislation.periods import Period
@@ -67,13 +74,16 @@ def line_of(text, *starts):
 
 
 def is_data(value):
-    """A setting's value: str, int, bool, null, lists or dicts of those, a Period, or a GGG Ref. Never a float."""
-    if value is None or isinstance(value, (bool, int, str, Period, Ref)):
+    """A setting's value: str, int, bool, null, lists or dicts of those, a Period, or a GGG Ref. Never
+    a float, and never a subclass: an int or str with a ``__str__`` or ``__iter__`` of its own would
+    write what it likes into the generated Cedar, so only the exact types are data."""
+    kind = type(value)
+    if value is None or kind in (bool, int, str, Period, Ref):
         return True
-    if isinstance(value, (list, tuple)):
+    if kind in (list, tuple):
         return all(is_data(v) for v in value)
-    if isinstance(value, (dict, MappingProxyType)):
-        return all(isinstance(k, str) and is_data(v) for k, v in value.items())
+    if kind in (dict, MappingProxyType):
+        return all(type(k) is str and is_data(v) for k, v in value.items())
     return False
 
 
@@ -172,13 +182,27 @@ def kind_of(name):
 
 def as_layer(chapter, source, fn, args, kwargs):
     """Run ``fn`` on ``chapter`` as the layer ``source`` that defined it, so ``self.layer`` and ``uses``
-    are those of the layer whose code runs, whatever lower class the instance has."""
+    are those of the layer whose code runs, whatever lower class the instance has.
+
+    Every method of every chapter runs through here, so this is where calls between domains are
+    counted: a method of a domain other than the one running is one more nested call, however the
+    caller got hold of it, and the one that would pass ``MAX_DEPTH`` is refused."""
+    context, domain = chapter.__context__, type(chapter).__domain__
+    crossing = bool(context.running) and context.running[-1] != domain
+    if crossing:
+        if context.depth >= MAX_DEPTH:
+            raise LegislationError(f"calls between domains stop at depth {MAX_DEPTH}")
+        context.depth += 1
+    context.running.append(domain)
     layers = chapter.__dict__.setdefault("__layers__", [])
     layers.append(source)
     try:
         return fn(chapter, *args, **kwargs)
     finally:
         layers.pop()
+        context.running.pop()
+        if crossing:
+            context.depth -= 1
 
 
 def bound(fn, source):
@@ -339,6 +363,16 @@ def _member(key, value, load, refuse):
         line = raw.__code__.co_firstlineno
     elif isinstance(value, Forbid):
         kind, raw, op, legislation = "forbid", value, value.op, value.legislation
+        action = f"{op}.{value.each}" if value.each else op
+        if load.codex.facts is not None and action not in load.codex.facts.actions:
+            refuse(
+                (
+                    f'{key}: each="{value.each}" names no list of {op}: the fact schema has no {action}'
+                    if value.each
+                    else f"{key}: the fact schema has no facts for {op}"
+                ),
+                line,
+            )
     elif isinstance(value, float):
         refuse(f"{key}: floats are not allowed in a chapter", line)
     elif isinstance(value, type):
@@ -373,6 +407,11 @@ def _member(key, value, load, refuse):
     if kind == "compute" and mark == EXTENSION:
         refuse(
             f"{key}: a compute_ method cannot be an extension; merging what layers compute is not defined",
+            line,
+        )
+    if legislation is not None and type(legislation) is not str:
+        refuse(
+            f'{key}: legislation="..." is a string, not {type(legislation).__name__}',
             line,
         )
     if not key.startswith("_") and not load.own and legislation is None:
