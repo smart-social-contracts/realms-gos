@@ -3,6 +3,7 @@
 | Suite | Where | Runs | Needs |
 |---|---|---|---|
 | Backend | [`tests/ggg/`](../../tests/ggg) | Every operation, Cedar, the sandbox, codices, against an in-memory realm | Python 3.10, `cedarpy` |
+| Source scans and contracts | [`tests/backend/`](../../tests/backend) | Build variants, the codex package contract, extension manifests and sidebar labels, local-time arithmetic, the marketplace canister | Python 3.10 |
 | Codex hooks | `codices/tests/` | Each first-party codex's hooks against canned reads | Python |
 | Frontend | [`src/realm_frontend/`](../../src/realm_frontend) | Unit tests (Vitest), browser tests (Playwright) | Node |
 | CLI | [`cli/tests/`](../../cli/tests) | The `realms` CLI | Python |
@@ -123,9 +124,19 @@ use clean ones. Every test records screenshots and video into `src/realm_fronten
 spec had to repeat (a reloaded join page) is a `workaround` annotation in the report. The workflow [`realms-gaas-e2e.yml`](../../.github/workflows/realms-gaas-e2e.yml) runs the same script nightly and on
 demand, and uploads both folders.
 
-## Not yet in CI
+## In CI
 
-CI ([`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml)) still runs `tests/backend/`,
-the suite of the previous backend, which does not load on this branch. `tests/ggg` and
-`scripts/loc_budget.py` are not in CI yet, and `cedarpy` is not in `requirements-dev.txt`. Run them
-locally before a pull request.
+[`tests.yml`](../../.github/workflows/tests.yml) runs on every pull request and every push to `main` and
+`feat/layered-codex`: `tests/ggg` (with `cedarpy`, once through each operation's `ggg_` method), `tests/backend`, the
+extension sandbox ratchet and the generated GGG methods and zone data. It needs no secrets and no replica.
+`tests/backend/marketplace` runs in its own environment because the marketplace canister pins another
+`ic-python-db`. [`ci-pr.yml`](../../.github/workflows/ci-pr.yml) and `ci-main.yml` run by hand only (the full bring-up of a
+mundus on a local replica), and `scripts/loc_budget.py` is not in CI yet. Run all of it before a pull request:
+
+```bash
+pip install -r requirements.txt -e cli/ cedarpy==4.12.2 pytest
+pytest tests/ggg -q && pytest tests/backend -q --ignore=tests/backend/marketplace
+```
+
+`tests/backend` held the suite of the previous backend until realms-gos#513 removed it; that code is in
+`legacy/realm_backend`, and the tests that checked it are in the history before that change.

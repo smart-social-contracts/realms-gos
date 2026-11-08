@@ -1,0 +1,76 @@
+# tests.yml — the unit suites: no canister, no replica, no secrets.
+#
+# Runs on every pull request and every push to main or feat/layered-codex. ci-pr.yml and
+# ci-main.yml run only by hand (their triggers are commented out), and with them the full
+# mundus bring-up; this one is the gate that cannot be skipped.
+
+name: Tests
+
+on:
+  pull_request:
+    branches: [main, feat/layered-codex]
+  push:
+    branches: [main, feat/layered-codex]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: |
+          pip install -e cli/
+          pip install -r requirements.txt
+          pip install pytest pytest-cov cedarpy==4.12.2
+      - name: Extension sandbox ratchet
+        # The list of extensions that still import host modules may only shrink.
+        run: python3 scripts/declare_extension_runtime.py --check
+      - name: GGG interface and zone data
+        # The generated GGG methods must match ggg/ggg.did. The bundled time zones are what the pinned tz
+        # database gives: it is downloaded, checked against its sha512 and built here.
+        run: |
+          python3 scripts/ggg_candid.py --check
+          python3 scripts/build_zones.py --check
+      - name: tests/ggg
+        # Its own process: its fake chain replaces the ggg entities the other suites load.
+        run: |
+          pytest -q tests/ggg --cov=src/realm_backend --cov-report=
+          # Again, each operation through its ggg_ method, every reply checked against ggg.did.
+          GGG_MIRROR=strict pytest -q tests/ggg
+      - name: GGG coverage floors
+        # A ratchet, not a target: each floor is the level reached when it was set. Raise it when the
+        # number above it grows. Generated files are left out.
+        run: |
+          coverage report --include='src/realm_backend/api/*' --fail-under=95
+          coverage report --include='src/realm_backend/ggg_api.py' --fail-under=60
+      - name: tests/backend
+        # Source scans and contracts of the extensions, codices and build variants.
+        # marketplace/ runs in the next job until the realm backend pins ic-python-db 0.14.0 as well
+        # (realms-gos#541); then drop the --ignore and the job.
+        run: pytest -q tests/backend --ignore=tests/backend/marketplace
+
+  # TEMPORARY: the marketplace canister pins ic-python-db 0.14.0, the realm backend still 0.12.0, and
+  # the two cannot share an environment. Remove with the --ignore above once #541 has merged.
+  marketplace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: |
+          pip install -r src/marketplace_backend/requirements.txt
+          pip install pytest
+      - run: pytest -q tests/backend/marketplace

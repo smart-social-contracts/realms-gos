@@ -77,68 +77,25 @@ jobs:
       - run: |
           pip install -e cli/
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov cedarpy==4.12.2
       - name: CLI unit tests
         run: pytest -v cli/tests/ || true
-      - name: Extension privilege ratchet
-        # Blocking on purpose: these are pure source scans and in-memory unit
-        # tests with no canister or DB, so a failure here is a real
-        # regression. The exemption list may only shrink, no extension may
-        # take the caller's identity from its own call args, every bridge verb
-        # must keep checking the caller's operation host-side, and no verb may
-        # be dispatched without its call origin.
+      - name: Extension sandbox ratchet
+        # Blocking on purpose: the list of extensions that still import host modules may only shrink.
+        run: python3 scripts/declare_extension_runtime.py --check
+      - name: tests/backend
+        # The whole directory, not a list: a test added there runs. Source scans and contracts of the
+        # extensions, codices and build variants, with no canister or DB. The build-variant tests are blocking
+        # on purpose: the checked-in variant is production, the test gate fails closed, and the packer's wasm
+        # scan works in both directions (realms-gos#395). marketplace/ has its own step until the realm backend pins ic-python-db 0.14.0 as well (realms-gos#541).
+        run: pytest -q tests/backend --ignore=tests/backend/marketplace
+      - name: Marketplace (temporary)
+        # Its own environment: the marketplace canister pins ic-python-db 0.14.0. Remove this step and
+        # the --ignore above once #541 has merged.
         run: |
-          python3 scripts/declare_extension_runtime.py --check
-          pytest -q tests/backend/test_extension_caller_identity.py \
-                    tests/backend/test_sandbox_exemption_ratchet.py \
-                    tests/backend/test_extension_manifest_contract.py \
-                    tests/backend/test_extension_bridge.py \
-                    tests/backend/test_extension_bridge_verbs.py \
-                    tests/backend/test_extension_owned_entities.py \
-                    tests/backend/test_land_bridge.py \
-                    tests/backend/test_extension_grants.py \
-                    tests/backend/test_notification_bridge.py \
-                    tests/backend/test_console_bridge.py \
-                    tests/backend/test_async_bridge.py \
-                    tests/backend/test_treasury_bridge.py \
-                    tests/backend/test_procurement_bridge.py \
-                    tests/backend/test_procurement_sandboxed.py \
-                    tests/backend/test_justice_bridge.py \
-                    tests/backend/test_justice_sandboxed.py \
-                    tests/backend/test_sandbox_package_bundle.py \
-                    tests/backend/department_docs/ \
-                    tests/backend/test_time_utils.py \
-                    tests/backend/test_localtime.py \
-                    tests/backend/test_call_origin.py \
-                    tests/backend/test_ggg_sdk_json_shim.py \
-                    tests/backend/test_sidebar_visibility.py \
-                    tests/backend/test_repl_host.py \
-                    tests/backend/test_repl_ui_parity.py \
-                    tests/backend/test_shell_access_denied.py \
-                    tests/backend/test_department_table.py \
-                    tests/backend/test_no_module_level_re.py \
-                    tests/backend/test_stamp_build.py \
-                    tests/backend/test_proposal_dispatch_orchestration.py \
-                    tests/backend/test_delegation.py
-      - name: Tax policy
-        # Its own process: these load the real ggg entities, which the run
-        # above replaces with the CLI's mock module.
-        run: |
-          pytest -q tests/backend/test_taxation.py \
-                    tests/backend/test_tax_bridge.py \
-                    tests/backend/test_agora_tax_assessment.py
-      - name: Build variants
-        # Blocking on purpose: the checked-in variant is production, the test
-        # gate fails closed, and the packer's wasm scan works in both
-        # directions. See realms-gos#395.
-        run: |
-          pytest -q tests/backend/test_build_variant.py \
-                    tests/backend/test_publish_build_variant.py
-      - name: Cedar policy drift
-        # The embedded policy text the canister runs must mirror the .cedar
-        # source files; a stale copy silently changes what a realm enforces.
-        run: |
-          python3 scripts/sync_cedar_policies.py --check
+          python -m venv /tmp/marketplace-env
+          /tmp/marketplace-env/bin/pip install -r src/marketplace_backend/requirements.txt pytest
+          /tmp/marketplace-env/bin/pytest -q tests/backend/marketplace
       - name: GGG interface
         # The generated GGG methods must match ggg/ggg.did, and every operation must pass
         # tests/ggg. Its own process: its fake chain replaces the ggg entities loaded above.
@@ -164,11 +121,6 @@ jobs:
         with:
           name: coverage-ggg
           path: coverage-ggg.xml
-      - name: Host locale parity and sidebar labels
-        run: |
-          pytest -q tests/backend/test_sidebar_labels.py \
-                    tests/backend/test_api_errors.py \
-                    tests/backend/test_extension_i18n_packs.py
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
