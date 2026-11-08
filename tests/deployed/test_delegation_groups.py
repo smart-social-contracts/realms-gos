@@ -170,7 +170,7 @@ def test_a_grant_made_before_groups_works_as_it_did(upgraded, people):
                                on_behalf_of=alice)
     assert "does not cover" in refused(upgraded, "profile_update", claude, nickname="Ali", on_behalf_of=alice)
     listed = {o["op"] for o in ok(upgraded, "delegable_operations", alice, query=True)["operations"]}
-    assert "proposal_vote" in listed and "payment_account_add" not in listed and len(listed) == 22
+    assert "proposal_vote" in listed and "payment_account_add" not in listed and len(listed) == 25
     card = [g for g in ok(upgraded, "delegation_list", alice, query=True)["as_grantor"]
             if g["id"] == upgraded.old_grant][0]
     assert card["scope"] == {"operations": ["proposal.vote", "proposal.create"]} and card["status"] == "active"

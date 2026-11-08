@@ -3,9 +3,11 @@ import hashlib
 from core import auth
 from core import chain
 from api import delegation
-from api import orgs
-from core.db import Conflict, Fail, Forbidden, each, find, next_id, page, view
-from ggg import Appointment, Department, Human, Identity, Invite, Member, Position, Proposal, Realm, User, UserProfile
+from api import assets, orgs
+from core import language
+from core.db import Conflict, Fail, Forbidden, each, find, next_id, page, page_by, view
+from ggg import (Appointment, Attribute, Department, Human, Identity, Invite, Member, Position, Proposal, Realm, User,
+                 UserProfile)
 from api import codex
 from core.op import op
 from api.proposals import root
@@ -59,7 +61,7 @@ def subject(args):
 
 def card(user):
     m = Member[user.id]
-    return {**view(user, "id", "nickname", "avatar", "home_quarter"), "status": m.status if m else "",
+    return {**view(user, "id", "nickname", "avatar", "home_quarter", "language", "home_zone"), "status": m.status if m else "",
             "profiles": [p.id for p in user.profiles]}
 
 
@@ -79,6 +81,26 @@ def enroll(principal, nickname=""):
     return user
 
 
+def check_language(args):
+    """Refuse a ``language`` that is no BCP 47 tag, before anything is written."""
+    if "language" in args:
+        language.require(args["language"])
+
+
+def check_choices(args):
+    """Refuse a ``language`` that is no BCP 47 tag and a ``home_zone`` the realm has not defined."""
+    check_language(args)
+    if "home_zone" in args:
+        assets.defined_zone(args["home_zone"])
+
+
+def apply_choices(user, args):
+    """Set the ``language`` and ``home_zone`` a call states; ``check_choices`` has accepted them."""
+    user.language = args.get("language", user.language)
+    if "home_zone" in args:
+        assets.move_home(user, args["home_zone"])
+
+
 def digest(code):
     return hashlib.sha256(code.strip().upper().encode()).hexdigest()
 
@@ -92,10 +114,10 @@ def redeemable(code, principal):
     return inv
 
 
-@op("self.join")
+@op("self.join", check=check_choices)
 def realm_join(c, args):
-    """Join with an invite ``code`` (needed unless registration is open) and an optional ``nickname``.
-    A member can join again with a code to gain its profile and seat. Returns ``user``, ``status`` and ``profiles``.
+    """Join with an invite ``code`` (needed unless registration is open) and an optional ``nickname``,
+    ``language`` (a BCP 47 tag) and ``home_zone`` (a zone of the realm). A member can join again with a code to gain its profile and seat. Returns ``user``, ``status`` and ``profiles``.
     Example: ``{"code": "X7K-29Q"}`` → ``{"user": "bob", "status": "active", "profiles": ["member"]}``."""
     member, realm = Member[c.user], Realm["1"]
     inv = redeemable(args["code"], c.user) if args.get("code") else None
@@ -108,6 +130,7 @@ def realm_join(c, args):
     if inv and inv.position:
         orgs.fill(find(Position, inv.position), c.user)
     user = enroll(c.user, args.get("nickname", ""))
+    apply_choices(user, args)
     if inv:
         give(user, find(UserProfile, inv.profile))
         inv.uses, inv.redeemed_by = inv.uses + 1, inv.redeemed_by + [c.user]
@@ -144,11 +167,13 @@ def me(c, args):
     return out
 
 
-@op("self.update_public_profile", returns="user")
+@op("self.update_public_profile", check=check_language, returns="user")
 def profile_update(c, args):
-    """Change your public ``nickname`` and ``avatar``; a field you leave out stays as it is. Returns ``user``."""
+    """Change your public ``nickname`` and ``avatar`` and your ``language`` (a BCP 47 tag); a field you leave out
+    stays as it is. Returns ``user``."""
     user = find(User, c.user)
     user.nickname, user.avatar = args.get("nickname", user.nickname), args.get("avatar", user.avatar)
+    user.language = args.get("language", user.language)
     return {"user": user.id}
 
 
@@ -184,13 +209,15 @@ def user_import(c, args):
     return {"added": len(ids)}
 
 
-@op("user.edit", returns="user")
+@op("user.edit", check=check_choices, returns="user")
 def user_edit(c, args):
-    """Edit ``user``'s ``nickname``, ``avatar`` or ``home_quarter``; only the fields given change."""
+    """Edit ``user``'s ``nickname``, ``avatar``, ``home_quarter``, ``language`` (a BCP 47 tag) or ``home_zone`` (a
+    zone of the realm); only the fields given change."""
     user = find(User, args["user"])
     for field in ("nickname", "avatar", "home_quarter"):
         if field in args:
             setattr(user, field, args[field])
+    apply_choices(user, args)
     return {"user": user.id}
 
 
@@ -215,16 +242,23 @@ def user_remove(c, args):
         raise Conflict(f"{user.id} still holds appointments; end them first")
     if Member[user.id]:
         Member[user.id].delete()
+    assets.leave_home(user)
     user.delete()
+
+
+def person(user):
+    """The Human behind ``user``, made on the first identity or attribute they submit."""
+    return next(each(Human, "user", user), None) or Human(id=next_id(Human, "H"), user=user)
 
 
 @op("identity.submit", returns="identity")
 def identity_submit(c, args):
-    """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``issuer``
-    and ``ref`` (where the proof is kept). Returns ``identity``, pending until reviewed."""
-    human = next(each(Human, "user", c.user), None) or Human(id=next_id(Human, "H"), user=c.user)
-    i = Identity(id=next_id(Identity, "ID"), human=human, kind=args["kind"], issuer=args.get("issuer", ""),
-                 ref=args.get("ref", ""))
+    """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``category`` (a
+    subdivision of the kind), ``issuer``, ``expires_at`` and ``ref`` (where the proof is kept). Returns ``identity``,
+    pending until reviewed."""
+    i = Identity(id=next_id(Identity, "ID"), human=person(c.user), kind=args["kind"],
+                 category=args.get("category", ""), issuer=args.get("issuer", ""), ref=args.get("ref", ""),
+                 expires_at=int(args.get("expires_at") or 0))
     return {"identity": i.id}
 
 
@@ -240,6 +274,43 @@ def identity_review(c, args):
         raise Conflict(f"{i.id} is {i.status}; it can only go from pending to verified or rejected")
     i.status, i.verified_at = args["status"], chain.now() if args["status"] == "verified" else 0
     return {"identity": i.id, "status": i.status}
+
+
+@op("attribute.submit", private=("kind", "value"), returns="attribute")
+def attribute_submit(c, args):
+    """Submit a certified attribute of your own person for review: ``kind`` (such as large_family), ``value`` (such
+    as general), ``ref`` (where the proof is kept) and optional ``issuer`` and ``expires_at``. Returns ``attribute``,
+    pending until reviewed. Its kind and value are personal data (I-PRV-1): only you, whoever holds
+    attribute.review and the codex read them, and the audit log does not keep them."""
+    a = Attribute(id=next_id(Attribute, "ATTR"), human=person(c.user).id, kind=args["kind"], value=args["value"],
+                  issuer=args.get("issuer", ""), ref=args["ref"], expires_at=int(args.get("expires_at") or 0))
+    return {"attribute": a.id}
+
+
+def attribute_owner(args):
+    return {Human[find(Attribute, args["attribute"]).human].user}
+
+
+@op("attribute.review", signing=True, parties=attribute_owner, returns="attribute")
+def attribute_review(c, args):
+    """Decide a pending ``attribute``: ``status`` verified or rejected. Returns ``attribute`` and ``status``."""
+    a = find(Attribute, args["attribute"])
+    if args["status"] not in ("verified", "rejected") or a.status != "pending":
+        raise Conflict(f"{a.id} is {a.status}; it can only go from pending to verified or rejected")
+    a.status, a.verified_at = args["status"], chain.now() if args["status"] == "verified" else 0
+    return {"attribute": a.id, "status": a.status}
+
+
+@op("self.data_view", read=True, returns="attributes")
+def attribute_list(c, args):
+    """Your own attributes, all or only those of ``kind``, ``count`` rows at a time (default 100, at most 500) from
+    row ``from`` (default 1). Returns ``attributes`` and ``next`` (null at the end); a page can hold fewer than
+    ``count`` when ``kind`` is given: follow ``next``."""
+    human = next(each(Human, "user", c.user), None)
+    if human is None:
+        return {"attributes": [], "next": None}
+    rows, nxt = page_by(Attribute, "human", human.id, args)
+    return {"attributes": [view(a) for a in rows if args.get("kind") in (None, a.kind)], "next": nxt}
 
 
 def fresh_code(c):

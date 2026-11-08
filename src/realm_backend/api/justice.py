@@ -1,10 +1,11 @@
 from core import chain
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, page_by, view, window
-from ggg import (Appeal, Case, Contract, Court, Department, Dispute, Invoice, Judge, Member, Notification, Organization,
-                 Penalty, User, Verdict)
+from ggg import (Appeal, Case, Contract, Court, Department, Dispute, Judge, Member, Notification, Organization, Penalty,
+                 User, Verdict)
 from api.licenses import active
 from core.op import op
 from api.proposals import holders, realm_wide
+from api.treasury import new_invoice
 
 LEVELS = {"first_instance": 1, "specialized": 1, "appellate": 2, "supreme": 3}
 APPEAL_WINDOW = 14 * 86400
@@ -382,8 +383,8 @@ def penalty_execute(c, args):
         target = find(Member, target.id)
     p.due_at = p.due_at or now + PAY_WITHIN
     if p.kind in ("fine", "restitution"):
-        p.invoice = Invoice(id=next_id(Invoice, "INV"), payer=p.target, amount=p.amount, symbol=p.symbol,
-                            due_at=p.due_at, reason=f"Penalty:{p.id}").id
+        p.invoice = new_invoice(p.target, [{"concept": p.kind, "amount": p.amount}], p.symbol, p.due_at,
+                                f"Penalty:{p.id}").id
     elif p.kind in TARGETS:
         target.status = {"suspension": "suspended", "revocation": "revoked", "termination": "terminated"}[p.kind]
     # freeze, injunction and community service are recorded here and carried out by their own operations.

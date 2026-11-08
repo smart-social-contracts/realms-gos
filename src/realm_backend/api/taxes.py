@@ -1,72 +1,116 @@
 from core import chain
 from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page_by, view, window
-from ggg import Land, Member, Organization, TaxDeclaration, TaxPolicy, User
+from ggg import Land, Member, Organization, TaxDeclaration, TaxPolicy, Token, User
 from core.op import op
-from core.ratio import ONE
+from core.ratio import PERCENT, RATE_MAX
+from core.tax_entries import SUBJECTS
+from api import codex
 from api.proposals import realm_wide
-from api.treasury import currency, decimals_of, new_invoice
+from api.treasury import checked_total, currency, decimals_of, invoice_item, new_invoice, total
 
-BASES = ("flat", "land_area", "declared")
-METHODS = ("fixed", "proportional", "progressive")
+ENTRY_FIELDS = ("code", "kind", "subject", "rate", "amount", "facts")
+
+
+def whole(value, where):
+    if type(value) is not int or value < 0:
+        raise Fail(f"{where} must be a whole number, not negative")
+    return value
 
 
 def rate(value, where):
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= ONE:
-        raise Fail(f"{where}: rate must be a whole number of hundred-millionths between 0 and {ONE} (100 %)")
+    if type(value) is not int or not 0 <= value <= RATE_MAX:
+        raise Fail(f"{where}: rate must be a whole number of hundred-millionths between 0 and {RATE_MAX}")
     return value
 
 
 def refuse_rate_bp(rated, where):
-    """A tax or bracket still written in basis points: its rate would be missing, or read as a tiny one."""
+    """A bracket still written in basis points: its rate would be missing, or read as a tiny one."""
     if "rate_bp" in rated:
-        raise Fail(f"{where}: rate_bp is now rate, in hundred-millionths: 1 % is {ONE // 100}")
+        raise Fail(f"{where}: rate_bp is now rate, in hundred-millionths: 1 % is {PERCENT}")
 
 
-def check(document):
-    taxes, codes = document.get("taxes"), set()
+def check_brackets(code, brackets):
+    if not isinstance(brackets, list) or not brackets or brackets[-1].get("up_to") is not None:
+        raise Fail(f"tax '{code}': progressive brackets must end open (up_to null)")
+    bounds = [b["up_to"] for b in brackets[:-1]]
+    if bounds != sorted(set(bounds)) or any(type(b) is not int or b <= 0 for b in bounds):
+        raise Fail(f"tax '{code}': bracket bounds must be increasing positive integers")
+    for b in brackets:
+        refuse_rate_bp(b, code)
+        rate(b.get("rate"), code)
+
+
+def entry_of_draft(entry):
+    """One entry of a draft as it is stored (the fields it states, ``facts`` always), refused if it is not a tax: it
+    names a ``kind`` (the realm's word) and a ``subject``, and charges by at most one of ``amount``, ``rate`` or the
+    ``brackets`` of its facts."""
+    if not isinstance(entry, dict):
+        raise Fail("a tax is a map with code, kind, subject, rate or amount, and facts")
+    entry = {k: v for k, v in entry.items() if v is not None}
+    code = entry.get("code", "")
+    unknown = set(entry) - set(ENTRY_FIELDS)
+    if unknown:
+        raise Fail(f"tax '{code}': {', '.join(sorted(unknown))} is not a field of a tax; the settings go in facts")
+    if not isinstance(entry.get("kind"), str) or not entry["kind"]:
+        raise Fail(f"tax '{code}': kind is the realm's word for it, such as tax or fee")
+    if entry.get("subject") not in SUBJECTS:
+        raise Fail(f"tax '{code}': subject must be one of {', '.join(SUBJECTS)}")
+    facts = entry.get("facts") or {}
+    if not isinstance(facts, dict):
+        raise Fail(f"tax '{code}': facts is a map")
+    charged_by = [name for name, given in (("amount", "amount" in entry), ("rate", "rate" in entry),
+                                           ("brackets", "brackets" in facts)) if given]
+    if len(charged_by) > 1:
+        raise Fail(f"tax '{code}' charges by {' and '.join(charged_by)}: give one")
+    if "amount" in entry:
+        whole(entry["amount"], f"tax '{code}': amount")
+    if "rate" in entry:
+        rate(entry["rate"], code)
+    if "brackets" in facts:
+        check_brackets(code, facts["brackets"])
+    return {**entry, "facts": facts}
+
+
+def draft_of(args):
+    """The ``document`` and the typed ``taxes`` of a tax_policy_draft call, checked."""
+    document, taxes = args["document"], args.get("taxes")
+    if not isinstance(document, dict):
+        raise Fail("a tax policy's document is a map")
+    if taxes is None and "taxes" in document:
+        raise Fail("the taxes are a list of their own, taxes, beside the document: each has a code, kind and subject")
     if not isinstance(taxes, list) or not taxes:
         raise Fail("a tax policy needs a list of taxes")
-    for tax in taxes:
-        code = tax.get("code", "")
+    entries, codes = [entry_of_draft(entry) for entry in taxes], set()
+    for entry in entries:
+        code = entry.get("code", "")
         if not code or code in codes:
             raise Fail(f"tax code '{code}' is missing or used twice")
         codes.add(code)
-        if tax.get("base", "flat") not in BASES or tax.get("method", "fixed") not in METHODS:
-            raise Fail(f"tax '{code}': base must be one of {BASES}, method one of {METHODS}")
-        refuse_rate_bp(tax, code)
-        if tax.get("method") == "proportional":
-            rate(tax.get("rate"), code)
-        if tax.get("method") == "progressive":
-            brackets = tax.get("brackets") or []
-            if not brackets or brackets[-1].get("up_to") is not None:
-                raise Fail(f"tax '{code}': progressive brackets must end open (up_to null)")
-            bounds = [b["up_to"] for b in brackets[:-1]]
-            if bounds != sorted(set(bounds)) or any(not isinstance(b, int) or b <= 0 for b in bounds):
-                raise Fail(f"tax '{code}': bracket bounds must be increasing positive integers")
-            for b in brackets:
-                refuse_rate_bp(b, code)
-                rate(b.get("rate"), code)
-    return document
+    return document, entries
 
 
-def owed(tax, value):
-    """The reference calculation: what a taxable ``value`` owes under one tax (integer, rates in hundred-millionths)."""
-    if value <= 0 or value < int(tax.get("exempt_below") or 0):
+def owed(entry, value, decimals):
+    """The reference calculation: what a taxable ``value`` owes under one entry when no codex computes it, in the token's
+    smallest unit, rounded to the cent as GGG rounds (integer; rates in hundred-millionths). The brackets of a
+    progressive tax are added up exactly and the total is rounded once."""
+    from realms.legislation.rates import times  # the layered codex library's one rounding rule, compiled on first use
+
+    facts = entry["facts"]
+    if value <= 0 or value < int(facts.get("exempt_below") or 0):
         return 0
-    method = tax.get("method", "fixed")
-    if method == "fixed":
-        return int(tax.get("amount") or 0)
-    if method == "proportional":
-        return value * int(tax["rate"]) // ONE
-    total, lower = 0, 0
-    for b in tax["brackets"]:
+    if "amount" in entry:
+        return entry["amount"]
+    if "rate" in entry:
+        return times(value, entry["rate"], decimals)
+    exact, lower = 0, 0  # in hundred-millionths of the smallest unit
+    for b in facts.get("brackets") or []:
         upper = value if b.get("up_to") is None else min(value, b["up_to"])
         if upper > lower:
-            total += (upper - lower) * int(b["rate"]) // ONE
+            exact += (upper - lower) * int(b["rate"])
         if b.get("up_to") is None or value <= b["up_to"]:
             break
         lower = b["up_to"]
-    return total
+    return times(exact, 1, decimals)
 
 
 def adopted():
@@ -76,11 +120,19 @@ def adopted():
     return p
 
 
-def tax_of(policy, code):
-    tax = next((t for t in policy.document.get("taxes", []) if t.get("code") == code), None)
-    if tax is None or tax.get("enabled") is False:
+def enabled(entry):
+    return entry["facts"].get("enabled") is not False
+
+
+def entry_of(policy, code):
+    entry = next((t for t in policy.taxes if t["code"] == code), None)
+    if entry is None or not enabled(entry):
         raise Fail(f"the adopted tax policy has no tax '{code}'")
-    return tax
+    return entry
+
+
+def symbol_of(policy):
+    return policy.document.get("symbol") or currency()
 
 
 def key(declarant, code, period):
@@ -91,49 +143,79 @@ def declared(declarant, period, code):
     return first(TaxDeclaration, "key", key(declarant, code, period)) is not None
 
 
-def levy(policy, tax, declarant, period, value):
-    """Record what ``declarant`` owes for ``period`` and bill it."""
-    d = TaxDeclaration(id=next_id(TaxDeclaration, "TD"), declarant=declarant, period=period, base=tax["code"],
-                       key=key(declarant, tax["code"], period), amount=value, status="assessed")
-    amount = owed(tax, value)
-    if amount > 0:
-        due = chain.now() + int(tax.get("due_days", 30)) * 86400
-        d.invoice = new_invoice(declarant, amount, policy.document.get("symbol") or currency(), due,
-                                f"TaxDeclaration:{d.id}").id
-    else:
-        d.status = "settled"
-    return d
+def levy(policy, entry, declarant, period, base, items):
+    """Record that ``declarant`` owes ``items`` for ``period`` on ``base``, and bill them: an invoice for what they come
+    to, none when it is nothing. Nothing is written if the items are not an amount of money."""
+    did, amount = next_id(TaxDeclaration, "TD"), total(items)
+    invoice = None
+    if amount != 0:
+        due = chain.now() + int(entry["facts"].get("due_days", 30)) * 86400
+        invoice = new_invoice(declarant, items, symbol_of(policy), due, f"TaxDeclaration:{did}")
+    return TaxDeclaration(id=did, declarant=declarant, period=period, base=entry["code"],
+                          key=key(declarant, entry["code"], period), amount=base,
+                          status="assessed" if invoice else "settled", invoice=invoice.id if invoice else "")
 
 
-def flat(tax):
-    return tax.get("base", "flat") == "flat"
+def reference_items(entry, base, decimals):
+    """The items of the entry's own charge on ``base``: one line, none when nothing is owed."""
+    amount = owed(entry, base, decimals)
+    return [{"concept": entry["code"], "amount": amount}] if amount > 0 else []
 
 
-def payers(tax, start, count):
-    """The taxpayers met in one id range: active, non-exempt members for flat taxes, owners of active parcels for land."""
-    if not flat(tax):
+def subjects_of(entry, payer):
+    """The subjects ``payer`` holds under ``entry``, as references: each of their active parcels, or themselves."""
+    if entry["subject"] == "Land":
+        return [f"Land:{p.id}" for p in each(Land, "owner", payer) if p.status == "active"]
+    return [payer]
+
+
+def assessment(entry, payer, base, decimals):
+    """The items ``payer`` owes under ``entry``: what the active codex computes for each subject they hold under it,
+    or, when no codex answers, the charge of the entry's own rate, amount or brackets on ``base``."""
+    answers = {}
+    for subject in subjects_of(entry, payer):
+        answers[subject] = yield from codex.compute("tax_assess", {"entry": entry, "subject": subject})
+    if all(answer is None for answer in answers.values()):
+        return reference_items(entry, base, decimals)
+    items = []
+    for subject, answer in answers.items():
+        if not isinstance(answer, list):  # a codex that computes some subjects computes all of them
+            raise Fail(f"the codex answered {answer!r} for {entry['code']} on {subject}, not a list of invoice items")
+        items += [invoice_item(item) for item in answer]
+    return items
+
+
+def payers(entry, start, count):
+    """The taxpayers met in one id range: active, non-exempt members for a tax on users, owners of active parcels for
+    one on land."""
+    if entry["subject"] == "Land":
         return {p.owner for p in Land.load_some(start, count) if p.status == "active" and p.owner}
-    exempt = set(tax.get("exempt_profiles") or [])
+    exempt = set(entry["facts"].get("exempt_profiles") or [])
     return {f"User:{m.id}" for m in Member.load_some(start, count)
             if m.status == "active" and not (User[m.id] and exempt & {p.id for p in User[m.id].profiles})}
 
 
-def taxable(tax, payer):
-    """A taxpayer's taxable value: 1 for flat taxes, the area of all their active parcels × unit value for land."""
-    if flat(tax):
+def taxable(entry, payer):
+    """A taxpayer's taxable value: 1 for a tax on users, the area of all their active parcels × unit value for one on
+    land."""
+    if entry["subject"] != "Land":
         return 1
-    return int(tax.get("unit_value", 1)) * sum(p.width * p.height for p in each(Land, "owner", payer)
-                                               if p.status == "active")
+    return int(entry["facts"].get("unit_value", 1)) * sum(p.width * p.height for p in each(Land, "owner", payer)
+                                                          if p.status == "active")
 
 
-@op("tax.manage", governed=realm_wide, returns="policy", check=lambda args: check(args["document"]))
+@op("tax.manage", governed=realm_wide, returns="policy", check=draft_of)
 def tax_policy_draft(c, args):
-    """Draft a tax policy from ``document`` (optional symbol, list of taxes) and optional ``description``. Each tax
-    has a unique code, a base (flat, land_area or declared) and a method: fixed (amount), proportional (rate,
-    in hundred-millionths: 1 % is 1000000) or progressive (brackets of up_to and rate, the last with up_to null).
-    Returns ``policy``."""
-    # The document was checked by dispatch, before a governed call became a proposal: ``check=`` above.
-    p = TaxPolicy(id=next_id(TaxPolicy, "TAX-POLICY"), document=args["document"],
+    """Draft a tax policy from its typed ``taxes`` and a ``document`` (the policy's text and whatever else the realm
+    records about it, such as the ``symbol`` of its currency), with optional ``description``. Each tax has a unique
+    ``code``, a ``kind`` (the realm's word: tax, fee, ...), a ``subject`` (``User``: every active member;
+    ``Land``: the owners of parcels; ``Declaration``: what the taxpayer declares) and what it charges when no codex
+    computes it: an ``amount``, a ``rate`` (hundred-millionths: 1 % is 1000000), or progressive ``brackets`` in its
+    ``facts`` (each ``up_to`` and ``rate``, the last with up_to null). Other ``facts`` it reads: ``unit_value`` (land),
+    ``exempt_below``, ``exempt_profiles`` (users), ``due_days`` and ``enabled``. Returns ``policy``."""
+    # The draft was checked by dispatch, before a governed call became a proposal: ``check=`` above.
+    document, taxes = draft_of(args)
+    p = TaxPolicy(id=next_id(TaxPolicy, "TAX-POLICY"), document=document, taxes=taxes,
                   description=args.get("description", ""))
     return {"policy": p.id}
 
@@ -154,25 +236,39 @@ def tax_policy_propose(c, args):
 def tax_assess(c, args):
     """Bill one batch of taxpayers for ``period`` (a label) under the adopted policy: tax ``tax`` only (not a
     self-declared one: those are billed by tax_declare), or by default every enabled tax that is not self-declared.
-    The batch is the members (flat taxes) and parcels (land taxes) with ids from ``from`` (default 1), ``count`` of
-    each; call again with ``next`` until it is null. Those already billed for the period are skipped. Returns
-    ``invoices``, ``count`` (invoices issued), ``skipped`` and ``next``."""
+    The batch is the members (taxes on users) and parcels (taxes on land) with ids from ``from`` (default 1),
+    ``count`` of each; call again with ``next`` until it is null. Those already billed for the period are skipped. A
+    taxpayer's invoice has the items the active codex computes for each of their subjects under the tax, or, when
+    it gives none, one item from the tax's own amount, rate or brackets. Returns ``invoices``, ``count`` (invoices
+    issued), ``skipped`` and ``next``."""
     policy, period = adopted(), args["period"]
-    if args.get("tax") and tax_of(policy, args["tax"]).get("base") == "declared":
+    if args.get("tax") and entry_of(policy, args["tax"])["subject"] == "Declaration":
         raise Fail(f"tax '{args['tax']}' is self-declared: tax_declare bills it")
-    taxes = [tax_of(policy, args["tax"])] if args.get("tax") else [
-        t for t in policy.document["taxes"] if t.get("enabled", True) and t.get("base", "flat") != "declared"]
+    entries = [entry_of(policy, args["tax"])] if args.get("tax") else [
+        t for t in policy.taxes if enabled(t) and t["subject"] != "Declaration"]
     start, count = window(args)
-    invoices, skipped = [], 0
-    for tax in taxes:
-        for declarant in sorted(payers(tax, start, count)):
-            if declared(declarant, period, tax["code"]):
+    symbol = symbol_of(policy)
+    find(Token, symbol)  # the invoices are in it
+    decimals = decimals_of(symbol)
+    invoices, skipped, due = [], 0, []
+    # Everyone's items first: a codex answer that is not an invoice's items refuses the call before anyone is billed.
+    for entry in entries:
+        for declarant in sorted(payers(entry, start, count)):
+            if declared(declarant, period, entry["code"]):
                 skipped += 1
                 continue
-            d = levy(policy, tax, declarant, period, taxable(tax, declarant))
-            if d.invoice:
-                invoices.append(d.invoice)
-    last = max([(Member if flat(t) else Land).max_id() for t in taxes], default=0)
+            base = taxable(entry, declarant)
+            items = yield from assessment(entry, declarant, base, decimals)
+            checked_total(items)
+            due.append((entry, declarant, base, items))
+    for entry, declarant, base, items in due:
+        if declared(declarant, period, entry["code"]):  # a call that ran while the codex was asked billed them
+            skipped += 1
+            continue
+        d = levy(policy, entry, declarant, period, base, items)
+        if d.invoice:
+            invoices.append(d.invoice)
+    last = max([(Land if t["subject"] == "Land" else Member).max_id() for t in entries], default=0)
     return {"policy": policy.id, "invoices": invoices, "count": len(invoices), "skipped": skipped,
             "next": start + count if start + count <= last else None}
 
@@ -192,16 +288,17 @@ def tax_declare(c, args):
     ``organization`` you administer, and get billed what it owes. Returns ``declaration``, ``invoice``, ``owed``.
     Example: ``{"organization": "clinic-b", "period": "2026-Q3", "base": "revenue", "amount": 182000}``."""
     policy, period, amount = adopted(), args["period"], int(args["amount"])
-    tax = tax_of(policy, args["base"])
-    if tax.get("base") != "declared":
-        raise Fail(f"tax '{tax['code']}' is assessed by the realm, not declared")
+    entry = entry_of(policy, args["base"])
+    if entry["subject"] != "Declaration":
+        raise Fail(f"tax '{entry['code']}' is assessed by the realm, not declared")
     declarant = declarant_of(c, args)
     if amount < 0:
         raise Fail("a declared amount cannot be negative")
-    if declared(declarant, period, tax["code"]):
-        raise Conflict(f"{declarant} has already declared {tax['code']} for {period}")
-    d = levy(policy, tax, declarant, period, amount)
-    return {"declaration": d.id, "invoice": d.invoice, "owed": owed(tax, amount)}
+    if declared(declarant, period, entry["code"]):
+        raise Conflict(f"{declarant} has already declared {entry['code']} for {period}")
+    items = reference_items(entry, amount, decimals_of(symbol_of(policy)))
+    d = levy(policy, entry, declarant, period, amount, items)
+    return {"declaration": d.id, "invoice": d.invoice, "owed": total(items)}
 
 
 @op("realm.data_view", read=True)
@@ -212,11 +309,12 @@ def tax_policy_view(c, args):
     else stays with the declarant."""
     declarant = declarant_of(c, args)
     current = first(TaxPolicy, "status", "adopted")
-    symbol = (current.document.get("symbol") if current else None) or currency()
+    symbol = symbol_of(current) if current else currency()
     drafts = [p for p in latest(TaxPolicy) if p.status == "draft"][:DRAFTS]
     rows, nxt = page_by(TaxDeclaration, "declarant", declarant, args)
-    return {"policy": view(current, "id", "document", "description", "adopted_at", "proposal") if current else None,
+    return {"policy": view(current, "id", "document", "taxes", "description", "adopted_at", "proposal")
+            if current else None,
             "currency": symbol, "decimals": decimals_of(symbol),
-            "drafts": [view(p, "id", "document", "description") for p in drafts],
+            "drafts": [view(p, "id", "document", "taxes", "description") for p in drafts],
             "declarations": [view(d, "id", "period", "base", "amount", "status", "invoice") for d in rows],
             "next": nxt}

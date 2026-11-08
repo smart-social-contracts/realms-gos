@@ -224,6 +224,7 @@ def upgraded(request, wasm_of, people):
             f"as_last_release_saved('{department}', threshold=3000000, tally={{'yes': 1, 'no': 0, 'abstain': 0, "
             f"'required': 2, 'veto': []}})\n"))
         assert "Traceback" not in out, out
+    realm.wait(600)  # the replica limits how often a canister is installed
     realm.upgrade(current)  # the heap is emptied: the next read comes from storage, and migrates the row
     realm.open = wide, department
     return realm

@@ -24,6 +24,7 @@ OWN = {
     "tax_policy_view": ("direct", "see", None, None),
     "task_create": ("direct", "admin", None, None),
     "task_edit": ("direct", "admin", None, None),
+    "task_add_schedule": ("direct", "admin", None, None),
     "task_delete": ("direct", "admin", None, None),
     "task_run": ("direct", "admin", None, None),
     "task_logs": ("direct", "admin", None, None),
@@ -49,13 +50,14 @@ OWN = {
     "db_convert_indexes": ("none", None, None, None),
 }
 
-# The 22 operations that were delegable once phase 0 had closed its holes. A grant that names permissions covers
-# exactly these, with the behaviour they had then, however many operations later releases make delegable.
+# The operations that were delegable once phase 0 had closed its holes (GGG lists them, the model's "Power of
+# attorney"). A grant that names permissions covers exactly these, with the behaviour they had then, however many
+# operations later releases make delegable.
 LEGACY = frozenset((
-    "me", "profile_update", "zone_set", "zone_clear", "proposal_create", "proposal_withdraw", "proposal_vote",
-    "transfer_create", "invoice_check", "my_invoices", "tax_declare", "license_apply", "license_renew",
-    "dispute_file", "dispute_withdraw", "dispute_get", "evidence_submit", "appeal_file", "bid_submit", "bid_withdraw",
-    "notification_list", "notification_read"))
+    "me", "profile_update", "attribute_list", "zone_set", "zone_clear", "proposal_create", "proposal_withdraw",
+    "proposal_vote", "transfer_create", "invoice_check", "my_invoices", "tax_declare", "license_apply", "license_renew",
+    "request_file", "request_get", "dispute_file", "dispute_withdraw", "dispute_get", "evidence_submit", "appeal_file",
+    "bid_submit", "bid_withdraw", "notification_list", "notification_read"))
 
 # The operations a grant by groups can reach in this release. Each phase of the rollout adds its own; the last
 # deletes the gate.

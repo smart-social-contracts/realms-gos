@@ -27,10 +27,11 @@ GOVERNANCE = {"voting_threshold": 70 * PERCENT, "voting_quorum": 10 * PERCENT}
 POLICY = {"m": 2, "n": 3, "quorum": 50 * PERCENT, "veto": []}
 SHARES = [{"fund": "ROADS", "share": 30 * PERCENT}]
 RUBRIC = {"price": 60 * PERCENT, "quality": 40 * PERCENT}
-TAXES = {"symbol": "DOM", "taxes": [
-    {"code": "revenue", "base": "declared", "method": "proportional", "rate": 200 * BASIS_POINT},
-    {"code": "property", "base": "flat", "method": "progressive",
-     "brackets": [{"up_to": 5_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}]}]}
+DOCUMENT = {"symbol": "DOM"}
+ENTRIES = [
+    {"code": "revenue", "kind": "tax", "subject": "Declaration", "rate": 200 * BASIS_POINT, "facts": {}},
+    {"code": "property", "kind": "tax", "subject": "User",
+     "facts": {"brackets": [{"up_to": 5_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}]}}]
 
 # A proposal the last release left voting, with the shares of its action as it filed them.
 OLD_ACTION = {"op": "allocation_rule_draft", "args": {"source_fund": "ROOT", "rules": {"ROADS": 20}}}
@@ -61,7 +62,7 @@ version_1(ggg.Department, "Finance", policy={OLD_POLICY!r})
 version_1(ggg.Realm, "1", manifest_data={{**ggg.Realm["1"].manifest_data, "governance": {OLD_GOVERNANCE!r}}})
 version_1(ggg.AllocationRule, "AR-1", rules={OLD_SHARES!r})
 version_1(ggg.Tender, "T-1", rubric={OLD_RUBRIC!r})
-version_1(ggg.TaxPolicy, "TAX-POLICY-1", document={OLD_TAXES!r})
+version_1(ggg.TaxPolicy, "TAX-POLICY-1", drop=("taxes",), document={OLD_TAXES!r})
 version_1(ggg.Proposal, "P-2", drop=("quorum",), threshold=50, quorum_percent=0, action={OLD_ACTION!r})
 print(json.dumps(saved))
 '''
@@ -72,12 +73,12 @@ print(json.dumps({f"{entity.__name__}:{alias}": db.load(entity.__name__, entity[
 
 def versions(saved):
     """The version each row is saved at: the rows that migrate to the ratios' form are at 2, a proposal at 3 (it also keeps
-    its voting rule since realms-gos#547)."""
+    its voting rule since realms-gos#547) and a tax policy at 3 (its taxes are typed entries since realms-gos#547)."""
     return {key: row["__version__"] for key, row in saved.items()}
 
 
-CURRENT = {"Proposal:P-1": 3, "Department:Finance": 2, "Realm:1": 2, "AllocationRule:AR-1": 2, "Tender:T-1": 2,
-           "TaxPolicy:TAX-POLICY-1": 2, "Proposal:P-2": 3}
+CURRENT = {"Proposal:P-1": 3, "Department:Finance": 2, "Realm:1": 2, "AllocationRule:AR-1": 2, "Tender:T-1": 3,
+           "TaxPolicy:TAX-POLICY-1": 3, "Proposal:P-2": 3}
 
 
 def ok(realm, op, who, query=False, **args):
@@ -119,7 +120,7 @@ def realm(wasm_of, people):
     ok(realm, "allocation_rule_draft", ctl, source_fund="ROOT", rules=SHARES)
     ok(realm, "allocation_rule_propose", ctl, rule="AR-1")  # a budget view shows the adopted rule
     ok(realm, "tender_create", ctl, title="Bike lane", requester="Finance", opens_at=1, closes_at=2, rubric=RUBRIC)
-    ok(realm, "tax_policy_draft", ctl, document=TAXES)
+    ok(realm, "tax_policy_draft", ctl, document=DOCUMENT, taxes=ENTRIES)
     # What a new realm saves: the rows are of this release's shape, and the old rows below are those of the last.
     assert versions(rows(realm)) == CURRENT
     realm.old_rows = json.loads(run(realm, SAVE_OLD))  # read before anything loads, and so migrates, them
@@ -143,7 +144,8 @@ def test_every_ratio_keeps_its_meaning_after_the_upgrade(realm, people):
     funds = {f["id"]: f for f in ok(realm, "budget_view", alice, query=True)["funds"]}
     assert funds["ROOT"]["rule"]["rules"] == SHARES
     assert ok(realm, "tender_get", alice, query=True, tender="T-1")["tender"]["rubric"] == RUBRIC
-    assert ok(realm, "tax_policy_view", alice, query=True)["drafts"][0]["document"] == TAXES
+    draft = ok(realm, "tax_policy_view", alice, query=True)["drafts"][0]
+    assert (draft["document"], draft["taxes"]) == (DOCUMENT, ENTRIES)
     assert rows(realm)["Realm:1"]["manifest_data"]["governance"] == GOVERNANCE
 
 

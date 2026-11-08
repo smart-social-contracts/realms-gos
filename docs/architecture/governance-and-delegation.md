@@ -186,8 +186,8 @@ every group, those the member gains later included, and every operation a later 
 - The limits are read when a call is made, not only when the grant is: a stricter limit binds a grant made before it.
 - **The rollout.** `ENABLED` in `core/poa.py` lists the operations a grant by groups can reach in this release. The
   classification arrives whole, the code in phases, so an operation that is not enabled is refused whatever its
-  tier. This release enables the 22 operations that were delegable once phase 0 had closed its holes.
-- **Grants made before groups** name permissions (`operations`) and keep covering exactly those 22 operations (`LEGACY`),
+  tier. This release enables the 25 operations that were delegable once phase 0 had closed its holes.
+- **Grants made before groups** name permissions (`operations`) and keep covering exactly those 25 operations (`LEGACY`),
   with the behaviour they had then: a proposal with an action stays refused, and payout accounts, identity proofs,
   quarter moves and federal votes stay refused. A later release never widens them.
 

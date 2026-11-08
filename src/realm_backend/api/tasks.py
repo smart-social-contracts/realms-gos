@@ -2,9 +2,9 @@ import json
 
 from core import auth
 from core import chain
-from core.db import PAGE, PAGE_MAX, Conflict, Fail, Forbidden, find, page, view
-from ggg import Task, TaskExecution, TaskSchedule, TaskStep
-from core.op import dispatch, op, ops
+from core.db import PAGE, PAGE_MAX, Conflict, Fail, Forbidden, find, next_id, page, view
+from ggg import Event, Task, TaskExecution, TaskSchedule, TaskStep
+from core.op import dispatch, op, ops, redacted
 from core.ratio import upgrade_call
 
 BUSY = ("running", "waiting")
@@ -12,12 +12,27 @@ BUSY = ("running", "waiting")
 # authority is the vote that scheduled it, so nobody changes, runs or removes one by hand. Its creator, the realm, makes
 # it the realm's own (``own``); its name starts with OWN, which task_create refuses, so nobody can take the name first.
 OWN = "proposal "
+# The tasks task_schedule creates are named "TASK-<n>"; task_create refuses such names, so a name chosen first cannot clash.
+SCHEDULED = "TASK"
+# GGG's status of a task, from the toolkit's: scheduled, then run, failed or cancelled.
+STATUS = {"pending": "scheduled", "running": "scheduled", "waiting": "scheduled", "completed": "run", "failed": "failed",
+          "cancelled": "cancelled"}
 # The toolkit's TaskSchedule declares no indexed field, so the enabled schedules are kept in this field index.
 ENABLED = (TaskSchedule.get_full_type_name(), "enabled", "1")
 
 
+def meta(task):
+    """What the realm keeps about a task: its ``creator``, and the ``event`` of the last operation it ran."""
+    return json.loads(task.metadata)
+
+
 def creator(task):
-    return json.loads(task.metadata)["creator"]
+    return meta(task)["creator"]
+
+
+def scheduled(task):
+    """Whether ``task`` is one task_schedule made: GGG's Task, which runs once."""
+    return task.name.startswith(f"{SCHEDULED}-")
 
 
 def own(task):
@@ -58,10 +73,12 @@ def checked(steps):
     return [(s["op"], s.get("args") or {}, int(s.get("wait", 0))) for s in steps]
 
 
-def define(task, steps):
+def define(task, steps, reason=None):
+    """Give ``task`` its ``steps``; ``reason`` says why they were scheduled."""
     # The toolkit's TaskStep has no field for an operation call; ic_python_db keeps the extra attribute.
     for name, args, wait in steps:
-        TaskStep(task=task, run_next_after=wait, action=json.dumps({"op": name, "args": args}))
+        call = {"op": name, "args": args, **({"reason": reason} if reason else {})}
+        TaskStep(task=task, run_next_after=wait, action=json.dumps(call))
 
 
 def execute(task, start=0, ex=None):
@@ -76,6 +93,8 @@ def execute(task, start=0, ex=None):
         steps[i].status = "completed" if out["ok"] else "failed"
         if not out["ok"]:
             return finish(task, ex, "failed", out)
+        if not ops()[call["op"]]["read"]:
+            task.metadata = json.dumps({**meta(task), "event": str(Event.max_id())})  # the step's own audit event
         if steps[i].run_next_after and i + 1 < len(steps):
             task.status, task.step_to_execute = "waiting", i + 1
             chain.set_timer(steps[i].run_next_after, lambda name=task.name, n=i + 1, e=ex.name: resume(name, n, e))
@@ -101,7 +120,8 @@ def arm(schedule):
 
 def fire(name):
     s = TaskSchedule[name]
-    if s is None or s.disabled:
+    # A schedule moved to a later time (task_reschedule) leaves its first timer behind: that one is too early.
+    if s is None or s.disabled or chain.now() < s.run_at:
         return
     s.last_run_at = chain.now()
     if s.repeat_every:
@@ -135,6 +155,8 @@ def task_create(c, args):
     steps = checked(args["steps"])
     if args["name"].startswith(OWN):
         raise Forbidden(f"task names starting with '{OWN}' are the realm's own")
+    if args["name"].startswith(f"{SCHEDULED}-"):
+        raise Forbidden(f"task names starting with '{SCHEDULED}-' are named by task_schedule")
     if Task[args["name"]]:
         raise Conflict(f"task '{args['name']}' exists")
     task = Task(name=args["name"], metadata=json.dumps({"creator": c.user}), status="pending")
@@ -183,7 +205,7 @@ def task_run(c, args):
 
 
 @op("task.schedule")
-def task_schedule(c, args):
+def task_add_schedule(c, args):
     """Run your ``task`` (any task if you hold all; not a cancelled one) at ``run_at`` (default now), then every
     ``repeat_every`` seconds if set. Returns ``schedule``."""
     task = owned(c, args)
@@ -196,24 +218,84 @@ def task_schedule(c, args):
     return {"schedule": s.name}
 
 
-@op("task.cancel")
+def valid_schedule(args):
+    if not isinstance(args.get("args") or {}, dict):
+        raise Fail("args are the arguments of the operation, an object")
+    checked([{"op": args["op"]}])
+    if ops()[args["op"]]["read"]:
+        raise Fail(f"{args['op']} only reads: a task runs a change")
+
+
+@op("task.schedule", check=valid_schedule, returns="task")
+def task_schedule(c, args):
+    """Schedule the operation ``op`` with ``args`` once, at the time ``at`` (seconds; a time that has passed runs it at
+    once), with an optional ``reason``. It runs as you, with the permissions you hold then: every guard and rule runs
+    again, so it obeys the legislation in force at that time, and a task that is refused ends failed and changes
+    nothing. Its operation's audit event, with origin task, is the task's ``event``. Only a user calling for themselves
+    schedules: a codex, an extension or the replay of a proposal is refused, as the task would run as the canister or as
+    someone who did not choose it. Returns ``task``."""
+    if c.origin != "user":
+        raise Fail(f"a task is scheduled by a user calling for themselves, not by a {c.origin}")
+    task = Task(name=next_id(Task, SCHEDULED), metadata=json.dumps({"creator": c.user}), status="pending")
+    define(task, checked([args]), args.get("reason"))
+    when = TaskSchedule(name=f"{task.name}@1", task=task, last_run_at=0, run_at=int(args["at"]), repeat_every=0)
+    enable(when, True)
+    arm(when)
+    return {"task": task.name}
+
+
+@op("task.schedule", returns="task")
+def task_reschedule(c, args):
+    """Move the time of your scheduled ``task`` (any task if you hold all) to ``at`` (seconds). A task that has run,
+    failed or been cancelled stays as it is, and so does one without a single schedule to move."""
+    task = owned(c, args)
+    schedules = list(task.schedules)
+    if task.status != "pending" or len(schedules) != 1 or schedules[0].disabled:
+        raise Conflict(f"task '{task.name}' does not wait for a single time ({STATUS[task.status]})")
+    schedules[0].run_at = int(args["at"])
+    arm(schedules[0])
+    return {"task": task.name}
+
+
+@op("task.schedule", returns="task")
 def task_cancel(c, args):
     """Cancel your ``task`` (any task if you hold all) for good: disable its schedules and stop a waiting run before
-    its next step."""
-    stop(owned(c, args))
+    its next step. A task made by task_schedule that has already run or failed is a conflict: it stays as it ended."""
+    task = owned(c, args)
+    if scheduled(task) and task.status in ("completed", "failed"):
+        raise Conflict(f"task '{task.name}' already ended: {STATUS[task.status]}")
+    stop(task)
+    return {"task": task.name}
+
+
+def shown(step):
+    """A step as the task list shows it: its operation's arguments as a log may show them, not the personal data or
+    secrets they hold."""
+    call = json.loads(step.action)
+    return {**call, "args": redacted(call["op"], call.get("args") or {}), "wait": step.run_next_after, "status": step.status}
 
 
 def summary(task):
-    return {"name": task.name, "status": task.status, "creator": creator(task),
-            "steps": [{**json.loads(s.action), "wait": s.run_next_after, "status": s.status} for s in ordered(task)],
+    return {"name": task.name, "status": task.status, "creator": creator(task), "event": meta(task).get("event"),
+            "steps": [shown(s) for s in ordered(task)],
             "schedules": [view(s, "name", "run_at", "repeat_every", "last_run_at", "disabled") for s in task.schedules]}
 
 
-@op("task.view", read=True)
+def wanted(args):
+    """The tasks task_list keeps: those with a step of the operation ``op`` and the GGG ``status``, if given."""
+    def keep(task):
+        return (not args.get("op") or any(json.loads(s.action)["op"] == args["op"] for s in task.steps)) \
+            and (not args.get("status") or STATUS[task.status] == args["status"])
+    return keep
+
+
+@op("realm.monitor", read=True, returns="tasks")
 def task_list(c, args):
     """Tasks with their status, creator, steps and schedules, ``count`` rows at a time (default 100, at most 500) from
-    row ``from`` (default 1). Returns ``tasks`` and ``next``, the ``from`` of the next page (null at the end)."""
-    rows, nxt = page(Task, args)
+    row ``from`` (default 1), optionally only those with a step of the operation ``op`` or with the ``status``
+    scheduled, run, failed or cancelled; a filtered page may hold fewer. Returns ``tasks`` and ``next``, the ``from`` of
+    the next page (null at the end)."""
+    rows, nxt = page(Task, args, wanted(args))
     return {"tasks": [summary(t) for t in rows], "next": nxt}
 
 

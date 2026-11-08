@@ -48,6 +48,7 @@ class Realm(Row):
     installed_version = String(default="")
     network = String(default="")
     timezone = String(default="UTC")  # an IANA name (core.zones); UTC until the realm sets one
+    languages = Json([])  # BCP 47 tags, the first the default; none until the realm sets them
     can_test_mode = Boolean(default=False)
     test_mode = Boolean(default=False)
     test_flags = Json({})  # the test_mode_* switches

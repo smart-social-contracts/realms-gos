@@ -2,6 +2,7 @@
 member's notices and the record of what a delegate did. Grants that name permissions are in test_delegation.py."""
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -106,8 +107,11 @@ def test_everything_covers_exactly_the_enabled_operations(name, monkeypatch):
     assert reached(call(name, "claude-conn", on_behalf_of="ctl")) == (name in poa.ENABLED)
 
 
-def test_the_legacy_operations_are_the_22_delegable_after_phase_0():
-    assert len(poa.LEGACY) == 22 and poa.ENABLED == poa.LEGACY <= set(op.OPS)
+def test_the_legacy_operations_are_those_the_model_lists_as_delegable_before_groups():
+    file = (ROOT / "ggg" / "model" / "README.md").read_text()
+    listed = file.split("A grant whose `scope` names permissions covers only the operations")[1].split("Under such a grant")[0]
+    names = {n for n in re.findall(r"`([a-z_]+)`", listed) if n in ggg_delegation.OPERATIONS}
+    assert poa.LEGACY == names and poa.ENABLED == poa.LEGACY <= set(op.OPS)
 
 
 # ---- What a grant cannot say
