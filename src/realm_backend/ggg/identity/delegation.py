@@ -21,8 +21,7 @@ class Delegation(Row):
     revoked_at = Integer(default=0)
     revoked_by = String(default="")
     notice = String(default="")  # the member's notice of this delegate's latest acts (core.poa.notice)
-    notice_at = Integer(default=0)
-    notice_acts = Integer(default=0)
+    notice_acts = Integer(default=0)  # how many acts that notice tells of
 
 
 class DelegationRequest(Row):

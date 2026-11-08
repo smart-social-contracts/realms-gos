@@ -10,7 +10,6 @@ from core import chain
 from core.db import Fail, Forbidden, next_id
 from ggg_delegation import EVERYTHING, GROUPS, OPERATIONS
 
-DAY = 86400
 EVERYTHING_SCOPE = "*"
 TOPIC = "poa"  # of the notices that tell the member what a delegate did
 NOTICE_WINDOW = 3600  # a delegate's acts within an hour share one notice
@@ -126,7 +125,9 @@ def longest_grant(groups):
     """The longest, in seconds, that a grant naming ``groups`` may last: the shortest of theirs."""
     everything = EVERYTHING_SCOPE in groups
     limits = [longest(g, everything) for g in groups if g != EVERYTHING_SCOPE]
-    return min(limits + [EVERYTHING["longest"]] if everything else limits)
+    if everything:
+        limits.append(EVERYTHING["longest"])
+    return min(limits)
 
 
 def covered(grant, name, spec, permission):
@@ -199,7 +200,8 @@ def vocabulary(held):
 def notice(grant_id, name, args, out):
     """Tell the grantor what a delegate did under ``grant_id``: a notice of topic ``poa``, linked to the proposal the
     act concerns or else to the Power of attorney page. A delegate's acts within an hour of the notice's first share
-    it, kept as a count and the last ten acts, so a busy delegate costs one write."""
+    it, kept as a count and the last ten acts. Every field written is a save of its row, so a busy delegate's later
+    acts write only what changed."""
     if name in NO_NOTICE:
         return
     from ggg import Delegation, Notification
@@ -207,14 +209,17 @@ def notice(grant_id, name, args, out):
     grant, now = Delegation[grant_id], chain.now()
     who, proposal = grant.label or grant.delegate, out.get("proposal") or args.get("proposal")
     act = f"{name} {proposal}" if proposal else name
-    shared = Notification[grant.notice] if grant.notice and now - grant.notice_at < NOTICE_WINDOW else None
-    if shared is None:
+    shared = Notification[grant.notice] if grant.notice else None
+    if shared is None or now - shared.at >= NOTICE_WINDOW:
         grant.notice = Notification(
             id=next_id(Notification, "N"), recipient=f"User:{grant.grantor}", topic=TOPIC, title=f"{who} did {act}",
             body=act, href=f"/proposal/{proposal}" if proposal else "/delegations", sender=grant.delegate, at=now).id
-        grant.notice_at, grant.notice_acts = now, 1
+        grant.notice_acts = 1
         return
     grant.notice_acts += 1
-    shared.title, shared.href, shared.at = f"{who} did {grant.notice_acts} things", "/delegations", now
+    shared.title = f"{who} did {grant.notice_acts} things"
     shared.body = "\n".join((shared.body.split("\n") + [act])[-NOTICE_ACTS:])
-    shared.read_by = []  # it says something new
+    if shared.read_by:
+        shared.read_by = []  # it says something new
+    if grant.notice_acts == 2:
+        shared.href = "/delegations"

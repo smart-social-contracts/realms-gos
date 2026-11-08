@@ -163,10 +163,9 @@ def test_requests_and_decisions_by_group():
     assert "not a group" in denied("delegation_request", "claude-conn", groups=["nonsense"], **ask)
     assert "90 days" in denied("delegation_request", "claude-conn", groups=["*"], grantor="alice", expires_in=91 * DAY)
     r = ok("delegation_request", "claude-conn", groups=["vote", "propose"], **ask)["request"]
-    assert "not asked for: profile" in denied("delegation_request_decide", "alice", request=r, approve=True,
-                                                groups=["profile"])
-    assert "request names groups" in denied("delegation_request_decide", "alice", request=r, approve=True,
-                                              operations=["proposal.vote"])
+    decide = dict(request=r, approve=True)
+    assert "not asked for: profile" in denied("delegation_request_decide", "alice", groups=["profile"], **decide)
+    assert "request names groups" in denied("delegation_request_decide", "alice", operations=["proposal.vote"], **decide)
     out = ok("delegation_request_decide", "alice", request=r, approve=True, groups=["vote"])
     assert Delegation[out["delegation"]].scope == {"groups": ["vote"]}
     everything = ok("delegation_request", "claude-conn", groups=["*"], **ask)["request"]
@@ -179,10 +178,10 @@ def test_a_human_delegate_accepts_a_grant_by_groups():
     d = grant("vote", delegate="bob")
     p = ok("proposal_create", "carla", title="Park")["proposal"]
     assert Delegation[d].status == "pending"
-    assert "no active power of attorney" in denied("proposal_vote", "bob", proposal=p, choice="yes",
-                                                    on_behalf_of="alice")
+    vote = dict(proposal=p, choice="yes", on_behalf_of="alice")
+    assert "no active power of attorney" in denied("proposal_vote", "bob", **vote)
     ok("delegation_accept", "bob", delegation=d)
-    ok("proposal_vote", "bob", proposal=p, choice="yes", on_behalf_of="alice")
+    ok("proposal_vote", "bob", **vote)
 
 
 # ---- The rules of phase 0, under a grant by groups
@@ -192,8 +191,8 @@ def test_a_proposal_under_a_group_grant_is_a_motion():
     world.build()
     g = grant("propose")
     for action in ({"op": "me", "args": {}}, {"op": "task_create", "args": {"name": "later", "steps": []}}):
-        assert "asks the member each time" in denied("proposal_create", "claude-conn", title="x", action=action,
-                                                      on_behalf_of="alice")
+        error = denied("proposal_create", "claude-conn", title="x", action=action, on_behalf_of="alice")
+        assert "asks the member each time" in error
     assert Proposal.count() == 0
     p = ok("proposal_create", "claude-conn", title="Bike lane", on_behalf_of="alice")["proposal"]
     assert (Proposal[p].proposer, Proposal[p].filed_under) == ("alice", g)
