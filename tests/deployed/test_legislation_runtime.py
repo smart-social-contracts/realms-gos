@@ -212,7 +212,7 @@ t0 = ic.performance_counter(0)
 box = sandbox.Resident(program, legislation._answer, legislation.ACTIONS)
 t1 = ic.performance_counter(0)
 box.call("setup", operations=sorted(ops()), layers=plan["layers"], realm=plan["realm"],
-         calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=sorted(legislation.VIEWS), facts=None)
+         calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=sorted(legislation.VIEWS), money=legislation.MONEY, facts=None)
 t2 = ic.performance_counter(0)
 for c in plan["chapters"]:
     box.call("load", source=c["source"], domain=c["domain"], text=texts[c["sha256"]])
@@ -450,6 +450,134 @@ def test_k_an_upgrade_with_a_codex_that_cannot_load_records_it_and_the_realm_fai
     assert proposal(town, founder, "anything")["error"].startswith("legislation error: the codex sha256:")
     assert ok(town, "codex_revert", people["ctl"])["codex"]  # reserved: no chapter runs, the realm is back
     assert ok(town, "codex_status", founder, query=True)["healthy"]
+
+
+# Spain's quota as the design writes it (§5.6) and València's bonus, which reads the verified large-family title with find().
+ES_TAX = '''
+from realms.legislation import above, fixed, overridable
+
+class Tax(above("tax")):
+    @fixed(legislation="TRLRHL Arts. 61, 65, 71 and 74")
+    def compute_tax_assess(self, entry, subject):
+        if entry.code != "ibi_urban":
+            return []
+        gross = subject.assessed_value.times(entry.rate)            # nearest cent, half away from zero
+        net = gross - gross.times(self.ibi_bonus(subject))
+        items = [{"concept": entry.code, "amount": gross, "legislation": "TRLRHL Art. 71.1"}]
+        if net < gross:
+            items.append({"concept": entry.code + "_bonus", "amount": net - gross, "legislation": "TRLRHL Art. 74"})
+        return items
+
+    @overridable(legislation="TRLRHL Art. 74")
+    def ibi_bonus(self, land):
+        return 0
+'''
+VALENCIA_TAX = '''
+from ggg import Attribute, Human
+from realms.legislation import above, pct
+
+class Tax(above("tax")):
+    large_family_bonus = {"general": pct("60"), "special": pct("90")}
+
+    def ibi_bonus(self, land):
+        kind, _, user = land.owner.partition(":")
+        for human in (Human.find("user", user) if kind == "User" else ()):
+            for attribute in Attribute.find("human", human.id):
+                if attribute.kind == "large_family" and attribute.status == "verified":
+                    return self.large_family_bonus.get(attribute.value, 0)
+        return 0
+'''
+UNIT = 10**8  # DOM has 8 decimals: a cent is 10**6 of the smallest unit
+HALF_A_CENT = 23 * UNIT + 45 * 10**6  # 23.45: at 10 % it is 2.345, exactly between 2.34 and 2.35
+IBI = {"code": "ibi_urban", "kind": "tax", "subject": "Land", "rate": 10_000_000, "facts": {}}  # 10 %
+COMPUTE = '''
+import json
+from core import chain, legislation
+
+def compute():
+    before = ic.performance_counter(0)
+    answer = legislation.compute("tax_assess", decimals=8, entry=%(entry)r, subject=%(subject)r)
+    return answer, ic.performance_counter(0) - before
+
+compute()  # the first call of a heap compiles the modules it reaches: not what a compute costs
+answer, cost = compute()
+print(json.dumps({"answer": answer, "cost": cost}))
+'''
+
+
+@pytest.fixture(scope="module")
+def agora(wasm_of, people):
+    """A launched realm on DOM, whose founder holds a verified large-family title, with two parcels of 23.45 DOM and
+    a tax on land at 10 % under the layered codex of Spain and València."""
+    from test_layered_codex import Canister
+
+    realm = Canister(wasm_of("production"), installer=people["installer"])
+    ctl, founder, alice = people["ctl"], people["founder"], people["alice"]
+    ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
+    ok(realm, "setup_step", founder, step="realm", name="Agora", open_registration=True)
+    ok(realm, "setup_step", founder, step="trust_policy", require_marketplace_approval=False)
+    ok(realm, "setup_step", founder, step="tokens", accounting_currency="DOM", accounting_currency_decimals=8)
+    ok(realm, "setup_launch", founder)
+    ok(realm, "token_register", ctl, symbol="DOM", ledger=people["installer"], decimals=8, fee=10_000)
+    ok(realm, "realm_join", alice)
+    for owner, x in ((founder, 0), (alice, 1)):
+        parcel = ok(realm, "land_register", ctl, owner=owner, x=x, y=0)["land"]
+        ok(realm, "land_assess", ctl, land=parcel, value=HALF_A_CENT, area=120, reference="CAT-17")
+    title = ok(realm, "attribute_submit", founder, kind="large_family", value="general", ref="vault:title")["attribute"]
+    ok(realm, "attribute_review", ctl, attribute=title, status="verified")
+    ok(realm, "tax_policy_draft", ctl, document={"symbol": "DOM"}, taxes=[IBI])
+    ok(realm, "tax_policy_propose", ctl, policy="TAX-POLICY-1")
+    install(realm, [("eu/es", "tax", ES_TAX), (TOWN, "tax", VALENCIA_TAX)], layers=("eu/es", TOWN), calendars=())
+    return realm
+
+
+def test_m_compute_tax_assess_gives_the_ibi_with_ggg_s_rounding_and_the_bonus(agora, people, costs):
+    """Spain's quota on the wasm, and what one compute costs (host reads of the parcel and of the title included)."""
+    ctl, founder, alice = people["ctl"], people["founder"], people["alice"]
+    assert ok(agora, "tax_assess", ctl, period="2026")["count"] == 2
+
+    def items(who):
+        [invoice] = ok(agora, "my_invoices", who, query=True)["invoices"]
+        assert sum(i["amount"] for i in invoice["items"]) == invoice["amount"]
+        return [(i["concept"], i["amount"]) for i in invoice["items"]]
+
+    # 2.345 is a half: 2.35, where banker's rounding would give 2.34. The bonus is 60 % of that: 1.41.
+    assert items(alice) == [("ibi_urban", 235 * 10**6)]
+    assert items(founder) == [("ibi_urban", 235 * 10**6), ("ibi_urban_bonus", -141 * 10**6)]
+    assert failures(agora, founder) == {}
+    for entry, subject, what, answer in (
+            (IBI, "Land:L-1", "with the bonus (a find() on Human and one on Attribute)", ("ibi_urban", 235 * 10**6)),
+            (IBI, "Land:L-2", "without a title", ("ibi_urban", 235 * 10**6)),
+            ({**IBI, "code": "water"}, "Land:L-1", "of a tax the chapter leaves to the realm: [] after reading the parcel", None)):
+        got = run(agora, COMPUTE % {"entry": entry, "subject": subject})
+        costs.report(f"compute_tax_assess {what}", got["cost"])
+        print(f"compute_tax_assess {what}: {got['cost']:,} instructions")
+        shown = [(i["concept"], i["amount"]) for i in got["answer"]][:1]  # the gross, before any bonus
+        assert shown == ([answer] if answer else []), got
+        assert got["cost"] < 50_000_000, got
+
+
+FLOATS = {
+    "a float": ("return [{\"concept\": \"x\", \"amount\": 0.5}]", "0.5: no floats in a chapter"),
+    "float()": ("return float(subject.area)", "float: no floats in a chapter"),
+    "a division": ("return subject.area / 3", "no `/` in a chapter"),
+    "a division in place": ("n = subject.area\n        n /= 3\n        return n", "no `/` in a chapter"),
+    "a power": ("return subject.area ** 2", "no `**` or pow() in a chapter"),
+    "a power in place": ("n = subject.area\n        n **= 2\n        return n", "no `**` or pow() in a chapter"),
+    "pow()": ("return pow(subject.area, 2)", "pow: no floats in a chapter"),
+    "a local named float": ("float = 3\n        return float", "float: no floats in a chapter"),
+}
+
+
+@pytest.mark.parametrize("form", sorted(FLOATS))
+def test_n_a_chapter_with_float_arithmetic_does_not_build(town, form):
+    """The subset check the realm runs on its own interpreter's bytecode (3.13: BINARY_OP 11 and 24 are / and /=, 8 and 21
+    are ** and **=), and the names it binds (a local is in co_varnames, not co_names)."""
+    body, reason = FLOATS[form]
+    text = f"from realms.legislation import above\nclass Tax(above('tax')):\n    def compute_tax_assess(self, entry, subject):\n        {body}\n"
+    got = run(town, BUILD % {"chapters": [(TOWN, "tax", text)], "calendars": [], "realm": TOWN, "layers": [TOWN]})
+    [error] = got["errors"]
+    assert reason in error, got
 
 
 RESERVED_LEG = '''

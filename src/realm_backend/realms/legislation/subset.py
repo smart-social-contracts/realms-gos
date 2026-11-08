@@ -61,6 +61,16 @@ FRAME_ATTRIBUTES = frozenset(
 )
 # str.format and str.format_map walk attributes named in the template: a chapter writes f-strings.
 FORMAT_METHODS = frozenset(("format", "format_map"))
+# Money is an integer in the token's smallest unit and a rate an integer in hundred-millionths (rule 12): a chapter
+# computes with whole numbers and Money, and a float on money would round where GGG's one rule does not. So no float or
+# complex number, no float() or complex(), and no `/`, which makes a float of two integers. Nor any exponentiation:
+# `x ** n` and pow(x, n) are floats for a negative n, a complex number for a negative base, and n can come at run time,
+# so no check of a constant exponent would hold; a chapter needs no power. The names are refused wherever a chapter binds
+# or reads them, as a name, an attribute, a keyword or a string, so that the two checkers agree on one list.
+FLOAT_NAMES = frozenset(("float", "complex", "pow"))
+NO_FLOAT = "no floats in a chapter: money is whole units of the token, a rate is pct(\"1.10\"), a share of money is Money.times(rate)"
+NO_DIVISION = "no `/` in a chapter, it makes a float: use // on whole numbers, or Money.times(rate) for a share of money"
+NO_POWER = "no `**` or pow() in a chapter, a negative power is a float: multiply, or use Money.times(rate)"
 GENERATOR_FLAGS = (
     0x20 | 0x80 | 0x100 | 0x200
 )  # CO_GENERATOR, CO_COROUTINE, CO_ITERABLE_COROUTINE, CO_ASYNC_GENERATOR
@@ -175,6 +185,25 @@ def strings(const):
     if isinstance(const, (tuple, frozenset)):
         return [s for item in const for s in strings(item)]
     return []
+
+
+def inexact(const):
+    """Every float or complex number inside a constant: itself, or in a tuple or frozenset."""
+    if isinstance(const, (float, complex)):
+        return [const]
+    if isinstance(const, (tuple, frozenset)):
+        return [number for item in const for number in inexact(item)]
+    return []
+
+
+def operator_refusal(name, arg):
+    """Why an instruction is refused, if it is `/`, `/=`, `**` or `**=`: BINARY_OP's arguments 11 and 24, 8 and 21 on
+    3.11 and later; their own instructions before."""
+    if name in ("BINARY_TRUE_DIVIDE", "INPLACE_TRUE_DIVIDE") or (name == "BINARY_OP" and arg in (11, 24)):
+        return NO_DIVISION
+    if name in ("BINARY_POWER", "INPLACE_POWER") or (name == "BINARY_OP" and arg in (8, 21)):
+        return NO_POWER
+    return None
 
 
 def sdk_names():
@@ -387,6 +416,10 @@ class Check:
                     )
                 if s in FRAME_ATTRIBUTES or s == "metaclass":
                     self.refuse(f"{s!r}: not allowed in a chapter", s)
+                if s in FLOAT_NAMES:  # a keyword's name, or a name looked up as a string
+                    self.refuse(f"{s}: {NO_FLOAT}", s)
+            for number in inexact(const):
+                self.refuse(f"{number!r}: {NO_FLOAT}", repr(number))
         for name in code.co_names:
             if name in FRAME_ATTRIBUTES:
                 self.refuse(
@@ -403,6 +436,10 @@ class Check:
                 and not (scope == "module" and name == "__doc__")
             ):
                 self.refuse(f"{name}: no dunder names in a chapter", name)
+        # The names the code binds as well as those it reads (co_names holds the global and attribute names only).
+        for name in (code.co_name, *code.co_names, *code.co_varnames, *code.co_cellvars, *code.co_freevars):
+            if name in FLOAT_NAMES:
+                self.refuse(f"{name}: {NO_FLOAT}", name)
         if code.co_flags & GENERATOR_FLAGS:
             self.refuse(
                 f"{code.co_name}: no generators, coroutines or async code in a chapter",
@@ -414,6 +451,9 @@ class Check:
                     f"{self.what(name, arg)} is not part of the readable subset in a {scope}",
                     code.co_name,
                 )
+            reason = operator_refusal(name, arg)
+            if reason:
+                self.refuse(reason, code.co_name)
         for const in code.co_consts:
             if type(const) is type(code) and const.co_flags & GENERATOR_FLAGS:
                 self.refuse(

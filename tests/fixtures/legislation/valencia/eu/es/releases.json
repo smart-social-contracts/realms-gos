@@ -1,0 +1,18 @@
+[
+  {
+    "version": "2.4.0",
+    "published": "2026-11-02",
+    "effective_from": "2027-01-01",
+    "commit": "398ca632573ee86ee7ecfc36a2e2a817d9350e78",
+    "chapters": {
+      "data_protection": "sha256:c88a657b741a332f5e63c97d2a06bc859833a5de371161005c2f5625d37f47bb",
+      "language": "sha256:0f13de1ea79d9c311bdd2adeb33204e214ed01eb1ed65f98896c22bc7197c8d4",
+      "local_regime": "sha256:1a9fcecab3866cc77008528371aeaf7b72360f6ecd81ba877210b3e194935624",
+      "procedure": "sha256:9aad335a653d319127e147585287778ec8b96bc5a60a4f867905df487260da87",
+      "register": "sha256:fb56a3e6460e72ea8849d8d343aa2816933053ddbf9d8c91e8d9274e53e56fc6",
+      "tax": "sha256:0af5a1da7b42451e2506502195ccd07049c6aa4670fc86e2f8e406972ba1d27d"
+    },
+    "calendar": "sha256:b8935ae502bdc311dc336f8850613e47e30e7712042d435810641a1db67ba0f9",
+    "notes": {"en": "Tax, procedure, register, local regime, data protection and language, with Spain's holidays", "es": "Impuestos, procedimiento, padrón, régimen local, protección de datos y lengua, con los festivos de España"}
+  }
+]

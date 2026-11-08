@@ -1,0 +1,13 @@
+[
+  {
+    "version": "1.0.0",
+    "published": "2026-10-15",
+    "effective_from": "2027-01-01",
+    "commit": "398ca632573ee86ee7ecfc36a2e2a817d9350e78",
+    "chapters": {
+      "water": "sha256:05375f4a3d950f8da60275c2aad037c325f158786ab34a150fd88e36b2d050f5"
+    },
+    "calendar": null,
+    "notes": {"ca-valencia": "Primera versió: l'aigua", "es": "Primera versión: el agua"}
+  }
+]

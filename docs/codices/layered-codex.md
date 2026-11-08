@@ -216,7 +216,7 @@ The rules:
 | Field | Rule |
 |---|---|
 | `name` | official names, by language |
-| `created_by` | the act that created the source |
+| `created_by` | the act that created the source; left out when none did, such as a municipality older than any statute |
 | `publisher.realm` | the canister id of the source's own realm, if it has one, else `null` (§8) |
 
 A source carries no time zone and no zone file: a realm's time zone is its own `Realm.timezone`
@@ -387,6 +387,13 @@ The rules (the checker enforces them, §12):
    bound once, as the method's parameters, and never rebound, deleted or reused as a nested function's
    parameter. A chapter's class lives as long as the codex runs, so a default or an attribute on an SDK
    object, a parameter or a view would be state shared by every call.
+6. **No floats.** Money is whole units of the token and a rate is `pct("1.10")`, so a chapter holds no float
+   literal, calls no `float()` or `complex()`, and writes no `/` or `/=`, which make a float of two integers
+   (`//` divides whole numbers). It writes no `**`, `**=` or `pow()` either: a negative power is a float and a
+   negative base to a fractional power a complex number, and the power can come at run time, where no check of a
+   constant would hold; a chapter needs no power. The names `float`, `complex` and `pow` are neither read nor bound
+   anywhere in a chapter, and `type(x)` of a float or a complex number is refused, so the data a chapter reads
+   cannot hand it the class either. A share of money is `amount.times(rate)`, rounded by GGG's one rule (§4.5).
 
 ### 4.1 Marks
 
@@ -519,7 +526,7 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 |---|---|
 | `self.ggg.<op>(**args)` | queues GGG operation `<op>` as an effect, as codex effects work today |
 | `self.deny(reason)` | a guard's refusal |
-| `from ggg import ...` | read-only access to GGG's entities (`Member.each`, `Land.get`, ...) |
+| `from ggg import ...` | read-only access to the fields of GGG's entities that legislation may read: `get(id)`, `each()` and `find(field, value)` on an indexed field. A list reads as a tuple and a mapping as `row["code"]`; values are as the realm stores them (an attribute's status is `verified`, a parcel's owner `User:<id>`) |
 | `Ref(kind, id)` | GGG's `Ref`, e.g. `Ref("external", "INE")` |
 | `self.now()` | the current time, a UTC timestamp, as today |
 | `self.approved_by(department)` | whether the current operation carries that department's approval |
@@ -528,12 +535,39 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 | `self.local_day(at)` | the realm's local day of UTC timestamp `at`, `YYYY-MM-DD`, computed by the realm from its own time zone (below): the day a working-day count starts from (§5.2) |
 | `pct("1.10")` | a rate literal, stored as the integer in hundred-millionths (§4.3) |
 | `days(n)`, `working_days(n)`, `months(n)`, `years(n)` | a Period, as GGG writes it: the unit constructors GGG defines, for settings (§4.3); the SDK adds none |
+| `Money(units, decimals)` | an amount in the token's smallest unit: it adds, compares and `times(rate)`; an amount GGG hands a chapter (a parcel's `assessed_value`, below) is one |
 | `amount.times(rate)` | money times a rate, rounded as GGG says |
 
 **Rounding is one rule, set by GGG:** nearest cent, an exact half away from zero, stated with the money
 kind of GGG's fact schema so that every implementation rounds the same way. The rule's text is on
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
 `times()` takes no rounding argument and a chapter names no rule.
+
+**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row,
+the object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
+currency (GGG's model), and it reaches the chapter as a `Money` of that currency's decimals, so that
+`subject.assessed_value.times(entry.rate)` rounds to its cent. A codex therefore computes a tax on land only when it
+is billed in the accounting currency, and `tax_assess` refuses the call otherwise; a tax on land in another token has
+its own rate, amount or brackets. Only a `compute_` method knows the token: anywhere else an amount read is a `Money`
+without decimals, and `times()` says so instead of guessing. A chapter's own amounts are `Money(units, decimals)`,
+the decimals those of the amounts it read (`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the
+same kind, `sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
+(`realms.legislation.rates.times`): there is one implementation.
+
+**Round once.** GGG rounds an amount where it is complete (D23), not at each step: a tax by brackets adds the exact
+products of each bracket, whole numbers in hundred-millionths of a unit, and rounds the total once. Rounding each
+bracket and adding the cents gives another total. A tax of 0.1 % on the first 25.00 and 0.3 % above, on 40.00, is
+2.5 cents and 4.5 cents: 7 cents rounded once, and 8 when each is rounded first. A chapter writes it the same way:
+
+```python
+def brackets_tax(self, value, brackets):       # value: a Money; brackets: up_to and rate, the last up_to None
+    exact, lower = 0, 0                        # whole numbers, in hundred-millionths of a unit: nothing rounded yet
+    for bracket in brackets:
+        upper = value.units if bracket["up_to"] is None else min(value.units, bracket["up_to"])
+        exact += max(upper - lower, 0) * bracket["rate"]
+        lower = max(lower, upper)
+    return Money(exact, value.decimals).times(1)    # the one rounding, of the total
+```
 
 **Time zones.** GGG's `Realm.timezone` is an IANA name such as `Europe/Madrid`
 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)). Timestamps stay UTC nanoseconds,
@@ -652,9 +686,9 @@ class LocalRegime(above("local_regime")):
     def check_proposal_create(self, args):
         if "Code" not in args.action:                        # only this realm's own change of legislation (see below)
             return None
-        # ... elided: the realm's local day (§4.5) of the earliest close of the vote and of args.effective_at
+        earliest_close_day = self.local_day(self.now())      # a vote may close as soon as its outcome is certain
         if args.effective_at is None \
-                or effective_day < self.legislation.procedure.working_days_after(earliest_close_day, 15):
+                or self.local_day(args.effective_at) < self.legislation.procedure.working_days_after(earliest_close_day, 15):
             return self.deny("an ordinance takes effect at the earliest 15 working days after the vote closes (Art. 65.2)")
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
@@ -686,8 +720,8 @@ class LocalRegime(above("local_regime")):
 
     def on_codex_install(self, event):
         title = "Nova ordenança" + (" (traducció pendent)" if event.languages_missing else "")
-        for m in Member.each():
-            self.ggg.notification_send(recipient=Ref("user", m.user), topic="ordinance",
+        for m in Member.each():                              # a member's id is its user's id
+            self.ggg.notification_send(recipient=Ref("user", m.id), topic="ordinance",
                 title=title, body=event.result["codex"])
 ```
 
@@ -832,7 +866,7 @@ class Tax(above("tax")):
         if entry.code != "ibi_urban":
             return []
         gross = subject.assessed_value.times(entry.rate)            # nearest cent, half away from zero
-        net = gross - gross.times(self.ibi_bonus(subject))
+        net = gross - gross.times(self.ibi_bonus(subject.owner))
         items = [{"concept": entry.code, "amount": gross, "legislation": "TRLRHL Art. 71.1"}]
         if net < gross:
             items.append({"concept": entry.code + "_bonus", "amount": net - gross,
@@ -840,8 +874,8 @@ class Tax(above("tax")):
         return items
 
     @overridable(legislation="TRLRHL Art. 74")
-    def ibi_bonus(self, land):
-        return 0
+    def ibi_bonus(self, owner):
+        return 0                                        # owner: "User:<id>", as a parcel's owner is written
 
 # legislation/eu/es/vc/46250-valencia/tax.py
 from ggg import Attribute, Human
@@ -851,10 +885,15 @@ class Tax(above("tax")):
     surface_public_transport = True
     large_family_bonus = {"general": pct("60"), "special": pct("90")}      # 60 % and 90 % of the quota
 
-    def ibi_bonus(self, land):
-        owner = Human.for_user(land.owner.id)
-        verified = [a.value for a in Attribute.of(owner, kind="large_family") if a.status == "Verified"]
-        return self.large_family_bonus.get(verified[0], 0) if verified else 0
+    def ibi_bonus(self, owner):
+        kind, _, user = owner.partition(":")
+        if kind != "User":
+            return 0
+        for human in Human.find("user", user):                          # find: an indexed field and the value it has
+            for attribute in Attribute.find("human", human.id):
+                if attribute.kind == "large_family" and attribute.status == "verified":
+                    return self.large_family_bonus.get(attribute.value, 0)
+        return 0
 ```
 
 - **The rate lives in one place:** the entry of the adopted policy, proposed with
@@ -869,7 +908,9 @@ class Tax(above("tax")):
   own layer (§4.3), read by Spain's forbids through `S.` and fixed per realm at build. They never come
   from whoever proposes the rate.
 - **The amount** is computed by `compute_tax_assess`, which GGG calls for each entry and subject, page
-  by page. GGG's rounding rule applies to `times()`.
+  by page. The subject is the view of the parcel (`Land.get`'s, with its `assessed_value` and `area`), whose
+  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax on land computed by a
+  codex is billed in (§4.5), and GGG's rounding rule applies to `times()`.
 
 ### 5.7 A body beside the line
 
@@ -883,9 +924,9 @@ class Water(above("water")):
     @fixed(legislation="EMSHI statutes (illustrative)")
     def on_tax_policy_propose(self, event):
         for entry in TaxPolicy.get(event.args["policy"]).taxes:     # the saved policy's entries
-            if entry.code == "water_supply":
+            if entry["code"] == "water_supply":
                 self.ggg.notification_send(recipient=self.bulk_supplier, topic="tariff",
-                                           title="Water tariff proposed", body=entry.code)
+                                           title="Water tariff proposed", body=entry["code"])
 ```
 
 València's water layer path goes through EMSHI, because València syncs from EMSHI and EMSHI from CV
@@ -1551,6 +1592,13 @@ CI) and [realms-codices#12](https://github.com/smart-social-contracts/realms-cod
 
 It uses Python's parser (`ast`), so it runs only off-chain:
 
+- the layout of §3, which it checks first and stops at if the tree breaks it: folder names, a `source.json`
+  whose `id` is the folder's path, only `<domain>.py` files with a GGG domain, the shapes of `source.json`,
+  `releases.json` and `calendar.json`, and each release against the source's files **at the release's own
+  commit**, which must be in the history of `HEAD` (read with git, so the check needs the full history): all its
+  chapters and its calendar listed, never the `realm` domain, every checksum the sha256 of the bytes. A realm loads
+  only its own `realm.py`: one beside a source's releases is that source's own. realms-codices CI runs this command and
+  has no checker of its own;
 - every rule in §4: file and class names, base, imports, banned constructs, citations, marks, `uses`,
   and that every `on_`, `check_` and `compute_` method names a GGG operation;
 - the `F` expression rules (§6): the operation named, `each` naming the list it ranges over (for
