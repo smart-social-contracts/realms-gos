@@ -127,13 +127,16 @@ def test_the_fact_schema_the_realm_bundles_is_one_the_library_reads():
     assert (revenue.type, revenue.optional) == ("Long", False)
     assert schema.actions["procedure_define"].facts["decision_deadline"].type == "Period"
     assert "proposal_create" in schema.actions and "document_share" in schema.actions
+    basis = schema.actions["document_share"].facts["basis"]  # §5.4's `F.basis.is_none()`
+    assert (basis.type, basis.optional) == ("Record", True) and "facts" not in schema.actions["tax_policy_draft.taxes"].facts
 
 
 def test_facts_are_cedar_values():
     assert forbids.cedar_value("String", {"Cast": None}, "x") == "Cast"  # a variant's tag
     assert forbids.cedar_value("Set<String>", ["b", "a", "b"], "x") == ["a", "b"]
     assert forbids.cedar_value("Period", {"count": 3, "unit": {"Month": None}}, "x") == {"count": 3, "unit": "Month"}
-    for kind, value in (("Long", True), ("Long", 2**63), ("Long", "5"), ("Bool", 1), ("String", 5), ("Set<String>", "ab")):
+    assert forbids.cedar_value("Record", {"legal_basis": "consent"}, "x") == {}  # a forbid only tests that it is there
+    for kind, value in (("Long", True), ("Long", 2**63), ("Long", "5"), ("Bool", 1), ("String", 5), ("Set<String>", "ab"), ("Record", "x")):
         with pytest.raises(Fail):
             forbids.cedar_value(kind, value, "x")
 

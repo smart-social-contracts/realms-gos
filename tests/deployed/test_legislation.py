@@ -402,7 +402,7 @@ def test_the_realm_generates_the_same_cedar_as_a_laptop_and_its_engine_validates
     )
     assert (
         'action "tax_policy_draft.taxes" in ["call"]' in got["schema"]
-        and "scope: Set<String>" in got["schema"]
+        and "covered: Bool" in got["schema"]
     )
     assert got["decisions"] == {
         "urban at the cap": True,

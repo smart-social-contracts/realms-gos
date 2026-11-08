@@ -5,8 +5,9 @@ operation's own action, its arguments in GGG's form (``ggg_api.ggg_args``) and t
 ``@op``); for a list's action, the fields of one element, one request per element. ``targets`` reads which actions the
 generated policies name, and ``requests`` makes the requests one call needs.
 
-The facts are those Cedar can compare (ggg_facts.py): text, whole numbers, booleans, periods and sets of text. A
-Value, a blob, a reference or a record is not a fact, so a rule on one is a guard.
+The facts are those Cedar can compare or test (ggg_facts.py): text, whole numbers, booleans, periods, sets of text,
+and records, which a forbid can only test for. A Value, a blob or a list of records is not a fact, so a rule on one
+is a guard.
 """
 
 from core import ranges
@@ -110,6 +111,10 @@ def cedar_value(kind, value, where):
         if not isinstance(value, dict):
             raise Fail(f"{where} is not a period")
         return {"count": cedar_value("Long", value.get("count"), where), "unit": text_of(value.get("unit"), where)}
+    if kind == "Record":  # a forbid can only test that it is there
+        if not isinstance(value, dict):
+            raise Fail(f"{where} is not a record")
+        return {}
     if kind == "Set<String>":
         if not isinstance(value, (list, tuple)):
             raise Fail(f"{where} is not a list")

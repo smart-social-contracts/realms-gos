@@ -245,8 +245,9 @@ def ranges_module():
     return "\n".join(lines)
 
 
-# The numbers Cedar compares as a Long, and the facts it reads as text (a principal, a variant's tag). A Value, a blob,
-# a Ref, a record other than a Period and a list of records are not facts a forbid can read: a rule on one is a guard.
+# The numbers Cedar compares as a Long, and the facts it reads as text (a principal, a variant's tag). A record other
+# than a Period is a fact a forbid can only test for. A Value, a blob and a list of records are not facts a forbid can
+# read: a rule on one is a guard.
 LONGS = ("nat", "nat8", "nat16", "nat32", "nat64", "int")
 # Actions whose forbids also run on another action: a draft is checked as the policy proposed from it will be
 # (layered-codex.md §6), so the same forbids run when it is saved.
@@ -263,6 +264,8 @@ def cedar_fact(fact):
         entry = {"type": "Bool"}
     elif kind == "Period":
         entry = {"type": "Period"}
+    elif "fields" in fact:
+        entry = {"type": "Record"}
     elif kind in LONGS:
         entry = {"type": "Long", "min": int(fact["min"]), "max": int(fact["max"])}
     elif kind == "vec" and fact["element"]["type"] in ("text", "principal"):
@@ -293,12 +296,13 @@ def facts_module():
         "",
         "- ``action`` is a GGG operation (``tax_policy_propose``) or one list of its arguments, ``<operation>.<list>``",
         "  (``tax_policy_propose.taxes``), whose facts are the fields of one element; both are Cedar actions.",
-        "- ``type`` is ``String`` (text, a principal, a variant's tag), ``Long``, ``Bool``, ``Period`` or ``Set<String>``.",
-        "  A ``Long`` has ``min`` and ``max``, GGG's range for it; ``optional`` is only written when true.",
+        "- ``type`` is ``String`` (text, a principal, a variant's tag), ``Long``, ``Bool``, ``Period``, ``Set<String>``",
+        "  or ``Record`` (a record, which a forbid can only test for: ``F.basis.is_none()``). A ``Long`` has ``min`` and",
+        "  ``max``, GGG's range for it; ``optional`` is only written when true.",
         "- ``also`` (only where present) names the other actions that the forbids on this action also apply to:",
         "  those on ``tax_policy_propose.taxes`` run on ``tax_policy_draft.taxes`` too, so a draft is checked as the",
         "  policy proposed from it will be.",
-        "- A fact Cedar cannot compare (a Value, a blob, a reference or another record) is left out. What an operation",
+        "- A fact Cedar cannot compare or test (a Value, a blob, a list of records) is left out. What an operation",
         "  keeps from the legislation (``secret=``) is taken out by the realm when it loads this (core.legislation_sandbox).",
         "- Numbers are GGG's: a time is in nanoseconds, a ratio in hundred-millionths.",
         '"""',

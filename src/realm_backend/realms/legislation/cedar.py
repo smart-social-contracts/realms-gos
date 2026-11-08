@@ -52,7 +52,10 @@ from realms.legislation.periods import Period
 from realms.legislation.sealed import MappingProxyType, Sealed
 
 NAMESPACE = "Realm"
-TYPES = ("Long", "String", "Bool", "Period", "Set<String>", "Set<Long>")
+TYPES = ("Long", "String", "Bool", "Period", "Set<String>", "Set<Long>", "Record")
+# A Record fact is a record a forbid can only test for (``is_some()``, ``is_none()``), as §5.4's ``F.basis.is_none()``:
+# its fields are no facts. Cedar sees it as an empty record, ``{}``.
+CEDAR_TYPES = {"Record": "{}"}
 # Words Cedar does not accept as a bare attribute name: written as context.facts["name"].
 RESERVED = frozenset(
     ("true", "false", "if", "then", "else", "in", "like", "has", "is", "principal", "action",
@@ -878,7 +881,7 @@ def schema(fact_schema, forbids=(), context=None, only=None):
     for name, action in fact_schema.actions.items():
         if only is not None and name not in only:
             continue
-        facts = record([(f, t.type, t.optional) for f, t in action.facts.items()])
+        facts = record([(f, CEDAR_TYPES.get(t.type, t.type), t.optional) for f, t in action.facts.items()])
         fields = base + [("facts", facts, False)]
         if name in open_settings:
             domains = [

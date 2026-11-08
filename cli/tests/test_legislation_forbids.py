@@ -1159,6 +1159,20 @@ def test_the_schema_declares_only_the_actions_asked_for():
     assert len(c.cedar_schema().splitlines()) > len(only.splitlines())
 
 
+def test_a_record_fact_is_tested_for_and_never_compared():
+    """§5.4's `F.basis.is_none()`: a record the forbid can only ask is there, Cedar's empty record `{}`."""
+    facts = {"document_share": {"facts": {"kind": "String", "basis": {"type": "Record", "optional": True}}}}
+    c = codex(facts=facts)
+    c.load("eu/es", "tax", forbid_chapter('forbid("document_share", F.basis.is_none(), legislation="GDPR Art. 6")'))
+    assert c.cedar().endswith("  when { !(context.facts has basis) };\n")
+    assert "basis?: {}" in c.cedar_schema()
+    assert cedarpy.validate_policies(c.cedar(), c.cedar_schema()).validation_passed
+    (rule,) = c.forbids()
+    assert rule.evaluate({"kind": "x"}) and not rule.evaluate({"kind": "x", "basis": {}})
+    assert "do not compare" in refused(
+        forbid_chapter('forbid("document_share", F.basis.is_some() & (F.basis == 1), legislation="x")'), c=codex(facts=facts))
+
+
 def test_names_and_strings_are_written_as_cedar_wants_them():
     c = codex()
     c.load("eu/es", "tax", RESERVED_NAME)
