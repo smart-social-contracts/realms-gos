@@ -121,7 +121,8 @@ same rows.
 - an invoice's `items` are lines with a `concept` and a signed `amount`, optionally a `quantity`, a `unit` and the
   `legislation` that charges it; they sum to the invoice's `amount`, and `invoice_item_add` adds a line to a pending
   invoice. The invoice of a fine or a restitution has one item, named for the kind of penalty;
-- a budget line is `revenue` or `expense`, and `budget_propose` takes every draft line of a period together
+- a budget line is `revenue` or `expense`, a category is one kind within a fund and period (`budget_draft` refuses a
+  line of the other kind with `InvalidArgument`), and `budget_propose` takes every draft line of a period together
   (so a line drafted after the proposal was filed, and before it was accepted, is adopted with it). `years` is
   a fact for legislation and is not kept. Realms GOS never marks a draft `proposed`: a governed `*_propose` leaves the
   draft as it is until the vote accepts it. `budget_extend` copies a period's budget as it stood at the end of the

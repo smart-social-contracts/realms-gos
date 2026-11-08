@@ -616,12 +616,15 @@ def supersede(b):
 @op("org.manage_budget", governed=fund_department, returns="budget")
 def budget_draft(c, args):
     """Draft a budget line for ``fund`` in the open ``period``: ``planned`` amount for ``category``, of ``kind``
-    ``revenue`` or ``expense``. Returns ``budget``."""
+    ``revenue`` or ``expense``; a category is one kind in a fund and period. Returns ``budget``."""
     fund, p = find(Fund, args["fund"]), find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Conflict(f"{p.id} is {p.status}")
     if args["kind"] not in KINDS:
         raise Fail(f"kind is one of {', '.join(KINDS)}")
+    other = [b for b in each(Budget, "slot", slot(fund, p, args["category"])) if b.kind != args["kind"]]
+    if other:  # a line's slot has no kind: a category is revenue or expense, not both
+        raise Fail(f"{args['category']} is a {other[0].kind} category of fund {fund.id} in {p.id}, not {args['kind']}")
     b = Budget(id=next_id(Budget, "B"), fund=fund, period=p, category=args["category"],
                slot=slot(fund, p, args["category"]), kind=args["kind"], planned=int(args["planned"]))
     return {"budget": b.id}

@@ -43,6 +43,22 @@ def test_a_budget_line_is_revenue_or_expense():
     assert Budget[draft("ROOT", "x", 1, kind="revenue")].kind == "revenue"
 
 
+def test_a_category_is_revenue_or_expense_within_a_fund_and_period():
+    setup_finance()
+    ok("period_open", "bob", **FY2027)
+    draft("ROADS", "fees", 40, kind="revenue")
+    line = {"fund": "ROADS", "period": "FY2026", "category": "fees", "planned": 5}
+    out = call("budget_draft", "bob", kind="expense", **line)
+    assert out["kind"] == "invalid_argument" and "revenue category of fund ROADS" in out["error"]
+    assert Budget.count() == 1
+    draft("ROADS", "fees", 45, kind="revenue")  # another version of the revenue line
+    draft("ROADS", "fees", 5, period="FY2027")  # another period
+    draft("ROOT", "fees", 5)  # another fund
+    propose()
+    out = call("budget_draft", "bob", kind="expense", **line)  # an adopted revenue line holds the category too
+    assert out["kind"] == "invalid_argument"
+
+
 def test_budget_propose_adopts_every_draft_line_of_the_period_together():
     setup_finance()
     a, b = draft("ROOT", "property_tax", 900, kind="revenue"), draft("ROADS", "capital", 300)
