@@ -101,7 +101,9 @@ removed when the realm launches.
 - **Anonymous callers** are refused with `sign in first` before Cedar runs, unless the operation is
   `public`.
 - **Replays** (a passed proposal running its action, origin `replay`) skip authorization: the vote
-  was the authorization. The original caller was checked when they filed it.
+  was the authorization. The original caller was checked when they filed it. A proposal a delegate filed is
+  checked again when it runs: the grant it was filed under must still be active and able to call the action
+  directly (`proposals.check_grant`).
 - **Extensions** call as the user (origin `extension`). They need the user's permission *and*
   the operation in their manifest. An extension can never do more than the user could.
 - **Codices** call as the realm itself (origin `codex`). The third permit lets them through, but

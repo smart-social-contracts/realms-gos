@@ -218,7 +218,7 @@ def user_remove(c, args):
     user.delete()
 
 
-@op("identity.submit", delegable=True, returns="identity")
+@op("identity.submit", returns="identity")
 def identity_submit(c, args):
     """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``issuer``
     and ``ref`` (where the proof is kept). Returns ``identity``, pending until reviewed."""

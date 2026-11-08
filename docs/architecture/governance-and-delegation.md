@@ -67,7 +67,7 @@ stateDiagram-v2
 | File | `proposal_create` | `title`, `description`, `department` (default: the realm), optional `action` `{op, args}`. Voting opens at once. |
 | Vote | `proposal_vote` | `choice`: `yes`, `no` or `abstain`. Voting again replaces your vote. Delegable. |
 | Close | `proposal_finalize` | Records accepted or rejected. |
-| Act | `proposal_execute` | Replays the action once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. |
+| Act | `proposal_execute` | Replays the action once, with origin `replay`, as the proposer (the grantor, for a call made under power of attorney). A department's proposal may only carry actions that department, or one under it, governs; a realm-wide proposal may carry any. A proposal a delegate filed runs only while its grant is active, and only an action that grant could call directly (see [Delegation](#delegation-power-of-attorney)). |
 
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
 it, along with the realm-wide `threshold` and `quorum_percent`.
@@ -116,10 +116,20 @@ realms local call proposal_vote '{"proposal": "P-7", "choice": "yes", "on_behalf
 - Either side ends it with `delegation_revoke`.
 - A delegate can ask instead: `delegation_request` (open for one hour, at most 10 open requests
   per person), answered with `delegation_request_decide`.
+- Power of attorney itself, payout accounts, identity proofs, moving to another quarter, tasks, keys,
+  the shell and extension calls are never delegable.
+- A delegate's governed call (a transfer from a fund, say) is always filed as a proposal, even where the
+  department decides directly.
+- A proposal a delegate files records the grant it was filed under. When it is carried, its action runs only if
+  that grant is still active and could call the action directly; otherwise the proposal ends `failed`, with the
+  reason. A delegate's proposal cannot carry another proposal, and the delegate does not vote on a proposal it
+  filed. A delegate withdraws only the proposals it filed under its grant.
+- A delegate reads the member's own notifications, not the inboxes of the offices where the member holds a seat.
 
 The guardrails make delegation safe by construction: a delegate can only use permissions the
 grant names, only on `delegable` operations, never on `signing` ones, and never with `all`. The
-audit `Event` records both the grantor (`user`) and the signer (`by`).
+audit `Event` records both the grantor (`user`) and the signer (`by`). `codex_status` reports `agents` and
+`delegable` empty: no signing permission is open to an agent or to a delegate, whatever the codex says.
 
 ## Agents
 

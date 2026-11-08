@@ -16,10 +16,10 @@ GENERATOR = type((lambda: (yield))())
 
 class Call:
     """``user`` is who acts; ``by`` signed the message (the user, or their delegate); ``proposal`` is the
-    accepted proposal whose replay this is, if any."""
+    accepted proposal whose replay this is, if any; ``grant`` is the power of attorney a delegate acts under."""
 
-    def __init__(self, user, by, origin, proposal=""):
-        self.user, self.by, self.origin, self.proposal = user, by, origin, proposal
+    def __init__(self, user, by, origin, proposal="", grant=""):
+        self.user, self.by, self.origin, self.proposal, self.grant = user, by, origin, proposal, grant
 
     @property
     def delegated(self):
@@ -71,14 +71,16 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         claimed = args.pop("on_behalf_of", None)
         # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
         user = by if origin == "replay" else claimed or by
-        auth.authorize(user, by, name, spec, args, origin, declared)
+        grant = auth.authorize(user, by, name, spec, args, origin, declared)
         governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
-        if governing is not None and not direct(governing):
+        # A delegate's governed call is always a proposal: where the department decides directly, the member's own
+        # vote is what lets it through.
+        if governing is not None and (grant or not direct(governing)):
             from api import proposals
 
-            out = proposals.file_replay(name, args, user, by, governing)
+            out = proposals.file_replay(name, args, user, by, governing, grant)
         else:
-            out = spec["fn"](Call(user, by, origin, proposal), args)
+            out = spec["fn"](Call(user, by, origin, proposal, grant), args)
             if isinstance(out, GENERATOR):
                 out = yield from out
             out = out or {}

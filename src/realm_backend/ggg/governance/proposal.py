@@ -10,6 +10,7 @@ class Proposal(Row):
     description = String(default="")
     proposer = String(default="")
     on_behalf_of = String(default="")
+    filed_under = String(default="")  # the power of attorney a delegate filed it under
     department = ManyToOne("Department", "proposals")
     action = Json(None)  # {"op": name, "args": {...}} replayed once accepted
     status = String(default="voting", indexed=True)  # draft | voting | accepted | rejected | expired | executed | failed | withdrawn

@@ -4,6 +4,7 @@ import pathlib
 
 import pytest
 
+import ggg_api
 from api import codex
 import fake_chain
 from core import op
@@ -97,6 +98,11 @@ def test_install_status_uninstall():
     ok("codex_uninstall", "ctl")
     assert ok("codex_status", "alice")["codex"] is None
     assert "no codex" in call("codex_uninstall", "ctl")["error"]
+
+
+def test_codex_status_reports_the_signing_policy_this_realm_enforces():
+    # Agents never sign and nobody signs on another's behalf, whatever a codex says (auth.GUARDRAILS).
+    assert ggg_api.signing() == {"agents": [], "delegable": [], "supervision": "required"}
 
 
 def test_permissions():
