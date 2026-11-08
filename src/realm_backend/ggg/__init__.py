@@ -3,8 +3,9 @@
 from ggg.finance import (AllocationRule, Bid, BidScore, Budget, FinancialReport, FiscalPeriod, Fund, Invoice,
                          LedgerEntry, NFTToken, PaymentAccount, TaxDeclaration, TaxPolicy, Tender, Token, Trade,
                          Transfer, Treasury)
-from ggg.governance import (Calendar, Codex, Contract, FederalVote, FederalVoteLeg, FederationMessage, Forward,
-                            GuestUser, License, Mandate, Proposal, ProposalEdge, Quarter, Realm, Registry, Vote)
+from ggg.governance import (Calendar, ChapterSource, Codex, Contract, FederalVote, FederalVoteLeg, FederationMessage,
+                            Forward, GuestUser, InstallJob, LayeredCodex, License, Mandate, Proposal, ProposalEdge,
+                            Quarter, Realm, Registry, Vote)
 from ggg.identity import Delegation, DelegationRequest, Human, Identity, Member, Organization
 from ggg.justice import Appeal, Case, Court, Dispute, Judge, Penalty, Verdict
 from ggg.land import Land, Zone

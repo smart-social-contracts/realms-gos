@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import os
+from pathlib import Path
 
 from ic.candid import Types, decode, encode
 from ic.principal import Principal
@@ -54,10 +55,12 @@ class Canister:
         self.wasm = gzip.compress(open(wasm_path, "rb").read())
         self._install({"install": None}, encode([{"type": Types.Text, "value": installer}]))
 
-    def upgrade(self):
-        """Upgrade the canister to the same wasm, as its controller: its stable memory stays, its timers are gone until
-        post_upgrade."""
+    def upgrade(self, wasm_path=None):
+        """Upgrade the canister to ``wasm_path`` (the wasm it has by default), as its controller: its stable memory stays,
+        its timers are gone until post_upgrade."""
         self.pic.set_sender(Principal.from_str(CONTROLLER))
+        if wasm_path:
+            self.wasm = gzip.compress(Path(wasm_path).read_bytes())
         self._install({"upgrade": []}, encode([]))
 
     def wait(self, seconds):
