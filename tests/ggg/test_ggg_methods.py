@@ -50,6 +50,18 @@ def test_private_data_and_wrapped_keys_are_blobs():
     assert g.ggg_document_get(doc) == {"Ok": None} or "Err" in g.ggg_document_get(doc)
 
 
+def test_I_PRV_4_a_document_record_never_carries_the_ciphertext_to_a_reader_without_the_key_published_or_not():
+    health()
+    caller("carla")
+    doc = do(g.ggg_document_store({"document": None, "department": "Health", "keys": [], **REPORT}))["Ok"]["document"]["id"]
+    for reader in (fake_chain.ANONYMOUS, "alice"):
+        caller(reader)
+        shown = ggg_api.to_ggg(doc, "Document")
+        assert (shown["ref"], shown["hash"], shown["facts"]) == ("", "", {"Map": []}), reader
+    caller("carla")
+    assert ggg_api.to_ggg(doc, "Document")["ref"] == REPORT["ref"]
+
+
 def test_I_PRV_4_the_ggg_method_gives_a_stranger_only_the_public_copy_of_a_published_document():
     health()
     caller("carla")

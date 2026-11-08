@@ -77,12 +77,12 @@ def test_story_civil_registry_tells_the_statistics_office_of_bobs_registration()
     outside()
     sent = tell()
     row = Dispatch[sent]
-    assert (row.to, row.topic, row.title, row.body, row.status) == ("stats-office", "registration", "Bob registered",
-                                                                     {"text": "Bob joined Agora"}, "queued")
+    assert (row.to, row.topic, row.title, row.status) == ("stats-office", "registration", "Bob registered", "queued")
+    assert row.body == {"text": "Bob joined Agora"}
     assert row.queued_at == fake_chain.now() and Notification.count() == 0
     later(3600)
-    out = ok("dispatch_confirm", "bob", dispatch=sent, outcome={"Confirmed": {"at": fake_chain.now() - 60,
-                                                                               "receipt": "filing 88"}})
+    delivered = {"at": fake_chain.now() - 60, "receipt": "filing 88"}
+    out = ok("dispatch_confirm", "bob", dispatch=sent, outcome={"Confirmed": delivered})
     assert out["dispatch"] == sent
     assert (row.status, row.outcome_at, row.receipt) == ("confirmed", fake_chain.now() - 60, "filing 88")
     assert ok("dispatch_list", "bob", status="confirmed")["dispatches"][0]["receipt"] == "filing 88"
@@ -189,14 +189,14 @@ def test_story_civil_registry_sends_the_ordinance_to_the_provincial_gazette():
     doc = stored()
     assert publish(doc, to="gazette")["ok"]
     row = Dispatch["DSP-1"]
-    assert (row.to, row.topic, row.title, row.document, row.status) == ("gazette", "publication", REPORT["title"], doc,
-                                                                         "queued")
+    assert (row.to, row.topic, row.title, row.document) == ("gazette", "publication", REPORT["title"], doc)
+    assert row.status == "queued"
     assert row.body == {"ref": "pub/report.pdf", "hash": "sha256:cd34"}
     assert Document[doc].public == row.body
     assert Document[doc].publications == [{"journal": "gazette", "dispatch": "DSP-1", "published_at": None, "ref": None}]
     later(86400)
-    ok("dispatch_confirm", "bob", dispatch="DSP-1", outcome={"Confirmed": {"at": fake_chain.now() - 3600,
-                                                                            "receipt": "bulletin 214"}})
+    delivered = {"at": fake_chain.now() - 3600, "receipt": "bulletin 214"}
+    ok("dispatch_confirm", "bob", dispatch="DSP-1", outcome={"Confirmed": delivered})
     assert Document[doc].publications == [{"journal": "gazette", "dispatch": "DSP-1",
                                            "published_at": fake_chain.now() - 3600, "ref": "bulletin 214"}]
 
@@ -295,8 +295,8 @@ def test_the_ggg_methods_reply_with_a_delivery_a_dispatch_and_an_event():
     assert shown["body"] == {"Map": [("text", {"Text": "Bob joined"})]} and shown["document"] is None and shown["codex"] is None
     caller("bob")
     queued_at = shown["queued_at"]
-    done = do(g.ggg_dispatch_confirm({"dispatch": "DSP-1", "outcome": {"Confirmed": {"at": queued_at + 5 * NS,
-                                                                                    "receipt": "filing 88"}}}))
+    in_the_future = {"at": queued_at + 5 * NS, "receipt": "filing 88"}
+    done = do(g.ggg_dispatch_confirm({"dispatch": "DSP-1", "outcome": {"Confirmed": in_the_future}}))
     assert list(done["Err"]) == ["InvalidArgument"]  # five seconds from now
     done = do(g.ggg_dispatch_confirm({"dispatch": "DSP-1", "outcome": {"Confirmed": {"at": None, "receipt": "filing 88"}}}))
     assert done["Ok"]["status"] == {"Confirmed": {"at": fake_chain.now() * NS, "receipt": "filing 88"}}

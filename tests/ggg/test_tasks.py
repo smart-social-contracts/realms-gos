@@ -196,8 +196,8 @@ def test_story_a_member_schedules_a_task_that_runs_once_with_their_authority():
     event = Event[str(Event.max_id())]
     assert (event.op, event.origin, event.user) == ("notification_send", "task", "carla")
     task = as_ggg(name)
-    assert (task["op"], task["status"], task["at"], task["reason"]) == ("notification_send", {"Run": None}, at * NS,
-                                                                       "the registration lapses")
+    assert (task["op"], task["status"]) == ("notification_send", {"Run": None})
+    assert (task["at"], task["reason"]) == (at * NS, "the registration lapses")
     assert task["scheduled_by"] == {"kind": "User", "id": "carla"} and task["event"] == event.id
     assert task["args"] == {"Map": [("recipient", {"Text": "User:alice"}), ("title", {"Text": LAPSE["title"]})]}
     later(3600)
@@ -312,7 +312,10 @@ def test_task_list_is_for_the_monitor_and_filters_by_operation_and_status():
     other = ok("task_schedule", "carla", op="governance_update", args={}, at=fake_chain.now() + 300)["task"]
     ok("task_cancel", "carla", task=second)
     assert "needs realm.monitor" in denied("task_list", "carla")
-    names = lambda **args: [t["name"] for t in ok("task_list", "dana", **args)["tasks"]]
+
+    def names(**args):
+        return [t["name"] for t in ok("task_list", "dana", **args)["tasks"]]
+
     assert names() == [first, second, other]
     assert names(op="governance_update") == [other]
     assert names(status="scheduled") == [first, other] and names(status="cancelled") == [second]

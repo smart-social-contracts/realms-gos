@@ -199,7 +199,7 @@ def task_run(c, args):
     return {"execution": ex.name, "status": task.status}
 
 
-@op("task.schedule", returns="schedule")
+@op("task.schedule")
 def task_add_schedule(c, args):
     """Run your ``task`` (any task if you hold all; not a cancelled one) at ``run_at`` (default now), then every
     ``repeat_every`` seconds if set. Returns ``schedule``."""
