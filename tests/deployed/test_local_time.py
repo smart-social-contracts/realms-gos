@@ -17,11 +17,11 @@ NS = 10**9
 HOUR = 3600
 
 # Instruction ceilings, about three times what PocketIC measures: a parse 1.8M, a conversion 120k, day_bounds 0.8M,
-# a count of up to five working days 1.9M.
+# a count of up to five working days, with its day's bounds, 2.3M.
 PARSE_BUDGET = 6_000_000
 CONVERSION_BUDGET = 400_000
 BOUNDS_BUDGET = 2_500_000
-COUNT_BUDGET = 6_000_000
+COUNT_BUDGET = 7_000_000
 
 # Basilisk compiles a bundled module from its source the first time one of its names is read. That one-off cost
 # (FIRST_USE) is kept apart from the parse of a zone file.
@@ -161,7 +161,7 @@ def test_the_day_boundaries_follow_the_clock_changes(clock):
 
 
 def count(clock, *cases):
-    """``[(day, start) or the refusal, ...]`` for ``(UTC instant, working days)`` cases, and the most one cost."""
+    """``[(day, start, end) or the refusal, ...]`` for ``(UTC instant, working days)`` cases, and the most one cost."""
     out = clock.run(COUNT.format(calendar=json.dumps(CALENDAR), cases=list(cases)))
     return [counted if isinstance(counted, str) else tuple(counted) for counted, _ in out], max(cost for _, cost in out)
 
@@ -172,8 +172,10 @@ def test_working_days_are_counted_over_holidays_a_weekend_and_a_summer_time_chan
                           (utc(2026, 10, 8, 10), 2),  # Thursday 8 Oct: Fri 9 and Mon 12 are holidays, then the weekend
                           (utc(2026, 10, 22, 10), 5),  # across the end of summer time, Sunday 25 Oct
                           (utc(2026, 10, 25, 0, 30), 1), (utc(2026, 10, 25, 1, 30), 1))  # both 02:30s of that Sunday
-    assert counted == [("2026-10-14", utc(2026, 10, 13, 22)), ("2026-10-29", utc(2026, 10, 28, 23)),
-                       ("2026-10-26", utc(2026, 10, 25, 23)), ("2026-10-26", utc(2026, 10, 25, 23))]
+    assert counted == [("2026-10-14", utc(2026, 10, 13, 22), utc(2026, 10, 14, 22)),
+                       ("2026-10-29", utc(2026, 10, 28, 23), utc(2026, 10, 29, 23)),
+                       ("2026-10-26", utc(2026, 10, 25, 23), utc(2026, 10, 26, 23)),
+                       ("2026-10-26", utc(2026, 10, 25, 23), utc(2026, 10, 26, 23))]
     print(f"\na count of up to five working days costs at most {cost:,} instructions")
     assert cost < COUNT_BUDGET
 
