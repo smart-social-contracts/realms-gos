@@ -1,10 +1,11 @@
-from core import chain
-from core.db import Conflict, Fail, Forbidden, deref, each, find, next_id, page, page_by, view
+from core import chain, localtime
+from core.db import Conflict, Fail, Forbidden, Unavailable, deref, each, find, next_id, page, page_by, view
 from ggg import Calendar, Department, License, Organization, Procedure
 from core.op import op
 from api.proposals import realm_wide
 
-SHOWN = ("id", "kind", "holder", "status", "issued_at", "expires_at")
+SHOWN = ("id", "kind", "holder", "status", "decision_due", "issued_at", "expires_at")
+NS = 10**9  # the chain counts seconds, localtime nanoseconds
 
 
 def valid(lic):
@@ -43,11 +44,34 @@ def applicant(ref, user):
         raise Forbidden(f"you cannot apply for {ref}")
 
 
+def decision_due(kind, applied_at):
+    """When a decision on an application for a licence of ``kind``, made at ``applied_at``, is due by its Procedure:
+    the end of the last day of the deadline on the realm's clock, because that day counts in full and positive silence
+    applies only after it. 0 when the kind has no procedure, or none with a deadline.
+
+    Working days need the calendar of the layers the realm runs (realms-gos#505); a realm with none cannot date such an
+    application, and refuses it."""
+    procedure = Procedure[kind]
+    deadline = procedure.decision_deadline if procedure else None
+    if not deadline:
+        return 0
+    from realms.legislation.calendar import Calendar as Layers
+    from realms.legislation.errors import LegislationError
+    from realms.legislation.periods import Period
+
+    try:
+        _, _, end = localtime.add_period(applied_at * NS, Period(deadline["count"], deadline["unit"]), Layers())
+    except LegislationError as e:
+        raise Unavailable(f"an application for a {kind} licence cannot be dated: {e}")
+    return end // NS
+
+
 def application(c, kind, holder, department, evidence_ref, conditions):
     applicant(holder, c.user)
     issuer = find(Department, department) if department else None
-    lic = License(id=next_id(License, "LIC"), kind=kind, holder=holder, status="applied", applied_at=chain.now(),
-                  evidence_ref=evidence_ref, conditions=conditions)
+    now = chain.now()
+    lic = License(id=next_id(License, "LIC"), kind=kind, holder=holder, status="applied", applied_at=now,
+                  decision_due=decision_due(kind, now), evidence_ref=evidence_ref, conditions=conditions)
     if issuer:
         lic.issued_by = issuer
     return {"license": lic.id}

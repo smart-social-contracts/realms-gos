@@ -109,6 +109,10 @@ Where the two interfaces cannot say the same thing, the `ggg.did` methods do thi
   the title, kind, languages, `public` and `publications`, but not the ciphertext `ref` and `hash` nor the
   `facts` (I-PRV-4). Staff and key holders get the whole record, and for a document not published anyone else
   is refused;
+- `License.decision_due` is set when the application is made, from the `Procedure` of its kind, as the end of the
+  last day of the deadline on the realm's clock (`localtime.add_period`): that day counts in full, so positive silence
+  applies from the next. A deadline in `WorkingDay`s needs the calendar of the layers the realm runs; a realm with none
+  refuses the application with `Unavailable`;
 - a request's `body` and `reply`, and a dispatch's `body`, are not checked for personal data, which the realm
   cannot see: whoever files or decides puts personal data in an encrypted `Document` and names its id there;
 - `request_get` answers `NotFound` for a request that is not the caller's, as for one that does not exist.

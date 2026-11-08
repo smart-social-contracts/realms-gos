@@ -159,3 +159,19 @@ def test_an_attribute_is_submitted_listed_and_reviewed_through_the_ggg_methods(r
     events = ok(realm, "events", ctl, query=True)["events"]
     assert {"attribute_submit", "attribute_review"} <= {e["op"] for e in events}
     assert "large_family" not in json.dumps(events) and "general" not in json.dumps(events)
+
+
+def test_a_licence_application_is_dated_by_its_procedure_and_working_days_fail_closed(realm, people):
+    """The legislation library compiles on first use in the canister: the deadline counts there as in the unit tests."""
+    ctl, alice = people["ctl"], people["alice"]
+    ok(realm, "procedure_define", ctl, kind="business", initiated_by="the applicant", silence="positive",
+       decision_deadline={"count": 1, "unit": "Day"})
+    ok(realm, "license_apply", alice, kind="business")
+    licences = ok(realm, "license_list", alice, query=True, holder=f"User:{alice}", kind="business")["licenses"]
+    applied = stored(realm, "License", licences[0]["id"])["applied_at"]
+    # one day from the day of the application, and that day counts in full: the second midnight after it, in UTC
+    assert licences[0]["decision_due"] == (applied // 86400 + 2) * 86400
+    ok(realm, "procedure_define", ctl, kind="business", initiated_by="the applicant",
+       decision_deadline={"count": 15, "unit": "WorkingDay"})
+    refused = realm.call("license_apply", {"kind": "business"}, sender=alice)
+    assert not refused["ok"] and refused["kind"] == "unavailable", refused
