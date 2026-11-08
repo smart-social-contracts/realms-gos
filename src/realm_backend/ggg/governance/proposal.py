@@ -23,6 +23,8 @@ class Proposal(Row):
     quorum = Integer(default=0)  # share of the electorate that must vote
     tally = Json({})
     result = Json(None)
+    links = Json([])  # [{"kind": "replaces" | "relates_to", "proposal": id}], fixed at creation like the action
+    replaced_by = String(default="")  # the one proposal that replaces this withdrawn one
     votes = OneToMany("Vote", "proposal")
 
     @classmethod

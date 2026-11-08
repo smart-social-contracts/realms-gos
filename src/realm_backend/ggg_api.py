@@ -662,7 +662,8 @@ def chart(out, args):
 def proposal_detail(out, args):
     pid = out["proposal"]["id"]
     return {"proposal": pid, "votes": [ggg.Vote[f"{pid}:{v['voter']}"] for v in out.get("votes", [])],
-            "next": None if out.get("next") is None else str(out["next"])}
+            "next": None if out.get("next") is None else str(out["next"]),
+            "replaced_by": out["proposal"].get("replaced_by") or None}
 
 
 def nxt(out):
