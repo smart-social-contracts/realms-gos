@@ -625,10 +625,13 @@ def test_a_guard_case_that_does_not_come_out_as_written_is_a_problem(tree):
     "case, expected",
     [
         ({"call": "rate", "returns": 1}, "name is text"),
-        ({"name": "x", "returns": 1}, "one of call, guard, forbid says what is tested"),
+        (
+            {"name": "x", "returns": 1},
+            "one of call, guard, forbid, compute says what is tested",
+        ),
         (
             {"name": "x", "call": "rate", "guard": "realm_join", "returns": 1},
-            "one of call, guard, forbid",
+            "one of call, guard, forbid, compute",
         ),
         ({"name": "x", "call": "rate"}, "returns is what the case expects"),
         ({"name": "x", "call": "rate", "returns": 1, "args": 1}, "args is a list"),
