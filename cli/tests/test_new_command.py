@@ -1104,7 +1104,7 @@ class TestFromStage:
 def test_new_help_lists_from_stage():
     result = runner.invoke(app, ["new", "--help"])
     assert result.exit_code == 0
-    text = result.output.replace("\x1b[0m", "").replace("\x1b[1m", "")
+    text = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
     assert "from-stage" in text
 
 
