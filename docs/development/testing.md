@@ -130,14 +130,14 @@ demand, and uploads both folders.
 `main` and `feat/layered-codex`, needs no secrets and no replica, and is the one place these suites run: `tests/ggg`
 (with `cedarpy`, once through each operation's `ggg_` method, with coverage floors), `tests/backend`, the layered
 codex library (`cli/tests/test_legislation*.py`, with the pinned Cedar tools), the extension sandbox ratchet and the
-generated GGG methods and zone data. `tests/backend/marketplace` runs in its own environment because the marketplace
-canister pins another `ic-python-db`. [`ci-pr.yml`](../../.github/workflows/ci-pr.yml) and `ci-main.yml` run by hand
+generated GGG methods and zone data. The realm backend and the marketplace both pin `ic-python-db` 0.14.0, so
+`tests/backend/marketplace` runs in the same environment. [`ci-pr.yml`](../../.github/workflows/ci-pr.yml) and `ci-main.yml` run by hand
 only and keep what the full bring-up of a mundus on a local replica needs: lint, the packed wasms on PocketIC, e2e, the
 frontend tests and the CLI tests. `scripts/loc_budget.py` is not in CI yet. Run the unit gate before a pull request:
 
 ```bash
 pip install -r requirements.txt -e cli/ cedarpy==4.12.2 pytest
-pytest tests/ggg -q && pytest tests/backend -q --ignore=tests/backend/marketplace
+pytest tests/ggg -q && pytest tests/backend -q
 ```
 
 `tests/backend` held the suite of the previous backend until realms-gos#513 removed it; that code is in
