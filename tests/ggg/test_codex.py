@@ -298,9 +298,20 @@ def test_hooks_fire_from_their_operations():
     assert "N-welcome newbie" in notes
 
 
+TOWN_TAX = "from realms.legislation import above\n\nclass Tax(above('tax')):\n    pass\n"
+
+
 def waiting_codex():
-    """A layered codex installed and checked but not yet in force, as an install leaves it."""
-    return LayeredCodex(id="sha256:" + "5" * 64, status="pending", installed_at=fake_chain.now())
+    """A layered codex installed and checked but not yet in force, as an install leaves it: one chapter, stored, so
+    that the runtime can load it at the switch."""
+    from core import layered_codex as store
+
+    sha256 = store.store_chapter(store.checksum(TOWN_TAX), TOWN_TAX).sha256
+    chapters = {"town/tax": {"source": "town", "version": None, "sha256": sha256, "vouched_by": "town",
+                             "route": "https", "fetched_at": fake_chain.now(), "url": "https://example.test/tax.py",
+                             "size": len(TOWN_TAX)}}
+    return LayeredCodex(id=store.codex_id(["town"], {"tax": ["town"]}, chapters), layers=["town"],
+                        layer_paths={"tax": ["town"]}, chapters=chapters, status="pending", installed_at=fake_chain.now())
 
 
 def test_codex_activate_is_a_conflict_while_no_codex_is_pending():
