@@ -104,7 +104,7 @@ the codex (no operation edits them yet).
 | `codex_install {manifest, source}` | realm-wide | The same from inline code; its checksum must be pinned in the trust policy. |
 | `codex_revert` | realm-wide | Back to the codex it replaced. |
 | `codex_uninstall` | realm-wide | Run with no codex. |
-| `codex_status` | read | The active codex, its health, hooks, effective configuration, and the install history. |
+| `codex_status` | read | The active codex, its health, hooks, effective configuration, and the install history. A layered codex shows its layers, chapters and `activates_at`; `pending` is the layered codex waiting for its time and `job` the latest install job. |
 
 `codex_install` installs only the codex. Its `dependencies` (extensions) are installed separately;
 `realms local setup --codex <id>` does both.

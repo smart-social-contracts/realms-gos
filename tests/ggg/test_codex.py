@@ -9,7 +9,7 @@ from api import codex
 import fake_chain
 from core import op
 import world
-from ggg import Codex, Department, Event, Invoice, Proposal, Realm, Token
+from ggg import Codex, Department, Event, Invoice, LayeredCodex, Proposal, Realm, Token
 from kit import call, denied, ok, rows
 from test_spec import spec_ops
 
@@ -302,11 +302,9 @@ def test_hooks_fire_from_their_operations():
     assert "N-welcome newbie" in notes
 
 
-def waiting_codex(version="2.0.0"):
-    """A codex installed and checked but not yet in force, as the install of a layered codex leaves it."""
-    m = manifest(version, hooks=["init"])
-    return Codex(id=f"test@{version}", version=version, checksum=codex.checksum(m, SOURCE), status="pending",
-                 manifest=m, source=SOURCE, capabilities=m["capabilities"], installed_at=fake_chain.now())
+def waiting_codex():
+    """A layered codex installed and checked but not yet in force, as an install leaves it."""
+    return LayeredCodex(id="sha256:" + "5" * 64, status="pending", installed_at=fake_chain.now())
 
 
 def test_codex_activate_is_a_conflict_while_no_codex_is_pending():
@@ -322,32 +320,31 @@ def test_codex_activate_makes_the_pending_codex_active_and_keeps_the_one_it_repl
     build()
     ok("codex_install", "ctl", manifest=manifest(), source=SOURCE)
     waiting = waiting_codex()
-    checksum = "sha256:" + waiting.checksum
     seen = ok("codex_status", "alice")
-    assert (seen["pending"], seen["codex"]["version"]) == (checksum, "1.0.0")
+    assert (seen["pending"]["id"], seen["codex"]["version"]) == (waiting.id, "1.0.0")
     other = call("codex_activate", "ctl", codex="sha256:" + "0" * 64)
     assert other["kind"] == "conflict" and "not the pending codex" in other["error"]
     assert waiting.status == "pending"
-    out = ok("codex_activate", "ctl", codex=checksum, at=fake_chain.now())
-    assert out["codex"] == "test@2.0.0" and out["init"]["ok"]
+    out = ok("codex_activate", "ctl", codex=waiting.id, at=fake_chain.now())
+    assert out["codex"] == waiting.id
     seen = ok("codex_status", "alice")
-    assert (seen["codex"]["version"], seen["codex"]["previous"], seen["pending"]) == ("2.0.0", "test@1.0.0", None)
+    assert (seen["codex"]["id"], seen["codex"]["previous"], seen["pending"]) == (waiting.id, "test@1.0.0", None)
     assert Codex["test@1.0.0"].status == "inactive"
     assert ok("codex_revert", "ctl")["codex"] == "test@1.0.0" and Codex["test@1.0.0"].status == "active"
-    assert call("codex_activate", "ctl", codex=checksum)["kind"] == "conflict"  # it is not pending any more
+    assert call("codex_activate", "ctl", codex=waiting.id)["kind"] == "conflict"  # it is not pending any more
 
 
 def test_codex_activate_in_a_realm_without_a_codex():
     build()
     waiting = waiting_codex()
-    ok("codex_activate", "ctl", codex="sha256:" + waiting.checksum)
+    ok("codex_activate", "ctl", codex=waiting.id)
     assert (waiting.status, waiting.previous) == ("active", "") and codex.active().id == waiting.id
 
 
 def test_a_pending_codex_is_not_activated_ahead_of_its_time():
     build()
     waiting = waiting_codex()
-    out = call("codex_activate", "ctl", codex="sha256:" + waiting.checksum, at=fake_chain.now() + 3600)
+    out = call("codex_activate", "ctl", codex=waiting.id, at=fake_chain.now() + 3600)
     assert not out["ok"] and "at once" in out["error"] and waiting.status == "pending"
 
 
@@ -355,7 +352,7 @@ def test_activating_a_codex_is_the_realms_to_decide():
     build()
     waiting = waiting_codex()
     world.policy(Department["Administration"], 2, 3)
-    p = ok("codex_activate", "ctl", codex="sha256:" + waiting.checksum)["proposal"]
+    p = ok("codex_activate", "ctl", codex=waiting.id)["proposal"]
     assert waiting.status == "pending"
     vote_through(p)
     assert waiting.status == "active"
