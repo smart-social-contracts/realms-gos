@@ -544,15 +544,16 @@ kind of GGG's fact schema so that every implementation rounds the same way. The 
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
 `times()` takes no rounding argument and a chapter names no rule.
 
-**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row,
-the object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
+**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row, the
+object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
 currency (GGG's model), and it reaches the chapter as a `Money` of that currency's decimals, so that
-`subject.assessed_value.times(entry.rate)` rounds to its cent. A codex therefore computes a tax on land only when it
-is billed in the accounting currency, and `tax_assess` refuses the call otherwise; a tax on land in another token has
-its own rate, amount or brackets. Only a `compute_` method knows the token: anywhere else an amount read is a `Money`
-without decimals, and `times()` says so instead of guessing. A chapter's own amounts are `Money(units, decimals)`,
-the decimals those of the amounts it read (`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the
-same kind, `sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
+`subject.assessed_value.times(entry.rate)` rounds to its cent. Every amount a chapter reads is in it, so a codex
+computes a tax only when it is billed in the accounting currency, whatever the tax's subject: `tax_assess` refuses a
+codex's answer for one billed in another token, and such a tax has its own rate, amount or brackets. Only a `compute_`
+method knows the token: anywhere else an amount read is a `Money` without decimals, and `times()` says so instead of
+guessing. A chapter's own amounts are `Money(units, decimals)`, the decimals those of the amounts it read
+(`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the same kind:
+`sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
 (`realms.legislation.rates.times`): there is one implementation.
 
 **Round once.** GGG rounds an amount where it is complete (D23), not at each step: a tax by brackets adds the exact
@@ -911,8 +912,8 @@ class Tax(above("tax")):
   from whoever proposes the rate.
 - **The amount** is computed by `compute_tax_assess`, which GGG calls for each entry and subject, page
   by page. The subject is the view of the parcel (`Land.get`'s, with its `assessed_value` and `area`), whose
-  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax on land computed by a
-  codex is billed in (§4.5), and GGG's rounding rule applies to `times()`.
+  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax computed by a codex is
+  billed in (§4.5), and GGG's rounding rule applies to `times()`.
 
 ### 5.7 A body beside the line
 
@@ -1698,11 +1699,44 @@ difference is not expected to matter; the two versions are aligned at basilisk's
 Given a realm's links and a commit, it prints the layer paths, the flattened view and the generated
 Cedar, with the same `realms.legislation` code the canister runs.
 
+Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
+`realms legislation resolve [TREE] --realm <source id> [--commit REV] [--sync-source ID]... [--record FILE]... [--own FILE] [--facts FILE]`.
+
+- **Records.** A sync source's record (§8) is the tree's own `releases.json` (`--sync-source`: the newest release of
+  the source and of each source above it) or a file in the shape of §8 (`--record`). Reading them from the sync
+  sources' realms comes with the published record (D6, [#491](https://github.com/smart-social-contracts/realms-gos/issues/491)).
+- **Files.** The tree is read with git, never from the working copy: a relayed layer at the commit its release
+  names, the realm's own layer (its folder, or the layer in `--own`) at `--commit`, and every file against the
+  checksum its record lists.
+- **Output.** The codex id (§9.1), the layers, each domain's layer path and flattened view, and the Cedar of every
+  forbid when `--facts` gives a fact schema in the shape the generator reads (`cedar.FactSchema`). It calls no network.
+
 ### 12.5 `realms legislation propose`
 
 Given the realm, the chapters to set or remove, and a commit, it writes the change list (with
 `replaces` read from the realm's `ggg_codex_status`) and the report. It prints the `Code { url;
 checksum }` to submit.
+
+Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
+`realms legislation propose [TREE] --realm <source id> --commit REV --set <chapter>... --remove <chapter>... --url URL --out FILE`,
+with `--replaces <codex id | none>` or `--network`, `--canister` and `--identity`, and optionally
+`--summary LANG=TEXT`, `--report FILE --report-url URL` and `--repo OWNER/NAME`.
+
+- **The file.** The change list as canonical JSON (§9.1: sorted keys, no spaces, UTF-8, no newline at the end),
+  so the checksum a proposal pins is the checksum of the file. Each chapter's URL names the commit in full, and its
+  sha256 and size are those of the bytes at that commit. `--url` is where the change list will be served.
+- **`replaces`** is given, or read from the realm's `codex_status` when `--network`, `--canister` and `--identity`
+  are all given; the command says which it reads before it does. No network is reached otherwise, there is no
+  default network, and no identity is chosen for the caller.
+- **Refused.** What the realm would refuse (§7): a chapter outside the realm's own layer (a layer from above comes
+  as a release), a name that is not a GGG domain or `calendar`, a chapter of 0 bytes, above 256 KB or not UTF-8, more
+  than 50 chapters, a change list above 64 KB, an address that is not https. A `release` is always `null`:
+  installing a release is the realm's own "Propose install" (§11).
+- **Stricter and looser than the realm.** The same chapter in `--set` and `--remove` is refused by the command; the
+  realm accepts it, if the codex has the chapter, and applies the removal first. A `--remove` of a chapter the codex does not have passes the
+  command, which does not know the codex, and can only fail at the realm (§9.2 step 2).
+- **The report** (§12.3, C4) is attached, not written: `--report` is the file and `--report-url` where it is served.
+- **Output.** The `Code { url; checksum }` to submit.
 
 ---
 

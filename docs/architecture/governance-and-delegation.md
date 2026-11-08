@@ -164,7 +164,7 @@ Every operation has a **tier** and, mostly, a **group**. GGG states them for its
 | Tier | Under a grant |
 |---|---|
 | `direct` | Runs at once as the member, and the member is told afterwards. |
-| `confirm` | Asks the member each time: a delegate only prepares it. Not built yet: refused. |
+| `confirm` | Asks the member each time: a delegate only prepares it, and the member approves it ([Pending actions](#pending-actions-the-members-tap)). |
 | `member`, `founder` | The member's own act (`delegation_revoke_all`), or the founder's (`setup_launch`). Never under a grant. |
 | `none` | Needs no power of attorney: public reads, calls between canisters, the host's steps. |
 
@@ -186,7 +186,10 @@ every group, those the member gains later included, and every operation a later 
 - The limits are read when a call is made, not only when the grant is: a stricter limit binds a grant made before it.
 - **The rollout.** `ENABLED` in `core/poa.py` lists the operations a grant by groups can reach in this release. The
   classification arrives whole, the code in phases, so an operation that is not enabled is refused whatever its
-  tier. This release enables the 24 operations that were delegable once phase 0 had closed its holes.
+  tier. This release enables the 24 operations that were delegable once phase 0 had closed its holes, and the five
+  that phase 0 removed, which come back as pending actions: `payment_account_add`, `payment_account_remove`,
+  `identity_submit`, `self_change_quarter` and `federal_vote_propose` (and `proposal_create` with an action), with
+  `action_get` and `action_list`.
 - **Grants made before groups** name permissions (`operations`) and keep covering exactly those 24 operations (`LEGACY`),
   with the behaviour they had then: a proposal with an action stays refused, and payout accounts, identity proofs,
   quarter moves and federal votes stay refused. A later release never widens them. `attribute_list` is not among them: a
@@ -202,9 +205,15 @@ every group, those the member gains later included, and every operation a later 
 - A delegate can ask instead: `delegation_request` (open for one hour, at most 10 open requests
   per person), answered with `delegation_request_decide`, which can only narrow the request: fewer groups, an earlier
   expiry.
-- Power of attorney itself, payout accounts, identity proofs, moving to another quarter, federal votes, tasks,
-  keys, the shell and extension calls are not done directly under a grant.
-- A proposal a delegate files with `proposal_create` is a motion: it carries no action.
+- Payout accounts, identity proofs, moving to another quarter, federal votes and a proposal that carries an action are
+  never done directly under a grant: under a grant by groups they are prepared, and wait for the member's tap
+  ([below](#pending-actions-the-members-tap)). Under a grant made before groups they stay refused. Power of attorney
+  itself, tasks, keys, the shell and extension calls are not done directly under a grant either, and a later release
+  switches them on.
+- A proposal a delegate files with `proposal_create` is a motion: it carries no action. With an action it is a pending
+  action (under a grant by groups) or refused (under an old grant).
+- A grant to the realm's own principal is refused: the effects of a codex's chapters act as the realm, and would act
+  for the member.
 - A delegate's governed call (a transfer from a fund, say) is always filed as a proposal, even where the
   department decides directly. The proposal records the grant it was filed under. When it is carried, the call runs
   unless that grant was revoked or replaced, and only if the grant could still make the call: its scope, its limits (the
@@ -212,11 +221,11 @@ every group, those the member gains later included, and every operation a later 
   checked again. A grant that has merely expired does not stop it, because a
   vote can outlast the grant; after the grant has expired, the member stops such a proposal by withdrawing it (or
   voting no). Otherwise the proposal ends `failed`, with the reason.
-- A delegate never votes on a proposal it filed, whichever grantor it votes for: a delegate that holds grants from
-  two members and filed for one votes on it for neither. And no delegate of a member votes
-  on a proposal that a delegate of the same member filed (I-ID-13), whoever filed it and whatever the status of that
-  grant now. The member votes on it as usual, and a delegate of another member may. A delegate withdraws only the
-  proposals it filed under its grant.
+- A delegate never votes on a proposal it filed or prepared, whichever grantor it votes for: a delegate that holds grants
+  from two members and filed for one votes on it for neither. And no delegate of a member votes
+  on a proposal that a delegate of the same member filed, or prepared as a pending action the member approved
+  (I-ID-13), whoever it was and whatever the status of that grant now. The member votes on it as usual, and a delegate
+  of another member may. A delegate withdraws only the proposals it filed under its grant.
 - A delegate reads the member's own notifications, not the inboxes of the offices where the member holds a seat.
 
 ### What the member is told
@@ -226,11 +235,53 @@ every group, those the member gains later included, and every operation a later 
   delegate's principal. A delegate's acts within an hour share one notice (`Delegation.notice` and `notice_acts`): it
   keeps a count and the last ten acts, and is unread again each time. Reads send nothing, and marking notices read
   leaves none.
-- A delegate never marks a `poa` notice read: by id it is refused, and with `all` it is left unread.
+- A delegate never marks a `poa` notice read, nor a `poa.confirm` one: by id it is refused, and with `all` it is left
+  unread.
 - The audit `Event` of a delegated act names the grant it ran under (`Event.grant`, indexed). `delegation_activity`
   pages the events of one grant, newest first, to its grantor and to its delegate, who needs no permission of its own
   for that grant (an AI connection has none). The audit log keeps its last 2,000 events, so the reply says how far
   back it reaches (`since`); the `poa` notices are the lasting record.
+
+### Pending actions: the member's tap
+
+A call in its confirm form (a `confirm` operation, or a `direct` one whose condition holds) is never done under a grant.
+The delegate prepares it, and only the member's own approval runs it. The code is `core/pending.py`, the operations
+`api/actions.py`, the record `PendingAction` (`AC-<n>`).
+
+1. **Filing.** A delegate's call with `on_behalf_of` reaches `dispatch`, which sees that it asks the member each time
+   and files it instead of running it: through `run` with the operation's own name, or through `call_for` (GGG's
+   `ggg_call_for`, which also takes a `note`). The grant must be active and cover the operation's group, the arguments
+   must pass the operation's own checks, and the member, acting for themselves, must be allowed the call now. At most 10
+   actions wait between one member and one delegate, and the arguments are at most 32 KB of canonical JSON. The reply is
+   `{pending, approve_link, expires_at}`, the member gets a notice (topic `poa.confirm`, linked to
+   `/delegations/confirm/AC-<n>`), and the audit log records the filing: `user` the member, `by` the delegate, the
+   result `{pending: id}` and the grant. A call that asks the member each time, made through the operation's own typed
+   method (not through `call_for`) with `on_behalf_of`, is refused, saying to use `ggg_call_for`, because the method's
+   reply has no place for a pending action.
+2. **The record.** It holds the exact `method` and `args`, never edited. `summary` (a label and a value per line) and
+   `risk` are the realm's own words, written from the stored arguments and the operation's `summary` hook, never from
+   text the delegate supplies: each argument appears under its own lower-case name, the lines the realm adds start with
+   a capital, and the delegate's text inside them is quoted. Only `note` is the delegate's, and a client shows it apart.
+   `hash` is the sha256 (the canister's native one) of the canonical JSON of the realm's canister id, the id, the call,
+   the grantor, the delegate, the grant and `expires_at`. It lasts 24 hours.
+3. **Approving.** `action_approve {action, hash}` takes nothing else. It is the member's own act: refused under a grant
+   (`on_behalf_of`), for any caller but the grantor, from a task, extension, codex, shell or replay, and inside
+   `call_for`. It succeeds only if the hash matches, the status is `pending`, the time has not passed and the grant is
+   still active and covers the operation. The realm then sets `approving` and `decided_at` before the call awaits
+   another canister, so a second approval meets it; runs the stored call through `dispatch` as the member with origin
+   `confirmed` (checked like `user`: permission, guardrails, parties, banned status, now); and stores the reply as
+   `result`, without secrets (they are in the approval's own reply alone), as `done` or `failed`. A governed call goes
+   as the member's own would: at once where the department decides directly, else as the member's own proposal with
+   `prepared_by` the delegate. The audit `Event` has `user` and `by` the member, origin `confirmed`, `prepared_by` and
+   `grant`. An action left `approving` after a trap reads `failed` after 10 minutes and is never retried.
+4. **Declining and withdrawing.** The member declines (`action_decline`); the delegate withdraws its own
+   (`action_withdraw`).
+5. **Reads.** A read in its confirm form is approved, not run: the action is `approved` and stores nothing. The delegate
+   collects it once with `action_collect`, before it lapses and while the grant covers it: the realm runs the read as the
+   member then and returns the reply. The audit log records `{collected: id}`, never the reply.
+6. **Lazy states.** Nothing sweeps. An action reads `expired` once its day has passed and `void` once its grant was
+   revoked, replaced, has ended or no longer covers the operation, whenever it is read, listed, approved or counted
+   against the limit of 10.
 
 The guardrails make delegation safe by construction: a delegate can only do what its grant covers, only on `direct`
 operations, never on `signing` ones, and never with `all`. The audit `Event` records both the grantor (`user`) and the

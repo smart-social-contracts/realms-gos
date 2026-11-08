@@ -11,6 +11,7 @@ class Event(Row):
     by = String(default="")
     origin = String(default="")
     grant = String(indexed=True)  # the power of attorney a delegate acted under, if one did
+    prepared_by = String(default="")  # the delegate that prepared the act, when the member approved it (origin confirmed)
     args = Json({})
     result = Json({})
     at = Integer(default=0)

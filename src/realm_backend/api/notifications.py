@@ -50,8 +50,9 @@ def notification_list(c, args):
 
 
 def left_unread(c, n):
-    """A delegate leaves the member's power-of-attorney notices unread: they are how the member learns what it did."""
-    return c.delegated and n.topic == poa.TOPIC
+    """A delegate leaves the member's power-of-attorney notices unread: they are how the member learns what it did, and
+    what waits for their approval (topics ``poa`` and ``poa.confirm``)."""
+    return c.delegated and n.topic.split(".")[0] == poa.TOPIC
 
 
 @op("self.data_manage")

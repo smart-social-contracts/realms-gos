@@ -9,6 +9,9 @@ inert placeholders named after GGG's entities: the check loads chapters, it neve
 This is the S1 stub: the full checker (the ``F`` rules, ``uses`` cycles, cases, Python versus Cedar)
 comes with S2 and C2.
 
+``resolve`` and ``propose`` (§12.4, §12.5) have their logic in ``legislation_resolve`` and ``legislation_propose``;
+the commands below only read the options and print.
+
 The layers of a source are its ancestor folders, top to bottom: ``eu/es/vc/46250-valencia`` runs
 ``eu``, ``eu/es``, ``eu/es/vc`` and itself. The links between realms (§3.3, the resolver of S3) are not
 read here, so a body beside the line, such as EMSHI, is checked as a realm of its own. A realm loads only its
@@ -24,7 +27,23 @@ from rich.console import Console
 
 from realms.cli.commands.legislation_analysis import Analysis, MissingTools
 from realms.cli.commands.legislation_cases import case_problems
-from realms.cli.commands.legislation_layout import layout_problems
+from realms.cli.commands.legislation_layout import commit_of, layout_problems
+from realms.cli.commands.legislation_propose import (
+    change_list,
+    chapter_entry,
+    code_to_submit,
+    https,
+    parse_summary,
+    replaced_codex,
+    report_entry,
+)
+from realms.cli.commands.legislation_resolve import (
+    file_record,
+    read_json,
+    report_lines,
+    resolve_realm,
+    tree_record,
+)
 from realms.legislation import Codex, LegislationError, Refused, subset_ast
 from realms.legislation.paths import REALM
 from realms.legislation.resolver import check_uses
@@ -239,3 +258,166 @@ def check_command(
         list(dict.fromkeys(problems))
     )  # a layer's refusal shows once, though every realm below it runs the layer
     console.print(f"[green]ok: {len(realms)} realm(s) checked[/green]")
+
+
+@legislation_app.command("resolve")
+def resolve_command(
+    tree: Path = typer.Argument(
+        Path("legislation"),
+        help="The legislation/ folder, inside a git checkout of realms-codices",
+    ),
+    realm: str = typer.Option(
+        ..., "--realm", help="The realm's own source id, eu/es/vc/46250-valencia"
+    ),
+    commit: str = typer.Option(
+        "HEAD",
+        "--commit",
+        help="The commit the realm's own chapters, and the tree's releases.json, are read at",
+    ),
+    sync_sources: List[str] = typer.Option(
+        [],
+        "--sync-source",
+        help="A sync source whose record is the tree's releases.json: the newest release of it and of each source above it",
+    ),
+    records: List[Path] = typer.Option(
+        [],
+        "--record",
+        exists=True,
+        dir_okay=False,
+        help="A sync source's record, a file in the shape of §8: {source, layers}",
+    ),
+    own: Optional[Path] = typer.Option(
+        None,
+        "--own",
+        exists=True,
+        dir_okay=False,
+        help="The realm's own layer, {chapters: {domain: sha256}, calendar: sha256}; its folder at --commit by default",
+    ),
+    facts: Optional[Path] = typer.Option(
+        None,
+        "--facts",
+        exists=True,
+        dir_okay=False,
+        help="The fact schema as JSON in the shape the Cedar generator reads (cedar.FactSchema); without it no Cedar is written",
+    ),
+) -> None:
+    """Print a realm's codex id, layer paths, flattened view (§5.9) and generated Cedar (§5.8), as the realm works them out.
+
+    Reads the tree with git and calls no network.
+    """
+    try:
+        operations = ggg_operations()
+        at = commit_of(tree, commit)
+        relays = [tree_record(tree, at, s) for s in sync_sources]
+        relays += [file_record(path) for path in records]
+        resolution = resolve_realm(
+            tree,
+            realm,
+            at,
+            relays,
+            read_json(own) if own else None,
+            operations,
+            {"ggg": check_view()},
+            read_json(facts) if facts else None,
+        )
+        lines = report_lines(resolution, facts is not None)
+    except ImportError as e:
+        console.print(f"[red]the GGG operation list is unavailable: {e}[/red]")
+        raise typer.Exit(2)
+    except LegislationError as e:
+        refuse([str(e)])
+    for line in lines:
+        typer.echo(line)
+
+
+@legislation_app.command("propose")
+def propose_command(
+    tree: Path = typer.Argument(
+        Path("legislation"),
+        help="The legislation/ folder, inside a git checkout of realms-codices",
+    ),
+    realm: str = typer.Option(
+        ..., "--realm", help="The realm's own source id, eu/es/vc/46250-valencia"
+    ),
+    commit: str = typer.Option(
+        ...,
+        "--commit",
+        help="The commit that holds the chapters: their URLs name it, so it must be one the realm can fetch",
+    ),
+    set_chapters: List[str] = typer.Option(
+        [],
+        "--set",
+        help="A chapter of the realm's own layer to set, <realm>/<domain> or <realm>/calendar; repeat for more",
+    ),
+    remove: List[str] = typer.Option(
+        [],
+        "--remove",
+        help="A chapter of the realm's own layer to empty; repeat for more",
+    ),
+    replaces: Optional[str] = typer.Option(
+        None,
+        "--replaces",
+        help="The id of the realm's active codex, or none when it has none; or read it with --network, --canister and --identity",
+    ),
+    network: Optional[str] = typer.Option(
+        None, "--network", help="The network to read the active codex from (no default)"
+    ),
+    canister: Optional[str] = typer.Option(
+        None,
+        "--canister",
+        help="The realm's canister id, to read the active codex from",
+    ),
+    identity: Optional[str] = typer.Option(
+        None,
+        "--identity",
+        help="The identity that reads the active codex: required with --network and --canister, never a default",
+    ),
+    summary: List[str] = typer.Option(
+        [], "--summary", help="LANG=TEXT shown in the proposal; repeat per language"
+    ),
+    report: Optional[Path] = typer.Option(
+        None,
+        "--report",
+        exists=True,
+        dir_okay=False,
+        help="The analysis report to attach (§12.3), with --report-url",
+    ),
+    report_url: Optional[str] = typer.Option(
+        None, "--report-url", help="Where the report is served (https)"
+    ),
+    url: str = typer.Option(
+        ...,
+        "--url",
+        help="Where the change list will be served (https): the proposal pins this address and the file's checksum",
+    ),
+    out: Path = typer.Option(..., "--out", help="Where to write the change list"),
+    repo: str = typer.Option(
+        "smart-social-contracts/realms-codices",
+        "--repo",
+        help="The GitHub repository the chapters are served from",
+    ),
+) -> None:
+    """Write the change list of a proposal (§7) as canonical JSON and print the Code { url; checksum } to submit.
+
+    Reads the chapters with git. Reads the realm only when --network, --canister and --identity are all given,
+    and says which before it does.
+    """
+    try:
+        https(url)
+        if bool(report) != bool(report_url):
+            raise LegislationError("--report and --report-url go together")
+        at = commit_of(tree, commit)
+        data = change_list(
+            realm,
+            replaced_codex(replaces, network, canister, identity),
+            [chapter_entry(tree, at, repo, realm, c) for c in set_chapters],
+            remove,
+            report_entry(report, report_url) if report else None,
+            parse_summary(summary),
+        )
+    except LegislationError as e:
+        refuse([str(e)])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    typer.echo(f"wrote {out} ({len(data)} bytes)")
+    typer.echo(code_to_submit(url, data))

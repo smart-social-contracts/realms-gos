@@ -24,7 +24,7 @@ GROUPS = {
     "admin": ("Run the realm", "Governed administration as proposals; monitoring, tasks, the audit log; an upgrade approval asks you.", "Reaches the whole realm's records and settings.", 7776000),
     "setup": ("Set up my realm", "The whole setup wizard: settings, branding, tokens, the codex you picked, departments, seats, funds, voting rules, registration; appointments, roles and the steps that decide which code the realm trusts ask you. Ends at Launch.", "Takes effect at once while the realm is in setup; Launch stays yours.", 2592000),
 }
-EVERYTHING = {"longest": 7776000, "never": ("member", "founder")}
+EVERYTHING = {"longest": 7776000, "never": ("member", "founder", "none")}
 OPERATIONS = {
     "user_get": ("direct", "office", None, None),
     "user_list": ("direct", "office", None, None),
@@ -59,6 +59,14 @@ OPERATIONS = {
     "delegation_revoke_all": ("member", None, None, None),
     "delegation_request": ("none", None, None, None),
     "delegation_request_decide": ("direct", "poa", None, "approves"),
+    "action_get": ("direct", "see", None, None),
+    "action_list": ("direct", "see", None, None),
+    "action_approve": ("member", None, None, None),
+    "action_decline": ("member", None, None, None),
+    "action_withdraw": ("none", None, None, None),
+    "action_collect": ("none", None, None, None),
+    "call_for": ("none", None, None, None),
+    "read_for": ("none", None, None, None),
     "department_get": ("direct", "see", None, None),
     "department_list": ("direct", "see", None, None),
     "department_chart": ("direct", "see", None, None),
