@@ -2,20 +2,22 @@
 Computer. Nothing outside calls the realm and the realm calls no outside body. A notice to one is a Dispatch in an
 outbox: an operator or a bridge delivers it and confirms it here with the receipt (``dispatch_confirm``). What an outside
 body says enters only through ``external_report``, by a principal who received it (I-EXT-6)."""
+import json
+
 from core import chain
 from core.db import Conflict, Fail, find, next_id, page, view
 from ggg import Dispatch, Document, External
-from core.op import op
+from core.op import AUDIT_ARGS_MAX, op, redacted
 from api.proposals import realm_wide
 
 # tender_notice names the realm's own journal with this word, so no outside body can take it.
 REALM_JOURNAL = "realm"
 
 
-def queue(external, topic, title, body, document="", codex=""):
+def queue(external, topic, title, body, document=""):
     """Queue a notice for the outside body ``external`` (a row). Returns the dispatch."""
     return Dispatch(id=next_id(Dispatch, "DSP"), to=external.id, topic=topic, title=title, body=body,
-                    document=document, codex=codex, queued_at=chain.now())
+                    document=document, queued_at=chain.now())
 
 
 def valid_external(args):
@@ -48,14 +50,17 @@ def external_list(c, args):
 def valid_report(args):
     if not (isinstance(args["topic"], str) and args["topic"]):
         raise Fail("a report has a topic")
+    if len(json.dumps(redacted("external_report", args))) > AUDIT_ARGS_MAX:
+        raise Fail(f"a report is at most {AUDIT_ARGS_MAX} characters of JSON: put a long body in the file the "
+                   "evidence_ref names")
 
 
 @op("external.report", check=valid_report)
 def external_report(c, args):
     """Enter what the outside body ``external`` said or sent: its ``topic`` and ``body``, with the ``evidence_ref`` of
     the file you received. The call's audit event is the record, and legislation hooks it: the realm never takes an
-    outside body's word without a principal's. The audit log keeps the arguments of a report only up to 2000
-    characters of JSON, so a long body belongs in the file the ``evidence_ref`` names."""
+    outside body's word without a principal's. The audit log keeps the arguments of a call only up to AUDIT_ARGS_MAX
+    characters of JSON, so a longer report is refused: a long body belongs in the file the ``evidence_ref`` names."""
     find(External, args["external"])
 
 
@@ -67,8 +72,13 @@ def outcome_of(args):
     case, payload = next(iter(outcome.items()))
     if case == "Failed" and not (isinstance(payload, str) and payload):
         raise Fail("a failed dispatch says why")
-    if case == "Confirmed" and not isinstance(payload, dict):
-        raise Fail("a confirmation is a record with when (at) and the receipt")
+    if case == "Confirmed":
+        if not isinstance(payload, dict):
+            raise Fail("a confirmation is a record with when (at) and the receipt")
+        if payload.get("at") is not None and type(payload["at"]) is not int:
+            raise Fail("at is a time in seconds")
+        if payload.get("receipt") is not None and not isinstance(payload["receipt"], str):
+            raise Fail("a receipt is text")
     return case, payload
 
 

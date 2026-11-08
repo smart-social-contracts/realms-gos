@@ -1,6 +1,6 @@
 import fake_chain
 import world
-from ggg import Document, Event, KeyEnvelope
+from ggg import Document, Event, KeyEnvelope, Organization
 from kit import call, denied, direct, ok
 
 REPORT = {"title": "Inspection report, Clinic B", "ref": "files/health/DOC-1.enc", "hash": "sha256:ab12",
@@ -195,3 +195,19 @@ def test_json_arguments_of_the_wrong_type_are_refused_not_trapped():
         assert not out["ok"] and out["kind"] == "invalid_argument", args
     out = direct("document_list", "carla", department="Health", language=5)
     assert not out["ok"] and out["kind"] == "invalid_argument"
+
+
+def test_on_staff_finds_the_staff_of_a_department_from_the_seats_of_the_reader():
+    """It must say what ``managers`` lists, found without listing the department's seats."""
+    from api import crypto
+    from ggg import Appointment
+
+    depts = health()
+    world.seat("health.inspector_2", "bob", depts["Health"], "document.manage")
+    world.seat("clinic-b.physician", "mallory", Organization["clinic-b"], "credential.sign")  # a seat elsewhere
+    Appointment["health.inspector_2:bob"].status = "ended"
+    depts["Health"].head = "dana"
+    for principal in ("carla", "bob", "dana", "mallory", "dr-ana", "alice", fake_chain.ANONYMOUS):
+        assert crypto.on_staff("Health", principal) == (principal in crypto.managers("dept:Health")), principal
+    assert crypto.on_staff("Health", "carla") and crypto.on_staff("Health", "dana")
+    assert not crypto.on_staff("Health", "bob") and not crypto.on_staff("Health", "mallory")

@@ -241,13 +241,47 @@ def test_task_schedule_needs_the_permission_a_known_operation_and_object_argumen
     assert Task.count() == 0
 
 
-def test_a_task_is_scheduled_by_a_user_and_not_by_the_realm_or_its_codex():
+def test_a_task_is_scheduled_by_a_user_calling_for_themselves_and_by_no_codex_extension_or_replay():
     clerk()
-    args = {"op": "notification_send", "args": LAPSE, "at": fake_chain.now() + 10}
-    out = json.loads(op.run(op.dispatch("task_schedule", json.dumps(args), origin="codex", signer=fake_chain.self_id(),
-                                        declared=("task_schedule",))))
-    assert out["kind"] == "invalid_argument" and "scheduled by a user" in out["error"]
+    args = json.dumps({"op": "notification_send", "args": LAPSE, "at": fake_chain.now() + 10})
+    callers = (("codex", fake_chain.self_id()), ("extension", "carla"), ("replay", "carla"), ("task", "carla"))
+    for origin, signer in callers:
+        out = json.loads(op.run(op.dispatch("task_schedule", args, origin=origin, signer=signer,
+                                            declared=("task_schedule",))))
+        assert out["kind"] == "invalid_argument" and f"not by a {origin}" in out["error"], origin
     assert Task.count() == 0 and fake_chain.state["timers"] == []
+    assert lapse(fake_chain.now() + 10) == "TASK-1"
+
+
+def test_a_task_runs_a_change_and_not_a_read():
+    clerk()
+    out = call("task_schedule", "carla", op="notification_list", args={}, at=fake_chain.now() + 10)
+    assert out["kind"] == "invalid_argument" and "only reads" in out["error"] and Task.count() == 0
+
+
+def test_the_task_list_shows_the_steps_without_their_private_arguments_and_secrets():
+    clerk()
+    world.profile("monitor", "realm.monitor")
+    world.person("dana", "monitor")
+    at = fake_chain.now() + 100
+    ok("task_schedule", "carla", op="attribute_submit", at=at,
+       args={"kind": "disability", "value": "65 %", "ref": "vault:certificate"})
+    ok("task_schedule", "carla", op="private_data_update", args={"private_data": "0a0b"}, at=at)
+    shown = [t["steps"][0]["args"] for t in ok("task_list", "dana")["tasks"]]
+    assert shown == [{"ref": "vault:certificate"}, {}]
+    assert "disability" not in json.dumps(ok("task_list", "ctl")) and "0a0b" not in json.dumps(ok("task_list", "ctl"))
+    listed = [t["args"] for t in g.ggg_task_list({"cursor": None, "limit": None, "op": None, "status": None})["Ok"]["items"]]
+    assert listed == [{"Map": [("ref", {"Text": "vault:certificate"})]}, {"Map": []}]
+    assert "disability" in Task["TASK-1"].steps[0].action  # the task itself keeps what it will run
+
+
+def test_a_named_task_that_has_run_can_still_be_cancelled():
+    world.build()
+    ok("task_create", "ctl", name="payroll", steps=CHECK)
+    ok("task_run", "ctl", task="payroll")
+    assert Task["payroll"].status == "completed"
+    ok("task_cancel", "ctl", task="payroll")
+    assert Task["payroll"].status == "cancelled"
 
 
 def test_a_task_scheduled_for_a_time_that_has_passed_runs_at_once():

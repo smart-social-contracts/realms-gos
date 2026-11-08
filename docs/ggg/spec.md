@@ -150,16 +150,19 @@ same rows.
   outside body carries no translations. `document_publish` with an outside journal in `to` queues one dispatch
   (`topic` `publication`, `body` the clear copy's `ref` and `hash`) and adds a `Publication` to the document that its
   confirmation fills; a second call queues again only when the first dispatch failed. `external_report` is audited as
-  its `Event`, whose arguments the audit log keeps up to 2000 characters of JSON;
+  its `Event`, whose arguments the audit log keeps up to `AUDIT_ARGS_MAX` (2000) characters of JSON: a longer report is
+  refused, and a long body belongs in the file its `evidence_ref` names;
 - GGG's `Task` is a task of the realm's scheduler (`ic-basilisk-toolkit`'s) with one step and one schedule that does not
   repeat: `task_schedule` makes it, named `TASK-<n>`, and it runs once, through `dispatch` with origin `task`, as the
-  user who scheduled it. A task that is refused ends `failed` (it has no event); one that ran keeps the id of the
-  operation's own `Event` (`event`). Its `scheduled_by` is `User:<principal>`, or `Realm:1` for a task the realm
-  scheduled itself, such as a proposal's run. `task_schedule` is refused (`InvalidArgument`) when the caller is the
-  canister itself, as a codex's effect is: no task is scheduled by a department or the codex. `task_list` shows every task of the scheduler as a
-  `Task` made of its first step and first schedule, and filters by `op` and by `status` (`scheduled`, `run`, `failed`,
-  `cancelled`). `task_cancel` of a one-time task that already ran or failed is `Conflict`. A task with several
-  steps, or a repeat, is made with `task_create` and `task_add_schedule`;
+  user who scheduled it. Only a user calling for themselves schedules: a codex, an extension, the replay of a proposal
+  or another task is refused with `InvalidArgument`, as is an operation that only reads. A task that is refused ends
+  `failed` (it has no event); one that ran keeps the id of the operation's own `Event` (`event`). Its `scheduled_by` is
+  `User:<principal>`, or `Realm:1` for a task the realm scheduled itself, such as a proposal's run. `task_list` shows
+  every task of the scheduler as a `Task` made of its first step and first schedule, with the step's arguments as the
+  audit log keeps them (without the secrets and the operation's private arguments), and filters by `op` and by `status`
+  (`scheduled`, `run`, `failed`, `cancelled`). `task_cancel` of a task `task_schedule` made that already ran or failed
+  is `Conflict`; any other task cancels. A task with several steps, or a repeat, is made with `task_create` and
+  `task_add_schedule`;
 - a tender's `kind`, `procedure` and `estimated_value` are optional on `tender_create`; `tender_notice` appends a
   notice to the tender in the order recorded, and the derived fact `published_in` of `tender_award` is the journals of
   its notices, each once. A contract made from a tender (`contract_create` with `tender`, or `tender_award`) takes its

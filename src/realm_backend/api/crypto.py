@@ -3,7 +3,7 @@ from core.db import Conflict, Fail, Forbidden, deref, find, next_id, page_by, vi
 from ggg import Department, Dispatch, Document, External, KeyEnvelope, Realm
 from core.op import op
 from api.external import queue
-from api.proposals import holders, root
+from api.proposals import appointed, holders, root
 
 MGMT = "aaaaa-aa"
 CONTEXT = (bytes([len(b"realms")]) + b"realms").hex()  # one root context; recipients differ by vetKD input
@@ -251,10 +251,21 @@ def document_list(c, args):
 CONCEALED = {"ref": "", "hash": "", "facts": {}}
 
 
+def on_staff(department, principal):
+    """Whether ``principal`` is among ``managers("dept:<department>")``: its head or the holder of a seat in it. Found from
+    their own seats, not by listing the department's: a reply that holds hundreds of documents asks this of each."""
+    d = find(Department, department)
+    return principal == d.head or any(a.position.department == d for a in appointed(principal))
+
+
+def holds_key(doc, principal):
+    return KeyEnvelope[f"{scope_of(doc)}|{principal}"] is not None
+
+
 def reads_ciphertext(doc, principal):
     """Whether ``principal`` reads the ciphertext reference, hash and facts of ``doc``: its department's staff and the
     holders of its key. Anyone else reads only the public copy of a published document."""
-    return KeyEnvelope[f"{scope_of(doc)}|{principal}"] is not None or principal in managers(f"dept:{doc.department}")
+    return holds_key(doc, principal) or on_staff(doc.department, principal)
 
 
 @op("self.data_view", read=True, public=True)

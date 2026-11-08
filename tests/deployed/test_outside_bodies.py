@@ -5,6 +5,8 @@ task scheduled before the upgrade runs after it. A task scheduled by a member ru
 failed when the guard of that day refuses it. A dispatch takes one outcome. The GGG methods answer in the types of ggg.did.
 """
 
+import json
+
 import pytest
 from ic.candid import Types
 from pic import Canister
@@ -226,3 +228,78 @@ def test_what_an_outside_body_says_is_entered_as_an_event_with_its_evidence(real
        evidence_ref="files/stats/report-17.pdf")
     event = last_event(realm, bob, "external_report")
     assert (event["user"], event["args"]["evidence_ref"]) == (bob, "files/stats/report-17.pdf")
+
+
+def snapshot(realm, people):
+    """What the operations show of the rows of this file's tests, which a second upgrade must leave as it found them."""
+    bob = people["bob"]
+    return {"tender": ok(realm, "tender_get", bob, query=True, tender="T-1")["tender"],
+            "tasks": ok(realm, "task_list", bob, query=True)["tasks"],
+            "dispatches": ok(realm, "dispatch_list", bob, query=True)["dispatches"],
+            "externals": ok(realm, "external_list", bob, query=True)["externals"],
+            "notifications": ok(realm, "notification_list", bob, query=True)["notifications"]}
+
+
+def test_a_second_upgrade_changes_nothing(realm, people):
+    before = snapshot(realm, people)
+    realm.wait(600)  # PocketIC refuses an upgrade soon after the install of a wasm this large
+    realm.upgrade()
+    assert snapshot(realm, people) == before
+    assert before["tender"]["notices"] and before["dispatches"] and before["tasks"]
+
+
+# Alice, staff of Health, reads a page of its documents through ggg_document_list. Every Document of the reply is
+# concealed unless the reader holds its key (crypto.reads_ciphertext), so the page asks of each whether she is staff.
+MEASURE_PAGE = '''
+import json
+import ggg
+import ggg_api
+from api import crypto
+from basilisk import ic
+from core import chain
+
+health = ggg.Department["Health"]
+for p in range(10):  # a department of 100 seats, as a large one has
+    seats = ggg.Position(id=f"health.bulk{p}", title=f"Bulk {p}", department=health, headcount=10)
+    for a in range(10):
+        ggg.Appointment(id=f"health.bulk{p}:seat{a}", position=seats, user=f"seat-{p}-{a}", started_at=1)
+for i in range(1, 501):
+    ggg.Document(id=f"BULK-{i}", department="Health", title=f"Minutes {i}", kind="minutes", languages=["en"],
+                 ref=f"inline:{i}", hash="sha256:ab12", author="%(alice)s", at=1)
+rows = [ggg.Document[f"BULK-{i}"] for i in range(1, 501)]
+original = chain.caller
+chain.caller = lambda: "%(alice)s"
+try:
+    start = ic.performance_counter(0)
+    page = ggg_api.read("document_list", "DocumentListArgs",
+                        {"department": "Health", "cursor": None, "limit": 500, "kind": None, "language": None},
+                        "DocumentPageReply")
+    listing = ic.performance_counter(0) - start
+    start = ic.performance_counter(0)
+    kept = [crypto.reads_ciphertext(row, "%(alice)s") for row in rows]
+    reading = ic.performance_counter(0) - start
+    start = ic.performance_counter(0)
+    for row in rows:  # what the reply asks of each document, the staff of its department being asked after once
+        ggg_api.FIX["Document"](row)
+    concealing = ic.performance_counter(0) - start
+    ggg_api.STAFF.clear()
+    start = ic.performance_counter(0)
+    for row in rows:  # what asking after the staff by listing the department's seats would cost
+        "%(alice)s" in crypto.managers("dept:Health")
+    listing_the_seats = ic.performance_counter(0) - start
+finally:
+    chain.caller = original
+print(json.dumps({"documents": len(page["Ok"]["items"]), "listing": listing, "reads_ciphertext": reading,
+                  "concealing": concealing, "listing_the_seats": listing_the_seats, "all_read": all(kept)}))
+'''
+BUDGET = 3_000_000_000  # 60 % of the 5 billion instructions of a query, which the page must leave room under
+
+
+def test_a_page_of_500_documents_is_listed_within_a_querys_instruction_limit(realm, people):
+    out = json.loads(realm.shell(MEASURE_PAGE % {"alice": people["alice"]}))
+    print(f"\nggg_document_list of 500 documents, a department of 100 seats: {out['listing']:,} instructions; "
+          f"asking after the staff of each alone {out['reads_ciphertext']:,} ({out['reads_ciphertext'] // 500:,} each), "
+          f"once per reply {out['concealing']:,}; "
+          f"managers() of each instead {out['listing_the_seats']:,}")
+    assert out["documents"] == 500 and out["all_read"]
+    assert out["listing"] < BUDGET

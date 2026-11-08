@@ -12,6 +12,8 @@ MODULES = ("assets", "codex", "crypto", "delegation", "extensions", "external", 
            "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
 EVENTS_KEPT = 2000
+# The longest the arguments of a call may be, as JSON, for the audit log to keep them: it keeps only their names past it.
+AUDIT_ARGS_MAX = 2000
 # Basilisk stubs the `types` module.
 GENERATOR = type((lambda: (yield))())
 
@@ -95,7 +97,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
                 out = yield from out
             out = out or {}
         if not spec["read"]:
-            audit(name, user, by, origin, args, out, spec["private"])
+            audit(name, user, by, origin, args, out)
         return json.dumps({"ok": True, **out})
     except auth.Denied as e:
         return json.dumps({"ok": False, "error": str(e), "kind": e.kind, "permission": e.permission, "denied": True})
@@ -112,11 +114,19 @@ def direct(department):
     return int(p.get("m", 1)) <= 1 and int(p.get("n", 1)) <= 1 and not p.get("quorum") and not p.get("veto")
 
 
-def audit(name, user, by, origin, args, out, private=()):
+def redacted(name, args):
+    """The arguments of a call to ``name`` as a log may show them, the audit log and a scheduled task's alike: without the
+    secrets of every call and the operation's ``private`` arguments, which hold personal data or key material (I-ALL-5)."""
+    spec = OPS.get(name) or ops().get(name)
+    private = spec["private"] if spec else ()
+    return {k: v for k, v in args.items() if k not in SECRET and k not in private}
+
+
+def audit(name, user, by, origin, args, out):
     from ggg import Event
 
-    kept = {k: v for k, v in args.items() if k not in SECRET and k not in private}
-    if len(json.dumps(kept)) > 2000:
+    kept = redacted(name, args)
+    if len(json.dumps(kept)) > AUDIT_ARGS_MAX:
         kept = {"keys": sorted(kept)}
     Event(id=str(Event.max_id() + 1), op=name, user=user, by=by, origin=origin, args=kept,
           result={k: v for k, v in out.items() if k not in SECRET and isinstance(v, (str, int, bool))}, at=chain.now())

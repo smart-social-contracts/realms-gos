@@ -251,6 +251,21 @@ def realm_fix(r):
             "accounting_currency_decimals": get(r, "accounting_currency_decimals") if get(r, "accounting_currency") else None}
 
 
+# Whether the caller is on a department's staff, (department, caller) -> bool, for the length of one reply: a page of
+# documents asks it of each, and building a reply writes nothing, so the answer cannot change under it. reply() empties it.
+STAFF = {}
+
+
+def reads_document(d):
+    """crypto.reads_ciphertext for the caller, asking after the staff of the document's department once per reply."""
+    caller, department = chain.caller(), get(d, "department")
+    if crypto.holds_key(d, caller):
+        return True
+    if (department, caller) not in STAFF:
+        STAFF[department, caller] = crypto.on_staff(department, caller)
+    return STAFF[department, caller]
+
+
 def scheduled_task(t):
     """A task of the realm's scheduler as GGG's Task, which is one operation at a time: the task's first step and
     first schedule. The tasks the realm itself schedules, such as a proposal's run, are the realm's."""
@@ -303,7 +318,7 @@ FIX = {
     "FederalVote": lambda v: {"title": get(v, "title") or (get(v, "action") or {}).get("title", "")},
     "Event": lambda e: {"agent": bool(get(e, "agent"))},
     # The ciphertext of a document stays with its staff and key holders (I-PRV-4), as in crypto.document_get.
-    "Document": lambda d: {} if crypto.reads_ciphertext(d, chain.caller()) else crypto.CONCEALED,
+    "Document": lambda d: {} if reads_document(d) else crypto.CONCEALED,
     "Task": scheduled_task,
     "Dispatch": lambda d: {"status": dispatch_status(d)},
     "Proposal": lambda p: {"action": action(get(p, "action")),  # a realm-wide proposal names no department
@@ -576,8 +591,11 @@ def reply(op, args, out, reply_t):
         if "NotFound" in err and ok_t.startswith("opt "):
             return {"Ok": None}
         return {"Err": err}
-    raw = BUILD[op](out, args) if op in BUILD else result(op, out, ok_t)
-    return {"Ok": to_ggg(raw, ok_t)}
+    try:
+        raw = BUILD[op](out, args) if op in BUILD else result(op, out, ok_t)
+        return {"Ok": to_ggg(raw, ok_t)}
+    finally:
+        STAFF.clear()
 
 
 def load(t, key):

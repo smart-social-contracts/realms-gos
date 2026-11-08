@@ -125,7 +125,8 @@ def test_an_outcome_is_confirmed_or_failed_and_a_failure_says_why():
     outside()
     sent = tell()
     for outcome in ({}, {"Confirmed": {}, "Failed": "x"}, {"Delivered": {}}, {"Failed": ""}, {"Failed": 5},
-                    {"Confirmed": "yes"}, "confirmed", None):  # Candid cannot say most of these: JSON
+                    {"Confirmed": "yes"}, {"Confirmed": {"at": "yesterday"}}, {"Confirmed": {"at": True}},
+                    {"Confirmed": {"receipt": 214}}, "confirmed", None):  # Candid cannot say most of these: JSON
         assert direct("dispatch_confirm", "bob", dispatch=sent, outcome=outcome)["kind"] == "invalid_argument", outcome
     assert call("dispatch_confirm", "bob", dispatch="DSP-9", outcome={"Failed": "x"})["kind"] == "not_found"
     assert Dispatch[sent].status == "queued"
@@ -172,6 +173,18 @@ def test_a_report_comes_from_a_body_the_realm_knows_through_a_principal_who_may_
     assert "needs external.report" in denied("external_report", "alice", **args)
     assert call("external_report", "bob", **{**args, "external": "nobody"})["kind"] == "not_found"
     assert call("external_report", "bob", **{**args, "topic": ""})["kind"] == "invalid_argument"
+
+
+def test_a_report_the_audit_log_could_not_keep_whole_is_refused():
+    outside()
+    from core.op import AUDIT_ARGS_MAX
+
+    args = dict(external="stats-office", topic="duplicate", evidence_ref="files/r.pdf")
+    out = call("external_report", "bob", body="x" * AUDIT_ARGS_MAX, **args)
+    assert out["kind"] == "invalid_argument" and "evidence_ref" in out["error"]
+    assert Event[str(Event.max_id())].op != "external_report"
+    assert call("external_report", "bob", body="x" * 1000, **args)["ok"]
+    assert Event[str(Event.max_id())].args["evidence_ref"] == "files/r.pdf"
 
 
 # --- publishing in an outside journal -----------------------------------------------------------

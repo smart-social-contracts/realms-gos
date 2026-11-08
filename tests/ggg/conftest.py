@@ -51,6 +51,7 @@ if MIRROR:
 @pytest.fixture(autouse=True)
 def fresh():
     Database.get_instance().clear()
+    ggg_api.STAFF.clear()
     fake_chain.reset()
     fake_chain.state["mirror"] = MIRROR
     yield

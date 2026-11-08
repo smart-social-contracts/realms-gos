@@ -14,10 +14,9 @@ def notify(recipient, title, body="", href="", topic="", sender="", translations
                         topic=topic, sender=sender, at=chain.now(), translations=list(translations)).id
 
 
-def in_reader_language(n, reader):
-    """``n`` as ``reader`` reads it: the title and body in their language, when the notification has one."""
-    user = User[reader]
-    found = language.pick(n.translations, user.language if user else "")
+def in_language(n, tag):
+    """``n`` as a reader whose language is ``tag`` reads it: the title and body in their language, when it has one."""
+    found = language.pick(n.translations, tag)
     return {"title": found["title"], "body": found.get("body") or n.body} if found else {}
 
 
@@ -44,8 +43,10 @@ def notification_list(c, args):
     ``unread`` keeps only those you have not read. Returns ``notifications`` and ``next`` (null at the end)."""
     rows, nxt = page_by(Notification, "recipient", inbox(c, args), args)
     rows = [n for n in rows if not (args.get("unread") and c.user in n.read_by)]
-    return {"notifications": [{**view(n, *SHOWN), **in_reader_language(n, c.user), "read": c.user in n.read_by}
-                              for n in rows], "next": nxt}
+    reader = User[c.user]
+    tag = reader.language if reader else ""
+    return {"notifications": [{**view(n, *SHOWN), **in_language(n, tag), "read": c.user in n.read_by} for n in rows],
+            "next": nxt}
 
 
 @op("self.data_manage", delegable=True)
