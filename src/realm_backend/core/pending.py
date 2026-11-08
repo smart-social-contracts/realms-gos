@@ -11,7 +11,6 @@ import json
 
 from core import auth, chain, poa, ranges
 from core.db import Conflict, Fail, Forbidden, JSON_MAX, NotFound, Unavailable, each, find, next_id, view
-from core.sandbox import sha256
 
 TTL = 86400  # a pending action lasts a day
 APPROVING_TTL = 600  # an approval still running after this long ended in a trap
@@ -34,6 +33,8 @@ def canonical(value):
 def seal(aid, method, args, grantor, delegate, grant, expires_at):
     """The hash of a record: the realm's canister id (so no action works in another realm), the id, the call, who prepared
     it for whom under which grant, and when it lapses."""
+    from core.sandbox import sha256  # it imports core.op, which imports this module
+
     return sha256(canonical({"realm": chain.self_id(), "id": aid, "method": method, "args": args, "grantor": grantor,
                              "delegate": delegate, "grant": grant, "expires_at": expires_at}))
 
@@ -133,13 +134,15 @@ def quoted(text):
 
 def shown(key, value, args):
     """An argument as the member reads it: a principal with its nickname, an amount in the token's decimals when the
-    call names the token, any structure as JSON."""
+    call names the token, any structure as JSON, and text with a line break or another unprintable character quoted."""
     from ggg import Token, User
 
     token = Token[str(args["symbol"])] if args.get("symbol") else None
     if key == "amount" and isinstance(value, int) and not isinstance(value, bool) and token:
         return f"{amount(value, token.decimals)} {token.id}"
     if isinstance(value, str):
+        if not value.isprintable():  # a line break could start a line of the realm's own
+            return quoted(value)
         member = User[value] if len(value) <= 64 else None
         return f"{value} ({member.nickname})" if member and member.nickname else value
     return canonical(value)

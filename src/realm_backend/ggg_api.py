@@ -453,7 +453,7 @@ def to_candid(v, t):
     """A GGG value of type ``t`` as candid text, with every field named by its number."""
     k, detail = kind(t)
     if k == "time":
-        return f"{v} : nat64"
+        return f"({v} : nat64)"  # parenthesised, so that `opt` takes the number and not the annotation
     if k == "opt":
         return "null" if v is None else f"opt {to_candid(v, detail)}"
     if k == "vec":
@@ -473,7 +473,7 @@ def to_candid(v, t):
         return f"principal {quote(v.to_str() if hasattr(v, 'to_str') else str(v))}"
     if t == "blob":
         return 'blob "' + "".join(f"\\{b:02x}" for b in v) + '"'
-    return "null" if t == "null" else f"{v} : {t}"
+    return "null" if t == "null" else f"({v} : {t})"
 
 
 def from_candid(v, t):

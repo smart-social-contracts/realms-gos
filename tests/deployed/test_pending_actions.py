@@ -42,8 +42,9 @@ out = call("action_approve", {{"action": "{action}", "hash": action["hash"]}}, u
 assert out["ok"] and out["action"]["status"] == "done", out
 """
 COUNT = "from ggg import PaymentAccount, Forward\nprint(PaymentAccount.count(), Forward.count())"
-# The instructions of a filing and of an approval, with margin: measured on PocketIC at about a tenth of this.
-FILING_BUDGET = APPROVAL_BUDGET = 500_000_000
+# The instructions of a filing and of an approval, with margin: measured on PocketIC at about 100M and 150M (a filing
+# writes a record, an audit event and a notice and meets one Cedar decision; an approval meets two and runs the call).
+FILING_BUDGET = APPROVAL_BUDGET = 300_000_000
 
 
 @pytest.fixture(scope="module")
@@ -97,7 +98,7 @@ def test_prepare_through_ggg_call_for_approve_through_ggg_action_approve_and_rea
     # the delegate reads the result, Candid-encoded with the method's own type
     got = realm.ggg("ggg_action_get", TEXT, action["id"], Types.Opt(ACTION), claude, query=True)["Ok"][0]
     assert next(iter(got["status"])) == "Done" and got["result"] == done["result"]
-    assert decode(bytes(got["result"]))
+    assert decode(bytes(got["result"][0]))
     events = ok(realm, "events", people["ctl"], query=True, count=20)["events"]
     approval = [e for e in events if e["origin"] == "confirmed"][0]
     assert (approval["user"], approval["by"], approval["prepared_by"]) == (alice, alice, claude)
@@ -125,7 +126,8 @@ def test_the_actions_and_their_states_survive_an_upgrade(realm, people):
         "network": "ICP", "address": "after-the-upgrade", "symbol": "REALM", "label": "Savings"}
     kept = ok(realm, "action_get", claude, query=True, action=done[0]["id"])["action"]
     assert kept["status"] == "done" and kept["result"] == done[0]["result"]
-    ok(realm, "action_approve", alice, action=waiting["id"], hash=waiting["hash"])
+    after = ok(realm, "action_approve", alice, action=waiting["id"], hash=waiting["hash"])["action"]
+    assert after["status"] == "done", after
     assert counts(realm)[0] == 3
     assert "is done" in refused(realm, "action_approve", alice, action=waiting["id"], hash=waiting["hash"])
 
@@ -149,8 +151,9 @@ def test_a_second_approval_sent_while_the_first_waits_on_another_canister_is_ref
     first = north.submit("action_approve", {"action": action["id"], "hash": action["hash"]}, sender=alice)
     second = north.submit("action_approve", {"action": action["id"], "hash": action["hash"]}, sender=alice)
     replies = north.finish(first, second)
-    assert [r["ok"] for r in replies] == [True, False], replies
-    assert replies[0]["action"]["status"] == "done" and "is approving" in replies[1]["error"]
+    approved, refused_ = sorted(replies, key=lambda r: not r["ok"])  # the replica picks which of the two runs first
+    assert approved["ok"] and approved["action"]["status"] == "done", replies
+    assert not refused_["ok"] and "is approving" in refused_["error"], replies
     assert north.ok("user_get", "ctl", query=True, user=alice)["user"]["home_quarter"] == south.cid
     assert north.shell("from ggg import Forward\nprint(Forward.count())").strip() == "1"
     again = north.ok("action_get", "alice", query=True, action=action["id"])["action"]

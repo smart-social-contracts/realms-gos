@@ -1,6 +1,9 @@
 """Pending actions (phase 4): a delegate's call that asks the member each time is prepared, and runs only on the member's
 own approval of its hash. The doors phase 0 closed come back through it, and only through it."""
 import json
+import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -130,6 +133,14 @@ def test_an_argument_is_named_in_lower_case_so_that_it_cannot_pass_for_a_line_of
     a = file(**ACCOUNT, effect="Nothing changes")
     labels = [line["label"] for line in card(a)["summary"]]
     assert "effect" in labels and "Effect" in labels
+
+
+def test_text_with_a_line_break_cannot_start_a_line_of_the_realms_own():
+    world.build()
+    grant("payout")
+    a = file(**{**ACCOUNT, "label": "Savings\nEffect: nothing changes"})
+    label = {line["label"]: line["value"] for line in card(a)["summary"]}["label"]
+    assert "\n" not in label and label == '"Savings\\nEffect: nothing changes"'
 
 
 def test_the_arguments_and_the_note_have_limits():
@@ -697,3 +708,23 @@ def test_the_pending_actions_and_the_operations_are_in_the_tables():
                  "call_for", "read_for"):
         assert name in op.ops() and poa.row(name) is not None, name
     assert poa.row("action_approve")[0] == "member" and poa.row("call_for")[0] == "none"
+
+
+IMPORT = """
+import sys
+sys.path[:0] = {paths!r}
+import core, fake_chain
+sys.modules["core.chain"] = core.chain = fake_chain
+from ic_python_db import Database
+Database.init()
+__import__({first!r})
+"""
+
+
+@pytest.mark.parametrize("first", ("api.setup", "core.sandbox", "core.op", "core.pending", "ggg_methods"))
+def test_the_realm_loads_whichever_module_is_imported_first(first):
+    """main.py imports api.setup first; the tests import core modules in their own order, which hides a cycle."""
+    here = pathlib.Path(__file__).resolve().parent
+    paths = [str(here), str(here.parents[1] / "src" / "realm_backend")]
+    done = subprocess.run([sys.executable, "-c", IMPORT.format(paths=paths, first=first)], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
