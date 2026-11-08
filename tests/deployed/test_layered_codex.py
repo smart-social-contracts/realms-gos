@@ -9,6 +9,7 @@ import os
 import pathlib
 
 import pytest
+from outcalls import Web
 from pic import Canister
 
 CODICES = pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices"
@@ -17,9 +18,13 @@ PREVIOUS_WASM = os.environ.get("REALM_PREVIOUS_WASM")
 
 LAYERS = ["eu/es", "eu/es/vc"]
 PATHS = {"tax": ["eu/es", "eu/es/vc"]}
-SMALL = "class Tax:\n    holiday = 'Año Nuevo'\n"  # not ASCII: the checksum is of the UTF-8 bytes
+# The two chapters of the codex written below. They load, as a codex's chapters do once it is active: a codex that does not
+# load denies every operation its legislation could guard, the resume of an install job among them.
+SMALL = 'from realms.legislation import above\n\n\nclass Tax(above("tax")):\n    """Año Nuevo"""\n'  # not ASCII: the checksum is of the UTF-8 bytes
+BIG_HEAD = 'from realms.legislation import above\n\n\nclass Tax(above("tax")):\n    pass\n\n# '
 RATE_LIMIT = 600  # seconds the replica wants between install_code messages as dear as installing this wasm
-BIG = "x" * (256 * 1024)  # the most a chapter may be, and more than the database's declared value size
+BIG = BIG_HEAD + "x" * (256 * 1024 - len(BIG_HEAD) - 1) + "\n"  # the most a chapter may be, and more than the database's declared value size
+CHANGE_LIST = "https://example.org/change.json"  # the install job's change list: nobody serves it
 
 
 def ok(realm, op, who, query=False, **args):
@@ -84,7 +89,7 @@ import ggg
 from core import layered_codex as store
 from core.db import Conflict, Fail
 
-big = "x" * store.MAX_CHAPTER
+big = {BIG_HEAD!r} + "x" * (store.MAX_CHAPTER - {len(BIG_HEAD)} - 1) + "\\n"
 small = {SMALL!r}
 counted = {{}}
 
@@ -114,7 +119,8 @@ for text, key in ((big + "x", store.checksum(big + "x")), (small, store.checksum
         store.store_chapter(key, text)
     except Fail as e:
         refusals.append(str(e))
-job = store.start_job("P-1", {{"url": "https://example.org/change.json", "checksum": "sha256:" + "1" * 64}})
+job = store.start_job("P-1", {{"url": {CHANGE_LIST!r}, "checksum": "sha256:" + "1" * 64}})
+job.step = "fetch_change_list"  # as api.installs.start sets it, which would also arm the step's timer
 try:
     store.start_job("P-2", {{}})
 except Conflict as e:
@@ -163,17 +169,48 @@ def test_a_layered_codex_and_its_chapter_texts_survive_an_upgrade(written, peopl
     founder = people["founder"]
     before = ok(written, "codex_status", founder, query=True)
     assert before["codex"]["id"] == written.written["id"] and before["codex"]["status"] == "active"
+    assert before["job"]["id"] == "J-1" and before["job"]["status"] == "running"
 
     written.wait(RATE_LIMIT)
     written.upgrade()
 
     after = ok(written, "codex_status", founder, query=True)
-    assert after["codex"] == before["codex"] and after["job"] == before["job"]
+    assert after["codex"] == before["codex"]
     assert after["codex"]["layer_paths"] == PATHS and after["codex"]["chapters"]["eu/es/tax"]["route"] == "capital"
-    assert after["job"]["id"] == "J-1" and after["job"]["status"] == "running"
+    # The timer that ran the job is gone with the heap: the job waits, paused, for an admin (D2, realms-gos#584).
+    assert after["job"] == {**before["job"], "status": "paused"}
     stored = json.loads(run(written, READ))
     assert stored == {"sources": {sha256(SMALL): len(SMALL), sha256(BIG): len(BIG)}, "count": 2, "codices": 1,
                       "jobs": 1}
+
+
+def test_an_admin_resumes_the_paused_job_which_ends_and_leaves_the_codex_and_its_texts_as_they_were(written, people):
+    """Nobody serves the job's change list, so the step the upgrade stopped in runs again and fails on a 404: the job
+    ends with its reason, and what the realm stored stays. (tests/deployed/test_installs.py runs one to its end.)"""
+    founder, ctl = people["founder"], people["ctl"]
+    before = ok(written, "codex_status", founder, query=True)
+    assert before["job"]["status"] == "paused"
+    web = Web(written.pic)  # the realm's outcall for the change list; the table has no answer for it: a 404
+
+    assert ok(written, "codex_install_resume", ctl, job="J-1") == {"ok": True, "job": "J-1", "step": before["job"]["step"]}
+    for _ in range(100):  # rounds, a second apart, until the job is over
+        written.pic.advance_time(10**9)
+        for _ in range(2):
+            written.pic.tick()
+            web.answer()
+        job = ok(written, "codex_status", founder, query=True)["job"]
+        if job["status"] != "running":
+            break
+    assert [url for _, url in web.asked] == [CHANGE_LIST]
+    assert job["status"] == "failed" and job["error"] == f"{CHANGE_LIST}: HTTP 404"
+
+    after = ok(written, "codex_status", founder, query=True)
+    assert after["codex"] == before["codex"] and after["pending"] is None
+    stored = json.loads(run(written, READ))
+    assert stored == {"sources": {sha256(SMALL): len(SMALL), sha256(BIG): len(BIG)}, "count": 2, "codices": 1,
+                      "jobs": 1}
+    refused = written.call("codex_install_resume", {"job": "J-1"}, sender=ctl)
+    assert not refused["ok"] and refused["kind"] == "conflict" and "not paused" in refused["error"]
 
 
 def test_a_chapter_stored_again_after_the_upgrade_is_not_stored_twice(written):
