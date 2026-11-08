@@ -191,15 +191,11 @@ def test_failing_hook_marks_the_codex_unhealthy_until_one_succeeds():
     assert ok("codex_status", "alice")["healthy"]
 
 
-def registry(monkeypatch, approval, files):
-    def call_text(cid, method, arg=None):
-        fake_chain.state["calls"].append((cid, method, arg))
-        if method == "get_file":
-            return json.dumps({"content_b64": base64.b64encode(files[json.loads(arg)["path"]].encode()).decode()})
-        return json.dumps(approval)
-        yield
+def registry(approval, files):
+    def get_file(arg):
+        return {"content_b64": base64.b64encode(files[json.loads(arg)["path"]].encode()).decode()}
 
-    monkeypatch.setattr(fake_chain, "call_text", call_text)
+    fake_chain.peer("registry", get_file=get_file, get_namespace_approval_icc=approval)
     Realm["1"].file_registry_canister_id, Realm["1"].marketplace_canister_id = "registry", "mkt"
 
 
@@ -219,10 +215,10 @@ def test_I_EXT_3_code_from_args_needs_an_allowlisted_checksum():
     ({"approved": True, "approver": "evil"}, ["evil"], None),
     ({"approved": False, "status": "pending"}, [], "not approved"),
 ])
-def test_I_EXT_3_registry_code_needs_a_trusted_approval(monkeypatch, approval, trusted, error):
+def test_I_EXT_3_registry_code_needs_a_trusted_approval(approval, trusted, error):
     build(approval=True)
     files = {"manifest.json": json.dumps(manifest()), "backend/hooks.py": SOURCE}
-    registry(monkeypatch, {"namespace": "ext/test/1.0.0", **approval}, files)
+    registry({"namespace": "ext/test/1.0.0", **approval}, files)
     Realm["1"].trusted_approvers = trusted
     out = call("codex_install", "ctl", codex="test", version="1.0.0")
     assert (out.get("error") is None if error is None else error in out["error"]), out
