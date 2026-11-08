@@ -297,10 +297,9 @@ def settle(p, final):
     return result
 
 
-def file_replay(name, args, user, by, department, grant=""):
-    """Turn a governed call into a proposal that replays it once accepted."""
-    p = new_proposal(f"{name} {json.dumps(args, sort_keys=True)[:120]}", user, by, department,
-                     {"op": name, "args": args}, grant=grant)
+def file_replay(filing, user, by, grant=""):
+    """File the proposal ``filing`` describes (core.op.filing), to replay its action once accepted."""
+    p = new_proposal(filing["title"], user, by, find(Department, filing["department"]), filing["action"], grant=grant)
     return {"proposal": p.id, "requires_vote": True}
 
 

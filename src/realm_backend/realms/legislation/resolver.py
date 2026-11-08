@@ -50,7 +50,7 @@ def resolve(plan, chapters, calendars=None, operations=None, modules=None):
         file = f"{entry['source']}/{entry['domain']}.py"
         codex.load(entry["source"], entry["domain"], _bytes(chapters, entry, file))
     codex.check()
-    _check_uses(codex)
+    check_uses(codex)
     return Resolution(plan, codex)
 
 
@@ -60,9 +60,11 @@ def _bytes(found, entry, file):
     return found[entry["sha256"]]
 
 
-def _check_uses(codex):
-    """The ``uses`` between domains, seen from the domains: an edge from X to Y when any chapter of X
-    declares Y."""
+def check_uses(codex):
+    """The ``uses`` between domains of a loaded ``codex``, seen from the domains: an edge from X to Y when any
+    chapter of X declares Y. Refuses an undeclared or missing domain, a cycle and a chain deeper than
+    ``MAX_DEPTH``. ``resolve`` runs it; so does the realm, which loads a codex chapter by chapter.
+    """
     edges = {}
     for domain, chain in codex.chapters.items():
         for cls in chain:

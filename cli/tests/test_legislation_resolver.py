@@ -1066,13 +1066,14 @@ class Beta(above("beta")):
 """
 
 
-def test_methods_handed_across_domains_still_count_as_calls_between_domains():
-    """Alpha gets beta's bound method once, through ``uses``; then they call each other directly."""
+def test_a_method_handed_across_domains_is_refused_at_the_boundary():
+    """Alpha asks beta for a bound method, to call it directly afterwards: what crosses a domain boundary is
+    plain data, so the hand-over itself is refused (realms-gos#543) and the depth counter unwinds."""
     codex = Codex(["town"], realm="town")
     codex.load("town", "alpha", PING)
     codex.load("town", "beta", PONG)
     context = codex.context()
-    with pytest.raises(LegislationError, match="calls between domains stop at depth 8"):
+    with pytest.raises(LegislationError, match="town/beta.py returned method: only plain data crosses"):
         codex.instance("alpha", context).call()
     assert context.depth == 0 and context.running == []  # undone as the calls unwind
 

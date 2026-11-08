@@ -381,7 +381,12 @@ The rules (the checker enforces them, §12):
 5. **Single inheritance only.** No metaclasses, no class decorators, no nested classes, no `exec`,
    `eval`, `compile`, `globals`, `locals`, `setattr`, `__import__`, `open`, no dunder attribute access
    (`__class__`, `__dict__`, `__bases__`, `__subclasses__`, ...). These are the same restrictions as
-   codex code today ([Design choices](../architecture/design-choices.md)).
+   codex code today ([Design choices](../architecture/design-choices.md)). No default arguments either,
+   on a method, a nested function or a lambda, and an attribute is set only on `self` or on the event a
+   hook was given, the two objects a call gets fresh, never on anything else; `self` and that event are
+   bound once, as the method's parameters, and never rebound, deleted or reused as a nested function's
+   parameter. A chapter's class lives as long as the codex runs, so a default or an attribute on an SDK
+   object, a parameter or a view would be state shared by every call.
 
 ### 4.1 Marks
 
@@ -520,6 +525,7 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 | `self.approved_by(department)` | whether the current operation carries that department's approval |
 | `self.legislation.<d>`, `self.layer.<d>` | §4.4 |
 | `self.calendar` | the realm's calendar: the union of the `calendar.json` of the layers it runs (§3.4); `self.calendar.add(day, period)` adds a Period to a realm-local day, counting working days on it |
+| `self.local_day(at)` | the realm's local day of UTC timestamp `at`, `YYYY-MM-DD`, computed by the realm from its own time zone (below): the day a working-day count starts from (§5.2) |
 | `pct("1.10")` | a rate literal, stored as the integer in hundred-millionths (§4.3) |
 | `days(n)`, `working_days(n)`, `months(n)`, `years(n)` | a Period, as GGG writes it: the unit constructors GGG defines, for settings (§4.3); the SDK adds none |
 | `amount.times(rate)` | money times a rate, rounded as GGG says |
@@ -1251,29 +1257,91 @@ The job's other rules:
 
 ### 9.3 The runtime
 
-- **Loading:** after every canister upgrade, or on first use, the realm loads the active codex's
-  chapters from `ChapterSource` into the sandbox and parses the Cedar once. That matches today's
-  lazy-load pattern in [`core/auth.py`](../../src/realm_backend/core/auth.py).
+Built: `core/legislation.py` (the realm's side) and `core/legislation_sandbox.py` (the program that runs inside
+the codex subinterpreter), on the library of §12 ([#488](https://github.com/smart-social-contracts/realms-gos/issues/488)).
+
+- **Loading:** after every canister upgrade (`post_upgrade`, where the realm starts), or on first use, the realm
+  loads the active codex's chapters from `ChapterSource` into **one codex subinterpreter kept across calls**
+  (`core/sandbox.py`'s `Resident`), never into its own interpreter: the subinterpreter imports the library from
+  the sources the realm bundles, builds the `Codex`, loads the chapters top to bottom and runs the checks of
+  §12.2, then answers each call. A query cannot keep what it loads, so the load happens where the realm starts.
+  Cedar is parsed once per activation (D4). That matches today's lazy-load pattern in
+  [`core/auth.py`](../../src/realm_backend/core/auth.py).
 - **Methods:** around a GGG operation `op`, the realm runs the guards `check_<op>` before it, the
-  `compute_<op>` methods during it when GGG asks, and the hooks `on_<op>` after it. Each is answered by
-  the resolved class of its domain, applying the marks (§4.1).
+  `compute_<op>` methods during it when GGG asks, and the hooks `on_<op>` after it succeeds. Each is answered by
+  the resolved class of its domain, applying the marks (§4.1). Every domain whose chapter defines the guard or
+  the hook runs, by domain name (the design orders domains no other way); a `compute_` is answered by one
+  domain, and two domains defining it is an error. Guards get the operation's arguments as `args` (attribute
+  access, `args.basis.legal_basis`; an argument the call did not give reads None); a guard returns None or
+  `self.deny(reason)` and queues no effect. Hooks get GGG's `Event`, one per domain, shared down the layers of
+  that domain. Read operations run no legislation, and nor do the effects a chapter queues (origin `codex`):
+  a hook's effect never runs another guard or hook, so chapters cannot cascade. A governed call that becomes a
+  proposal is a `proposal_create` to the legislation: its guards and hooks run on the filing. What a chapter
+  reads of GGG's entities is an allowlist of entities and fields (`VIEWS` in `core/legislation.py`): what
+  legislation needs to decide, never a key, a code, a person's private data, a sealed bid, who voted what, a
+  grant, a payment account or what one member was told; the arguments and results it gets carry no key material
+  or credential (`secret=` on the operation: a code, keys, private data, a request's body and reply), and neither
+  do the replies of its effects, while the personal data the audit log keeps out (`private=`) still reaches the
+  legislation that decides on it (I-PRV-1); and no read is answered while the codex loads.
 - **Failures:**
-  - a hook that raises never fails the caller; it marks the codex unhealthy, as today;
-  - a guard that raises **denies** (fail closed), with "legislation error in <chapter>";
-  - calls between domains stop at depth 8.
-- **Making "unhealthy" visible.** Today it is only the `healthy` flag of `ggg_codex_status`, with no
-  UI and no notice. Add:
+  - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
+    hooks still run;
+  - a guard that raises **denies** (fail closed), with "legislation error in <chapter>: <error>"; so does a
+    codex that does not load, for every operation its legislation could guard, until a revert;
+  - calls between domains stop at depth 8; the install refuses a `uses` chain that could reach it;
+  - a chapter that exhausts the sandbox's instruction budget fails that call; the realm closes the spent
+    interpreter, loads the codex again and asks once more, so the calls before it never cost a later one its
+    answer. The reads of one call are metered on the realm's side too: past 2 B instructions they are refused
+    and the call fails, so a chapter that loops on reads costs the caller that much and never the whole message.
+    The hooks of an operation run one domain per call, so a domain that loops costs no other domain its
+    effects;
+  - a failure on a query path (`compute_realm_join`, asked by `join_targets`) is not kept: a query keeps no
+    writes.
+- **Making "unhealthy" visible.** `LayeredCodex.failures` holds, per chapter file and method, the failure
+  count, the last error and when; `ggg_codex_status` shows it as `failures`, and `healthy` is false while it is
+  not empty. The flag clears when that method next succeeds. There is no automatic revert. Still to add (D5, D8):
   - **a notification** to the IT admin team (§10) on the first failure, and again after 24 hours if it
     still fails;
-  - **a per-chapter, per-method failure count** and the last error in `ggg_codex_status` and on the
-    public record;
   - **on the codex page,** the failing chapters and methods, and for IT team members a "revert"
     button that starts `codex.revert_fast`.
 
-  No banner for members. The flag clears when that method next succeeds. There is no automatic
-  revert.
+  No banner for members.
+- **Across domains:** what crosses a domain boundary is plain data, or the called chapter seen through its
+  public view (its public members only, never the `self` API): a method that returns `self` hands back the view,
+  a bound method or a view of other domains is refused
+  ([#543](https://github.com/smart-social-contracts/realms-gos/issues/543)).
+- **Effects** go through the codex caller as a legacy codex's do: origin `codex`, the realm as signer, Cedar's
+  guardrails. A layered codex declares no capability list: the GGG page (§1, "Effects are operations") has a
+  hook queue GGG operations "which the GOS runs as the realm, under the same permissions as any caller", and
+  rule 9 of §2 and the `self` API of §4.5 put no catalogue between a chapter and GGG, so the operation an effect
+  names is the one declared for it. Plainly: **a chapter can do, as the realm, anything the realm itself may do
+  directly** through a GGG operation, and nothing that takes a permission it does not hold: a layered codex holds
+  none, so an effect hands out no permission (I-ID-3) and no invite to a profile that carries one (a legacy
+  codex's effects keep acting for the realm as before, marked as such by the legacy hook path alone). **A governed
+  operation it queues is never run, whatever the department's policy: it becomes a proposal the realm files**,
+  decided by the vote that operation needs. Effects apply in order and stop at the first that fails, and
+  whatever one fails with is the chapter's failure, never the caller's; the operation's own audit event precedes
+  theirs. Refused before they run and counted against the chapter: an effect that names a reserved operation
+  (§10.4), one about a proposal or a federal vote whose action is reserved (a stop, a withdrawal, a vote, a
+  quarter's report of its leg), and one that carries a `timezone` (§4.5). The security review of #512 and #544
+  decides whether chapters get capabilities of their own, and reviews the allowlist of what they read.
 - **Facts:** the facts of a forbid are the operation's args, as GGG supplies them. The settings it
   reads with `S.` were folded in at build.
+- **Costs**, measured on PocketIC (basilisk 0.15.1, the realm's production wasm, 8 November 2026):
+
+  | What | Instructions |
+  |---|---|
+  | load: spawn the subinterpreter with the program and the library's sources | 379 M |
+  | load: import the library from text inside it | 556 M |
+  | load: 9 chapters loaded (the readable-subset check, the marks) and the checks of §12.2 | 64 M |
+  | one `activate`: the `on_codex_activate` hook and its one effect, a notification | 50 M |
+  | one guard call, 3 domains (the round trip, before the realm acts on the answer) | 2.5 M |
+  | the hooks of one operation, 2 domains, one call each, 2 effects queued (before the realm applies them) | 7.2 M |
+  | one `build` of the example: 7 chapters, a calendar, the flattened views | 1,045 M |
+
+  A load, about 1 B in all, is paid once per activation and once per upgrade (in `post_upgrade`, where the
+  realm starts), never in a query; the library's import from text is most of it. A guard or a hook costs
+  about as much as a small database read.
 
 ### 9.4 Cedar changes
 
@@ -1378,7 +1446,8 @@ proposal's `effective_at` (§5.2).
      never calls chapters for them.
    - A proposal whose action is a reserved operation runs no legislation at all: no chapter's guard,
      forbid or hook runs on its `proposal_create`, its vote or its execution. A guard on
-     `proposal_create`, such as §5.2's, can neither refuse nor delay a revert.
+     `proposal_create`, such as §5.2's, can neither refuse nor delay a revert. The same holds for a
+     federal vote whose action is reserved, its legs in the quarters and the messages that carry it.
    - No chapter may change the IT team or who defines it.
    - The Cedar `GUARDRAILS` keep them permitted for their holders: no generated forbid targets their
      actions, and the checker guarantees that.

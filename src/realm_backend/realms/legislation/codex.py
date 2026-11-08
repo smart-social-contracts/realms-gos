@@ -364,9 +364,9 @@ class Codex(metaclass=Sealed):
         ``settings`` in the generic mode."""
         return _cedar().schema(self.facts, self.forbids() if generic else (), context)
 
-    def context(self, now=0, approvals=()):
-        """A call's context: the time and the approvals the operation carries."""
-        return Context(self, now, approvals, self.operations)
+    def context(self, now=0, approvals=(), local_day=None):
+        """A call's context: the time, the approvals the operation carries and the realm's local-day function."""
+        return Context(self, now, approvals, self.operations, local_day)
 
     def instance(self, domain, context):
         """The resolved chapter of ``domain``, ready to run for ``context``."""

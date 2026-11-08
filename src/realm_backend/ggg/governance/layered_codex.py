@@ -21,6 +21,8 @@ class LayeredCodex(Row):
     activates_at = Integer(default=0)  # seconds: when a pending codex takes effect
     installed_at = Integer(default=0)
     proposal = String(default="")  # the proposal that adopted it
+    # {chapter file: {method: {count, error, at}}}: the methods failing now, cleared as each succeeds again (§9.3)
+    failures = Json({})
 
 
 class ChapterSource(Row):
