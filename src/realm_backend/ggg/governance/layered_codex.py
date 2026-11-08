@@ -41,7 +41,7 @@ class InstallJob(Row):
 
     __alias__ = "id"
     id = String()
-    proposal = String(default="")
+    proposal = String(default="", indexed=True)
     change_list = Json({})  # {url, checksum}
     step = String(default="")
     staged = Json({})  # what the steps so far have produced, for the next one

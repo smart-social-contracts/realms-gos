@@ -3,6 +3,7 @@ import json
 from ic_python_db import Database, Entity, ManyToMany, ManyToOne, OneToOne, String
 
 PAGE, PAGE_MAX = 100, 500
+JSON_MAX = 65536  # characters of a Json field, unless it says otherwise
 DRAFTS = 10  # how many drafts a read view lists, newest first
 # convert_legacy_indexes. The key prefixes of ic-python-db's field and relation indexes. The longest key it looks for:
 # the map ignores the max_key_size main.py declares, so nothing stops a longer one, but the realm's are far shorter and
@@ -85,7 +86,7 @@ class Unavailable(Fail):
 class Json(String):
     # Read gives a copy; write by assignment, in-place edits are not saved.
     def __init__(self, default=None, **kw):
-        super().__init__(default=json.dumps(default), max_length=kw.pop("max_length", 65536), **kw)
+        super().__init__(default=json.dumps(default), max_length=kw.pop("max_length", JSON_MAX), **kw)
 
     def __get__(self, obj, t=None):
         return self if obj is None else json.loads(super().__get__(obj, t) or "null")

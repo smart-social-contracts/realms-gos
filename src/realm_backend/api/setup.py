@@ -9,7 +9,7 @@ from core.db import CONVERT_IDS, PAGE_MAX, Conflict, Fail, Forbidden, Unavailabl
 from api.extensions import trust
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
-from api import codex
+from api import codex, installs
 from core.op import call, op, ops
 from api.proposals import root
 
@@ -83,6 +83,7 @@ def start(installer=""):
     if Realm["1"].timezone != "UTC":  # a UTC realm needs no zone file, nor the reader
         localtime.use(Realm["1"].timezone)
     legislation.warm()  # the active layered codex's sandbox is gone after an upgrade, and a query could not keep one
+    installs.pause_after_upgrade()
     tasks.rearm()
     from api import proposals, quarters
 
