@@ -286,7 +286,6 @@ class RealmGenerator:
             {"name": "Shanghai", "lat": 31.2304, "lng": 121.4737},
             {"name": "Seoul", "lat": 37.5665, "lng": 126.9780},
             {"name": "Bangkok", "lat": 13.7563, "lng": 100.5018},
-            {"name": "Hong Kong", "lat": 22.3193, "lng": 114.1694},
             # South America
             {"name": "São Paulo", "lat": -23.5505, "lng": -46.6333},
             {"name": "Buenos Aires", "lat": -34.6037, "lng": -58.3816},
