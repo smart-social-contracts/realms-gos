@@ -31,7 +31,7 @@ def active():
 
 def find_codex(codex_id):
     """A codex of either kind by its id: ``name@version`` for a legacy one, ``sha256:…`` for a layered one."""
-    return find(LayeredCodex if codex_id.startswith("sha256:") else Codex, codex_id)
+    return find(Codex if "@" in codex_id else LayeredCodex, codex_id)
 
 
 def runnable(manifest):

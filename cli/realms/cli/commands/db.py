@@ -153,21 +153,29 @@ class CursorDatabaseExplorer:
     def list_entities(
         self, entity_type: str, page_num: int = 0, page_size: int = 10
     ) -> Dict[str, Any]:
-        """One page of an entity's rows (``realm_export``), each with its ``_type`` and ``_id``."""
+        """One page of an entity's rows (``realm_export``), each with its ``_type`` and ``_id``.
+
+        The realm returns fewer rows than asked for when an entity's rows are large, and says where to go on in
+        ``next``: the page is filled by following it, never by computing where the next call starts.
+        """
         if "::" in entity_type:
             return {"error": f"{entity_type}: extension entities are not supported by this realm version", "items": []}
-        try:
-            reply = self.call_backend(
-                "realm_export", {"entity": entity_type, "from": page_num * page_size + 1, "count": page_size}
-            )
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            return {"error": str(e), "items": []}
-        if not reply.get("ok"):
-            return {"error": reply.get("error", "Unknown error"), "items": []}
-        more = reply.get("next") is not None
+        rows, start = [], page_num * page_size + 1
+        while start is not None and len(rows) < page_size:
+            try:
+                reply = self.call_backend(
+                    "realm_export", {"entity": entity_type, "from": start, "count": page_size - len(rows)}
+                )
+            except Exception as e:
+                logger.error(traceback.format_exc())
+                return {"error": str(e), "items": []}
+            if not reply.get("ok"):
+                return {"error": reply.get("error", "Unknown error"), "items": []}
+            rows += reply["rows"]
+            start = reply.get("next")
+        more = start is not None
         return {
-            "items": [{"_type": entity_type, "_id": row.get("id", ""), **row} for row in reply["rows"]],
+            "items": [{"_type": entity_type, "_id": row.get("id", ""), **row} for row in rows],
             "page_num": page_num,
             "page_size": page_size,
             "total_pages": page_num + (2 if more else 1),
