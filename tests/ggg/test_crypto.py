@@ -110,7 +110,10 @@ def test_a_document_has_a_kind_languages_and_facts_and_replaces_them():
     assert (row.kind, row.languages, row.facts, row.public, row.publications) == (
         "report", ["en", "es-ES"], {"given_freely": True}, None, [])
     ok("document_store", "carla", department="Health", document=doc, **{**REPORT, "languages": ["ca"]})
-    assert (Document[doc].kind, Document[doc].languages, Document[doc].facts) == ("", ["ca"], {})
+    assert (Document[doc].kind, Document[doc].languages, Document[doc].facts) == (
+        "report", ["ca"], {"given_freely": True})  # left out, they stay
+    ok("document_store", "carla", department="Health", document=doc, kind="minutes", facts={}, **REPORT)
+    assert (Document[doc].kind, Document[doc].facts) == ("minutes", {})
     for languages in (["english"], "en", [5], [""]):
         out = call("document_store", "carla", department="Health", **{**REPORT, "languages": languages})
         assert not out["ok"] and out["kind"] == "invalid_argument", languages

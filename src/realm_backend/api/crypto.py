@@ -138,9 +138,10 @@ def stored_languages(args):
 def document_store(c, args):
     """Store a ``department`` document (or replace ``document``): ``title``, ``languages`` (BCP 47 tags), ``ref`` and
     ``hash`` of its ciphertext, optional ``kind`` (minutes, an ordinance), ``facts`` (what legislation reads about
-    it) and ``keys`` (principal to wrapped key). Returns ``document`` and its key ``scope``."""
-    fields = {"title": args["title"], "kind": args.get("kind", ""), "languages": args["languages"],
-              "ref": args["ref"], "hash": args["hash"], "facts": args.get("facts") or {}, "at": chain.now()}
+    it) and ``keys`` (principal to wrapped key). A replacement that leaves out ``kind`` or ``facts`` keeps them.
+    Returns ``document`` and its key ``scope``."""
+    fields = {"title": args["title"], "languages": args["languages"], "ref": args["ref"], "hash": args["hash"],
+              "at": chain.now()}
     staff(args["department"], c.user)
     doc = find(Document, args["document"]) if args.get("document") else None
     if doc and doc.department != args["department"]:
@@ -148,6 +149,9 @@ def document_store(c, args):
     doc = doc or Document(id=next_id(Document, "DOC"), department=args["department"], author=c.user)
     for k, v in fields.items():
         setattr(doc, k, v)
+    for k in ("kind", "facts"):  # left out, they stay as they are: a screen that predates them re-stores a document
+        if args.get(k) is not None:
+            setattr(doc, k, args[k])
     grant(scope_of(doc), args.get("keys") or {}, c.user)
     return {"document": doc.id, "scope": scope_of(doc)}
 
