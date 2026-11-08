@@ -6,11 +6,12 @@ import pytest
 
 import ggg_api
 from api import codex
+from core import layered_codex as store
 import fake_chain
 from core import op
 import world
 from ggg import Codex, Department, Event, Invoice, LayeredCodex, Proposal, Realm, Token
-from kit import call, denied, ok, rows
+from kit import call, denied, fire_timers, ok, rows
 from test_spec import spec_ops
 
 CODICES = pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices"
@@ -46,6 +47,12 @@ def read_undeclared(args):
 def broken(args):
     return 1 // 0
 '''
+
+
+@op.op("treasury.manage")
+def t_poke(c, args):
+    """A write the layered codices below guard, to tell which codex the runtime runs."""
+    return {"done": args.get("what", "")}
 
 
 @op.op("treasury.manage")
@@ -298,9 +305,20 @@ def test_hooks_fire_from_their_operations():
     assert "N-welcome newbie" in notes
 
 
+TOWN_TAX = "from realms.legislation import above\n\nclass Tax(above('tax')):\n    pass\n"
+
+
 def waiting_codex():
-    """A layered codex installed and checked but not yet in force, as an install leaves it."""
-    return LayeredCodex(id="sha256:" + "5" * 64, status="pending", installed_at=fake_chain.now())
+    """A layered codex installed and checked but not yet in force, as an install leaves it: one chapter, stored, so
+    that the runtime can load it at the switch."""
+    from core import layered_codex as store
+
+    sha256 = store.store_chapter(store.checksum(TOWN_TAX), TOWN_TAX).sha256
+    chapters = {"town/tax": {"source": "town", "version": None, "sha256": sha256, "vouched_by": "town",
+                             "route": "https", "fetched_at": fake_chain.now(), "url": "https://example.test/tax.py",
+                             "size": len(TOWN_TAX)}}
+    return LayeredCodex(id=store.codex_id(["town"], {"tax": ["town"]}, chapters), layers=["town"],
+                        layer_paths={"tax": ["town"]}, chapters=chapters, status="pending", installed_at=fake_chain.now())
 
 
 def test_codex_activate_is_a_conflict_while_no_codex_is_pending():
@@ -325,6 +343,7 @@ def test_codex_activate_makes_the_pending_codex_active_and_keeps_the_one_it_repl
     assert out["codex"] == waiting.id
     seen = ok("codex_status", "alice")
     assert (seen["codex"]["id"], seen["codex"]["previous"], seen["pending"]) == (waiting.id, "test@1.0.0", None)
+    assert seen["codex"]["installed_at"] == fake_chain.now() and store.own_source() == "town"  # with no job behind it
     assert Codex["test@1.0.0"].status == "inactive"
     assert ok("codex_revert", "ctl")["codex"] == "test@1.0.0" and Codex["test@1.0.0"].status == "active"
     assert call("codex_activate", "ctl", codex=waiting.id)["kind"] == "conflict"  # it is not pending any more
@@ -352,6 +371,54 @@ def test_activating_a_codex_is_the_realms_to_decide():
     assert waiting.status == "pending"
     vote_through(p)
     assert waiting.status == "active"
+
+
+REGISTER = '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def check_t_poke(self, args):
+        if args.what == "who":
+            return self.deny("%s")
+
+    def on_codex_activate(self, event):
+        self.ggg.t_log(text="activated by %s")
+'''
+
+
+def test_codex_activate_switches_the_runtime_and_runs_the_new_codexs_hook_once_in_the_next_message():
+    from core import legislation
+    from test_legislation_runtime import LOG, TOWN, activate as running, layered
+
+    build()
+    a = running(layered({(TOWN, "register"): REGISTER % ("A", "A")}, layers=[TOWN]))
+    b = layered({(TOWN, "register"): REGISTER % ("B", "B")}, layers=[TOWN], status="pending")
+    LOG.clear()
+    assert call("t_poke", "ctl", what="who")["error"] == "A"
+    assert ok("codex_activate", "ctl", codex=b.id)["codex"] == b.id
+    assert (a.status, b.status, b.previous) == ("inactive", "active", a.id)
+    assert legislation._state["codex"] == b.id and call("t_poke", "ctl", what="who")["error"] == "B"
+    assert LOG == []  # the switch's own message runs no hook: not A's for the operation, not B's yet
+    fire_timers()
+    assert LOG == [("activated by B", "codex")]
+    fire_timers()
+    assert LOG == [("activated by B", "codex")]  # once
+
+
+def test_codex_activate_refuses_a_codex_that_does_not_load_and_switches_nothing():
+    from core import legislation
+    from test_legislation_runtime import LOG, TOWN, activate as running, layered
+
+    build()
+    a = running(layered({(TOWN, "register"): REGISTER % ("A", "A")}, layers=[TOWN]))
+    b = layered({(TOWN, "register"): "class Register:\n    pass\n"}, layers=[TOWN], status="pending")
+    LOG.clear()
+    out = call("codex_activate", "ctl", codex=b.id)
+    assert not out["ok"] and "x/town/register.py" in out["error"], out  # the load refused the chapter
+    assert (a.status, b.status) == ("active", "pending") and codex.active().id == a.id
+    assert legislation._state["codex"] == a.id and call("t_poke", "ctl", what="who")["error"] == "A"
+    fire_timers()
+    assert LOG == []
 
 
 def test_codex_compute_gives_no_answer_until_the_layered_runtime_gives_one():

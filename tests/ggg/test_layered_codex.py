@@ -105,7 +105,7 @@ def test_a_second_install_job_is_refused_while_one_is_running_or_paused():
     with pytest.raises(Conflict, match="an install is running"):
         store.start_job("P-2", change_list)
     job.status = "paused"
-    with pytest.raises(Conflict, match="an install is paused"):
+    with pytest.raises(Conflict, match="an install is running"):  # one message, whatever holds the place (§9.2)
         store.start_job("P-2", change_list)
     assert InstallJob.count() == 1
 

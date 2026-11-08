@@ -79,6 +79,16 @@ def test_the_totals_of_a_budget_are_those_of_the_lines_it_proposes():
     assert totals({"period": "FY2026"}) == {"revenue": 900, "expense": 320}
 
 
+def test_the_totals_of_a_filed_budget_are_those_of_the_lines_its_proposal_fixed():
+    setup_finance()
+    draft("ROADS", "capital", 300)
+    p = file_roads_budget()
+    draft("ROADS", "upkeep", 20)  # after the filing: the next proposal's
+    totals = op.ops()["budget_propose"]["derived"]
+    assert totals(roads_budget()["args"], p) == {"revenue": 0, "expense": 300}
+    assert totals(roads_budget()["args"]) == {"revenue": 0, "expense": 20}
+
+
 def test_lines_adopt_in_draft_order_so_a_later_line_amends_an_earlier_one_and_inherits_its_spending():
     setup_finance()
     old = draft("ROADS", "capital", 100)

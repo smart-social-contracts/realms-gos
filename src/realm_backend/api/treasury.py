@@ -670,10 +670,11 @@ def totals_of(lines):
     return totals
 
 
-def budget_totals(args):
+def budget_totals(args, proposal=""):
     """The facts of a budget_propose call that are not its arguments (GGG's derived facts): ``revenue`` and ``expense``,
-    the sums of ``planned`` over the draft lines it proposes of each kind."""
-    return totals_of(draft_lines(args))
+    the sums of ``planned`` over the lines it proposes of each kind: those ``proposal`` fixed when it was filed, if the
+    call is its replay, and otherwise the draft lines it would propose."""
+    return totals_of(fixed_lines(args, proposal) if proposal else draft_lines(args))
 
 
 def check_years(args):
@@ -706,7 +707,7 @@ def fix_lines(args, proposal):
 def release_lines(args, proposal):
     """A proposal that ended without adopting its lines gives them back: ``draft`` with no proposal, to be proposed
     again."""
-    period = FiscalPeriod[str(args.get("period"))]  # a stored action may name no period: it fixed no line
+    period = FiscalPeriod[args["period"]] if args.get("period") else None  # a stored action may name no period
     if period is None:
         return
     for b in lines_of(period):
@@ -714,13 +715,16 @@ def release_lines(args, proposal):
             b.status, b.proposal = "draft", ""
 
 
+def fixed_lines(args, proposal):
+    """The lines ``proposal`` fixed when it was filed, and that it has not adopted yet."""
+    lines = lines_of(find(FiscalPeriod, args["period"]))
+    return [b for b in lines if b.status == "proposed" and b.proposal == proposal]
+
+
 def carried_lines(c, args):
     """The lines a budget_propose call adopts: those its proposal fixed when it was filed; a department that decides
     alone files no proposal, and adopts the draft lines the call names."""
-    if not c.proposal:
-        return draft_lines(args)
-    lines = lines_of(find(FiscalPeriod, args["period"]))
-    return [b for b in lines if b.status == "proposed" and b.proposal == c.proposal]
+    return fixed_lines(args, c.proposal) if c.proposal else draft_lines(args)
 
 
 @op("org.manage_budget", governed=propose_department, check=check_years, derived=budget_totals, fixes=fix_lines,
