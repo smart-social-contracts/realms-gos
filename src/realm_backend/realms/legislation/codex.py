@@ -83,6 +83,18 @@ def no_dunder(fn):
     return guarded
 
 
+def chapter_line(error, file):
+    """The line of ``file`` that ``error`` was raised from, read off its traceback, so a refusal from
+    inside the class body (a forbid's expression, rule 2) points at the member; None if none.
+    """
+    tb, line = error.__traceback__, None
+    while tb is not None:
+        if tb.tb_frame.f_code.co_filename == file:
+            line = tb.tb_lineno
+        tb = tb.tb_next
+    return line
+
+
 def _cedar():
     """The Cedar generator, imported when a codex is built or installed: hooks and guards never need
     it, and compiling a bundled module costs the realm tens of millions of instructions on first use.
@@ -181,9 +193,9 @@ class Codex(metaclass=Sealed):
         except Refused:
             raise
         except LegislationError as e:
-            raise Refused(str(e), None, file)
+            raise Refused(str(e), chapter_line(e, file), file)
         except Exception as e:
-            raise Refused(f"{type(e).__name__}: {e}", None, file)
+            raise Refused(f"{type(e).__name__}: {e}", chapter_line(e, file), file)
         finally:
             _LOADING.pop()
         cls = self._the_chapter(space, load, imported)
