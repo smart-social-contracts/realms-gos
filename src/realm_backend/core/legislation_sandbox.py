@@ -3,8 +3,8 @@
 core.legislation spawns one subinterpreter per active layered codex with this file's text as its program (plus
 ``LIBRARY``, the sources of ``realms.legislation``, appended by the realm) and calls the functions below with plain
 data: ``setup`` installs the library and builds an empty ``Codex``, ``load`` adds one chapter, ``finish`` runs the
-install checks; ``views`` and ``cedar`` are the install's report; ``guard``, ``hooks`` and ``compute`` answer for a
-GGG operation. The only way out is ``rpc``: ``ggg_read`` for the read-only view of GGG's entities that chapters import,
+install checks; ``views`` and ``cedar`` are the install's report; ``guard``, ``hook_domains`` with ``hook``, and
+``compute`` answer for a GGG operation. The only way out is ``rpc``: ``ggg_read`` for the read-only view of GGG's entities that chapters import,
 and ``local_day`` for the realm's local day of a timestamp.
 
 Nothing here runs in the realm's own interpreter: the realm reads this file's text (core.sandbox.module_source) and
@@ -243,26 +243,24 @@ def guard(op, args, now, approvals):
     return outcomes
 
 
-def hooks(op, event, now, approvals):
-    """Every domain's ``on_<op>`` with GGG's event, by domain name, each with an event and an effects queue of its
-    own. Returns one outcome per domain: ``{"domain", "files"}`` plus ``effects`` (``[[op, args], ...]``) or
-    ``error`` and ``chapter``. A failing domain's effects are dropped; the other domains still run."""
+def hook_domains(op):
+    """The domains whose chapter defines ``on_<op>``, by name, each with its chapter files top to bottom."""
+    return [{"domain": domain, "files": files_of(domain)} for domain in domains_with(f"on_{op}")]
+
+
+def hook(op, domain, event, now, approvals):
+    """One domain's ``on_<op>`` with GGG's event and an effects queue of its own, as one sandbox call. Returns
+    ``{"effects": [[op, args], ...]}``, or ``error`` and ``chapter``."""
     from realms.legislation.context import Event
 
-    codex, name, outcomes = STATE["codex"], f"on_{op}", []
-    for domain in domains_with(name):
-        ctx = context(now, approvals)
-        outcome = {"domain": domain, "files": files_of(domain)}
-        outcomes.append(outcome)
-        try:
-            getattr(codex.instance(domain, ctx), name)(Event(event["user"], event["args"], event["result"], event["at"]))
-            if not is_plain(ctx.effects.queued):
-                raise problem(f"{name} queued an effect whose arguments are not plain data")
-        except Exception as e:
-            outcome.update(failure(e))
-        else:
-            outcome["effects"] = ctx.effects.queued
-    return outcomes
+    codex, name, ctx = STATE["codex"], f"on_{op}", context(now, approvals)
+    try:
+        getattr(codex.instance(domain, ctx), name)(Event(event["user"], event["args"], event["result"], event["at"]))
+        if not is_plain(ctx.effects.queued):
+            raise problem(f"{name} queued an effect whose arguments are not plain data")
+    except Exception as e:
+        return failure(e)
+    return {"effects": ctx.effects.queued}
 
 
 def compute(op, kwargs, now, approvals):

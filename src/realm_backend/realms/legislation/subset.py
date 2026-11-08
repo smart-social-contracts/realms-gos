@@ -302,10 +302,10 @@ class Check:
         ops = instructions(code, self.names)
         self.no_defaults(ops)
         for i, (name, arg) in enumerate(ops):
-            if name == "STORE_ATTR" and not self.on_local(code, ops, i):
+            if name == "STORE_ATTR" and not self.on_parameter(code, ops, i):
                 attr = code.co_names[arg]
                 self.refuse(
-                    f".{attr} = ...: a chapter sets attributes on self, or on what it was given, never on a class or a call's result",
+                    f".{attr} = ...: a chapter sets attributes on self, or on what a method was given, never on a local, a class or a call's result",
                     f".{attr}",
                 )
             if name == "CALL_INTRINSIC_1" and arg not in _INTRINSICS:
@@ -321,19 +321,21 @@ class Check:
             return arg >> 1
         return arg
 
-    def on_local(self, code, ops, i):
-        """Whether the object the attribute is stored on was just loaded from a local variable of this
-        function: a fast local, or one of its own cells (a local a nested function also reads).
-        """
+    def on_parameter(self, code, ops, i):
+        """Whether the object the attribute is stored on was just loaded from a parameter of this function: ``self``,
+        or what the method was given (the event a hook adds to). A local assigned from anything else may be an
+        object that outlives the call (an SDK function, the calendar), so a store on it is refused."""
         if i == 0:
             return False
         name, arg = ops[i - 1]
+        count = code.co_argcount + code.co_kwonlyargcount + bool(code.co_flags & 4) + bool(code.co_flags & 8)
+        params = code.co_varnames[:count]
         if name in ("LOAD_FAST", "LOAD_FAST_CHECK"):
-            return arg < len(code.co_varnames)
+            return arg < len(params)
         if name == "LOAD_FAST_LOAD_FAST":
-            return (arg & 15) < len(code.co_varnames)
-        if name == "LOAD_DEREF":
-            return self.deref_name(code, arg) in code.co_cellvars
+            return (arg & 15) < len(params)
+        if name == "LOAD_DEREF":  # a parameter a nested function also reads is a cell on 3.10
+            return self.deref_name(code, arg) in params
         return False
 
     @staticmethod

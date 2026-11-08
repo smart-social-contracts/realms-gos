@@ -1548,7 +1548,7 @@ def test_a_chapter_cannot_give_a_metaclass_to_skip_the_marks():
         ),
         ("return (i for i in [1])", "no generators, coroutines or async code"),
         ("yield 1", "no generators, coroutines or async code"),
-        ("event.inner.field = 1", "sets attributes on self, or on what it was given"),
+        ("event.inner.field = 1", "sets attributes on self, or on what a method was given"),
         ("type(self).authority = 1", "sets attributes on self"),
         ("with open('x') as f:\n            pass", "a with statement"),
         (
@@ -1660,15 +1660,16 @@ def test_a_chapter_cannot_change_a_class_above_or_its_own():
         "from realms.legislation import above\nclass Register(above('register')):\n"
         "    def on_user_remove(self, event):\n        type(self).authority = None\n",
     )
-    cls = c.load(
+    # Through a local too: an attribute is set on self or on what the method was given, never on a local, so the
+    # class is out of reach at load time already (and refuses the change at run time besides).
+    assert ".authority = ...: a chapter sets attributes on self, or on what a method was given, never on a local" in refused(
+        c,
         VALENCIA,
         "register",
         "from realms.legislation import above\nclass Register(above('register')):\n"
         "    def on_user_remove(self, event):\n        cls = type(self)\n        cls.authority = None\n",
     )
-    with pytest.raises(LegislationError, match="never changes once loaded"):
-        cls(c.context()).on_user_remove(Event("a", {}, {}, 0))
-    assert cls.authority == Ref("external", "INE")
+    assert c.resolved("register").authority == Ref("external", "INE")
 
 
 def test_values_a_layer_above_set_are_frozen():

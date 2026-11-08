@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
-from test_layered_codex import RATE_LIMIT, ok, sha256
+from test_layered_codex import PREVIOUS_WASM, RATE_LIMIT, ok, sha256
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "realm_backend"))
 from realms.legislation.calendar import Calendar  # noqa: E402
@@ -180,8 +180,9 @@ from core import chain, legislation
 t0 = ic.performance_counter(0)
 guards = legislation._call("guard", op="proposal_create", args={"title": "measure", "action": None}, now=chain.now(), approvals=[])
 t1 = ic.performance_counter(0)
-hooks = legislation._call("hooks", op="proposal_create", now=chain.now(), approvals=[],
-                          event={"user": %(founder)r, "args": {"title": "measure"}, "result": {"proposal": "P-0"}, "at": chain.now()})
+event = {"user": %(founder)r, "args": {"title": "measure"}, "result": {"proposal": "P-0"}, "at": chain.now()}
+hooks = [legislation._call("hook", op="proposal_create", domain=d["domain"], event=event, now=chain.now(), approvals=[])
+         for d in legislation._call("hook_domains", op="proposal_create")]
 t2 = ic.performance_counter(0)
 print(json.dumps({"guard": t1 - t0, "hook": t2 - t1, "guards": len(guards), "hooks": len(hooks),
                   "effects": sum(len(h.get("effects", [])) for h in hooks)}))
@@ -322,7 +323,8 @@ def test_b_guards_deny_down_the_layers_and_hooks_notify_as_the_codex(town, peopl
     assert notice["body"] == pid
     measured = run(town, MEASURE % {"founder": founder})
     print(f"one guard call ({measured['guards']} domains): {measured['guard']:,} instructions; "
-          f"one hook call ({measured['hooks']} domains, {measured['effects']} effects queued): {measured['hook']:,}")
+          f"the hooks of one operation ({measured['hooks']} domains, one call each, {measured['effects']} effects queued): "
+          f"{measured['hook']:,}")
     assert measured["guard"] < 100_000_000 and measured["hook"] < 100_000_000, measured
 
 
@@ -368,12 +370,12 @@ def test_d_a_raising_guard_denies_naming_the_chapter_and_a_raising_hook_never_fa
 def test_e_a_hook_that_exhausts_the_budget_fails_alone_and_the_codex_reloads(town, people):
     founder = people["founder"]
     assert ok(town, "proposal_create", founder, title="loop")["proposal"]
-    # A spent budget poisons the interpreter, so no chapter can be named: the failure is the codex's, for that method.
-    error = failures(town, founder)["codex"]["on_proposal_create"]["error"]
+    # A spent budget poisons the interpreter; the hook ran one domain per call, so the failure is that chapter's.
+    error = failures(town, founder)["x/town/register.py"]["on_proposal_create"]["error"]
     assert "BudgetExceeded" in error, error
     assert run(town, STATE)["loaded"]  # the spent interpreter was replaced
     assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
-    assert "codex" in failures(town, founder)  # the loop still counts until the hooks next succeed
+    assert "x/town/register.py" in failures(town, founder)  # the loop still counts until the hook next succeeds
     ok(town, "proposal_create", founder, title="fine again")
     assert failures(town, founder) == {}
 
@@ -430,7 +432,7 @@ def test_j_a_hook_that_loops_on_reads_fails_alone_and_the_caller_succeeds(town, 
     founder = people["founder"]
     install(town, chapters_of(founder, [(TOWN, "register", READ_LOOP)]))
     assert ok(town, "proposal_create", founder, title="read loop")["proposal"]
-    error = failures(town, founder)["codex"]["on_proposal_create"]["error"]
+    error = failures(town, founder)["x/town/register.py"]["on_proposal_create"]["error"]
     assert error.startswith("the chapters read for more than") and error.endswith("instructions in one call: the call stops")
     ok(town, "proposal_create", founder, title="reads fine")
     assert failures(town, founder) == {}
@@ -448,3 +450,32 @@ def test_k_an_upgrade_with_a_codex_that_cannot_load_records_it_and_the_realm_fai
     assert proposal(town, founder, "anything")["error"].startswith("legislation error: the codex sha256:")
     assert ok(town, "codex_revert", people["ctl"])["codex"]  # reserved: no chapter runs, the realm is back
     assert ok(town, "codex_status", founder, query=True)["healthy"]
+
+
+RESERVED_LEG = '''
+import json
+from core import legislation
+from core.db import first
+from ggg import FederalVote, FederalVoteLeg
+leg = next(iter(FederalVote[%(vote)r].legs))
+print(json.dumps({"proposal": leg.proposal_id, "indexed": first(FederalVoteLeg, "proposal_id", leg.proposal_id) is not None,
+                  "reserved": legislation._reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})}))
+'''
+
+
+@pytest.mark.skipif(not PREVIOUS_WASM, reason="REALM_PREVIOUS_WASM names no wasm")
+def test_l_a_federal_revert_in_flight_across_the_upgrade_keeps_its_leg_reserved(wasm_of, people):
+    """The leg of a federal vote written before FederalVoteLeg.proposal_id had its index is found by it after the
+    upgrade (setup.start indexes the legs once), so no chapter guards the vote on it."""
+    from test_layered_codex import new_realm
+
+    founder = people["founder"]
+    realm = new_realm(PREVIOUS_WASM, people)
+    vote = ok(realm, "federal_vote_propose", founder, title="revert", action={"op": "codex_revert", "args": {}})["vote"]
+    realm.wait(RATE_LIMIT)
+    realm.upgrade(wasm_of("production"))
+    got = run(realm, RESERVED_LEG % {"vote": vote})
+    assert got["indexed"] and got["reserved"], got
+    install(realm, [(TOWN, "procedure", DENY_ALL)], layers=[TOWN], calendars=())
+    assert realm.call("proposal_create", {"title": "x"}, sender=founder)["error"] == "nothing may be proposed"
+    assert ok(realm, "proposal_vote", founder, proposal=got["proposal"], choice="yes")["vote"]  # the leg: no guard

@@ -16,9 +16,9 @@ from test_legislation_runtime import LOG, TOWN, TOWN_REALM, activate, layered, t
 from test_legislation_runtime import fresh_realm  # noqa: F401  the autouse fixture
 
 
-@op.op("treasury.manage")
+@op.op("treasury.manage", secret=("code",))
 def t_poke(c, args):
-    """A plain write any chapter may guard or hook."""
+    """A plain write any chapter may guard or hook; its ``code`` is the caller's secret, in and out."""
     return {"done": args.get("what", ""), "code": "SHOWN-ONCE"}
 
 
@@ -245,7 +245,7 @@ class Register(above("register")):
 def test_a_hook_that_reads_past_the_budget_fails_alone():
     activate(layered({(TOWN, "register"): READ_LOOP}, layers=[TOWN]))
     assert ok("t_poke", what="read loop")["done"] == "read loop"
-    error = failures()["codex"]["on_t_poke"]["error"]
+    error = failures()["x/town/register.py"]["on_t_poke"]["error"]
     assert error == f"the chapters read for more than {legislation.READS:,} instructions in one call: the call stops"
     ok("t_poke", what="fine")
     assert failures() == {}
@@ -327,3 +327,151 @@ def test_a_chapter_handed_across_domains_is_the_public_view_and_a_method_is_refu
         "legislation error in x/town/beta.py: _secret is private to its chapter: other chapters cannot call it")
     assert call("t_poke", what="hand method")["error"] == (
         "legislation error in x/town/alpha.py: x/town/beta.py was handed method: only plain data crosses a domain boundary")
+
+
+# ── The re-review: what crosses, what an effect may do, the revert floor, state, reads per domain ───────────────
+
+TAX = '''
+from realms.legislation import above
+
+class Tax(above("tax")):
+    def compute_tax_assess(self, entry, subject):
+        return [{"concept": str(entry.code), "amount": 1}]
+'''
+
+
+def test_a_tax_entrys_code_reaches_compute_tax_assess():
+    """Secrets are an operation's own: tax_assess keeps none, so a tax entry's code is not an invite's code."""
+    activate(layered({(TOWN, "tax"): TAX}, layers=[TOWN]))
+    got = op.run(codex_api.compute("tax_assess", {"entry": {"code": "ibi_urban", "rate": 1}, "subject": "Land:1"}))
+    assert got == [{"concept": "ibi_urban", "amount": 1}]
+
+
+INVITE = register('''    def on_t_poke(self, event):
+        if event.args.get("what") == "invite":
+            self.ggg.invite_create(profile="boss")
+            self.ggg.notification_send(recipient="User:mallory", title="inv", body="$eff:0:invite")
+        if event.args.get("what") == "plain invite":
+            self.ggg.invite_create(profile="nobody")
+            self.ggg.notification_send(recipient="User:mallory", title="plain", body="$eff:0:invite")
+''')
+
+
+def test_a_codex_holds_no_permission_and_an_effects_reply_crosses_without_its_secret():
+    from ggg import Invite, UserProfile
+
+    world.policy(Department["Administration"], 3, 5)
+    UserProfile(id="boss", description="all powers", allowed_to=["all"])
+    UserProfile(id="nobody", description="no power", allowed_to=[])
+    activate(layered({(TOWN, "register"): INVITE}, layers=[TOWN]))
+    ok("t_poke", what="invite")
+    assert failures()["x/town/register.py"]["on_t_poke"]["error"] == "invite_create: you do not hold all"
+    assert notices("inv") == [] and rows(Invite) == []
+    ok("t_poke", what="plain invite")  # a profile with no permission: the invite is made, its code stays with the realm
+    [body] = notices("plain")
+    assert "'id': " in body and "code" not in body
+    assert "all" not in auth.permissions("mallory")
+
+
+ADMIN = register('''    def on_t_poke(self, event):
+        if event.args.get("what") == "admin":
+            self.ggg.profile_create(profile="root2", allowed_to=["all"])
+            self.ggg.role_assign(user="mallory", profile="root2")
+''')
+
+
+def test_a_governed_effect_is_a_proposal_even_where_the_department_decides_directly():
+    from core.op import direct
+
+    assert direct(Department["Administration"])
+    activate(layered({(TOWN, "register"): ADMIN}, layers=[TOWN]))
+    ok("t_poke", what="admin")
+    assert "all" not in auth.permissions("mallory")
+    filed = [(p.action["op"], p.proposer, p.status) for p in rows(Proposal) if p.action]
+    assert filed == [("profile_create", "realm", "voting"), ("role_assign", "realm", "voting")]
+
+
+NOARGS = register('''    def on_t_poke(self, event):
+        if event.args.get("what") == "noargs":
+            self.ggg.proposal_stop()
+        if event.args.get("what") == "after":
+            self.ggg.proposal_stop()
+            self.ggg.notification_send(recipient="User:alice", title="after", body="")
+''')
+
+
+def test_an_effect_whose_governed_function_raises_is_the_chapters_failure_and_the_caller_stands():
+    activate(layered({(TOWN, "register"): NOARGS}, layers=[TOWN]))
+    before = Event.max_id()
+    assert ok("t_poke", what="noargs")["done"] == "noargs"
+    assert [Event[str(i)].op for i in range(before + 1, Event.max_id() + 1)] == ["t_poke"]  # audited once
+    assert failures()["x/town/register.py"]["on_t_poke"]["error"] == "proposal_stop: KeyError: 'proposal'"
+    ok("t_poke", what="after")
+    assert notices("after") == []  # the effects stopped at the one that failed
+
+
+def test_a_quarters_report_of_a_leg_of_a_reserved_federal_vote_is_reserved():
+    vote = ok("federal_vote_propose", title="revert", action={"op": "codex_revert", "args": {}})["vote"]
+    assert legislation._reserved("quarter_report", {"population": 3, "leg": {"vote": vote, "outcome": "passed"}})
+    assert not legislation._reserved("quarter_report", {"population": 3})
+    other = ok("federal_vote_propose", title="other", action={"op": "profile_create", "args": {"profile": "p"}})["vote"]
+    assert not legislation._reserved("quarter_report", {"leg": {"vote": other}})
+
+
+STATEFUL = register('''    def check_t_poke(self, args):
+        f = days
+        f.memo = args.what
+''').replace("from realms.legislation import above", "from realms.legislation import above, days")
+CALENDAR_STATE = register('''    def check_t_poke(self, args):
+        c = self.calendar
+        c.memo = args.what
+''')
+EVENT_OK = register('''    def on_t_poke(self, event):
+        event.seen = [w for w in (event.args.get("what"),) if w]
+''')
+
+
+@pytest.mark.parametrize("text, line", [(STATEFUL, 6), (CALENDAR_STATE, 6)])
+def test_an_attribute_is_set_on_self_or_on_what_the_method_was_given_never_on_a_local(text, line):
+    out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
+                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
+    assert out["errors"] == [f"x/town/register.py:{line}: .memo = ...: a chapter sets attributes on self, or on what a method "
+                             "was given, never on a local, a class or a call's result"]
+    out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
+                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:y"}]}, {"sha256:y": EVENT_OK})
+    assert out["errors"] == []  # the event a hook was given takes attributes, as §4.1 says
+
+
+TWO_HOOKS = {
+    (TOWN, "register"): READ_LOOP,
+    (TOWN, "water"): '''
+from realms.legislation import above
+
+class Water(above("water")):
+    def on_t_poke(self, event):
+        self.ggg.notification_send(recipient="User:alice", title="water", body=event.args.get("what", ""))
+''',
+}
+
+
+def test_the_reads_budget_is_one_domains_so_a_looping_domain_costs_no_other_its_effects():
+    activate(layered(TWO_HOOKS, layers=[TOWN]))
+    ok("t_poke", what="read loop")
+    assert notices("water") == ["read loop"]  # the water domain's hook ran and its effect applied
+    recorded = failures()
+    assert "x/town/register.py" in recorded and "x/town/water.py" not in recorded
+
+
+def test_the_leg_index_is_filled_for_legs_written_before_it_existed():
+    from api import federation
+    from core.db import first
+    from ggg import FederalVoteLeg
+
+    vote = ok("federal_vote_propose", title="revert", action={"op": "codex_revert", "args": {}})["vote"]
+    leg = next(iter(FederalVote[vote].legs))
+    leg.db().field_index_remove(leg._type, "proposal_id", leg.proposal_id, leg._id)  # as a leg written before the index
+    assert first(FederalVoteLeg, "proposal_id", leg.proposal_id) is None
+    assert not legislation._reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})
+    federation.index_legs()  # what setup.start runs once, where the realm starts after the upgrade
+    assert first(FederalVoteLeg, "proposal_id", leg.proposal_id).id == leg.id
+    assert legislation._reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})

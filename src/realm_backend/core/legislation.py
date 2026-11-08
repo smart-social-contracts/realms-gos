@@ -16,7 +16,8 @@ chapter and method on the codex row (``failures``), which ``codex_status`` shows
 method next succeeds; a failure on a query path (``compute_realm_join`` from ``join_targets``) is not kept, as a
 query keeps no writes. Nothing reverts by itself. Reserved operations (§10.4) run no chapter, nor does a proposal or
 a federal vote about one. Effects go through the codex caller (origin ``codex``) like a legacy codex's, except that
-a governed operation becomes a proposal the realm files; a chapter's own effects run no legislation again.
+a governed operation always becomes a proposal the realm files; a chapter's own effects run no legislation again.
+What an operation keeps secret (core.op's ``secret=``) never reaches a chapter.
 """
 
 import json
@@ -26,7 +27,7 @@ from core import civil
 from core import localtime
 from core import sandbox
 from core.db import PAGE, Fail, Forbidden, first, view
-from core.op import GENERATOR, SECRET, Call, direct, filing, ops
+from core.op import GENERATOR, Call, filing, ops
 import core.legislation_sandbox  # noqa: F401  bundled with the realm for its text (core.sandbox.module_source); never run here
 
 # The operations no chapter may hook, guard or forbid, as realms.legislation.chapter.RESERVED lists them; written here
@@ -73,7 +74,7 @@ VIEWS = {
     "Realm": ("id", "name", "status", "accounting_currency", "accounting_currency_decimals", "is_quarter", "is_capital",
               "quarter_join_mode", "open_registration", "timezone"),
     "TaxDeclaration": ("id", "declarant", "period", "base", "amount", "status", "invoice"),
-    "TaxPolicy": ("id", "status", "document", "description", "proposal", "adopted_at"),
+    "TaxPolicy": ("id", "status", "document", "description", "proposal", "adopted_at"),  # + "taxes" once G2 lands it (§5.7)
     "Tender": ("id", "title", "description", "requester", "status", "opens_at", "closes_at", "winner", "contract"),
     "Transfer": ("id", "sender", "to", "symbol", "amount", "status", "at"),
     "User": ("id", "nickname", "home_quarter", "profiles"),
@@ -185,7 +186,7 @@ def compute(op, **kwargs):
         return None
     method = f"compute_{op}"
     try:
-        outcome = _call("compute", op=op, kwargs=_public(kwargs), now=chain.now(), approvals=[])
+        outcome = _call("compute", op=op, kwargs=_public(kwargs, _secret(op)), now=chain.now(), approvals=[])
     except Fail as e:
         _record("codex", method, str(e))
         raise Fail(f"legislation error: {e}")
@@ -226,6 +227,9 @@ def _action_about(op, args):
     if op == "federation_message":
         body = args.get("body") if isinstance(args.get("body"), dict) else {}
         return body["action"] if "action" in body else _vote_action(body.get("vote"))
+    if op == "quarter_report":
+        leg = args.get("leg") if isinstance(args.get("leg"), dict) else {}
+        return _vote_action(leg.get("vote"))
     if op.startswith("federal_vote_"):
         return _vote_action(args.get("vote"))
     if op.startswith("proposal_") and isinstance(args.get("proposal"), str):
@@ -265,7 +269,8 @@ def _guard(op, args, call, department):
     sandbox that fails, refuses it too (fail closed), naming the chapter, and counts."""
     method = f"check_{op}"
     try:
-        outcomes = _call("guard", op=op, args=_public(args), now=chain.now(), approvals=_approvals(call, department))
+        outcomes = _call("guard", op=op, args=_public(args, _secret(op)), now=chain.now(),
+                         approvals=_approvals(call, department))
     except Fail as e:
         _record("codex", method, str(e))
         raise Forbidden(f"legislation error: {e}")
@@ -281,44 +286,53 @@ def _guard(op, args, call, department):
 
 
 def _hooks(op, args, result, call, department):
-    """The hooks ``on_<op>`` after the operation, with GGG's event, and their effects applied in order. A hook that
-    raises, or an effect that fails, never fails the caller: it counts against the chapter. A generator."""
-    method = f"on_{op}"
-    event = {"user": call.user, "args": _public(args), "result": _public(result), "at": chain.now()}
+    """The hooks ``on_<op>`` after the operation, with GGG's event: one sandbox call per domain, so that each domain
+    has the reads budget to itself and a domain that fails never costs another its effects. A hook that raises, or
+    an effect that fails, never fails the caller: it counts against the chapter. A generator."""
+    method, secret = f"on_{op}", _secret(op)
+    event = {"user": call.user, "args": _public(args, secret), "result": _public(result, secret), "at": chain.now()}
+    approvals = _approvals(call, department)
     try:
-        outcomes = _call("hooks", op=op, event=event, now=chain.now(), approvals=_approvals(call, department))
+        domains = _call("hook_domains", op=op)
     except Fail as e:
-        _record("codex", method, str(e))  # the sandbox itself failed, a spent budget twice over among the causes
+        _record("codex", method, str(e))
         return
     _clear(["codex"], method)
-    for outcome in outcomes:
+    for entry in domains:
+        files = entry["files"]
+        try:
+            outcome = _call("hook", op=op, domain=entry["domain"], event=event, now=chain.now(), approvals=approvals)
+        except Fail as e:  # the sandbox failed on this domain: its budget or its reads spent
+            _record(files[-1], method, str(e))
+            continue
         if "error" in outcome:
-            _record(outcome["chapter"] or outcome["files"][-1], method, outcome["error"])
+            _record(outcome["chapter"] or files[-1], method, outcome["error"])
             continue
         errors = yield from _effects(outcome["effects"])
         if errors:
-            _record(outcome["files"][-1], method, "; ".join(errors))
+            _record(files[-1], method, "; ".join(errors))
         else:
-            _clear(outcome["files"], method)
+            _clear(files, method)
 
 
 def _effects(effects):
     """Apply a hook's queued effects in order, as the codex, stopping at the first that fails: GGG operations, with
-    ``$eff`` references to earlier results resolved as a legacy codex's are. Returns the errors (one at most). A
-    generator."""
+    ``$eff`` references to earlier results resolved as a legacy codex's are, from replies without their secrets.
+    Returns the errors (one at most). A generator."""
     results = []
     for name, args in effects:
         reply = yield from _effect(name, sandbox.resolve(args, results))
-        results.append(reply)
+        results.append(_public(reply, _secret(name)))
         if not reply.get("ok"):
             return [f"{name}: {reply.get('error')}"]
     return []
 
 
 def _effect(name, args):
-    """One effect: a governed operation becomes a proposal the realm files (a ``proposal_create`` of its own), never
-    a direct call; a reserved operation, an operation about a proposal or a vote on one, and an effect that would
-    set a time zone (§4.5) are refused."""
+    """One effect, as a reply ``{ok, ...}``: a governed operation becomes a proposal the realm files, whatever its
+    department's policy, never a direct call; a reserved operation, an operation about a proposal or a vote on one,
+    and an effect that would set a time zone (§4.5) are refused; whatever else fails is the chapter's failure,
+    never the caller's."""
     if name in RESERVED or _reserved(name, args):
         return {"ok": False, "error": f"{name} is about a reserved operation: no chapter may call it"}
     if "timezone" in args:
@@ -328,11 +342,11 @@ def _effect(name, args):
         return {"ok": False, "error": f"unknown operation '{name}'"}
     try:
         department = spec["governed"](args) if spec["governed"] else None
-    except Fail as e:
-        return {"ok": False, "error": str(e)}
-    if department is not None and not direct(department):
-        name, args = "proposal_create", filing(name, args, department)
-    return (yield from sandbox.apply(name, args, (name,)))
+        if department is not None:
+            name, args = "proposal_create", filing(name, args, department)
+        return (yield from sandbox.apply(name, args, (name,)))
+    except Exception as e:  # noqa: BLE001  a trap is not an Exception and still undoes the message
+        return {"ok": False, "error": str(e) if isinstance(e, Fail) else f"{type(e).__name__}: {e}"}
 
 
 def _call(fn, **kwargs):
@@ -441,14 +455,21 @@ def _calendar(sources, entry):
         raise Fail(f"{entry['source']}/calendar.json is not JSON: {e}")
 
 
-def _public(value):
-    """``value`` without the fields the audit keeps secret (core.op.SECRET), at any depth: what crosses into a chapter
-    as an operation's arguments or result."""
+def _public(value, secret):
+    """``value`` without the keys ``secret`` names (an operation's ``secret=``, core.op), at any depth: what crosses
+    into a chapter as that operation's arguments or result."""
+    if not secret:
+        return value
     if isinstance(value, dict):
-        return {k: _public(v) for k, v in value.items() if k not in SECRET}
+        return {k: _public(v, secret) for k, v in value.items() if k not in secret}
     if isinstance(value, list):
-        return [_public(v) for v in value]
+        return [_public(v, secret) for v in value]
     return value
+
+
+def _secret(op):
+    spec = ops().get(op)
+    return spec["secret"] if spec else ()
 
 
 def _answer(action, kw):

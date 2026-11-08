@@ -39,6 +39,7 @@ class Check:
         except SyntaxError as e:
             raise Refused(e.msg, e.lineno, file)
         self.imported = set()
+        self.params = []  # the parameters of the functions being visited, innermost last
 
     def refuse(self, node, reason):
         raise Refused(reason, getattr(node, "lineno", None), self.file)
@@ -267,13 +268,17 @@ class Check:
             self.identifier(arg, arg.arg, "method")
         bound = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
         bound.update(a.arg for a in (args.vararg, args.kwarg) if a)
-        if isinstance(node, ast.Lambda):
-            self.expression(node.body, bound)
-            return
-        for statement in node.body:
-            bound.update(self.assigned(statement))
-        for statement in node.body:
-            self.statement(statement, bound)
+        self.params.append(frozenset(bound))
+        try:
+            if isinstance(node, ast.Lambda):
+                self.expression(node.body, bound)
+                return
+            for statement in node.body:
+                bound.update(self.assigned(statement))
+            for statement in node.body:
+                self.statement(statement, bound)
+        finally:
+            self.params.pop()
 
     def assigned(self, node):
         """Names a statement binds in its function, so attribute stores on them are on locals."""
@@ -343,10 +348,10 @@ class Check:
             self.identifier(node, node.id, "method")
         elif isinstance(node, ast.Attribute):
             self.identifier(node, node.attr, "method")
-            if not (isinstance(node.value, ast.Name) and node.value.id in local):
+            if not (isinstance(node.value, ast.Name) and self.params and node.value.id in self.params[-1]):
                 self.refuse(
                     node,
-                    f".{node.attr} = ...: a chapter sets attributes on self, or on what it was given, never on a class or a call's result",
+                    f".{node.attr} = ...: a chapter sets attributes on self, or on what a method was given, never on a local, a class or a call's result",
                 )
         elif isinstance(node, ast.Subscript):
             self.expression(node, local)

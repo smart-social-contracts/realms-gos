@@ -47,6 +47,7 @@ CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
 # {"done": True, "refused": [...]} at the end (a new realm: {"done": True}). "refused" names the lists it skipped as
 # too long to convert.
 INDEX_CONVERSION = "index_conversion"
+LEG_INDEX = "leg_index"  # FederalVoteLeg.proposal_id indexed for the legs that predate the index (#488)
 HEX = "0123456789abcdef"
 COUNTED = ("User", "Member", "Department", "Organization", "Proposal", "Extension", "Task", "Notification")
 SHELL = """class _Ops:
@@ -70,7 +71,8 @@ def start(installer=""):
     if Realm["1"] is None:
         realm = Realm(id="1", principal_id=chain.self_id())
         realm.calendar, realm.treasury = Calendar(id="1"), Treasury(id="1")
-        realm.manifest_data = {INDEX_CONVERSION: {"done": True}}  # a new database holds no list saved the old way
+        # a new database holds no list saved the old way, and no leg that predates its index
+        realm.manifest_data = {INDEX_CONVERSION: {"done": True}, LEG_INDEX: True}
         Department(id="Administration", is_root=True, description="The realm's root department")
     installer = (installer or "").strip()
     if installer and not Realm["1"].installer_canister_id:
@@ -82,6 +84,11 @@ def start(installer=""):
     # release lacks traps the upgrade on purpose: tz names only grow, and the realm must not turn UTC without a word.
     if Realm["1"].timezone != "UTC":  # a UTC realm needs no zone file, nor the reader
         localtime.use(Realm["1"].timezone)
+    if not Realm["1"].manifest_data.get(LEG_INDEX):
+        from api import federation
+
+        federation.index_legs()
+        remember(LEG_INDEX, True)
     legislation.warm()  # the active layered codex's sandbox is gone after an upgrade, and a query could not keep one
     installs.pause_after_upgrade()
     tasks.rearm()
