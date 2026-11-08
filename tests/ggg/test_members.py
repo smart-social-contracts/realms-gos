@@ -3,8 +3,10 @@ import hashlib
 from core import auth
 import fake_chain
 import world
-from ggg import Appointment, Delegation, Event, Identity, Invite, Member, Position, Proposal, Realm, User, UserProfile
-from kit import denied, later, ok
+from core.db import each
+from ggg import (Appointment, Attribute, Delegation, Department, Event, Human, Identity, Invite, Member, Position,
+                 Proposal, Realm, User, UserProfile, Zone)
+from kit import call, denied, later, ok
 
 DAY = 86400
 
@@ -170,3 +172,150 @@ def test_identity_review_is_signed_by_a_human_not_the_owner():
     Appointment(id="bot", user="registry-bot", agent=True, position=Position["civil-registry.head"])
     assert "human" in denied("identity_review", "registry-bot", identity=i, status="verified")
     assert UserProfile["member"] is not None and Delegation.count() == 0
+
+
+def define_districts():
+    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    ok("zone_define", "ctl", zone="hillside", name="Hillside", kind="district")
+
+
+def test_a_member_states_language_and_home_zone_when_joining():
+    world.build()
+    define_districts()
+    Realm["1"].open_registration = True
+    ok("realm_join", "zoe", language="es-ES", home_zone="riverside")
+    assert (User["zoe"].language, User["zoe"].home_zone) == ("es-ES", "riverside")
+    assert Zone["riverside"].population == 1
+    card = ok("user_get", "dana", user="zoe")["user"]
+    assert (card["language"], card["home_zone"]) == ("es-ES", "riverside")
+
+
+def test_joining_with_a_bad_language_or_zone_is_refused_before_anything_is_written():
+    world.build()
+    define_districts()
+    ok("zone_set", "alice", zone="871f1d489ffffff")
+    Realm["1"].open_registration = True
+    for args in ({"language": "english please"}, {"language": ""}, {"home_zone": "nowhere"},
+                 {"home_zone": "871f1d489ffffff"}):
+        out = call("realm_join", "zoe", **args)
+        assert not out["ok"] and out["kind"] == "invalid_argument", (args, out)
+    assert User["zoe"] is None and Member["zoe"] is None
+    assert Zone["riverside"].population == 0
+
+
+def test_a_member_changes_their_own_language_and_a_clerk_moves_their_home_zone():
+    world.build()
+    define_districts()
+    Realm["1"].open_registration = True
+    ok("realm_join", "zoe", home_zone="riverside")
+    ok("profile_update", "zoe", language="ca")
+    assert User["zoe"].language == "ca"
+    assert call("profile_update", "zoe", language="x")["kind"] == "invalid_argument"
+    ok("user_edit", "dana", user="zoe", home_zone="hillside", language="es")
+    assert (User["zoe"].home_zone, User["zoe"].language) == ("hillside", "es")
+    assert (Zone["riverside"].population, Zone["hillside"].population) == (0, 1)
+    ok("user_edit", "dana", user="zoe", home_zone="hillside")
+    assert Zone["hillside"].population == 1
+    assert call("user_edit", "dana", user="zoe", home_zone="nowhere")["kind"] == "invalid_argument"
+    assert User["zoe"].home_zone == "hillside"
+
+
+def test_a_removed_member_leaves_the_population_of_their_zone():
+    world.build()
+    define_districts()
+    ok("zone_define", "ctl", zone="other", name="Other", kind="district")
+    ok("user_add", "ctl", user="zoe")
+    ok("user_edit", "ctl", user="zoe", home_zone="other")
+    ok("user_remove", "ctl", user="zoe")
+    assert Zone["other"].population == 0
+
+
+def registry_with_reviewer():
+    """Agora, with Dana able to review attributes and Alice holding the member profile as the example has her."""
+    world.build()
+    world.seat("civil-registry.reviewer", "hector", Department["Civil Registry"], "attribute.review")
+    world.person("hector")
+
+
+def test_an_identity_states_its_category_and_expiry():
+    world.build()
+    i = ok("identity_submit", "alice", kind="residence_permit", category="long_term", issuer="ES", ref="vault:p",
+           expires_at=fake_chain.now() + 5 * DAY)["identity"]
+    assert (Identity[i].category, Identity[i].expires_at) == ("long_term", fake_chain.now() + 5 * DAY)
+    plain = ok("identity_submit", "alice", kind="passport", ref="vault:q")["identity"]
+    assert (Identity[plain].category, Identity[plain].expires_at) == ("", 0)
+
+
+def test_story_alice_submits_her_large_family_title_and_a_reviewer_verifies_it():
+    registry_with_reviewer()
+    a = ok("attribute_submit", "alice", kind="large_family", value="general", issuer="regional-government",
+           ref="vault:alice-title", expires_at=fake_chain.now() + 365 * DAY)["attribute"]
+    assert Attribute[a].status == "pending" and Attribute[a].human == next(each(Human, "user", "alice")).id
+    assert call("attribute_review", "alice", attribute=a, status="verified")["denied"]
+    out = ok("attribute_review", "hector", attribute=a, status="verified")
+    assert out["status"] == "verified" and Attribute[a].verified_at == fake_chain.now()
+    assert "pending" in denied("attribute_review", "hector", attribute=a, status="rejected")
+    mine = ok("attribute_list", "alice")["attributes"]
+    assert [(x["id"], x["kind"], x["value"], x["status"]) for x in mine] == [(a, "large_family", "general", "verified")]
+    assert ok("attribute_list", "alice", kind="student")["attributes"] == []
+    assert ok("attribute_list", "alice", kind="large_family")["attributes"] == mine
+
+
+def test_a_rejected_attribute_stays_rejected():
+    registry_with_reviewer()
+    a = ok("attribute_submit", "alice", kind="disability", value="33", ref="vault:x")["attribute"]
+    assert ok("attribute_review", "hector", attribute=a, status="rejected")["status"] == "rejected"
+    assert Attribute[a].verified_at == 0
+    assert "rejected" in denied("attribute_review", "hector", attribute=a, status="verified")
+    assert "verified or rejected" in denied("attribute_review", "hector", attribute=a, status="pending")
+
+
+def test_I_PRV_1_an_attribute_is_read_only_by_the_person_and_its_reviewers():
+    registry_with_reviewer()
+    a = ok("attribute_submit", "alice", kind="disability", value="33 percent", ref="vault:x")["attribute"]
+    world.seat("civil-registry.monitor", "dana", Department["Civil Registry"], "realm.monitor")
+    # nobody else's list shows it, and no other operation returns it
+    assert ok("attribute_list", "bob")["attributes"] == []
+    assert ok("attribute_list", "hector")["attributes"] == []
+    assert "attribute.review" in denied("attribute_review", "bob", attribute=a, status="verified")
+    assert "disability" not in str(ok("me", "alice")) and "33 percent" not in str(ok("user_get", "dana", user="alice"))
+    # a reviewer reads it in the record they decide, and the audit log keeps neither the kind nor the value
+    ok("attribute_review", "hector", attribute=a, status="verified")
+    log = str([e["args"] for e in ok("events", "dana")["events"]]) + str([e["result"] for e in ok("events", "dana")["events"]])
+    assert "disability" not in log and "33 percent" not in log
+    assert {e["op"] for e in ok("events", "dana")["events"]} >= {"attribute_submit", "attribute_review"}
+
+
+def test_attributes_are_submitted_in_person_and_listed_for_a_grantor_by_a_delegate():
+    registry_with_reviewer()
+    refused = denied("delegation_grant", "alice", delegate="claude-conn", operations=["attribute.submit"], expires_in=DAY)
+    assert "not a delegable" in refused
+    ok("delegation_grant", "alice", delegate="claude-conn", operations=["self.data_view"], expires_in=DAY)
+    assert "power of attorney" in denied("attribute_submit", "claude-conn", kind="student", value="yes", ref="x",
+                                         on_behalf_of="alice")
+    ok("attribute_submit", "alice", kind="student", value="yes", ref="vault:s")
+    assert len(ok("attribute_list", "claude-conn", on_behalf_of="alice")["attributes"]) == 1
+    assert "sign in" in denied("attribute_submit", fake_chain.ANONYMOUS, kind="x", value="y", ref="z")
+    assert "sign in" in denied("attribute_list", fake_chain.ANONYMOUS)
+
+
+def test_an_agent_cannot_review_attributes():
+    registry_with_reviewer()
+    world.seat("civil-registry.review-bot", "review-bot", Department["Civil Registry"], "attribute.review",
+               agent=True, supervisor="dana")
+    a = ok("attribute_submit", "alice", kind="student", value="yes", ref="vault:s")["attribute"]
+    assert "human" in denied("attribute_review", "review-bot", attribute=a, status="verified")
+
+
+def test_I_PRV_1_exporting_attributes_takes_the_reviewers_permission_too():
+    registry_with_reviewer()
+    world.seat("civil-registry.exporter", "carla", Department["Civil Registry"], "db.export")
+    world.seat("civil-registry.reviewing-exporter", "elena", Department["Civil Registry"], "db.export",
+               "attribute.review")
+    ok("attribute_submit", "alice", kind="disability", value="33 percent", ref="vault:x")
+    assert "attribute.review" in denied("realm_export", "carla", entity="Attribute")
+    assert ok("realm_export", "carla", entity="Member")["rows"]
+    rows = ok("realm_export", "elena", entity="Attribute")["rows"]
+    assert [(r["kind"], r["value"]) for r in rows] == [("disability", "33 percent")]
+    assert ok("realm_export", "ctl", entity="Attribute")["rows"] == rows
+    assert "db.export" in denied("realm_export", "hector", entity="Attribute")

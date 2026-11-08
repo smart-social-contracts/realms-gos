@@ -17,7 +17,7 @@ method next succeeds; a failure on a query path (``compute_realm_join`` from ``j
 query keeps no writes. Nothing reverts by itself. Reserved operations (§10.4) run no chapter, nor does a proposal or
 a federal vote about one. Effects go through the codex caller (origin ``codex``) like a legacy codex's, except that
 a governed operation always becomes a proposal the realm files; a chapter's own effects run no legislation again.
-What an operation keeps secret (core.op's ``secret=``) never reaches a chapter.
+What an operation keeps private (core.op's ``private=``) never reaches a chapter.
 """
 
 import json
@@ -82,9 +82,6 @@ VIEWS = {
     "Verdict": ("id", "case", "issued_by", "decision", "status", "issued_at"),
     "Zone": ("id", "name", "kind", "land", "user", "metadata"),
 }
-# GGG operations the runtime raises as events itself, before an operation of that name exists in this realm: the
-# switch to a codex is GGG's codex_activate (§9.2 step 6), which the install task performs.
-EVENTS = ("codex_activate",)
 LIBRARY, PROGRAM = "realms.legislation", "core.legislation_sandbox"
 UNKNOWN = object()  # the running codex before the first look in a new heap
 # codex: the id of the codex the runtime runs (None: a legacy codex or none); box: its sandbox, None when it did not
@@ -186,7 +183,7 @@ def compute(op, **kwargs):
         return None
     method = f"compute_{op}"
     try:
-        outcome = _call("compute", op=op, kwargs=_public(kwargs, _secret(op)), now=chain.now(), approvals=[])
+        outcome = _call("compute", op=op, kwargs=_public(kwargs, _private(op)), now=chain.now(), approvals=[])
     except Fail as e:
         _record("codex", method, str(e))
         raise Fail(f"legislation error: {e}")
@@ -269,7 +266,7 @@ def _guard(op, args, call, department):
     sandbox that fails, refuses it too (fail closed), naming the chapter, and counts."""
     method = f"check_{op}"
     try:
-        outcomes = _call("guard", op=op, args=_public(args, _secret(op)), now=chain.now(),
+        outcomes = _call("guard", op=op, args=_public(args, _private(op)), now=chain.now(),
                          approvals=_approvals(call, department))
     except Fail as e:
         _record("codex", method, str(e))
@@ -289,8 +286,8 @@ def _hooks(op, args, result, call, department):
     """The hooks ``on_<op>`` after the operation, with GGG's event: one sandbox call per domain, so that each domain
     has the reads budget to itself and a domain that fails never costs another its effects. A hook that raises, or
     an effect that fails, never fails the caller: it counts against the chapter. A generator."""
-    method, secret = f"on_{op}", _secret(op)
-    event = {"user": call.user, "args": _public(args, secret), "result": _public(result, secret), "at": chain.now()}
+    method, private = f"on_{op}", _private(op)
+    event = {"user": call.user, "args": _public(args, private), "result": _public(result, private), "at": chain.now()}
     approvals = _approvals(call, department)
     try:
         domains = _call("hook_domains", op=op)
@@ -322,7 +319,7 @@ def _effects(effects):
     results = []
     for name, args in effects:
         reply = yield from _effect(name, sandbox.resolve(args, results))
-        results.append(_public(reply, _secret(name)))
+        results.append(_public(reply, _private(name)))
         if not reply.get("ok"):
             return [f"{name}: {reply.get('error')}"]
     return []
@@ -395,7 +392,7 @@ def _spawn(plan, sources, facts=None):
     except RuntimeError as e:
         raise Fail(f"the codex sandbox did not start: {e}")
     try:
-        _ok(box.call("setup", operations=sorted(set(ops()) | set(EVENTS)), layers=list(plan["layers"]), realm=plan["realm"],
+        _ok(box.call("setup", operations=sorted(ops()), layers=list(plan["layers"]), realm=plan["realm"],
                      calendars=[[c["source"], _calendar(sources, c)] for c in plan["calendars"]],
                      entities=sorted(VIEWS), facts=facts))
         for c in plan["chapters"]:
@@ -455,21 +452,21 @@ def _calendar(sources, entry):
         raise Fail(f"{entry['source']}/calendar.json is not JSON: {e}")
 
 
-def _public(value, secret):
-    """``value`` without the keys ``secret`` names (an operation's ``secret=``, core.op), at any depth: what crosses
-    into a chapter as that operation's arguments or result."""
-    if not secret:
+def _public(value, private):
+    """``value`` without the keys ``private`` names (an operation's ``private=``, core.op: personal data and key
+    material), at any depth: what crosses into a chapter as that operation's arguments or result."""
+    if not private:
         return value
     if isinstance(value, dict):
-        return {k: _public(v, secret) for k, v in value.items() if k not in secret}
+        return {k: _public(v, private) for k, v in value.items() if k not in private}
     if isinstance(value, list):
-        return [_public(v, secret) for v in value]
+        return [_public(v, private) for v in value]
     return value
 
 
-def _secret(op):
+def _private(op):
     spec = ops().get(op)
-    return spec["secret"] if spec else ()
+    return tuple(spec["private"]) if spec else ()
 
 
 def _answer(action, kw):

@@ -5,7 +5,7 @@ import fake_chain
 from api import quarters
 from core.ratio import ONE
 import world
-from ggg import Codex, Department, Forward, GuestUser, Member, Proposal, Quarter, Realm, User
+from ggg import Codex, Department, Forward, GuestUser, Member, Proposal, Quarter, Realm, User, Zone
 from kit import call, denied, ok, rows
 
 CAPITAL = fake_chain.SELF
@@ -110,6 +110,18 @@ def test_I_FED_1_bob_moves_to_south(monkeypatch):
     assert Member["bob"] is None and GuestUser["bob"].home_quarter == "south" and User["bob"].home_quarter == "south"
     assert "proposal.vote" not in auth.permissions("bob")
     assert "needs self.change_quarter" in denied("self_change_quarter", "bob", quarter="south")
+
+
+def test_a_member_who_moves_away_leaves_the_population_of_their_home_zone(monkeypatch):
+    quarter(monkeypatch, "north", "south")
+    reply("south", "federation_message")
+    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    ok("user_edit", "ctl", user="bob", home_zone="riverside")
+    ok("user_edit", "ctl", user="alice", home_zone="riverside")
+    assert Zone["riverside"].population == 2
+    ok("self_change_quarter", "bob", quarter="south")
+    assert (User["bob"].home_zone, Zone["riverside"].population) == ("", 1)
+    assert User["alice"].home_zone == "riverside"
 
 
 def test_bob_arrives_in_south(monkeypatch):

@@ -1548,7 +1548,7 @@ def test_a_chapter_cannot_give_a_metaclass_to_skip_the_marks():
         ),
         ("return (i for i in [1])", "no generators, coroutines or async code"),
         ("yield 1", "no generators, coroutines or async code"),
-        ("event.inner.field = 1", "sets attributes on self, or on what a method was given"),
+        ("event.inner.field = 1", "sets attributes on self, or on the event a hook was given"),
         ("type(self).authority = 1", "sets attributes on self"),
         ("with open('x') as f:\n            pass", "a with statement"),
         (
@@ -1627,12 +1627,12 @@ def test_a_legitimate_chapter_uses_the_whole_subset():
         "        assert total >= 0, 'never'\n"
         "        if not picked:\n"
         "            raise ValueError('none')\n"
-        "        land.note = label\n"
+        "        self.note = label\n"
         "        self.ggg.notification_send(recipient=Ref('user', 'a'), **{'body': label})\n"
         "        return total + seen['a'] if picked else 0\n",
     )
-    land = type("L", (), {})()
-    assert cls(c.context()).ibi_bonus(land) == 5 and land.note == "bonus 4"
+    chapter = cls(c.context())
+    assert chapter.ibi_bonus(type("L", (), {})()) == 5 and chapter.note == "bonus 4"
 
 
 def test_a_chapter_cannot_change_a_class_above_or_its_own():
@@ -1662,7 +1662,7 @@ def test_a_chapter_cannot_change_a_class_above_or_its_own():
     )
     # Through a local too: an attribute is set on self or on what the method was given, never on a local, so the
     # class is out of reach at load time already (and refuses the change at run time besides).
-    assert ".authority = ...: a chapter sets attributes on self, or on what a method was given, never on a local" in refused(
+    assert ".authority = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else" in refused(
         c,
         VALENCIA,
         "register",

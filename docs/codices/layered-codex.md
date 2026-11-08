@@ -382,9 +382,10 @@ The rules (the checker enforces them, §12):
    `eval`, `compile`, `globals`, `locals`, `setattr`, `__import__`, `open`, no dunder attribute access
    (`__class__`, `__dict__`, `__bases__`, `__subclasses__`, ...). These are the same restrictions as
    codex code today ([Design choices](../architecture/design-choices.md)). No default arguments either,
-   on a method, a nested function or a lambda, and an attribute is set only on `self` or on what a
-   method was given (the event a hook adds to), never on a local: a chapter's class lives as long as the
-   codex runs, so a default or an attribute on an SDK object would be state shared by every call.
+   on a method, a nested function or a lambda, and an attribute is set only on `self` or on the event a
+   hook was given, the two objects a call gets fresh, never on anything else: a chapter's class lives as
+   long as the codex runs, so a default or an attribute on an SDK object, a parameter or a view would be
+   state shared by every call.
 
 ### 4.1 Marks
 
@@ -1295,7 +1296,7 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   reads of GGG's entities is an allowlist of entities and fields (`VIEWS` in `core/legislation.py`): what
   legislation needs to decide, never a key, a code, a person's private data, a sealed bid, who voted what, a
   grant, a payment account or what one member was told; the arguments and results it gets carry nothing the
-  operation keeps secret (`secret=` on the operation: an invite's code, private data, wrapped keys), and neither do
+  operation keeps secret (`private=` on the operation: an invite's code, personal data, wrapped keys), and neither do
   the replies of its effects; and no read is answered while the codex loads.
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
@@ -1329,8 +1330,9 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   hook queue GGG operations "which the GOS runs as the realm, under the same permissions as any caller", and
   rule 9 of §2 and the `self` API of §4.5 put no catalogue between a chapter and GGG, so the operation an effect
   names is the one declared for it. Plainly: **a chapter can do, as the realm, anything the realm itself may do
-  directly** through a GGG operation, and nothing that takes a permission it does not hold: a codex holds none,
-  so an effect hands out no permission (I-ID-3) and no invite to a profile that carries one. **A governed
+  directly** through a GGG operation, and nothing that takes a permission it does not hold: a layered codex holds
+  none, so an effect hands out no permission (I-ID-3) and no invite to a profile that carries one (a legacy
+  codex's effects keep acting for the realm as before, marked as such by the legacy hook path alone). **A governed
   operation it queues is never run, whatever the department's policy: it becomes a proposal the realm files**,
   decided by the vote that operation needs. Effects apply in order and stop at the first that fails, and
   whatever one fails with is the chapter's failure, never the caller's; the operation's own audit event precedes

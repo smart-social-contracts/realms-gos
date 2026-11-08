@@ -99,6 +99,22 @@ def test_I_ADM_2_founder_configures_during_setup_then_it_is_governed():
     denied("setup_state", "alice")
 
 
+def test_the_realm_stores_its_languages_and_refuses_what_is_no_tag():
+    world.build()
+    ok("setup_step", "ctl", step="install", network="local", founder="frank")
+    ok("setup_step", "frank", step="realm", name="Agora", languages=["es-ES", "en", "ca"])
+    assert Realm["1"].languages == ["es-ES", "en", "ca"]
+    assert ok("realm_info", fake_chain.ANONYMOUS)["realm"]["languages"] == ["es-ES", "en", "ca"]
+    for languages in (["english"], ["en", ""], "en", [5]):
+        out = call("setup_step", "frank", step="realm", languages=languages)
+        assert not out["ok"] and out["kind"] == "invalid_argument", (languages, out)
+    assert Realm["1"].languages == ["es-ES", "en", "ca"]
+    ok("setup_launch", "frank")
+    world.policy(Department["Administration"], 2, 3)
+    assert call("realm_configure", "ctl", languages=["klingon!"])["kind"] == "invalid_argument"
+    assert ok("realm_configure", "ctl", languages=["es"])["requires_vote"]
+
+
 def release(sha256="aa", approval=APPROVED):
     """A realm with a file registry whose release wasm hashes to ``sha256``, approved as ``approval`` says."""
     world.build()

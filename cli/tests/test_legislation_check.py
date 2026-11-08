@@ -42,7 +42,7 @@ def tree(tmp_path, monkeypatch):
     monkeypatch.setattr(
         legislation,
         "ggg_operations",
-        lambda: frozenset({"user_add", "notification_send", "realm_join"})
+        lambda: frozenset({"user_add", "notification_send", "realm_join", "codex_activate"})
         | legislation.INTERIM_OPERATIONS,
     )
     root = tmp_path / "legislation"

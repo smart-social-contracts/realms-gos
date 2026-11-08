@@ -13,6 +13,7 @@ from basilisk import Principal  # tests replace it, to accept their names for pr
 
 import ggg
 import ggg_did
+from api import crypto, tasks
 from api.proposals import settings
 from api.setup import VERSION
 from core import chain
@@ -245,9 +246,43 @@ def realm_fix(r):
     # A quarter counts its own members; a capital adds what its quarters last reported.
     members = quarters.population() + (0 if quarters.federated() else sum(q.population for q in quarters.known()))
     return {"member_count": members, "voting_threshold": int(rules.get("voting_threshold", ONE // 2)),
-            "voting_quorum": int(rules.get("voting_quorum", 0)),
+            "voting_quorum": int(rules.get("voting_quorum", 0)), "casting_vote": rules.get("casting_vote"),
             "installed_version": get(r, "installed_version") or VERSION,
             "accounting_currency_decimals": get(r, "accounting_currency_decimals") if get(r, "accounting_currency") else None}
+
+
+# Whether the caller is on a department's staff, (department, caller) -> bool, for the length of one reply: a page of
+# documents asks it of each, and building a reply writes nothing, so the answer cannot change under it. reply() empties it.
+STAFF = {}
+
+
+def reads_document(d):
+    """crypto.reads_ciphertext for the caller, asking after the staff of the document's department once per reply."""
+    caller, department = chain.caller(), get(d, "department")
+    if crypto.holds_key(d, caller):
+        return True
+    if (department, caller) not in STAFF:
+        STAFF[department, caller] = crypto.on_staff(department, caller)
+    return STAFF[department, caller]
+
+
+def scheduled_task(t):
+    """A task of the realm's scheduler as GGG's Task, which is one operation at a time: the task's first step and
+    first schedule. The tasks the realm itself schedules, such as a proposal's run, are the realm's."""
+    t = t if isinstance(t, dict) else tasks.summary(t)
+    step, when = (t["steps"] or [{}])[0], (t["schedules"] or [{}])[0]
+    by = "Realm:1" if t["creator"] == chain.self_id() else f"User:{t['creator']}"
+    return {"id": t["name"], "op": step.get("op", ""), "args": step.get("args"), "at": when.get("run_at", 0),
+            "reason": step.get("reason"), "status": tasks.STATUS[t["status"]], "scheduled_by": by,
+            "event": t["event"]}
+
+
+def dispatch_status(d):
+    """A dispatch's status as GGG's variant: confirmed with when and the receipt, or failed with the reason."""
+    status = get(d, "status")
+    if status == "confirmed":
+        return {"Confirmed": {"at": get(d, "outcome_at"), "receipt": get(d, "receipt")}}
+    return {"Failed": get(d, "failure")} if status == "failed" else {"Queued": None}
 
 
 def action(a):
@@ -282,6 +317,10 @@ FIX = {
                           "symbol": get(m, "symbol") or scope(m, "symbol")},
     "FederalVote": lambda v: {"title": get(v, "title") or (get(v, "action") or {}).get("title", "")},
     "Event": lambda e: {"agent": bool(get(e, "agent"))},
+    # The ciphertext of a document stays with its staff and key holders (I-PRV-4), as in crypto.document_get.
+    "Document": lambda d: {} if reads_document(d) else crypto.CONCEALED,
+    "Task": scheduled_task,
+    "Dispatch": lambda d: {"status": dispatch_status(d)},
     "Proposal": lambda p: {"action": action(get(p, "action")),  # a realm-wide proposal names no department
                            "department": None if getattr(get(p, "department"), "is_root", False) else get(p, "department")},
     # The replayed operation's JSON reply stands in for a Candid one.
@@ -339,6 +378,8 @@ UNFIX = {
     "ProposalAction": unaction,
     "CodexSource": lambda case, payload: payload,
     "SetupStep": lambda case, payload: {"step": snake(case), **payload},
+    # Named for the first inline `variant { Set : principal; Clear }` in ggg.did (department_edit's head): every copy of
+    # the shape is this class, so governance_update's casting_vote is a principal, or "", as well.
     "DepartmentEditArgsHead": lambda case, payload: payload or "",
 }
 
@@ -550,8 +591,11 @@ def reply(op, args, out, reply_t):
         if "NotFound" in err and ok_t.startswith("opt "):
             return {"Ok": None}
         return {"Err": err}
-    raw = BUILD[op](out, args) if op in BUILD else result(op, out, ok_t)
-    return {"Ok": to_ggg(raw, ok_t)}
+    try:
+        raw = BUILD[op](out, args) if op in BUILD else result(op, out, ok_t)
+        return {"Ok": to_ggg(raw, ok_t)}
+    finally:
+        STAFF.clear()
 
 
 def load(t, key):
@@ -594,6 +638,7 @@ LOCAL = {
 # operation's first word.
 KEY = {"crypto_envelope": "scope", "crypto_derive_key": "transport_public_key", "private_data_update": "private_data",
        "federal_vote_finalize": "vote", "federal_vote_cancel": "vote", "tax_policy_propose": "policy",
+       "budget_extend": "period",
        "allocation_rule_propose": "rule", "representative_remove": "appointment", "document_get": "document",
        "dispute_get": "dispute", "report_view": "report"}
 # Operations that take ``limit`` as such, not as a page size.
@@ -705,6 +750,8 @@ BUILD = {
     "department_chart": chart,
     "proposal_get": proposal_detail,
     "enforcement_record": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
+    "external_report": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
+    "notification_send": lambda o, a: {"Dispatch": o["dispatch"]} if "dispatch" in o else {"Notification": o["notification"]},
     "credential_verify": lambda o, a: {"valid": o.get("valid"), **(o.get("checks") or {})},
     "codex_status": lambda o, a: {**o, "checksum": (o.get("codex") or {}).get("id"),
                                   "history": [h["id"] for h in o.get("history", [])], "signing": signing()},

@@ -39,7 +39,7 @@ class Check:
         except SyntaxError as e:
             raise Refused(e.msg, e.lineno, file)
         self.imported = set()
-        self.params = []  # the parameters of the functions being visited, innermost last
+        self.allowed = []  # per function being visited: the names a store may target (self, a hook's event)
 
     def refuse(self, node, reason):
         raise Refused(reason, getattr(node, "lineno", None), self.file)
@@ -247,11 +247,14 @@ class Check:
                 decorator,
                 "a method is decorated with a mark (fixed, extension, overridable) and nothing else",
             )
-        self.function(node, [])
+        names = [a.arg for a in node.args.posonlyargs + node.args.args]
+        event = names[1] if node.name.startswith("on_") and len(names) >= 2 else None
+        self.function(node, [], frozenset({"self", event} - {None}))
 
     # ── methods and lambdas ──
 
-    def function(self, node, outer_locals):
+    def function(self, node, outer_locals, allowed=None):
+        """A method (``allowed`` names what a store may target), or a function nested in one, which inherits it."""
         ast = self.ast
         args = node.args
         if args.defaults or any(d is not None for d in args.kw_defaults):
@@ -268,7 +271,7 @@ class Check:
             self.identifier(arg, arg.arg, "method")
         bound = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
         bound.update(a.arg for a in (args.vararg, args.kwarg) if a)
-        self.params.append(frozenset(bound))
+        self.allowed.append(allowed if allowed is not None else self.allowed[-1] if self.allowed else frozenset())
         try:
             if isinstance(node, ast.Lambda):
                 self.expression(node.body, bound)
@@ -278,7 +281,7 @@ class Check:
             for statement in node.body:
                 self.statement(statement, bound)
         finally:
-            self.params.pop()
+            self.allowed.pop()
 
     def assigned(self, node):
         """Names a statement binds in its function, so attribute stores on them are on locals."""
@@ -348,10 +351,10 @@ class Check:
             self.identifier(node, node.id, "method")
         elif isinstance(node, ast.Attribute):
             self.identifier(node, node.attr, "method")
-            if not (isinstance(node.value, ast.Name) and self.params and node.value.id in self.params[-1]):
+            if not (isinstance(node.value, ast.Name) and self.allowed and node.value.id in self.allowed[-1]):
                 self.refuse(
                     node,
-                    f".{node.attr} = ...: a chapter sets attributes on self, or on what a method was given, never on a local, a class or a call's result",
+                    f".{node.attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
                 )
         elif isinstance(node, ast.Subscript):
             self.expression(node, local)

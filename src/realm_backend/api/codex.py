@@ -151,6 +151,23 @@ def codex_install(c, args):
     return {"codex": key, "init": init}
 
 
+@op("codex.install", governed=realm_wide, returns="codex")
+def codex_activate(c, args):
+    """Make the pending codex, named by its ``codex`` checksum (``sha256:<hex>``), the active one now; the codex it
+    replaces is kept to revert to, and its ``on_codex_activate`` hooks run in the next message. Conflict when no codex
+    is pending or it is another one. ``at``, when given, is not in the future: a pending codex is activated at once.
+    Returns ``codex``."""
+    waiting = pending()
+    if waiting is None:
+        raise Conflict("no codex is pending")
+    if args["codex"] != waiting.id:
+        raise Conflict(f"{args['codex']} is not the pending codex")
+    if args.get("at") and int(args["at"]) > chain.now():
+        raise Fail("this realm activates a pending codex at once: at is not in the future")
+    switch(waiting)
+    return {"codex": waiting.id}
+
+
 @op("codex.uninstall", governed=realm_wide)
 def codex_uninstall(c, args):
     """Deactivate the active codex; the realm then runs without one."""

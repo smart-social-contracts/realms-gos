@@ -3,7 +3,7 @@ import json
 import math
 
 from core import chain
-from api import proposals
+from api import assets, proposals
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, view
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
@@ -391,6 +391,7 @@ def self_change_quarter(c, args):
     f = Forward(id=next_id(Forward, "FWD"), subject=subject, origin=here, destination=dest, moved_at=moved_at,
                 signature=signature)
     member.delete()
+    assets.leave_home(user)
     user.home_quarter, user.profiles = dest, []
     guest = GuestUser[c.user] or GuestUser(id=c.user)
     guest.home_quarter, guest.permissions = dest, GUEST

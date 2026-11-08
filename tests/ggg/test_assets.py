@@ -3,8 +3,9 @@ import pytest
 import fake_chain
 import world
 from api.assets import quote, value
-from ggg import Case, Codex, Delegation, Dispute, Land, NFTToken, Organization, Verdict, Zone
-from kit import call, denied, later, ok
+from ggg import (Case, Codex, Delegation, Department, Dispute, Event, Land, NFTToken, Organization, Verdict,
+                 Zone)
+from kit import call, denied, later, ok, rows
 
 OK = "(variant { Ok = 4_412 : nat })"
 RX = "health.prescription/1"
@@ -110,6 +111,31 @@ def test_zones_are_chosen_by_their_user():
     assert [z["id"] for z in ok("land_map", "bob")["zones"]] == ["871f1d489ffffff", "871f1d48bffffff"]
 
 
+def test_the_realm_defines_zones_that_members_can_name_as_home():
+    agora()
+    assert "realm.configure" in denied("zone_define", "alice", zone="riverside", name="Riverside", kind="district")
+    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    ok("zone_define", "ctl", zone="riverside", name="Riverside North", kind="district")
+    zone = Zone["riverside"]
+    shown = (zone.name, zone.kind, zone.defined, zone.population, zone.user)
+    assert shown == ("Riverside North", "district", True, 0, "")
+    ok("zone_set", "alice", zone="871f1d489ffffff")
+    assert "home cell" in call("zone_define", "ctl", zone="871f1d489ffffff", name="x", kind="y")["error"]
+    assert "zone of the realm" in call("zone_set", "bob", zone="riverside")["error"]
+    assert [z["id"] for z in ok("land_map", "bob")["zones"]] == ["riverside", "871f1d489ffffff"]
+
+
+def test_defining_a_zone_is_governed_once_the_realm_has_launched():
+    agora()
+    world.policy(Department["Administration"], 2, 3)
+    ok("setup_step", "ctl", step="install", network="local", founder="frank")
+    ok("setup_step", "frank", step="realm", name="Agora")
+    ok("zone_define", "frank", zone="riverside", name="Riverside", kind="district")
+    ok("setup_launch", "frank")
+    out = ok("zone_define", "ctl", zone="hillside", name="Hillside", kind="district")
+    assert out["requires_vote"] and Zone["hillside"] is None
+
+
 def test_story_dr_ana_prescribes_and_a_pharmacy_verifies():
     agora()
     lic = license_clinic()
@@ -209,13 +235,15 @@ def test_parcels_are_found_through_their_cells():
     a = register(x=14, y=14, w=4, h=4)
     assert Land[a].cell == "0:0"
     assert "overlaps L-1" in call("land_register", "ctl", owner="bob", x=17, y=17)["error"]
-    assert "overlaps L-1" in call("land_register", "ctl", owner="bob", x=-1, y=10, width=16, height=16)["error"]
+    assert "overlaps L-1" in call("land_register", "ctl", owner="bob", x=3, y=10, width=16, height=16)["error"]
+    refused = call("land_register", "ctl", owner="bob", x=-1, y=10)  # GGG's coordinates are natural numbers
+    assert refused["kind"] == "invalid_argument" and "x is -1" in refused["error"]
     assert "1 to 16" in call("land_register", "ctl", owner="bob", x=100, y=0, width=17)["error"]
     b = register("bob", x=18, y=14, w=16, h=16)
-    register("carla", x=-16, y=-16, w=16, h=16)
+    register("carla", x=32, y=32, w=16, h=16)
     assert [p["id"] for p in ok("land_map", "bob", x=16, y=16, w=2, h=2)["parcels"]] == [a]
     assert {p["id"] for p in ok("land_map", "bob", x=16, y=16, w=3, h=3)["parcels"]} == {a, b}
-    assert [p["id"] for p in ok("land_map", "bob", x=-1, y=-1, w=1, h=1)["parcels"]] == ["L-3"]
+    assert [p["id"] for p in ok("land_map", "bob", x=32, y=32, w=1, h=1)["parcels"]] == ["L-3"]
     assert "1 to 32" in call("land_map", "bob", w=33)["error"]
 
 
@@ -262,3 +290,47 @@ def test_I_AST_5_a_parcel_has_exactly_one_owner():
     ok("land_mint_nft", "ctl", land=other)
     assert f'principal "{fake_chain.SELF}"' in ledger_calls("mint")[0]
     assert {p.owner for p in Land.load_some(1, 10)} == {"User:alice", "Organization:buildco"}
+
+
+def assessor(depts):
+    world.person("hector")
+    world.seat("finance.assessor", "hector", depts["Finance"], "land.assess")
+
+
+def test_the_assessor_sets_the_value_and_area_of_a_parcel_signing_for_it():
+    assessor(agora())
+    land = register()
+    assert Land[land].assessed_value is None and Land[land].area is None and Land[land].assessed_at == 0
+    out = ok("land_assess", "hector", land=land, value=95_000, area=120, reference="CAT-17", legislation="Art. 7")
+    assert out["land"] == land
+    row = Land[land]
+    assert (row.assessed_value, row.area, row.assessed_at, row.assessment_ref) == (95_000, 120, fake_chain.now(), "CAT-17")
+    later(60)
+    ok("land_assess", "hector", land=land, value=96_000)  # a field left out keeps its value
+    assert (row.assessed_value, row.area, row.assessment_ref, row.assessed_at) == (96_000, 120, "CAT-17", fake_chain.now())
+    assert ok("land_list", "bob")["lands"][0]["assessed_value"] == 96_000
+    first = [e for e in rows(Event) if e.op == "land_assess"][0]
+    assert (first.user, first.args["legislation"]) == ("hector", "Art. 7")  # the audit event names the provision
+
+
+def test_an_assessment_sets_something_and_a_revoked_parcel_has_none():
+    assessor(agora())
+    land = register()
+    assert "sets a value, an area or a reference" in denied("land_assess", "hector", land=land)
+    assert "unknown Land" in denied("land_assess", "hector", land="L-99", value=1)
+    Land[land].status = "revoked"
+    assert call("land_assess", "hector", land=land, value=1)["kind"] == "conflict"
+    assert Land[land].assessed_value is None
+
+
+def test_assessing_a_parcel_needs_the_permission_and_cannot_be_delegated_or_left_to_an_agent():
+    depts = agora()
+    assessor(depts)
+    land = register()
+    assert "land.assess" in denied("land_assess", "bob", land=land, value=1)
+    Delegation(id="d1", grantor="hector", delegate="claude-conn", status="active",
+               scope={"operations": ["land.assess"]}, expires_at=fake_chain.now() + 3600)
+    assert "power of attorney" in denied("land_assess", "claude-conn", land=land, value=1, on_behalf_of="hector")
+    world.seat("finance.assessment_bot", "records-bot", depts["Finance"], "land.assess", agent=True, supervisor="hector")
+    assert "human" in denied("land_assess", "records-bot", land=land, value=1)
+    assert Land[land].assessed_value is None

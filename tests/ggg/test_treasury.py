@@ -28,6 +28,19 @@ def setup_finance():
     return depts
 
 
+def one_item(amount):
+    """The one item of an invoice for ``amount``."""
+    return [{"concept": "fee", "amount": amount}]
+
+
+def draft(fund, category, planned, kind="expense", period="FY2026", by="bob"):
+    return ok("budget_draft", by, fund=fund, period=period, category=category, kind=kind, planned=planned)["budget"]
+
+
+def propose(period="FY2026", by="bob"):
+    return ok("budget_propose", by, period=period)
+
+
 def balance_reply(amount):
     fake_chain.state["replies"][(LEDGER, "icrc1_balance_of")] = f"({amount:_} : nat)"
 
@@ -37,7 +50,7 @@ def ledger_ok(tx=18_234):
 
 
 def receive(amount, payer="alice"):
-    inv = ok("invoice_create", "bob", payer=payer, amount=amount, reason=f"User:{payer}")["invoice"]
+    inv = ok("invoice_create", "bob", payer=payer, amount=amount, items=one_item(amount), reason=f"User:{payer}")["invoice"]
     balance_reply(amount)
     assert ok("invoice_check", payer, invoice=inv)["status"] == "paid"
     return inv
@@ -79,12 +92,13 @@ def test_story_agora_finance():
     receive(300_000)
     assert funds() == {"ROOT": 150_000, "ROADS": 60_000, "WELFARE": 90_000}
 
-    fee = ok("invoice_create", "bob", payer="bob", amount=10, reason="Member:bob")
+    fee = ok("invoice_create", "bob", payer="bob", amount=10, items=one_item(10), reason="Member:bob")
     assert fee["pay_to"]["subaccount"] == fee["invoice"].encode().ljust(32, b"\0").hex()
     assert [i["amount"] for i in ok("my_invoices", "bob")["invoices"]] == [10]
 
-    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=300_000)["budget"]
-    ok("budget_propose", "bob", budget=b)
+    b = draft("ROADS", "capital", 300_000)
+    draft("ROADS", "payroll", 4_000)  # an adopted budget is exhaustive: the salaries below need their line
+    propose()
     ok("payment_account_add", "bob", organization="buildco", network="ICP", address="buildco-wallet", symbol="REALM")
 
     Position["infrastructure.planning_officer"].salary = 4_000
@@ -173,7 +187,7 @@ def test_transfer_create_is_delegable():
 
 def test_I_FIN_3_invoice_paid_only_when_ledger_shows_amount():
     setup_finance()
-    inv = ok("invoice_create", "bob", payer="alice", amount=120, reason="User:alice", due_at=fake_chain.now() + 10)
+    inv = ok("invoice_create", "bob", payer="alice", amount=120, items=one_item(120), reason="User:alice", due_at=fake_chain.now() + 10)
     inv = inv["invoice"]
     balance_reply(119)
     assert ok("invoice_check", "alice", invoice=inv)["status"] == "pending"
@@ -193,9 +207,9 @@ def test_I_FIN_3_invoice_paid_only_when_ledger_shows_amount():
 
 def test_I_FIN_4_adopted_budgets_rules_and_policies_are_frozen():
     setup_finance()
-    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=300_000)["budget"]
-    ok("budget_propose", "bob", budget=b)
-    assert "only a draft" in call("budget_propose", "bob", budget=b)["error"]
+    b = draft("ROADS", "capital", 300_000)
+    propose()
+    assert "no draft budget lines" in call("budget_propose", "bob", period="FY2026")["error"]
     new = ok("budget_amend", "bob", budget=b, planned=400_000)["budget"]
     assert (Budget[b].status, Budget[b].planned) == ("amended", 300_000)
     assert (Budget[new].status, Budget[new].planned) == ("adopted", 400_000)
@@ -212,8 +226,8 @@ def fund_roads_with_budget(planned, funds_held=10_000):
     setup_finance()
     allocate(ROADS=100)
     receive(funds_held)
-    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=planned)["budget"]
-    ok("budget_propose", "bob", budget=b)
+    b = draft("ROADS", "capital", planned)
+    propose()
     ledger_ok()
     return b
 
@@ -241,11 +255,37 @@ def test_a_payment_in_one_step_past_the_plan_is_refused_whole():
     assert Transfer.count() == 0 and Budget[b].actual == 0
 
 
-def test_payments_the_budget_does_not_cover_are_unaffected():
+def test_an_adopted_budget_is_exhaustive_so_a_payment_in_a_category_it_has_no_line_for_is_refused():
     fund_roads_with_budget(500)
-    assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=900)["status"] == "completed"  # no budget
+    out = call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=900)  # the category is transfer
+    assert out["kind"] == "conflict" and "no expense line for transfer" in out["error"]
+    assert not Transfer.count()
+    assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=100, category="capital")["status"] \
+        == "completed"  # and the ledger's fee needs no line
+
+
+def test_nobody_names_the_ledgers_fee_as_a_category():
+    fund_roads_with_budget(500)
+    for name, args in (("transfer_create", {"fund": "ROADS", "to": "buildco", "amount": 900}),
+                       ("budget_draft", {"fund": "ROADS", "period": "FY2026", "kind": "expense", "planned": 900})):
+        out = call(name, "ctl", category="ledger_fee", **args)
+        assert out["kind"] == "invalid_argument" and "ledger's fee" in out["error"], (name, out)
+    assert not Transfer.count() and Budget.count() == 1  # the budget line of fund_roads_with_budget
+
+
+def test_the_fee_of_a_payment_is_booked_whatever_the_adopted_budget_says():
+    fund_roads_with_budget(500)
     assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=100, category="capital")["status"] \
         == "completed"
+    assert {e.category for e in rows(LedgerEntry) if e.kind == "expense"} == {"capital", "ledger_fee"}
+
+
+def test_a_fund_without_an_adopted_budget_pays_in_any_category():
+    setup_finance()
+    allocate(ROADS=100)
+    receive(10_000)
+    ledger_ok()
+    assert call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=900)["status"] == "completed"
 
 
 def test_a_failed_payment_frees_its_budget():
@@ -260,8 +300,8 @@ def test_a_voted_payment_past_the_plan_fails_with_its_reason_and_pays_nothing():
     depts = setup_finance()
     allocate(ROADS=100)
     receive(10_000)
-    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=500)["budget"]
-    ok("budget_propose", "bob", budget=b)
+    b = draft("ROADS", "capital", 500)
+    propose()
     ledger_ok()
     world.grant(depts["Infrastructure"], "transfer.create")
     world.policy(depts["Infrastructure"], 1, 2)
@@ -281,8 +321,8 @@ def test_a_payroll_past_the_plan_is_refused_before_anyone_is_paid():
     infrastructure = Department["Infrastructure"]
     world.seat("infrastructure.surveyor", "dana", infrastructure)
     Position["infrastructure.planning_officer"].salary = Position["infrastructure.surveyor"].salary = 2_000
-    ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="payroll", planned=3_999)
-    ok("budget_propose", "bob", budget="B-2")
+    draft("ROADS", "payroll", 3_999)
+    propose()
     entries = LedgerEntry.count()  # the first salary fits the plan: only the check up front keeps it from being paid
     assert "4000 was asked" in call("payroll_run", "bob", department="Infrastructure", period="2026-11")["error"]
     assert (Transfer.count(), LedgerEntry.count(), Budget["B-2"].actual) == (0, entries, 0)
@@ -301,23 +341,25 @@ def test_governed_budget_is_adopted_by_its_proposal():
     depts = setup_finance()
     world.policy(depts["Infrastructure"], 1, 2)
     world.seat("infrastructure.director", "dana", depts["Infrastructure"], "org.manage_budget")
-    out = ok("budget_draft", "dana", fund="ROADS", period="FY2026", category="capital", planned=1)
+    out = ok("budget_draft", "dana", fund="ROADS", period="FY2026", category="capital", kind="expense", planned=1)
     assert out["requires_vote"] and Budget.count() == 0
     adopt(out["proposal"])
-    p = ok("budget_propose", "dana", budget="B-1")["proposal"]
+    world.policy(Department["Administration"], 2, 3)  # the budget of the period is the realm's: the root decides
+    p = propose(by="dana")["proposal"]
     assert Budget["B-1"].status == "draft"
-    adopt(p)
+    for voter in world.PEOPLE:
+        ok("proposal_vote", voter, proposal=p, choice="yes")
     assert (Budget["B-1"].status, Budget["B-1"].proposal) == ("adopted", p)
 
 
 def test_I_FIN_5_closed_period_accepts_no_entries():
     setup_finance()
-    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=1)["budget"]
-    ok("budget_propose", "bob", budget=b)
+    b = draft("ROADS", "capital", 1)
+    propose()
     allocate(ROADS=100)
     receive(1_000)
     first = ok("report_issue", "bob", period="FY2026")["report"]
-    inv = ok("invoice_create", "bob", payer="alice", amount=5, reason="User:alice")["invoice"]
+    inv = ok("invoice_create", "bob", payer="alice", amount=5, items=one_item(5), reason="User:alice")["invoice"]
     ok("period_close", "bob", period="FY2026")
     assert Budget[b].status == "closed"
     entries = LedgerEntry.count()
@@ -475,7 +517,7 @@ def test_fund_balances_are_the_sum_of_their_ledger_entries():
     allocate(WELFARE=30, ROADS=20)
     receive(1_000)
     receive(333, payer="dana")
-    inv = ok("invoice_create", "bob", payer="alice", amount=700, symbol="ckUSDC", reason="User:alice")["invoice"]
+    inv = ok("invoice_create", "bob", payer="alice", amount=700, items=one_item(700), symbol="ckUSDC", reason="User:alice")["invoice"]
     balance_reply(700)
     ok("invoice_check", "alice", invoice=inv)
     ledger_ok()
@@ -565,8 +607,8 @@ def test_registries_are_bounded(monkeypatch):
 def test_invoice_refresh_checks_a_batch_at_a_time():
     setup_finance()
     due = fake_chain.now() + 10
-    invoices = [ok("invoice_create", "bob", payer="alice", amount=5, due_at=due)["invoice"] for _ in range(3)]
-    ok("invoice_create", "bob", payer="alice", amount=5)
+    invoices = [ok("invoice_create", "bob", payer="alice", amount=5, items=one_item(5), due_at=due)["invoice"] for _ in range(3)]
+    ok("invoice_create", "bob", payer="alice", amount=5, items=one_item(5))
     fake_chain.state["now"] += 20
     balance_reply(0)
     Invoice[invoices[1]].status = "overdue"
@@ -583,7 +625,7 @@ def test_invoice_refresh_checks_a_batch_at_a_time():
 def test_invoice_refresh_makes_at_most_twenty_ledger_calls():
     setup_finance()
     for _ in range(25):
-        ok("invoice_create", "bob", payer="alice", amount=5)
+        ok("invoice_create", "bob", payer="alice", amount=5, items=one_item(5))
     balance_reply(0)
     out = ok("invoice_refresh", "bob", count=100)
     assert out["checked"] == 20 and out["next"]
@@ -596,8 +638,8 @@ def test_reports_and_my_invoices_are_paginated():
     first = ok("report_view", "bob", count=2)
     second = ok("report_view", "bob", count=2, **{"from": first["next"]})
     assert [r["id"] for r in first["reports"] + second["reports"]] == reports and second["next"] is None
-    mine = [ok("invoice_create", "bob", payer="alice", amount=n)["invoice"] for n in (1, 2, 3)]
-    ok("invoice_create", "bob", payer="dana", amount=4)
+    mine = [ok("invoice_create", "bob", payer="alice", amount=n, items=one_item(n))["invoice"] for n in (1, 2, 3)]
+    ok("invoice_create", "bob", payer="dana", amount=4, items=one_item(4))
     first = ok("my_invoices", "alice", count=2)
     second = ok("my_invoices", "alice", count=2, **{"from": first["next"]})
     assert [i["id"] for i in first["invoices"] + second["invoices"]] == mine and second["next"] is None
@@ -652,9 +694,9 @@ def test_token_register_updates():
 def test_a_member_reads_the_budgets_of_the_funds():
     setup_finance()
     ok("fund_create", "bob", fund="WELFARE", name="Welfare", kind="special_revenue")
-    b = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="capital", planned=300_000)["budget"]
-    draft = ok("budget_draft", "bob", fund="ROADS", period="FY2026", category="upkeep", planned=5)["budget"]
-    ok("budget_propose", "bob", budget=b)
+    b = draft("ROADS", "capital", 300_000)
+    propose()
+    spare_line = draft("ROADS", "upkeep", 5)
     rule = allocate(ROADS=30, WELFARE=20)
     spare = ok("allocation_rule_draft", "bob", source_fund="ROOT", rules=[{"fund": "ROADS", "share": 10 * PERCENT}])["rule"]
 
@@ -665,7 +707,7 @@ def test_a_member_reads_the_budgets_of_the_funds():
     assert funds["ROADS"]["rule"] is None
     assert [(x["id"], x["period"], x["planned"], x["actual"]) for x in funds["ROADS"]["budgets"]] == [
         (b, "FY2026", 300_000, 0)]  # the draft is not shown as a budget
-    assert draft not in str(seen["funds"])
+    assert spare_line not in str(seen["funds"])
     assert (seen["period"], [p["id"] for p in seen["periods"]]) == ("FY2026", ["FY2026"])
     assert seen["config"]["auto_allocate"] is True
     assert (seen["currency"], seen["decimals"]) == ("REALM", 8)
@@ -674,14 +716,14 @@ def test_a_member_reads_the_budgets_of_the_funds():
 
 def test_budget_view_reads_one_period_and_only_its_adopted_budgets():
     setup_finance()
-    b = ok("budget_draft", "bob", fund="ROOT", period="FY2026", category="upkeep", planned=10)["budget"]
-    ok("budget_propose", "bob", budget=b)
+    b = draft("ROOT", "upkeep", 10)
+    propose()
     for planned in range(11, 16):  # five superseded versions of the same line
         b = ok("budget_amend", "bob", budget=b, planned=planned)["budget"]
-    ok("budget_draft", "bob", fund="ROOT", period="FY2026", category="spare", planned=1)
+    draft("ROOT", "spare", 1)
     ok("period_open", "bob", period="FY2027", starts_at=FY2026["ends_at"], ends_at=FY2026["ends_at"] + 100)
-    later = ok("budget_draft", "bob", fund="ROOT", period="FY2027", category="roads", planned=99)["budget"]
-    ok("budget_propose", "bob", budget=later)
+    later = draft("ROOT", "roads", 99, period="FY2027")
+    propose("FY2027")
 
     def lines(**args):
         seen = ok("budget_view", "mallory", **args)
@@ -695,7 +737,8 @@ def test_budget_view_reads_one_period_and_only_its_adopted_budgets():
 
 def test_budget_view_without_a_period_covering_now_lists_no_budgets():
     setup_finance()
-    ok("budget_propose", "bob", budget=ok("budget_draft", "bob", fund="ROOT", period="FY2026", category="x", planned=1)["budget"])
+    draft("ROOT", "x", 1)
+    propose()
     fake_chain.state["now"] = FY2026["ends_at"] + 1
     seen = ok("budget_view", "mallory")
     assert seen["period"] is None and seen["funds"][0]["budgets"] == []
