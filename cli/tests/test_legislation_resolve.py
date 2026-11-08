@@ -186,7 +186,7 @@ def test_with_a_fact_schema_it_prints_the_cedar_of_5_8(tree, tmp_path):
 def test_without_a_fact_schema_it_says_why_there_is_no_cedar(tree):
     out = resolve(tree, *SYNC_SOURCES)
     assert out.output.endswith(
-        "Cedar:\nnot generated: --facts FILE gives GGG's fact schema\n"
+        "Cedar:\nnot generated: --facts FILE gives the fact schema the generator reads\n"
     )
 
 
@@ -236,6 +236,42 @@ def test_an_empty_list_of_releases_is_refused(valencia_copy, git):
     out = resolve(valencia_copy / "legislation", *SYNC_SOURCES)
     assert out.exit_code == 1
     assert "eu/es/vc/emshi/releases.json is a list of releases" in out.output
+
+
+@pytest.mark.parametrize(
+    "commit", ["--output=/dev/null", "HEAD", "main", "398ca63"], ids=str
+)
+def test_a_record_may_name_a_commit_only_by_its_40_hex_digits(tree, tmp_path, commit):
+    record = tree_record(tree, commit_of(tree, "HEAD"), "eu/es/vc")
+    record["layers"][1]["commit"] = commit
+    file = tmp_path / "cv.json"
+    file.write_text(json.dumps(record))
+    out = resolve(tree, "--record", str(file))
+    assert out.exit_code == 1
+    assert f"commit {commit!r} is not the 40 hex digits of a git commit" in out.output
+
+
+def test_a_release_in_the_tree_is_held_to_the_layout_of_the_releases(
+    valencia_copy, git
+):
+    file = valencia_copy / "legislation/eu/es/vc/emshi/releases.json"
+    releases = json.loads(file.read_text())
+    releases[-1]["commit"] = "HEAD"
+    file.write_text(json.dumps(releases))
+    git(valencia_copy, "commit", "-q", "-a", "--no-verify", "-m", "a release by name")
+    out = resolve(valencia_copy / "legislation", *SYNC_SOURCES)
+    assert out.exit_code == 1
+    assert (
+        "eu/es/vc/emshi/releases.json, newest release: commit is the 40 hex digits"
+        in out.output
+    )
+
+
+def test_a_chapter_that_is_not_utf8_is_refused_with_its_name(valencia_copy, git):
+    (valencia_copy / "legislation" / VALENCIA / "tax.py").write_bytes(b"# \xff\n")
+    git(valencia_copy, "commit", "-q", "-a", "--no-verify", "-m", "not UTF-8")
+    out = resolve(valencia_copy / "legislation", *SYNC_SOURCES)
+    assert out.exit_code == 1 and f"{VALENCIA}/tax.py is not UTF-8" in out.output
 
 
 def test_a_commit_git_does_not_know_is_refused(tree):

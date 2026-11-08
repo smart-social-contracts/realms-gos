@@ -3,6 +3,7 @@
 The tree is ``tests/fixtures/legislation/valencia`` in a throw-away git repository (``valencia_repo``).
 """
 
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -14,7 +15,8 @@ from realms.cli.commands import legislation_propose
 from realms.cli.commands.legislation import legislation_app
 from realms.legislation import LegislationError
 
-FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/legislation"
+ROOT = Path(__file__).resolve().parents[2]
+FIXTURES = ROOT / "tests/fixtures/legislation"
 
 VALENCIA = "eu/es/vc/46250-valencia"
 TAX = f"{VALENCIA}/tax"
@@ -204,6 +206,8 @@ def replaces_from_realm(tree, tmp_path, commit, *more):
         "local",
         "--canister",
         "a-realm",
+        "--identity",
+        "reader",
         *more,
     )
     return out, (
@@ -215,12 +219,30 @@ def test_replaces_is_read_from_the_realms_codex_status(
     tree, tmp_path, chapters_commit, monkeypatch
 ):
     calls = active_codex(monkeypatch, {"ok": True, "codex": {"id": CODEX}})
-    out, change = replaces_from_realm(
-        tree, tmp_path, chapters_commit, "--identity", "reader"
-    )
+    out, change = replaces_from_realm(tree, tmp_path, chapters_commit)
     assert out.exit_code == 0, out.output
     assert change["replaces"] == CODEX
     assert calls == [("a-realm", "codex_status", "local", "reader", True)]
+    assert "reading codex_status of a-realm on local as reader" in out.output
+
+
+def test_the_realm_is_never_read_as_an_identity_the_caller_did_not_name(
+    tree, tmp_path, chapters_commit, no_network
+):
+    out = propose(
+        tree,
+        tmp_path / "x.json",
+        "--commit",
+        chapters_commit,
+        "--set",
+        TAX,
+        "--network",
+        "local",
+        "--canister",
+        "a-realm",
+    )
+    assert out.exit_code == 1 and "--identity is required" in out.output
+    assert not (tmp_path / "x.json").exists()
 
 
 def test_a_realm_with_no_active_codex_is_replaced_by_none(
@@ -248,11 +270,14 @@ def test_a_realm_that_refuses_the_read_stops_the_command(
         ([], "say which codex this replaces"),
         (["--network", "local"], "say which codex this replaces"),
         (["--canister", "a-realm"], "say which codex this replaces"),
+        (["--identity", "reader"], "say which codex this replaces"),
+        (["--network", "local", "--identity", "reader"], "say which codex"),
         (
             ["--replaces", CODEX, "--network", "local", "--canister", "a-realm"],
             "not both",
         ),
         (["--replaces", CODEX, "--network", "local"], "not both"),
+        (["--replaces", CODEX, "--identity", "reader"], "not both"),
     ],
 )
 def test_no_realm_is_called_unless_it_is_named_with_a_network(
@@ -352,6 +377,16 @@ def test_a_chapter_the_realm_would_not_store_is_refused(
     assert out.exit_code == 1 and why in out.output
 
 
+def test_a_chapter_that_is_not_utf8_is_refused_as_the_realm_refuses_it(
+    valencia_copy, tmp_path, git, no_network
+):
+    (valencia_copy / "legislation" / f"{TAX}.py").write_bytes(b"# \xff\xfe\n")
+    git(valencia_copy, "commit", "-q", "-a", "--no-verify", "-m", "not UTF-8")
+    out = bonus(valencia_copy / "legislation", tmp_path / "x.json", "HEAD")
+    assert out.exit_code == 1 and f"{TAX} is not UTF-8" in out.output
+    assert not (tmp_path / "x.json").exists()
+
+
 def test_more_chapters_than_a_change_list_may_set_are_refused():
     entries = [{"chapter": f"{VALENCIA}/domain{n}"} for n in range(51)]
     with pytest.raises(LegislationError, match="at most 50 chapters, not 51"):
@@ -361,3 +396,47 @@ def test_more_chapters_than_a_change_list_may_set_are_refused():
 def test_the_output_folder_is_made(tree, tmp_path, chapters_commit, no_network):
     out = bonus(tree, tmp_path / "changes" / "x" / "bonus.json", chapters_commit)
     assert out.exit_code == 0 and (tmp_path / "changes/x/bonus.json").exists()
+
+
+# ---- the limits and the kind are the realm's
+
+
+def value_of(node):
+    """A constant of the canister's source: a literal, or a product of literals (``256 * 1024``)."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return value_of(node.left) * value_of(node.right)
+    return ast.literal_eval(node)
+
+
+def realm_constants(module: str, *names: str) -> dict:
+    """The values ``names`` have in ``src/realm_backend/<module>``, read from its source: the module needs the realm's
+    own modules to import, and the CLI's tests do not have them."""
+    found = {}
+    for node in ast.parse((ROOT / "src/realm_backend" / module).read_text()).body:
+        if isinstance(node, ast.Assign):
+            target = node.targets[0]
+            targets = target.elts if isinstance(target, ast.Tuple) else [target]
+            values = (
+                node.value.elts if isinstance(node.value, ast.Tuple) else [node.value]
+            )
+            found.update(
+                {
+                    t.id: value_of(v)
+                    for t, v in zip(targets, values)
+                    if getattr(t, "id", None) in names
+                }
+            )
+    return found
+
+
+def test_the_kind_the_format_and_the_limits_are_the_realms():
+    ours = {
+        name: getattr(legislation_propose, name)
+        for name in ("KIND", "FORMAT", "MAX_CHAPTERS", "MAX_CHAPTER", "MAX_CHANGE_LIST")
+    }
+    theirs = {
+        **realm_constants("core/change_list.py", "KIND", "FORMAT", "MAX_CHAPTERS"),
+        **realm_constants("core/layered_codex.py", "MAX_CHAPTER"),
+        **realm_constants("api/installs.py", "MAX_CHANGE_LIST"),
+    }
+    assert ours == theirs

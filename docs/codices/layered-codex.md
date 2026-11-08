@@ -1674,7 +1674,7 @@ Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codi
   names, the realm's own layer (its folder, or the layer in `--own`) at `--commit`, and every file against the
   checksum its record lists.
 - **Output.** The codex id (§9.1), the layers, each domain's layer path and flattened view, and the Cedar of every
-  forbid when `--facts` gives GGG's fact schema. It calls no network.
+  forbid when `--facts` gives a fact schema in the shape the generator reads (`cedar.FactSchema`). It calls no network.
 
 ### 12.5 `realms legislation propose`
 
@@ -1684,17 +1684,22 @@ checksum }` to submit.
 
 Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
 `realms legislation propose [TREE] --realm <source id> --commit REV --set <chapter>... --remove <chapter>... --url URL --out FILE`,
-with `--replaces <codex id | none>` or `--network` and `--canister`, and optionally `--summary LANG=TEXT`,
-`--report FILE --report-url URL`, `--identity` and `--repo OWNER/NAME`.
+with `--replaces <codex id | none>` or `--network`, `--canister` and `--identity`, and optionally
+`--summary LANG=TEXT`, `--report FILE --report-url URL` and `--repo OWNER/NAME`.
 
 - **The file.** The change list as canonical JSON (§9.1: sorted keys, no spaces, UTF-8, no newline at the end),
   so the checksum a proposal pins is the checksum of the file. Each chapter's URL names the commit in full, and its
   sha256 and size are those of the bytes at that commit. `--url` is where the change list will be served.
-- **`replaces`** is given, or read from the realm's `codex_status` when `--network` and `--canister` are given.
-  No network is reached otherwise, and there is no default network.
+- **`replaces`** is given, or read from the realm's `codex_status` when `--network`, `--canister` and `--identity`
+  are all given; the command says which it reads before it does. No network is reached otherwise, there is no
+  default network, and no identity is chosen for the caller.
 - **Refused.** What the realm would refuse (§7): a chapter outside the realm's own layer (a layer from above comes
-  as a release), a name that is not a GGG domain or `calendar`, a chapter of 0 bytes or above 256 KB, more than 50
-  chapters, a change list above 64 KB, an address that is not https.
+  as a release), a name that is not a GGG domain or `calendar`, a chapter of 0 bytes, above 256 KB or not UTF-8, more
+  than 50 chapters, a change list above 64 KB, an address that is not https. A `release` is always `null`:
+  installing a release is the realm's own "Propose install" (§11).
+- **Stricter and looser than the realm.** The same chapter in `--set` and `--remove` is refused by the command; the
+  realm accepts it, if the codex has the chapter, and applies the removal first. A `--remove` of a chapter the codex does not have passes the
+  command, which does not know the codex, and can only fail at the realm (§9.2 step 2).
 - **The report** (§12.3, C4) is attached, not written: `--report` is the file and `--report-url` where it is served.
 - **Output.** The `Code { url; checksum }` to submit.
 

@@ -37,7 +37,7 @@ from realms.cli.commands.legislation_propose import (
 )
 from realms.cli.commands.legislation_resolve import (
     file_record,
-    load_json,
+    read_json,
     report_lines,
     resolve_realm,
     tree_record,
@@ -242,7 +242,7 @@ def resolve_command(
         "--facts",
         exists=True,
         dir_okay=False,
-        help="GGG's fact schema as JSON, which the Cedar is generated against; without it no Cedar is written",
+        help="The fact schema as JSON in the shape the Cedar generator reads (cedar.FactSchema); without it no Cedar is written",
     ),
 ) -> None:
     """Print a realm's codex id, layer paths, flattened view (§5.9) and generated Cedar (§5.8), as the realm works them out.
@@ -259,10 +259,10 @@ def resolve_command(
             realm,
             at,
             relays,
-            load_json(own.read_text(), str(own)) if own else None,
+            read_json(own) if own else None,
             operations,
             {"ggg": check_view()},
-            load_json(facts.read_text(), str(facts)) if facts else None,
+            read_json(facts) if facts else None,
         )
         lines = report_lines(resolution, facts is not None)
     except ImportError as e:
@@ -301,7 +301,7 @@ def propose_command(
     replaces: Optional[str] = typer.Option(
         None,
         "--replaces",
-        help="The id of the realm's active codex, or none when it has none; or read it with --network and --canister",
+        help="The id of the realm's active codex, or none when it has none; or read it with --network, --canister and --identity",
     ),
     network: Optional[str] = typer.Option(
         None, "--network", help="The network to read the active codex from (no default)"
@@ -312,7 +312,9 @@ def propose_command(
         help="The realm's canister id, to read the active codex from",
     ),
     identity: Optional[str] = typer.Option(
-        None, "--identity", help="The identity that reads the active codex"
+        None,
+        "--identity",
+        help="The identity that reads the active codex: required with --network and --canister, never a default",
     ),
     summary: List[str] = typer.Option(
         [], "--summary", help="LANG=TEXT shown in the proposal; repeat per language"
@@ -341,7 +343,8 @@ def propose_command(
 ) -> None:
     """Write the change list of a proposal (§7) as canonical JSON and print the Code { url; checksum } to submit.
 
-    Reads the chapters with git. Reads the realm only when --network and --canister are given.
+    Reads the chapters with git. Reads the realm only when --network, --canister and --identity are all given,
+    and says which before it does.
     """
     try:
         https(url)

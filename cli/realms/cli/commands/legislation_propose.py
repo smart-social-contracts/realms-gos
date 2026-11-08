@@ -10,6 +10,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import typer
+
 from realms.cli.commands.legislation_canonical import canonical
 from realms.cli.commands.legislation_layout import GGG_DOMAINS, bytes_at, git
 from realms.cli.realm_api import call_op
@@ -31,24 +33,32 @@ def replaced_codex(
     identity: Optional[str],
 ) -> Optional[str]:
     """The ``replaces`` of the change list: the id given (``none`` for a realm with no active codex), or the realm's
-    active codex read from the realm. Never a network the caller did not name."""
-    if replaces is not None and (network or canister):
-        raise LegislationError(
-            "give --replaces, or --network and --canister to read it from the realm, not both"
-        )
+    active codex read from the realm. A realm is read only when the caller names its network, its canister and the
+    identity that reads: never a default network, and never the identity the tool happens to find.
+    """
+    reading = (network, canister, identity)
     if replaces is not None:
+        if any(reading):
+            raise LegislationError(
+                "give --replaces, or --network, --canister and --identity to read it from the realm, not both"
+            )
         return None if replaces == "none" else replaces
-    if network and canister:
-        return active_codex_id(canister, network, identity)
-    raise LegislationError(
-        "say which codex this replaces: --replaces ID (or none), or --network and --canister to read it from the realm"
-    )
+    if network and canister and not identity:
+        raise LegislationError(
+            "--identity is required with --network and --canister: the read is made as the identity you name"
+        )
+    if not all(reading):
+        raise LegislationError(
+            "say which codex this replaces: --replaces ID (or none), "
+            "or --network, --canister and --identity to read it from the realm"
+        )
+    return active_codex_id(canister, network, identity)
 
 
-def active_codex_id(
-    canister: str, network: str, identity: Optional[str]
-) -> Optional[str]:
-    """The id of the realm's active codex as ``codex_status`` shows it, or None when it has none."""
+def active_codex_id(canister: str, network: str, identity: str) -> Optional[str]:
+    """The id of the realm's active codex as ``codex_status`` shows it, or None when it has none. Says where it reads
+    before it does."""
+    typer.echo(f"reading codex_status of {canister} on {network} as {identity}")
     reply = call_op(
         canister,
         "codex_status",
@@ -87,6 +97,12 @@ def chapter_entry(tree: Path, commit: str, repo: str, realm: str, chapter: str) 
         raise LegislationError(
             f"{chapter} is {len(data)} bytes: a chapter is between 1 and {MAX_CHAPTER} bytes "
             "(to empty a chapter, remove it)"
+        )
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise LegislationError(
+            f"{chapter} is not UTF-8: a realm reads a chapter as text"
         )
     prefix = git(tree, "rev-parse", "--show-prefix").decode().strip()
     return {

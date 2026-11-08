@@ -157,8 +157,7 @@ def release_reasons(release) -> List[str]:
         )
         if r
     ]
-    commit = release.get("commit")
-    if not (isinstance(commit, str) and len(commit) == 40 and set(commit) <= HEX):
+    if not is_commit(release.get("commit")):
         reasons.append("commit is the 40 hex digits of a git commit")
     chapters = release.get("chapters")
     if not isinstance(chapters, dict) or not chapters:
@@ -222,6 +221,11 @@ def by_language(value) -> bool:
         and bool(value)
         and all(is_text(k) and is_text(v) for k, v in value.items())
     )
+
+
+def is_commit(value) -> bool:
+    """The 40 hex digits of a git commit: the only form a tool passes to git, so that no name, option or path does."""
+    return isinstance(value, str) and len(value) == 40 and set(value) <= HEX
 
 
 def is_checksum(value) -> bool:
