@@ -1,6 +1,6 @@
 import json
 
-from core import auth, chain
+from core import auth, chain, ranges
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
 from ggg import (Appointment, Calendar, Contract, Delegation, Department, Mandate, Member, Proposal, ProposalEdge,
                  Realm, Task, TaskSchedule, Vote)
@@ -53,6 +53,7 @@ def check_action(action):
         raise Fail(f"unknown operation '{action.get('op')}'")
     if "on_behalf_of" in (action.get("args") or {}):
         raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, as its proposer")
+    ranges.check(action["op"], action.get("args") or {})
 
 
 def check_scope(department, action):

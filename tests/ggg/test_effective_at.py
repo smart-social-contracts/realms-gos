@@ -104,9 +104,11 @@ def test_effective_at_is_whole_seconds_or_the_proposal_is_refused(effective_at):
 def test_a_past_effective_at_is_refused_at_creation_but_the_present_second_is_not():
     world.build()
     now = fake_chain.now()
-    for past in (now - 1, now - HOUR, -1):
+    for past in (now - 1, now - HOUR):
         out = call("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=past)
         assert not out["ok"] and out["kind"] == "invalid_argument" and "in the past" in out["error"]
+    out = call("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=-1)  # no time at all
+    assert not out["ok"] and out["kind"] == "invalid_argument" and "between 0 and" in out["error"]
     assert Proposal.count() == 0
     ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=now)
     ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS, effective_at=0)  # 0: no time stated
