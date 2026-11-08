@@ -219,7 +219,7 @@ The rules:
 | `publisher.realm` | the canister id of the source's own realm, if it has one, else `null` (§8) |
 
 A source carries no time zone and no zone file: a realm's time zone is its own `Realm.timezone`
-(§4.5), never a layer's, and each canister stores only its own zone file.
+(§4.5), never a layer's, and the zone data comes with the realm's release, never with a layer.
 
 ### 3.2 `releases.json`
 
@@ -523,10 +523,12 @@ kind of GGG's fact schema so that every implementation rounds the same way. The 
 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)). Timestamps stay UTC nanoseconds,
 and an effective time is an exact UTC instant (§9.5). Realm-local time is computed in Realms GOS
 ([#503](https://github.com/smart-social-contracts/realms-gos/issues/503)): a pure-Python zone-file
-reader plus date arithmetic, with no change to the Python runtime. Each canister stores only its own
-zone file, as raw bytes (never base64), parsed once and kept in memory. The day of a timestamp, for
-the working-day count of §5.2 or the official journal's daily issue (§9.6), is the local day computed
-this way, on the clock that counts (below).
+reader plus date arithmetic, with no change to the Python runtime. Every realm release ships the zone
+data for all zones, as raw bytes (never base64), so the rules are refreshed whenever a realm is
+upgraded; there is no upload and no checksum step. A quarter is a full realm canister, so it has every
+zone too. A canister loads only its own zone, parsed once and kept in memory, and never on a query.
+The day of a timestamp, for the working-day count of §5.2 or the official journal's daily issue
+(§9.6), is the local day computed this way, on the clock that counts (below).
 
 **Where a zone comes from.** Always from the realm itself, never from outside it:
 
@@ -545,8 +547,9 @@ this way, on the clock that counts (below).
   `timezone`), before any vote. When the proposal executes, the capital sends the setting to the
   quarter over the trusted capital-to-quarter channel, the `quarter.sync` permission the federation
   already uses ([Quarters and federation](../architecture/quarters-and-federation.md)), and the
-  quarter applies it as its own zone. If the quarter refuses it or cannot be reached, the operation
-  fails and nothing changes.
+  quarter applies it as its own zone. Only the name travels: the quarter's release already holds the
+  data of every zone. If the quarter refuses it or cannot be reached, the operation fails and nothing
+  changes.
 
 This is the first of the **settings the realm sets for its quarters**, and the only one so far. Which
 others join it (branding, the welcome text, ...) is an open point, to be decided with the product
@@ -1068,7 +1071,7 @@ The realm needs, from outside its own state:
 | the realm's links | layer paths | the realm's own GGG state: its sync sources, each active after both votes |
 | published releases of each sync source, and of the layers it relays | checking layers from above; compliance | the sync source's published record (below) |
 | world facts (`capital`, `population`, ...) | `S.` in forbids, and chapters | the realm's own layer: settings (§4.3). No record is read |
-| the time zones | showing the realm's official time (the capital's zone) and a quarter's local time in the UI; the local day for the official journal's issues (the capital's) and for working-day counts (the zone of the matter's clock, §4.5) | the canister's own `Realm.timezone`: the realm's, set by the realm; a quarter's, copied from its capital when it joined and its own after that. Never taken from a layer, another realm or a sync source. The canister's own zone file, stored as raw bytes and read by Realms GOS's pure-Python reader |
+| the time zones | showing the realm's official time (the capital's zone) and a quarter's local time in the UI; the local day for the official journal's issues (the capital's) and for working-day counts (the zone of the matter's clock, §4.5) | the canister's own `Realm.timezone`: the realm's, set by the realm; a quarter's, copied from its capital when it joined and its own after that. Never taken from a layer, another realm or a sync source. The zone data ships with the realm release, as raw bytes, and a canister loads only its own zone with Realms GOS's pure-Python reader |
 
 GGG and the registry hold no national codes (INE, BFS, ISO). A gateway that needs them reads a Realms
 GOS extension.
@@ -1260,7 +1263,7 @@ other core extensions of [`core-extensions.json`](../../core-extensions.json)
   the capital's, not one for each quarter.
 - **One issue every day,** even on a day with no entries. The day is the realm's local day on the
   capital's clock (the realm's official time), computed in Realms GOS from the capital's own zone
-  file (§4.5). A quarter's zone plays no part in it.
+  (§4.5). A quarter's zone plays no part in it.
 - **The canister serves the JSON, which is the authority.** The PDF is a browser print route with the
   realm's logo; it is never checksummed.
 - **Personal-data rules live in the extension's config,** not in a chapter.
@@ -1504,7 +1507,7 @@ is no G6.
 | G8 ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)) | ggg | `PeriodUnit` gains `WorkingDay` (§4.3): a day that is neither a weekend day nor a holiday in the realm's calendar, in the time zone of the clock that counts (§4.5); GGG names the unit, realms count it | G2 | `.did` and the schema docs have the unit, defined as above |
 | [ggg#9](https://github.com/smart-social-contracts/ggg/issues/9) | ggg | One scale for every ratio, hundred-millionths (§4.3): the model's basis-point fields (quorum, thresholds, shares, weights) move to it; a breaking change | – | `.did`, the conventions and the conformance suite use the one scale |
 | [ggg#21](https://github.com/smart-social-contracts/ggg/issues/21) | ggg | Quarters in different time zones (§4.5): I-ADM-4 clarified (a quarter starts from its capital's zone, the realm may set it by vote), and `timezone` on `quarter_configure` | G5 | model, layered-codex page and `.did` say it; the fixture and the conformance suite agree |
-| [#503](https://github.com/smart-social-contracts/realms-gos/issues/503) | realms-gos | Realm-local time in Realms GOS (§4.5): a pure-Python zone-file reader plus date arithmetic; the realm stores only its own zone file as raw bytes (never base64), parsed once and kept in memory; no change to the Python runtime | G5 | a realm with `timezone = "Europe/Madrid"` reports the right local date and offset on both sides of a DST switch, on PocketIC, including in a year after 2037 (the POSIX footer rule); no base64 and no new runtime modules are used |
+| [#503](https://github.com/smart-social-contracts/realms-gos/issues/503) | realms-gos | Realm-local time in Realms GOS (§4.5): a pure-Python zone-file reader plus date arithmetic; the release ships the zone data for every zone as raw bytes (never base64) and the realm loads only its own zone, parsed once and kept in memory; no change to the Python runtime | G5 | a realm with `timezone = "Europe/Madrid"` reports the right local date and offset on both sides of a DST switch, on PocketIC, including in a year after 2037 (the POSIX footer rule); no base64 and no new runtime modules are used |
 | [#504](https://github.com/smart-social-contracts/realms-gos/issues/504) | realms-gos | Proposals execute at `effective_at` (§7, §9.2 step 6, §9.5): every accepted proposal's action runs at that time, or on acceptance without one; a layered-codex install switches then, and quarters switch at that T | G7 | PocketIC: a transfer, a codex install and a settings call each execute at `effective_at` and not before; without it, on acceptance; the install's `on_codex_activate` runs at the switch |
 | [#505](https://github.com/smart-social-contracts/realms-gos/issues/505) | realms-gos | Count working days in the realm (§3.4, §4.3): start + n working days on the realm's calendar in its time zone, one function in the date module of #503; the library gains `working_days(n)`; a count that reaches a year with no calendar entries fails closed | #503, G8 | PocketIC: a 2-working-day count over a holiday and a weekend, and one across a summer-time change, pass; a count into a year with no entries fails with a clear error |
 | [#499](https://github.com/smart-social-contracts/realms-gos/issues/499) | realms-gos | Test harness for linked realms: scripted peers in `fake_chain`, multi-canister PocketIC, outcall mocking, public fixtures | – | the workflow tests of the change list run on it |
