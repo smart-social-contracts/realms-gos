@@ -119,12 +119,27 @@ def test_budget_extend_is_refused_once_the_period_has_an_extended_or_adopted_lin
     agora_budget()
     ok("budget_extend", "bob", period="FY2027")
     again = call("budget_extend", "bob", period="FY2027")
-    assert again["kind"] == "conflict" and "extended" in again["error"]
+    assert again["kind"] == "conflict" and "no fund is left" in again["error"]
     assert len(FiscalPeriod["FY2027"].budgets) == 3
     ok("period_open", "bob", period="FY2028", starts_at=FY2027["ends_at"], ends_at=FY2027["ends_at"] + 100)
     draft("ROOT", "x", 1, period="FY2028")
-    propose("FY2028")
-    assert call("budget_extend", "bob", period="FY2028")["kind"] == "conflict"  # an adopted line
+    propose("FY2028")  # the root's fund has an adopted line: only the other fund's budget is left to carry
+    assert ok("budget_extend", "bob", period="FY2028")["extended"] == 1
+    assert call("budget_extend", "bob", period="FY2028")["kind"] == "conflict"
+
+
+def test_budget_extend_carries_the_line_in_force_when_the_period_ended_and_never_a_replaced_one():
+    agora_budget()
+    ok("budget_extend", "bob", period="FY2027")
+    draft("ROADS", "capital", 500, period="FY2027")  # 500 over the 300 carried
+    propose("FY2027")
+    ok("period_open", "bob", period="FY2028", starts_at=FY2027["ends_at"], ends_at=FY2027["ends_at"] + 100)
+    assert ok("budget_extend", "bob", period="FY2028")["extended"] == 3
+    capital = [line for line in lines_of("FY2028") if line[:2] == ("ROADS", "capital")]
+    assert capital == [("ROADS", "capital", "expense", 500, 0, "extended")]
+    ok("period_close", "bob", period="FY2027")  # and the same once the period is closed
+    ok("period_open", "bob", period="FY2029", starts_at=FY2027["ends_at"] + 100, ends_at=FY2027["ends_at"] + 200)
+    assert ok("budget_extend", "bob", period="FY2029")["extended"] == 3 and len(FiscalPeriod["FY2029"].budgets) == 3
 
 
 def test_draft_lines_stand_in_no_way_of_budget_extend():
@@ -172,6 +187,29 @@ def test_an_extended_line_caps_spending_until_an_adopted_budget_replaces_it():
     propose("FY2027")
     assert (extended.status, Budget[new].status, Budget[new].actual) == ("closed", "adopted", 300)
     assert pay(200)["status"] == "completed"
+
+
+def test_budget_extend_carries_the_funds_that_have_no_line_yet():
+    agora_budget()
+    draft("ROADS", "capital", 500, period="FY2027")
+    propose("FY2027")  # the roads fund adopts its own budget for FY2027
+    assert ok("budget_extend", "bob", period="FY2027")["extended"] == 2  # the root fund's two lines are left
+    assert sorted((b[0], b[1], b[5]) for b in lines_of("FY2027")) == [
+        ("ROADS", "capital", "adopted"), ("ROOT", "property_tax", "extended"), ("ROOT", "salaries", "extended")]
+    assert call("budget_extend", "bob", period="FY2027")["kind"] == "conflict"  # no fund is left
+
+
+def test_a_proposal_closes_the_extended_lines_of_the_funds_it_adopts_and_no_others():
+    agora_budget()
+    ok("budget_extend", "bob", period="FY2027")
+    draft("ROOT", "fees", 40, kind="revenue", period="FY2027")  # the root fund's budget names one slot
+    propose("FY2027")
+    assert sorted((b[0], b[1], b[5]) for b in lines_of("FY2027")) == [
+        ("ROADS", "capital", "extended"), ("ROOT", "fees", "adopted"), ("ROOT", "property_tax", "closed"),
+        ("ROOT", "salaries", "closed")]
+    seen = ok("budget_view", "mallory", period="FY2027")
+    assert [(f["id"], b["category"], b["status"]) for f in seen["funds"] for b in f["budgets"]] == [
+        ("ROOT", "fees", "adopted"), ("ROADS", "capital", "extended")]
 
 
 def test_the_budget_view_shows_the_extended_lines_in_force():
@@ -258,6 +296,17 @@ def test_a_loan_is_from_an_outside_body_the_realm_knows():
     out = call("loan_create", "bob", lender="bank-b", amount=500, term=TERM, rate=1, fund="ROADS")
     assert out["kind"] == "not_found" and "bank-b" in out["error"]
     assert Loan.count() == 0 and Treasury["1"].debt_outstanding == 0
+
+
+def test_the_debt_of_the_realm_stays_an_amount_of_money():
+    setup_lending()
+    most = 2**53 - 1
+    borrow(most - 100)
+    assert "largest amount of money" in denied("loan_create", "bob", lender="bank-a", amount=101, term=TERM, rate=1,
+                                               fund="ROADS")
+    assert Loan.count() == 1 and Treasury["1"].debt_outstanding == most - 100
+    borrow(100)
+    assert Treasury["1"].debt_outstanding == most
 
 
 def test_borrowing_is_the_realms_to_decide():

@@ -117,20 +117,25 @@ same rows.
   last open), at most one of them; its other settings are facts too: `unit_value` (land), `exempt_below`,
   `exempt_profiles` (users), `due_days` and `enabled`. `tax_assess` bills one invoice for each taxpayer, entry and
   period, with the items the active codex computes for each of their subjects (`compute_tax_assess`) or, when no
-  codex answers, one item from the entry's own charge, rounded to the cent as GGG rounds: a codex answer that is
-  not invoice items, or that comes to less than nothing, bills nobody;
+  codex answers, one item from the entry's own charge, rounded to the cent as GGG rounds (the brackets of a
+  progressive tax are added up exactly and the total rounded once). A codex answer that is not invoice items, that
+  comes to less than nothing or more than an amount of money, or that covers some of a payer's subjects and not the
+  others, refuses the call before anyone is billed;
 - an invoice's `items` are lines with a `concept` and a signed `amount`, optionally a `quantity`, a `unit` and the
   `legislation` that charges it; they sum to the invoice's `amount`, and `invoice_item_add` adds a line to a pending
-  invoice;
+  invoice. The invoice of a fine or a restitution has one item, named for the kind of penalty;
 - a budget line is `revenue` or `expense`, and `budget_propose` takes every draft line of a period together
   (so a line drafted after the proposal was filed, and before it was accepted, is adopted with it). `years` is
   a fact for legislation and is not kept. Realms GOS never marks a draft `proposed`: a governed `*_propose` leaves the
   draft as it is until the vote accepts it. `budget_extend` copies a period's budget as it stood at the end of the
-  period before (adopted, extended or closed with it) into the period as `extended` lines. An `extended` line stands
-  in for an adopted one: it caps spending, `budget_view` lists it, `period_close` closes it, and the adopted line
-  of its fund and category replaces it;
+  period before into the period as `extended` lines, for each fund that has no extended, proposed or adopted line
+  in it yet (`Conflict` when none is left): of each fund and category the newest line that was adopted or extended
+  (or `closed` with the period), never a line a newer one replaced. An `extended` line stands in for an adopted one:
+  it caps spending, `budget_view` lists it and `period_close` closes it. A proposal for the period closes the
+  extended lines of every fund whose lines it adopts, and leaves the other funds' extensions;
 - a loan's `term` is a `Period` with the unit in lower-case text (`day`, `working_day`, `month`, `year`), its `lender`
-  an `External` the realm knows (`NotFound` otherwise), and `Treasury.debt_outstanding` is kept as a running total, like fund balances;
+  an `External` the realm knows (`NotFound` otherwise), and `Treasury.debt_outstanding` is kept as a running total,
+  like fund balances;
 - `codex_activate` makes the pending layered codex, named by its id (its checksum), the active one at once and keeps
   the codex it replaces as `previous`; `codex_status` shows the pending one as `pending`. An `at` in the future is
   refused until activations can be scheduled;

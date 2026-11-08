@@ -1,12 +1,12 @@
 from core import chain
 from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page_by, view, window
-from ggg import Land, Member, Organization, TaxDeclaration, TaxPolicy, User
+from ggg import Land, Member, Organization, TaxDeclaration, TaxPolicy, Token, User
 from core.op import op
 from core.ratio import PERCENT, RATE_MAX
 from core.tax_entries import SUBJECTS
 from api import codex
 from api.proposals import realm_wide
-from api.treasury import currency, decimals_of, invoice_item, new_invoice, total
+from api.treasury import checked_total, currency, decimals_of, invoice_item, new_invoice, total
 
 ENTRY_FIELDS = ("code", "kind", "subject", "rate", "amount", "facts")
 
@@ -91,7 +91,8 @@ def draft_of(args):
 
 def owed(entry, value, decimals):
     """The reference calculation: what a taxable ``value`` owes under one entry when no codex computes it, in the token's
-    smallest unit, rounded to the cent as GGG rounds (integer; rates in hundred-millionths)."""
+    smallest unit, rounded to the cent as GGG rounds (integer; rates in hundred-millionths). The brackets of a
+    progressive tax are added up exactly and the total is rounded once."""
     from realms.legislation.rates import times  # the layered codex library's one rounding rule, compiled on first use
 
     facts = entry["facts"]
@@ -101,15 +102,15 @@ def owed(entry, value, decimals):
         return entry["amount"]
     if "rate" in entry:
         return times(value, entry["rate"], decimals)
-    total_owed, lower = 0, 0
+    exact, lower = 0, 0  # in hundred-millionths of the smallest unit
     for b in facts.get("brackets") or []:
         upper = value if b.get("up_to") is None else min(value, b["up_to"])
         if upper > lower:
-            total_owed += times(upper - lower, int(b["rate"]), decimals)
+            exact += (upper - lower) * int(b["rate"])
         if b.get("up_to") is None or value <= b["up_to"]:
             break
         lower = b["up_to"]
-    return total_owed
+    return times(exact, 1, decimals)
 
 
 def adopted():
@@ -171,12 +172,14 @@ def subjects_of(entry, payer):
 def assessment(entry, payer, base, decimals):
     """The items ``payer`` owes under ``entry``: what the active codex computes for each subject they hold under it,
     or, when no codex answers, the charge of the entry's own rate, amount or brackets on ``base``."""
-    items = []
+    answers = {}
     for subject in subjects_of(entry, payer):
-        answer = yield from codex.compute("tax_assess", {"entry": entry, "subject": subject})
-        if answer is None:
-            return reference_items(entry, base, decimals)
-        if not isinstance(answer, list):
+        answers[subject] = yield from codex.compute("tax_assess", {"entry": entry, "subject": subject})
+    if all(answer is None for answer in answers.values()):
+        return reference_items(entry, base, decimals)
+    items = []
+    for subject, answer in answers.items():
+        if not isinstance(answer, list):  # a codex that computes some subjects computes all of them
             raise Fail(f"the codex answered {answer!r} for {entry['code']} on {subject}, not a list of invoice items")
         items += [invoice_item(item) for item in answer]
     return items
@@ -244,8 +247,11 @@ def tax_assess(c, args):
     entries = [entry_of(policy, args["tax"])] if args.get("tax") else [
         t for t in policy.taxes if enabled(t) and t["subject"] != "Declaration"]
     start, count = window(args)
-    decimals = decimals_of(symbol_of(policy))
-    invoices, skipped = [], 0
+    symbol = symbol_of(policy)
+    find(Token, symbol)  # the invoices are in it
+    decimals = decimals_of(symbol)
+    invoices, skipped, due = [], 0, []
+    # Everyone's items first: a codex answer that is not an invoice's items refuses the call before anyone is billed.
     for entry in entries:
         for declarant in sorted(payers(entry, start, count)):
             if declared(declarant, period, entry["code"]):
@@ -253,9 +259,15 @@ def tax_assess(c, args):
                 continue
             base = taxable(entry, declarant)
             items = yield from assessment(entry, declarant, base, decimals)
-            d = levy(policy, entry, declarant, period, base, items)
-            if d.invoice:
-                invoices.append(d.invoice)
+            checked_total(items)
+            due.append((entry, declarant, base, items))
+    for entry, declarant, base, items in due:
+        if declared(declarant, period, entry["code"]):  # a call that ran while the codex was asked billed them
+            skipped += 1
+            continue
+        d = levy(policy, entry, declarant, period, base, items)
+        if d.invoice:
+            invoices.append(d.invoice)
     last = max([(Land if t["subject"] == "Land" else Member).max_id() for t in entries], default=0)
     return {"policy": policy.id, "invoices": invoices, "count": len(invoices), "skipped": skipped,
             "next": start + count if start + count <= last else None}
