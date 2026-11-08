@@ -3,6 +3,7 @@ import sys
 
 from core import auth
 from core import chain
+from core import ranges
 from core.db import Fail
 
 OPS = {}
@@ -74,6 +75,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
         user = by if origin == "replay" else claimed or by
         grant = auth.authorize(user, by, name, spec, args, origin, declared)
+        ranges.check(name, args)
         if spec["check"]:
             spec["check"](args)
         governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None

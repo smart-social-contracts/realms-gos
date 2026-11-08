@@ -1,6 +1,6 @@
 import json
 
-from core import auth, chain
+from core import auth, chain, ranges
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
 from ggg import (Appointment, Calendar, Contract, Delegation, Department, Mandate, Member, Proposal, ProposalEdge,
                  Realm, Task, TaskSchedule, Vote)
@@ -9,6 +9,8 @@ from core.op import dispatch, op, ops
 from core.ratio import ONE, refuse_renamed
 
 CHOICES = ("yes", "no", "abstain")
+# What a threshold is a share of, the looser first: a stricter rule can only move to the right (ggg I-GOV-3).
+BASES = ("cast", "eligible")
 OPEN = ("draft", "voting")
 # Proposals that can still vote or run, so their department must stay.
 PENDING = OPEN + ("accepted", "execution_scheduled")
@@ -53,6 +55,7 @@ def check_action(action):
         raise Fail(f"unknown operation '{action.get('op')}'")
     if "on_behalf_of" in (action.get("args") or {}):
         raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, as its proposer")
+    ranges.check(action["op"], action.get("args") or {})
 
 
 def check_scope(department, action):
@@ -128,24 +131,77 @@ def filer(p):
     return grant.delegate if grant else ""
 
 
-def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=(), grant=""):
+def default_rule(department):
+    """The rule that decides the proposals of ``department`` unless a proposer states a stricter one (ggg I-GOV-3). The
+    realm's own, over the votes cast, with the casting vote of its governed configuration; a department's m of the n
+    seats of its policy, rounded down, with the policy's quorum. A department's threshold is a share of its policy's n,
+    never of the seats that happen to be filled: a vacancy does not make a vote easier."""
+    if department.is_root:
+        rules = settings()
+        return {"threshold": int(rules.get("voting_threshold", ONE // 2)), "quorum": int(rules.get("voting_quorum", 0)),
+                "threshold_of": "cast", "casting_vote": rules.get("casting_vote", "")}
     policy = department.policy or {}
+    return {"threshold": int(policy.get("m", 1)) * ONE // int(policy.get("n", 1)),
+            "quorum": int(policy.get("quorum", 0)), "threshold_of": "eligible", "casting_vote": ""}
+
+
+def whole(name, value):
+    """``value`` as a whole number, or a refusal naming ``name``: ``int`` raises on a word, and the call would trap."""
+    number = ranges.numeral(value)
+    if not isinstance(number, int):
+        raise Fail(f"{name} is a whole number")
+    return number
+
+
+def stricter_rule(department, stated):
+    """The default rule of ``department`` with what ``stated`` (a proposer's ``threshold``, ``quorum``, ``threshold_of``)
+    makes stricter. A weaker one is refused: legislation's guards may demand a stricter rule and must not be undone."""
+    rule = default_rule(department)
+    for name in ("threshold", "quorum"):
+        if stated.get(name) is not None:
+            value = whole(name, stated[name])
+            if value < rule[name]:
+                raise Fail(f"{name} {value} is weaker than the {rule[name]} that decides {department.id}")
+            rule[name] = value
+    basis = stated.get("threshold_of")
+    if basis is not None:
+        if basis not in BASES:
+            raise Fail(f"threshold_of is one of {', '.join(BASES)}")
+        if BASES.index(basis) < BASES.index(rule["threshold_of"]):
+            raise Fail(f"threshold_of {basis} is weaker than {rule['threshold_of']}, which decides {department.id}")
+        rule["threshold_of"] = basis
+    return rule
+
+
+def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=(), grant="",
+                 stated=None):
+    """File a proposal. ``stated``: the proposer's ``kind``, ``matter`` and stricter rule; a proposal filed without
+    it takes the default rule of its scope."""
+    stated = stated or {}
+    rule = stricter_rule(department, stated)
     p = Proposal(id=next_id(Proposal, "P"), title=title, description=description, proposer=user,
                  on_behalf_of=user if by != user else "", filed_under=grant, department=department, action=action,
-                 status="voting", opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
-                 effective_at=effective_at, links=list(links),
-                 threshold=int(settings().get("voting_threshold", ONE // 2)),
-                 quorum=int(settings().get("voting_quorum", 0) if department.is_root else policy.get("quorum", 0)))
+                 kind=stated.get("kind") or "", matter=stated.get("matter") or "", status="voting",
+                 opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
+                 effective_at=effective_at, links=list(links), **rule)
     for link in links:
         ProposalEdge(id=next_id(ProposalEdge, "L"), source=p.id, target=link["proposal"], kind=link["kind"])
         if link["kind"] == "replaces":
             Proposal[link["proposal"]].replaced_by = p.id
-    p.tally = {c: 0 for c in CHOICES}
-    if not department.is_root:
-        p.tally = {**p.tally, "required": int(policy.get("m", 1)), "veto": list(policy.get("veto", []))}
+    open_vote(p)
     if p.deadline:
         arm(p)
     return p
+
+
+def open_vote(p):
+    """Start the tally and count the eligible voters, for the quorum and for the end when everyone has voted: a member who
+    joins or a seat that fills later does not change it (ggg I-GOV-3). A department's vote keeps the policy's n, which its
+    threshold is a share of (``seats``), and its veto holders, as they are now."""
+    p.tally = {**{c: 0 for c in CHOICES}, "eligible": electorate_size(p)}
+    if scoped_to_department(p):
+        policy = p.department.policy or {}
+        p.tally = {**p.tally, "seats": int(policy.get("n", 1)), "veto": list(policy.get("veto", []))}
 
 
 def arm(p):
@@ -271,10 +327,18 @@ def electorate_size(p):
     return len(holders(p.department) | ({p.department.head} - {""}))
 
 
+def scoped_to_department(p):
+    """Whether a department decides ``p`` (by its seats), not the whole realm (by its members)."""
+    return p.department is not None and not p.department.is_root
+
+
 def count(p):
-    """The tally kept as votes are cast, the number of eligible voters and whether a veto holder voted no."""
+    """The tally kept as votes are cast, the number of eligible voters counted when the vote opened and whether a veto
+    holder voted no."""
     tally = {c: int((p.tally or {}).get(c, 0)) for c in CHOICES}
-    size = electorate_size(p)
+    size = (p.tally or {}).get("eligible")
+    if size is None:  # a vote opened before the count was kept: count now
+        size = electorate_size(p)
     vetoes = (Vote[f"{p.id}:{v}"] for v in (p.tally or {}).get("veto", []))
     return tally, size, any(v is not None and v.choice == "no" for v in vetoes)
 
@@ -291,33 +355,55 @@ def veto_pending(p):
 
 
 def department_outcome(p, tally, size, vetoed, final):
-    """A department's vote passes with ``m`` approvals, no veto holder against and the policy's quorum met (ggg
-    I-GOV-3). Before it ends it is accepted only once every veto holder who can still vote has voted, and it is never
-    rejected: a no can still be replaced (ggg I-GOV-7)."""
-    passes = tally["yes"] >= p.tally["required"] and not vetoed and quorum_met(p, tally, size)
+    """A department's vote passes when the yes votes reach its threshold of the policy's n seats (exactly m under the
+    policy's own rule, ceil(threshold * n) under a stricter one), no veto holder is against and the policy's quorum is met
+    among the ``size`` eligible (ggg I-GOV-3). Before it ends it is accepted only once every veto holder who can still
+    vote has voted, and it is never rejected: a no can still be replaced (ggg I-GOV-7)."""
+    passes = (tally["yes"] > 0 and tally["yes"] * ONE >= p.threshold * p.tally["seats"] and not vetoed
+              and quorum_met(p, tally, size))
     if passes and (final or not veto_pending(p)):
         return "accepted"
     return "rejected" if final else None
+
+
+def exceeds(p, tally, size):
+    """Whether the yes votes of a realm-wide proposal exceed its threshold of the votes cast, or of all the eligible."""
+    basis = size if p.threshold_of == "eligible" else tally["yes"] + tally["no"]
+    return tally["yes"] * ONE > p.threshold * basis
+
+
+def decided_by_casting_vote(p, tally):
+    """Whether the yes votes stand exactly at the threshold of the yes and no votes cast and the realm's casting member,
+    who is still one of the voters, voted yes (ggg I-GOV-3). Only the votes cast can tie."""
+    caster = Vote[f"{p.id}:{p.casting_vote}"] if p.casting_vote and eligible(p, p.casting_vote) else None
+    return (p.threshold_of == "cast" and caster is not None and caster.choice == "yes"
+            and tally["yes"] * ONE == p.threshold * (tally["yes"] + tally["no"]))
+
+
+def cannot_pass(p, tally, size):
+    """Whether a realm-wide proposal fails even if everyone who has yet to vote says yes. A tie at the threshold is not
+    yet failed while there is a casting vote, which may decide it."""
+    best, limit = (size - tally["no"]) * ONE, p.threshold * size
+    return best < limit or (best == limit and not (p.threshold_of == "cast" and p.casting_vote))
 
 
 def outcome(p, final):
     tally, size, vetoed = count(p)
     # A vote ends at its deadline, or earlier, the moment every eligible member has voted (ggg I-GOV-7).
     final = final or (size > 0 and sum(tally.values()) >= size)
-    if "required" in (p.tally or {}):
+    if scoped_to_department(p):
         return department_outcome(p, tally, size, vetoed, final)
     if not p.deadline and not final:
-        # No deadline: open until certain. Yes alone over the threshold of everyone eligible passes it; enough no
-        # that the rest voting yes could not pass it fails it; once everyone has voted, it is decided as is.
+        # No deadline: open until certain. Yes alone over the threshold of everyone eligible passes it; if even all the
+        # rest voting yes could not pass it, it fails; once everyone has voted, it is decided as is.
         if tally["yes"] * ONE > p.threshold * max(size, 1) and quorum_met(p, tally, size):
             return "accepted"
-        if tally["no"] * ONE >= (ONE - p.threshold) * max(size, 1):
+        if cannot_pass(p, tally, max(size, 1)):
             return "rejected"
         final = sum(tally.values()) >= size
     if not final:
         return None
-    decisive = tally["yes"] + tally["no"]
-    passes = quorum_met(p, tally, size) and decisive and tally["yes"] * ONE > p.threshold * decisive
+    passes = quorum_met(p, tally, size) and (exceeds(p, tally, size) or decided_by_casting_vote(p, tally))
     return "accepted" if passes else "rejected"
 
 
@@ -338,12 +424,17 @@ def effective_at_of(args):
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
-    governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
+    governs). Voting opens at once. Optional ``kind`` and ``matter``: what it is and what it decides, in the realm's words.
+    Optional ``threshold``, ``quorum`` (hundred-millionths) and ``threshold_of`` (``cast`` or ``eligible``): a rule
+    stricter than the scope's own, which decides it, fixed like the action. A realm-wide proposal's default is the
+    realm's threshold and quorum over the votes cast, a department's m of the n seats of its policy; a weaker rule
+    is refused. Under ``cast`` a tie at the threshold is accepted only if the realm's casting member voted yes.
+    Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
     instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier once every eligible
-    member has voted (or, in a department, once it has ``m`` approvals, every veto holder who can still vote has
-    voted, none against, and its quorum is met; or, for a realm-wide proposal in a realm whose voting window is 0, once
-    the outcome is certain), whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and
-    nothing runs.
+    member has voted (or, in a department, once its yes votes reach its threshold (``m`` approvals under the policy's own
+    rule), every veto holder who can still vote has voted, none against, and its quorum is met; or, for a realm-wide
+    proposal in a realm whose voting window is 0, once the outcome is certain), whenever it is closed; if it ends after
+    ``effective_at`` the proposal ends ``expired`` and nothing runs.
     Optional ``links``, at most 16 of ``{kind, proposal}`` (``replaces`` or ``relates_to``), each proposal named once and
     fixed at creation: ``replaces`` names a withdrawn proposal of yours that no other proposal replaces yet.
     Under a power of attorney a proposal is a motion: it carries no action.
@@ -357,8 +448,9 @@ def proposal_create(c, args):
         check_action(action)
         check_scope(department, action)
     links = checked_links(c.user, args.get("links"))
+    stated = {k: args.get(k) for k in ("kind", "matter", "threshold", "quorum", "threshold_of")}
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
-                     effective_at_of(args), links, c.grant)
+                     effective_at_of(args), links, c.grant, stated)
     return {"proposal": p.id}
 
 
@@ -390,8 +482,9 @@ def proposal_linked_from(c, args):
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
     Voting again replaces your earlier vote, until the vote ends: at its deadline, or once every eligible member has
-    voted (in a department, once it has ``m`` approvals, every veto holder who can still vote has voted, none against,
-    and its quorum is met; for a realm-wide proposal in a realm with no voting window, once the outcome is certain).
+    voted (in a department, once its yes votes reach its threshold, every veto holder who can still vote has voted, none
+    against, and its quorum is met; for a realm-wide proposal in a realm with no voting window, once the outcome is
+    certain).
     Only an acceptance ends a department's vote early, so a no can be replaced until the deadline, or until every
     eligible member has voted; in a realm with no voting window a department's vote that can't pass on the votes cast
     so far stays open until it passes, everyone has voted, or its proposer withdraws it. After the vote ends no vote is
@@ -425,6 +518,7 @@ def proposal_open(c, args):
     if p.status != "draft":
         raise Conflict(f"{p.id} is not a draft")
     p.status, p.opens_at, p.deadline = "voting", chain.now(), chain.now() + window()
+    open_vote(p)
     return {"proposal": p.id}
 
 
@@ -564,26 +658,43 @@ def contract_terminate(c, args):
     return {"contract": k.id}
 
 
+def casting_member(principal):
+    """The casting member a ``governance_update`` names, as ``department_edit`` names a head: the principal of an active
+    member, or "" for nobody."""
+    member = Member[principal] if isinstance(principal, str) and principal else None
+    if principal != "" and (member is None or member.status != "active"):
+        raise Fail('casting_vote is the principal of an active member, or "" for nobody')
+    return principal
+
+
 def voting_rules(args):
-    """The ratios of a ``governance_update`` call, refused if they are not between 0 and 100 %, or the old names."""
+    """The rules of a ``governance_update`` call, as they are stored: the ratios, refused if they are not between 0 and
+    100 %, or the old names, and the casting vote, refused unless it names an active member. The voting window is kept
+    elsewhere and only checked here, to be a whole number."""
     refuse_renamed(args, {"threshold": "voting_threshold", "quorum_percent": "voting_quorum"})
-    ratios = {k: int(args[k]) for k in ("voting_threshold", "voting_quorum") if k in args}
-    if any(not 0 <= v <= ONE for v in ratios.values()):
+    if "voting_window" in args:
+        whole("voting_window", args["voting_window"])
+    rules = {k: whole(k, args[k]) for k in ("voting_threshold", "voting_quorum") if k in args}
+    if any(not 0 <= v <= ONE for v in rules.values()):
         raise Fail(f"a threshold and a quorum are between 0 and {ONE} (100 %)")
-    return ratios
+    if args.get("casting_vote") is not None:
+        rules["casting_vote"] = casting_member(args["casting_vote"])
+    return rules
 
 
 @op("governance.update", governed=launched, check=voting_rules)
 def governance_update(c, args):
     """Set the voting rules for new proposals, any of: ``voting_window`` (seconds), ``voting_threshold`` (the share of
-    the yes and no votes the yes votes of a realm-wide proposal must exceed) and ``voting_quorum`` (the share of the
-    members who must vote on it), both in hundred-millionths: 50 % is 50000000."""
-    ratios = voting_rules(args)
+    the yes and no votes the yes votes of a realm-wide proposal must exceed), ``voting_quorum`` (the share of the
+    members who must vote on it), both in hundred-millionths: 50 % is 50000000, and ``casting_vote``: an active member
+    whose yes decides a tie at the threshold of a realm-wide proposal, or "" for nobody. A proposal copies the casting
+    vote when it is filed; if the member leaves, ties reject until another is set."""
+    rules = voting_rules(args)
     realm, cal = Realm["1"] or Realm(id="1"), Calendar["1"] or Calendar(id="1")
     if "voting_window" in args:
         cal.voting_window = int(args["voting_window"])
     data = realm.manifest_data or {}
-    data["governance"] = {**data.get("governance", {}), **ratios}
+    data["governance"] = {**data.get("governance", {}), **rules}
     realm.manifest_data = data
 
 
