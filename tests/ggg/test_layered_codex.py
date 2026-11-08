@@ -3,7 +3,9 @@ and how it sits beside a legacy codex. Nothing installs a layered codex yet, so 
 entities."""
 
 import hashlib
+import importlib.util
 import json
+import pathlib
 
 import pytest
 from ic_python_db import ManyToMany, ManyToOne, OneToMany, OneToOne
@@ -68,6 +70,27 @@ def test_the_same_legislation_fetched_by_two_routes_at_two_times_has_the_same_id
     here = two_chapters(route="https", fetched_at=9_000_000, vouched_by="eu/es", url="https://mirror.example/tax.py")
     assert there != here
     assert layered(there).id == layered(here).id
+
+
+def test_the_clis_canonical_json_and_codex_id_are_the_realms():
+    """``realms legislation resolve`` prints the id of a codex from its plan, and ``propose`` writes a change list as
+    canonical JSON: the CLI's copy (a module of its own, loaded by path as the CLI package is not this package)."""
+    from core import change_list
+    from realms.legislation import plan
+
+    path = pathlib.Path(__file__).resolve().parents[2] / "cli/realms/cli/commands/legislation_canonical.py"
+    spec = importlib.util.spec_from_file_location("legislation_canonical", path)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    assert cli.canonical({"b": "ñ", "a": [1]}) == store.canonical({"b": "ñ", "a": [1]}).encode()
+    sums = {name: "sha256:" + str(n) * 64 for n, name in enumerate(("a", "b", "c", "d"))}
+    relay = {"source": "eu/es", "layers": [{"source": "eu/es", "version": "1.0.0", "calendar": sums["a"],
+                                            "chapters": {"tax": sums["b"], "water": sums["c"]}}]}
+    planned = plan("eu/es/town", [relay], {"chapters": {"tax": sums["d"]}, "calendar": sums["b"]})
+    chapters = {chapter: {"sha256": item["sha256"]} for chapter, item in change_list.named(planned)}
+    assert len(chapters) == 5  # three chapters and two calendars
+    assert cli.codex_id(planned) == store.codex_id(planned.layers, planned.paths, chapters)
 
 
 def test_a_chapter_is_stored_once_under_its_checksum():

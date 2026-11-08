@@ -581,17 +581,62 @@ class Tax(above("tax")):
         op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Token:REALM"}, decimals=2))
 
 
-def test_a_codex_does_not_compute_a_tax_on_land_billed_in_another_token():
-    """A parcel's value is in the accounting currency: a codex that answers for a tax on land billed in another
-    token refuses the call, before anyone is billed."""
+def test_a_codex_does_not_compute_a_tax_billed_in_another_token():
+    """A parcel's value is in the accounting currency: a codex that answers for a tax billed in another token
+    refuses the call, before anyone is billed."""
     setup_taxes()
     Token(id="OTHER", ledger="other-ledger", decimals=CENTS)
     Land(id="L-1", owner="User:alice", width=1, height=1, assessed_value=2_345, area=1)
     ibi_codex()
     adopt_policy([IBI], document={"symbol": "OTHER"})
     refused = call("tax_assess", "bob", period="2026")
-    assert not refused["ok"] and "tax 'ibi_urban' on land is billed in OTHER" in refused["error"] and "REALM" in refused["error"]
+    assert not refused["ok"] and "tax 'ibi_urban' is billed in OTHER" in refused["error"] and "REALM" in refused["error"]
     assert Invoice.count() == 0 and TaxDeclaration.count() == 0
+
+
+# A tax on users whose chapter reads the parcels each of them holds: its amounts are in the accounting currency too.
+HOLDINGS = '''
+from ggg import Land
+from realms.legislation import above
+
+class Tax(above("tax")):
+    def compute_tax_assess(self, entry, subject):
+        return [{"concept": entry.code, "amount": sum([p.assessed_value.units for p in Land.find("owner", "User:" + subject.id)])}]
+'''
+WEALTH = {"code": "wealth", "kind": "tax", "subject": "User", "amount": 5, "facts": {}}
+
+
+def test_a_codex_does_not_compute_a_tax_on_users_billed_in_another_token_that_reads_the_parcels():
+    setup_taxes()
+    Token(id="OTHER", ledger="other-ledger", decimals=CENTS)
+    Land(id="L-1", owner="User:alice", width=1, height=1, assessed_value=2_345, area=1)
+    activate(layered({(TOWN, "tax"): HOLDINGS}, layers=[TOWN]))
+    adopt_policy([WEALTH], document={"symbol": "OTHER"})
+    refused = call("tax_assess", "bob", period="2026")
+    assert not refused["ok"] and "tax 'wealth' is billed in OTHER" in refused["error"] and "REALM" in refused["error"]
+    assert Invoice.count() == 0 and TaxDeclaration.count() == 0
+
+
+def test_the_same_tax_on_users_billed_in_the_accounting_currency_is_computed():
+    setup_taxes()
+    Land(id="L-1", owner="User:alice", width=1, height=1, assessed_value=2_345, area=1)
+    Land(id="L-2", owner="User:alice", width=1, height=1, assessed_value=100, area=1)
+    activate(layered({(TOWN, "tax"): HOLDINGS}, layers=[TOWN]))
+    adopt_policy([WEALTH])
+    ok("tax_assess", "bob", period="2026")
+    assert ibi_items("User:alice") == [("wealth", 2_445)] and ibi_items("User:bob") == []
+
+
+def test_tax_assess_reads_the_accounting_currency_once_whatever_the_number_of_answers(monkeypatch):
+    setup_taxes()
+    for owner in ("alice", "bob", "dana"):
+        Land(id=f"L-{owner}", owner=f"User:{owner}", width=1, height=1, assessed_value=2_345, area=1)
+    ibi_codex()
+    adopt_policy([IBI], document={})  # no symbol of its own: the policy bills in the accounting currency
+    reads, real = [], taxes.currency
+    monkeypatch.setattr(taxes, "currency", lambda: reads.append(1) or real())
+    ok("tax_assess", "bob", period="2026")
+    assert len(reads) == 1 and Invoice.count() == 3
 
 
 def test_a_tax_on_land_in_another_token_is_billed_by_its_own_rate_where_no_codex_computes_it():
