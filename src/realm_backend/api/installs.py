@@ -15,25 +15,30 @@ A proposal with an ``effective_at`` stages at acceptance (steps 1 to 5, ``prepar
 that time is the switch: a job not done by then fails it, and the old codex keeps running. Without one, the job
 runs on acceptance and switches as soon as it is built. A failure at any step records its reason, drops the staged
 codex and leaves the active codex unchanged. Every step can run twice: the fetches skip what is stored, and the
-switch checks the active codex first. One job at a time: one caught by an upgrade waits ``paused`` for an admin's
-``codex_install_resume``; one not done in 24 hours fails. ``codex_status`` shows the job, its step and its error.
+switch checks the active codex first. One job at a time, and a staged job holds that place until its switch time
+(stopping its proposal frees it; a revert is not an install and stays allowed): one caught by an upgrade waits
+``paused`` for an admin's ``codex_install_resume``; one not done in 24 hours fails, as does a step that has not
+finished 15 minutes after it was armed (a step that ran out of instructions leaves no trace of its own).
+``codex_status`` shows the job, its step and its error.
 """
 
 import json
 
+from api import codex
 from core import chain
 from core import change_list
 from core import layered_codex as store
 from core import legislation
-from core.db import JSON_MAX, Conflict, Fail, each, find, next_id
-from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal, Realm
-from api import codex
+from core.db import JSON_MAX, Conflict, Fail, each, find, next_id, view
 from core.op import GENERATOR, op
+from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal, Realm
 
 STEPS = ("fetch_change_list", "check_change_list", "fetch_chapters", "check_sources", "build", "switch")
 WAIT = "wait"  # staged: the pending codex waits for its proposal's effective_at, which switches it
 TIMEOUT = 24 * 3600
 TIMED_OUT = "not done within 24 hours"
+STEP_LIMIT = 15 * 60  # seconds a step may take, outcall included, before the job is given up
+REUSED = ("status", "chapters", "proposal", "failures", "activates_at", "installed_at", "previous")  # of a row kept
 MAX_CHANGE_LIST = 64 * 1024
 MAX_CHAPTER = store.MAX_CHAPTER
 # The replica counts a reply's headers and its framing against max_response_bytes, not only its body: room for them,
@@ -86,7 +91,14 @@ def start(proposal, url, checksum):
 
 
 def arm(job_id):
+    """The job's current step in the next message, and a watch on it: a step that traps (the instruction limit)
+    leaves nothing behind, not even a note that it started, so the mark is made here, in the message before."""
+    job = InstallJob[job_id]
+    staged, name = job.staged, job.step
+    stamp = staged["armed"] = staged.get("armed", 0) + 1
+    job.staged = staged
     chain.set_timer(0, lambda: step(job_id))
+    chain.set_timer(STEP_LIMIT, lambda: unfinished(job_id, name, stamp))
 
 
 def watch(job_id, delay):
@@ -173,6 +185,9 @@ def step(job_id):
     except Fail as e:
         fail(InstallJob[job_id], str(e))
         return
+    except Exception as e:  # noqa: BLE001  anything else is a bug in a step: the job records it instead of hanging
+        fail(InstallJob[job_id], f"{type(e).__name__}: {e}")
+        return
     job = InstallJob[job_id]
     if following is None or job.status != "running":
         return
@@ -188,6 +203,13 @@ def expire(job_id):
         fail(job, TIMED_OUT)
 
 
+def unfinished(job_id, name, stamp):
+    """The step armed as ``stamp`` had STEP_LIMIT to finish: a job still running it has lost it."""
+    job = InstallJob[job_id]
+    if job is not None and job.status == "running" and job.step == name and job.staged.get("armed") == stamp:
+        fail(job, f"step {name} did not complete (likely the instruction limit)")
+
+
 def fail(job, reason):
     """The job ends here: its reason is recorded, the codex it staged is dropped and the active codex is untouched.
     A job that has ended keeps its reason: the late reply to an outcall it made changes nothing."""
@@ -195,8 +217,9 @@ def fail(job, reason):
         return
     waiting = LayeredCodex[job.staged["codex"]] if job.staged.get("codex") else None
     if waiting is not None and waiting.status == "pending":
-        if job.staged.get("was"):  # a row this legislation had before the install: back to what it was
-            waiting.status = job.staged["was"]
+        if job.staged.get("was"):  # the row this legislation had before the install: back to what it was
+            for field, value in job.staged["was"].items():
+                setattr(waiting, field, value)
         else:
             waiting.delete()
     job.staged, job.status, job.error, job.finished_at = {}, "failed", reason[:500], chain.now()
@@ -249,6 +272,8 @@ def fetch_chapter(job, entry):
     receives them. A generator."""
     refusals = []
     for index, url in enumerate(entry["urls"]):
+        if InstallJob[job.id].status != "running":  # stopped while an earlier URL was being tried
+            return
         try:
             status, body = yield from fetched(url, MAX_CHAPTER)
             job = InstallJob[job.id]
@@ -306,7 +331,7 @@ def build(job):
         raise Fail(f"a codex of {len(entries)} chapters with these URLs is more than the realm stores per codex")
     when = activates_at_of(job)
     row = LayeredCodex[codex_id]
-    was = row.status if row is not None else ""
+    was = view(row, *REUSED) if row is not None else None  # a legislation the realm ran before keeps its row
     if row is None:
         row = LayeredCodex(id=codex_id)
     row.layers, row.layer_paths, row.chapters = planned.layers, planned.paths, entries
@@ -318,22 +343,26 @@ def build(job):
 def finish(job):
     """Step 6, the switch: the pending codex becomes active and the previous one is kept, in this message. The
     active codex is checked first: already this one, nothing happens; another than the change list replaces, the
-    install is stale and fails. A generator: the runtime's ``on_codex_activate`` hooks run."""
+    install is stale and fails. The job is done before the ``on_codex_activate`` hooks run, last: a hook never fails
+    the switch (§9.3), and one that traps after a call it made takes nothing of the switch with it. A generator."""
     waiting = LayeredCodex[job.staged["codex"]] if job.staged.get("codex") else None
     if waiting is None:
         raise Fail("nothing is staged")
     current = codex.active()
-    if current is None or current.id != waiting.id:
-        current_id = current.id if current else None
-        if current_id != job.staged.get("replaces"):
-            raise Fail(f"stale: the change list replaces {job.staged.get('replaces') or 'no codex'}, "
-                       f"the active codex is {current_id or 'none'}")
-        if waiting.status != "pending":
-            raise Conflict(f"{waiting.id} is {waiting.status}, not pending")
-        yield from codex.switch(waiting)
-        waiting.installed_at = chain.now()
-        remember_source(waiting.layers[-1])
+    if current is not None and current.id == waiting.id:
+        job.step, job.status, job.finished_at = "switch", "done", chain.now()
+        return
+    current_id = current.id if current else None
+    if current_id != job.staged.get("replaces"):
+        raise Fail(f"stale: the change list replaces {job.staged.get('replaces') or 'no codex'}, "
+                   f"the active codex is {current_id or 'none'}")
+    if waiting.status != "pending":
+        raise Conflict(f"{waiting.id} is {waiting.status}, not pending")
+    codex.switch(waiting)
+    waiting.installed_at = chain.now()
+    remember_source(waiting.layers[-1])
     job.step, job.status, job.finished_at = "switch", "done", chain.now()
+    yield from legislation.activate(waiting)
 
 
 RUN = {"fetch_change_list": fetch_change_list, "check_change_list": check_change_list,

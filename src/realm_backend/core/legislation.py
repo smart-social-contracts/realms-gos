@@ -30,7 +30,8 @@ from core.op import GENERATOR, SECRET, Call, direct, filing, ops
 import core.legislation_sandbox  # noqa: F401  bundled with the realm for its text (core.sandbox.module_source); never run here
 
 # The operations no chapter may hook, guard or forbid, as realms.legislation.chapter.RESERVED lists them; written here
-# too because the realm never compiles the library in its own interpreter (a test keeps the two equal).
+# too because the realm compiles the library in its own interpreter only when an install checks a change list, and
+# the runtime needs the list before that (a test keeps the two equal).
 RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
 ACTIONS = ("ggg_read", "local_day")  # what a chapter may ask the realm, through the sandbox's rpc
 # Instructions the realm spends answering one sandbox call's reads, at most: past it the reads are refused and the
@@ -135,6 +136,8 @@ def build(plan, sources, facts=None):
         out = {"views": box.call("views"), "cedar": _ok(box.call("cedar"))["cedar"] if facts else None, "errors": []}
     except Fail as e:
         out = {"views": {}, "cedar": None, "errors": [str(e)]}
+    except RuntimeError as e:  # the sandbox itself failed on a call: the budget, or a chapter that broke it
+        out = {"views": {}, "cedar": None, "errors": [f"the codex failed while building: {e}"]}
     finally:
         if box is not None:
             box.close()

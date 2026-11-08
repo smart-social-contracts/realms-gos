@@ -48,8 +48,7 @@ def live_job():
 
 def start_job(proposal, change_list):
     """Begin the install of ``change_list`` (``{url, checksum}``) for ``proposal``. Refused while another job is
-    running or paused: a paused one waits for an admin (§9.2)."""
-    live = live_job()
-    if live is not None:
-        raise Conflict(f"an install is {live.status}")
+    running or paused (a paused one waits for an admin, a staged one for its switch time, §9.2)."""
+    if live_job() is not None:
+        raise Conflict("an install is running")
     return InstallJob(id=next_id(InstallJob, "J"), proposal=proposal, change_list=change_list, started_at=chain.now())

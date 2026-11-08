@@ -16,6 +16,21 @@ from fixtures import legislation as arcadia
 from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal
 from kit import call, denied, fire_timers, later, ok
 
+TRAPPING_REALM_CHAPTER = '''
+from realms.legislation import above
+
+class Realm(above("realm")):
+    def on_codex_activate(self, event):
+        self.ggg.t_trap_after_call(codex=event.args["codex"])
+'''
+
+
+@op.op("treasury.manage")
+def t_trap_after_call(c, args):
+    """A hook's effect that calls another canister and then fails: the message traps after its await."""
+    yield from fake_chain.call("elsewhere", "ping")
+    raise ValueError("the effect broke after its call")
+
 HOUR = 3600
 WEB = "https://legislation.example.test/"
 LIST_URL = WEB + "changes/arcadia/first.json"
@@ -382,6 +397,72 @@ def test_an_upgrade_while_a_staged_codex_waits_for_its_time_changes_nothing(real
     later(HOUR)
     fire_timers()
     assert Proposal[p].status == "executed" and active_id() == expected_id(own_layer())
+
+
+def test_an_unexpected_exception_in_a_step_is_recorded_as_the_jobs_failure(realm, monkeypatch):
+    def broken(job):
+        raise TypeError("a bug in a step")
+
+    monkeypatch.setitem(installs.RUN, "check_change_list", broken)
+    ok("codex_install", "ctl", **change_list(own_layer()))
+    run_job()
+    assert (job()["status"], job()["step"], job()["error"]) == ("failed", "check_change_list", "TypeError: a bug in a step")
+    assert active_id() is None
+
+
+def test_a_step_that_never_finishes_is_given_up_after_its_time(realm):
+    ok("codex_install", "ctl", **change_list(own_layer()))
+    fire_due()  # step 1 done, step 2 armed: its watch is the delayed timer left
+    armed = job()["step"]
+    fake_chain.state["timers"] = [(secs, cb) for secs, cb in fake_chain.state["timers"] if secs]  # the step is lost
+    fire_timers()  # its watch fires: the step was armed and never finished
+    assert job()["status"] == "failed" and job()["error"] == f"step {armed} did not complete (likely the instruction limit)"
+    assert active_id() is None
+
+
+def test_a_watch_whose_step_finished_in_time_does_nothing(realm):
+    ok("codex_install", "ctl", **change_list(own_layer()))
+    run_job()  # every step done: the watches are the delayed timers left over
+    assert job()["status"] == "done"
+    later(installs.STEP_LIMIT)
+    fire_timers()
+    assert job()["status"] == "done" and active_id() == expected_id(own_layer())
+
+
+def test_a_failed_install_of_legislation_the_realm_ran_before_gives_its_row_back_whole(realm, monkeypatch):
+    first, second = own_layer(), {**own_layer(), "arcadia/tax": chapter_text("tax", "2.0.0")}
+    install(change_list(first))
+    install(change_list(second, replaces=expected_id(first), url=WEB + "changes/second.json"))
+    ok("codex_revert", "ctl")  # back to the first: the second's row stays, reverted
+    before = LayeredCodex[expected_id(second)]
+    assert before.status == "reverted" and before.proposal == ""
+    kept = dict((k, getattr(before, k)) for k in installs.REUSED)
+    # Installing the second again, now with a URL of its own and a failure at the switch: the row is as it was.
+    monkeypatch.setattr(installs, "activates_at_of", lambda job: 0)
+    args = change_list({"arcadia/tax": second["arcadia/tax"]}, replaces=expected_id(first), url=WEB + "changes/third.json")
+    ok("codex_install", "ctl", **args)
+    run_until("switch")
+    row = LayeredCodex[expected_id(second)]
+    assert row.status == "pending" and row.chapters["arcadia/tax"]["route"] == "stored"  # the row was rewritten
+    assert kept["chapters"]["arcadia/tax"]["route"] == "https"
+    ok("codex_uninstall", "ctl")  # the active codex changes under the staged switch: it is stale
+    fire_due()
+    assert job()["status"] == "failed" and "stale" in job()["error"]
+    row = LayeredCodex[expected_id(second)]
+    assert {k: getattr(row, k) for k in installs.REUSED} == kept
+
+
+def test_the_switch_stands_when_a_hook_traps_after_a_call_it_made(realm):
+    layer = {**own_layer(realm_chapter=TRAPPING_REALM_CHAPTER)}
+    ok("codex_install", "ctl", **change_list(layer))
+    run_until("switch")
+    with pytest.raises(fake_chain.Trap, match="the effect broke after its call"):
+        fire_due()
+    # The fake chain keeps every write of the trapped message; the real one keeps those made before the await, and
+    # the switch writes all come before the hooks run (installs.finish).
+    seen = status()
+    assert seen["codex"]["id"] == expected_id(layer) and seen["job"]["status"] == "done"
+    assert installs.own_source() == "arcadia"
 
 
 def test_a_switch_whose_codex_cannot_load_leaves_the_active_codex_and_the_runtime_as_they_were(realm, monkeypatch):

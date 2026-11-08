@@ -12,6 +12,7 @@ from core.layered_codex import MAX_CHAPTER
 
 KIND, FORMAT = "realms-gos/legislation-change", 1
 MAX_CHAPTERS = 50
+MAX_MIRRORS = 4  # every URL tried is an outcall the realm pays for
 CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar (§7)
 REALM = "realm"  # the domain only the realm's own layer fills (§3)
 # GGG's domain list, the ggg submodule's domains.json (tests/ggg keeps the two equal).
@@ -28,6 +29,8 @@ def parse(text):
         data = json.loads(text)
     except ValueError as e:
         raise Fail(f"the change list is not JSON: {e}")
+    except RecursionError:
+        raise Fail("the change list is nested too deep")
     if not isinstance(data, dict) or data.get("kind") != KIND or data.get("format") != FORMAT:
         raise Fail(f'the change list is not {{"kind": "{KIND}", "format": {FORMAT}}}')
     realm = data.get("realm")
@@ -61,7 +64,12 @@ def parse(text):
 def _entry(entry):
     chapter = entry.get("chapter")
     source, domain = chapter_id(chapter)
-    urls = [entry.get("url")] + list(entry.get("mirrors") or [])
+    mirrors = entry.get("mirrors") or []
+    if not isinstance(mirrors, list):
+        raise Fail(f"{chapter}: mirrors is a list of URLs")
+    if len(mirrors) > MAX_MIRRORS:
+        raise Fail(f"{chapter}: at most {MAX_MIRRORS} mirrors, not {len(mirrors)}")
+    urls = [entry.get("url")] + mirrors
     for url in urls:
         if not isinstance(url, str) or not url.startswith("https://"):
             raise Fail(f"{chapter}: a chapter is fetched over https, not {url!r}")

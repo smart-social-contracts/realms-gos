@@ -1075,7 +1075,8 @@ Limits:
 
 - change list ≤ 64 KB;
 - each chapter ≤ 256 KB;
-- ≤ 50 chapters per change list.
+- ≤ 50 chapters per change list;
+- ≤ 4 mirrors per chapter: every URL the realm tries is an outcall it pays for.
 
 These all fit within one HTTPS outcall each (2 MB maximum). A canister-to-canister fetch from a sync
 source has no 2 MB limit; the 256 KB chapter limit stays.
@@ -1261,7 +1262,8 @@ The job's other rules:
   `codex.install`, not governed: it only re-runs the step the job stopped in and cannot change what the
   vote approved); the step it stopped in then runs again.
 - **One job at a time:** a second install while one runs is refused with `Conflict("an install is
-  running")`.
+  running")`, the legacy path included. A staged install holds that place until its switch time; stopping its
+  proposal frees it. A revert is not an install and stays allowed.
 - **Timeout:** a job not finished within 24 hours fails.
 - **Status:** `ggg_codex_status` shows the job, its step and its error.
 

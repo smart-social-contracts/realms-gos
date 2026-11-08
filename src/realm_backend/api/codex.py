@@ -98,11 +98,11 @@ def switch_to(row, replaced):
 
 def switch(waiting):
     """The switch of an install (docs/codices/layered-codex.md §9.2 step 6): the pending ``waiting`` becomes the
-    active codex in place of the current one, kept to revert to, and its ``on_codex_activate`` hooks run. The
-    runtime loads it first: a codex that does not load raises before anything changes. A generator."""
+    active codex in place of the current one, kept to revert to. The runtime loads it first: a codex that does not
+    load raises before anything changes. The ``on_codex_activate`` hooks (``legislation.activate``) are the caller's
+    to run once its own writes are done: a hook never fails the switch (§9.3)."""
     legislation.load(waiting)
     switch_to(waiting, active())
-    yield from legislation.activate(waiting)
 
 
 @op("codex.install", governed=realm_wide, returns="codex")
@@ -117,7 +117,7 @@ def codex_install(c, args):
 
         return (yield from installs.begin(c, args))
     if store.live_job() is not None:
-        raise Conflict(f"an install is {store.live_job().status}")
+        raise Conflict("an install is running")
     if "source" in args:
         manifest, source, namespace = args["manifest"], args["source"], None
     else:

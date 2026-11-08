@@ -322,3 +322,25 @@ def test_j_what_each_step_costs(net, site, people, costs):
     costs.measure(lab, "install step 6: switch (load, activate, the realm hook)",
                   LAB % args + "from core.op import run\nrun(installs.finish(job))")
     assert active_id(lab) == expected_id(layer) and status(lab)["job"]["status"] == "done"
+
+
+TRAPPING_REALM_CHAPTER = '''
+from realms.legislation import above
+
+class Realm(above("realm")):
+    def on_codex_activate(self, event):
+        self.ggg.realm_register(registry="aaaaa-aa")  # the management canister has no such method: the call is
+        # rejected after the await and the effect traps
+'''
+
+
+def test_k_the_switch_stands_when_the_realm_hook_traps_after_a_call_it_made(net, town, site, people):
+    current = active_id(town)
+    layer = {**own_layer(people["founder"]), "arcadia/realm": TRAPPING_REALM_CHAPTER.encode()}
+    town.govern("codex_install", site.change_list(layer, replaces=current, remove=["arcadia/water"]))
+    job = settled(net, town)
+    assert (job["status"], job["step"]) == ("done", "switch"), job
+    seen = status(town)
+    assert seen["codex"]["id"] == expected_id(layer) and seen["codex"]["previous"] == current and seen["pending"] is None
+    net.wait(5)  # the trapped hook took nothing with it, and the realm goes on under the new codex
+    assert active_id(town) == expected_id(layer) and status(town)["healthy"]

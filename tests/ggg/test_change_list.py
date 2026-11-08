@@ -32,6 +32,11 @@ def refused(fn, *args, match, **kw):
 # ---- parse
 
 
+def test_four_mirrors_are_the_most_a_chapter_may_have():
+    parsed = change_list.parse(text(set=[entry("town/tax", mirrors=[URL + f"m{n}/tax.py" for n in range(4)])]))
+    assert len(parsed["set"][0]["urls"]) == 5
+
+
 def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and_checksum():
     parsed = change_list.parse(text(set=[entry("town/tax", mirrors=[URL + "mirror/tax.py"])], summary={"en": "x"}))
     assert parsed["realm"] == "town" and parsed["replaces"] is None and parsed["summary"] == {"en": "x"}
@@ -51,6 +56,10 @@ def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and
     (text(set=[entry("town/tax"), entry("town/tax")]), "twice"),
     (text(set=[{**entry("town/tax"), "url": "http://x"}]), "over https"),
     (text(set=[{**entry("town/tax"), "mirrors": ["ftp://x"]}]), "over https"),
+    (text(set=[{**entry("town/tax"), "mirrors": "https://x"}]), "mirrors is a list"),
+    (text(set=[{**entry("town/tax"), "mirrors": {"a": 1}}]), "mirrors is a list"),
+    (text(set=[entry("town/tax", mirrors=[URL + f"m{n}/tax.py" for n in range(5)])]), "at most 4 mirrors, not 5"),
+    ("[" * 100_000 + "]" * 100_000, "nested too deep"),
     (text(set=[{**entry("town/tax"), "sha256": "sha256:" + "0" * 64}]), "64 hex digits"),
     (text(set=[{**entry("town/tax"), "sha256": "0" * 63}]), "64 hex digits"),
     (text(set=[entry("town/tax", size=0)]), "size is between"),
