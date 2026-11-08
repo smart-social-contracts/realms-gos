@@ -115,7 +115,9 @@ def test_a_chapter_loads_through_the_canisters_copy_of_the_library(realm):
     print(
         f"first use: import {cost['import']:,} instructions, two chapters {cost['load']:,}"
     )
-    assert cost["import"] + cost["load"] < 400_000_000, cost
+    # The library's import closure compiles once per upgrade: measured at 371M instructions with the
+    # F expressions (S2) and 427M with the resolver (S3) too, on basilisk 0.16.
+    assert cost["import"] + cost["load"] < 600_000_000, cost
 
 
 RESOLVER_CODE = '''
