@@ -22,6 +22,7 @@ from typing import List, Optional
 import typer
 from rich.console import Console
 
+from realms.cli.commands.legislation_cases import case_problems
 from realms.cli.commands.legislation_layout import layout_problems
 from realms.legislation import Codex, LegislationError, Refused, subset_ast
 from realms.legislation.paths import REALM
@@ -138,8 +139,9 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
                 break  # the layers below build on this one
     try:
         codex.check()
-        if not problems:  # `uses` is read from a codex that loaded whole: a chapter that did not load would be a false "no such domain"
+        if not problems:  # read from a codex that loaded whole: a chapter that did not load would be a false "no such domain"
             check_uses(codex)
+            problems += case_problems(tree, codex, realm)
     except LegislationError as e:
         problems.append(str(e))
     return problems

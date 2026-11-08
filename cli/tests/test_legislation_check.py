@@ -442,3 +442,229 @@ def test_a_refusal_in_a_layer_shows_once_though_every_realm_below_runs_the_layer
     assert out.exit_code == 1
     assert out.output.count("a default argument is state shared by every call") == 1
     assert "1 refused" in out.output
+
+
+# ── Test cases (§12.3): <domain>.cases.json beside a chapter, run on the realm's codex ──
+
+RATE_AND_BONUS = """from realms.legislation import above, overridable, pct
+
+class Tax(above('tax')):
+    rate = overridable(pct("1.10"), legislation='TRLRHL Art. 72.3')
+
+    @overridable(legislation='TRLRHL Art. 74')
+    def bonus(self, owner):
+        return 0
+"""
+VALENCIA_BONUS = """from realms.legislation import above, pct
+
+class Tax(above('tax')):
+    rate = pct("1.24")
+
+    def bonus(self, owner):
+        return 60 if owner == "User:alice" else 0
+"""
+GUARD = """from realms.legislation import above, extension
+
+class LocalRegime(above('local_regime')):
+    @extension(legislation='Ley 7/1985 Art. 65.2')
+    def check_realm_join(self, args):
+        if self.local_day(self.now()) < "2027-01-01":
+            return self.deny("not before 2027")
+        if args.code is None and not self.approved_by("Administration"):
+            return self.deny("a code or the Administration")
+"""
+
+
+def with_cases(tree, path, cases, chapter=None):
+    if chapter is not None:
+        write(tree, path.replace(".cases.json", ".py"), chapter)
+    write(tree, path, cases)
+
+
+def case_run(tree, realm="eu/es"):
+    out = run(str(tree), "--realm", realm)
+    return out.exit_code, out.output
+
+
+def test_a_call_case_reads_a_setting_or_calls_a_helper_of_the_resolved_domain(tree):
+    write(tree, "eu/es/tax.py", RATE_AND_BONUS)
+    write(tree, "eu/es/vc/46250-valencia/tax.py", VALENCIA_BONUS)
+    cases = [
+        {"name": "Spain's cap", "call": "rate", "returns": 1100000},
+        {
+            "name": "no bonus by default",
+            "call": "bonus",
+            "args": ["User:alice"],
+            "returns": 0,
+        },
+        {
+            "name": "València's cap",
+            "realm": VALENCIA,
+            "call": "rate",
+            "returns": 1240000,
+        },
+        {
+            "name": "València's bonus",
+            "realm": VALENCIA,
+            "call": "bonus",
+            "args": ["User:alice"],
+            "returns": 60,
+        },
+    ]
+    write(tree, "eu/es/tax.cases.json", cases)
+    assert case_run(tree, "eu/es")[0] == 0
+    assert case_run(tree, VALENCIA)[0] == 0
+    cases[0]["returns"], cases[3]["returns"] = 1200000, 90
+    write(tree, "eu/es/tax.cases.json", cases)
+    code, output = case_run(tree, "eu/es")
+    assert (
+        code == 1
+        and 'eu/es/tax.cases.json: case "Spain\'s cap": returns 1100000, written 1200000'
+        in output
+    )
+    assert "València's bonus" not in output  # it names València: it runs there
+    code, output = case_run(tree, VALENCIA)
+    assert (
+        'case "València\'s bonus": returns 60, written 90' in output
+        and "Spain's cap" not in output
+    )
+
+
+def test_a_case_that_calls_what_the_chapter_does_not_have_says_so(tree):
+    write(tree, "eu/es/tax.py", RATE_AND_BONUS)
+    write(
+        tree, "eu/es/tax.cases.json", [{"name": "x", "call": "nothing", "returns": 0}]
+    )
+    code, output = case_run(tree)
+    assert code == 1 and 'case "x": the tax chapter has no member nothing' in output
+
+
+def test_a_guard_case_runs_the_domains_guard_on_the_arguments_the_time_and_the_approvals(
+    tree,
+):
+    write(tree, "eu/es/local_regime.py", GUARD)
+    before, after = 1_700_000_000, 1_800_000_000  # 14 Nov 2023 and 15 Jan 2027
+    write(
+        tree,
+        "eu/es/local_regime.cases.json",
+        [
+            {
+                "name": "before 2027",
+                "guard": "realm_join",
+                "now": before,
+                "args": {"code": "x"},
+                "denies": "not before 2027",
+            },
+            {
+                "name": "needs a code",
+                "guard": "realm_join",
+                "now": after,
+                "args": {"code": None},
+                "denies": "a code or the Administration",
+            },
+            {
+                "name": "approved",
+                "guard": "realm_join",
+                "now": after,
+                "args": {"code": None},
+                "approvals": ["Administration"],
+                "denies": None,
+            },
+            {
+                "name": "with a code",
+                "guard": "realm_join",
+                "now": after,
+                "args": {"code": "x"},
+                "denies": None,
+            },
+        ],
+    )
+    assert case_run(tree) == (0, "ok: 1 realm(s) checked\n")
+
+
+def test_a_guard_case_that_does_not_come_out_as_written_is_a_problem(tree):
+    write(tree, "eu/es/local_regime.py", GUARD)
+    write(
+        tree,
+        "eu/es/local_regime.cases.json",
+        [
+            {
+                "name": "wrongly allowed",
+                "guard": "realm_join",
+                "now": 0,
+                "denies": None,
+            },
+            {"name": "no such guard", "guard": "realm_leave", "denies": None},
+        ],
+    )
+    code, output = case_run(tree)
+    assert code == 1
+    assert "case \"wrongly allowed\": denies 'not before 2027', written None" in output
+    assert (
+        'case "no such guard": the local_regime chapter has no check_realm_leave'
+        in output
+    )
+
+
+@pytest.mark.parametrize(
+    "case, expected",
+    [
+        ({"call": "rate", "returns": 1}, "name is text"),
+        ({"name": "x", "returns": 1}, "one of call, guard, forbid says what is tested"),
+        (
+            {"name": "x", "call": "rate", "guard": "realm_join", "returns": 1},
+            "one of call, guard, forbid",
+        ),
+        ({"name": "x", "call": "rate"}, "returns is what the case expects"),
+        ({"name": "x", "call": "rate", "returns": 1, "args": 1}, "args is a list"),
+        (
+            {"name": "x", "guard": "realm_join", "denies": 5},
+            "denies is the reason, or null",
+        ),
+        (
+            {"name": "x", "guard": "realm_join", "denies": None, "now": "soon"},
+            "now is a time in seconds",
+        ),
+        (
+            {
+                "name": "x",
+                "guard": "realm_join",
+                "denies": None,
+                "approvals": "Administration",
+            },
+            "approvals is a list",
+        ),
+        ({"name": "x", "forbid": "tax_assess", "fires": []}, "facts is an object"),
+        (
+            {"name": "x", "forbid": "tax_assess", "facts": {}, "fires": "all"},
+            "fires is a list of forbid ids",
+        ),
+        (
+            {"name": "x", "call": "rate", "returns": 1, "realm": "Eu/ES"},
+            "realm is a source id",
+        ),
+    ],
+)
+def test_the_shape_of_a_cases_file_is_checked_with_the_layout(tree, case, expected):
+    write(tree, "eu/es/tax.py", RATE_AND_BONUS)
+    write(tree, "eu/es/tax.cases.json", [case])
+    code, output = case_run(tree)
+    assert code == 1 and "eu/es/tax.cases.json: case" in output and expected in output
+    write(
+        tree,
+        "eu/es/tax.cases.json",
+        [{"name": "x", "call": "rate", "returns": 1100000}],
+    )
+    assert case_run(tree)[0] == 0
+
+
+def test_cases_belong_to_a_chapter_beside_them(tree):
+    write(tree, "eu/es/tax.cases.json", [])
+    code, output = case_run(tree)
+    assert (
+        code == 1
+        and "eu/es/tax.cases.json: cases for tax, but there is no tax.py beside them"
+        in output
+    )
+    write(tree, "eu/es/tax.py", RATE_AND_BONUS)
+    assert case_run(tree)[0] == 0

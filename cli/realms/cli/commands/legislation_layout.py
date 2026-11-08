@@ -9,6 +9,8 @@ The rules:
 - a source is a folder with a ``source.json`` (§3.1), whose ``id`` is the folder's path under the tree;
 - the only ``.py`` files in a source are ``<domain>.py``, ``<domain>`` a GGG domain;
 - ``calendar.json`` (§3.4) and ``releases.json`` (§3.2) have the shapes the design shows;
+- ``<domain>.cases.json`` (§12.3) tests the chapter ``<domain>.py`` beside it, and has the shape of
+  ``legislation_cases``;
 - a release lists all of its source's chapters and its calendar, never the ``realm`` domain (which only a realm's own
   layer fills, §3: a ``realm.py`` beside a ``releases.json`` is the realm's own and no release carries it), and every
   checksum is the sha256 of the file's bytes **at the release's own commit**, which is where a follower fetches them
@@ -35,6 +37,8 @@ GGG_DOMAINS = (
     "treasury", "federation",
 )  # fmt: skip
 SOURCE_FILES = ("source.json", "releases.json", "calendar.json")
+CASES_SUFFIX = ".cases.json"
+CASE_KINDS = ("call", "guard", "forbid")
 HEX = frozenset("0123456789abcdef")
 
 
@@ -60,13 +64,16 @@ def folder_problems(tree: Path, folder: Path) -> List[str]:
         return problems + [
             f"{shown(tree, files[name])}: not in a source: a source is a folder with a source.json"
             for name in sorted(files)
-            if name.endswith(".py") or name in SOURCE_FILES
+            if name.endswith((".py", CASES_SUFFIX)) or name in SOURCE_FILES
         ]
     source = folder.relative_to(tree).as_posix()
     problems += json_problems(
         tree, files["source.json"], lambda data: source_reasons(data, source)
     )
     problems += chapter_problems(tree, files)
+    for name in sorted(files):
+        if name.endswith(CASES_SUFFIX):
+            problems += json_problems(tree, files[name], cases_reasons)
     if "calendar.json" in files:
         problems += json_problems(tree, files["calendar.json"], calendar_reasons)
     if "releases.json" in files:
@@ -79,10 +86,16 @@ def folder_problems(tree: Path, folder: Path) -> List[str]:
 
 
 def chapter_problems(tree: Path, files: dict) -> List[str]:
-    return [
+    problems = [
         f"{shown(tree, files[name])}: {name[:-3]} is not a GGG domain ({', '.join(GGG_DOMAINS)})"
         for name in sorted(files)
         if name.endswith(".py") and name[:-3] not in GGG_DOMAINS
+    ]
+    return problems + [
+        f"{shown(tree, files[name])}: cases for {name[: -len(CASES_SUFFIX)]}, but there is no {name[: -len(CASES_SUFFIX)]}.py beside them"
+        for name in sorted(files)
+        if name.endswith(CASES_SUFFIX)
+        and name[: -len(CASES_SUFFIX)] + ".py" not in files
     ]
 
 
@@ -139,6 +152,63 @@ def calendar_reasons(data) -> List[str]:
             for entry in entries
             if not by_language(entry.get("name"))
         ]
+    return reasons
+
+
+def cases_reasons(data) -> List[str]:
+    """§12.3, ``<domain>.cases.json``: a list of cases, each with a name, one kind of test and what it expects."""
+    if not isinstance(data, list):
+        return ["a list of cases"]
+    reasons = []
+    for case in data:
+        label = f"case {case.get('name')!r}" if isinstance(case, dict) else "a case"
+        reasons += [f"{label}: {r}" for r in case_reasons(case)]
+    return reasons
+
+
+def case_reasons(case) -> List[str]:
+    if not isinstance(case, dict):
+        return ["a case is an object"]
+    reasons = []
+    if not is_text(case.get("name")):
+        reasons.append("name is text")
+    if "realm" in case:
+        try:
+            source_id(case["realm"])
+        except LegislationError:
+            reasons.append("realm is a source id, such as eu/es/vc/46250-valencia")
+    kinds = [k for k in CASE_KINDS if k in case]
+    if len(kinds) != 1:
+        return reasons + [f"one of {', '.join(CASE_KINDS)} says what is tested"]
+    kind = kinds[0]
+    if not is_text(case[kind]):
+        reasons.append(f"{kind} is a name")
+    expected = {"call": "returns", "guard": "denies", "forbid": "fires"}[kind]
+    if expected not in case:
+        reasons.append(f"{expected} is what the case expects")
+    if kind == "call" and not isinstance(case.get("args", []), list):
+        reasons.append("args is a list")
+    if kind == "guard":
+        if not isinstance(case.get("args", {}), dict):
+            reasons.append("args is an object")
+        if (
+            not (case.get("denies") is None or is_text(case["denies"]))
+            and "denies" in case
+        ):
+            reasons.append("denies is the reason, or null for a guard that allows")
+        approvals = case.get("approvals", [])
+        if not (isinstance(approvals, list) and all(is_text(a) for a in approvals)):
+            reasons.append("approvals is a list of department names")
+        if type(case.get("now", 0)) is not int:
+            reasons.append("now is a time in seconds")
+    if kind == "forbid":
+        if not isinstance(case.get("facts"), dict):
+            reasons.append("facts is an object")
+        if "each" in case and not is_text(case["each"]):
+            reasons.append("each names a list")
+        fires = case.get("fires", [])
+        if not (isinstance(fires, list) and all(is_text(f) for f in fires)):
+            reasons.append("fires is a list of forbid ids")
     return reasons
 
 
