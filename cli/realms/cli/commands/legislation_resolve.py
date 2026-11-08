@@ -41,6 +41,10 @@ def tree_record(tree: Path, commit: str, source: str) -> dict:
                 bytes_at(tree, commit, layer, "releases.json").decode(),
                 f"{layer}/releases.json",
             )
+            if not isinstance(releases, list) or not releases:
+                raise LegislationError(
+                    f"{layer}/releases.json is a list of releases, newest last"
+                )
             layers.append({"source": layer, **releases[-1]})
     if not layers:
         raise LegislationError(
@@ -58,6 +62,8 @@ def layer_at(tree: Path, commit: str, source: str) -> dict:
     """``source``'s own layer as it stands at ``commit``, in the shape ``plan`` takes (§8): the checksum of each of
     its chapters and of its calendar."""
     names = names_at(tree, commit, source)
+    if not names:
+        raise LegislationError(f"{source} has no files at commit {commit[:7]}")
     return {
         "chapters": {
             name[:-3]: checksum(bytes_at(tree, commit, source, name))

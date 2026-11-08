@@ -37,6 +37,7 @@ from realms.cli.commands.legislation_propose import (
 )
 from realms.cli.commands.legislation_resolve import (
     file_record,
+    load_json,
     report_lines,
     resolve_realm,
     tree_record,
@@ -258,10 +259,10 @@ def resolve_command(
             realm,
             at,
             relays,
-            json.loads(own.read_text()) if own else None,
+            load_json(own.read_text(), str(own)) if own else None,
             operations,
             {"ggg": check_view()},
-            json.loads(facts.read_text()) if facts else None,
+            load_json(facts.read_text(), str(facts)) if facts else None,
         )
         lines = report_lines(resolution, facts is not None)
     except ImportError as e:

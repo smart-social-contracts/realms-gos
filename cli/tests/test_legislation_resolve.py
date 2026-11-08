@@ -215,6 +215,29 @@ def test_a_sync_source_with_no_releases_is_refused(tree):
     assert "have no releases.json at commit" in out.output
 
 
+def test_a_realm_the_tree_has_no_folder_for_is_refused(tree):
+    out = resolve(tree, *SYNC_SOURCES, realm="eu/es/vc/46250-valencai")
+    assert out.exit_code == 1
+    assert "eu/es/vc/46250-valencai has no files at commit" in out.output
+
+
+@pytest.mark.parametrize("option", ["--own", "--facts"])
+def test_a_file_that_is_not_json_is_refused_with_its_name(tree, tmp_path, option):
+    file = tmp_path / "broken.json"
+    file.write_text("{")
+    out = resolve(tree, *SYNC_SOURCES, option, str(file))
+    assert out.exit_code == 1 and f"{file} is not valid JSON" in out.output
+
+
+def test_an_empty_list_of_releases_is_refused(valencia_copy, git):
+    emshi = valencia_copy / "legislation/eu/es/vc/emshi/releases.json"
+    emshi.write_text("[]")
+    git(valencia_copy, "commit", "-q", "-a", "--no-verify", "-m", "no releases")
+    out = resolve(valencia_copy / "legislation", *SYNC_SOURCES)
+    assert out.exit_code == 1
+    assert "eu/es/vc/emshi/releases.json is a list of releases" in out.output
+
+
 def test_a_commit_git_does_not_know_is_refused(tree):
     out = resolve(tree, *SYNC_SOURCES, "--commit", "no-such-branch")
     assert out.exit_code == 1
