@@ -34,7 +34,30 @@ on:
         default: false
 
 jobs:
+  # Before anything is written. The release job needs this one, so a stale tz database stops the workflow before a
+  # version is bumped, a commit pushed, a tag made or a release created.
+  tzdata:
+    name: The realm bundles the latest tz database
+    runs-on: ubuntu-latest
+    # Its steps are skipped for a CLI-only release and when stale data is allowed: the job still succeeds.
+    steps:
+      - name: Checkout code
+        if: ${{ inputs.cli_only != true && inputs.allow_stale_tzdata != true }}
+        uses: actions/checkout@v4
+
+      - name: Compare with the tz database IANA has published
+        if: ${{ inputs.cli_only != true && inputs.allow_stale_tzdata != true }}
+        run: |
+          bundled=$(python3 -c "import sys; sys.path.insert(0, 'src/realm_backend'); import zonedata; print(zonedata.VERSION)")
+          latest=$(curl -fsS https://data.iana.org/time-zones/tzdb/version | tr -d '[:space:]')
+          if [ "$bundled" != "$latest" ]; then
+            echo "::error::The realm bundles tz database $bundled and IANA has published $latest: run scripts/build_zones.py --release $latest and commit the result (or release with allow_stale_tzdata)"
+            exit 1
+          fi
+          echo "✅ The realm bundles tz database $bundled"
+
   release:
+    needs: tzdata
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -154,17 +177,6 @@ jobs:
       # test wasm lacks it. The marketplace gets its build provenance from
       # scripts/stamp_build.py, run by the Python that builds it so the
       # dependency versions are the packed ones.
-      - name: The realm bundles the latest tz database
-        if: ${{ inputs.cli_only != true && inputs.allow_stale_tzdata != true }}
-        run: |
-          bundled=$(python3 -c "import sys; sys.path.insert(0, 'src/realm_backend'); import zonedata; print(zonedata.VERSION)")
-          latest=$(curl -fsS https://data.iana.org/time-zones/tzdb/version | tr -d '[:space:]')
-          if [ "$bundled" != "$latest" ]; then
-            echo "::error::The realm bundles tz database $bundled and IANA has published $latest: run scripts/build_zones.py --release $latest and commit the result (or release with allow_stale_tzdata)"
-            exit 1
-          fi
-          echo "✅ The realm bundles tz database $bundled"
-
       - name: Build backend WASM
         if: ${{ inputs.cli_only != true }}
         env:
