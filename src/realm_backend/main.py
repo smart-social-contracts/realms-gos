@@ -16,8 +16,10 @@ from core.op import dispatch, run as drive  # noqa: E402
 from ggg_methods import *  # noqa: E402, F401, F403
 
 # basilisk bundles what main imports: the layered codex library ships with the realm, which runs its own copy
-# (docs/codices/layered-codex.md §12). Nothing runs until the runtime loads a chapter through it.
+# (docs/codices/layered-codex.md §12). Nothing runs until the runtime loads a chapter through it. The same goes for
+# the storage rules of a layered codex, until the install task imports them.
 import realms.legislation  # noqa: E402, F401
+import core.layered_codex  # noqa: E402, F401
 
 
 @init

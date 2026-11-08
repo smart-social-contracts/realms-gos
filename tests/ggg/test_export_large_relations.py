@@ -66,3 +66,21 @@ def test_a_row_with_no_unlisted_side_serializes_as_ic_python_db_does():
     world.build()
     user = User["alice"]
     assert user.serialize() == Entity.serialize(user) and user.serialize()["profiles"] == ["member"]
+
+
+def test_a_small_row_serializes_as_ic_python_db_does_minus_the_unlisted_side():
+    """Only that side differs: the fields, the links to one row and the other many-to-many sides are the same."""
+    world.build()
+    permission = Permission(id="proposal.vote", description="vote")
+    permission.users.add(User["alice"])
+    permission.profiles.add(UserProfile["member"])
+    court = Court(id="C1")
+    judge = Judge(id="J1", user="elena", court=court)
+    judge.cases.add(Case(id="K1", court=court))
+
+    for row, side in ((UserProfile["member"], "users"), (permission, "users"), (judge, "cases")):
+        full = Entity.serialize(row)
+        assert full[side], (row, side)  # the side has members here, so the comparison means something
+        assert row.serialize() == {k: v for k, v in full.items() if k != side}
+    assert Entity.serialize(permission)["profiles"] == permission.serialize()["profiles"] == ["member"]
+    assert judge.serialize()["court"] == "C1"

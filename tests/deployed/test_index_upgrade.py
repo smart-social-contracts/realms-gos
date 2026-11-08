@@ -203,7 +203,7 @@ def test_members_votes_and_proposals_are_the_same_after_the_conversion(realm, pe
 
 
 def test_a_finished_realm_answers_at_once_and_only_the_host_runs_it(realm, people):
-    assert convert(realm, people["ctl"]) == [{"ok": True, "lists": 0, "ids": 0, "done": True}]
+    assert convert(realm, people["ctl"]) == [{"ok": True, "lists": 0, "ids": 0, "done": True, "refused": []}]
     done = json.loads(run(realm, OP_COST))
     assert done["reply"]["done"] and done["instructions"] < 60_000_000, done
     out = realm.call("db_convert_indexes", {}, sender=people["alice"])
@@ -214,11 +214,13 @@ def test_a_new_realm_is_done_from_the_start(wasm_of, people):
     """Nothing in a new database is an array, so the op reads no index entry: it costs one ordinary call (about 30
     million instructions for the dispatch, the authorization and the audit event), where a pass costs billions."""
     fresh = Canister(wasm_of("production"), installer=people["installer"])
-    assert ok(fresh, "db_convert_indexes", people["ctl"]) == {"ok": True, "lists": 0, "ids": 0, "done": True}
+    done = {"ok": True, "lists": 0, "ids": 0, "done": True, "refused": []}
+    assert ok(fresh, "db_convert_indexes", people["ctl"]) == done
     cost = json.loads(run(fresh, OP_COST))
     assert cost["reply"]["done"] and cost["instructions"] < 60_000_000, cost
 
 
+# Last in the file: it downgrades the realm the tests above share, so nothing may run on that realm after it.
 def test_a_rollback_to_the_previous_release_reads_the_converted_lists_as_empty(realm, people):
     """So the upgrade is one way (docs/deployment/README.md): the release before 0.13 looks for the arrays."""
     if realm.variant != "previous":
