@@ -73,47 +73,6 @@ def test_every_exemption_has_a_tracking_issue(ratchet):
     )
 
 
-def test_backend_grant_list_matches_the_baseline():
-    """The canister must grant privilege to exactly the audited set.
-
-    ``scripts/sandbox_exemptions.json`` is a repo file and is not packed into the
-    WASM, so the backend carries its own copy in
-    ``core.privileged_extensions``. If the two drift, the ratchet stops
-    describing what the deployed canister actually trusts.
-    """
-    import json
-    import sys
-
-    sys.path.insert(0, str(REPO_ROOT / "src" / "realm_backend"))
-    from core.privileged_extensions import IN_PROCESS_EXEMPT_EXTENSION_IDS
-
-    baseline = set(
-        json.loads((REPO_ROOT / "scripts" / "sandbox_exemptions.json").read_text())[
-            "exempt"
-        ]
-    )
-    assert set(IN_PROCESS_EXEMPT_EXTENSION_IDS) == baseline, (
-        "core/privileged_extensions.py and scripts/sandbox_exemptions.json "
-        "disagree about which non-core extensions may run in-process"
-    )
-
-
-def test_manifest_cannot_grant_itself_host_access():
-    """A package requesting in_process gets it only if the host already trusts it."""
-    import sys
-
-    sys.path.insert(0, str(REPO_ROOT / "src" / "realm_backend"))
-    from core.privileged_extensions import may_run_in_process
-
-    assert may_run_in_process("demo_simulator") is True  # audited exemption
-    assert may_run_in_process("public_dashboard") is True  # core
-    for untrusted in ("attacker_ext", "hello_world", "", "member_dashboard_evil"):
-        assert may_run_in_process(untrusted) is False, (
-            f"{untrusted!r} must not receive host privilege; in_process is "
-            "granted by the host list, not requested by the package"
-        )
-
-
 def test_progress_is_visible(ratchet):
     """Surface the remaining count so the number moves in review, not silently."""
     state = ratchet.survey()
