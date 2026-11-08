@@ -115,7 +115,8 @@ def test_a_rule_out_of_range_is_refused_before_anything_is_written():
 @pytest.mark.parametrize("word", ["abc", "", [1], 0.5, {"x": 1}])
 def test_a_rule_that_is_no_whole_number_is_refused_not_trapped(word):
     world.build()
-    for out in (file(threshold=word), file(quorum=word), call("governance_update", "ctl", voting_quorum=word)):
+    for out in (file(threshold=word), file(quorum=word), call("governance_update", "ctl", voting_quorum=word),
+                call("governance_update", "ctl", voting_window=word)):
         assert out["kind"] == "invalid_argument" and "is a whole number" in out["error"], (word, out)
     assert Proposal.count() == 0
 

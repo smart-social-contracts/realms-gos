@@ -8,6 +8,7 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "..", "src", "realm_backend")
 sys.path[:0] = [HERE, SRC]
+sys.path.append(os.path.join(HERE, ".."))  # tests/fixtures, last: its names must not shadow the realm's own
 
 import core  # noqa: E402
 import fake_chain  # noqa: E402
