@@ -99,10 +99,19 @@ def switch_to(row, replaced):
 def switch(waiting):
     """The switch of an install (docs/codices/layered-codex.md §9.2 step 6): the pending ``waiting`` becomes the
     active codex in place of the current one, kept to revert to. The runtime loads it first: a codex that does not
-    load raises before anything changes. The ``on_codex_activate`` hooks (``legislation.activate``) are the caller's
-    to run once its own writes are done: a hook never fails the switch (§9.3)."""
+    load raises before anything changes. The ``on_codex_activate`` hooks run in the next message (``hooks``): a hook
+    never fails the switch (§9.3), nor the proposal execution or install step that made it."""
     legislation.load(waiting)
     switch_to(waiting, active())
+    chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
+
+
+def hooks(codex_id):
+    """The ``on_codex_activate`` hooks of the codex just switched to, once per realm, unless it was switched away
+    from again before this message ran. A generator: a hook's effects may call other canisters."""
+    row = LayeredCodex[codex_id]
+    if row is not None and row.status == "active":
+        yield from legislation.activate(row)
 
 
 @op("codex.install", governed=realm_wide, returns="codex")
@@ -115,7 +124,7 @@ def codex_install(c, args):
     if "checksum" in args:
         from api import installs  # it imports this module
 
-        return (yield from installs.begin(c, args))
+        return installs.begin(c, args)
     if store.live_job() is not None:
         raise Conflict("an install is running")
     if "source" in args:

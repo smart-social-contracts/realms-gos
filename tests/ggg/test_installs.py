@@ -207,6 +207,7 @@ def test_a_scheduled_install_stages_at_acceptance_and_switches_at_its_time_not_b
     seen = status()
     assert seen["codex"]["id"] == expected_id(layer) and seen["pending"] is None
     assert seen["job"]["status"] == "done" and seen["job"]["step"] == "switch"
+    fire_due()  # the realm hook, in the message after the switch
     assert ok("notification_list", "alice")["notifications"][-1]["title"] == "activated"
 
 
@@ -456,13 +457,13 @@ def test_the_switch_stands_when_a_hook_traps_after_a_call_it_made(realm):
     layer = {**own_layer(realm_chapter=TRAPPING_REALM_CHAPTER)}
     ok("codex_install", "ctl", **change_list(layer))
     run_until("switch")
-    with pytest.raises(fake_chain.Trap, match="the effect broke after its call"):
-        fire_due()
-    # The fake chain keeps every write of the trapped message; the real one keeps those made before the await, and
-    # the switch writes all come before the hooks run (installs.finish).
+    fire_due()  # the switch: its message ends with the hooks armed, not run
     seen = status()
     assert seen["codex"]["id"] == expected_id(layer) and seen["job"]["status"] == "done"
     assert installs.own_source() == "arcadia"
+    with pytest.raises(fake_chain.Trap, match="the effect broke after its call"):
+        fire_due()  # the hooks' own message traps, and takes nothing of the switch with it
+    assert status()["codex"]["id"] == expected_id(layer) and status()["job"]["status"] == "done"
 
 
 def test_a_switch_whose_codex_cannot_load_leaves_the_active_codex_and_the_runtime_as_they_were(realm, monkeypatch):

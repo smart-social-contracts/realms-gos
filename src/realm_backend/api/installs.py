@@ -9,7 +9,8 @@ then runs one step per message:
 4. ``check_sources``: the chapters against the records of the sync sources (core.change_list.vouch);
 5. ``build``: the layer paths (``plan``), every chapter loaded and checked in a fresh sandbox (core.legislation.build),
    then the codex row, ``pending``;
-6. ``switch``: the new codex active, the previous one kept, the runtime loaded (api.codex.switch).
+6. ``switch``: the new codex active, the previous one kept, the runtime loaded (api.codex.switch); the realm
+   domain's ``on_codex_activate`` hooks run in the message after it.
 
 A proposal with an ``effective_at`` stages at acceptance (steps 1 to 5, ``prepare``) and its scheduled execution at
 that time is the switch: a job not done by then fails it, and the old codex keeps running. Without one, the job
@@ -107,7 +108,7 @@ def watch(job_id, delay):
 
 def begin(c, args):
     """``codex_install`` with a change list ``url`` and its ``checksum``. For the scheduled proposal whose job staged
-    the codex, this is the switch at its time; otherwise a job starts and the call returns ``job``. A generator."""
+    the codex, this is the switch at its time; otherwise a job starts and the call returns ``job``."""
     job = job_of(c.proposal) if c.proposal else None
     if job is None:
         return {"job": start(c.proposal, args["url"], args["checksum"]).id}
@@ -115,7 +116,7 @@ def begin(c, args):
         return {"codex": job.staged.get("codex"), "job": job.id}
     if job.status == "running" and job.step in (WAIT, "switch"):
         try:
-            yield from finish(job)
+            finish(job)
         except Fail as e:
             fail(InstallJob[job.id], str(e))
             raise
@@ -343,26 +344,23 @@ def build(job):
 def finish(job):
     """Step 6, the switch: the pending codex becomes active and the previous one is kept, in this message. The
     active codex is checked first: already this one, nothing happens; another than the change list replaces, the
-    install is stale and fails. The job is done before the ``on_codex_activate`` hooks run, last: a hook never fails
-    the switch (§9.3), and one that traps after a call it made takes nothing of the switch with it. A generator."""
+    install is stale and fails. The ``on_codex_activate`` hooks run in the message after (api.codex.switch): a hook
+    never fails the switch (§9.3), and one that traps takes nothing of it with it."""
     waiting = LayeredCodex[job.staged["codex"]] if job.staged.get("codex") else None
     if waiting is None:
         raise Fail("nothing is staged")
     current = codex.active()
-    if current is not None and current.id == waiting.id:
-        job.step, job.status, job.finished_at = "switch", "done", chain.now()
-        return
-    current_id = current.id if current else None
-    if current_id != job.staged.get("replaces"):
-        raise Fail(f"stale: the change list replaces {job.staged.get('replaces') or 'no codex'}, "
-                   f"the active codex is {current_id or 'none'}")
-    if waiting.status != "pending":
-        raise Conflict(f"{waiting.id} is {waiting.status}, not pending")
-    codex.switch(waiting)
-    waiting.installed_at = chain.now()
-    remember_source(waiting.layers[-1])
+    if current is None or current.id != waiting.id:
+        current_id = current.id if current else None
+        if current_id != job.staged.get("replaces"):
+            raise Fail(f"stale: the change list replaces {job.staged.get('replaces') or 'no codex'}, "
+                       f"the active codex is {current_id or 'none'}")
+        if waiting.status != "pending":
+            raise Conflict(f"{waiting.id} is {waiting.status}, not pending")
+        codex.switch(waiting)
+        waiting.installed_at = chain.now()
+        remember_source(waiting.layers[-1])
     job.step, job.status, job.finished_at = "switch", "done", chain.now()
-    yield from legislation.activate(waiting)
 
 
 RUN = {"fetch_change_list": fetch_change_list, "check_change_list": check_change_list,

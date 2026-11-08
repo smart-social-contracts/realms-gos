@@ -152,6 +152,7 @@ def test_a_the_realm_installs_its_own_layer_from_a_url_and_the_realm_hook_runs_a
     assert (tax["route"], tax["url"], tax["vouched_by"], tax["size"]) == ("https", WEB + "arcadia/tax.py", "arcadia",
                                                                           len(layer["arcadia/tax"]))
     assert seen["pending"] is None and seen["healthy"]
+    net.wait(1)  # the realm hook runs in the message after the switch
     assert [n["title"] for n in town.ok("notification_list", "founder", query=True)["notifications"]] == ["activated"]
     assert [url for _, url in net.web.asked] == [args["url"]] + [WEB + c + ".py" for c in layer]
 
@@ -319,28 +320,35 @@ def test_j_what_each_step_costs(net, site, people, costs):
                       RECEIVE_CHAPTER % {**args, "index": index, "body": body})
     costs.measure(lab, "install step 4: check the sources (plan, records)", LAB % args + "installs.check_sources(job)")
     costs.measure(lab, "install step 5: build (fresh sandbox, 4 chapters, the pending row)", LAB % args + "installs.build(job)")
-    costs.measure(lab, "install step 6: switch (load, activate, the realm hook)",
-                  LAB % args + "from core.op import run\nrun(installs.finish(job))")
+    costs.measure(lab, "install step 6: switch (load, the statuses)", LAB % args + "installs.finish(job)")
+    costs.measure(lab, "install step 6: the realm hook, in its own message",
+                  LAB % args + "from api import codex\nfrom core.op import run\nrun(codex.hooks(job.staged['codex']))")
     assert active_id(lab) == expected_id(layer) and status(lab)["job"]["status"] == "done"
 
 
+# The hook notes that it ran, then asks for the realm's vetKD key: PocketIC has no such key, the management canister
+# rejects the call after the await, and the effect traps. The note, written before the await, stays.
 TRAPPING_REALM_CHAPTER = '''
 from realms.legislation import above
 
 class Realm(above("realm")):
     def on_codex_activate(self, event):
-        self.ggg.realm_register(registry="aaaaa-aa")  # the management canister has no such method: the call is
-        # rejected after the await and the effect traps
+        self.ggg.notification_send(recipient="User:%(founder)s", topic="codex", title="about to call", body="")
+        self.ggg.crypto_public_key()
 '''
 
 
 def test_k_the_switch_stands_when_the_realm_hook_traps_after_a_call_it_made(net, town, site, people):
     current = active_id(town)
-    layer = {**own_layer(people["founder"]), "arcadia/realm": TRAPPING_REALM_CHAPTER.encode()}
+    layer = {**own_layer(people["founder"]), "arcadia/realm": (TRAPPING_REALM_CHAPTER % {"founder": people["founder"]}).encode()}
+    before = len(town.ok("notification_list", "founder", query=True)["notifications"])
     town.govern("codex_install", site.change_list(layer, replaces=current, remove=["arcadia/water"]))
     job = settled(net, town)
     assert (job["status"], job["step"]) == ("done", "switch"), job
     seen = status(town)
     assert seen["codex"]["id"] == expected_id(layer) and seen["codex"]["previous"] == current and seen["pending"] is None
-    net.wait(5)  # the trapped hook took nothing with it, and the realm goes on under the new codex
-    assert active_id(town) == expected_id(layer) and status(town)["healthy"]
+    net.wait(5)  # the hook's message: the note is written, the call made, the reply a rejection, the message trapped
+    titles = [n["title"] for n in town.ok("notification_list", "founder", query=True)["notifications"][before:]]
+    assert titles == ["about to call"]  # written before the await, so the call was made
+    seen = status(town)
+    assert seen["codex"]["id"] == expected_id(layer) and seen["failures"] == {} and seen["healthy"]  # no trace of the trap

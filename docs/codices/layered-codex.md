@@ -1248,7 +1248,9 @@ per message:
    `proposal_stop` discards its pending codex and its staging. Without `effective_at` the job runs on
    acceptance and switches as soon as step 5 is done. At the switch, in one message, set the new codex
    active and keep the previous one; the realm loads the parsed policy set and the realm domain's
-   `on_codex_activate` hook runs once per realm, not in each quarter and not on a revert.
+   `on_codex_activate` hook runs once per realm, not in each quarter and not on a revert. The hook runs in
+   the message after the switch, so a hook that fails, or traps after a call it made, never fails the
+   switch, the proposal's execution or the install step that made it.
    **Legislation applies when the proposal passes and its changes are executed,** which is at that
    time. No chapter calls `codex_activate`, and no publication, in the official journal (§9.6) or in an
    outside gazette, plays a role in when the legislation applies.
