@@ -126,10 +126,15 @@ def compute(op, **kwargs):
     layered codex is active. A ``compute_`` method that fails fails the operation asking, and counts."""
     if not _ensure():
         return None
-    outcome = _call("compute", op=op, kwargs=kwargs, now=chain.now(), approvals=[])
+    method = f"compute_{op}"
+    try:
+        outcome = _call("compute", op=op, kwargs=kwargs, now=chain.now(), approvals=[])
+    except Fail as e:
+        _record("codex", method, str(e))
+        raise Fail(f"legislation error: {e}")
+    _clear(["codex"], method)
     if not outcome["found"]:
         return None
-    method = f"compute_{op}"
     if "error" in outcome:
         file = outcome["chapter"] or outcome["files"][-1]
         _record(file, method, outcome["error"])
@@ -183,6 +188,7 @@ def _guard(op, args, call, department):
     except Fail as e:
         _record("codex", method, str(e))
         raise Forbidden(f"legislation error: {e}")
+    _clear(["codex"], method)
     for outcome in outcomes:
         if "error" in outcome:
             file = outcome["chapter"] or outcome["files"][-1]
@@ -200,8 +206,9 @@ def _hooks(op, args, result, call, department):
     try:
         outcomes = _call("hooks", op=op, event=event, now=chain.now(), approvals=_approvals(call, department))
     except Fail as e:
-        _record("codex", method, str(e))
+        _record("codex", method, str(e))  # the sandbox itself failed, a spent budget twice over among the causes
         return
+    _clear(["codex"], method)
     for outcome in outcomes:
         if "error" in outcome:
             _record(outcome["chapter"] or outcome["files"][-1], method, outcome["error"])

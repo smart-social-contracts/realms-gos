@@ -23,7 +23,7 @@ TOWN = "x/town"
 MADRID = ZoneInfo("Europe/Madrid")
 CALENDAR = {"weekend": ["sat", "sun"], "years": {
     str(year): [{"date": f"{year}-01-01", "name": {"es": "Año Nuevo"}}, {"date": f"{year}-10-12", "name": {"es": "Fiesta Nacional"}},
-                {"date": f"{year}-12-25", "name": {"es": "Navidad"}}] for year in range(2025, 2031)}}
+                {"date": f"{year}-12-25", "name": {"es": "Navidad"}}] for year in range(2020, 2032)}}  # the replica's clock starts in 2021
 EU_DP = '''
 from realms.legislation import above, extension
 
@@ -198,6 +198,29 @@ before = ic.performance_counter(0)
 out = legislation.build(plan, sources)
 print(json.dumps({"cost": ic.performance_counter(0) - before, "errors": out["errors"], "domains": sorted(out["views"])}))
 '''
+LOAD = '''
+import json
+from core import legislation, sandbox
+from core.op import ops
+from ggg import LayeredCodex
+codex = LayeredCodex[%(codex)r]
+plan, texts = legislation._plan_of(codex), legislation._texts(codex)
+program, _ = sandbox.module_source(legislation.PROGRAM)
+program += f"\\nLIBRARY = {sandbox.module_sources(legislation.LIBRARY)!r}\\n"
+t0 = ic.performance_counter(0)
+box = sandbox.Resident(program, legislation._answer, legislation.ACTIONS)
+t1 = ic.performance_counter(0)
+box.call("setup", operations=sorted(set(ops()) | set(legislation.EVENTS)), layers=plan["layers"], realm=plan["realm"],
+         calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=legislation._entities(), facts=None)
+t2 = ic.performance_counter(0)
+for c in plan["chapters"]:
+    box.call("load", source=c["source"], domain=c["domain"], text=texts[c["sha256"]])
+t3 = ic.performance_counter(0)
+box.call("finish")
+t4 = ic.performance_counter(0)
+box.close()
+print(json.dumps({"spawn": t1 - t0, "library": t2 - t1, "chapters": t3 - t2, "checks": t4 - t3, "count": len(plan["chapters"])}))
+'''
 STATE = '''
 import json
 from core import legislation
@@ -246,7 +269,6 @@ def town(wasm_of, people):
     ok(realm, "setup_step", founder, step="realm", name="Town", open_registration=True, timezone="Europe/Madrid")
     ok(realm, "setup_step", founder, step="trust_policy", require_marketplace_approval=False)
     ok(realm, "setup_step", founder, step="tokens", accounting_currency="DOM", accounting_currency_decimals=8)
-    ok(realm, "realm_join", founder)
     return realm
 
 
@@ -255,7 +277,9 @@ def test_a_activation_loads_the_chapters_once_and_runs_on_codex_activate(town, p
     got = install(town, chapters_of(founder, [(TOWN, "water", TOWN_WATER), (TOWN, "register", TOWN_REGISTER)]))
     assert got["failures"] == {}
     assert titles(town, founder) == ["activated"]
-    print(f"load (spawn, library, 9 chapters): {got['load']:,} instructions; activate (hook and effect): {got['activate']:,}")
+    parts = run(town, LOAD % {"codex": got["codex"]})
+    print(f"load: {got['load']:,} instructions (spawn {parts['spawn']:,}, the library imported from text {parts['library']:,}, "
+          f"{parts['count']} chapters {parts['chapters']:,}, checks {parts['checks']:,}); activate (hook and effect): {got['activate']:,}")
     assert got["load"] < 2_000_000_000, got
 
 
@@ -316,11 +340,12 @@ def test_d_a_raising_guard_denies_naming_the_chapter_and_a_raising_hook_never_fa
 def test_e_a_hook_that_exhausts_the_budget_fails_alone_and_the_codex_reloads(town, people):
     founder = people["founder"]
     assert ok(town, "proposal_create", founder, title="loop")["proposal"]
-    error = failures(town, founder)["x/town/register.py"]["on_proposal_create"]["error"]
+    # A spent budget poisons the interpreter, so no chapter can be named: the failure is the codex's, for that method.
+    error = failures(town, founder)["codex"]["on_proposal_create"]["error"]
     assert "BudgetExceeded" in error, error
     assert run(town, STATE)["loaded"]  # the spent interpreter was replaced
     assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
-    assert "x/town/register.py" in failures(town, founder)  # the loop still counts until the hook next succeeds
+    assert "codex" in failures(town, founder)  # the loop still counts until the hooks next succeed
     ok(town, "proposal_create", founder, title="fine again")
     assert failures(town, founder) == {}
 
