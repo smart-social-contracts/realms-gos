@@ -63,15 +63,15 @@ same rows.
   its status is `execution_scheduled`, and a one-step task of the realm's task scheduler runs it, which
   the scheduler arms again after an upgrade. A vote ends at its deadline, or earlier the moment every
   eligible member has voted (I-GOV-7). A department's vote also ends as soon as it has `m` approvals, every veto
-  holder has voted (none against) and its quorum is met. Only an acceptance ends it early: until its deadline, or
-  until everyone has voted, a no can be replaced. Realms GOS has a rule of its own besides: a realm-wide vote in a
-  realm with no voting window ends as soon as its outcome is certain, while a department's vote there, if it can't
-  pass on the votes cast so far, stays open until it passes, everyone has voted or its proposer withdraws it. After the vote ends no vote is
-  accepted or replaced; when it is closed does not matter, so a timer that fires late, an upgrade or a late `proposal_finalize`
-  never moves the end. A vote that ends after `effective_at` leaves the proposal `expired`, and nothing
-  runs. One that ended in time but is closed after `effective_at`, by the timer, an upgrade or
-  `proposal_finalize`, is accepted and its action runs at once. `proposal_stop` ends a waiting proposal
-  as `withdrawn`, and `ggg_proposal_stop` replies `Done` without an id when it applies at once, `Proposed`
+  holder who can still vote has voted (none against) and its quorum is met. Only an acceptance ends it early: until
+  its deadline, or until everyone has voted, a no can be replaced. Realms GOS has a rule of its own besides: a
+  realm-wide vote in a realm with no voting window ends as soon as its outcome is certain, while a department's vote
+  there, if it can't pass on the votes cast so far, stays open until it passes, everyone has voted or its proposer
+  withdraws it. After the vote ends no vote is accepted or replaced; when it is closed does not matter, so a timer
+  that fires late, an upgrade or a late `proposal_finalize` never moves the end. A vote that ends after `effective_at`
+  leaves the proposal `expired`, and nothing runs. One that ended in time but is closed after `effective_at`, by the
+  timer, an upgrade or `proposal_finalize`, is accepted and its action runs at once. `proposal_stop` ends a waiting
+  proposal as `withdrawn`, and `ggg_proposal_stop` replies `Done` without an id when it applies at once, `Proposed`
   with the new proposal's id under a voting policy. Proposals due at the same second run in no set order;
 - a proposal's `links` are `{kind, proposal}` with the kind in lower-case text (`replaces`, `relates_to`) where `ggg.did` has
   a variant; `proposal_linked_from` is the paged read of the links *to* a proposal, `proposal_get` shows `replaced_by`,

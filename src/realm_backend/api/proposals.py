@@ -311,9 +311,10 @@ def proposal_create(c, args):
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
     governs). Voting opens at once. Optional ``effective_at`` (whole seconds, UTC, not in the past): once accepted, the action runs then
     instead (status ``execution_scheduled`` while it waits). A vote ends at its deadline, or earlier once every eligible
-    member has voted (or, in a department, once it has ``m`` approvals, every veto holder has voted, none against, and
-    its quorum is met; or, for a realm-wide proposal in a realm whose voting window is 0, once the outcome is certain),
-    whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and nothing runs.
+    member has voted (or, in a department, once it has ``m`` approvals, every veto holder who can still vote has
+    voted, none against, and its quorum is met; or, for a realm-wide proposal in a realm whose voting window is 0, once
+    the outcome is certain), whenever it is closed; if it ends after ``effective_at`` the proposal ends ``expired`` and
+    nothing runs.
     Optional ``links``, at most 16 of ``{kind, proposal}`` (``replaces`` or ``relates_to``), each proposal named once and
     fixed at creation: ``replaces`` names a withdrawn proposal of yours that no other proposal replaces yet.
     Returns ``proposal``.
@@ -355,11 +356,12 @@ def proposal_linked_from(c, args):
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
     Voting again replaces your earlier vote, until the vote ends: at its deadline, or once every eligible member has
-    voted (in a department, once it has ``m`` approvals, every veto holder has voted, none against, and its quorum is
-    met; for a realm-wide proposal in a realm with no voting window, once the outcome is certain). Only an acceptance
-    ends a department's vote early, so a no can be replaced until the deadline, or until every eligible member has
-    voted; in a realm with no voting window a department's vote that can't pass on the votes cast so far stays open
-    until it passes, everyone has voted, or its proposer withdraws it. After the vote ends no vote is accepted and none is replaced."""
+    voted (in a department, once it has ``m`` approvals, every veto holder who can still vote has voted, none against,
+    and its quorum is met; for a realm-wide proposal in a realm with no voting window, once the outcome is certain).
+    Only an acceptance ends a department's vote early, so a no can be replaced until the deadline, or until every
+    eligible member has voted; in a realm with no voting window a department's vote that can't pass on the votes cast
+    so far stays open until it passes, everyone has voted, or its proposer withdraws it. After the vote ends no vote is
+    accepted and none is replaced."""
     p = find(Proposal, args["proposal"])
     if args["choice"] not in CHOICES:
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")

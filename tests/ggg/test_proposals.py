@@ -131,8 +131,9 @@ def test_I_GOV_7_a_veto_holder_who_never_votes_does_not_block_acceptance_at_the_
 
 def test_I_GOV_7_a_veto_holder_who_left_the_department_does_not_hold_the_vote_open():
     civil_registry(2, veto=["dana"])
-    # The rows are set as a department vote leaves them: appointment_end is governed by the department, so under
-    # this 2-of-3 policy it would file a proposal, and the policy keeps its veto list when a seat ends.
+    # The rows are set as expelling her leaves them: org.expel (department_expel) is governed by the department, so
+    # under this 2-of-3 policy it would file a proposal; it ends her seat and clears the head, and the policy keeps
+    # its veto list.
     Appointment["civil-registry.head:dana"].status = "ended"
     Department["Civil Registry"].head = ""
     p = department_proposal()
