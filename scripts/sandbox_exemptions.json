@@ -31,12 +31,10 @@
     "Core/system extensions are not listed: they are never sandboxed by design."
   ],
   "exempt": {
-    "demo_simulator": "_cdk, core, ggg",
-    "passport_verification": "basilisk, core, ggg"
+    "demo_simulator": "_cdk, core, ggg"
   },
   "tracking_issues": {
-    "demo_simulator": 270,
-    "passport_verification": 275
+    "demo_simulator": 270
   },
   "_async_bridge_issue": 279,
   "_promoted_to_core": {

@@ -65,6 +65,8 @@ jobs:
             echo "::error::canister/principal ids belong in casals.json (read them with 'casals export')"; exit 1
           fi
 
+  # The unit gate (tests/ggg, tests/backend, the ratchet and the GGG checks) is tests.yml, which runs on every
+  # pull request; this job keeps what only the full bring-up needs: the layered codex library, the CLI, the frontend.
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -93,95 +95,6 @@ jobs:
         run: pytest -q cli/tests/test_legislation*.py
       - name: CLI unit tests
         run: pytest -v cli/tests/ || true
-      - name: Extension privilege ratchet
-        # Blocking on purpose: these are pure source scans and in-memory unit
-        # tests with no canister or DB, so a failure here is a real
-        # regression. The exemption list may only shrink, no extension may
-        # take the caller's identity from its own call args, every bridge verb
-        # must keep checking the caller's operation host-side, and no verb may
-        # be dispatched without its call origin.
-        run: |
-          python3 scripts/declare_extension_runtime.py --check
-          pytest -q tests/backend/test_extension_caller_identity.py \
-                    tests/backend/test_sandbox_exemption_ratchet.py \
-                    tests/backend/test_extension_manifest_contract.py \
-                    tests/backend/test_extension_bridge.py \
-                    tests/backend/test_extension_bridge_verbs.py \
-                    tests/backend/test_extension_owned_entities.py \
-                    tests/backend/test_land_bridge.py \
-                    tests/backend/test_extension_grants.py \
-                    tests/backend/test_notification_bridge.py \
-                    tests/backend/test_console_bridge.py \
-                    tests/backend/test_async_bridge.py \
-                    tests/backend/test_treasury_bridge.py \
-                    tests/backend/test_procurement_bridge.py \
-                    tests/backend/test_procurement_sandboxed.py \
-                    tests/backend/test_justice_bridge.py \
-                    tests/backend/test_justice_sandboxed.py \
-                    tests/backend/test_sandbox_package_bundle.py \
-                    tests/backend/department_docs/ \
-                    tests/backend/test_time_utils.py \
-                    tests/backend/test_localtime.py \
-                    tests/backend/test_call_origin.py \
-                    tests/backend/test_ggg_sdk_json_shim.py \
-                    tests/backend/test_sidebar_visibility.py \
-                    tests/backend/test_repl_host.py \
-                    tests/backend/test_repl_ui_parity.py \
-                    tests/backend/test_shell_access_denied.py \
-                    tests/backend/test_department_table.py \
-                    tests/backend/test_no_module_level_re.py \
-                    tests/backend/test_stamp_build.py \
-                    tests/backend/test_proposal_dispatch_orchestration.py \
-                    tests/backend/test_delegation.py
-      - name: Tax policy
-        # Its own process: these load the real ggg entities, which the run
-        # above replaces with the CLI's mock module.
-        run: |
-          pytest -q tests/backend/test_taxation.py \
-                    tests/backend/test_tax_bridge.py \
-                    tests/backend/test_agora_tax_assessment.py
-      - name: Build variants
-        # Blocking on purpose: the checked-in variant is production, the test
-        # gate fails closed, and the packer's wasm scan works in both
-        # directions. See realms-gos#395.
-        run: |
-          pytest -q tests/backend/test_build_variant.py \
-                    tests/backend/test_publish_build_variant.py
-      - name: Cedar policy drift
-        # The embedded policy text the canister runs must mirror the .cedar
-        # source files; a stale copy silently changes what a realm enforces.
-        run: |
-          python3 scripts/sync_cedar_policies.py --check
-      - name: GGG interface
-        # The generated GGG methods must match ggg/ggg.did, and every operation must pass
-        # tests/ggg. Its own process: its fake chain replaces the ggg entities loaded above.
-        run: |
-          python3 scripts/ggg_candid.py --check
-          # The bundled time zones are what the pinned tz database gives: it is downloaded, checked against its sha512
-          # and built here (needs make and a C compiler).
-          python3 scripts/build_zones.py --check
-          pytest -q tests/ggg --cov=src/realm_backend --cov-report=
-          # Again, each operation through its ggg_ method, every reply checked against ggg.did.
-          GGG_MIRROR=strict pytest -q tests/ggg
-      - name: GGG coverage floors
-        # A ratchet, not a target: each floor is the level reached when it was set, so coverage can
-        # only go up. Raise a floor when the number above it grows; ggg_api.py is lowest while the
-        # mirror harness (tests/ggg/mirror.py) still reports mismatches. Generated files are left out.
-        run: |
-          coverage report --include='src/realm_backend/api/*' --fail-under=95
-          coverage report --include='src/realm_backend/ggg_api.py' --fail-under=60
-          coverage report --omit='src/realm_backend/ggg_did.py,src/realm_backend/ggg_methods.py' --skip-covered
-          coverage xml -o coverage-ggg.xml --omit='src/realm_backend/ggg_did.py,src/realm_backend/ggg_methods.py'
-      - name: Upload the GGG coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-ggg
-          path: coverage-ggg.xml
-      - name: Host locale parity and sidebar labels
-        run: |
-          pytest -q tests/backend/test_sidebar_labels.py \
-                    tests/backend/test_api_errors.py \
-                    tests/backend/test_extension_i18n_packs.py
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
