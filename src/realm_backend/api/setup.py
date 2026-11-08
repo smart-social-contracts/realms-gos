@@ -5,7 +5,7 @@ import constants
 import ggg
 from core import sandbox
 from api import tasks
-from core.db import CONVERT_IDS, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
+from core.db import CONVERT_IDS, PAGE_MAX, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
 from api.extensions import trust
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
@@ -368,11 +368,12 @@ def realm_monitor(c, args):
 
 @op("db.export", read=True, returns="rows")
 def realm_export(c, args):
-    """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it."""
+    """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it. An entity whose rows are
+    large returns fewer rows than ``count`` asks for: follow ``next``, never compute ``from``."""
     cls = getattr(ggg, args["entity"], None)
     if not (isinstance(cls, type) and issubclass(cls, Entity)):
         raise Fail(f"unknown entity '{args['entity']}'")
-    rows, nxt = page(cls, args)
+    rows, nxt = page(cls, args, most=getattr(cls, "export_most", PAGE_MAX))
     return {"entity": args["entity"], "rows": [view(r) for r in rows], "next": nxt}
 
 
