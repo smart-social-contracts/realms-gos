@@ -3,7 +3,9 @@
 `pytest -q tests/deployed` packs the realm wasm (`wasm_of` in `conftest.py`, once per session and variant) and runs
 it on a local PocketIC server, because basilisk stubs parts of the standard library inside a canister and only the
 built artifact shows how the code behaves. Set `POCKET_IC_BIN` to a PocketIC server; `pic.py` defaults to the one in
-the dfx cache. On a loaded machine an install can make the server answer "busy": run the tests again.
+the dfx cache. Create instances with `pic.new_pocket_ic()` (the classes below do): on a loaded machine the server
+answers 409 "busy" to anything sent during a slow round, such as the install of an 11 MB wasm, and it waits instead
+of failing.
 
 | File | What it gives a test |
 |---|---|

@@ -11,15 +11,14 @@ The wasm is uploaded once, and time, timers and HTTPS outcalls (``net.web``) bel
 """
 
 from outcalls import Web
-from pic import Canister, Wasm
-from pocket_ic import PocketIC
+from pic import Canister, Wasm, new_pocket_ic
 
 ACCEPTED = ("executed", "execution_scheduled")
 
 
 class Network:
     def __init__(self, wasm_path, people):
-        self.pic = PocketIC()
+        self.pic = new_pocket_ic()
         self.wasm = Wasm(self.pic, wasm_path)
         self.people = people
         self.web = Web(self.pic)

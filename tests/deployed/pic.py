@@ -15,6 +15,8 @@ from pathlib import Path
 from ic.candid import Types, decode, encode
 from ic.principal import Principal
 from pocket_ic import PocketIC
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 os.environ.setdefault("POCKET_IC_BIN", os.path.expanduser("~/.cache/dfinity/versions/0.31.0/pocket-ic"))
 
@@ -44,6 +46,16 @@ GGG_ERROR = Types.Variant({
     "Forbidden": Types.Record({"permission": Types.Opt(Types.Text), "message": Types.Text}),
     "InvalidArgument": Types.Text, "Conflict": Types.Text, "Unavailable": Types.Text,
     "GenericError": Types.Record({"error_code": Types.Nat, "message": Types.Text})})
+
+
+def new_pocket_ic():
+    """A PocketIC instance whose requests wait while the server is busy with a round. A round that takes long, such as
+    the install of an 11 MB wasm on a loaded machine, makes it answer 409 to anything else, which the client takes as
+    an error."""
+    pic = PocketIC()
+    busy = Retry(total=100, status_forcelist=(409,), allowed_methods=None, backoff_factor=0.05, raise_on_status=False)
+    pic.server.request_client.mount("http://", HTTPAdapter(max_retries=busy))
+    return pic
 
 
 def _management(pic, canister, method, typ, value):
@@ -81,7 +93,7 @@ class Canister:
     def __init__(self, wasm_path, installer="", pic=None, wasm=None):
         """A canister running ``wasm_path`` on a PocketIC instance of its own, or on ``pic`` when given, installing
         the already uploaded ``wasm`` if there is one."""
-        self.pic = pic or PocketIC()
+        self.pic = pic or new_pocket_ic()
         self.id = _new_canister(self.pic)
         self.wasm = wasm or Wasm(self.pic, wasm_path)
         self._install({"install": None}, encode([{"type": Types.Text, "value": installer}]))
