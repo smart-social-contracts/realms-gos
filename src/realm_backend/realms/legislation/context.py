@@ -47,12 +47,14 @@ class Ref(metaclass=Sealed):
 
 
 def plain(value):
-    """``value`` as plain data: Periods, Refs and Money in the form GGG stores them, inside lists and dicts."""
-    if isinstance(value, (Period, Ref, Money)):
+    """``value`` as plain data: Periods, Refs and Money in the form GGG stores them, inside lists and dicts. Only the
+    SDK's own classes: a subclass would bring a ``to_json`` of its own."""
+    kind = type(value)
+    if kind in (Period, Ref, Money):
         return value.to_json()
-    if isinstance(value, Queued):
+    if kind is Queued:
         return str(value)
-    if isinstance(value, Args):
+    if kind is Args:
         return plain(value.__data__)
     if isinstance(value, (dict, MappingProxyType)):
         return {k: plain(v) for k, v in value.items()}
@@ -208,9 +210,9 @@ def is_result(value):
     lists and dicts of those."""
     from realms.legislation.chapter import is_data
 
-    if isinstance(value, Money):
-        return True
     kind = type(value)
+    if kind is Money:
+        return True
     if kind in (list, tuple):
         return all(is_result(v) for v in value)
     if kind in (dict, MappingProxyType):

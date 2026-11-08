@@ -562,12 +562,17 @@ FLOATS = {
     "float()": ("return float(subject.area)", "float: no floats in a chapter"),
     "a division": ("return subject.area / 3", "no `/` in a chapter"),
     "a division in place": ("n = subject.area\n        n /= 3\n        return n", "no `/` in a chapter"),
+    "a power": ("return subject.area ** 2", "no `**` or pow() in a chapter"),
+    "a power in place": ("n = subject.area\n        n **= 2\n        return n", "no `**` or pow() in a chapter"),
+    "pow()": ("return pow(subject.area, 2)", "pow: no floats in a chapter"),
+    "a local named float": ("float = 3\n        return float", "float: no floats in a chapter"),
 }
 
 
 @pytest.mark.parametrize("form", sorted(FLOATS))
 def test_n_a_chapter_with_float_arithmetic_does_not_build(town, form):
-    """The subset check the realm runs on its own interpreter's bytecode (3.13: BINARY_OP 11 and 24 are / and /=)."""
+    """The subset check the realm runs on its own interpreter's bytecode (3.13: BINARY_OP 11 and 24 are / and /=, 8 and 21
+    are ** and **=), and the names it binds (a local is in co_varnames, not co_names)."""
     body, reason = FLOATS[form]
     text = f"from realms.legislation import above\nclass Tax(above('tax')):\n    def compute_tax_assess(self, entry, subject):\n        {body}\n"
     got = run(town, BUILD % {"chapters": [(TOWN, "tax", text)], "calendars": [], "realm": TOWN, "layers": [TOWN]})

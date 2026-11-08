@@ -169,13 +169,17 @@ def subjects_of(entry, payer):
     return [payer]
 
 
-def assessment(entry, payer, base, decimals):
-    """The items ``payer`` owes under ``entry``: what the active codex computes for each subject they hold under it,
-    or, when no codex answers, the charge of the entry's own rate, amount or brackets on ``base``."""
+def assessment(entry, payer, base, symbol, decimals):
+    """The items ``payer`` owes under ``entry``, billed in token ``symbol`` of ``decimals``: what the active codex
+    computes for each subject they hold under it, or, when no codex answers, the charge of the entry's own rate, amount
+    or brackets on ``base``. A parcel's value is in the accounting currency, so a codex does not compute a tax on land
+    billed in another token: that refuses the call."""
     answers = {}
     for subject in subjects_of(entry, payer):
-        answers[subject] = yield from codex.compute("tax_assess", {"entry": entry, "subject": subject,
-                                                                     "decimals": decimals})
+        answers[subject] = yield from codex.compute("tax_assess", {"entry": entry, "subject": subject}, decimals=decimals)
+        if answers[subject] is not None and entry["subject"] == "Land" and symbol != currency():
+            raise Fail(f"tax '{entry['code']}' on land is billed in {symbol}, but a parcel's value is in {currency()}: "
+                       f"a codex computes a tax on land in the accounting currency only")
     if all(answer is None for answer in answers.values()):
         return reference_items(entry, base, decimals)
     items = []
@@ -259,7 +263,7 @@ def tax_assess(c, args):
                 skipped += 1
                 continue
             base = taxable(entry, declarant)
-            items = yield from assessment(entry, declarant, base, decimals)
+            items = yield from assessment(entry, declarant, base, symbol, decimals)
             checked_total(items)
             due.append((entry, declarant, base, items))
     for entry, declarant, base, items in due:

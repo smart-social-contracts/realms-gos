@@ -15,9 +15,9 @@ from core import layered_codex as store
 from core import legislation, localtime, op
 from core.db import each
 
-from ggg import Attribute, Codex, Human, Invoice, Land, LayeredCodex, Quarter, Realm
+from ggg import Attribute, Codex, Human, Invoice, Land, LayeredCodex, Quarter, Realm, TaxDeclaration, Token
 from kit import call, ok, rows
-from test_taxes import adopt_policy, setup_taxes
+from test_taxes import CENTS, adopt_policy, setup_taxes
 from test_treasury import setup_finance
 import world
 
@@ -571,14 +571,68 @@ class Tax(above("tax")):
         value = subject.assessed_value
         return [subject.id, subject.owner, subject.area, value if value is None else value.decimals, value, entry.rate]
 '''}, layers=[TOWN]))
-    seen = op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-1", "decimals": 2}))
+    seen = op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-1"}, decimals=2))
     assert seen == ["L-1", "User:alice", 120, 2, 20_000_000, 10_000_000]
-    unassessed = op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-2", "decimals": 2}))
+    unassessed = op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-2"}, decimals=2))
     assert unassessed == ["L-2", "User:alice", None, None, None, 10_000_000]
     with pytest.raises(Exception, match="'Land:L-9' is not found"):
-        op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-9", "decimals": 2}))
+        op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Land:L-9"}, decimals=2))
     with pytest.raises(Exception, match="'Token:REALM': a chapter does not read Token"):
-        op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Token:REALM", "decimals": 2}))
+        op.run(codex_api.compute("tax_assess", {"entry": IBI, "subject": "Token:REALM"}, decimals=2))
+
+
+def test_a_codex_does_not_compute_a_tax_on_land_billed_in_another_token():
+    """A parcel's value is in the accounting currency: a codex that answers for a tax on land billed in another
+    token refuses the call, before anyone is billed."""
+    setup_taxes()
+    Token(id="OTHER", ledger="other-ledger", decimals=CENTS)
+    Land(id="L-1", owner="User:alice", width=1, height=1, assessed_value=2_345, area=1)
+    ibi_codex()
+    adopt_policy([IBI], document={"symbol": "OTHER"})
+    refused = call("tax_assess", "bob", period="2026")
+    assert not refused["ok"] and "tax 'ibi_urban' on land is billed in OTHER" in refused["error"] and "REALM" in refused["error"]
+    assert Invoice.count() == 0 and TaxDeclaration.count() == 0
+
+
+def test_a_tax_on_land_in_another_token_is_billed_by_its_own_rate_where_no_codex_computes_it():
+    setup_taxes()
+    Token(id="OTHER", ledger="other-ledger", decimals=CENTS)
+    Land(id="L-1", owner="User:alice", width=1, height=1, assessed_value=2_345, area=1)
+    adopt_policy([{**IBI, "facts": {"unit_value": 2_345}}], document={"symbol": "OTHER"})
+    ok("tax_assess", "bob", period="2026")
+    assert ibi_items("User:alice") == [("ibi_urban", 235)] and Invoice[1].symbol == "OTHER"  # 2.345 at 10 %
+
+
+# A tax by brackets, as docs §4.5 writes it: the exact products added, the total rounded once.
+PROGRESSIVE = '''
+from realms.legislation import Money, above
+
+class Tax(above("tax")):
+    def compute_tax_assess(self, entry, subject):
+        value = subject.assessed_value
+        exact, lower = 0, 0
+        for bracket in entry.facts.brackets:
+            upper = value.units if bracket["up_to"] is None else min(value.units, bracket["up_to"])
+            exact += max(upper - lower, 0) * bracket["rate"]
+            lower = max(lower, upper)
+        return [{"concept": entry.code, "amount": Money(exact, value.decimals).times(1)}]
+'''
+BRACKETS = {"code": "progressive", "kind": "tax", "subject": "Land",
+            "facts": {"brackets": [{"up_to": 2_500, "rate": 100_000}, {"up_to": None, "rate": 300_000}]}}  # 0.1 %, then 0.3 %
+
+
+def test_a_chapter_rounds_a_tax_by_brackets_once_as_the_hosts_own_calculation_does():
+    setup_taxes()
+    values = {"alice": 4_000, "bob": 2_000, "dana": 123_457, "carla": 2_500}
+    for owner, value in values.items():
+        Land(id=f"L-{owner}", owner=f"User:{owner}", width=1, height=1, assessed_value=value, area=1)
+    activate(layered({(TOWN, "tax"): PROGRESSIVE}, layers=[TOWN]))
+    adopt_policy([BRACKETS])
+    ok("tax_assess", "bob", period="2026")
+    for owner, value in values.items():
+        assert ibi_items(f"User:{owner}") == [("progressive", taxes.owed(BRACKETS, value, CENTS))]
+    # 40.00 is 2.5 cents on the first 25.00 and 4.5 above: 7 cents rounded once, 8 rounded bracket by bracket
+    assert ibi_items("User:alice") == [("progressive", 7)]
 
 
 def test_a_tax_on_users_gets_the_view_of_the_user_it_taxes():

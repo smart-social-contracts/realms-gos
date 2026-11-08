@@ -1451,7 +1451,7 @@ def test_the_syntax_tree_check_tells_authors_what_the_realm_refuses(member, reas
             "F.kind.in_(): Set<String> and Set<Long> do not compare",
         ),
         (
-            "F.pages > type((F.pages > 1).right)(2 ** 70)",
+            "F.pages > type((F.pages > 1).right)(1180591620717411303424)",  # 2 to the 70th
             "does not fit Cedar's 64-bit integer",
         ),
         (

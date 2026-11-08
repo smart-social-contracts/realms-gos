@@ -91,7 +91,8 @@ VIEWS = {
     "Zone": ("id", "name", "kind", "land", "user", "metadata"),
 }
 # The fields of VIEWS that are an amount of money. A chapter reads them as a ``Money``, which rounds as GGG does, in
-# the decimals of the token the call works in (a ``compute_`` is told them); the other calls do not know them.
+# the decimals a ``compute_`` is told (a parcel's value is in the accounting currency, and tax_assess computes a tax on
+# land through a codex only when it is billed in it); the other calls do not know them.
 MONEY = {"Land": ("assessed_value",)}
 LIBRARY, PROGRAM = "realms.legislation", "core.legislation_sandbox"
 UNKNOWN = object()  # the running codex before the first look in a new heap

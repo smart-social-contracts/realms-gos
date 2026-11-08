@@ -83,7 +83,9 @@ class Money(metaclass=Sealed):
     can be added and compared but cannot be multiplied by a rate until its decimals are known.
 
     ``times(rate)`` applies GGG's one rounding rule and takes no rounding argument. Money adds to and
-    compares with Money only, and never changes once written."""
+    compares with Money of one token only (two known, different decimals are refused, as ``+`` refuses
+    them), is false when it is nothing, and never changes once written. ``sum`` needs a start of its own,
+    ``sum(amounts, Money(0, decimals))``: its default start, the integer 0, is no Money."""
 
     __slots__ = ("units", "decimals")
 
@@ -100,10 +102,14 @@ class Money(metaclass=Sealed):
     def __setattr__(self, name, value):
         raise LegislationError("money never changes: compute a new amount")
 
+    def __delattr__(self, name):
+        raise LegislationError("money never changes: compute a new amount")
+
     def times(self, rate):
         if self.decimals is None:
             raise LegislationError(
-                "money times a rate rounds to the cent, so it needs the token's decimals: Money(units, decimals)"
+                "money times a rate rounds to the cent, so it needs the token's decimals: only a compute_ method knows "
+                "the token, and the amounts it reads carry it; or write Money(units, decimals)"
             )
         return Money(times(self.units, rate, self.decimals), self.decimals)
 
@@ -118,44 +124,51 @@ class Money(metaclass=Sealed):
             and self.decimals != other.decimals
         ):
             raise LegislationError(
-                "two amounts in tokens of different decimals cannot be combined"
+                "two amounts in tokens of different decimals cannot be combined or compared"
             )
         return self.decimals if self.decimals is not None else other.decimals
 
     def __add__(self, other):
-        if not isinstance(other, Money):
+        if type(other) is not Money:
             return NotImplemented
         return Money(self.units + other.units, self._decimals(other))
 
     def __sub__(self, other):
-        if not isinstance(other, Money):
+        if type(other) is not Money:
             return NotImplemented
         return Money(self.units - other.units, self._decimals(other))
 
     def __neg__(self):
         return Money(-self.units, self.decimals)
 
-    def _units(self, other):
-        return other.units if isinstance(other, Money) else NotImplemented
+    def __bool__(self):
+        return self.units != 0
+
+    def _compared(self, other):
+        """The units of ``other`` to compare with ``self``'s, as ``+`` combines them: of one token, or unknown."""
+        if type(other) is not Money:
+            return NotImplemented
+        self._decimals(other)
+        return other.units
 
     def __eq__(self, other):
-        units = self._units(other)
+        units = self._compared(other)
         return units if units is NotImplemented else self.units == units
 
     def __lt__(self, other):
-        units = self._units(other)
+        units = self._compared(other)
         return units if units is NotImplemented else self.units < units
 
     def __le__(self, other):
-        units = self._units(other)
+        units = self._compared(other)
         return units if units is NotImplemented else self.units <= units
 
     def __gt__(self, other):
-        units = self._units(other)
+        units = self._compared(other)
         return units if units is NotImplemented else self.units > units
 
     def __ge__(self, other):
-        units = self._units(other)
+        units = self._compared(other)
         return units if units is NotImplemented else self.units >= units
 
     def __hash__(self):
