@@ -698,7 +698,7 @@ def account_owner(c, args):
     return f"Organization:{org}"
 
 
-@op("self.data_manage", delegable=True, returns="account")
+@op("self.data_manage", returns="account")
 def payment_account_add(c, args):
     """Add a payout account (``network``, ``address``, optional ``symbol`` and ``label``) for you, or for
     ``organization`` if you administer it. Transfers in ``symbol`` are paid to it. Returns ``account``."""
@@ -707,7 +707,7 @@ def payment_account_add(c, args):
     return {"account": a.id}
 
 
-@op("self.data_manage", delegable=True, returns="account")
+@op("self.data_manage", returns="account")
 def payment_account_remove(c, args):
     """Remove your payout ``account``, or with ``organization`` one of an organization you administer. Returns the
     ``account`` as it was."""

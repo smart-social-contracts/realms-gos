@@ -135,7 +135,9 @@ def test_change_quarter_rules_and_delegation(monkeypatch):
     from ggg import Delegation
     Delegation(id="d1", grantor="alice", delegate="claude-conn", status="active",
                scope={"operations": ["self.change_quarter"]}, expires_at=fake_chain.now() + 60)
-    ok("self_change_quarter", "claude-conn", quarter="south", on_behalf_of="alice")
+    assert "power of attorney" in denied("self_change_quarter", "claude-conn", quarter="south", on_behalf_of="alice")
+    assert Member["alice"] is not None
+    ok("self_change_quarter", "alice", quarter="south")
     assert Member["alice"] is None
 
 

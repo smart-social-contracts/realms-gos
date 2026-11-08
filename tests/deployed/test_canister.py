@@ -57,3 +57,33 @@ def test_story(realm, people):
     assert len(ok(realm, "ops_list", None, query=True)["operations"]) >= 200
     assert "call it with run" in refused(realm, "proposal_create", alice, query=True, title="x")
     assert ok(realm, "shell", ctl, expr="ops.proposal_list()")["result"]["proposals"][0]["id"] == p
+
+    # A delegate's proposal is checked against its grant when it runs.
+    ok(realm, "delegation_revoke", alice,
+       delegation=ok(realm, "delegation_list", alice, query=True)["as_grantor"][0]["id"])
+    narrow = dict(delegate=claude, operations=["proposal.create", "self.update_public_profile"], expires_in=24 * 3600)
+    grant = ok(realm, "delegation_grant", alice, **narrow)["delegation"]
+    ok(realm, "governance_update", ctl, voting_window=0)
+    as_alice = dict(on_behalf_of=alice)
+    outside = {"op": "delegation_grant",
+               "args": {"delegate": claude, "operations": ["proposal.vote"], "expires_in": 60}}
+    assert "power of attorney" in refused(realm, "proposal_create", claude, title="x", action=outside, **as_alice)
+
+    def rename(title):
+        action = {"op": "profile_update", "args": {"nickname": "Ali"}}
+        return ok(realm, "proposal_create", claude, title=title, action=action, **as_alice)["proposal"]
+
+    def carry(proposal):
+        ok(realm, "proposal_vote", alice, proposal=proposal, choice="yes")
+        return ok(realm, "proposal_vote", bob, proposal=proposal, choice="yes")["status"]
+
+    ended = rename("Rename, grant ended")
+    ok(realm, "delegation_revoke", alice, delegation=grant)
+    assert carry(ended) == "failed"
+    reason = ok(realm, "proposal_get", alice, query=True, proposal=ended)["proposal"]["result"]["error"]
+    assert "power of attorney" in reason, reason
+    assert ok(realm, "me", alice, query=True)["user"]["nickname"] != "Ali"
+
+    ok(realm, "delegation_grant", alice, **narrow)
+    assert carry(rename("Rename, grant active")) == "executed"
+    assert ok(realm, "me", alice, query=True)["user"]["nickname"] == "Ali"

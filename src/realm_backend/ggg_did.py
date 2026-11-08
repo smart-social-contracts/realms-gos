@@ -143,7 +143,7 @@ class UserImportArgs(Record): users: Vec["NewUser"]; department: Opt[text]
 class UserEditArgs(Record): user: Principal; nickname: Opt[text]; avatar: Opt[text]; home_quarter: Opt[text]
 class UserSetStatusArgs(Record): user: Principal; status: "MemberStatus"; department: Opt[text]
 class UserRemoveArgs(Record): user: Principal; department: Opt[text]
-class IdentitySubmitArgs(Record): kind: text; issuer: Opt[text]; ref: text; on_behalf_of: Opt[Principal]
+class IdentitySubmitArgs(Record): kind: text; issuer: Opt[text]; ref: text
 class IdentityReviewArgs(Record): identity: text; status: "IdentityReviewArgsStatus"
 class IdentityReviewArgsStatus(Variant, total=False): Verified: null; Rejected: null
 class InviteCreateArgs(Record): profile: Opt[text]; department: Opt[text]; position: Opt[text]; code: Opt[text]; max_uses: Opt[nat]; expires_at: Opt[Timestamp]
@@ -219,8 +219,8 @@ class TaxAssessArgs(Record): period: text; tax: Opt[text]; cursor: Opt[text]; li
 class TaxAssessPage(Record): items: Vec["Invoice"]; skipped: nat; next: Opt[text]
 class TaxDeclareArgs(Record): base: text; period: text; amount: nat; organization: Opt[text]; on_behalf_of: Opt[Principal]
 class TaxDeclared(Record): declaration: "TaxDeclaration"; invoice: Opt["Invoice"]
-class PaymentAccountAddArgs(Record): network: text; address: text; symbol: Opt[text]; label: Opt[text]; organization: Opt[text]; on_behalf_of: Opt[Principal]
-class PaymentAccountRemoveArgs(Record): account: text; organization: Opt[text]; on_behalf_of: Opt[Principal]
+class PaymentAccountAddArgs(Record): network: text; address: text; symbol: Opt[text]; label: Opt[text]; organization: Opt[text]
+class PaymentAccountRemoveArgs(Record): account: text; organization: Opt[text]
 class ForceTransferArgs(Record): symbol: text; from_: Principal; to: Principal; amount: nat; reason: Opt[text]
 class FreezeArgs(Record): symbol: text; account: Principal; frozen: bool; reason: Opt[text]
 class LandListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; owner: Opt["Ref"]
@@ -287,7 +287,7 @@ class QuarterReport(Record): quarter: text; drifting: bool
 class QuarterRegisterArgs(Record): canister: Principal; name: Opt[text]
 class QuarterConfigureArgs(Record): quarter: Opt[text]; name: Opt[text]; status: Opt["QuarterStatus"]; quarter_join_mode: Opt[text]; federation_codex: Opt[text]; rule: Opt["Value"]; timezone: Opt[text]
 class JoinFederationArgs(Record): capital: Principal; name: Opt[text]
-class ChangeQuarterArgs(Record): quarter: text; on_behalf_of: Opt[Principal]
+class ChangeQuarterArgs(Record): quarter: text
 class FederalVoteProposeArgs(Record): title: text; action: "ProposalAction"; on_behalf_of: Opt[Principal]
 class FederationMessageArgs(Record): topic: text; body: "Value"; to: Opt[text]
 class SigningPolicy(Record): agents: Vec[text]; delegable: Vec[text]; supervision: "SigningPolicySupervision"
@@ -554,7 +554,7 @@ SCHEMA["UserImportArgs"] = ("record", {"users": "vec NewUser", "department": "op
 SCHEMA["UserEditArgs"] = ("record", {"user": "principal", "nickname": "opt text", "avatar": "opt text", "home_quarter": "opt text"})
 SCHEMA["UserSetStatusArgs"] = ("record", {"user": "principal", "status": "MemberStatus", "department": "opt text"})
 SCHEMA["UserRemoveArgs"] = ("record", {"user": "principal", "department": "opt text"})
-SCHEMA["IdentitySubmitArgs"] = ("record", {"kind": "text", "issuer": "opt text", "ref": "text", "on_behalf_of": "opt principal"})
+SCHEMA["IdentitySubmitArgs"] = ("record", {"kind": "text", "issuer": "opt text", "ref": "text"})
 SCHEMA["IdentityReviewArgsStatus"] = ("variant", {"Verified": "null", "Rejected": "null"})
 SCHEMA["IdentityReviewArgs"] = ("record", {"identity": "text", "status": "IdentityReviewArgsStatus"})
 SCHEMA["InviteCreateArgs"] = ("record", {"profile": "opt text", "department": "opt text", "position": "opt text", "code": "opt text", "max_uses": "opt nat", "expires_at": "opt Timestamp"})
@@ -630,8 +630,8 @@ SCHEMA["TaxAssessArgs"] = ("record", {"period": "text", "tax": "opt text", "curs
 SCHEMA["TaxAssessPage"] = ("record", {"items": "vec Invoice", "skipped": "nat", "next": "opt text"})
 SCHEMA["TaxDeclareArgs"] = ("record", {"base": "text", "period": "text", "amount": "nat", "organization": "opt text", "on_behalf_of": "opt principal"})
 SCHEMA["TaxDeclared"] = ("record", {"declaration": "TaxDeclaration", "invoice": "opt Invoice"})
-SCHEMA["PaymentAccountAddArgs"] = ("record", {"network": "text", "address": "text", "symbol": "opt text", "label": "opt text", "organization": "opt text", "on_behalf_of": "opt principal"})
-SCHEMA["PaymentAccountRemoveArgs"] = ("record", {"account": "text", "organization": "opt text", "on_behalf_of": "opt principal"})
+SCHEMA["PaymentAccountAddArgs"] = ("record", {"network": "text", "address": "text", "symbol": "opt text", "label": "opt text", "organization": "opt text"})
+SCHEMA["PaymentAccountRemoveArgs"] = ("record", {"account": "text", "organization": "opt text"})
 SCHEMA["ForceTransferArgs"] = ("record", {"symbol": "text", "from": "principal", "to": "principal", "amount": "nat", "reason": "opt text"})
 SCHEMA["FreezeArgs"] = ("record", {"symbol": "text", "account": "principal", "frozen": "bool", "reason": "opt text"})
 SCHEMA["LandListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "owner": "opt Ref"})
@@ -698,7 +698,7 @@ SCHEMA["QuarterReport"] = ("record", {"quarter": "text", "drifting": "bool"})
 SCHEMA["QuarterRegisterArgs"] = ("record", {"canister": "principal", "name": "opt text"})
 SCHEMA["QuarterConfigureArgs"] = ("record", {"quarter": "opt text", "name": "opt text", "status": "opt QuarterStatus", "quarter_join_mode": "opt text", "federation_codex": "opt text", "rule": "opt Value", "timezone": "opt text"})
 SCHEMA["JoinFederationArgs"] = ("record", {"capital": "principal", "name": "opt text"})
-SCHEMA["ChangeQuarterArgs"] = ("record", {"quarter": "text", "on_behalf_of": "opt principal"})
+SCHEMA["ChangeQuarterArgs"] = ("record", {"quarter": "text"})
 SCHEMA["FederalVoteProposeArgs"] = ("record", {"title": "text", "action": "ProposalAction", "on_behalf_of": "opt principal"})
 SCHEMA["FederationMessageArgs"] = ("record", {"topic": "text", "body": "Value", "to": "opt text"})
 SCHEMA["SigningPolicySupervision"] = ("variant", {"Required": "null", "Optional": "null"})

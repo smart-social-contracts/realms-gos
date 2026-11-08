@@ -1,7 +1,7 @@
 import fake_chain
 import world
-from ggg import Delegation, DelegationRequest, Event, Vote
-from kit import call, denied, later, ok
+from ggg import Delegation, DelegationRequest, Event, PaymentAccount, Proposal, User, Vote
+from kit import call, denied, later, ok, rows
 
 DAY = 86400
 
@@ -156,3 +156,132 @@ def test_auth():
         assert "needs self." in denied(name, "claude-conn", delegation="D-1", request="DR-1"), name
     assert "sign in" in denied("delegation_request", fake_chain.ANONYMOUS, grantor="alice")
     assert call("delegation_list", "bob")["ok"]
+
+
+def delegate_to_claude(*permissions, grantor="alice"):
+    """A grant that outlasts a proposal's voting window: the grant must still be active when the vote is carried."""
+    return ok("delegation_grant", grantor, delegate="claude-conn", operations=list(permissions),
+              expires_in=30 * DAY)["delegation"]
+
+
+def carry(proposal):
+    """Every member votes yes: the deciding vote closes the proposal and runs its action."""
+    for voter in world.PEOPLE:
+        ok("proposal_vote", voter, proposal=proposal, choice="yes")
+    return {"status": Proposal[proposal].status, "result": Proposal[proposal].result}
+
+
+def nickname(new):
+    return {"op": "profile_update", "args": {"nickname": new}}
+
+
+def test_payout_accounts_are_not_delegable():
+    world.build()
+    delegate_to_claude("self.data_manage")
+    mine = ok("payment_account_add", "alice", network="ICP", address="alice-wallet", symbol="REALM")["account"]
+    added = denied("payment_account_add", "claude-conn", network="ICP", address="other-wallet", symbol="REALM",
+                   on_behalf_of="alice")
+    removed = denied("payment_account_remove", "claude-conn", account=mine, on_behalf_of="alice")
+    assert "power of attorney" in added and "power of attorney" in removed
+    assert [a.address for a in rows(PaymentAccount)] == ["alice-wallet"]
+    assert not {"payment_account_add", "payment_account_remove"} & {
+        o["op"] for o in ok("delegable_operations", "alice")["operations"]}
+
+
+def test_identity_submission_and_quarter_moves_are_not_delegable():
+    world.build()
+    for permission in ("identity.submit", "self.change_quarter"):
+        assert "not a delegable" in denied("delegation_grant", "alice", delegate="claude-conn",
+                                           operations=[permission], expires_in=DAY)
+    # A grant made while they were delegable stops covering them.
+    Delegation(id="D-old", grantor="alice", delegate="claude-conn", status="active", expires_at=fake_chain.now() + DAY,
+               scope={"operations": ["identity.submit", "self.change_quarter"]})
+    assert "power of attorney" in denied("identity_submit", "claude-conn", kind="passport", on_behalf_of="alice")
+    assert "power of attorney" in denied("self_change_quarter", "claude-conn", quarter="south", on_behalf_of="alice")
+
+
+def test_a_delegates_proposal_carries_only_what_its_grant_could_call():
+    world.build()
+    delegate_to_claude("proposal.create", "proposal.vote", "self.update_public_profile")
+    personal = [
+        {"op": "delegation_grant", "args": {"delegate": "claude-conn", "operations": ["proposal.vote"],
+                                            "expires_in": DAY}},
+        {"op": "payment_account_add", "args": {"network": "ICP", "address": "other-wallet"}},
+        {"op": "task_create", "args": {"name": "later", "steps": []}},
+        {"op": "role_assign", "args": {"user": "claude-conn", "profile": "member"}},
+        {"op": "proposal_create", "args": {"title": "again"}},
+    ]
+    for action in personal:
+        error = denied("proposal_create", "claude-conn", title="x", action=action, on_behalf_of="alice")
+        assert "power of attorney" in error, (action["op"], error)
+    assert Proposal.count() == 0
+    p = ok("proposal_create", "claude-conn", title="New nickname", action=nickname("Ali"), on_behalf_of="alice")
+    out = carry(p["proposal"])
+    assert out["status"] == "executed" and User["alice"].nickname == "Ali", out
+
+
+def test_a_delegates_proposal_records_its_grant_and_fails_once_the_grant_has_ended():
+    world.build()
+    grant = delegate_to_claude("proposal.create", "self.update_public_profile")
+    p = ok("proposal_create", "claude-conn", title="x", action=nickname("Ali"), on_behalf_of="alice")["proposal"]
+    assert (Proposal[p].proposer, Proposal[p].on_behalf_of, Proposal[p].filed_under) == ("alice", "alice", grant)
+    ok("delegation_revoke", "alice", delegation=grant)
+    out = carry(p)
+    assert out["status"] == "failed" and "power of attorney" in out["result"]["error"], out
+    assert User["alice"].nickname == "Alice"
+
+
+def test_a_delegates_proposal_fails_when_its_grant_no_longer_covers_the_action():
+    world.build()
+    grant = delegate_to_claude("proposal.create", "self.update_public_profile")
+    p = ok("proposal_create", "claude-conn", title="x", action=nickname("Ali"), on_behalf_of="alice")["proposal"]
+    # Replaced by a narrower grant: the proposal was filed under the first one.
+    ok("delegation_revoke", "alice", delegation=grant)
+    delegate_to_claude("proposal.create")
+    out = carry(p)
+    assert out["status"] == "failed" and "power of attorney" in out["result"]["error"], out
+    assert User["alice"].nickname == "Alice"
+
+
+def test_a_proposal_a_delegate_filed_before_grants_were_recorded_is_not_run_unchecked():
+    world.build()
+    p = ok("proposal_create", "alice", title="x", action=nickname("Ali"))["proposal"]
+    Proposal[p].on_behalf_of = "alice"  # how a delegate's filing looked before the grant was recorded
+    out = carry(p)
+    assert out["status"] == "failed" and "power of attorney" in out["result"]["error"], out
+    assert User["alice"].nickname == "Alice"
+
+
+def test_a_delegate_does_not_vote_on_a_proposal_it_filed():
+    world.build()
+    delegate_to_claude("proposal.create", "proposal.vote")
+    mine = ok("proposal_create", "claude-conn", title="Bike lane", on_behalf_of="alice")["proposal"]
+    assert "filed" in denied("proposal_vote", "claude-conn", proposal=mine, choice="yes", on_behalf_of="alice")
+    other = ok("proposal_create", "bob", title="Park")["proposal"]
+    ok("proposal_vote", "claude-conn", proposal=other, choice="yes", on_behalf_of="alice")
+    ok("proposal_vote", "alice", proposal=mine, choice="yes")
+    assert Vote[f"{mine}:alice"].cast_by == "alice"
+
+
+def test_a_delegate_withdraws_only_the_proposals_it_filed_under_its_grant():
+    world.build()
+    delegate_to_claude("proposal.create")
+    hers = ok("proposal_create", "alice", title="Alice's own")["proposal"]
+    claudes = ok("proposal_create", "claude-conn", title="Claude's", on_behalf_of="alice")["proposal"]
+    assert "not filed under" in denied("proposal_withdraw", "claude-conn", proposal=hers, on_behalf_of="alice")
+    ok("proposal_withdraw", "claude-conn", proposal=claudes, on_behalf_of="alice")
+    assert (Proposal[hers].status, Proposal[claudes].status) == ("voting", "withdrawn")
+    ok("proposal_withdraw", "alice", proposal=hers)
+
+
+def test_a_delegates_proposal_fails_if_its_grant_lapses_before_the_vote_is_carried():
+    world.build()
+    ok("delegation_grant", "alice", delegate="claude-conn", expires_in=2 * DAY,
+       operations=["proposal.create", "self.update_public_profile"])
+    p = ok("proposal_create", "claude-conn", title="x", action=nickname("Ali"), on_behalf_of="alice")["proposal"]
+    for voter in world.PEOPLE[:3]:
+        ok("proposal_vote", voter, proposal=p, choice="yes")
+    later(3 * DAY)
+    out = carry(p)
+    assert out["status"] == "failed" and "power of attorney" in out["result"]["error"], out
+    assert User["alice"].nickname == "Alice"
