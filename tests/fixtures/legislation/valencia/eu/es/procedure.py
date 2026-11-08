@@ -9,7 +9,7 @@ class Procedure(above("procedure")):
     default_decision_deadline = overridable(months(3), legislation="Ley 39/2015 Art. 21.3")   # a GGG Period
 
     over_six_months = forbid("procedure_define",
-        F.decision_deadline.is_some() & (F.decision_deadline > months(6))     
+        F.decision_deadline.is_some() & (F.decision_deadline > months(6))     # GGG's fact, a Period: another unit fails closed
         & F.legislation.is_none(),
         legislation="Ley 39/2015 Art. 21.2")
 
