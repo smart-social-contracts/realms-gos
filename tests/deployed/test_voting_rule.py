@@ -1,0 +1,202 @@
+"""A proposal's voting rule on the real wasm (ggg I-GOV-3, I-GOV-7; realms-gos#547): stored when it is filed through
+GGG's Candid method, never weaker than the scope's default, applied as stored, decided by the realm's casting vote at a
+tie, and migrated for the proposals the last release left open. Numbers outside the range GGG gives them are refused.
+"""
+
+import pytest
+from ic.candid import Types
+from ic.principal import Principal
+from pic import CONTROLLER, Canister
+
+PERCENT = 1_000_000
+ONE = 100 * PERCENT
+LINK = Types.Record({"kind": Types.Variant({"Replaces": Types.Null, "RelatesTo": Types.Null}), "proposal": Types.Text})
+BASIS = Types.Variant({"Cast": Types.Null, "Eligible": Types.Null})
+CREATE_ARGS = Types.Record({
+    "title": Types.Text, "description": Types.Text, "department": Types.Opt(Types.Text), "kind": Types.Opt(Types.Text),
+    "matter": Types.Opt(Types.Text), "threshold": Types.Opt(Types.Nat), "quorum": Types.Opt(Types.Nat),
+    "threshold_of": Types.Opt(BASIS), "action": Types.Variant({"Motion": Types.Null}),
+    "effective_at": Types.Opt(Types.Nat64), "links": Types.Opt(Types.Vec(LINK)),
+    "on_behalf_of": Types.Opt(Types.Principal)})
+GOVERNANCE_ARGS = Types.Record({
+    "voting_window": Types.Opt(Types.Nat64), "voting_threshold": Types.Opt(Types.Nat),
+    "voting_quorum": Types.Opt(Types.Nat),
+    "casting_vote": Types.Opt(Types.Variant({"Set": Types.Principal, "Clear": Types.Null}))})
+GOVERNED = Types.Variant({"Proposed": Types.Text, "Done": Types.Opt(Types.Text)})
+
+
+def ok(realm, op, who, query=False, **args):
+    out = realm.call(op, args, sender=who, query=query)
+    assert out["ok"], (op, out)
+    return out
+
+
+def file(realm, who, department=None, threshold=None, quorum=None, basis=None, kind=None, matter=None):
+    """``ggg_proposal_create`` with Candid: the rule stated is optional. Returns the proposal's id, or the GGG error."""
+    arg = {"title": "x", "description": "", "department": [department] if department else [],
+           "kind": [kind] if kind else [], "matter": [matter] if matter else [],
+           "threshold": [threshold] if threshold is not None else [], "quorum": [quorum] if quorum is not None else [],
+           "threshold_of": [{basis: None}] if basis else [], "action": {"Motion": None}, "effective_at": [],
+           "links": [], "on_behalf_of": []}
+    out = realm.ggg("ggg_proposal_create", CREATE_ARGS, arg, Types.Text, who)
+    return out["Ok"] if "Ok" in out else out["Err"]
+
+
+def govern(realm, **rules):
+    """``ggg_governance_update`` as the controller; ``casting_vote`` is a principal, or "clear"."""
+    cast = rules.pop("casting_vote", None)
+    arg = {"voting_window": [], "voting_threshold": [], "voting_quorum": [],
+           "casting_vote": [] if cast is None else [{"Clear": None} if cast == "clear" else {"Set": cast}]}
+    arg.update({k: [v] for k, v in rules.items()})
+    out = realm.ggg("ggg_governance_update", GOVERNANCE_ARGS, arg, GOVERNED, CONTROLLER)
+    return out["Ok"] if "Ok" in out else out["Err"]
+
+
+def vote(realm, who, proposal, choice):
+    ok(realm, "proposal_vote", who, proposal=proposal, choice=choice)
+
+
+def get(realm, who, proposal):
+    return ok(realm, "proposal_get", who, query=True, proposal=proposal)["proposal"]
+
+
+@pytest.fixture(scope="module")
+def realm(wasm_of, people):
+    """A launched realm of four members, the founder, Alice, Bob and Mallory, and the Council department, which decides 2
+    of 4 with the four of them in its seats."""
+    realm = Canister(wasm_of("production"), installer=people["installer"])
+    ctl, founder = people["ctl"], people["founder"]
+    ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
+    ok(realm, "setup_step", founder, step="realm", name="Agora", open_registration=True)
+    ok(realm, "setup_step", founder, step="trust_policy", require_marketplace_approval=False)
+    ok(realm, "setup_launch", founder)
+    members = [people[name] for name in ("alice", "bob", "mallory")]
+    for member in members:
+        ok(realm, "realm_join", member)
+    ok(realm, "department_create", ctl, department="Council")
+    ok(realm, "position_create", ctl, department="Council", position="council.member", headcount=4)
+    for member in members + [founder]:
+        ok(realm, "appoint", ctl, position="council.member", user=member)
+    ok(realm, "department_set_policy", ctl, department="Council", m=2, n=4)
+    return realm
+
+
+def test_a_rule_stated_through_ggg_is_stored_and_decides_the_vote_as_stored(realm, people):
+    founder, alice, bob, mallory = (people[n] for n in ("founder", "alice", "bob", "mallory"))
+    plain = file(realm, alice)
+    raised = file(realm, alice, threshold=50 * PERCENT, basis="Eligible", kind="legislation", matter="tax")
+    assert {k: get(realm, alice, raised)[k] for k in ("threshold", "quorum", "threshold_of", "kind", "matter")} == {
+        "threshold": 50 * PERCENT, "quorum": 0, "threshold_of": "eligible", "kind": "legislation", "matter": "tax"}
+    assert get(realm, alice, plain)["threshold_of"] == "cast"
+    for proposal in (plain, raised):  # two yes, a no and an abstention: everyone has voted
+        for who, choice in ((founder, "yes"), (alice, "yes"), (bob, "no"), (mallory, "abstain")):
+            vote(realm, who, proposal, choice)
+    assert get(realm, alice, plain)["status"] == "accepted"  # two yes against one no
+    assert get(realm, alice, raised)["status"] == "rejected"  # two of four is not more than half of them
+    assert get(realm, alice, raised)["tally"]["eligible"] == 4
+
+
+def test_a_rule_weaker_than_the_scopes_default_is_refused(realm, people):
+    alice = people["alice"]
+    ok(realm, "governance_update", people["ctl"], voting_quorum=20 * PERCENT)
+    for stated in ({"threshold": 40 * PERCENT}, {"quorum": 10 * PERCENT}, {"department": "Council", "basis": "Cast"},
+                   {"department": "Council", "threshold": 40 * PERCENT}):
+        assert "InvalidArgument" in file(realm, alice, **stated), stated
+    refused = realm.call("proposal_create", {"title": "x", "threshold_of": "other"}, sender=alice)
+    assert not refused["ok"] and refused["kind"] == "invalid_argument"
+    ok(realm, "governance_update", people["ctl"], voting_quorum=0)
+
+
+def test_a_department_proposal_takes_m_of_n_over_the_seats_and_a_raised_threshold_asks_for_more(realm, people):
+    alice, bob, mallory, founder = (people[n] for n in ("alice", "bob", "mallory", "founder"))
+    plain, raised = file(realm, alice, "Council"), file(realm, alice, "Council", threshold=75 * PERCENT)
+    assert (get(realm, alice, plain)["threshold"], get(realm, alice, plain)["threshold_of"]) == (50 * PERCENT, "eligible")
+    for proposal in (plain, raised):
+        vote(realm, alice, proposal, "yes")
+        vote(realm, bob, proposal, "yes")
+    assert get(realm, alice, plain)["status"] == "accepted"  # m of the four seats
+    assert get(realm, alice, raised)["status"] == "voting"  # three quarters of four are three
+    vote(realm, mallory, raised, "yes")
+    assert get(realm, alice, raised)["status"] == "accepted"
+
+
+def test_a_tie_at_the_threshold_is_accepted_only_with_the_casting_members_yes(realm, people):
+    founder, alice, bob, mallory = (people[n] for n in ("founder", "alice", "bob", "mallory"))
+    assert govern(realm, casting_vote=founder) == {"Done": []}
+    decided, undecided = file(realm, alice), file(realm, alice)
+    assert get(realm, alice, decided)["casting_vote"] == founder
+    for proposal, yes, abstaining in ((decided, founder, bob), (undecided, bob, founder)):
+        vote(realm, yes, proposal, "yes")
+        vote(realm, alice, proposal, "no")
+        vote(realm, abstaining, proposal, "abstain")
+        vote(realm, mallory, proposal, "abstain")
+    assert get(realm, alice, decided)["status"] == "accepted"  # one yes and one no, and the founder's is the yes
+    assert get(realm, alice, undecided)["status"] == "rejected"  # the founder did not vote yes
+    assert govern(realm, casting_vote="clear") == {"Done": []}
+    assert get(realm, alice, file(realm, alice))["casting_vote"] == ""
+    assert get(realm, alice, decided)["casting_vote"] == founder  # fixed at creation
+
+
+def test_a_casting_vote_names_an_active_member(realm, people):
+    assert "InvalidArgument" in govern(realm, casting_vote=Principal.self_authenticating(b"nobody").to_str())
+
+
+def test_a_ratio_out_of_range_is_refused_whichever_way_it_comes(realm, people):
+    alice, ctl = people["alice"], people["ctl"]
+    assert "InvalidArgument" in govern(realm, voting_threshold=ONE + 1)
+    assert "InvalidArgument" in file(realm, alice, threshold=ONE + 1)
+    refused = realm.call("governance_update", {"voting_quorum": ONE + 1}, sender=ctl)
+    assert not refused["ok"] and refused["kind"] == "invalid_argument"
+    refused = realm.call("transfer_create", {"fund": "ROOT", "to": alice, "amount": 2**53}, sender=ctl)
+    assert not refused["ok"] and refused["kind"] == "invalid_argument" and "must be between" in refused["error"]
+
+
+def test_a_periods_count_beyond_a_million_is_refused_in_the_wasm(realm):
+    """No operation takes a Period yet; the check is made on the operation's name, from the bounds in the build."""
+    out = realm.shell(
+        "from core import ranges\nfrom core.db import Fail\n"
+        "for count in (1000000, 1000001):\n"
+        "    try:\n"
+        "        ranges.check('loan_create', {'term': {'count': count, 'unit': 'day'}})\n"
+        "        print(count, 'passes')\n"
+        "    except Fail as e:\n"
+        "        print(count, e.kind)\n")
+    assert out.split("\n")[:2] == ["1000000 passes", "1000001 invalid_argument"]
+
+
+# ---- An upgrade
+
+ROWS = '''
+import json
+from ic_python_db import Database
+import ggg
+
+db = Database.get_instance()
+
+
+def as_last_release_saved(proposal, **fields):
+    key = ggg.Proposal[proposal]._id
+    row = {k: v for k, v in db.load("Proposal", key).items() if k not in ("kind", "matter", "threshold_of", "casting_vote")}
+    db.save("Proposal", key, {**row, "__version__": 2, **fields})
+'''
+
+
+def test_the_proposals_of_the_last_release_are_decided_by_the_rule_they_were_filed_under(realm, people):
+    alice, bob, mallory = (people[n] for n in ("alice", "bob", "mallory"))
+    ok(realm, "governance_update", people["ctl"], voting_threshold=60 * PERCENT, voting_quorum=10 * PERCENT)
+    open_realm_wide, open_department = file(realm, alice), file(realm, alice, "Council")
+    vote(realm, alice, open_department, "yes")
+    out = realm.shell(ROWS + (
+        f"as_last_release_saved('{open_realm_wide}', tally={{'yes': 0, 'no': 0, 'abstain': 0}})\n"
+        f"as_last_release_saved('{open_department}', threshold=3000000, tally={{'yes': 1, 'no': 0, 'abstain': 0, "
+        f"'required': 2, 'veto': []}})\n"))
+    assert "Traceback" not in out, out
+    realm.upgrade()  # the heap is emptied: the next read comes from storage, and migrates the row
+    plain, department = get(realm, alice, open_realm_wide), get(realm, alice, open_department)
+    assert (plain["threshold"], plain["quorum"], plain["threshold_of"], plain["casting_vote"]) == (
+        60 * PERCENT, 10 * PERCENT, "cast", "")
+    assert (department["threshold"], department["threshold_of"]) == (50 * PERCENT, "eligible")
+    assert "required" not in department["tally"] and department["tally"]["yes"] == 1
+    vote(realm, bob, open_department, "yes")  # m was 2, and 2 of the 4 seats reach half of them
+    assert get(realm, alice, open_department)["status"] == "accepted"
+    ok(realm, "governance_update", people["ctl"], voting_threshold=50 * PERCENT, voting_quorum=0)

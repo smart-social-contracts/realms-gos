@@ -245,7 +245,7 @@ def realm_fix(r):
     # A quarter counts its own members; a capital adds what its quarters last reported.
     members = quarters.population() + (0 if quarters.federated() else sum(q.population for q in quarters.known()))
     return {"member_count": members, "voting_threshold": int(rules.get("voting_threshold", ONE // 2)),
-            "voting_quorum": int(rules.get("voting_quorum", 0)),
+            "voting_quorum": int(rules.get("voting_quorum", 0)), "casting_vote": rules.get("casting_vote"),
             "installed_version": get(r, "installed_version") or VERSION,
             "accounting_currency_decimals": get(r, "accounting_currency_decimals") if get(r, "accounting_currency") else None}
 

@@ -92,6 +92,34 @@ def test_another_proposal_stops_a_scheduled_one():
     assert "withdrawn" in call("proposal_stop", "ctl", proposal=p)["error"]
 
 
+def test_a_departments_proposal_cannot_stop_a_realm_wide_scheduled_one():
+    """The vote of a few seats must not undo the realm's: the stop is governed by the department the stopped proposal
+    is scoped to (ggg I-GOV-8), which here is the root."""
+    world.build()
+    p = scheduled_proposal()
+    out = call("proposal_create", "carla", title="Stop it", department="Infrastructure",
+               action={"op": "proposal_stop", "args": {"proposal": p}})
+    assert not out["ok"] and out["kind"] == "forbidden" and "only a realm-wide proposal" in out["error"]
+    assert Proposal.count() == 1 and Proposal[p].status == "execution_scheduled"
+
+
+def test_a_realm_wide_proposal_stops_a_departments_scheduled_one():
+    world.build()
+    ok("governance_update", "ctl", voting_window=0)
+    crew = {"op": "department_create", "args": {"department": "Crew", "parent": "Infrastructure"}}
+    scheduled = ok("proposal_create", "carla", title="Crew", department="Infrastructure", action=crew,
+                   effective_at=fake_chain.now() + HOUR)["proposal"]
+    ok("proposal_vote", "carla", proposal=scheduled, choice="yes")
+    assert Proposal[scheduled].status == "execution_scheduled"
+    stop = ok("proposal_create", "alice", title="Stop it",
+              action={"op": "proposal_stop", "args": {"proposal": scheduled}})["proposal"]
+    vote_yes(stop)
+    assert Proposal[stop].status == "executed" and Proposal[scheduled].status == "withdrawn"
+    later(HOUR)
+    fire_timers()
+    assert Department["Crew"] is None
+
+
 @pytest.mark.parametrize("effective_at", [1_790_003_600.5, "1790003600", True, [1_790_003_600]],
                          ids=["a fraction", "a string", "a bool", "a list"])
 def test_effective_at_is_whole_seconds_or_the_proposal_is_refused(effective_at):
