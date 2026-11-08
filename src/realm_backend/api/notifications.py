@@ -1,4 +1,4 @@
-from core import chain
+from core import chain, poa
 from core.db import Forbidden, deref, find, next_id, page_by, ref, view
 from ggg import Event, Notification
 from core.op import op, ops
@@ -29,7 +29,7 @@ def inbox(c, args):
     return recipient
 
 
-@op("self.data_view", read=True, delegable=True, returns="notifications")
+@op("self.data_view", read=True, returns="notifications")
 def notification_list(c, args):
     """The notifications of ``recipient`` (default "User:<you>"; or "Department:<id>", "Organization:<id>" where
     you hold a seat), oldest first, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1);
@@ -39,18 +39,26 @@ def notification_list(c, args):
     return {"notifications": [{**view(n, *SHOWN), "read": c.user in n.read_by} for n in rows], "next": nxt}
 
 
-@op("self.data_manage", delegable=True)
+def left_unread(c, n):
+    """A delegate leaves the member's power-of-attorney notices unread: they are how the member learns what it did."""
+    return c.delegated and n.topic == poa.TOPIC
+
+
+@op("self.data_manage")
 def notification_read(c, args):
     """Mark notifications as read: ``notification`` (one id), or with ``all`` a page of ``recipient``'s (default
     "User:<you>"), ``count`` (default 100, at most 500) from row ``from`` (default 1); call again with ``next`` until
-    it is null. Returns ``read``, how many were newly marked."""
+    it is null. Returns ``read``, how many were newly marked. A delegate marks none of the member's power-of-attorney
+    notices (topic ``poa``): by id it is refused, and with ``all`` they stay unread."""
     if args.get("all"):
         rows, nxt = page_by(Notification, "recipient", inbox(c, args), args)
     else:
         rows, nxt = [find(Notification, args["notification"])], None
         if rows[0].recipient not in addressed_to(c):
             raise Forbidden(f"notification {rows[0].id} is not addressed to you")
-    fresh = [n for n in rows if c.user not in n.read_by]
+        if left_unread(c, rows[0]):
+            raise Forbidden(f"notification {rows[0].id} tells you what your delegates did: only you mark it read")
+    fresh = [n for n in rows if c.user not in n.read_by and not left_unread(c, n)]
     for n in fresh:
         n.read_by = n.read_by + [c.user]
     return {"read": len(fresh), "next": nxt}

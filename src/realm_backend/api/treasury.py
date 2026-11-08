@@ -240,7 +240,7 @@ def positive(args, key="amount"):
     return amount
 
 
-@op("transfer.create", delegable=True, governed=fund_department, parties=lambda a: {a.get("to", "")},
+@op("transfer.create", governed=fund_department, parties=lambda a: {a.get("to", "")},
     returns="transfer")
 def transfer_create(c, args):
     """Pay ``amount`` of ``symbol`` (default the realm currency) from ``fund`` to ``to`` (principal, user or org); the
@@ -340,7 +340,7 @@ def invoice_create(c, args):
     return {"invoice": inv.id, "pay_to": pay_to(inv)}
 
 
-@op("self.invoice_refresh", delegable=True, returns="invoice")
+@op("self.invoice_refresh", returns="invoice")
 def invoice_check(c, args):
     """Check the ledger for a payment of ``invoice`` (yours or your organization's). Returns its ``status``."""
     inv = find(Invoice, args["invoice"])
@@ -377,7 +377,7 @@ def invoice_refresh(c, args):
             "next": nxt}
 
 
-@op("self.data_view", read=True, delegable=True)
+@op("self.data_view", read=True)
 def my_invoices(c, args):
     """One page of your ``invoices`` (``from``, ``count``), each with its status and ``pay_to``, the ledger account to
     pay it into; ``next`` continues it."""

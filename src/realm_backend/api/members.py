@@ -132,7 +132,7 @@ def user_list(c, args):
     return {"users": [card(u) for u in rows], "next": nxt}
 
 
-@op("self.data_view", read=True, delegable=True)
+@op("self.data_view", read=True)
 def me(c, args):
     """Your card, permissions and the first page of your delegations each way (``next`` in it continues them with
     delegation_list), plus your private data when you call it yourself (not as a delegate)."""
@@ -144,7 +144,7 @@ def me(c, args):
     return out
 
 
-@op("self.update_public_profile", delegable=True, returns="user")
+@op("self.update_public_profile", returns="user")
 def profile_update(c, args):
     """Change your public ``nickname`` and ``avatar``; a field you leave out stays as it is. Returns ``user``."""
     user = find(User, c.user)

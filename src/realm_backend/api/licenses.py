@@ -49,7 +49,7 @@ def application(c, kind, holder, department, evidence_ref, conditions):
     return {"license": lic.id}
 
 
-@op("license.apply", delegable=True, returns="license")
+@op("license.apply", returns="license")
 def license_apply(c, args):
     """Apply for a licence of ``kind`` for ``holder`` (default you, or ``Organization:id`` of one you administer), to
     issuing ``department`` (optional), with optional ``evidence_ref`` and ``conditions``. Returns ``license``."""
@@ -57,7 +57,7 @@ def license_apply(c, args):
                        args.get("evidence_ref", ""), args.get("conditions", {}))
 
 
-@op("license.apply", delegable=True, returns="license")
+@op("license.apply", returns="license")
 def license_renew(c, args):
     """Apply to renew the active or expired ``license``, optionally with new ``evidence_ref``. Approving the renewal
     expires the old licence. Returns the new application's ``license``."""

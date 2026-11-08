@@ -219,7 +219,7 @@ def land_unfreeze(c, args):
     return (yield from freeze(args, False))
 
 
-@op("self.data_manage", delegable=True, returns="zone")
+@op("self.data_manage", returns="zone")
 def zone_set(c, args):
     """Make ``zone`` (an h3 cell) your home, with optional ``name`` and ``kind``; it replaces your previous home."""
     zone = Zone[args["zone"]]
@@ -232,7 +232,7 @@ def zone_set(c, args):
     return {"zone": zone.id}
 
 
-@op("self.data_manage", delegable=True, returns="zone")
+@op("self.data_manage", returns="zone")
 def zone_clear(c, args):
     """Stop having ``zone`` as your home."""
     zone = find(Zone, args["zone"])

@@ -125,10 +125,11 @@ def check_grant(grant_id, grantor, action):
         raise Fail(f"{name} is missing {e}")
 
 
-def filer(p):
-    """The delegate that filed ``p`` under a power of attorney, if any."""
+def filed_for(p, member):
+    """Whether a delegate of ``member`` filed ``p``: under a grant of theirs, whoever holds it and whatever its status
+    is now (I-ID-13)."""
     grant = Delegation[p.filed_under] if p.filed_under else None
-    return grant.delegate if grant else ""
+    return bool(grant) and grant.grantor == member
 
 
 def default_rule(department):
@@ -420,7 +421,7 @@ def effective_at_of(args):
     return value
 
 
-@op("proposal.create", delegable=True, returns="proposal")
+@op("proposal.create", returns="proposal")
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it
@@ -454,7 +455,7 @@ def proposal_create(c, args):
     return {"proposal": p.id}
 
 
-@op("proposal.create", delegable=True, returns="proposal")
+@op("proposal.create", returns="proposal")
 def proposal_withdraw(c, args):
     """Withdraw ``proposal``, a proposal of yours that is still a draft or being voted on."""
     p = find(Proposal, args["proposal"])
@@ -478,7 +479,7 @@ def proposal_linked_from(c, args):
     return {"links": [{"kind": e.kind, "proposal": e.source} for e in edges], "next": nxt}
 
 
-@op("proposal.vote", delegable=True, returns="vote")
+@op("proposal.vote", returns="vote")
 def proposal_vote(c, args):
     """Vote on ``proposal`` before its deadline: ``choice`` is yes, no or abstain. Returns ``vote``.
     Voting again replaces your earlier vote, until the vote ends: at its deadline, or once every eligible member has
@@ -494,8 +495,9 @@ def proposal_vote(c, args):
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
     if p.status != "voting" or (p.deadline and chain.now() > p.deadline):
         raise Conflict(f"{p.id} is not open for voting")
-    if c.grant and filer(p) == c.by:
-        raise Forbidden(f"{p.id} was filed by {c.by}: a delegate does not vote on its own proposal")
+    if c.grant and filed_for(p, c.user):
+        raise Forbidden(f"{p.id} was filed by a delegate of {c.user}: a delegate does not vote on what one of the "
+                        "member's delegates filed")
     if not eligible(p, c.user):
         raise Forbidden(f"you are not eligible to vote on {p.id}")
     key = f"{p.id}:{c.user}"

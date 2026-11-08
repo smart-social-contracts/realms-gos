@@ -273,6 +273,15 @@ def scope(row, key):
     return s.get(key) if isinstance(s, dict) else None
 
 
+GROUP = "group:"
+
+
+def named(row):
+    """A grant's or request's ``scope`` in GGG: its groups as ``group:<id>``, or the permissions it names."""
+    groups = scope(row, "groups")
+    return [GROUP + g for g in groups] if groups else scope(row, "operations") or []
+
+
 FIX = {
     "Realm": realm_fix,
     "Member": lambda m: {"user": get(m, "user") or ident(m)},
@@ -288,8 +297,8 @@ FIX = {
     "ProposalResult": lambda r: r if "Reply" in r or "Error" in r else {"Error": r.get("error", "")}
     if not r.get("ok", True) else {"Reply": json.dumps(r, sort_keys=True).encode()},
     "DelegableOperation": lambda d: {"operation": get(d, "operation") or get(d, "op")},
-    "Delegation": lambda d: {"scope": scope(d, "operations") or []},
-    "DelegationRequest": lambda d: {"scope": scope(d, "operations") or []},
+    "Delegation": lambda d: {"scope": named(d)},
+    "DelegationRequest": lambda d: {"scope": named(d)},
     "Policy": lambda p: {"m": get(p, "m") or 1, "n": get(p, "n") or 1, "veto": get(p, "veto") or [],
                          "quorum": int(get(p, "quorum") or 0)},
     "UserEntry": lambda e: entry(get(e, "user") or e),
@@ -645,8 +654,19 @@ def page_of(key, item=None):
     return build
 
 
+def grouped(args, g):
+    """A grant's scope as Realms GOS takes it: ``group:<id>`` entries are ``groups``, anything else permissions."""
+    names = args.get("operations")
+    if names is None or not any(n.startswith(GROUP) for n in names):
+        return args
+    if not all(n.startswith(GROUP) for n in names):
+        raise BadArgument("a grant names groups or permissions, not both")
+    return {**{k: v for k, v in args.items() if k != "operations"}, "groups": [n.removeprefix(GROUP) for n in names]}
+
+
 # Argument and reply adapters, for operations whose shapes differ beyond names and units.
 ARGS = {
+    "delegation_grant": grouped, "delegation_request": grouped, "delegation_request_decide": grouped,
     "department_set_policy": lambda a, g: {**{k: v for k, v in a.items() if k != "policy"}, **a.get("policy", {})},
     "treasury_configure": lambda a, g: {"config": a},
     "representative_remove": lambda a, g: seat_owner(a),

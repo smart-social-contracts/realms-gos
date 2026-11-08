@@ -10,6 +10,7 @@ class Event(Row):
     user = String(default="")
     by = String(default="")
     origin = String(default="")
+    grant = String(indexed=True)  # the power of attorney a delegate acted under, if one did
     args = Json({})
     result = Json({})
     at = Integer(default=0)

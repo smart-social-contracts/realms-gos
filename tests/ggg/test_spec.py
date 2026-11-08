@@ -8,7 +8,7 @@ from core import op
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPECS = (ROOT / "ggg" / "model" / "README.md", ROOT / "docs" / "ggg" / "spec.md")
-FLAGS = ("read", "delegable", "governed", "signing")
+FLAGS = ("read", "delegable", "confirm", "governed", "signing")
 
 
 def spec_ops():
@@ -41,8 +41,9 @@ def registered():
 
 
 def flags_of(s):
-    return {"read": s["read"], "delegable": s["delegable"], "governed": s["governed"] is not None,
-            "signing": s["signing"], "public": s["public"]}
+    """``delegable`` and ``confirm`` are the model's tiers, direct and ask-each-time: never a decorator's flag."""
+    return {"read": s["read"], "delegable": s["tier"] == "direct", "confirm": s["tier"] == "confirm",
+            "governed": s["governed"] is not None, "signing": s["signing"], "public": s["public"]}
 
 
 def test_every_spec_operation_is_registered_as_specified():
