@@ -27,10 +27,13 @@ GOVERNANCE = {"voting_threshold": 70 * PERCENT, "voting_quorum": 10 * PERCENT}
 POLICY = {"m": 2, "n": 3, "quorum": 50 * PERCENT, "veto": []}
 SHARES = [{"fund": "ROADS", "share": 30 * PERCENT}]
 RUBRIC = {"price": 60 * PERCENT, "quality": 40 * PERCENT}
-TAXES = {"symbol": "DOM", "taxes": [
-    {"code": "revenue", "base": "declared", "method": "proportional", "rate": 200 * BASIS_POINT},
-    {"code": "property", "base": "flat", "method": "progressive",
-     "brackets": [{"up_to": 5_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}]}]}
+DOCUMENT = {"symbol": "DOM"}
+ENTRIES = [
+    {"code": "revenue", "kind": "tax", "subject": "Declaration", "rate": 200 * BASIS_POINT, "facts": {}},
+    {"code": "property", "kind": "tax", "subject": "User",
+     "facts": {"brackets": [{"up_to": 5_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}]}}]
+# The versions the entities are saved at: the tax policy moved its taxes out of the document after the ratios.
+VERSION = {"TaxPolicy": 3}
 
 # A proposal the last release left voting, with the shares of its action as it filed them.
 OLD_ACTION = {"op": "allocation_rule_draft", "args": {"source_fund": "ROOT", "rules": {"ROADS": 20}}}
@@ -61,7 +64,7 @@ version_1(ggg.Department, "Finance", policy={OLD_POLICY!r})
 version_1(ggg.Realm, "1", manifest_data={{**ggg.Realm["1"].manifest_data, "governance": {OLD_GOVERNANCE!r}}})
 version_1(ggg.AllocationRule, "AR-1", rules={OLD_SHARES!r})
 version_1(ggg.Tender, "T-1", rubric={OLD_RUBRIC!r})
-version_1(ggg.TaxPolicy, "TAX-POLICY-1", document={OLD_TAXES!r})
+version_1(ggg.TaxPolicy, "TAX-POLICY-1", drop=("taxes",), document={OLD_TAXES!r})
 version_1(ggg.Proposal, "P-2", drop=("quorum",), threshold=50, quorum_percent=0, action={OLD_ACTION!r})
 print(json.dumps(saved))
 '''
@@ -80,6 +83,10 @@ def run(realm, code):
     out = realm.shell(code)
     assert "Traceback" not in out, out
     return out
+
+
+def versions(realm):
+    return {key: row["__version__"] for key, row in rows(realm).items()}
 
 
 def rows(realm):
@@ -109,9 +116,9 @@ def realm(wasm_of, people):
     ok(realm, "allocation_rule_draft", ctl, source_fund="ROOT", rules=SHARES)
     ok(realm, "allocation_rule_propose", ctl, rule="AR-1")  # a budget view shows the adopted rule
     ok(realm, "tender_create", ctl, title="Bike lane", requester="Finance", opens_at=1, closes_at=2, rubric=RUBRIC)
-    ok(realm, "tax_policy_draft", ctl, document=TAXES)
+    ok(realm, "tax_policy_draft", ctl, document=DOCUMENT, taxes=ENTRIES)
     # What a new realm saves: the rows are of this release's shape, and the old rows below are those of the last.
-    assert {row["__version__"] for row in rows(realm).values()} == {2}
+    assert versions(realm) == {key: VERSION.get(key.split(":")[0], 2) for key in rows(realm)}
     realm.old_rows = json.loads(run(realm, SAVE_OLD))  # read before anything loads, and so migrates, them
     realm.upgrade()
     return realm
@@ -133,12 +140,13 @@ def test_every_ratio_keeps_its_meaning_after_the_upgrade(realm, people):
     funds = {f["id"]: f for f in ok(realm, "budget_view", alice, query=True)["funds"]}
     assert funds["ROOT"]["rule"]["rules"] == SHARES
     assert ok(realm, "tender_get", alice, query=True, tender="T-1")["tender"]["rubric"] == RUBRIC
-    assert ok(realm, "tax_policy_view", alice, query=True)["drafts"][0]["document"] == TAXES
+    draft = ok(realm, "tax_policy_view", alice, query=True)["drafts"][0]
+    assert (draft["document"], draft["taxes"]) == (DOCUMENT, ENTRIES)
     assert rows(realm)["Realm:1"]["manifest_data"]["governance"] == GOVERNANCE
 
 
 def test_the_migrated_rows_are_saved_at_the_new_version(realm):
-    assert {row["__version__"] for row in rows(realm).values()} == {2}
+    assert versions(realm) == {key: VERSION.get(key.split(":")[0], 2) for key in rows(realm)}
 
 
 def test_a_proposal_filed_before_the_upgrade_runs_its_action_with_the_shares_it_was_filed_with(realm, people):

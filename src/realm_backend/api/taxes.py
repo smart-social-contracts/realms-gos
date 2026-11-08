@@ -7,7 +7,6 @@ from core.tax_entries import SUBJECTS
 from api import codex
 from api.proposals import realm_wide
 from api.treasury import currency, decimals_of, invoice_item, new_invoice, total
-from realms.legislation.rates import times
 
 ENTRY_FIELDS = ("code", "kind", "subject", "rate", "amount", "facts")
 
@@ -93,6 +92,8 @@ def draft_of(args):
 def owed(entry, value, decimals):
     """The reference calculation: what a taxable ``value`` owes under one entry when no codex computes it, in the token's
     smallest unit, rounded to the cent as GGG rounds (integer; rates in hundred-millionths)."""
+    from realms.legislation.rates import times  # the layered codex library's one rounding rule, compiled on first use
+
     facts = entry["facts"]
     if value <= 0 or value < int(facts.get("exempt_below") or 0):
         return 0
