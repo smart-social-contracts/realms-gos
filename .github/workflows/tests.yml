@@ -2,8 +2,8 @@
 #
 # Runs on every pull request and every push to main or feat/layered-codex. It is the one place
 # the unit suites run: tests/ggg, tests/backend, the layered codex library, the sandbox ratchet and
-# the GGG checks. ci-pr.yml and ci-main.yml run only by hand (their triggers are commented out) and
-# keep what the full mundus bring-up needs: lint, the packed wasms, e2e, the frontend and the CLI.
+# the GGG checks. ci-pr.yml (on pull requests too) and ci-main.yml (by hand only) keep what the full
+# mundus bring-up needs: lint, the packed wasms, e2e, the frontend and the CLI.
 
 name: Tests
 

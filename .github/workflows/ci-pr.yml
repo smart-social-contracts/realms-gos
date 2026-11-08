@@ -12,9 +12,12 @@
 name: CI (PR)
 
 on:
-  # pull_request:
-  #   branches: [main]
+  pull_request:
+    branches: [main, "feat/**"]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-pr-${{ github.ref }}
@@ -30,6 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -51,7 +56,8 @@ jobs:
         # not environment ids). The CLI is covered too: a `--network` default
         # table there is the same bug one layer up. The only literals allowed
         # are DFINITY system canisters that are the same on every mainnet alias
-        # (Candid UI, Internet Identity, ckBTC ledger + index).
+        # (Candid UI, Internet Identity, the ICP ledger, and the ckBTC, ckUSDC
+        # and ckEURC ledgers + indexes).
         run: |
           if grep -rnoE '\b[a-z0-9]{5}(-[a-z0-9]{5}){3,10}-[a-z0-9]{3}\b' \
                scripts .github src/realm_backend src/*/static src/realm_frontend/src cli/realms dfx.json \
@@ -61,12 +67,13 @@ jobs:
                --exclude-dir=node_modules --exclude-dir=tests --exclude-dir=__pycache__ --exclude-dir=declarations --exclude-dir=dist --exclude-dir=cycleops \
                --exclude=test_identity_seed.py --exclude='*.test.ts' --exclude='*.test.js' \
              | grep -v -- '-xxxxx-' \
-             | grep -vE 'rxs6w-5qaaa-aaaah-avp2a-cai|rdmx6-jaaaa-aaaaa-aaadq-cai|mxzaz-hqaaa-aaaar-qaada-cai|n5wcd-faaaa-aaaar-qaaea-cai'; then
+             | grep -vE ':(rxs6w-5qaaa-aaaah-avp2a-cai|rdmx6-jaaaa-aaaaa-aaadq-cai|ryjl3-tyaaa-aaaaa-aaaba-cai|mxzaz-hqaaa-aaaar-qaada-cai|n5wcd-faaaa-aaaar-qaaea-cai|xevnm-gaaaa-aaaar-qafnq-cai|xrs4b-hiaaa-aaaar-qafoa-cai|pe5t5-diaaa-aaaar-qahwa-cai|pd4vj-oqaaa-aaaar-qahwq-cai)$'; then
             echo "::error::canister/principal ids belong in casals.json (read them with 'casals export')"; exit 1
           fi
 
-  # The unit gate (tests/ggg, tests/backend, the ratchet and the GGG checks) is tests.yml, which runs on every
-  # pull request; this job keeps what only the full bring-up needs: the layered codex library, the CLI, the frontend.
+  # The Python unit suites (tests/ggg, tests/backend, the layered codex library, the ratchet and the GGG
+  # checks) run in tests.yml and nowhere else. This job keeps the CLI tests, without the library's, and
+  # the frontend tests.
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -76,34 +83,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: |
-          pip install -e cli/
-          pip install -r requirements.txt
-          pip install pytest pytest-cov cedarpy==4.12.2
-      # The pinned Cedar CLI 4.14.1 (experimental, with symcc) and cvc5 1.3.1 prove that every
-      # generated forbid never errors (docs/codices/layered-codex.md §6 rule 9); the library's tests
-      # below need them, and cedarpy 4.12 (the canister's Cedar line) for validation and decisions.
-      - name: Cedar analysis tools
-        uses: actions/cache@v4
-        with:
-          path: .cache/cedar-tools
-          key: cedar-tools-cli-4.14.1-cvc5-1.3.1
-      - run: scripts/cedar_tools.sh .cache/cedar-tools >> "$GITHUB_ENV"
-      - name: Layered codex library
-        # Blocking: realms.legislation is the code the realm runs at install, and these tests are
-        # in-process (cedarpy, the pinned CLI), with no canister or DB.
-        run: pytest -q cli/tests/test_legislation*.py
+      # The CLI's own `listings` extra brings h3, so test_listings_command runs.
+      - run: pip install -e "cli/[listings]" pytest
       - name: CLI unit tests
-        run: pytest -v cli/tests/ || true
+        run: pytest -v cli/tests/ --ignore-glob='cli/tests/test_legislation*'
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: src/realm_frontend/package-lock.json
+          cache-dependency-path: package-lock.json
       - name: Host frontend i18n tests
         working-directory: src/realm_frontend
         run: |
           npm ci
+          npx svelte-kit sync
           npx vitest run src/lib/i18n/localeParity.test.ts \
             src/lib/stores/sidebar.test.ts \
             src/lib/i18n/resolveLocale.test.ts \
