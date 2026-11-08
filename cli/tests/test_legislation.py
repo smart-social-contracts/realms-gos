@@ -1459,8 +1459,10 @@ def test_the_canisters_copy_imports_nothing_from_the_cli_or_the_canister():
         "'core', 'api', 'ggg', 'basilisk', 'ic_basilisk_toolkit', 'json', 're', 'typing', 'datetime', 'functools')))"
         % os.path.abspath(canister)
     )
+    # -S: no site, so no .pth file runs at startup. ``pip install -e`` adds one whose finder imports
+    # ``re`` and ``functools`` (through pathlib), and those would be listed here though legislation never imports them.
     out = subprocess.run(
-        [sys.executable, "-I", "-c", code], capture_output=True, text=True
+        [sys.executable, "-I", "-S", "-c", code], capture_output=True, text=True
     )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "[]"
