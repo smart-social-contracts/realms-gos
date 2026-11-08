@@ -601,15 +601,16 @@ def budget_draft(c, args):
     return {"budget": b.id}
 
 
-def drafts_of(p):
-    return [b for b in p.budgets if b.status == "draft"]
+def proposed_lines(args):
+    """The lines a budget_propose call proposes: every draft line of its period."""
+    return [b for b in find(FiscalPeriod, args["period"]).budgets if b.status == "draft"]
 
 
 def budget_totals(args):
     """The facts of a budget_propose call that are not its arguments (GGG's derived facts): ``revenue`` and ``expense``,
-    the sums of ``planned`` over the draft lines of the period of each kind."""
+    the sums of ``planned`` over the lines it proposes of each kind."""
     totals = {"revenue": 0, "expense": 0}
-    for b in drafts_of(find(FiscalPeriod, args["period"])):
+    for b in proposed_lines(args):
         totals[b.kind] += b.planned
     return totals
 
@@ -617,7 +618,7 @@ def budget_totals(args):
 def check_budget_proposal(args):
     """A proposal of a budget the period has no lines for, of no years, or with a total out of range files nothing."""
     p = find(FiscalPeriod, args["period"])
-    if not drafts_of(p):
+    if not proposed_lines(args):
         raise Conflict(f"{p.id} has no draft budget lines to propose")
     if args.get("years") is not None and int(args["years"]) < 1:
         raise Fail("a budget covers at least one year")
@@ -632,8 +633,7 @@ def budget_propose(c, args):
     when more than one (a fact for legislation). Each line replaces the adopted or extended line of its fund and
     category, and the spending booked against that carries over. Returns ``period``, ``budgets`` and the planned
     ``revenue`` and ``expense``."""
-    p = find(FiscalPeriod, args["period"])
-    lines = drafts_of(p)
+    p, lines = find(FiscalPeriod, args["period"]), proposed_lines(args)
     if p.status != "open" or not lines:
         raise Conflict(f"{p.id} is {p.status}; only draft lines for an open period can be adopted")
     totals = budget_totals(args)
