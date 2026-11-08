@@ -1,4 +1,4 @@
-"""Proposals and votes, contracts, licences, the realm itself, quarters, federation and codex."""
+"""Proposals and votes, contracts, licences, procedures and requests, the realm itself, quarters, federation and codex."""
 
 from .proposal import Proposal
 from .proposal_edge import ProposalEdge
@@ -6,6 +6,8 @@ from .vote import Vote
 from .mandate import Mandate
 from .contract import Contract
 from .license import License
+from .procedure import Procedure
+from .request import Request
 from .guest_user import GuestUser
 from .realm import Realm
 from .calendar import Calendar

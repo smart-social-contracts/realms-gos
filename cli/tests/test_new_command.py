@@ -405,7 +405,7 @@ class TestBrandingSize:
         huge.write_bytes(b"x" * (BRANDING_MAX_BYTES + 1))
         with pytest.raises(StageError) as exc:
             validate_branding_size(str(huge), "background")
-        assert "1.5 MiB" in exc.value.message
+        assert "700 KiB" in exc.value.message
 
     def test_accept_small_file(self, tmp_path: Path):
         small = tmp_path / "logo.png"
@@ -419,7 +419,7 @@ class TestBrandingSize:
         merged["branding"]["logo"] = str(huge)
         with pytest.raises(StageError) as exc:
             validate_merged_spec(merged, network="staging", identity="alice")
-        assert "1.5 MiB" in exc.value.message
+        assert "700 KiB" in exc.value.message
 
 
 class TestSetupSteps:

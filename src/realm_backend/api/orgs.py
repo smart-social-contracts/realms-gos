@@ -89,18 +89,19 @@ def profile_of(c, args):
 
 @op("org.create", governed=parent_of, returns="department")
 def department_create(c, args):
-    """Create ``department`` (a new name) under ``parent`` (default the root), with an optional ``description``.
-    Returns ``department``."""
+    """Create ``department`` (a new name) under ``parent`` (default the root), with an optional ``description`` and
+    ``kind`` (what the body is, such as plenary). Returns ``department``."""
     if Department[args["department"]]:
         raise Conflict(f"department {args['department']} exists")
-    d = Department(id=args["department"], description=args.get("description", ""), parent=parent_of(args))
+    d = Department(id=args["department"], description=args.get("description", ""), kind=args.get("kind", ""),
+                   parent=parent_of(args))
     return {"department": d.id}
 
 
 @op("org.set_policy", governed=dept)
 def department_edit(c, args):
-    """Edit ``department``: ``description``, ``parent`` (never itself or one of its sub-departments; the root has none)
-    and ``head`` (someone holding a seat in it, or "" for nobody); a field you leave out stays."""
+    """Edit ``department``: ``description``, ``kind``, ``parent`` (never itself or one of its sub-departments; the
+    root has none) and ``head`` (someone holding a seat in it, or "" for nobody); a field you leave out stays."""
     d = dept(args)
     parent = find(Department, args["parent"]) if args.get("parent") else None
     up = parent
@@ -112,7 +113,8 @@ def department_edit(c, args):
         raise Fail("the root department has no parent")
     if args.get("head") and args["head"] not in holders(d):
         raise Fail(f"{args['head']} holds no seat in {d.id}")
-    d.description, d.head = args.get("description", d.description), args.get("head", d.head)
+    d.description, d.kind = args.get("description", d.description), args.get("kind", d.kind)
+    d.head = args.get("head", d.head)
     if parent:
         d.parent = parent
 
@@ -172,7 +174,7 @@ def chart(d):
 def department_get(c, args):
     """``department`` with its parent, head and policy, and its ``positions`` with their holders."""
     d = dept(args)
-    return {"department": {**view(d, "id", "description", "is_root", "head", "policy"),
+    return {"department": {**view(d, "id", "description", "kind", "is_root", "head", "policy"),
                            "parent": d.parent.id if d.parent else ""},
             "positions": [seat_view(p) for p in d.positions]}
 
@@ -182,7 +184,7 @@ def department_list(c, args):
     """Departments, ``count`` rows at a time (default 100, at most 500) from row ``from`` (default 1).
     Returns ``departments`` and ``next``, the ``from`` of the next page (null at the end)."""
     rows, nxt = page(Department, args)
-    return {"departments": [{**view(d, "id", "description", "is_root", "head"),
+    return {"departments": [{**view(d, "id", "description", "kind", "is_root", "head"),
                              "parent": d.parent.id if d.parent else ""} for d in rows], "next": nxt}
 
 

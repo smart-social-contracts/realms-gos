@@ -118,12 +118,17 @@ def window(args, most=PAGE_MAX):
     return max(1, int(args.get("from") or 1)), max(1, min(int(args.get("count") or PAGE), most))
 
 
-def page(cls, args, keep=lambda row: True):
-    """One id range of ``cls`` (``from``, ``count``), filtered by ``keep``; ``next`` continues it."""
-    start, count = window(args)
-    rows = [r for r in cls.load_some(start, count) if keep(r)]
-    more = start + count <= cls.max_id()
-    return rows, (start + count if more else None)
+def page(cls, args, keep=lambda row: True, most=PAGE_MAX):
+    """One id range of ``cls`` (``from``, ``count``, at most ``most``), filtered by ``keep``; ``next`` continues it.
+
+    ``load_some`` skips the ids that were deleted and takes the next rows in their place, so a full page ends at its
+    last row's id, not at ``from + count - 1``: ``next`` is the id after that row, or None when the page is not full
+    or nothing follows the row."""
+    start, count = window(args, most)
+    loaded = cls.load_some(start, count)
+    following = int(loaded[-1]._id) + 1 if len(loaded) == count else None
+    more = following is not None and following <= cls.max_id()
+    return [r for r in loaded if keep(r)], (following if more else None)
 
 
 def page_by(cls, field, value, args, most=PAGE_MAX):

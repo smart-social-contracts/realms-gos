@@ -1,5 +1,7 @@
 import fake_chain
+import ggg_methods as g
 import world
+from core import op
 from core.ratio import PERCENT
 from ggg import Bid, Contract, Delegation, Department, Event, Organization, Tender
 from kit import call, denied, later, ok
@@ -28,10 +30,10 @@ def bid(t, who, vendor, price, nonce, **extra):
               payload_hash=seal(price, nonce), **extra)["bid"]
 
 
-def evaluation():
+def evaluation(**tendered):
     """T-1 open, BuildCo bids 48,000 and RoadCorp 52,000, revealed after 30 days."""
     agora()
-    t = tender()["tender"]
+    t = tender(**tendered)["tender"]
     ok("tender_open", "carla", tender=t)
     b1, b2 = bid(t, "bob", "buildco", 48000, "n1"), bid(t, "alice", "roadcorp", 52000, "n2")
     later(31 * DAY)
@@ -183,3 +185,106 @@ def test_bids_reveal_is_governed_by_the_requester():
     world.policy(depts["Infrastructure"], 2, 3)
     assert ok("bids_reveal", "carla", tender=t, openings={b: {"price": 48000, "nonce": "n1"}})["requires_vote"]
     assert Tender[t].status == "open" and Bid[b].sealed
+
+
+# --- what is tendered, and where it was noticed --------------------------------------------------
+
+def journals():
+    ok("external_add", "ctl", external="gazette", name="Provincial gazette", kind="journal", channel="manual")
+    ok("external_add", "ctl", external="stats-office", name="Statistics office", kind="authority", channel="manual")
+
+
+def test_a_tender_says_what_is_tendered_by_which_procedure_and_for_how_much():
+    agora()
+    t = tender(kind="works", procedure="open", estimated_value=600_000)["tender"]
+    assert (Tender[t].kind, Tender[t].procedure, Tender[t].estimated_value, Tender[t].notices) \
+        == ("works", "open", 600_000, [])
+    got = ok("tender_get", "alice", tender=t)["tender"]
+    assert (got["kind"], got["procedure"], got["estimated_value"], got["notices"]) == ("works", "open", 600_000, [])
+    bare = tender()["tender"]
+    assert Tender[bare].estimated_value is None
+    assert [x["estimated_value"] for x in ok("tender_list", "alice")["tenders"]] == [600_000, None]
+
+
+def test_story_infrastructure_records_where_the_notice_of_t5_appeared():
+    agora()
+    journals()
+    t = tender()["tender"]
+    first = fake_chain.now()
+    later(DAY)
+    ok("tender_notice", "carla", tender=t, journal="realm")
+    ok("tender_notice", "carla", tender=t, journal="gazette", ref="bulletin 214", at=first)
+    ok("tender_notice", "carla", tender=t, journal="gazette")
+    now = fake_chain.now()
+    assert Tender[t].notices == [{"journal": "realm", "published_at": now, "ref": None},
+                                 {"journal": "gazette", "published_at": first, "ref": "bulletin 214"},
+                                 {"journal": "gazette", "published_at": now, "ref": None}]
+    assert ok("tender_get", "alice", tender=t)["tender"]["notices"][1]["ref"] == "bulletin 214"
+
+
+def test_a_notice_is_of_a_tender_in_a_journal_that_has_appeared_by_now_and_is_for_the_holders_of_tender_manage():
+    agora()
+    journals()
+    t = tender()["tender"]
+    assert "needs tender.manage" in denied("tender_notice", "alice", tender=t, journal="realm")
+    assert call("tender_notice", "carla", tender="T-9", journal="realm")["kind"] == "not_found"
+    assert call("tender_notice", "carla", tender=t, journal="nowhere")["kind"] == "not_found"
+    assert call("tender_notice", "carla", tender=t, journal="stats-office")["kind"] == "invalid_argument"
+    future = call("tender_notice", "carla", tender=t, journal="realm", at=fake_chain.now() + 1)
+    assert future["kind"] == "invalid_argument" and "future" in future["error"]
+    assert Tender[t].notices == []
+
+
+def test_published_in_is_the_journals_of_the_notices_of_the_tender_each_once():
+    agora()
+    journals()
+    t = tender()["tender"]
+    derived = op.ops()["tender_award"]["derived"]
+    assert derived({"tender": t}) == {"published_in": []}
+    for journal in ("realm", "gazette", "realm"):
+        ok("tender_notice", "carla", tender=t, journal=journal)
+    assert derived({"tender": t}) == {"published_in": ["realm", "gazette"]}
+
+
+def test_the_award_makes_a_contract_of_the_kind_and_procedure_of_its_tender():
+    t, b1, b2 = evaluation(kind="works", procedure="open")
+    ok("bid_score", "carla", bid=b1, scores={"price": 9, "quality": 8})
+    k = Contract[ok("tender_award", "carla", tender=t)["contract"]]
+    assert (k.kind, k.procedure, k.tender) == ("works", "open", t)
+
+
+def test_a_contract_made_from_a_tender_takes_its_kind_and_procedure():
+    agora()
+    t = tender(kind="works", procedure="open")["tender"]
+    k = Contract[ok("contract_create", "ctl", title="Bike lane", tender=t)["contract"]]
+    assert (k.kind, k.procedure, k.tender) == ("works", "open", t)
+    same = Contract[ok("contract_create", "ctl", title="Bike lane", tender=t, kind="works")["contract"]]
+    assert same.kind == "works"
+    assert "kind" in denied("contract_create", "ctl", title="Bike lane", tender=t, kind="supplies")
+    assert "procedure" in denied("contract_create", "ctl", title="Bike lane", tender=t, procedure="restricted")
+    assert call("contract_create", "ctl", title="Bike lane", tender="T-9")["kind"] == "not_found"
+    free = Contract[ok("contract_create", "ctl", title="Cleaning", kind="services", procedure="direct")["contract"]]
+    assert (free.kind, free.procedure, free.tender) == ("services", "direct", "")
+
+
+def test_a_tender_stored_before_notices_reads_with_none_and_keeps_its_rubric():
+    from test_ratios import stored_as_version_1  # test_ratios imports this module
+
+    agora()
+    t = tender()["tender"]
+    stored_as_version_1(Tender, t, drop=("notices", "kind", "procedure", "estimated_value"))
+    row = Tender[t]
+    assert (row.notices, row.kind, row.procedure, row.estimated_value, row.rubric) == ([], "", "", None, RUBRIC)
+
+
+def test_the_ggg_methods_record_a_notice_and_reply_with_the_tender():
+    agora()
+    journals()
+    t = tender(kind="works", procedure="open", estimated_value=600_000)["tender"]
+    fake_chain.state["caller"] = "carla"
+    got = op.run(g.ggg_tender_notice({"tender": t, "journal": "gazette", "ref": "bulletin 214", "at": None}))["Ok"]
+    assert (got["kind"], got["procedure"], got["estimated_value"]) == ("works", "open", 600_000)
+    assert got["notices"] == [{"journal": "gazette", "published_at": fake_chain.now() * 1_000_000_000,
+                               "ref": "bulletin 214"}]
+    refused = op.run(g.ggg_tender_notice({"tender": t, "journal": "nowhere", "ref": None, "at": None}))
+    assert refused["Err"] == {"NotFound": None} or list(refused["Err"]) == ["NotFound"]

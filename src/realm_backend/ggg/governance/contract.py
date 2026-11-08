@@ -9,6 +9,9 @@ class Contract(Row):
     title = String(default="")
     parties = Json([])  # ["Organization:buildco", "Department:infrastructure"]
     mandate = ManyToOne("Mandate", "contracts")
+    kind = String(default="")  # what is contracted: works, supplies, services (the realm's words)
+    procedure = String(default="")
+    tender = String(default="")  # the tender it came from, which gave it its kind and procedure
     value = Integer(default=0)
     symbol = String(default="")
     terms_ref = String(default="")
