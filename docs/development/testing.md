@@ -123,9 +123,14 @@ use clean ones. Every test records screenshots and video into `src/realm_fronten
 spec had to repeat (a reloaded join page) is a `workaround` annotation in the report. The workflow [`realms-gaas-e2e.yml`](../../.github/workflows/realms-gaas-e2e.yml) runs the same script nightly and on
 demand, and uploads both folders.
 
-## Not yet in CI
+## In CI
 
-CI ([`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml)) still runs `tests/backend/`,
-the suite of the previous backend, which does not load on this branch. `tests/ggg` and
-`scripts/loc_budget.py` are not in CI yet, and `cedarpy` is not in `requirements-dev.txt`. Run them
-locally before a pull request.
+[`ci-pr.yml`](../../.github/workflows/ci-pr.yml) runs on every pull request to `main` or a `feat/**`
+branch (and by hand): the lint checks, `tests/ggg` (the job installs `cedarpy` itself), the CLI
+tests, the host's locale parity tests, the packed realm wasms on PocketIC (`tests/deployed`) and the
+Casals end-to-end run.
+
+`tests/backend/` is the suite of the previous backend, which does not load on this branch, and
+only a handful of its files still run in CI. The rest are out until each is ported to `tests/ggg`
+or deleted ([#554](https://github.com/smart-social-contracts/realms-gos/issues/554)).
+`scripts/loc_budget.py` is not in CI yet. Run it locally before a pull request.
