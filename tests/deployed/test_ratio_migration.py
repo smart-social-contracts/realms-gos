@@ -70,6 +70,16 @@ print(json.dumps({f"{entity.__name__}:{alias}": db.load(entity.__name__, entity[
 '''
 
 
+def versions(saved):
+    """The version each row is saved at: the rows that migrate to the ratios' form are at 2, a proposal at 3 (it also keeps
+    its voting rule since realms-gos#547)."""
+    return {key: row["__version__"] for key, row in saved.items()}
+
+
+CURRENT = {"Proposal:P-1": 3, "Department:Finance": 2, "Realm:1": 2, "AllocationRule:AR-1": 2, "Tender:T-1": 2,
+           "TaxPolicy:TAX-POLICY-1": 2, "Proposal:P-2": 3}
+
+
 def ok(realm, op, who, query=False, **args):
     out = realm.call(op, args, sender=who, query=query)
     assert out["ok"], (op, out)
@@ -111,7 +121,7 @@ def realm(wasm_of, people):
     ok(realm, "tender_create", ctl, title="Bike lane", requester="Finance", opens_at=1, closes_at=2, rubric=RUBRIC)
     ok(realm, "tax_policy_draft", ctl, document=TAXES)
     # What a new realm saves: the rows are of this release's shape, and the old rows below are those of the last.
-    assert {row["__version__"] for row in rows(realm).values()} == {2}
+    assert versions(rows(realm)) == CURRENT
     realm.old_rows = json.loads(run(realm, SAVE_OLD))  # read before anything loads, and so migrates, them
     realm.upgrade()
     return realm
@@ -138,7 +148,7 @@ def test_every_ratio_keeps_its_meaning_after_the_upgrade(realm, people):
 
 
 def test_the_migrated_rows_are_saved_at_the_new_version(realm):
-    assert {row["__version__"] for row in rows(realm).values()} == {2}
+    assert versions(rows(realm)) == CURRENT
 
 
 def test_a_proposal_filed_before_the_upgrade_runs_its_action_with_the_shares_it_was_filed_with(realm, people):

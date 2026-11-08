@@ -234,13 +234,15 @@ def test_parcels_are_found_through_their_cells():
     a = register(x=14, y=14, w=4, h=4)
     assert Land[a].cell == "0:0"
     assert "overlaps L-1" in call("land_register", "ctl", owner="bob", x=17, y=17)["error"]
-    assert "overlaps L-1" in call("land_register", "ctl", owner="bob", x=-1, y=10, width=16, height=16)["error"]
+    assert "overlaps L-1" in call("land_register", "ctl", owner="bob", x=3, y=10, width=16, height=16)["error"]
+    refused = call("land_register", "ctl", owner="bob", x=-1, y=10)  # GGG's coordinates are natural numbers
+    assert refused["kind"] == "invalid_argument" and "x is -1" in refused["error"]
     assert "1 to 16" in call("land_register", "ctl", owner="bob", x=100, y=0, width=17)["error"]
     b = register("bob", x=18, y=14, w=16, h=16)
-    register("carla", x=-16, y=-16, w=16, h=16)
+    register("carla", x=32, y=32, w=16, h=16)
     assert [p["id"] for p in ok("land_map", "bob", x=16, y=16, w=2, h=2)["parcels"]] == [a]
     assert {p["id"] for p in ok("land_map", "bob", x=16, y=16, w=3, h=3)["parcels"]} == {a, b}
-    assert [p["id"] for p in ok("land_map", "bob", x=-1, y=-1, w=1, h=1)["parcels"]] == ["L-3"]
+    assert [p["id"] for p in ok("land_map", "bob", x=32, y=32, w=1, h=1)["parcels"]] == ["L-3"]
     assert "1 to 32" in call("land_map", "bob", w=33)["error"]
 
 
