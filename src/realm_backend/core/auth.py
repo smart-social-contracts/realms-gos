@@ -118,14 +118,15 @@ def active_grant(grantor, delegate):
     raise Denied(f"{delegate} holds no active power of attorney from {grantor}")
 
 
-def authorize(user, by, name, spec, args, origin="user", declared=()):
-    """Refuse the call with Denied, or return the id of the power of attorney a delegate acts under ("" for no one)."""
+def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None):
+    """Refuse the call with Denied, or return the id of the power of attorney a delegate acts under ("" for no one).
+    A delegate acts under its active grant from ``user``, or under ``grant`` when one is given."""
     if origin == "replay":
         return ""
     if by == chain.ANONYMOUS and not spec["public"]:
         raise SignIn("sign in first")
     held = permissions(user)
-    grant = active_grant(user, by) if user != by else None
+    grant = (grant or active_grant(user, by)) if user != by else None
     needed = spec["perm_for"](args) if spec.get("perm_for") else spec["perm"]
     context = {
         "op": name, "permission": needed or "", "user": user, "signer": by, "origin": origin,
