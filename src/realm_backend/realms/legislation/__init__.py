@@ -14,9 +14,13 @@ A chapter writes::
 
 ``__all__`` is exactly what a chapter may import; the loader refuses any other name. The tools and
 the runtime use the rest of the module: ``Codex`` (build a codex, ``load`` each chapter top to bottom,
-``check`` the settings, run the resolved classes with a ``Context``), ``Calendar``, ``Event``,
-``Money`` and the errors. ``plan`` and ``resolve`` (S3) turn the realm's links into its layer paths
+``check`` the settings, run the resolved classes with a ``Context``), ``Calendar``, ``Event``, ``times``
+and the errors. ``plan`` and ``resolve`` (S3) turn the realm's links into its layer paths
 and its chapters into a loaded codex with a flattened view.
+
+``Money`` is the chapter's money: ``Money(units, decimals)`` adds, compares and ``times(rate)`` with GGG's
+one rounding rule (rule 12), by the same ``rates.times`` the realm's tax code calls. A parcel's
+``assessed_value`` reaches ``compute_tax_assess`` as one.
 
 A forbid's rule is an ``F`` expression (§6)::
 
@@ -73,6 +77,7 @@ from realms.legislation.resolver import resolve as resolve
 # What a chapter may import, and nothing else.
 __all__ = [
     "F",
+    "Money",
     "Ref",
     "S",
     "above",

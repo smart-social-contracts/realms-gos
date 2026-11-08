@@ -14,8 +14,13 @@ never imports it. Every import is inside a function, so the text is a program, n
 
 import sys
 
-# "codex": the Codex; "files": the chapter files loaded; "ready": the load is complete; "forbids": its bound forbids
-STATE = {"ready": False}
+# "codex": the Codex; "files": the chapter files loaded; "ready": the load is complete; "entities": the names of the
+# entities a chapter reads; "decimals": the token a compute_ call works in, while it runs (the Money views carry it);
+# "forbids": the codex's bound forbids, once `cedar` has made them.
+STATE = {"ready": False, "entities": (), "decimals": None}
+# The argument of a compute_<op> that names the row the operation is about, as "<Entity>:<id>": the chapter is given
+# the view ``ggg.<Entity>.get(id)`` gives of that row, not the reference.
+SUBJECTS = {"tax_assess": "subject"}
 
 
 class Finder:
@@ -39,9 +44,11 @@ class Finder:
         exec(compile(text, module.__name__.replace(".", "/") + ".py", "exec"), module.__dict__)
 
 
-def ggg_module(entities):
-    """The ``ggg`` module a chapter imports: one read-only entity per name, read through the realm (``rpc``)."""
+def ggg_module(entities, money):
+    """The ``ggg`` module a chapter imports: one read-only entity per name, read through the realm (``rpc``). The
+    fields in ``money`` (entity name to field names) are read as ``Money`` of the decimals the call works in."""
     from realms.legislation.errors import LegislationError
+    from realms.legislation.rates import Money
     from realms.legislation.sealed import Sealed, freeze
 
     class View(metaclass=Sealed):
@@ -50,8 +57,9 @@ def ggg_module(entities):
         __slots__ = ("__kind__", "__data__")
 
         def __init__(self, kind, data):
+            amounts = {f: Money(data[f], STATE["decimals"]) for f in money.get(kind, ()) if data[f] is not None}
             object.__setattr__(self, "__kind__", kind)
-            object.__setattr__(self, "__data__", freeze(data))
+            object.__setattr__(self, "__data__", freeze({**data, **amounts}))
 
         def __getattr__(self, name):
             if name.startswith("_") or name not in self.__data__:
@@ -108,7 +116,7 @@ def ggg_module(entities):
     return module
 
 
-def setup(operations, layers, realm, calendars, entities):
+def setup(operations, layers, realm, calendars, entities, money):
     """An empty codex of ``layers`` with its calendars, ready to load chapters into. Installs the library first when
     the realm appended its sources (``LIBRARY``); on a laptop the library is importable as it is."""
     sources = globals().get("LIBRARY")
@@ -118,12 +126,12 @@ def setup(operations, layers, realm, calendars, entities):
     from realms.legislation.errors import LegislationError
 
     try:
-        codex = Codex(layers, realm=realm, operations=operations, modules={"ggg": ggg_module(entities)})
+        codex = Codex(layers, realm=realm, operations=operations, modules={"ggg": ggg_module(entities, money)})
         for source, data in calendars:
             codex.calendar_layer(source, data)
     except LegislationError as e:
         return {"ok": False, "error": str(e)}
-    STATE.update(codex=codex, files=set())
+    STATE.update(codex=codex, files=set(), entities=frozenset(entities))
     return {"ok": True}
 
 
@@ -306,10 +314,12 @@ def hook(op, domain, event, now, approvals):
     return {"effects": ctx.effects.queued}
 
 
-def compute(op, kwargs, now, approvals):
-    """The one domain's ``compute_<op>`` with ``kwargs`` (dicts as ``Args``). Returns ``{"found": False}`` when no
-    chapter defines it, else ``{"found": True, "domain", "files"}`` plus ``result`` or ``error`` and ``chapter``.
-    Two domains defining it is an error: one domain answers what an operation asks."""
+def compute(op, kwargs, now, approvals, decimals=None):
+    """The one domain's ``compute_<op>`` with ``kwargs`` (dicts as ``Args``; the row an operation is about, ``SUBJECTS``,
+    as its view). ``decimals`` is the token the answer is in, which the ``Money`` of every view read during the call
+    carries. Returns ``{"found": False}`` when no chapter defines it, else ``{"found": True, "domain", "files"}`` plus
+    ``result`` or ``error`` and ``chapter``. Two domains defining it is an error: one domain answers what an operation
+    asks."""
     codex, name = STATE["codex"], f"compute_{op}"
     found = domains_with(name)
     if not found:
@@ -319,10 +329,14 @@ def compute(op, kwargs, now, approvals):
         return {**outcome, "error": f"{name} is defined in {', '.join(found)}: one domain answers a compute",
                 "chapter": None}
     ctx = context(now, approvals)
+    STATE["decimals"] = decimals
     try:
         from realms.legislation.context import plain
 
-        result = plain(getattr(codex.instance(found[0], ctx), name)(**{k: wrap(v) for k, v in kwargs.items()}))
+        arguments = {k: wrap(v) for k, v in kwargs.items()}
+        if SUBJECTS.get(op) in arguments:
+            arguments[SUBJECTS[op]] = subject_view(kwargs[SUBJECTS[op]])
+        result = plain(getattr(codex.instance(found[0], ctx), name)(**arguments))
         if ctx.effects.queued:
             raise problem(f"{name} queued an effect: a compute_ method only answers")
         if not is_plain(result):
@@ -331,7 +345,20 @@ def compute(op, kwargs, now, approvals):
         outcome.update(failure(e))
     else:
         outcome["result"] = result
+    finally:
+        STATE["decimals"] = None
     return outcome
+
+
+def subject_view(reference):
+    """The view ``ggg.<Entity>.get(id)`` gives of the row ``reference`` (``"Land:L-1"``) names."""
+    kind, _, id = reference.partition(":")
+    if kind not in STATE["entities"]:
+        raise problem(f"{reference!r}: a chapter does not read {kind}")
+    row = getattr(STATE["codex"].modules["ggg"], kind).get(id)
+    if row is None:
+        raise problem(f"{reference!r} is not found")
+    return row
 
 
 def problem(message):

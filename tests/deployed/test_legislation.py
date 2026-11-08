@@ -353,7 +353,8 @@ except Exception as e:
     error = f"{type(e).__name__}: {e}"
 finally:
     cedar.load(auth.SCHEMA, auth.GUARDRAILS + auth.POLICIES)  # the realm's own policy set again
-print(json.dumps({"cedar": policies, "schema": schema, "decisions": decisions, "error": error, "injection": injection,
+print(json.dumps({"cedar": policies, "schema": schema, "context": auth.CONTEXT, "decisions": decisions, "error": error,
+                  "injection": injection,
                   "cost": {"generate": generated - before, "load": loaded - generated, "decide": decided - loaded} if error is None else None}))
 """ % {
     "facts": FACTS,
@@ -400,10 +401,11 @@ def test_the_realm_generates_the_same_cedar_as_a_laptop_and_its_engine_validates
         '@id("eu/es/tax/ibi_urban_cap")' in got["cedar"]
         and "+ (if true then 70000 else 0)" in got["cedar"]
     )
-    assert (
-        'action "tax_policy_draft.taxes" in ["call"]' in got["schema"]
-        and "covered: Bool" in got["schema"]
-    )
+    assert 'action "tax_policy_draft.taxes" in ["call"]' in got["schema"]
+    # Every field of the realm's own context (core/auth.py) is in the schema; none is named here, so a field
+    # added or renamed there cannot leave this test behind.
+    missing = [f"{n}: {t}" for n, t in got["context"].items() if f"{n}: {t}" not in got["schema"]]
+    assert got["context"] and not missing, missing
     assert got["decisions"] == {
         "urban at the cap": True,
         "urban over the cap": False,

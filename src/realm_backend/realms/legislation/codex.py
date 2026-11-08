@@ -68,12 +68,20 @@ def domain_id(domain):
 def one_argument_type(obj, *rest):
     """``type(x)`` as a chapter gets it. ``type(name, bases, dict)`` is refused: it builds a class
     outside the class statement the subset allows, an int or str subclass with a ``__str__`` of its
-    own among them, and its dict's keys dodge the dunder rule as computed strings."""
+    own among them, and its dict's keys dodge the dunder rule as computed strings. So is the type of a
+    float or a complex number (the data a chapter reads can hold one): its class would build more of
+    them, which rule 6 keeps out, and the type of a class, the SDK's metaclass, which builds subclasses
+    of Money and the other SDK classes."""
     if rest:
         raise LegislationError(
             "type(name, bases, dict) is not allowed in a chapter: a chapter defines one class, with class"
         )
-    return type(obj)
+    kind = type(obj)
+    if issubclass(kind, (float, complex)):
+        raise LegislationError("type() of a float is not allowed in a chapter: no floats (rule 6)")
+    if issubclass(kind, type):
+        raise LegislationError("type() of a class is not allowed in a chapter: it would give its metaclass")
+    return kind
 
 
 def no_dunder(fn):

@@ -9,7 +9,7 @@ import pytest
 from api import codex as codex_api
 from core import auth, legislation, op
 from core.db import Fail
-from ggg import Department, Event, FederalVote, Human, Identity, LayeredCodex, Notification, Proposal
+from ggg import Department, Event, FederalVote, Human, Identity, Land, LayeredCodex, Notification, Proposal
 from kit import call, ok, rows
 import world
 from test_legislation_runtime import LOG, TOWN, TOWN_REALM, activate, layered, town  # noqa: F401
@@ -343,6 +343,7 @@ class Tax(above("tax")):
 def test_a_tax_entrys_code_reaches_compute_tax_assess():
     """What is secret is an operation's own: tax_assess keeps nothing, so a tax entry's code is not an invite's code."""
     activate(layered({(TOWN, "tax"): TAX}, layers=[TOWN]))
+    Land(id="1")
     got = op.run(codex_api.compute("tax_assess", {"entry": {"code": "ibi_urban", "rate": 1}, "subject": "Land:1"}))
     assert got == [{"concept": "ibi_urban", "amount": 1}]
 
