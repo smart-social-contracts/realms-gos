@@ -85,6 +85,11 @@ def test_I_ADM_2_founder_configures_during_setup_then_it_is_governed():
     ok("setup_step", "ctl", step="install", network="local", founder="frank")
     assert "set once" in call("setup_step", "frank", step="install", can_test_mode=True)["error"]
     assert ok("realm_configure_branding", "frank", logo_url="/logo.png").get("configured") == ["logo_url"]
+    image = "data:image/png;base64," + "A" * (setup.IMAGE_MAX - 22)
+    assert ok("setup_step", "frank", step="branding", logo_url=image, background_image_url=image)
+    too_big = call("setup_step", "frank", step="branding", background_image_url=image + "A")
+    assert "background_image_url is above 960,000 characters" in too_big["error"]
+    assert Realm["1"].background_image_url == image
     assert "unknown setup step" in call("setup_step", "frank", step="codex")["error"]
     assert "cannot configure" in call("setup_step", "frank", step="branding", name="x")["error"]
     assert "name the realm" in call("setup_launch", "frank")["error"]
@@ -93,6 +98,10 @@ def test_I_ADM_2_founder_configures_during_setup_then_it_is_governed():
     assert Realm["1"].calendar.voting_window == 0
     ok("setup_launch", "frank")
     denied("governance_update", "frank", voting_window=3600)
+    # Governed now: an image that cannot be stored is refused before a vote is asked for.
+    refused = call("realm_configure_branding", "ctl", logo_url=image + "A")
+    assert "logo_url is above 960,000 characters" in refused["error"] and "requires_vote" not in refused
+    assert ok("realm_configure_branding", "ctl", logo_url="/logo.png")["requires_vote"]
     out = ok("realm_configure", "ctl", open_registration=True)
     assert out["requires_vote"] and not Realm["1"].open_registration
     assert ok("governance_update", "ctl", voting_window=3600)["requires_vote"]

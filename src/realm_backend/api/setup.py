@@ -42,6 +42,12 @@ FIELDS = {
                        "installer_canister_id", "baton_canister_id", "conductor_canister_id", "casals_stand"),
     "trust_policy": ("require_marketplace_approval", "trusted_approvers", "trusted_principals"),
 }
+# The branding images are kept in the Realm row as data URLs, and setup_step answers with the whole setup state, both
+# images included: an update's reply may not pass 2 MiB, so two images and the rest of the state must fit in it. The
+# frontend compresses an image to 700 KiB (imageDataUrl.ts), which is 955,759 characters in base64 with the
+# "data:image/jpeg;base64," prefix; IMAGE_MAX leaves a little room over that.
+IMAGES = ("logo_url", "background_image_url")
+IMAGE_MAX = 960_000
 # Kept in manifest_data["casals"], not on Realm: the stand Casals built the realm on, its baton and its conductor.
 CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
 # Kept in manifest_data too: how far db_convert_indexes has got, {"after": key, "refused": [key, ...]} while it runs and
@@ -148,14 +154,18 @@ def remember(key, value):
 
 
 def valid_values(values):
-    """Refuse a ``timezone`` this release has no zone file for and ``languages`` that are no BCP 47 tags. The check
-    of ``realm_configure``, so that a call that cannot succeed is refused before a voting policy turns it into a
-    proposal."""
+    """Refuse a ``timezone`` this release has no zone file for, ``languages`` that are no BCP 47 tags and a branding
+    image above ``IMAGE_MAX``. The check of ``realm_configure`` and ``realm_configure_branding``, so that a call that
+    cannot succeed is refused before a voting policy turns it into a proposal."""
     if "timezone" in values and not zones.known(values["timezone"]):
         raise Fail(f"timezone must be an IANA name such as Europe/Madrid, or UTC; this release has no zone "
                    f"'{values['timezone']}'")
     if "languages" in values:
         language.require_all(values["languages"])
+    for name in IMAGES:
+        if len(values.get(name) or "") > IMAGE_MAX:
+            raise Fail(f"{name} is above {IMAGE_MAX:,} characters (an image of about 700 KiB): the realm sends its "
+                       f"images with every page it shows")
 
 
 def configure(fields, values):
@@ -297,9 +307,10 @@ def realm_configure(c, args):
     return configure(FIELDS["realm"], args)
 
 
-@op("realm.configure.branding", governed=launched)
+@op("realm.configure.branding", governed=launched, check=valid_values)
 def realm_configure_branding(c, args):
-    """Set any of ``logo_url``, ``background_image_url`` and ``primary_color`` (like ``#1E6B52``)."""
+    """Set any of ``logo_url``, ``background_image_url`` and ``primary_color`` (like ``#1E6B52``). An image is a URL or
+    a data URL of at most 960,000 characters, about 700 KiB."""
     return configure(FIELDS["branding"], args)
 
 
