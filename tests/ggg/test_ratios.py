@@ -42,7 +42,7 @@ def test_a_proposal_keeps_its_threshold_and_quorum():
     stored_as_version_1(Proposal, p, drop=("quorum",), threshold=60, quorum_percent=25)
     proposal = Proposal[p]
     assert (proposal.threshold, proposal.quorum) == (60 * PERCENT, 25 * PERCENT)
-    assert "quorum_percent" not in saved(Proposal, p) and saved(Proposal, p)["__version__"] == 2
+    assert "quorum_percent" not in saved(Proposal, p) and saved(Proposal, p)["__version__"] == 3
     Database.get_instance().clear_registry()
     assert (Proposal[p].threshold, Proposal[p].quorum) == (60 * PERCENT, 25 * PERCENT)  # a second read changes nothing
 

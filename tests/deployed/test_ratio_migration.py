@@ -32,8 +32,6 @@ ENTRIES = [
     {"code": "revenue", "kind": "tax", "subject": "Declaration", "rate": 200 * BASIS_POINT, "facts": {}},
     {"code": "property", "kind": "tax", "subject": "User",
      "facts": {"brackets": [{"up_to": 5_000, "rate": 40 * BASIS_POINT}, {"up_to": None, "rate": 80 * BASIS_POINT}]}}]
-# The versions the entities are saved at: the tax policy moved its taxes out of the document after the ratios.
-VERSION = {"TaxPolicy": 3}
 
 # A proposal the last release left voting, with the shares of its action as it filed them.
 OLD_ACTION = {"op": "allocation_rule_draft", "args": {"source_fund": "ROOT", "rules": {"ROADS": 20}}}
@@ -73,6 +71,16 @@ print(json.dumps({f"{entity.__name__}:{alias}": db.load(entity.__name__, entity[
 '''
 
 
+def versions(saved):
+    """The version each row is saved at: the rows that migrate to the ratios' form are at 2, a proposal at 3 (it also keeps
+    its voting rule since realms-gos#547) and a tax policy at 3 (its taxes are typed entries since realms-gos#547)."""
+    return {key: row["__version__"] for key, row in saved.items()}
+
+
+CURRENT = {"Proposal:P-1": 3, "Department:Finance": 2, "Realm:1": 2, "AllocationRule:AR-1": 2, "Tender:T-1": 2,
+           "TaxPolicy:TAX-POLICY-1": 3, "Proposal:P-2": 3}
+
+
 def ok(realm, op, who, query=False, **args):
     out = realm.call(op, args, sender=who, query=query)
     assert out["ok"], (op, out)
@@ -83,10 +91,6 @@ def run(realm, code):
     out = realm.shell(code)
     assert "Traceback" not in out, out
     return out
-
-
-def versions(realm):
-    return {key: row["__version__"] for key, row in rows(realm).items()}
 
 
 def rows(realm):
@@ -118,7 +122,7 @@ def realm(wasm_of, people):
     ok(realm, "tender_create", ctl, title="Bike lane", requester="Finance", opens_at=1, closes_at=2, rubric=RUBRIC)
     ok(realm, "tax_policy_draft", ctl, document=DOCUMENT, taxes=ENTRIES)
     # What a new realm saves: the rows are of this release's shape, and the old rows below are those of the last.
-    assert versions(realm) == {key: VERSION.get(key.split(":")[0], 2) for key in rows(realm)}
+    assert versions(rows(realm)) == CURRENT
     realm.old_rows = json.loads(run(realm, SAVE_OLD))  # read before anything loads, and so migrates, them
     realm.upgrade()
     return realm
@@ -146,7 +150,7 @@ def test_every_ratio_keeps_its_meaning_after_the_upgrade(realm, people):
 
 
 def test_the_migrated_rows_are_saved_at_the_new_version(realm):
-    assert versions(realm) == {key: VERSION.get(key.split(":")[0], 2) for key in rows(realm)}
+    assert versions(rows(realm)) == CURRENT
 
 
 def test_a_proposal_filed_before_the_upgrade_runs_its_action_with_the_shares_it_was_filed_with(realm, people):
