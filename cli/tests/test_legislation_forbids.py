@@ -377,6 +377,58 @@ def test_python_and_cedar_agree_with_the_settings_left_open():
     assert agree(with_edges(), generic=True, per_action=1000) == (4_000, [])
 
 
+class Rewritten:
+    """A codex or a forbid whose Cedar is ``rewrite`` of what it generated: the Cedar says one thing, Python another."""
+
+    def __init__(self, inner, rewrite):
+        self.inner, self.rewrite = inner, rewrite
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def cedar(self, generic=False):
+        text = self.inner.cedar(generic)
+        return (
+            self.rewrite(text)
+            if isinstance(text, str)
+            else "".join(self.rewrite(t) for t in text)
+        )
+
+    def forbids(self):
+        return [
+            Rewritten(f, self.rewrite) if hasattr(f, "cedar") else f
+            for f in self.inner.forbids()
+        ]
+
+
+def test_agree_reports_where_cedar_decides_otherwise_than_python():
+    c = with_edges()
+    assert agree(c, generic=False, per_action=300)[1] == []
+    checked, problems = agree(
+        Rewritten(c, lambda cedar: cedar.replace("<= 1300000", "<= 1300001")),
+        generic=False,
+        per_action=2500,
+    )
+    assert checked == 10_000 and problems
+    assert any(
+        "Cedar forbids" in p and "Python" in p and "ibi_urban_range" in p
+        for p in problems
+    ), problems[:3]
+
+
+def test_agree_reports_a_forbid_that_makes_cedar_error():
+    c = with_edges()
+
+    def erroring(cedar):
+        return cedar.replace(
+            "context.facts.rate >= 400000",
+            "context.facts.rate + 9223372036854775807 >= 400000",
+        )
+
+    problems = agree(Rewritten(c, erroring), generic=False, per_action=2500)[1]
+    assert any("Cedar errors on" in p for p in problems), problems[:3]
+
+
 def test_the_generated_facts_reach_the_edges_and_both_decisions():
     c = with_edges()
     draw = Draw(2026, c.forbids())
@@ -644,6 +696,29 @@ def test_the_unbounded_sum_would_error_and_the_bounded_one_does_not(cedar_tools)
         for name, text in (("bounded", added.cedar()), ("unbounded", unbounded))
     }
     assert proved == {"bounded": True, "unbounded": False}
+
+
+def test_never_errors_problems_names_the_forbid_that_can_error_on_each_action(
+    cedar_tools,
+):
+    c = with_edges()
+
+    def bounds_removed(cedar):
+        return cedar.replace(
+            "(context.facts.rate < 0 || context.facts.rate > 100000000 || context.facts.surcharge < 0 || context.facts.surcharge > 100000000 || ",
+            "(",
+        )
+
+    problems = never_errors_problems(Rewritten(c, bounds_removed), *cedar_tools)
+    assert (
+        len(problems) == 1
+        and "two_facts_added can error on document_share" in problems[0]
+    ), problems
+    assert "DOES NOT HOLD" in problems[0]
+    memo = {}
+    assert (
+        never_errors_problems(c, *cedar_tools, memo) == [] and len(memo) == 17
+    )  # one answer per Cedar text and action
 
 
 def test_a_forbid_that_cedar_cannot_prove_is_reported_with_the_request_that_errors(

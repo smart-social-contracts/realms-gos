@@ -22,6 +22,7 @@ from typing import List, Optional
 import typer
 from rich.console import Console
 
+from realms.cli.commands.legislation_analysis import Analysis, MissingTools
 from realms.cli.commands.legislation_cases import case_problems
 from realms.cli.commands.legislation_layout import layout_problems
 from realms.legislation import Codex, LegislationError, Refused, subset_ast
@@ -62,6 +63,13 @@ def ggg_operations() -> frozenset:
     from realms.src.realm_backend import ggg_did
 
     return frozenset(ggg_did.METHODS) | INTERIM_OPERATIONS
+
+
+def fact_schema() -> dict:
+    """GGG's fact schema as the forbids read it: the canister's generated ``ggg_facts`` (scripts/ggg_candid.py)."""
+    from realms.src.realm_backend import ggg_facts
+
+    return ggg_facts.FACTS
 
 
 def check_view():
@@ -109,11 +117,22 @@ def chapters_of(tree: Path, source: str) -> List[str]:
     return sorted(p.stem for p in (tree / source).glob("*.py"))
 
 
-def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[str]:
+def check_realm(
+    tree: Path,
+    realm: str,
+    known: List[str],
+    operations,
+    facts: dict,
+    analysis: Analysis,
+) -> List[str]:
     """Load the realm's codex from the tree; the refusals, as the checker prints them."""
     layers = layers_of(realm, known)
     codex = Codex(
-        layers, realm=realm, operations=operations, modules={"ggg": check_view()}
+        layers,
+        realm=realm,
+        operations=operations,
+        modules={"ggg": check_view()},
+        facts=facts,
     )
     problems = []
     for source in layers:
@@ -139,9 +158,11 @@ def check_realm(tree: Path, realm: str, known: List[str], operations) -> List[st
                 break  # the layers below build on this one
     try:
         codex.check()
-        if not problems:  # read from a codex that loaded whole: a chapter that did not load would be a false "no such domain"
+        if (
+            not problems
+        ):  # read from a codex that loaded whole: a chapter that did not load would be a false "no such domain"
             check_uses(codex)
-            problems += case_problems(tree, codex, realm)
+            problems += analysis.problems(codex) or case_problems(tree, codex, realm)
     except LegislationError as e:
         problems.append(str(e))
     return problems
@@ -167,6 +188,12 @@ def check_command(
         "--realm",
         help="Check this realm's codex only (its source id, eu/es/vc/46250-valencia)",
     ),
+    no_analysis: bool = typer.Option(
+        False,
+        "--no-analysis",
+        help="Do not run the Cedar analysis of the forbids (agreement with Python, never errors), which needs "
+        "cedarpy, the Cedar CLI and cvc5 (scripts/cedar_tools.sh)",
+    ),
 ) -> None:
     """Hold the tree to the layout of §3, then load every realm's chapters as the realm does and report what it refuses."""
     if not tree.is_dir():
@@ -183,8 +210,19 @@ def check_command(
     except ImportError as e:
         console.print(f"[red]the GGG operation list is unavailable: {e}[/red]")
         raise typer.Exit(2)
-    problems = []
-    for one in realms:
-        problems += check_realm(tree, one, known, operations)
-    refuse(list(dict.fromkeys(problems)))  # a layer's refusal shows once, though every realm below it runs the layer
+    try:
+        facts = fact_schema()
+    except ImportError as e:
+        console.print(f"[red]GGG's fact schema is unavailable: {e}[/red]")
+        raise typer.Exit(2)
+    problems, analysis = [], Analysis(skip=no_analysis)
+    try:
+        for one in realms:
+            problems += check_realm(tree, one, known, operations, facts, analysis)
+    except MissingTools as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    refuse(
+        list(dict.fromkeys(problems))
+    )  # a layer's refusal shows once, though every realm below it runs the layer
     console.print(f"[green]ok: {len(realms)} realm(s) checked[/green]")

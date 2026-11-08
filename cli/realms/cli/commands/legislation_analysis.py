@@ -262,19 +262,71 @@ def symcc(cedar_cli, cvc5, schema, policy, action):
     return (False if "DOES NOT HOLD" in out.stdout else None), said
 
 
-def never_errors_problems(codex, cedar_cli, cvc5):
+def never_errors_problems(codex, cedar_cli, cvc5, proved=None):
     """The forbids of ``codex`` that SymCC does not prove never error, for each action they name: Cedar skips a
     forbid that errors (an integer overflow, a missing attribute), so such a forbid would allow what it forbids.
-    An undecided answer is a problem too, never a pass."""
+    An undecided answer is a problem too, never a pass. ``proved`` remembers the answer for each Cedar text and action.
+    """
+    proved = {} if proved is None else proved
     schema, problems = codex.cedar_schema(context={"op": "String"}), []
     for bound in codex.forbids():
         for action in bound.actions:
-            proved, said = symcc(cedar_cli, cvc5, schema, bound.cedar(), action)
-            if proved is not True:
+            key = (bound.cedar(), action)
+            if key not in proved:
+                answer, said = symcc(cedar_cli, cvc5, schema, key[0], action)
                 what = (
-                    "can error" if proved is False else "is not proved to never error"
+                    "can error" if answer is False else "is not proved to never error"
                 )
-                problems.append(
-                    f"{bound.file}:{bound.line}: {bound.id} {what} on {action}: {said}"
+                proved[key] = (
+                    None
+                    if answer
+                    else f"{bound.file}:{bound.line}: {bound.id} {what} on {action}: {said}"
                 )
+            if proved[key]:
+                problems.append(proved[key])
     return problems
+
+
+# ── What check runs ───────────────────────────────────────────────────────────────────────────────────────────────
+
+
+class MissingTools(Exception):
+    """The Cedar analysis cannot run here; the message says what to install."""
+
+
+class Analysis:
+    """The forbids of each realm's codex, bound and analysed: bound (the ``F`` rules of §6), Python and Cedar agreeing
+    on generated facts, and Cedar never erroring. A forbid with the same Cedar in two realms is proved once.
+    """
+
+    def __init__(self, skip=False, per_action=500):
+        self.skip, self.per_action, self.proved = skip, per_action, {}
+
+    def problems(self, codex):
+        """Every problem with ``codex``'s forbids. The binding refuses with ``Refused`` like a chapter does."""
+        forbids = codex.forbids()
+        if self.skip or not forbids:
+            return []
+        cedar_cli, cvc5 = self.tools()
+        problems = []
+        # with the realm's settings folded in, and left open as the analysis of §12.3 reads them
+        for generic in (False, True):
+            problems += agree(codex, generic, self.per_action)[1]
+        return problems + never_errors_problems(codex, cedar_cli, cvc5, self.proved)
+
+    def tools(self):
+        try:
+            import cedarpy  # noqa: F401  agree decides with it
+        except ImportError:
+            raise MissingTools(
+                "the Cedar analysis needs cedarpy: pip install 'cedarpy==4.12.2'"
+            )
+        cedar_cli, cvc5 = os.environ.get("CEDAR_CLI"), os.environ.get("CVC5")
+        if not (
+            cedar_cli and cvc5 and os.path.exists(cedar_cli) and os.path.exists(cvc5)
+        ):
+            raise MissingTools(
+                "the proof that no forbid errors needs the pinned Cedar CLI and cvc5: run scripts/cedar_tools.sh "
+                "and set CEDAR_CLI and CVC5 to what it prints (or pass --no-analysis to go without)"
+            )
+        return cedar_cli, cvc5

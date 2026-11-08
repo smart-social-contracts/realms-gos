@@ -1,6 +1,7 @@
 """``realms legislation check``: a legislation/ tree loaded as the realm loads it, refusals printed as the checker does."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,16 @@ from typer.testing import CliRunner
 
 from realms.cli.commands import legislation
 from realms.cli.commands.legislation import legislation_app
+
+# GGG's fact schema for the operations the forbids below name (the canister's ggg_facts has them all, with these shapes)
+RATE = {"type": "Long", "optional": True, "min": 0, "max": 100_000_000}
+FACTS = {
+    "tax_policy_propose": {"facts": {"policy": "String"}},
+    "tax_policy_propose.taxes": {"facts": {"code": "String", "rate": RATE}, "also": ["tax_policy_draft.taxes"]},
+    "tax_policy_draft.taxes": {"facts": {"code": "String", "rate": RATE}},
+    "document_share": {"facts": {"kind": "String", "pages": {"type": "Long", "min": 0, "max": 10_000}}},
+    "codex_revert": {"facts": {}},
+}  # fmt: skip
 
 ES_REGISTER = """from realms.legislation import Ref, above, fixed
 
@@ -60,10 +71,14 @@ def tree(tmp_path, monkeypatch):
                 "codex_activate",
                 "codex_revert",
                 "tax_assess",
+                "tax_policy_propose",
+                "tax_policy_draft",
+                "document_share",
             }
         )
         | legislation.INTERIM_OPERATIONS,
     )
+    monkeypatch.setattr(legislation, "fact_schema", lambda: FACTS)
     root = tmp_path / "legislation"
     for source in ("eu", "eu/es", "eu/es/vc", "eu/es/vc/46250-valencia"):
         write(root, source + "/source.json", source_json(source))
@@ -668,3 +683,114 @@ def test_cases_belong_to_a_chapter_beside_them(tree):
     )
     write(tree, "eu/es/tax.py", RATE_AND_BONUS)
     assert case_run(tree)[0] == 0
+
+
+# ── The F rules (§6) and the Cedar analysis of the forbids ──
+
+FORBID_HEAD = "from realms.legislation import F, S, above, forbid, overridable, pct, when\n\nclass Tax(above('tax')):\n    capital = overridable(False, legislation='x')\n"
+IBI_CAP = "    cap = forbid('tax_policy_propose', (F.code == 'ibi_urban') & F.rate.is_some() & (F.rate > pct('1.10') + when(S.capital, pct('0.07'))), each='taxes', legislation='x')\n"
+
+
+def forbid_in(rule):
+    return FORBID_HEAD + f"    cap = {rule}\n"
+
+
+@pytest.mark.parametrize(
+    "rule, expected",
+    [
+        (
+            "forbid('nothing', F.x == 1, legislation='x')",
+            "cap: the fact schema has no facts for nothing",
+        ),
+        (
+            "forbid('user_add', F.x == 1, legislation='x')",
+            "cap: the fact schema has no facts for user_add",
+        ),
+        (
+            "forbid('tax_policy_propose', F.code == 'a', each='nope', legislation='x')",
+            'each="nope" names no list of tax_policy_propose',
+        ),
+        (
+            "forbid('tax_policy_propose', F.nope == 'a', each='taxes', legislation='x')",
+            "F.nope: tax_policy_propose.taxes has no fact nope",
+        ),
+        (
+            "forbid('tax_policy_propose', F.rate.is_some() & (F.rate > when(S.missing, 1, 0)), each='taxes', legislation='x')",
+            "S.missing",
+        ),
+        (
+            "forbid('tax_policy_propose', F.rate.is_some() & (F.rate > pct('0.1234567')), each='taxes', legislation='x')",
+            "'0.1234567' has more than 6 decimals: it does not fit the scale of hundred-millionths",
+        ),
+        (
+            "forbid('tax_policy_propose', F.rate > 5, each='taxes', legislation='x')",
+            "F.rate is optional: compare it after F.rate.is_some() in the same & chain",
+        ),
+        (
+            "forbid('tax_policy_propose', (F.code == 'a') and (F.rate > 5), each='taxes', legislation='x')",
+            "use &, | and ~ in a forbid",
+        ),
+        (
+            "forbid('document_share', F.pages + 4611686018427387904 + 4611686018427387904 > 1, legislation='x')",
+            "may overflow Cedar's 64-bit integer even within the fact schema's ranges",
+        ),
+        (
+            "forbid('codex_revert', F.x == 1, legislation='x')",
+            "codex_revert is reserved; no chapter may hook, guard or forbid it",
+        ),
+    ],
+)
+def test_a_forbid_follows_the_f_rules(tree, rule, expected):
+    refused_with(tree, forbid_in(rule), expected)
+    write(tree, "eu/es/tax.py", FORBID_HEAD + IBI_CAP)
+    assert run(str(tree), "--realm", "eu/es", "--no-analysis").exit_code == 0
+
+
+def test_a_forbid_reads_the_settings_of_its_own_domain_only(tree):
+    write(
+        tree,
+        "eu/es/procedure.py",
+        "from realms.legislation import above, overridable\n\nclass Procedure(above('procedure')):\n    notice = overridable(3, legislation='x')\n",
+    )
+    rule = "forbid('tax_policy_propose', F.rate.is_some() & (F.rate > when(S.notice, 1, 0)), each='taxes', legislation='x')"
+    refused_with(tree, forbid_in(rule), "S.notice")
+    write(tree, "eu/es/tax.py", forbid_in(rule.replace("S.notice", "S.capital")))
+    assert run(str(tree), "--realm", "eu/es", "--no-analysis").exit_code == 0
+
+
+@pytest.fixture
+def cedar_tools(monkeypatch):
+    """The pinned Cedar CLI and cvc5 (scripts/cedar_tools.sh), when CEDAR_CLI and CVC5 point at them."""
+    pytest.importorskip("cedarpy")
+    cli, cvc5 = os.environ.get("CEDAR_CLI"), os.environ.get("CVC5")
+    if not (cli and cvc5 and os.path.exists(cli) and os.path.exists(cvc5)):
+        pytest.skip(
+            "set CEDAR_CLI and CVC5 to the pinned Cedar CLI and cvc5 (scripts/cedar_tools.sh)"
+        )
+    return cli, cvc5
+
+
+def test_check_proves_the_forbids_agree_with_python_and_never_error(tree, cedar_tools):
+    write(tree, "eu/es/tax.py", FORBID_HEAD + IBI_CAP)
+    out = run(str(tree), "--realm", "eu/es/vc/46250-valencia")
+    assert out.exit_code == 0, out.output
+
+
+def test_check_without_the_cedar_tools_says_what_to_install_and_never_passes_a_forbid_unproved(
+    tree, monkeypatch
+):
+    pytest.importorskip("cedarpy")
+    monkeypatch.delenv("CEDAR_CLI", raising=False)
+    monkeypatch.delenv("CVC5", raising=False)
+    write(tree, "eu/es/tax.py", FORBID_HEAD + IBI_CAP)
+    out = run(str(tree), "--realm", "eu/es")
+    assert (
+        out.exit_code == 2
+        and "scripts/cedar_tools.sh" in out.output
+        and "--no-analysis" in out.output
+    )
+    assert run(str(tree), "--realm", "eu/es", "--no-analysis").exit_code == 0
+    write(
+        tree, "eu/es/tax.py", tax_chapter()
+    )  # no forbid, nothing to prove: no tools needed
+    assert run(str(tree), "--realm", "eu/es").exit_code == 0
