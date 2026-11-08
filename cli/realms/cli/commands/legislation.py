@@ -117,21 +117,15 @@ def chapters_of(tree: Path, source: str) -> List[str]:
     return sorted(p.stem for p in (tree / source).glob("*.py"))
 
 
-def check_realm(
-    tree: Path,
-    realm: str,
-    known: List[str],
-    operations,
-    facts: dict,
-    analysis: Analysis,
-) -> List[str]:
-    """Load the realm's codex from the tree; the refusals, as the checker prints them."""
+def load_realm(tree: Path, realm: str, known: List[str], operations, facts: dict, ggg):
+    """The realm's codex with its calendars and chapters loaded from the tree, and the refusals met on the way, as the
+    checker prints them. ``ggg`` is the module a chapter imports ``ggg`` from."""
     layers = layers_of(realm, known)
     codex = Codex(
         layers,
         realm=realm,
         operations=operations,
-        modules={"ggg": check_view()},
+        modules={"ggg": ggg},
         facts=facts,
     )
     problems = []
@@ -156,13 +150,32 @@ def check_realm(
             except Refused as e:
                 problems.append(str(e))
                 break  # the layers below build on this one
+    return codex, problems
+
+
+def check_realm(
+    tree: Path,
+    realm: str,
+    known: List[str],
+    operations,
+    facts: dict,
+    analysis: Analysis,
+) -> List[str]:
+    """Load the realm's codex from the tree and check it; the refusals, as the checker prints them."""
+    codex, problems = load_realm(tree, realm, known, operations, facts, check_view())
+
+    def reload(ggg):
+        return load_realm(tree, realm, known, operations, facts, ggg)[0]
+
     try:
         codex.check()
         if (
             not problems
         ):  # read from a codex that loaded whole: a chapter that did not load would be a false "no such domain"
             check_uses(codex)
-            problems += analysis.problems(codex) or case_problems(tree, codex, realm)
+            problems += analysis.problems(codex) or case_problems(
+                tree, codex, realm, reload
+            )
     except LegislationError as e:
         problems.append(str(e))
     return problems

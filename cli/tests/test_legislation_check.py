@@ -794,3 +794,175 @@ def test_check_without_the_cedar_tools_says_what_to_install_and_never_passes_a_f
         tree, "eu/es/tax.py", tax_chapter()
     )  # no forbid, nothing to prove: no tools needed
     assert run(str(tree), "--realm", "eu/es").exit_code == 0
+
+
+# ── A compute case: compute_<op> run by the realm's sandbox program on records of GGG's entities ──
+
+IBI_TAX = """from realms.legislation import above, fixed, overridable
+
+class Tax(above('tax')):
+    @fixed(legislation='TRLRHL Arts. 61, 65, 71 and 74')
+    def compute_tax_assess(self, entry, subject):
+        if entry.code != "ibi_urban" or subject.assessed_value is None:
+            return []
+        gross = subject.assessed_value.times(entry.rate)
+        net = gross - gross.times(self.ibi_bonus(subject.owner))
+        items = [{"concept": entry.code, "amount": gross, "legislation": "TRLRHL Art. 71.1"}]
+        if net < gross:
+            items.append({"concept": entry.code + "_bonus", "amount": net - gross, "legislation": "TRLRHL Art. 74"})
+        return items
+
+    @overridable(legislation='TRLRHL Art. 74')
+    def ibi_bonus(self, owner):
+        return 0
+"""
+VALENCIA_IBI = """from ggg import Attribute, Human
+from realms.legislation import above, pct
+
+class Tax(above('tax')):
+    large_family_bonus = {"general": pct("60"), "special": pct("90")}
+
+    def ibi_bonus(self, owner):
+        kind, _, user = owner.partition(":")
+        if kind != "User":
+            return 0
+        for human in Human.find("user", user):
+            for attribute in Attribute.find("human", human.id):
+                if attribute.kind == "large_family" and attribute.status == "verified":
+                    return self.large_family_bonus.get(attribute.value, 0)
+        return 0
+"""
+IBI = {
+    "code": "ibi_urban",
+    "kind": "tax",
+    "subject": "Land",
+    "rate": 1_240_000,
+    "facts": {},
+}
+RECORDS = {
+    "Land": [
+        {"id": "L-1", "owner": "User:alice", "assessed_value": 20_000_000},
+        {"id": "L-2", "owner": "User:bob", "assessed_value": 20_000_000},
+        {"id": "L-3", "owner": "User:alice"},
+    ],
+    "Human": [{"id": "h-alice", "user": "alice"}, {"id": "h-bob", "user": "bob"}],
+    "Attribute": [
+        {
+            "id": "a-alice",
+            "human": "h-alice",
+            "kind": "large_family",
+            "value": "general",
+            "status": "verified",
+        },
+        {
+            "id": "a-bob",
+            "human": "h-bob",
+            "kind": "large_family",
+            "value": "general",
+            "status": "pending",
+        },
+    ],
+}
+
+
+def ibi_case(subject, returns, **more):
+    return {
+        "name": f"the IBI of {subject}",
+        "realm": VALENCIA,
+        "compute": "tax_assess",
+        "args": {"entry": IBI, "subject": subject},
+        "decimals": 2,
+        "records": RECORDS,
+        "returns": returns,
+        **more,
+    }
+
+
+def test_a_compute_case_assesses_a_parcel_from_the_records(tree):
+    write(tree, "eu/es/tax.py", IBI_TAX)
+    write(tree, f"{VALENCIA}/tax.py", VALENCIA_IBI)
+    gross = {
+        "concept": "ibi_urban",
+        "amount": 248_000,
+        "legislation": "TRLRHL Art. 71.1",
+    }  # 1.24 % of 200 000.00
+    write(
+        tree,
+        "eu/es/tax.cases.json",
+        [
+            ibi_case(
+                "Land:L-1",
+                [
+                    gross,
+                    {
+                        "concept": "ibi_urban_bonus",
+                        "amount": -148_800,
+                        "legislation": "TRLRHL Art. 74",
+                    },
+                ],
+            ),
+            ibi_case("Land:L-2", [gross]),  # a title not yet verified is none
+            ibi_case("Land:L-3", []),  # never assessed: no IBI yet
+        ],
+    )
+    assert case_run(tree, VALENCIA) == (0, "ok: 1 realm(s) checked\n")
+    write(tree, "eu/es/tax.cases.json", [ibi_case("Land:L-2", [])])
+    code, output = case_run(tree, VALENCIA)
+    assert (
+        code == 1
+        and 'case "the IBI of Land:L-2": returns [{' in output
+        and "written []" in output
+    )
+
+
+def test_a_compute_case_that_raises_or_has_no_compute_says_so(tree):
+    write(tree, "eu/es/tax.py", IBI_TAX)
+    write(tree, f"{VALENCIA}/tax.py", VALENCIA_IBI)
+    missing = ibi_case("Land:L-9", [])
+    write(
+        tree,
+        "eu/es/tax.cases.json",
+        [missing, ibi_case("Land:L-1", [], compute="tax_declare")],
+    )
+    code, output = case_run(tree, VALENCIA)
+    assert code == 1
+    assert "raised: 'Land:L-9' is not found" in output
+    assert "no chapter has compute_tax_declare" in output
+
+
+@pytest.mark.parametrize(
+    "change, expected",
+    [
+        ({"args": "L-1"}, "args is the arguments of the compute_ method"),
+        ({"decimals": -1}, "decimals is the token's decimals"),
+        ({"decimals": 2.5}, "decimals is the token's decimals"),
+        ({"records": [{"id": 1}]}, "records is {Entity: [row, ...]}"),
+        (
+            {"records": {"Land": [{"owner": "User:alice"}]}},
+            "each row an object with an id",
+        ),
+    ],
+)
+def test_the_shape_of_a_compute_case_is_checked_with_the_layout(tree, change, expected):
+    write(tree, "eu/es/tax.py", IBI_TAX)
+    write(tree, "eu/es/tax.cases.json", [ibi_case("Land:L-1", [], **change)])
+    code, output = case_run(tree, VALENCIA)
+    assert code == 1 and expected in output
+
+
+def test_the_money_fields_a_case_reads_are_the_realms():
+    """The realm reads a parcel's assessed_value as Money (core.legislation.MONEY); cases read the same."""
+    import ast
+
+    from realms.cli.commands.legislation_cases import MONEY
+
+    source = (
+        Path(__file__).resolve().parents[2] / "src/realm_backend/core/legislation.py"
+    ).read_text()
+    realms = next(
+        ast.literal_eval(node.value)
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and getattr(node.targets[0], "id", None) == "MONEY"
+    )
+    assert MONEY == realms

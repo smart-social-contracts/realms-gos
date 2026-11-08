@@ -38,7 +38,7 @@ GGG_DOMAINS = (
 )  # fmt: skip
 SOURCE_FILES = ("source.json", "releases.json", "calendar.json")
 CASES_SUFFIX = ".cases.json"
-CASE_KINDS = ("call", "guard", "forbid")
+CASE_KINDS = ("call", "guard", "forbid", "compute")
 HEX = frozenset("0123456789abcdef")
 
 
@@ -183,7 +183,12 @@ def case_reasons(case) -> List[str]:
     kind = kinds[0]
     if not is_text(case[kind]):
         reasons.append(f"{kind} is a name")
-    expected = {"call": "returns", "guard": "denies", "forbid": "fires"}[kind]
+    expected = {
+        "call": "returns",
+        "guard": "denies",
+        "forbid": "fires",
+        "compute": "returns",
+    }[kind]
     if expected not in case:
         reasons.append(f"{expected} is what the case expects")
     if kind == "call" and not isinstance(case.get("args", []), list):
@@ -201,6 +206,8 @@ def case_reasons(case) -> List[str]:
             reasons.append("approvals is a list of department names")
         if type(case.get("now", 0)) is not int:
             reasons.append("now is a time in seconds")
+    if kind == "compute":
+        reasons += compute_reasons(case)
     if kind == "forbid":
         if not isinstance(case.get("facts"), dict):
             reasons.append("facts is an object")
@@ -209,6 +216,25 @@ def case_reasons(case) -> List[str]:
         fires = case.get("fires", [])
         if not (isinstance(fires, list) and all(is_text(f) for f in fires)):
             reasons.append("fires is a list of forbid ids")
+    return reasons
+
+
+def compute_reasons(case) -> List[str]:
+    reasons = []
+    if not isinstance(case.get("args"), dict):
+        reasons.append("args is the arguments of the compute_ method, as an object")
+    if type(case.get("decimals")) is not int or case["decimals"] < 0:
+        reasons.append("decimals is the token's decimals, a whole number")
+    records = case.get("records")
+    if not (
+        isinstance(records, dict)
+        and all(
+            isinstance(rows, list)
+            and all(isinstance(r, dict) and "id" in r for r in rows)
+            for rows in records.values()
+        )
+    ):
+        reasons.append("records is {Entity: [row, ...]}, each row an object with an id")
     return reasons
 
 

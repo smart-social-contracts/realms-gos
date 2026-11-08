@@ -1632,6 +1632,7 @@ UTC. A case has a `name` and one kind of test, evaluated in-process with the lib
 | `call` | `call`, `args` (plain data), `returns` | a public member of the resolved domain: a helper called with the arguments, or a setting read |
 | `guard` | `guard` (an operation), `args`, `approvals`, `now` (seconds), `denies` (a reason, or null) | the domain's `check_<operation>` on the operation's arguments, with those departments' approvals and that time |
 | `forbid` | `forbid` (an operation), `each`, `facts`, `fires` (forbid ids) | the realm's forbids on that operation (and list) in plain Python, with its settings folded: those that fire must be exactly `fires` |
+| `compute` | `compute` (an operation), `args` (the arguments of `compute_<operation>`), `decimals` (the token's), `records`, `returns` | the domain's `compute_<operation>`, run by the realm's own sandbox program (`core.legislation_sandbox`), which reads GGG's entities from `records` (`{"Land": [{"id": "L-1", "owner": "User:alice", "assessed_value": 20000000}], "Human": [...]}`) and hands the chapter the subject as the view `Land.get` gives, with money in `decimals`; `returns` is the invoice items |
 
 ```json
 [
@@ -1641,7 +1642,7 @@ UTC. A case has a `name` and one kind of test, evaluated in-process with the lib
 ```
 
 A case that does not come out as written is a problem, `<source>/<domain>.cases.json: case "<name>": <what>`.
-Hooks and `compute_` need a read view of GGG and are not run by `check`.
+Hooks are not run by `check`.
 
 ### 12.2 In-canister checks (install step 5, no parser)
 
