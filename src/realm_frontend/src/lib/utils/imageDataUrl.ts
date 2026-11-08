@@ -1,4 +1,5 @@
-const DEFAULT_MAX_BYTES = Math.floor(1.5 * 1024 * 1024);
+// The realm backend refuses a data URL above 1,000,000 characters (IMAGE_MAX in api/setup.py): 700 KiB in base64.
+const DEFAULT_MAX_BYTES = 700 * 1024;
 
 function loadImageFromFile(file: File): Promise<HTMLImageElement> {
 	return new Promise((resolve, reject) => {
@@ -58,7 +59,7 @@ async function encodeCanvas(
 		}
 	}
 
-	throw new Error('Image is too large even after compression (max 1.5MB)');
+	throw new Error('Image is too large even after compression (max 700KB)');
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

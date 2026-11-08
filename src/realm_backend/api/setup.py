@@ -41,6 +41,12 @@ FIELDS = {
                        "installer_canister_id", "baton_canister_id", "conductor_canister_id", "casals_stand"),
     "trust_policy": ("require_marketplace_approval", "trusted_approvers", "trusted_principals"),
 }
+# The branding images are kept in the Realm row as data URLs. The wizard sends both in one call, which may not pass the
+# 2 MiB of an ingress message, and realm_info returns both in one reply, which may not pass 3 MiB. An image of 700 KiB
+# is 955,736 characters in base64: the frontend compresses to that (imageDataUrl.ts), and there is room for the
+# "data:image/...;base64," prefix.
+IMAGES = ("logo_url", "background_image_url")
+IMAGE_MAX = 1_000_000
 # Kept in manifest_data["casals"], not on Realm: the stand Casals built the realm on, its baton and its conductor.
 CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
 # Kept in manifest_data too: how far db_convert_indexes has got, {"after": key, "refused": [key, ...]} while it runs and
@@ -150,6 +156,10 @@ def configure(fields, values):
     if unknown:
         raise Fail(f"cannot configure {', '.join(unknown)} here")
     known_timezone(values)
+    for name in IMAGES:
+        if len(values.get(name) or "") > IMAGE_MAX:
+            raise Fail(f"{name} is above {IMAGE_MAX:,} characters (an image of about 700 KiB): the realm sends its images "
+                       f"with every page it shows")
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in HEX for ch in color[1:].lower())):
         raise Fail(f"primary_color must look like #1E6B52, not {color}")
     if (values.get("test_mode") or any((values.get("test_flags") or {}).values())) \
