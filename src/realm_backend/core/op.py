@@ -34,7 +34,7 @@ class Call:
 
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
-       returns=None, check=None, private=(), derived=None, secret=()):
+       returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -45,17 +45,22 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm. It runs
     before ``governed`` turns the call into a proposal, so a call that cannot succeed files nothing.
     private -> the arguments that hold personal data or key material: the audit log never keeps them (I-ALL-5).
-    derived(args) -> the facts of the call that are not its arguments, computed from the realm's records (GGG's
-    ``derived`` facts, such as the totals of a budget), for the rules that read the call's facts.
+    derived(args, proposal) -> the facts of the call that are not its arguments, computed from the realm's records (GGG's
+    ``derived`` facts, such as the totals of a budget), for the rules that read the call's facts. ``proposal`` is the
+    proposal whose replay the call is, "" for any other call.
     secret -> the arguments and reply fields that are key material or credentials (a code, keys, private data, a
     request's body and reply): the legislation never sees them, at any depth (I-PRV-1), and nor does the audit log.
     Personal data the audit keeps out (``private``) still reaches the legislation that decides on it.
+    fixes(args, proposal) -> runs when a proposal that carries the call is filed, by the governed call or by
+    ``proposal_create``, before the proposal is written: it refuses a call that has nothing to carry and ties the records
+    the call will act on to ``proposal``, so that no other proposal takes them.
+    releases(args, proposal) -> runs when that proposal ends without the call having run: it frees what ``fixes`` tied.
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,
-                            "secret": tuple(secret)}
+                            "secret": tuple(secret), "fixes": fixes, "releases": releases}
         return fn
     return wrap
 

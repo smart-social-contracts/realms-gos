@@ -64,7 +64,8 @@ def settle(leg):
         if result is None:
             raise Conflict(f"{p.id} is still open until {p.deadline}")
         tally, size, _ = proposals.count(p)
-        p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
+        proposals.end(p, result)
+        p.tally = {**(p.tally or {}), **tally, "eligible": size}
     tally, size, _ = proposals.count(p)
     leg.outcome, leg.status = "passed" if p.status in PASSED else "failed", "reported"
     leg.yes, leg.no, leg.abstain, leg.eligible = tally["yes"], tally["no"], tally["abstain"], size
@@ -106,7 +107,7 @@ def count(v):
 def withdraw(leg):
     p = Proposal[leg.proposal_id]
     if p is not None and p.status in proposals.OPEN:
-        p.status = "withdrawn"
+        proposals.end(p, "withdrawn")
     leg.status = "cancelled"
 
 

@@ -114,7 +114,7 @@ def test_the_budget_of_a_period_is_the_realms_to_decide():
     world.policy(Department["Administration"], 2, 3)
     draft("ROADS", "capital", 300)
     p = propose()["proposal"]
-    assert Budget["B-1"].status == "draft"
+    assert (Budget["B-1"].status, Budget["B-1"].proposal) == ("proposed", p)  # fixed when the proposal is filed
     for voter in world.PEOPLE:
         ok("proposal_vote", voter, proposal=p, choice="yes")
     assert (Budget["B-1"].status, Budget["B-1"].proposal) == ("adopted", p)
