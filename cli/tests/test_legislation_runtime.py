@@ -5,7 +5,8 @@ reach a chapter's public members only, and what a method hands back is plain dat
 
 import pytest
 
-from realms.legislation import Codex, LegislationError, Money, Ref, days
+from realms.legislation import Codex, LegislationError, Money, Ref, Refused, days
+from realms.legislation import subset_ast
 from realms.legislation.context import Args, Public, crossing
 
 TOWN = "x/town"
@@ -141,3 +142,40 @@ def test_crossing_passes_data_wraps_a_chapter_and_refuses_the_rest():
     for value in (Public(chapter), chapter.name, object(), 1.5):
         with pytest.raises(LegislationError, match="only plain data crosses"):
             crossing(value, "f.py")
+
+
+# ── self and a hook's event are bound once (realms-gos#579, the fourth review) ─────────────────────────────────
+
+HEAD = "from realms.legislation import above, days\n\nclass Register(above('register')):\n"
+REBINDINGS = {
+    "assignment in a helper": "    def check_t(self, args):\n        self.keep(days, 'x')\n\n    def keep(self, f, v):\n        self = f\n        self.memo = v\n",
+    "augmented assignment": "    def check_t(self, args):\n        self += 1\n",
+    "a walrus": "    def check_t(self, args):\n        return (self := days)\n",
+    "a loop target": "    def check_t(self, args):\n        for self in (days,):\n            self.memo = 1\n",
+    "a comprehension target": "    def check_t(self, args):\n        return [self for self in (days,)]\n",
+    "del": "    def check_t(self, args):\n        del self\n",
+    "nonlocal in a nested function": "    def check_t(self, args):\n        def put(v):\n            nonlocal self\n            self = v\n        put(days)\n",
+    "a nested function's parameter": "    def check_t(self, args):\n        def put(self, v):\n            self.memo = v\n        put(days, 'x')\n",
+    "a lambda's parameter": "    def check_t(self, args):\n        return (lambda self: self)(days)\n",
+    "the class's own function": "    def check_t(self, args):\n        self = Register.helper\n        self.memo = 'x'\n\n    def helper(self):\n        pass\n",
+    "the event rebound in a hook": "    def on_t(self, event):\n        event = days\n        event.memo = 'x'\n",
+    "the event as a loop target": "    def on_t(self, event):\n        for event in (days,):\n            event.memo = 'x'\n",
+    "the event as a nested parameter": "    def on_t(self, event):\n        def put(event, v):\n            event.memo = v\n        put(days, 'x')\n",
+}
+
+
+@pytest.mark.parametrize("form", sorted(REBINDINGS))
+def test_self_and_the_event_are_bound_once_in_both_checkers(form):
+    text = HEAD + REBINDINGS[form]
+    with pytest.raises(Refused, match="is bound once, as the method's parameter"):
+        Codex(["x"], realm="x", operations=["t"]).load("x", "register", text)
+    with pytest.raises(Refused, match="is bound once, as the method's parameter"):
+        subset_ast.check(text, "x/register.py")
+
+
+def test_a_hook_still_adds_to_its_event_and_a_method_to_self():
+    text = HEAD + ("    def on_t(self, event):\n        event.seen = [w for w in ('a',)]\n        self.note = event.seen\n"
+                   "        other = [event for event in ()]\n" if False else
+                   "    def on_t(self, event):\n        event.seen = [w for w in ('a',)]\n        self.note = event.seen\n")
+    Codex(["x"], realm="x", operations=["t"]).load("x", "register", text)
+    subset_ast.check(text, "x/register.py")

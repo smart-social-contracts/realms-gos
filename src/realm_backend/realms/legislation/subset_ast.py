@@ -271,7 +271,12 @@ class Check:
             self.identifier(arg, arg.arg, "method")
         bound = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
         bound.update(a.arg for a in (args.vararg, args.kwarg) if a)
+        if allowed is None:  # a function nested in a method: its parameters may not reuse the protected names
+            for name in bound & (self.allowed[-1] if self.allowed else frozenset()):
+                self.refuse(node, f"{name} is bound once, as the method's parameter: a nested function has no parameter of that name")
         self.allowed.append(allowed if allowed is not None else self.allowed[-1] if self.allowed else frozenset())
+        if allowed is not None:
+            self.bound_once(node, allowed)
         try:
             if isinstance(node, ast.Lambda):
                 self.expression(node.body, bound)
@@ -282,6 +287,25 @@ class Check:
                 self.statement(statement, bound)
         finally:
             self.allowed.pop()
+
+    def bound_once(self, node, names):
+        """``self`` and the event a hook was given are bound once, as the method's own parameters, and never again:
+        no assignment to them (plain, augmented, a walrus, a loop or comprehension target, nonlocal), no del."""
+        ast = self.ast
+        for statement in node.body:
+            for child in ast.walk(statement):
+                rebound = ()
+                if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                    rebound = (child.id,)
+                elif isinstance(child, (ast.Global, ast.Nonlocal)):
+                    rebound = tuple(child.names)
+                elif isinstance(child, ast.ExceptHandler) and child.name:
+                    rebound = (child.name,)
+                elif isinstance(child, ast.alias):
+                    rebound = (child.asname or child.name,)
+                for name in rebound:
+                    if name in names:
+                        self.refuse(child, f"{name} is bound once, as the method's parameter, and never rebound or deleted")
 
     def assigned(self, node):
         """Names a statement binds in its function, so attribute stores on them are on locals."""

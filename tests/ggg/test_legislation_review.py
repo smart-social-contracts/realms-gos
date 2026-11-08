@@ -16,9 +16,9 @@ from test_legislation_runtime import LOG, TOWN, TOWN_REALM, activate, layered, t
 from test_legislation_runtime import fresh_realm  # noqa: F401  the autouse fixture
 
 
-@op.op("treasury.manage", private=("code",))
+@op.op("treasury.manage", secret=("code",))
 def t_poke(c, args):
-    """A plain write any chapter may guard or hook; its ``code`` is private, in and out."""
+    """A plain write any chapter may guard or hook; its ``code`` is a secret, in and out."""
     return {"done": args.get("what", ""), "code": "SHOWN-ONCE"}
 
 
@@ -341,7 +341,7 @@ class Tax(above("tax")):
 
 
 def test_a_tax_entrys_code_reaches_compute_tax_assess():
-    """What is private is an operation's own: tax_assess keeps nothing, so a tax entry's code is not an invite's code."""
+    """What is secret is an operation's own: tax_assess keeps nothing, so a tax entry's code is not an invite's code."""
     activate(layered({(TOWN, "tax"): TAX}, layers=[TOWN]))
     got = op.run(codex_api.compute("tax_assess", {"entry": {"code": "ibi_urban", "rate": 1}, "subject": "Land:1"}))
     assert got == [{"concept": "ibi_urban", "amount": 1}]
@@ -555,3 +555,58 @@ def test_a_store_through_a_parameter_is_refused_and_self_and_the_event_outlive_n
     assert call("t_poke", what="recall")["error"] == "memo: None"  # a fresh instance per call
     ok("t_poke", what="again")
     assert notices("count") == ["1", "1"]  # a fresh event per call (the denied recall ran no hook)
+
+
+# ── The fourth review: what the legislation reads after G2 ───────────────────────────────────────────────────────
+
+
+@op.op("treasury.manage", private=("kind", "value"))
+def t_attribute(c, args):
+    """A write whose kind and value the audit keeps out, as attribute_submit's, and the legislation still reads."""
+    return {"done": True}
+
+
+PRIVATE_NOT_SECRET = register('''    def check_t_attribute(self, args):
+        return self.deny(f"{args.kind}={args.value}")
+''')
+
+
+def test_personal_data_the_audit_keeps_out_still_reaches_the_legislation_that_decides_on_it():
+    activate(layered({(TOWN, "register"): PRIVATE_NOT_SECRET}, layers=[TOWN]))
+    assert call("t_attribute", kind="large_family", value="general")["error"] == "large_family=general"
+    assert legislation._secret("t_attribute") == () and op.ops()["t_attribute"]["private"] == ("kind", "value")
+
+
+EXAMPLES = '''
+from ggg import Attribute, Document, External, Human, Member, TaxPolicy
+from realms.legislation import above
+
+class Register(above("register")):
+    def check_t_poke(self, args):
+        what = args.what
+        if what == "5.2":  # the languages of the ordinance's document, and every member
+            return self.deny(",".join(Document.get("DOC-1").languages) + ":" + str(len(Member.each())))
+        if what == "5.4":  # the recipient's kind, read from GGG's entity
+            return self.deny(External.get("AGE").kind)
+        if what == "5.6":  # the owner's verified large-family attribute
+            human = Human.find("user", "alice")[0]
+            verified = [a.value for a in Attribute.find("human", human.id) if a.status == "Verified"]
+            return self.deny(",".join(verified))
+        if what == "5.7":  # the saved policy's entries
+            return self.deny(",".join([entry["code"] for entry in TaxPolicy.get("TP-1").taxes]))
+'''
+
+
+def test_the_design_examples_reads_are_answered():
+    from ggg import Attribute, Document, External, Human, TaxPolicy
+
+    Document(id="DOC-1", title="Ordenança", kind="ordinance", languages=["es"], author="alice", at=1)
+    External(id="AGE", name="Administración General del Estado", kind="authority")
+    Human(id="h-alice", user="alice", date_of_birth="1980-02-03")
+    Attribute(id="A-1", human="h-alice", kind="large_family", value="general", status="Verified")
+    TaxPolicy(id="TP-1", status="adopted", taxes=[{"code": "ibi_urban", "rate": 1000000}, {"code": "water_supply"}])
+    activate(layered({(TOWN, "register"): EXAMPLES}, layers=[TOWN]))
+    assert call("t_poke", what="5.2")["error"] == "es:7"
+    assert call("t_poke", what="5.4")["error"] == "authority"
+    assert call("t_poke", what="5.6")["error"] == "general"
+    assert call("t_poke", what="5.7")["error"] == "ibi_urban,water_supply"

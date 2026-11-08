@@ -383,9 +383,10 @@ The rules (the checker enforces them, §12):
    (`__class__`, `__dict__`, `__bases__`, `__subclasses__`, ...). These are the same restrictions as
    codex code today ([Design choices](../architecture/design-choices.md)). No default arguments either,
    on a method, a nested function or a lambda, and an attribute is set only on `self` or on the event a
-   hook was given, the two objects a call gets fresh, never on anything else: a chapter's class lives as
-   long as the codex runs, so a default or an attribute on an SDK object, a parameter or a view would be
-   state shared by every call.
+   hook was given, the two objects a call gets fresh, never on anything else; `self` and that event are
+   bound once, as the method's parameters, and never rebound, deleted or reused as a nested function's
+   parameter. A chapter's class lives as long as the codex runs, so a default or an attribute on an SDK
+   object, a parameter or a view would be state shared by every call.
 
 ### 4.1 Marks
 
@@ -1278,9 +1279,10 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   proposal is a `proposal_create` to the legislation: its guards and hooks run on the filing. What a chapter
   reads of GGG's entities is an allowlist of entities and fields (`VIEWS` in `core/legislation.py`): what
   legislation needs to decide, never a key, a code, a person's private data, a sealed bid, who voted what, a
-  grant, a payment account or what one member was told; the arguments and results it gets carry nothing the
-  operation keeps secret (`private=` on the operation: an invite's code, personal data, wrapped keys), and neither do
-  the replies of its effects; and no read is answered while the codex loads.
+  grant, a payment account or what one member was told; the arguments and results it gets carry no key material
+  or credential (`secret=` on the operation: a code, keys, private data, a request's body and reply), and neither
+  do the replies of its effects, while the personal data the audit log keeps out (`private=`) still reaches the
+  legislation that decides on it (I-PRV-1); and no read is answered while the codex loads.
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
     hooks still run;

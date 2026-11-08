@@ -34,7 +34,7 @@ class Call:
 
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
-       returns=None, check=None, private=(), derived=None):
+       returns=None, check=None, private=(), derived=None, secret=()):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -44,15 +44,18 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     or for a governed operation the id of the record it created. Without it, the reply itself is the result.
     check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm. It runs
     before ``governed`` turns the call into a proposal, so a call that cannot succeed files nothing.
-    private -> the arguments, and the fields of the reply, that hold personal data or key material: the audit log
-    never keeps them (I-ALL-5) and the legislation never sees them, at any depth.
+    private -> the arguments that hold personal data or key material: the audit log never keeps them (I-ALL-5).
     derived(args) -> the facts of the call that are not its arguments, computed from the realm's records (GGG's
     ``derived`` facts, such as the totals of a budget), for the rules that read the call's facts.
+    secret -> the arguments and reply fields that are key material or credentials (a code, keys, private data, a
+    request's body and reply): the legislation never sees them, at any depth (I-PRV-1), and nor does the audit log.
+    Personal data the audit keeps out (``private``) still reaches the legislation that decides on it.
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
-                            "returns": returns, "check": check, "private": private, "derived": derived}
+                            "returns": returns, "check": check, "private": private, "derived": derived,
+                            "secret": tuple(secret)}
         return fn
     return wrap
 
@@ -129,11 +132,11 @@ def direct(department):
 
 def redacted(name, args):
     """The arguments of a call to ``name``, or its reply, as a log may show them, the audit log and a scheduled task's
-    alike: without the secrets of every call and the operation's ``private`` fields, which hold personal data or key
-    material (I-ALL-5)."""
+    alike: without the secrets of every call, the operation's ``private`` fields, which hold personal data or key
+    material (I-ALL-5), and its ``secret`` ones."""
     spec = OPS.get(name) or ops().get(name)
-    private = spec["private"] if spec else ()
-    return {k: v for k, v in args.items() if k not in SECRET and k not in private}
+    hidden = set(SECRET) | set(spec["private"] if spec else ()) | set(spec["secret"] if spec else ())
+    return {k: v for k, v in args.items() if k not in hidden}
 
 
 def audit(name, user, by, origin, args, out):

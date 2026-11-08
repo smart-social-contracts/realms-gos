@@ -75,7 +75,7 @@ def crypto_public_key(c, args):
     return {"public_key": blob_hex(reply)}
 
 
-@op("self.data_manage", returns="encrypted_key", private=("encrypted_key",))
+@op("self.data_manage", returns="encrypted_key", secret=("encrypted_key",))
 def crypto_derive_key(c, args):
     """Your vetKey, encrypted to ``transport_public_key`` (hex). It opens only what was wrapped for you."""
     reply = yield from chain.call(MGMT, "vetkd_derive_key", f'(record {{ input = blob "{blob(c.user.encode().hex())}"; '
@@ -84,7 +84,7 @@ def crypto_derive_key(c, args):
     return {"encrypted_key": blob_hex(reply)}
 
 
-@op("self.data_manage", returns="granted", private=("keys",))
+@op("self.data_manage", returns="granted", secret=("keys",))
 def crypto_grant(c, args):
     """Store wrapped keys at ``scope``: ``keys`` maps principal to wrapped key. Replaces earlier wraps."""
     manager(args["scope"], c.user)
@@ -135,7 +135,7 @@ def stored_languages(args):
     language.require_all(args["languages"])
 
 
-@op("document.manage", check=stored_languages, private=("keys",))
+@op("document.manage", check=stored_languages, private=("keys",), secret=("keys",))
 def document_store(c, args):
     """Store a ``department`` document (or replace ``document``): ``title``, ``languages`` (BCP 47 tags), ``ref`` and
     ``hash`` of its ciphertext, optional ``kind`` (minutes, an ordinance), ``facts`` (what legislation reads about
@@ -171,7 +171,7 @@ def recipient_of(args):
         raise Fail("a basis states its legal_basis and its purpose")
 
 
-@op("document.manage", private=("keys",), returns="granted")
+@op("document.manage", private=("keys",), secret=("keys",), returns="granted")
 def document_share(c, args):
     """Share ``document`` with ``recipient`` (``User:id``, ``Organization:id`` or ``External:id``), who must exist:
     ``keys`` maps principal to wrapped key (for an External, the principal that delivers to it). State the ``basis``
