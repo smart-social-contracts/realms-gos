@@ -125,6 +125,12 @@ def check_grant(grant_id, grantor, action):
         raise Fail(f"{name} is missing {e}")
 
 
+def filer(p):
+    """The delegate that filed ``p`` under a power of attorney, if any."""
+    grant = Delegation[p.filed_under] if p.filed_under else None
+    return grant.delegate if grant else ""
+
+
 def filed_for(p, member):
     """Whether a delegate of ``member`` filed ``p``: under a grant of theirs, whoever holds it and whatever its status
     is now (I-ID-13)."""
@@ -495,6 +501,8 @@ def proposal_vote(c, args):
         raise Fail(f"choice must be one of {', '.join(CHOICES)}")
     if p.status != "voting" or (p.deadline and chain.now() > p.deadline):
         raise Conflict(f"{p.id} is not open for voting")
+    if c.grant and filer(p) == c.by:
+        raise Forbidden(f"{p.id} was filed by {c.by}: a delegate does not vote on its own proposal, for any member")
     if c.grant and filed_for(p, c.user):
         raise Forbidden(f"{p.id} was filed by a delegate of {c.user}: a delegate does not vote on what one of the "
                         "member's delegates filed")

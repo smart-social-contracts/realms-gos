@@ -210,9 +210,10 @@ every group, those the member gains later included, and every operation a later 
   the member's permissions and standing are checked again. A grant that has merely expired does not stop it, because a
   vote can outlast the grant; after the grant has expired, the member stops such a proposal by withdrawing it (or
   voting no). Otherwise the proposal ends `failed`, with the reason.
-- No delegate of a member votes on a proposal that a delegate of the same member filed (I-ID-13), whoever filed it
-  and whatever the status of that grant now. The member votes on it as usual, and a delegate of another member may.
-  A delegate withdraws only the proposals it filed under its grant.
+- A delegate does not vote on a proposal it filed, for any member it acts for, and no delegate of a member votes
+  on a proposal that a delegate of the same member filed (I-ID-13), whoever filed it and whatever the status of that
+  grant now. The member votes on it as usual, and a delegate of another member may. A delegate withdraws only the
+  proposals it filed under its grant.
 - A delegate reads the member's own notifications, not the inboxes of the offices where the member holds a seat.
 
 ### What the member is told

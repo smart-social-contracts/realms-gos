@@ -208,6 +208,7 @@ def finance_for_carla():
     receive(1_000)
     world.grant(depts["Infrastructure"], "transfer.create")
     ledger_ok()
+    return depts
 
 
 def file_transfer(delegate="claude-conn"):
@@ -263,7 +264,7 @@ def test_I_ID_13_no_delegate_of_a_member_votes_on_what_another_delegate_of_the_m
     p = ok("proposal_create", "agent-1", title="Bike lane", on_behalf_of="alice")["proposal"]
     vote = dict(proposal=p, choice="yes", on_behalf_of="alice")
     assert "filed by a delegate of alice" in denied("proposal_vote", "agent-2", **vote)
-    assert "filed by a delegate of alice" in denied("proposal_vote", "agent-1", **vote)
+    assert "filed by agent-1" in denied("proposal_vote", "agent-1", **vote)
     ok("delegation_revoke", "alice", delegation=first)  # whatever that grant's status now
     assert "filed by a delegate of alice" in denied("proposal_vote", "agent-2", **vote)
     ok("delegation_grant", "alice", delegate="agent-3", groups=["propose"], expires_in=DAY)
@@ -272,6 +273,40 @@ def test_I_ID_13_no_delegate_of_a_member_votes_on_what_another_delegate_of_the_m
     assert "filed by a delegate of alice" in denied("proposal_vote", "agent-2", proposal=q, choice="yes",
                                                     on_behalf_of="alice")
     ok("proposal_vote", "alice", proposal=p, choice="yes")
+
+
+def lend(style, grantor, perms, groups, delegate="claude-conn"):
+    """A grant to ``delegate``, naming permissions (as before groups) or groups."""
+    scope = {"operations": perms} if style == "permissions" else {"groups": groups}
+    return ok("delegation_grant", grantor, delegate=delegate, expires_in=30 * DAY, **scope)["delegation"]
+
+
+@pytest.mark.parametrize("style", ("permissions", "groups"))
+def test_I_ID_10_a_delegate_that_files_for_one_member_does_not_vote_on_it_for_another(style):
+    world.build()
+    lend(style, "alice", ["proposal.create", "proposal.vote"], ["propose", "vote"])
+    lend(style, "bob", ["proposal.vote"], ["vote"])
+    p = ok("proposal_create", "claude-conn", title="Bike lane", on_behalf_of="alice")["proposal"]
+    for member in ("alice", "bob"):
+        error = denied("proposal_vote", "claude-conn", proposal=p, choice="yes", on_behalf_of=member)
+        assert "filed by claude-conn" in error, (member, error)
+    ok("proposal_vote", "bob", proposal=p, choice="yes")
+
+
+@pytest.mark.parametrize("style", ("permissions", "groups"))
+def test_I_ID_10_a_delegate_that_files_a_transfer_for_one_member_does_not_vote_on_it_for_another(style):
+    depts = finance_for_carla()
+    world.policy(depts["Infrastructure"], 2, 3)
+    depts["Infrastructure"].head = "bob"
+    lend(style, "carla", ["transfer.create", "proposal.vote"], ["money", "vote"])
+    lend(style, "bob", ["proposal.vote"], ["vote"])
+    p = file_transfer()
+    for member in ("carla", "bob"):
+        error = denied("proposal_vote", "claude-conn", proposal=p, choice="yes", on_behalf_of=member)
+        assert "filed by claude-conn" in error, (member, error)
+    assert Proposal[p].status == "voting" and Transfer.count() == 0
+    ok("proposal_vote", "bob", proposal=p, choice="yes")
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "executed"
 
 
 def test_I_ID_13_a_delegate_of_another_member_votes_and_the_member_does():
