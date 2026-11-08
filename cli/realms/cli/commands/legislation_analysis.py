@@ -128,6 +128,8 @@ class Draw:
             return self.random.choice(self.strings)
         if kind == "Bool":
             return self.random.random() < 0.5
+        if kind == "Record":  # a record a forbid can only test for (is_some, is_none): Cedar's empty record
+            return {}
         if kind == "Period":
             return {
                 "count": self.long(None),
