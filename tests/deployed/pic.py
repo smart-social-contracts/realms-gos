@@ -54,10 +54,12 @@ class Canister:
         self.wasm = gzip.compress(open(wasm_path, "rb").read())
         self._install({"install": None}, encode([{"type": Types.Text, "value": installer}]))
 
-    def upgrade(self):
-        """Upgrade the canister to the same wasm, as its controller: its stable memory stays, its timers are gone until
-        post_upgrade."""
+    def upgrade(self, wasm_path=None):
+        """Upgrade the canister, as its controller, to the wasm at ``wasm_path`` or else to the same wasm: its stable
+        memory stays, its timers are gone until post_upgrade."""
         self.pic.set_sender(Principal.from_str(CONTROLLER))
+        if wasm_path:
+            self.wasm = gzip.compress(open(wasm_path, "rb").read())
         self._install({"upgrade": []}, encode([]))
 
     def wait(self, seconds):
