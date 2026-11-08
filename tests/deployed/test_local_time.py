@@ -1,4 +1,4 @@
-"""Realm-local time in the real wasm (realms-gos#503).
+"""Realm-local time in the real wasm (realms-gos#503), and the working days counted on it (realms-gos#505).
 
 A canister has no ``zoneinfo``, ``bisect``, ``struct`` or ``datetime.timezone``, so the zone file reader and the date
 arithmetic are pure Python that only the packed wasm shows working. The realm's zone file is loaded through the
@@ -16,10 +16,12 @@ ZONES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures
 NS = 10**9
 HOUR = 3600
 
-# Instruction ceilings, about three times what PocketIC measures: a parse 1.8M, a conversion 120k, day_bounds 0.8M.
+# Instruction ceilings, about three times what PocketIC measures: a parse 1.8M, a conversion 120k, day_bounds 0.8M,
+# a count of up to five working days, with its day's bounds, 2.3M.
 PARSE_BUDGET = 6_000_000
 CONVERSION_BUDGET = 400_000
 BOUNDS_BUDGET = 2_500_000
+COUNT_BUDGET = 7_000_000
 
 # Basilisk compiles a bundled module from its source the first time one of its names is read. That one-off cost
 # (FIRST_USE) is kept apart from the parse of a zone file.
@@ -58,6 +60,25 @@ import json
 start = ic.performance_counter(0)
 bounds = localtime.day_bounds(civil.days_from_civil({y}, {m}, {d}))
 print(json.dumps([list(bounds), ic.performance_counter(0) - start]))
+"""
+
+# The holidays of the example of #505 (illustrative dates). The library compiles from source the first time a name of it
+# is read, so that cost is kept out of the timing of a count.
+CALENDAR = {"weekend": ["sat", "sun"], "years": {"2026": [{"date": "2026-10-09"}, {"date": "2026-10-12"}]}}
+COUNT = """
+from core import localtime
+from realms.legislation import Calendar, LegislationError, working_days
+import json
+calendar = Calendar([{calendar}])
+out = []
+for ns, n in {cases}:
+    start = ic.performance_counter(0)
+    try:
+        counted = list(localtime.add_period(ns, working_days(n), calendar))
+    except LegislationError as refusal:
+        counted = str(refusal)
+    out.append([counted, ic.performance_counter(0) - start])
+print(json.dumps(out))
 """
 
 
@@ -137,3 +158,29 @@ def test_the_day_boundaries_follow_the_clock_changes(clock):
         assert (first, (end - first) // NS // HOUR) == (start, hours), date
     print(f"\nday_bounds costs {cost:,} instructions")
     assert cost < BOUNDS_BUDGET
+
+
+def count(clock, *cases):
+    """``[(day, start, end) or the refusal, ...]`` for ``(UTC instant, working days)`` cases, and the most one cost."""
+    out = clock.run(COUNT.format(calendar=json.dumps(CALENDAR), cases=list(cases)))
+    return [counted if isinstance(counted, str) else tuple(counted) for counted, _ in out], max(cost for _, cost in out)
+
+
+def test_working_days_are_counted_over_holidays_a_weekend_and_a_summer_time_change(clock):
+    load(clock, "Europe_Madrid.slim")
+    counted, cost = count(clock,
+                          (utc(2026, 10, 8, 10), 2),  # Thursday 8 Oct: Fri 9 and Mon 12 are holidays, then the weekend
+                          (utc(2026, 10, 22, 10), 5),  # across the end of summer time, Sunday 25 Oct
+                          (utc(2026, 10, 25, 0, 30), 1), (utc(2026, 10, 25, 1, 30), 1))  # both 02:30s of that Sunday
+    assert counted == [("2026-10-14", utc(2026, 10, 13, 22), utc(2026, 10, 14, 22)),
+                       ("2026-10-29", utc(2026, 10, 28, 23), utc(2026, 10, 29, 23)),
+                       ("2026-10-26", utc(2026, 10, 25, 23), utc(2026, 10, 26, 23)),
+                       ("2026-10-26", utc(2026, 10, 25, 23), utc(2026, 10, 26, 23))]
+    print(f"\na count of up to five working days costs at most {cost:,} instructions")
+    assert cost < COUNT_BUDGET
+
+
+def test_a_count_into_a_year_with_no_entries_is_refused_in_the_wasm(clock):
+    load(clock, "Europe_Madrid.slim")
+    (refusal,), _ = count(clock, (utc(2026, 12, 29, 10), 3))
+    assert "entries for 2027" in refusal

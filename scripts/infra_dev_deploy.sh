@@ -131,7 +131,7 @@ export DFX_NETWORK="$NETWORK"
 cd "$REPO_ROOT"
 
 # Basilisk builds need an isolated venv (see AGENTS.md / publish_build.py).
-VENV="$REPO_ROOT/.venv-basilisk"
+VENV="$REPO_ROOT/.venv-basilisk-infra"  # not .venv-basilisk: that one builds the realm backend, with its own pins
 if [[ ! -x "$VENV/bin/python" ]]; then
     echo -e "${YELLOW}Creating basilisk venv at $VENV${NC}"
     python3 -m venv "$VENV"
