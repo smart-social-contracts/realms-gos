@@ -88,6 +88,7 @@ t0 = ic.performance_counter(0)
 box = legislation._spawn(plan, texts)
 t1 = ic.performance_counter(0)
 generated = legislation._generated(box)
+auth.use_forbids(None)  # the same forbids again are not parsed again: start from the realm's own policies
 t2 = ic.performance_counter(0)
 auth.use_forbids(generated)
 t3 = ic.performance_counter(0)

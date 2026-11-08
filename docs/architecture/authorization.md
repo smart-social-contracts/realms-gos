@@ -98,14 +98,24 @@ above cover them too. The facts of a forbid are the operation's arguments as GGG
 ([`ggg_facts.py`](../../src/realm_backend/ggg_facts.py)) and the facts the operation derives (`derived=` on `@op`).
 
 After the permission decision, `dispatch` calls `auth.refuse_forbidden`, which asks, for the operation, one request
-per forbid-named action (one per element of a list), under the context `origin: "forbids"` that carries only the
-operation and its facts. It asks nothing when no forbid names the operation, so a realm with a legacy codex or
-none decides as before. It follows the replay of an accepted proposal as well, which has no permission decision of its
-own (the vote was it): the forbids of the legislation in force still apply, and a replay one refuses ends the
-proposal `failed`. `proposal_create` asks them of the action it carries when it files, so a proposal that could only
-fail is never put to the vote. A refusal names the forbids that fired, their ids and citations
-(`taxes[1]: refused by eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)`). No forbid can name a reserved operation, and none is asked of a reserved operation or of a
-proposal about one.
+per forbid-named action (one per element of a list, at most 500), under the context `origin: "forbids"` that carries
+only the operation and its facts: its arguments in GGG's form, `on_behalf_of` among them, and the facts it derives. It
+asks nothing when no forbid names the operation, so a realm with a legacy codex or none decides as before.
+
+The forbids hold wherever the call can start or finish:
+
+- A governed call that becomes a proposal is asked as `proposal_create` too, and `proposal_create` and
+  `federal_vote_propose` ask them of the action they carry, when they file: a proposal that could only fail is never
+  put to the vote.
+- A pending action (a delegate's call the member approves) is asked when it is prepared and when the member approves
+  it, with the member as `on_behalf_of` both times.
+- The replay of an accepted proposal has no permission decision of its own (the vote was it), but the forbids of the
+  legislation in force still apply, and a replay one refuses ends the proposal `failed`.
+- While a codex does not load, the operations its forbids named are refused, reads included.
+- No forbid can name a reserved operation, and none is asked of a reserved operation or of a proposal about one.
+
+A refusal names the forbids that fired, their ids and citations
+(`taxes[1]: refused by eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)`).
 
 ## Where permissions come from
 
