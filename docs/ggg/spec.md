@@ -279,6 +279,10 @@ What the model replaced in earlier versions of Realms GOS:
 - A fund that has an adopted budget refuses spending in a category it has no expense line for: the vault's and the
   voting extension's payments (category `transfer`) and a codex's payroll (`payroll`) need a line in such a fund,
   where they needed none before.
+- A budget line whose `kind` the upgrade turned into `expense` may share its fund, period and category with a
+  `revenue` line, which the model now forbids. The upgrade leaves both rows; `budget_extend` carries only the newer of
+  the two into the next period (a slot holds one line), and skips a line whose category the new period already holds
+  as the other kind, even in a draft.
 - A tax policy kept its taxes in `document.taxes`, each with a `base` and a `method`; they are `TaxPolicy.taxes`,
   typed entries (a flat tax is a tax on `User`, a land tax one on `Land`, a declared tax one on `Declaration`;
   a fixed tax is an `amount`, a proportional one a `rate`, the settings and brackets are `facts`). Stored

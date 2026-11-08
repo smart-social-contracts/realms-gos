@@ -205,6 +205,24 @@ def test_an_extended_line_caps_spending_until_an_adopted_budget_replaces_it():
     assert pay(200)["status"] == "completed"
 
 
+def test_budget_extend_skips_a_line_whose_category_the_period_holds_as_the_other_kind():
+    agora_budget()
+    draft("ROADS", "capital", 80, kind="revenue", period="FY2027")  # capital is an expense of the roads in FY2026
+    assert ok("budget_extend", "bob", period="FY2027")["extended"] == 2  # the root fund's two lines
+    assert sorted((b[0], b[1], b[5]) for b in lines_of("FY2027")) == [
+        ("ROADS", "capital", "draft"), ("ROOT", "property_tax", "extended"), ("ROOT", "salaries", "extended")]
+
+
+def test_budget_extend_with_nothing_to_carry_but_a_line_of_the_other_kind_is_a_conflict():
+    setup_finance()
+    draft("ROADS", "capital", 300)
+    propose()
+    open_next_period()
+    draft("ROADS", "capital", 80, kind="revenue", period="FY2027")
+    assert call("budget_extend", "bob", period="FY2027")["kind"] == "conflict"
+    assert [b[5] for b in lines_of("FY2027")] == ["draft"]
+
+
 def test_budget_extend_carries_the_funds_that_have_no_line_yet():
     agora_budget()
     draft("ROADS", "capital", 500, period="FY2027")
