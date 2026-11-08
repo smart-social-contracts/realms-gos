@@ -2,8 +2,8 @@
   "_comment": [
     "Non-core extensions still allowed to run in-process instead of sandboxed.",
     "",
-    "This list may only SHRINK. It is enforced by",
-    "tests/backend/test_sandbox_exemption_ratchet.py:",
+    "This list may only SHRINK. It is enforced in CI by",
+    "scripts/declare_extension_runtime.py --check:",
     "  - a new extension may not be added (write it sandbox-clean instead);",
     "  - an entry that no longer needs the exemption must be deleted.",
     "",
@@ -31,12 +31,10 @@
     "Core/system extensions are not listed: they are never sandboxed by design."
   ],
   "exempt": {
-    "demo_simulator": "_cdk, core, ggg",
-    "passport_verification": "basilisk, core, ggg"
+    "demo_simulator": "_cdk, core, ggg"
   },
   "tracking_issues": {
-    "demo_simulator": 270,
-    "passport_verification": 275
+    "demo_simulator": 270
   },
   "_async_bridge_issue": 279,
   "_promoted_to_core": {
