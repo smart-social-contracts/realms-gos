@@ -123,17 +123,17 @@ def test_a_tax_policy_keeps_its_rates():
         {"code": "residence", "method": "fixed", "amount": 5, "brackets": None}]}
     TaxPolicy(id="TAX-POLICY-1", document=old)
     stored_as_version_1(TaxPolicy, "TAX-POLICY-1")
-    revenue, property_, residence = TaxPolicy["TAX-POLICY-1"].document["taxes"]
-    assert revenue == {"code": "revenue", "method": "proportional", "rate": 200 * BASIS_POINT}
-    assert [b["rate"] for b in property_["brackets"]] == [40 * BASIS_POINT, 80 * BASIS_POINT]
-    assert residence == {"code": "residence", "method": "fixed", "amount": 5, "brackets": None}
+    revenue, property_, residence = TaxPolicy["TAX-POLICY-1"].taxes
+    assert revenue["rate"] == 200 * BASIS_POINT
+    assert [b["rate"] for b in property_["facts"]["brackets"]] == [40 * BASIS_POINT, 80 * BASIS_POINT]
+    assert residence["amount"] == 5
     stored_as_version_1(TaxPolicy, "TAX-POLICY-1")
-    assert TaxPolicy["TAX-POLICY-1"].document["taxes"][0]["rate"] == 200 * BASIS_POINT  # a second read changes nothing
+    assert TaxPolicy["TAX-POLICY-1"].taxes[0]["rate"] == 200 * BASIS_POINT  # a second read changes nothing
 
 
 def test_a_rate_finer_than_a_basis_point():
-    tax = {"method": "proportional", "rate": 125_000}  # 0.125 %, 12.5 basis points
-    assert taxes.owed(tax, 1_000_000) == 1_250
+    tax = {"code": "r", "kind": "tax", "subject": "User", "rate": 125_000, "facts": {}}  # 0.125 %, 12.5 basis points
+    assert taxes.owed(tax, 1_000_000, 2) == 1_250
 
 
 def test_an_old_name_is_refused_with_the_new_one():
@@ -142,10 +142,10 @@ def test_an_old_name_is_refused_with_the_new_one():
     assert "voting_quorum" in denied("governance_update", "ctl", quorum_percent=25)
     assert "quorum" in denied("department_set_policy", "ctl", department="Finance", m=1, n=1, quorum_percent=25)
     document = {"taxes": [{"code": "revenue", "base": "declared", "method": "proportional", "rate_bp": 200}]}
-    assert "rate" in denied("tax_policy_draft", "ctl", document=document)
+    assert "taxes" in denied("tax_policy_draft", "ctl", document=document)
     brackets = [{"up_to": None, "rate_bp": 80}]
-    document = {"taxes": [{"code": "property", "base": "flat", "method": "progressive", "brackets": brackets}]}
-    assert "rate" in denied("tax_policy_draft", "ctl", document=document)
+    entry = {"code": "property", "kind": "tax", "subject": "User", "facts": {"brackets": brackets}}
+    assert "rate" in denied("tax_policy_draft", "ctl", document={}, taxes=[entry])
     assert Realm["1"].manifest_data.get("governance") is None and TaxPolicy.count() == 0
 
 
@@ -172,7 +172,7 @@ OLD_CALLS = [
     ("department_set_policy", {"department": "Finance", "m": 2, "n": 3, "quorum_percent": 50},
      {"department": "Finance", "m": 2, "n": 3, "quorum": 50 * PERCENT}),
     ("tax_policy_draft", {"document": {"taxes": [{"code": "r", "method": "proportional", "rate_bp": 200}]}},
-     {"document": {"taxes": [{"code": "r", "method": "proportional", "rate": 200 * BASIS_POINT}]}}),
+     {"document": {}, "taxes": [{"code": "r", "kind": "tax", "subject": "User", "rate": 200 * BASIS_POINT, "facts": {}}]}),
     ("allocation_rule_draft", {"source_fund": "ROOT", "rules": {"ROADS": 30}},
      {"source_fund": "ROOT", "rules": [{"fund": "ROADS", "share": 30 * PERCENT}]}),
     ("tender_create", {"rubric": {"price": 60, "quality": 40}}, {"rubric": RUBRIC}),

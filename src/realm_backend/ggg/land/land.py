@@ -15,6 +15,10 @@ class Land(Row):
     owner = String(default="", indexed=True)  # "User:alice" or "Organization:buildco"
     status = String(default="active")  # active | disputed | transferred | revoked
     token_id = String(default="")
+    assessed_value = Integer()  # what the assessor set, in the accounting currency; None before the first assessment
+    area = Integer()  # in square metres, set with the value
+    assessed_at = Integer(default=0)
+    assessment_ref = String(default="")  # the entry in the assessor's register
     registered_by = String(default="")
     metadata = Json({})
     zones = OneToMany("Zone", "land")

@@ -19,6 +19,11 @@ def active():
     return first(Codex, "status", "active")
 
 
+def pending():
+    """The codex installed and waiting for ``codex_activate``, if any; at most one waits at a time."""
+    return first(Codex, "status", "pending")
+
+
 def runnable(manifest):
     if manifest.get("codex_api_version") != API:
         raise Fail(f"this realm runs codex API {API}, not {manifest.get('codex_api_version')}")
@@ -61,6 +66,20 @@ def hook(name, context=None):
     return out
 
 
+def compute(name, context):
+    """The active codex's answer to GGG's ``compute_<name>`` for ``context``, None when it has none: D3 owns this body."""
+    return None
+    yield  # a generator, as the runtime's answer is one: it runs the sandbox
+
+
+def switch_to(row, replaced):
+    """Make ``row`` the active codex in place of ``replaced`` (kept to revert to), and run its ``init`` hook."""
+    row.previous, row.status = replaced.id if replaced else "", "active"
+    if replaced:
+        replaced.status = "inactive"
+    return (yield from hook("init"))
+
+
 @op("codex.install", governed=realm_wide, returns="codex")
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
@@ -82,11 +101,24 @@ def codex_install(c, args):
     row = Codex[key] or Codex(id=key)
     row.version, row.checksum, row.manifest, row.source = manifest["version"], digest, manifest, source
     row.capabilities, row.installed_at = manifest.get("capabilities", []), chain.now()
-    row.previous, row.status = current.id if current else "", "active"
-    if current:
-        current.status = "inactive"
-    init = yield from hook("init")
+    init = yield from switch_to(row, current)
     return {"codex": key, "init": init}
+
+
+@op("codex.install", governed=realm_wide, returns="codex")
+def codex_activate(c, args):
+    """Make the pending codex, named by its ``codex`` checksum (``sha256:<hex>``), the active one now; the codex it
+    replaces is kept to revert to. Conflict when no codex is pending or it is another one. ``at``, when given, is not
+    in the future: a pending codex is activated at once. Returns ``codex``, ``init``."""
+    waiting = pending()
+    if waiting is None:
+        raise Conflict("no codex is pending")
+    if args["codex"] != f"sha256:{waiting.checksum}":
+        raise Conflict(f"{args['codex']} is not the pending codex")
+    if args.get("at") and int(args["at"]) > chain.now():
+        raise Fail("this realm activates a pending codex at once: at is not in the future")
+    init = yield from switch_to(waiting, active())
+    return {"codex": waiting.id, "init": init}
 
 
 @op("codex.uninstall", governed=realm_wide)
@@ -113,13 +145,16 @@ def codex_revert(c, args):
 
 @op("realm.data_view", read=True)
 def codex_status(c, args):
-    """The active codex, whether it is healthy (its last hook succeeded), its hooks and configuration, and one page
-    of the install ``history``: ``count`` installs (default 100, at most 500) from row ``from`` (default 1), with
-    ``next``, the ``from`` of the next page (null at the end)."""
+    """The active codex, the checksum of the ``pending`` one (null when none waits), whether it is healthy (its last
+    hook succeeded), its hooks and configuration, and one page of the install ``history``: ``count`` installs
+    (default 100, at most 500) from row ``from`` (default 1), with ``next``, the ``from`` of the next page (null at
+    the end)."""
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
     rows, nxt = page(Codex, args)
+    waiting = pending()
     return {"codex": view(codex, *SHOWN) if codex else None, "healthy": codex is not None and not problem,
+            "pending": f"sha256:{waiting.checksum}" if waiting else None,
             "problem": problem, "hooks": (codex.manifest or {}).get("hooks", []) if codex else [],
             "config": config(codex) if codex else {},
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt}

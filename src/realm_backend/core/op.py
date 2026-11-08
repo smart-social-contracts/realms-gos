@@ -27,7 +27,7 @@ class Call:
 
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
-       returns=None, check=None):
+       returns=None, check=None, derived=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -37,11 +37,13 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     or for a governed operation the id of the record it created. Without it, the reply itself is the result.
     check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm. It runs
     before ``governed`` turns the call into a proposal, so a call that cannot succeed files nothing.
+    derived(args) -> the facts of the call that are not its arguments, computed from the realm's records (GGG's
+    ``derived`` facts, such as the totals of a budget), for the rules that read the call's facts.
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
-                            "returns": returns, "check": check}
+                            "returns": returns, "check": check, "derived": derived}
         return fn
     return wrap
 

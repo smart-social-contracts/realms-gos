@@ -594,6 +594,7 @@ LOCAL = {
 # operation's first word.
 KEY = {"crypto_envelope": "scope", "crypto_derive_key": "transport_public_key", "private_data_update": "private_data",
        "federal_vote_finalize": "vote", "federal_vote_cancel": "vote", "tax_policy_propose": "policy",
+       "budget_extend": "period",
        "allocation_rule_propose": "rule", "representative_remove": "appointment", "document_get": "document",
        "dispute_get": "dispute", "report_view": "report"}
 # Operations that take ``limit`` as such, not as a page size.
