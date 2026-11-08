@@ -14,6 +14,8 @@ BASES = ("cast", "eligible")
 OPEN = ("draft", "voting")
 # Proposals that can still vote or run, so their department must stay.
 PENDING = OPEN + ("accepted", "execution_scheduled")
+# Where a proposal ends without its action having run to completion.
+NOT_RUN = ("rejected", "expired", "withdrawn", "failed")
 MAX_LINKS = 16  # a proposal's own links, so that a reply never outgrows the Internet Computer's limits
 LINK_KINDS = ("replaces", "relates_to")
 # Proposals whose deadline timers are set again after an upgrade, per message.
@@ -173,13 +175,36 @@ def stricter_rule(department, stated):
     return rule
 
 
+def fix_records(action, pid):
+    """Tie to proposal ``pid`` the records its ``action`` will act on, if the operation fixes any (``fixes``)."""
+    spec = ops().get(action["op"]) if action else None
+    if spec and spec["fixes"]:
+        spec["fixes"](action.get("args") or {}, pid)
+
+
+def release_records(p):
+    """Free what ``p`` fixed when it was filed, for it will not run its action (``releases``)."""
+    spec = ops().get(p.action["op"]) if p.action else None
+    if spec and spec["releases"]:
+        spec["releases"](p.action.get("args") or {}, p.id)
+
+
+def end(p, status):
+    """Move ``p`` to ``status``; one in which its action did not run frees the records the action fixed."""
+    p.status = status
+    if status in NOT_RUN:
+        release_records(p)
+
+
 def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=(), grant="",
                  stated=None):
     """File a proposal. ``stated``: the proposer's ``kind``, ``matter`` and stricter rule; a proposal filed without
     it takes the default rule of its scope."""
     stated = stated or {}
     rule = stricter_rule(department, stated)
-    p = Proposal(id=next_id(Proposal, "P"), title=title, description=description, proposer=user,
+    pid = next_id(Proposal, "P")
+    fix_records(action, pid)  # the last refusal: a refused proposal leaves no trace
+    p = Proposal(id=pid, title=title, description=description, proposer=user,
                  on_behalf_of=user if by != user else "", filed_under=grant, department=department, action=action,
                  kind=stated.get("kind") or "", matter=stated.get("matter") or "", status="voting",
                  opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
@@ -229,7 +254,8 @@ def close(p, result):
     tally, size, _ = count(p)
     if result == "accepted" and p.effective_at:
         result = status_at_effective_time(p)  # before any write: a refusal leaves the proposal open
-    p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
+    end(p, result)
+    p.tally = {**(p.tally or {}), **tally, "eligible": size}
 
 
 def vote_end(p):
@@ -276,14 +302,15 @@ def run_action(p):
         if p.on_behalf_of:
             check_grant(p.filed_under, p.proposer, p.action)
     except Fail as e:
-        p.status, p.result = "failed", {"ok": False, "error": str(e), "kind": e.kind}
+        end(p, "failed")
+        p.result = {"ok": False, "error": str(e), "kind": e.kind}
         return
     p.status = "executed"
     out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay", signer=p.proposer,
                               proposal=p.id)
     p.result = json.loads(out)
     if not p.result.get("ok"):
-        p.status = "failed"
+        end(p, "failed")
 
 
 def settle(p, final):
@@ -464,7 +491,7 @@ def proposal_withdraw(c, args):
         raise Forbidden(f"{p.id} was not filed under this power of attorney")
     if p.status not in OPEN:
         raise Conflict(f"{p.id} is {p.status}; only an open proposal can be withdrawn")
-    p.status = "withdrawn"
+    end(p, "withdrawn")
     return {"proposal": p.id}
 
 
@@ -562,7 +589,7 @@ def proposal_stop(c, args):
     task = Task[scheduled_task_name(p)]
     if task:
         tasks.stop(task)
-    p.status = "withdrawn"
+    end(p, "withdrawn")
     return {"proposal": p.id, "status": p.status}
 
 

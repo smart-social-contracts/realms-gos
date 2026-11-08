@@ -31,7 +31,7 @@ class Call:
 
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
-       returns=None, check=None, private=(), derived=None):
+       returns=None, check=None, private=(), derived=None, fixes=None, releases=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -44,11 +44,16 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     private -> the arguments that hold personal data or key material: the audit log never keeps them (I-ALL-5).
     derived(args) -> the facts of the call that are not its arguments, computed from the realm's records (GGG's
     ``derived`` facts, such as the totals of a budget), for the rules that read the call's facts.
+    fixes(args, proposal) -> runs when a proposal that carries the call is filed, by the governed call or by
+    ``proposal_create``, before the proposal is written: it refuses a call that has nothing to carry and ties the records
+    the call will act on to ``proposal``, so that no other proposal takes them.
+    releases(args, proposal) -> runs when that proposal ends without the call having run: it frees what ``fixes`` tied.
     """
     def wrap(fn):
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
-                            "returns": returns, "check": check, "private": private, "derived": derived}
+                            "returns": returns, "check": check, "private": private, "derived": derived,
+                            "fixes": fixes, "releases": releases}
         return fn
     return wrap
 
