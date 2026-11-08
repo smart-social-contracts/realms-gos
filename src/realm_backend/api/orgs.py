@@ -1,7 +1,7 @@
 from core import chain
 from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
-from ggg import Appointment, Authority, Department, Organization, Position, User, UserProfile
+from ggg import Appointment, Authority, Department, Organization, Position, Proposal, User, UserProfile
 from core.op import op
 from core.ratio import ONE, refuse_renamed
 from api.proposals import PENDING, holders, realm_wide, root
@@ -128,7 +128,8 @@ def department_delete(c, args):
         raise Fail("the root department cannot be deleted")
     if list(d.children) or any(p.status != "closed" for p in d.positions):
         raise Conflict(f"{d.id} still has sub-departments or open positions")
-    if any(p.status in PENDING for p in d.proposals):
+    # d.proposals holds every proposal the department ever had, more than a call may load: look at the pending ones.
+    if any(p.department and p.department.id == d.id for status in PENDING for p in each(Proposal, "status", status)):
         raise Conflict(f"{d.id} still has proposals to vote on or run")
     d.delete()
 

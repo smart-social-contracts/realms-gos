@@ -1,16 +1,16 @@
-"""Contract tests for codex packages (issue #244).
+"""Contract tests for codex packages (codex_api_version 2).
 
-Every publishable codex under ``codices/codices/`` must be a valid
-``kind: codex`` extension package:
+Every publishable codex under ``codices/codices/`` is a ``kind: codex`` package:
 
-  - manifest declares kind/codex_api_version this core supports
-  - unified layout: backend/entry.py (hook module), data files under backend/
-  - no legacy integration mechanisms (entity_method_overrides, init.py)
-  - entry.py implements the mandatory hooks and only known optional ones
-  - all Python sources parse; all declared data files exist
+  - the manifest declares the hook API this realm runs
+  - the code is one file, ``backend/hooks.py``, whose ``@hook`` functions are
+    exactly the manifest's ``hooks``, all of them known to the realm
+  - ``capabilities`` and the shape of the rest are plain data
+  - every Python source parses
 
-These tests are the regression net for the packaging contract between core
-and codices — they fail when either side drifts.
+What a codex's hooks do against a running realm is tested in
+``tests/ggg/test_codex.py``, which also checks that every capability is a
+realm operation.
 """
 
 import ast
@@ -22,24 +22,13 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent.parent
 CODICES_ROOT = REPO_ROOT / "codices" / "codices"
 
-# Hook API v1 contract (mirrors core/codex_hooks.py).
-SUPPORTED_CODEX_API_VERSIONS = {1}
-MANDATORY_HOOKS = {"get_config", "init"}
-OPTIONAL_HOOKS = {
-    "seed",
-    "on_user_register",
-    "on_treasury_send",
-    "on_invoice_accounting",
-    "on_stage_change",
-    "check_lifecycle_transition",
-    "get_dashboard_config",
-    "get_extension_overrides",
-    "get_federal_governance_params",
-    "on_federation_message",
-}
+# The same number as API in src/realm_backend/api/codex.py: a realm refuses any other.
+CODEX_API_VERSION = 2
+# The hooks the realm fires (docs/codices/README.md, "Hooks").
+KNOWN_HOOKS = {"init", "on_user_register", "on_stage_change", "assign_quarter"}
 
-# Internal/legacy directories that are not publishable codex packages.
-SKIP_DIRS = {"_common", "common", "westminster"}
+# Shared files, not publishable codex packages.
+SKIP_DIRS = {"_common", "common"}
 
 
 def _codex_dirs():
@@ -59,14 +48,14 @@ def _manifest(codex_dir):
         return json.load(f)
 
 
-def _entry_functions(codex_dir):
-    """Top-level function names defined in backend/entry.py."""
-    source = (codex_dir / "backend" / "entry.py").read_text()
-    tree = ast.parse(source)
+def _hook_functions(codex_dir):
+    """Names of the top-level functions decorated with ``@hook`` in backend/hooks.py."""
+    tree = ast.parse((codex_dir / "backend" / "hooks.py").read_text())
     return {
         node.name
         for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        if isinstance(node, ast.FunctionDef)
+        and any(isinstance(d, ast.Name) and d.id == "hook" for d in node.decorator_list)
     }
 
 
@@ -90,12 +79,11 @@ class TestManifestContract:
     def test_kind_is_codex(self, codex_dir):
         assert _manifest(codex_dir).get("kind") == "codex"
 
-    def test_api_version_supported(self, codex_dir):
-        version = _manifest(codex_dir).get("codex_api_version")
-        assert version in SUPPORTED_CODEX_API_VERSIONS
+    def test_api_version_is_the_one_the_realm_runs(self, codex_dir):
+        assert _manifest(codex_dir).get("codex_api_version") == CODEX_API_VERSION
 
     def test_machine_id_matches_directory(self, codex_dir):
-        """The registry namespace key is the lowercase machine id — it must
+        """The registry namespace key is the lowercase machine id: it must
         match the package directory, never a capitalized display name."""
         manifest = _manifest(codex_dir)
         assert manifest.get("id") == codex_dir.name
@@ -104,9 +92,10 @@ class TestManifestContract:
     def test_has_version(self, codex_dir):
         assert _manifest(codex_dir).get("version")
 
-    def test_no_entity_method_overrides(self, codex_dir):
-        """Monkey-patch overrides are replaced by the hook API (issue #244)."""
-        assert "entity_method_overrides" not in _manifest(codex_dir)
+    def test_capabilities_are_operation_names(self, codex_dir):
+        capabilities = _manifest(codex_dir).get("capabilities", [])
+        assert isinstance(capabilities, list)
+        assert all(isinstance(name, str) and name for name in capabilities)
 
     def test_dependencies_shape(self, codex_dir):
         deps = _manifest(codex_dir).get("dependencies", [])
@@ -115,34 +104,18 @@ class TestManifestContract:
         for name in names:
             assert isinstance(name, str) and name
 
-    def test_data_files_exist_under_backend(self, codex_dir):
-        manifest = _manifest(codex_dir)
-        for key, rel in (manifest.get("data_files") or {}).items():
-            path = codex_dir / "backend" / rel
-            assert path.exists(), f"data_files[{key}] missing: backend/{rel}"
-
-    def test_codex_modules_allow_list_files_exist(self, codex_dir):
-        """If the package opts in, each listed stem must be backend/modules/<name>.py."""
-        manifest = _manifest(codex_dir)
-        if "codex_modules" not in manifest:
-            return
-        allow = manifest["codex_modules"]
-        assert isinstance(allow, list), "codex_modules must be a list of stems"
-        for stem in allow:
-            path = codex_dir / "backend" / "modules" / f"{stem}.py"
-            assert path.is_file(), f"codex_modules lists '{stem}' but {path} is missing"
-
 
 class TestPackageLayout:
-    def test_backend_entry_exists(self, codex_dir):
-        assert (codex_dir / "backend" / "entry.py").exists()
+    def test_hooks_file_exists(self, codex_dir):
+        assert (codex_dir / "backend" / "hooks.py").exists()
 
-    def test_no_legacy_init_py(self, codex_dir):
-        """Legacy exec'd init.py is replaced by the init hook."""
+    def test_no_code_of_the_previous_hook_api(self, codex_dir):
+        """API 1 shipped backend/entry.py and a root init.py; API 2 runs only backend/hooks.py."""
+        assert not (codex_dir / "backend" / "entry.py").exists()
         assert not (codex_dir / "init.py").exists()
 
     def test_no_loose_python_at_package_root(self, codex_dir):
-        """All code ships under backend/ (unified extension layout)."""
+        """All code ships under backend/."""
         loose = [
             p.name for p in codex_dir.iterdir()
             if p.suffix == ".py" and not p.name.startswith("test")
@@ -153,28 +126,13 @@ class TestPackageLayout:
         for path in (codex_dir / "backend").rglob("*.py"):
             ast.parse(path.read_text(), filename=str(path))
 
-    def test_all_data_files_are_valid_json(self, codex_dir):
-        data_dir = codex_dir / "backend" / "data"
-        if not data_dir.is_dir():
-            return
-        for path in data_dir.rglob("*.json"):
-            json.loads(path.read_text())
-
 
 class TestHookContract:
-    def test_mandatory_hooks_implemented(self, codex_dir):
-        functions = _entry_functions(codex_dir)
-        missing = MANDATORY_HOOKS - functions
-        assert not missing, f"entry.py missing mandatory hooks: {missing}"
+    def test_manifest_hooks_are_known(self, codex_dir):
+        hooks = _manifest(codex_dir).get("hooks", [])
+        unknown = set(hooks) - KNOWN_HOOKS
+        assert not unknown, f"hooks the realm never fires: {sorted(unknown)}"
 
-    def test_public_hooks_are_known(self, codex_dir):
-        """Every public entry.py function that looks like a hook must be part
-        of the versioned contract — no ad-hoc core touchpoints."""
-        functions = _entry_functions(codex_dir)
-        hook_like = {
-            f for f in functions
-            if f.startswith("on_") or f.startswith("check_") or f in {"init", "seed"}
-            or f.startswith("get_")
-        }
-        unknown = hook_like - MANDATORY_HOOKS - OPTIONAL_HOOKS
-        assert not unknown, f"unknown hook-like functions: {unknown}"
+    def test_manifest_hooks_are_the_hook_functions(self, codex_dir):
+        """A hook missing from the manifest is never fired; a listed one that is not defined fails when fired."""
+        assert set(_manifest(codex_dir).get("hooks", [])) == _hook_functions(codex_dir)

@@ -5,7 +5,7 @@ import constants
 import ggg
 from core import sandbox
 from api import tasks
-from core.db import Conflict, Fail, Forbidden, Unavailable, page, view
+from core.db import CONVERT_IDS, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
 from api.extensions import trust
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
@@ -44,6 +44,8 @@ FIELDS = {
 }
 # Kept in manifest_data["casals"], not on Realm: the stand Casals built the realm on, its baton and its conductor.
 CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
+# Kept in manifest_data too: how far db_convert_indexes has got ({"after": key}), or {"done": True}
+INDEX_CONVERSION = "index_conversion"
 HEX = "0123456789abcdef"
 COUNTED = ("User", "Member", "Department", "Organization", "Proposal", "Extension", "Task", "Notification")
 SHELL = """class _Ops:
@@ -67,6 +69,7 @@ def start(installer=""):
     if Realm["1"] is None:
         realm = Realm(id="1", principal_id=chain.self_id())
         realm.calendar, realm.treasury = Calendar(id="1"), Treasury(id="1")
+        realm.manifest_data = {INDEX_CONVERSION: {"done": True}}  # a new database holds no list saved the old way
         Department(id="Administration", is_root=True, description="The realm's root department")
     installer = (installer or "").strip()
     if installer and not Realm["1"].installer_canister_id:
@@ -374,6 +377,20 @@ def realm_export(c, args):
         raise Fail(f"unknown entity '{args['entity']}'")
     rows, nxt = page(cls, args)
     return {"entity": args["entity"], "rows": [view(r) for r in rows], "next": nxt}
+
+
+@op("db.convert")
+def db_convert_indexes(c, args):
+    """After an upgrade from a release before ic-python-db 0.13: convert the index lists saved as one array each, at most
+    ``ids`` (default 10,000) of their ids per call. Call it until ``done``. A realm created by this release, or one
+    that is done, answers at once and reads no index entry. Returns the ``lists`` and ``ids`` converted and ``done``."""
+    progress = Realm["1"].manifest_data.get(INDEX_CONVERSION) or {}
+    if progress.get("done"):
+        return {"lists": 0, "ids": 0, "done": True}
+    out = convert_legacy_indexes(progress.get("after", ""), max(1, int(args.get("ids") or CONVERT_IDS)))
+    done = out["next"] is None
+    remember(INDEX_CONVERSION, {"done": True} if done else {"after": out["next"]})
+    return {"lists": out["lists"], "ids": out["ids"], "done": done}
 
 
 @op("shell.execute")
