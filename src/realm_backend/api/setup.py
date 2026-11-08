@@ -45,7 +45,7 @@ FIELDS = {
 CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
 # Kept in manifest_data too: how far db_convert_indexes has got ({"after": key}), or {"done": True}
 INDEX_CONVERSION = "index_conversion"
-HEX ="0123456789abcdef"
+HEX = "0123456789abcdef"
 COUNTED = ("User", "Member", "Department", "Organization", "Proposal", "Extension", "Task", "Notification")
 SHELL = """class _Ops:
     def __getattr__(self, name):

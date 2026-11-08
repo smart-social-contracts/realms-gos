@@ -142,9 +142,16 @@ a list of 20,000 ids is past a query's 5 billion instructions.
 So the controller of an upgraded realm converts its lists once, before members read them, by calling the operation
 `db_convert_indexes` (`run`, no arguments) again and again until its reply says `"done": true`. A call converts at most
 10,000 ids (`ids` changes that), about 2.5 billion instructions, and looks at no more than 20,000 index entries, about
-2 billion. A list is converted whole, so one longer than that is converted alone in its call, at about 245 thousand
-instructions per id (31 billion for 127,000). The realm remembers how far it got and when it is done: a call after
-that, and every call on a realm created by this release, answers at once without reading the index entries.
+0.8 billion. A list is converted whole, and a list longer than `ids` uses its call up: measured on 127,000 ids it took
+31.1 and 32.5 billion instructions (245 to 256 thousand per id), so an update, which has 40 billion, converts a list of
+up to about 155,000 ids. The operation refuses, naming the list, one over 140,000 ids; nothing in this release converts
+that one (reading it in an update would run out of instructions too). The realm remembers how far it got and when it
+is done: a call after that, and every call on a realm created by this release, answers at once without reading the
+index entries.
+
+**This is one way.** Once a release with ic-python-db 0.13 or later has run on a realm, it has converted lists, and a
+release before 0.13 reads them as empty: `count_by` answers 0 and `find_by` answers `[]`. Do not downgrade a realm that
+has run it; restore from a backup instead.
 
 ### The token ledger
 

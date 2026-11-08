@@ -6,7 +6,7 @@ import json
 import world
 from api.setup import INDEX_CONVERSION
 from ic_python_db import Database
-from kit import denied, ok
+from kit import call, denied, ok
 
 from ggg import Member, Proposal, Realm, Vote
 
@@ -125,10 +125,28 @@ def test_the_realm_remembers_how_far_it_got():
 
     first = ok("db_convert_indexes", "ctl", ids=100)
 
-    assert not first["done"] and Realm["1"].manifest_data[INDEX_CONVERSION]["after"]
-    assert ok("db_convert_indexes", "ctl", ids=100)["done"]
+    # A list longer than ``ids`` uses its call up: the shorter one, then the longer, then the end
+    assert first["ids"] == 200 and not first["done"] and Realm["1"].manifest_data[INDEX_CONVERSION]["after"]
+    second = ok("db_convert_indexes", "ctl", ids=100)
+    assert second["ids"] == 300 and not second["done"]
+    assert ok("db_convert_indexes", "ctl", ids=100) == {"ok": True, "lists": 0, "ids": 0, "done": True}
     assert Realm["1"].manifest_data[INDEX_CONVERSION] == {"done": True}
     assert is_converted("_fi:Vote:voter:bb", 200) and is_converted("_fi:Vote:proposal_id:a", 300)
+
+
+def test_a_list_too_long_for_one_call_is_refused_by_name_and_the_rest_waits():
+    """Converting it would take more instructions than an update has: say which list, and convert nothing else."""
+    world.build()
+    legacy("_fi:Vote:voter:small", range(1, 21))
+    legacy("_ri:Proposal:big:votes", range(1, 150_001))
+    forget_the_conversion()
+
+    assert ok("db_convert_indexes", "ctl")["lists"] == 1  # the short list goes first, in its own call
+    out = call("db_convert_indexes", "ctl")
+
+    assert not out["ok"] and out["kind"] == "unavailable" and "_ri:Proposal:big:votes" in out["error"]
+    assert "150000 ids" in out["error"] and storage().get("_ri:Proposal:big:votes")[:1] == "["
+    assert "after" in Realm["1"].manifest_data[INDEX_CONVERSION]  # not done
 
 
 def test_an_id_that_looks_like_an_array_is_not_a_list():

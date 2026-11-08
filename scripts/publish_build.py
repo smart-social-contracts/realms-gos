@@ -114,7 +114,9 @@ def _basilisk_python(root: Path, canister: str) -> str:
         print(f"  creating basilisk venv at {venv}")
         _run([sys.executable, "-m", "venv", str(venv)])
         _run([str(venv / "bin" / "pip"), "install", "-q", "--upgrade", "pip"])
-        _run([str(venv / "bin" / "pip"), "install", "-q", *requirements])
+    # Also in a venv that exists: it may hold older pins, and a stale ic-python-db builds a stale wasm. pip changes
+    # nothing, and asks the network for nothing, when the pins are met.
+    _run([str(venv / "bin" / "pip"), "install", "-q", *requirements])
     return str(py)
 
 

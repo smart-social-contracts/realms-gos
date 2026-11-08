@@ -1,19 +1,27 @@
 import json
 
-from ic_python_db import Database, Entity, String
+from ic_python_db import Database, Entity, ManyToMany, ManyToOne, OneToOne, String
 
 PAGE, PAGE_MAX = 100, 500
 DRAFTS = 10  # how many drafts a read view lists, newest first
-# convert_legacy_indexes: the key prefixes of ic-python-db's field and relation indexes; the longest key main.py declares;
-# the ids one call converts (about 245 thousand instructions each: 2.5 billion) and the keys it looks at (about 100
-# thousand each: 2 billion), at most
+# convert_legacy_indexes. The key prefixes of ic-python-db's field and relation indexes. The longest key it looks for:
+# the map ignores the max_key_size main.py declares, so nothing stops a longer one, but the realm's are far shorter and
+# a list under a longer key is still converted, by the first update that reads it. The ids one call converts, and the
+# index entries it looks at, at most (about 245 thousand instructions per id: 2.5 billion; about 40 thousand per entry:
+# 0.8 billion). What one call may spend on a single list: it is converted whole, in an update of 40 billion.
 INDEX_PREFIXES = ("_fi:", "_ri:")
 MAX_KEY = 256
 CONVERT_IDS, CONVERT_ROWS, CONVERT_PAGE = 10_000, 20_000, 500
+CONVERT_COST_PER_ID, CONVERT_BUDGET = 250_000, 35_000_000_000
 
 
 class Row(Entity):
     """An entity whose indexed fields are indexed from creation, defaults included."""
+
+    # Many-to-many sides left out of serialize() and so of view() and the export: they can hold as many rows as the
+    # realm has members, and ic-python-db refuses to serialize a relation of more than MAX_UNPAGED rows. The other side
+    # lists the same links (a User lists its profiles).
+    unlisted = ()
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -22,6 +30,25 @@ class Row(Entity):
                 value = getattr(self, name)
                 if value is not None:
                     self.db().field_index_add(self._type, name, str(value), self._id)
+
+    def serialize(self):
+        """What Entity.serialize gives, without the many-to-many sides in ``unlisted``."""
+        if not self.unlisted:
+            return super().serialize()
+        data = self._serialize_base()
+        for cls in reversed(type(self).__mro__):
+            for name, prop in vars(cls).items():
+                if name.startswith("_") or name in self.unlisted:
+                    continue
+                if isinstance(prop, (ManyToOne, OneToOne)):
+                    ref = self.__dict__.get(f"_rel_{name}")
+                    if ref is not None:
+                        data[name] = self._resolve_ref_with_alias(ref, prop._get_allowed_types())
+                elif isinstance(prop, ManyToMany):
+                    ids = self.db().reverse_index_get(self._type, self._id, name)
+                    if ids:
+                        data[name] = [self._resolve_ref_with_alias(i, prop._get_allowed_types()) for i in ids]
+        return data
 
 
 class Fail(Exception):
@@ -160,7 +187,9 @@ def convert_legacy_indexes(after="", ids=CONVERT_IDS):
     ic-python-db converts such a list when something first reads its index. A query's conversion is discarded with the
     rest of its writes, so every query pays for it again: 2.7 billion instructions for a list of 12,000 ids, and past
     about 20,000 the query traps. An update keeps the conversion, so this is run until ``next`` is None after an upgrade
-    from such a release. A list is converted whole, so one longer than ``ids`` is converted alone in its call.
+    from such a release. A list is converted whole, so one longer than ``ids`` is converted alone in its call, and the
+    call ends there. One that a call cannot convert at all (about 140,000 ids) is refused by name: ic-python-db would
+    run out of instructions converting it, wherever it is read.
 
     Returns ``lists`` and ``ids`` converted, and ``next``: the ``after`` of the call that continues, None at the end.
     A converted list is not found again, so a second run converts nothing.
@@ -182,12 +211,17 @@ def convert_legacy_indexes(after="", ids=CONVERT_IDS):
                 size = value.count(",") + 1 if legacy else 0
                 if seen >= CONVERT_ROWS or (legacy and converted and converted + size > ids):
                     return {"lists": lists, "ids": converted, "next": last}
+                if size * CONVERT_COST_PER_ID > CONVERT_BUDGET:
+                    raise Unavailable(f"{key} holds about {size} ids: converting it takes more instructions than a call "
+                                      f"has ({size * CONVERT_COST_PER_ID // 10**9} billion of {CONVERT_BUDGET // 10**9})")
                 seen += 1
                 last = key
                 if legacy:
                     db._ix_count(key)
                     lists += 1
                     converted += size
+                    if converted >= ids:  # a list longer than ``ids`` has used the call
+                        return {"lists": lists, "ids": converted, "next": last}
             if len(rows) < CONVERT_PAGE:
                 break
             start = rows[-1][0]

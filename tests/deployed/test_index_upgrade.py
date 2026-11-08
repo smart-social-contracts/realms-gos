@@ -82,6 +82,14 @@ page = db.field_index_page("Vote", "proposal_id", "P-1", 1, 50)
 print(count, len(page), ic.performance_counter(0) - before)
 '''
 # One db_convert_indexes call as the controller's shell makes it, with the instructions it used
+COUNTS = '''
+import json
+import ggg
+
+print(json.dumps({"votes": ggg.Vote.count_by("proposal_id", "P-1"),
+                  "found": len(ggg.Vote.find_by("proposal_id", "P-1")[0]),
+                  "members": ggg.Member.count_by("status", "active")}))
+'''
 OP_COST = '''
 import json
 from basilisk import ic
@@ -147,6 +155,7 @@ def realm(request, wasm_of, people):
     ok(realm, "proposal_vote", alice, proposal="P-1", choice="yes")  # one of three: the proposal stays open
     run(realm, LEGACY)
     realm.upgrade(current)
+    realm.variant = request.param
     return realm
 
 
@@ -208,3 +217,12 @@ def test_a_new_realm_is_done_from_the_start(wasm_of, people):
     assert ok(fresh, "db_convert_indexes", people["ctl"]) == {"ok": True, "lists": 0, "ids": 0, "done": True}
     cost = json.loads(run(fresh, OP_COST))
     assert cost["reply"]["done"] and cost["instructions"] < 60_000_000, cost
+
+
+def test_a_rollback_to_the_previous_release_reads_the_converted_lists_as_empty(realm, people):
+    """So the upgrade is one way (docs/deployment/README.md): the release before 0.13 looks for the arrays."""
+    if realm.variant != "previous":
+        pytest.skip("it takes the previous release's own wasm")
+    assert json.loads(run(realm, COUNTS)) == {"votes": PHANTOM + 2, "found": 2, "members": 3}
+    realm.upgrade(PREVIOUS)
+    assert json.loads(run(realm, COUNTS)) == {"votes": 0, "found": 0, "members": 0}
