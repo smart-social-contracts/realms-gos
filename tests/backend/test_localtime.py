@@ -2,6 +2,9 @@
 
 This runs on CPython, where ``zoneinfo`` exists and is the reference. A canister has none of it, so
 tests/deployed/test_local_time.py runs the same code in the real wasm.
+
+Counting working days (realms-gos#505) is the library's ``Calendar``; what these tests check is the bridge from a UTC
+instant to a local day and back.
 """
 
 import io
@@ -16,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "src", "realm_backend"))
 
 from core import civil, localtime, tzif  # noqa: E402
+from realms.legislation import Calendar, LegislationError, days, working_days  # noqa: E402
 
 ZONES = os.path.join(HERE, "..", "fixtures", "tzif")
 NS = 10**9
@@ -236,3 +240,50 @@ assert MADRID.endswith(FOOTER)
 def test_a_file_that_is_not_tzif_version_2_or_later_is_refused(data):
     with pytest.raises(ValueError):
         tzif.parse(data)
+
+
+# ── Working days (realms-gos#505) ─────────────────────────────────────────────
+
+# A calendar that knows 2026 only: the holidays of the example of #505 (illustrative dates).
+CALENDAR = Calendar([{"weekend": ["sat", "sun"], "years": {"2026": [{"date": "2026-10-09"}, {"date": "2026-10-12"}]}}])
+
+
+def test_two_working_days_from_thursday_8_october_2026_end_on_wednesday_the_14th(realm_zone):
+    realm_zone("Europe_Madrid.slim")
+    # Fri 9 Oct is a holiday (Valencian Community Day), Sat 10 and Sun 11 the weekend, Mon 12 Oct a holiday.
+    day, start = localtime.add_period(utc(2026, 10, 8, 10), working_days(2), CALENDAR)
+    assert day == "2026-10-14"
+    assert start == utc(2026, 10, 13, 22)  # Wednesday starts at midnight in Madrid, two hours ahead of UTC
+
+
+def test_a_count_across_the_end_of_summer_time_skips_the_25_hour_sunday_and_moves_the_start(realm_zone):
+    realm_zone("Europe_Madrid.slim")
+    # Thu 22 Oct + 5 working days: Fri 23, Mon 26, Tue 27, Wed 28, Thu 29. Thursday starts an hour later in UTC than
+    # it would have a week before, as the clocks went back on Sunday 25 Oct at 03:00.
+    thursday = localtime.add_period(utc(2026, 10, 22, 10), working_days(5), CALENDAR)
+    assert thursday == ("2026-10-29", utc(2026, 10, 28, 23))
+    # Both 02:30s of that Sunday are the same day.
+    for at in (utc(2026, 10, 25, 0, 30), utc(2026, 10, 25, 1, 30)):
+        assert localtime.add_period(at, working_days(1), CALENDAR) == ("2026-10-26", utc(2026, 10, 25, 23))
+    # And the clocks going forward, on Sun 29 March.
+    assert localtime.add_period(utc(2026, 3, 27, 10), working_days(1), CALENDAR) == ("2026-03-30", utc(2026, 3, 29, 22))
+
+
+def test_a_count_that_reaches_a_year_with_no_entries_fails_closed_naming_the_year(realm_zone):
+    realm_zone("Europe_Madrid.slim")
+    tuesday = utc(2026, 12, 29, 10)
+    assert localtime.add_period(tuesday, working_days(2), CALENDAR)[0] == "2026-12-31"
+    with pytest.raises(LegislationError, match="entries for 2027"):
+        localtime.add_period(tuesday, working_days(3), CALENDAR)
+    assert localtime.add_period(tuesday, days(5), CALENDAR)[0] == "2027-01-03"  # calendar days need no entries
+
+
+def test_the_same_instant_counted_on_two_clocks_can_end_on_two_days(realm_zone):
+    realm_zone("Europe_Madrid.slim")
+    madrid, sydney = tzif.parse(zone_file("Europe_Madrid.slim")), tzif.parse(zone_file("Australia_Sydney.slim"))
+    at = utc(2026, 10, 13, 20)  # Tuesday 22:00 in Madrid, Wednesday 07:00 in Sydney
+    assert localtime.add_period(at, working_days(1), CALENDAR, madrid) == ("2026-10-14", utc(2026, 10, 13, 22))
+    assert localtime.add_period(at, working_days(1), CALENDAR, sydney) == ("2026-10-15", utc(2026, 10, 14, 13))
+    assert localtime.day_bounds(civil.days_from_civil(2026, 10, 15), sydney)[0] == utc(2026, 10, 14, 13)
+    # The realm's own clock is the default, and a count on another leaves it alone.
+    assert localtime.add_period(at, working_days(1), CALENDAR) == ("2026-10-14", utc(2026, 10, 13, 22))
