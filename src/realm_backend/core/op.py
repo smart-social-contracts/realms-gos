@@ -128,6 +128,13 @@ def audit(name, user, by, origin, args, out, grant=""):
         old.delete()
 
 
+def oldest_event():
+    """The oldest event the audit log still holds, or None."""
+    from ggg import Event
+
+    return Event[str(max(1, Event.max_id() - EVENTS_KEPT + 1))]
+
+
 def run(gen):
     try:
         next(gen)

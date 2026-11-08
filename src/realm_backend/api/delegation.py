@@ -3,7 +3,7 @@ from core import chain
 from core import poa
 from core.db import Conflict, Fail, Forbidden, each, find, next_id, page_by, view, window as paging
 from ggg import Delegation, DelegationRequest, Event, User
-from core.op import EVENTS_KEPT, op, ops
+from core.op import op, ops, oldest_event
 
 DAY = 86400
 YEAR = 365 * DAY
@@ -276,7 +276,7 @@ def delegation_activity(c, args):
         raise Forbidden(f"{d.id} is not yours")
     last, count = int(args.get("from") or Event.max_id()), min(int(args.get("count") or 100), 500)
     newest = [e for e in reversed(list(each(Event, "grant", d.id))) if int(e.id) <= last]
-    oldest = Event[str(max(1, Event.max_id() - EVENTS_KEPT + 1))]
+    oldest = oldest_event()
     return {"events": [view(e) for e in newest[:count]], "since": oldest.at if oldest else 0,
             "next": int(newest[count - 1].id) - 1 if len(newest) > count else None}
 
