@@ -29,7 +29,7 @@ FACTS = {
     "procedure_define": {
         "facts": {
             "decision_deadline": {"type": "Period", "optional": True},
-            "longer_deadline_legislation": {"type": "String", "optional": True},
+            "legislation": {"type": "String", "optional": True},
         }
     },
     "document_share": {"facts": {"basis": {"type": "String", "optional": True}}},
@@ -56,6 +56,7 @@ tax, as it applies in eu/es/vc/46250-valencia, path eu/es → eu/es/vc/46250-val
   ibi_urban_range           forbid                                                eu/es                            TRLRHL Art. 72.1, 72.3
   ibi_urban_cap             forbid                                                eu/es                            TRLRHL Art. 72.3
   ibi_rustic_cap            forbid                                                eu/es                            TRLRHL Art. 72.3
+  compute_tax_assess        compute fixed                                         eu/es                            TRLRHL Arts. 61, 65, 71 and 74
   ibi_bonus                 helper                                                eu/es → eu/es/vc/46250-valencia  TRLRHL Art. 74
   large_family_bonus        setting = {"general": 60000000, "special": 90000000}  eu/es/vc/46250-valencia"""
 
