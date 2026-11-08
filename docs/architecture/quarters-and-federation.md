@@ -83,16 +83,18 @@ A realm has one face, so its quarters share some settings and keep others (not b
 realm-wide vote changes them on the capital, with the same operations as today (`realm_configure`,
 `realm_configure_branding`, `realm_configure_tokens`), and the capital pushes them to every quarter.
 The quarter's label is not the realm's name: it is the `name` under which the capital registered the
-quarter, which the quarter learns with the directory, as it learns its `index`. A quarter cannot rename
-its label. A realm that joins as a quarter takes the capital's identity at its first sync, and its
+quarter, which the quarter learns with the directory, as it learns its `index`. Only the capital can
+rename a quarter's label, with `quarter_configure` and its `name`; the quarter itself cannot. A realm that joins as a quarter takes the capital's identity at its first sync, and its
 former name is dropped. A quarter that secedes keeps the values it last received, and they are its
 own to change from then on.
 
-**A different currency cannot join.** Changing a realm's accounting currency would reinterpret its
-books, so a realm whose accounting currency differs from the capital's cannot join as a quarter:
-`quarter_join_federation` refuses, with an error that says to change the currency first, through the
-realm's own governance. A realm that has not chosen a currency yet takes the capital's. The join reads
-the capital's public `realm_info`, which holds the currency, the time zone and the welcome message.
+**A different currency cannot join.** Amounts are integers in units of 10**decimals, so changing a
+realm's accounting currency, or only its decimals, would rescale its books. A realm whose currency code
+or decimals differ from the capital's therefore cannot join as a quarter: `quarter_join_federation`
+refuses, with an error that says to change the currency first, through the realm's own governance. A
+realm that has not chosen a currency yet (a blank code) takes the capital's code and decimals. The join
+reads the capital's public `realm_info`, which holds the currency code and decimals, the time zone and
+the welcome message (it gains the decimals).
 
 One list of synced fields drives the parts of the mechanism, which uses the capital-to-quarter channel
 the federation already has (`quarter.sync`):
@@ -141,8 +143,8 @@ would arrive at another moment and bypass the legislation.
 without votes, and the sync does not end that: the quarter applies the other synced fields and leaves
 its stage alone. A quarter's `setup_launch` takes the capital's stage instead of `alpha`, and is
 refused with `Conflict` while its capital is still in `setup`, and also while the quarter has never
-synced, because it does not yet know the capital's stage: it must have its first sync. From then on the stage is kept in sync
-like the rest. Whenever a push or a sync changes a quarter's stage, the quarter runs its codex's
+synced, because it does not yet know the capital's stage: it must have its first sync. From then on
+the stage is kept in sync like the rest. Whenever a push or a sync changes a quarter's stage, the quarter runs its codex's
 `on_stage_change` with the new stage, and `setup_launch`'s hook gets the stage the quarter took.
 
 **What `adopt()` does for a new quarter.** When the capital builds a quarter (`quarter_add`), `adopt()`
@@ -156,6 +158,9 @@ and syncs it. Against the table:
   own, and nothing follows after the build.
 - `adopt()` now also launches the quarter (`setup_launch`) right after its first sync. The launch needs
   the realm's name, which arrives with that sync, and the quarter takes the capital's stage at once.
+- `adopt()` keeps the quarter pending and looks again every `ADOPT_EVERY` seconds until the first sync
+  and the launch have both succeeded, skipping the steps already done. Today it clears `pending` before
+  the sync, so a failed first sync is never retried.
 
 ## Time zones in a federation
 
