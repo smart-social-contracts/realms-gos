@@ -69,10 +69,9 @@ jobs:
           name: coverage-ggg
           path: coverage-ggg.xml
       - name: tests/backend
-        # Source scans and contracts of the extensions, codices and build variants.
-        # marketplace/ runs in the next job until the realm backend pins ic-python-db 0.14.0 as well
-        # (realms-gos#541); then drop the --ignore and the job.
-        run: pytest -q tests/backend --ignore=tests/backend/marketplace
+        # Source scans and contracts of the extensions, codices, build variants and the marketplace
+        # (the realm backend and the marketplace both pin ic-python-db 0.14.0).
+        run: pytest -q tests/backend
       # The pinned Cedar CLI 4.14.1 (experimental, with symcc) and cvc5 1.3.1 prove that every
       # generated forbid never errors (docs/codices/layered-codex.md §6 rule 9); the library's tests
       # below need them, and cedarpy 4.12 (the canister's Cedar line) for validation and decisions.
@@ -86,17 +85,3 @@ jobs:
         # realms.legislation is the code the realm runs at install; these tests are in-process
         # (cedarpy, the pinned CLI), with no canister or DB.
         run: pytest -q cli/tests/test_legislation*.py
-
-  # TEMPORARY: the marketplace canister pins ic-python-db 0.14.0, the realm backend still 0.12.0, and
-  # the two cannot share an environment. Remove with the --ignore above once #541 has merged.
-  marketplace:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - run: |
-          pip install -r src/marketplace_backend/requirements.txt
-          pip install pytest
-      - run: pytest -q tests/backend/marketplace

@@ -375,16 +375,21 @@ def realm_export(c, args):
 
 @op("db.convert")
 def db_convert_indexes(c, args):
-    """After an upgrade from a release before ic-python-db 0.13: convert the index lists saved as one array each, at most
-    ``ids`` (default 10,000) of their ids per call. Call it until ``done``. A realm created by this release, or one
-    that is done, answers at once and reads no index entry. Returns the ``lists`` and ``ids`` converted and ``done``."""
+    """After an upgrade from a release before ic-python-db 0.13: convert the index lists saved as one array each, at
+    most ``ids`` (default 10,000, at most 140,000) of their ids per call. Call it until ``done``. A realm created by
+    this release, or one that is done, answers at once and reads no index entry. Returns the ``lists`` and ``ids``
+    converted, whether it is ``done`` and the lists ``refused`` so far: one longer than a call can convert is left as
+    it was."""
     progress = Realm["1"].manifest_data.get(INDEX_CONVERSION) or {}
+    refused = progress.get("refused", [])
     if progress.get("done"):
-        return {"lists": 0, "ids": 0, "done": True}
+        return {"lists": 0, "ids": 0, "done": True, "refused": refused}
     out = convert_legacy_indexes(progress.get("after", ""), max(1, int(args.get("ids") or CONVERT_IDS)))
+    refused = refused + out["refused"]
     done = out["next"] is None
-    remember(INDEX_CONVERSION, {"done": True} if done else {"after": out["next"]})
-    return {"lists": out["lists"], "ids": out["ids"], "done": done}
+    progress = {"done": True} if done else {"after": out["next"]}
+    remember(INDEX_CONVERSION, {**progress, "refused": refused})
+    return {"lists": out["lists"], "ids": out["ids"], "done": done, "refused": refused}
 
 
 @op("shell.execute")

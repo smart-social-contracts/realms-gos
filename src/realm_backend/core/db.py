@@ -188,16 +188,20 @@ def convert_legacy_indexes(after="", ids=CONVERT_IDS):
     rest of its writes, so every query pays for it again: 2.7 billion instructions for a list of 12,000 ids, and past
     about 20,000 the query traps. An update keeps the conversion, so this is run until ``next`` is None after an upgrade
     from such a release. A list is converted whole, so one longer than ``ids`` is converted alone in its call, and the
-    call ends there. One that a call cannot convert at all (about 140,000 ids) is refused by name: ic-python-db would
-    run out of instructions converting it, wherever it is read.
+    call ends there. ``ids`` is held to what a call can convert (CONVERT_BUDGET at CONVERT_COST_PER_ID, about 140,000).
+    A list longer than that is skipped and named in ``refused``: no call converts it, and ic-python-db would run out of
+    instructions converting it wherever it is read, so the rest is converted and the walk still ends.
 
-    Returns ``lists`` and ``ids`` converted, and ``next``: the ``after`` of the call that continues, None at the end.
-    A converted list is not found again, so a second run converts nothing.
+    Returns ``lists`` and ``ids`` converted, the keys ``refused``, and ``next``: the ``after`` of the call that
+    continues, None at the end. A converted list is not found again, so a second run converts nothing.
 
     This belongs in ic-python-db as a public ``Database.convert_legacy_indexes``; it is here until that release.
     """
     db = Database.get_instance()
+    most = CONVERT_BUDGET // CONVERT_COST_PER_ID
+    ids = min(ids, most)
     lists = converted = seen = 0
+    refused = []
     last = after
     for start, end in index_ranges(after):
         while True:
@@ -210,19 +214,18 @@ def convert_legacy_indexes(after="", ids=CONVERT_IDS):
                 legacy = value.startswith("[") and key[-26:-24] != "|h"
                 size = value.count(",") + 1 if legacy else 0
                 if seen >= CONVERT_ROWS or (legacy and converted and converted + size > ids):
-                    return {"lists": lists, "ids": converted, "next": last}
-                if size * CONVERT_COST_PER_ID > CONVERT_BUDGET:
-                    raise Unavailable(f"{key} holds about {size} ids: converting it takes more instructions than a call "
-                                      f"has ({size * CONVERT_COST_PER_ID // 10**9} billion of {CONVERT_BUDGET // 10**9})")
+                    return {"lists": lists, "ids": converted, "refused": refused, "next": last}
                 seen += 1
                 last = key
-                if legacy:
+                if size > most:
+                    refused.append(key)
+                elif legacy:
                     db._ix_count(key)
                     lists += 1
                     converted += size
                     if converted >= ids:  # a list longer than ``ids`` has used the call
-                        return {"lists": lists, "ids": converted, "next": last}
+                        return {"lists": lists, "ids": converted, "refused": refused, "next": last}
             if len(rows) < CONVERT_PAGE:
                 break
             start = rows[-1][0]
-    return {"lists": lists, "ids": converted, "next": None}
+    return {"lists": lists, "ids": converted, "refused": refused, "next": None}
