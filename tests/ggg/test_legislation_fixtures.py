@@ -34,6 +34,9 @@ def test_every_chapter_loads_and_the_record_is_what_the_resolver_takes():
 
 
 def test_a_scripted_sync_source_answers_its_record_and_the_bytes_of_a_chapter():
+    """Illustrates scripting a peer by method name. The call shape is not the design's: §8 makes
+    ``legislation_releases`` a Candid query (``chain.call``), and how a chapter's bytes travel is for the install task
+    to settle. A test of that task scripts the shape the task uses."""
     source = fake_chain.peer("arcadia-capital", legislation_releases=legislation.releases(),
                              legislation_chapter=lambda sent: legislation.chapter(sent["sha256"]).decode())
     releases = json.loads(op.run(fake_chain.call_op("arcadia-capital", "legislation_releases", {})))

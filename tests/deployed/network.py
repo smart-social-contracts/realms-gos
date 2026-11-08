@@ -49,14 +49,14 @@ class Network:
         for _ in range(rounds):
             self.tick()
 
-    def wait_until(self, reached, step=1, rounds=1, limit=86400):
+    def wait_until(self, reached, step=1, rounds=1, limit=200):
         """Let time pass ``step`` seconds and ``rounds`` rounds at a time until ``reached()``, so that a flow of timer
-        steps can be stopped between two of them."""
-        waited = 0
-        while not reached():
-            assert waited < limit, f"not reached in {limit} seconds"
+        steps can be stopped between two of them. Fails after ``limit`` steps."""
+        for _ in range(limit):
+            if reached():
+                return
             self.wait(step, rounds)
-            waited += step
+        assert reached(), f"not reached in {limit} steps of {step} seconds"
 
     def upgrade_when(self, realm, reached, **pace):
         """Run the flow until ``reached()``, then upgrade ``realm`` in place right there: its timers are gone until
@@ -90,11 +90,11 @@ class Realm(Canister):
         self.network.wait(seconds)
 
     def proposal(self, proposal_id):
-        return self.ok("proposal_get", "alice", query=True, proposal=proposal_id)["proposal"]
+        return self.ok("proposal_get", "founder", query=True, proposal=proposal_id)["proposal"]
 
-    def govern(self, op, args, by="alice", effective_at=None):
-        """Run ``op`` with ``args`` as the realm, by a vote: ``by`` files the proposal, every member votes yes, and it is
-        finalized if the vote is still open. Returns the proposal id once it is executed, or scheduled for
+    def govern(self, op, args, by="founder", effective_at=None):
+        """Run ``op`` with ``args`` as the realm, by a vote: ``by`` files the proposal, every member votes yes, and it
+        is finalized if the vote is still open. Returns the proposal id once it is executed, or scheduled for
         ``effective_at`` (then ``run_at_effective_at`` runs it)."""
         filing = {"title": f"{op} in {self.name}", "action": {"op": op, "args": args}}
         if effective_at:

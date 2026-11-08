@@ -2,7 +2,7 @@
 
 The wasm is larger than one ingress message, so it is installed the way dfx does it:
 gzipped, uploaded in chunks to a canister's chunk store, then installed from the chunks.
-Realms of one PocketIC instance (tests/deployed/links.py) upload it once and install from the same store.
+Realms of one PocketIC instance (tests/deployed/network.py) upload it once and install from the same store.
 """
 
 import base64
@@ -51,9 +51,11 @@ GGG_ERROR = Types.Variant({
 def new_pocket_ic():
     """A PocketIC instance whose requests wait while the server is busy with a round. A round that takes long, such as
     the install of an 11 MB wasm on a loaded machine, makes it answer 409 to anything else, which the client takes as
-    an error."""
+    an error. Only a 409 is tried again, for up to ten minutes: a server that is gone, or a request it refuses, fails
+    at once, and one that stays busy fails with a ``RetryError``."""
     pic = PocketIC()
-    busy = Retry(total=100, status_forcelist=(409,), allowed_methods=None, backoff_factor=0.05, raise_on_status=False)
+    busy = Retry(total=None, connect=0, read=0, redirect=0, other=0, status=600, status_forcelist=(409,),
+                 allowed_methods=None, backoff_factor=0.05, backoff_max=1, raise_on_status=True)
     pic.server.request_client.mount("http://", HTTPAdapter(max_retries=busy))
     return pic
 
@@ -103,7 +105,8 @@ class Canister:
         its timers are gone until post_upgrade.
 
         The replica refuses an install soon after another of an 11 MB wasm (``CanisterInstallCodeRateLimited``), and
-        what lets it through is rounds run, which an upgrade right after the install has not had: wait and ask again."""
+        what lets it through is rounds run, which an upgrade right after the install has not had: run some and ask
+        again. The clock stays where it is, so that no timer fires and no outcall times out meanwhile."""
         if wasm_path:
             self.wasm = Wasm(self.pic, wasm_path)
         for attempt in range(UPGRADE_ATTEMPTS):
@@ -112,7 +115,8 @@ class Canister:
             except ValueError as refused:
                 if "CanisterInstallCodeRateLimited" not in str(refused) or attempt == UPGRADE_ATTEMPTS - 1:
                     raise
-                self.wait(60)
+                for _ in range(10):
+                    self.pic.tick()
 
     def wait(self, seconds):
         """Let ``seconds`` pass on the replica's clock and run what falls due, timers and the calls they make."""
