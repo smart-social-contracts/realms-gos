@@ -194,3 +194,15 @@ def test_the_export_pages_a_256_kb_chapter_alone(written, people):
         seen += [row["sha256"] for row in out["rows"]]
         start = out["next"]
     assert seen == [sha256(SMALL), sha256(BIG)]
+
+
+def test_a_page_continues_after_a_deleted_row_on_the_real_wasm(wasm_of, people):
+    """``load_some`` skips the deleted id and takes the next row in its place: ``next`` follows the last row loaded."""
+    realm = new_realm(wasm_of("production"), people)
+    run(realm, "import ggg\nfor n in range(1, 6):\n    ggg.InstallJob(id=f'J-{n}', status='done')\n"
+               "ggg.InstallJob['J-2'].delete()")
+    ctl = people["ctl"]
+    first = ok(realm, "realm_export", ctl, query=True, entity="InstallJob", count=2)
+    assert ([row["id"] for row in first["rows"]], first["next"]) == (["J-1", "J-3"], 4)
+    rest = ok(realm, "realm_export", ctl, query=True, entity="InstallJob", count=2, **{"from": 4})
+    assert ([row["id"] for row in rest["rows"]], rest["next"]) == (["J-4", "J-5"], None)

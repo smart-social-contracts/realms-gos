@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import typer
 
+from realms.cli.commands.export_data import export_data_command
 from realms.cli.commands.db import (
     CursorDatabaseExplorer,
     NavigationState,
@@ -44,6 +45,26 @@ def _realm(rows_by_entity, export_error=None, most=None):
     return run
 
 
+def _realm_with_gaps(ids):
+    """A ``subprocess.run`` stand-in for a realm whose ``User`` rows have the ids ``ids``: the others were deleted.
+    ``from`` is a row id, a page the next ``count`` rows from it, and ``next`` the id after the page's last row (None
+    when nothing follows), as ``core.db.page`` answers."""
+    calls = []
+
+    def run(cmd, **kwargs):
+        name, args = json.loads("[" + cmd[-1][1:-1] + "]")
+        args = json.loads(args)
+        calls.append(args)
+        rows = [{"id": str(i)} for i in ids if args["entity"] == "User" and i >= args["from"]][:args["count"]]
+        full = len(rows) == args["count"]
+        reply = {"ok": True, "entity": args["entity"], "rows": rows,
+                 "next": int(rows[-1]["id"]) + 1 if full and int(rows[-1]["id"]) < max(ids) else None}
+        return MagicMock(returncode=0, stdout=_candid(reply), stderr="")
+
+    run.calls = calls
+    return run
+
+
 class TestCursorDatabaseExplorer:
     @pytest.mark.parametrize("entity,row", [
         ("User", {"id": "user1", "nickname": "Test User"}),
@@ -55,10 +76,10 @@ class TestCursorDatabaseExplorer:
         realm = _realm({entity: [row]})
 
         with patch("subprocess.run", side_effect=realm):
-            result = explorer.list_entities(entity, 0, 10)
+            result = explorer.list_entities(entity, 1, 10)
 
         assert result["items"] == [{"_type": entity, "_id": row["id"], **row}]
-        assert result["total_pages"] == 1
+        assert result["next"] is None
         assert realm.calls == [("read", "realm_export", {"entity": entity, "from": 1, "count": 10})]
 
     def test_a_page_the_realm_cuts_short_is_filled_by_following_next(self):
@@ -67,11 +88,87 @@ class TestCursorDatabaseExplorer:
         realm = _realm({"ChapterSource": rows}, most=1)
 
         with patch("subprocess.run", side_effect=realm):
-            result = explorer.list_entities("ChapterSource", 1, 2)
+            result = explorer.list_entities("ChapterSource", 3, 2)
 
         assert [item["sha256"] for item in result["items"]] == ["sha256:2", "sha256:3"]
-        assert result["more"] is True
+        assert result["next"] == 5
         assert [args["from"] for _, _, args in realm.calls if args.get("entity")] == [3, 4]
+
+    def test_a_next_that_does_not_go_forward_is_an_error_and_not_a_loop(self):
+        def stuck(cmd, **kwargs):
+            name, args = json.loads("[" + cmd[-1][1:-1] + "]")
+            args = json.loads(args)
+            reply = {"ok": True, "rows": [{"id": "a"}], "next": args["from"]} if name == "realm_export" \
+                else {"ok": True}
+            return MagicMock(returncode=0, stdout=_candid(reply), stderr="")
+
+        explorer = CursorDatabaseExplorer("local", "realm_backend")
+
+        with patch("subprocess.run", side_effect=stuck) as run:
+            result = explorer.list_entities("User", 1, 5)
+
+        assert result == {"error": "User: the realm answered next=1 to from=1", "items": []}
+        assert run.call_count == 1
+
+    @pytest.mark.parametrize("deleted", [(), (1,), (2,), (100,), (101,), (150, 151), (250,)])
+    def test_a_deleted_id_across_a_page_boundary_repeats_and_skips_no_row(self, deleted):
+        ids = [n for n in range(1, 251) if n not in deleted]
+        explorer = CursorDatabaseExplorer("local", "realm_backend")
+
+        with patch("subprocess.run", side_effect=_realm_with_gaps(ids)):
+            seen = [item["_id"] for item in explorer.all_entities("User")]
+
+        assert seen == [str(n) for n in ids]
+
+    def test_the_export_command_writes_every_row_once_when_an_id_was_deleted(self, tmp_path):
+        ids = [n for n in range(1, 251) if n != 2]  # a computed second page would start at 101, a row already read
+        realm = _realm_with_gaps(ids)
+
+        with patch("subprocess.run", side_effect=realm), \
+             patch("realms.cli.commands.export_data.get_project_root", return_value=tmp_path):
+            export_data_command(output_dir=str(tmp_path / "out"), entity_types="User", include_codexes=False)
+
+        exported = json.loads((tmp_path / "out" / "realm_data.json").read_text())
+        assert [row["id"] for row in exported] == [str(n) for n in ids]
+        assert [call["from"] for call in realm.calls] == [1, 102, 202]  # each page starts at the last row's id + 1
+
+    def test_the_pages_of_the_explorer_start_where_the_realm_said(self):
+        ids = [n for n in range(1, 26) if n != 2]
+        explorer = CursorDatabaseExplorer("local", "realm_backend")
+
+        with patch("subprocess.run", side_effect=_realm_with_gaps(ids)):
+            first = explorer.list_entities("User", 1, 10)
+            second = explorer.list_entities("User", first["next"], 10)
+            third = explorer.list_entities("User", second["next"], 10)
+
+        assert [i["_id"] for i in first["items"]] == ["1"] + [str(n) for n in range(3, 12)] and first["next"] == 12
+        assert [i["_id"] for i in second["items"]] == [str(n) for n in range(12, 22)] and second["next"] == 22
+        assert [i["_id"] for i in third["items"]] == [str(n) for n in range(22, 26)] and third["next"] is None
+
+    def test_page_up_and_down_go_back_to_the_start_of_each_page_seen(self):
+        ids = [n for n in range(1, 26) if n != 2]
+        explorer = CursorDatabaseExplorer("local", "realm_backend")
+        explorer.state.view_mode, explorer.state.entity_type = "record_list", type("User", (), {})
+        keys = {getattr(b.keys[0], "value", b.keys[0]): b.handler for b in explorer.create_key_bindings().bindings}
+
+        def press(key):
+            keys[key](MagicMock())
+            return [item["_id"] for item in explorer.state.current_items]
+
+        with patch("subprocess.run", side_effect=_realm_with_gaps(ids)):
+            explorer.refresh_data()
+            second = press("pagedown")
+            third = press("pagedown")
+            assert press("pagedown") == third  # nothing follows the third page
+            assert press("pageup") == second
+            first = press("pageup")
+            assert press("pageup") == first  # nor does anything precede the first
+
+        assert first == ["1"] + [str(n) for n in range(3, 12)]
+        assert second == [str(n) for n in range(12, 22)]
+        assert third == [str(n) for n in range(22, 26)]
+        assert explorer.state.page_starts == [1] and (explorer.state.page_num, explorer.state.next_start) == (0, 12)
+        assert explorer.state.total_pages == 2
 
     def test_every_row_of_an_entity_whose_pages_are_cut_short_is_read_once(self):
         rows = [{"sha256": f"sha256:{n}"} for n in range(7)]
@@ -87,6 +184,7 @@ class TestCursorDatabaseExplorer:
         state = NavigationState()
         assert state.entity_type == ""
         assert state.page_num == 0
+        assert state.page_starts == [1] and state.next_start is None
         assert state.page_size == 10
         assert state.current_items == []
         assert state.selected_item is None
@@ -184,7 +282,8 @@ class TestCursorDatabaseExplorer:
             with patch.object(explorer, "list_entities") as mock_list:
                 mock_list.return_value = {
                     "items": [{"_id": "org1", "name": "Test Org"}],
-                    "page_num": 0,
+                    "start": 1,
+                    "next": None,
                 }
 
                 explorer.handle_relationship_drilling()

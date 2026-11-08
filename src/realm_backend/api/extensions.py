@@ -179,7 +179,7 @@ def extension_list(c, args):
     """Installed extensions with whether each is available to you (visitors included: the menu and the public
     dashboard need it), ``count`` rows at a time (default 100, at most
     500) from row ``from`` (default 1). Returns ``extensions`` and ``next``, the ``from`` of the next page (null at the
-    end); a page can be short where extensions were uninstalled, so follow ``next``."""
+    end)."""
     rows, nxt = page(Extension, args)
     held = holds(c.user)
     return {"extensions": [{**view(e, "id", "version", "status", "operations", "sidebar", "access"),
