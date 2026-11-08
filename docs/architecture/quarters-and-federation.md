@@ -140,7 +140,8 @@ would arrive at another moment and bypass the legislation.
 **The stage and `setup`.** A quarter that has not launched is in `setup`, configured by its founder
 without votes, and the sync does not end that: the quarter applies the other synced fields and leaves
 its stage alone. A quarter's `setup_launch` takes the capital's stage instead of `alpha`, and is
-refused with `Conflict` while its capital is still in `setup`. From then on the stage is kept in sync
+refused with `Conflict` while its capital is still in `setup`, and also while the quarter has never
+synced, because it does not yet know the capital's stage: it must have its first sync. From then on the stage is kept in sync
 like the rest. Whenever a push or a sync changes a quarter's stage, the quarter runs its codex's
 `on_stage_change` with the new stage, and `setup_launch`'s hook gets the stage the quarter took.
 
