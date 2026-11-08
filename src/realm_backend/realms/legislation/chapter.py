@@ -475,7 +475,8 @@ class Chapter(metaclass=ChapterMeta):
 
     A chapter changes nothing itself: ``self.ggg.<op>(**args)`` queues GGG operation ``<op>`` as an
     effect. ``self.deny(reason)`` is a guard's refusal. ``self.legislation.<d>`` and ``self.layer.<d>``
-    reach a declared domain (layered-codex.md §4.4). ``self.calendar`` is the realm's calendar.
+    reach a declared domain (layered-codex.md §4.4). ``self.calendar`` is the realm's calendar, and
+    ``self.local_day(at)`` the realm's local day of a timestamp.
     """
 
     uses = ()
@@ -493,6 +494,16 @@ class Chapter(metaclass=ChapterMeta):
     def now(self):
         """The current time, a UTC timestamp, as the realm supplies it."""
         return self.__context__.now
+
+    def local_day(self, at):
+        """The realm's local day of UTC timestamp ``at``, as ``YYYY-MM-DD``: the day a working-day count starts
+        from (layered-codex.md §4.5, §5.2). The realm computes it from its own time zone.
+        """
+        if self.__context__.local_day is None:
+            raise LegislationError(
+                "this context has no local day: the realm supplies it"
+            )
+        return self.__context__.local_day(at)
 
     def approved_by(self, department):
         """Whether the current operation carries ``department``'s approval."""

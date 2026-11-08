@@ -1,9 +1,13 @@
-from core import chain
-from core.db import Conflict, Forbidden, deref, each, find, next_id, page, page_by, view
-from ggg import Calendar, Department, License, Organization
+from core import chain, localtime
+from core.db import Conflict, Fail, Forbidden, Unavailable, deref, each, find, next_id, page, page_by, view
+from ggg import Calendar, Department, License, Organization, Procedure
 from core.op import op
+from api.proposals import realm_wide
 
-SHOWN = ("id", "kind", "holder", "status", "issued_at", "expires_at")
+SHOWN = ("id", "kind", "holder", "status", "decision_due", "issued_at", "expires_at")
+NS = 10**9  # the chain counts seconds, localtime nanoseconds
+# The operations' text for GGG's PeriodUnit, as the legislation library tags it.
+PERIOD_UNITS = {"day": "Day", "working_day": "WorkingDay", "month": "Month", "year": "Year"}
 
 
 def valid(lic):
@@ -32,24 +36,50 @@ def holders(args):
     return principals(find(License, args["license"]).holder)
 
 
+def administers(org, user):
+    return org.status == "active" and user in (org.admins or [])
+
+
 def applicant(ref, user):
     entity = deref(ref)
-    org = isinstance(entity, Organization)
-    if not (ref == f"User:{user}" or org and entity.status == "active" and user in (entity.admins or [])):
+    if not (ref == f"User:{user}" or isinstance(entity, Organization) and administers(entity, user)):
         raise Forbidden(f"you cannot apply for {ref}")
+
+
+def decision_due(kind, applied_at):
+    """When a decision on an application for a licence of ``kind``, made at ``applied_at``, is due by its Procedure:
+    the end of the last day of the deadline on the realm's clock, because that day counts in full and positive silence
+    applies only after it. 0 when the kind has no procedure, or none with a deadline.
+
+    Working days need the calendar of the layers the realm runs (realms-gos#505); a realm with none cannot date such an
+    application, and refuses it."""
+    procedure = Procedure[kind]
+    deadline = procedure.decision_deadline if procedure else None
+    if not deadline:
+        return 0
+    from realms.legislation.calendar import Calendar as Layers
+    from realms.legislation.errors import LegislationError
+    from realms.legislation.periods import Period
+
+    try:
+        _, _, end = localtime.add_period(applied_at * NS, Period(deadline["count"], PERIOD_UNITS[deadline["unit"]]), Layers())
+    except LegislationError as e:
+        raise Unavailable(f"an application for a {kind} licence cannot be dated: {e}")
+    return end // NS
 
 
 def application(c, kind, holder, department, evidence_ref, conditions):
     applicant(holder, c.user)
     issuer = find(Department, department) if department else None
-    lic = License(id=next_id(License, "LIC"), kind=kind, holder=holder, status="applied", applied_at=chain.now(),
-                  evidence_ref=evidence_ref, conditions=conditions)
+    now = chain.now()
+    lic = License(id=next_id(License, "LIC"), kind=kind, holder=holder, status="applied", applied_at=now,
+                  decision_due=decision_due(kind, now), evidence_ref=evidence_ref, conditions=conditions)
     if issuer:
         lic.issued_by = issuer
     return {"license": lic.id}
 
 
-@op("license.apply", delegable=True, returns="license")
+@op("license.apply", returns="license")
 def license_apply(c, args):
     """Apply for a licence of ``kind`` for ``holder`` (default you, or ``Organization:id`` of one you administer), to
     issuing ``department`` (optional), with optional ``evidence_ref`` and ``conditions``. Returns ``license``."""
@@ -57,7 +87,7 @@ def license_apply(c, args):
                        args.get("evidence_ref", ""), args.get("conditions", {}))
 
 
-@op("license.apply", delegable=True, returns="license")
+@op("license.apply", returns="license")
 def license_renew(c, args):
     """Apply to renew the active or expired ``license``, optionally with new ``evidence_ref``. Approving the renewal
     expires the old licence. Returns the new application's ``license``."""
@@ -130,3 +160,39 @@ def license_verify(c, args):
     Returns ``valid`` and the ``license``."""
     lic = find(License, args["license"]) if args.get("license") else active(args["holder"], args["kind"])
     return {"valid": bool(lic and valid(lic)), "license": shown(lic) if lic else None}
+
+
+SILENCES = ("positive", "negative")
+
+
+def valid_procedure(args):
+    """Refuse a deadline that is no Period, or a silence that is neither positive nor negative."""
+    deadline = args.get("decision_deadline")
+    if deadline is not None and not (
+            isinstance(deadline, dict) and type(deadline.get("count")) is int and deadline["count"] >= 0
+            and isinstance(deadline.get("unit"), str) and deadline["unit"] in PERIOD_UNITS):
+        raise Fail(f"a decision_deadline is a count of {', '.join(PERIOD_UNITS)}, such as 3 months")
+    if args.get("silence") not in (None, *SILENCES):
+        raise Fail(f"silence is {' or '.join(SILENCES)}")
+
+
+@op("procedure.define", governed=realm_wide, check=valid_procedure, returns="procedure")
+def procedure_define(c, args):
+    """Define, or redefine, how applications for licences of ``kind`` are decided: who starts it (``initiated_by``),
+    optionally the ``matter``, a ``decision_deadline`` (a Period ``{"count": 3, "unit": "month"}``, the unit day,
+    working_day, month or year), what ``silence`` means (positive grants, negative refuses), the ``legislation`` that says so and
+    ``facts``. The licence applications that follow take their ``decision_due`` from it. Returns ``procedure``, the
+    kind."""
+    p = Procedure[args["kind"]] or Procedure(id=args["kind"])
+    p.initiated_by, p.matter = args["initiated_by"], args.get("matter", "")
+    p.decision_deadline, p.silence = args.get("decision_deadline"), args.get("silence", "")
+    p.legislation, p.facts = args.get("legislation", ""), args.get("facts") or {}
+    return {"procedure": p.id}
+
+
+@op("realm.data_view", read=True, returns="procedures")
+def procedure_list(c, args):
+    """The realm's procedures, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1). Returns
+    ``procedures`` and ``next`` (null at the end)."""
+    rows, nxt = page(Procedure, args)
+    return {"procedures": [view(p) for p in rows], "next": nxt}

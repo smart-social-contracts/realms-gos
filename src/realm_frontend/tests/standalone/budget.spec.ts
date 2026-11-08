@@ -277,7 +277,13 @@ test('a payment into the treasury is split between the department funds', async 
 
 	const billed = await done(
 		'invoice_create',
-		{ payer: realm.founder, amount, symbol: SYMBOL, reason: `Tax: budget ${RUN}` },
+		{
+			payer: realm.founder,
+			amount,
+			items: [{ concept: 'tax', amount }],
+			symbol: SYMBOL,
+			reason: `Tax: budget ${RUN}`
+		},
 		founder()
 	);
 	const payTo = billed.pay_to as { owner: string; subaccount: string };
@@ -298,7 +304,7 @@ test('a payment into the treasury is split between the department funds', async 
 });
 
 test('the finance role adopts a budget for the roads, and only it can', async () => {
-	const draft = { fund: ROADS, period, category: CATEGORY, planned: 300_000 };
+	const draft = { fund: ROADS, period, category: CATEGORY, kind: 'expense', planned: 300_000 };
 	// What the period's earlier budget for this category has spent carries over to its successor.
 	const carried = (await adoptedBudget())?.actual ?? 0;
 	await leavesUnchanged(['Budget'], async () => {
@@ -319,13 +325,13 @@ test('the finance role adopts a budget for the roads, and only it can', async ()
 	});
 
 	await leavesUnchanged(['Budget'], async () => {
-		await refused('budget_propose', { budget }, member, /needs org\.manage_budget/);
+		await refused('budget_propose', { period }, member, /needs org\.manage_budget/);
 	});
-	await done('budget_propose', { budget }, founder());
+	await done('budget_propose', { period }, founder());
 	expect(await row<Budget>('Budget', budget)).toMatchObject({ status: 'adopted', actual: carried });
 
 	await leavesUnchanged(['Budget'], async () => {
-		await refused('budget_propose', { budget }, founder(), /only a draft for an open period/);
+		await refused('budget_propose', { period }, founder(), /no draft budget lines/);
 	});
 });
 
@@ -498,7 +504,13 @@ test.fixme('a budget with a negative amount is refused', async () => {
 	await leavesUnchanged(['Budget'], async () => {
 		await refused(
 			'budget_draft',
-			{ fund: ROADS, period: (await openPeriod())!.id, category: `negative-${RUN}`, planned: -5 },
+			{
+				fund: ROADS,
+				period: (await openPeriod())!.id,
+				category: `negative-${RUN}`,
+				kind: 'expense',
+				planned: -5
+			},
 			founder(),
 			/positive|negative/
 		);

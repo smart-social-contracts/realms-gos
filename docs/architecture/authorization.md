@@ -23,10 +23,11 @@ context?*
 | `user` | Who the call is for: the signer, or the grantor in `on_behalf_of` |
 | `signer` | Who signed the message |
 | `origin` | `user`, `extension`, `codex` or `replay` |
-| `read`, `public`, `signing`, `delegable` | The operation's flags |
+| `read`, `public`, `signing` | The operation's flags |
+| `delegable` | A delegate may do the call at once: its tier is direct, and the release has switched it on |
 | `delegated` | `user != signer` |
 | `signer_agent` | The operation is `signing` and the signer holds an agent appointment |
-| `scope` | The permissions the grantor delegated to the signer |
+| `covered` | The grant the signer acts under reaches the call (`false` without one) |
 | `declared` | The operations the calling extension or codex declared |
 | `parties` | The principals the matter is about (from `parties(args)`) |
 
@@ -58,10 +59,10 @@ them (invariant I-ALL-2).
 forbid (principal, action, resource) when { context.signing && context.signer_agent };
 // Signing acts are never done under a power of attorney...
 forbid (principal, action, resource) when { context.delegated && context.signing };
-// ...nor are operations that are not delegable...
+// ...nor are operations that are not direct (they ask the member each time, or are the member's own)...
 forbid (principal, action, resource) when { context.delegated && !context.delegable };
-// ...nor anything outside the delegated scope.
-forbid (principal, action, resource) when { context.delegated && !context.scope.contains(context.permission) };
+// ...nor anything the grant does not cover.
+forbid (principal, action, resource) when { context.delegated && !context.covered };
 // Nobody decides a matter they are a party to.
 forbid (principal, action, resource)
   when { context.parties.contains(context.user) || context.parties.contains(context.signer) };
@@ -72,9 +73,18 @@ forbid (principal, action, resource)
   when { (context.origin == "extension" || context.origin == "codex") && !context.declared.contains(context.op) };
 ```
 
+`context.delegable` says the call's tier is direct, the release has switched the operation on, and, under a grant by
+groups, its arguments do not make it ask each time. `context.covered` says the grant reaches the call: it names the
+operation's group (or everything), the group's longest duration has not passed since the grant began, or, for a
+grant made before groups, the operation is one of the 24 it covers and its permission is named. Both are computed by
+[`core/poa.py`](../../src/realm_backend/core/poa.py); see
+[Delegation](governance-and-delegation.md#delegation-power-of-attorney).
+
 When Cedar says no, `reason()` turns the context into a readable message, such as
 `proposal_vote needs proposal.vote`, `resolution_issue must be done by a human, not an agent` or
-`dispute_accept: you are a party to this matter`.
+`dispute_accept: you are a party to this matter`. For a delegate it says which guardrail refused:
+`payment_account_add cannot be done under this power of attorney: this grant does not cover it` (or `it asks the member
+each time`, or `it is not delegable`).
 
 ## Where permissions come from
 

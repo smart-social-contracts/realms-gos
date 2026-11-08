@@ -2,12 +2,14 @@ import hashlib
 
 from core import chain
 from core.db import Conflict, Fail, Forbidden, find, next_id, page, view
-from ggg import Bid, BidScore, Contract, Department, Organization, Tender
+from ggg import Bid, BidScore, Contract, Department, External, Organization, Tender
+from api.external import REALM_JOURNAL
 from api.justice import people
 from core.op import op
 from core.ratio import ONE, PERCENT
 
 MAX_MARK = 10
+LISTED = ("id", "title", "kind", "procedure", "estimated_value", "status", "opens_at", "closes_at", "notices")
 
 
 def seal(price, nonce):
@@ -66,14 +68,17 @@ def rubric_of(args):
 def tender_create(c, args):
     """Draft a tender ``title`` for department ``requester``, with optional ``description``, the times it ``opens_at``
     and ``closes_at`` (seconds, closing after opening), and ``rubric``, criterion weights in hundred-millionths that
-    are positive and add up to 100000000 (e.g. ``{"price": 60000000, "quality": 40000000}`` for 60 % and 40 %).
-    Returns ``tender``."""
+    are positive and add up to 100000000 (e.g. ``{"price": 60000000, "quality": 40000000}`` for 60 % and 40 %). The
+    realm's own words say what is tendered (``kind``: works, supplies, services) and by which ``procedure``; the
+    ``estimated_value`` is in the accounting currency. Returns ``tender``."""
     rubric = rubric_of(args)
     opens, closes = int(args["opens_at"]), int(args["closes_at"])
     if closes <= opens:
         raise Fail("a tender closes after it opens")
     t = Tender(id=next_id(Tender, "T"), title=args["title"], description=args.get("description", ""),
-               requester=find(Department, args["requester"]), opens_at=opens, closes_at=closes, rubric=rubric)
+               requester=find(Department, args["requester"]), kind=args.get("kind", ""),
+               procedure=args.get("procedure", ""), estimated_value=args.get("estimated_value"), opens_at=opens,
+               closes_at=closes, rubric=rubric)
     return {"tender": t.id}
 
 
@@ -96,14 +101,28 @@ def tender_cancel(c, args):
     moving(args, ("draft", "open"), "cancelled")
 
 
+@op("tender.manage", returns="tender")
+def tender_notice(c, args):
+    """Record that a notice of ``tender`` appeared in ``journal``: an outside body of kind journal, or ``realm`` for the
+    realm's own, at the time ``at`` (default now, never in the future) with an optional ``ref`` to the issue.
+    Legislation reads the journals of a tender's notices as ``published_in`` when it is awarded. Returns ``tender``."""
+    t, now = find(Tender, args["tender"]), chain.now()
+    if args["journal"] != REALM_JOURNAL and find(External, args["journal"]).kind != "journal":
+        raise Fail(f"{args['journal']} is not a journal")
+    at = int(args.get("at") or now)
+    if at > now:
+        raise Fail("a notice cannot have appeared in the future")
+    t.notices = t.notices + [{"journal": args["journal"], "published_at": at, "ref": args.get("ref")}]
+    return {"tender": t.id}
+
+
 @op("realm.data_view", read=True, returns="tenders")
 def tender_list(c, args):
     """List tenders, or only those whose ``status`` is draft, open, closed, evaluation, contracted or cancelled, from
     row ``from`` (default 1) over ``count`` rows (default 100, at most 500); a filtered page may hold fewer.
     Returns ``tenders`` and ``next``, the ``from`` of the next page (null at the end)."""
     rows, nxt = page(Tender, args, keep=lambda t: not args.get("status") or t.status == args["status"])
-    return {"tenders": [{**view(t, "id", "title", "status", "opens_at", "closes_at"), "requester": t.requester.id}
-                        for t in rows], "next": nxt}
+    return {"tenders": [{**view(t, *LISTED), "requester": t.requester.id} for t in rows], "next": nxt}
 
 
 @op("realm.data_view", read=True)
@@ -111,11 +130,11 @@ def tender_get(c, args):
     """Show ``tender`` with its rubric and bids; a sealed bid shows only its vendor, time and commitment hash.
     Returns ``tender``."""
     t = find(Tender, args["tender"])
-    data = view(t, "id", "title", "description", "status", "opens_at", "closes_at", "rubric", "winner", "contract")
+    data = view(t, *LISTED, "description", "rubric", "winner", "contract")
     return {"tender": {**data, "requester": t.requester.id, "bids": [shown(b) for b in t.bids]}}
 
 
-@op("bid.submit", delegable=True, returns="bid")
+@op("bid.submit", returns="bid")
 def bid_submit(c, args):
     """For ``vendor``, an active organization you represent, bid on the open ``tender``: ``payload_ref`` (the encrypted
     bid) and ``payload_hash``, the ``sha256:`` of ``price:nonce``. One bid per vendor and tender. Returns ``bid``."""
@@ -133,7 +152,7 @@ def bid_submit(c, args):
     return {"bid": b.id}
 
 
-@op("bid.submit", delegable=True, returns="bid")
+@op("bid.submit", returns="bid")
 def bid_withdraw(c, args):
     """Withdraw ``bid``, made for a vendor you represent, while its tender still takes bids. Returns the ``bid``
     as it was."""
@@ -184,7 +203,17 @@ def bid_score(c, args):
     return {"bid": b.id, "score": b.score}
 
 
-@op("tender.manage", signing=True, governed=requester, returns="contract")
+def journals_of_notices(args, proposal=""):
+    """The facts of a tender_award call that are not its arguments (GGG's derived facts): ``published_in``, the journals
+    of the tender's notices."""
+    journals = []
+    for notice in find(Tender, args["tender"]).notices:
+        if notice["journal"] not in journals:
+            journals.append(notice["journal"])
+    return {"published_in": journals}
+
+
+@op("tender.manage", signing=True, governed=requester, derived=journals_of_notices, returns="contract")
 def tender_award(c, args):
     """Award ``tender`` to ``bid`` (default the best-scored revealed bid), signing an active contract between the
     requester and the vendor; a lower-scored bid needs a ``justification``. Returns ``winner``, ``score``,
@@ -201,7 +230,7 @@ def tender_award(c, args):
     if b.score < best.score and not why:
         raise Fail(f"{best.id} scored {best.score}, more than {b.id}'s {b.score}: justify the deviation")
     k = Contract(id=next_id(Contract, "C"), title=t.title, parties=[f"Department:{t.requester.id}",
-                 f"Organization:{b.vendor.id}"], terms_ref=b.payload_ref, terms_hash=b.payload_hash,
-                 status="active", starts_at=chain.now())
+                 f"Organization:{b.vendor.id}"], kind=t.kind, procedure=t.procedure, tender=t.id,
+                 terms_ref=b.payload_ref, terms_hash=b.payload_hash, status="active", starts_at=chain.now())
     t.winner, t.contract, t.status = b.id, k.id, "contracted"
     return {"winner": b.id, "score": b.score, "contract": k.id, "justification": why}

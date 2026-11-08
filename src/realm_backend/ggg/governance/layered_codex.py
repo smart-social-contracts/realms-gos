@@ -21,12 +21,17 @@ class LayeredCodex(Row):
     activates_at = Integer(default=0)  # seconds: when a pending codex takes effect
     installed_at = Integer(default=0)
     proposal = String(default="")  # the proposal that adopted it
+    # {chapter file: {method: {count, error, at}}}: the methods failing now, cleared as each succeeds again (§9.3)
+    failures = Json({})
 
 
 class ChapterSource(Row):
     """The text of a chapter, or of a ``calendar.json``, stored once under its checksum."""
 
     __alias__ = "sha256"
+    # Rows realm_export returns at most in a page: one row can be 256 KB, and a few of them pass a query's instruction
+    # limit or the reply's size.
+    export_most = 1
     sha256 = String()  # sha256:<hex> of the text's UTF-8 bytes
     source = String(default="")
 
@@ -36,10 +41,12 @@ class InstallJob(Row):
 
     __alias__ = "id"
     id = String()
-    proposal = String(default="")
+    proposal = String(default="", indexed=True)
     change_list = Json({})  # {url, checksum}
     step = String(default="")
-    staged = Json({})  # what the steps so far have produced, for the next one
+    # What the steps so far have produced, for the next one: checksums, where the bytes came from, and the fields a
+    # re-installed legislation's row had before, to put back on failure (its chapters alone can fill a Json's default).
+    staged = Json({}, max_length=1 << 18)
     status = String(default="running", indexed=True)  # running | paused | failed | done
     error = String(default="")
     started_at = Integer(default=0)

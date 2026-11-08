@@ -1,10 +1,11 @@
 from core import chain
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, page_by, view, window
-from ggg import (Appeal, Case, Contract, Court, Department, Dispute, Invoice, Judge, Member, Notification, Organization,
-                 Penalty, User, Verdict)
+from ggg import (Appeal, Case, Contract, Court, Department, Dispute, Judge, Member, Notification, Organization, Penalty,
+                 User, Verdict)
 from api.licenses import active
 from core.op import op
 from api.proposals import holders, realm_wide
+from api.treasury import new_invoice
 
 LEVELS = {"first_instance": 1, "specialized": 1, "appellate": 2, "supreme": 3}
 APPEAL_WINDOW = 14 * 86400
@@ -117,7 +118,7 @@ def notify(recipient, topic, title, body, sender):
     return n.id
 
 
-@op("dispute.create", delegable=True, returns="dispute")
+@op("dispute.create", returns="dispute")
 def dispute_file(c, args):
     """File a dispute titled ``title`` against ``respondent`` (an ``Entity:id`` ref, or a user id), with optional
     ``subject`` (e.g. ``Contract:C-9``) and ``description_ref``. Returns ``dispute``.
@@ -129,7 +130,7 @@ def dispute_file(c, args):
     return {"dispute": d.id}
 
 
-@op("dispute.create", delegable=True, returns="dispute")
+@op("dispute.create", returns="dispute")
 def dispute_withdraw(c, args):
     """Withdraw ``dispute``, a dispute you filed that has not been accepted or rejected yet."""
     d = find(Dispute, args["dispute"])
@@ -141,7 +142,7 @@ def dispute_withdraw(c, args):
     return {"dispute": d.id}
 
 
-@op("dispute.view", read=True, delegable=True, returns="dispute")
+@op("dispute.view", read=True, returns="dispute")
 def dispute_get(c, args):
     """Show ``dispute`` in full, if you filed it or act for its respondent. Returns ``dispute``."""
     d = find(Dispute, args["dispute"])
@@ -203,7 +204,7 @@ def case_assign(c, args):
     return {"case": case.id}
 
 
-@op("dispute.create", delegable=True, returns="evidence")
+@op("dispute.create", returns="evidence")
 def evidence_submit(c, args):
     """As a party to ``case`` (assigned or in progress), submit evidence: ``ref`` (an encrypted reference) and its
     ``hash`` (``sha256:…``). Returns ``evidence``, its id within the case (e.g. ``E-1``)."""
@@ -316,7 +317,7 @@ def verdict_modify_terms(c, args):
     return {"verdict": v.id}
 
 
-@op("dispute.create", delegable=True, returns="appeal")
+@op("dispute.create", returns="appeal")
 def appeal_file(c, args):
     """As a party, appeal the issued ``verdict`` within 14 days to ``court`` (default the issuing court's parent),
     which must rank above the issuing court; optional ``grounds_ref``. Returns ``appeal`` and ``court``."""
@@ -382,8 +383,8 @@ def penalty_execute(c, args):
         target = find(Member, target.id)
     p.due_at = p.due_at or now + PAY_WITHIN
     if p.kind in ("fine", "restitution"):
-        p.invoice = Invoice(id=next_id(Invoice, "INV"), payer=p.target, amount=p.amount, symbol=p.symbol,
-                            due_at=p.due_at, reason=f"Penalty:{p.id}").id
+        p.invoice = new_invoice(p.target, [{"concept": p.kind, "amount": p.amount}], p.symbol, p.due_at,
+                                f"Penalty:{p.id}").id
     elif p.kind in TARGETS:
         target.status = {"suspension": "suspended", "revocation": "revoked", "termination": "terminated"}[p.kind]
     # freeze, injunction and community service are recorded here and carried out by their own operations.

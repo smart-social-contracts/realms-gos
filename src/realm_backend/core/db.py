@@ -3,6 +3,7 @@ import json
 from ic_python_db import Database, Entity, ManyToMany, ManyToOne, OneToOne, String
 
 PAGE, PAGE_MAX = 100, 500
+JSON_MAX = 65536  # characters of a Json field, unless it says otherwise
 DRAFTS = 10  # how many drafts a read view lists, newest first
 # convert_legacy_indexes. The key prefixes of ic-python-db's field and relation indexes. The longest key it looks for:
 # the map ignores the max_key_size main.py declares, so nothing stops a longer one, but the realm's are far shorter and
@@ -85,7 +86,7 @@ class Unavailable(Fail):
 class Json(String):
     # Read gives a copy; write by assignment, in-place edits are not saved.
     def __init__(self, default=None, **kw):
-        super().__init__(default=json.dumps(default), max_length=kw.pop("max_length", 65536), **kw)
+        super().__init__(default=json.dumps(default), max_length=kw.pop("max_length", JSON_MAX), **kw)
 
     def __get__(self, obj, t=None):
         return self if obj is None else json.loads(super().__get__(obj, t) or "null")
@@ -118,12 +119,17 @@ def window(args, most=PAGE_MAX):
     return max(1, int(args.get("from") or 1)), max(1, min(int(args.get("count") or PAGE), most))
 
 
-def page(cls, args, keep=lambda row: True):
-    """One id range of ``cls`` (``from``, ``count``), filtered by ``keep``; ``next`` continues it."""
-    start, count = window(args)
-    rows = [r for r in cls.load_some(start, count) if keep(r)]
-    more = start + count <= cls.max_id()
-    return rows, (start + count if more else None)
+def page(cls, args, keep=lambda row: True, most=PAGE_MAX):
+    """One id range of ``cls`` (``from``, ``count``, at most ``most``), filtered by ``keep``; ``next`` continues it.
+
+    ``load_some`` skips the ids that were deleted and takes the next rows in their place, so a full page ends at its
+    last row's id, not at ``from + count - 1``: ``next`` is the id after that row, or None when the page is not full
+    or nothing follows the row."""
+    start, count = window(args, most)
+    loaded = cls.load_some(start, count)
+    following = int(loaded[-1]._id) + 1 if len(loaded) == count else None
+    more = following is not None and following <= cls.max_id()
+    return [r for r in loaded if keep(r)], (following if more else None)
 
 
 def page_by(cls, field, value, args, most=PAGE_MAX):

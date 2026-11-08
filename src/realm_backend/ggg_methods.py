@@ -5,7 +5,7 @@ from basilisk import Async, Opt, Principal, Vec, blob, query, text, update  # no
 from ggg_api import read, run
 from ggg_did import *  # noqa: F401, F403
 
-__all__ = ['icrc10_supported_standards', 'ggg_user_get', 'ggg_user_list', 'ggg_invite_list', 'ggg_delegation_list', 'ggg_delegable_operations', 'ggg_me', 'ggg_realm_join', 'ggg_profile_update', 'ggg_private_data_update', 'ggg_user_add', 'ggg_user_import', 'ggg_user_edit', 'ggg_user_set_status', 'ggg_user_remove', 'ggg_identity_submit', 'ggg_identity_review', 'ggg_invite_create', 'ggg_invite_revoke', 'ggg_profile_create', 'ggg_profile_edit', 'ggg_role_assign', 'ggg_role_revoke', 'ggg_delegation_grant', 'ggg_delegation_accept', 'ggg_delegation_revoke', 'ggg_delegation_request', 'ggg_delegation_request_decide', 'ggg_department_get', 'ggg_department_list', 'ggg_department_chart', 'ggg_organization_get', 'ggg_organization_list', 'ggg_department_create', 'ggg_department_edit', 'ggg_department_delete', 'ggg_department_set_policy', 'ggg_position_create', 'ggg_position_edit', 'ggg_position_close', 'ggg_appoint', 'ggg_appoint_acting', 'ggg_appointment_end', 'ggg_department_expel', 'ggg_authority_grant', 'ggg_authority_revoke', 'ggg_organization_register', 'ggg_organization_edit', 'ggg_representative_add', 'ggg_representative_remove', 'ggg_organization_set_status', 'ggg_proposal_get', 'ggg_proposal_linked_from', 'ggg_proposal_list', 'ggg_proposal_create', 'ggg_proposal_vote', 'ggg_proposal_withdraw', 'ggg_proposal_open', 'ggg_proposal_finalize', 'ggg_proposal_execute', 'ggg_proposal_stop', 'ggg_mandate_create', 'ggg_mandate_revoke', 'ggg_mandate_assign_executor', 'ggg_contract_create', 'ggg_contract_terminate', 'ggg_governance_update', 'ggg_treasury_view', 'ggg_ledger_view', 'ggg_report_view', 'ggg_treasury_configure', 'ggg_token_register', 'ggg_nft_token_register', 'ggg_transfer_create', 'ggg_transfer_revert', 'ggg_invoice_create', 'ggg_invoice_check', 'ggg_my_invoices', 'ggg_invoice_refresh', 'ggg_fund_create', 'ggg_period_open', 'ggg_period_close', 'ggg_budget_draft', 'ggg_budget_propose', 'ggg_budget_amend', 'ggg_allocation_rule_draft', 'ggg_allocation_rule_propose', 'ggg_payroll_run', 'ggg_report_issue', 'ggg_tax_policy_draft', 'ggg_tax_policy_propose', 'ggg_tax_assess', 'ggg_tax_declare', 'ggg_payment_account_add', 'ggg_payment_account_remove', 'ggg_token_force_transfer', 'ggg_token_freeze', 'ggg_land_list', 'ggg_land_map', 'ggg_credential_verify', 'ggg_land_register', 'ggg_land_transfer', 'ggg_land_mint_nft', 'ggg_land_freeze', 'ggg_land_unfreeze', 'ggg_zone_set', 'ggg_zone_clear', 'ggg_credential_issue', 'ggg_credential_revoke', 'ggg_license_list', 'ggg_license_verify', 'ggg_license_apply', 'ggg_license_renew', 'ggg_license_decide', 'ggg_license_suspend', 'ggg_license_revoke', 'ggg_dispute_get', 'ggg_dispute_list_all', 'ggg_resolution_query', 'ggg_dispute_file', 'ggg_dispute_withdraw', 'ggg_dispute_accept', 'ggg_dispute_reject', 'ggg_case_assign', 'ggg_evidence_submit', 'ggg_evidence_evaluate', 'ggg_verdict_draft', 'ggg_verdict_issue', 'ggg_verdict_finalize', 'ggg_verdict_link_contract', 'ggg_verdict_modify_terms', 'ggg_appeal_file', 'ggg_appeal_decide', 'ggg_penalty_execute', 'ggg_enforcement_record', 'ggg_enforcement_escalate', 'ggg_enforcement_notify', 'ggg_court_create', 'ggg_judge_appoint', 'ggg_judge_revoke', 'ggg_tender_list', 'ggg_tender_get', 'ggg_tender_create', 'ggg_tender_open', 'ggg_tender_close', 'ggg_tender_cancel', 'ggg_bid_submit', 'ggg_bid_withdraw', 'ggg_bids_reveal', 'ggg_bid_score', 'ggg_tender_award', 'ggg_quarter_directory', 'ggg_join_targets', 'ggg_quarter_sync', 'ggg_quarter_report', 'ggg_quarter_register', 'ggg_quarter_deregister', 'ggg_quarter_configure', 'ggg_quarter_secede', 'ggg_quarter_join_federation', 'ggg_self_change_quarter', 'ggg_federal_vote_propose', 'ggg_federal_vote_cancel', 'ggg_federal_vote_finalize', 'ggg_federation_message', 'ggg_codex_status', 'ggg_notification_list', 'ggg_events', 'ggg_codex_install', 'ggg_codex_uninstall', 'ggg_codex_revert', 'ggg_notification_read', 'ggg_notification_send', 'ggg_realm_info', 'ggg_realm_monitor', 'ggg_setup_state', 'ggg_setup_step', 'ggg_setup_launch', 'ggg_host_install', 'ggg_host_infrastructure', 'ggg_realm_configure', 'ggg_realm_configure_branding', 'ggg_realm_configure_tokens', 'ggg_realm_configure_trust_policy', 'ggg_realm_register', 'ggg_realm_upgrade', 'ggg_crypto_envelope', 'ggg_crypto_scopes', 'ggg_crypto_access', 'ggg_document_list', 'ggg_document_get', 'ggg_crypto_public_key', 'ggg_crypto_derive_key', 'ggg_crypto_grant', 'ggg_crypto_revoke', 'ggg_document_store', 'ggg_document_share', 'ggg_document_revoke', 'ggg_document_delete']
+__all__ = ['icrc10_supported_standards', 'ggg_user_get', 'ggg_user_list', 'ggg_invite_list', 'ggg_delegation_list', 'ggg_attribute_list', 'ggg_delegable_operations', 'ggg_delegation_groups', 'ggg_delegation_activity', 'ggg_me', 'ggg_realm_join', 'ggg_profile_update', 'ggg_private_data_update', 'ggg_user_add', 'ggg_user_import', 'ggg_user_edit', 'ggg_user_set_status', 'ggg_user_remove', 'ggg_identity_submit', 'ggg_identity_review', 'ggg_attribute_submit', 'ggg_attribute_review', 'ggg_invite_create', 'ggg_invite_revoke', 'ggg_profile_create', 'ggg_profile_edit', 'ggg_role_assign', 'ggg_role_revoke', 'ggg_delegation_grant', 'ggg_delegation_accept', 'ggg_delegation_revoke', 'ggg_delegation_request', 'ggg_delegation_request_decide', 'ggg_delegation_revoke_all', 'ggg_department_get', 'ggg_department_list', 'ggg_department_chart', 'ggg_organization_get', 'ggg_organization_list', 'ggg_department_create', 'ggg_department_edit', 'ggg_department_delete', 'ggg_department_set_policy', 'ggg_position_create', 'ggg_position_edit', 'ggg_position_close', 'ggg_appoint', 'ggg_appoint_acting', 'ggg_appointment_end', 'ggg_department_expel', 'ggg_authority_grant', 'ggg_authority_revoke', 'ggg_organization_register', 'ggg_organization_edit', 'ggg_representative_add', 'ggg_representative_remove', 'ggg_organization_set_status', 'ggg_proposal_get', 'ggg_proposal_linked_from', 'ggg_proposal_list', 'ggg_proposal_create', 'ggg_proposal_vote', 'ggg_proposal_withdraw', 'ggg_proposal_open', 'ggg_proposal_finalize', 'ggg_proposal_execute', 'ggg_proposal_stop', 'ggg_mandate_create', 'ggg_mandate_revoke', 'ggg_mandate_assign_executor', 'ggg_contract_create', 'ggg_contract_terminate', 'ggg_governance_update', 'ggg_treasury_view', 'ggg_ledger_view', 'ggg_report_view', 'ggg_loan_list', 'ggg_treasury_configure', 'ggg_token_register', 'ggg_nft_token_register', 'ggg_transfer_create', 'ggg_transfer_revert', 'ggg_invoice_create', 'ggg_invoice_check', 'ggg_my_invoices', 'ggg_invoice_refresh', 'ggg_invoice_item_add', 'ggg_fund_create', 'ggg_period_open', 'ggg_period_close', 'ggg_budget_draft', 'ggg_budget_propose', 'ggg_budget_extend', 'ggg_budget_amend', 'ggg_allocation_rule_draft', 'ggg_allocation_rule_propose', 'ggg_payroll_run', 'ggg_loan_create', 'ggg_loan_repay', 'ggg_report_issue', 'ggg_tax_policy_draft', 'ggg_tax_policy_propose', 'ggg_tax_assess', 'ggg_tax_declare', 'ggg_payment_account_add', 'ggg_payment_account_remove', 'ggg_token_force_transfer', 'ggg_token_freeze', 'ggg_land_list', 'ggg_land_map', 'ggg_credential_verify', 'ggg_land_register', 'ggg_land_transfer', 'ggg_land_mint_nft', 'ggg_land_assess', 'ggg_land_freeze', 'ggg_land_unfreeze', 'ggg_zone_define', 'ggg_zone_set', 'ggg_zone_clear', 'ggg_credential_issue', 'ggg_credential_revoke', 'ggg_license_list', 'ggg_license_verify', 'ggg_procedure_list', 'ggg_request_get', 'ggg_request_list', 'ggg_license_apply', 'ggg_license_renew', 'ggg_license_decide', 'ggg_license_suspend', 'ggg_license_revoke', 'ggg_procedure_define', 'ggg_request_file', 'ggg_request_set_due', 'ggg_request_decide', 'ggg_dispute_get', 'ggg_dispute_list_all', 'ggg_resolution_query', 'ggg_dispute_file', 'ggg_dispute_withdraw', 'ggg_dispute_accept', 'ggg_dispute_reject', 'ggg_case_assign', 'ggg_evidence_submit', 'ggg_evidence_evaluate', 'ggg_verdict_draft', 'ggg_verdict_issue', 'ggg_verdict_finalize', 'ggg_verdict_link_contract', 'ggg_verdict_modify_terms', 'ggg_appeal_file', 'ggg_appeal_decide', 'ggg_penalty_execute', 'ggg_enforcement_record', 'ggg_enforcement_escalate', 'ggg_enforcement_notify', 'ggg_court_create', 'ggg_judge_appoint', 'ggg_judge_revoke', 'ggg_tender_list', 'ggg_tender_get', 'ggg_tender_create', 'ggg_tender_open', 'ggg_tender_close', 'ggg_tender_cancel', 'ggg_bid_submit', 'ggg_bid_withdraw', 'ggg_bids_reveal', 'ggg_bid_score', 'ggg_tender_award', 'ggg_tender_notice', 'ggg_quarter_directory', 'ggg_join_targets', 'ggg_quarter_sync', 'ggg_quarter_report', 'ggg_quarter_register', 'ggg_quarter_deregister', 'ggg_quarter_configure', 'ggg_quarter_secede', 'ggg_quarter_join_federation', 'ggg_self_change_quarter', 'ggg_federal_vote_propose', 'ggg_federal_vote_cancel', 'ggg_federal_vote_finalize', 'ggg_federation_message', 'ggg_codex_status', 'ggg_notification_list', 'ggg_events', 'ggg_external_list', 'ggg_dispatch_list', 'ggg_task_list', 'ggg_codex_install', 'ggg_codex_uninstall', 'ggg_codex_revert', 'ggg_codex_activate', 'ggg_notification_read', 'ggg_notification_send', 'ggg_external_add', 'ggg_external_report', 'ggg_dispatch_confirm', 'ggg_task_schedule', 'ggg_task_reschedule', 'ggg_task_cancel', 'ggg_realm_info', 'ggg_realm_monitor', 'ggg_setup_state', 'ggg_setup_step', 'ggg_setup_launch', 'ggg_host_install', 'ggg_host_infrastructure', 'ggg_realm_configure', 'ggg_realm_configure_branding', 'ggg_realm_configure_tokens', 'ggg_realm_configure_trust_policy', 'ggg_realm_register', 'ggg_realm_upgrade', 'ggg_crypto_envelope', 'ggg_crypto_scopes', 'ggg_crypto_access', 'ggg_document_list', 'ggg_document_get', 'ggg_crypto_public_key', 'ggg_crypto_derive_key', 'ggg_crypto_grant', 'ggg_crypto_revoke', 'ggg_document_store', 'ggg_document_share', 'ggg_document_publish', 'ggg_document_revoke', 'ggg_document_delete']
 
 @query
 def icrc10_supported_standards() -> Vec[Icrc10SupportedStandardsResult]: return read("icrc10_supported_standards", None, None, "vec Icrc10SupportedStandardsResult")
@@ -18,7 +18,13 @@ def ggg_invite_list(a: ListArgs) -> InvitePageReply: return read("invite_list", 
 @query
 def ggg_delegation_list(a: DelegationListArgs) -> DelegationPageReply: return read("delegation_list", "DelegationListArgs", a, "DelegationPageReply")
 @query
+def ggg_attribute_list(a: AttributeListArgs) -> AttributePageReply: return read("attribute_list", "AttributeListArgs", a, "AttributePageReply")
+@query
 def ggg_delegable_operations() -> VecDelegableOperationReply: return read("delegable_operations", None, None, "VecDelegableOperationReply")
+@query
+def ggg_delegation_groups(a: DelegationGroupsArgs) -> DelegationGroupPageReply: return read("delegation_groups", "DelegationGroupsArgs", a, "DelegationGroupPageReply")
+@query
+def ggg_delegation_activity(a: DelegationActivityArgs) -> EventPageReply: return read("delegation_activity", "DelegationActivityArgs", a, "EventPageReply")
 @query
 def ggg_me(a: MeArgs) -> MeReply: return read("me", "MeArgs", a, "MeReply")
 @update
@@ -42,6 +48,10 @@ def ggg_identity_submit(a: IdentitySubmitArgs) -> Async[IdentityReply]: return (
 @update
 def ggg_identity_review(a: IdentityReviewArgs) -> Async[IdentityReply]: return (yield from run("identity_review", "IdentityReviewArgs", a, "IdentityReply"))
 @update
+def ggg_attribute_submit(a: AttributeSubmitArgs) -> Async[AttributeReply]: return (yield from run("attribute_submit", "AttributeSubmitArgs", a, "AttributeReply"))
+@update
+def ggg_attribute_review(a: AttributeReviewArgs) -> Async[AttributeReply]: return (yield from run("attribute_review", "AttributeReviewArgs", a, "AttributeReply"))
+@update
 def ggg_invite_create(a: InviteCreateArgs) -> Async[InviteCreatedReply]: return (yield from run("invite_create", "InviteCreateArgs", a, "InviteCreatedReply"))
 @update
 def ggg_invite_revoke(a: text) -> Async[InviteReply]: return (yield from run("invite_revoke", "text", a, "InviteReply"))
@@ -63,6 +73,8 @@ def ggg_delegation_revoke(a: text) -> Async[DelegationReply]: return (yield from
 def ggg_delegation_request(a: DelegationRequestArgs) -> Async[DelegationRequestReply]: return (yield from run("delegation_request", "DelegationRequestArgs", a, "DelegationRequestReply"))
 @update
 def ggg_delegation_request_decide(a: DelegationDecideArgs) -> Async[OptDelegationReply]: return (yield from run("delegation_request_decide", "DelegationDecideArgs", a, "OptDelegationReply"))
+@update
+def ggg_delegation_revoke_all(a: DelegationRevokeAllArgs) -> Async[DelegationsRevokedReply]: return (yield from run("delegation_revoke_all", "DelegationRevokeAllArgs", a, "DelegationsRevokedReply"))
 @query
 def ggg_department_get(a: GetArgs) -> OptDepartmentDetailReply: return read("department_get", "GetArgs", a, "OptDepartmentDetailReply")
 @query
@@ -147,6 +159,8 @@ def ggg_treasury_view(a: ListArgs) -> TreasuryViewReply: return read("treasury_v
 def ggg_ledger_view(a: LedgerArgs) -> LedgerPageReply: return read("ledger_view", "LedgerArgs", a, "LedgerPageReply")
 @query
 def ggg_report_view(a: ReportArgs) -> ReportPageReply: return read("report_view", "ReportArgs", a, "ReportPageReply")
+@query
+def ggg_loan_list(a: LoanListArgs) -> LoanPageReply: return read("loan_list", "LoanListArgs", a, "LoanPageReply")
 @update
 def ggg_treasury_configure(a: TreasuryConfigureArgs) -> Async[GovernedReply]: return (yield from run("treasury_configure", "TreasuryConfigureArgs", a, "GovernedReply"))
 @update
@@ -166,6 +180,8 @@ def ggg_my_invoices(a: MyInvoicesArgs) -> MyInvoicePageReply: return read("my_in
 @update
 def ggg_invoice_refresh(a: InvoiceRefreshArgs) -> Async[InvoicePageReply]: return (yield from run("invoice_refresh", "InvoiceRefreshArgs", a, "InvoicePageReply"))
 @update
+def ggg_invoice_item_add(a: InvoiceItemAddArgs) -> Async[InvoiceReply]: return (yield from run("invoice_item_add", "InvoiceItemAddArgs", a, "InvoiceReply"))
+@update
 def ggg_fund_create(a: FundCreateArgs) -> Async[GovernedReply]: return (yield from run("fund_create", "FundCreateArgs", a, "GovernedReply"))
 @update
 def ggg_period_open(a: PeriodOpenArgs) -> Async[GovernedReply]: return (yield from run("period_open", "PeriodOpenArgs", a, "GovernedReply"))
@@ -174,7 +190,9 @@ def ggg_period_close(a: text) -> Async[GovernedReply]: return (yield from run("p
 @update
 def ggg_budget_draft(a: BudgetDraftArgs) -> Async[GovernedReply]: return (yield from run("budget_draft", "BudgetDraftArgs", a, "GovernedReply"))
 @update
-def ggg_budget_propose(a: text) -> Async[GovernedReply]: return (yield from run("budget_propose", "text", a, "GovernedReply"))
+def ggg_budget_propose(a: BudgetProposeArgs) -> Async[GovernedReply]: return (yield from run("budget_propose", "BudgetProposeArgs", a, "GovernedReply"))
+@update
+def ggg_budget_extend(a: text) -> Async[NatReply]: return (yield from run("budget_extend", "text", a, "NatReply"))
 @update
 def ggg_budget_amend(a: BudgetAmendArgs) -> Async[GovernedReply]: return (yield from run("budget_amend", "BudgetAmendArgs", a, "GovernedReply"))
 @update
@@ -183,6 +201,10 @@ def ggg_allocation_rule_draft(a: AllocationRuleDraftArgs) -> Async[GovernedReply
 def ggg_allocation_rule_propose(a: text) -> Async[GovernedReply]: return (yield from run("allocation_rule_propose", "text", a, "GovernedReply"))
 @update
 def ggg_payroll_run(a: PayrollRunArgs) -> Async[GovernedReply]: return (yield from run("payroll_run", "PayrollRunArgs", a, "GovernedReply"))
+@update
+def ggg_loan_create(a: LoanCreateArgs) -> Async[GovernedReply]: return (yield from run("loan_create", "LoanCreateArgs", a, "GovernedReply"))
+@update
+def ggg_loan_repay(a: LoanRepayArgs) -> Async[LoanReply]: return (yield from run("loan_repay", "LoanRepayArgs", a, "LoanReply"))
 @update
 def ggg_report_issue(a: ReportIssueArgs) -> Async[FinancialReportReply]: return (yield from run("report_issue", "ReportIssueArgs", a, "FinancialReportReply"))
 @update
@@ -214,9 +236,13 @@ def ggg_land_transfer(a: LandTransferArgs) -> Async[GovernedReply]: return (yiel
 @update
 def ggg_land_mint_nft(a: LandMintArgs) -> Async[NatReply]: return (yield from run("land_mint_nft", "LandMintArgs", a, "NatReply"))
 @update
+def ggg_land_assess(a: LandAssessArgs) -> Async[LandReply]: return (yield from run("land_assess", "LandAssessArgs", a, "LandReply"))
+@update
 def ggg_land_freeze(a: LandFreezeArgs) -> Async[LandReply]: return (yield from run("land_freeze", "LandFreezeArgs", a, "LandReply"))
 @update
 def ggg_land_unfreeze(a: text) -> Async[LandReply]: return (yield from run("land_unfreeze", "text", a, "LandReply"))
+@update
+def ggg_zone_define(a: ZoneDefineArgs) -> Async[GovernedReply]: return (yield from run("zone_define", "ZoneDefineArgs", a, "GovernedReply"))
 @update
 def ggg_zone_set(a: ZoneSetArgs) -> Async[ZoneReply]: return (yield from run("zone_set", "ZoneSetArgs", a, "ZoneReply"))
 @update
@@ -229,6 +255,12 @@ def ggg_credential_revoke(a: CredentialRevokeArgs) -> Async[NatReply]: return (y
 def ggg_license_list(a: LicenseListArgs) -> LicensePageReply: return read("license_list", "LicenseListArgs", a, "LicensePageReply")
 @query
 def ggg_license_verify(a: LicenseVerifyArgs) -> LicenseCheckReply: return read("license_verify", "LicenseVerifyArgs", a, "LicenseCheckReply")
+@query
+def ggg_procedure_list(a: ListArgs) -> ProcedurePageReply: return read("procedure_list", "ListArgs", a, "ProcedurePageReply")
+@query
+def ggg_request_get(a: RequestGetArgs) -> OptRequestReply: return read("request_get", "RequestGetArgs", a, "OptRequestReply")
+@query
+def ggg_request_list(a: RequestListArgs) -> RequestPageReply: return read("request_list", "RequestListArgs", a, "RequestPageReply")
 @update
 def ggg_license_apply(a: LicenseApplyArgs) -> Async[LicenseReply]: return (yield from run("license_apply", "LicenseApplyArgs", a, "LicenseReply"))
 @update
@@ -239,6 +271,14 @@ def ggg_license_decide(a: LicenseDecideArgs) -> Async[LicenseReply]: return (yie
 def ggg_license_suspend(a: LicenseSuspendArgs) -> Async[LicenseReply]: return (yield from run("license_suspend", "LicenseSuspendArgs", a, "LicenseReply"))
 @update
 def ggg_license_revoke(a: text) -> Async[LicenseReply]: return (yield from run("license_revoke", "text", a, "LicenseReply"))
+@update
+def ggg_procedure_define(a: ProcedureDefineArgs) -> Async[GovernedReply]: return (yield from run("procedure_define", "ProcedureDefineArgs", a, "GovernedReply"))
+@update
+def ggg_request_file(a: RequestFileArgs) -> Async[RequestReply]: return (yield from run("request_file", "RequestFileArgs", a, "RequestReply"))
+@update
+def ggg_request_set_due(a: RequestSetDueArgs) -> Async[RequestReply]: return (yield from run("request_set_due", "RequestSetDueArgs", a, "RequestReply"))
+@update
+def ggg_request_decide(a: RequestDecideArgs) -> Async[RequestReply]: return (yield from run("request_decide", "RequestDecideArgs", a, "RequestReply"))
 @query
 def ggg_dispute_get(a: DisputeGetArgs) -> OptDisputeReply: return read("dispute_get", "DisputeGetArgs", a, "OptDisputeReply")
 @query
@@ -309,6 +349,8 @@ def ggg_bids_reveal(a: BidsRevealArgs) -> Async[GovernedReply]: return (yield fr
 def ggg_bid_score(a: BidScoreArgs) -> Async[BidReply]: return (yield from run("bid_score", "BidScoreArgs", a, "BidReply"))
 @update
 def ggg_tender_award(a: TenderAwardArgs) -> Async[GovernedReply]: return (yield from run("tender_award", "TenderAwardArgs", a, "GovernedReply"))
+@update
+def ggg_tender_notice(a: TenderNoticeArgs) -> Async[TenderReply]: return (yield from run("tender_notice", "TenderNoticeArgs", a, "TenderReply"))
 @query
 def ggg_quarter_directory(a: ListArgs) -> QuarterDirectoryReply: return read("quarter_directory", "ListArgs", a, "QuarterDirectoryReply")
 @query
@@ -343,6 +385,12 @@ def ggg_codex_status(a: ListArgs) -> CodexViewReply: return read("codex_status",
 def ggg_notification_list(a: NotificationListArgs) -> NotificationPageReply: return read("notification_list", "NotificationListArgs", a, "NotificationPageReply")
 @query
 def ggg_events(a: ListArgs) -> EventPageReply: return read("events", "ListArgs", a, "EventPageReply")
+@query
+def ggg_external_list(a: ListArgs) -> ExternalPageReply: return read("external_list", "ListArgs", a, "ExternalPageReply")
+@query
+def ggg_dispatch_list(a: DispatchListArgs) -> DispatchPageReply: return read("dispatch_list", "DispatchListArgs", a, "DispatchPageReply")
+@query
+def ggg_task_list(a: TaskListArgs) -> TaskPageReply: return read("task_list", "TaskListArgs", a, "TaskPageReply")
 @update
 def ggg_codex_install(a: CodexSource) -> Async[GovernedReply]: return (yield from run("codex_install", "CodexSource", a, "GovernedReply"))
 @update
@@ -350,9 +398,23 @@ def ggg_codex_uninstall() -> Async[GovernedReply]: return (yield from run("codex
 @update
 def ggg_codex_revert() -> Async[GovernedReply]: return (yield from run("codex_revert", None, None, "GovernedReply"))
 @update
+def ggg_codex_activate(a: CodexActivateArgs) -> Async[GovernedReply]: return (yield from run("codex_activate", "CodexActivateArgs", a, "GovernedReply"))
+@update
 def ggg_notification_read(a: NotificationReadArgs) -> Async[NotificationsReadReply]: return (yield from run("notification_read", "NotificationReadArgs", a, "NotificationsReadReply"))
 @update
-def ggg_notification_send(a: NotificationSendArgs) -> Async[NotificationReply]: return (yield from run("notification_send", "NotificationSendArgs", a, "NotificationReply"))
+def ggg_notification_send(a: NotificationSendArgs) -> Async[DeliveryReply]: return (yield from run("notification_send", "NotificationSendArgs", a, "DeliveryReply"))
+@update
+def ggg_external_add(a: ExternalAddArgs) -> Async[GovernedReply]: return (yield from run("external_add", "ExternalAddArgs", a, "GovernedReply"))
+@update
+def ggg_external_report(a: ExternalReportArgs) -> Async[EventReply]: return (yield from run("external_report", "ExternalReportArgs", a, "EventReply"))
+@update
+def ggg_dispatch_confirm(a: DispatchConfirmArgs) -> Async[DispatchReply]: return (yield from run("dispatch_confirm", "DispatchConfirmArgs", a, "DispatchReply"))
+@update
+def ggg_task_schedule(a: TaskScheduleArgs) -> Async[TaskReply]: return (yield from run("task_schedule", "TaskScheduleArgs", a, "TaskReply"))
+@update
+def ggg_task_reschedule(a: TaskRescheduleArgs) -> Async[TaskReply]: return (yield from run("task_reschedule", "TaskRescheduleArgs", a, "TaskReply"))
+@update
+def ggg_task_cancel(a: text) -> Async[TaskReply]: return (yield from run("task_cancel", "text", a, "TaskReply"))
 @query
 def ggg_realm_info() -> Realm: return read("realm_info", None, None, "Realm")
 @query
@@ -401,6 +463,8 @@ def ggg_crypto_revoke(a: KeyRevokeArgs) -> Async[NatReply]: return (yield from r
 def ggg_document_store(a: DocumentStoreArgs) -> Async[DocumentStoredReply]: return (yield from run("document_store", "DocumentStoreArgs", a, "DocumentStoredReply"))
 @update
 def ggg_document_share(a: DocumentShareArgs) -> Async[NatReply]: return (yield from run("document_share", "DocumentShareArgs", a, "NatReply"))
+@update
+def ggg_document_publish(a: DocumentPublishArgs) -> Async[DocumentReply]: return (yield from run("document_publish", "DocumentPublishArgs", a, "DocumentReply"))
 @update
 def ggg_document_revoke(a: DocumentRevokeArgs) -> Async[NatReply]: return (yield from run("document_revoke", "DocumentRevokeArgs", a, "NatReply"))
 @update

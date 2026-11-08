@@ -19,7 +19,10 @@ Each department has an approval **policy**, set with `department_set_policy`:
 {"department": "Civil Registry", "m": 2, "n": 3, "quorum": 0, "veto": ["dana"]}
 ```
 
-- `m` of `n`: how many yes votes the department needs, out of its seats.
+- `m` of `n`: how many yes votes the department needs, out of the `n` seats of its policy: a proposal's threshold is m/n,
+  rounded down (2 of 3 is 66 666 666 in hundred-millionths), and the yes votes must reach it, which takes exactly `m` of
+  them. `n` is what the threshold is a share of, whoever sits in the seats: a vacancy never makes a vote easier, and a
+  direct policy (1 of 1) needs one yes however many hold seats.
 - `quorum`: turnout needed, as a share of the department's voters (0 to 100 000 000; every ratio is in hundred-millionths,
   so 50 % is 50 000 000 and 0.1 % is 100 000).
 - `veto`: seated members whose *no* rejects the proposal.
@@ -98,16 +101,33 @@ replaced by the second. The other side is readable: `proposal_get` shows the pro
 (`replaces` there reads "replaced by"). Nothing limits how many proposals link to one.
 
 The voting window comes from the realm's calendar (default 7 days). `governance_update` changes
-it, along with the realm-wide `voting_threshold` and `voting_quorum`, in hundred-millionths.
+it, along with the realm-wide `voting_threshold` and `voting_quorum`, in hundred-millionths, and the
+realm's **casting vote**, `casting_vote`: the principal of an active member, or `""` to remove it.
+
+**The rule of a proposal.** Every proposal stores the rule that decides it when it is filed, like its action:
+`threshold`, `quorum`, `threshold_of` (`cast`, the yes and no votes cast, or `eligible`, all the eligible voters) and
+`casting_vote`, and `proposal_create` also takes `kind` and `matter`, the realm's words for what it is and decides. The
+default rule is the scope's own:
+
+- realm-wide: the realm's `voting_threshold` and `voting_quorum` over the votes `cast`, and the realm's `casting_vote`
+  at that moment;
+- a department: m/n of its policy's `n` seats, with the policy's `quorum`, and no casting vote.
+
+A proposer may state a stricter rule in `proposal_create`, never a weaker one (`InvalidArgument`): a higher
+`threshold` or `quorum`, or `eligible` where the default is `cast`. A proposal a governed call files takes its scope's
+default rule. A stricter department threshold `t` needs ceil(`t` · `n`) yes votes. The electorate is counted when the
+vote opens (`tally.eligible`, for the quorum and for the end when everyone has voted), and a department's vote keeps the
+policy's `n` as it was then (`tally.seats`): members who join, seats that fill and later changes to the policy do not
+change what the rule is measured against.
 
 **Who votes and how it is counted:**
 
 | | Realm-wide proposal (root department) | Department proposal |
 |---|---|---|
 | Eligible voters | every active member | the head and the holders of active seats |
-| Passes when | turnout ≥ `voting_quorum` and yes > `voting_threshold` of yes + no (default 50 %) | yes ≥ `m`, turnout ≥ the policy's `quorum`, and no veto holder voted no |
+| Passes when | turnout ≥ the stored `quorum` and yes *exceed* the stored `threshold` of yes + no (`cast`) or of all the eligible voters (`eligible`). Under `cast`, a tie exactly at the threshold passes if the casting member is still a member and voted yes | yes *reach* the stored `threshold` of the policy's `n` seats (exactly `m` under the policy's own rule), turnout ≥ the stored `quorum` of the eligible voters, and no veto holder voted no |
 | Rejected when | the rule above fails at the end of the vote | the rule above fails at the end of the vote |
-| Can close early | yes, once every eligible member has voted | yes, once every eligible member has voted, or as soon as it passes and every veto holder who can still vote has voted. Only an acceptance ends it early: until the deadline, or until every eligible member has voted, a no (a veto holder's too) can be replaced, even when `m` is out of reach |
+| Can close early | yes, once every eligible member has voted | yes, once every eligible member has voted, or as soon as it passes and every veto holder who can still vote has voted. Only an acceptance ends it early: until the deadline, or until every eligible member has voted, a no (a veto holder's too) can be replaced, even when the threshold is out of reach |
 
 A department cannot be deleted while it has a proposal being voted on or waiting to run. Only the root department
 is realm-wide: a proposal whose department is gone has no voters and runs nothing.
@@ -130,36 +150,92 @@ A member can let someone else act for them: a person, or an AI agent.
 ```bash
 # Alice lets her assistant vote for her for 30 days
 realms local call delegation_grant '{"delegate": "<assistant principal>",
-  "operations": ["proposal.vote"], "expires_in": 2592000, "label": "assistant"}'
+  "groups": ["vote"], "expires_in": 2592000, "label": "assistant"}'
 
 # The assistant then signs calls for Alice
 realms local call proposal_vote '{"proposal": "P-7", "choice": "yes", "on_behalf_of": "<alice>"}'
 ```
 
-- `operations` lists **permissions**, not operation names. `delegable_operations` shows which
-  operations can be delegated and the permission to name for each.
-- A grant lasts at most a year.
+### Tiers and groups
+
+Every operation has a **tier** and, mostly, a **group**. GGG states them for its operations in `ggg/delegation.json`
+(generated into `ggg_delegation.py`); the operations Realms GOS adds are in `core/poa.py` (`OWN`).
+
+| Tier | Under a grant |
+|---|---|
+| `direct` | Runs at once as the member, and the member is told afterwards. |
+| `confirm` | Asks the member each time: a delegate only prepares it. Not built yet: refused. |
+| `member`, `founder` | The member's own act (`delegation_revoke_all`), or the founder's (`setup_launch`). Never under a grant. |
+| `none` | Needs no power of attorney: public reads, calls between canisters, the host's steps. |
+
+A few `direct` operations ask each time when their arguments say so (`proposal_create` with an action, an invite that
+carries a profile or a seat, a trust-policy step, and others): `confirm_if` names the condition (`CONDITIONS` in
+`core/poa.py`).
+
+A grant names **groups**, plain-language sets of operations, such as `vote`, `propose` or `see`, or `*` for everything:
+every group, those the member gains later included, and every operation a later release adds, but never a `member` or
+`founder` operation. A grant names groups or permissions, never both.
+
+- `delegable_operations` returns the groups the caller can grant (also `delegation_groups`, paged, and GGG's
+  `ggg_delegation_groups`): each with its label, summary, risk and longest duration, and the operations in it the
+  caller holds, with their tiers. A group is listed when the caller holds the permission of one of its enabled
+  operations. It comes with `operations`, the operations a grant that names permissions covers.
+- A grant of a group lasts at most the group's `longest`: a year, except `money` and `admin` (90 days) and `setup`
+  (30 days). A grant naming several groups lasts at most the shortest; `*` lasts at most 90 days, and each group's own
+  longest still applies under it. Nothing lasts more than a year.
+- The limits are read when a call is made, not only when the grant is: a stricter limit binds a grant made before it.
+- **The rollout.** `ENABLED` in `core/poa.py` lists the operations a grant by groups can reach in this release. The
+  classification arrives whole, the code in phases, so an operation that is not enabled is refused whatever its
+  tier. This release enables the 24 operations that were delegable once phase 0 had closed its holes.
+- **Grants made before groups** name permissions (`operations`) and keep covering exactly those 24 operations (`LEGACY`),
+  with the behaviour they had then: a proposal with an action stays refused, and payout accounts, identity proofs,
+  quarter moves and federal votes stay refused. A later release never widens them. `attribute_list` is not among them: a
+  grant of `self.data_view` was consented as profile, notifications and invoices, and attributes are personal data.
+
+### Rules for a delegate
+
+- `operations` lists **permissions**, not operation names, in a grant made the old way. A grant lasts at most a year.
 - If the delegate is a registered user, the grant is **pending** until they `delegation_accept` it.
   Any other delegate (such as an AI agent's principal) gets it at once.
-- Either side ends it with `delegation_revoke`.
+- Either side ends it with `delegation_revoke`. `delegation_revoke_all` ends every pending or active grant the member
+  gave, a page at a time, and is the member's own act: it is refused under any grant.
 - A delegate can ask instead: `delegation_request` (open for one hour, at most 10 open requests
-  per person), answered with `delegation_request_decide`.
+  per person), answered with `delegation_request_decide`, which can only narrow the request: fewer groups, an earlier
+  expiry.
 - Power of attorney itself, payout accounts, identity proofs, moving to another quarter, federal votes, tasks,
-  keys, the shell and extension calls are never delegable.
+  keys, the shell and extension calls are not done directly under a grant.
 - A proposal a delegate files with `proposal_create` is a motion: it carries no action.
 - A delegate's governed call (a transfer from a fund, say) is always filed as a proposal, even where the
   department decides directly. The proposal records the grant it was filed under. When it is carried, the call runs
-  unless that grant was revoked or replaced, and only if the grant could still make the call: its scope, the member's
-  permissions and standing are checked again. A grant that has merely expired does not stop it, because a vote can
-  outlast the grant; after the grant has expired, the member stops such a proposal by withdrawing it (or voting no).
-  Otherwise the proposal ends `failed`, with the reason.
-- A delegate does not vote on a proposal it filed, and withdraws only the proposals it filed under its grant.
+  unless that grant was revoked or replaced, and only if the grant could still make the call: its scope, its limits (the
+  grant's longest duration is measured at the filing, not at the vote), the member's permissions and standing are
+  checked again. A grant that has merely expired does not stop it, because a
+  vote can outlast the grant; after the grant has expired, the member stops such a proposal by withdrawing it (or
+  voting no). Otherwise the proposal ends `failed`, with the reason.
+- A delegate never votes on a proposal it filed, whichever grantor it votes for: a delegate that holds grants from
+  two members and filed for one votes on it for neither. And no delegate of a member votes
+  on a proposal that a delegate of the same member filed (I-ID-13), whoever filed it and whatever the status of that
+  grant now. The member votes on it as usual, and a delegate of another member may. A delegate withdraws only the
+  proposals it filed under its grant.
 - A delegate reads the member's own notifications, not the inboxes of the offices where the member holds a seat.
 
-The guardrails make delegation safe by construction: a delegate can only use permissions the
-grant names, only on `delegable` operations, never on `signing` ones, and never with `all`. The
-audit `Event` records both the grantor (`user`) and the signer (`by`). `codex_status` reports `agents` and
-`delegable` empty: no signing permission is open to an agent or to a delegate, whatever the codex says.
+### What the member is told
+
+- After a delegate's update succeeds, the member gets a notification with topic `poa`: "‹name› did ‹what›", linked
+  to the proposal it concerns or else to the Power of attorney page. ‹name› is the grant's label, or else the
+  delegate's principal. A delegate's acts within an hour share one notice (`Delegation.notice` and `notice_acts`): it
+  keeps a count and the last ten acts, and is unread again each time. Reads send nothing, and marking notices read
+  leaves none.
+- A delegate never marks a `poa` notice read: by id it is refused, and with `all` it is left unread.
+- The audit `Event` of a delegated act names the grant it ran under (`Event.grant`, indexed). `delegation_activity`
+  pages the events of one grant, newest first, to its grantor and to its delegate, who needs no permission of its own
+  for that grant (an AI connection has none). The audit log keeps its last 2,000 events, so the reply says how far
+  back it reaches (`since`); the `poa` notices are the lasting record.
+
+The guardrails make delegation safe by construction: a delegate can only do what its grant covers, only on `direct`
+operations, never on `signing` ones, and never with `all`. The audit `Event` records both the grantor (`user`) and the
+signer (`by`). `codex_status` reports `agents` and `delegable` empty: no signing permission is open to an agent or to
+a delegate, whatever the codex says.
 
 ## Agents
 

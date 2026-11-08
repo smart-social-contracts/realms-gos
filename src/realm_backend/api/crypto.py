@@ -1,8 +1,9 @@
-from core import chain
-from core.db import Fail, Forbidden, find, next_id, page_by, view
-from ggg import Department, Document, KeyEnvelope, Realm
+from core import auth, chain, language
+from core.db import Conflict, Fail, Forbidden, deref, find, next_id, page_by, view
+from ggg import Department, Dispatch, Document, External, KeyEnvelope, Realm
 from core.op import op
-from api.proposals import holders, root
+from api.external import queue
+from api.proposals import appointed, holders, root
 
 MGMT = "aaaaa-aa"
 CONTEXT = (bytes([len(b"realms")]) + b"realms").hex()  # one root context; recipients differ by vetKD input
@@ -74,7 +75,7 @@ def crypto_public_key(c, args):
     return {"public_key": blob_hex(reply)}
 
 
-@op("self.data_manage", returns="encrypted_key")
+@op("self.data_manage", returns="encrypted_key", secret=("encrypted_key",))
 def crypto_derive_key(c, args):
     """Your vetKey, encrypted to ``transport_public_key`` (hex). It opens only what was wrapped for you."""
     reply = yield from chain.call(MGMT, "vetkd_derive_key", f'(record {{ input = blob "{blob(c.user.encode().hex())}"; '
@@ -83,7 +84,7 @@ def crypto_derive_key(c, args):
     return {"encrypted_key": blob_hex(reply)}
 
 
-@op("self.data_manage", returns="granted")
+@op("self.data_manage", returns="granted", secret=("keys",))
 def crypto_grant(c, args):
     """Store wrapped keys at ``scope``: ``keys`` maps principal to wrapped key. Replaces earlier wraps."""
     manager(args["scope"], c.user)
@@ -130,11 +131,18 @@ def staff(department, principal):
         raise Forbidden(f"only {department}'s staff manage its documents")
 
 
-@op("document.manage")
+def stored_languages(args):
+    language.require_all(args["languages"])
+
+
+@op("document.manage", check=stored_languages, private=("keys",), secret=("keys",))
 def document_store(c, args):
-    """Store a ``department`` document (or replace ``document``): ``title``, ``ref`` and ``hash`` of its ciphertext,
-    and optional ``keys`` (principal to wrapped key). Returns ``document`` and its key ``scope``."""
-    fields = {"title": args["title"], "ref": args["ref"], "hash": args["hash"], "at": chain.now()}
+    """Store a ``department`` document (or replace ``document``): ``title``, ``languages`` (BCP 47 tags), ``ref`` and
+    ``hash`` of its ciphertext, optional ``kind`` (minutes, an ordinance), ``facts`` (what legislation reads about
+    it) and ``keys`` (principal to wrapped key). A replacement that leaves out ``kind`` or ``facts`` keeps them.
+    Returns ``document`` and its key ``scope``."""
+    fields = {"title": args["title"], "languages": args["languages"], "ref": args["ref"], "hash": args["hash"],
+              "at": chain.now()}
     staff(args["department"], c.user)
     doc = find(Document, args["document"]) if args.get("document") else None
     if doc and doc.department != args["department"]:
@@ -142,16 +150,65 @@ def document_store(c, args):
     doc = doc or Document(id=next_id(Document, "DOC"), department=args["department"], author=c.user)
     for k, v in fields.items():
         setattr(doc, k, v)
+    for k in ("kind", "facts"):  # left out, they stay as they are: a screen that predates them re-stores a document
+        if args.get(k) is not None:
+            setattr(doc, k, args[k])
     grant(scope_of(doc), args.get("keys") or {}, c.user)
     return {"document": doc.id, "scope": scope_of(doc)}
 
 
-@op("document.manage", returns="granted")
+RECIPIENTS = ("User", "Organization", "External")
+
+
+def recipient_of(args):
+    """The ``recipient`` of a share, which must exist, and the ``basis`` it states, if any, which must say its legal
+    basis and purpose."""
+    recipient, basis = args["recipient"], args.get("basis")
+    if not isinstance(recipient, str) or recipient.partition(":")[0] not in RECIPIENTS:
+        raise Fail(f"a document is shared with a User, an Organization or an External, not {recipient}")
+    deref(recipient)
+    if basis is not None and not (isinstance(basis, dict) and basis.get("legal_basis") and basis.get("purpose")):
+        raise Fail("a basis states its legal_basis and its purpose")
+
+
+@op("document.manage", private=("keys",), secret=("keys",), returns="granted")
 def document_share(c, args):
-    """Share ``document``: ``keys`` maps principal to wrapped key. Returns ``granted``."""
+    """Share ``document`` with ``recipient`` (``User:id``, ``Organization:id`` or ``External:id``), who must exist:
+    ``keys`` maps principal to wrapped key (for an External, the principal that delivers to it). State the ``basis``
+    (``legal_basis``, ``purpose``, optional ``legislation`` and ``special_category``) and any ``facts`` legislation
+    reads; the audit log keeps them with the recipient. Returns ``granted``."""
     doc = find(Document, args["document"])
     staff(doc.department, c.user)
+    recipient_of(args)
     return {"granted": grant(scope_of(doc), args["keys"], c.user)}
+
+
+def sent_to(doc, journal):
+    """Whether a dispatch of ``doc`` to ``journal`` is queued or confirmed. A failed one may be sent again."""
+    return any(p["journal"] == journal.id and Dispatch[p["dispatch"]].status != "failed" for p in doc.publications)
+
+
+@op("document.manage", returns="document")
+def document_publish(c, args):
+    """Make ``document`` public: the content in clear is at ``ref``, with its ``hash``, and anyone reads the record
+    with document_get, signed in or not. Publish only what everyone may read: a published copy holds no personal
+    data (I-PRV-1). Publishing the same content again is not an error; other content is a conflict. With a journal
+    outside the realm in ``to`` (an outside body of kind journal) a dispatch to it is queued, once unless it failed:
+    its confirmation gives the document's publication the journal's date and reference."""
+    doc = find(Document, args["document"])
+    staff(doc.department, c.user)
+    journal = find(External, args["to"]) if args.get("to") else None
+    if journal is not None and journal.kind != "journal":
+        raise Fail(f"{journal.id} is not a journal")
+    published = {"ref": args["ref"], "hash": args["hash"]}
+    if doc.public not in (None, published):
+        raise Conflict(f"{doc.id} is already published with other content")
+    doc.public = published
+    if journal is not None and not sent_to(doc, journal):
+        sent = queue(journal, "publication", doc.title, published, document=doc.id)
+        doc.publications = doc.publications + [{"journal": journal.id, "dispatch": sent.id, "published_at": None,
+                                                "ref": None}]
+    return {"document": doc.id}
 
 
 @op("document.manage", returns="revoked")
@@ -178,19 +235,50 @@ def document_delete(c, args):
 
 @op("document.manage", read=True, returns="documents")
 def document_list(c, args):
-    """The documents of ``department`` (id, title, hash, author, time), for its staff, ``count`` at a time (default
-    100, at most 500) from row ``from`` (default 1). Returns ``documents`` and ``next`` (null at the end)."""
+    """The documents of ``department``, for its staff, all or only those of ``kind`` and ``language``, ``count`` at a
+    time (default 100, at most 500) from row ``from`` (default 1). Returns ``documents`` and ``next`` (null at the
+    end); a page can hold fewer than ``count`` when a filter is given: follow ``next``."""
     staff(args["department"], c.user)
+    if args.get("language"):
+        language.require(args["language"])
     rows, nxt = page_by(Document, "department", args["department"], args)
-    return {"documents": [view(d, "id", "title", "hash", "author", "at") for d in rows], "next": nxt}
+    wanted = [d for d in rows if args.get("kind") in (None, d.kind)
+              and (not args.get("language") or language.listed(d.languages, args["language"]))]
+    return {"documents": [view(d) for d in wanted], "next": nxt}
 
 
-@op("self.data_view", read=True)
+# What a reader without the key sees in place of a published document's ciphertext reference, hash and facts (I-PRV-4).
+CONCEALED = {"ref": "", "hash": "", "facts": {}}
+
+
+def on_staff(department, principal):
+    """Whether ``principal`` is among ``managers("dept:<department>")``: its head or the holder of a seat in it. Found from
+    their own seats, not by listing the department's: a reply that holds hundreds of documents asks this of each."""
+    d = find(Department, department)
+    return principal == d.head or any(a.position.department == d for a in appointed(principal))
+
+
+def holds_key(doc, principal):
+    return KeyEnvelope[f"{scope_of(doc)}|{principal}"] is not None
+
+
+def reads_ciphertext(doc, principal):
+    """Whether ``principal`` reads the ciphertext reference, hash and facts of ``doc``: its department's staff and the
+    holders of its key. Anyone else reads only the public copy of a published document."""
+    return holds_key(doc, principal) or on_staff(doc.department, principal)
+
+
+@op("self.data_view", read=True, public=True)
 def document_get(c, args):
-    """The ciphertext reference of ``document`` and your wrapped key: for its department's staff and key holders."""
+    """``document`` with its key scope and your wrapped key, for its department's staff and key holders. Anyone, signed
+    in or not, reads a published document: its public copy, title, kind and languages, without the ciphertext."""
     doc = find(Document, args["document"])
+    if not reads_ciphertext(doc, c.user):
+        if not doc.public:
+            if c.user == chain.ANONYMOUS:
+                raise auth.SignIn("sign in first")
+            raise Forbidden(f"{doc.id} was not shared with you")
+        return {"document": {**view(doc), **CONCEALED}, "scope": scope_of(doc), "wrapped_dek": "", "envelope": None}
     mine = KeyEnvelope[f"{scope_of(doc)}|{c.user}"]
-    if mine is None and c.user not in managers(f"dept:{doc.department}"):
-        raise Forbidden(f"{doc.id} was not shared with you")
     return {"document": view(doc), "scope": scope_of(doc), "wrapped_dek": mine.wrapped_dek if mine else "",
             "envelope": mine.id if mine else None}

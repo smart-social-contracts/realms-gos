@@ -266,9 +266,17 @@ class Check:
                     "import",
                 )
 
+    def no_defaults(self, ops):
+        """A default argument is one object for every call of the method, and the chapter's class lives as long as
+        the codex runs: none, on a method, a nested function or a lambda."""
+        for name, arg in ops:
+            if (name == "MAKE_FUNCTION" and arg and arg & 0x03) or (name == "SET_FUNCTION_ATTRIBUTE" and arg in (1, 2)):
+                self.refuse("a default argument is state shared by every call: pass the value instead", "=")
+
     def class_body(self, code):
         self.common(code, "class body", CLASS_INSTRUCTIONS)
         ops = instructions(code, self.names)
+        self.no_defaults(ops)
         for i, (name, arg) in enumerate(ops):
             if name in ("LOAD_ATTR", "LOAD_METHOD"):
                 # The dunder names a class body may hold (CLASS_BODY) are the ones CPython itself
@@ -287,23 +295,48 @@ class Check:
                     )
         for const in code.co_consts:
             if type(const) is type(code):
-                self.function(const)
+                self.function(const, event_of(const))
 
-    def function(self, code):
+    def function(self, code, event=None, nested=False):
+        """A method, or a function nested in one (``nested``); ``event`` names the event the enclosing hook was given."""
         self.common(code, "method", FUNCTION_INSTRUCTIONS)
         ops = instructions(code, self.names)
+        self.no_defaults(ops)
+        self.bound_once(code, ops, {"self", event} - {None}, nested)
         for i, (name, arg) in enumerate(ops):
-            if name == "STORE_ATTR" and not self.on_local(code, ops, i):
+            if name == "STORE_ATTR" and not self.on_self_or_event(code, ops, i, event):
                 attr = code.co_names[arg]
                 self.refuse(
-                    f".{attr} = ...: a chapter sets attributes on self, or on what it was given, never on a class or a call's result",
+                    f".{attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
                     f".{attr}",
                 )
             if name == "CALL_INTRINSIC_1" and arg not in _INTRINSICS:
                 self.refuse("an instruction outside the readable subset", code.co_name)
         for const in code.co_consts:
             if type(const) is type(code):
-                self.function(const)
+                self.function(const, event, nested=True)
+
+    def bound_once(self, code, ops, names, nested):
+        """``self`` and the event a hook was given are bound once, as the method's own parameters, and never again:
+        a store on either would otherwise be a store on whatever the name was rebound to. So no assignment to them
+        (plain, augmented, a walrus, a loop or comprehension target, nonlocal), no del, and no parameter of a
+        nested function or lambda that reuses the names."""
+        if nested:
+            count = code.co_argcount + code.co_kwonlyargcount + bool(code.co_flags & 4) + bool(code.co_flags & 8)
+            for param in code.co_varnames[:count]:
+                if param in names:
+                    self.refuse(f"{param} is bound once, as the method's parameter: a nested function has no parameter of that name", param)
+        for name, arg in ops:
+            rebound = ()
+            if name in ("STORE_FAST", "STORE_FAST_LOAD_FAST", "DELETE_FAST"):
+                rebound = (code.co_varnames[arg >> 4 if name == "STORE_FAST_LOAD_FAST" else arg],)
+            elif name == "STORE_FAST_STORE_FAST":
+                rebound = (code.co_varnames[arg >> 4], code.co_varnames[arg & 15])
+            elif name in ("STORE_DEREF", "DELETE_DEREF"):
+                rebound = (self.deref_name(code, arg),)
+            for variable in rebound:
+                if variable in names:
+                    self.refuse(f"{variable} is bound once, as the method's parameter, and never rebound or deleted", variable)
 
     @staticmethod
     def attribute_index(name, arg):
@@ -312,19 +345,21 @@ class Check:
             return arg >> 1
         return arg
 
-    def on_local(self, code, ops, i):
-        """Whether the object the attribute is stored on was just loaded from a local variable of this
-        function: a fast local, or one of its own cells (a local a nested function also reads).
-        """
+    def on_self_or_event(self, code, ops, i, event):
+        """Whether the object the attribute is stored on was just loaded as ``self`` or as the event the hook was
+        given (``event``): the two objects a call gets fresh, and so the only ones a store cannot turn into state
+        kept between calls. Anything else, a parameter included, may outlive the call: an SDK function, the
+        calendar, a view, another chapter."""
         if i == 0:
             return False
+        allowed = {"self", event} - {None}
         name, arg = ops[i - 1]
         if name in ("LOAD_FAST", "LOAD_FAST_CHECK"):
-            return arg < len(code.co_varnames)
+            return code.co_varnames[arg] in allowed
         if name == "LOAD_FAST_LOAD_FAST":
-            return (arg & 15) < len(code.co_varnames)
-        if name == "LOAD_DEREF":
-            return self.deref_name(code, arg) in code.co_cellvars
+            return code.co_varnames[arg & 15] in allowed
+        if name == "LOAD_DEREF":  # a parameter a nested function also reads is a cell on 3.10
+            return self.deref_name(code, arg) in allowed
         return False
 
     @staticmethod
@@ -426,6 +461,13 @@ class Check:
         if name == "LOAD_BUILD_CLASS":
             return "a nested class"
         return f"an instruction ({name})"
+
+
+def event_of(code):
+    """The name of the event a hook's code object is given: its second parameter, for an ``on_<op>`` method."""
+    if code.co_name.startswith("on_") and code.co_argcount >= 2:
+        return code.co_varnames[1]
+    return None
 
 
 def check(code, text, file):
