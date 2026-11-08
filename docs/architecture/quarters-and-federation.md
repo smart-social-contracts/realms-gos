@@ -71,11 +71,13 @@ how a new codex reaches a realm's own quarters at one switch time are in
 Quarters can lie in different time zones, and each is a full realm with its own `Realm.timezone`
 (not built yet: [#528](https://github.com/smart-social-contracts/realms-gos/issues/528)).
 
-- A new quarter **starts on its capital's zone,** copied once by `quarter_join_federation`. After that
-  the zone is the quarter's own.
+- A new quarter **starts on its capital's zone,** copied once by `quarter_join_federation` when the
+  joining realm is still on `UTC` (not yet chosen). A realm that already chose a zone keeps it. After
+  that the zone is the quarter's own.
 - A quarter **changes its own zone** with `realm_configure`, governed on the quarter as today.
 - The realm **sets a quarter's zone** by a realm-wide vote on the capital. The capital sends it to the
-  quarter over `quarter.sync`, and the quarter applies it. A malformed name is refused before any vote.
+  quarter over `quarter.sync`, and the quarter applies it. A malformed name, or a `timezone` with no
+  `quarter`, is refused before any vote.
 
 ```bash
 realms realm call capital quarter_configure '{"quarter": "<canister id>", "timezone": "Asia/Tokyo"}'
@@ -87,6 +89,12 @@ The codex never sets a zone. Two clocks have separate jobs:
 |---|---|---|
 | The realm's official time | the capital's | realm-wide votes, their deadlines and working days; a realm-wide `effective_at` as people see it; the official journal |
 | A quarter's local time | the quarter's | its own departments' deadlines and working days; the local time its members see |
+
+Realm-wide counts are made on the capital. A federal vote's deadline is set there once, as an instant,
+and every quarter's leg keeps it. A quarter never counts on the capital's clock, and its own votes, its
+root department's included, use its own zone. The UI shows a realm-wide time in the official time, with
+the quarter's local time beside it when they differ. The journal on a quarter issues nothing and shows
+the capital's.
 
 An `effective_at` is an exact UTC instant, so a codex switch at that time happens at the same moment
 in every quarter. The rules are in [The layered codex](../codices/layered-codex.md#45-the-self-api-at-least).

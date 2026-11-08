@@ -118,8 +118,9 @@ These are settled. Each later section applies them.
 20. **`each="taxes"`** ranges over the saved TaxPolicy's `taxes`, and the same check runs when the
     draft is saved.
 21. **Each realm sets its own `Realm.timezone`** (an IANA name) and never takes it from another realm,
-    from legislation or from a sync source; timestamps stay UTC. A quarter has a zone of its own: it
-    starts on its capital's, may change it, and the realm may set it by a realm-wide vote. The
+    from legislation or from a sync source; timestamps stay UTC. A quarter has a zone of its own: a new
+    one starts on its capital's (a realm that joins keeps a zone it already chose), it may change it,
+    and the realm may set it by a realm-wide vote. The
     capital's zone is the realm's official time, a quarter's its local time (§4.5). Realm-local time
     is computed in Realms GOS, with no change to the Python runtime
     ([#503](https://github.com/smart-social-contracts/realms-gos/issues/503)).
@@ -537,19 +538,21 @@ official journal's daily issue (§9.6), is the local day computed this way, on t
 
 - **A realm sets its own** with `realm_configure`. It never takes a zone from another realm, from
   legislation or from a sync source ([GGG I-ADM-4](https://github.com/smart-social-contracts/ggg/blob/main/model/README.md)).
-  **The codex never sets a zone:** the runtime refuses an effect a hook queues that carries
-  `timezone`, through `realm_configure` or `quarter_configure`. Its guards (`check_realm_configure`,
-  `check_quarter_configure`) may constrain who may change a zone, like those of any governed operation.
-- **A new quarter starts on its capital's zone,** copied once when it joins the federation
-  (`quarter_join_federation`). After that the zone is the quarter's own, and a later change of the
-  capital's does not follow.
+  **The codex never sets a zone:** the runtime refuses any effect a hook queues that carries
+  `timezone`. Its guards (`check_realm_configure`, `check_quarter_configure`) may constrain who may
+  change a zone, like those of any governed operation.
+- **A new quarter starts on its capital's zone.** `quarter_join_federation` copies it once, when the
+  joining realm is still on `UTC` (GGG I-ADM-4: `UTC` means not yet chosen), as a freshly built quarter
+  is. A realm that already chose a zone keeps it when it joins as a quarter. After that the zone is
+  the quarter's own, and a later change of the capital's does not follow.
 - **A quarter may change its own zone** with `realm_configure` on the quarter, governed there as today.
 - **The realm may set a quarter's zone** by a realm-wide vote: `quarter_configure` on the capital takes
   a `timezone` for the `quarter` it names; the capital's own zone is set with `realm_configure`. A
-  malformed name, or one the release has no data for, is refused by the operation's `check=` (the
-  one `realm_configure` has) before the call becomes a proposal, so before any vote. When the
-  proposal executes, the capital sends the setting to the quarter over the trusted capital-to-quarter
-  channel, the `quarter.sync` permission the federation already uses
+  `timezone` with no `quarter` is refused. So is a malformed name, or one the release has no data for:
+  `quarter_configure`'s `check=` also runs `realm_configure`'s zone test (`known_timezone`). Both are
+  refused before the call becomes a proposal, so before any vote. When the proposal executes, the
+  capital sends the setting to the quarter over the trusted capital-to-quarter channel, the
+  `quarter.sync` permission the federation already uses
   ([Quarters and federation](../architecture/quarters-and-federation.md)), and the quarter applies it
   as its own zone. Only the name travels: the quarter's release already holds the data of every zone.
   If the quarter refuses it or cannot be reached, the operation fails and nothing changes.
@@ -565,8 +568,13 @@ owner.
 | the realm's official time | the capital's | realm-wide votes: their deadlines and working-day counts; a realm-wide `effective_at` as people see it; the realm's single official journal (§9.6) |
 | a quarter's local time | the quarter's | its own departments' deadlines and working days; the local time its members see |
 
-A count takes the zone of the matter it serves. The calendar's holidays are the realm's, the same in
+Realm-wide counts are made on the capital. A federal vote's deadline is set there once, as an instant,
+and every quarter's leg keeps it. A quarter never counts on the capital's clock, and its own votes, its
+root department's included, use its own zone. The calendar's holidays are the realm's, the same in
 every quarter (§3.4): a quarter's zone decides only where its days begin and end.
+
+The UI shows a realm-wide time in the official time (the capital's), with the quarter's local time
+beside it when they differ.
 
 For example, a codex switch set for 1 December 2026, 00:00 in Europe/Madrid is the instant 23:00 UTC
 on 30 November. It is 08:00 on 1 December in a quarter on Asia/Tokyo and 17:00 on 30 November in one
@@ -1072,7 +1080,7 @@ The realm needs, from outside its own state:
 | the realm's links | layer paths | the realm's own GGG state: its sync sources, each active after both votes |
 | published releases of each sync source, and of the layers it relays | checking layers from above; compliance | the sync source's published record (below) |
 | world facts (`capital`, `population`, ...) | `S.` in forbids, and chapters | the realm's own layer: settings (§4.3). No record is read |
-| the time zones | showing the realm's official time (the capital's zone) and a quarter's local time in the UI; the local day for the official journal's issues (the capital's) and for working-day counts (the zone of the matter's clock, §4.5) | the canister's own `Realm.timezone`: the realm's, set by the realm; a quarter's, copied from its capital when it joined and its own after that. Never taken from a layer, another realm or a sync source. The tz data ships with the realm release, as hex text that `bytes.fromhex` decodes, and a canister reads only its own zone with Realms GOS's pure-Python reader |
+| the time zones | showing the realm's official time (the capital's zone), with a quarter's local time beside it when they differ, in the UI; the local day for the official journal's issues (the capital's) and for working-day counts (the zone of the matter's clock, §4.5) | the canister's own `Realm.timezone`: the realm's, set by the realm; a quarter's, copied from its capital when it joins while still on `UTC`, then changed by the quarter or by a realm-wide vote. Never taken from a layer, another realm or a sync source. The tz data ships with the realm release, as hex text that `bytes.fromhex` decodes, and a canister reads only its own zone with Realms GOS's pure-Python reader |
 
 GGG and the registry hold no national codes (INE, BFS, ISO). A gateway that needs them reads a Realms
 GOS extension.
@@ -1249,8 +1257,9 @@ codex checksum, so a receiver can tell which legislation the sender ran.
 
 **Quarters in different time zones.** T is an exact UTC instant, so every quarter switches at the same
 moment, whatever its zone (§4.5). The vote's deadline, and any working days counted up to T, belong to
-a realm-wide vote and are counted on the capital's clock; the UI shows T in the realm's official time.
-A quarter that changes its zone, or has it changed, moves no T.
+a realm-wide vote and are counted on the capital's clock. The UI shows T in the realm's official time,
+with the quarter's local time beside it when they differ. A quarter that changes its zone, or has it
+changed, moves no T.
 
 ### 9.6 The official journal (extension `journal`)
 
@@ -1261,7 +1270,7 @@ other core extensions of [`core-extensions.json`](../../core-extensions.json)
 - **One official journal per realm.** It is a report of the latest news and changes, nothing else.
   Its entries include every release of the realm's sync sources, as the scheduled check finds them
   (§11.2), and the realm's own releases when it is a sync source itself. A federation has one journal,
-  the capital's, not one for each quarter.
+  the capital's. The journal on a quarter issues nothing and shows the capital's.
 - **One issue every day,** even on a day with no entries. The day is the realm's local day on the
   capital's clock (the realm's official time), computed in Realms GOS from the capital's own zone
   (§4.5). A quarter's zone plays no part in it.
@@ -1532,8 +1541,8 @@ is no G6.
 | [#500](https://github.com/smart-social-contracts/realms-gos/issues/500) | realms-gos | Linked realms: `sync_source_add`, `follower_accept`, records, serving chapter bytes, follower reports, leaving through the link event (§11) | G3, D1 | PocketIC: two realms link by both votes, the follower installs a relayed release from the source's capital, reports its layers, and leaves through the link event |
 | [#501](https://github.com/smart-social-contracts/realms-gos/issues/501) | realms-gos | Propagation across a realm's own quarters (§9.5): staging mode, the switch at T (the proposal's `effective_at`), quarter compliance, paused tasks resumed by an admin | D2, #504 | PocketIC: every quarter switches at T; a quarter not ready reads non-compliant; a task interrupted by an upgrade resumes only by an admin |
 | [#502](https://github.com/smart-social-contracts/realms-gos/issues/502) | realms-gos | Districts as zones: `User.home_zone`, `Zone.population`, `compute_realm_join` preferring a zone | G2 | PocketIC: a member with a home zone joins the quarter that holds it while capacity allows; capacity decides otherwise |
-| [#528](https://github.com/smart-social-contracts/realms-gos/issues/528) | realms-gos | Quarters in different time zones (§4.5, §9.5, §9.6): a quarter starts on its capital's zone, copied at `quarter_join_federation`; `quarter_configure` gains `timezone` with a `check=`, and the capital pushes it to the quarter over `quarter.sync`; realm-wide counts use the capital's zone, local ones the quarter's; J1 uses the capital's | [#511](https://github.com/smart-social-contracts/realms-gos/issues/511), #501, #499, ggg#21 | multi-canister PocketIC: a quarter joins on its capital's zone and keeps it when the capital's changes; the quarter and a realm-wide vote can each change it, and a malformed name is refused before any vote; a working-day count over a Madrid/Tokyo date difference uses the capital's zone for a realm-wide vote and the quarter's for its department; a switch at T is the same UTC instant in both; a hook cannot set a zone |
-| J1 ([realms-extensions#54](https://github.com/smart-social-contracts/realms-extensions/issues/54)) | realms-extensions | Core extension `journal`, the official journal (§9.6): one per realm, daily issues, sync-source releases as entries and, on a sync source, its own releases, JSON served by the canister as the authority, PDF print route with the logo, personal-data rules in config; added to `core-extensions.json` | D7, #503 | a new realm has the journal; an issue opens at local midnight, also across a DST change; a release found by the check appears as an entry; the print route renders; publication changes no `activates_at` |
+| [#528](https://github.com/smart-social-contracts/realms-gos/issues/528) | realms-gos | Quarters in different time zones (§4.5, §9.5, §9.6): a quarter starts on its capital's zone, copied at `quarter_join_federation` unless the joining realm already chose one; `quarter_configure` gains `timezone` with a `check=`, and the capital pushes it to the quarter over `quarter.sync`; realm-wide counts use the capital's zone, local ones the quarter's; J1 uses the capital's, and a quarter's journal shows it | [#511](https://github.com/smart-social-contracts/realms-gos/issues/511), #501, #499, ggg#21 | multi-canister PocketIC: a quarter joins on its capital's zone and keeps it when the capital's changes, and a realm that already chose a zone keeps it on joining; the quarter and a realm-wide vote can each change it, and a malformed name, or a `timezone` with no `quarter`, is refused before any vote; a quarter that refuses or can't be reached leaves everything unchanged; a working-day count over a Madrid/Tokyo date difference uses the capital's zone for a realm-wide vote and the quarter's for its department; a switch at T is the same UTC instant in both; a hook cannot set a zone |
+| J1 ([realms-extensions#54](https://github.com/smart-social-contracts/realms-extensions/issues/54)) | realms-extensions | Core extension `journal`, the official journal (§9.6): one per realm, daily issues, sync-source releases as entries and, on a sync source, its own releases, JSON served by the canister as the authority, PDF print route with the logo, personal-data rules in config; added to `core-extensions.json` | D7, #503 | a new realm has the journal; an issue opens at midnight on the capital's clock, also across a DST change; a quarter's journal issues nothing and shows the capital's; a release found by the check appears as an entry; the print route renders; publication changes no `activates_at` |
 
 Suggested order: R1 and R2 in parallel with G1, G4, G5, G7, ggg#9, #499, #503 and #504 → G2 and G3 → G8 →
 #505 → S1 → S2 and S3 → C1–C3 → D1 → D2 to D4 and #500 → D5 to D7, #501 and J1 → D8 and D9, #502,
