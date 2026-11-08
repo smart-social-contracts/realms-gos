@@ -136,7 +136,7 @@ def license_verify(c, args):
     return {"valid": bool(lic and valid(lic)), "license": shown(lic) if lic else None}
 
 
-PERIOD_UNITS = ("day", "working_day", "month", "year")
+PERIOD_UNITS = ("Day", "WorkingDay", "Month", "Year")  # GGG's PeriodUnit, as the legislation library has it
 SILENCES = ("positive", "negative")
 
 
@@ -153,8 +153,8 @@ def valid_procedure(args):
 @op("procedure.define", governed=realm_wide, check=valid_procedure, returns="procedure")
 def procedure_define(c, args):
     """Define, or redefine, how applications for licences of ``kind`` are decided: who starts it (``initiated_by``),
-    optionally the ``matter``, a ``decision_deadline`` (a Period ``{"count": 3, "unit": "month"}`` of day, working_day,
-    month or year), what ``silence`` means (positive grants, negative refuses), the ``legislation`` that says so and
+    optionally the ``matter``, a ``decision_deadline`` (a Period ``{"count": 3, "unit": "Month"}``, the unit Day,
+    WorkingDay, Month or Year), what ``silence`` means (positive grants, negative refuses), the ``legislation`` that says so and
     ``facts``. The licence applications that follow take their ``decision_due`` from it. Returns ``procedure``, the
     kind."""
     p = Procedure[args["kind"]] or Procedure(id=args["kind"])

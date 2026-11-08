@@ -10,7 +10,7 @@ class Procedure(Row):
     id = String()
     initiated_by = String(default="")
     matter = String(default="")
-    decision_deadline = Json(None)  # a Period: {"count", "unit"} with unit day, working_day, month or year
+    decision_deadline = Json(None)  # a Period: {"count", "unit"} with GGG's unit: Day, WorkingDay, Month or Year
     silence = String(default="")  # positive grants, negative refuses; "" when legislation says nothing
     legislation = String(default="")
     facts = Json({})

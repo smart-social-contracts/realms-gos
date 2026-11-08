@@ -7,7 +7,7 @@ import ggg_methods as g
 import world
 from core import op
 from core.candid import Reader
-from ggg import Department, KeyEnvelope, Mandate, Proposal, Quarter, Realm, User, UserProfile
+from ggg import Department, KeyEnvelope, Mandate, Procedure, Proposal, Quarter, Realm, User, UserProfile
 from kit import ok
 from mirror import FakePrincipal as P
 from test_assets import RX, agora, license_clinic, prescribe
@@ -48,6 +48,18 @@ def test_private_data_and_wrapped_keys_are_blobs():
     assert got["document"]["hash"] == "sha256:ab12" and got["envelope"]["wrapped_dek"] == b"\x0a"
     caller("bob")
     assert g.ggg_document_get(doc) == {"Ok": None} or "Err" in g.ggg_document_get(doc)
+
+
+def test_a_procedure_keeps_ggg_s_period_unit_tags():
+    health()
+    caller("ctl")
+    args = {"kind": "business", "initiated_by": "the applicant", "matter": None, "silence": {"Negative": None},
+            "decision_deadline": {"count": 30, "unit": {"WorkingDay": None}}, "legislation": None, "facts": None}
+    assert do(g.ggg_procedure_define(args)) == {"Ok": {"Done": "business"}}
+    assert Procedure["business"].decision_deadline == {"count": 30, "unit": "WorkingDay"}
+    listed = g.ggg_procedure_list({"cursor": None, "limit": None})["Ok"]["items"]
+    assert listed[0]["decision_deadline"] == {"count": 30, "unit": {"WorkingDay": None}}
+    assert listed[0]["silence"] == {"Negative": None}
 
 
 def test_a_credential_header_is_a_list_of_text_pairs():

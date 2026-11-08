@@ -114,7 +114,7 @@ def test_I_LIC_2_only_active_unexpired_licences_count():
 
 
 HEALTH = {"kind": "health", "initiated_by": "the applicant", "matter": "licence",
-          "decision_deadline": {"count": 3, "unit": "month"}, "silence": "positive", "legislation": "Licensing Act 12"}
+          "decision_deadline": {"count": 3, "unit": "Month"}, "silence": "positive", "legislation": "Licensing Act 12"}
 
 
 def test_story_the_realm_defines_how_health_licences_are_decided():
@@ -124,12 +124,12 @@ def test_story_the_realm_defines_how_health_licences_are_decided():
     assert ok("procedure_define", "carla", **HEALTH)["procedure"] == "health"
     p = Procedure["health"]
     assert (p.initiated_by, p.matter, p.decision_deadline, p.silence, p.legislation, p.facts) == (
-        "the applicant", "licence", {"count": 3, "unit": "month"}, "positive", "Licensing Act 12", {})
+        "the applicant", "licence", {"count": 3, "unit": "Month"}, "positive", "Licensing Act 12", {})
     ok("procedure_define", "carla", kind="health", initiated_by="the department", facts={"fee": 0})
     p = Procedure["health"]
     assert (p.initiated_by, p.matter, p.decision_deadline, p.silence, p.facts) == ("the department", "", None, "", {"fee": 0})
     ok("procedure_define", "carla", kind="business", initiated_by="the applicant", silence="negative",
-       decision_deadline={"count": 30, "unit": "working_day"})
+       decision_deadline={"count": 30, "unit": "WorkingDay"})
     listed = ok("procedure_list", "alice")
     assert [x["id"] for x in listed["procedures"]] == ["health", "business"] and listed["next"] is None
     assert [x["id"] for x in ok("procedure_list", "alice", count=1)["procedures"]] == ["health"]
@@ -139,8 +139,8 @@ def test_story_the_realm_defines_how_health_licences_are_decided():
 def test_a_procedure_with_no_period_or_a_bad_silence_is_refused_before_anything_is_written():
     """Candid cannot say most of these, so the arguments go to the operation as JSON."""
     agora()
-    for bad in ({"decision_deadline": {"count": 3, "unit": "fortnight"}}, {"decision_deadline": {"count": -1, "unit": "day"}},
-                {"decision_deadline": {"count": "3", "unit": "day"}}, {"decision_deadline": {"unit": "day"}},
+    for bad in ({"decision_deadline": {"count": 3, "unit": "fortnight"}}, {"decision_deadline": {"count": -1, "unit": "Day"}},
+                {"decision_deadline": {"count": "3", "unit": "Day"}}, {"decision_deadline": {"unit": "Day"}},
                 {"silence": "tacit"}):
         out = direct("procedure_define", "ctl", **{**HEALTH, **bad})
         assert not out["ok"] and out["kind"] == "invalid_argument", bad

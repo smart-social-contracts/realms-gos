@@ -3,6 +3,7 @@ import hashlib
 from core import auth
 import fake_chain
 import world
+from core.db import each
 from ggg import (Appointment, Attribute, Delegation, Department, Event, Human, Identity, Invite, Member, Position,
                  Proposal, Realm, User, UserProfile, Zone)
 from kit import call, denied, later, ok
@@ -249,7 +250,7 @@ def test_story_alice_submits_her_large_family_title_and_a_reviewer_verifies_it()
     registry_with_reviewer()
     a = ok("attribute_submit", "alice", kind="large_family", value="general", issuer="regional-government",
            ref="vault:alice-title", expires_at=fake_chain.now() + 365 * DAY)["attribute"]
-    assert Attribute[a].status == "pending" and Attribute[a].human == Human.find({"user": "alice"})[0].id
+    assert Attribute[a].status == "pending" and Attribute[a].human == next(each(Human, "user", "alice")).id
     assert call("attribute_review", "alice", attribute=a, status="verified")["denied"]
     out = ok("attribute_review", "hector", attribute=a, status="verified")
     assert out["status"] == "verified" and Attribute[a].verified_at == fake_chain.now()

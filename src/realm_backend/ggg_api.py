@@ -299,6 +299,7 @@ FIX = {
     {"Package": c} if "manifest" in c else {"Registry": c},
     "SetupStep": lambda s: s if len(s) == 1 else {camel(s.get("step")): {k: v for k, v in s.items() if k != "step"}},
     "DepartmentEditArgsHead": lambda h: h if isinstance(h, dict) else {"Set": h} if h else {"Clear": None},
+    "PeriodUnit": lambda u: {u: None},  # Realms GOS keeps GGG's own tags (Day, WorkingDay, Month, Year)
 }
 
 
@@ -340,6 +341,7 @@ UNFIX = {
     "CodexSource": lambda case, payload: payload,
     "SetupStep": lambda case, payload: {"step": snake(case), **payload},
     "DepartmentEditArgsHead": lambda case, payload: payload or "",
+    "PeriodUnit": lambda case, payload: case,
 }
 
 
