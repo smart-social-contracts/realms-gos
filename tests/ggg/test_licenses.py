@@ -1,5 +1,10 @@
+from datetime import datetime, timezone
+
+import pytest
+
 import fake_chain
 import world
+from core import localtime
 from ggg import Delegation, License, Organization, Procedure, Proposal
 from kit import call, denied, direct, later, ok
 from api.licenses import active
@@ -153,3 +158,82 @@ def test_defining_a_procedure_is_governed_by_the_root_department():
     out = ok("procedure_define", "ctl", **HEALTH)
     assert out["requires_vote"] and Procedure["health"] is None
     assert Proposal[out["proposal"]].action["op"] == "procedure_define"
+
+
+@pytest.fixture
+def utc():
+    """The reader keeps its zone in the module, which outlives the test that set it: a canister starts in UTC."""
+    localtime.use("UTC")
+    yield
+    localtime.use("UTC")
+
+
+def at(*when):
+    """The second of a UTC instant, from (year, month, day, hour, minute)."""
+    return int(datetime(*when, tzinfo=timezone.utc).timestamp())
+
+
+def define_deadline(count, unit):
+    ok("procedure_define", "ctl", kind="health", initiated_by="the applicant", silence="positive",
+       decision_deadline={"count": count, "unit": unit})
+
+
+def applied_at(*when):
+    fake_chain.state["now"] = at(*when)
+    return apply_clinic()
+
+
+def test_a_decision_is_due_at_the_end_of_the_last_day_of_the_deadline(utc):
+    """One day from the 21st is the 22nd, and the 22nd counts in full: positive silence applies from the 23rd, never
+    during the 22nd."""
+    agora()
+    define_deadline(1, "Day")
+    lic = applied_at(2026, 9, 21, 14, 13)
+    assert License[lic].decision_due == at(2026, 9, 23)
+    assert License[lic].decision_due > at(2026, 9, 22, 23, 59)
+    assert ok("license_list", fake_chain.ANONYMOUS, holder="Organization:clinic-b")["licenses"][0]["decision_due"] \
+        == at(2026, 9, 23)
+
+
+def test_a_deadline_in_months_ends_with_the_last_day_of_the_month_it_reaches(utc):
+    agora()
+    define_deadline(3, "Month")
+    assert License[applied_at(2026, 9, 21, 14, 13)].decision_due == at(2026, 12, 22)
+    assert License[applied_at(2026, 11, 30, 9, 0)].decision_due == at(2027, 3, 1)  # February has no 30th: its 28th
+    define_deadline(1, "Year")
+    assert License[applied_at(2028, 2, 29, 9, 0)].decision_due == at(2029, 3, 1)
+
+
+def test_the_day_is_the_realms_own_not_utc(utc):
+    """22:30 UTC on 1 July is already the 2nd in Madrid, where a day is over at 22:00 UTC."""
+    agora()
+    ok("realm_configure", "ctl", timezone="Europe/Madrid")
+    define_deadline(1, "Day")
+    assert License[applied_at(2026, 7, 1, 22, 30)].decision_due == at(2026, 7, 3, 22)
+
+
+def test_working_days_fail_closed_while_the_realm_has_no_calendar(utc):
+    agora()
+    define_deadline(15, "WorkingDay")
+    out = call("license_apply", "dr-ana", kind="health", holder="Organization:clinic-b", department="Health")
+    assert not out["ok"] and out["kind"] == "unavailable" and "2026" in out["error"]
+    assert License.max_id() == 0
+
+
+def test_a_licence_without_a_procedure_or_a_deadline_has_no_due_date(utc):
+    agora()
+    assert License[apply_clinic()].decision_due == 0
+    ok("procedure_define", "ctl", kind="health", initiated_by="the applicant")
+    assert License[apply_clinic()].decision_due == 0
+    assert ok("license_list", fake_chain.ANONYMOUS, holder="Organization:clinic-b")["licenses"][0]["decision_due"] == 0
+
+
+def test_a_renewal_is_dated_by_the_procedure_in_force_and_an_earlier_licence_keeps_its_date(utc):
+    agora()
+    define_deadline(10, "Day")
+    first = applied_at(2026, 9, 21, 14, 13)
+    ok("license_decide", "hector", license=first, approve=True)
+    define_deadline(20, "Day")
+    renewal = ok("license_renew", "dr-ana", license=first)["license"]
+    assert License[first].decision_due == at(2026, 10, 2)
+    assert License[renewal].decision_due == at(2026, 10, 12)
