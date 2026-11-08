@@ -7,6 +7,7 @@ from core import auth, op
 from core.db import Forbidden
 from core.ratio import PERCENT
 from ggg import Appointment, Delegation, Department, Mandate, Position, Proposal, Realm, User, UserProfile, Vote
+from ic_python_db.constants import MAX_UNPAGED
 from kit import call, denied, later, ok
 
 
@@ -352,6 +353,20 @@ def test_a_department_with_a_proposal_to_vote_on_or_run_cannot_be_deleted():
         out = call("department_delete", "ctl", department="Sub")
         assert out["kind"] == "conflict" and "proposals" in out["error"], (status, out)
         Proposal[p].status = "rejected"
+    ok("department_delete", "ctl", department="Sub")
+    assert Department["Sub"] is None
+
+
+def test_a_department_with_more_proposals_than_a_call_can_load_is_still_deleted_and_still_guarded():
+    """Its ``proposals`` relation holds them all (ic-python-db refuses to load more than MAX_UNPAGED of a relation), but
+    only the pending ones matter."""
+    world.build()
+    sub = Department(id="Sub", parent=Department["Infrastructure"])
+    for n in range(MAX_UNPAGED + 1):
+        Proposal(id=f"H-{n}", title="x", department=sub, status="executed")
+    Proposal["H-7"].status = "voting"
+    assert call("department_delete", "ctl", department="Sub")["kind"] == "conflict"
+    Proposal["H-7"].status = "rejected"
     ok("department_delete", "ctl", department="Sub")
     assert Department["Sub"] is None
 

@@ -130,6 +130,22 @@ casals -e production --identity <id> upgrade casals.json --wasm <family>        
 casals -e production --identity <id> upgrade casals.json --content <namespace>    # a frontend bundle
 ```
 
+#### After an upgrade from ic-python-db 0.12
+
+A realm backend built with ic-python-db 0.12 or earlier saved each index list (the members with a status, the votes of
+a proposal, a department's proposals) as one JSON array, which every change reads and rewrites whole: about 51 thousand
+instructions per id already in the list, so 6.5 billion for each vote on a proposal that has 127,000. 0.13 and later keep
+one entry per id, at about 0.6 million per change however long the list is, and convert an array the first time its
+index is read. In an update that conversion is kept. In a query it is discarded and paid again by the next query, and
+a list of 20,000 ids is past a query's 5 billion instructions.
+
+So the controller of an upgraded realm converts its lists once, before members read them, by calling the operation
+`db_convert_indexes` (`run`, no arguments) again and again until its reply says `"done": true`. A call converts at most
+10,000 ids (`ids` changes that), about 2.5 billion instructions, and looks at no more than 20,000 index entries, about
+2 billion. A list is converted whole, so one longer than that is converted alone in its call, at about 245 thousand
+instructions per id (31 billion for 127,000). The realm remembers how far it got and when it is done: a call after
+that, and every call on a realm created by this release, answers at once without reading the index entries.
+
 ### The token ledger
 
 The realm's treasury reads only the standard ICRC-1 transfer result, `variant { Ok : nat; Err : TransferError }`.

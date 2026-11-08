@@ -1,9 +1,15 @@
 import json
 
-from ic_python_db import Entity, String
+from ic_python_db import Database, Entity, String
 
 PAGE, PAGE_MAX = 100, 500
 DRAFTS = 10  # how many drafts a read view lists, newest first
+# convert_legacy_indexes: the key prefixes of ic-python-db's field and relation indexes; the longest key main.py declares;
+# the ids one call converts (about 245 thousand instructions each: 2.5 billion) and the keys it looks at (about 100
+# thousand each: 2 billion), at most
+INDEX_PREFIXES = ("_fi:", "_ri:")
+MAX_KEY = 256
+CONVERT_IDS, CONVERT_ROWS, CONVERT_PAGE = 10_000, 20_000, 500
 
 
 class Row(Entity):
@@ -134,3 +140,55 @@ def view(row, *fields):
         if isinstance(v, str) and v[:1] in "[{" and isinstance(getattr(type(row), k, None), Json):
             data[k] = json.loads(v)
     return {k: data.get(k) for k in fields} if fields else data
+
+
+def index_ranges(after):
+    """The (start, end) key ranges that hold index keys, in the order ``convert_legacy_indexes`` walks them, from the
+    one holding ``after``. Storage orders keys by length first, so each length of each prefix is a range of its own."""
+    here = (after[:4], len(after.encode())) if after else ("", 0)
+    for prefix in INDEX_PREFIXES:
+        for length in range(len(prefix) + 1, MAX_KEY + 1):
+            if (prefix, length) < here:
+                continue
+            fill = "\x00" * (length - len(prefix))
+            yield (after if (prefix, length) == here else prefix + fill), prefix[:-1] + chr(ord(prefix[-1]) + 1) + fill
+
+
+def convert_legacy_indexes(after="", ids=CONVERT_IDS):
+    """Convert, at most ``ids`` ids at a time, the index lists saved as one JSON array each (ic-python-db before 0.13).
+
+    ic-python-db converts such a list when something first reads its index. A query's conversion is discarded with the
+    rest of its writes, so every query pays for it again: 2.7 billion instructions for a list of 12,000 ids, and past
+    about 20,000 the query traps. An update keeps the conversion, so this is run until ``next`` is None after an upgrade
+    from such a release. A list is converted whole, so one longer than ``ids`` is converted alone in its call.
+
+    Returns ``lists`` and ``ids`` converted, and ``next``: the ``after`` of the call that continues, None at the end.
+    A converted list is not found again, so a second run converts nothing.
+
+    This belongs in ic-python-db as a public ``Database.convert_legacy_indexes``; it is here until that release.
+    """
+    db = Database.get_instance()
+    lists = converted = seen = 0
+    last = after
+    for start, end in index_ranges(after):
+        while True:
+            rows = db._scan(start, end, CONVERT_PAGE)
+            for key, value in rows:
+                if key == last:  # a range starts at its last key
+                    continue
+                # An entry of a converted list holds an id: only a custom id, under "|h" and 24 hex digits, can look
+                # like an array
+                legacy = value.startswith("[") and key[-26:-24] != "|h"
+                size = value.count(",") + 1 if legacy else 0
+                if seen >= CONVERT_ROWS or (legacy and converted and converted + size > ids):
+                    return {"lists": lists, "ids": converted, "next": last}
+                seen += 1
+                last = key
+                if legacy:
+                    db._ix_count(key)
+                    lists += 1
+                    converted += size
+            if len(rows) < CONVERT_PAGE:
+                break
+            start = rows[-1][0]
+    return {"lists": lists, "ids": converted, "next": None}
