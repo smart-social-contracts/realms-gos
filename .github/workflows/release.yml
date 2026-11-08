@@ -48,8 +48,13 @@ jobs:
       - name: Compare with the tz database IANA has published
         if: ${{ inputs.cli_only != true && inputs.allow_stale_tzdata != true }}
         run: |
+          set -o pipefail
           bundled=$(python3 -c "import sys; sys.path.insert(0, 'src/realm_backend'); import zonedata; print(zonedata.VERSION)")
           latest=$(curl -fsS https://data.iana.org/time-zones/tzdb/version | tr -d '[:space:]')
+          if [ -z "$latest" ]; then
+            echo "::error::Could not read IANA's version (https://data.iana.org/time-zones/tzdb/version)"
+            exit 1
+          fi
           if [ "$bundled" != "$latest" ]; then
             echo "::error::The realm bundles tz database $bundled and IANA has published $latest: run scripts/build_zones.py --release $latest and commit the result (or release with allow_stale_tzdata)"
             exit 1
