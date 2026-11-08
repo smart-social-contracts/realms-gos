@@ -64,8 +64,8 @@ def get(realm, who, proposal):
 
 
 def launch(realm, people):
-    """A launched realm of four members, the founder, Alice, Bob and Mallory, and the Council department, which decides 2
-    of 4 with the four of them in its seats."""
+    """A launched realm of four members, the founder, Alice, Bob and Mallory, and two departments with the four of them in
+    their seats: the Council decides 2 of 4, the Panel 2 of 3."""
     ctl, founder = people["ctl"], people["founder"]
     ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
     ok(realm, "setup_step", founder, step="realm", name="Agora", open_registration=True)
@@ -74,11 +74,13 @@ def launch(realm, people):
     members = [people[name] for name in ("alice", "bob", "mallory")]
     for member in members:
         ok(realm, "realm_join", member)
-    ok(realm, "department_create", ctl, department="Council")
-    ok(realm, "position_create", ctl, department="Council", position="council.member", headcount=4)
-    for member in members + [founder]:
-        ok(realm, "appoint", ctl, position="council.member", user=member)
-    ok(realm, "department_set_policy", ctl, department="Council", m=2, n=4)
+    for department, n in (("Council", 4), ("Panel", 3)):
+        seat = f"{department.lower()}.member"
+        ok(realm, "department_create", ctl, department=department)
+        ok(realm, "position_create", ctl, department=department, position=seat, headcount=4)
+        for member in members + [founder]:
+            ok(realm, "appoint", ctl, position=seat, user=member)
+        ok(realm, "department_set_policy", ctl, department=department, m=2, n=n)
 
 
 @pytest.fixture(scope="module")
@@ -125,6 +127,19 @@ def test_a_department_proposal_takes_m_of_n_over_the_seats_and_a_raised_threshol
     assert get(realm, alice, raised)["status"] == "voting"  # three quarters of four are three
     vote(realm, mallory, raised, "yes")
     assert get(realm, alice, raised)["status"] == "accepted"
+
+
+def test_a_departments_threshold_is_a_share_of_the_policys_n_not_of_the_filled_seats(realm, people):
+    alice, bob, mallory, founder = (people[n] for n in ("alice", "bob", "mallory", "founder"))
+    plain, strict = file(realm, alice, "Panel"), file(realm, alice, "Panel", threshold=ONE)
+    for proposal in (plain, strict):
+        vote(realm, alice, proposal, "yes")
+        vote(realm, bob, proposal, "yes")
+    row = get(realm, alice, plain)
+    assert (row["status"], row["tally"]["seats"], row["tally"]["eligible"]) == ("accepted", 3, 4)  # 2 of 3, whoever sits
+    assert get(realm, alice, strict)["status"] == "voting"
+    vote(realm, mallory, strict, "yes")
+    assert get(realm, alice, strict)["status"] == "accepted"  # all of the 3, not all of the 4
 
 
 def test_a_tie_at_the_threshold_is_accepted_only_with_the_casting_members_yes(realm, people):
@@ -201,7 +216,7 @@ def upgraded(request, wasm_of, people):
     alice = people["alice"]
     ok(realm, "governance_update", people["ctl"], voting_threshold=60 * PERCENT, voting_quorum=10 * PERCENT)
     wide, department = (ok(realm, "proposal_create", alice, title=t, **d)["proposal"] for t, d in (
-        ("wide", {}), ("department", {"department": "Council"})))
+        ("wide", {}), ("department", {"department": "Panel"})))
     vote(realm, alice, department, "yes")
     if request.param == "rewritten":
         out = realm.shell(ROWS + (
@@ -220,10 +235,10 @@ def test_the_proposals_of_the_last_release_are_decided_by_the_rule_they_were_fil
     row = get(upgraded, alice, wide)
     assert (row["threshold"], row["quorum"], row["threshold_of"], row["casting_vote"]) == (
         60 * PERCENT, 10 * PERCENT, "cast", "")
-    row = get(upgraded, alice, department)
-    assert (row["threshold"], row["quorum"], row["threshold_of"]) == (50 * PERCENT, 0, "eligible")
-    assert "required" not in row["tally"] and row["tally"]["yes"] == 1
-    vote(upgraded, bob, department, "yes")  # m was 2, and 2 of the 4 seats reach half of them
+    row = get(upgraded, alice, department)  # 2 of 3 with four seats held: it took 2 approvals, and still does
+    assert (row["threshold"], row["quorum"], row["threshold_of"]) == (66_666_666, 0, "eligible")
+    assert "required" not in row["tally"] and row["tally"]["yes"] == 1 and row["tally"]["seats"] == 3
+    vote(upgraded, bob, department, "yes")
     assert get(upgraded, alice, department)["status"] == "accepted"
     for who in ("founder", "bob", "mallory"):
         vote(upgraded, people[who], wide, "yes")
