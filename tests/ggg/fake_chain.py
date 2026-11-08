@@ -39,6 +39,12 @@ def now():
     return state["now"]
 
 
+def instructions():
+    """Stands in for the instruction counter: a million more every time it is read."""
+    state["instructions"] = state.get("instructions", 0) + 1_000_000
+    return state["instructions"]
+
+
 def candid_encode(text):
     """Stands in for Candid: the text itself, after the magic bytes."""
     return b"DIDL" + text.encode()

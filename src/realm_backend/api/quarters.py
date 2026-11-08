@@ -7,7 +7,7 @@ from api import proposals
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, view
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
-from core.op import op, run
+from core.op import filing, op, run
 from core.ratio import ONE, PERCENT
 
 CAPACITY, TEST_CAPACITY, TEST_NETWORKS, SCALE_AT = 2000, 10, ("test", "staging", "demo", "local"), 0.9
@@ -142,7 +142,7 @@ def want_quarter():
     r = realm()
     if not federated() and scale()["wanted"] and not r.scale_in_flight:
         r.scale_in_flight, r.scale_requested_at = True, chain.now()
-        proposals.file_replay("quarter_add", {}, chain.self_id(), chain.self_id(), proposals.root())
+        proposals.file_replay(filing("quarter_add", {}, proposals.root()), chain.self_id(), chain.self_id())
 
 
 def apply_directory(reply):

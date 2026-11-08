@@ -1,0 +1,329 @@
+"""What the review of the runtime (realms-gos#579) found and the runtime now refuses, each probe kept as a test: the
+entities and fields a chapter may read, the secrets kept out of what crosses, a governed effect filed as a proposal,
+effects on proposals and federal votes about a reserved operation, a codex that does not load for any reason, reads
+metered per call, the guards on a governed call's filing, default arguments, chapter instances handed across domains,
+effects stopping at the first failure, and the audit order."""
+
+import pytest
+
+from api import codex as codex_api
+from core import auth, legislation, op
+from core.db import Fail
+from ggg import Department, Event, FederalVote, Human, Identity, LayeredCodex, Notification, Proposal
+from kit import call, ok, rows
+import world
+from test_legislation_runtime import LOG, TOWN, TOWN_REALM, activate, layered, town  # noqa: F401
+from test_legislation_runtime import fresh_realm  # noqa: F401  the autouse fixture
+
+
+@op.op("treasury.manage")
+def t_poke(c, args):
+    """A plain write any chapter may guard or hook."""
+    return {"done": args.get("what", ""), "code": "SHOWN-ONCE"}
+
+
+def register(body):
+    return "from realms.legislation import above\n\nclass Register(above(\"register\")):\n" + body
+
+
+def notices(title):
+    return [n.body for n in Notification.load_some(1, 200) if n.title == title]
+
+
+def failures():
+    return ok("codex_status", query=True)["failures"]
+
+
+# ── 1. The view: an allowlist of entities and fields ────────────────────────────────────────────────────────────
+
+SNOOP = '''
+from ggg import Human, Identity, Member, Notification
+from realms.legislation import above
+
+class Register(above("register")):
+    def check_t_poke(self, args):
+        what = args.what
+        if what == "birthday":
+            return self.deny(Human.get("h-alice").date_of_birth)
+        if what == "identity ref":
+            return self.deny(Identity.get("i-1").ref)
+        if what == "notification body":
+            return self.deny(Notification.get("1").body)
+        if what == "find secret":
+            return self.deny(str(len(Member.find("private_data", "x"))))
+        if what == "allowed":
+            human = Human.get("h-alice")
+            return self.deny(f"{human.user}:{len(Member.find('status', 'active'))}:{Identity.get('i-1').kind}")
+'''
+
+
+def test_the_view_shows_the_allowed_fields_of_the_allowed_entities_and_nothing_else():
+    Human(id="h-alice", user="alice", date_of_birth="1980-02-03", h3_index="8928308280fffff")
+    Identity(id="i-1", human=Human["h-alice"], kind="passport", issuer="ES", ref="vault:1", status="verified")
+    Notification(id="1", recipient="User:alice", title="private", body="for alice only")
+    activate(layered({(TOWN, "register"): SNOOP}, layers=[TOWN]))
+    assert call("t_poke", what="allowed")["error"] == "alice:7:passport"
+    assert call("t_poke", what="birthday")["error"].endswith("AttributeError: Human has no field 'date_of_birth'")
+    assert call("t_poke", what="identity ref")["error"].endswith("AttributeError: Identity has no field 'ref'")
+    assert call("t_poke", what="notification body")["error"].endswith("AttributeError: Notification has no field 'body'")
+    assert call("t_poke", what="find secret")["error"].endswith("rpc failed: a chapter does not read Member.private_data")
+    for entity in ("KeyEnvelope", "Vote", "Delegation", "DelegationRequest", "PaymentAccount", "Event", "Invite", "Codex",
+                   "ChapterSource", "InstallJob", "Extension", "Bid", "Forward", "FederationMessage"):
+        assert entity not in legislation.VIEWS
+    for entity, field in (("Human", "date_of_birth"), ("Human", "h3_index"), ("Identity", "ref"), ("Document", "ref"),
+                          ("Document", "hash"), ("Notification", "body"), ("Notification", "read_by"), ("User", "private_data"),
+                          ("Realm", "manifest_data"), ("Proposal", "votes"), ("Land", "registered_by")):
+        assert field not in legislation.VIEWS[entity]
+
+
+@pytest.mark.parametrize("entity", ["KeyEnvelope", "Vote", "Delegation", "PaymentAccount"])
+def test_an_entity_outside_the_view_cannot_be_imported(entity):
+    text = f"from ggg import {entity}\nfrom realms.legislation import above\nclass Register(above('register')):\n    pass\n"
+    out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
+                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
+    assert out["errors"] == [f"x/town/register.py:1: ImportError: cannot import name '{entity}' from 'ggg' (unknown location)"]
+
+
+# ── 2. Secrets never cross ──────────────────────────────────────────────────────────────────────────────────────
+
+INVITES = register('''    def on_invite_create(self, event):
+        self.ggg.notification_send(recipient="User:mallory", title="invite", body=str(event.result["invite"].get("code")))
+
+    def check_t_poke(self, args):
+        if args.what == "secret arg":
+            return self.deny(str(args.code))
+
+    def on_t_poke(self, event):
+        if event.args.get("what") == "secret result":
+            self.ggg.notification_send(recipient="User:mallory", title="result", body=str(event.result.get("code")))
+''')
+
+
+def test_secret_fields_are_stripped_from_what_crosses_into_a_chapter():
+    activate(layered({(TOWN, "register"): INVITES}, layers=[TOWN]))
+    got = ok("invite_create", "dana")
+    assert got["invite"]["code"]  # shown to the caller, once
+    assert notices("invite") == ["None"]
+    assert call("t_poke", what="secret arg", code="X7K-29Q")["error"] == "None"
+    ok("t_poke", what="secret result")
+    assert notices("result") == ["None"]
+
+
+# ── 3. Effects: a governed operation becomes a proposal the realm files; nothing about a reserved operation ──────
+
+POWER = register('''    def on_t_poke(self, event):
+        what = event.args.get("what")
+        if what == "admin":
+            self.ggg.profile_create(profile="root2", allowed_to=["all"])
+            self.ggg.role_assign(user="mallory", profile="root2")
+        if what is not None and what.startswith("stop:"):
+            self.ggg.proposal_stop(proposal=what[5:])
+        if what is not None and what.startswith("withdraw:"):
+            self.ggg.proposal_withdraw(proposal=what[9:])
+        if what == "two":
+            self.ggg.t_poke(what="first", code="")
+            self.ggg.notification_send(recipient="User:nobody", title="fails", body="")
+            self.ggg.t_poke(what="never")
+''')
+
+
+def test_a_governed_effect_is_filed_as_a_proposal_by_the_realm_and_applied_only_by_the_vote():
+    world.policy(Department["Administration"], 3, 5)
+    activate(layered({(TOWN, "register"): POWER}, layers=[TOWN]))
+    ok("t_poke", what="admin")
+    assert "all" not in auth.permissions("mallory")
+    filed = [p for p in rows(Proposal) if p.action and p.action["op"] in ("profile_create", "role_assign")]
+    expected = [("profile_create", "realm", "voting"), ("role_assign", "realm", "voting")]
+    assert [(p.action["op"], p.proposer, p.status) for p in filed] == expected
+    assert failures() == {}
+    for p in filed:
+        for voter in world.PEOPLE:
+            call("proposal_vote", voter, proposal=p.id, choice="yes")
+    assert "all" in auth.permissions("mallory")  # the vote, not the chapter, gave it
+
+
+def test_an_effect_cannot_stop_or_withdraw_a_proposal_about_a_reserved_operation():
+    first = town()
+    first.status = "inactive"
+    second = activate(layered({(TOWN, "register"): POWER}, layers=[TOWN], previous=first.id))
+    pid = ok("proposal_create", "alice", title="revert", effective_at=1790000000 + 30 * 86400,
+             action={"op": "codex_revert", "args": {}})["proposal"]
+    for voter in world.PEOPLE:
+        call("proposal_vote", voter, proposal=pid, choice="yes")
+    assert Proposal[pid].status == "execution_scheduled"
+    ok("t_poke", what="stop:" + pid)
+    assert failures()["x/town/register.py"]["on_t_poke"]["error"] == f"proposal_stop: proposal_stop is about a reserved operation: no chapter may call it"
+    ok("t_poke", what="withdraw:" + pid)
+    assert failures()["x/town/register.py"]["on_t_poke"]["error"].startswith("proposal_withdraw: proposal_withdraw is about a reserved")
+    assert Proposal[pid].status == "execution_scheduled" and LayeredCodex[second.id].status == "active"
+
+
+def test_effects_stop_at_the_first_that_fails():
+    activate(layered({(TOWN, "register"): POWER}, layers=[TOWN]))
+    before = Event.max_id()
+    ok("t_poke", what="two")
+    applied = [e.args.get("what") for e in rows(Event) if e.id and int(e.id) > before and e.op == "t_poke"]
+    assert applied == ["two", "first"]  # the operation, then the first effect; "never" was not applied
+    assert failures()["x/town/register.py"]["on_t_poke"]["error"].startswith("notification_send: unknown User")
+
+
+def test_the_operations_own_audit_event_precedes_its_effects():
+    activate(layered({(TOWN, "register"): POWER}, layers=[TOWN]))
+    before = Event.max_id()
+    ok("t_poke", what="two")
+    events = [(e.op, e.origin, e.args.get("what")) for e in rows(Event) if int(e.id) > before]
+    assert events[0] == ("t_poke", "user", "two") and events[1] == ("t_poke", "codex", "first")
+
+
+# ── 4. Federal votes about a reserved operation ─────────────────────────────────────────────────────────────────
+
+DENY_VOTES = '''
+from realms.legislation import above
+
+class Procedure(above("procedure")):
+    def check_proposal_create(self, args):
+        return self.deny("nothing may be proposed")
+
+    def check_proposal_vote(self, args):
+        return self.deny("nothing may be voted")
+
+    def check_federal_vote_propose(self, args):
+        return self.deny("no federal vote")
+'''
+
+
+def test_a_federal_vote_whose_action_is_reserved_and_its_leg_run_no_guard():
+    activate(layered({(TOWN, "procedure"): DENY_VOTES}, layers=[TOWN]))
+    assert call("federal_vote_propose", title="x", action={"op": "profile_create", "args": {}})["error"] == "no federal vote"
+    vote = ok("federal_vote_propose", title="revert", action={"op": "codex_revert", "args": {}})["vote"]
+    leg = next(leg for leg in FederalVote[vote].legs)
+    assert Proposal[leg.proposal_id].action is None  # a leg carries no action of its own
+    assert ok("proposal_vote", "alice", proposal=leg.proposal_id, choice="yes")["vote"]
+    assert call("proposal_create", "alice", title="other")["error"] == "nothing may be proposed"
+
+
+# ── 5. A codex that does not load, for any reason ────────────────────────────────────────────────────────────────
+
+DEEP = "from realms.legislation import above\nclass Procedure(above('procedure')):\n    x = " + "-" * 50000 + "1\n"
+LOAD_READS = "from ggg import Member\nfrom realms.legislation import above\nclass Procedure(above('procedure')):\n    n = len(Member.each())\n"
+
+
+def test_whatever_the_sandbox_raises_at_load_is_a_fail_and_warm_records_it():
+    first = town()
+    broken = layered({(TOWN, "procedure"): DEEP}, layers=[TOWN], previous=first.id)
+    with pytest.raises(Fail, match="the codex does not load: sandboxed call raised: (RecursionError|MemoryError)"):
+        legislation.load(broken)
+    assert legislation._state["codex"] == first.id and legislation._state["box"] is not None
+    first.status, broken.status = "inactive", "active"
+    legislation.warm()  # post_upgrade: no trap
+    assert "Error" in LayeredCodex[broken.id].failures["codex"]["load"]["error"]  # a RecursionError or a MemoryError
+    assert call("t_poke", what="x")["error"].startswith("legislation error: the codex sha256:")
+
+
+def test_the_view_answers_no_read_while_the_codex_loads():
+    out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
+                             "chapters": [{"source": TOWN, "domain": "procedure", "sha256": "sha256:x"}]}, {"sha256:x": LOAD_READS})
+    assert out["errors"] == ["x/town/procedure.py:4: GGG's entities are read when a method runs, not while the codex loads"]
+
+
+# ── 6. Reads are metered per call ───────────────────────────────────────────────────────────────────────────────
+
+READ_LOOP = '''
+from ggg import Member
+from realms.legislation import above
+
+class Register(above("register")):
+    def on_t_poke(self, event):
+        if event.args.get("what") == "read loop":
+            n = 0
+            while n < 5000:
+                Member.get("nobody")
+                n += 1
+'''
+
+
+def test_a_hook_that_reads_past_the_budget_fails_alone():
+    activate(layered({(TOWN, "register"): READ_LOOP}, layers=[TOWN]))
+    assert ok("t_poke", what="read loop")["done"] == "read loop"
+    error = failures()["codex"]["on_t_poke"]["error"]
+    assert error == f"the chapters read for more than {legislation.READS:,} instructions in one call: the call stops"
+    ok("t_poke", what="fine")
+    assert failures() == {}
+
+
+# ── 7. The filing of a governed call is a proposal_create to the legislation ────────────────────────────────────
+
+FILING = '''
+from realms.legislation import above
+
+class Procedure(above("procedure")):
+    def check_proposal_create(self, args):
+        if args.action is not None and args.action.op == "profile_create":
+            return self.deny("no new profiles by proposal")
+
+    def on_proposal_create(self, event):
+        self.ggg.notification_send(recipient="User:alice", title="filed", body=str(event.result.get("requires_vote")))
+'''
+
+
+def test_a_governed_call_turned_proposal_runs_proposal_creates_guards_and_hooks():
+    world.policy(Department["Administration"], 3, 5)
+    activate(layered({(TOWN, "procedure"): FILING}, layers=[TOWN]))
+    assert call("profile_create", profile="p", allowed_to=[])["error"] == "no new profiles by proposal"
+    assert [p for p in rows(Proposal) if p.action and p.action["op"] == "profile_create"] == []
+    filed = ok("user_set_status", user="bob", status="suspended")
+    assert filed["requires_vote"] and notices("filed") == ["True"]
+
+
+# ── 8. No default arguments ─────────────────────────────────────────────────────────────────────────────────────
+
+MEMORY = register('''    def check_t_poke(self, args, seen=[]):
+        seen.append(args.what)
+        return None
+''')
+LAMBDA_DEFAULT = register('''    def check_t_poke(self, args):
+        f = lambda acc=[]: acc
+        return None
+''')
+
+
+@pytest.mark.parametrize("text, line", [(MEMORY, 4), (LAMBDA_DEFAULT, 5),
+                                        (register("    def check_t_poke(self, args, n=15):\n        pass\n"), 4)])
+def test_default_arguments_are_refused_at_load(text, line):
+    out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
+                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
+    assert out["errors"] == [f"x/town/register.py:{line}: a default argument is state shared by every call: pass the value instead"]
+
+
+# ── 9. What a chapter hands to another domain crosses the same boundary ─────────────────────────────────────────
+
+ALPHA = '''
+from realms.legislation import above
+
+class Alpha(above("alpha")):
+    uses = ["beta"]
+
+    def check_t_poke(self, args):
+        if args.what == "hand self":
+            return self.deny(self.legislation.beta.take(self))
+        if args.what == "hand method":
+            return self.deny(self.legislation.beta.take(self.check_t_poke))
+
+    def _secret(self):
+        return "alpha's private member"
+'''
+BETA = '''
+from realms.legislation import above
+
+class Beta(above("beta")):
+    def take(self, other):
+        return other._secret()
+'''
+
+
+def test_a_chapter_handed_across_domains_is_the_public_view_and_a_method_is_refused():
+    activate(layered({(TOWN, "alpha"): ALPHA, (TOWN, "beta"): BETA}, layers=[TOWN]))
+    assert call("t_poke", what="hand self")["error"] == (
+        "legislation error in x/town/beta.py: _secret is private to its chapter: other chapters cannot call it")
+    assert call("t_poke", what="hand method")["error"] == (
+        "legislation error in x/town/alpha.py: x/town/beta.py was handed method: only plain data crosses a domain boundary")

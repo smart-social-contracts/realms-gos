@@ -30,6 +30,11 @@ def now():
     return ic.time() // 1_000_000_000
 
 
+def instructions():
+    """Instructions this message has run so far: a deterministic clock for what work costs."""
+    return ic.performance_counter(0)
+
+
 def candid_encode(text):
     return ic.candid_encode(text)
 

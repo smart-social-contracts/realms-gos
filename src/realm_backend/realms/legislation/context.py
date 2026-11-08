@@ -218,24 +218,24 @@ def is_result(value):
     return is_data(value)
 
 
-def crossing(value, file):
-    """``value``, as it leaves the chapter of ``file`` for another domain: plain data passes, a chapter instance
-    is seen through ``Public``, and anything else (a method, a view of other domains, an object a chapter
-    made) is refused (realms-gos#543)."""
+def crossing(value, file, way="returned"):
+    """``value``, as it crosses between the chapter of ``file`` and another domain, ``returned`` by its method or
+    ``handed`` to it: plain data passes, a chapter instance is seen through ``Public``, and anything else (a
+    method, a view of other domains, an object a chapter made) is refused (realms-gos#543)."""
     from realms.legislation.chapter import Chapter
 
     if isinstance(value, Chapter):
         return Public(value)
     if isinstance(value, Public) or not is_result(value):
         raise LegislationError(
-            f"{file} returned {type(value).__name__}: only plain data crosses a domain boundary"
+            f"{file} {way} {type(value).__name__}: only plain data crosses a domain boundary"
         )
     return value
 
 
 class Public(metaclass=Sealed):
-    """Another domain's chapter as a caller sees it: its public members only, never the ``self`` API, and
-    what its methods return goes through ``crossing``."""
+    """Another domain's chapter as a caller sees it: its public members only, never the ``self`` API; what
+    its methods are handed and what they return goes through ``crossing``."""
 
     __slots__ = ("__chapter__",)
 
@@ -258,6 +258,8 @@ class Public(metaclass=Sealed):
             return value  # a setting: frozen data
 
         def call(*args, **kwargs):
+            args = tuple(crossing(a, cls.__file__, "was handed") for a in args)
+            kwargs = {k: crossing(v, cls.__file__, "was handed") for k, v in kwargs.items()}
             return crossing(value(*args, **kwargs), cls.__file__)
 
         return call

@@ -78,18 +78,21 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         if spec["check"]:
             spec["check"](args)
         governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
+        from core import legislation
+
+        call = Call(user, by, origin, proposal, grant)
+        record = None if spec["read"] else (lambda out: audit(name, user, by, origin, args, out))
         # A delegate's governed call is always a proposal: where the department decides directly, the member's own
-        # vote is what lets it through.
+        # vote is what lets it through. The filing is a proposal_create to the legislation.
         if governing is not None and (grant or not direct(governing)):
             from api import proposals
 
-            out = proposals.file_replay(name, args, user, by, governing, grant)
+            pargs = filing(name, args, governing)
+            out = yield from legislation.run("proposal_create", call, pargs, None,
+                                             lambda: proposals.file_replay(pargs, user, by, grant), record)
         else:
-            from core import legislation
-
-            out = yield from legislation.run(name, spec, Call(user, by, origin, proposal, grant), args, governing)
-        if not spec["read"]:
-            audit(name, user, by, origin, args, out)
+            out = yield from legislation.run(name, call, args, governing, lambda: spec["fn"](call, args), record,
+                                             spec["read"])
         return json.dumps({"ok": True, **out})
     except auth.Denied as e:
         return json.dumps({"ok": False, "error": str(e), "kind": e.kind, "permission": e.permission, "denied": True})
@@ -99,6 +102,12 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         return json.dumps({"ok": False, "error": f"missing {e}", "kind": Fail.kind})
     except Exception as e:
         chain.trap(f"{name}: {e}")
+
+
+def filing(name, args, department):
+    """The proposal a governed call becomes, as ``proposal_create`` takes it: a title, the department and the action."""
+    return {"title": f"{name} {json.dumps(args, sort_keys=True)[:120]}", "department": department.id,
+            "action": {"op": name, "args": args}}
 
 
 def direct(department):

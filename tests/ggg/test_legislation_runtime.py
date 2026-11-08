@@ -370,7 +370,7 @@ class Register(above("register")):
             self.ggg.t_act(what="nested")
 '''})
     ok("t_act", what="revert")
-    assert failures()["x/town/register.py"]["on_t_act"]["error"] == "codex_revert: codex_revert is reserved: no chapter may call it"
+    assert failures()["x/town/register.py"]["on_t_act"]["error"] == "codex_revert: codex_revert is about a reserved operation: no chapter may call it"
     ok("t_act", what="zone")
     assert failures()["x/town/register.py"]["on_t_act"]["error"] == "realm_configure: a chapter never sets a time zone"
     assert Realm["1"].timezone == "UTC"
