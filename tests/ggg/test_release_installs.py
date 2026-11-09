@@ -36,6 +36,8 @@ def entry(version, source="arcadia"):
 NORTH = {"source": "arcadia/north", "version": "1.0.0", "published": 5, "effective_from": 6, "commit": "c" * 40,
          "chapters": {"tax": "sha256:" + sha(NORTH_TAX)}, "calendar": None, "notes": {}}
 TEXTS = {"sha256:" + sha(NORTH_TAX): NORTH_TAX}
+EAST_TAX = 'from realms.legislation import above\n\n\nclass Tax(above("tax")):\n    pass\n'
+EAST = {**NORTH, "source": "arcadia/east", "chapters": {"tax": "sha256:" + sha(EAST_TAX)}}
 
 
 def text_of(checksum):
@@ -54,6 +56,18 @@ def release_list(version="1.0.0", source="arcadia", domains=BOTH, **kw):
     chapters = {f"{source}/{d}": chapter_text(d, version) for d in domains}
     kw.setdefault("url", WEB + f"changes/{source}-{version}.json")
     return listing(chapters, realm="town", release={"source": source, "version": version}, **kw)
+
+
+def north_list(**kw):
+    return listing({"arcadia/north/tax": NORTH_TAX.encode()}, realm="town", release={"source": "arcadia/north", "version": "1.0.0"}, **kw)
+
+
+def run_both_layers():
+    """The realm runs arcadia above arcadia/north, from the one record that relays both."""
+    capital(entry("1.0.0"), NORTH)
+    install(north_list())
+    install(release_list(replaces=active_id()))
+    assert status()["codex"]["layers"] == ["arcadia", "arcadia/north", "town"]
 
 
 def link(cid=SRC, status_="active"):
@@ -131,7 +145,7 @@ def test_the_publishers_record_vouches_before_the_record_that_relays_the_layer()
 
 def test_a_record_that_relays_two_layers_installs_them_one_release_at_a_time_in_either_order():
     capital(entry("1.0.0"), NORTH)
-    install(listing({"arcadia/north/tax": NORTH_TAX.encode()}, realm="town", release={"source": "arcadia/north", "version": "1.0.0"}))
+    install(north_list())
     assert job()["status"] == "done" and status()["codex"]["layers"] == ["arcadia/north", "town"]
     install(release_list(replaces=active_id()))
     seen = status()
@@ -163,6 +177,54 @@ def test_the_record_that_vouches_for_a_newer_release_is_the_one_that_vouches_for
     install(release_list("2.0.0", replaces=active_id()))
     assert job()["status"] == "done"
     assert {installed()[c]["vouched_by"] for c in ("arcadia/tax", "arcadia/procedure")} == {"arcadia"}
+
+
+def test_a_sync_source_cannot_reorder_the_layers_the_realm_runs_by_listing_them_the_other_way_round():
+    run_both_layers()
+    first, fetched = active_id(), len(asked(SRC, "legislation_chapter"))
+    capital(NORTH, entry("2.0.0"))  # north above arcadia, where the realm runs arcadia above north
+    failing(release_list("2.0.0", replaces=first),
+            "the record of src/town puts arcadia/north above arcadia, and this realm runs arcadia above arcadia/north")
+    assert active_id() == first and status()["codex"]["layers"] == ["arcadia", "arcadia/north", "town"]
+    assert len(asked(SRC, "legislation_chapter")) == fetched  # refused before any chapter was fetched
+
+
+def test_a_release_of_a_layer_the_realm_runs_keeps_the_order_the_realm_runs_the_layers_in():
+    run_both_layers()
+    capital(entry("2.0.0"), NORTH)
+    install(release_list("2.0.0", replaces=active_id()))
+    seen = status()
+    assert job()["status"] == "done" and seen["codex"]["layers"] == ["arcadia", "arcadia/north", "town"]
+    assert seen["codex"]["layer_paths"]["tax"] == ["arcadia", "arcadia/north"]
+    assert (installed(seen)["arcadia/tax"]["version"], installed(seen)["arcadia/north/tax"]["version"]) == ("2.0.0", "1.0.0")
+    assert [(r["source"], r["version"]) for r in ok("legislation_releases", "alice")["releases"]] == [
+        ("arcadia", "2.0.0"), ("arcadia/north", "1.0.0")]
+
+
+def test_a_layer_whose_link_ended_is_not_reordered_when_a_related_layer_is_released_from_another_record():
+    run_both_layers()
+    SyncSource[SRC].status = "ended"
+    text = json.dumps({"source": "arcadia/east", "releases": [entry("1.0.0"), EAST]})  # the publisher of east
+    fake_chain.serve(POINTER, text.encode())
+    SyncSource(id=POINTER, checksum="sha256:" + sha(text), name="East", status="active")
+    install(listing({"arcadia/east/tax": EAST_TAX.encode()}, realm="town", replaces=active_id(),
+                    release={"source": "arcadia/east", "version": "1.0.0"}, url=WEB + "changes/east.json"))
+    seen = status()
+    assert job()["status"] == "done" and seen["codex"]["layers"] == ["arcadia", "arcadia/east", "arcadia/north", "town"]
+    assert seen["codex"]["layer_paths"]["tax"] == ["arcadia", "arcadia/east", "arcadia/north"]
+    assert {c: installed(seen)[c]["vouched_by"] for c in ("arcadia/tax", "arcadia/east/tax", "arcadia/north/tax")} == {
+        "arcadia/tax": "src/town", "arcadia/east/tax": "arcadia/east", "arcadia/north/tax": "src/town"}
+
+
+def test_a_new_layer_that_its_record_does_not_place_among_the_layers_the_realm_runs_is_refused():
+    run_both_layers()
+    SyncSource[SRC].status = "ended"
+    text = json.dumps({"source": "arcadia/east", "releases": [EAST]})  # relays nothing the realm runs
+    fake_chain.serve(POINTER, text.encode())
+    SyncSource(id=POINTER, checksum="sha256:" + sha(text), name="East", status="active")
+    failing(listing({"arcadia/east/tax": EAST_TAX.encode()}, realm="town", replaces=active_id(),
+                    release={"source": "arcadia/east", "version": "1.0.0"}, url=WEB + "changes/east.json"),
+            "the record of arcadia/east lists arcadia/east, and none of the layers this realm runs")
 
 
 def test_the_layers_from_above_stay_as_installed_when_the_realm_changes_its_own_layer_and_no_record_is_read():

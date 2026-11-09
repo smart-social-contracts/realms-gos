@@ -142,7 +142,7 @@ def test_a_release_the_record_does_not_cover_is_refused_and_the_old_codex_keeps_
 def test_two_sync_sources_that_relay_different_releases_of_a_layer_are_refused(net, source, other, town, site):
     link(town, other)  # source relays arcadia 1.0.0, other 2.0.0
     first = active_id(town)
-    job = failing(net, town, release_args(site, "2.0.0", replaces=first), "relay different releases (1.0.0 and 2.0.0)")
+    job = failing(net, town, release_args(site, "2.0.0", replaces=first), "relay different releases (2.0.0 and 1.0.0)")
     assert job["step"] == "fetch_chapters"  # before any chapter was fetched
 
 
@@ -222,5 +222,5 @@ def test_what_reading_a_record_costs(lab, costs, count):
     costs.measure(lab, f"{label}: check", "from api import links\nrecord = links.checked_record('k', 'eu/es', releases)")
     costs.measure(lab, f"{label}: keep (write the row)", "links.keep_record(record)")
     costs.measure(lab, f"{label}: read the row back", "import ggg\nlen(ggg.SourceRecord['k'].releases)")
-    costs.measure(lab, f"{label}: cut to the layers the new codex has",
-                  "from core import change_list\nchange_list.relays_for([], [record], {'source': 'eu/es', 'version': '1.0.0'})")
+    costs.measure(lab, f"{label}: place the layer in the codex's order",
+                  "from core import change_list\nchange_list.layers_for([], [record], {'source': 'eu/es', 'version': '1.0.0'})")

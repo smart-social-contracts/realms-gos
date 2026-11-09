@@ -241,7 +241,7 @@ def fetch_chapters(job):
     change list not stored yet, from the capital of the sync source that vouches for its layer, its URL or a mirror;
     the step runs again, in the next message, until none is missing."""
     listed, _, _ = prepared(job)
-    if "relays" not in job.staged:
+    if "layers" not in job.staged:
         yield from read_records(job, listed)
         return "fetch_chapters" if InstallJob[job.id].status == "running" else None
     for entry in listed["set"]:
@@ -253,23 +253,19 @@ def fetch_chapters(job):
 
 def read_records(job, listed):
     """Read the records of the sync sources, when the change list installs a release, and stage what step 4 and 5
-    check against: the ``relays`` for ``plan`` (core.change_list.relays_for) and the record that vouches for the release
-    (``vouching``). Then the change list is checked against them at once, so that a release no record vouches for
-    fails before any chapter is fetched. A generator."""
+    check against (core.change_list.layers_for): the layers the new codex has, in the order the active codex runs them,
+    who vouches for each, and the record that vouches for the release. Then the change list is checked against them at
+    once, so that a release no record vouches for fails before any chapter is fetched. A generator."""
     release = listed["release"]
     found = (yield from links.read_active_records()) if release is not None else []
     job = InstallJob[job.id]
     if job.status != "running":
         return
     _, realm, _ = prepared(job)
-    runs = installed_layers(codex.active(), realm)
     staged = job.staged
-    staged["relays"] = change_list.relays_for(runs, found, release)
+    staged["layers"] = change_list.layers_for(installed_layers(codex.active(), realm), found, release)
     job.staged = staged
     vouched(job)
-    if release is not None:
-        staged["vouching"] = change_list.vouching(found, release)
-        job.staged = staged
 
 
 def fetch_chapter(job, entry):
@@ -306,7 +302,7 @@ def fetch_chapter(job, entry):
 def vouching_capital(job, entry):
     """The capital to ask for the chapter ``entry``: the sync source that vouches for the release it is a part of, when
     that is a realm. None for the realm's own chapters and for a stand-in record, which have only their URLs."""
-    vouching = job.staged.get("vouching")
+    vouching = job.staged["layers"]["vouching"]
     if vouching is None or entry["source"] != vouching["release"]["source"] or not links.is_realm_key(vouching["key"]):
         return None
     return vouching["key"]
@@ -396,7 +392,7 @@ def keep_relayed(row):
     """At the switch to ``row``: if its install brought a release, this realm's record lists it, as the record that
     vouches for it lists it (api.links.relay_release)."""
     job = store.live_job()
-    vouching = job.staged.get("vouching") if job is not None and job.staged.get("codex") == row.id else None
+    vouching = job.staged["layers"]["vouching"] if job is not None and job.staged.get("codex") == row.id else None
     if vouching is not None:
         links.relay_release(vouching["release"], vouching["order"])
 
@@ -438,13 +434,11 @@ def prepared(job):
 
 
 def vouched(job):
-    """``prepared`` and then the records the job staged: the plan of the new codex, who vouches for each chapter, the
+    """``prepared`` and then the layers the job staged: the plan of the new codex, who vouches for each chapter, the
     change list."""
     listed, realm, own = prepared(job)
-    brought = (listed["release"] or {}).get("source")  # the layer a release replaces is vouched for anew
-    kept = {layer["source"]: layer["vouched_by"] for layer in installed_layers(codex.active(), realm)
-            if layer["source"] != brought}
-    planned, vouched_by = change_list.vouch(listed, realm, job.staged["relays"], own, kept)
+    layers = job.staged["layers"]
+    planned, vouched_by = change_list.vouch(listed, realm, layers["relays"], own, layers["vouchers"])
     return planned, vouched_by, listed
 
 

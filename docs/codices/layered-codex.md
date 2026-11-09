@@ -1214,13 +1214,16 @@ chosen sync source, one with an active link, is its record as the releases it ru
   codex and gives the flattened view of §5.9 as plain data.
 
 A follower installs a layer from above as a release, one layer at a time (§7, §9.2). The install reads the
-records of its active sync sources only when it brings a release. It hands `plan` each record **cut to the layers the
-new codex has**: the layers the realm runs from above, each as it runs them (the release, checksums and voucher it
-was installed with), and the release's layer as the record lists it. A record that has moved on to a newer release
-of a layer the realm keeps is no conflict, since the install does not touch that layer. So a record that relays
-several layers is installed in any order, and a change to the realm's own layer needs no call to a sync source. A
-layer from above that no active record lists (its link ended) stays as installed, under the source that vouched for
-it, and `plan` gets it as a record of its own.
+records of its active sync sources only when it brings a release. **The layers the realm runs keep the order the
+active codex runs them in**, whatever a record says, each as the realm runs it (the release, checksums and voucher
+it was installed with); a record that has moved on to a newer release of one of them is no conflict, since the
+install does not touch it. The release's layer takes the place of its earlier release when the realm runs it
+already. A new layer goes right after the last layer the vouching record lists above it, or before the first it
+lists below it; a record that lists none of the layers the realm runs places nothing, and the install is refused.
+Every active record must agree with the order that results: one that puts two of the layers the other way round than
+the realm runs them is refused, naming both. `plan` gets the result as one record, named by its last layer. So a
+record that relays several layers is installed in any order, a change to the realm's own layer needs no call to a sync
+source, and a layer whose link has ended stays where it is.
 
 A follower checks each layer from above against one record:
 
@@ -1340,13 +1343,15 @@ per message:
    - each layer from above must match the record that vouches for it: its publisher's, when the realm
      syncs from the publisher directly, otherwise the relaying sync source's (the first of them, in the
      order of the links), whichever route the bytes came by; a copy that does not match is refused. A
-     layer the realm already runs keeps the voucher it was installed with;
+     layer the realm already runs keeps the voucher it was installed with, and the order it runs in: a
+     record that lists the layers in another order is refused (§8);
    - a release install must match one release exactly and be whole;
    - if two sync sources relay different releases of the same layer, the follower's own legislation
      decides which one it installs. **If its legislation does not choose, the install is refused and
      the old codex keeps running.**
 5. **Build:**
-   - compute the new layer paths from the paths the sync sources relay, then the realm's own layer
+   - compute the new layer paths from the layers the realm runs from above, in the order it runs them,
+     with the release's layer placed by the record that vouches for it, then the realm's own layer
      (`plan`, shape in §8);
    - refuse paths that do not form one chain (§3.3);
    - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`
