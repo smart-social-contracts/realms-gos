@@ -50,7 +50,7 @@ def broken(args):
 
 
 @op.op("treasury.manage")
-def t_poke(c, args):
+def t_codex_poke(c, args):
     """A write the layered codices below guard, to tell which codex the runtime runs."""
     return {"done": args.get("what", "")}
 
@@ -377,7 +377,7 @@ REGISTER = '''
 from realms.legislation import above
 
 class Register(above("register")):
-    def check_t_poke(self, args):
+    def check_t_codex_poke(self, args):
         if args.what == "who":
             return self.deny("%s")
 
@@ -394,10 +394,10 @@ def test_codex_activate_switches_the_runtime_and_runs_the_new_codexs_hook_once_i
     a = running(layered({(TOWN, "register"): REGISTER % ("A", "A")}, layers=[TOWN]))
     b = layered({(TOWN, "register"): REGISTER % ("B", "B")}, layers=[TOWN], status="pending")
     LOG.clear()
-    assert call("t_poke", "ctl", what="who")["error"] == "A"
+    assert call("t_codex_poke", "ctl", what="who")["error"] == "A"
     assert ok("codex_activate", "ctl", codex=b.id)["codex"] == b.id
     assert (a.status, b.status, b.previous) == ("inactive", "active", a.id)
-    assert legislation._state["codex"] == b.id and call("t_poke", "ctl", what="who")["error"] == "B"
+    assert legislation._state["codex"] == b.id and call("t_codex_poke", "ctl", what="who")["error"] == "B"
     assert LOG == []  # the switch's own message runs no hook: not A's for the operation, not B's yet
     fire_timers()
     assert LOG == [("activated by B", "codex")]
@@ -416,7 +416,7 @@ def test_codex_activate_refuses_a_codex_that_does_not_load_and_switches_nothing(
     out = call("codex_activate", "ctl", codex=b.id)
     assert not out["ok"] and "x/town/register.py" in out["error"], out  # the load refused the chapter
     assert (a.status, b.status) == ("active", "pending") and codex.active().id == a.id
-    assert legislation._state["codex"] == a.id and call("t_poke", "ctl", what="who")["error"] == "A"
+    assert legislation._state["codex"] == a.id and call("t_codex_poke", "ctl", what="who")["error"] == "A"
     fire_timers()
     assert LOG == []
 

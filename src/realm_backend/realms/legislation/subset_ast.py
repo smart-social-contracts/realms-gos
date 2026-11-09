@@ -17,6 +17,7 @@ from realms.legislation.subset import (
     NO_FLOAT,
     NO_POWER,
     SDK,
+    base_names,
     sdk_names,
 )
 
@@ -44,6 +45,7 @@ class Check:
             raise Refused(e.msg, e.lineno, file)
         self.imported = set()
         self.allowed = []  # per function being visited: the names a store may target (self, a hook's event)
+        self.taken = frozenset()  # the names a store on self may not use: the class's own members and the base class's
 
     def refuse(self, node, reason):
         raise Refused(reason, getattr(node, "lineno", None), self.file)
@@ -214,6 +216,13 @@ class Check:
             and isinstance(body[0].value.value, str)
         ):
             body = body[1:]
+        self.taken = base_names() | {
+            target.id
+            for member in body
+            if isinstance(member, ast.Assign)
+            for target in member.targets
+            if isinstance(target, ast.Name)
+        } | {member.name for member in body if isinstance(member, ast.FunctionDef)}
         for member in body:
             if isinstance(member, ast.Pass):
                 continue
@@ -385,6 +394,11 @@ class Check:
                 self.refuse(
                     node,
                     f".{node.attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
+                )
+            if node.value.id == "self" and node.attr in self.taken:
+                self.refuse(
+                    node,
+                    f".{node.attr} = ...: {node.attr} is a member of the chapter or of the self API: a store on self takes a new name",
                 )
         elif isinstance(node, ast.Subscript):
             self.expression(node, local)

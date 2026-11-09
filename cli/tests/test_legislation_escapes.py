@@ -289,3 +289,187 @@ def test_no_cedar_is_injected_through_a_setting_or_a_literal(name):
         "context.facts.rate > 1300000 };" in before
         and 'context.facts.code == "ibi_urban"' in before
     )
+
+
+# The security review before wave 3 (realms-gos#512). One instance runs every layer's code of a domain in a call, so
+# a name a lower layer stores on ``self`` must never hide a member or the self API the layer above reads.
+ES_SELF = """
+from realms.legislation import above, fixed, overridable
+class Procedure(above("procedure")):
+    limit = fixed(5, legislation="x")
+    capital = overridable(False, legislation="x")
+
+    @fixed(legislation="x")
+    def cap(self):
+        return 5
+
+    @overridable(legislation="x")
+    def charge(self):
+        return self.limit, self.capital, self.cap(), self.approved_by("Junta"), self.running_layer()
+"""
+UNTOUCHED = (5, False, 5, False, "eu/es")
+
+
+def _lower(body):
+    """The lowest layer's ``charge``: ``body`` runs on ``self``, then the layer above reads from the same instance."""
+    return (
+        H
+        + "class Procedure(above('procedure')):\n    def charge(self):\n        "
+        + body
+        + "\n        return super().charge()\n"
+    )
+
+
+def _self_codex():
+    c = Codex(["eu/es", "x/town"], realm="x/town", operations=["codex_install"])
+    c.load("eu/es", "procedure", ES_SELF)
+    return c
+
+
+@pytest.mark.parametrize(
+    "store", ["self.limit = 99", "self.capital = True", "self.cap = lambda: 99"]
+)
+def test_a_lower_layer_cannot_change_what_the_layer_above_reads_from_self(store):
+    c = _self_codex()
+    chapter = c.load("x/town", "procedure", _lower(store))(c.context())
+    with pytest.raises(LegislationError, match="a store on self takes a new name"):
+        chapter.charge()
+    assert c.chapters["procedure"][0](c.context()).charge() == UNTOUCHED
+
+
+@pytest.mark.parametrize(
+    "store",
+    [
+        "self.charge = None",  # a member of this chapter
+        "self.approved_by = lambda department: True",  # the self API
+        "self.running_layer = lambda: 'x/town'",
+        "self.now = lambda: 0",
+        "self.deny = lambda reason: None",
+    ],
+)
+def test_both_checkers_refuse_a_store_under_a_name_the_chapter_or_the_self_api_defines(
+    store,
+):
+    from realms.legislation import subset_ast
+
+    with pytest.raises(Refused, match="a store on self takes a new name"):
+        _self_codex().load("x/town", "procedure", _lower(store))
+    with pytest.raises(Refused, match="a store on self takes a new name"):
+        subset_ast.check(_lower(store), "x/town/procedure.py")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "limit",
+        "capital",
+        "cap",
+        "charge",
+        "approved_by",
+        "running_layer",
+        "now",
+        "uses",
+    ],
+)
+def test_an_instance_refuses_a_store_under_any_name_its_classes_define(name):
+    c = _self_codex()
+    chapter = c.load("x/town", "procedure", _lower("pass"))(c.context())
+    with pytest.raises(
+        LegislationError, match=f"self.{name}: .* a store on self takes a new name"
+    ):
+        setattr(chapter, name, 1)
+
+
+def test_a_store_under_a_new_name_still_works():
+    c = _self_codex()
+    chapter = c.load("x/town", "procedure", _lower("self.memo = 7"))(c.context())
+    assert chapter.charge() == UNTOUCHED and chapter.memo == 7
+
+
+# A hook may store on its event parameter, so it must be handed the call's own Event: a chapter that called its own hook
+# with an SDK function, or with itself, would turn that store into state kept between calls, or into a store on self.
+HOOK_CALLS = {
+    "an SDK function": "self.on_codex_install(days)",
+    "the chapter itself": "self.on_codex_install(self)",
+    "no event": "self.on_codex_install()",
+    "an event as a keyword": "self.on_codex_install(event=days)",
+}
+
+
+def _hook_chapter(mark, call):
+    """A chapter with a hook, marked ``mark``, that stores on its event, and a method that makes ``call``."""
+    c = Codex(["x/town"], realm="x/town", operations=["codex_install"])
+    text = (
+        f"from realms.legislation import above, days, {mark}\n"
+        "class Procedure(above('procedure')):\n"
+        f"    @{mark}\n    def on_codex_install(self, event):\n        event.memo = 'x'\n\n"
+        f"    def charge(self):\n        {call}\n"
+    )
+    return c.load("x/town", "procedure", text)(c.context())
+
+
+@pytest.mark.parametrize("mark", ["overridable", "extension"])
+@pytest.mark.parametrize("call", sorted(HOOK_CALLS))
+def test_a_hook_runs_with_the_calls_event_only(mark, call):
+    from realms.legislation import days
+
+    chapter = _hook_chapter(mark, HOOK_CALLS[call])
+    with pytest.raises(
+        LegislationError, match="a hook runs with the operation's event"
+    ):
+        chapter.charge()
+    assert not hasattr(days, "memo")
+
+
+@pytest.mark.parametrize("mark", ["overridable", "extension"])
+def test_a_hook_still_runs_with_an_event(mark):
+    from realms.legislation import Event
+
+    chapter = _hook_chapter(mark, "pass")
+    event = Event("a", {}, {}, 0)
+    chapter.on_codex_install(event)
+    assert event.memo == "x"
+
+
+EXPORTED = (
+    "above",
+    "days",
+    "extension",
+    "fixed",
+    "forbid",
+    "months",
+    "overridable",
+    "pct",
+    "when",
+    "working_days",
+    "years",
+)
+
+
+@pytest.mark.parametrize("name", EXPORTED)
+def test_the_functions_a_chapter_imports_refuse_attributes(name):
+    import realms.legislation as sdk
+
+    function = getattr(sdk, name)
+    with pytest.raises(LegislationError, match="never change"):
+        function.memo = 1
+    assert not hasattr(function, "memo")
+
+
+def test_every_other_name_a_chapter_imports_is_a_class_or_an_expression_builder():
+    import realms.legislation as sdk
+
+    assert sorted(set(sdk.__all__) - set(EXPORTED)) == ["F", "Money", "Ref", "S"]
+
+
+def test_the_functions_a_chapter_imports_still_work():
+    import realms.legislation as sdk
+
+    assert (
+        sdk.days(2).to_json() == {"count": 2, "unit": "Day"}
+        and sdk.pct("1.10") is not None
+    )
+    assert (
+        sdk.fixed(5, legislation="x").mark == "fixed"
+        and sdk.overridable(lambda self: 1).mark == "overridable"
+    )

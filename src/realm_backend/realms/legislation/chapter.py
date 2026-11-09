@@ -205,10 +205,23 @@ def as_layer(chapter, source, fn, args, kwargs):
             context.depth -= 1
 
 
-def bound(fn, source):
-    """A method of layer ``source``, as installed on the class."""
+def hook_event(name, args, kwargs):
+    """The event hook ``name`` is called with: the call's own ``Event``, and nothing else. A hook may store on its event,
+    so a chapter that called its own hook with an SDK function would turn that store into state shared by every chapter.
+    """
+    if len(args) != 1 or kwargs or type(args[0]) is not Event:
+        raise LegislationError(
+            f"{name}: a hook runs with the operation's event, nothing else"
+        )
+    return args[0]
+
+
+def bound(fn, source, hook=False):
+    """A method of layer ``source``, as installed on the class. A hook runs with the call's event only."""
 
     def run(self, *args, **kwargs):
+        if hook:
+            hook_event(fn.__name__, args, kwargs)
         return as_layer(self, source, fn, args, kwargs)
 
     run.__name__, run.__doc__, run.__wrapped__ = fn.__name__, fn.__doc__, fn
@@ -235,11 +248,10 @@ def extend(name, kind):
                 if name in getattr(c, "__own__", {})
             ]
             if kind == "hook":
-                event = args[0] if args and isinstance(args[0], Event) else None
+                event = hook_event(name, args, kwargs)
                 for source, fn in chain:
                     as_layer(self, source, fn, args, kwargs)
-                    if event is not None:
-                        event.seal()
+                    event.seal()
                 return None
             if kind == "guard":
                 for source, fn in chain:
@@ -465,7 +477,7 @@ def _install(member):
         return (
             extend(member.name, member.kind)
             if member.mark == EXTENSION
-            else bound(member.value, member.source)
+            else bound(member.value, member.source, member.kind == "hook")
         )
     return member.value
 
@@ -483,6 +495,16 @@ class Chapter(metaclass=ChapterMeta):
 
     def __init__(self, context):
         self.__context__ = context
+
+    def __setattr__(self, name, value):
+        """One instance runs every layer's code of the domain in a call, so a name stored on it that any class
+        defines (a member, fixed or not, or the self API) would hide that member from the code of the layer
+        above. A chapter stores new names only."""
+        if any(name in vars(cls) for cls in type(self).__mro__):
+            raise LegislationError(
+                f"self.{name}: {name} is a member of the chapter or of the self API: a store on self takes a new name"
+            )
+        object.__setattr__(self, name, value)
 
     @property
     def ggg(self):

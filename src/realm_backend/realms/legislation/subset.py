@@ -212,6 +212,14 @@ def sdk_names():
     return sdk.__all__
 
 
+def base_names():
+    """The names ``Chapter`` defines, the self API among them. Read when a chapter is checked: chapter.py imports this
+    module."""
+    from realms.legislation.chapter import Chapter
+
+    return frozenset(vars(Chapter))
+
+
 class Check:
     """One chapter's compiled code against the subset. ``run`` raises ``Refused`` at the first problem."""
 
@@ -219,6 +227,7 @@ class Check:
         self.text, self.file = text, file
         self.names = opnames()
         self.imported = set()  # the names the module's import statements bind
+        self.taken = frozenset()  # the names a store on self may not use: the class's own members and the base class's
 
     def refuse(self, reason, token=None):
         line = None
@@ -306,6 +315,7 @@ class Check:
         self.common(code, "class body", CLASS_INSTRUCTIONS)
         ops = instructions(code, self.names)
         self.no_defaults(ops)
+        self.taken = base_names() | {code.co_names[arg] for name, arg in ops if name == "STORE_NAME"}
         for i, (name, arg) in enumerate(ops):
             if name in ("LOAD_ATTR", "LOAD_METHOD"):
                 # The dunder names a class body may hold (CLASS_BODY) are the ones CPython itself
@@ -333,12 +343,18 @@ class Check:
         self.no_defaults(ops)
         self.bound_once(code, ops, {"self", event} - {None}, nested)
         for i, (name, arg) in enumerate(ops):
-            if name == "STORE_ATTR" and not self.on_self_or_event(code, ops, i, event):
-                attr = code.co_names[arg]
-                self.refuse(
-                    f".{attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
-                    f".{attr}",
-                )
+            if name == "STORE_ATTR":
+                attr, target = code.co_names[arg], self.stored_on(code, ops, i)
+                if target not in {"self", event} - {None}:
+                    self.refuse(
+                        f".{attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
+                        f".{attr}",
+                    )
+                if target == "self" and attr in self.taken:
+                    self.refuse(
+                        f".{attr} = ...: {attr} is a member of the chapter or of the self API: a store on self takes a new name",
+                        f".{attr}",
+                    )
             if name == "CALL_INTRINSIC_1" and arg not in _INTRINSICS:
                 self.refuse("an instruction outside the readable subset", code.co_name)
         for const in code.co_consts:
@@ -374,22 +390,21 @@ class Check:
             return arg >> 1
         return arg
 
-    def on_self_or_event(self, code, ops, i, event):
-        """Whether the object the attribute is stored on was just loaded as ``self`` or as the event the hook was
-        given (``event``): the two objects a call gets fresh, and so the only ones a store cannot turn into state
-        kept between calls. Anything else, a parameter included, may outlive the call: an SDK function, the
-        calendar, a view, another chapter."""
+    def stored_on(self, code, ops, i):
+        """The variable the object an attribute is stored on was just loaded from, or None. A chapter may store on
+        ``self`` and on the event a hook was given only: the two objects a call gets fresh, and so the only ones a store
+        cannot turn into state kept between calls. Anything else, a parameter included, may outlive the call: an SDK
+        function, the calendar, a view, another chapter."""
         if i == 0:
-            return False
-        allowed = {"self", event} - {None}
+            return None
         name, arg = ops[i - 1]
         if name in ("LOAD_FAST", "LOAD_FAST_CHECK"):
-            return code.co_varnames[arg] in allowed
+            return code.co_varnames[arg]
         if name == "LOAD_FAST_LOAD_FAST":
-            return code.co_varnames[arg & 15] in allowed
+            return code.co_varnames[arg & 15]
         if name == "LOAD_DEREF":  # a parameter a nested function also reads is a cell on 3.10
-            return self.deref_name(code, arg) in allowed
-        return False
+            return self.deref_name(code, arg)
+        return None
 
     @staticmethod
     def deref_name(code, index):
@@ -436,6 +451,11 @@ class Check:
                 and not (scope == "module" and name == "__doc__")
             ):
                 self.refuse(f"{name}: no dunder names in a chapter", name)
+        # Dunder names are refused where the code reads them (co_names) and in strings, not among the variables it binds
+        # (co_varnames, co_cellvars, co_freevars): a local is only a name and reaches nothing. Refusing them there would
+        # also refuse super(): a method that calls it holds the implicit ``__class__`` cell in co_freevars. That cell is
+        # the class that defines the method, which type(self) and above() give already. (subset_ast refuses a dunder
+        # variable the author writes; super() writes none.)
         # The names the code binds as well as those it reads (co_names holds the global and attribute names only).
         for name in (code.co_name, *code.co_names, *code.co_varnames, *code.co_cellvars, *code.co_freevars):
             if name in FLOAT_NAMES:
