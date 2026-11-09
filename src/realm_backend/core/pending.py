@@ -414,6 +414,7 @@ def approve(c, aid, sent):
     """Run the call of the action ``aid`` as its grantor, on the grantor's own approval that sends its hash. A generator.
     Returns the action and the reply of the call; the call's own refusal fails the action, it does not undo the approval."""
     from core.op import dispatch, ops
+    from ggg import Delegation
 
     a = decision(c, aid)
     if a.status != "pending":
@@ -425,7 +426,7 @@ def approve(c, aid, sent):
     spec = ops()[a.method]
     # A signing act is described from the records it acts on, which the hash does not seal (a draft verdict can be
     # edited, a ledger grows): the official signs what they were shown, or nothing.
-    if spec["signing"] and summary_of(a.grantor, a.method, spec, a.args) != a.summary:
+    if spec["signing"] and summary_of(a.grantor, a.method, spec, a.args, Delegation[a.grant]) != a.summary:
         raise Conflict(f"what {a.id} shows has changed since it was prepared: decline it and ask for it again")
     a.decided_at = chain.now()
     if spec["read"]:  # a read is approved once, and its delegate collects it

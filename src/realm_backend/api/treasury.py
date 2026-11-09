@@ -929,7 +929,7 @@ def statements_of(period, args):
     return statements
 
 
-def reporting(user, args):
+def reporting(user, args, grant):
     p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
     s = statements_of(p, args)
     previous = [r for r in p.reports if r.kind == kind]
@@ -1079,7 +1079,7 @@ def ledger_memo(args):
     return str(args.get("reason", ""))[:64]
 
 
-def forcing_transfer(user, args):
+def forcing_transfer(user, args, grant):
     token = find(Token, args["symbol"])
     return you_sign(f"By court order, moves {money(positive(args), token.id)} from {quoted(args['from'])} to "
                     f"{quoted(args['to'])} on the ledger of {token.id}", ("Ledger memo", quoted(ledger_memo(args))))
@@ -1107,7 +1107,7 @@ def token_force_transfer(c, args):
     return {"transfer": t.id, "status": t.status, "ledger_tx": tx}
 
 
-def freezing_account(user, args):
+def freezing_account(user, args, grant):
     token = find(Token, args["symbol"])
     return you_sign(f"{'Freezes' if args.get('frozen', True) else 'Unfreezes'} {quoted(args['account'])} "
                     f"on the ledger of {token.id}", ("Ledger memo", quoted(ledger_memo(args))))

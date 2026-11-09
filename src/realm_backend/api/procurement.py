@@ -194,7 +194,7 @@ def marks_of(bid, args):
     return marks
 
 
-def scoring(user, args):
+def scoring(user, args, grant):
     b = find(Bid, args["bid"])
     marks = ", ".join(f"{quoted(k)} {v}" for k, v in sorted(marks_of(b, args).items()))
     return you_sign(f"Scores bid {b.id} of {quoted(b.vendor.id)} on tender {b.tender.id} {quoted(b.tender.title)} "
@@ -243,7 +243,7 @@ def awarded(t, args):
     return b, best, why
 
 
-def awarding(user, args):
+def awarding(user, args, grant):
     t = find(Tender, args["tender"])
     b, best, why = awarded(t, args)
     return you_sign(f"Awards tender {t.id} {quoted(t.title)} to bid {b.id} of {quoted(b.vendor.id)}, which scored "

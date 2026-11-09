@@ -8,6 +8,7 @@ import pytest
 import fake_chain
 import world
 from core import op, pending, poa
+from core.pending import FSI, PDI, quoted
 from ggg import Delegation, Department, Event, KeyEnvelope, Notification, PendingAction, Position, User
 from keys_people import DAY, DERIVED, NAMES, SCOPE, build
 from kit import denied, ok, rows
@@ -41,7 +42,12 @@ def prepare(name, case, delegate="claude-conn", **changes):
 
 def lines_of(action, delegate="claude-conn"):
     """What the realm says about the action, as its delegate reads it: the grantor's card says the same."""
-    return {line["label"]: line["value"] for line in card(action, delegate)["summary"]}
+    return {line["label"]: plain(line["value"]) for line in card(action, delegate)["summary"]}
+
+
+def plain(text):
+    """``text`` without the isolates its quotations sit in, which no one types."""
+    return text.replace(FSI, "").replace(PDI, "")
 
 
 def prepared(name):
@@ -153,7 +159,8 @@ def test_a_principal_that_is_not_a_member_still_reads_as_itself():
 def test_the_departments_and_organisations_of_the_realms_lines_are_quoted():
     build()
     lend("carla", "office:Health")
-    assert poa.label_of("office:Health") == 'Office work: "Health"' and poa.label_of("orgs:clinic-b") == 'Organisations I run: "clinic-b"'
+    assert poa.label_of("office:Health") == f'Office work: {quoted("Health")}'
+    assert poa.label_of("orgs:clinic-b") == f'Organisations I run: {quoted("clinic-b")}'
     documents = ok("document_list", "carla", department="Health")["documents"]
     a = ok("document_delete", "claude-conn", on_behalf_of="carla", document=documents[0]["id"])["pending"]
     assert lines_of(a)["Document"].endswith(' of "Health"')

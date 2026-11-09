@@ -103,7 +103,7 @@ def of_the_licence(lic):
     return f"licence {lic.id} ({quoted(lic.kind)}) of {quoted(lic.holder)}"
 
 
-def deciding_licence(user, args):
+def deciding_licence(user, args, grant):
     lic = find(License, args["license"])
     if not args.get("approve"):
         return you_sign(f"Rejects the application for {of_the_licence(lic)}")
@@ -143,7 +143,7 @@ def license_decide(c, args):
     return {"license": lic.id, "status": lic.status, "expires_at": lic.expires_at}
 
 
-def suspending_licence(user, args):
+def suspending_licence(user, args, grant):
     lic = find(License, args["license"])
     if args.get("resume"):
         return you_sign(f"Reinstates the suspended {of_the_licence(lic)}")
@@ -162,7 +162,7 @@ def license_suspend(c, args):
     return {"license": lic.id, "status": after}
 
 
-def revoking_licence(user, args):
+def revoking_licence(user, args, grant):
     lic = find(License, args["license"])
     return you_sign(f"Revokes for good the {lic.status} {of_the_licence(lic)}")
 

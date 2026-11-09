@@ -786,7 +786,7 @@ def contract_create(c, args):
     return {"contract": k.id}
 
 
-def terminating(user, args):
+def terminating(user, args, grant):
     k = find(Contract, args["contract"])
     parties = ", ".join(quoted(p) for p in k.parties) or "no named party"
     return you_sign(f"Terminates contract {k.id} {quoted(k.title)} between {parties}, which is {k.status}")

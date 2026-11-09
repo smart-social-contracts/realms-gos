@@ -144,7 +144,7 @@ def of_the_parcel(land):
     return f"parcel {land.id} ({quoted(land.kind)}, {land.width} by {land.height} cells at {land.x}, {land.y})"
 
 
-def moving_land(user, args):
+def moving_land(user, args, grant):
     land, to, order = find(Land, args["land"]), owner_ref(args["to"]), deref(args["order"])
     if not isinstance(order, Verdict):
         raise Fail("moving a parcel needs an issued court verdict")
@@ -211,7 +211,7 @@ def land_mint_nft(c, args):
     return {"land": land.id, "token_id": token_id}
 
 
-def assessing_land(user, args):
+def assessing_land(user, args, grant):
     land = find(Land, args["land"])
     changes = [f"{name} {whole(name, args[name]) if name != 'reference' else quoted(args[name])}"
                for name in ("value", "area", "reference") if args.get(name) is not None]
@@ -252,7 +252,7 @@ def freeze(args, on):
     return {"land": land.id, "status": land.status}
 
 
-def freezing_land(user, args):
+def freezing_land(user, args, grant):
     land = find(Land, args["land"])
     return you_sign(f"Marks {of_the_parcel(land)} of {quoted(land.owner)} disputed"
                     f"{' and freezes its NFT' if land.token_id else ''}",
@@ -265,7 +265,7 @@ def land_freeze(c, args):
     return (yield from freeze(args, True))
 
 
-def unfreezing_land(user, args):
+def unfreezing_land(user, args, grant):
     land = find(Land, args["land"])
     return you_sign(f"Ends the dispute on {of_the_parcel(land)} of {quoted(land.owner)}: it becomes active again"
                     f"{' and its NFT is unfrozen' if land.token_id else ''}")
@@ -375,7 +375,7 @@ def licences_held(issuer, kinds):
     return ", ".join(f"{lic.id if lic else 'none'} ({quoted(kind)})" for kind, lic in held) or "none needed"
 
 
-def issuing_credential(user, args):
+def issuing_credential(user, args, grant):
     expires = whole("expires_at", args.get("expires_at") or 0)
     rule = schema_of(args["schema"])
     collection = find(NFTToken, rule["collection"])
@@ -418,7 +418,7 @@ def credential_issue(c, args):
     return {"collection": collection.id, "token_id": token_id, "header": meta}
 
 
-def revoking_credential(user, args):
+def revoking_credential(user, args, grant):
     return you_sign(f"Revokes the {quoted(args['schema'])} credential, token {whole('token_id', args['token_id'])}, "
                     f"issued by organization {quoted(args['organization'])}: the token is frozen for good",
                     ("Revocation reason", quoted(args.get("reason", ""))))

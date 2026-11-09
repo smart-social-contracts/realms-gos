@@ -289,7 +289,7 @@ def identity_owner(args):
     return {find(Identity, args["identity"]).human.user}
 
 
-def reviewing_identity(user, args):
+def reviewing_identity(user, args, grant):
     i = find(Identity, args["identity"])
     proof = quoted(i.kind) + (f" ({quoted(i.category)})" if i.category else "")
     return you_sign(f"Marks identity proof {i.id} of {quoted(i.human.user)} as {quoted(args['status'])}",
@@ -323,7 +323,7 @@ def attribute_owner(args):
     return {Human[find(Attribute, args["attribute"]).human].user}
 
 
-def reviewing_attribute(user, args):
+def reviewing_attribute(user, args, grant):
     a = find(Attribute, args["attribute"])
     # Its kind and value are personal data (I-PRV-1), and the delegate reads this card: they stay out of it.
     return you_sign(f"Marks attribute {a.id} of {quoted(Human[a.human].user)} as {quoted(args['status'])}",

@@ -185,7 +185,7 @@ def of_the_dispute(d):
     return f"dispute {d.id} {quoted(d.title)} from {quoted(d.claimant)} against {quoted(d.respondent)}"
 
 
-def accepting_dispute(user, args):
+def accepting_dispute(user, args, grant):
     d, court = find(Dispute, args["dispute"]), find(Court, args["court"])
     return you_sign(f"Accepts {of_the_dispute(d)} into court {court.id} {quoted(court.name)}; "
                     "a case between them opens")
@@ -206,7 +206,7 @@ def dispute_accept(c, args):
     return {"case": case.id}
 
 
-def rejecting_dispute(user, args):
+def rejecting_dispute(user, args, grant):
     return you_sign(f"Rejects {of_the_dispute(find(Dispute, args['dispute']))}; no case opens")
 
 
@@ -257,7 +257,7 @@ def evidence_submit(c, args):
     return {"evidence": item["id"]}
 
 
-def evaluating_evidence(user, args):
+def evaluating_evidence(user, args, grant):
     case = find(Case, args["case"])
     item = next((i for i in case.evidence or [] if i["id"] == args["evidence"]), None)
     if item is None:
@@ -303,7 +303,7 @@ def of_the_verdict(v):
     return f"verdict {v.id} in case {v.case.id} {quoted(v.case.title)}"
 
 
-def issuing_verdict(user, args):
+def issuing_verdict(user, args, grant):
     v = find(Verdict, args["verdict"])
     return you_sign(f"Issues {of_the_verdict(v)}; the parties may appeal it for {APPEAL_WINDOW // 86400} days",
                     *verdict_text(v.decision, v.reasoning_ref, [terms_of(p) for p in v.penalties]))
@@ -324,7 +324,7 @@ def verdict_issue(c, args):
     return {"verdict": v.id, "appealable_until": v.issued_at + APPEAL_WINDOW}
 
 
-def finalizing_verdict(user, args):
+def finalizing_verdict(user, args, grant):
     v = find(Verdict, args["verdict"])
     return you_sign(f"Makes {of_the_verdict(v)} final and closes the case",
                     *verdict_text(v.decision, v.reasoning_ref, [terms_of(p) for p in v.penalties]))
@@ -347,7 +347,7 @@ def verdict_finalize(c, args):
     return {"verdict": v.id}
 
 
-def linking_verdict(user, args):
+def linking_verdict(user, args, grant):
     v, k = find(Verdict, args["verdict"]), find(Contract, args["contract"])
     disputed = "; the active contract becomes disputed" if k.status == "active" else ""
     return you_sign(f"Links {of_the_verdict(v)} to contract {k.id} {quoted(k.title)}, which is {k.status}{disputed}",
@@ -368,7 +368,7 @@ def verdict_link_contract(c, args):
     return {"verdict": v.id}
 
 
-def modifying_verdict(user, args):
+def modifying_verdict(user, args, grant):
     v = find(Verdict, args["verdict"])
     terms = [penalty_terms(t) for t in args["penalties"]] if "penalties" in args else [terms_of(p) for p in v.penalties]
     reopens = f"; it restarts the {APPEAL_WINDOW // 86400}-day appeal window" if v.status == "issued" else ""
@@ -419,7 +419,7 @@ def appeal_file(c, args):
     return {"appeal": a.id, "court": court.id}
 
 
-def deciding_appeal(user, args):
+def deciding_appeal(user, args, grant):
     a = find(Appeal, args["appeal"])
     appeal = f"appeal {a.id} against verdict {a.verdict} in case {a.case.id} {quoted(a.case.title)}"
     if not args["granted"]:
@@ -461,7 +461,7 @@ EFFECTS = {"fine": "Invoices the target", "restitution": "Invoices the target", 
            "revocation": "Revokes the target", "termination": "Terminates the target"}
 
 
-def executing_penalty(user, args):
+def executing_penalty(user, args, grant):
     p = find(Penalty, args["penalty"])
     effect = EFFECTS.get(p.kind, "Only marks the penalty executed: its own operation carries it out")
     undated = p.kind in ("fine", "restitution") and not p.due_at
