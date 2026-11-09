@@ -6,7 +6,7 @@ import fake_chain
 import pytest
 import world
 from api import links
-from core import legislation
+from core import legislation, op
 from core.db import Fail
 from fake_chain import peer, rejects
 from ggg import Follower, Quarter, Realm, Release, SyncSource
@@ -235,6 +235,26 @@ def test_a_notice_nobody_answered_is_sent_again_until_it_is():
     fire_timers()
     assert not SyncSource[SRC].unsent and status(SyncSource[SRC]) == "active"
     assert fake_chain.state["timers"] == []
+
+
+def test_one_chain_of_timers_serves_a_link_and_ends_when_the_other_side_ends_it():
+    source = peer(SRC, realm_info=realm_info(), link_notify=rejects("the canister is stopped"))
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    ok("sync_source_remove", "ctl", source={"Realm": SRC})  # a second notice to the same stopped realm
+    assert len(source.sent("link_notify")) == 2 and len(fake_chain.state["timers"]) == 1
+    fire_timers()  # sends the status as it is now, and sets the next timer
+    assert len(source.sent("link_notify")) == 3 and len(fake_chain.state["timers"]) == 1
+    assert source.sent("link_notify")[-1]["status"]["Ended"]["by"] == ME
+
+    follower = peer(FOL, link_notify=rejects("the canister is stopped"))
+    ok("follower_accept", "ctl", follower=FOL)
+    assert Follower[FOL].unsent
+    ok("link_notify", FOL, side="follower", status={"Ended": {"by": FOL, "at": fake_chain.now()}})
+    assert not Follower[FOL].unsent  # their notice settles what this realm had to tell
+    fake_chain.state["timers"].clear()
+    sent = len(follower.sent("link_notify"))
+    op.run(links.resend(Follower, FOL))  # the timer that was set when the notice failed
+    assert len(follower.sent("link_notify")) == sent and fake_chain.state["timers"] == []
 
 
 def test_a_notice_waiting_when_the_realm_is_upgraded_is_sent_again_at_its_start():

@@ -183,40 +183,53 @@ def vote_link(cls, key, cycle, **fields):
         undo(link, before)
         raise
     cls[key].checking = False
-    yield from notify(cls[key])  # their vote is in or it is not: this notice completes the link in either order
+    yield from tell(cls[key])  # their vote is in or it is not: this notice completes the link in either order
     return {}
 
 
 def notify(link):
     """Tell the capital at the other side what this side's vote, or its ending, made of ``link``, and read the answer:
     ``active`` means their vote is in. An answer of any kind is an answer, a refusal among them; a call that fails is
-    not, and the notice is sent again (``resend``). A generator."""
+    not, and the link stays ``unsent``. Returns whether it was answered. A generator."""
     cls, key = type(link), link.id
     try:
         reply = yield from quarters.ask(key, "link_notify", {"side": SIDES[cls], "status": link_status(link)})
     except Exception:  # noqa: BLE001  rejected: the realm is stopped, gone, or has no such method
-        again = cls[key]
-        again.unsent = True
-        chain.set_timer(RETRY, lambda: resend(cls, key))
-        return
+        cls[key].unsent = True
+        return False
     link = cls[key]  # the link may have changed while the call was out
     link.unsent = False
     if isinstance(reply, dict) and reply.get("ok") and reply.get("status") == "active" and link.status == "requested":
         link.status = "active"
+    return True
+
+
+def tell(link):
+    """``notify``, and the timer that sends it again if nobody answered: one chain of timers per link, started when the
+    link first becomes ``unsent``, as the one running sends the link's status as it is then. A generator."""
+    waiting = link.unsent
+    if not (yield from notify(link)) and not waiting:
+        retry_later(type(link), link.id)
+
+
+def retry_later(cls, key):
+    chain.set_timer(RETRY, lambda: resend(cls, key))
 
 
 def resend(cls, key):
-    """A notice nobody answered, sent again with the link's status now. A generator."""
+    """A notice nobody answered, sent again with the link's status now, and the next timer set if nobody answers. The
+    other side ending the link ends the chain: its notice (``received``) settles what this realm had to tell. A
+    generator."""
     link = cls[key]
-    if link is not None and link.unsent:
-        yield from notify(link)
+    if link is not None and link.unsent and not (yield from notify(link)):
+        retry_later(cls, key)
 
 
 def resume():
     """Timers do not survive an upgrade: send again the notices nobody answered."""
     for cls in SIDES:
         for link in each(cls, "unsent", True):
-            chain.set_timer(RETRY, lambda cls=cls, key=link.id: resend(cls, key))
+            retry_later(cls, link.id)
 
 
 def end_link(cls, key):
@@ -226,7 +239,7 @@ def end_link(cls, key):
         raise Conflict("this link has ended")
     link.status, link.ended_by, link.ended_at = "ended", chain.self_id(), chain.now()
     if is_realm(link):
-        yield from notify(link)
+        yield from tell(link)
     return {}
 
 
@@ -304,7 +317,7 @@ def received(link, caller, status):
         raise Fail("a notice that a link ended names its sender as by")
     if at > chain.now() + CLOCK_TOLERANCE:
         raise Fail("a notice that a link ended is not dated ahead of this realm's clock")
-    link.status, link.ended_by, link.ended_at = "ended", by, at
+    link.status, link.ended_by, link.ended_at, link.unsent = "ended", by, at, False
 
 
 def valid_status(status):
