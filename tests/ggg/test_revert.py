@@ -10,6 +10,8 @@ import pytest
 import fake_chain
 import world
 from core import auth, op
+from core import it_team as it_team_module
+from core.db import Forbidden
 from core.ratio import PERCENT
 from ggg import (Appointment, Authority, Codex, Department, Event, Invite, LayeredCodex, Member, Position, Proposal,
                  Realm, User, UserProfile)
@@ -404,6 +406,39 @@ def test_a_member_whose_user_has_another_internal_id_is_found_as_the_status_oper
     removed = as_codex("user_remove", {"user": by_user})  # user_remove and role_revoke find a User
     assert (removed["ok"], removed["kind"]) == (False, "forbidden") and "no codex may" in removed["error"]
     assert Member["bob"].status == "active"
+
+
+MALFORMED = [("appointment_end", {"appointment": 3.5}), ("position_edit", {"position": {"id": "it.bob"}}),
+             ("authority_revoke", {}), ("role_revoke", {"user": None, "profile": "member"}),
+             ("user_set_status", {"user": ["bob"], "status": "banned"}), ("department_edit", {"department": None}),
+             ("invite_create", {"position": [], "department": 7.5}), ("proposal_create", {"title": "x", "action": 5}),
+             ("proposal_create", {"title": "x", "action": {"op": None, "args": None}})]
+
+
+@pytest.mark.parametrize("name,args", MALFORMED, ids=[f"{name}-{n}" for n, (name, args) in enumerate(MALFORMED)])
+def test_the_check_refuses_or_lets_pass_a_malformed_call_and_never_traps(name, args):
+    build()
+    it_team(("bob",))
+    it_team_check(name, args)  # the operation itself refuses what it cannot read: the team's check has nothing to say
+    Realm["1"].it_team = "Gone"  # a department that no longer exists
+    it_team_check(name, args)
+
+
+def it_team_check(name, args):
+    try:
+        it_team_module.refuse_change(name, args)
+    except Forbidden as refused:
+        assert "no codex may" in str(refused)
+
+
+def test_a_profile_edit_that_may_take_every_permission_is_refused_and_a_team_that_is_gone_is_ignored():
+    build()
+    it_team(("bob",))
+    garbled = as_codex("profile_edit", {"profile": "it.bob", "allowed_to": 5})  # not a list: it would take every permission
+    assert (garbled["ok"], garbled["kind"]) == (False, "forbidden") and "no codex may" in garbled["error"]
+    Realm["1"].it_team = "Gone"
+    assert "no codex may" not in as_codex("profile_edit", {"profile": "member", "allowed_to": []}).get("error", "")
+    assert call("codex_revert_fast", "ctl")["kind"] == "conflict"  # and there is no team to revert fast
 
 
 @pytest.mark.parametrize("name,args", [
