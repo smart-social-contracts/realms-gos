@@ -11,6 +11,7 @@ class LayeredCodex(Row):
     this realm's copy of it: ``sha256:`` and the checksum of its layers, layer paths and chapters' checksums."""
 
     __alias__ = "id"
+    __version__ = 2  # 2: voting_rule
     id = String()
     layers = Json([])  # every source with a chapter or a calendar, top to bottom
     layer_paths = Json({})  # {domain: [source, ...]}, top to bottom
@@ -21,11 +22,19 @@ class LayeredCodex(Row):
     activates_at = Integer(default=0)  # seconds: when a pending codex takes effect
     installed_at = Integer(default=0)
     proposal = String(default="")  # the proposal that adopted it
+    # The realm's rule over the votes cast as it was when this codex became active: what decides a vote to revert to it
+    # (§10.1). {} for a codex that became active before the realm recorded it.
+    voting_rule = Json({})
     # {chapter file: {method: {count, error, at}}}: the methods failing now, cleared as each succeeds again (§9.3)
     failures = Json({})
     # The operations a forbid of this legislation names, as the last load found them (§9.4): while it does not load,
     # the realm refuses these, reads among them, as it would have judged them.
     forbids = Json([])
+
+    @classmethod
+    def migrate(cls, obj, from_version, to_version):
+        obj.setdefault("voting_rule", {})  # a Json field a stored row lacks would read as the text of its default
+        return obj
 
 
 class ChapterSource(Row):

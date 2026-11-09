@@ -1,4 +1,4 @@
-from core import chain, forbids, poa
+from core import chain, forbids, it_team, poa
 from core.db import Fail, Forbidden, each
 
 CONTEXT = {"op": "String", "permission": "String", "user": "String", "signer": "String", "origin": "String",
@@ -140,6 +140,8 @@ def permissions(principal):
             held |= {p.id for p in pos.department.permissions}
             held |= {op for auth in each(Authority, "target", f"Department:{pos.department.id}")
                      for op in auth.operations or []}
+            if pos.department.id == it_team.department_id():
+                held.add(it_team.PERMISSION)
     return held
 
 

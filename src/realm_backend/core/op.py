@@ -3,6 +3,7 @@ import sys
 
 from core import auth
 from core import chain
+from core import it_team
 from core import pending
 from core import poa
 from core import ranges
@@ -40,7 +41,7 @@ class Call:
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
        returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None, summary=None,
-       title=None, lists=None):
+       title=None, lists=None, names=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -60,6 +61,9 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     keys, private data, a request's body and reply, the cell of zone_set): the legislation never sees them, at any
     depth (I-PRV-1), and nor does the audit log.
     Personal data the audit keeps out (``private``) still reaches the legislation that decides on it.
+    names(args) -> the arguments with what the call acts on named, for a call that leaves it to the state of the realm (a
+    revert names the codex it restores): a governed call is filed as a proposal with these, so that what the vote
+    approves is what runs.
     fixes(args, proposal) -> runs when a proposal that carries the call is filed, by the governed call or by
     ``proposal_create``, before the proposal is written: it refuses a call that has nothing to carry and ties the records
     the call will act on to ``proposal``, so that no other proposal takes them.
@@ -79,7 +83,7 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,
                             "secret": tuple(secret), "fixes": fixes, "releases": releases, "summary": summary,
-                            "title": title, "lists": lists or {}}
+                            "title": title, "lists": lists or {}, "names": names}
         poa.classify(OPS[fn.__name__], fn.__name__)
         return fn
     return wrap
@@ -121,6 +125,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         asked = pending.asked_under(user, by, spec, args) if origin == "user" and user != by and not query else None
         if asked:
             return json.dumps({"ok": True, **pending.prepare(asked, user, by, name, spec, args, note)})
+        if origin == "codex":
+            it_team.refuse_change(name, args)
         grant = auth.authorize(user, by, name, spec, args, origin, declared)
         # The facts of a call are its arguments as GGG defines them, and ``on_behalf_of`` is one: a forbid may refuse a
         # delegate's vote. ``claimed`` was taken out of ``args`` above, for the operations never read it; a claim of
@@ -162,7 +168,10 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
 
 
 def filing(name, args, department):
-    """The proposal a governed call becomes, as ``proposal_create`` takes it: a title, the department and the action."""
+    """The proposal a governed call becomes, as ``proposal_create`` takes it: a title, the department and the action,
+    with what the call acts on named (``names``)."""
+    names = OPS[name]["names"]
+    args = names(args) if names else args
     return {"title": f"{name} {json.dumps(args, sort_keys=True)[:120]}", "department": department.id,
             "action": {"op": name, "args": args}}
 

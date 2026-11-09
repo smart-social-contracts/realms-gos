@@ -150,7 +150,7 @@ def test_an_effect_cannot_stop_or_withdraw_a_proposal_about_a_reserved_operation
     first.status = "inactive"
     second = activate(layered({(TOWN, "register"): POWER}, layers=[TOWN], previous=first.id))
     pid = ok("proposal_create", "alice", title="revert", effective_at=1790000000 + 30 * 86400,
-             action={"op": "codex_revert", "args": {}})["proposal"]
+             action={"op": "codex_revert", "args": {"codex": first.id}})["proposal"]
     for voter in world.PEOPLE:
         call("proposal_vote", voter, proposal=pid, choice="yes")
     assert Proposal[pid].status == "execution_scheduled"

@@ -142,15 +142,23 @@ def filed_for(p, member):
     return grant.grantor == member if grant else bool(p.prepared_by) and p.proposer == member
 
 
-def default_rule(department):
+def realm_rule():
+    """The realm's own rule: over the votes cast, with the casting vote of its governed configuration."""
+    rules = settings()
+    return {"threshold": int(rules.get("voting_threshold", ONE // 2)), "quorum": int(rules.get("voting_quorum", 0)),
+            "threshold_of": "cast", "casting_vote": rules.get("casting_vote", "")}
+
+
+def default_rule(department, action=None):
     """The rule that decides the proposals of ``department`` unless a proposer states a stricter one (ggg I-GOV-3). The
-    realm's own, over the votes cast, with the casting vote of its governed configuration; a department's m of the n
-    seats of its policy, rounded down, with the policy's quorum. A department's threshold is a share of its policy's n,
-    never of the seats that happen to be filled: a vacancy does not make a vote easier."""
+    realm's own, except that a vote to revert to a codex follows the rule recorded with that codex, so that the codex
+    it undoes cannot have changed it (docs/codices/layered-codex.md §10.1); a department's m of the n seats of its
+    policy, rounded down, with the policy's quorum. A department's threshold is a share of its policy's n, never of the
+    seats that happen to be filled: a vacancy does not make a vote easier."""
     if department.is_root:
-        rules = settings()
-        return {"threshold": int(rules.get("voting_threshold", ONE // 2)), "quorum": int(rules.get("voting_quorum", 0)),
-                "threshold_of": "cast", "casting_vote": rules.get("casting_vote", "")}
+        from api import codex
+
+        return codex.recorded_rule(action) or realm_rule()
     policy = department.policy or {}
     return {"threshold": int(policy.get("m", 1)) * ONE // int(policy.get("n", 1)),
             "quorum": int(policy.get("quorum", 0)), "threshold_of": "eligible", "casting_vote": ""}
@@ -164,10 +172,11 @@ def whole(name, value):
     return number
 
 
-def stricter_rule(department, stated):
-    """The default rule of ``department`` with what ``stated`` (a proposer's ``threshold``, ``quorum``, ``threshold_of``)
-    makes stricter. A weaker one is refused: legislation's guards may demand a stricter rule and must not be undone."""
-    rule = default_rule(department)
+def stricter_rule(department, stated, action=None):
+    """The default rule of ``department`` for a proposal carrying ``action``, with what ``stated`` (a proposer's
+    ``threshold``, ``quorum``, ``threshold_of``) makes stricter. A weaker one is refused: legislation's guards may demand
+    a stricter rule and must not be undone."""
+    rule = default_rule(department, action)
     for name in ("threshold", "quorum"):
         if stated.get(name) is not None:
             value = whole(name, stated[name])
@@ -210,7 +219,7 @@ def new_proposal(title, user, by, department, action=None, description="", effec
     """File a proposal. ``stated``: the proposer's ``kind``, ``matter`` and stricter rule; a proposal filed without
     it takes the default rule of its scope. ``prepared_by``: the delegate whose pending action the proposer approved."""
     stated = stated or {}
-    rule = stricter_rule(department, stated)
+    rule = stricter_rule(department, stated, action)
     pid = next_id(Proposal, "P")
     fix_records(action, pid)  # the last refusal: a refused proposal leaves no trace
     p = Proposal(id=pid, title=title, description=description, proposer=user,
