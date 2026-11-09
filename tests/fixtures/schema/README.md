@@ -39,5 +39,15 @@ print(realm.shell("import json\nfrom ic_python_db import Database\n"
 Save the printed JSON as the file. The same two lines of Python read the schema straight from a live realm
 through `__shell__` (an update call a controller makes; it writes nothing).
 
+## `../current_schema.json`: the schema of this build
+
+`tests/fixtures/current_schema.json` is the schema the **current** wasm stores, taken the same way. The fast test runs in
+CPython, where `ggg` also imports the toolkit's crypto module that the canister never imports (its `KeyEnvelope` shadows
+the realm's, and it adds a `CryptoGroup` and a `CryptoGroupMember`): `test_the_registry_is_what_the_canister_registers`
+holds the registry the fast test checks to this file, and `tests/deployed/test_schema_snapshot.py` holds the file to the
+wasm. When an entity changes (a field, a default, a `migrate()`), both fail until the file is taken again: build the
+wasm of the branch, run the snippet above on it, save the output as `current_schema.json`, and commit it with the change.
+(A diff of the file is the list of what the next deploy will change in the stored schema.)
+
 Run `tests/ggg/test_schema_upgrade.py` after replacing a file. A file that was refreshed too early (from a build that
 already has a new field) hides the problem the next deploy would meet.
