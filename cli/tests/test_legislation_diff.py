@@ -13,7 +13,7 @@ from realms.cli.commands import legislation
 from realms.cli.commands.legislation import legislation_app
 from realms.cli.commands.legislation_diff import analyse_action
 from realms.cli.commands.legislation_load import CommitFiles, load_realm
-from realms.cli.commands.legislation_proof import Answer, Solver
+from realms.cli.commands.legislation_proof import Answer, Solver, verdict_of
 from realms.cli.commands.legislation_report import Comparison
 
 VALENCIA = "eu/es/vc/46250-valencia"
@@ -220,6 +220,34 @@ def test_a_difference_that_is_no_range_of_a_number_is_given_as_the_request_alone
     assert result.statements == []
     report = world.diff(world.base, head).output
     assert "- newly forbidden: yes, e.g. `{'facts': {'kind': 'secret'}" in report
+
+
+@pytest.mark.parametrize("word", ["secret", "VERIFIED", "DOES NOT HOLD"])
+def test_a_counterexample_that_carries_the_verdict_word_is_still_a_counterexample(
+    world, word
+):
+    extra = f"\n    named = forbid('document_share', F.kind == '{word}', legislation='x')\n"
+    head = world.change({"eu/es/tax.py": tax("1.10", rustic("0.90") + extra)})
+    [result] = [
+        r
+        for r in world.realm(world.base, head, "eu/es").folded
+        if r.action == "document_share"
+    ]
+    assert result.forbidden.proved is False
+    assert result.forbidden.example["facts"]["kind"] == word
+
+
+def test_the_verdict_is_read_from_the_verdict_line_alone():
+    held = "\u2713 Policy set 1 implies policy set 2: VERIFIED\n"
+    broken = (
+        "\u2717 Policy set 1 implies policy set 2: DOES NOT HOLD\n  Counterexample found:\n"
+        'principal: Realms::User::"", action: Realms::Action::"a", resource: Realms::Realm::""\n'
+        'context: {facts: {kind: "VERIFIED"}}\n'
+    )
+    assert verdict_of(held) is True
+    assert verdict_of(broken) is False
+    assert verdict_of('context: {facts: {kind: "VERIFIED"}}\n') is None
+    assert verdict_of("error: cvc5 is missing\n") is None
 
 
 # ── The questions with one answer (points 3 and 4) ───────────────────────────────────────────────────────────────

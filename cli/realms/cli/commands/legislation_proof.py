@@ -77,11 +77,26 @@ class Solver:
             except subprocess.TimeoutExpired:
                 return Answer(None, None, f"no answer in {SYMCC_TIMEOUT} s")
         said = (done.stdout + done.stderr).strip()
-        if done.returncode == 0 and "VERIFIED" in done.stdout:
-            return Answer(True, None, said)
-        if "DOES NOT HOLD" in done.stdout:
+        verdict = verdict_of(done.stdout)
+        if verdict is False:
             return Answer(False, example_of(done.stdout), said)
+        if verdict is True and done.returncode == 0:
+            return Answer(True, None, said)
         return Answer(None, None, said)
+
+
+VERDICT = re.compile(r"^\S+ .*: (VERIFIED|DOES NOT HOLD)\s*$")  # "✓ Policy set 1 implies policy set 2: VERIFIED"
+
+
+def verdict_of(output: str) -> Optional[bool]:
+    """True for VERIFIED, False for DOES NOT HOLD, None for neither, read from SymCC's verdict line alone: the first
+    line that ends in one of the two. The counterexample after it holds the request's own values, and a request can
+    carry the word VERIFIED as a string."""
+    for line in output.splitlines():
+        found = VERDICT.match(line)
+        if found:
+            return found.group(1) == "VERIFIED"
+    return None
 
 
 # ── The request a counterexample names ────────────────────────────────────────────────────────────────────────────
