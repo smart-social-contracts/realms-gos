@@ -1,0 +1,364 @@
+"""What changes when the forbids of a realm change (docs/codices/layered-codex.md §12.3, points 2 to 4 and 8).
+
+For one Cedar action, ``analyse_action`` asks SymCC (``legislation_proof``) of the forbids of the old codex and of
+the new one, over every request the fact schema allows:
+
+- what is **newly forbidden** and **newly allowed**, each proved or given with a request that breaks it, and, where the
+  difference is a range of one fact, its readable form (``legislation_ranges``) proved equal to the difference;
+- whether **nothing is permitted** any more (a dead operation), which forbids **never fire**, which are **redundant**
+  (the other forbids already cover them: a warning), and which **can error** (Cedar skips a forbid that errors, so it
+  would not forbid);
+- every query the solver did not **decide**, which is a failure and never a pass.
+
+The same is asked with the realm's settings folded in, and once with them left open (``generic``), which gives the
+statements that hold for every realm that runs the source: "for capitals".
+"""
+
+import itertools
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+from realms.cli.commands.legislation_proof import (
+    Answer,
+    Solver,
+    assumption,
+    everything_permitted,
+    forbids_on,
+    policy_set,
+)
+from realms.cli.commands.legislation_ranges import (
+    around,
+    case_words,
+    claim,
+    constants,
+    describe,
+    facts_read,
+    regions,
+    settings_read,
+    shown,
+)
+
+
+@dataclass
+class ActionResult:
+    """What the analysis found for one Cedar action."""
+
+    action: str
+    forbidden: Answer = (
+        None  # proved: nothing is newly forbidden; else the request that is
+    )
+    allowed: Answer = None
+    statements: List[str] = field(
+        default_factory=list
+    )  # the differences in words, each proved
+    dead: Answer = None  # proved: no request is permitted
+    never_fires: List[str] = field(default_factory=list)
+    redundant: List[str] = field(default_factory=list)
+    can_error: List[str] = field(default_factory=list)
+    undecided: List[str] = field(default_factory=list)
+
+    def nothing_to_say(self) -> bool:
+        """Whether the analysis found nothing for the action: no difference, no dead operation, no forbid that never
+        fires, overlaps or can error, and every query decided."""
+        return (
+            self.forbidden.proved
+            and self.allowed.proved
+            and self.dead.proved is False
+            and not (
+                self.never_fires or self.redundant or self.can_error or self.undecided
+            )
+        )
+
+    def failures(self) -> List[str]:
+        out = (
+            [f"{self.action}: nothing is permitted: {self.dead.example}"]
+            if self.dead.proved
+            else []
+        )
+        out += [f"{self.action}: {f} never fires" for f in self.never_fires]
+        out += self.can_error
+        return out + [f"{self.action}: undecided: {u}" for u in self.undecided]
+
+
+def analyse_action(
+    solver: Solver, action: str, old, new, generic: bool, errors: dict
+) -> ActionResult:
+    """The questions for ``action``, of ``old`` (a codex or None) and ``new``. ``errors`` remembers, by Cedar text and
+    action, which forbids were proved never to error."""
+    assumed = assumption(new, action)
+    old_forbids = forbids_on(old, action, generic) if old else {}
+    new_forbids = forbids_on(new, action, generic)
+    before, after = policy_set(old_forbids, assumed), policy_set(new_forbids, assumed)
+    result = ActionResult(action)
+    result.forbidden = solver.implies(action, before, after)
+    result.allowed = solver.implies(action, after, before)
+    result.dead = solver.always_denies(action, after)
+    if result.dead.proved is None:
+        result.undecided.append(f"nothing permitted: {result.dead.said}")
+    for kind, answer in (
+        ("newly forbidden", result.forbidden),
+        ("newly allowed", result.allowed),
+    ):
+        if answer.proved is None:
+            result.undecided.append(f"{kind}: {answer.said}")
+    sweep(solver, action, new_forbids, assumed, result)
+    if not generic:
+        result.can_error = cannot_error(
+            solver, action, new, new_forbids, errors, result
+        )
+    if result.forbidden.proved is False or result.allowed.proved is False:
+        result.statements = explain(
+            solver, action, old, new, generic, result, before, after
+        )
+    return result
+
+
+def sweep(
+    solver: Solver,
+    action: str,
+    forbids: dict,
+    assumed: Optional[str],
+    result: ActionResult,
+) -> None:
+    """Which forbids never fire, and which of the others the rest already cover."""
+    base = everything_permitted(assumed)
+    everything = policy_set(forbids, assumed)
+
+    def asked(id_):
+        never = solver.equivalent(action, base, [*base, forbids[id_]])
+        rest = policy_set({k: v for k, v in forbids.items() if k != id_}, assumed)
+        return never, solver.equivalent(action, everything, rest)
+
+    with ThreadPoolExecutor() as pool:
+        answers = dict(zip(forbids, pool.map(asked, forbids)))
+    for id_, (never, covered) in answers.items():
+        for kind, answer in (("never fires", never), ("redundant", covered)):
+            if answer.proved is None:
+                result.undecided.append(f"{id_} {kind}: {answer.said}")
+        if never.proved:
+            result.never_fires.append(id_)
+        elif covered.proved:
+            result.redundant.append(id_)
+
+
+def cannot_error(
+    solver: Solver, action: str, codex, forbids: dict, memo: dict, result: ActionResult
+) -> List[str]:
+    """The forbids of ``codex`` on ``action`` that SymCC does not prove never to error."""
+    problems = []
+    for bound in (f for f in codex.forbids() if action in f.actions):
+        key = (forbids[bound.id], action)
+        if key not in memo:
+            memo[key] = solver.never_errors(action, forbids[bound.id])
+        answer = memo[key]
+        if answer.proved is None:
+            result.undecided.append(f"{bound.id} never errors: {answer.said}")
+        elif not answer.proved:
+            problems.append(
+                f"{bound.file}:{bound.line}: {bound.id} can error on {action}: {answer.example}"
+            )
+    return problems
+
+
+# ── The difference in words ───────────────────────────────────────────────────────────────────────────────────────
+
+NEWLY = {  # (was forbidden, is forbidden) -> in the difference
+    "forbidden": lambda was, is_: is_ and not was,
+    "allowed": lambda was, is_: was and not is_,
+}
+
+
+def explain(solver, action, old, new, generic, result, before, after) -> List[str]:
+    """The newly forbidden and newly allowed in words: the range of one fact, found around each example (for each
+    combination of the Boolean settings the change reads, when they are left open), written as forbids and proved equal
+    to the difference. Nothing is said that is not proved: otherwise the examples stand.
+    """
+    old_bound = [f for f in old.forbids() if action in f.actions] if old else []
+    new_bound = [f for f in new.forbids() if action in f.actions]
+    old_text, new_text = cedars(old_bound, generic), cedars(new_bound, generic)
+    differing = [f for f in old_bound if f.cedar(generic) not in new_text]
+    differing += [f for f in new_bound if f.cedar(generic) not in old_text]
+    found = {}
+    for kind, newly in NEWLY.items():
+        answer = getattr(result, kind)
+        if answer.proved is False:
+            found[kind] = find_ranges(
+                answer.example,
+                newly,
+                differing,
+                old_bound,
+                new_bound,
+                new,
+                action,
+                generic,
+            )
+    if not found or None in found.values():
+        return []
+    claims = {
+        kind: [
+            claim(action, x, runs, conditions, f"newly_{kind}_{n}")
+            for n, (runs, conditions, _) in enumerate(cases)
+        ]
+        for kind, (x, cases) in found.items()
+    }
+    proof = solver.equivalent(
+        action,
+        [*after, *claims.get("allowed", [])],
+        [*before, *claims.get("forbidden", [])],
+    )
+    if proof.proved is None:
+        result.undecided.append(f"the range of the difference: {proof.said}")
+    if not proof.proved:
+        return []
+    schema = new.facts.actions[action].facts
+    return [
+        f"{words + ': ' if words else ''}{describe(x, first, last, schema[x].range)} newly {kind}"
+        for kind, (x, cases) in found.items()
+        for runs, _, words in cases
+        for first, last in runs
+    ]
+
+
+def plus(policies: List[str], extra: Optional[str]) -> List[str]:
+    return [*policies, extra] if extra else policies
+
+
+def cedars(forbids: list, generic: bool) -> set:
+    return {f.cedar(generic) for f in forbids}
+
+
+def forbidden_by(forbids: list, facts: dict, settings: Optional[dict]) -> bool:
+    """Whether any of ``forbids`` fires on ``facts`` (plain Python), with the example's settings when they are open."""
+    return any(
+        f.evaluate(facts, None if settings is None else settings.get(f.domain, {}))
+        for f in forbids
+    )
+
+
+def find_ranges(example, newly, differing, old_bound, new_bound, new, action, generic):
+    """Around the request ``example``, the fact ``x`` whose runs say where the sets differ in the way ``newly`` says, the
+    other facts as the example has them and, with the settings open, each combination of the Boolean settings the change
+    reads: ``(x, [(runs, conditions, the case in words), ...])``, or None where no fact explains the example.
+    """
+    facts, settings = example.get("facts", {}), (
+        example.get("settings") if generic else None
+    )
+    names = facts_read_by(differing)
+    schema = new.facts.actions[action].facts
+    for x in names:
+        fact = schema.get(x)
+        if fact is None or fact.type != "Long" or not fact.range or x not in facts:
+            continue
+        cases = []
+        for combination in combinations(settings, differing):
+
+            def decide(value):
+                changed = {**facts, x: value}
+                return newly(
+                    forbidden_by(old_bound, changed, combination),
+                    forbidden_by(new_bound, changed, combination),
+                )
+
+            runs = regions(
+                decide, constants(old_bound + new_bound, combination), *fact.range
+            )
+            if runs:
+                fixed = read_settings(combination, differing)
+                cases.append(
+                    (
+                        runs,
+                        around(names, example, x, fixed),
+                        case_words(example, names, x, fixed),
+                    )
+                )
+        if any(
+            first <= facts[x] <= last for runs, _, _ in cases for first, last in runs
+        ):
+            return x, cases
+    return None
+
+
+def combinations(settings: Optional[dict], differing: list) -> List[Optional[dict]]:
+    """The settings to try: the example's, or with them open, every setting of true and false for each Boolean setting
+    the differing forbids read (the others as the example has them)."""
+    if settings is None:
+        return [None]
+    slots = [
+        (f.domain, n)
+        for f in differing
+        for n in settings_read(f.expression)
+        if isinstance(settings.get(f.domain, {}).get(n), bool)
+    ]
+    slots = list(dict.fromkeys(slots))
+    out = []
+    for values in itertools.product((False, True), repeat=len(slots)):
+        combination = {d: dict(v) for d, v in settings.items()}
+        for (domain, name), value in zip(slots, values):
+            combination[domain][name] = value
+        out.append(combination)
+    return out
+
+
+def read_settings(settings: Optional[dict], differing: list) -> Optional[dict]:
+    """``settings`` (by domain) restricted to the settings the differing forbids read."""
+    if settings is None:
+        return None
+    read = {(f.domain, n) for f in differing for n in settings_read(f.expression)}
+    return {
+        d: {n: v for n, v in values.items() if (d, n) in read}
+        for d, values in settings.items()
+    }
+
+
+def facts_read_by(forbids: list) -> List[str]:
+    names = []
+    for forbid in forbids:
+        names += [n for n in facts_read(forbid.expression) if n not in names]
+    return names
+
+
+# ── The folded line of the flattened view (§5.9) ──────────────────────────────────────────────────────────────────
+
+
+def folded_line(solver: Solver, codex, bound, action: str) -> Optional[str]:
+    """``for eu/es/vc/46250-valencia: capital + surface_public_transport → maximum 1.24 % (1240000)`` for a forbid of one
+    fact against a number the settings fold, proved equal to the forbid; None for any other forbid.
+    """
+    assumed = assumption(codex, action)
+    base = everything_permitted(assumed)
+    fires = solver.equivalent(action, base, [*base, bound.cedar()])
+    if fires.proved is not False or not fires.example:
+        return None
+    facts = fires.example.get("facts", {})
+    schema = codex.facts.actions[action].facts
+    for x in facts_read(bound.expression):
+        fact = schema.get(x)
+        if fact is None or fact.type != "Long" or not fact.range or x not in facts:
+            continue
+        low, high = fact.range
+        decide = lambda value: bound.evaluate({**facts, x: value})  # noqa: E731
+        run = next(
+            (
+                r
+                for r in regions(decide, constants([bound]), low, high)
+                if r[0] <= facts[x] <= r[1]
+            ),
+            None,
+        )
+        if run is None or run[1] != high or run[0] == low:
+            continue
+        conditions = around(facts_read(bound.expression), fires.example, x)
+        proof = solver.equivalent(
+            action,
+            [*base, bound.cedar()],
+            [*base, claim(action, x, [run], conditions, "maximum")],
+        )
+        if proof.proved:
+            true = [
+                n
+                for n in settings_read(bound.expression)
+                if bound.settings.get(n) is True
+            ]
+            return f"for {codex.realm}: {' + '.join(true) + ' → ' if true else ''}maximum {shown(run[0] - 1, fact.range)}"
+    return None

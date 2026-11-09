@@ -178,3 +178,8 @@ def forbids_on(codex, action: str, generic: bool = False) -> dict:
 def policy_set(forbids: dict, assumed: Optional[str]) -> List[str]:
     """The set a question is asked of: everything permitted, the forbids, the assumption."""
     return [PERMIT_ALL, *forbids.values(), *([assumed] if assumed else [])]
+
+
+def everything_permitted(assumed: Optional[str]) -> List[str]:
+    """The set before any forbid: everything permitted, bar what the fact schema rules out."""
+    return [PERMIT_ALL, *([assumed] if assumed else [])]

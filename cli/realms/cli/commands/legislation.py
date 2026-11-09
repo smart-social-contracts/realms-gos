@@ -24,10 +24,15 @@ from typing import List, Optional
 import typer
 from rich.console import Console
 
-from realms.cli.commands.legislation_analysis import Analysis, MissingTools
+from realms.cli.commands.legislation_analysis import Analysis, MissingTools, cedar_tools
 from realms.cli.commands.legislation_cases import case_problems
 from realms.cli.commands.legislation_layout import commit_of, layout_problems
 from realms.cli.commands.legislation_load import WorkingFiles, load_realm
+from realms.cli.commands.legislation_report import (
+    Comparison,
+    change_list_commit,
+    render,
+)
 from realms.cli.commands.legislation_propose import (
     change_list,
     chapter_entry,
@@ -365,3 +370,58 @@ def propose_command(
     out.write_bytes(data)
     typer.echo(f"wrote {out} ({len(data)} bytes)")
     typer.echo(code_to_submit(url, data))
+
+
+@legislation_app.command("diff")
+def diff_command(
+    tree: Path = typer.Argument(
+        Path("legislation"), help="The legislation/ folder, inside a git checkout"
+    ),
+    base: str = typer.Option(..., "--base", help="The commit before the change"),
+    head: str = typer.Option("HEAD", "--head", help="The commit with the change"),
+    realm: List[str] = typer.Option(
+        [],
+        "--realm",
+        help="Only these realms (source ids); default: every realm the change reaches",
+    ),
+    change_list: Optional[Path] = typer.Option(
+        None,
+        "--change-list",
+        help="A change list (§7): its realm is the one analysed, and its chapters' commit is --head",
+    ),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Write the report here (Markdown), not to the output"
+    ),
+) -> None:
+    """Compare the tree at two commits for every realm the change reaches, and write the report of §12.3.
+
+    Needs the pinned Cedar CLI and cvc5 (CEDAR_CLI, CVC5; scripts/cedar_tools.sh). Exits 1 when the report lists a
+    failure: a forbid that can error, a nothing-permitted operation, a forbid that never fires, a query the solver did
+    not decide, a codex that does not load or a test case that fails.
+    """
+    try:
+        tools = cedar_tools("analysis of a change")
+        facts = fact_schema()
+        base_commit = commit_of(tree, base)
+        realms, head_commit = list(realm), None
+        if change_list:
+            data = read_json(change_list)
+            realms, head_commit = [data["realm"]], change_list_commit(data) or None
+        head_commit = commit_of(tree, head_commit or head)
+        comparison = Comparison(
+            tree, base_commit, head_commit, ggg_operations(), facts, check_view(), tools
+        )
+        results = [comparison.realm(r) for r in comparison.affected(realms)]
+    except MissingTools as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    except (LegislationError, ImportError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    report = render(base_commit, head_commit, results, comparison.changed)
+    if out:
+        out.write_text(report)
+    else:
+        typer.echo(report)
+    if any(r.failures() for r in results):
+        raise typer.Exit(1)

@@ -41,8 +41,14 @@ class CommitFiles:
 
     def __init__(self, tree: Path, commit: str):
         self.tree, self.commit = tree, commit
+        self.listed: dict = {}  # git is asked once for each folder
 
     def sources(self) -> List[str]:
+        if None not in self.listed:
+            self.listed[None] = self.list_sources()
+        return self.listed[None]
+
+    def list_sources(self) -> List[str]:
         listing = run_git(self.tree, "ls-tree", "-r", "--name-only", self.commit, "./")
         if listing.returncode:
             raise LegislationError(
@@ -55,7 +61,9 @@ class CommitFiles:
         )
 
     def names(self, source: str) -> List[str]:
-        return sorted(names_at(self.tree, self.commit, source))
+        if source not in self.listed:
+            self.listed[source] = sorted(names_at(self.tree, self.commit, source))
+        return self.listed[source]
 
     def text(self, source: str, name: str) -> str:
         return bytes_at(self.tree, self.commit, source, name).decode("utf-8")
