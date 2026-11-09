@@ -6,7 +6,8 @@ from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Rea
 from api import codex
 from api.licenses import active, principals
 from core.op import op
-from api.proposals import launched, realm_wide
+from core.pending import canonical, quoted, you_sign
+from api.proposals import day_of, launched, realm_wide, whole
 
 LAND = "LAND"
 PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id", "assessed_value", "area",
@@ -139,7 +140,21 @@ def land_register(c, args):
     return {"land": land.id}
 
 
-@op("nft.force_transfer", signing=True, governed=realm_wide, parties=transfer_parties)
+def of_the_parcel(land):
+    return f"parcel {land.id} ({quoted(land.kind)}, {land.width} by {land.height} cells at {land.x}, {land.y})"
+
+
+def moving_land(user, args):
+    land, to, order = find(Land, args["land"]), owner_ref(args["to"]), deref(args["order"])
+    if not isinstance(order, Verdict):
+        raise Fail("moving a parcel needs an issued court verdict")
+    return you_sign(f"Moves {of_the_parcel(land)}{' and its NFT' if land.token_id else ''} from {quoted(land.owner)} "
+                    f"to {quoted(to)} under verdict {order.id} of case {order.case.id}",
+                    ("Court order", quoted(order.decision)))
+
+
+@op("nft.force_transfer", signing=True, governed=realm_wide, parties=transfer_parties, summary=moving_land,
+    title="Move a parcel by court order")
 def land_transfer(c, args):
     """Move parcel ``land`` to ``to`` (user or organization) under court ``order`` (``Verdict:id``, issued or final,
     in a case whose dispute is about ``Land:<id>`` and in which ``to`` is a party), and its NFT with it if minted."""
@@ -196,7 +211,15 @@ def land_mint_nft(c, args):
     return {"land": land.id, "token_id": token_id}
 
 
-@op("land.assess", signing=True, returns="land")
+def assessing_land(user, args):
+    land = find(Land, args["land"])
+    changes = [f"{name} {whole(name, args[name]) if name != 'reference' else quoted(args[name])}"
+               for name in ("value", "area", "reference") if args.get(name) is not None]
+    lines = [("Legislation followed", quoted(args["legislation"]))] if args.get("legislation") else []
+    return you_sign(f"Sets the assessment of {of_the_parcel(land)}: {', '.join(changes) or 'nothing'}", *lines)
+
+
+@op("land.assess", signing=True, returns="land", summary=assessing_land, title="Assess a parcel")
 def land_assess(c, args):
     """Set what the assessor decided for the parcel ``land``, signing for it: its ``value`` in the accounting
     currency, its ``area`` in square metres, and the ``reference`` of the entry in the assessor's register. A field
@@ -229,13 +252,26 @@ def freeze(args, on):
     return {"land": land.id, "status": land.status}
 
 
-@op("nft.freeze", signing=True, parties=owners, returns="land")
+def freezing_land(user, args):
+    land = find(Land, args["land"])
+    return you_sign(f"Marks {of_the_parcel(land)} of {quoted(land.owner)} disputed"
+                    f"{' and freezes its NFT' if land.token_id else ''}",
+                    ("Freeze reason", quoted(args.get("reason", ""))))
+
+
+@op("nft.freeze", signing=True, parties=owners, returns="land", summary=freezing_land, title="Freeze a parcel")
 def land_freeze(c, args):
     """Mark the active parcel ``land`` disputed and freeze its NFT, with optional ``reason``."""
     return (yield from freeze(args, True))
 
 
-@op("nft.freeze", signing=True, parties=owners, returns="land")
+def unfreezing_land(user, args):
+    land = find(Land, args["land"])
+    return you_sign(f"Ends the dispute on {of_the_parcel(land)} of {quoted(land.owner)}: it becomes active again"
+                    f"{' and its NFT is unfrozen' if land.token_id else ''}")
+
+
+@op("nft.freeze", signing=True, parties=owners, returns="land", summary=unfreezing_land, title="Unfreeze a parcel")
 def land_unfreeze(c, args):
     """End the dispute on parcel ``land``: it becomes active again and its NFT is unfrozen."""
     return (yield from freeze(args, False))
@@ -332,7 +368,19 @@ def signer(c, args):
     return rule, org, find(NFTToken, rule["collection"])
 
 
-@op("credential.sign", signing=True)
+def issuing_credential(user, args):
+    expires = whole("expires_at", args.get("expires_at") or 0)
+    return you_sign(f"Issues a {quoted(args['schema'])} credential from organization {quoted(args['organization'])} "
+                    f"to {quoted(args['holder'])}",
+                    ("Credential claims", canonical(args.get("fields", {}))),
+                    ("Credential subject", quoted(args.get("subject", "")) if args.get("subject") else "none"),
+                    ("Credential payload", f"hash {quoted(args.get('payload_hash', ''))}, "
+                                           f"kept at {quoted(args.get('payload_ref', ''))}"),
+                    ("Credential expiry", f"expires {day_of(expires)}" if expires else "never expires"),
+                    ("Prepared by", quoted(args["prepared_by"]) if args.get("prepared_by") else "nobody"))
+
+
+@op("credential.sign", signing=True, summary=issuing_credential, title="Issue a credential")
 def credential_issue(c, args):
     """Mint a ``schema`` credential to principal ``holder`` for ``organization`` (you need a seat there that signs it),
     with optional ``subject``, public ``fields``, ``payload_hash`` (sha256:…), ``payload_ref``, ``prepared_by`` and
@@ -357,7 +405,13 @@ def credential_issue(c, args):
     return {"collection": collection.id, "token_id": token_id, "header": meta}
 
 
-@op("credential.sign", signing=True, returns="token_id")
+def revoking_credential(user, args):
+    return you_sign(f"Revokes the {quoted(args['schema'])} credential, token {whole('token_id', args['token_id'])}, "
+                    f"issued by organization {quoted(args['organization'])}: the token is frozen for good",
+                    ("Revocation reason", quoted(args.get("reason", ""))))
+
+
+@op("credential.sign", signing=True, returns="token_id", summary=revoking_credential, title="Revoke a credential")
 def credential_revoke(c, args):
     """Revoke the ``schema`` credential ``token_id`` that ``organization`` issued (you need a seat there that signs
     it; the ledger's token header must name both): the token is frozen for good, with ``reason``."""

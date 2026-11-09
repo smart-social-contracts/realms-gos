@@ -190,7 +190,35 @@ ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_s
                     "task_logs",
                     "task_reschedule",
                     "task_run",
-                    "task_schedule"}
+                    "task_schedule",
+                    # The signing acts: each is prepared by the assistant and signed by the official's own tap, never
+                    # done under a grant (the guardrails keep a delegated signing call forbidden).
+                    "appeal_decide",
+                    "attribute_review",
+                    "bid_score",
+                    "contract_terminate",
+                    "credential_issue",
+                    "credential_revoke",
+                    "dispute_accept",
+                    "dispute_reject",
+                    "evidence_evaluate",
+                    "identity_review",
+                    "land_assess",
+                    "land_freeze",
+                    "land_transfer",
+                    "land_unfreeze",
+                    "license_decide",
+                    "license_revoke",
+                    "license_suspend",
+                    "penalty_execute",
+                    "report_issue",
+                    "tender_award",
+                    "token_force_transfer",
+                    "token_freeze",
+                    "verdict_finalize",
+                    "verdict_issue",
+                    "verdict_link_contract",
+                    "verdict_modify_terms"}
 
 # The origins whose delegated call may wait for the member's tap: someone's call is in progress, and its reply says that
 # the action waits. A task runs unattended, so it runs only what its grant covers directly (the model's "Tasks"), and so

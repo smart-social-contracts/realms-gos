@@ -1,10 +1,11 @@
 from core import chain
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, page_by, view, window
+from core.pending import money, quoted, you_sign
 from ggg import (Appeal, Case, Contract, Court, Department, Dispute, Judge, Member, Notification, Organization, Penalty,
                  User, Verdict)
 from api.licenses import active
 from core.op import op
-from api.proposals import holders, realm_wide
+from api.proposals import day_of, holders, realm_wide
 from api.treasury import new_invoice
 
 LEVELS = {"first_instance": 1, "specialized": 1, "appellate": 2, "supreme": 3}
@@ -112,6 +113,24 @@ def verdict_view(v):
                           for p in v.penalties]}
 
 
+def in_words(terms):
+    """A penalty's terms (``penalty_terms``' form) as the judge signs them."""
+    fine = f" of {money(terms['amount'], terms['symbol'])}" if terms["kind"] in ("fine", "restitution") else ""
+    due = f", due {day_of(terms['due_at'])}" if terms["due_at"] else ""
+    return f"{terms['kind']}{fine} on {quoted(terms['target'])}{due}"
+
+
+def terms_of(p):
+    """The terms of the stored penalty ``p``, in the form ``penalty_terms`` gives them."""
+    return {"kind": p.kind, "target": p.target, "amount": p.amount, "symbol": p.symbol, "due_at": p.due_at}
+
+
+def verdict_text(decision, reasoning, terms):
+    """The text and terms of a verdict, whole, as the judge signs them."""
+    return [("Verdict text", quoted(decision)), ("Verdict reasoning", quoted(reasoning) if reasoning else "none"),
+            ("Verdict penalties", "; ".join(map(in_words, terms)) or "none")]
+
+
 def notify(recipient, topic, title, body, sender):
     n = Notification(id=next_id(Notification, "N"), recipient=recipient, topic=topic, title=title, body=body,
                      sender=sender, at=chain.now())
@@ -162,7 +181,18 @@ def dispute_list_all(c, args):
             "next": nxt}
 
 
-@op("dispute.accept", signing=True, parties=of_dispute, returns="case")
+def of_the_dispute(d):
+    return f"dispute {d.id} {quoted(d.title)} from {quoted(d.claimant)} against {quoted(d.respondent)}"
+
+
+def accepting_dispute(user, args):
+    d, court = find(Dispute, args["dispute"]), find(Court, args["court"])
+    return you_sign(f"Accepts {of_the_dispute(d)} into court {court.id} {quoted(court.name)}; "
+                    "a case between them opens")
+
+
+@op("dispute.accept", signing=True, parties=of_dispute, returns="case", summary=accepting_dispute,
+    title="Accept a dispute")
 def dispute_accept(c, args):
     """Accept the filed ``dispute`` into ``court`` (an operating court), opening a case between claimant and
     respondent. Returns ``case``."""
@@ -176,7 +206,12 @@ def dispute_accept(c, args):
     return {"case": case.id}
 
 
-@op("dispute.reject", signing=True, parties=of_dispute, returns="dispute")
+def rejecting_dispute(user, args):
+    return you_sign(f"Rejects {of_the_dispute(find(Dispute, args['dispute']))}; no case opens")
+
+
+@op("dispute.reject", signing=True, parties=of_dispute, returns="dispute", summary=rejecting_dispute,
+    title="Reject a dispute")
 def dispute_reject(c, args):
     """Reject the filed ``dispute``."""
     d = find(Dispute, args["dispute"])
@@ -222,7 +257,18 @@ def evidence_submit(c, args):
     return {"evidence": item["id"]}
 
 
-@op("evidence.evaluate", signing=True, parties=of_case, returns="admitted")
+def evaluating_evidence(user, args):
+    case = find(Case, args["case"])
+    item = next((i for i in case.evidence or [] if i["id"] == args["evidence"]), None)
+    if item is None:
+        raise NotFound(f"unknown evidence '{args['evidence']}' in {case.id}")
+    verdict = "Admits" if args.get("admitted", True) else "Excludes"
+    return you_sign(f"{verdict} evidence {item['id']} in case {case.id} {quoted(case.title)}",
+                    ("Evidence", f"submitted by {quoted(item['by'])}, hash {quoted(item['hash'])}"))
+
+
+@op("evidence.evaluate", signing=True, parties=of_case, returns="admitted", summary=evaluating_evidence,
+    title="Admit or exclude evidence")
 def evidence_evaluate(c, args):
     """As a judge sitting on ``case``, admit ``evidence`` (e.g. ``E-1``), or exclude it with ``admitted`` false
     (default true). Returns ``status``, admitted or excluded, and ``admitted``."""
@@ -253,7 +299,18 @@ def verdict_draft(c, args):
     return {"verdict": v.id}
 
 
-@op("resolution.issue", signing=True, parties=of_verdict, returns="verdict")
+def of_the_verdict(v):
+    return f"verdict {v.id} in case {v.case.id} {quoted(v.case.title)}"
+
+
+def issuing_verdict(user, args):
+    v = find(Verdict, args["verdict"])
+    return you_sign(f"Issues {of_the_verdict(v)}; the parties may appeal it for {APPEAL_WINDOW // 86400} days",
+                    *verdict_text(v.decision, v.reasoning_ref, [terms_of(p) for p in v.penalties]))
+
+
+@op("resolution.issue", signing=True, parties=of_verdict, returns="verdict", summary=issuing_verdict,
+    title="Issue a verdict")
 def verdict_issue(c, args):
     """As a judge sitting on the case, issue the draft ``verdict``; the parties may appeal it for 14 days.
     Returns ``appealable_until``."""
@@ -267,7 +324,14 @@ def verdict_issue(c, args):
     return {"verdict": v.id, "appealable_until": v.issued_at + APPEAL_WINDOW}
 
 
-@op("resolution.finalize", signing=True, parties=of_verdict, returns="verdict")
+def finalizing_verdict(user, args):
+    v = find(Verdict, args["verdict"])
+    return you_sign(f"Makes {of_the_verdict(v)} final and closes the case",
+                    *verdict_text(v.decision, v.reasoning_ref, [terms_of(p) for p in v.penalties]))
+
+
+@op("resolution.finalize", signing=True, parties=of_verdict, returns="verdict", summary=finalizing_verdict,
+    title="Make a verdict final")
 def verdict_finalize(c, args):
     """Make the issued ``verdict`` final and close its case, once its 14-day appeal window has passed with no appeal
     pending."""
@@ -283,7 +347,15 @@ def verdict_finalize(c, args):
     return {"verdict": v.id}
 
 
-@op("resolution.link_contract", signing=True, parties=of_verdict, returns="verdict")
+def linking_verdict(user, args):
+    v, k = find(Verdict, args["verdict"]), find(Contract, args["contract"])
+    disputed = "; the active contract becomes disputed" if k.status == "active" else ""
+    return you_sign(f"Links {of_the_verdict(v)} to contract {k.id} {quoted(k.title)}, which is {k.status}{disputed}",
+                    ("Verdict text", quoted(v.decision)))
+
+
+@op("resolution.link_contract", signing=True, parties=of_verdict, returns="verdict", summary=linking_verdict,
+    title="Link a verdict to a contract")
 def verdict_link_contract(c, args):
     """Link ``verdict`` (not overturned) to ``contract`` (not terminated or fulfilled); an active contract becomes
     disputed."""
@@ -296,7 +368,16 @@ def verdict_link_contract(c, args):
     return {"verdict": v.id}
 
 
-@op("resolution.modify_terms", signing=True, parties=of_verdict, returns="verdict")
+def modifying_verdict(user, args):
+    v = find(Verdict, args["verdict"])
+    terms = [penalty_terms(t) for t in args["penalties"]] if "penalties" in args else [terms_of(p) for p in v.penalties]
+    reopens = f"; it restarts the {APPEAL_WINDOW // 86400}-day appeal window" if v.status == "issued" else ""
+    return you_sign(f"Changes the {v.status} {of_the_verdict(v)} to read as follows{reopens}",
+                    *verdict_text(args.get("decision", v.decision), args.get("reasoning_ref", v.reasoning_ref), terms))
+
+
+@op("resolution.modify_terms", signing=True, parties=of_verdict, returns="verdict", summary=modifying_verdict,
+    title="Change the terms of a verdict")
 def verdict_modify_terms(c, args):
     """As a judge sitting on the case, change a draft or issued ``verdict``'s ``decision``, ``reasoning_ref`` or
     ``penalties`` (a new list replaces them all, as in verdict_draft). Changing an issued verdict restarts its
@@ -338,7 +419,18 @@ def appeal_file(c, args):
     return {"appeal": a.id, "court": court.id}
 
 
-@op("appeal.allow", signing=True, parties=of_appeal, returns="appeal")
+def deciding_appeal(user, args):
+    a = find(Appeal, args["appeal"])
+    appeal = f"appeal {a.id} against verdict {a.verdict} in case {a.case.id} {quoted(a.case.title)}"
+    if not args["granted"]:
+        return you_sign(f"Denies {appeal}; the verdict stands")
+    terms = [penalty_terms(t) for t in args.get("penalties", [])]
+    return you_sign(f"Grants {appeal}; the verdict is overturned and a new one is issued as follows",
+                    *verdict_text(args.get("decision", ""), args.get("reasoning_ref", ""), terms))
+
+
+@op("appeal.allow", signing=True, parties=of_appeal, returns="appeal", summary=deciding_appeal,
+    title="Decide an appeal")
 def appeal_decide(c, args):
     """As a judge of the appeal's court, grant or deny ``appeal`` with ``granted`` true or false. Granting needs a new
     ``decision`` (optional ``reasoning_ref``, ``penalties`` as in verdict_draft) and issues a verdict that overturns
@@ -365,8 +457,20 @@ def appeal_decide(c, args):
     return {"appeal": a.id, "status": a.status, "verdict": a.new_verdict or a.verdict}
 
 
+EFFECTS = {"fine": "Invoices the target", "restitution": "Invoices the target", "suspension": "Suspends the target",
+           "revocation": "Revokes the target", "termination": "Terminates the target"}
+
+
+def executing_penalty(user, args):
+    p = find(Penalty, args["penalty"])
+    effect = EFFECTS.get(p.kind, "Only marks the penalty executed: its own operation carries it out")
+    return you_sign(f"Carries out penalty {p.id} of {of_the_verdict(p.verdict)}: {in_words(terms_of(p))}",
+                    ("Penalty effect", effect))
+
+
 @op("fine.apply", signing=True, parties=of_penalty,
-    perm_for=lambda args: CARRIED_OUT_WITH[find(Penalty, args["penalty"]).kind], returns="penalty")
+    perm_for=lambda args: CARRIED_OUT_WITH[find(Penalty, args["penalty"]).kind], returns="penalty",
+    summary=executing_penalty, title="Carry out a penalty")
 def penalty_execute(c, args):
     """Carry out pending ``penalty`` once its verdict is final: a fine or restitution becomes an invoice (due in 30 days
     unless set), a suspension, revocation or termination changes its target's status, other kinds are only marked

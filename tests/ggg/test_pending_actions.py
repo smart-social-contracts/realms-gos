@@ -846,7 +846,9 @@ def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_whe
              "identity_submit": {"kind": "passport"}, "self_change_quarter": {"quarter": "south"},
              "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION},
              "contract_create": {"title": "Road"}}
-    preparable = {n for n, s in op.ops().items() if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
+    # The signing acts read records for their lines: tests/ggg/test_signing_acts.py checks them with the records.
+    preparable = {n for n, s in op.ops().items()
+                  if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"]) and not s["signing"]}
     assert preparable <= set(cases), preparable - set(cases)
     for name, args in cases.items():
         lines = {line["label"]: line["value"] for line in pending.summary_of("alice", name, op.ops()[name], args)}

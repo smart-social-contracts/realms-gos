@@ -6,6 +6,7 @@ from ggg import Bid, BidScore, Contract, Department, External, Organization, Ten
 from api.external import REALM_JOURNAL
 from api.justice import people
 from core.op import op
+from core.pending import quoted, you_sign
 from core.ratio import ONE, PERCENT
 
 MAX_MARK = 10
@@ -184,7 +185,23 @@ def bids_reveal(c, args):
     return {"revealed": len(bids)}
 
 
-@op("bid.evaluate", signing=True, parties=vendor_people, returns="bid")
+def marks_of(bid, args):
+    """The marks ``args`` give ``bid``, which must be on the criteria of its tender's rubric."""
+    rubric = bid.tender.rubric
+    marks = {k: int(v) for k, v in (args.get("scores") or {}).items()}
+    if not marks or any(k not in rubric or not 0 <= v <= MAX_MARK for k, v in marks.items()):
+        raise Fail(f"scores are 0-{MAX_MARK} on the rubric's criteria: {', '.join(rubric)}")
+    return marks
+
+
+def scoring(user, args):
+    b = find(Bid, args["bid"])
+    marks = ", ".join(f"{quoted(k)} {v}" for k, v in sorted(marks_of(b, args).items()))
+    return you_sign(f"Scores bid {b.id} of {quoted(b.vendor.id)} on tender {b.tender.id} {quoted(b.tender.title)} "
+                    f"with {marks} (marks out of {MAX_MARK}); your earlier marks on it are replaced")
+
+
+@op("bid.evaluate", signing=True, parties=vendor_people, returns="bid", summary=scoring, title="Score a bid")
 def bid_score(c, args):
     """Score the revealed ``bid``: ``scores`` maps rubric criteria to marks from 0 to 10; scoring again replaces your
     marks. Returns ``bid`` and its weighted ``score`` out of 100, averaged over evaluators."""
@@ -192,9 +209,7 @@ def bid_score(c, args):
     rubric = b.tender.rubric
     if b.tender.status != "evaluation" or b.sealed:
         raise Conflict(f"{b.id} is not open for evaluation")
-    marks = {k: int(v) for k, v in (args.get("scores") or {}).items()}
-    if not marks or any(k not in rubric or not 0 <= v <= MAX_MARK for k, v in marks.items()):
-        raise Fail(f"scores are 0-{MAX_MARK} on the rubric's criteria: {', '.join(rubric)}")
+    marks = marks_of(b, args)
     for k, v in marks.items():
         key = f"{b.id}:{c.user}:{k}"
         s = BidScore[key] or BidScore(id=key, bid=b, evaluator=c.user, criterion=k)
@@ -213,12 +228,8 @@ def journals_of_notices(args, proposal=""):
     return {"published_in": journals}
 
 
-@op("tender.manage", signing=True, governed=requester, derived=journals_of_notices, returns="contract")
-def tender_award(c, args):
-    """Award ``tender`` to ``bid`` (default the best-scored revealed bid), signing an active contract between the
-    requester and the vendor; a lower-scored bid needs a ``justification``. Returns ``winner``, ``score``,
-    ``contract``."""
-    t = find(Tender, args["tender"])
+def awarded(t, args):
+    """The bid that wins ``tender`` as ``args`` ask, the best-scored one, and the justification given for the choice."""
     bids = [b for b in t.bids if not b.sealed]
     if t.status != "evaluation" or not bids:
         raise Conflict(f"{t.id} has no evaluated bids")
@@ -229,6 +240,26 @@ def tender_award(c, args):
     why = args.get("justification", "")
     if b.score < best.score and not why:
         raise Fail(f"{best.id} scored {best.score}, more than {b.id}'s {b.score}: justify the deviation")
+    return b, best, why
+
+
+def awarding(user, args):
+    t = find(Tender, args["tender"])
+    b, best, why = awarded(t, args)
+    return you_sign(f"Awards tender {t.id} {quoted(t.title)} to bid {b.id} of {quoted(b.vendor.id)}, which scored "
+                    f"{b.score} (the best scored {best.score}), and signs an active contract between "
+                    f"{quoted('Department:' + t.requester.id)} and {quoted('Organization:' + b.vendor.id)}",
+                    ("Award justification", quoted(why) if why else "none"))
+
+
+@op("tender.manage", signing=True, governed=requester, derived=journals_of_notices, returns="contract",
+    summary=awarding, title="Award a tender")
+def tender_award(c, args):
+    """Award ``tender`` to ``bid`` (default the best-scored revealed bid), signing an active contract between the
+    requester and the vendor; a lower-scored bid needs a ``justification``. Returns ``winner``, ``score``,
+    ``contract``."""
+    t = find(Tender, args["tender"])
+    b, _, why = awarded(t, args)
     k = Contract(id=next_id(Contract, "C"), title=t.title, parties=[f"Department:{t.requester.id}",
                  f"Organization:{b.vendor.id}"], kind=t.kind, procedure=t.procedure, tender=t.id,
                  terms_ref=b.payload_ref, terms_hash=b.payload_hash, status="active", starts_at=chain.now())

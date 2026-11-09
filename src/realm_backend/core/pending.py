@@ -141,6 +141,20 @@ def quoted(text):
     return json.dumps(str(text))
 
 
+def you_sign(sentence, *details):
+    """The lines of a signing act (an operation's ``summary``): one sentence for what the official signs, then ``(label,
+    value)`` details for the texts it carries, whole. Whatever a delegate or another member wrote is in them quoted."""
+    return [{"label": "You sign", "value": sentence}] + [{"label": label, "value": value} for label, value in details]
+
+
+def money(units, symbol):
+    """``units`` of the token ``symbol`` in its own decimals; a symbol that is no token of the realm is quoted."""
+    from ggg import Token
+
+    token = Token[str(symbol)]
+    return f"{amount(units, token.decimals)} {token.id}" if token else f"{units} {quoted(symbol)}"
+
+
 def shown(key, value, args):
     """An argument as the member reads it: a principal with its nickname, an amount in the token's decimals when the
     call names the token, any structure as JSON, and text with a line break or another unprintable character quoted."""

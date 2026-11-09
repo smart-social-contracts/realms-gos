@@ -9,7 +9,7 @@ from ggg import (AllocationRule, Budget, Contract, Department, External, Financi
                  Transfer, Treasury)
 from ggg.finance.budget import KINDS
 from core.op import op
-from core.pending import quoted
+from core.pending import canonical, money, quoted, you_sign
 from core.ratio import ONE, PERCENT
 from api.proposals import realm_wide, root
 
@@ -916,20 +916,40 @@ def payroll_run(c, args):
     return {"transfers": results, "seats": len(batch), "total": total}
 
 
-@op("treasury.manage", signing=True, returns="report")
-def report_issue(c, args):
-    """Freeze the statements of fiscal ``period`` as a report of ``kind`` (default period_close), with a hash chained
-    over its ledger entries in id order, superseding the previous one of that kind. The issuer may add figures the
-    ledger does not keep, as a map of ``adjustments``; they stand beside the ledger's in the statements and outside
-    the hash. Returns ``report``, ``source_hash``, ``supersedes``."""
-    p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
-    s = p.statements
+def statements_of(period, args):
+    """The statements a report of ``period`` freezes now: the ledger's running ones, and the issuer's ``adjustments``
+    beside them."""
+    s = period.statements
     statements = {"accounts": dict(sorted(s["accounts"].items())),
                   "fund_balances": dict(sorted(s["fund_balances"].items())), "debit": s["debit"], "credit": s["credit"]}
     if args.get("adjustments") is not None:
         if not isinstance(args["adjustments"], dict):
             raise Fail("adjustments is a map of the figures the issuer adds")
         statements["adjustments"] = args["adjustments"]
+    return statements
+
+
+def reporting(user, args):
+    p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
+    s = statements_of(p, args)
+    previous = [r for r in p.reports if r.kind == kind]
+    return you_sign(f"Issues a {quoted(kind)} report of fiscal period {quoted(p.id)}, "
+                    + (f"which replaces report {previous[-1].id}" if previous else "the first of its kind"),
+                    ("Report totals", f"debit {s['debit']}, credit {s['credit']}"),
+                    ("Report fund balances", canonical(s["fund_balances"])),
+                    ("Report accounts", canonical(s["accounts"])),
+                    ("Report adjustments", canonical(s["adjustments"]) if "adjustments" in s else "none"),
+                    ("Report source hash", "sha256:" + p.source_hash))
+
+
+@op("treasury.manage", signing=True, returns="report", summary=reporting, title="Issue a financial report")
+def report_issue(c, args):
+    """Freeze the statements of fiscal ``period`` as a report of ``kind`` (default period_close), with a hash chained
+    over its ledger entries in id order, superseding the previous one of that kind. The issuer may add figures the
+    ledger does not keep, as a map of ``adjustments``; they stand beside the ledger's in the statements and outside
+    the hash. Returns ``report``, ``source_hash``, ``supersedes``."""
+    p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
+    statements = statements_of(p, args)
     previous = [r for r in p.reports if r.kind == kind]
     r = FinancialReport(id=next_id(FinancialReport, "FR"), kind=kind, period=p, as_of=chain.now(),
                         statements=statements, source_hash="sha256:" + p.source_hash,
@@ -1054,8 +1074,19 @@ def payment_account_remove(c, args):
 
 # --- court-ordered token actions ------------------------------------------------------------------
 
+def ledger_memo(args):
+    """The memo a court-ordered call leaves on the ledger: the first 64 characters of its ``reason``."""
+    return str(args.get("reason", ""))[:64]
+
+
+def forcing_transfer(user, args):
+    token = find(Token, args["symbol"])
+    return you_sign(f"By court order, moves {money(positive(args), token.id)} from {quoted(args['from'])} to "
+                    f"{quoted(args['to'])} on the ledger of {token.id}", ("Ledger memo", quoted(ledger_memo(args))))
+
+
 @op("token.force_transfer", signing=True, governed=realm_wide, parties=lambda a: {a.get("from", ""), a.get("to", "")},
-    returns="transfer")
+    returns="transfer", summary=forcing_transfer, title="Move tokens by court order")
 def token_force_transfer(c, args):
     """By court order, move ``amount`` of ``symbol`` from principal ``from`` to principal ``to`` on the token's ledger,
     with optional ``reason`` as memo. Returns ``transfer``, ``status`` and ``ledger_tx``."""
@@ -1064,7 +1095,7 @@ def token_force_transfer(c, args):
     t = Transfer(id=next_id(Transfer, "TR"), sender=args["from"], to=args["to"], symbol=token.id, amount=amount,
                  status="sending", at=chain.now())
     arg = (f'(record {{ from = {account(args["from"])}; to = {account(args["to"])}; amount = {amount} : nat; '
-           f'memo = opt {text(args.get("reason", "")[:64])} }})')
+           f'memo = opt {text(ledger_memo(args))} }})')
     reply = yield from chain.call(token.ledger, "force_transfer", arg)
     status, tx = outcome(reply)
     if status != "completed":
@@ -1076,14 +1107,21 @@ def token_force_transfer(c, args):
     return {"transfer": t.id, "status": t.status, "ledger_tx": tx}
 
 
-@op("token.freeze", signing=True, governed=realm_wide, parties=lambda a: {a.get("account", "")})
+def freezing_account(user, args):
+    token = find(Token, args["symbol"])
+    return you_sign(f"{'Freezes' if args.get('frozen', True) else 'Unfreezes'} {quoted(args['account'])} "
+                    f"on the ledger of {token.id}", ("Ledger memo", quoted(ledger_memo(args))))
+
+
+@op("token.freeze", signing=True, governed=realm_wide, parties=lambda a: {a.get("account", "")},
+    summary=freezing_account, title="Freeze or unfreeze a token account")
 def token_freeze(c, args):
     """Freeze principal ``account`` on the ``symbol`` ledger with optional ``reason``; ``frozen`` false unfreezes it."""
     token = find(Token, args["symbol"])
     method = "freeze_account" if args.get("frozen", True) else "unfreeze_account"
     reply = yield from chain.call(token.ledger, method,
                                   f'(record {{ account = {account(args["account"])}; '
-                                  f'reason = opt {text(args.get("reason", "")[:64])} }})')
+                                  f'reason = opt {text(ledger_memo(args))} }})')
     if outcome(reply)[0] != "completed":
         raise Fail(f"{method} not confirmed: {reply[:200]}")
     return {"account": args["account"], "frozen": method == "freeze_account"}
