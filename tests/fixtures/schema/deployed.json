@@ -1,0 +1,4039 @@
+{
+ "AllocationRule": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "proposal": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "rules": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "source_fund": {
+    "default": "ROOT",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "draft",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "has_migrate": true,
+  "relationships": {},
+  "version": 2
+ },
+ "Appeal": {
+  "fields": {
+   "appellant": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "decision": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "grounds_ref": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "new_verdict": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "filed",
+    "kind": "property",
+    "type": "String"
+   },
+   "verdict": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "case": {
+    "inverse": "appeals",
+    "kind": "relationship",
+    "many": false,
+    "target": "Case",
+    "type": "ManyToOne"
+   },
+   "court": {
+    "inverse": "appeals",
+    "kind": "relationship",
+    "many": false,
+    "target": "Court",
+    "type": "ManyToOne"
+   },
+   "ledger_entries": {
+    "inverse": "appeal",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Appointment": {
+  "fields": {
+   "agent": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "ended_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "substantive",
+    "kind": "property",
+    "type": "String"
+   },
+   "source_quarter": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "started_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "status": {
+    "default": "active",
+    "kind": "property",
+    "type": "String"
+   },
+   "supervisor": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "user": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "position": {
+    "inverse": "appointments",
+    "kind": "relationship",
+    "many": false,
+    "target": "Position",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Authority": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "operations": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "target": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "grantor": {
+    "inverse": "authorities",
+    "kind": "relationship",
+    "many": false,
+    "target": "Department",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Bid": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "payload_hash": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "payload_ref": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "price": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "score": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "sealed": {
+    "default": 1,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "submitted_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "scores": {
+    "inverse": "bid",
+    "kind": "relationship",
+    "many": true,
+    "target": "BidScore",
+    "type": "OneToMany"
+   },
+   "tender": {
+    "inverse": "bids",
+    "kind": "relationship",
+    "many": false,
+    "target": "Tender",
+    "type": "ManyToOne"
+   },
+   "vendor": {
+    "inverse": "bids",
+    "kind": "relationship",
+    "many": false,
+    "target": "Organization",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "BidScore": {
+  "fields": {
+   "criterion": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "evaluator": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "score": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "scored_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "bid": {
+    "inverse": "scores",
+    "kind": "relationship",
+    "many": false,
+    "target": "Bid",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Budget": {
+  "fields": {
+   "actual": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "category": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "expense",
+    "kind": "property",
+    "type": "String"
+   },
+   "planned": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "proposal": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "slot": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "draft",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "fund": {
+    "inverse": "budgets",
+    "kind": "relationship",
+    "many": false,
+    "target": "Fund",
+    "type": "ManyToOne"
+   },
+   "period": {
+    "inverse": "budgets",
+    "kind": "relationship",
+    "many": false,
+    "target": "FiscalPeriod",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Calendar": {
+  "fields": {
+   "benefit_cycle": {
+    "default": 2592000,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "codex_release_cycle": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "custom_cycles": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "epoch": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "fiscal_period": {
+    "default": 31536000,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "default": "1",
+    "kind": "property",
+    "type": "String"
+   },
+   "license_review_cycle": {
+    "default": 63072000,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "service_payment_cycle": {
+    "default": 2592000,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "voting_window": {
+    "default": 604800,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "realm": {
+    "inverse": "calendar",
+    "kind": "relationship",
+    "many": false,
+    "target": "Realm",
+    "type": "OneToOne"
+   }
+  },
+  "version": 1
+ },
+ "Call": {
+  "fields": {
+   "is_async": {
+    "has_default": false,
+    "kind": "property",
+    "type": "Boolean"
+   }
+  },
+  "relationships": {
+   "codex": {
+    "inverse": "calls",
+    "kind": "relationship",
+    "many": false,
+    "target": "Codex",
+    "type": "ManyToOne"
+   },
+   "task_step": {
+    "inverse": "call",
+    "kind": "relationship",
+    "many": false,
+    "target": "TaskStep",
+    "type": "OneToOne"
+   }
+  },
+  "version": 1
+ },
+ "Case": {
+  "fields": {
+   "closed_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "defendant": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "dispute": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "evidence": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "filed_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "plaintiff": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "filed",
+    "kind": "property",
+    "type": "String"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "appeals": {
+    "inverse": "case",
+    "kind": "relationship",
+    "many": true,
+    "target": "Appeal",
+    "type": "OneToMany"
+   },
+   "court": {
+    "inverse": "cases",
+    "kind": "relationship",
+    "many": false,
+    "target": "Court",
+    "type": "ManyToOne"
+   },
+   "judges": {
+    "inverse": "cases",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "Judge"
+    ],
+    "type": "ManyToMany"
+   },
+   "ledger_entries": {
+    "inverse": "case",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   },
+   "verdicts": {
+    "inverse": "case",
+    "kind": "relationship",
+    "many": true,
+    "target": "Verdict",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Codex": {
+  "fields": {
+   "checksum": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "url": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "calls": {
+    "inverse": "codex",
+    "kind": "relationship",
+    "many": true,
+    "target": "Call",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Contract": {
+  "fields": {
+   "ends_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "parties": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "starts_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "status": {
+    "default": "draft",
+    "kind": "property",
+    "type": "String"
+   },
+   "symbol": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "terms_hash": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "terms_ref": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "value": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "ledger_entries": {
+    "inverse": "contract",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   },
+   "mandate": {
+    "inverse": "contracts",
+    "kind": "relationship",
+    "many": false,
+    "target": "Mandate",
+    "type": "ManyToOne"
+   },
+   "trades": {
+    "inverse": "contract",
+    "kind": "relationship",
+    "many": true,
+    "target": "Trade",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Court": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "jurisdiction": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "level": {
+    "default": "first_instance",
+    "kind": "property",
+    "type": "String"
+   },
+   "license": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "operator": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "active",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "appeals": {
+    "inverse": "court",
+    "kind": "relationship",
+    "many": true,
+    "target": "Appeal",
+    "type": "OneToMany"
+   },
+   "cases": {
+    "inverse": "court",
+    "kind": "relationship",
+    "many": true,
+    "target": "Case",
+    "type": "OneToMany"
+   },
+   "children": {
+    "inverse": "parent",
+    "kind": "relationship",
+    "many": true,
+    "target": "Court",
+    "type": "OneToMany"
+   },
+   "judges": {
+    "inverse": "court",
+    "kind": "relationship",
+    "many": true,
+    "target": "Judge",
+    "type": "OneToMany"
+   },
+   "parent": {
+    "inverse": "children",
+    "kind": "relationship",
+    "many": false,
+    "target": "Court",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Delegation": {
+  "fields": {
+   "accepted_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "delegate": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "expires_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "granted_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "grantor": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "label": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "link": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "requires_acceptance": {
+    "default": true,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "revoked_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "revoked_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "scope": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "starts_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "status": {
+    "default": "pending",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "DelegationRequest": {
+  "fields": {
+   "delegate": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "expires_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "grantor": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "label": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "request_expires_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "scope": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "starts_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Department": {
+  "fields": {
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "head": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "is_root": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "policy": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{\"m\":1,\"n\":1,\"quorum\":0,\"veto\":[]}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "target_policy": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   }
+  },
+  "has_migrate": true,
+  "relationships": {
+   "authorities": {
+    "inverse": "grantor",
+    "kind": "relationship",
+    "many": true,
+    "target": "Authority",
+    "type": "OneToMany"
+   },
+   "children": {
+    "inverse": "parent",
+    "kind": "relationship",
+    "many": true,
+    "target": "Department",
+    "type": "OneToMany"
+   },
+   "fund": {
+    "inverse": "department",
+    "kind": "relationship",
+    "many": false,
+    "target": "Fund",
+    "type": "OneToOne"
+   },
+   "licenses_issued": {
+    "inverse": "issued_by",
+    "kind": "relationship",
+    "many": true,
+    "target": "License",
+    "type": "OneToMany"
+   },
+   "mandates": {
+    "inverse": "executor",
+    "kind": "relationship",
+    "many": true,
+    "target": "Mandate",
+    "type": "OneToMany"
+   },
+   "parent": {
+    "inverse": "children",
+    "kind": "relationship",
+    "many": false,
+    "target": "Department",
+    "type": "ManyToOne"
+   },
+   "permissions": {
+    "inverse": "departments",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "Permission"
+    ],
+    "type": "ManyToMany"
+   },
+   "positions": {
+    "inverse": "department",
+    "kind": "relationship",
+    "many": true,
+    "target": "Position",
+    "type": "OneToMany"
+   },
+   "proposals": {
+    "inverse": "department",
+    "kind": "relationship",
+    "many": true,
+    "target": "Proposal",
+    "type": "OneToMany"
+   },
+   "tenders": {
+    "inverse": "requester",
+    "kind": "relationship",
+    "many": true,
+    "target": "Tender",
+    "type": "OneToMany"
+   }
+  },
+  "version": 2
+ },
+ "Dispute": {
+  "fields": {
+   "case": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "claimant": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "description_ref": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "respondent": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "filed",
+    "kind": "property",
+    "type": "String"
+   },
+   "subject": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Document": {
+  "fields": {
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "author": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "department": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "hash": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "ref": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Event": {
+  "fields": {
+   "args": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "op": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "origin": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "result": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "user": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Extension": {
+  "fields": {
+   "access": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{\"profiles\":[\"member\"],\"departments\":[]}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "manifest": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "operations": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "sidebar": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "source": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "installed",
+    "kind": "property",
+    "type": "String"
+   },
+   "version": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "FXPair": {
+  "fields": {
+   "base_class": {
+    "constraints": {
+     "max_length": 16
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "base_symbol": {
+    "constraints": {
+     "max_length": 8
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "decimals": {
+    "default": 9,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "last_error": {
+    "constraints": {
+     "max_length": 256
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "last_updated": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "name": {
+    "constraints": {
+     "max_length": 16
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "quote_class": {
+    "constraints": {
+     "max_length": 16
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "quote_symbol": {
+    "constraints": {
+     "max_length": 8
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "rate": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "FederalVote": {
+  "fields": {
+   "action": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "deadline": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "hash": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "origin_quarter": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "rule": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{\"kind\":\"majority_of_quarters\"}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "status": {
+    "default": "open",
+    "kind": "property",
+    "type": "String"
+   },
+   "tally": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   }
+  },
+  "has_migrate": true,
+  "relationships": {
+   "legs": {
+    "inverse": "vote",
+    "kind": "relationship",
+    "many": true,
+    "target": "FederalVoteLeg",
+    "type": "OneToMany"
+   }
+  },
+  "version": 2
+ },
+ "FederalVoteLeg": {
+  "fields": {
+   "abstain": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "eligible": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "hash": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "no": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "outcome": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "proposal_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "quarter": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "open",
+    "kind": "property",
+    "type": "String"
+   },
+   "yes": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "vote": {
+    "inverse": "legs",
+    "kind": "relationship",
+    "many": false,
+    "target": "FederalVote",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "FederationMessage": {
+  "fields": {
+   "body": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "response": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "source": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "topic": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "FinancialReport": {
+  "fields": {
+   "as_of": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "issued_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "period_close",
+    "kind": "property",
+    "type": "String"
+   },
+   "source_hash": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "statements": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "supersedes": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "period": {
+    "inverse": "reports",
+    "kind": "relationship",
+    "many": false,
+    "target": "FiscalPeriod",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "FiscalPeriod": {
+  "fields": {
+   "ends_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "source_hash": {
+    "default": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "kind": "property",
+    "type": "String"
+   },
+   "starts_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "statements": {
+    "constraints": {
+     "max_length": 1048576
+    },
+    "default": "{\"accounts\":{},\"fund_balances\":{},\"debit\":0,\"credit\":0}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "status": {
+    "default": "open",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "budgets": {
+    "inverse": "period",
+    "kind": "relationship",
+    "many": true,
+    "target": "Budget",
+    "type": "OneToMany"
+   },
+   "ledger_entries": {
+    "inverse": "period",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   },
+   "reports": {
+    "inverse": "period",
+    "kind": "relationship",
+    "many": true,
+    "target": "FinancialReport",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Forward": {
+  "fields": {
+   "destination": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "moved_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "origin": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "signature": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "subject": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Fund": {
+  "fields": {
+   "allocation_rule": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "balances": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "general",
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "budgets": {
+    "inverse": "fund",
+    "kind": "relationship",
+    "many": true,
+    "target": "Budget",
+    "type": "OneToMany"
+   },
+   "department": {
+    "inverse": "fund",
+    "kind": "relationship",
+    "many": false,
+    "target": "Department",
+    "type": "OneToOne"
+   },
+   "ledger_entries": {
+    "inverse": "fund",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "GuestUser": {
+  "fields": {
+   "home_quarter": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "permissions": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Human": {
+  "fields": {
+   "date_of_birth": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "h3_index": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "user": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "identities": {
+    "inverse": "human",
+    "kind": "relationship",
+    "many": true,
+    "target": "Identity",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Identity": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "issuer": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "ref": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "pending",
+    "kind": "property",
+    "type": "String"
+   },
+   "verified_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "human": {
+    "inverse": "identities",
+    "kind": "relationship",
+    "many": false,
+    "target": "Human",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Invite": {
+  "fields": {
+   "created_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "department": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "expires_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "max_uses": {
+    "default": 1,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "position": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "profile": {
+    "default": "member",
+    "kind": "property",
+    "type": "String"
+   },
+   "redeemed_by": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "revoked": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "uses": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Invoice": {
+  "fields": {
+   "amount": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "due_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "paid_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "payer": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "payment": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "reason": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "pending",
+    "kind": "property",
+    "type": "String"
+   },
+   "symbol": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "ledger_entries": {
+    "inverse": "invoice",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   },
+   "transfers": {
+    "inverse": "invoice",
+    "kind": "relationship",
+    "many": true,
+    "target": "Transfer",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Judge": {
+  "fields": {
+   "appointed_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "specialization": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "active",
+    "kind": "property",
+    "type": "String"
+   },
+   "user": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "cases": {
+    "inverse": "judges",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "Case"
+    ],
+    "type": "ManyToMany"
+   },
+   "court": {
+    "inverse": "judges",
+    "kind": "relationship",
+    "many": false,
+    "target": "Court",
+    "type": "ManyToOne"
+   },
+   "verdicts": {
+    "inverse": "issued_by",
+    "kind": "relationship",
+    "many": true,
+    "target": "Verdict",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "KeyEnvelope": {
+  "fields": {
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "granted_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "principal": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "scope": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "wrapped_dek": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Land": {
+  "fields": {
+   "cell": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "height": {
+    "default": 1,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "unassigned",
+    "kind": "property",
+    "type": "String"
+   },
+   "metadata": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "owner": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "registered_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "active",
+    "kind": "property",
+    "type": "String"
+   },
+   "token_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "width": {
+    "default": 1,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "x": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "y": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "zones": {
+    "inverse": "land",
+    "kind": "relationship",
+    "many": true,
+    "target": "Zone",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "LedgerEntry": {
+  "fields": {
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "category": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "credit": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "debit": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "symbol": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "transaction": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "user": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "appeal": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Appeal",
+    "type": "ManyToOne"
+   },
+   "case": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Case",
+    "type": "ManyToOne"
+   },
+   "contract": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Contract",
+    "type": "ManyToOne"
+   },
+   "fund": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Fund",
+    "type": "ManyToOne"
+   },
+   "invoice": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Invoice",
+    "type": "ManyToOne"
+   },
+   "organization": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Organization",
+    "type": "ManyToOne"
+   },
+   "penalty": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Penalty",
+    "type": "ManyToOne"
+   },
+   "period": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "FiscalPeriod",
+    "type": "ManyToOne"
+   },
+   "transfer": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Transfer",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "License": {
+  "fields": {
+   "applied_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "conditions": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "evidence_ref": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "expires_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "holder": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "issued_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "kind": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "applied",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "issued_by": {
+    "inverse": "licenses_issued",
+    "kind": "relationship",
+    "many": false,
+    "target": "Department",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Mandate": {
+  "fields": {
+   "expires_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "proposal": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "scope": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "status": {
+    "default": "active",
+    "kind": "property",
+    "type": "String"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "contracts": {
+    "inverse": "mandate",
+    "kind": "relationship",
+    "many": true,
+    "target": "Contract",
+    "type": "OneToMany"
+   },
+   "executor": {
+    "inverse": "mandates",
+    "kind": "relationship",
+    "many": false,
+    "target": "Department",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Member": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "joined_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "status": {
+    "default": "active",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "NFTToken": {
+  "fields": {
+   "canister": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "required_license": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "supply_cap": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "total_supply": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "transferable": {
+    "default": true,
+    "kind": "property",
+    "type": "Boolean"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Notification": {
+  "fields": {
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "body": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "href": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "read_by": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "recipient": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "sender": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "topic": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "visibility": {
+    "default": "private",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Organization": {
+  "fields": {
+   "admins": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "active",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "bids": {
+    "inverse": "vendor",
+    "kind": "relationship",
+    "many": true,
+    "target": "Bid",
+    "type": "OneToMany"
+   },
+   "ledger_entries": {
+    "inverse": "organization",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   },
+   "positions": {
+    "inverse": "organization",
+    "kind": "relationship",
+    "many": true,
+    "target": "Position",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "PaymentAccount": {
+  "fields": {
+   "address": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "label": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "network": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "owner": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "symbol": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "verified": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Penalty": {
+  "fields": {
+   "amount": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "due_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "executed_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "invoice": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "fine",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "pending",
+    "kind": "property",
+    "type": "String"
+   },
+   "symbol": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "target": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "ledger_entries": {
+    "inverse": "penalty",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   },
+   "verdict": {
+    "inverse": "penalties",
+    "kind": "relationship",
+    "many": false,
+    "target": "Verdict",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Permission": {
+  "fields": {
+   "category": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "scope": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "departments": {
+    "inverse": "permissions",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "Department"
+    ],
+    "type": "ManyToMany"
+   },
+   "profiles": {
+    "inverse": "permissions",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "UserProfile"
+    ],
+    "type": "ManyToMany"
+   },
+   "users": {
+    "inverse": "permissions",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "User"
+    ],
+    "type": "ManyToMany"
+   }
+  },
+  "version": 1
+ },
+ "Position": {
+  "fields": {
+   "headcount": {
+    "default": 1,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "inherit_from_capital": {
+    "default": true,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "salary": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "salary_period": {
+    "default": "monthly",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "open",
+    "kind": "property",
+    "type": "String"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "appointments": {
+    "inverse": "position",
+    "kind": "relationship",
+    "many": true,
+    "target": "Appointment",
+    "type": "OneToMany"
+   },
+   "department": {
+    "inverse": "positions",
+    "kind": "relationship",
+    "many": false,
+    "target": "Department",
+    "type": "ManyToOne"
+   },
+   "organization": {
+    "inverse": "positions",
+    "kind": "relationship",
+    "many": false,
+    "target": "Organization",
+    "type": "ManyToOne"
+   },
+   "profile": {
+    "inverse": "positions",
+    "kind": "relationship",
+    "many": false,
+    "target": "UserProfile",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Proposal": {
+  "fields": {
+   "action": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "null",
+    "kind": "property",
+    "type": "Json"
+   },
+   "deadline": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "effective_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "filed_under": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "links": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "on_behalf_of": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "opens_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "proposer": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "quorum": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "replaced_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "result": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "null",
+    "kind": "property",
+    "type": "Json"
+   },
+   "status": {
+    "default": "voting",
+    "kind": "property",
+    "type": "String"
+   },
+   "tally": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "threshold": {
+    "default": 50000000,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "has_migrate": true,
+  "relationships": {
+   "department": {
+    "inverse": "proposals",
+    "kind": "relationship",
+    "many": false,
+    "target": "Department",
+    "type": "ManyToOne"
+   },
+   "votes": {
+    "inverse": "proposal",
+    "kind": "relationship",
+    "many": true,
+    "target": "Vote",
+    "type": "OneToMany"
+   }
+  },
+  "version": 2
+ },
+ "ProposalEdge": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "source": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "target": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Quarter": {
+  "fields": {
+   "codex_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "codex_version": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "index": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "last_activity_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "last_sync": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "name": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "population": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "status": {
+    "default": "setup",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Realm": {
+  "fields": {
+   "accounting_currency": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "accounting_currency_decimals": {
+    "default": 8,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "ai_assistant_enabled": {
+    "default": true,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "auto_scale_enabled": {
+    "default": true,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "background_image_url": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "bootstrap_state": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "can_test_mode": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "codex_install_state": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "federation_codex": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "federation_realm_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "file_registry_canister_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "frontend_canister_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "default": "1",
+    "kind": "property",
+    "type": "String"
+   },
+   "installed_version": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "installer_canister_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "is_capital": {
+    "default": true,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "is_quarter": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "last_activity_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "logo_url": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "manifest_data": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "manifesto": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "marketplace_canister_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "network": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "nft_canister_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "open_registration": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "primary_color": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "principal_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "quarter_join_mode": {
+    "default": "auto",
+    "kind": "property",
+    "type": "String"
+   },
+   "require_marketplace_approval": {
+    "default": true,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "scale_in_flight": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "scale_requested_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "shared_tokens_json": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "status": {
+    "default": "setup",
+    "kind": "property",
+    "type": "String"
+   },
+   "sync_state": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "test_flags": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "test_mode": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "timezone": {
+    "default": "UTC",
+    "kind": "property",
+    "type": "String"
+   },
+   "token_canister_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "trusted_approvers": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "trusted_principals": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "welcome_message": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "has_migrate": true,
+  "relationships": {
+   "calendar": {
+    "inverse": "realm",
+    "kind": "relationship",
+    "many": false,
+    "target": "Calendar",
+    "type": "OneToOne"
+   },
+   "treasury": {
+    "inverse": "realm",
+    "kind": "relationship",
+    "many": false,
+    "target": "Treasury",
+    "type": "OneToOne"
+   }
+  },
+  "version": 2
+ },
+ "Registry": {
+  "fields": {
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "principal_id": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "Row": {
+  "fields": {},
+  "relationships": {},
+  "version": 1
+ },
+ "Task": {
+  "fields": {
+   "metadata": {
+    "constraints": {
+     "max_length": 256
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "constraints": {
+     "max_length": 256
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "constraints": {
+     "max_length": 32
+    },
+    "default": "pending",
+    "kind": "property",
+    "type": "String"
+   },
+   "step_to_execute": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "executions": {
+    "inverse": "task",
+    "kind": "relationship",
+    "many": true,
+    "target": "TaskExecution",
+    "type": "OneToMany"
+   },
+   "schedules": {
+    "inverse": "task",
+    "kind": "relationship",
+    "many": true,
+    "target": "TaskSchedule",
+    "type": "OneToMany"
+   },
+   "steps": {
+    "inverse": "task",
+    "kind": "relationship",
+    "many": true,
+    "target": "TaskStep",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "TaskExecution": {
+  "fields": {
+   "completed_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "name": {
+    "constraints": {
+     "max_length": 256
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "result": {
+    "constraints": {
+     "max_length": 5000
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "started_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "status": {
+    "constraints": {
+     "max_length": 50
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "task": {
+    "inverse": "executions",
+    "kind": "relationship",
+    "many": false,
+    "target": "Task",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "TaskSchedule": {
+  "fields": {
+   "disabled": {
+    "has_default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "last_run_at": {
+    "has_default": false,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "name": {
+    "constraints": {
+     "max_length": 256
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "repeat_every": {
+    "has_default": false,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "run_at": {
+    "has_default": false,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "task": {
+    "inverse": "schedules",
+    "kind": "relationship",
+    "many": false,
+    "target": "Task",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "TaskStep": {
+  "fields": {
+   "run_next_after": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "status": {
+    "constraints": {
+     "max_length": 32
+    },
+    "default": "pending",
+    "kind": "property",
+    "type": "String"
+   },
+   "timer_id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "Integer"
+   }
+  },
+  "relationships": {
+   "call": {
+    "inverse": "task_step",
+    "kind": "relationship",
+    "many": false,
+    "target": "Call",
+    "type": "OneToOne"
+   },
+   "task": {
+    "inverse": "steps",
+    "kind": "relationship",
+    "many": false,
+    "target": "Task",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "TaxDeclaration": {
+  "fields": {
+   "amount": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "base": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "declarant": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "invoice": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "key": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "period": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "filed",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
+ "TaxPolicy": {
+  "fields": {
+   "adopted_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "document": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "proposal": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "draft",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "has_migrate": true,
+  "relationships": {},
+  "version": 2
+ },
+ "Tender": {
+  "fields": {
+   "closes_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "contract": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "opens_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "rubric": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "status": {
+    "default": "draft",
+    "kind": "property",
+    "type": "String"
+   },
+   "title": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "winner": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "has_migrate": true,
+  "relationships": {
+   "bids": {
+    "inverse": "tender",
+    "kind": "relationship",
+    "many": true,
+    "target": "Bid",
+    "type": "OneToMany"
+   },
+   "requester": {
+    "inverse": "tenders",
+    "kind": "relationship",
+    "many": false,
+    "target": "Department",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 2
+ },
+ "Token": {
+  "fields": {
+   "decimals": {
+    "default": 8,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "fee": {
+    "default": 10,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "indexer": {
+    "constraints": {
+     "max_length": 64
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "ledger": {
+    "constraints": {
+     "max_length": 64
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "constraints": {
+     "max_length": 64
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "balances": {
+    "inverse": "token",
+    "kind": "relationship",
+    "many": true,
+    "target": "WalletBalance",
+    "type": "OneToMany"
+   },
+   "subaccounts": {
+    "inverse": "token",
+    "kind": "relationship",
+    "many": true,
+    "target": "WalletSubaccount",
+    "type": "OneToMany"
+   },
+   "transfers": {
+    "inverse": "token",
+    "kind": "relationship",
+    "many": true,
+    "target": "WalletTransfer",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Trade": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "leg_a": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "leg_b": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "pending",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "contract": {
+    "inverse": "trades",
+    "kind": "relationship",
+    "many": false,
+    "target": "Contract",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Transfer": {
+  "fields": {
+   "amount": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "ledger_tx": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "payroll": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "reply": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "sender": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "sending",
+    "kind": "property",
+    "type": "String"
+   },
+   "symbol": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "to": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "invoice": {
+    "inverse": "transfers",
+    "kind": "relationship",
+    "many": false,
+    "target": "Invoice",
+    "type": "ManyToOne"
+   },
+   "ledger_entries": {
+    "inverse": "transfer",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Treasury": {
+  "fields": {
+   "config": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{\"epoch\":\"monthly\",\"anchor_month\":1,\"source_fund\":\"ROOT\",\"auto_allocate\":false}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "id": {
+    "default": "1",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "realm": {
+    "inverse": "treasury",
+    "kind": "relationship",
+    "many": false,
+    "target": "Realm",
+    "type": "OneToOne"
+   }
+  },
+  "version": 1
+ },
+ "User": {
+  "fields": {
+   "avatar": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "home_quarter": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "nickname": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "private_data": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "permissions": {
+    "inverse": "users",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "Permission"
+    ],
+    "type": "ManyToMany"
+   },
+   "profiles": {
+    "inverse": "users",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "UserProfile"
+    ],
+    "type": "ManyToMany"
+   }
+  },
+  "version": 1
+ },
+ "UserProfile": {
+  "fields": {
+   "allowed_to": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "description": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "permissions": {
+    "inverse": "profiles",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "Permission"
+    ],
+    "type": "ManyToMany"
+   },
+   "positions": {
+    "inverse": "profile",
+    "kind": "relationship",
+    "many": true,
+    "target": "Position",
+    "type": "OneToMany"
+   },
+   "users": {
+    "inverse": "profiles",
+    "kind": "relationship",
+    "many": true,
+    "target": [
+     "User"
+    ],
+    "type": "ManyToMany"
+   }
+  },
+  "version": 1
+ },
+ "Verdict": {
+  "fields": {
+   "contract": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "decision": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "issued_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "reasoning_ref": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "draft",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "case": {
+    "inverse": "verdicts",
+    "kind": "relationship",
+    "many": false,
+    "target": "Case",
+    "type": "ManyToOne"
+   },
+   "issued_by": {
+    "inverse": "verdicts",
+    "kind": "relationship",
+    "many": false,
+    "target": "Judge",
+    "type": "ManyToOne"
+   },
+   "penalties": {
+    "inverse": "verdict",
+    "kind": "relationship",
+    "many": true,
+    "target": "Penalty",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
+ "Vote": {
+  "fields": {
+   "cast_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "cast_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "choice": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "proposal_id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "voter": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "proposal": {
+    "inverse": "votes",
+    "kind": "relationship",
+    "many": false,
+    "target": "Proposal",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "WalletBalance": {
+  "fields": {
+   "amount": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "principal": {
+    "constraints": {
+     "max_length": 64
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "token": {
+    "inverse": "balances",
+    "kind": "relationship",
+    "many": false,
+    "target": "Token",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "WalletSubaccount": {
+  "fields": {
+   "balance": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "label": {
+    "constraints": {
+     "max_length": 128
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "subaccount_hex": {
+    "constraints": {
+     "max_length": 64
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "token": {
+    "inverse": "subaccounts",
+    "kind": "relationship",
+    "many": false,
+    "target": "Token",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "WalletTransfer": {
+  "fields": {
+   "amount": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "fee": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "kind": {
+    "constraints": {
+     "max_length": 16
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "principal_from": {
+    "constraints": {
+     "max_length": 64
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "principal_to": {
+    "constraints": {
+     "max_length": 64
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "timestamp": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "tx_id": {
+    "constraints": {
+     "max_length": 64
+    },
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "token": {
+    "inverse": "transfers",
+    "kind": "relationship",
+    "many": false,
+    "target": "Token",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ },
+ "Zone": {
+  "fields": {
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "unassigned",
+    "kind": "property",
+    "type": "String"
+   },
+   "metadata": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "name": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "user": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {
+   "land": {
+    "inverse": "zones",
+    "kind": "relationship",
+    "many": false,
+    "target": "Land",
+    "type": "ManyToOne"
+   }
+  },
+  "version": 1
+ }
+}

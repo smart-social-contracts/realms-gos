@@ -15,3 +15,9 @@ class Event(Row):
     args = Json({})
     result = Json({})
     at = Integer(default=0)
+
+    @classmethod
+    def migrate(cls, obj, from_version, to_version):
+        # ``grant`` has no default: an event written before it existed has none, which is what a missing value means.
+        # ic-python-db rejects an upgrade that adds a field without a default to an entity with no migrate().
+        return obj

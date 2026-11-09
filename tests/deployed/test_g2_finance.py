@@ -42,8 +42,8 @@ from ic_python_db import Database
 import ggg
 
 db = Database.get_instance()
-TABLE = ((ggg.TaxPolicy, "TAX-POLICY-1"), (ggg.Budget, "B-1"), (ggg.Budget, "B-2"), (ggg.Invoice, "INV-1"),
-         (ggg.Invoice, "INV-2"), (ggg.Treasury, "1"), (ggg.Land, "L-1"))
+TABLE = ((ggg.TaxPolicy, "TAX-POLICY-1"), (ggg.Budget, "B-1"), (ggg.Budget, "B-2"), (ggg.Budget, "B-3"), (ggg.Budget, "B-4"),
+         (ggg.Invoice, "INV-1"), (ggg.Invoice, "INV-2"), (ggg.Treasury, "1"), (ggg.Land, "L-1"))
 '''
 SAVE_OLD = ROWS + f'''
 def version_1(entity, alias, drop=(), **fields):
@@ -56,6 +56,8 @@ def version_1(entity, alias, drop=(), **fields):
 version_1(ggg.TaxPolicy, "TAX-POLICY-1", drop=("taxes",), document={OLD_DOCUMENT!r})
 version_1(ggg.Budget, "B-1", kind="capital")  # any text was a kind
 version_1(ggg.Budget, "B-2")
+version_1(ggg.Budget, "B-3", kind="income")  # a revenue line, as the last release let one be called
+version_1(ggg.Budget, "B-4", kind="Cost")
 version_1(ggg.Invoice, "INV-1", drop=("items", "facts"))
 version_1(ggg.Invoice, "INV-2", drop=("items", "facts"))
 version_1(ggg.Treasury, "1", drop=("debt_outstanding",))
@@ -108,8 +110,10 @@ def seed_previous(realm, ctl, alice):
     kind, one line at a time, an invoice without items and the taxes in the document."""
     ok(realm, "budget_draft", ctl, fund="ROADS", period="FY2026", category="capital", kind="capital", planned=300 * UNIT)
     ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2026", category="property_tax", kind="revenue", planned=900 * UNIT)
-    ok(realm, "budget_propose", ctl, budget="B-1")
-    ok(realm, "budget_propose", ctl, budget="B-2")
+    ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2026", category="levies", kind="income", planned=200 * UNIT)
+    ok(realm, "budget_draft", ctl, fund="ROADS", period="FY2026", category="works", kind="Cost", planned=50 * UNIT)
+    for budget in ("B-1", "B-2", "B-3", "B-4"):
+        ok(realm, "budget_propose", ctl, budget=budget)
     for amount in (120 * UNIT, 7 * UNIT):
         ok(realm, "invoice_create", ctl, payer=alice, amount=amount, reason="TaxDeclaration:TD-1" if amount > UNIT * 100 else "")
     ok(realm, "tax_policy_draft", ctl, document=OLD_DOCUMENT)
@@ -119,6 +123,8 @@ def seed_current(realm, ctl, alice):
     """The same through this release's operations; the rows are then written back as the last release saved them."""
     ok(realm, "budget_draft", ctl, fund="ROADS", period="FY2026", category="capital", kind="expense", planned=300 * UNIT)
     ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2026", category="property_tax", kind="revenue", planned=900 * UNIT)
+    ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2026", category="levies", kind="revenue", planned=200 * UNIT)
+    ok(realm, "budget_draft", ctl, fund="ROADS", period="FY2026", category="works", kind="expense", planned=50 * UNIT)
     ok(realm, "budget_propose", ctl, period="FY2026")
     for amount in (120 * UNIT, 7 * UNIT):
         ok(realm, "invoice_create", ctl, payer=alice, amount=amount, items=[{"concept": "fee", "amount": amount}],
@@ -163,7 +169,8 @@ def test_the_rows_start_in_the_form_of_the_last_release(realm):
     old = realm.old_rows
     assert all(old[key]["__version__"] < number for key, number in versions_of(old, VERSION).items())
     assert old["TaxPolicy:TAX-POLICY-1"]["document"] == OLD_DOCUMENT and "taxes" not in old["TaxPolicy:TAX-POLICY-1"]
-    assert old["Budget:B-1"]["kind"] == "capital" and "items" not in old["Invoice:INV-1"]
+    assert [old[f"Budget:B-{n}"]["kind"] for n in (1, 3, 4)] == ["capital", "income", "Cost"]
+    assert "items" not in old["Invoice:INV-1"]
     assert "debt_outstanding" not in old["Treasury:1"] and "assessed_value" not in old["Land:L-1"]
 
 
@@ -173,10 +180,12 @@ def test_the_tax_policy_keeps_its_taxes_as_typed_entries(realm, people):
     assert versions(realm)["TaxPolicy:TAX-POLICY-1"] == 3
 
 
-def test_the_budget_lines_are_revenue_or_expense(realm, people):
+def test_the_budget_lines_are_revenue_or_expense_by_what_they_were_called(realm, people):
+    """A line called income was revenue and one called Cost an expense; "capital", which says neither, is read as an expense."""
     seen = ok(realm, "budget_view", people["alice"], query=True, period="FY2026")
     lines = {b["category"]: (b["kind"], b["planned"], b["status"]) for f in seen["funds"] for b in f["budgets"]}
-    assert lines == {"capital": ("expense", 300 * UNIT, "adopted"), "property_tax": ("revenue", 900 * UNIT, "adopted")}
+    assert lines == {"capital": ("expense", 300 * UNIT, "adopted"), "property_tax": ("revenue", 900 * UNIT, "adopted"),
+                     "levies": ("revenue", 200 * UNIT, "adopted"), "works": ("expense", 50 * UNIT, "adopted")}
 
 
 def test_each_invoice_has_one_item_for_its_whole_amount(realm, people):
@@ -219,10 +228,10 @@ def test_tax_declare_adds_up_the_brackets_of_a_progressive_tax_and_rounds_the_to
 
 def test_budget_extend_carries_the_budget_of_the_period_before_and_only_once(realm, people):
     ctl = people["ctl"]
-    assert ok(realm, "budget_extend", ctl, period="FY2027")["extended"] == 2
+    assert ok(realm, "budget_extend", ctl, period="FY2027")["extended"] == 4  # the four lines of FY2026
     assert refused(realm, "budget_extend", ctl, period="FY2027")["kind"] == "conflict"
     seen = ok(realm, "budget_view", people["alice"], query=True, period="FY2027")
-    assert sorted(b["status"] for f in seen["funds"] for b in f["budgets"]) == ["extended", "extended"]
+    assert sorted(b["status"] for f in seen["funds"] for b in f["budgets"]) == ["extended"] * 4
 
 
 def test_a_budget_is_proposed_per_period_with_its_totals_as_facts(realm, people):

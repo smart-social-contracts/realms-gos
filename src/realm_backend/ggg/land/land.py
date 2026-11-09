@@ -22,3 +22,10 @@ class Land(Row):
     registered_by = String(default="")
     metadata = Json({})
     zones = OneToMany("Zone", "land")
+
+    @classmethod
+    def migrate(cls, obj, from_version, to_version):
+        # ``assessed_value`` and ``area`` have no default: a parcel registered before they existed was never assessed,
+        # which is what a missing value means. ic-python-db rejects an upgrade that adds a field without a default to
+        # an entity with no migrate().
+        return obj

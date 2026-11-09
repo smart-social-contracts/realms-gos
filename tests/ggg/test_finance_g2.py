@@ -34,6 +34,16 @@ def agora_budget():
 
 # --- budgets by kind, proposed per period ---------------------------------------------------------
 
+@pytest.mark.parametrize("old, now", [
+    ("income", "revenue"), ("Income", "revenue"), (" revenue ", "revenue"),
+    ("expense", "expense"), ("Expenditure", "expense"), ("COST", "expense"),
+    ("capital", "expense"), ("", "expense"), (None, "expense")])
+def test_an_old_budget_kind_is_read_by_what_it_says(old, now):
+    """The last release took any text as a kind: the migration reads income and revenue as revenue, expense, expenditure
+    and cost as expense, and any other text as an expense, as an unset kind always was."""
+    assert Budget.migrate({"kind": old}, 1, 2)["kind"] == now
+
+
 def test_a_budget_line_is_revenue_or_expense():
     setup_finance()
     line = {"fund": "ROOT", "period": "FY2026", "category": "x", "planned": 1}
