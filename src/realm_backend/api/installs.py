@@ -416,13 +416,14 @@ def build(job):
 
 def confirm(job):
     """A quarter asks the capital which codex it requires now (``quarter_sync``: the one in force, or a pending one once
-    due), at the switch time and after it, and goes on to the switch only if that is the codex it staged: one the capital has left, withdrawn, reverted or replaced by a newer, is never
-    activated. A newer codex the capital announced is staged by its own job. A capital that does not answer leaves the
-    quarter on its codex and the job paused, for an admin's ``codex_install_resume`` to ask again. A generator."""
+    due), at the switch time and after it, and goes on to the switch only if that is the codex it staged: one the
+    capital has left, withdrawn, reverted or replaced by a newer, is never activated. A newer codex the capital
+    announced is staged by its own job. A capital that does not answer leaves the quarter on its codex and the job
+    paused, for an admin's ``codex_install_resume`` to ask again. A generator."""
     if not announced_by_my_capital(job):
         raise Fail(LEFT)
     try:
-        reply = yield from quarters.ask(quarters.capital(), "quarter_sync", {})  # no report: nothing of this quarter changes
+        reply = yield from quarters.ask(quarters.capital(), "quarter_sync", {})  # an empty report: no change to its record
         if not reply.get("ok"):
             raise Fail(f"the capital refused: {reply.get('error')}")
     except Exception as e:  # noqa: BLE001  rejected, trapped or refused: the codex is not confirmed

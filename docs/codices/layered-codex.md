@@ -1623,6 +1623,8 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile. The 24 hours of the job
   cover its work, not the wait for T, however far away T is.
 - **A quarter ready after T** goes through the same confirmation before it switches.
+- **Upgrading.** Upgrade a federation's capital before its quarters: a quarter confirms its switch against the
+  codex the capital's `quarter_sync` names, and an older capital names its active codex only.
 - **A revert.** When the capital restores an earlier codex (`codex_revert`, `codex_revert_fast`), it tells each
   active quarter `codex.revert`, and each restores that codex from its own history at once: nothing is downloaded
   and no `on_codex_activate` runs. The quarter reports what it runs; a quarter that never ran that codex refuses,

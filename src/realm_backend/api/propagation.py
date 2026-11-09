@@ -145,10 +145,13 @@ def on_revert(c, body):
     in its history (nothing is downloaded). No ``on_codex_activate`` runs. A codex this quarter never ran is refused,
     and the capital records the refusal."""
     quarters.from_capital(c)
+    codex_id = body.get("codex")
+    if not (isinstance(codex_id, str) and codex_id):
+        raise Fail("a revert to restore names the codex")  # without one, restoring would take the previous codex
     current = runtime.active()
-    if current is not None and current.id == body.get("codex"):
+    if current is not None and current.id == codex_id:
         return {"reverted": "active"}
-    return {"reverted": "restored", **runtime.restore(runtime.restoring({"codex": body.get("codex")}))}
+    return {"reverted": "restored", **runtime.restore(runtime.restoring({"codex": codex_id}))}
 
 
 def task_name(job):

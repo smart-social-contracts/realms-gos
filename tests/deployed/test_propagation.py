@@ -216,8 +216,8 @@ def test_a_quarter_ready_after_t_does_not_switch_to_a_codex_the_capital_reverted
     assert flag(capital, late) == "compliant"  # it runs what the capital runs
 
 
-def test_a_quarter_ready_after_t_does_not_switch_to_a_codex_the_capital_replaced_by_a_newer_one(net, site, people,
-                                                                                               federation):
+def test_a_quarter_ready_after_t_does_not_switch_to_a_codex_the_capital_replaced_by_a_newer_one(
+        net, site, people, federation):
     capital, early, late, _ = federation
     first = expected_id(layer_of(people))
     second = layer_of(people, "2.0.0")

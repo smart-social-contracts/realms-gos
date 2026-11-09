@@ -503,6 +503,10 @@ def test_a_quarter_restores_the_codex_its_capital_reverted_to_from_its_own_histo
 def test_a_quarter_refuses_a_revert_to_a_codex_it_never_ran_and_from_anyone_but_its_capital(monkeypatch):
     quarter(monkeypatch, "north", "south")
     first, second = stored_codices()
+    for body in ({}, {"codex": ""}, {"codex": None}, {"codex": 7}):  # none named: it would take the previous codex
+        assert call("federation_message", CAPITAL, topic="codex.revert", body=body)["error"] == (
+            "a revert to restore names the codex")
+        assert status()["codex"]["id"] == second
     unknown = call("federation_message", CAPITAL, topic="codex.revert", body={"codex": OTHER})
     assert (unknown["kind"], status()["codex"]["id"]) == ("not_found", second)
     assert "only this quarter's capital" in call("federation_message", "south", topic="codex.revert", body={"codex": first})["error"]
