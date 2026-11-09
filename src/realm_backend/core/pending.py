@@ -119,17 +119,17 @@ def risk_of(name):
 
 def summary_of(user, name, spec, args):
     """The realm's words about the call, a label and a value per line: each argument under its own name, a lower-case
-    word, then what the operation says of its effect (its ``summary`` hook) and where a governed call goes, under labels
-    of several words that start with a capital. An argument can never take a label of the realm's: a label of the realm's
-    has a space in it, and an argument's name is a single word."""
+    word, then what the operation says of its effect (its ``summary`` hook) and what happens when the member approves
+    it, under labels of several words that start with a capital. An argument can never take a label of the realm's: a
+    label of the realm's has a space in it, and an argument's name is a single word."""
     for key in args:
         if not (key.isascii() and key.isidentifier() and key == key.lower()):
             raise Fail(f"'{key}' is not an argument name: they are lower-case words")
     lines = [{"label": key, "value": shown(key, value, args)} for key, value in sorted(args.items())]
     if spec["summary"]:
         lines += spec["summary"](user, args)
-    if spec["governed"]:
-        lines.append({"label": "What happens next", "value": consequence(spec["governed"](args))})
+    department = spec["governed"](args) if spec["governed"] else None
+    lines.append({"label": "What happens next", "value": consequence(department)})
     return lines
 
 
@@ -161,10 +161,11 @@ def amount(units, decimals):
 
 
 def consequence(department):
+    """What approving does: a call no department governs, or one a department decides alone, runs at once."""
     from core.op import direct
 
     if department is None or direct(department):
-        return "Runs at once"
+        return "Runs at once when you approve"
     return f"Files a proposal under {department.id}; the realm votes"
 
 
