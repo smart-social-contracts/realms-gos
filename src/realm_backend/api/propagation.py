@@ -9,7 +9,10 @@ by the capital; one that finishes later switches then, if the capital still runs
 The switch cannot be atomic across canisters: calls between quarters carry the sender's codex checksum
 (quarters.ask), which the receivers record.
 
-A capital that drops a staged codex (its proposal was stopped, its job failed) tells the quarters (``codex.unstage``).
+A capital that drops a staged codex (its proposal was stopped, its job failed) tells the quarters (``codex.unstage``),
+and one that reverts tells them to restore the codex it restored (``codex.revert``), which each keeps in its history:
+nothing is downloaded and no ``on_codex_activate`` runs. A quarter that reports it runs a codex the realm voted out is
+told again, so one that was down catches up at its next report.
 A quarter a message does not reach, because it is down or upgrading, is not told again: it keeps its codex and reads
 non-compliant. One that was told and is paused by an upgrade waits for an admin's ``codex_install_resume``, like any
 install job.
@@ -25,7 +28,7 @@ from core.db import Conflict, Fail, each, find, next_id
 from core.op import op
 from ggg import FederationMessage, InstallJob, LayeredCodex, Quarter, Task, TaskSchedule
 
-STAGE, UNSTAGE = "codex.stage", "codex.unstage"  # the federation_message topics
+STAGE, UNSTAGE, REVERT = "codex.stage", "codex.unstage", "codex.revert"  # the federation_message topics
 # Seconds the capital gives the quarters that switched at T to say so before it judges the others: they report
 # within moments, and a flag raised in between would be a flag withdrawn at once.
 JUDGE_AFTER = 60
@@ -40,6 +43,24 @@ def announce(job):
     row = LayeredCodex[job.staged["codex"]]
     tell_all(STAGE, {"codex": row.id, "checksum": job.change_list["checksum"],
                      "at": row.activates_at or job.started_at, "proposal": job.proposal})
+
+
+def reverted(target):
+    """The realm's codex was restored to ``target`` (api.codex.restore): a capital tells its quarters to restore it too.
+    A quarter, and a capital, then see what the realm runs: the one reports it, the other judges its quarters."""
+    tell_all(REVERT, {"codex": target.id})
+    chain.set_timer(0, after_switch)
+
+
+def correct(quarter):
+    """A quarter that reports it runs a codex the realm voted out, and so missed the revert, is told again to restore
+    the one in force: it was down, or upgrading, when the capital told it."""
+    current = runtime.active()
+    if current is None or quarter.codex_id in ("", current.id):
+        return
+    running = LayeredCodex[quarter.codex_id]
+    if running is not None and running.status == "reverted":
+        chain.set_timer(0, lambda cid=quarter.id, codex_id=current.id: tell(cid, REVERT, {"codex": codex_id}))
 
 
 def withdraw(codex_id):
@@ -111,6 +132,17 @@ def on_unstage(c, body):
     return {"unstaged": job is not None}
 
 
+def on_revert(c, body):
+    """From the capital: it restored the earlier codex ``codex``, and so does this quarter, at once, to the copy it keeps
+    in its history (nothing is downloaded). No ``on_codex_activate`` runs. A codex this quarter never ran is refused,
+    and the capital records the refusal."""
+    quarters.from_capital(c)
+    current = runtime.active()
+    if current is not None and current.id == body.get("codex"):
+        return {"reverted": "active"}
+    return {"reverted": "restored", **runtime.restore(runtime.restoring({"codex": body.get("codex")}))}
+
+
 def schedule(job, at):
     """Run ``codex_switch_staged`` for ``job`` at T as a one-step task of the realm's task scheduler, which arms its
     timer again after an upgrade (tasks.rearm). The step runs as the realm itself: the capital's vote is the
@@ -144,9 +176,9 @@ def codex_switch_staged(c, args):
 
 
 def after_switch():
-    """The message after a layered codex was switched to: a quarter reports what it runs, so that its capital's flag for
-    it follows at once; the capital judges its quarters when the others have had time to say they switched. A
-    generator."""
+    """The message after the realm's codex changed, by a switch or a revert: a quarter reports what it runs, so that its
+    capital's flag for it follows at once; the capital judges its quarters when the others have had time to say they
+    changed. A generator."""
     if quarters.federated():
         try:
             yield from quarters.ask(quarters.capital(), "quarter_sync", quarters.report())
@@ -181,9 +213,15 @@ def judge(quarter, reported):
     if reported == target.id:
         return compliance.valid("compliant")
     before = compliance.of(quarter.compliance)
-    since = before["NonCompliant"]["since"] if isinstance(before, dict) else target.activates_at or target.installed_at
+    since = before["NonCompliant"]["since"] if isinstance(before, dict) else took_effect(target)
     theirs = LayeredCodex[reported] if reported else None
     return compliance.valid({"NonCompliant": {"since": since, "stale": behind(target, theirs)}})
+
+
+def took_effect(target):
+    """When ``target`` took effect: its time T while it is pending, otherwise when the realm put it in force (the
+    switch, or the revert that restored it)."""
+    return target.activates_at if target.status == "pending" else store.in_force_since() or target.installed_at
 
 
 def behind(target, theirs):
@@ -199,9 +237,9 @@ def layer_of(codex, layer):
 
 
 def judge_quarters():
-    """On the capital, a moment after it switched: every active quarter that has reported is judged against the codex now
-    in force, so that one that did not switch with the others reads non-compliant since T without waiting for its next
-    report."""
+    """On the capital, a moment after its codex changed: every active quarter that has reported is judged against the
+    codex now in force, so that one that did not change with the others reads non-compliant since the change without
+    waiting for its next report."""
     for q in each(Quarter, "status", "active"):
         if q.last_sync:
             q.compliance = judge(q, q.codex_id)

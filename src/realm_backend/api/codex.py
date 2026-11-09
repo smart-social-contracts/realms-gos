@@ -112,6 +112,7 @@ def switch(waiting):
     switch_to(waiting, active())
     waiting.installed_at = chain.now()
     store.remember_source(waiting.layers[-1])
+    store.remember_in_force(waiting.activates_at if 0 < waiting.activates_at <= chain.now() else chain.now())
     chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
     from api import propagation  # it imports the install task, which imports this module
 
@@ -236,13 +237,17 @@ def only_previous(target):
 def restore(target):
     """The revert: ``target``, an earlier codex of either kind, is the active codex again and the one it replaces is
     reverted. No ``on_codex_activate`` hook runs (§10.5), and nothing else about the codex changes: it keeps the voting
-    rule and window it was recorded with. Returns ``codex``."""
+    rule and window it was recorded with. A capital's quarters restore it too (api.propagation). Returns ``codex``."""
     if isinstance(target, Codex):
         runnable(target.manifest or {})
     current = active()
     current.status, target.status = "reverted", "active"
     if isinstance(current, LayeredCodex) or isinstance(target, LayeredCodex):
         legislation.warm(target if isinstance(target, LayeredCodex) else None)
+    store.remember_in_force(chain.now())
+    from api import propagation  # it imports the install task, which imports this module
+
+    propagation.reverted(target)  # a capital tells its quarters; a quarter reports to its capital
     return {"codex": target.id}
 
 

@@ -150,6 +150,7 @@ def record(c, args):
     from api import propagation  # it imports the install task, which imports this module
 
     q.compliance = propagation.judge(q, args.get("codex_id"))
+    propagation.correct(q)
     q.last_sync = q.last_activity_at = chain.now()
     if q.status == "setup":
         q.status = "active"
