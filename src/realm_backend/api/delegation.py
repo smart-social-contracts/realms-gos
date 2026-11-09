@@ -358,7 +358,7 @@ def delegation_activity(c, args):
     keeps its last events only: ``since`` is the time of the oldest it still holds, and the ``poa`` notices are the
     lasting record. The delegate of the grant reads its events without a permission of its own, and no others."""
     d = find(Delegation, args["delegation"])
-    if c.user not in (d.grantor, d.delegate):
+    if c.user not in (d.grantor, d.delegate) or (c.delegated and c.by != d.delegate):  # another delegate's is not yours
         raise Forbidden(f"{d.id} is not yours")
     last, count = int(args.get("from") or Event.max_id()), paging(args)[1]
     newest = [e for e in reversed(list(each(Event, "grant", d.id))) if int(e.id) <= last]

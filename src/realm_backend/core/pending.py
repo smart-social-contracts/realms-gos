@@ -215,13 +215,29 @@ def title_of(name):
     return (spec and spec["title"]) or name
 
 
-def card(a, result=None):
-    """An action as a client reads it. ``result`` replaces the stored one: the approval's own reply carries what is not
-    kept (``blank``). ``title`` and ``delegate_is_member`` (a member, or an AI connection) are the realm's own words."""
+def reads(c, a):
+    """Whether the call ``c`` reads the action ``a``: its grantor in person, or the delegate that prepared it. A delegate
+    acting for the grantor reads the actions it prepared and no others: another delegate's card holds what that
+    delegate asked for, its codes, keys and private data among them."""
+    if c.delegated:
+        return (c.user, c.by) == (a.grantor, a.delegate)
+    return c.user in (a.grantor, a.delegate)
+
+
+def card(c, a, result=None):
+    """An action as the call ``c`` reads it. ``result`` replaces the stored one: the approval's own reply carries what is
+    not kept (``blank``). ``title`` and ``delegate_is_member`` (a member, or an AI connection) are the realm's own words.
+    Only the grantor or the delegate, calling in person, reads the secret fields of the call the action holds; to any
+    other reader, such as a task or an extension, they are blank in ``args`` and ``result`` and left out of ``summary``."""
     from ggg import User
 
-    return {**view(a, *CARD), "title": title_of(a.method), "delegate_is_member": User[a.delegate] is not None,
-            "result": a.result if result is None else result}
+    out = {**view(a, *CARD), "title": title_of(a.method), "delegate_is_member": User[a.delegate] is not None,
+           "result": a.result if result is None else result}
+    if reads(c, a) and c.origin == "user":
+        return out
+    hidden = secrets_of(a.method, delivered=False)
+    return {**out, "args": blank(a.method, out["args"], delivered=False), "result": blank(a.method, out["result"], delivered=False),
+            "summary": [line for line in out["summary"] if line["label"] not in hidden]}
 
 
 # ---- States
@@ -258,16 +274,24 @@ def settled(a):
     return a
 
 
-def blank(name, value):
-    """``value``, the reply of operation ``name``, with its secrets (core.op.redacted's) blanked at any depth: the action
-    keeps the reply for whoever reads it later. A secret the operation ``delivers`` stays: the member approved handing
-    it to the delegate. A name in SECRET is blanked whatever an operation delivers."""
+def secrets_of(name, delivered=True):
+    """The names of the fields of a call to operation ``name`` that its audit event keeps out: those in SECRET, its
+    ``private`` and its ``secret`` ones. The secrets the operation ``delivers`` are not among them when ``delivered``: the
+    member approved handing them to the delegate."""
     from core.op import SECRET, ops
 
     spec = ops().get(name)
     hidden = set(SECRET)
     if spec:
-        hidden |= set(spec["private"]) | (set(spec["secret"]) - set(spec["delivers"]))
+        hidden |= set(spec["private"]) | (set(spec["secret"]) - (set(spec["delivers"]) if delivered else set()))
+    return hidden
+
+
+def blank(name, value, delivered=True):
+    """``value``, the reply of operation ``name``, with its secrets (``secrets_of``) blanked at any depth: the action keeps
+    the reply for whoever reads it later. A secret the operation ``delivers`` stays, unless ``delivered`` is false; a name
+    in SECRET is blanked whatever an operation delivers."""
+    hidden = secrets_of(name, delivered)
 
     def clean(x):
         if isinstance(x, dict):

@@ -326,7 +326,14 @@ The delegate prepares it, and only the member's own approval runs it. The code i
 5. **Reads.** A read in its confirm form is approved, not run: the action is `approved` and stores nothing. The delegate
    collects it once with `action_collect`, before it lapses and while the grant covers it: the realm runs the read as the
    member then and returns the reply. The audit log records `{collected: id}`, never the reply.
-6. **Lazy states.** Nothing sweeps. An action reads `expired` once its day has passed and `void` once its grant was
+6. **Who reads it.** A card holds what the delegate asked for: a joining code, wrapped keys, private data, the key a
+   derivation delivered. `action_get` and `action_list` answer the grantor in person and the delegate that prepared the
+   action. A delegate acting for the member (`on_behalf_of`, `read_for`, a task it made) reads only the actions it
+   prepared, never another delegate's, even under "See my affairs". To any other reader of a card, such as a task or an
+   extension of the member's, the secret fields of the call it holds (`secret=`, `private=`, SECRET) are blank in `args`
+   and `result` and absent from `summary`. A grant's activity (`delegation_activity`) is read the same way: by its
+   grantor and its own delegate, not by another delegate of the member.
+7. **Lazy states.** Nothing sweeps. An action reads `expired` once its day has passed and `void` once its grant was
    revoked, replaced, has ended or no longer covers the operation, whenever it is read, listed, approved or counted
    against the limit of 10.
 

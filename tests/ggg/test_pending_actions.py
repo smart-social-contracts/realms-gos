@@ -363,10 +363,10 @@ def test_an_action_is_read_by_its_grantor_and_its_delegate_alone():
     assert ok("action_list", "alice", status="done")["actions"] == []
     approved(a)
     assert [c["status"] for c in ok("action_list", "alice", status="done")["actions"]] == ["done"]
-    # a delegate reads the member's actions through the grant, too
+    # a delegate reads, through the grant, the actions it prepared and no other delegate's (test_action_readers.py)
     grant("see", delegate="reader")
     assert card(a, "reader") is None
-    assert ok("read_for", "reader", method="action_get", args={"action": a}, grantor="alice")["action"]["id"] == a
+    assert ok("read_for", "reader", method="action_get", args={"action": a}, grantor="alice")["action"] is None
 
 
 # ---- The doors phase 0 closed
