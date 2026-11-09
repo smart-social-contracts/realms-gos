@@ -192,7 +192,8 @@ def method(name, params, returns, query, em):
     stem, op = camel(name.removeprefix("ggg_")), name.removeprefix("ggg_")
     arg = em.ref(params[0], f"{stem}Args").replace('"', "") if params else None
     reply = em.ref(returns[0], f"{stem}Result").replace('"', "")
-    sig, a = (f"a: {arg}", "a") if arg else ("", "None")
+    # A caller may send no argument at all to a method whose argument is optional: Candid reads it as null.
+    sig, a = (f"a: {arg}{' = None' if arg.startswith('Opt[') else ''}", "a") if arg else ("", "None")
     types = f"\"{em.expr(params[0])}\"" if params else "None"
     call = f'"{op}", {types}, {a}, "{em.expr(returns[0])}"'
     if query:
