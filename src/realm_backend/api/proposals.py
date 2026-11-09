@@ -480,7 +480,7 @@ def codex_lines(what):
     return [("Codex to install", quoted(what.get("codex"))), ("Codex version", quoted(what.get("version")))]
 
 
-def proposing_action(user, args):
+def proposing_action(user, args, grant):
     """What a proposal that carries an action is, in the realm's words: whom it asks and what it would run, with what a
     codex install would put in place and the lines of the action's own operation. What the proposer wrote is quoted."""
     action = args.get("action")
@@ -496,7 +496,7 @@ def proposing_action(user, args):
         lines += [{"label": label, "value": value} for label, value in codex_lines(what)]
     nested = ops().get(action.get("op"))
     if nested and nested["summary"] and action["op"] != "proposal_create":  # a proposal of a proposal is not unrolled
-        lines += nested["summary"](user, what)
+        lines += nested["summary"](user, what, grant)
     effect = "Files a proposal in your name. The realm votes on it; if it passes, the action runs"
     return lines + [{"label": "What changes", "value": effect}]
 
@@ -744,7 +744,7 @@ def day_of(seconds):
     return "%d-%02d-%02d" % civil_from_days(seconds // 86400)
 
 
-def contracting(user, args):
+def contracting(user, args, grant):
     """What a contract signed for ``user`` changes: the realm is bound to its parties as soon as it is approved. The
     member reads its parties, amount and term, the delegate's own words quoted. It is refused here, as it is when
     approved, if its mandate does not allow it; a contract needs no mandate, since the member approves each one."""

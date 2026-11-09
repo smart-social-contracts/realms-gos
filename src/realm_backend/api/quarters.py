@@ -378,7 +378,7 @@ def scale_status(c, args):
     return scale()
 
 
-def moving(user, args):
+def moving(user, args, grant):
     """What a move changes for ``user``: they become a guest here and lose their profiles in this quarter."""
     dest = Quarter[str(args.get("quarter"))]
     return ([{"label": "Moves you to", "value": quoted(dest.name)}] if dest and dest.name else []) + [
