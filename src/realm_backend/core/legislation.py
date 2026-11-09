@@ -15,8 +15,9 @@ Loading: after an upgrade (``warm``, from setup.start) or on first use, the acti
 ``ChapterSource`` and loaded through core.legislation_sandbox, the program of the subinterpreter. Failures: a guard
 that raises denies ("legislation error in <chapter>"), a hook that raises never fails its caller; both count per
 chapter and method on the codex row (``failures``), which ``codex_status`` shows, and an entry clears when that
-method next succeeds; a failure on a query path (``compute_realm_join`` from ``join_targets``) is not kept, as a
-query keeps no writes. Nothing reverts by itself. Reserved operations (§10.4) run no chapter, nor does a proposal or
+method next succeeds, and the IT admin team is notified of a method's first failure and again after a day (``_record``);
+a failure on a query path (``compute_realm_join`` from ``join_targets``) is not kept, as a query keeps no writes.
+Nothing reverts by itself. Reserved operations (§10.4) run no chapter, nor does a proposal or
 a federal vote about one. Effects go through the codex caller (origin ``codex``) like a legacy codex's, except that
 a governed operation always becomes a proposal the realm files; a chapter's own effects run no legislation again.
 What an operation keeps secret (core.op's ``secret=``: key material and credentials) never reaches a chapter; the

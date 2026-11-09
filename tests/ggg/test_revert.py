@@ -381,7 +381,13 @@ def test_a_codex_that_forbids_and_guards_everything_is_reverted_by_the_team_unde
     assert call("proposal_create", "alice", title="x")["ok"]  # the first codex runs again
 
 
-def test_no_chapter_runs_for_a_reserved_operation_and_the_checker_refuses_a_forbid_of_one():
+def test_the_guardrails_name_no_reserved_operation():
+    from realms.legislation import RESERVED
+
+    assert not [name for name in RESERVED if name in auth.GUARDRAILS or name in auth.POLICIES]
+
+
+def test_a_reserved_operation_and_a_proposal_about_one_are_reserved_and_the_list_is_the_librarys():
     from core import legislation
     from realms.legislation import RESERVED
 

@@ -188,6 +188,7 @@ def codex_uninstall(c, args):
 
 
 def legacy_with_checksum(digest):
+    """The legacy codex whose ``checksum`` is ``digest``. It is not indexed: a realm has few legacy codices."""
     return next((row for row in Codex.load_some(1, max(Codex.max_id(), 1)) if row.checksum == digest), None)
 
 

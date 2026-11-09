@@ -1227,7 +1227,8 @@ New entities, beside today's `Codex` ([`api/codex.py`](../../src/realm_backend/a
 
 ```
 LayeredCodex { id; layers; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, route, fetched_at, url, size}};
-           previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal }
+           previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal;
+           voting_rule (the realm's rule when it became active, §10.1) }
 ChapterSource { sha256 (key); source text }            the downloaded bytes, stored once
 InstallJob { id; proposal; change_list {url, checksum}; step; staged; status: running | paused | failed | done; error; started_at; finished_at }
 ```
@@ -1375,11 +1376,13 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
     writes.
 - **Making "unhealthy" visible.** `LayeredCodex.failures` holds, per chapter file and method, the failure
   count, the last error and when; `ggg_codex_status` shows it as `failures`, and `healthy` is false while it is
-  not empty. The flag clears when that method next succeeds. There is no automatic revert. Still to add (D5, D8):
-  - **a notification** to the IT admin team (§10) on the first failure, and again after 24 hours if it
-    still fails;
-  - **on the codex page,** the failing chapters and methods, and for IT team members a "revert"
-    button that starts `codex.revert_fast`.
+  not empty. The flag clears when that method next succeeds. There is no automatic revert.
+  - **The IT admin team (§10) is notified** (topic `codex.failing`, to the team's department) on the first
+    failure of a method, and again when it fails once more at least 24 hours after the last notice: the
+    entry's `notified` is the time of that notice. A realm with no team designated notifies no one, and the
+    next failure notifies the team once there is one.
+  - **Still to add (D8), on the codex page:** the failing chapters and methods, and for IT team members a
+    "revert" button that starts `codex.revert_fast`.
 
   No banner for members.
 - **Across domains:** what crosses a domain boundary is plain data, frozen on the way (a list is a tuple, a
@@ -1597,16 +1600,27 @@ proposal's `effective_at` (§5.2).
 ## 10. Revert floor and the IT admin team
 
 1. **Member revert:** `codex.revert` (it exists, `governed=realm_wide`) can restore **any** earlier
-   codex in the history. The proposal's voting rules are the governance settings of **the codex being
-   restored**, so a bad codex can't change the rules for undoing itself.
-2. **IT admin team:** the realm admins define who it is and how many of them must approve. This is
-   **left open on purpose:** no structure (department, positions, list), no size and no m-of-n is
-   hardcoded. [#490](https://github.com/smart-social-contracts/realms-gos/issues/490) proposes the
-   form of the team before any code is written. IT team members can run `codex.revert_fast`, which can
-   only restore the **previous** codex. Each use is recorded on the public record.
+   codex in the history, named by its checksum (`codex_revert { codex }`; none names the codex the active one
+   replaced). It needs no download: every codex's chapters are in `ChapterSource`. Filed as a proposal, it
+   names the codex it restores, found when it is filed, so that what is voted on is what runs; a
+   `proposal_create` that carries a revert naming none is refused. The proposal's voting rules are those of
+   **the codex being restored**: the realm records its rule (threshold, quorum and casting vote) with each
+   codex when it becomes active, and a revert vote follows the rule recorded with the codex it restores, so a
+   bad codex can't change the rules for undoing itself. A revert does not record it again, and a codex that
+   became active before rules were recorded is restored under the rule in force.
+2. **IT admin team:** a **department the realm admins designate** (`it_team_set { department }`), so that the
+   realm hardcodes no structure, no size and no m-of-n: its seats and its policy (m of n, quorum, veto) are
+   whatever the admins set, and the votes, vetoes, audit and power-of-attorney rules that already exist apply.
+   The seat holders of that department hold `codex.revert_fast`. `codex_revert_fast` is governed by the
+   department under its own policy; it can only restore the **previous** codex, named when it is filed like any
+   revert, and is refused while no team is designated. Each use is recorded on the audit log with an Event: who
+   asked, and the codex restored.
 3. **Changing the IT team** is done by the realm admins through the realm's admin operations, never by
-   a chapter. That operation (called `it_team.set` below; #490 proposes its form) is reserved like the
-   others.
+   a chapter. That operation, `it_team_set` (`""` designates none), is governed like the realm's other admin
+   settings: direct during setup, a realm-wide vote after launch. It is reserved like the others, and no
+   call of a codex (an effect of a chapter, or of a legacy codex), nor a proposal that one files, may change the
+   team's department: its policy, its positions, who holds them, an expulsion, its place in the realm or its
+   deletion. A department that is the team cannot be deleted until another is designated.
 4. **Reserved operations:** `codex.revert`, `codex.revert_fast`, `it_team.set` and
    `sync_source_remove` (no chapter can forbid a follower's leaving).
    - No chapter may forbid them, guard them or hook them. The checker refuses it, and the runtime
@@ -1622,7 +1636,10 @@ proposal's `effective_at` (§5.2).
      links, named in [ggg#3](https://github.com/smart-social-contracts/ggg/issues/3) (§13). That
      operation runs on the sync source and is not reserved.
 5. **History:** every codex ever active is kept, with its chapters in `ChapterSource`, so a revert
-   needs no download. A revert does not clear a non-compliant flag: a follower that reverts below a
+   needs no download. A checksum names a layered codex by its id, and a legacy codex by its `checksum` or by
+   the `name@version` the history lists it by; one that is not in the history is not found, and neither
+   the active codex nor a pending one is an earlier codex (a pending codex is activated by `codex_activate`
+   alone). A revert does not clear a non-compliant flag: a follower that reverts below a
    release already in effect is non-compliant again. A revert does not run `on_codex_activate`.
 
 ---

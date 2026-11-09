@@ -118,6 +118,7 @@ def permissions(principal):
     realm = Realm["1"]
     if realm and realm.installer_canister_id and realm.installer_canister_id == principal:
         return {"all"}
+    team = realm.it_team if realm else ""
 
     held = {"self.join"}
     user = User[principal]
@@ -140,8 +141,8 @@ def permissions(principal):
             held |= {p.id for p in pos.department.permissions}
             held |= {op for auth in each(Authority, "target", f"Department:{pos.department.id}")
                      for op in auth.operations or []}
-            if pos.department.id == it_team.department_id():
-                held.add(it_team.PERMISSION)
+            if team and pos.department.id == team:
+                held.add(it_team.PERMISSION)  # the seat holders of the IT admin team (§10.2)
     return held
 
 
