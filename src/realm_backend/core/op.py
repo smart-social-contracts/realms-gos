@@ -56,8 +56,9 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     derived(args, proposal) -> the facts of the call that are not its arguments, computed from the realm's records (GGG's
     ``derived`` facts, such as the totals of a budget), for the rules that read the call's facts. ``proposal`` is the
     proposal whose replay the call is, "" for any other call.
-    secret -> the arguments and reply fields that are key material or credentials (a code, keys, private data, a
-    request's body and reply): the legislation never sees them, at any depth (I-PRV-1), and nor does the audit log.
+    secret -> the arguments and reply fields that are key material, credentials or a member's home cell (a code,
+    keys, private data, a request's body and reply, the cell of zone_set): the legislation never sees them, at any
+    depth (I-PRV-1), and nor does the audit log.
     Personal data the audit keeps out (``private``) still reaches the legislation that decides on it.
     fixes(args, proposal) -> runs when a proposal that carries the call is filed, by the governed call or by
     ``proposal_create``, before the proposal is written: it refuses a call that has nothing to carry and ties the records

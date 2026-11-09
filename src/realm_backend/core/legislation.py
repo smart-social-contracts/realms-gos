@@ -102,10 +102,11 @@ VIEWS = {
 }
 # The field of VIEWS that a chapter reads on some rows only, ``{entity: (field, shown)}``, ``shown(row)`` saying of the
 # row as VIEWS gives it whether the field is for the chapter. On any other row it reads as None, and no ``find`` goes by
-# it. A private document's title is metadata in clear; a dispatch's title is a public document's only when it
-# publishes one (topic "publication", api.crypto.document_publish), and any other notice's is not for legislation.
+# it. A private document's title is metadata in clear; a dispatch's title is a public document's only when the dispatch
+# carries a document (only api.crypto.document_publish sets one; a notice's topic is the sender's word, and any other
+# notice's title is not for legislation).
 CONDITIONAL = {"Document": ("title", lambda row: bool(row["public"])),
-               "Dispatch": ("title", lambda row: row["topic"] == "publication")}
+               "Dispatch": ("title", lambda row: bool(row["document"]))}
 # The entities of which a chapter sees the rows whose field is set and no others, ``{entity: field}``: a zone is the
 # realm's (``defined``) or a member's home cell, which is no row to legislation: it reads as none, in a ``get`` as in a
 # ``page`` or a ``find``.

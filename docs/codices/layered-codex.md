@@ -1346,8 +1346,8 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   grant, a payment account or what one member was told. So a notification shows its recipient, topic, sender and
   time and not its title; a request shows when it was filed, is due and was decided, and not its body, reply or
   decision (free text); a dispatch shows its recipient, topic and status and not its body; a procedure and a loan
-  show no `facts`; a document shows its title only when it is public, and a dispatch only when it publishes a
-  document (topic `publication`); and a chapter sees the zones the realm defined and never a member's home cell, which is as
+  show no `facts`; a document shows its title only when it is public, and a dispatch only when it carries a
+  document (only the publication of a document does); and a chapter sees the zones the realm defined and never a member's home cell, which is as
   private as `Human.h3_index` (a chapter reads a member's district as `User.home_zone`, the id of a zone the realm
   defined). The arguments and results it gets carry no key material or credential (`secret=` on the operation: a
   code, keys, private data, a request's body and reply, the home cell `zone_set` and `zone_clear` take), and neither

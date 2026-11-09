@@ -156,13 +156,15 @@ def test_a_dispatch_is_found_by_its_recipient_and_its_status():
     assert find("Dispatch", "status", "failed") == []
 
 
-def test_a_dispatch_shows_its_title_only_when_it_publishes_a_document():
+def test_a_dispatch_shows_its_title_only_when_it_carries_a_document():
+    """Only the publication of a document sets `document`; a sender may tag any notice "publication"."""
     Dispatch(**DISPATCH)
-    Dispatch(**{**DISPATCH, "id": "D2", "topic": "notice", "title": "Your file has a debt"})
+    Dispatch(**{**DISPATCH, "id": "D2", "topic": "notice", "title": "Your file has a debt", "document": ""})
+    Dispatch(**{**DISPATCH, "id": "D3", "title": "Your file has another debt", "document": ""})  # tagged "publication"
     assert [(d["id"], d["topic"], d["title"]) for d in page("Dispatch")] == [
-        ("D1", "publication", "Ordinance 1"), ("D2", "notice", None)]
-    assert get("Dispatch", "D2")["title"] is None
-    assert [d["title"] for d in find("Dispatch", "to", "External:bulletin")] == ["Ordinance 1", None]
+        ("D1", "publication", "Ordinance 1"), ("D2", "notice", None), ("D3", "publication", None)]
+    assert get("Dispatch", "D2")["title"] is None and get("Dispatch", "D3")["title"] is None
+    assert [d["title"] for d in find("Dispatch", "to", "External:bulletin")] == ["Ordinance 1", None, None]
     refused("Dispatch", "title", "Your file has a debt")
 
 
