@@ -51,16 +51,6 @@ def window():
     return cal.voting_window if cal else 7 * 86400
 
 
-def window_of(action):
-    """Seconds the proposal that carries ``action`` stays open: the realm's, except that a vote to revert to a codex runs
-    under the window recorded with that codex, as it follows its rule (``default_rule``): a codex that lengthens the
-    window cannot stall the revert that undoes it."""
-    from api import codex
-
-    recorded = codex.recorded_rule(action)
-    return recorded["window"] if recorded else window()
-
-
 def check_action(action):
     """An action must name a known operation and no ``on_behalf_of``: it runs once accepted as its proposer (see
     run_action), not as a member picked by whoever filed it."""
@@ -168,16 +158,13 @@ def rule_to_record():
     return {**realm_rule(), "window": window()}
 
 
-def default_rule(department, action=None):
+def default_rule(department, recorded=None):
     """The rule that decides the proposals of ``department`` unless a proposer states a stricter one (ggg I-GOV-3). The
-    realm's own, except that a vote to revert to a codex follows the rule recorded with that codex, so that the codex
-    it undoes cannot have changed it (docs/codices/layered-codex.md §10.1); a department's m of the n seats of its
-    policy, rounded down, with the policy's quorum. A department's threshold is a share of its policy's n, never of the
-    seats that happen to be filled: a vacancy does not make a vote easier."""
+    realm's own, except that a vote to revert to a codex follows the rule ``recorded`` with that codex (api.codex), so that
+    the codex it undoes cannot have changed it (docs/codices/layered-codex.md §10.1); a department's m of the n seats of
+    its policy, rounded down, with the policy's quorum. A department's threshold is a share of its policy's n, never of
+    the seats that happen to be filled: a vacancy does not make a vote easier."""
     if department.is_root:
-        from api import codex
-
-        recorded = codex.recorded_rule(action)
         return {name: recorded[name] for name in RULE} if recorded else realm_rule()
     policy = department.policy or {}
     return {"threshold": int(policy.get("m", 1)) * ONE // int(policy.get("n", 1)),
@@ -192,11 +179,11 @@ def whole(name, value):
     return number
 
 
-def stricter_rule(department, stated, action=None):
-    """The default rule of ``department`` for a proposal carrying ``action``, with what ``stated`` (a proposer's
-    ``threshold``, ``quorum``, ``threshold_of``) makes stricter. A weaker one is refused: legislation's guards may demand
-    a stricter rule and must not be undone."""
-    rule = default_rule(department, action)
+def stricter_rule(department, stated, recorded=None):
+    """The default rule of ``department`` (for a revert, the rule ``recorded`` with the codex it restores), with what
+    ``stated`` (a proposer's ``threshold``, ``quorum``, ``threshold_of``) makes stricter. A weaker one is refused:
+    legislation's guards may demand a stricter rule and must not be undone."""
+    rule = default_rule(department, recorded)
     for name in ("threshold", "quorum"):
         if stated.get(name) is not None:
             value = whole(name, stated[name])
@@ -238,9 +225,12 @@ def new_proposal(title, user, by, department, action=None, description="", effec
                  stated=None, prepared_by=""):
     """File a proposal. ``stated``: the proposer's ``kind``, ``matter`` and stricter rule; a proposal filed without
     it takes the default rule of its scope. ``prepared_by``: the delegate whose pending action the proposer approved."""
+    from api import codex
+
     stated = stated or {}
-    rule = stricter_rule(department, stated, action)
-    seconds = window_of(action)
+    recorded = codex.recorded_rule(action)  # a revert follows the rule and runs under the window of the codex it restores
+    rule = stricter_rule(department, stated, recorded)
+    seconds = recorded["window"] if recorded else window()  # a codex cannot lengthen or shorten it to stall the revert
     pid = next_id(Proposal, "P")
     fix_records(action, pid)  # the last refusal: a refused proposal leaves no trace
     p = Proposal(id=pid, title=title, description=description, proposer=user,

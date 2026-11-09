@@ -1608,20 +1608,28 @@ proposal's `effective_at` (§5.2).
    voting window with each codex when it becomes active, and a revert vote follows the rule and runs under the
    window recorded with the codex it restores, so a bad codex can't change the rules for undoing itself, nor
    lengthen the window to stall it. A revert does not record them again. A codex that became active before
-   they were recorded has none: its revert is decided by the realm's current rule and window.
+   they were recorded gets them when the codex after it is switched in (the rule and window in force until
+   then); one replaced before that has none, and its revert is decided by the realm's current rule and
+   window.
 2. **IT admin team:** a **department the realm admins designate** (`it_team_set { department }`), so that the
    realm hardcodes no structure, no size and no m-of-n: its seats and its policy (m of n, quorum, veto) are
    whatever the admins set, and the votes, vetoes, audit and power-of-attorney rules that already exist apply.
-   The seat holders of that department hold `codex.revert_fast`. `codex_revert_fast` is governed by the
-   department under its own policy; it can only restore the **previous** codex, named when it is filed like any
-   revert, and is refused while no team is designated. Each use is recorded on the audit log with an Event: who
+   The seat holders of that department hold `codex.revert_fast`: only its seats give it, and no profile may list
+   it. `codex_revert_fast` is governed by the department under its own policy, and runs under the voting window
+   recorded with the codex it restores, as a member revert does, so that a codex cannot shorten the window to
+   expire the team's vote. It can only restore the **previous** codex, named when it is filed like any revert, and
+   is refused while no team is designated, whatever files or replays it. Each use is recorded on the audit log with an Event: who
    asked, and the codex restored.
 3. **Changing the IT team** is done by the realm admins through the realm's admin operations, never by
    a chapter. That operation, `it_team_set` (`""` designates none), is governed like the realm's other admin
    settings: direct during setup, a realm-wide vote after launch. It is reserved like the others, and no
-   call of a codex (an effect of a chapter, or of a legacy codex), nor a proposal that one files, may change the
-   team's department: its policy, its positions, who holds them, an expulsion, its place in the realm or its
-   deletion. A department that is the team cannot be deleted until another is designated.
+   call of a codex (an effect of a chapter, or of a legacy codex), nor a proposal that one files, however deep
+   it is nested, may change the team's department (its policy, its positions, who holds them, an invite to
+   them, an expulsion, its place in the realm or its deletion) or the standing of a member who holds a seat in it
+   (their status, their roles, a profile they have, the authority the team was given). A department, a seat or a
+   member is named as the operations find it, by its name or by its internal id. A department that is the team
+   cannot be deleted until another is designated. A realm that was launched before `it_team_set` existed has
+   no founder permission to set the team: the realm votes on it.
 4. **Reserved operations:** `codex.revert`, `codex.revert_fast`, `it_team.set` and
    `sync_source_remove` (no chapter can forbid a follower's leaving).
    - No chapter may forbid them, guard them or hook them. The checker refuses it, and the runtime

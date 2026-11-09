@@ -118,8 +118,8 @@ def permissions(principal):
     realm = Realm["1"]
     if realm and realm.installer_canister_id and realm.installer_canister_id == principal:
         return {"all"}
-    team = realm.it_team if realm else ""
 
+    team = it_team.department_id()
     held = {"self.join"}
     user = User[principal]
     if user:

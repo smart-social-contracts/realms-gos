@@ -11,7 +11,8 @@ import fake_chain
 import world
 from core import auth, op
 from core.ratio import PERCENT
-from ggg import Appointment, Codex, Department, Event, LayeredCodex, Proposal, Realm
+from ggg import Appointment, Authority, Codex, Department, Event, Invite, LayeredCodex, Position, Proposal, Realm, \
+    User, UserProfile
 from kit import call, denied, later, ok, rows
 from test_codex import SOURCE, build, manifest, vote_through
 from test_legislation_runtime import (BROKEN_GUARD, DENY_ALL, TOWN, activate, failures, fresh_realm, layered,  # noqa: F401
@@ -151,6 +152,33 @@ def test_a_window_of_no_deadline_is_recorded_too():
     assert Proposal[revert["proposal"]].deadline == 0  # it ends once its outcome is certain
 
 
+def test_a_fast_revert_runs_under_the_window_recorded_with_the_codex_it_restores():
+    build()
+    ok("governance_update", "ctl", voting_window=2 * DAY)
+    installed("1.0.0")
+    ok("governance_update", "ctl", voting_window=1)  # a codex that shortens the window to expire the team's vote
+    installed("1.1.0")
+    it_team(("bob", "carla"), policy=(2, 2))
+    filed = ok("codex_revert_fast", "bob")
+    assert Proposal[filed["proposal"]].deadline - Proposal[filed["proposal"]].opens_at == 2 * DAY
+
+
+def test_a_codex_that_became_active_before_rules_were_recorded_gets_the_rule_in_force_when_it_is_replaced():
+    build()
+    settings(60 * PERCENT)
+    one, = installed("1.0.0")
+    one.voting_rule = {}  # as the realm found it after the upgrade
+    settings(70 * PERCENT)
+    installed("1.1.0")
+    assert Codex["test@1.0.0"].voting_rule["threshold"] == 70 * PERCENT  # the rule in force until the new codex ran
+    settings(80 * PERCENT)
+    installed("1.2.0")
+    assert Codex["test@1.0.0"].voting_rule["threshold"] == 70 * PERCENT  # a record is never replaced
+    assert Codex["test@1.1.0"].voting_rule["threshold"] == 70 * PERCENT
+    revert = ok("proposal_create", "alice", title="back", action={"op": "codex_revert", "args": {"codex": "test@1.0.0"}})
+    assert rule_of(revert["proposal"])[0] == 70 * PERCENT
+
+
 def test_a_codex_keeps_the_rule_it_was_recorded_with_when_it_is_restored():
     build()
     settings(60 * PERCENT)
@@ -194,6 +222,19 @@ def test_the_admins_designate_the_team_directly_in_setup_and_the_realm_votes_aft
     assert Realm["1"].it_team == "Civil Registry"
     vote_through(ok("it_team_set", "ctl", department="")["proposal"])
     assert Realm["1"].it_team == ""
+
+
+@pytest.mark.parametrize("naming", ["by internal id", "by an integer"])
+def test_designating_the_team_by_its_internal_id_stores_its_name_and_changes_nothing_else(naming):
+    build()
+    team = it_team(("bob",), policy=(2, 2))
+    ok("it_team_set", "ctl", department="")
+    out = ok("it_team_set", "ctl", department=NAMINGS[naming](team))
+    assert (out["department"], Realm["1"].it_team) == ("IT", "IT")
+    assert "codex.revert_fast" in auth.permissions("bob")  # the seat holders hold it
+    assert call("department_delete", "ctl", department="IT")["kind"] == "conflict"  # and the team is not deleted
+    refused = as_codex("department_set_policy", {"department": "IT", "m": 1, "n": 1})
+    assert refused["kind"] == "forbidden" and Department["IT"].policy["m"] == 2
 
 
 def test_the_department_that_is_the_team_cannot_be_deleted_until_another_is_designated():
@@ -250,6 +291,35 @@ def test_a_fast_revert_is_recorded_with_an_event():
     assert (event.op, event.user, event.result["codex"]) == ("codex_revert_fast", "bob", "test@1.0.0")
 
 
+def test_whatever_carries_a_fast_revert_it_is_refused_while_no_team_is_designated():
+    build()
+    one, two = installed("1.0.0", "1.1.0")
+    revert = {"op": "codex_revert_fast", "args": {"codex": one.id}}
+    refused = call("proposal_create", "alice", title="fast", action=revert)  # the realm may carry any action
+    assert refused["kind"] == "conflict" and "no IT admin team" in refused["error"]
+    it_team(("bob",))
+    filed = ok("proposal_create", "alice", title="fast", action=revert)["proposal"]
+    ok("it_team_set", "ctl", department="")  # the team is gone by the time the vote ends
+    for voter in world.PEOPLE:
+        ok("proposal_vote", voter, proposal=filed, choice="yes")
+    assert Proposal[filed].status == "failed" and "no IT admin team" in Proposal[filed].result["error"]
+    assert statuses("1.0.0", "1.1.0") == ["inactive", "active"]
+
+
+def test_only_the_seats_of_the_team_give_the_permission_and_no_profile_may_list_it():
+    build()
+    it_team(("bob",))
+    assert "codex.revert_fast" in auth.permissions("bob")
+    for allowed_to in (["codex.revert_fast"], ["user.view", "codex.revert_fast"]):
+        refused = call("profile_create", "ctl", profile="reverter", allowed_to=allowed_to)  # not even the controller
+        assert refused["kind"] == "invalid_argument" and "no profile lists it" in refused["error"]
+    ok("profile_create", "ctl", profile="reverter", allowed_to=["user.view"])
+    assert call("profile_edit", "ctl", profile="reverter", allowed_to=["codex.revert_fast"])["kind"] == "invalid_argument"
+    assert UserProfile["reverter"].allowed_to == ["user.view"]
+    ok("role_assign", "ctl", user="alice", profile="reverter")
+    assert "codex.revert_fast" not in auth.permissions("alice")
+
+
 def test_the_teams_seat_holders_hold_the_permission_only_while_the_department_is_the_team():
     build()
     it_team(("bob",))
@@ -271,8 +341,31 @@ CHANGES = [
     ("appoint", {"position": "it.bob", "user": "dana"}),
     ("appoint_acting", {"position": "it.bob", "user": "dana"}),
     ("appointment_end", {"appointment": "it.bob:bob"}),
+    ("invite_create", {"position": "it.bob"}),
+    ("invite_create", {"department": "IT"}),
+    ("user_set_status", {"user": "bob", "status": "banned"}),
+    ("user_remove", {"user": "bob"}),
+    ("role_revoke", {"user": "bob", "profile": "member"}),
+    ("profile_edit", {"profile": "member", "allowed_to": []}),
+    ("profile_edit", {"profile": "it.bob", "allowed_to": []}),
+    ("authority_revoke", {"authority": "AUTH-1"}),
     ("it_team_set", {"department": "Health"}),
 ]
+KINDS = {"department": Department, "position": Position, "appointment": Appointment, "user": User, "profile": UserProfile,
+         "authority": Authority}
+# How an operation may name a row: by its key, by its internal id as text, or as an integer. A row is found by its internal
+# id before its key (core.db.find), so each of them names the same one.
+NAMINGS = {"by key": lambda row: row.id, "by internal id": lambda row: str(row._id), "by an integer": lambda row: row._id}
+
+
+def renamed(args, naming):
+    """``args`` with each row it names (a department, a position, a user...) named as ``naming`` says."""
+    rows = {key: KINDS[key][value] for key, value in args.items() if key in KINDS and isinstance(value, str)}
+    return {key: NAMINGS[naming](rows[key]) if rows.get(key) is not None else value for key, value in args.items()}
+
+
+def with_authority_to_the_team():
+    Authority(id="AUTH-1", grantor=Department["Administration"], target="Department:IT", operations=["user.view"])
 
 
 def as_codex(name, args):
@@ -281,21 +374,38 @@ def as_codex(name, args):
                                          declared=(name, "proposal_create", "federal_vote_propose"))))
 
 
-@pytest.mark.parametrize("name,args", CHANGES, ids=[name for name, _ in CHANGES])
-def test_a_codex_cannot_change_the_team_nor_carry_a_change_to_a_vote(name, args):
+@pytest.mark.parametrize("naming", NAMINGS)
+@pytest.mark.parametrize("name,args", CHANGES, ids=[f"{name}-{'-'.join(map(str, args.values()))}" for name, args in CHANGES])
+def test_a_codex_cannot_change_the_team_nor_carry_a_change_to_a_vote_however_it_names_what_it_changes(name, args, naming):
     build()
     it_team(("bob",))
+    with_authority_to_the_team()
+    args = renamed(args, naming)
     refused = as_codex(name, args)
     assert (refused["ok"], refused["kind"]) == (False, "forbidden") and "no codex may" in refused["error"]
     carried = as_codex("proposal_create", {"title": "x", "action": {"op": name, "args": args}})
     assert (carried["ok"], carried["kind"]) == (False, "forbidden") and "no codex may" in carried["error"]
-    assert Proposal.max_id() == 0 and Department["IT"] is not None
+    nested = {"op": "proposal_create", "args": {"title": "inner", "action": {"op": name, "args": args}}}
+    deeper = as_codex("proposal_create", {"title": "x", "action": nested})  # filed on replay, so checked at every depth
+    assert (deeper["ok"], deeper["kind"]) == (False, "forbidden") and "no codex may" in deeper["error"]
+    assert Proposal.max_id() == 0 and Department["IT"] is not None and Invite.max_id() == 0
 
 
-def test_a_codex_changes_any_other_department_as_before():
+@pytest.mark.parametrize("name,args", [
+    ("department_set_policy", {"department": "Health", "m": 1, "n": 1}),
+    ("invite_create", {"department": "Health", "profile": "plain"}),
+    ("user_set_status", {"user": "dana", "status": "suspended"}),
+    ("role_revoke", {"user": "dana", "profile": "member"}),
+    ("profile_edit", {"profile": "civil-registry.clerk", "allowed_to": []}),
+    ("authority_revoke", {"authority": "AUTH-2"})])
+def test_a_codex_still_changes_what_is_not_the_team_or_its_seat_holders(name, args):
     build()
     it_team(("bob",))
-    assert as_codex("department_set_policy", {"department": "Health", "m": 1, "n": 1})["ok"]
+    with_authority_to_the_team()
+    Authority(id="AUTH-2", grantor=Department["Administration"], target="Department:Health", operations=["user.view"])
+    UserProfile(id="plain", allowed_to=[])  # an invite whose profile holds nothing a codex lacks
+    done = as_codex(name, args)
+    assert done["ok"], done
 
 
 CHANGE_THE_TEAM = '''
@@ -327,6 +437,29 @@ def test_a_chapter_that_tries_to_change_the_team_fails_and_changes_nothing(what,
     assert Department["IT"].policy == {"m": 2, "n": 2, "quorum": 0, "veto": []} and Proposal.max_id() == 0
     assert [a.user for a in rows(Appointment) if a.position.id == "it.bob"] == ["bob"]
     assert Realm["1"].it_team == "IT"
+
+
+CHANGE_THE_TEAM_BY_ID = '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def on_t_codex_poke(self, event):
+        self.ggg.department_set_policy(department=__ID__, m=1, n=1)
+        self.ggg.proposal_create(title="by id", department="Administration", action={"op": "department_set_policy",
+            "args": {"department": __ID__, "m": 1, "n": 1}})
+'''
+
+
+@pytest.mark.parametrize("written", ["__ID__", '"__ID__"'], ids=["an integer", "text"])
+def test_a_chapter_that_names_the_team_by_its_internal_id_changes_nothing(written):
+    build()
+    team = it_team(("bob",))
+    world.policy(team, 2, 2)
+    town({(TOWN, "register"): CHANGE_THE_TEAM_BY_ID.replace('"__ID__"', written).replace("__ID__", str(team._id))})
+    ok("t_codex_poke")
+    error = failures()["x/town/register.py"]["on_t_codex_poke"]["error"]
+    assert error == "department_set_policy: department_set_policy changes the IT admin team: no codex may"
+    assert Department["IT"].policy == {"m": 2, "n": 2, "quorum": 0, "veto": []} and Proposal.max_id() == 0
 
 
 # ── The team is told when a codex method fails ──────────────────────────────────────────────────────────────────────

@@ -94,10 +94,12 @@ def compute(name, context, decimals=None):
 def switch_to(row, replaced):
     """Make ``row`` the active codex in place of ``replaced``, which is kept to revert to, and record the realm's voting
     rule and window with it: what will decide a vote to revert to this codex (§10.1)."""
-    row.previous, row.status = replaced.id if replaced else "", "active"
-    row.voting_rule = rule_to_record()
+    record = rule_to_record()
+    row.previous, row.status, row.voting_rule = replaced.id if replaced else "", "active", record
     if replaced:
         replaced.status = "inactive"
+        if not replaced.voting_rule:  # it became active before the realm recorded rules: the rule in force until now
+            replaced.voting_rule = record
 
 
 def switch(waiting):
@@ -242,10 +244,12 @@ def restore(target):
 
 
 def recorded_rule(action):
-    """The rule and window recorded with the codex that ``action`` restores, when it is a ``codex_revert`` and that
-    codex has them: what decides its vote (§10.1). None for any other action, and for a codex that became active before
-    the realm recorded rules: its vote follows the rule and window in force."""
-    if not (isinstance(action, dict) and action.get("op") == "codex_revert" and (action.get("args") or {}).get("codex")):
+    """The rule and window recorded with the codex that ``action`` restores, when it is a revert (``codex_revert``, or
+    ``codex_revert_fast``, which keeps its department's rule but runs under the window) and that codex has them: what
+    decides its vote (§10.1). None for any other action, and for a codex with no record: its vote follows the rule and
+    window in force."""
+    if not (isinstance(action, dict) and action.get("op") in ("codex_revert", "codex_revert_fast")
+            and (action.get("args") or {}).get("codex")):
         return None
     return named(action["args"]["codex"]).voting_rule or None
 
@@ -263,9 +267,18 @@ def filed_revert(args, proposal):
     restoring(args)
 
 
+def fast_target(args):
+    """The codex a fast revert restores: the previous one, and only while a team is designated, whatever files or
+    replays the revert."""
+    it_team_governs(args)
+    target = restoring(args)
+    only_previous(target)
+    return target
+
+
 def filed_fast_revert(args, proposal):
     filed_revert(args, proposal)
-    only_previous(restoring(args))
+    fast_target(args)
 
 
 def it_team_governs(args):
@@ -290,9 +303,7 @@ def codex_revert_fast(c, args):
     """Go back to the codex the active one replaced, on the approval of the IT admin team (``it_team_set``): its
     department's own policy decides, m of n, quorum and veto. Refused when no team is designated. No legislation runs
     for it, and no ``on_codex_activate`` hook. Returns ``codex``."""
-    target = restoring(args)
-    only_previous(target)
-    return restore(target)
+    return restore(fast_target(args))
 
 
 def shown(codex):

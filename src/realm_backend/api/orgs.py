@@ -165,9 +165,7 @@ def it_team_set(c, args):
     start ``codex_revert_fast`` and are told when a codex method fails, and its own policy (m of n, quorum, veto) decides
     a fast revert. Direct during setup, a realm-wide vote after launch. No codex can make this call or change the
     department. Returns ``department``."""
-    team = args["department"]
-    if team:
-        find(Department, team)
+    team = find(Department, args["department"]).id if args["department"] else ""  # its alias, however it was named
     Realm["1"].it_team = team
     return {"department": team}
 

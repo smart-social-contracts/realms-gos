@@ -44,6 +44,8 @@ class Register(above("register")):
             self.ggg.department_set_policy(department="IT", m=1, n=1)
         if event.args["title"] == "designate":
             self.ggg.it_team_set(department="Support")
+        if event.args["title"] == "by id":
+            self.ggg.department_set_policy(department=__ID__, m=1, n=1)  # the team, by the internal id of its row
 '''
 # The codex row as the install's switch leaves it: loaded first, then made the active one with its voting rule recorded.
 SWITCH = '''
@@ -171,6 +173,8 @@ def test_d_the_team_reverts_fast_to_the_previous_codex_only_under_its_own_policy
     assert filed["requires_vote"]
     action = ok(realm, "proposal_get", alice, query=True, proposal=filed["proposal"])["proposal"]["action"]
     assert action == {"op": "codex_revert_fast", "args": {"codex": first}}
+    # Its window is the one recorded with the codex it restores (no deadline), not the 30 days the realm has now.
+    assert ok(realm, "proposal_get", alice, query=True, proposal=filed["proposal"])["proposal"]["deadline"] == 0
     ok(realm, "proposal_vote", alice, proposal=filed["proposal"], choice="yes")
     assert status(realm, alice)["codex"]["id"] == blocked  # one of two approvals
     ok(realm, "proposal_vote", mallory, proposal=filed["proposal"], choice="yes")
@@ -182,7 +186,8 @@ def test_d_the_team_reverts_fast_to_the_previous_codex_only_under_its_own_policy
 
 def test_e_no_codex_changes_the_team_and_the_team_is_told_when_a_codex_method_fails(realm, people):
     alice, bob = people["alice"], people["bob"]
-    switch(realm, (TOWN, "water", BREAKS), (TOWN, "register", CHANGES_THE_TEAM))
+    team = run(realm, "import json\nfrom ggg import Department\nprint(json.dumps({'id': Department['IT']._id}))")["id"]
+    switch(realm, (TOWN, "water", BREAKS), (TOWN, "register", CHANGES_THE_TEAM.replace("__ID__", str(team))))
     assert inbox(realm, alice) == []
     broken = realm.call("proposal_create", {"title": "break the water"}, sender=alice)
     assert broken["error"] == "legislation error in x/town/water.py: ValueError: no water here"
@@ -195,7 +200,8 @@ def test_e_no_codex_changes_the_team_and_the_team_is_told_when_a_codex_method_fa
     assert inbox(realm, alice) == [told, told]  # a day on, it still fails
     assert failures(realm, alice)["x/town/water.py"]["check_proposal_create"]["count"] == 3
 
-    for title, attempted in (("change the team", "department_set_policy"), ("designate", "it_team_set")):
+    for title, attempted in (("change the team", "department_set_policy"), ("designate", "it_team_set"),
+                             ("by id", "department_set_policy")):
         ok(realm, "proposal_create", alice, title=title)
         error = failures(realm, alice)["x/town/register.py"]["on_proposal_create"]["error"]
         assert error.startswith(f"{attempted}: ") and ("no codex may" in error or "reserved operation" in error), error
