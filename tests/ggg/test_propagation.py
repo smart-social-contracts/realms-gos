@@ -418,3 +418,84 @@ def test_a_quarter_drifts_when_its_layered_codex_is_not_its_capitals(monkeypatch
     assert quarters.codex() == {"id": OTHER, "version": OTHER}
     Realm["1"].sync_state = {"codex": {"id": "sha256:" + "c" * 64, "version": "sha256:" + "c" * 64}}
     assert quarters.drifting(quarters.codex()["version"])
+
+
+# ---- A revert on the capital reaches the quarters.
+
+
+def two_installs():
+    """The capital's codex, installed twice: the first, then the second that replaces it. Returns their ids."""
+    first, second = own_layer(), {**own_layer(), "arcadia/tax": own_layer("2.0.0")["arcadia/tax"]}
+    install(change_list(first))
+    install(change_list(second, replaces=expected_id(first), url="https://legislation.example.test/changes/second.json"))
+    return expected_id(first), expected_id(second)
+
+
+def test_a_revert_on_the_capital_tells_each_quarter_and_runs_no_realm_hook(federation):
+    first, second = two_installs()
+    report("north", second)
+    report("south", second)
+    for quarter_peer in federation:
+        quarter_peer.calls.clear()
+    fire_due()
+    activated = len(ok("notification_list", "alice")["notifications"])
+    later(HOUR)
+    ok("codex_revert", "ctl")
+    fire_due()
+    for quarter_peer in federation:
+        assert quarter_peer.sent("federation_message") == [{"topic": "codex.revert", "body": {"codex": first},
+                                                            "codex": first}]
+    assert len(ok("notification_list", "alice")["notifications"]) == activated  # a revert runs no on_codex_activate
+    reverted = fake_chain.now()
+    report("north", first)  # north followed
+    later(propagation.JUDGE_AFTER)
+    fire_timers()  # the capital judges the quarters that did not
+    assert flag("north") == "compliant"
+    assert flag("south") == {"NonCompliant": {"since": reverted, "stale": ["arcadia"]}}  # since the revert, not since first
+
+
+def test_a_quarter_that_reports_a_codex_the_realm_voted_out_is_told_again(federation):
+    first, second = two_installs()
+    ok("codex_revert", "ctl")
+    fire_due()
+    federation[1].calls.clear()
+    report("south", second)  # it was down when the capital told it, and reports what it still runs
+    fire_due()
+    assert federation[1].sent("federation_message") == [{"topic": "codex.revert", "body": {"codex": first}, "codex": first}]
+    federation[1].calls.clear()
+    report("south", first)  # it restored it: nothing more to say
+    report("south", OTHER)  # a codex the realm never ran is not one it voted out
+    fire_due()
+    assert federation[1].sent("federation_message") == []
+
+
+def stored_codices():
+    """Two codices a quarter has run, the second now active: ids of the first and the second."""
+    realm = "from realms.legislation import above\n\nclass Realm(above('realm')):\n    pass\n"
+    first = activate(layered({("arcadia", "realm"): realm}, layers=["arcadia"]))
+    first.status = "inactive"
+    second = activate(layered({("arcadia", "realm"): realm + "# two\n"}, layers=["arcadia"]))
+    second.previous = first.id
+    return first.id, second.id
+
+
+def test_a_quarter_restores_the_codex_its_capital_reverted_to_from_its_own_history_and_reports_it(monkeypatch):
+    quarter(monkeypatch, "north")
+    first, second = stored_codices()
+    capital_peer = peer(CAPITAL, quarter_sync={"ok": True, "directory": [], "codex": {"id": first, "version": first}, "index": 1})
+    out = call("federation_message", CAPITAL, topic="codex.revert", body={"codex": first})
+    assert out["ok"] and out["reverted"] == "restored"
+    assert status()["codex"]["id"] == first and LayeredCodex[second].status == "reverted"
+    fire_due()
+    assert ok("notification_list", "alice")["notifications"] == []  # no on_codex_activate
+    assert [s["codex_id"] for s in capital_peer.sent("quarter_sync")] == [first]  # it told its capital
+    assert call("federation_message", CAPITAL, topic="codex.revert", body={"codex": first})["reverted"] == "active"
+
+
+def test_a_quarter_refuses_a_revert_to_a_codex_it_never_ran_and_from_anyone_but_its_capital(monkeypatch):
+    quarter(monkeypatch, "north", "south")
+    first, second = stored_codices()
+    unknown = call("federation_message", CAPITAL, topic="codex.revert", body={"codex": OTHER})
+    assert (unknown["kind"], status()["codex"]["id"]) == ("not_found", second)
+    assert "only this quarter's capital" in call("federation_message", "south", topic="codex.revert", body={"codex": first})["error"]
+    assert status()["codex"]["id"] == second

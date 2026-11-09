@@ -1615,12 +1615,18 @@ codex checksum, so a receiver can tell which legislation the sender ran.
 - **A quarter ready after T** asks its capital which codex it runs before it switches, and switches only to the
   one it staged. A codex the capital has left (reverted, or replaced by a newer one) is never activated; the
   job fails and says so.
+- **A revert.** When the capital restores an earlier codex (`codex_revert`, `codex_revert_fast`), it tells each
+  active quarter `codex.revert`, and each restores that codex from its own history at once: nothing is downloaded
+  and no `on_codex_activate` runs. The quarter reports what it runs; a quarter that never ran that codex refuses,
+  and the capital's record of the message says so. A quarter that missed the message and next reports a codex the
+  realm voted out is told again, so a quarter that was down catches up at its next report, and a bad codex does not
+  keep running in the quarters once the realm has voted it out.
 - **Compliance.** The capital sets `Quarter.compliance` when a quarter reports the codex it runs (`quarter_sync`,
   `quarter_report`, a leg): compliant when it is the codex in force, or the pending one once its time has come;
-  otherwise non-compliant since that codex took effect, naming the layers that differ. A minute after the
-  capital switches it judges the quarters that reported before and have not said they switched, so that one
-  that was not ready reads non-compliant since T without waiting for its next report. `quarter_directory`
-  shows the flag.
+  otherwise non-compliant since that codex took effect (the switch, or the revert that restored it), naming
+  the layers that differ. A minute after the capital's codex changes it judges the quarters that reported
+  before and have not said they changed, so that one that was not ready reads non-compliant since T without
+  waiting for its next report. `quarter_directory` shows the flag.
 - **What calls carry and what is recorded.** A call to a canister of the federation carries the checksum of the
   codex its sender runs. The receiver keeps it, with the sender's flag, on the `FederationMessage` (a move is
   the `user.arrive` message), on the `FederalVoteLeg`, and the origin quarter on the `Forward`. Legislation
