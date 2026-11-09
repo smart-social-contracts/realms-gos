@@ -10,11 +10,12 @@ import fake_chain
 import pytest
 import world
 from core import layered_codex as store
+from core import legislation
 from fake_chain import peer, rejects
 from fixtures import legislation as arcadia
-from ggg import SourceRecord, SyncSource
+from ggg import LayeredCodex, Release, SourceRecord, SyncSource
 from kit import denied, ok
-from test_installs import WEB, active_id, chapter_text, failing, install, job, run_job, run_until, status
+from test_installs import WEB, active_id, chapter_text, failing, fire_due, install, job, run_job, run_until, status
 from test_installs import change_list as listing
 
 SRC, OTHER = "src", "other"
@@ -313,6 +314,24 @@ def test_a_release_of_the_layer_an_install_brings_cannot_be_published_before_the
     assert job()["status"] == "done" and status()["codex"]["layers"] == ["arcadia", "town"]
     assert "arcadia is a layer this realm relays" in denied("legislation_release_publish", "ctl", **publish)  # and after
     assert ok("legislation_release_publish", "ctl", **{**publish, "source": "town"})["release"] == "town@9.9.9"
+
+
+def test_a_switch_the_record_refuses_changes_nothing_neither_the_stored_codex_nor_the_loaded_one():
+    """A publish that executes while the records are being read passes both guards of the publisher, and the switch
+    finds the layer it brings published by the realm: it is refused before the runtime loads the new codex."""
+    capital(entry("1.0.0"), NORTH)
+    install(release_list())
+    first = active_id()
+    ok("codex_install", "ctl", **north_list(replaces=first))
+    run_until("switch")
+    Release(id="arcadia/north@9.9.9", source="arcadia/north", version="9.9.9")  # the publish, written past the guards
+    fire_due()
+    assert job()["status"] == "failed"
+    assert "arcadia/north is the source id this realm publishes under: it is not a layer from above" in job()["error"]
+    seen = status()
+    assert seen["codex"]["id"] == first and seen["pending"] is None and LayeredCodex.count() == 1
+    assert legislation._state["codex"] == first and legislation._state["box"] is not None  # the runtime still runs it
+    assert [r["source"] for r in ok("legislation_releases", "alice")["releases"]] == ["arcadia", "arcadia/north"]
 
 
 def test_two_sync_sources_that_relay_different_releases_of_a_layer_are_refused():

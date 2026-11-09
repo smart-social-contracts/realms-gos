@@ -100,11 +100,13 @@ def switch_to(row, replaced):
 def switch(waiting):
     """The switch of an install (docs/codices/layered-codex.md §9.2 step 6): the pending ``waiting`` becomes the
     active codex in place of the current one, kept to revert to, with its ``installed_at`` and, the first time, the
-    realm's own source id (its own layer). The runtime loads it first: a codex that does not load raises before
-    anything changes. The ``on_codex_activate`` hooks run in the next message (``hooks``): a hook never fails the
-    switch (§9.3), nor the proposal execution or install step that made it."""
+    realm's own source id (its own layer). A release its install brings is checked first, and then the runtime loads
+    it: a codex that is refused or does not load raises before anything changes. The ``on_codex_activate`` hooks run
+    in the next message (``hooks``): a hook never fails the switch (§9.3), nor the proposal execution or install step
+    that made it."""
     from api import installs  # it imports this module
 
+    installs.check_relayed(waiting)
     legislation.load(waiting)
     installs.keep_relayed(waiting)
     switch_to(waiting, active())

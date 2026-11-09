@@ -398,12 +398,27 @@ def build(job):
     return WAIT if when > chain.now() else "switch"
 
 
+def vouching_of(row):
+    """The record that vouches for the release the install of ``row`` brings, or None: a job begun before the layers
+    were staged brings none."""
+    job = store.live_job()
+    staged = job.staged if job is not None and job.staged.get("codex") == row.id else {}
+    return staged.get("layers", {}).get("vouching")
+
+
+def check_relayed(row):
+    """Before the switch to ``row`` changes anything: refuse the release its install brings if the realm cannot keep it
+    as a layer from above any more (api.links.check_from_above). A publish can come between the install's checks and
+    its switch, and a switch that fails after the runtime has loaded the codex leaves the two apart."""
+    vouching = vouching_of(row)
+    if vouching is not None:
+        links.check_from_above(vouching["release"]["source"], vouching["release"]["version"])
+
+
 def keep_relayed(row):
     """At the switch to ``row``: if its install brought a release, this realm's record lists it, as the record that
     vouches for it lists it (api.links.relay_release)."""
-    job = store.live_job()
-    staged = job.staged if job is not None and job.staged.get("codex") == row.id else {}
-    vouching = staged.get("layers", {}).get("vouching")  # a job begun before the layers were staged brings no release
+    vouching = vouching_of(row)
     if vouching is not None:
         links.relay_release(vouching["release"], vouching["order"])
 
