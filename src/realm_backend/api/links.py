@@ -128,20 +128,26 @@ def sources():
         yield from each(SyncSource, "status", status)
 
 
+def open_followers():
+    """The followers whose links have not ended."""
+    return [f for status in STATUSES[:2] for f in each(Follower, "status", status)]
+
+
 def open_links():
     """The links that have not ended, as ``sync source <id>`` and ``follower <id>``."""
-    return [f"sync source {s.id}" for s in sources() if s.status != "ended"] + [
-        f"follower {f.id}" for status in STATUSES[:2] for f in each(Follower, "status", status)]
+    return [f"sync source {s.id}" for s in sources() if s.status != "ended"] + [f"follower {f.id}" for f in open_followers()]
 
 
 def takes_legislation_from(start, target):
     """Whether realm ``start`` takes legislation from ``target``, directly or through other realms, over links that
     have not ended, as each realm says now. A realm that cannot be read, or a walk past WALK_LIMIT realms, fails the
-    check with Unavailable: never an open link. A generator."""
+    check with Unavailable: never an open link. The followers of this realm take legislation from it, whatever their
+    own realm_info says yet: their vote may not have reached it. A generator."""
     todo, seen = [start], set()
+    followers = {f.id for f in open_followers()} if target == chain.self_id() else set()
     while todo:
         realm = todo.pop()
-        if realm == target:
+        if realm == target or realm in followers:
             return True
         if realm in seen:
             continue
@@ -159,7 +165,7 @@ def sources_of(realm):
         return [s.id for s in sources() if is_realm(s) and s.status != "ended"]
     try:
         info = yield from quarters.ask(realm, "realm_info", {})
-        return [s["source"]["Realm"] for s in info["sync_sources"]
+        return [capital_of(s["source"]["Realm"]) for s in info["sync_sources"]
                 if "Realm" in s["source"] and not isinstance(s["status"], dict)]
     except Exception:  # noqa: BLE001  rejected (stopped, gone, no realm), refused, or an answer that is no realm's
         raise Unavailable(f"{realm} could not be read to check for a cycle")
@@ -195,7 +201,7 @@ def notify(link):
         return
     link = cls[key]  # the link may have changed while the call was out
     link.unsent = False
-    if reply.get("ok") and reply.get("status") == "active" and link.status == "requested":
+    if isinstance(reply, dict) and reply.get("ok") and reply.get("status") == "active" and link.status == "requested":
         link.status = "active"
 
 

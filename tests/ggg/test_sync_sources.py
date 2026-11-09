@@ -144,6 +144,26 @@ def test_a_realm_that_cannot_be_read_fails_the_check_and_an_ended_link_comes_bac
     assert status(SyncSource[SRC]) == ended and SyncSource[SRC].name == "Src"
 
 
+def test_an_answer_that_is_no_realms_fails_the_check_cleanly():
+    for sources in ([{"source": {"Realm": {"id": SRC}}, "name": "x", "status": "active"}], [{"source": 7}], "none"):
+        peer(SRC, realm_info={"ok": True, "sync_sources": sources})
+        assert "could not be read" in denied("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+        assert SyncSource[SRC] is None
+    peer(SRC, realm_info=realm_info(), link_notify=["not", "an", "answer"])  # a notice answered with no reply at all
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert status(SyncSource[SRC]) == "requested" and not SyncSource[SRC].unsent and not SyncSource[SRC].checking
+
+
+def test_a_follower_this_realm_has_accepted_takes_legislation_from_it_before_its_own_vote_shows():
+    peer(FOL, link_notify=UNANSWERED)
+    ok("follower_accept", "ctl", follower=FOL)
+    peer(FOL, realm_info=realm_info())  # its realm_info does not list this realm yet
+    assert "a cycle" in denied("sync_source_add", "ctl", source={"Realm": FOL}, name="Fol")
+    peer(SRC, realm_info=realm_info(FOL))  # nor through another realm
+    assert "a cycle" in denied("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert SyncSource[FOL] is None and SyncSource[SRC] is None
+
+
 def test_a_walk_reads_at_most_a_bounded_number_of_realms():
     for i in range(links.WALK_LIMIT + 1):
         peer(f"r{i}", realm_info=realm_info(f"r{i + 1}"))
