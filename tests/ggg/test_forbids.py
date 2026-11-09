@@ -381,11 +381,11 @@ def test_a_forbid_reads_the_facts_the_operation_derives(agora, requests):
     out, asked = requests.during("budget_propose", "bob", fund="ROADS", period="FY2026")
     assert "forbidden by the legislation: its arguments: refused by x/town/treasury/expense_cap (a budget spends at most 1000)" \
         in out["error"]
-    assert asked[-1] == ("budget_propose", {"period": "FY2026", "expense": 1300, "revenue": 0})
+    assert asked[-1] == ("budget_propose", {"period": "FY2026", "fund": "ROADS", "expense": 1300, "revenue": 0})
     assert {b.status for b in rows(Budget)} == {"draft"}  # nothing was adopted
     draft("ROOT", "salaries", 500)
     assert ok("budget_propose", "bob", fund="ROOT", period="FY2026")["expense"] == 500
-    assert requests.asked[-1] == ("budget_propose", {"period": "FY2026", "expense": 500, "revenue": 0})
+    assert requests.asked[-1] == ("budget_propose", {"period": "FY2026", "fund": "ROOT", "expense": 500, "revenue": 0})
 
 
 def test_a_proposal_that_carries_a_call_the_forbids_refuse_is_refused_at_filing_and_fixes_nothing(agora):
@@ -431,7 +431,7 @@ def test_a_replay_the_forbids_allow_runs_and_a_legacy_realms_replay_is_untouched
     vote(second, "carla")
     assert Proposal[second].status == "executed"
     replay = requests.asked[before:]
-    assert ("budget_propose", {"period": "FY2026", "expense": 200, "revenue": 0}) in replay
+    assert ("budget_propose", {"period": "FY2026", "fund": "ROADS", "expense": 200, "revenue": 0}) in replay
 
 
 # ── Who the call acts for, and the proposal a governed call files ────────────────────────────────────────────────
