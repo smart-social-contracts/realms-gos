@@ -126,6 +126,12 @@ def sources():
         yield from each(SyncSource, "status", status)
 
 
+def open_links():
+    """The links that have not ended, as ``sync source <id>`` and ``follower <id>``."""
+    return [f"sync source {s.id}" for s in sources() if s.status != "ended"] + [
+        f"follower {f.id}" for status in STATUSES[:2] for f in each(Follower, "status", status)]
+
+
 def takes_legislation_from(start, target):
     """Whether realm ``start`` takes legislation from ``target``, directly or through other realms, over links that
     have not ended, as each realm says now. A realm that cannot be read, or a walk past WALK_LIMIT realms, fails the

@@ -454,3 +454,21 @@ def test_a_layer_from_above_is_never_the_source_id_the_realm_publishes_under():
     ok("legislation_release_publish", "ctl", **release("1.1.0"))
     assert [r["version"] for r in ok("legislation_releases", fake_chain.ANONYMOUS)["releases"]] == ["1.0.0", "1.1.0"]
     links.relay_release(relayed("eu", "1.0.0", stored("eu tax")), ["eu", "x/town"])  # another layer is still welcome
+
+
+def test_a_realm_with_a_link_that_has_not_ended_does_not_become_a_quarter():
+    url = "https://example.org/releases.json"
+    peer(SRC, realm_info=realm_info(), link_notify=UNANSWERED)
+    peer(FOL, link_notify=UNANSWERED)
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    ok("sync_source_add", "ctl", source={"Record": {"url": url, "checksum": CHECKSUM}}, name="The EU")
+    ok("follower_accept", "ctl", follower=FOL)
+    refused = denied("quarter_join_federation", "ctl", capital="capital")
+    assert all(open_link in refused for open_link in (f"sync source {SRC}", f"sync source {url}", f"follower {FOL}"))
+    assert not Realm["1"].is_quarter and Quarter["capital"] is None
+    ok("sync_source_remove", "ctl", source={"Realm": SRC})
+    ok("sync_source_remove", "ctl", source={"Record": {"url": url, "checksum": CHECKSUM}})
+    assert denied("quarter_join_federation", "ctl", capital="capital").endswith(f"follower {FOL}")
+    ok("follower_remove", "ctl", follower=FOL)
+    ok("quarter_join_federation", "ctl", capital="capital")  # every link has ended
+    assert Realm["1"].is_quarter and Quarter["capital"] is not None
