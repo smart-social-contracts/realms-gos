@@ -1424,9 +1424,10 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   private as `Human.h3_index` (a chapter reads a member's district as `User.home_zone`, the id of a zone the realm
   defined). The arguments and results it gets carry no key material or credential (`secret=` on the operation: a
   code, keys, private data, a request's body and reply, the home cell `zone_set` and `zone_clear` take), and neither
-  do the replies of its effects or the call a proposal carries and the result of running it, while the personal data
-  the audit log keeps out (`private=`) still reaches the legislation that decides on it (I-PRV-1); and no read is
-  answered while the codex loads.
+  do the replies of its effects or the call a proposal carries and the result of running it, nor any call that an
+  operation carries into a guard or a hook (the steps of a task, what `call_for` forwards, a pending action's card),
+  while the personal data the audit log keeps out (`private=`) still reaches the legislation that decides on it
+  (I-PRV-1); and no read is answered while the codex loads.
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
     hooks still run;

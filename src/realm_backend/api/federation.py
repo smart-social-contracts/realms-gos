@@ -121,7 +121,7 @@ def execute(v):
     return json.loads(out)
 
 
-def proposing(user, args):
+def proposing(user, args, grant):
     """What a federal vote does: its action runs in every quarter, as the realm itself, if it passes."""
     effect = ("The vote opens in every quarter of the federation. If it passes, its action runs in each of them as the "
               "realm itself, not as you")
