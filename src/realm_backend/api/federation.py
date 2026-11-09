@@ -236,7 +236,7 @@ def on_cancel(c, body):
 
 TOPICS = {"user.arrive": quarters.on_arrive, "quarter.secede": quarters.on_secede, "codex": quarters.on_codex,
           propagation.STAGE: propagation.on_stage, propagation.UNSTAGE: propagation.on_unstage,
-          propagation.REVERT: propagation.on_revert,
+          propagation.REVERT: propagation.on_revert, propagation.REQUIRED: propagation.on_required,
           "federal_vote.propose": on_propose, "federal_vote.open": on_open, "federal_vote.result": on_result,
           "federal_vote.cancel": on_cancel}
 
@@ -248,6 +248,8 @@ def federation_message(c, args):
     default to every active quarter."""
     topic, body = args["topic"], args.get("body", {})
     if Quarter[c.by] is None:
+        if topic in propagation.OWN:
+            raise Forbidden(f"{topic} is the realm's own: only its install and revert send it, it is never relayed")
         targets = [find(Quarter, args["to"]).id] if args.get("to") else [
             q.id for q in each(Quarter, "status", "active")]
         replies = {}

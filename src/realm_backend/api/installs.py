@@ -397,20 +397,28 @@ def build(job):
 
 
 def confirm(job):
-    """A quarter that is ready after its switch time asks the capital what it runs now, and goes on to the switch only
-    if that is the codex it staged: one the capital has left, reverted or replaced by a newer, is never activated.
-    A newer codex the capital announced is staged by its own job. A generator."""
+    """A quarter asks the capital which codex it requires now, at the switch time and after it, and goes on to the switch
+    only if that is the codex it staged: one the capital has left, withdrawn, reverted or replaced by a newer, is never
+    activated. A newer codex the capital announced is staged by its own job. A capital that does not answer leaves the
+    quarter on its codex and the job paused, for an admin's ``codex_install_resume`` to ask again. A generator."""
     if not announced_by_my_capital(job):
         raise Fail(LEFT)
-    reply = yield from quarters.ask(quarters.capital(), "quarter_sync", quarters.report())
+    from api import propagation  # it imports this module
+
+    try:
+        required = yield from propagation.capital_requires()
+    except Exception as e:  # noqa: BLE001  rejected, trapped or refused: the codex is not confirmed
+        job = InstallJob[job.id]
+        if job.status == "running":
+            job.status, job.error = "paused", f"the capital did not confirm the codex: {e}"[:500]
+        return None
     job = InstallJob[job.id]
     if job.status != "running":
         return None
-    if not reply.get("ok"):
-        raise Fail(f"the capital did not answer: {reply.get('error')}")
-    running, staged = reply["codex"]["id"], job.staged["announced"]["codex"]
-    if running != staged:
-        raise Fail(f"the capital runs {running or 'no codex'} now, not {staged}: a codex it has left is not switched to")
+    job.error = ""
+    staged = job.staged["announced"]["codex"]
+    if required != staged:
+        raise Fail(f"the capital requires {required or 'no codex'}, not {staged}: a codex it has left is not switched to")
     return "switch"
 
 

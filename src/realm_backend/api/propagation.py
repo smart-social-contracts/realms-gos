@@ -24,11 +24,14 @@ from api import codex as runtime
 from api import installs, links, quarters, tasks
 from core import chain, compliance
 from core import layered_codex as store
-from core.db import Conflict, Fail, each, find, next_id
+from core.db import Conflict, Fail, Forbidden, each, find, next_id
 from core.op import op
 from ggg import FederationMessage, InstallJob, LayeredCodex, Quarter, Task, TaskSchedule
 
-STAGE, UNSTAGE, REVERT = "codex.stage", "codex.unstage", "codex.revert"  # the federation_message topics
+STAGE, UNSTAGE, REVERT, REQUIRED = "codex.stage", "codex.unstage", "codex.revert", "codex.required"
+# The federation_message topics of this module. A local holder of quarter.sync can relay any other topic to the quarters,
+# but never these: only the capital's install and revert send them.
+OWN = (STAGE, UNSTAGE, REVERT, REQUIRED)
 # Seconds the capital gives the quarters that switched at T to say so before it judges the others: they report
 # within moments, and a flag raised in between would be a flag withdrawn at once.
 JUDGE_AFTER = 60
@@ -90,6 +93,23 @@ def tell(cid, topic, body):
 # ---- A quarter: stage what the capital announced, and switch at T.
 
 
+def on_required(c, body):
+    """From a quarter, to its capital: the codex the capital requires of its quarters now, ``codex`` ("" for none): the
+    one in force, or a pending one once its time has come."""
+    if quarters.federated():
+        raise Forbidden("only a capital answers what the realm requires")
+    target = required()
+    return {"codex": target.id if target is not None else ""}
+
+
+def capital_requires():
+    """The codex the capital requires of this quarter now. Raises when it does not answer. A generator."""
+    reply = yield from quarters.ask(quarters.capital(), "federation_message", {"topic": REQUIRED, "body": {}})
+    if not reply.get("ok"):
+        raise Fail(f"the capital refused: {reply.get('error')}")
+    return reply["codex"]
+
+
 def staging(codex_id):
     """The job that stages ``codex_id`` for the capital, if one is running or paused."""
     live = store.live_job()
@@ -115,8 +135,10 @@ def on_stage(c, body):
         if not installs.announced(live):
             raise Conflict("an install is running")
         installs.fail(live, f"the capital announced {codex_id}, which replaces it")
-    job = store.start_job(str(body.get("proposal") or ""), {"url": "", "checksum": checksum})
-    job.staged = {"announced": {"codex": codex_id, "at": at, "capital": c.by}}
+    # The job names no proposal: the capital's id could be the id of one of this realm's own, which would then switch it.
+    job = store.start_job("", {"url": "", "checksum": checksum})
+    job.staged = {"announced": {"codex": codex_id, "at": at, "capital": c.by,
+                                "proposal": str(body.get("proposal") or "")}}
     if at > chain.now():
         schedule(job, at)
     installs.launch(job)
@@ -157,10 +179,10 @@ def schedule(job, at):
 
 @op(None, public=True, returns="job")
 def codex_switch_staged(c, args):
-    """Switch to the codex this quarter staged in the install ``job``, when its time T has come. Anyone may ask: the
-    capital's vote decided it and the time cannot move; the realm's scheduler calls it at T, and asking again is
-    harmless. A job not staged by T stays as it is: it keeps staging, and switches when it is ready. Returns the
-    job's ``status`` and ``step``."""
+    """Switch to the codex this quarter staged in the install ``job``, when its time T has come, once the capital has
+    confirmed it still requires it (api.installs.confirm). Anyone may ask: the capital's vote decided it and the time
+    cannot move; the realm's scheduler calls it at T, and asking again is harmless. A job not staged by T stays as it
+    is: it keeps staging, and switches when it is ready. Returns the job's ``status`` and ``step``."""
     job = find(InstallJob, args["job"])
     announced = job.staged.get("announced")
     if announced is None:
@@ -169,7 +191,8 @@ def codex_switch_staged(c, args):
         raise Conflict(f"{job.id} switches at {announced['at']}")
     if job.status == "running" and job.step == installs.WAIT:
         if installs.announced_by_my_capital(job):
-            installs.switch(job)
+            job.step = "confirm"
+            installs.arm(job.id)
         else:
             installs.fail(job, installs.LEFT)
     return {"job": job.id, "status": job.status, "step": job.step}
