@@ -1440,10 +1440,16 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`
      validates the same Cedar and puts the running policies back, so an install that would not validate fails there.
      A codex that forbids nothing leaves the realm's own policies in force, and a legacy codex or none loads what it
      loads today.
-   - **The realm loads forbids from the sandbox and nothing else.** It reads the text outside its strings and refuses
-     it unless every policy is a forbid written as the generator writes one: no `permit`, and as many `;` and `forbid`
-     words as heads (`core.forbids.only_forbids`; the engine's API does not list the effects of a policy). A smuggled
-     `permit` fails the switch, the realm's start and install step 5.
+   - **The realm loads forbids from the sandbox and nothing else.** It accepts the text only as the grammar the
+     generator writes (`core.forbids.only_forbids` and `targets`), and no more: outside strings only words, spaces,
+     line breaks and Cedar's punctuation, so no comment of either kind (a `//` comment ends at `\r` as at `\n`, and a
+     scan that missed that let a `permit` through), no non-ASCII; inside strings no control character; no `permit`
+     word; each policy a forbid whose scope is exactly what the generator writes for the actions it names, with the
+     principal and the resource unconstrained, so no forbid of one person; and the operation of each action one of the
+     realm's own (`ops()`), never `call` (a forbid of which would refuse every permission decision) and never a
+     reserved one, whatever the sandbox says. A smuggled `permit` fails the switch, the realm's start and install
+     step 5. The engine's API does not yet list the effect and scope of a policy; when it does, the engine will check
+     the same (realms-gos#611, smart-social-contracts/basilisk#64).
    - **No generated forbid may target a reserved operation (§10.4).** The library refuses it when the chapter loads;
      the realm checks the policies it is about to load as well (`core.forbids.targets`), and refuses a policy that
      names an action without facts or no action at all (that would forbid every operation). And no forbid is asked of
@@ -1456,8 +1462,9 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`
    call whose operation a generated forbid names then makes, under the context `origin: "forbids"` (nothing in it but
    the operation and its facts; one `permit` for that origin is loaded with the forbids, so that only a forbid can
    refuse it): one request on the operation's own action, if a forbid names it, with its args in GGG's form
-   (`ggg_api.ggg_args`: renamed arguments, nanoseconds, variants), the principal the call acts for (`on_behalf_of`, as
-   the call states it, so that a rule can refuse a delegate's vote) and the facts the operation derives (`derived=` on
+   (`ggg_api.ggg_args`: renamed arguments, nanoseconds, variants), the principal the call acts for (`on_behalf_of`,
+   when the call names someone other than its signer, so that a rule can refuse a delegate's vote) and the facts the
+   operation derives (`derived=` on
    `@op`), and one request per element for each list a forbid ranges over: the element of the argument, or, where the
    list is not an argument, what `lists=` on `@op` gives (`tax_policy_propose`: the saved policy's entries). A list of
    more than 500 elements is refused with `invalid_argument` where it is given, at draft and at propose, so that no
@@ -1471,8 +1478,9 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`
    before it is filed, as well as under its own operation; `proposal_create` and `federal_vote_propose` ask the
    forbids of the action they carry. A proposal that could only fail is never put to the vote, and the records its
    action would fix (a budget's draft lines) stay as they were. A call a delegate prepares for the member's approval
-   (a pending action) is asked when it is prepared, so a forbidden action is never prepared, and again when the
-   member approves it; both name the member as `on_behalf_of`.
+   (a pending action) is asked when it is prepared, and so is the action a prepared `proposal_create` or
+   `federal_vote_propose` carries, so a forbidden action is never prepared; it is asked again when the member approves
+   it. Both name the member as `on_behalf_of`.
 6. **The replay of an accepted proposal** meets the same forbids, with no permit or guardrail in the way: the vote
    was the permission, but the forbids of the legislation in force when it executes still hold. The facts it
    derives are computed for that proposal (`derived(args, proposal)`: a budget's totals are those of the lines

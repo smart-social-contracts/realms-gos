@@ -107,8 +107,9 @@ The forbids hold wherever the call can start or finish:
 - A governed call that becomes a proposal is asked as `proposal_create` too, and `proposal_create` and
   `federal_vote_propose` ask them of the action they carry, when they file: a proposal that could only fail is never
   put to the vote.
-- A pending action (a delegate's call the member approves) is asked when it is prepared and when the member approves
-  it, with the member as `on_behalf_of` both times.
+- A pending action (a delegate's call the member approves) is asked when it is prepared, with the call a prepared
+  `proposal_create` or `federal_vote_propose` carries, and when the member approves it, with the member as
+  `on_behalf_of` both times.
 - The replay of an accepted proposal has no permission decision of its own (the vote was it), but the forbids of the
   legislation in force still apply, and a replay one refuses ends the proposal `failed`.
 - While a codex does not load, the operations its forbids named are refused, reads included.
