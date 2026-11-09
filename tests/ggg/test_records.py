@@ -98,6 +98,7 @@ def test_a_realm_without_a_layer_of_its_own_has_an_empty_record():
     ([entry(calendar="sha256:short")], "eu/es", "calendar is sha256"),
     ([entry(version="")], "eu/es", "version is 1 to 64 characters"),
     ([entry(commit=7)], "eu/es", "commit is 1 to 64 characters"),
+    ([entry(version="1.0@2")], "eu/es", "hold no '@'"),
     ([entry(published="2026-01-15")], "eu/es", "published is a time in seconds"),
     ([entry(effective_from=-1)], "eu/es", "effective_from is a time in seconds"),
     ([entry(notes=["x"])], "eu/es", "notes are at most"),

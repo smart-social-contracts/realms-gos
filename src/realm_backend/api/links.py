@@ -473,8 +473,7 @@ def legislation_release_publish(c, args):
 def record_source():
     """The source id of the realm's own layer: the one its releases are published under, else the one its first layered
     codex set; None before either."""
-    own = next(iter(each(Release, "relayed", False)), None)
-    return own.source if own is not None else store.own_source()
+    return published_as() or store.own_source()
 
 
 @op(None, read=True, public=True, returns="releases")
@@ -634,6 +633,7 @@ def checked_release(entry, key):
     for field in ("version", "commit"):
         if not isinstance(entry[field], str) or not 0 < len(entry[field]) <= VERSION_MAX:
             raise Fail(f"{key}: {source} {field} is 1 to {VERSION_MAX} characters")
+    no_at(source, entry["version"])
     for field in ("published", "effective_from"):
         if type(entry[field]) is not int or entry[field] < 0:
             raise Fail(f"{key}: {source} {field} is a time in seconds")
