@@ -42,7 +42,7 @@ class Call:
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
        returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None, summary=None,
-       title=None, lists=None):
+       title=None, lists=None, only_reads=False):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -73,6 +73,9 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     lists -> for each list of GGG's facts that is not one of the call's arguments, ``{list: fn(args)}`` giving its
     elements (GGG's form), such as the saved policy's entries that ``tax_policy_propose`` names by id; the forbids that
     range over the list judge each of them.
+    only_reads -> for an update that changes nothing: it calls another canister, which a ``read`` (a query) cannot. It
+    is authorized like any call, but it leaves no audit event and runs no legislation, as a read does: a page that reads
+    through it at every view must not fill the audit log, which keeps only EVENTS_KEPT events.
     """
     def wrap(fn):
         if fn.__name__ in OPS:  # a second registration would replace the first one's secret=, permission, governed= silently
@@ -81,7 +84,7 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,
                             "secret": tuple(secret), "fixes": fixes, "releases": releases, "summary": summary,
-                            "title": title, "lists": lists or {}}
+                            "title": title, "lists": lists or {}, "only_reads": only_reads}
         poa.classify(OPS[fn.__name__], fn.__name__)
         return fn
     return wrap
@@ -142,7 +145,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         from core import legislation
 
         call = Call(user, by, origin, proposal, grant, legacy, prepared.delegate if prepared else "", root)
-        record = None if spec["read"] else (lambda out: acted(name, user, by, origin, args, out, grant, prepared))
+        reading = spec["read"] or spec["only_reads"]
+        record = None if reading else (lambda out: acted(name, user, by, origin, args, out, grant, prepared))
         # A delegate's governed call is always a proposal: where the department decides directly, the member's own
         # vote is what lets it through. The filing is a proposal_create to the legislation.
         if governing is not None and (grant or not direct(governing)):
@@ -155,7 +159,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
                                              lambda: proposals.file_replay(pargs, user, by, grant, call.prepared_by), record)
         else:
             out = yield from legislation.run(name, call, args, governing, lambda: spec["fn"](call, args), record,
-                                             spec["read"])
+                                             reading)
         return json.dumps({"ok": True, **out})
     except auth.Denied as e:
         return json.dumps({"ok": False, "error": str(e), "kind": e.kind, "permission": e.permission, "denied": True})

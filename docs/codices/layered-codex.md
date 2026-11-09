@@ -1588,15 +1588,16 @@ other core extensions of [`core-extensions.json`](../../core-extensions.json)
   plain notice to an `External` body, and a statute's condition that the text be published there
   before it enters into force is not represented.
 
-**How it is built.** An entry (`JournalEntry`) is appended when the realm learns of what it reports, and is
-never changed: today the switch of a layered codex, later the releases the realm's checks find. It holds the instant
-and the realm's local day on the capital's clock at that moment, so a change of the realm's zone moves no past issue.
-An issue is not stored. `journal_issue {day}` returns the entries of a day, numbered from the journal's first day (the
-local day the realm first started with the journal), for every day from that one to today, with or without entries; a
-later day, or one before the first, is not found. No timer makes an issue. A quarter's `journal_issue` returns
-`issued: false` and names its capital; `journal_capital_issue` asks the capital for its issue through the quarter, as
-an update, because a read cannot call another canister. The extension's manifest holds the personal-data rules as an
-allow-list of the fields an entry may keep, which the realm applies when it records the entry.
+**How it is built.** An entry (`JournalEntry`) is appended when the realm learns of what it reports, and is never
+changed: today the switch of a layered codex, later the releases the realm's checks find. It holds the instant and the
+realm's local day on the capital's clock at that moment, so a change of the realm's zone moves no past issue. An issue
+is not stored. `journal_issue {day}` returns the entries of a day, numbered from the journal's first day (the local
+day the realm first started with the journal, moved back if the realm then sets a zone west of UTC), for every day
+from that one to today, with or without entries; a later day, or one before the first, is not found. No timer makes an
+issue. A quarter's `journal_issue` returns `issued: false` and names its capital; `journal_capital_issue` asks the
+capital for its issue through the quarter, as an update, because a read cannot call another canister. The extension's
+manifest holds the personal-data rules as an allow-list of the fields an entry may keep, which the realm applies when
+it records the entry.
 
 No chapter publishes to the journal or waits for a publication: a codex install appears in the realm's
 journal by the extension's own rule, and the statutory waits a chapter needs are expressed through the

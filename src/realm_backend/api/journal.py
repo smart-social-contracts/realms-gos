@@ -11,7 +11,7 @@ from core.op import op
 @op(None, read=True, public=True)
 def journal_issue(c, args):
     """The realm's official journal for ``day`` (``YYYY-MM-DD`` on the capital's clock, default today): the ``issue``
-    with its ``number``, counted from the journal's first day, and the day's ``entries``. Every day from the first
+    with the ``realm``'s name, its ``number``, counted from the journal's first day, and the day's ``entries``. Every day from the first
     to today has an issue, entries or not; a day after today or before the first one is not found. A quarter issues
     nothing: ``issued`` is false, there is no ``issue`` and ``capital`` is the canister whose journal it is
     (``journal_capital_issue`` reads it from there). Returns ``issued``, ``capital`` and ``issue``."""
@@ -20,15 +20,19 @@ def journal_issue(c, args):
     return {"issued": True, "capital": chain.self_id(), "issue": journal.issue(args.get("day"))}
 
 
-@op("realm.data_view")
+@op("realm.data_view", only_reads=True)
 def journal_capital_issue(c, args):
     """On a quarter, the capital's ``issue`` for ``day`` (as ``journal_issue`` takes it), asked of the capital: a read
-    cannot call another canister, so a quarter shows its capital's journal through this update. Returns ``issued``
-    (false: the quarter issues nothing), ``capital`` and ``issue``. A realm that is not a quarter is in Conflict."""
+    cannot call another canister, so a quarter shows its capital's journal through this update, which changes nothing
+    and leaves no audit event. Returns ``issued`` (false: the quarter issues nothing), ``capital`` and ``issue``. A realm
+    that is not a quarter is in Conflict."""
     if journal.publishes():
         raise Conflict("this realm issues its own journal: read it with journal_issue")
     capital = quarters.capital()
-    asked = {"day": args["day"]} if args.get("day") else {}
+    asked = {}
+    if args.get("day"):
+        journal.day_number(args["day"])  # a day the capital would refuse is refused here, without the call
+        asked = {"day": args["day"]}
     reply = json.loads((yield from chain.call_op(capital, "journal_issue", asked)) or "{}")
     if not reply.get("ok"):
         raise Fail(f"the capital's journal: {reply.get('error')}")

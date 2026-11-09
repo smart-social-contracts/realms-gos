@@ -75,8 +75,8 @@ def test_a_a_new_realm_has_a_journal_and_an_issue_for_today_with_no_entries(capi
     out = capital.call("journal_issue", {}, query=True)  # anonymous: the journal is public
     today = date(capital.now())
     assert out["ok"] and out["issued"] is True and out["capital"] == capital.cid
-    assert out["issue"] == {"day": today, "number": 1, "first_day": today, "today": today, "timezone": "UTC",
-                            "entries": []}
+    assert out["issue"] == {"realm": "capital", "day": today, "number": 1, "first_day": today, "today": today,
+                            "timezone": "UTC", "entries": []}
 
 
 def test_b_every_day_from_the_first_has_an_issue_and_a_day_after_today_or_before_the_first_has_none(net, capital):
@@ -134,6 +134,7 @@ def test_f_publishing_moves_no_activates_at_and_no_install(net, capital, site, p
         net.wait(10 * 60)
     seen = status(capital)
     assert (seen["pending"]["status"], seen["pending"]["activates_at"]) == ("pending", effective_at)
+    assert seen["job"]["step"] == "wait" and seen["job"]["status"] == "running"  # still staged, as it was
     assert active_id(capital) == current and len(issue(capital)["entries"]) == entries
     capital.run_at_effective_at(proposal)
     switched = issue(capital)["entries"][-1]
@@ -157,3 +158,12 @@ def test_h_what_reading_an_issue_costs(capital, costs):
     record(capital, BUSY_DAY)
     spent = costs.measure(capital, f"journal: an issue of {BUSY_DAY}+ entries, read", "from core import journal\njournal.issue()")
     assert spent < READ_BUDGET, spent
+
+
+def test_i_a_realm_west_of_utc_started_after_utc_midnight_has_an_issue_for_today(net, people):
+    go_to(net, utc(2021, 11, 3, 1))  # the 2nd in New York, where it is 21:00
+    west = net.realm("west", members=("alice",))
+    west.govern("realm_configure", {"timezone": "America/New_York"})
+    record(west)
+    today = issue(west)
+    assert (today["day"], today["first_day"], today["number"], len(today["entries"])) == ("2021-11-02", "2021-11-02", 1, 1)

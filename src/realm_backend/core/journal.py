@@ -40,7 +40,7 @@ def day_number(text):
     except (AttributeError, TypeError, ValueError):
         number = None
     if number is None or day_text(number) != text:
-        raise Fail(f"day must be a date written YYYY-MM-DD, not {text!r}")
+        raise Fail(f"day must be a date written YYYY-MM-DD, not {repr(text)[:30]}")
     return number
 
 
@@ -50,13 +50,17 @@ def local_day(seconds):
     return day_text(localtime.local_day(seconds * localtime.NS)[0])
 
 
-def begin():
-    """Fix the journal's first day, once: the realm's local day when it first starts with the journal. A realm
-    upgraded to this release begins on the day of the upgrade; it has no earlier entries to put in issues before."""
+def fix_first_day():
+    """Fix the journal's first day: the realm's local day when it first starts with the journal (an upgraded realm
+    begins on the day of its upgrade, with no earlier entries). It runs at every start of the realm and at every change
+    of its zone, and only ever moves the day back. A realm starts on UTC and its founder sets the zone later: for a
+    zone west of UTC, today there is a day earlier than the one the journal began on, and without this today would
+    have no issue and the entries recorded since would sit in no issue."""
     realm = Realm["1"]
-    data = realm.manifest_data
-    if "first_day" not in data.get(STATE, {}):
-        realm.manifest_data = {**data, STATE: {"first_day": local_day(chain.now())}}
+    data, today = realm.manifest_data, local_day(chain.now())
+    first = data.get(STATE, {}).get("first_day")
+    if first is None or day_number(today) < day_number(first):
+        realm.manifest_data = {**data, STATE: {"first_day": today}}
 
 
 def first_day():
@@ -77,8 +81,9 @@ def allowed_fields():
 
 
 def record(kind, **details):
-    """Append an entry of ``kind``, stamped now. Of ``details`` it keeps only the fields the rules allow, so that
-    what they leave out is never stored. A quarter records nothing."""
+    """Append an entry of ``kind``, stamped now, and return it. Of ``details`` it keeps only the fields the personal-data
+    rules allow (``allowed_fields``), so that what they leave out is never stored. A quarter records nothing and returns
+    None."""
     if not publishes():
         return None
     allowed = allowed_fields()
@@ -105,8 +110,9 @@ def codex_installed(codex):
 
 
 def issue(day=None):
-    """The issue of ``day`` (``YYYY-MM-DD``, default today): its ``number``, counted from the journal's first day,
-    and the day's ``entries`` in the order they were recorded. A day after today or before the first day has none."""
+    """The issue of ``day`` (``YYYY-MM-DD``, default today) of the realm named ``realm``: its ``number``, counted
+    from the journal's first day, and the day's ``entries`` in the order they were recorded. A day after today or
+    before the first day is not found."""
     today, first = local_day(chain.now()), first_day()
     day = today if day is None else day
     number = day_number(day) - day_number(first) + 1
@@ -114,5 +120,6 @@ def issue(day=None):
         raise NotFound(f"there is no issue for {day}: today is {today}, on the realm's clock")
     if number < 1:
         raise NotFound(f"there is no issue for {day}: the journal begins on {first}")
-    return {"day": day, "number": number, "first_day": first, "today": today, "timezone": Realm["1"].timezone,
-            "entries": [view(entry, *SHOWN) for entry in each(JournalEntry, "day", day)]}
+    realm = Realm["1"]
+    return {"realm": realm.name, "day": day, "number": number, "first_day": first, "today": today,
+            "timezone": realm.timezone, "entries": [view(entry, *SHOWN) for entry in each(JournalEntry, "day", day)]}
