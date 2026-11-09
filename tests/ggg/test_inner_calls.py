@@ -462,12 +462,12 @@ def test_every_grant_by_groups_reaches_extension_call_for_as_long_as_the_grant_m
     assert poa.group_of("extension_call") is None
     g = Delegation[grant("profile", grantor="alice", days=200)]
     later(100 * DAY)
-    assert poa.covered(g, "extension_call", spec, "extension.call")
+    assert poa.covered(g, "extension_call", spec, "extension.call", {})
     ok("delegation_revoke", "alice", delegation=g.id)
     g = Delegation[grant("*", grantor="alice", days=90)]
     monkeypatch.setitem(poa.EVERYTHING, "longest", 30 * DAY)
     later(31 * DAY)
-    assert not poa.covered(g, "extension_call", spec, "extension.call")
+    assert not poa.covered(g, "extension_call", spec, "extension.call", {})
 
 
 def test_no_group_lists_extension_call_and_the_admin_group_lists_the_tasks_and_the_shell():
@@ -475,4 +475,5 @@ def test_no_group_lists_extension_call_and_the_admin_group_lists_the_tasks_and_t
     groups = {g["id"]: {o["operation"] for o in g["operations"]} for g in ok("delegation_groups", "carla")["groups"]}
     assert "extension_call" not in set().union(*groups.values())
     assert groups["admin"] == {"shell", "task_add_schedule", "task_cancel", "task_create", "task_delete", "task_edit",
-                               "task_list", "task_logs", "task_reschedule", "task_run", "task_schedule"}
+                               "task_list", "task_logs", "task_reschedule", "task_run", "task_schedule",
+                               "events", "realm_monitor"}  # the last two are read with realm.monitor, as task_list is
