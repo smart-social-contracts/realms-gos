@@ -372,7 +372,7 @@ def ggg_tender_notice(a: TenderNoticeArgs) -> Async[TenderReply]: return (yield 
 @query
 def ggg_quarter_directory(a: ListArgs) -> QuarterDirectoryReply: return read("quarter_directory", "ListArgs", a, "QuarterDirectoryReply")
 @query
-def ggg_join_targets() -> JoinTargetsReply: return read("join_targets", None, None, "JoinTargetsReply")
+def ggg_join_targets(a: Opt[JoinTargetsArgs]) -> JoinTargetsReply: return read("join_targets", "opt JoinTargetsArgs", a, "JoinTargetsReply")
 @update
 def ggg_quarter_sync() -> Async[QuarterDirectoryReply]: return (yield from run("quarter_sync", None, None, "QuarterDirectoryReply"))
 @update

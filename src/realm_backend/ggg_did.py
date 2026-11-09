@@ -124,7 +124,7 @@ class Cycle(Record): name: text; every: Duration
 class Calendar(Record): id: text; realm: text; epoch: Duration; fiscal_period: Duration; voting_window: Duration; codex_release_cycle: Opt[Duration]; benefit_cycle: Opt[Duration]; service_payment_cycle: Opt[Duration]; license_review_cycle: Opt[Duration]; custom_cycles: Vec["Cycle"]
 class Registry(Record): id: text; description: text; principal_id: Principal
 class QuarterStatus(Variant, total=False): Setup: null; Active: null; Suspended: null; Splitting: null; Merging: null
-class Quarter(Record): id: text; name: text; index: nat; status: "QuarterStatus"; population: nat; codex_id: Opt[text]; codex_version: Opt[text]; compliance: "Compliance"; last_sync: Opt[Timestamp]; last_activity_at: Opt[Timestamp]
+class Quarter(Record): id: text; name: text; index: nat; status: "QuarterStatus"; population: nat; codex_id: Opt[text]; codex_version: Opt[text]; compliance: "Compliance"; last_sync: Opt[Timestamp]; last_activity_at: Opt[Timestamp]; zones: Opt[Vec[Tuple[text, nat]]]
 class Forward(Record): id: text; subject: "Ref"; origin: text; destination: text; moved_at: Timestamp; signature: blob
 class FederalVoteStatus(Variant, total=False): Open: null; Passed: null; Failed: null; Cancelled: null
 class FederalVote(Record): id: text; title: text; origin_quarter: text; action: "ProposalAction"; rule: "Value"; hash: text; deadline: Timestamp; status: "FederalVoteStatus"; tally: "Value"
@@ -351,9 +351,10 @@ class BidScoreArgs(Record): bid: text; scores: Vec["BidScoreArgsScores"]
 class BidScoreArgsScores(Record): criterion: text; score: nat
 class TenderAwardArgs(Record): tender: text; bid: Opt[text]; justification: Opt[text]
 class TenderNoticeArgs(Record): tender: text; journal: text; ref: Opt[text]; at: Opt[Timestamp]
-class QuarterDirectory(Record): capital: Opt[text]; items: Vec["Quarter"]; next: Opt[text]
+class QuarterDirectory(Record): capital: Opt[text]; items: Vec["Quarter"]; next: Opt[text]; zones: Opt[Vec["ZoneDefineArgs"]]
+class JoinTargetsArgs(Record): home_zone: Opt[text]
 class JoinTargets(Record): default: Opt[text]; targets: Vec[text]; mode: Opt[text]
-class QuarterReportArgs(Record): population: nat; codex_id: Opt[text]; codex_version: Opt[text]; leg: Opt["FederalVoteLeg"]
+class QuarterReportArgs(Record): population: nat; codex_id: Opt[text]; codex_version: Opt[text]; leg: Opt["FederalVoteLeg"]; zones: Opt[Vec[Tuple[text, nat]]]
 class QuarterReport(Record): quarter: text; drifting: bool
 class QuarterRegisterArgs(Record): canister: Principal; name: Opt[text]
 class QuarterConfigureArgs(Record): quarter: Opt[text]; name: Opt[text]; status: Opt["QuarterStatus"]; quarter_join_mode: Opt[text]; federation_codex: Opt[text]; rule: Opt["Value"]; timezone: Opt[text]; welcome_message: Opt[text]
@@ -664,7 +665,7 @@ SCHEMA["Cycle"] = ("record", {"name": "text", "every": "Duration"})
 SCHEMA["Calendar"] = ("record", {"id": "text", "realm": "text", "epoch": "Duration", "fiscal_period": "Duration", "voting_window": "Duration", "codex_release_cycle": "opt Duration", "benefit_cycle": "opt Duration", "service_payment_cycle": "opt Duration", "license_review_cycle": "opt Duration", "custom_cycles": "vec Cycle"})
 SCHEMA["Registry"] = ("record", {"id": "text", "description": "text", "principal_id": "principal"})
 SCHEMA["QuarterStatus"] = ("variant", {"Setup": "null", "Active": "null", "Suspended": "null", "Splitting": "null", "Merging": "null"})
-SCHEMA["Quarter"] = ("record", {"id": "text", "name": "text", "index": "nat", "status": "QuarterStatus", "population": "nat", "codex_id": "opt text", "codex_version": "opt text", "compliance": "Compliance", "last_sync": "opt Timestamp", "last_activity_at": "opt Timestamp"})
+SCHEMA["Quarter"] = ("record", {"id": "text", "name": "text", "index": "nat", "status": "QuarterStatus", "population": "nat", "codex_id": "opt text", "codex_version": "opt text", "compliance": "Compliance", "last_sync": "opt Timestamp", "last_activity_at": "opt Timestamp", "zones": "opt vec (text, nat)"})
 SCHEMA["Forward"] = ("record", {"id": "text", "subject": "Ref", "origin": "text", "destination": "text", "moved_at": "Timestamp", "signature": "blob"})
 SCHEMA["FederalVoteStatus"] = ("variant", {"Open": "null", "Passed": "null", "Failed": "null", "Cancelled": "null"})
 SCHEMA["FederalVote"] = ("record", {"id": "text", "title": "text", "origin_quarter": "text", "action": "ProposalAction", "rule": "Value", "hash": "text", "deadline": "Timestamp", "status": "FederalVoteStatus", "tally": "Value"})
@@ -891,9 +892,10 @@ SCHEMA["BidScoreArgsScores"] = ("record", {"criterion": "text", "score": "nat"})
 SCHEMA["BidScoreArgs"] = ("record", {"bid": "text", "scores": "vec BidScoreArgsScores"})
 SCHEMA["TenderAwardArgs"] = ("record", {"tender": "text", "bid": "opt text", "justification": "opt text"})
 SCHEMA["TenderNoticeArgs"] = ("record", {"tender": "text", "journal": "text", "ref": "opt text", "at": "opt Timestamp"})
-SCHEMA["QuarterDirectory"] = ("record", {"capital": "opt text", "items": "vec Quarter", "next": "opt text"})
+SCHEMA["QuarterDirectory"] = ("record", {"capital": "opt text", "items": "vec Quarter", "next": "opt text", "zones": "opt vec ZoneDefineArgs"})
+SCHEMA["JoinTargetsArgs"] = ("record", {"home_zone": "opt text"})
 SCHEMA["JoinTargets"] = ("record", {"default": "opt text", "targets": "vec text", "mode": "opt text"})
-SCHEMA["QuarterReportArgs"] = ("record", {"population": "nat", "codex_id": "opt text", "codex_version": "opt text", "leg": "opt FederalVoteLeg"})
+SCHEMA["QuarterReportArgs"] = ("record", {"population": "nat", "codex_id": "opt text", "codex_version": "opt text", "leg": "opt FederalVoteLeg", "zones": "opt vec (text, nat)"})
 SCHEMA["QuarterReport"] = ("record", {"quarter": "text", "drifting": "bool"})
 SCHEMA["QuarterRegisterArgs"] = ("record", {"canister": "principal", "name": "opt text"})
 SCHEMA["QuarterConfigureArgs"] = ("record", {"quarter": "opt text", "name": "opt text", "status": "opt QuarterStatus", "quarter_join_mode": "opt text", "federation_codex": "opt text", "rule": "opt Value", "timezone": "opt text", "welcome_message": "opt text"})
@@ -1185,13 +1187,13 @@ METHODS = {
     "bid_submit": ("BidSubmitArgs", "BidReply"), "bid_withdraw": ("BidWithdrawArgs", "BidReply"), "bids_reveal":
     ("BidsRevealArgs", "GovernedReply"), "bid_score": ("BidScoreArgs", "BidReply"), "tender_award":
     ("TenderAwardArgs", "GovernedReply"), "tender_notice": ("TenderNoticeArgs", "TenderReply"), "quarter_directory":
-    ("ListArgs", "QuarterDirectoryReply"), "join_targets": (None, "JoinTargetsReply"), "quarter_sync": (None,
-    "QuarterDirectoryReply"), "quarter_report": ("QuarterReportArgs", "QuarterReportReply"), "quarter_register":
-    ("QuarterRegisterArgs", "GovernedReply"), "quarter_deregister": ("text", "GovernedReply"), "quarter_configure":
-    ("QuarterConfigureArgs", "GovernedReply"), "quarter_secede": (None, "GovernedReply"), "quarter_join_federation":
-    ("JoinFederationArgs", "GovernedReply"), "self_change_quarter": ("ChangeQuarterArgs", "ForwardReply"),
-    "federal_vote_propose": ("FederalVoteProposeArgs", "FederalVoteReply"), "federal_vote_cancel": ("text",
-    "GovernedReply"), "federal_vote_finalize": ("text", "FederalVoteReply"), "federation_message":
+    ("ListArgs", "QuarterDirectoryReply"), "join_targets": ("opt JoinTargetsArgs", "JoinTargetsReply"),
+    "quarter_sync": (None, "QuarterDirectoryReply"), "quarter_report": ("QuarterReportArgs", "QuarterReportReply"),
+    "quarter_register": ("QuarterRegisterArgs", "GovernedReply"), "quarter_deregister": ("text", "GovernedReply"),
+    "quarter_configure": ("QuarterConfigureArgs", "GovernedReply"), "quarter_secede": (None, "GovernedReply"),
+    "quarter_join_federation": ("JoinFederationArgs", "GovernedReply"), "self_change_quarter": ("ChangeQuarterArgs",
+    "ForwardReply"), "federal_vote_propose": ("FederalVoteProposeArgs", "FederalVoteReply"), "federal_vote_cancel":
+    ("text", "GovernedReply"), "federal_vote_finalize": ("text", "FederalVoteReply"), "federation_message":
     ("FederationMessageArgs", "OptValueReply"), "follower_list": ("ListArgs", "FollowerPageReply"),
     "sync_source_add": ("SyncSourceAddArgs", "GovernedReply"), "sync_source_remove": ("SyncSourceRemoveArgs",
     "GovernedReply"), "follower_accept": ("FollowerArgs", "GovernedReply"), "follower_remove": ("FollowerArgs",
