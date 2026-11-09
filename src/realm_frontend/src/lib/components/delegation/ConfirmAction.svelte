@@ -4,7 +4,7 @@
 	import { Card, Heading, P, Spinner } from 'flowbite-svelte';
 	import { principal } from '$lib/stores/auth';
 	import { delegationsAsDelegate, delegationsAsGrantor, loadDelegations } from '$lib/stores/delegation.js';
-	import { grantLabel, loadAction, type ActionCardData } from '$lib/stores/actions';
+	import { grantLabel, loadAction, type ActionCardData, type NamedGrants } from '$lib/stores/actions';
 	import ActionCard from './ActionCard.svelte';
 
 	// The page where a member decides one pending action. It shows the realm's record of the action and nothing
@@ -22,7 +22,10 @@
 		try {
 			const [found] = await Promise.all([loadAction(id), loadDelegations()]);
 			card = found;
-			if (found) name = grantLabel(found, [...get(delegationsAsGrantor), ...get(delegationsAsDelegate)]);
+			if (found) {
+				const grants = [...(get(delegationsAsGrantor) as NamedGrants), ...(get(delegationsAsDelegate) as NamedGrants)];
+				name = grantLabel(found, grants);
+			}
 		} catch (e) {
 			card = null;
 			error = e instanceof Error ? e.message : String(e);

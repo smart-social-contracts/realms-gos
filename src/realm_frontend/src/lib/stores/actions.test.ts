@@ -16,6 +16,7 @@ import {
 	madeBy,
 	nextStep,
 	realmLines,
+	showUnseen,
 	type ActionCardData
 } from './actions';
 
@@ -126,5 +127,15 @@ describe('what a decided action says', () => {
 	it('names a delegate by the label the member gave its grant', () => {
 		expect(grantLabel(card(), [{ id: 'D-2', label: 'other' }, { id: 'D-1', label: 'My Claude' }])).toBe('My Claude');
 		expect(grantLabel(card(), [])).toBe('');
+	});
+});
+
+describe('the delegate\'s own text', () => {
+	it('shows bidirectional and control characters as escapes and keeps line breaks', () => {
+		expect(showUnseen('a\u202Eb\u2066c\u0000d\ne')).toBe('a\\u{202e}b\\u{2066}c\\u{0}d\ne');
+	});
+
+	it('leaves ordinary text, including other scripts, as it is', () => {
+		expect(showUnseen('Hola, ¿qué tal? שלום 你好')).toBe('Hola, ¿qué tal? שלום 你好');
 	});
 });

@@ -38,23 +38,34 @@ describe('an update the agent gave up on while it was still processing', () => {
 });
 
 describe('a call that was filed for a member to approve instead of done', () => {
-  const filed = '{"ok":true,"pending":"AC-3","approve_link":"/delegations/confirm/AC-3","expires_at":9}';
+	const filed = (link: string) => `{"ok":true,"pending":"AC-3","approve_link":"${link}","expires_at":9}`;
+	const confirmLink = '/delegations/confirm/AC-3';
 
-  it('is noted once, whichever page made it', async () => {
-    sentForApproval.set(null);
-    const actor = { run: vi.fn().mockResolvedValue(filed) };
-    await on(actor).run('payment_account_add', { on_behalf_of: 'alice', address: 'a' });
-    expect(get(sentForApproval)).toEqual({ action: 'AC-3', href: '/delegations/confirm/AC-3', grantor: 'alice' });
-  });
+	it('is noted once, whichever page made it', async () => {
+		sentForApproval.set(null);
+		const actor = { run: vi.fn().mockResolvedValue(filed(confirmLink)) };
+		await on(actor).run('payment_account_add', { on_behalf_of: 'alice', address: 'a' });
+		expect(get(sentForApproval)).toEqual({ action: 'AC-3', href: confirmLink, grantor: 'alice' });
+	});
 
-  it('is not noted for a call that was done, or a read', async () => {
-    sentForApproval.set(null);
-    const actor = {
-      run: vi.fn().mockResolvedValue('{"ok":true,"proposal":"P-1"}'),
-      read: vi.fn().mockResolvedValue(filed)
-    };
-    await on(actor).run('proposal_vote', { proposal: 'P-1' });
-    await on(actor).read('action_get', {});
-    expect(get(sentForApproval)).toBeNull();
-  });
+	it('is not noted for a call that was done, or a read', async () => {
+		sentForApproval.set(null);
+		const actor = {
+			run: vi.fn().mockResolvedValue('{"ok":true,"proposal":"P-1"}'),
+			read: vi.fn().mockResolvedValue(filed(confirmLink))
+		};
+		await on(actor).run('proposal_vote', { proposal: 'P-1' });
+		await on(actor).read('action_get', {});
+		expect(get(sentForApproval)).toBeNull();
+	});
+
+	it.each(['javascript:alert(1)', 'https://evil.example/delegations/confirm/AC-3', '//evil.example/delegations/confirm/AC-3'])(
+		'is not noted when its link is not a confirm page of this realm: %s',
+		async (link) => {
+			sentForApproval.set(null);
+			const actor = { run: vi.fn().mockResolvedValue(filed(link)) };
+			await on(actor).run('payment_account_add', { on_behalf_of: 'alice', address: 'a' });
+			expect(get(sentForApproval)).toBeNull();
+		}
+	);
 });

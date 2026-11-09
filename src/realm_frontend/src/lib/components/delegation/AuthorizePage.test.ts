@@ -176,6 +176,21 @@ describe('the Authorize page for a group the member holds nothing in', () => {
 	});
 });
 
+describe('the Authorize page when the realm will not say what the groups are', () => {
+	it('shows the realm\'s error, not ids the member seems to hold nothing in', async () => {
+		realmWith({ groups: ['vote'] });
+		const read = realm.read.getMockImplementation()!;
+		realm.read.mockImplementation(async (name: string) =>
+			name === 'delegable_operations' ? { ok: false, error: 'sign in first' } : read(name)
+		);
+		await open();
+		expect(screen.getByText('Request not available')).toBeTruthy();
+		expect(screen.getByText('sign in first')).toBeTruthy();
+		expect(screen.queryByText(/You hold nothing in this group/)).toBeNull();
+		expect(screen.queryByRole('checkbox')).toBeNull();
+	});
+});
+
 describe('the Authorize page for a request for everything', () => {
 	beforeEach(() => realmWith({ groups: ['*'] }));
 

@@ -2,17 +2,17 @@
 	import { _ } from 'svelte-i18n';
 	import { memberNickname } from '$lib/stores/delegation.js';
 	import { sentForApproval } from '$lib/stores/approvalSent';
+	import { shortPrincipal } from '$lib/utils/principals';
 
 	// Tells a member who acted for another that the act was not done but sent to that member to approve.
 	const sent = $derived($sentForApproval);
-	const shortened = (principal: string) => `${principal.slice(0, 8)}…${principal.slice(-6)}`;
 
 	let nickname = $state('');
 	$effect(() => {
 		nickname = '';
 		if (sent?.grantor) memberNickname(sent.grantor).then((name: string) => (nickname = name));
 	});
-	const member = $derived(nickname || (sent?.grantor ? shortened(sent.grantor) : ''));
+	const member = $derived(nickname || (sent?.grantor ? shortPrincipal(sent.grantor) : ''));
 </script>
 
 {#if sent}

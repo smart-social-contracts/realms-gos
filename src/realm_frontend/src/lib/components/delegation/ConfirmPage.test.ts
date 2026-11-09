@@ -16,7 +16,8 @@ vi.mock('$lib/stores/delegation.js', async () => {
 		resolveDelegationRealm: async () => realm,
 		loadDelegations: async () => {},
 		delegationsAsGrantor: writable([{ id: 'D-1', label: 'My Claude' }]),
-		delegationsAsDelegate: writable([])
+		delegationsAsDelegate: writable([]),
+		memberNickname: async (principal: string) => (principal === 'alice' ? 'Alice' : '')
 	};
 });
 
@@ -117,6 +118,7 @@ describe('the confirm page for a pending action', () => {
 		expect(given.textContent).toContain('address');
 		expect(given.textContent).not.toContain('What changes');
 		expect(screen.getByText('Recorded as your own act, prepared by My Claude.')).toBeTruthy();
+		expect(screen.getByText(/You can decide until /)).toBeTruthy();
 		expect(container.querySelectorAll('input, textarea, select, [contenteditable]')).toHaveLength(0);
 		expect(buttons()).toEqual(['Decline', 'Approve']);
 	});
@@ -192,6 +194,10 @@ describe('the confirm page for an action that is not waiting', () => {
 		await open();
 		expect(screen.getByText(text)).toBeTruthy();
 		expect(buttons()).toEqual([]);
+		// Nothing asks the member to decide any more, so the card no longer says it does.
+		expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('My Claude prepared one action for you');
+		expect(screen.queryByText(/asks you to approve/)).toBeNull();
+		expect(screen.queryByText(/You can decide until/)).toBeNull();
 	});
 });
 
@@ -213,11 +219,45 @@ describe('the confirm page for someone it is not for', () => {
 		expect(buttons()).toEqual([]);
 	});
 
-	it('lets the delegate read the action but not decide it', async () => {
+	it('lets the delegate read the action, in words for the delegate, but not decide it', async () => {
 		principal.set('claude-principal');
-		await open();
+		const { container } = render(Page);
+		await screen.findByRole('heading', { level: 1 });
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('You asked Alice to approve one action'));
 		expect(screen.getByText('Add a payout account')).toBeTruthy();
 		expect(screen.getByText('Only the member it was prepared for can approve or decline it.')).toBeTruthy();
+		expect(screen.getByText(/Alice can decide until /)).toBeTruthy();
+		expect(screen.getByText('The call, as you gave it')).toBeTruthy();
+		expect(screen.getByText('You said (your own words, not the realm\'s)')).toBeTruthy();
+		expect(screen.getByText('Recorded as Alice\'s own act, prepared by you.')).toBeTruthy();
+		// None of what the card says to the member: who asks, that the name is unverified, who prepared it.
+		expect(container.textContent).not.toMatch(/asks you to approve|You can decide until|is not verified|Prepared by the principal/);
 		expect(buttons()).toEqual([]);
+	});
+
+	it('names a member with no nickname by their principal, shortened', async () => {
+		principal.set('claude-principal');
+		realm.read.mockResolvedValue({ ok: true, action: card({ grantor: 'zzzzzzzzzzzzzzzzzzzzzzzz' }) });
+		await open();
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('You asked zzzzzzzz…zzzzzz to approve one action'));
+	});
+
+	it('tells the delegate of a decided action what it did, not what the member may do', async () => {
+		principal.set('claude-principal');
+		realm.read.mockResolvedValue({ ok: true, action: card({ status: 'declined' }) });
+		await open();
+		expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('You prepared one action for Alice');
+		expect(screen.queryByText(/can decide until/)).toBeNull();
+	});
+});
+
+describe('the note of the delegate', () => {
+	it('is text that reads in its own direction, with control and bidirectional characters shown as escapes', async () => {
+		realm.read.mockResolvedValue({ ok: true, action: card({ note: 'Pay \u202Eeulav\u200F now\u0007\nthank you' }) });
+		const { container } = render(Page);
+		await screen.findByRole('heading', { level: 1 });
+		const note = container.querySelector('blockquote')!;
+		expect(note.getAttribute('dir')).toBe('auto');
+		expect(note.textContent).toBe('Pay \\u{202e}eulav\\u{200f} now\\u{7}\nthank you');
 	});
 });

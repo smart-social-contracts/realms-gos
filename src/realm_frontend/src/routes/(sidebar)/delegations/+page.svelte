@@ -39,6 +39,8 @@
 	let error = $state('');
 	let groups = $state<Group[]>([]);
 	let activityOf = $state('');
+	// Revoke all ends every grant at once: the button asks here, on the page, before it does.
+	let askingRevokeAll = $state(false);
 
 	const open = (d: { status: string }) => d.status === 'active' || d.status === 'pending';
 	const activeToMe = $derived($delegationsAsDelegate.filter((d) => d.status === 'active'));
@@ -86,6 +88,7 @@
 	const revoke = (id: string) => change($_('delegation.page.revoked'), () => revokeDelegation(id));
 
 	async function revokeAll() {
+		askingRevokeAll = false;
 		error = '';
 		message = '';
 		const res = await revokeAllDelegations().catch((e: Error) => ({ success: false, error: e.message, data: undefined }));
@@ -143,7 +146,19 @@
 			<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 				<Heading tag="h2" class="text-lg">{$_('delegation.grants.title')}</Heading>
 				{#if $delegationsAsGrantor.some(open)}
-					<Button size="sm" color="light" onclick={revokeAll}>{$_('delegation.grants.revoke_all')}</Button>
+					{#if askingRevokeAll}
+						<div class="flex flex-wrap items-center gap-2" role="group" aria-label={$_('delegation.grants.revoke_all')}>
+							<span class="text-sm text-red-700">{$_('delegation.grants.revoke_all_ask')}</span>
+							<Button size="sm" color="red" onclick={revokeAll}>{$_('delegation.grants.revoke_all_yes')}</Button>
+							<Button size="sm" color="light" onclick={() => (askingRevokeAll = false)}>
+								{$_('delegation.grants.cancel')}
+							</Button>
+						</div>
+					{:else}
+						<Button size="sm" color="light" onclick={() => (askingRevokeAll = true)}>
+							{$_('delegation.grants.revoke_all')}
+						</Button>
+					{/if}
 				{/if}
 			</div>
 			{#if $delegationsAsGrantor.length === 0}

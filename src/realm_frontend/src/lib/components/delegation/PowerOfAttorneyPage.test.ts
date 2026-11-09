@@ -173,6 +173,22 @@ describe('Waiting for you', () => {
 		expect(runs('action_decline')).toEqual([{ action: 'AC-2' }]);
 	});
 
+	it('offers no way to decide inside a stranger\'s frame, whatever the card says', async () => {
+		Object.defineProperty(window, 'top', { value: {}, configurable: true });
+		Object.defineProperty(document, 'referrer', { value: 'https://evil.example/page', configurable: true });
+		try {
+			await open();
+			expect(screen.getByText('Add a payout account')).toBeTruthy();
+			expect(screen.getAllByText(/cannot be made inside another site/)).toHaveLength(2);
+			expect(screen.queryAllByRole('button', { name: 'Approve' })).toHaveLength(0);
+			expect(screen.queryAllByRole('button', { name: 'Decline' })).toHaveLength(0);
+			expect(realm.run).not.toHaveBeenCalled();
+		} finally {
+			Object.defineProperty(window, 'top', { value: window, configurable: true });
+			Object.defineProperty(document, 'referrer', { value: '', configurable: true });
+		}
+	});
+
 	it('says so when nothing waits', async () => {
 		realm.read.mockImplementation(async (name: string) =>
 			name === 'action_list'
@@ -196,11 +212,25 @@ describe('Your grants', () => {
 		expect(within(old).getByText('proposal.vote')).toBeTruthy();
 	});
 
-	it('revokes every grant at once', async () => {
+	it('asks on the page before it revokes every grant, then does', async () => {
+		const confirm = vi.spyOn(window, 'confirm');
 		await open();
 		await fireEvent.click(screen.getByRole('button', { name: 'Revoke all' }));
+		expect(screen.getByText('Revoke all your grants? Every delegate stops acting for you at once.')).toBeTruthy();
+		expect(runs('delegation_revoke_all')).toEqual([]);
+		await fireEvent.click(screen.getByRole('button', { name: 'Yes, revoke all' }));
 		expect(await screen.findByText('Revoked 2 grants.')).toBeTruthy();
 		expect(runs('delegation_revoke_all')).toEqual([{ from: 1, count: 500 }]);
+		expect(confirm).not.toHaveBeenCalled();
+	});
+
+	it('revokes nothing when the member cancels the question', async () => {
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Revoke all' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(screen.getByRole('button', { name: 'Revoke all' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Yes, revoke all' })).toBeNull();
+		expect(runs('delegation_revoke_all')).toEqual([]);
 	});
 });
 

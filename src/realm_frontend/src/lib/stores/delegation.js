@@ -200,9 +200,11 @@ export async function loadDelegationRequest(requestId) {
 		realm.read('delegable_operations')
 	]);
 	if (!list.ok) return legacy(list);
+	// Without the realm's groups the member would be shown raw ids, each marked as one they hold nothing in.
+	if (!ops.ok) return legacy(ops);
 	const request = list.requests.find((r) => r.id === requestId);
 	if (!request) return { success: false, error: 'This request is closed or was not made to you' };
-	const choices = choicesFor(request.scope, ops.ok ? ops.groups || [] : [], (permission) => holds(me, permission));
+	const choices = choicesFor(request.scope, ops.groups || [], (permission) => holds(me, permission));
 	return { success: true, data: { ...request, choices } };
 }
 

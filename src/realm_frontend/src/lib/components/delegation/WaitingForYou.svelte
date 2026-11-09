@@ -5,7 +5,7 @@
 	import { styles, cn } from '$lib/theme/utilities';
 	import { principal } from '$lib/stores/auth';
 	import { delegationsAsGrantor, requestsToMe } from '$lib/stores/delegation.js';
-	import { grantLabel, loadWaiting, type ActionCardData } from '$lib/stores/actions';
+	import { grantLabel, loadWaiting, type ActionCardData, type NamedGrants } from '$lib/stores/actions';
 	import { fmtTime } from '$lib/utils/dates';
 	import ActionCard from './ActionCard.svelte';
 
@@ -35,7 +35,7 @@
 			<P class="text-gray-500 text-sm">{$_('delegation.waiting.nothing')}</P>
 		{/if}
 		{#each waiting as card (card.id)}
-			<ActionCard {card} name={grantLabel(card, $delegationsAsGrantor)} viewer={$principal} />
+			<ActionCard {card} name={grantLabel(card, $delegationsAsGrantor as NamedGrants)} viewer={$principal} />
 		{/each}
 		{#each $requestsToMe as request (request.id)}
 			<div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-3">

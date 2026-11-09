@@ -69,8 +69,18 @@ export async function declineAction(card: ActionCardData): Promise<ActionCardDat
 	return (await must(run('action_decline', { action: card.id }))).action;
 }
 
+/**
+ * Text the delegate wrote, with its control and bidirectional characters shown as escapes (`\u{202e}`): left as they
+ * are, they could reorder or hide what the member reads. Line breaks stay.
+ */
+export const showUnseen = (text: string) =>
+	text.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, (ch) => (ch === '\n' ? ch : `\\u{${ch.codePointAt(0)!.toString(16)}}`));
+
+/** What a grant is called by whoever gave it; the delegation stores (an untyped module) hold these and more. */
+export type NamedGrants = { id: string; label: string }[];
+
 /** The label the member gave the grant an action was prepared under: the delegate's name as the member knows it. */
-export function grantLabel(card: ActionCardData, grants: { id: string; label: string }[]): string {
+export function grantLabel(card: ActionCardData, grants: NamedGrants): string {
 	return grants.find((g) => g.id === card.grant)?.label ?? '';
 }
 
