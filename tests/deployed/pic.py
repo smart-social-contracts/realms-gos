@@ -25,6 +25,7 @@ UPGRADE_ATTEMPTS = 10
 CONTROLLER = "kber3-kmjak-kngoi-c3iyv-ix4le-p27yv-3fzmi-vnnab-xtjtf-ndfta-wqe"
 _HASH = Types.Record({"hash": Types.Vec(Types.Nat8)})
 _UPLOAD = Types.Record({"canister_id": Types.Principal, "chunk": Types.Vec(Types.Nat8)})
+_CANISTER = Types.Record({"canister_id": Types.Principal})
 _UPGRADE_FLAGS = Types.Record({
     "skip_pre_upgrade": Types.Opt(Types.Bool),
     "wasm_memory_persistence": Types.Opt(Types.Variant({"keep": Types.Null, "replace": Types.Null})),
@@ -117,6 +118,17 @@ class Canister:
                     raise
                 for _ in range(10):
                     self.pic.tick()
+
+    def stop(self):
+        """Stop the canister, as its controller: it rejects the calls it is sent until ``start``."""
+        self._lifecycle("stop_canister")
+
+    def start(self):
+        self._lifecycle("start_canister")
+
+    def _lifecycle(self, method):
+        self.pic.set_sender(Principal.from_str(CONTROLLER))
+        _management(self.pic, self.id, method, _CANISTER, {"canister_id": self.id.bytes})
 
     def wait(self, seconds):
         """Let ``seconds`` pass on the replica's clock and run what falls due, timers and the calls they make."""

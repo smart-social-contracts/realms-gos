@@ -47,7 +47,7 @@ class ProposalResult(Variant, total=False): Reply: blob; Error: text
 class ProposalLinkKind(Variant, total=False): Replaces: null; RelatesTo: null
 class ProposalLink(Record): kind: "ProposalLinkKind"; proposal: text
 class ThresholdBasis(Variant, total=False): Cast: null; Eligible: null
-class Tally(Record): yes: nat; no: nat; abstain: nat; eligible: Opt[nat]
+class Tally(Record): yes: nat; no: nat; abstain: nat; eligible: Opt[nat]; seats: Opt[nat]
 class Proposal(Record): id: text; title: text; description: text; proposer: Principal; on_behalf_of: Opt[Principal]; prepared_by: Opt[Principal]; department: Opt[text]; kind: Opt[text]; matter: Opt[text]; action: "ProposalAction"; status: "ProposalStatus"; opens_at: Opt[Timestamp]; deadline: Opt[Timestamp]; effective_at: Opt[Timestamp]; threshold: nat; quorum: nat; threshold_of: "ThresholdBasis"; casting_vote: Opt[Principal]; tally: "Tally"; result: Opt["ProposalResult"]; links: Vec["ProposalLink"]
 class VoteChoice(Variant, total=False): Yes: null; No: null; Abstain: null
 class Vote(Record): id: text; proposal: text; voter: Principal; cast_by: Opt[Principal]; choice: "VoteChoice"; cast_at: Timestamp
@@ -119,12 +119,12 @@ class Tender(Record): id: text; title: text; description: text; requester: text;
 class Bid(Record): id: text; tender: text; vendor: text; submitted_at: Timestamp; sealed: bool; payload_ref: text; payload_hash: text; price: Opt[nat]; score: Opt[nat]
 class BidScore(Record): id: text; bid: text; evaluator: Principal; criterion: text; score: nat; scored_at: Timestamp
 class RealmStatus(Variant, total=False): Setup: null; Alpha: null; Beta: null; Production: null; Deprecation: null; Terminated: null
-class Realm(Record): id: text; name: text; manifesto: text; welcome_message: text; status: "RealmStatus"; calendar: Opt[text]; treasury: Opt[text]; accounting_currency: Opt[text]; accounting_currency_decimals: Opt[nat8]; is_quarter: bool; is_capital: bool; federation_realm_id: Opt[text]; federation_codex: Opt[text]; quarter_join_mode: Opt[text]; trusted_principals: Vec[Principal]; require_marketplace_approval: bool; trusted_approvers: Vec[text]; voting_threshold: nat; voting_quorum: nat; casting_vote: Opt[Principal]; open_registration: bool; logo_url: Opt[text]; background_image_url: Opt[text]; installed_version: text; network: text; timezone: text; languages: Vec[text]; member_count: nat
+class Realm(Record): id: text; name: text; manifesto: text; welcome_message: text; status: "RealmStatus"; calendar: Opt[text]; treasury: Opt[text]; accounting_currency: Opt[text]; accounting_currency_decimals: Opt[nat8]; is_quarter: bool; is_capital: bool; federation_realm_id: Opt[text]; federation_codex: Opt[text]; quarter_join_mode: Opt[text]; sync_sources: Vec["SyncSource"]; trusted_principals: Vec[Principal]; require_marketplace_approval: bool; trusted_approvers: Vec[text]; voting_threshold: nat; voting_quorum: nat; casting_vote: Opt[Principal]; open_registration: bool; logo_url: Opt[text]; background_image_url: Opt[text]; installed_version: text; network: text; timezone: text; languages: Vec[text]; member_count: nat
 class Cycle(Record): name: text; every: Duration
 class Calendar(Record): id: text; realm: text; epoch: Duration; fiscal_period: Duration; voting_window: Duration; codex_release_cycle: Opt[Duration]; benefit_cycle: Opt[Duration]; service_payment_cycle: Opt[Duration]; license_review_cycle: Opt[Duration]; custom_cycles: Vec["Cycle"]
 class Registry(Record): id: text; description: text; principal_id: Principal
 class QuarterStatus(Variant, total=False): Setup: null; Active: null; Suspended: null; Splitting: null; Merging: null
-class Quarter(Record): id: text; name: text; index: nat; status: "QuarterStatus"; population: nat; codex_id: Opt[text]; codex_version: Opt[text]; last_sync: Opt[Timestamp]; last_activity_at: Opt[Timestamp]
+class Quarter(Record): id: text; name: text; index: nat; status: "QuarterStatus"; population: nat; codex_id: Opt[text]; codex_version: Opt[text]; compliance: "Compliance"; last_sync: Opt[Timestamp]; last_activity_at: Opt[Timestamp]
 class Forward(Record): id: text; subject: "Ref"; origin: text; destination: text; moved_at: Timestamp; signature: blob
 class FederalVoteStatus(Variant, total=False): Open: null; Passed: null; Failed: null; Cancelled: null
 class FederalVote(Record): id: text; title: text; origin_quarter: text; action: "ProposalAction"; rule: "Value"; hash: text; deadline: Timestamp; status: "FederalVoteStatus"; tally: "Value"
@@ -132,6 +132,14 @@ class FederalVoteLegStatus(Variant, total=False): Open: null; Reported: null
 class Outcome(Variant, total=False): Passed: null; Failed: null
 class FederalVoteLeg(Record): id: text; vote: text; quarter: text; proposal_id: Opt[text]; outcome: Opt["Outcome"]; yes: nat; no: nat; abstain: nat; eligible: nat; status: "FederalVoteLegStatus"; hash: Opt[text]
 class FederationMessage(Record): id: text; topic: text; source: text; body: "Value"; response: Opt["Value"]
+class LinkStatus(Variant, total=False): Requested: null; Active: null; Ended: "LinkStatusEnded"
+class LinkStatusEnded(Record): by: Principal; at: Timestamp
+class SyncSourceRef(Variant, total=False): Realm: Principal; Record: "ProposalActionCode"
+class SyncSource(Record): source: "SyncSourceRef"; name: text; status: "LinkStatus"
+class Compliance(Variant, total=False): Compliant: null; NonCompliant: "ComplianceNonCompliant"; Unknown: null
+class ComplianceNonCompliant(Record): since: Timestamp; stale: Vec[text]
+class ReportedLayer(Record): version: text; checksum: text
+class Follower(Record): id: text; capital: Principal; status: "LinkStatus"; layers: Vec["ReportedLayer"]; compliance: "Compliance"; population: nat; reported_at: Opt[Timestamp]
 class CodexStatus(Variant, total=False): Pending: null; Active: null; Inactive: null; Reverted: null
 class Codex(Record): id: text; version: text; checksum: text; status: "CodexStatus"; manifest: "Value"; capabilities: Vec[text]; source: text; installed_at: Timestamp; previous: Opt[text]
 class Notification(Record): id: text; recipient: "Ref"; topic: text; title: text; body: text; href: Opt[text]; sender: Opt[text]; visibility: text; read_by: Vec[Principal]; at: Timestamp
@@ -258,7 +266,7 @@ class FundCreateArgs(Record): fund: text; name: Opt[text]; kind: Opt[text]; depa
 class PeriodOpenArgs(Record): period: text; name: Opt[text]; starts_at: Timestamp; ends_at: Timestamp
 class BudgetDraftArgs(Record): fund: text; period: text; category: text; kind: "BudgetKind"; planned: nat
 class BudgetAmendArgs(Record): budget: text; planned: nat
-class BudgetProposeArgs(Record): period: text; years: Opt[nat]
+class BudgetProposeArgs(Record): period: text; years: Opt[nat]; fund: Opt[text]
 class AllocationRuleDraftArgs(Record): source_fund: text; rules: Vec["Allocation"]
 class PayrollRunArgs(Record): department: text; period: text; symbol: Opt[text]
 class ReportIssueArgs(Record): period: text; kind: Opt[text]; adjustments: Opt["Value"]
@@ -353,6 +361,13 @@ class JoinFederationArgs(Record): capital: Principal; name: Opt[text]
 class ChangeQuarterArgs(Record): quarter: text
 class FederalVoteProposeArgs(Record): title: text; action: "ProposalAction"
 class FederationMessageArgs(Record): topic: text; body: "Value"; to: Opt[text]
+class SyncSourceAddArgs(Record): source: "SyncSourceRef"; name: text
+class SyncSourceRemoveArgs(Record): source: "SyncSourceRef"
+class FollowerArgs(Record): follower: Principal
+class FollowerReportArgs(Record): layers: Vec["ReportedLayer"]; compliance: "Compliance"; population: nat
+class FollowerPage(Record): items: Vec["Follower"]; next: Opt[text]
+class LinkSide(Variant, total=False): SyncSource: null; Follower: null
+class LinkNotifyArgs(Record): side: "LinkSide"; status: "LinkStatus"
 class SigningPolicy(Record): agents: Vec[text]; delegable: Vec[text]; supervision: "SigningPolicySupervision"
 class SigningPolicySupervision(Variant, total=False): Required: null; Optional: null
 class CodexView(Record): checksum: Opt[text]; pending: Opt[text]; healthy: bool; signing: "SigningPolicy"; history: Vec[text]; next: Opt[text]
@@ -360,9 +375,12 @@ class NotificationListArgs(Record): recipient: Opt["Ref"]; unread: Opt[bool]; cu
 class NotificationPage(Record): items: Vec["Notification"]; next: Opt[text]
 class EventArchive(Record): canister: Principal; first: text; last: text
 class EventPage(Record): items: Vec["Event"]; next: Opt[text]; archives: Vec["EventArchive"]
-class CodexSource(Variant, total=False): Package: "CodexSourcePackage"; Registry: "CodexSourceRegistry"
+class CodexSource(Variant, total=False): Package: "CodexSourcePackage"; Registry: "CodexSourceRegistry"; Release: "CodexSourceRelease"
 class CodexSourcePackage(Record): manifest: "Value"; source: text
 class CodexSourceRegistry(Record): codex: text; version: text
+class CodexSourceRelease(Record): source: text; version: text
+class ChapterRef(Record): domain: text; checksum: text
+class Release(Record): source: text; version: text; published: Timestamp; effective_from: Timestamp; commit: text; chapters: Vec["ChapterRef"]; calendar: Opt[text]; notes: "Value"
 class NotificationReadArgs(Record): notification: Opt[text]; recipient: Opt["Ref"]; cursor: Opt[text]; limit: Opt[nat32]; on_behalf_of: Opt[Principal]
 class NotificationsRead(Record): read: nat; next: Opt[text]
 class Translation(Record): language: text; title: text; body: Opt[text]
@@ -378,6 +396,9 @@ class DispatchListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; to: Opt[te
 class DispatchListArgsStatus(Variant, total=False): Queued: null; Confirmed: null; Failed: null
 class DispatchPage(Record): items: Vec["Dispatch"]; next: Opt[text]
 class CodexActivateArgs(Record): codex: text; at: Opt[Timestamp]
+class CodexRevertArgs(Record): codex: Opt[text]
+class LegislationReleasePublishArgs(Record): source: text; version: text; effective_from: Timestamp; commit: text; chapters: Vec["ChapterRef"]; calendar: Opt[text]; notes: "Value"
+class ReleasePage(Record): items: Vec["Release"]; next: Opt[text]
 class TaskScheduleArgs(Record): op: text; args: "Value"; at: Timestamp; reason: Opt[text]
 class TaskRescheduleArgs(Record): task: text; at: Timestamp
 class TaskListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; op: Opt[text]; status: Opt["TaskStatus"]
@@ -498,7 +519,12 @@ class QuarterReportReply(Variant, total=False): Ok: "QuarterReport"; Err: "GggEr
 class ForwardReply(Variant, total=False): Ok: "Forward"; Err: "GggError"
 class FederalVoteReply(Variant, total=False): Ok: "FederalVote"; Err: "GggError"
 class OptValueReply(Variant, total=False): Ok: Opt["Value"]; Err: "GggError"
+class FollowerPageReply(Variant, total=False): Ok: "FollowerPage"; Err: "GggError"
+class FollowerReply(Variant, total=False): Ok: "Follower"; Err: "GggError"
+class LinkStatusReply(Variant, total=False): Ok: "LinkStatus"; Err: "GggError"
 class CodexViewReply(Variant, total=False): Ok: "CodexView"; Err: "GggError"
+class ReleasePageReply(Variant, total=False): Ok: "ReleasePage"; Err: "GggError"
+class OptblobReply(Variant, total=False): Ok: Opt[blob]; Err: "GggError"
 class NotificationPageReply(Variant, total=False): Ok: "NotificationPage"; Err: "GggError"
 class ExternalPageReply(Variant, total=False): Ok: "ExternalPage"; Err: "GggError"
 class DispatchPageReply(Variant, total=False): Ok: "DispatchPage"; Err: "GggError"
@@ -561,7 +587,7 @@ SCHEMA["ProposalResult"] = ("variant", {"Reply": "blob", "Error": "text"})
 SCHEMA["ProposalLinkKind"] = ("variant", {"Replaces": "null", "RelatesTo": "null"})
 SCHEMA["ProposalLink"] = ("record", {"kind": "ProposalLinkKind", "proposal": "text"})
 SCHEMA["ThresholdBasis"] = ("variant", {"Cast": "null", "Eligible": "null"})
-SCHEMA["Tally"] = ("record", {"yes": "nat", "no": "nat", "abstain": "nat", "eligible": "opt nat"})
+SCHEMA["Tally"] = ("record", {"yes": "nat", "no": "nat", "abstain": "nat", "eligible": "opt nat", "seats": "opt nat"})
 SCHEMA["Proposal"] = ("record", {"id": "text", "title": "text", "description": "text", "proposer": "principal", "on_behalf_of": "opt principal", "prepared_by": "opt principal", "department": "opt text", "kind": "opt text", "matter": "opt text", "action": "ProposalAction", "status": "ProposalStatus", "opens_at": "opt Timestamp", "deadline": "opt Timestamp", "effective_at": "opt Timestamp", "threshold": "nat", "quorum": "nat", "threshold_of": "ThresholdBasis", "casting_vote": "opt principal", "tally": "Tally", "result": "opt ProposalResult", "links": "vec ProposalLink"})
 SCHEMA["VoteChoice"] = ("variant", {"Yes": "null", "No": "null", "Abstain": "null"})
 SCHEMA["Vote"] = ("record", {"id": "text", "proposal": "text", "voter": "principal", "cast_by": "opt principal", "choice": "VoteChoice", "cast_at": "Timestamp"})
@@ -633,12 +659,12 @@ SCHEMA["Tender"] = ("record", {"id": "text", "title": "text", "description": "te
 SCHEMA["Bid"] = ("record", {"id": "text", "tender": "text", "vendor": "text", "submitted_at": "Timestamp", "sealed": "bool", "payload_ref": "text", "payload_hash": "text", "price": "opt nat", "score": "opt nat"})
 SCHEMA["BidScore"] = ("record", {"id": "text", "bid": "text", "evaluator": "principal", "criterion": "text", "score": "nat", "scored_at": "Timestamp"})
 SCHEMA["RealmStatus"] = ("variant", {"Setup": "null", "Alpha": "null", "Beta": "null", "Production": "null", "Deprecation": "null", "Terminated": "null"})
-SCHEMA["Realm"] = ("record", {"id": "text", "name": "text", "manifesto": "text", "welcome_message": "text", "status": "RealmStatus", "calendar": "opt text", "treasury": "opt text", "accounting_currency": "opt text", "accounting_currency_decimals": "opt nat8", "is_quarter": "bool", "is_capital": "bool", "federation_realm_id": "opt text", "federation_codex": "opt text", "quarter_join_mode": "opt text", "trusted_principals": "vec principal", "require_marketplace_approval": "bool", "trusted_approvers": "vec text", "voting_threshold": "nat", "voting_quorum": "nat", "casting_vote": "opt principal", "open_registration": "bool", "logo_url": "opt text", "background_image_url": "opt text", "installed_version": "text", "network": "text", "timezone": "text", "languages": "vec text", "member_count": "nat"})
+SCHEMA["Realm"] = ("record", {"id": "text", "name": "text", "manifesto": "text", "welcome_message": "text", "status": "RealmStatus", "calendar": "opt text", "treasury": "opt text", "accounting_currency": "opt text", "accounting_currency_decimals": "opt nat8", "is_quarter": "bool", "is_capital": "bool", "federation_realm_id": "opt text", "federation_codex": "opt text", "quarter_join_mode": "opt text", "sync_sources": "vec SyncSource", "trusted_principals": "vec principal", "require_marketplace_approval": "bool", "trusted_approvers": "vec text", "voting_threshold": "nat", "voting_quorum": "nat", "casting_vote": "opt principal", "open_registration": "bool", "logo_url": "opt text", "background_image_url": "opt text", "installed_version": "text", "network": "text", "timezone": "text", "languages": "vec text", "member_count": "nat"})
 SCHEMA["Cycle"] = ("record", {"name": "text", "every": "Duration"})
 SCHEMA["Calendar"] = ("record", {"id": "text", "realm": "text", "epoch": "Duration", "fiscal_period": "Duration", "voting_window": "Duration", "codex_release_cycle": "opt Duration", "benefit_cycle": "opt Duration", "service_payment_cycle": "opt Duration", "license_review_cycle": "opt Duration", "custom_cycles": "vec Cycle"})
 SCHEMA["Registry"] = ("record", {"id": "text", "description": "text", "principal_id": "principal"})
 SCHEMA["QuarterStatus"] = ("variant", {"Setup": "null", "Active": "null", "Suspended": "null", "Splitting": "null", "Merging": "null"})
-SCHEMA["Quarter"] = ("record", {"id": "text", "name": "text", "index": "nat", "status": "QuarterStatus", "population": "nat", "codex_id": "opt text", "codex_version": "opt text", "last_sync": "opt Timestamp", "last_activity_at": "opt Timestamp"})
+SCHEMA["Quarter"] = ("record", {"id": "text", "name": "text", "index": "nat", "status": "QuarterStatus", "population": "nat", "codex_id": "opt text", "codex_version": "opt text", "compliance": "Compliance", "last_sync": "opt Timestamp", "last_activity_at": "opt Timestamp"})
 SCHEMA["Forward"] = ("record", {"id": "text", "subject": "Ref", "origin": "text", "destination": "text", "moved_at": "Timestamp", "signature": "blob"})
 SCHEMA["FederalVoteStatus"] = ("variant", {"Open": "null", "Passed": "null", "Failed": "null", "Cancelled": "null"})
 SCHEMA["FederalVote"] = ("record", {"id": "text", "title": "text", "origin_quarter": "text", "action": "ProposalAction", "rule": "Value", "hash": "text", "deadline": "Timestamp", "status": "FederalVoteStatus", "tally": "Value"})
@@ -646,6 +672,14 @@ SCHEMA["FederalVoteLegStatus"] = ("variant", {"Open": "null", "Reported": "null"
 SCHEMA["Outcome"] = ("variant", {"Passed": "null", "Failed": "null"})
 SCHEMA["FederalVoteLeg"] = ("record", {"id": "text", "vote": "text", "quarter": "text", "proposal_id": "opt text", "outcome": "opt Outcome", "yes": "nat", "no": "nat", "abstain": "nat", "eligible": "nat", "status": "FederalVoteLegStatus", "hash": "opt text"})
 SCHEMA["FederationMessage"] = ("record", {"id": "text", "topic": "text", "source": "text", "body": "Value", "response": "opt Value"})
+SCHEMA["LinkStatusEnded"] = ("record", {"by": "principal", "at": "Timestamp"})
+SCHEMA["LinkStatus"] = ("variant", {"Requested": "null", "Active": "null", "Ended": "LinkStatusEnded"})
+SCHEMA["SyncSourceRef"] = ("variant", {"Realm": "principal", "Record": "ProposalActionCode"})
+SCHEMA["SyncSource"] = ("record", {"source": "SyncSourceRef", "name": "text", "status": "LinkStatus"})
+SCHEMA["ComplianceNonCompliant"] = ("record", {"since": "Timestamp", "stale": "vec text"})
+SCHEMA["Compliance"] = ("variant", {"Compliant": "null", "NonCompliant": "ComplianceNonCompliant", "Unknown": "null"})
+SCHEMA["ReportedLayer"] = ("record", {"version": "text", "checksum": "text"})
+SCHEMA["Follower"] = ("record", {"id": "text", "capital": "principal", "status": "LinkStatus", "layers": "vec ReportedLayer", "compliance": "Compliance", "population": "nat", "reported_at": "opt Timestamp"})
 SCHEMA["CodexStatus"] = ("variant", {"Pending": "null", "Active": "null", "Inactive": "null", "Reverted": "null"})
 SCHEMA["Codex"] = ("record", {"id": "text", "version": "text", "checksum": "text", "status": "CodexStatus", "manifest": "Value", "capabilities": "vec text", "source": "text", "installed_at": "Timestamp", "previous": "opt text"})
 SCHEMA["Notification"] = ("record", {"id": "text", "recipient": "Ref", "topic": "text", "title": "text", "body": "text", "href": "opt text", "sender": "opt text", "visibility": "text", "read_by": "vec principal", "at": "Timestamp"})
@@ -772,7 +806,7 @@ SCHEMA["FundCreateArgs"] = ("record", {"fund": "text", "name": "opt text", "kind
 SCHEMA["PeriodOpenArgs"] = ("record", {"period": "text", "name": "opt text", "starts_at": "Timestamp", "ends_at": "Timestamp"})
 SCHEMA["BudgetDraftArgs"] = ("record", {"fund": "text", "period": "text", "category": "text", "kind": "BudgetKind", "planned": "nat"})
 SCHEMA["BudgetAmendArgs"] = ("record", {"budget": "text", "planned": "nat"})
-SCHEMA["BudgetProposeArgs"] = ("record", {"period": "text", "years": "opt nat"})
+SCHEMA["BudgetProposeArgs"] = ("record", {"period": "text", "years": "opt nat", "fund": "opt text"})
 SCHEMA["AllocationRuleDraftArgs"] = ("record", {"source_fund": "text", "rules": "vec Allocation"})
 SCHEMA["PayrollRunArgs"] = ("record", {"department": "text", "period": "text", "symbol": "opt text"})
 SCHEMA["ReportIssueArgs"] = ("record", {"period": "text", "kind": "opt text", "adjustments": "opt Value"})
@@ -867,6 +901,13 @@ SCHEMA["JoinFederationArgs"] = ("record", {"capital": "principal", "name": "opt 
 SCHEMA["ChangeQuarterArgs"] = ("record", {"quarter": "text"})
 SCHEMA["FederalVoteProposeArgs"] = ("record", {"title": "text", "action": "ProposalAction"})
 SCHEMA["FederationMessageArgs"] = ("record", {"topic": "text", "body": "Value", "to": "opt text"})
+SCHEMA["SyncSourceAddArgs"] = ("record", {"source": "SyncSourceRef", "name": "text"})
+SCHEMA["SyncSourceRemoveArgs"] = ("record", {"source": "SyncSourceRef"})
+SCHEMA["FollowerArgs"] = ("record", {"follower": "principal"})
+SCHEMA["FollowerReportArgs"] = ("record", {"layers": "vec ReportedLayer", "compliance": "Compliance", "population": "nat"})
+SCHEMA["FollowerPage"] = ("record", {"items": "vec Follower", "next": "opt text"})
+SCHEMA["LinkSide"] = ("variant", {"SyncSource": "null", "Follower": "null"})
+SCHEMA["LinkNotifyArgs"] = ("record", {"side": "LinkSide", "status": "LinkStatus"})
 SCHEMA["SigningPolicySupervision"] = ("variant", {"Required": "null", "Optional": "null"})
 SCHEMA["SigningPolicy"] = ("record", {"agents": "vec text", "delegable": "vec text", "supervision": "SigningPolicySupervision"})
 SCHEMA["CodexView"] = ("record", {"checksum": "opt text", "pending": "opt text", "healthy": "bool", "signing": "SigningPolicy", "history": "vec text", "next": "opt text"})
@@ -876,7 +917,10 @@ SCHEMA["EventArchive"] = ("record", {"canister": "principal", "first": "text", "
 SCHEMA["EventPage"] = ("record", {"items": "vec Event", "next": "opt text", "archives": "vec EventArchive"})
 SCHEMA["CodexSourcePackage"] = ("record", {"manifest": "Value", "source": "text"})
 SCHEMA["CodexSourceRegistry"] = ("record", {"codex": "text", "version": "text"})
-SCHEMA["CodexSource"] = ("variant", {"Package": "CodexSourcePackage", "Registry": "CodexSourceRegistry"})
+SCHEMA["CodexSourceRelease"] = ("record", {"source": "text", "version": "text"})
+SCHEMA["CodexSource"] = ("variant", {"Package": "CodexSourcePackage", "Registry": "CodexSourceRegistry", "Release": "CodexSourceRelease"})
+SCHEMA["ChapterRef"] = ("record", {"domain": "text", "checksum": "text"})
+SCHEMA["Release"] = ("record", {"source": "text", "version": "text", "published": "Timestamp", "effective_from": "Timestamp", "commit": "text", "chapters": "vec ChapterRef", "calendar": "opt text", "notes": "Value"})
 SCHEMA["NotificationReadArgs"] = ("record", {"notification": "opt text", "recipient": "opt Ref", "cursor": "opt text", "limit": "opt nat32", "on_behalf_of": "opt principal"})
 SCHEMA["NotificationsRead"] = ("record", {"read": "nat", "next": "opt text"})
 SCHEMA["Translation"] = ("record", {"language": "text", "title": "text", "body": "opt text"})
@@ -892,6 +936,9 @@ SCHEMA["DispatchListArgsStatus"] = ("variant", {"Queued": "null", "Confirmed": "
 SCHEMA["DispatchListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "to": "opt text", "status": "opt DispatchListArgsStatus"})
 SCHEMA["DispatchPage"] = ("record", {"items": "vec Dispatch", "next": "opt text"})
 SCHEMA["CodexActivateArgs"] = ("record", {"codex": "text", "at": "opt Timestamp"})
+SCHEMA["CodexRevertArgs"] = ("record", {"codex": "opt text"})
+SCHEMA["LegislationReleasePublishArgs"] = ("record", {"source": "text", "version": "text", "effective_from": "Timestamp", "commit": "text", "chapters": "vec ChapterRef", "calendar": "opt text", "notes": "Value"})
+SCHEMA["ReleasePage"] = ("record", {"items": "vec Release", "next": "opt text"})
 SCHEMA["TaskScheduleArgs"] = ("record", {"op": "text", "args": "Value", "at": "Timestamp", "reason": "opt text"})
 SCHEMA["TaskRescheduleArgs"] = ("record", {"task": "text", "at": "Timestamp"})
 SCHEMA["TaskListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "op": "opt text", "status": "opt TaskStatus"})
@@ -1012,7 +1059,12 @@ SCHEMA["QuarterReportReply"] = ("variant", {"Ok": "QuarterReport", "Err": "GggEr
 SCHEMA["ForwardReply"] = ("variant", {"Ok": "Forward", "Err": "GggError"})
 SCHEMA["FederalVoteReply"] = ("variant", {"Ok": "FederalVote", "Err": "GggError"})
 SCHEMA["OptValueReply"] = ("variant", {"Ok": "opt Value", "Err": "GggError"})
+SCHEMA["FollowerPageReply"] = ("variant", {"Ok": "FollowerPage", "Err": "GggError"})
+SCHEMA["FollowerReply"] = ("variant", {"Ok": "Follower", "Err": "GggError"})
+SCHEMA["LinkStatusReply"] = ("variant", {"Ok": "LinkStatus", "Err": "GggError"})
 SCHEMA["CodexViewReply"] = ("variant", {"Ok": "CodexView", "Err": "GggError"})
+SCHEMA["ReleasePageReply"] = ("variant", {"Ok": "ReleasePage", "Err": "GggError"})
+SCHEMA["OptblobReply"] = ("variant", {"Ok": "opt blob", "Err": "GggError"})
 SCHEMA["NotificationPageReply"] = ("variant", {"Ok": "NotificationPage", "Err": "GggError"})
 SCHEMA["ExternalPageReply"] = ("variant", {"Ok": "ExternalPage", "Err": "GggError"})
 SCHEMA["DispatchPageReply"] = ("variant", {"Ok": "DispatchPage", "Err": "GggError"})
@@ -1038,36 +1090,37 @@ METHODS = {
     "icrc10_supported_standards": (None, "vec Icrc10SupportedStandardsResult"), "user_get": ("principal",
     "OptUserEntryReply"), "user_list": ("ListArgs", "UserPageReply"), "invite_list": ("ListArgs",
     "InvitePageReply"), "delegation_list": ("DelegationListArgs", "DelegationPageReply"), "attribute_list":
-    ("AttributeListArgs", "AttributePageReply"), "delegable_operations": (None, "VecDelegableOperationReply"),
-    "delegation_groups": ("DelegationGroupsArgs", "DelegationGroupPageReply"), "delegation_activity":
-    ("DelegationActivityArgs", "EventPageReply"), "action_get": ("text", "OptPendingActionReply"), "action_list":
-    ("ActionListArgs", "PendingActionPageReply"), "read_for": ("ReadForArgs", "BlobReply"), "me": ("MeArgs",
-    "MeReply"), "realm_join": ("JoinArgs", "UserEntryReply"), "profile_update": ("ProfileUpdateArgs", "UserReply"),
-    "private_data_update": ("blob", "UserReply"), "user_add": ("UserAddArgs", "GovernedReply"), "user_import":
-    ("UserImportArgs", "GovernedReply"), "user_edit": ("UserEditArgs", "UserReply"), "user_set_status":
-    ("UserSetStatusArgs", "GovernedReply"), "user_remove": ("UserRemoveArgs", "GovernedReply"), "identity_submit":
-    ("IdentitySubmitArgs", "IdentityReply"), "identity_review": ("IdentityReviewArgs", "IdentityReply"),
-    "attribute_submit": ("AttributeSubmitArgs", "AttributeReply"), "attribute_review": ("AttributeReviewArgs",
-    "AttributeReply"), "invite_create": ("InviteCreateArgs", "InviteCreatedReply"), "invite_revoke": ("text",
-    "InviteReply"), "profile_create": ("ProfileCreateArgs", "GovernedReply"), "profile_edit": ("ProfileEditArgs",
-    "GovernedReply"), "role_assign": ("RoleArgs", "GovernedReply"), "role_revoke": ("RoleArgs", "GovernedReply"),
-    "delegation_grant": ("DelegationGrantArgs", "DelegationReply"), "delegation_accept": ("text",
-    "DelegationReply"), "delegation_revoke": ("text", "DelegationReply"), "delegation_request":
-    ("DelegationRequestArgs", "DelegationRequestReply"), "delegation_request_decide": ("DelegationDecideArgs",
-    "OptDelegationReply"), "delegation_revoke_all": ("DelegationRevokeAllArgs", "DelegationsRevokedReply"),
-    "action_approve": ("ActionApproveArgs", "PendingActionReply"), "action_decline": ("ActionDeclineArgs",
-    "PendingActionReply"), "action_withdraw": ("text", "PendingActionReply"), "action_collect": ("text",
-    "BlobReply"), "call_for": ("CallForArgs", "CallForReplyReply"), "department_get": ("GetArgs",
-    "OptDepartmentDetailReply"), "department_list": ("ListArgs", "DepartmentPageReply"), "department_chart":
-    ("ChartArgs", "ChartReply"), "organization_get": ("GetArgs", "OptOrganizationDetailReply"), "organization_list":
-    ("OrganizationListArgs", "OrganizationPageReply"), "department_create": ("DepartmentCreateArgs",
-    "GovernedReply"), "department_edit": ("DepartmentEditArgs", "GovernedReply"), "department_delete": ("text",
-    "GovernedReply"), "department_set_policy": ("DepartmentPolicyArgs", "GovernedReply"), "position_create":
-    ("PositionCreateArgs", "GovernedReply"), "position_edit": ("PositionEditArgs", "GovernedReply"),
-    "position_close": ("text", "GovernedReply"), "appoint": ("AppointArgs", "GovernedReply"), "appoint_acting":
-    ("AppointArgs", "GovernedReply"), "appointment_end": ("text", "GovernedReply"), "department_expel":
-    ("ExpelArgs", "GovernedReply"), "authority_grant": ("AuthorityGrantArgs", "GovernedReply"), "authority_revoke":
-    ("text", "GovernedReply"), "organization_register": ("OrganizationRegisterArgs", "OrganizationReply"),
+    ("AttributeListArgs", "AttributePageReply"), "attribute_pending_list": ("ListArgs", "AttributePageReply"),
+    "delegable_operations": (None, "VecDelegableOperationReply"), "delegation_groups": ("DelegationGroupsArgs",
+    "DelegationGroupPageReply"), "delegation_activity": ("DelegationActivityArgs", "EventPageReply"), "action_get":
+    ("text", "OptPendingActionReply"), "action_list": ("ActionListArgs", "PendingActionPageReply"), "read_for":
+    ("ReadForArgs", "BlobReply"), "me": ("MeArgs", "MeReply"), "realm_join": ("JoinArgs", "UserEntryReply"),
+    "profile_update": ("ProfileUpdateArgs", "UserReply"), "private_data_update": ("blob", "UserReply"), "user_add":
+    ("UserAddArgs", "GovernedReply"), "user_import": ("UserImportArgs", "GovernedReply"), "user_edit":
+    ("UserEditArgs", "UserReply"), "user_set_status": ("UserSetStatusArgs", "GovernedReply"), "user_remove":
+    ("UserRemoveArgs", "GovernedReply"), "identity_submit": ("IdentitySubmitArgs", "IdentityReply"),
+    "identity_review": ("IdentityReviewArgs", "IdentityReply"), "attribute_submit": ("AttributeSubmitArgs",
+    "AttributeReply"), "attribute_review": ("AttributeReviewArgs", "AttributeReply"), "invite_create":
+    ("InviteCreateArgs", "InviteCreatedReply"), "invite_revoke": ("text", "InviteReply"), "profile_create":
+    ("ProfileCreateArgs", "GovernedReply"), "profile_edit": ("ProfileEditArgs", "GovernedReply"), "role_assign":
+    ("RoleArgs", "GovernedReply"), "role_revoke": ("RoleArgs", "GovernedReply"), "delegation_grant":
+    ("DelegationGrantArgs", "DelegationReply"), "delegation_accept": ("text", "DelegationReply"),
+    "delegation_revoke": ("text", "DelegationReply"), "delegation_request": ("DelegationRequestArgs",
+    "DelegationRequestReply"), "delegation_request_decide": ("DelegationDecideArgs", "OptDelegationReply"),
+    "delegation_revoke_all": ("DelegationRevokeAllArgs", "DelegationsRevokedReply"), "action_approve":
+    ("ActionApproveArgs", "PendingActionReply"), "action_decline": ("ActionDeclineArgs", "PendingActionReply"),
+    "action_withdraw": ("text", "PendingActionReply"), "action_collect": ("text", "BlobReply"), "call_for":
+    ("CallForArgs", "CallForReplyReply"), "department_get": ("GetArgs", "OptDepartmentDetailReply"),
+    "department_list": ("ListArgs", "DepartmentPageReply"), "department_chart": ("ChartArgs", "ChartReply"),
+    "organization_get": ("GetArgs", "OptOrganizationDetailReply"), "organization_list": ("OrganizationListArgs",
+    "OrganizationPageReply"), "department_create": ("DepartmentCreateArgs", "GovernedReply"), "department_edit":
+    ("DepartmentEditArgs", "GovernedReply"), "department_delete": ("text", "GovernedReply"),
+    "department_set_policy": ("DepartmentPolicyArgs", "GovernedReply"), "position_create": ("PositionCreateArgs",
+    "GovernedReply"), "position_edit": ("PositionEditArgs", "GovernedReply"), "position_close": ("text",
+    "GovernedReply"), "appoint": ("AppointArgs", "GovernedReply"), "appoint_acting": ("AppointArgs",
+    "GovernedReply"), "appointment_end": ("text", "GovernedReply"), "department_expel": ("ExpelArgs",
+    "GovernedReply"), "authority_grant": ("AuthorityGrantArgs", "GovernedReply"), "authority_revoke": ("text",
+    "GovernedReply"), "organization_register": ("OrganizationRegisterArgs", "OrganizationReply"),
     "organization_edit": ("OrganizationEditArgs", "OrganizationReply"), "representative_add":
     ("RepresentativeAddArgs", "AppointmentReply"), "representative_remove": ("text", "AppointmentReply"),
     "organization_set_status": ("OrganizationStatusArgs", "GovernedReply"), "proposal_get": ("GetArgs",
@@ -1139,11 +1192,17 @@ METHODS = {
     ("JoinFederationArgs", "GovernedReply"), "self_change_quarter": ("ChangeQuarterArgs", "ForwardReply"),
     "federal_vote_propose": ("FederalVoteProposeArgs", "FederalVoteReply"), "federal_vote_cancel": ("text",
     "GovernedReply"), "federal_vote_finalize": ("text", "FederalVoteReply"), "federation_message":
-    ("FederationMessageArgs", "OptValueReply"), "codex_status": ("ListArgs", "CodexViewReply"), "notification_list":
+    ("FederationMessageArgs", "OptValueReply"), "follower_list": ("ListArgs", "FollowerPageReply"),
+    "sync_source_add": ("SyncSourceAddArgs", "GovernedReply"), "sync_source_remove": ("SyncSourceRemoveArgs",
+    "GovernedReply"), "follower_accept": ("FollowerArgs", "GovernedReply"), "follower_remove": ("FollowerArgs",
+    "GovernedReply"), "follower_report": ("FollowerReportArgs", "FollowerReply"), "link_notify": ("LinkNotifyArgs",
+    "LinkStatusReply"), "codex_status": ("ListArgs", "CodexViewReply"), "legislation_releases": ("ListArgs",
+    "ReleasePageReply"), "legislation_chapter": ("text", "OptblobReply"), "notification_list":
     ("NotificationListArgs", "NotificationPageReply"), "events": ("ListArgs", "EventPageReply"), "external_list":
     ("ListArgs", "ExternalPageReply"), "dispatch_list": ("DispatchListArgs", "DispatchPageReply"), "task_list":
     ("TaskListArgs", "TaskPageReply"), "codex_install": ("CodexSource", "GovernedReply"), "codex_uninstall": (None,
-    "GovernedReply"), "codex_revert": (None, "GovernedReply"), "codex_activate": ("CodexActivateArgs",
+    "GovernedReply"), "codex_revert": ("opt CodexRevertArgs", "GovernedReply"), "codex_activate":
+    ("CodexActivateArgs", "GovernedReply"), "legislation_release_publish": ("LegislationReleasePublishArgs",
     "GovernedReply"), "notification_read": ("NotificationReadArgs", "NotificationsReadReply"), "notification_send":
     ("NotificationSendArgs", "DeliveryReply"), "external_add": ("ExternalAddArgs", "GovernedReply"),
     "external_report": ("ExternalReportArgs", "EventReply"), "dispatch_confirm": ("DispatchConfirmArgs",

@@ -225,6 +225,16 @@ Realms GOS also differs from the model in what it keeps:
   `realms_gos:installer` and `realms_gos:baton`. `host_install`'s `registry` is kept for
   `realm_register`;
 - a federal vote's title is kept inside its action;
+- calls between realms (a link's notices and reports, and the reads of the check for a cycle) are not bounded-wait:
+  basilisk 0.15 has no call with a timeout, so a canister that never answers holds the message of the vote that
+  called it open, and an open call blocks stopping the realm for an upgrade. The model asks for bounded-wait
+  calls (§10); until basilisk has them, a vote names only realms its members trust. A call that is rejected, a
+  stopped realm among them, is handled: the vote's notice is sent again, and a check that cannot read a realm is
+  `Unavailable`;
+- the check for a cycle (I-NEST-2) runs when the vote applies, not when a proposal that carries it is filed: filing
+  makes no call to another realm. A vote refused at the end of the vote leaves the proposal `failed`;
+- `Quarter.compliance` is stored and read, and nothing writes it yet: it reads `Unknown` until the scheduled checks
+  and the switch of a codex across the quarters set it;
 - only the last 2,000 events are kept, and older ones are deleted rather than archived (I-EXT-4).
 
 A realm created before attributes and requests existed keeps the `member` profile it stored, which lacks
@@ -267,6 +277,8 @@ Next to the model's fields, the `Realm` row holds:
 | `Extension` | `id` (name), `version`, `status`, `operations` (Json: the only operations its frontend and backend may call), `manifest` (Json), `source` (its backend, when the manifest sets `backend`), `access` (Json: profiles and departments), `sidebar` (Json) | A feature package with its own frontend and, optionally, backend code. | `voting` 2.1.0, for `[member]`, in the Governance menu |
 | `LayeredCodex` | `id` (`sha256:` and the checksum of its layers, layer paths and chapter checksums), `layers`, `layer_paths`, `chapters` (Json: chapter id → source, version, sha256, vouched_by, route, fetched_at, url, size), `previous` (a codex of either kind), `status` (`pending`, `active`, `inactive`, `reverted`), `activates_at`, `installed_at`, `proposal` | A realm's legislation built from the chapters of several sources ([layered codex](../codices/layered-codex.md) §9.1). Active in place of a `Codex`, never beside one. | `sha256:4be1…`, active, tax path EU → Spain → CV |
 | `ChapterSource` | `sha256` (key), `source` | The text of a chapter or calendar, stored once under its checksum; at most 256 KB. | the text of `eu/es/tax` |
+| `SyncSource`, `Follower` | `id` (a realm's capital, or a stand-in record's url), `status` (`requested`, `active`, `ended`), `ended_by`, `ended_at`, `unsent`, `checking`; a sync source also `name` and the record's `checksum`, a follower also `layers`, `compliance`, `population`, `reported_at` | The two sides of a link between realms (§8 of the [layered codex](../codices/layered-codex.md)): `Realm.sync_sources` and GGG's `Follower`. | CV's link to València: `active`; València's last report: compliant |
+| `Release` | `id` (`<source>@<version>`), `source`, `version`, `relayed`, `rank`, `published`, `effective_from`, `commit`, `chapters` (domain → sha256), `calendar`, `notes` | One release in the realm's published record: its own, or one it relays from above, as the record that vouches for it lists it. | `eu/es@2.4.0`, relayed, rank 2 |
 | `InstallJob` | `id`, `proposal`, `change_list` (`{url, checksum}`), `step`, `staged`, `status` (`running`, `paused`, `failed`, `done`), `error`, `started_at`, `finished_at` | One install of a layered codex. At most one job is `running` or `paused`. | `J-1`, running, fetching chapters |
 
 Extensions are callers of their own (see the model's "Callers"): an extension calls operations
