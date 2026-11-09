@@ -374,10 +374,16 @@ def quarter_secede(c, args):
 @op("quarter.join_federation", governed=proposals.realm_wide)
 def quarter_join_federation(c, args):
     """Make this independent realm a quarter of ``capital`` (its canister id), known here as ``name`` (default
-    "capital"). The capital registers this realm separately. Returns ``capital``."""
+    "capital"). The capital registers this realm separately. A realm with a link that has not ended, to a sync source
+    or from a follower, cannot join: a quarter makes no call to another realm. Returns ``capital``."""
+    from api import links  # it imports this module
+
     r, cid = realm(), args["capital"]
     if r.is_quarter or cid == chain.self_id():
         raise Conflict("this realm already belongs to a federation")
+    open_links = links.open_links()
+    if open_links:  # a quarter makes no call to another realm, so it could not end them (I-NEST-3)
+        raise Conflict(f"end this realm's links before it becomes a quarter: {', '.join(open_links)}")
     r.is_quarter, r.is_capital, r.federation_realm_id = True, False, cid
     # The capital becomes a known quarter so its calls are accepted (I-FED-4).
     Quarter(id=cid, name=args.get("name", "capital"), index=0, status="active")
@@ -425,7 +431,7 @@ def scale_status(c, args):
     return scale()
 
 
-def moving(user, args):
+def moving(user, args, grant):
     """What a move changes for ``user``: they become a guest here and lose their profiles in this quarter."""
     dest = Quarter[str(args.get("quarter"))]
     return ([{"label": "Moves you to", "value": quoted(dest.name)}] if dest and dest.name else []) + [

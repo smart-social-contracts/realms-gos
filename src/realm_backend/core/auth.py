@@ -113,7 +113,7 @@ def permissions(principal):
         return {"all"}
     if principal == chain.ANONYMOUS:
         return set()
-    from ggg import Appointment, Authority, Follower, GuestUser, Quarter, Realm, SyncSource, User
+    from ggg import Follower, GuestUser, Quarter, Realm, SyncSource, User
 
     realm = Realm["1"]
     if realm and realm.installer_canister_id and realm.installer_canister_id == principal:
@@ -131,16 +131,46 @@ def permissions(principal):
         held |= set(guest.permissions or [])
     held |= {"quarter.sync"} if Quarter[principal] else set()
     held |= {"link.sync"} if Follower[principal] or SyncSource[principal] else set()  # the capitals of its links
-    for a in each(Appointment, "user", principal):
-        pos = a.position
-        if a.status != "active" or (pos.organization and pos.organization.status != "active"):
-            continue
-        if pos.profile:
-            held |= set(pos.profile.allowed_to or [])
-        if pos.department:
-            held |= {p.id for p in pos.department.permissions}
-            held |= {op for auth in each(Authority, "target", f"Department:{pos.department.id}")
-                     for op in auth.operations or []}
+    for a in seats(principal):
+        held |= seat_permissions(a)
+    return held
+
+
+def seats(principal):
+    """The active appointments of ``principal`` that give them permissions: not those of a suspended or dissolved
+    organization."""
+    from ggg import Appointment
+
+    return [a for a in each(Appointment, "user", principal)
+            if a.status == "active" and not (a.position.organization and a.position.organization.status != "active")]
+
+
+def seat_permissions(a):
+    """What the appointment ``a`` gives its holder: its position's profile and, for a seat in a department, the
+    department's own permissions and the authorities granted to it."""
+    from ggg import Authority
+
+    pos, held = a.position, set()
+    if pos.profile:
+        held |= set(pos.profile.allowed_to or [])
+    if pos.department:
+        held |= {p.id for p in pos.department.permissions}
+        held |= {op for auth in each(Authority, "target", f"Department:{pos.department.id}")
+                 for op in auth.operations or []}
+    return held
+
+
+def seats_in(principal, department):
+    """The active seats ``principal`` holds in the department with id ``department``."""
+    return [a for a in seats(principal) if a.position.department and a.position.department.id == department]
+
+
+def permissions_via(principal, department):
+    """The permissions ``principal`` holds through their seats in ``department``, and through nothing else: a permission
+    of a realm-wide profile, or of a seat elsewhere, is not office work of this department (core.poa)."""
+    held = set()
+    for a in seats_in(principal, department):
+        held |= seat_permissions(a)
     return held
 
 
@@ -192,7 +222,7 @@ def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None
         "read": spec["read"], "public": spec["public"], "signing": spec["signing"],
         "delegable": poa.direct(grant, name, spec, args), "delegated": user != by,
         "signer_agent": spec["signing"] and is_agent(by),
-        "covered": poa.covered(grant, name, spec, needed, at) if grant else False,
+        "covered": poa.covered(grant, name, spec, needed, args, at) if grant else False,
         "declared": sorted(declared),
         # A party may be named by principal or as "User:<principal>" (I-ALL-3).
         "parties": sorted({q for p in spec["parties"](args) for q in (p, p.removeprefix("User:"))})

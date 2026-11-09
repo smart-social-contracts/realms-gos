@@ -311,3 +311,9 @@ def test_the_source_ends_a_link_and_the_follower_keeps_its_layers(source, follow
     follower.govern("sync_source_add", {"source": {"Realm": source.cid}, "name": "The source"})
     source.govern("follower_accept", {"follower": follower.cid})
     assert source_of(follower)[source.cid] == "active" and followers_of(source)[follower.cid]["status"] == "active"
+
+
+def test_a_realm_with_a_link_that_has_not_ended_does_not_become_a_quarter(source, follower, north, people):
+    refused = source.call("quarter_join_federation", {"capital": north.cid}, sender=people["ctl"])
+    assert refused["kind"] == "conflict" and f"follower {follower.cid}" in refused["error"]
+    assert source.ok("realm_info", None, query=True)["realm"]["is_capital"]

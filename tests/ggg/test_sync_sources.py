@@ -5,8 +5,8 @@ method name. tests/deployed/test_sync_sources.py runs the same flows between rea
 import fake_chain
 import pytest
 import world
-from api import links
-from core import legislation
+from api import codex, links
+from core import legislation, op
 from core.db import Fail
 from fake_chain import peer, rejects
 from ggg import Follower, Quarter, Realm, Release, SyncSource
@@ -144,6 +144,26 @@ def test_a_realm_that_cannot_be_read_fails_the_check_and_an_ended_link_comes_bac
     assert status(SyncSource[SRC]) == ended and SyncSource[SRC].name == "Src"
 
 
+def test_an_answer_that_is_no_realms_fails_the_check_cleanly():
+    for sources in ([{"source": {"Realm": {"id": SRC}}, "name": "x", "status": "active"}], [{"source": 7}], "none"):
+        peer(SRC, realm_info={"ok": True, "sync_sources": sources})
+        assert "could not be read" in denied("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+        assert SyncSource[SRC] is None
+    peer(SRC, realm_info=realm_info(), link_notify=["not", "an", "answer"])  # a notice answered with no reply at all
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert status(SyncSource[SRC]) == "requested" and not SyncSource[SRC].unsent and not SyncSource[SRC].checking
+
+
+def test_a_follower_this_realm_has_accepted_takes_legislation_from_it_before_its_own_vote_shows():
+    peer(FOL, link_notify=UNANSWERED)
+    ok("follower_accept", "ctl", follower=FOL)
+    peer(FOL, realm_info=realm_info())  # its realm_info does not list this realm yet
+    assert "a cycle" in denied("sync_source_add", "ctl", source={"Realm": FOL}, name="Fol")
+    peer(SRC, realm_info=realm_info(FOL))  # nor through another realm
+    assert "a cycle" in denied("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert SyncSource[FOL] is None and SyncSource[SRC] is None
+
+
 def test_a_walk_reads_at_most_a_bounded_number_of_realms():
     for i in range(links.WALK_LIMIT + 1):
         peer(f"r{i}", realm_info=realm_info(f"r{i + 1}"))
@@ -217,6 +237,26 @@ def test_a_notice_nobody_answered_is_sent_again_until_it_is():
     assert fake_chain.state["timers"] == []
 
 
+def test_one_chain_of_timers_serves_a_link_and_ends_when_the_other_side_ends_it():
+    source = peer(SRC, realm_info=realm_info(), link_notify=rejects("the canister is stopped"))
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    ok("sync_source_remove", "ctl", source={"Realm": SRC})  # a second notice to the same stopped realm
+    assert len(source.sent("link_notify")) == 2 and len(fake_chain.state["timers"]) == 1
+    fire_timers()  # sends the status as it is now, and sets the next timer
+    assert len(source.sent("link_notify")) == 3 and len(fake_chain.state["timers"]) == 1
+    assert source.sent("link_notify")[-1]["status"]["Ended"]["by"] == ME
+
+    follower = peer(FOL, link_notify=rejects("the canister is stopped"))
+    ok("follower_accept", "ctl", follower=FOL)
+    assert Follower[FOL].unsent
+    ok("link_notify", FOL, side="follower", status={"Ended": {"by": FOL, "at": fake_chain.now()}})
+    assert not Follower[FOL].unsent  # their notice settles what this realm had to tell
+    fake_chain.state["timers"].clear()
+    sent = len(follower.sent("link_notify"))
+    op.run(links.resend(Follower, FOL))  # the timer that was set when the notice failed
+    assert len(follower.sent("link_notify")) == sent and fake_chain.state["timers"] == []
+
+
 def test_a_notice_waiting_when_the_realm_is_upgraded_is_sent_again_at_its_start():
     peer(FOL, link_notify=rejects("the canister is stopped"))
     ok("follower_accept", "ctl", follower=FOL)
@@ -225,6 +265,50 @@ def test_a_notice_waiting_when_the_realm_is_upgraded_is_sent_again_at_its_start(
     links.resume()
     fire_timers()
     assert not Follower[FOL].unsent and status(Follower[FOL]) == "active"
+
+
+def test_a_notice_during_our_cycle_walk_is_refused_and_our_own_notice_after_it_completes_the_link():
+    seen = []
+
+    def src_info(_):  # the source votes while the walk is out
+        seen.append(direct("link_notify", SRC, side="sync_source", status="requested"))
+        return realm_info()
+
+    source = peer(SRC, realm_info=src_info, link_notify={"ok": True, "status": "active"})
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert [(n["ok"], n["kind"]) for n in seen] == [(False, "forbidden")]  # not voted yet, as far as the source can tell
+    assert source.sent("link_notify") == [{"side": "follower", "status": "requested"}]
+    assert status(SyncSource[SRC]) == "active" and not SyncSource[SRC].checking  # the answer to our notice completed it
+
+
+def test_the_same_for_a_follower_this_realm_accepts_while_its_walk_is_out():
+    peer(SRC, realm_info=realm_info(), link_notify=UNANSWERED)
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    seen = []
+
+    def src_info(_):  # the follower votes while the walk, which reads this realm's sources, is out
+        seen.append(direct("link_notify", FOL, side="follower", status="requested"))
+        return realm_info()
+
+    peer(SRC, realm_info=src_info)
+    peer(FOL, link_notify={"ok": True, "status": "active"})
+    ok("follower_accept", "ctl", follower=FOL)
+    assert [(n["ok"], n["kind"]) for n in seen] == [(False, "forbidden")]
+    assert status(Follower[FOL]) == "active" and not Follower[FOL].checking
+
+
+def test_a_walk_that_fails_after_the_other_sides_notice_leaves_no_link_on_either_side():
+    seen = []
+
+    def cyclic(_):
+        seen.append(direct("link_notify", SRC, side="sync_source", status="requested"))
+        return realm_info(ME)
+
+    source = peer(SRC, realm_info=cyclic, link_notify=UNANSWERED)
+    assert "a cycle" in denied("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert [n["kind"] for n in seen] == ["forbidden"] and SyncSource[SRC] is None
+    assert source.sent("link_notify") == []  # and the source was told nothing
+    assert "not the capital" in denied("link_notify", "ctl", side="sync_source", status="requested")
 
 
 def test_either_side_ends_a_link_and_tells_the_other_and_a_new_vote_opens_a_new_link():
@@ -366,6 +450,45 @@ def test_a_sources_legislation_hooks_a_notice_and_never_guards_or_forbids_it():
             activate(layered({("x/town", "realm"): text}))
 
 
+def test_a_notice_that_a_link_ended_is_accepted_while_the_codex_is_not_loaded_and_other_guards_fail_closed():
+    peer(FOL, link_notify=UNANSWERED)
+    ok("follower_accept", "ctl", follower=FOL)
+    activate(layered({("x/town", "realm"): HOOK_LEAVING}))
+    legislation._drop()  # the sandbox is gone, as after an upgrade whose codex does not load
+    assert "legislation error" in denied("proposal_create", "alice", title="a motion")
+    ok("link_notify", FOL, side="follower", status={"Ended": {"by": FOL, "at": fake_chain.now()}})
+    assert status(Follower[FOL])["Ended"]["by"] == FOL  # nothing refused it, and the hook that could not run did not
+    assert LOG == []
+
+
+LEGACY = """
+from ggg_sdk import hook, realm
+
+@hook
+def leave(args):
+    realm.effect("sync_source_remove", source={"Realm": "src"})
+    return {}
+
+@hook
+def accept(args):
+    realm.effect("follower_accept", follower="fol")
+    return {}
+"""
+
+
+def test_a_legacy_codex_cannot_link_the_realm_or_end_a_link_for_it():
+    peer(SRC, realm_info=realm_info(), link_notify=UNANSWERED)
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    Realm["1"].require_marketplace_approval = False
+    manifest = {"id": "test", "version": "1.0.0", "codex_api_version": 2, "hooks": ["leave", "accept"],
+                "capabilities": ["sync_source_remove", "follower_accept"]}
+    ok("codex_install", "ctl", manifest=manifest, source=LEGACY)
+    for name in ("leave", "accept"):
+        (effect,) = op.run(codex.hook(name, {}))["effects"]
+        assert not effect["ok"] and "takes the realm's vote" in effect["error"]
+    assert status(SyncSource[SRC]) == "requested" and Follower[FOL] is None
+
+
 def test_a_sync_source_removal_is_reserved_so_no_legislation_runs_for_it():
     assert "sync_source_remove" in legislation.RESERVED and "link_notify" not in legislation.RESERVED
     assert legislation.is_reserved("sync_source_remove", {"source": {"Realm": SRC}})
@@ -443,3 +566,43 @@ def test_the_record_lists_the_relayed_layers_top_to_bottom_then_the_realms_own()
     assert [r["source"] for r in page["releases"]] == ["eu", "eu/es"] and page["next"] == 3
     last = ok("legislation_releases", fake_chain.ANONYMOUS, count=2, **{"from": 3})
     assert [r["source"] for r in last["releases"]] == ["x/town"] and last["next"] is None
+
+
+def test_a_layer_from_above_is_never_the_source_id_the_realm_publishes_under():
+    ok("legislation_release_publish", "ctl", **release())
+    with pytest.raises(Fail, match="x/town is the source id this realm publishes under"):
+        links.relay_release(relayed("x/town", "2.0.0", stored("tax 1.0.0")), ["x/town", "eu"])
+    assert [(r["source"], r["version"]) for r in ok("legislation_releases", fake_chain.ANONYMOUS)["releases"]] == [
+        ("x/town", "1.0.0")]  # nothing was written, and the realm can still publish
+    ok("legislation_release_publish", "ctl", **release("1.1.0"))
+    assert [r["version"] for r in ok("legislation_releases", fake_chain.ANONYMOUS)["releases"]] == ["1.0.0", "1.1.0"]
+    links.relay_release(relayed("eu", "1.0.0", stored("eu tax")), ["eu", "x/town"])  # another layer is still welcome
+
+
+def test_a_release_is_kept_under_its_source_and_version_so_neither_holds_an_at():
+    """Relayed ``a`` ``b@1`` and own ``a@b`` ``1`` would be one id."""
+    for odd in (release(source="a@b"), release("1@2")):
+        assert "hold no '@'" in denied("legislation_release_publish", "ctl", **odd)
+    assert ok("legislation_releases", fake_chain.ANONYMOUS)["releases"] == []
+    for source, version in (("a@b", "1"), ("a", "b@1")):
+        with pytest.raises(Fail, match="hold no '@'"):
+            links.relay_release(relayed(source, version, stored("eu tax")), [source])
+    assert ok("legislation_releases", fake_chain.ANONYMOUS)["releases"] == []
+
+
+def test_a_realm_with_a_link_that_has_not_ended_does_not_become_a_quarter():
+    url = "https://example.org/releases.json"
+    peer(SRC, realm_info=realm_info(), link_notify=UNANSWERED)
+    peer(FOL, link_notify=UNANSWERED)
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    ok("sync_source_add", "ctl", source={"Record": {"url": url, "checksum": CHECKSUM}}, name="The EU")
+    ok("follower_accept", "ctl", follower=FOL)
+    refused = denied("quarter_join_federation", "ctl", capital="capital")
+    assert all(open_link in refused for open_link in (f"sync source {SRC}", f"sync source {url}", f"follower {FOL}"))
+    assert not Realm["1"].is_quarter and Quarter["capital"] is None
+    ok("sync_source_remove", "ctl", source={"Realm": SRC})
+    ok("sync_source_remove", "ctl", source={"Record": {"url": url, "checksum": CHECKSUM}})
+    assert denied("quarter_join_federation", "ctl", capital="capital").endswith(f"follower {FOL}")
+    ok("follower_remove", "ctl", follower=FOL)
+    ok("quarter_join_federation", "ctl", capital="capital")  # every link has ended
+    assert Realm["1"].is_quarter and Quarter["capital"] is not None

@@ -25,23 +25,25 @@ FOR_TIERS = ("direct", "confirm")
 
 @op("self.join", read=True, returns="action")
 def action_get(c, args):
-    """The pending action ``action``, to its grantor or its delegate. Returns ``action`` as a card, or null for anyone else
-    and for an id that does not exist. A waiting action whose time or grant has run out reads expired or void."""
+    """The pending action ``action``, to its grantor or to the delegate that prepared it: a delegate acting for the grantor
+    reads only the actions it prepared. Returns ``action`` as a card, or null for anyone else and for an id that does not
+    exist. A waiting action whose time or grant has run out reads expired or void."""
     a = PendingAction[str(args["action"])]
-    return {"action": pending.card(pending.settled(a)) if a and c.user in (a.grantor, a.delegate) else None}
+    return {"action": pending.card(c, pending.settled(a)) if a and pending.reads(c, a) else None}
 
 
 @op("self.join", read=True, returns="actions")
 def action_list(c, args):
     """Your pending actions as ``role`` grantor (the default: "Waiting for you") or delegate, optionally only those with
-    ``status``, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1), as cards. Returns
-    ``actions`` and ``next`` (null at the end)."""
+    ``status``, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1), as cards. A delegate acting
+    for the grantor lists only the actions it prepared, so its page can be short, or empty, while ``next`` is set:
+    follow ``next``. Returns ``actions`` and ``next`` (null at the end)."""
     role = args.get("role", "grantor")
     if role not in LISTED:
         raise Fail(f"role is one of {', '.join(LISTED)}")
     rows, nxt = page_by(PendingAction, role, c.user, args)
-    settled = [pending.settled(a) for a in rows]
-    return {"actions": [pending.card(a) for a in settled if not args.get("status") or a.status == args["status"]],
+    settled = [pending.settled(a) for a in rows if pending.reads(c, a)]
+    return {"actions": [pending.card(c, a) for a in settled if not args.get("status") or a.status == args["status"]],
             "next": nxt}
 
 
@@ -56,21 +58,21 @@ def action_approve(c, args):
     if set(args) != {"action", "hash"}:
         raise Fail("an approval takes the action and its hash, nothing else")
     a, out = yield from pending.approve(c, args["action"], args["hash"])
-    return {"action": pending.card(a, out)}
+    return {"action": pending.card(c, a, out)}
 
 
 @op("self.confirm", returns="action")
 def action_decline(c, args):
     """Decline the pending action ``action``: nothing runs and it is closed. Your own act, as ``action_approve``. Returns
     ``action``."""
-    return {"action": pending.card(pending.decline(c, args["action"]))}
+    return {"action": pending.card(c, pending.decline(c, args["action"]))}
 
 
 @op("self.join", returns="action")
 def action_withdraw(c, args):
     """Take back ``action``, a pending action you prepared, while it waits for the member: you do this as yourself. To change
     a call, withdraw it and file another. Returns ``action``."""
-    return {"action": pending.card(pending.withdraw(c, args["action"]))}
+    return {"action": pending.card(c, pending.withdraw(c, args["action"]))}
 
 
 @op("self.join")
