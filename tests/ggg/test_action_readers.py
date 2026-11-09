@@ -104,6 +104,32 @@ def test_a_delegate_does_not_export_the_pending_actions():
     assert ok("realm_export", "ctl", entity="PendingAction")["rows"]  # the member's own full export is theirs
 
 
+def test_an_export_of_the_pending_actions_blanks_the_secrets_of_their_calls_whoever_exports():
+    join, derive, _ = two_delegates()
+    approved(derive, "alice")
+    rows_ = ok("realm_export", "ctl", entity="PendingAction")["rows"]
+    assert [r["id"] for r in rows_] == [join, derive, "AC-3"]
+    assert not any(secret in seen(rows_) for secret in SECRETS)
+    shown = {r["id"]: r for r in rows_}
+    assert shown[join]["args"] == {"code": ""} and shown[derive]["result"]["encrypted_key"] == ""
+    assert shown[join]["status"] == "pending" and shown[join]["method"] == "realm_join"
+    assert "What happens next" in [line["label"] for line in shown[join]["summary"]]
+    assert card(join)["args"] == {"code": "JOIN-1"}  # the card the member reads in the app is whole
+
+
+def test_a_card_read_by_a_task_hides_the_secrets_of_a_call_that_the_call_carries():
+    cases = keys_people.build()
+    lend("alice", "propose")
+    carried = {"op": "crypto_grant", "args": cases["crypto_grant"][2]}
+    a = ok("proposal_create", "claude-conn", on_behalf_of="alice", title="Share", action=carried)["pending"]
+    whole = pending.card(Call("alice", "alice", "user"), PendingAction[a])
+    assert "env:c" in seen(whole)  # the member in person reads it all
+    for reader in (Call("alice", "alice", "task"), Call("alice", "reader", "user")):
+        shown = pending.card(reader, PendingAction[a])
+        assert "env:c" not in seen(shown) and shown["args"]["action"]["op"] == "crypto_grant"
+        assert shown["args"]["action"]["args"]["scope"] == keys_people.SCOPE
+
+
 def test_a_delegated_task_reads_only_the_actions_its_delegate_prepared():
     console_world()
     fake_chain.state["replies"][("aaaaa-aa", "vetkd_derive_key")] = keys_people.VETKD_KEY

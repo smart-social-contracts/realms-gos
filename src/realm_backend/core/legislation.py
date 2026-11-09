@@ -332,7 +332,7 @@ def _guard(op, args, call, department):
     sandbox that fails, refuses it too (fail closed), naming the chapter, and counts."""
     method = f"check_{op}"
     try:
-        outcomes = _call("guard", op=op, args=_carried(_public(args, _secret(op, args))), now=chain.now(),
+        outcomes = _call("guard", op=op, args=carried(_public(args, _secret(op, args))), now=chain.now(),
                          approvals=_approvals(call, department))
     except Fail as e:
         _record("codex", method, str(e))
@@ -353,7 +353,7 @@ def _hooks(op, args, result, call, department):
     has the reads budget to itself and a domain that fails never costs another its effects. A hook that raises, or
     an effect that fails, never fails the caller: it counts against the chapter. A generator."""
     method, secret = f"on_{op}", _secret(op, args)
-    event = {"user": call.user, "args": _carried(_public(args, secret)), "result": _carried(_public(result, secret)),
+    event = {"user": call.user, "args": carried(_public(args, secret)), "result": carried(_public(result, secret)),
              "at": chain.now()}
     approvals = _approvals(call, department)
     try:
@@ -574,17 +574,17 @@ def _secret(op, args=None):
     return tuple(dict.fromkeys(f for n in names for f in (ops().get(n) or {"secret": ()})["secret"]))
 
 
-def _carried(value):
+def carried(value):
     """``value``, the arguments or the result of an operation, without the secret fields of the calls it carries, at any
     depth. A dict that names an operation (``op`` or ``method``, or both) beside its ``args`` is a call: a proposal's
     action, a step of a task, what ``call_for`` forwards, the card of a pending action. Its arguments lose the secret
     fields of the operations it names, and so do the ``result`` of a card and the lines of its ``summary`` that show them
     (a line is labelled with the argument it shows)."""
     if isinstance(value, list):
-        return [_carried(v) for v in value]
+        return [carried(v) for v in value]
     if not isinstance(value, dict):
         return value
-    out = {k: _carried(v) for k, v in value.items()}
+    out = {k: carried(v) for k, v in value.items()}
     names = [n for n in (value.get("op"), value.get("method")) if isinstance(n, str) and n in ops()]
     if names and isinstance(value.get("args"), dict):
         secret = tuple(dict.fromkeys(f for n in names for f in _secret(n)))
@@ -658,8 +658,8 @@ def _shown(entity, row, fields):
     if entity in CONDITIONAL and not CONDITIONAL[entity][1](data):
         data[CONDITIONAL[entity][0]] = None
     if entity == "Proposal" and isinstance(data["action"], dict):
-        data["result"] = _carried(_public(data["result"], _secret(data["action"].get("op"))))
-        data["action"] = _carried(data["action"])
+        data["result"] = carried(_public(data["result"], _secret(data["action"].get("op"))))
+        data["action"] = carried(data["action"])
     return data
 
 

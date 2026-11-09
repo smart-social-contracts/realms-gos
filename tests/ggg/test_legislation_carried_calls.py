@@ -110,5 +110,5 @@ def test_a_proposal_that_carries_a_proposal_shows_the_secrets_of_neither_call():
 
 def test_a_dict_that_names_an_operation_twice_loses_the_secrets_of_both():
     both = {"op": "t_view_secret", "method": "crypto_grant", "args": {"code": "S3CRET", "keys": {"a": "b"}, "scope": "s"}}
-    assert legislation._carried({"steps": [both]}) == {
+    assert legislation.carried({"steps": [both]}) == {
         "steps": [{"op": "t_view_secret", "method": "crypto_grant", "args": {"scope": "s"}}]}

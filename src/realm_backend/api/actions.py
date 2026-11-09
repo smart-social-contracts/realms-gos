@@ -36,7 +36,8 @@ def action_get(c, args):
 def action_list(c, args):
     """Your pending actions as ``role`` grantor (the default: "Waiting for you") or delegate, optionally only those with
     ``status``, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1), as cards. A delegate acting
-    for the grantor lists only the actions it prepared. Returns ``actions`` and ``next`` (null at the end)."""
+    for the grantor lists only the actions it prepared, so its page can be short, or empty, while ``next`` is set:
+    follow ``next``. Returns ``actions`` and ``next`` (null at the end)."""
     role = args.get("role", "grantor")
     if role not in LISTED:
         raise Fail(f"role is one of {', '.join(LISTED)}")

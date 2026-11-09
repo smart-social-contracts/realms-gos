@@ -11,7 +11,7 @@ from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, 
 from ic_python_db import Entity
 from api import codex, installs
 from core.op import call, op, ops
-from core.pending import quoted
+from core.pending import quoted, without_secrets
 from api.proposals import root
 
 VERSION = "VERSION_PLACEHOLDER"
@@ -437,8 +437,10 @@ def realm_export(c, args):
         raise Forbidden(f"exporting {args['entity']} needs {reader}")
     left_out = WITHHELD.get(args["entity"], ()) if c.delegated else ()
     rows, nxt = page(cls, args, most=getattr(cls, "export_most", PAGE_MAX))
-    return {"entity": args["entity"], "rows": [{k: v for k, v in view(r).items() if k not in left_out} for r in rows],
-            "next": nxt}
+    out = [{k: v for k, v in view(r).items() if k not in left_out} for r in rows]
+    if args["entity"] == "PendingAction":  # whoever exports, the secrets of the calls the actions hold stay out
+        out = [without_secrets(r["method"], r) for r in out]
+    return {"entity": args["entity"], "rows": out, "next": nxt}
 
 
 @op("db.convert")

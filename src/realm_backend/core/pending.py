@@ -251,16 +251,31 @@ def card(c, a, result=None):
     """An action as the call ``c`` reads it. ``result`` replaces the stored one: the approval's own reply carries what is
     not kept (``blank``). ``title`` and ``delegate_is_member`` (a member, or an AI connection) are the realm's own words.
     Only the grantor or the delegate, calling in person, reads the secret fields of the call the action holds; to any
-    other reader, such as a task or an extension, they are blank in ``args`` and ``result`` and left out of ``summary``."""
+    other reader, such as a task or an extension, they are blank (``without_secrets``)."""
     from ggg import User
 
     out = {**view(a, *CARD), "title": title_of(a.method), "delegate_is_member": User[a.delegate] is not None,
            "result": a.result if result is None else result}
-    if reads(c, a) and c.origin == "user":
-        return out
-    hidden = secrets_of(a.method, delivered=False)
-    return {**out, "args": blank(a.method, out["args"], delivered=False), "result": blank(a.method, out["result"], delivered=False),
-            "summary": [line for line in out["summary"] if line["label"] not in hidden]}
+    return out if reads(c, a) and c.origin == "user" else without_secrets(a.method, out)
+
+
+def without_secrets(method, shown):
+    """``shown``, a card or an exported row of an action whose call is to operation ``method``, with the secret fields of
+    that call blank in its ``args`` and ``result`` and left out of its ``summary``, and those of a call it carries too
+    (a proposal's action). The summary line of an argument is made again from the argument without them."""
+    from core import legislation
+
+    hidden = secrets_of(method, delivered=False)
+    args = legislation.carried(blank(method, shown["args"], delivered=False))
+    lines = [{"label": line["label"], "value": shown_line(line, args)} for line in shown["summary"]
+             if line["label"] not in hidden]
+    return {**shown, "args": args, "result": legislation.carried(blank(method, shown["result"], delivered=False)),
+            "summary": lines}
+
+
+def shown_line(line, args):
+    """The summary line of an argument as it reads from ``args``; the realm's own lines are kept."""
+    return line["value"] if line["label"] not in args else shown(line["label"], args[line["label"]], args)
 
 
 # ---- States
