@@ -3,6 +3,7 @@ import json
 from basilisk import Duration, Principal, ic
 
 from core.candid import quote, unquote
+from core.principal import valid as is_principal  # the in-process tests' chain accepts their fixtures' names too
 
 ANONYMOUS = "2vxsx-fae"
 # An HTTPS outcall is paid for by every node of the subnet; this is the largest subnet, and what a smaller one does
@@ -20,15 +21,6 @@ def caller():
 
 def is_controller(principal):
     return principal != ANONYMOUS and ic.is_controller(Principal.from_str(principal))
-
-
-def is_principal(text):
-    """Whether ``text`` is the text form of a principal: what the canister's own parse of it gives back, so the checksummed
-    groups of base32 and nothing that merely looks like them."""
-    try:
-        return Principal.from_str(text).to_str() == text
-    except Exception:
-        return False
 
 
 def self_id():
