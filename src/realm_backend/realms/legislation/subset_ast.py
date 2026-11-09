@@ -47,7 +47,7 @@ class Check:
         except SyntaxError as e:
             raise Refused(e.msg, e.lineno, file)
         self.imported = set()
-        self.allowed = []  # per function being visited: the names a store may target (self, a hook's event)
+        self.allowed = []  # per function being visited: the names bound once (self, a hook's event); only the event takes a store
 
     def refuse(self, node, reason):
         raise Refused(reason, getattr(node, "lineno", None), self.file)
@@ -275,7 +275,8 @@ class Check:
     # ── methods and lambdas ──
 
     def function(self, node, outer_locals, allowed=None):
-        """A method (``allowed`` names what a store may target), or a function nested in one, which inherits it."""
+        """A method (``allowed`` names what is bound once: self and a hook's event, of which only the event takes a store), or a
+        function nested in one, which inherits it."""
         ast = self.ast
         args = node.args
         if args.defaults or any(d is not None for d in args.kw_defaults):
