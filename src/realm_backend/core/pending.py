@@ -174,8 +174,11 @@ def title_of(name):
 
 def card(a, result=None):
     """An action as a client reads it. ``result`` replaces the stored one: the approval's own reply carries what is not
-    kept (``blank``)."""
-    return {**view(a, *CARD), "title": title_of(a.method), "result": a.result if result is None else result}
+    kept (``blank``). ``title`` and ``delegate_is_member`` (a member, or an AI connection) are the realm's own words."""
+    from ggg import User
+
+    return {**view(a, *CARD), "title": title_of(a.method), "delegate_is_member": User[a.delegate] is not None,
+            "result": a.result if result is None else result}
 
 
 # ---- States

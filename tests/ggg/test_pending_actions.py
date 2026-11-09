@@ -805,6 +805,20 @@ def test_a_card_is_headed_by_the_operations_own_title_and_nothing_the_delegate_w
     assert (card(a)["title"], card(a)["method"]) == ("Add a payout account", "payment_account_add")
 
 
+def test_a_card_and_a_request_say_whether_the_delegate_is_a_member_or_an_ai_connection():
+    world.build()
+    ai = grant("payout")
+    as_member = ok("delegation_grant", "alice", delegate="bob", groups=["payout"], expires_in=30 * DAY)["delegation"]
+    ok("delegation_accept", "bob", delegation=as_member)
+    assert not card(file())["delegate_is_member"]
+    from_bob = ok("payment_account_add", "bob", on_behalf_of="alice", **ACCOUNT)["pending"]
+    assert card(from_bob)["delegate_is_member"] and ai != as_member
+    ok("delegation_request", "claude-conn", grantor="carla", groups=["vote"], expires_in=DAY)
+    ok("delegation_request", "bob", grantor="carla", groups=["vote"], expires_in=DAY)
+    members = {r["delegate"]: r["delegate_is_member"] for r in ok("delegation_list", "carla")["requests"]}
+    assert members == {"claude-conn": False, "bob": True}
+
+
 def test_every_operation_that_can_be_prepared_for_a_member_has_a_plain_title():
     """A phase that switches an operation on (core.poa.ENABLED) writes its title with it: the member reads it as the
     heading of the action."""
