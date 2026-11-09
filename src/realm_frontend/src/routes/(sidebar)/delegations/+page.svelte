@@ -43,8 +43,8 @@
 	let askingRevokeAll = $state(false);
 
 	const open = (d: { status: string }) => d.status === 'active' || d.status === 'pending';
-	const activeToMe = $derived($delegationsAsDelegate.filter((d) => d.status === 'active'));
-	const activityGrant = $derived($delegationsAsGrantor.find((d) => d.id === activityOf));
+	const activeToMe = $derived($delegationsAsDelegate.filter((d: { status: string }) => d.status === 'active'));
+	const activityGrant = $derived($delegationsAsGrantor.find((d: { id: string }) => d.id === activityOf));
 	const everything = $derived($_('delegation.groups.everything'));
 
 	onMount(async () => {

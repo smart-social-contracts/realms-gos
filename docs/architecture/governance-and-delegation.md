@@ -259,12 +259,13 @@ The delegate prepares it, and only the member's own approval runs it. The code i
    method (not through `call_for`) with `on_behalf_of`, is refused, saying to use `ggg_call_for`, because the method's
    reply has no place for a pending action.
 2. **The record.** It holds the exact `method` and `args`, never edited. A card also carries `title`, the operation's
-   plain name ("Add a payout account"), which the realm writes beside the operation (`title=`). `summary` (a label and a value per line) and
-   `risk` are the realm's own words, written from the stored arguments and the operation's `summary` hook, never from
-   text the delegate supplies: each argument appears under its own lower-case name, the lines the realm adds start with
-   a capital, and the delegate's text inside them is quoted. Every card ends its realm lines with "What happens next":
-   "Runs at once when you approve", or the proposal that approving files when a department governs the call. Only
-   `note` is the delegate's, and a client shows it apart.
+   plain name ("Add a payout account"), which the realm writes beside the operation (`title=`). `summary` (a label and a
+   value per line) and `risk` are the realm's own words, written from the stored arguments and the operation's `summary`
+   hook, never from text the delegate supplies: each argument appears under its own lower-case name, the lines the realm
+   adds start with a capital, and the delegate's text inside them is quoted. Every card ends its realm lines with "What
+   happens next": "Runs at once when you approve", or the proposal that approving files when a department governs the
+   call. A call that carries an action (`proposal_create`, `federal_vote_propose`) says that approving only starts the
+   vote, and that the action runs only if the vote passes. Only `note` is the delegate's, and a client shows it apart.
    `hash` is the sha256 (the canister's native one) of the canonical JSON of the realm's canister id, the id, the call,
    the grantor, the delegate, the grant and `expires_at`. It lasts 24 hours.
 3. **Approving.** `action_approve {action, hash}` takes nothing else. It is the member's own act: refused under a grant
@@ -296,9 +297,10 @@ refused as a whole: each card checks the frame itself and, inside another site's
 - **`/delegations/confirm/<id>`** shows one action from `action_get` and nothing else the link carries. The heading
   is the operation's `title`; the delegate's arguments sit apart from the realm's own lines (a one-word lower-case
   label is an argument), and `note` is shown as the delegate's words, with its control and bidirectional characters
-  written out as escapes. Approve sends `{action, hash}` of the card shown; nothing on the page can be edited. An expired, void, declined, withdrawn, done or failed action shows its state with no buttons, and the
-  delegate who opens the link reads the action in words written for them ("You asked ‹member› to approve one action",
-  "‹member› can decide until …") but cannot decide it.
+  written out as escapes. Approve sends `{action, hash}` of the card shown; nothing on the page can be edited. An
+  expired, void, declined, withdrawn, done or failed action shows its state with no buttons, and the delegate who
+  opens the link reads the action in words written for them ("You asked ‹member› to approve one action", "‹member›
+  can decide until …") but cannot decide it.
 - **`/delegations/authorize/<request>`** lists the groups a request asks for (label, what it allows, its risk, a badge
   where some of it asks each time, all from `delegable_operations`). The member can untick groups and shorten the
   expiry, never widen either. "Everything" appears only when the request asks for it and is never ticked until the

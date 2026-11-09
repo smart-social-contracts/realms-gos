@@ -15,7 +15,9 @@ from core.db import Conflict, Fail, Forbidden, JSON_MAX, NotFound, Unavailable, 
 TTL = 86400  # a pending action lasts a day
 APPROVING_TTL = 600  # an approval still running after this long ended in a trap
 OPEN_MAX = 10  # actions waiting between one member and one delegate
-CARRIES = ("proposal_create", "federal_vote_propose")  # operations that carry a call of their own, ``action``
+# The operations that carry a call of their own, ``action``, and what approving them starts.
+OPENS = {"proposal_create": "Files a proposal in your name", "federal_vote_propose": "Opens a federal vote"}
+CARRIES = tuple(OPENS)
 # The characters of a call's arguments as canonical JSON: a Json field holds 65,536, and the page shows the whole call.
 ARGS_MAX = 32 * 1024
 NOTE_MAX = 500
@@ -129,7 +131,7 @@ def summary_of(user, name, spec, args):
     if spec["summary"]:
         lines += spec["summary"](user, args)
     department = spec["governed"](args) if spec["governed"] else None
-    lines.append({"label": "What happens next", "value": consequence(department)})
+    lines.append({"label": "What happens next", "value": consequence(department, name)})
     return lines
 
 
@@ -160,10 +162,13 @@ def amount(units, decimals):
     return f"{whole}.{part:0{decimals}d}".rstrip("0").rstrip(".") if decimals else str(whole)
 
 
-def consequence(department):
-    """What approving does: a call no department governs, or one a department decides alone, runs at once."""
+def consequence(department, name):
+    """What approving the call of ``name`` does: a call no department governs, or one a department decides alone, runs
+    at once. One that carries an action only starts the vote that decides whether the action runs."""
     from core.op import direct
 
+    if name in CARRIES:
+        return f"{OPENS[name]} when you approve; the action runs only if the vote passes"
     if department is None or direct(department):
         return "Runs at once when you approve"
     return f"Files a proposal under {department.id}; the realm votes"

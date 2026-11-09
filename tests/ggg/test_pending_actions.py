@@ -53,6 +53,11 @@ def approved(action, who="alice"):
     return out["action"]
 
 
+def next_step(action):
+    """What the card of ``action`` says approving it does."""
+    return {line["label"]: line["value"] for line in card(action)["summary"]}["What happens next"]
+
+
 def only_pending_action_changed(action):
     assert card(action)["status"] == "pending" and PaymentAccount.count() == 0
 
@@ -523,11 +528,11 @@ def test_an_approved_governed_call_follows_the_members_own_rule(confirm_ops):
     depts = world.build()
     grant("payout")
     a = ok("t_governed", "claude-conn", on_behalf_of="alice")["pending"]
-    assert {line["label"]: line["value"] for line in card(a)["summary"]}["What happens next"] == "Runs at once when you approve"
+    assert next_step(a) == "Runs at once when you approve"
     assert approved(a)["result"]["ran"] and confirm_ops == [("alice", "alice", "", "claude-conn")]
     world.policy(depts["Infrastructure"], 2, 3)
     b = ok("t_governed", "claude-conn", on_behalf_of="alice")["pending"]
-    assert "Files a proposal under Infrastructure" in {line["label"]: line["value"] for line in card(b)["summary"]}["What happens next"]
+    assert "Files a proposal under Infrastructure" in next_step(b)
     p = Proposal[approved(b)["result"]["proposal"]]
     assert (p.proposer, p.filed_under, p.prepared_by, p.status) == ("alice", "", "claude-conn", "voting")
     assert len(confirm_ops) == 1
@@ -834,6 +839,9 @@ def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_whe
     deciding, whether or not a department governs the call."""
     world.build()
     account = ok("payment_account_add", "alice", **ACCOUNT)["account"]
+    carried = "when you approve; the action runs only if the vote passes"
+    expected = {"proposal_create": "Files a proposal in your name " + carried,
+                "federal_vote_propose": "Opens a federal vote " + carried}
     cases = {"payment_account_add": ACCOUNT, "payment_account_remove": {"account": account},
              "identity_submit": {"kind": "passport"}, "self_change_quarter": {"quarter": "south"},
              "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION}}
@@ -841,7 +849,7 @@ def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_whe
     assert preparable <= set(cases), preparable - set(cases)
     for name, args in cases.items():
         lines = {line["label"]: line["value"] for line in pending.summary_of("alice", name, op.ops()[name], args)}
-        assert lines["What happens next"] == "Runs at once when you approve", name
+        assert lines["What happens next"] == expected.get(name, "Runs at once when you approve"), name
 
 
 def installing_in_place(args):
