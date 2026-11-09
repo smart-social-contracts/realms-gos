@@ -130,7 +130,13 @@ def crypto_revoke(c, args):
     return {"revoked": revoke(args["scope"], args["principals"])}
 
 
-@op("self.data_manage", read=True, returns="envelope")
+def own_envelope(args):
+    """Reading your own envelope takes no permission, so that a principal that is no member, such as an AI connection given
+    one scope's key, reads the key it was given: an envelope is useless without the key it is wrapped for."""
+    return "self.join"
+
+
+@op("self.data_manage", read=True, returns="envelope", perm_for=own_envelope)
 def crypto_envelope(c, args):
     """Your wrapped key at ``scope``: nobody can read another principal's envelope."""
     e = find(KeyEnvelope, f"{args['scope']}|{c.user}")

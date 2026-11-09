@@ -349,8 +349,10 @@ What the member reads before approving:
 - **A key given or taken away** (`crypto_grant`, `crypto_revoke`, `document_share`, `document_revoke`): who gets a key to
   which scope or document, or who loses access (and, if it is the member, that they do too). A grant to the delegate's own
   principal for one scope says "‹name› will be able to read ‹scope›, and nothing else of yours": it is the safe way for
-  an assistant to read one document. The call is refused, not prepared, when the member does not manage the scope or
-  staff the document's department.
+  an assistant to read one document. The assistant reads it back as itself, with `crypto_envelope` (the envelope
+  addressed to the caller takes no permission, so an AI connection with no profile can) or `document_get`; the scopes it
+  was not given stay closed to it, and so do `crypto_scopes`, `crypto_access` and granting, which need `self.data_manage`.
+  The call is refused, not prepared, when the member does not manage the scope or staff the document's department.
 - **A document deleted or published** (`document_delete`, `document_publish`): the document, and that a deletion cannot be
   undone and a published record cannot be taken back.
 - **Joining** (`realm_join`): the profile and the seat the invite code carries, and that joining is consent to the

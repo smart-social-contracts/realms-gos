@@ -168,6 +168,30 @@ def test_a_key_prepared_for_the_assistant_alone_gives_it_that_scope_and_no_other
     assert held_by("claude-conn") == [SCOPE]
 
 
+def test_an_ai_connection_reads_back_the_one_envelope_it_was_given_and_nothing_else_of_the_members():
+    a = prepare("crypto_grant", lent("crypto_grant")["crypto_grant"])
+    approved(a, "alice")
+    assert ok("crypto_envelope", "claude-conn", scope=SCOPE)["wrapped_dek"] == "env:c"
+    # an envelope it was not given, and the lists of keys that stay a member's to read
+    assert "unknown" in denied("crypto_envelope", "claude-conn", scope="user:alice:old")
+    assert "needs self.data_manage" in denied("crypto_scopes", "claude-conn")
+    assert "needs self.data_manage" in denied("crypto_access", "claude-conn", scope=SCOPE)
+    assert "needs self.data_manage" in denied("crypto_grant", "claude-conn", scope=SCOPE, keys={"claude-conn": "x"})
+
+
+def test_an_ai_connection_reads_a_document_whose_key_it_was_given_and_no_other():
+    build()
+    lend("carla", "keys", "office:Health")
+    documents = [d["id"] for d in ok("document_list", "carla", department="Health")["documents"]]
+    given, other = documents[0], documents[1]
+    scope = f"dept:Health:doc:{given}"
+    a = ok("crypto_grant", "claude-conn", on_behalf_of="carla", scope=scope, keys={"claude-conn": "env:doc"})["pending"]
+    approved(a, "carla")
+    got = ok("document_get", "claude-conn", document=given)
+    assert got["wrapped_dek"] == "env:doc" and got["document"]["ref"] == REPORT["ref"]
+    assert "not shared with you" in denied("document_get", "claude-conn", document=other)
+
+
 def test_a_member_who_is_a_delegate_reads_the_scope_it_was_given_and_no_other():
     case = build()["crypto_grant"]
     held = lend("alice", "keys", delegate="dana")
