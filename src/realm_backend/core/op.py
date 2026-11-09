@@ -10,7 +10,7 @@ from core.db import Fail, Forbidden
 
 OPS = {}
 MODULES = ("actions", "assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "installs", "justice", "licenses",
-           "members", "notifications", "orgs", "procurement", "proposals", "quarters", "requests", "setup", "tasks",
+           "links", "members", "notifications", "orgs", "procurement", "proposals", "quarters", "requests", "setup", "tasks",
            "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
 # Operations that run another operation, named by ``method``, for a member: a log hides that operation's secrets too.

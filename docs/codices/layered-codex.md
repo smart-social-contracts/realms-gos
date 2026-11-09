@@ -113,8 +113,8 @@ These are settled. Each later section applies them.
 18. **No rule** on hook order between domains, and none on lower layers filling settings that forbids
     above read.
 19. **The realm domain's entry points are GGG hooks:** `on_codex_activate` and `compute_realm_join`. A
-    follower leaving is a GGG event of the links. `sync_source_remove` is reserved: no chapter can
-    forbid, guard or hook it.
+    follower leaving is a GGG event of the links, `link_notify`, which a chapter may hook and never guard
+    or forbid. `sync_source_remove` is reserved: no chapter can forbid, guard or hook it.
 20. **`each="taxes"`** ranges over the saved TaxPolicy's `taxes`, and the same check runs when the
     draft is saved.
 21. **Each realm sets its own `Realm.timezone`** (an IANA name) and never takes it from another realm,
@@ -1217,6 +1217,30 @@ Layer paths are computed at install time and **stored in the codex**, with each 
 version, checksum, the record that vouched for it, the route and the fetch time. At run time the realm
 never needs the record, except to check compliance (§11).
 
+**How the realm keeps its links and its record** ([`api/links.py`](../../src/realm_backend/api/links.py)):
+
+- A link is a row on each side, made by that side's vote: `SyncSource` on the follower (a realm by its
+  capital, a stand-in record by its url), `Follower` on the source. Both are `requested` until the
+  other side's vote is in, then `active`; a stand-in record is `active` on the follower's vote alone.
+  Either side ends it (`ended`, with who and when), and an ended link is replaced by a new pair of votes.
+  The follower keeps the layers it installed.
+- The side whose vote changes a link tells the other side's capital with `link_notify` and reads the
+  answer, `active` meaning that their vote is in. A notice nobody answered (the call is rejected) is kept
+  as `unsent` and sent again every minute, also after an upgrade; a refusal is an answer. Only the
+  capital at the other side of a link this realm has voted on may send `link_notify` and
+  `follower_report` (permission `link.sync`); a quarter links to no realm and makes no call to one.
+- A vote refuses a cycle: it reads the `sync_sources` of `realm_info` along the sources of the other
+  realm, at most 32 realms, and a realm it cannot read fails the vote with `Unavailable`. The link is
+  recorded before the walk and undone if the walk refuses it.
+- A follower's report is kept on its `Follower` row as the follower's own claim, with its time. The
+  `follower_compliance` fact of a transfer to `Follower:<capital>` and of a quarter's report is the
+  compliance last reported, `Unknown` for any other recipient or a link that is not active.
+- The record is `Release` rows: the realm's own, published by `legislation_release_publish` (every
+  checksum already in `ChapterSource`, one source id, a version once, never edited), and the releases of
+  the layers it runs from above, which the install task keeps with `links.relay_release` as the record that
+  vouches for them lists them. `legislation_releases` answers the relayed ones top to bottom, then its own,
+  oldest first; `legislation_chapter` answers the text stored under a checksum.
+
 ---
 
 ## 9. The realm canister
@@ -1620,7 +1644,9 @@ proposal's `effective_at` (§5.2).
      actions, and the checker guarantees that.
    - A sync source's legislation hooks a follower's leaving on its own side, as a GGG event of the
      links, named in [ggg#3](https://github.com/smart-social-contracts/ggg/issues/3) (§13). That
-     operation runs on the sync source and is not reserved.
+     operation, `link_notify`, runs on the sync source and is not reserved: a chapter may hook it
+     (`on_link_notify`, reading the new `status`, such as `Ended`) and may never guard or forbid it, so a
+     side always learns that a link ended. The checker refuses a guard or a forbid on it.
 5. **History:** every codex ever active is kept, with its chapters in `ChapterSource`, so a revert
    needs no download. A revert does not clear a non-compliant flag: a follower that reverts below a
    release already in effect is non-compliant again. A revert does not run `on_codex_activate`.
