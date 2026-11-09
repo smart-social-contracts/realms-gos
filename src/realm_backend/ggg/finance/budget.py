@@ -3,6 +3,9 @@ from ic_python_db import Integer, ManyToOne, String
 from core.db import Row
 
 KINDS = ("revenue", "expense")
+# The old release took any text as a kind. These spellings say which of the two a line was; any other text is read as
+# an expense, as a line with no kind always was.
+OLD_KINDS = {"income": "revenue", "revenue": "revenue", "expense": "expense", "expenditure": "expense", "cost": "expense"}
 
 
 class Budget(Row):
@@ -23,6 +26,5 @@ class Budget(Row):
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
-        if obj.get("kind") not in KINDS:
-            obj["kind"] = "expense"
+        obj["kind"] = OLD_KINDS.get(str(obj.get("kind") or "").strip().lower(), "expense")
         return obj
