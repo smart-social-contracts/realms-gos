@@ -458,14 +458,17 @@ def test_a_governed_call_that_becomes_a_proposal_meets_the_forbids_of_proposal_c
     assert Budget[root].status == "adopted"
 
 
-def test_a_federal_vote_that_carries_a_call_the_forbids_refuse_is_refused_when_proposed(agora):
-    codex_of({("x/town", "local_regime"): """
+LOW_THRESHOLD = """
 from realms.legislation import F, above, forbid
 
 class LocalRegime(above("local_regime")):
     low_threshold = forbid("governance_update", F.voting_threshold.is_some() & (F.voting_threshold > 55000000),
                            legislation="at most 55 %")
-"""})
+"""
+
+
+def test_a_federal_vote_that_carries_a_call_the_forbids_refuse_is_refused_when_proposed(agora):
+    codex_of({("x/town", "local_regime"): LOW_THRESHOLD})
     action = {"op": "governance_update", "args": {"voting_threshold": 60_000_000}}
     message = denied("federal_vote_propose", "bob", title="Adopt", action=action)
     assert "governance_update is forbidden by the legislation: its arguments: refused by x/town/local_regime/low_threshold" \
@@ -653,6 +656,29 @@ def test_a_forbid_refuses_a_pending_action_when_it_is_prepared_and_when_it_is_ap
     done = approved(waiting)  # the approval runs the call as the member, and the forbid holds then too
     assert done["status"] == "failed" and "refused by x/town/local_regime/no_accounts" in done["result"]["error"]
     assert PaymentAccount.count() == 0
+
+
+def test_a_pending_action_that_carries_a_call_the_forbids_refuse_is_never_prepared(agora):
+    """A delegate's proposal_create with an action, and its federal_vote_propose, ask the member each time; the call they
+    carry meets the forbids when they are prepared, so the member is never asked to approve what could only fail."""
+    from test_pending_actions import grant
+
+    lines = [draft("ROADS", "capital", 900), draft("ROADS", "upkeep", 600), draft("ROOT", "salaries", 500)]
+    codex_of({("x/town", "treasury"): BUDGET_CAP, ("x/town", "local_regime"): LOW_THRESHOLD})
+    grant("propose")
+    for name, args, carried in (
+        ("proposal_create", dict(title="Roads"), {"op": "budget_propose", "args": {"fund": "ROADS", "period": "FY2026"}}),
+        ("federal_vote_propose", dict(title="Adopt"), {"op": "governance_update", "args": {"voting_threshold": 60_000_000}}),
+    ):
+        message = denied(name, "claude-conn", on_behalf_of="alice", action=carried, **args)
+        assert f"{carried['op']} is forbidden by the legislation" in message and PendingAction.count() == 0
+    assert [Budget[b].status for b in lines] == ["draft", "draft", "draft"]
+    for name, args, carried in (
+        ("proposal_create", dict(title="Salaries"), {"op": "budget_propose", "args": {"fund": "ROOT", "period": "FY2026"}}),
+        ("federal_vote_propose", dict(title="Adopt"), {"op": "governance_update", "args": {"voting_threshold": 50_000_000}}),
+    ):
+        assert ok(name, "claude-conn", on_behalf_of="alice", action=carried, **args)["pending"]
+    assert PendingAction.count() == 2
 
 
 def test_an_approved_call_states_the_member_it_acts_for(agora, monkeypatch):

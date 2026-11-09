@@ -15,6 +15,7 @@ from core.db import Conflict, Fail, Forbidden, JSON_MAX, NotFound, Unavailable, 
 TTL = 86400  # a pending action lasts a day
 APPROVING_TTL = 600  # an approval still running after this long ended in a trap
 OPEN_MAX = 10  # actions waiting between one member and one delegate
+CARRIES = ("proposal_create", "federal_vote_propose")  # operations that carry a call of their own, ``action``
 # The characters of a call's arguments as canonical JSON: a Json field holds 65,536, and the page shows the whole call.
 ARGS_MAX = 32 * 1024
 NOTE_MAX = 500
@@ -72,6 +73,11 @@ def prepare(grant, user, by, name, spec, args, note=""):
         raise auth.Denied(f"{name} cannot be done under this power of attorney: this grant does not cover it")
     auth.authorize(user, user, name, spec, args)
     auth.refuse_forbidden(user, name, spec, {**args, "on_behalf_of": user}, "")  # a forbidden action is never prepared
+    if name in CARRIES and isinstance(args.get("action"), dict):  # nor one that carries a forbidden call to the vote
+        from api import proposals  # it imports this module
+
+        proposals.check_action(args["action"])
+        proposals.refuse_forbidden_action(user, args["action"])
     ranges.check(name, args)
     if spec["check"]:
         spec["check"](args)
