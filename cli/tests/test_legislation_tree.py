@@ -13,6 +13,9 @@ from realms.cli.commands.legislation import check_view
 from realms.legislation import months, plan, resolve
 
 TREE = Path(__file__).resolve().parents[2] / "tests/fixtures/legislation/valencia"
+CODICES = (
+    Path(__file__).resolve().parents[2] / "codices/legislation"
+)  # the tree, in the codices submodule
 VALENCIA = "eu/es/vc/46250-valencia"
 OPERATIONS = (
     "codex_install",
@@ -152,3 +155,24 @@ def test_the_flattened_view_of_tax_shows_which_layer_sets_what(valencia):
     assert members["capital"] == ["eu/es", VALENCIA]
     assert members["ibi_bonus"] == ["eu/es", VALENCIA]
     assert members["compute_tax_assess"] == ["eu/es"]
+
+
+def test_the_fixture_is_the_codices_submodules_tree():
+    """The fixture is a copy of realms-codices' ``legislation/`` (its SOURCE.md): the same files with the same bytes
+    as the commit of the ``codices`` submodule this repository pins, bar the README the copy leaves out.
+    """
+    if not CODICES.is_dir():
+        pytest.skip(
+            "the codices submodule is not checked out, or its pin has no legislation/"
+        )
+
+    def files(root, left_out):
+        return {
+            f.relative_to(root).as_posix(): f.read_bytes()
+            for f in root.rglob("*")
+            if f.is_file() and f.relative_to(root).as_posix() not in left_out
+        }
+
+    copy, tree = files(TREE, {"SOURCE.md"}), files(CODICES, {"README.md"})
+    assert sorted(copy) == sorted(tree)
+    assert [name for name in tree if copy[name] != tree[name]] == []
