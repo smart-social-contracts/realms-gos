@@ -131,10 +131,15 @@ def undo(link, before):
         cls(**before)
 
 
+def links_of(cls):
+    """Every link of a kind, ``SyncSource`` or ``Follower``, whatever its status."""
+    for status in STATUSES:
+        yield from each(cls, "status", status)
+
+
 def sources():
     """Every sync source of the realm, whatever the state of its link."""
-    for status in STATUSES:
-        yield from each(SyncSource, "status", status)
+    yield from links_of(SyncSource)
 
 
 def open_followers():
@@ -235,8 +240,15 @@ def resend(cls, key):
 
 
 def resume():
-    """Timers do not survive an upgrade: send again the notices nobody answered."""
+    """Timers and calls in flight do not survive an upgrade. A vote still ``checking`` has no walk left, which only a
+    walk that succeeds clears: it ends, by this realm, and the other side is told like any ended link, so that its key
+    is not locked for good. Then the notices nobody answered are sent again."""
     for cls in SIDES:
+        for link in list(links_of(cls)):
+            if link.checking:
+                link.checking = False
+                if link.status != "ended":
+                    link.status, link.ended_by, link.ended_at, link.unsent = "ended", chain.self_id(), chain.now(), True
         for link in each(cls, "unsent", True):
             retry_later(cls, link.id)
 

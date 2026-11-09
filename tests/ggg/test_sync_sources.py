@@ -257,6 +257,26 @@ def test_one_chain_of_timers_serves_a_link_and_ends_when_the_other_side_ends_it(
     assert len(follower.sent("link_notify")) == sent and fake_chain.state["timers"] == []
 
 
+def test_a_vote_still_being_checked_when_the_realm_starts_is_ended_and_the_other_side_told():
+    """Its walk was a call in flight, and an upgrade drops those: only a walk that succeeds clears the mark."""
+    source = peer(SRC, link_notify={"ok": True, "status": "active"})
+    follower = peer(FOL, link_notify={"ok": True, "status": "active"})
+    SyncSource(id=SRC, name="Src", status="requested", checking=True)
+    Follower(id=FOL, status="requested", checking=True)
+    standing = Follower(id="old", status="active")  # a link that is no vote in flight is left as it is
+    links.resume()
+    assert not SyncSource[SRC].checking and not Follower[FOL].checking
+    ended = {"Ended": {"by": ME, "at": fake_chain.now()}}
+    assert status(SyncSource[SRC]) == ended and status(Follower[FOL]) == ended and status(standing) == "active"
+    fire_timers()  # the notices go out like any ended link's
+    assert source.sent("link_notify") == [{"side": "follower", "status": ended}]
+    assert follower.sent("link_notify") == [{"side": "sync_source", "status": ended}]
+    assert not SyncSource[SRC].unsent and not Follower[FOL].unsent
+    peer(SRC, realm_info=realm_info(), link_notify={"ok": True, "status": "active"})
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")  # the key is free for a new vote
+    assert status(SyncSource[SRC]) == "active"
+
+
 def test_a_notice_waiting_when_the_realm_is_upgraded_is_sent_again_at_its_start():
     peer(FOL, link_notify=rejects("the canister is stopped"))
     ok("follower_accept", "ctl", follower=FOL)

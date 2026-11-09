@@ -1226,7 +1226,9 @@ never needs the record, except to check compliance (§11).
   The follower keeps the layers it installed.
 - The side whose vote changes a link tells the other side's capital with `link_notify` and reads the
   answer, `active` meaning that their vote is in. A notice nobody answered (the call is rejected) is kept
-  as `unsent` and sent again every minute, also after an upgrade; a refusal is an answer. Only the
+  as `unsent` and sent again every minute, also after an upgrade; a refusal is an answer. A vote still
+  `checking` when the realm starts has no walk left (none outlives an upgrade): it ends, by this realm, and
+  the other side is told, so that its key is not locked for good. Only the
   capital at the other side of a link this realm has voted on may send `link_notify` and
   `follower_report` (permission `link.sync`); a quarter links to no realm and makes no call to one.
 - A vote refuses a cycle: it reads the `sync_sources` of `realm_info` along the sources of the other
