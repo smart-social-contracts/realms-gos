@@ -108,6 +108,9 @@ def switch(waiting):
     waiting.installed_at = chain.now()
     store.remember_source(waiting.layers[-1])
     chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
+    from api import propagation  # it imports the install task, which imports this module
+
+    chain.set_timer(0, propagation.after_switch)  # a quarter reports to its capital; a capital judges its quarters
 
 
 def hooks(codex_id):

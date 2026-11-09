@@ -27,6 +27,7 @@ import json
 
 from core import auth, chain
 from core import civil
+from core import compliance
 from core import localtime
 from core import sandbox
 from core.db import PAGE, Fail, Forbidden, first, view
@@ -67,7 +68,10 @@ VIEWS = {
     "Dispute": ("id", "claimant", "respondent", "subject", "title", "status", "case"),
     "Document": ("id", "department", "title", "kind", "languages", "public", "author", "at"),
     "External": ("id", "name", "kind"),
+    "FederalVoteLeg": ("id", "vote", "quarter", "outcome", "status", "codex", "compliance"),
+    "FederationMessage": ("id", "topic", "source", "codex", "compliance"),
     "FiscalPeriod": ("id", "name", "starts_at", "ends_at", "status"),
+    "Forward": ("id", "origin", "destination", "moved_at", "codex", "compliance"),
     "Fund": ("id", "name", "kind", "department", "balances", "allocation_rule"),
     "Human": ("id", "user"),
     "Identity": ("id", "human", "kind", "issuer", "status", "verified_at"),
@@ -88,7 +92,7 @@ VIEWS = {
     "Procedure": ("id", "initiated_by", "matter", "decision_deadline", "silence", "legislation"),
     "Proposal": ("id", "title", "description", "proposer", "department", "action", "status", "opens_at", "deadline",
                  "effective_at", "threshold", "quorum", "tally", "result", "links"),
-    "Quarter": ("id", "name", "index", "status", "population"),
+    "Quarter": ("id", "name", "index", "status", "population", "codex_id", "compliance"),
     "Realm": ("id", "name", "status", "accounting_currency", "accounting_currency_decimals", "is_quarter", "is_capital",
               "quarter_join_mode", "open_registration", "timezone"),
     "Request": ("id", "kind", "by", "filed_at", "due_at", "extension_limit", "status", "decided_at"),
@@ -197,7 +201,8 @@ def activate(codex):
         load(codex)
     from ggg import Realm
 
-    if Realm["1"].is_quarter:
+    here = Realm["1"]
+    if here.is_quarter and not here.is_capital:  # registering a quarter makes the capital a quarter too
         return
     realm = chain.self_id()
     yield from _hooks("codex_activate", {"codex": codex.id}, {"codex": codex.id}, Call(realm, realm, "codex"), None)
@@ -631,6 +636,8 @@ def _shown(entity, row, fields):
     show none of the arguments and reply fields its operation keeps secret (``secret=``), as when the call itself
     crosses (``_public``)."""
     data = view(row, *fields)
+    if "compliance" in data:  # a flag is kept as JSON text; a chapter reads its value (core.compliance)
+        data["compliance"] = compliance.of(data["compliance"])
     if entity in CONDITIONAL and not CONDITIONAL[entity][1](data):
         data[CONDITIONAL[entity][0]] = None
     if entity == "Proposal" and isinstance(data["action"], dict):

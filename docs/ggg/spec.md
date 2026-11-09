@@ -304,6 +304,7 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `task_add_schedule` (a time, and optionally a repeat, for the creator's named task) | `task.schedule` | delegable | Run the invoice check every day from 1 Jan |
 | `task_logs` | `task.view` | read, delegable | Payroll task and its last 3 runs |
 | `proposal_run_scheduled` (runs the action of a proposal waiting for its effective time once that time has come, else does nothing; the task scheduler calls it) | — (public) | | At `effective_at`, the realm runs `P-12`'s transfer |
+| `codex_switch_staged` (a quarter switches to the codex it staged from its capital once the capital's switch time has come, else does nothing; the task scheduler calls it) | — (public) | | At `effective_at`, each quarter switches to the codex the realm voted for |
 | `ops_list` | — (public) | read | geister reads it to build MCP tools |
 | `orchestration_decide` (approve or reject a Casals baton action for this realm) | `orchestration.approve` | confirm | Approve Casals' action "upgrade North to 0.9.1" |
 | `extension_install`, `extension_uninstall` | `extension.install`, `extension.uninstall` | governed, delegable | Install `procurement` 1.0.3 (marketplace-approved) → vote |

@@ -1,8 +1,7 @@
 import json
 
 from core import auth, chain
-from api import proposals
-from api import quarters
+from api import propagation, proposals, quarters
 from core.db import PAGE_MAX, Conflict, Fail, Forbidden, each, find, next_id, page
 from ggg import FederalVote, FederalVoteLeg, FederationMessage, Proposal, Quarter
 from core.op import GENERATOR, dispatch, op
@@ -70,11 +69,12 @@ def settle(leg):
     tally, size, _ = proposals.count(p)
     leg.outcome, leg.status = "passed" if p.status in PASSED else "failed", "reported"
     leg.yes, leg.no, leg.abstain, leg.eligible = tally["yes"], tally["no"], tally["abstain"], size
+    leg.codex, leg.compliance = quarters.codex()["id"], quarters.own_compliance()
 
 
 def leg_data(leg):
     return {"vote": leg.vote.id, "outcome": leg.outcome, "yes": leg.yes, "no": leg.no, "abstain": leg.abstain,
-            "eligible": leg.eligible, "hash": leg.hash}
+            "eligible": leg.eligible, "hash": leg.hash, "codex": leg.codex}
 
 
 def record_leg(q, data):
@@ -85,6 +85,8 @@ def record_leg(q, data):
         raise Fail(f"the leg does not match {leg.vote.id}'s published action and rule")
     leg.outcome, leg.status = "passed" if data["outcome"] == "passed" else "failed", "reported"
     leg.yes, leg.no, leg.abstain, leg.eligible = (int(data.get(k, 0)) for k in ("yes", "no", "abstain", "eligible"))
+    leg.codex = data.get("codex", "")
+    leg.compliance = propagation.judge(q, data.get("codex"))
 
 
 def rule_of(v):
@@ -233,14 +235,16 @@ def on_cancel(c, body):
 
 
 TOPICS = {"user.arrive": quarters.on_arrive, "quarter.secede": quarters.on_secede, "codex": quarters.on_codex,
+          propagation.STAGE: propagation.on_stage, propagation.UNSTAGE: propagation.on_unstage,
           "federal_vote.propose": on_propose, "federal_vote.open": on_open, "federal_vote.result": on_result,
           "federal_vote.cancel": on_cancel}
 
 
 @op("quarter.sync")
 def federation_message(c, args):
-    """From a registered quarter: handle ``topic`` with ``body``. From a local holder of quarter.sync: send it out, to
-    quarter ``to`` or by default to every active quarter."""
+    """From a registered quarter: handle ``topic`` with ``body``, and record the checksum of the codex the sender ran,
+    the ``codex`` it carries, and its flag. From a local holder of quarter.sync: send it out, to quarter ``to`` or by
+    default to every active quarter."""
     topic, body = args["topic"], args.get("body", {})
     if Quarter[c.by] is None:
         targets = [find(Quarter, args["to"]).id] if args.get("to") else [
@@ -249,11 +253,12 @@ def federation_message(c, args):
         for cid in targets:
             replies[cid] = yield from quarters.ask(cid, "federation_message", {"topic": topic, "body": body})
         m = FederationMessage(id=next_id(FederationMessage, "FM"), topic=topic, source=chain.self_id(), body=body,
-                              response=replies)
+                              response=replies, codex=quarters.codex()["id"], compliance=quarters.own_compliance())
         return {"message": m.id, "replies": replies}
-    handler = TOPICS.get(topic)
+    flag, handler = Quarter[c.by].compliance, TOPICS.get(topic)  # read first: a quarter that secedes is forgotten
     out = handler(c, body) if handler else {}
     if isinstance(out, GENERATOR):
         out = yield from out
-    m = FederationMessage(id=next_id(FederationMessage, "FM"), topic=topic, source=c.by, body=body, response=out)
+    m = FederationMessage(id=next_id(FederationMessage, "FM"), topic=topic, source=c.by, body=body, response=out,
+                          codex=args.get("codex", ""), compliance=flag)
     return {"message": m.id, **out}
