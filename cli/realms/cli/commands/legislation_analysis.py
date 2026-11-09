@@ -51,9 +51,10 @@ def literals(node, found):
     return found
 
 
-def endpoints(forbid, found):
+def endpoints(forbid, found, settings=None):
     """The folded value of every comparison side and between() bound that reads no fact (1240000 for
-    València's urban cap), and the count of every Period a rule names or a setting holds.
+    València's urban cap), and the count of every Period a rule names or a setting holds. ``settings`` replaces the
+    forbid's own, for the analysis that leaves them open.
     """
     from realms.legislation import expressions as e
     from realms.legislation.cedar import children
@@ -62,7 +63,11 @@ def endpoints(forbid, found):
         return isinstance(node, e.Fact) or any(reads_a_fact(c) for c in children(node))
 
     def value(node):
-        got = e._eval(node, e.Env({}, dict(forbid.settings), None), False)
+        got = e._eval(
+            node,
+            e.Env({}, dict(forbid.settings if settings is None else settings), None),
+            False,
+        )
         period = e.as_period(got)
         if period is not None:
             found.append(period[0])
@@ -323,12 +328,17 @@ class Analysis:
             raise MissingTools(
                 "the Cedar analysis needs cedarpy: pip install 'cedarpy==4.12.2'"
             )
-        cedar_cli, cvc5 = os.environ.get("CEDAR_CLI"), os.environ.get("CVC5")
-        if not (
-            cedar_cli and cvc5 and os.path.exists(cedar_cli) and os.path.exists(cvc5)
-        ):
-            raise MissingTools(
-                "the proof that no forbid errors needs the pinned Cedar CLI and cvc5: run scripts/cedar_tools.sh "
-                "and set CEDAR_CLI and CVC5 to what it prints (or pass --no-analysis to go without)"
-            )
-        return cedar_cli, cvc5
+        return cedar_tools(
+            "proof that no forbid errors", " (or pass --no-analysis to go without)"
+        )
+
+
+def cedar_tools(what: str, hint: str = ""):
+    """The pinned Cedar CLI and cvc5 that ``CEDAR_CLI`` and ``CVC5`` point at, or a refusal that says how to get them."""
+    cedar_cli, cvc5 = os.environ.get("CEDAR_CLI"), os.environ.get("CVC5")
+    if not (cedar_cli and cvc5 and os.path.exists(cedar_cli) and os.path.exists(cvc5)):
+        raise MissingTools(
+            f"the {what} needs the pinned Cedar CLI and cvc5: run scripts/cedar_tools.sh "
+            f"and set CEDAR_CLI and CVC5 to what it prints{hint}"
+        )
+    return cedar_cli, cvc5

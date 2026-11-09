@@ -152,9 +152,11 @@ def value_type(value, what):
 
 
 class FactType(metaclass=Sealed):
-    """One fact of an action: its Cedar type, whether it is optional, and ``(min, max)`` or None."""
+    """One fact of an action: its Cedar type, whether it is optional, ``(min, max)`` or None, and for a String the
+    ``values`` GGG allows (an enumeration: a variant's tags) or None. The generator ignores the values: Cedar's schema
+    cannot state them, so only the analysis of §12.3 assumes them."""
 
-    __slots__ = ("type", "optional", "range")
+    __slots__ = ("type", "optional", "range", "values")
 
     def __init__(self, action, name, entry):
         if isinstance(entry, str):
@@ -165,9 +167,10 @@ class FactType(metaclass=Sealed):
             "optional",
             "min",
             "max",
+            "values",
         }:
             raise LegislationError(
-                f"{where}: a fact is a type name or {{type, optional, min, max}}"
+                f"{where}: a fact is a type name or {{type, optional, min, max, values}}"
             )
         kind = entry.get("type")
         if kind not in TYPES:
@@ -188,9 +191,23 @@ class FactType(metaclass=Sealed):
                 raise LegislationError(
                     f"{where}: min {bounds[0]} is above max {bounds[1]}"
                 )
+        values = entry.get("values")
+        if values is not None:
+            if (
+                kind != "String"
+                or not isinstance(values, (list, tuple))
+                or not values
+                or not all(type(v) is str and v for v in values)
+                or len(set(values)) != len(values)
+            ):
+                raise LegislationError(
+                    f"{where}: values are the distinct, non-empty words of a String fact"
+                )
+            values = tuple(values)
         object.__setattr__(self, "type", kind)
         object.__setattr__(self, "optional", optional)
         object.__setattr__(self, "range", None if bounds == (None, None) else bounds)
+        object.__setattr__(self, "values", values)
 
     def __setattr__(self, name, value):
         raise LegislationError("the fact schema never changes")
@@ -243,7 +260,10 @@ class Action(metaclass=Sealed):
         }
 
     def shape(self):
-        return [(name, f.type, f.optional, f.range) for name, f in self.facts.items()]
+        return [
+            (name, f.type, f.optional, f.range, f.values)
+            for name, f in self.facts.items()
+        ]
 
 
 class FactSchema(metaclass=Sealed):

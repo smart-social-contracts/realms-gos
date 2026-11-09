@@ -22,7 +22,6 @@ A case that does not come out as written is a problem, ``<source>/<domain>.cases
 import importlib
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Callable, List
 
 from realms.cli.commands.legislation_layout import CASES_SUFFIX
@@ -34,23 +33,30 @@ SANDBOX = "realms.src.realm_backend.core.legislation_sandbox"
 MONEY = {"Land": ("assessed_value",)}
 
 
-def case_problems(tree: Path, codex: Codex, realm: str, reload: Callable) -> List[str]:
-    """The cases of ``codex``'s layers that name ``realm``, run on ``codex``; those that do not come out as written.
-    ``reload(ggg)`` loads the realm's codex again with ``ggg`` as the module chapters import ``ggg`` from.
-    """
-    problems = []
+def case_results(files, codex: Codex, realm: str, reload: Callable) -> List[tuple]:
+    """Every case of ``codex``'s layers that names ``realm``, run on ``codex``: ``(which, why it does not come out as
+    written or None)``. ``reload(ggg)`` loads the realm's codex again with ``ggg`` as the module chapters import ``ggg``
+    from."""
+    results = []
     for source in codex.layers:
-        for file in sorted((tree / source).glob("*" + CASES_SUFFIX)):
-            domain = file.name[: -len(CASES_SUFFIX)]
-            for case in json.loads(file.read_text()):
-                if case.get("realm", source) != realm:
-                    continue
-                reason = run_case(codex, domain, case, reload)
-                if reason:
-                    problems.append(
-                        f'{source}/{file.name}: case "{case["name"]}": {reason}'
-                    )
-    return problems
+        for name in files.names(source):
+            if not name.endswith(CASES_SUFFIX):
+                continue
+            domain = name[: -len(CASES_SUFFIX)]
+            for case in json.loads(files.text(source, name)):
+                if case.get("realm", source) == realm:
+                    which = f'{source}/{name}: case "{case["name"]}"'
+                    results.append((which, run_case(codex, domain, case, reload)))
+    return results
+
+
+def case_problems(files, codex: Codex, realm: str, reload: Callable) -> List[str]:
+    """The cases of ``codex``'s layers that name ``realm`` and do not come out as written."""
+    return [
+        f"{which}: {reason}"
+        for which, reason in case_results(files, codex, realm, reload)
+        if reason
+    ]
 
 
 def run_case(codex: Codex, domain: str, case: dict, reload: Callable):
