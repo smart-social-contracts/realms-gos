@@ -11,6 +11,14 @@ from network import Network
 from test_delegation_groups import launch, ok, refused
 
 DAY = 86400
+FSI, PDI = "\u2068", "\u2069"  # the isolate each quotation of the realm sits in
+
+
+def plain(text):
+    """``text`` without the isolates its quotations sit in, which no one types."""
+    return text.replace(FSI, "").replace(PDI, "")
+
+
 TEXT, BLOB = Types.Text, Types.Vec(Types.Nat8)
 SUMMARY_LINE = Types.Record({"label": TEXT, "value": TEXT})
 STATUS = Types.Variant({name: Types.Null for name in (
