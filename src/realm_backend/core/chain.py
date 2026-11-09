@@ -22,6 +22,15 @@ def is_controller(principal):
     return principal != ANONYMOUS and ic.is_controller(Principal.from_str(principal))
 
 
+def is_principal(text):
+    """Whether ``text`` is the text form of a principal: what the canister's own parse of it gives back, so the checksummed
+    groups of base32 and nothing that merely looks like them."""
+    try:
+        return Principal.from_str(text).to_str() == text
+    except Exception:
+        return False
+
+
 def self_id():
     return ic.id().to_str()
 

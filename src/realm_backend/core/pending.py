@@ -157,15 +157,6 @@ def moment(seconds):
     return f"{year:04d}-{month:02d}-{day:02d} {rest // 3600:02d}:{rest % 3600 // 60:02d} UTC"
 
 
-PRINCIPAL_MAX = 63  # the longest text form of a principal
-
-
-def is_principal(value):
-    """Whether ``value`` is the text form of a principal: groups of lower-case letters and digits joined by dashes."""
-    return (isinstance(value, str) and 0 < len(value) <= PRINCIPAL_MAX
-            and all(g.isascii() and g.isalnum() and g == g.lower() for g in value.split("-")))
-
-
 def nicknamed(value):
     """``value`` with the nickname of the member it names, if it names one."""
     from ggg import User
@@ -178,7 +169,7 @@ def principal(value):
     """``value``, a principal a delegate named, as the realm's own line shows it: with the nickname of the member it
     names, if it names one. Text that is not a principal's is refused, since it would stand in the realm's sentence
     as the delegate's words, unquoted."""
-    if not is_principal(value):
+    if not chain.is_principal(value):
         raise Fail(f"{quoted(value)[:60]} is not a principal")
     return nicknamed(value)
 
@@ -193,7 +184,7 @@ def principals(value, what):
 
 def held(value):
     """A principal the realm itself holds, such as an admin: shown as a principal, or quoted if what it holds is not one."""
-    return nicknamed(value) if is_principal(value) else quoted(value)
+    return nicknamed(value) if chain.is_principal(value) else quoted(value)
 
 
 def shown(key, value, args):

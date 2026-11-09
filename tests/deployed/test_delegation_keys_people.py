@@ -5,7 +5,7 @@ member approves it with ``ggg_action_approve``, and then the delegate holds that
 
 import pytest
 from ic.candid import Types, decode, encode
-from test_delegation_groups import launch, ok
+from test_delegation_groups import launch, ok, refused
 from test_pending_actions import ACTION, APPROVE, BLOB, CALL_FOR, CALL_FOR_REPLY, READ_FOR, TEXT
 
 DAY = 86400
@@ -58,3 +58,13 @@ def test_a_key_prepared_for_the_assistant_alone_is_stored_only_when_the_member_a
     assert bytes(own["wrapped_dek"]) == b"wrapped-for-claude" and str(own["principal"]) == claude
     other = realm.ggg("ggg_crypto_envelope", TEXT, f"user:{alice}:old", Types.Opt(ENVELOPE), claude, query=True)
     assert "Err" in other or other["Ok"] == []
+
+
+def test_text_that_only_looks_like_a_principal_is_refused_when_the_action_is_prepared_and_a_real_principal_is_not(realm, people):
+    alice, claude, bob = people["alice"], people["claude-conn"], people["bob"]
+    on = dict(on_behalf_of=alice, scope=f"user:{alice}:more")
+    phrase = "no-one-else-will-read-it-you-keep-it"  # lower-case words joined by dashes, but no checksummed principal
+    assert "is not a principal" in refused(realm, "crypto_grant", claude, keys={phrase: "x"}, **on)
+    waiting = ok(realm, "crypto_grant", claude, keys={bob: "x"}, **on)["pending"]
+    card = ok(realm, "action_get", alice, query=True, action=waiting)["action"]
+    assert {line["label"]: line["value"] for line in card["summary"]}["Keys go to"].startswith(bob)
