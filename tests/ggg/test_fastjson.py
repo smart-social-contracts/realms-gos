@@ -64,6 +64,24 @@ def test_loads_gives_each_object_to_the_pairs_hook_as_cpython_does():
         fastjson.loads(text, object_pairs_hook=refuses)
 
 
+@pytest.mark.parametrize("keyword", ["object_hook", "parse_float", "parse_int", "parse_constant", "strict", "cls"])
+def test_loads_refuses_a_keyword_it_does_not_honour(keyword):
+    """Dropping it, as the stub did, would let a caller work in the tests and differ in the canister."""
+    with pytest.raises(TypeError, match=keyword):
+        fastjson.loads("{}", **{keyword: None})
+
+
+@pytest.mark.parametrize("keyword", ["allow_nan", "skipkeys", "check_circular", "cls"])
+def test_dumps_refuses_a_keyword_it_does_not_honour(keyword):
+    with pytest.raises(TypeError, match=keyword):
+        fastjson.dumps({}, **{keyword: None})
+
+
+def test_dumps_takes_the_keywords_the_stub_names():
+    assert fastjson.dumps({"b": 1, "a": "é"}, ensure_ascii=True, sort_keys=True, indent=None, separators=(", ", ": "),
+                          default=str) == '{"a":"é","b":1}'
+
+
 @pytest.mark.parametrize("text", ["", "   ", "x", "[1,", "[\n  1,\n  "])
 def test_loads_refuses_what_is_not_json_as_cpython_does(text):
     with pytest.raises(json.JSONDecodeError) as stub:

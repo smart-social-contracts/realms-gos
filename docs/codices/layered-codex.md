@@ -1510,7 +1510,9 @@ instructions and a decision at about 0.7 M:
 | engine: parse and validate the realm's policies, the schema and the forbids, once per activation | 94 M |
 | the same with the schema of every operation (101 KB), which the realm does not load | 5,435 M |
 | handing that schema over from the sandbox: the JSON encoding and decoding of 101 K characters (451 M before the fast JSON of #582; 4.6 k instructions per character in the canister's own) | 16 M |
-| the sandbox generates the Cedar and hands it over: mostly reading GGG's fact schema (compile and its actions, about 175 M) and importing the generator (about 230 M) | 437 M |
+| the sandbox generates the Cedar and hands over the policy text: mostly reading GGG's fact schema (compile and its actions, about 175 M) and importing the generator (about 230 M) | 437 M |
+| the realm builds the schema and the fact types of the actions the forbids name, in its own interpreter | 2.5 M |
+| the same the first time since the realm last started or was upgraded: it compiles the library's Cedar module (497 M) and reads GGG's fact schema (194 M) and the schema writer's other modules (239 M) | 930 M, once |
 | the same for a codex that holds no forbid | 1 M |
 | `cedar()` in the sandbox, of its 10 M bytecode budget per spawn (shared with every guard and hook after it): the example above / the whole València corpus (14 chapters, 6 forbids) | 0.27 M / 0.85 M |
 | a permission decision, one request on `call`: no layered codex / forbids in force | 3.5 M / 3.8 M |
@@ -1519,7 +1521,7 @@ instructions and a decision at about 0.7 M:
 | the forbids of a proposal of a saved policy of 2 entries (it reads the policy too) | 9.7 M |
 | the forbids of a realm with no layered codex | 9 k |
 | naming the forbids behind a refusal (one call to the sandbox), only when a request is refused | 0.9 M |
-| install step 5 (`build`) of a codex with these forbids, in all | 1,753 M |
+| install step 5 (`build`) of a codex with these forbids, in all: the first in a heap / after that (its 930 M is once) | 2,669 M / about 1,740 M |
 | a codex with these forbids, loaded and activated: the sandbox 1,134 M, the Cedar 437 M, the engine 94 M, in all (the sandbox of a codex without forbids: 1,121 M) | 1,677 M |
 
 The engine does not parse again: the forbids of a draft of 5 entries cost 20.5 M each time, against 94 M for one

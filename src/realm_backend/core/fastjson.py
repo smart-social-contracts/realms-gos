@@ -11,6 +11,9 @@ What the stub did stays as it was, because stored rows and ``layered_codex.canon
 depend on it: ``dumps`` writes compact separators and non-ASCII characters as they are, whatever ``ensure_ascii`` and
 ``separators`` say; ``loads`` ignores whatever follows the first value and accepts control characters in strings.
 ``loads`` reports a malformed text as CPython does, with the line and column (``JSONDecodeError``, below).
+A keyword is honoured or refused with a TypeError, never dropped: the stub took ``**kw`` and ignored it, so a caller
+that passed one that matters (``object_pairs_hook``, to refuse a repeated key) worked under CPython's json in the
+tests and did nothing in the canister. ``loads`` honours ``object_pairs_hook``; ``dumps`` the keywords the stub names.
 This belongs in basilisk's preamble; it is here until that release.
 """
 
@@ -60,10 +63,9 @@ def install():
     json.loads, json.dumps = loads, dumps
 
 
-def loads(text, object_pairs_hook=None, **_):
+def loads(text, *, object_pairs_hook=None):
     """The first JSON value in ``text``. Raises JSONDecodeError where there is none. ``object_pairs_hook``, as CPython's,
-    makes each object from the list of its ``(key, value)`` pairs (the stub ignored it, so a caller that needs the
-    pairs, such as one that refuses a repeated key, would have worked in tests and not in the canister)."""
+    makes each object from the list of its ``(key, value)`` pairs."""
     if isinstance(text, (bytes, bytearray)):
         text = text.decode("utf-8")
     elif not isinstance(text, str):
@@ -78,7 +80,7 @@ def loads(text, object_pairs_hook=None, **_):
         raise JSONDecodeError("Expecting value", text, no_value.value) from None
 
 
-def dumps(obj, ensure_ascii=True, sort_keys=False, indent=None, separators=None, default=None, **_):
+def dumps(obj, ensure_ascii=True, sort_keys=False, indent=None, separators=None, default=None):
     """``obj`` as JSON text: compact, with non-ASCII characters as they are; ``indent`` is the stub's."""
     if indent is not None:
         return _STUB_DUMPS(obj, ensure_ascii, sort_keys, indent, separators, default)
