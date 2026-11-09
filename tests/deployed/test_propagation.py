@@ -109,9 +109,12 @@ def test_a_codex_reaches_the_quarters_that_stage_in_time_at_t_and_the_others_kee
     assert [active(realm) for realm in (capital, early, late)] == [None, None, None]
 
     capital.run_at_effective_at(proposal)
+    net.wait_until(lambda: active(early) == codex_id, rounds=2)  # at T it asks the capital, then switches
     assert active(capital) == active(early) == codex_id  # the same instant: T is an exact instant on every clock
     switched = {realm.name: status(realm)["codex"]["installed_at"] for realm in (capital, early)}
-    assert switched["capital"] == switched["early"] and t <= switched["capital"] <= t + 2
+    assert t <= switched["capital"] <= t + 2 and abs(switched["early"] - switched["capital"]) <= 2
+    asked = [m for m in rows(capital, "FederationMessage", "topic", "source") if m["topic"] == "codex.required"]
+    assert [m["source"] for m in asked] == [early.cid]  # only the quarter that switched in time asked
     net.wait(2)
     assert titles(capital) == ["activated"] and titles(early) == []  # on_codex_activate runs once, on the capital
 
@@ -198,7 +201,7 @@ def test_a_quarter_ready_after_t_does_not_switch_to_a_codex_the_capital_reverted
     assert job(late)["status"] == "paused"
     capital.run_at_effective_at(proposal)
     assert active(capital) == expected_id(layer)
-    capital.govern("codex_revert", {})  # the realm goes back before late is ready
+    capital.govern("codex_revert", {"codex": first})  # the realm goes back before late is ready
     assert active(capital) == first
 
     late.ok("codex_install_resume", "ctl", job=job(late)["id"])
@@ -227,3 +230,70 @@ def test_a_quarter_ready_after_t_does_not_switch_to_a_codex_the_capital_replaced
     jobs = {j["id"]: j for j in rows(late, "InstallJob", "id", "status", "error")}
     assert jobs["J-3"]["status"] == "failed" and "which replaces it" in jobs["J-3"]["error"]
     assert active(late) == first and status(late)["pending"] is None  # neither of them was ever activated
+
+
+# ---- A revert on the capital reaches the quarters. A federation of its own: the codices above are left as they are.
+
+
+@pytest.fixture(scope="module")
+def reverting(net):
+    """A capital and two quarters, ``follower`` and ``absent``, registered and synced."""
+    chief = net.realm("chief")
+    follower, absent = net.realm("follower", members=("alice",)), net.realm("absent", members=("alice",))
+    net.register_quarters(chief, follower, absent)
+    return chief, follower, absent
+
+
+def installed_everywhere(net, site, realms, layer, replaces=None):
+    """The capital installs ``layer`` at once and the quarters follow: returns when every realm runs it."""
+    realms[0].govern("codex_install", site.change_list(layer, replaces=replaces))
+    net.wait_until(lambda: all(active(realm) == expected_id(layer) for realm in realms), rounds=2)
+
+
+def test_a_quarter_that_switched_to_a_bad_codex_follows_the_capitals_revert_and_a_down_one_catches_up(
+        net, site, people, reverting):
+    chief, follower, absent = reverting
+    good, bad = layer_of(people), layer_of(people, "2.0.0")
+    installed_everywhere(net, site, reverting, good)
+    installed_everywhere(net, site, reverting, bad, replaces=expected_id(good))
+    net.wait(2)
+    activated = titles(chief)
+    assert activated == ["activated", "activated"] and titles(follower) == []
+
+    absent.stop()  # it will not hear of the revert
+    chief.govern("codex_revert", {"codex": expected_id(good)})
+    reverted = chief.now()
+    assert active(chief) == expected_id(good)
+    net.wait_until(lambda: active(follower) == expected_id(good), rounds=2)  # nothing is downloaded: it has the codex
+    assert [h["status"] for h in status(follower)["history"]] == ["active", "reverted"]  # the good codex, the bad one
+    net.wait(2)
+    assert titles(chief) == activated and titles(follower) == []  # a revert runs no on_codex_activate
+
+    net.wait(JUDGE_AFTER)
+    assert flag(chief, follower) == "compliant"
+    behind = flag(chief, absent)  # it runs the bad codex, since the revert, not since the good one was first installed
+    assert abs(behind["NonCompliant"]["since"] - reverted) <= 2 and behind["NonCompliant"]["stale"] == ["arcadia"]
+
+    absent.start()
+    absent.ok("quarter_sync", "ctl")  # it reports the codex the realm voted out: the capital tells it again
+    net.wait_until(lambda: active(absent) == expected_id(good), rounds=2)
+    net.wait(2)
+    assert flag(chief, absent) == "compliant" and titles(absent) == []
+
+
+def test_a_quarter_that_missed_the_withdrawal_does_not_switch_at_t_for_the_capital_no_longer_requires_it(
+        net, site, people, reverting):
+    chief, follower, _ = reverting
+    good = layer_of(people)
+    third = {**good, "arcadia/procedure": good["arcadia/procedure"] + b"\n# third\n"}
+    proposal = chief.govern("codex_install", site.change_list(third, replaces=expected_id(good)),
+                            effective_at=chief.now() + HOUR)
+    net.wait_until(lambda: job(follower).get("step") == "wait", rounds=2)
+    follower.stop()  # it will not hear that the proposal is stopped
+    chief.govern("proposal_stop", {"proposal": proposal})
+    follower.start()
+    assert status(follower)["pending"]["id"] == expected_id(third)  # still staged: nobody told it
+    net.wait(HOUR + 60)
+    assert active(follower) == expected_id(good) and status(follower)["pending"] is None
+    assert job(follower)["status"] == "failed"
+    assert "a codex it has left is not switched to" in job(follower)["error"]

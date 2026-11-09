@@ -1603,18 +1603,22 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   quarter, in a message of its own per quarter, `codex.stage`: the codex's checksum, the change list's
   checksum and T (the proposal's `effective_at`, or the moment the job started when there is none). A quarter
   it cannot reach is recorded in the `FederationMessage` of the call and holds up no other. A staged codex the
-  capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`.
+  capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`. These
+  messages are the realm's own: `federation_message` does not relay them for a member, whatever they hold. The
+  job a quarter runs names no proposal, so the capital's proposal id is never one of the quarter's.
 - **Staging in a quarter.** A quarter runs the same install job, in staging mode: the change list and every chapter
   it lacks are read from the capital by checksum (`legislation_chapter`; the capital keeps the change list's
   bytes in `ChapterSource` like a chapter's), and nothing changes while it stages. One install at a time still
   holds: a quarter refuses the announcement while an install of its own runs, and a newer announcement replaces a
   staging in progress. An upgrade pauses the job like any other, and `codex_install_resume` resumes it.
 - **The switch.** The quarter schedules `codex_switch_staged` at T as a task of the realm's own, which
-  `tasks.rearm()` arms again after an upgrade. A quarter staged by T switches then, in one message, with no
-  `on_codex_activate`; it reports to its capital at once.
-- **A quarter ready after T** asks its capital which codex it runs before it switches, and switches only to the
-  one it staged. A codex the capital has left (reverted, or replaced by a newer one) is never activated; the
-  job fails and says so.
+  `tasks.rearm()` arms again after an upgrade. At T a quarter that is staged asks its capital which codex it
+  requires (the one in force, or the pending one once its time has come, `codex.required`) and switches, with no
+  `on_codex_activate`, only if that is the one it staged; it then reports to its capital. A codex the capital has
+  left (withdrawn, reverted, or replaced by a newer one) is never activated, even by a quarter that missed the
+  message: its job fails and says so. A capital that does not answer leaves the quarter on its codex and the job
+  paused, for an admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile.
+- **A quarter ready after T** goes through the same confirmation before it switches.
 - **A revert.** When the capital restores an earlier codex (`codex_revert`, `codex_revert_fast`), it tells each
   active quarter `codex.revert`, and each restores that codex from its own history at once: nothing is downloaded
   and no `on_codex_activate` runs. The quarter reports what it runs; a quarter that never ran that codex refuses,

@@ -160,7 +160,8 @@ def test_a_quarter_that_already_runs_the_pending_codex_at_its_time_is_not_behind
 
 
 def capital_serving(layer, listed, running=None):
-    """The capital as a peer: it serves the change list and the chapters by checksum and says which codex it runs."""
+    """The capital as a peer: it serves the change list and the chapters by checksum, and says which codex it requires
+    of its quarters (``running``, "" for none)."""
     texts = {"sha256:" + sha(body): body.decode() for body in layer.values()}
     texts[listed["checksum"]] = fake_chain.state["web"][listed["url"]][1].decode()
 
@@ -169,7 +170,7 @@ def capital_serving(layer, listed, running=None):
             return {"ok": True, "text": texts[sent["chapter"]]}
         return {"ok": False, "error": "not found", "kind": "not_found"}
 
-    return peer(CAPITAL, legislation_chapter=chapter,
+    return peer(CAPITAL, legislation_chapter=chapter, federation_message={"ok": True, "codex": running or ""},
                 quarter_sync={"ok": True, "directory": [], "codex": {"id": running, "version": running}, "index": 1})
 
 
@@ -182,12 +183,12 @@ def test_a_quarter_stages_from_its_capital_and_switches_at_t_and_runs_no_realm_h
     quarter(monkeypatch, "north")
     layer = own_layer()
     listed = change_list(layer)
-    serving = capital_serving(layer, listed, running=None)
+    serving = capital_serving(layer, listed, running=expected_id(layer))  # the capital switches at T too
     at = fake_chain.now() + HOUR
     assert announce(layer, listed, at)["staged"] == "started"
     run_job()
     seen = status()
-    assert (seen["job"]["status"], seen["job"]["step"], seen["job"]["proposal"]) == ("running", "wait", "P-9")
+    assert (seen["job"]["status"], seen["job"]["step"], seen["job"]["proposal"]) == ("running", "wait", "")  # not P-9
     assert seen["codex"] is None and seen["pending"]["id"] == expected_id(layer) and seen["pending"]["activates_at"] == at
     assert {c["route"] for c in seen["pending"]["chapters"].values()} == {"capital"}
     assert [sent["chapter"] for sent in serving.sent("legislation_chapter")] == [
@@ -199,8 +200,11 @@ def test_a_quarter_stages_from_its_capital_and_switches_at_t_and_runs_no_realm_h
     assert status()["codex"] is None  # nothing switches before T
     later(1)
     fire_timers()
+    assert status()["job"]["step"] == "confirm"  # at T it asks the capital which codex it requires
+    run_job()
     seen = status()
     assert seen["codex"]["id"] == expected_id(layer) and seen["job"]["status"] == "done" and seen["pending"] is None
+    assert serving.sent("federation_message") == [{"topic": "codex.required", "body": {}, "codex": ""}]
     fire_due()
     assert ok("notification_list", "alice")["notifications"] == []  # on_codex_activate runs once per realm, on the capital
     assert [s["population"] for s in serving.sent("quarter_sync")] == [len(world.PEOPLE)]  # it told its capital
@@ -342,13 +346,15 @@ def test_switching_by_hand_before_t_is_refused_and_after_t_it_is_harmless(monkey
     quarter(monkeypatch, "north")
     layer = own_layer()
     listed = change_list(layer)
-    capital_serving(layer, listed)
+    capital_serving(layer, listed, running=expected_id(layer))
     announce(layer, listed, fake_chain.now() + HOUR)
     run_job()
     assert "switches at" in call("codex_switch_staged", fake_chain.ANONYMOUS, job="J-1")["error"]
     later(HOUR)
-    assert ok("codex_switch_staged", fake_chain.ANONYMOUS, job="J-1")["status"] == "done"
-    assert ok("codex_switch_staged", fake_chain.ANONYMOUS, job="J-1")["status"] == "done"  # again: nothing more happens
+    assert ok("codex_switch_staged", fake_chain.ANONYMOUS, job="J-1")["step"] == "confirm"
+    assert ok("codex_switch_staged", fake_chain.ANONYMOUS, job="J-1")["step"] == "confirm"  # again: nothing more happens
+    run_job()
+    assert job()["status"] == "done"
 
 
 # ---- Calls between quarters carry the sender's codex checksum.
@@ -499,3 +505,90 @@ def test_a_quarter_refuses_a_revert_to_a_codex_it_never_ran_and_from_anyone_but_
     assert (unknown["kind"], status()["codex"]["id"]) == ("not_found", second)
     assert "only this quarter's capital" in call("federation_message", "south", topic="codex.revert", body={"codex": first})["error"]
     assert status()["codex"]["id"] == second
+
+
+# ---- What the review found: the relay, the switch at T, and the proposal ids.
+
+
+@pytest.mark.parametrize("topic", ["codex.stage", "codex.unstage", "codex.revert", "codex.required"])
+def test_an_admin_cannot_relay_the_realms_own_topics_to_the_quarters(federation, topic):
+    layer = own_layer()
+    body = {"codex": expected_id(layer), "checksum": change_list(layer)["checksum"], "at": 0, "proposal": "P-1"}
+    refused = call("federation_message", "ctl", topic=topic, body=body)  # a holder of everything, the controller
+    assert refused["kind"] == "forbidden" and "never relayed" in refused["error"]
+    for quarter_peer in federation:
+        assert quarter_peer.sent("federation_message") == []
+    assert ok("federation_message", "ctl", topic="ping", body={})["replies"].keys() == {"north", "south"}  # others go
+
+
+def test_the_capital_says_which_codex_it_requires_the_pending_one_once_it_is_due(federation):
+    assert ok("federation_message", "north", topic="codex.required")["codex"] == ""  # no layered codex
+    layer = own_layer()
+    p = schedule(change_list(layer))
+    run_job()
+    assert ok("federation_message", "north", topic="codex.required")["codex"] == ""  # pending, not due
+    later(HOUR)
+    assert ok("federation_message", "north", topic="codex.required")["codex"] == expected_id(layer)  # due
+    fire_timers()
+    run_job()
+    assert Proposal[p].status == "executed"
+    assert ok("federation_message", "north", topic="codex.required")["codex"] == expected_id(layer)  # in force
+
+
+def staged_until_t(monkeypatch, running):
+    """A quarter that staged a codex for T an hour away, its capital requiring ``running``; returns the capital peer."""
+    quarter(monkeypatch, "north")
+    layer = own_layer()
+    listed = change_list(layer)
+    serving = capital_serving(layer, listed, running=running)
+    announce(layer, listed, fake_chain.now() + HOUR)
+    run_job()
+    assert job()["step"] == "wait"
+    later(HOUR)
+    return serving, layer
+
+
+def test_a_quarter_that_missed_the_withdrawal_does_not_switch_at_t_because_the_capital_no_longer_requires_it(monkeypatch):
+    staged_until_t(monkeypatch, running="")  # the proposal was stopped; the unstage never arrived
+    fire_timers()
+    run_job()
+    assert status()["codex"] is None and status()["pending"] is None
+    assert "a codex it has left is not switched to" in job()["error"]
+
+
+def test_a_quarter_does_not_switch_at_t_when_the_capital_requires_another_codex(monkeypatch):
+    staged_until_t(monkeypatch, running=OTHER)
+    fire_timers()
+    run_job()
+    assert status()["codex"] is None and "the capital requires " + OTHER in job()["error"]
+
+
+def test_a_capital_that_does_not_answer_at_t_leaves_the_quarter_on_its_codex_until_an_admin_asks_again(monkeypatch):
+    serving, layer = staged_until_t(monkeypatch, running=None)
+    serving.answer("federation_message", rejects("the canister is stopped"))
+    fire_timers()
+    run_job()
+    assert status()["codex"] is None and job()["status"] == "paused" and "did not confirm" in job()["error"]
+    serving.answer("federation_message", {"ok": True, "codex": expected_id(layer)})
+    ok("codex_install_resume", "ctl", job="J-1")
+    run_job()
+    assert status()["codex"]["id"] == expected_id(layer) and job()["status"] == "done" and job()["error"] == ""
+
+
+def test_the_capitals_proposal_id_is_not_the_id_of_a_proposal_of_the_quarter(monkeypatch):
+    quarter(monkeypatch, "north")
+    layer = own_layer()
+    listed = change_list(layer)
+    capital_serving(layer, listed, running=expected_id(layer))
+    announce(layer, listed, fake_chain.now() + HOUR, proposal="P-1")  # the id of the quarter's own first proposal
+    run_job()
+    assert job()["proposal"] == "" and status()["pending"]["proposal"] == ""
+    ok("governance_update", "ctl", voting_window=0)
+    other = change_list(own_layer("2.0.0"), url="https://legislation.example.test/changes/own.json")
+    p = ok("proposal_create", "alice", title="Legislation", action={"op": "codex_install", "args": other})["proposal"]
+    assert p == "P-1"
+    for voter in ("alice", "bob", "dana", "carla"):
+        if Proposal[p].status == "voting":
+            ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert Proposal[p].status == "failed" and "an install is running" in Proposal[p].result["error"]  # not the staged job
+    assert status()["codex"] is None and job()["step"] == "wait"
