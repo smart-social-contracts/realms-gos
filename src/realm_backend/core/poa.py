@@ -43,7 +43,8 @@ OWN = {
     "extension_set_access": ("direct", "setup", "admin", None),
     "sidebar_configure": ("direct", "setup", "admin", None),
     "realm_configure_infrastructure": ("direct", "setup", "admin", "in_setup"),
-    # Each operation an extension runs needs a group of its own: it passes the delegate on (design, phase 7).
+    # It belongs to no group: a grant by groups reaches it, and each operation it runs is held to the grant, as a call of
+    # the delegate's own (core.op.on_behalf).
     "extension_call": ("direct", None, None, None),
     # Public reads, and an upgrade step for controllers: no member's act.
     "extension_list": ("none", None, None, None),
@@ -68,7 +69,8 @@ LEGACY = frozenset((
 
 # The operations a grant by groups can reach in this release. Each phase of the rollout adds its own; the last
 # deletes the gate. The five that phase 0 closed come back as pending actions (core.pending), and the member's
-# own pending actions are read like any other record.
+# own pending actions are read like any other record. The tasks, the shell and extension calls run other operations
+# for the member: each of those is held to the grant (core.op.on_behalf).
 ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
                     "federal_vote_propose", "action_get", "action_list",
                     # A member's own affairs, office work, organizations and administration: the direct operations
@@ -176,7 +178,24 @@ ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_s
                     "user_list",
                     "user_remove",
                     "user_set_status",
-                    "verdict_draft"}
+                    "verdict_draft",
+                    "extension_call",
+                    "shell",
+                    "task_add_schedule",
+                    "task_cancel",
+                    "task_create",
+                    "task_delete",
+                    "task_edit",
+                    "task_list",
+                    "task_logs",
+                    "task_reschedule",
+                    "task_run",
+                    "task_schedule"}
+
+# The origins whose delegated call may wait for the member's tap: someone's call is in progress, and its reply says that
+# the action waits. A task runs unattended, so it runs only what its grant covers directly (the model's "Tasks"), and so
+# does anything it runs through the shell or an extension: a call asks only if its origin and its root are in this list.
+ASKING_ORIGINS = ("user", "shell", "extension")
 
 # Whether the arguments of a call make an operation ask each time. They are read only under a grant by groups: a
 # grant made before groups keeps the behaviour phase 0 gave its operations (proposal_create refuses an action itself).
@@ -288,9 +307,8 @@ def grant_groups(grant):
 
 def longest(group, everything):
     """How long, in seconds, a grant may last since its start and still reach ``group``. Under "everything" no group
-    goes past 90 days. A direct operation of no group (``extension_call``, whose inner calls each need a group of their
-    own) is reached by "everything" alone."""
-    seconds = GROUPS[group][3] if group else EVERYTHING["longest"]
+    goes past 90 days."""
+    seconds = GROUPS[group][3]
     return min(seconds, EVERYTHING["longest"]) if everything else seconds
 
 
@@ -345,10 +363,12 @@ def covered(grant, name, spec, permission, args, at=None):
     if name not in ENABLED or spec["tier"] in EVERYTHING["never"]:
         return False
     (group, place), everything = about(name, args), EVERYTHING_SCOPE in groups
-    if not everything and not names_place(grant, group, place, permission):
+    if group and not everything and not names_place(grant, group, place, permission):
         return False
+    # An operation of no group is reached by every grant, for as long as the grant may last.
+    lasts = longest(group, everything) if group else longest_grant(groups)
     # The grant counts from when it began to act: its start, or its acceptance if that came later.
-    return (at or chain.now()) - max(grant.starts_at, grant.accepted_at) < longest(group, everything)
+    return (at or chain.now()) - max(grant.starts_at, grant.accepted_at) < lasts
 
 
 def asks(grant, spec, args):
@@ -368,12 +388,13 @@ def direct(grant, name, spec, args):
 
 
 def enabled_by_group():
-    """The enabled operations (name, spec) of each group, by name."""
+    """The enabled operations (name, spec) of each group, by name. One that belongs to no group is in none."""
     from core.op import ops
 
     out = {}
     for name in sorted(ENABLED):
-        out.setdefault(group_of(name), []).append((name, ops()[name]))
+        if group_of(name):
+            out.setdefault(group_of(name), []).append((name, ops()[name]))
     return out
 
 
