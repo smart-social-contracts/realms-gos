@@ -141,20 +141,44 @@ def test_facts_are_cedar_values():
             forbids.cedar_value(kind, value, "x")
 
 
+OPERATIONS = {"tax_policy_propose", "tax_policy_draft", "codex_revert", "a"}
+
+
 def test_targets_name_the_actions_the_policies_forbid_and_refuse_a_reserved_operation():
     facts = {"tax_policy_propose.taxes": {}, "tax_policy_draft.taxes": {}, "codex_revert": {}}
     two = 'forbid (principal,\n        action in [Realm::Action::"tax_policy_propose.taxes",\n' \
           '                   Realm::Action::"tax_policy_draft.taxes"],\n        resource)\n  when { true };\n'
-    assert forbids.targets(two, facts, RESERVED) == {"tax_policy_draft": ["tax_policy_draft.taxes"],
-                                                     "tax_policy_propose": ["tax_policy_propose.taxes"]}
+    assert forbids.targets(two, facts, OPERATIONS, RESERVED) == {"tax_policy_draft": ["tax_policy_draft.taxes"],
+                                                                 "tax_policy_propose": ["tax_policy_propose.taxes"]}
     reserved = 'forbid (principal, action == Realm::Action::"codex_revert", resource)\n  when { true };\n'
     with pytest.raises(Fail, match="no chapter may forbid codex_revert"):
-        forbids.targets(reserved, facts, RESERVED)
-    with pytest.raises(Fail, match="names no action"):
-        forbids.targets("forbid (principal, action, resource)\n  when { true };\n", facts, RESERVED)
+        forbids.targets(reserved, facts, OPERATIONS, RESERVED)
+    with pytest.raises(Fail, match="not scoped as the generator writes one"):  # it would forbid every operation
+        forbids.targets("forbid (principal, action, resource)\n  when { true };\n", facts, OPERATIONS, RESERVED)
     with pytest.raises(Fail, match="has no facts"):
-        forbids.targets(two.replace("tax_policy_draft.taxes", "nowhere"), facts, RESERVED)
-    assert forbids.targets("", facts, RESERVED) == {}
+        forbids.targets(two.replace("tax_policy_draft.taxes", "tax_policy_draft.nowhere"), facts, OPERATIONS, RESERVED)
+    assert forbids.targets("", facts, OPERATIONS, RESERVED) == {}
+
+
+def test_a_forbid_reaches_no_further_than_the_operations_it_names():
+    """The realm's own registry decides what an action is, not the sandbox: `call` is the action of every permission
+    decision, a forbid of one person is not what the generator writes, and a list of one is not either."""
+    facts = {"call": {}, "a": {}, "a.b": {}, "x": {}}
+    scope = 'forbid (%s, resource)\n  when { true };\n'
+    for head, why in (
+        ('principal, action == Realm::Action::"call"', "no operation of this realm"),
+        ('principal, action == Realm::Action::"x"', "no operation of this realm"),
+        ('principal, action == Realm::Action::"a.b.c"', "no operation of this realm"),
+        ('principal, action == Realm::Action::"a."', "no operation of this realm"),
+        ('principal == Realm::User::"alice", action == Realm::Action::"a"', "not scoped as the generator writes one"),
+        ('principal, action in [Realm::Action::"a"]', "not scoped as the generator writes one"),
+        ('principal, action == Realm::Action::"a" || action == Realm::Action::"a.b"', "not scoped"),
+        ('principal, action == Realm::Action::"a", resource == Realm::Realm::"1"', "not scoped"),
+    ):
+        with pytest.raises(Fail, match=why):
+            forbids.targets(scope % head, facts, OPERATIONS, RESERVED)
+    assert forbids.targets(scope % 'principal, action == Realm::Action::"a.b"', facts, OPERATIONS, RESERVED) == \
+        {"a": ["a.b"]}
 
 
 # ── What the legislation never sees ──────────────────────────────────────────────────────────────────────────────
@@ -456,20 +480,59 @@ FORBID = 'forbid (principal, action == Realm::Action::"a", resource)\n  when { t
 
 def test_the_realm_loads_forbids_and_nothing_else_from_the_sandbox():
     facts = {"a": {}}
-    assert forbids.targets("@id(\"x\")\n" + FORBID, facts, RESERVED) == {"a": ["a"]}
+
+    def targets(text):
+        return forbids.targets(text, facts, OPERATIONS, RESERVED)
+
+    assert targets("@id(\"x\")\n" + FORBID) == {"a": ["a"]}
     # what is inside a string is not code, whatever it says; an escaped quote does not close it
-    quoted = '@legislation("a permit (principal, action, resource); \\" forbid (")\n@id("x \\\\")\n' + FORBID
-    assert forbids.targets(quoted, facts, RESERVED) == {"a": ["a"]}
-    for smuggled, why in (
+    quoted = '@legislation("a permit (principal, action, resource); \\" forbid (// /* ")\n@id("x \\\\")\n' + FORBID
+    assert targets(quoted) == {"a": ["a"]}
+    assert targets('@legislation("Ley Orgánica 3/2018 \\u{1f600} \\n")\n' + FORBID) == {"a": ["a"]}  # text is free
+    smuggles = (
         ("permit (principal, action, resource);\n", "permits"),
         ("@id(\"p\")\npermit (principal, action == Realm::Action::\"a\", resource) when { context.public };\n", "permits"),
         ("forbid(principal, action, resource);\n", "not a forbid written as"),  # a head the scan of heads would miss
-        ("//\nforbid (principal, action, resource) when { true }\n;", "names no action"),
-        ("@id(\"u\n\")\n", "does not close, or breaks a line"),
-        ("@id(\"u)\n", "does not close, or breaks a line"),
-    ):
+        ("//\nforbid (principal, action, resource) when { true }\n;", "never writes"),
+        ("\nforbid (principal, action, resource) when { true }\n;\n", "not scoped"),
+        # a comment ends at `\n` and at `\r`, and a quote in one opens a string for any reader that skips comments
+        ('// "\rpermit (principal, action, resource);\r// "\n', "control character|never writes"),  # the review's
+        ('// "\npermit (principal, action, resource);\n// "\n', "control character|never writes"),
+        ("\rpermit (principal, action, resource);\r", "never writes"),
+        ("\r\npermit (principal, action, resource);\r\n", "never writes"),
+        ("/* permit (principal, action, resource); */", "never writes"),
+        ('/* " */ permit (principal, action, resource); /* " */', "never writes"),
+        ("// permit (principal, action, resource);\n", "never writes"),
+        ("#permit (principal, action, resource);\n", "never writes"),
+        ("\u2028permit (principal, action, resource);\n", "never writes"),
+        ("\u0085permit (principal, action, resource);\n", "never writes"),
+        ("\\\"permit (principal, action, resource);\n", "never writes|does not close"),
+        ("\tpermit (principal, action, resource);\n", "never writes"),
+        ("\x00permit (principal, action, resource);\n", "never writes"),
+        ('@id("u\n")\n', "control character"),
+        ('@id("u\r")\n', "control character"),
+        ('@id("u\x7f")\n', "control character"),
+        ('@id("u)\n', "does not close"),
+    )
+    for smuggled, why in smuggles:
         with pytest.raises(Fail, match=why):
-            forbids.targets(FORBID + smuggled, facts, RESERVED)
+            targets(FORBID + smuggled)
+        with pytest.raises(Fail, match=why):
+            targets(smuggled + FORBID)  # first or last, it makes no difference
+
+
+def test_the_comment_that_hides_a_permit_from_a_scan_is_real_to_the_engine():
+    """Cedar ends a `//` comment at `\\r` as at `\\n`, so a quote in one that is read as the start of a string hides the
+    `permit` after it: the engine grants what no scan that follows only `\\n` sees. The realm refuses such text."""
+    import cedarpy
+
+    hidden = FORBID + '// "\rpermit (principal, action, resource);\r// "\n'
+    request = {"principal": 'Realm::User::"u"', "action": 'Realm::Action::"other"', "resource": 'Realm::Realm::"1"',
+               "context": {}}
+    assert cedarpy.is_authorized(request, hidden, []).decision == cedarpy.Decision.Allow  # the permit works
+    assert cedarpy.is_authorized(request, FORBID, []).decision == cedarpy.Decision.Deny
+    with pytest.raises(Fail):
+        forbids.targets(hidden, {"a": {}}, OPERATIONS, RESERVED)
 
 
 def test_a_codex_whose_generated_cedar_smuggles_a_permit_is_not_loaded_nor_built(agora, monkeypatch):

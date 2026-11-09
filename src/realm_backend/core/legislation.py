@@ -468,7 +468,7 @@ def _generated(box):
     from core.forbids import targets  # compiled when a codex forbids something, not at every start
 
     return {"schema": out["schema"], "policies": out["cedar"], "types": out["facts"],
-            "targeted": targets(out["cedar"], out["facts"], RESERVED)}
+            "targeted": targets(out["cedar"], out["facts"], ops(), RESERVED)}
 
 
 def _ok(reply):
