@@ -101,7 +101,7 @@ def test_a_codex_reaches_the_quarters_that_stage_in_time_at_t_and_the_others_kee
         assert seen["codex"] is None and seen["pending"]["id"] == codex_id and seen["pending"]["activates_at"] == t
     assert {c["route"] for c in status(early)["pending"]["chapters"].values()} == {"capital"}
     assert {c["route"] for c in status(capital)["pending"]["chapters"].values()} == {"https"}
-    assert job(early)["proposal"] == proposal
+    assert job(early)["proposal"] == ""  # not the capital's proposal id, which could be one of the quarter's own
 
     early.upgrade()  # a staged job has no timer to lose: its schedule is armed again, and it waits for T
     assert (job(early)["status"], job(early)["step"]) == ("running", "wait")
@@ -113,8 +113,6 @@ def test_a_codex_reaches_the_quarters_that_stage_in_time_at_t_and_the_others_kee
     assert active(capital) == active(early) == codex_id  # the same instant: T is an exact instant on every clock
     switched = {realm.name: status(realm)["codex"]["installed_at"] for realm in (capital, early)}
     assert t <= switched["capital"] <= t + 2 and abs(switched["early"] - switched["capital"]) <= 2
-    asked = [m for m in rows(capital, "FederationMessage", "topic", "source") if m["topic"] == "codex.required"]
-    assert [m["source"] for m in asked] == [early.cid]  # only the quarter that switched in time asked
     net.wait(2)
     assert titles(capital) == ["activated"] and titles(early) == []  # on_codex_activate runs once, on the capital
 
@@ -141,11 +139,17 @@ def test_a_codex_reaches_the_quarters_that_stage_in_time_at_t_and_the_others_kee
     assert refused["ok"] is False and "failed" in refused["error"]
     never.stop()  # the later tests do not need it
 
-    # what receiving a 256 KB chapter from the capital costs a quarter
-    reply = json.dumps({"ok": True, "text": BIG_CHAPTER.decode()})
-    costs.measure(late, "quarter: read the capital's 256 KB reply (candid text, then json)",
-                  "import json\nfrom core.candid import quote, unquote\n"
-                  f"text = quote({reply!r})\njson.loads(unquote(text))")
+    # what receiving a 256 KB chapter from the capital costs a quarter: the whole callback of the call (api.installs
+    # fetch_from_capital after its await): the candid reply decoded, read, checked and stored. The chapter is new to it.
+    chapter = BIG_CHAPTER.decode()[:-2] + "z\n"
+    prepared = late.shell(
+        "import json\nfrom core import chain, layered_codex as store\nfrom core.candid import quote, unquote\n"
+        f"chapter = {chapter!r}\nsha = store.checksum(chapter)\n"
+        "reply = chain.candid_encode('(' + quote(json.dumps({'ok': True, 'text': chapter})) + ')')")
+    assert "Traceback" not in prepared, prepared
+    costs.measure(late, "quarter: the capital's 256 KB chapter, from the reply to the stored row (callback)",
+                  "text = json.loads(unquote(chain.candid_decode(reply)))['text']\n"
+                  "assert len(text.encode()) <= store.MAX_CHAPTER\nstore.store_chapter(sha, text)")
 
 
 def layer_of(people, tax="1.0.0"):
@@ -291,6 +295,7 @@ def test_a_quarter_that_missed_the_withdrawal_does_not_switch_at_t_for_the_capit
     net.wait_until(lambda: job(follower).get("step") == "wait", rounds=2)
     follower.stop()  # it will not hear that the proposal is stopped
     chief.govern("proposal_stop", {"proposal": proposal})
+    net.wait(5)  # the capital's message to the stopped quarter is rejected
     follower.start()
     assert status(follower)["pending"]["id"] == expected_id(third)  # still staged: nobody told it
     net.wait(HOUR + 60)
