@@ -60,15 +60,20 @@ def install():
     json.loads, json.dumps = loads, dumps
 
 
-def loads(text, **_):
-    """The first JSON value in ``text``. Raises JSONDecodeError where there is none."""
+def loads(text, object_pairs_hook=None, **_):
+    """The first JSON value in ``text``. Raises JSONDecodeError where there is none. ``object_pairs_hook``, as CPython's,
+    makes each object from the list of its ``(key, value)`` pairs (the stub ignored it, so a caller that needs the
+    pairs, such as one that refuses a repeated key, would have worked in tests and not in the canister)."""
     if isinstance(text, (bytes, bytearray)):
         text = text.decode("utf-8")
     elif not isinstance(text, str):
         raise TypeError(f"the JSON object must be str, bytes or bytearray, not {type(text).__name__}")
     start = len(text) - len(text.lstrip(" \t\n\r"))
+    scanner = _Scanner
+    if object_pairs_hook is not None:
+        scanner = type("_PairsScanner", (_Scanner,), {"object_pairs_hook": object_pairs_hook})
     try:
-        return _json.make_scanner(_Scanner)(text, start)[0]
+        return _json.make_scanner(scanner)(text, start)[0]
     except StopIteration as no_value:
         raise JSONDecodeError("Expecting value", text, no_value.value) from None
 

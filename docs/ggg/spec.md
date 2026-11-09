@@ -238,7 +238,8 @@ profile or a department sees.
 
 `Zone.defined` tells a zone of the realm (`zone_define`, which members name as their `home_zone`) from a member's
 home cell, and `Zone.population` is a running total of the members whose `home_zone` it is, kept by joining,
-`user_edit` and `user_remove`.
+`user_edit` and `user_remove`. A member's home cell is private, like `Human.h3_index`: a layered codex's chapters read
+no `Zone.user` or `Zone.metadata`, only a member's `User.home_zone`, the district.
 
 Indexed lookup keys, kept so that no lookup scans a collection: `Attribute.human`, `Delegation.link` (grantor and
 delegate while pending or active), `Dispatch.to` and `Dispatch.status`, `Vote.proposal_id`, `Budget.slot` (`fund:period:category`),

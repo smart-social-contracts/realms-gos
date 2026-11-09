@@ -1113,10 +1113,13 @@ The change list:
 | `replaces` | must equal the current codex's checksum; otherwise the install is refused as stale |
 | `set[].chapter` | `<source id>/<domain>`. The source must be in one of the realm's layer paths (§3.3); the domain must be in the GGG list. A calendar is set the same way, under the id `<source id>/calendar`, e.g. `eu/es/calendar` |
 | `set[].url`, `mirrors` | https only. The first URL whose bytes match `sha256` and `size` wins. For a layer from above, the bytes may instead come from the sync source's capital (§9.2) |
-| `remove` | chapters to empty. Allowed only for the realm's own layer |
+| `remove` | chapters to empty. Allowed only for the realm's own layer. A chapter is not both in `set` and in `remove` |
 | `release` | for legislation from above: `{"source": "eu/es", "version": "2.4.0"}`. `set` must then contain exactly that release's chapters on the realm's layer paths, and its calendar (§3.2) |
 | `report` | optional analysis report (§12.3). The UI shows it, labelled as not checked by the realm |
-| `summary` | shown in the proposal |
+| `summary` | shown in the proposal: the text of the summary per language, `{"es": "..."}`, or left out |
+
+The realm reads the list strictly: a JSON object that repeats a key is refused (a tool that kept the first value
+would show voters something other than what the realm installs, which keeps the last).
 
 Limits:
 
@@ -1340,10 +1343,15 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   proposal is a `proposal_create` to the legislation: its guards and hooks run on the filing. What a chapter
   reads of GGG's entities is an allowlist of entities and fields (`VIEWS` in `core/legislation.py`): what
   legislation needs to decide, never a key, a code, a person's private data, a sealed bid, who voted what, a
-  grant, a payment account or what one member was told; the arguments and results it gets carry no key material
-  or credential (`secret=` on the operation: a code, keys, private data, a request's body and reply), and neither
-  do the replies of its effects, while the personal data the audit log keeps out (`private=`) still reaches the
-  legislation that decides on it (I-PRV-1); and no read is answered while the codex loads.
+  grant, a payment account or what one member was told. So a notification shows its recipient, topic, sender and
+  time and not its title; a request shows when it was filed, is due and was decided, and not its body, reply or
+  decision (free text); a dispatch shows its title and status and not its body; a procedure and a loan show no
+  `facts`; a document shows its title only when it is public; and a zone shows no member, because a member's home
+  cell is as private as `Human.h3_index` (a chapter reads a member's district as `User.home_zone`, the id of a zone
+  the realm defined, never a cell). The arguments and results it gets carry no key material or credential
+  (`secret=` on the operation: a code, keys, private data, a request's body and reply), and neither do the replies
+  of its effects or the call a proposal carries, while the personal data the audit log keeps out (`private=`) still
+  reaches the legislation that decides on it (I-PRV-1); and no read is answered while the codex loads.
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
     hooks still run;
@@ -1434,9 +1442,12 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`
 3. **Load order:** `GUARDRAILS + POLICIES + generated forbids of every chapter`, parsed once per codex
    activation. The generated rules name their action in the head (the operation, or
    `<operation>.<list>`), so a decision only evaluates rules for that action.
-   - The Cedar is generated in the codex sandbox, which hands over the policies, the schema and the facts of the
-     actions the policies name; the realm's engine then parses and validates them strictly (`core.auth.use_forbids`),
-     and every decision after that evaluates what it holds, with no parse. `load` does it at the switch, so a codex
+   - The Cedar is generated in the codex sandbox, which hands over the policy text and nothing else. The realm builds
+     the schema and the fact types itself, from its own copy of GGG's fact schema (`ggg_facts`, less what operations
+     keep secret) and the context of `core.auth`, for the actions the policies name, with the library's schema writer;
+     a sandbox that said otherwise would change nothing. The realm's engine then parses and validates the policies
+     strictly against that schema (`core.auth.use_forbids`), and every decision after that evaluates what it holds,
+     with no parse. `load` does it at the switch, so a codex
      whose Cedar does not validate raises before the switch; `warm` does it at the realm's start, and the same
      forbids again (a reload after the sandbox spent its budget) are not parsed again. Step 5 of the install (`build`)
      validates the same Cedar and puts the running policies back, so an install that would not validate fails there.
@@ -1447,7 +1458,8 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`
      line breaks and Cedar's punctuation, so no comment of either kind (a `//` comment ends at `\r` as at `\n`, and a
      scan that missed that let a `permit` through), no non-ASCII; inside strings no control character; no `permit`
      word; each policy a forbid whose scope is exactly what the generator writes for the actions it names, with the
-     principal and the resource unconstrained, so no forbid of one person; and the operation of each action one of the
+     principal and the resource unconstrained, so no forbid of one person, and a condition that never uses either
+     word (the generator cannot write them); and the operation of each action one of the
      realm's own (`ops()`), never `call` (a forbid of which would refuse every permission decision) and never a
      reserved one, whatever the sandbox says. A smuggled `permit` fails the switch, the realm's start and install
      step 5. The engine's API does not yet list the effect and scope of a policy; when it does, the engine will check
@@ -1463,7 +1475,7 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`
 4. **The requests of a call.** The permission decision is what it was: one request on `call`, before anything else. A
    call whose operation a generated forbid names then makes, under the context `origin: "forbids"` (nothing in it but
    the operation and its facts; one `permit` for that origin is loaded with the forbids, so that only a forbid can
-   refuse it): one request on the operation's own action, if a forbid names it, with its args in GGG's form
+   refuse it, and never for `call` itself, the permission decision): one request on the operation's own action, if a forbid names it, with its args in GGG's form
    (`ggg_api.ggg_args`: renamed arguments, nanoseconds, variants), the principal the call acts for (`on_behalf_of`,
    when the call names someone other than its signer, so that a rule can refuse a delegate's vote) and the facts the
    operation derives (`derived=` on

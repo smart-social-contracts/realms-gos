@@ -48,8 +48,9 @@ class SignIn(Denied):
 # The generated forbids of a layered codex are asked on their own, apart from the permission decision: the request
 # carries only the operation and its facts, under this origin, which this permit lets through so that only a forbid
 # can refuse it. That is how an accepted proposal's replay meets the legislation's forbids, with no permit or guardrail
-# to deny it (the vote was the permission).
-FORBIDS_ONLY = 'permit (principal, action in Realm::Action::"call", resource) when { context.origin == "forbids" };\n'
+# to deny it (the vote was the permission). Never the permission decision itself, which is the action ``call``.
+FORBIDS_ONLY = ('permit (principal, action in Realm::Action::"call", resource) when { context.origin == "forbids" }\n'
+                '  unless { action == Realm::Action::"call" };\n')
 BLANK = {k: "" if t == "String" else False if t == "Bool" else [] for k, t in CONTEXT.items()}
 BASE = GUARDRAILS + POLICIES
 # What the Cedar engine holds: the realm's own policies, and with a layered codex the generated forbids and the schema

@@ -8,8 +8,9 @@ install checks; ``views`` is the install's report and ``cedar`` the Cedar the fo
 ``compute`` answer for a GGG operation. The only way out is ``rpc``: ``ggg_read`` for the read-only view of GGG's entities that chapters import,
 and ``local_day`` for the realm's local day of a timestamp.
 
-Nothing here runs in the realm's own interpreter: the realm reads this file's text (core.sandbox.module_source) and
-never imports it. Every import is inside a function, so the text is a program, not a module.
+Nothing here runs in the realm's own interpreter but ``readable``, a pure function the realm calls too so that both
+read the same fact schema: the realm otherwise reads this file's text (core.sandbox.module_source) and never runs it.
+Every import is inside a function, so the text is a program, not a module.
 """
 
 import sys
@@ -181,10 +182,10 @@ def readable(facts, secret):
     return out
 
 
-def cedar(context, secret):
-    """The Cedar of every forbid, settings folded (§5.8): the policies, the schema they validate against with the
-    realm's ``context`` fields (§9.4), and the facts of each action the policies name, as ``[type, optional]``. A codex
-    without forbids is none of it, and costs nothing: GGG's fact schema is only read for one that holds a forbid."""
+def cedar(secret):
+    """The Cedar of every forbid, settings folded (§5.8): the policy text and nothing else, as the realm builds the
+    schema and the fact types it validates them against itself (core.legislation). A codex without forbids is none of
+    it, and costs nothing: GGG's fact schema is only read for one that holds a forbid."""
     codex = STATE["codex"]
     if not codex.has_forbids():
         return {"ok": True, "cedar": ""}
@@ -195,13 +196,7 @@ def cedar(context, secret):
     try:
         codex.use_facts(readable(FACTS, secret))
         bound = STATE["forbids"] = codex.forbids()
-        named = sorted({action for forbid in bound for action in forbid.actions})
-        return {
-            "ok": True,
-            "cedar": generator.policies(bound),
-            "schema": codex.cedar_schema(context=context, only=named),
-            "facts": {a: {n: [f.type, f.optional] for n, f in codex.facts.actions[a].facts.items()} for a in named},
-        }
+        return {"ok": True, "cedar": generator.policies(bound)}
     except LegislationError as e:
         return {"ok": False, "error": str(e)}
 

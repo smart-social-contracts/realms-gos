@@ -72,7 +72,10 @@ def test_the_view_shows_the_allowed_fields_of_the_allowed_entities_and_nothing_e
         assert entity not in legislation.VIEWS
     for entity, field in (("Human", "date_of_birth"), ("Human", "h3_index"), ("Identity", "ref"), ("Document", "ref"),
                           ("Document", "hash"), ("Notification", "body"), ("Notification", "read_by"), ("User", "private_data"),
-                          ("Realm", "manifest_data"), ("Proposal", "votes"), ("Land", "registered_by")):
+                          ("Realm", "manifest_data"), ("Proposal", "votes"), ("Land", "registered_by"),
+                          ("Zone", "user"), ("Zone", "metadata"), ("Notification", "title"), ("Request", "body"),
+                          ("Request", "reply"), ("Request", "decision"), ("Dispatch", "body"), ("Procedure", "facts"),
+                          ("Loan", "facts")):
         assert field not in legislation.VIEWS[entity]
 
 

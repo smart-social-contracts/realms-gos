@@ -70,9 +70,32 @@ def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and
     (text().replace('"remove": []', '"remove": "town/tax"'), "remove is a list"),
     (text(release={"source": "eu/es"}), "release is"),
     (text(), "changes nothing"),
+    # a repeated key reads as its last value here and as its first elsewhere: what voters see could differ
+    (text(set=[entry("town/tax")]).replace('"realm": "town"', '"realm": "town", "realm": "other"'), "repeats the key 'realm'"),
+    (text(set=[entry("town/tax")]).replace('"size": 100', '"size": 100, "size": 200'), "repeats the key 'size'"),
+    (text(set=[entry("town/tax")], summary={"en": "x"}).replace('"en": "x"', '"en": "x", "en": "y"'), "repeats the key 'en'"),
+    (text(set=[entry("town/tax")], remove=["town/tax"]), "town/tax is both set and removed"),
+    (text(set=[entry("town/tax")], summary="a summary"), "summary is"),
+    (text(set=[entry("town/tax")], summary=["a summary"]), "summary is"),
+    (text(set=[entry("town/tax")], summary={"en": 5}), "summary is"),
+    (text(set=[entry("town/tax")], summary=0), "summary is"),
+    (text(set=[entry("town/tax")], summary=False), "summary is"),
 ])
 def test_what_parse_refuses(bad, match):
     refused(change_list.parse, bad, match=match)
+
+
+def test_a_summary_is_a_text_per_language_and_may_be_left_out():
+    chapter = [entry("town/tax")]
+    assert change_list.parse(text(set=chapter))["summary"] == {}
+    assert change_list.parse(text(set=chapter, summary=None))["summary"] == {}
+    assert change_list.parse(text(set=chapter, summary={}))["summary"] == {}
+    assert change_list.parse(text(set=chapter, summary={"en": "x", "es": "y"}))["summary"] == {"en": "x", "es": "y"}
+
+
+def test_the_same_key_in_different_objects_is_no_repeat():
+    same = text(set=[entry("town/tax"), entry("town/water")], remove=["town/procedure"])
+    assert [c["chapter"] for c in change_list.parse(same)["set"]] == ["town/tax", "town/water"]
 
 
 def test_the_change_list_of_the_bonus_change_is_one_the_realm_accepts():

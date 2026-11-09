@@ -81,19 +81,31 @@ def head_of(actions):
     return "principal,\n        action in [" + ",\n                   ".join(named) + "],\n        resource)"
 
 
+def names_principal_or_resource(policy, head):
+    """Whether the condition of a generated forbid, the text of ``policy`` after its ``head``, uses the word
+    ``principal`` or ``resource`` outside a string. The scope keeps them unconstrained, so a condition that names one
+    would reach one person again; the generator never writes either (``F`` has no way to name them, and a fact called
+    so is written as ``context.facts["principal"]``)."""
+    outside, _ = strings_of(policy[len(head):])
+    return not {"principal", "resource"}.isdisjoint(" ".join(outside).translate(PUNCTUATION).split())
+
+
 def targets(policies, facts, operations, reserved):
     """The Cedar actions the generated ``policies`` name, by operation: ``{"tax_policy_propose":
     ["tax_policy_propose.taxes"]}``. ``operations`` are the realm's own, which no one else's word replaces, ``facts``
     the actions the generator described, and ``reserved`` the operations no chapter may forbid (§10.4). Fail for what
     the generator must never write: anything but forbids, a scope other than the one it writes (a forbid of one
-    person, of `call` itself, of an action that is no operation of this realm, of a reserved operation), or an action
-    without facts."""
+    person, of `call` itself, of an action that is no operation of this realm, of a reserved operation) or a
+    condition that names the principal or the resource, or an action without facts."""
     named = {}
     for policy in only_forbids(policies):
         actions = [part.split('"', 1)[0] for part in policy.split("resource)", 1)[0].split('Realm::Action::"')[1:]]
         if not actions or not policy.startswith(head_of(actions)):
             raise Fail("a generated forbid is not scoped as the generator writes one: it would reach further than "
                        "the operations it names")
+        if names_principal_or_resource(policy, head_of(actions)):
+            raise Fail("a generated forbid names the principal or the resource in its condition, which the generator "
+                       "never writes: it would reach one person")
         for action in actions:
             operation, _, field = action.partition(".")
             if operation not in operations or "." in field or action.endswith("."):

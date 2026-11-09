@@ -125,6 +125,13 @@ def test_a_malformed_text_is_reported_in_the_canister_as_cpython_reports_it(full
     assert json.loads(run(full, DECODE)) == expected
 
 
+def test_a_change_list_that_repeats_a_key_is_refused_in_the_canister(full):
+    """core.change_list reads the pairs of each object; the stub's loads ignored the hook, the fast one gives it."""
+    out = run(full, "from core import change_list\nfrom core.db import Fail\ntry:\n"
+                    "    change_list.parse('{\"kind\": 1, \"kind\": 2}')\nexcept Fail as e:\n    print(e)")
+    assert out.strip() == "the change list repeats the key 'kind'"
+
+
 # What the stub writes, which the canister's dumps must write byte for byte. The text is made on the host, with
 # CPython's json asked for compact separators and raw non-ASCII characters, which is how the stub writes.
 CORPUS = [

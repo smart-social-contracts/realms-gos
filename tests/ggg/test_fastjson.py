@@ -50,6 +50,20 @@ def test_loads_is_as_lenient_as_the_stub():
     assert fastjson.loads('{"c": "line\nbreak"}') == {"c": "line\nbreak"}
 
 
+def test_loads_gives_each_object_to_the_pairs_hook_as_cpython_does():
+    """The stub ignored the hook, so a caller that refuses a repeated key (core.change_list) passed its tests and did
+    nothing in the canister."""
+    text = '{"a": 1, "a": 2, "b": [{"c": 3, "c": 4}]}'
+    assert fastjson.loads(text, object_pairs_hook=list) == json.loads(text, object_pairs_hook=list)
+    assert fastjson.loads(text) == {"a": 2, "b": [{"c": 4}]}  # the hook of one call is not left behind for the next
+
+    def refuses(pairs):
+        raise ValueError("no")
+
+    with pytest.raises(ValueError, match="^no$"):
+        fastjson.loads(text, object_pairs_hook=refuses)
+
+
 @pytest.mark.parametrize("text", ["", "   ", "x", "[1,", "[\n  1,\n  "])
 def test_loads_refuses_what_is_not_json_as_cpython_does(text):
     with pytest.raises(json.JSONDecodeError) as stub:
