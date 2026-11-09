@@ -222,8 +222,9 @@ def is_result(value):
 
 def crossing(value, file, way="returned"):
     """``value``, as it crosses between the chapter of ``file`` and another domain, ``returned`` by its method or
-    ``handed`` to it: plain data passes, a chapter instance is seen through ``Public``, and anything else (a
-    method, a view of other domains, an object a chapter made) is refused (realms-gos#543)."""
+    ``handed`` to it: plain data passes frozen (a list is a tuple, a dict read-only), so neither side changes
+    what the other holds; a chapter instance is seen through ``Public``, and anything else (a method, a view of
+    other domains, an object a chapter made) is refused (realms-gos#543, #621)."""
     from realms.legislation.chapter import Chapter
 
     if isinstance(value, Chapter):
@@ -232,7 +233,7 @@ def crossing(value, file, way="returned"):
         raise LegislationError(
             f"{file} {way} {type(value).__name__}: only plain data crosses a domain boundary"
         )
-    return value
+    return freeze(value)
 
 
 class Public(metaclass=Sealed):

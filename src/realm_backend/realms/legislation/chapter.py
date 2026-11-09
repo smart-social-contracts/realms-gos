@@ -308,7 +308,8 @@ class ChapterMeta(type, metaclass=Sealed):
                 _rule(member, upper, refuse)
             own[key] = member
             attrs[key] = _install(member)
-        body = {k: v for k, v in namespace.items() if k in CLASS_BODY or k == "uses"}
+        body = {k: v for k, v in namespace.items() if k in CLASS_BODY}
+        body["uses"] = tuple(uses)  # a tuple, as a setting's list is: the class holds no mutable value
         cls = super().__new__(meta, name, bases, {**body, **attrs})
         _keep(
             cls,
