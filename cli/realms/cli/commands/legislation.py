@@ -18,7 +18,6 @@ read here, so a body beside the line, such as EMSHI, is checked as a realm of it
 own ``realm.py``: the one a source above keeps beside its releases is that source's, as ``plan`` skips a relayed one.
 """
 
-import json
 from pathlib import Path
 from typing import List, Optional
 
@@ -28,6 +27,7 @@ from rich.console import Console
 from realms.cli.commands.legislation_analysis import Analysis, MissingTools
 from realms.cli.commands.legislation_cases import case_problems
 from realms.cli.commands.legislation_layout import commit_of, layout_problems
+from realms.cli.commands.legislation_load import WorkingFiles, load_realm
 from realms.cli.commands.legislation_propose import (
     change_list,
     chapter_entry,
@@ -44,8 +44,7 @@ from realms.cli.commands.legislation_resolve import (
     resolve_realm,
     tree_record,
 )
-from realms.legislation import Codex, LegislationError, Refused, subset_ast
-from realms.legislation.paths import REALM
+from realms.legislation import LegislationError
 from realms.legislation.resolver import check_uses
 
 console = Console()
@@ -117,74 +116,18 @@ def check_view():
     return view
 
 
-def sources(tree: Path) -> List[str]:
-    """Every source id under ``tree``: a folder with a source.json, as ``eu/es/vc``."""
-    return sorted(
-        p.parent.relative_to(tree).as_posix() for p in tree.rglob("source.json")
-    )
-
-
-def layers_of(source: str, known: List[str]) -> List[str]:
-    """The source's ancestor sources and itself, top to bottom."""
-    parts = source.split("/")
-    path = ["/".join(parts[: i + 1]) for i in range(len(parts))]
-    return [s for s in path if s in known]
-
-
-def chapters_of(tree: Path, source: str) -> List[str]:
-    """The domains the source has a chapter for: its ``<domain>.py`` files."""
-    return sorted(p.stem for p in (tree / source).glob("*.py"))
-
-
-def load_realm(tree: Path, realm: str, known: List[str], operations, facts: dict, ggg):
-    """The realm's codex with its calendars and chapters loaded from the tree, and the refusals met on the way, as the
-    checker prints them. ``ggg`` is the module a chapter imports ``ggg`` from."""
-    layers = layers_of(realm, known)
-    codex = Codex(
-        layers,
-        realm=realm,
-        operations=operations,
-        modules={"ggg": ggg},
-        facts=facts,
-    )
-    problems = []
-    for source in layers:
-        calendar = tree / source / "calendar.json"
-        if calendar.exists():  # its shape passed the layout rules
-            codex.calendar_layer(source, json.loads(calendar.read_text()))
-    domains = []
-    for source in layers:
-        for domain in chapters_of(tree, source):
-            if domain not in domains:
-                domains.append(domain)
-    for domain in domains:
-        for source in layers:
-            file = tree / source / (domain + ".py")
-            if not file.exists() or (domain == REALM and source != realm):
-                continue  # a realm chapter is the realm's own; the layers above hold theirs for themselves (§3)
-            text = file.read_text()
-            try:
-                subset_ast.check(text, f"{source}/{domain}.py")
-                codex.load(source, domain, text)
-            except Refused as e:
-                problems.append(str(e))
-                break  # the layers below build on this one
-    return codex, problems
-
-
 def check_realm(
-    tree: Path,
+    files: WorkingFiles,
     realm: str,
-    known: List[str],
     operations,
     facts: dict,
     analysis: Analysis,
 ) -> List[str]:
     """Load the realm's codex from the tree and check it; the refusals, as the checker prints them."""
-    codex, problems = load_realm(tree, realm, known, operations, facts, check_view())
+    codex, problems = load_realm(files, realm, operations, facts, check_view())
 
     def reload(ggg):
-        return load_realm(tree, realm, known, operations, facts, ggg)[0]
+        return load_realm(files, realm, operations, facts, ggg)[0]
 
     try:
         codex.check()
@@ -193,7 +136,7 @@ def check_realm(
         ):  # read from a codex that loaded whole: a chapter that did not load would be a false "no such domain"
             check_uses(codex)
             problems += analysis.problems(codex) or case_problems(
-                tree, codex, realm, reload
+                files, codex, realm, reload
             )
     except LegislationError as e:
         problems.append(str(e))
@@ -232,7 +175,8 @@ def check_command(
         console.print(f"[red]{tree} is not a folder[/red]")
         raise typer.Exit(2)
     refuse(layout_problems(tree))
-    known = sources(tree)
+    files = WorkingFiles(tree)
+    known = files.sources()
     realms = [realm] if realm else known
     if realm and realm not in known:
         console.print(f"[red]{realm} has no source.json under {tree}[/red]")
@@ -250,7 +194,7 @@ def check_command(
     problems, analysis = [], Analysis(skip=no_analysis)
     try:
         for one in realms:
-            problems += check_realm(tree, one, known, operations, facts, analysis)
+            problems += check_realm(files, one, operations, facts, analysis)
     except MissingTools as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(2)

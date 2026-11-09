@@ -1,0 +1,180 @@
+"""Questions to Cedar's SymCC about sets of forbids (docs/codices/layered-codex.md §12.3).
+
+SymCC (``cedar symcc`` of the Cedar CLI 4.14.1, experimental flavour, with cvc5 1.3.1) proves a property of policy sets
+for every request, or gives one that breaks it. Each question is asked of one Cedar action, over a set that starts with
+``permit`` for everything so that only the forbids decide: the legislation, not who holds which permission, and with
+the assumptions of the fact schema added, since a Cedar schema cannot state a range (R1, realms-gos#481).
+
+An ``Answer`` is ``proved`` True (VERIFIED), False (DOES NOT HOLD, with the request that breaks it as ``example``) or
+None (the solver did not decide: never a pass).
+"""
+
+import os
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import List, NamedTuple, Optional
+
+from realms.legislation.cedar import NAMESPACE, attribute, has, quoted
+from realms.legislation.periods import UNITS
+
+SYMCC_TIMEOUT = 300  # seconds for one query; the CLI itself stops cvc5 after 60
+PERMIT_ALL = '@id("harness/permit_all")\npermit (principal, action, resource);'
+PERIOD_COUNT_MAX = 1_000_000  # GGG's range for a Period's count
+
+
+class Answer(NamedTuple):
+    proved: Optional[bool]
+    example: Optional[
+        dict
+    ]  # the context of a request that breaks the property, when it does not hold
+    said: str
+
+
+class Solver:
+    """The Cedar CLI's ``symcc`` for one schema."""
+
+    def __init__(self, cedar_cli: str, cvc5: str, schema: str):
+        self.cedar_cli, self.cvc5, self.schema = cedar_cli, cvc5, schema
+
+    def never_errors(self, action: str, policy: str) -> Answer:
+        return self.ask(action, "never-errors", {"-p": [policy]})
+
+    def always_denies(self, action: str, policies: List[str]) -> Answer:
+        return self.ask(action, "always-denies", {"-p": policies})
+
+    def implies(self, action: str, first: List[str], second: List[str]) -> Answer:
+        """Whether every request the set ``first`` allows is allowed by ``second``."""
+        return self.ask(
+            action, "implies", {"--policies1": first, "--policies2": second}
+        )
+
+    def equivalent(self, action: str, first: List[str], second: List[str]) -> Answer:
+        return self.ask(
+            action, "equivalent", {"--policies1": first, "--policies2": second}
+        )
+
+    def ask(self, action: str, check: str, sets: dict) -> Answer:
+        with tempfile.TemporaryDirectory() as folder:
+            schema = Path(folder, "realm.cedarschema")
+            schema.write_text(self.schema)
+            files = []
+            for flag, policies in sets.items():
+                path = Path(folder, f"{len(files)}.cedar")
+                path.write_text("\n\n".join(policies) + "\n")
+                files += [flag, str(path)]
+            command = [
+                self.cedar_cli, "symcc", "--principal-type", f"{NAMESPACE}::User", "--action",
+                f'{NAMESPACE}::Action::"{action}"', "--resource-type", f"{NAMESPACE}::Realm",
+                "--schema", str(schema), "--counterexample", check, *files,
+            ]  # fmt: skip
+            try:
+                done = subprocess.run(
+                    command, capture_output=True, text=True, timeout=SYMCC_TIMEOUT,
+                    env={**os.environ, "CVC5": self.cvc5},
+                )  # fmt: skip
+            except subprocess.TimeoutExpired:
+                return Answer(None, None, f"no answer in {SYMCC_TIMEOUT} s")
+        said = (done.stdout + done.stderr).strip()
+        if done.returncode == 0 and "VERIFIED" in done.stdout:
+            return Answer(True, None, said)
+        if "DOES NOT HOLD" in done.stdout:
+            return Answer(False, example_of(done.stdout), said)
+        return Answer(None, None, said)
+
+
+# ── The request a counterexample names ────────────────────────────────────────────────────────────────────────────
+
+TOKEN = re.compile(r'\s*("(?:\\.|[^"\\])*"|-?\d+|[{}\[\],:]|[A-Za-z_][A-Za-z_0-9]*)')
+
+
+def example_of(output: str) -> Optional[dict]:
+    """The context of the request a counterexample names, from the ``context: {...}`` line SymCC prints."""
+    line = next(
+        (row for row in output.splitlines() if row.startswith("context:")), None
+    )
+    if line is None:
+        return None
+    tokens = TOKEN.findall(line[len("context:") :])
+    try:
+        value, _ = read_value(tokens, 0)
+    except (IndexError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def read_value(tokens: List[str], i: int):
+    """The Cedar value that starts at ``tokens[i]``: a record, a set, a string, a number or a Boolean."""
+    token = tokens[i]
+    if token == "{":
+        record, i = {}, i + 1
+        while tokens[i] != "}":
+            key = tokens[i]
+            if tokens[i + 1] != ":":
+                raise ValueError(f"{key} is not followed by a colon")
+            record[key.strip('"')], i = read_value(tokens, i + 2)
+            i += tokens[i] == ","
+        return record, i + 1
+    if token == "[":
+        items, i = [], i + 1
+        while tokens[i] != "]":
+            item, i = read_value(tokens, i)
+            items.append(item)
+            i += tokens[i] == ","
+        return items, i + 1
+    if token[0] == '"':
+        return bytes(token[1:-1], "utf-8").decode("unicode_escape"), i + 1
+    if token in ("true", "false"):
+        return token == "true", i + 1
+    return int(token), i + 1
+
+
+# ── The requests GGG's fact schema allows ─────────────────────────────────────────────────────────────────────────
+
+
+def assumption(codex, action: str) -> Optional[str]:
+    """A forbid that fires on the requests of ``action`` that the fact schema rules out: a number outside the range GGG
+    gives it, a Period of a count or a unit GGG does not have. Added to every set under analysis, it takes them out of
+    the question ("a rate lies between 0 and 100 %"). It is analysis input and is never installed.
+    """
+    breaks = []
+    for name, fact in codex.facts.actions[action].facts.items():
+        outside = fact_outside(name, fact)
+        if outside:
+            breaks.append(
+                outside
+                if not fact.optional
+                else f"({has('context.facts', name)} && {outside})"
+            )
+    if not breaks:
+        return None
+    return (
+        f'@id("assume/{action}")\n'
+        f"forbid (principal, action == {NAMESPACE}::Action::{quoted(action)}, resource)\n"
+        f"  when {{ {' || '.join(breaks)} }};"
+    )
+
+
+def fact_outside(name: str, fact) -> Optional[str]:
+    """What it is for the fact ``name`` to be outside what GGG allows, or None where it allows anything."""
+    value = attribute("context.facts", name)
+    if fact.type == "Long" and fact.range:
+        low, high = fact.range
+        return f"({value} < {low} || {value} > {high})"
+    if fact.type == "Period":
+        units = " || ".join(f"{value}.unit == {quoted(u)}" for u in UNITS)
+        return (
+            f"({value}.count < 0 || {value}.count > {PERIOD_COUNT_MAX} || !({units}))"
+        )
+    return None
+
+
+def forbids_on(codex, action: str, generic: bool = False) -> dict:
+    """The Cedar of each forbid of ``codex`` on ``action``, by id."""
+    return {f.id: f.cedar(generic) for f in codex.forbids() if action in f.actions}
+
+
+def policy_set(forbids: dict, assumed: Optional[str]) -> List[str]:
+    """The set a question is asked of: everything permitted, the forbids, the assumption."""
+    return [PERMIT_ALL, *forbids.values(), *([assumed] if assumed else [])]
