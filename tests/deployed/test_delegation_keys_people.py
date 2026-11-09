@@ -45,7 +45,7 @@ def test_a_key_prepared_for_the_assistant_alone_is_stored_only_when_the_member_a
     ok(realm, "delegation_grant", alice, delegate=mallory, groups=["see"], expires_in=30 * DAY)
     peek = {"method": "ggg_action_get", "arg": encode([{"type": TEXT, "value": action["id"]}]), "on_behalf_of": alice}
     read = realm.ggg("ggg_read_for", READ_FOR, peek, BLOB, mallory, query=True)
-    assert decode(bytes(read["Ok"]))[0]["value"] == []
+    assert decode(bytes(read["Ok"]))[0]["value"] is None  # a null opt, which an untyped decode reads as None
 
     tap = {"action": action["id"], "hash": action["hash"], "on_behalf_of": []}
     assert "Err" in realm.ggg("ggg_action_approve", APPROVE, tap, ACTION, claude)  # the delegate's own tap is refused
@@ -57,7 +57,7 @@ def test_a_key_prepared_for_the_assistant_alone_is_stored_only_when_the_member_a
     own = realm.ggg("ggg_crypto_envelope", TEXT, scope, Types.Opt(ENVELOPE), claude, query=True)["Ok"][0]
     assert bytes(own["wrapped_dek"]) == b"wrapped-for-claude" and str(own["principal"]) == claude
     other = realm.ggg("ggg_crypto_envelope", TEXT, f"user:{alice}:old", Types.Opt(ENVELOPE), claude, query=True)
-    assert "Err" in other or other["Ok"] == []
+    assert "Err" in other  # the scope it was not given has no envelope for it: not found
 
 
 def test_text_that_only_looks_like_a_principal_is_refused_when_the_action_is_prepared_and_a_real_principal_is_not(realm, people):
