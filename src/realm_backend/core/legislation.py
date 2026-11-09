@@ -196,7 +196,8 @@ def activate(codex):
         load(codex)
     from ggg import Realm
 
-    if Realm["1"].is_quarter:
+    here = Realm["1"]
+    if here.is_quarter and not here.is_capital:  # registering a quarter makes the capital a quarter too
         return
     realm = chain.self_id()
     yield from _hooks("codex_activate", {"codex": codex.id}, {"codex": codex.id}, Call(realm, realm, "codex"), None)
