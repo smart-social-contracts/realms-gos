@@ -4,6 +4,7 @@ import { backend, quarterBackend, setActiveQuarter, whenBackendSignsAs } from '$
 import { read, run, quarter } from '$lib/realm';
 import { principal } from '$lib/stores/auth';
 import { activeQuarterId } from '$lib/stores/quarters';
+import { choicesFor } from '$lib/utils/authorizeChoices';
 
 const STORAGE_KEY = 'realm_acting_on_behalf_of';
 
@@ -19,10 +20,22 @@ function readStored() {
 /** Grantor principal when acting on behalf of another user; null = self. */
 export const actingOnBehalfOf = writable(readStored());
 
-/** Cached delegation lists from delegation_list. */
+/**
+ * @typedef {{groups?: string[], operations?: string[]}} Scope
+ * @typedef {{id: string, grantor: string, delegate: string, label: string, description: string, scope: Scope,
+ *   status: string, starts_at: number, expires_at: number}} Grant
+ * @typedef {{id: string, grantor: string, delegate: string, delegate_is_member: boolean, label: string,
+ *   description: string, scope: Scope, starts_at: number, expires_at: number, request_expires_at: number}} GrantRequest
+ */
+
+/** Cached delegation lists from delegation_list. @type {import('svelte/store').Writable<Grant[]>} */
 export const delegationsAsDelegate = writable([]);
+/** @type {import('svelte/store').Writable<Grant[]>} */
 export const delegationsAsGrantor = writable([]);
+/** @type {import('svelte/store').Writable<Grant[]>} */
 export const pendingDelegations = writable([]);
+/** Open requests to act for the caller, which they answer on the Authorize page. @type {import('svelte/store').Writable<GrantRequest[]>} */
+export const requestsToMe = writable([]);
 
 actingOnBehalfOf.subscribe((value) => {
 	if (!browser) return;
@@ -95,6 +108,7 @@ export async function loadDelegations(backendActor) {
 		const asDelegate = [];
 		let fromGrantor = 1;
 		let fromDelegate = 1;
+		let requests = [];
 		while (fromGrantor || fromDelegate) {
 			// A side already read to its end starts over at row 1 here: its rows are dropped.
 			const page = await realm.read('delegation_list', {
@@ -103,6 +117,7 @@ export async function loadDelegations(backendActor) {
 				count: 100
 			});
 			if (!page.ok) return;
+			requests = page.requests;
 			if (fromGrantor) asGrantor.push(...page.as_grantor);
 			if (fromDelegate) asDelegate.push(...page.as_delegate);
 			fromGrantor = fromGrantor && page.next.grantor;
@@ -111,34 +126,27 @@ export async function loadDelegations(backendActor) {
 		delegationsAsDelegate.set(asDelegate);
 		delegationsAsGrantor.set(asGrantor);
 		pendingDelegations.set(asDelegate.filter((d) => d.status === 'pending'));
+		requestsToMe.set(requests.filter((r) => r.grantor === get(principal)));
 	} catch (e) {
 		console.warn('Failed to load delegations:', e);
 	}
 }
 
-/** Permissions the caller holds here and may grant: [{operation, label, description}], ``operation`` being the permission. */
-export async function loadDelegableOperations() {
+/** The groups the caller may grant, in the realm's own words: [{id, label, summary, risk, longest, confirms}]. */
+export async function loadDelegationGroups() {
 	const realm = await resolveDelegationRealm();
-	const [ops, me] = await Promise.all([realm.read('delegable_operations'), realm.read('me')]);
-	if (!ops.ok) return [];
-	const byPermission = new Map();
-	for (const { op, permission } of ops.operations) {
-		if (holds(me, permission)) byPermission.set(permission, [...(byPermission.get(permission) || []), op]);
-	}
-	return [...byPermission].map(([operation, names]) => ({
-		operation,
-		label: operation,
-		description: names.join(', ')
-	}));
+	const reply = await realm.read('delegable_operations');
+	if (!reply.ok) throw new Error(reply.error);
+	return reply.groups || [];
 }
 
-/** Grant power of attorney from the caller (who is always the grantor). Times are epoch seconds. */
-export async function grantDelegation({ delegate, operations, label, description, startsAt, expiresAt }) {
+/** Grant power of attorney from the caller (who is always the grantor) for ``groups``. Times are epoch seconds. */
+export async function grantDelegation({ delegate, groups, label, description, startsAt, expiresAt }) {
 	const realm = await resolveDelegationRealm();
 	return legacy(
 		await realm.run('delegation_grant', {
 			delegate,
-			operations,
+			groups,
 			label,
 			description,
 			starts_at: startsAt,
@@ -147,29 +155,67 @@ export async function grantDelegation({ delegate, operations, label, description
 	);
 }
 
-/** An open power of attorney request addressed to (or filed by) the caller. */
-export async function loadDelegationRequest(requestId) {
+export async function acceptDelegation(delegationId) {
 	const realm = await resolveDelegationRealm();
-	const [list, me] = await Promise.all([realm.read('delegation_list', { count: 1 }), realm.read('me')]);
-	if (!list.ok) return legacy(list);
-	const request = list.requests.find((r) => r.id === requestId);
-	if (!request) return { success: false, error: 'This request is closed or was not made to you' };
-	const permissions = request.scope.operations.map((operation) => ({
-		operation,
-		label: operation,
-		grantor_holds: holds(me, operation)
-	}));
-	return { success: true, data: { ...request, permissions } };
+	return legacy(await realm.run('delegation_accept', { delegation: delegationId }));
 }
 
-/** Approve a request, with a subset of its permissions and an expiry no later than asked. */
-export async function approveDelegationRequest(requestId, { operations, expiresAt } = {}) {
+export async function revokeDelegation(delegationId) {
+	const realm = await resolveDelegationRealm();
+	return legacy(await realm.run('delegation_revoke', { delegation: delegationId }));
+}
+
+/** End every grant the caller gave, a page of them at a time. Resolves to how many it ended. */
+export async function revokeAllDelegations() {
+	const realm = await resolveDelegationRealm();
+	let revoked = 0;
+	for (let from = 1; from; ) {
+		const reply = await realm.run('delegation_revoke_all', { from, count: 500 });
+		if (!reply.ok) return { success: false, error: reply.error };
+		revoked += reply.revoked;
+		from = reply.next;
+	}
+	return { success: true, data: { revoked } };
+}
+
+/** What the delegate of ``delegationId`` did, newest first, from event id ``from`` (the latest when omitted). */
+export async function loadDelegationActivity(delegationId, from) {
+	const realm = await resolveDelegationRealm();
+	return realm.read('delegation_activity', { delegation: delegationId, count: 50, from });
+}
+
+/** The nickname of the member ``principal``; empty when they have none or are not a member. */
+export async function memberNickname(principal) {
+	const realm = await resolveDelegationRealm();
+	const reply = await realm.read('user_get', { user: principal });
+	return reply.ok ? reply.user.nickname || '' : '';
+}
+
+/** An open power of attorney request addressed to (or filed by) the caller, with the choices it leaves them. */
+export async function loadDelegationRequest(requestId) {
+	const realm = await resolveDelegationRealm();
+	const [list, me, ops] = await Promise.all([
+		realm.read('delegation_list', { count: 1 }),
+		realm.read('me'),
+		realm.read('delegable_operations')
+	]);
+	if (!list.ok) return legacy(list);
+	// Without the realm's groups the member would be shown raw ids, each marked as one they hold nothing in.
+	if (!ops.ok) return legacy(ops);
+	const request = list.requests.find((r) => r.id === requestId);
+	if (!request) return { success: false, error: 'This request is closed or was not made to you' };
+	const choices = choicesFor(request.scope, ops.groups || [], (permission) => holds(me, permission));
+	return { success: true, data: { ...request, choices } };
+}
+
+/** Approve a request with a scope within what it asked (``{groups}`` or ``{operations}``) and an expiry no later. */
+export async function approveDelegationRequest(requestId, { scope, expiresAt } = {}) {
 	const realm = await resolveDelegationRealm();
 	return legacy(
 		await realm.run('delegation_request_decide', {
 			request: requestId,
 			approve: true,
-			operations,
+			...scope,
 			expires_at: expiresAt
 		})
 	);

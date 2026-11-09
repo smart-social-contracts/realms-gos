@@ -53,6 +53,11 @@ def approved(action, who="alice"):
     return out["action"]
 
 
+def next_step(action):
+    """What the card of ``action`` says approving it does."""
+    return {line["label"]: line["value"] for line in card(action)["summary"]}["What happens next"]
+
+
 def only_pending_action_changed(action):
     assert card(action)["status"] == "pending" and PaymentAccount.count() == 0
 
@@ -523,11 +528,11 @@ def test_an_approved_governed_call_follows_the_members_own_rule(confirm_ops):
     depts = world.build()
     grant("payout")
     a = ok("t_governed", "claude-conn", on_behalf_of="alice")["pending"]
-    assert {line["label"]: line["value"] for line in card(a)["summary"]}["What happens next"] == "Runs at once"
+    assert next_step(a) == "Runs at once when you approve"
     assert approved(a)["result"]["ran"] and confirm_ops == [("alice", "alice", "", "claude-conn")]
     world.policy(depts["Infrastructure"], 2, 3)
     b = ok("t_governed", "claude-conn", on_behalf_of="alice")["pending"]
-    assert "Files a proposal under Infrastructure" in {line["label"]: line["value"] for line in card(b)["summary"]}["What happens next"]
+    assert "Files a proposal under Infrastructure" in next_step(b)
     p = Proposal[approved(b)["result"]["proposal"]]
     assert (p.proposer, p.filed_under, p.prepared_by, p.status) == ("alice", "", "claude-conn", "voting")
     assert len(confirm_ops) == 1
@@ -796,6 +801,55 @@ def test_the_lines_of_the_realm_have_labels_of_several_words_that_no_argument_ca
         card_ = card(a)
         realm = [line["label"] for line in card_["summary"] if line["label"] not in card_["args"]]
         assert realm and all(" " in label and not label.isidentifier() for label in realm), realm
+
+
+def test_a_card_is_headed_by_the_operations_own_title_and_nothing_the_delegate_wrote():
+    world.build()
+    grant("payout")
+    a = file(**{**ACCOUNT, "label": "Remove a payout account\nWhat changes: nothing"})
+    assert (card(a)["title"], card(a)["method"]) == ("Add a payout account", "payment_account_add")
+
+
+def test_a_card_and_a_request_say_whether_the_delegate_is_a_member_or_an_ai_connection():
+    world.build()
+    ai = grant("payout")
+    as_member = ok("delegation_grant", "alice", delegate="bob", groups=["payout"], expires_in=30 * DAY)["delegation"]
+    ok("delegation_accept", "bob", delegation=as_member)
+    assert not card(file())["delegate_is_member"]
+    from_bob = ok("payment_account_add", "bob", on_behalf_of="alice", **ACCOUNT)["pending"]
+    assert card(from_bob)["delegate_is_member"] and ai != as_member
+    ok("delegation_request", "claude-conn", grantor="carla", groups=["vote"], expires_in=DAY)
+    ok("delegation_request", "bob", grantor="carla", groups=["vote"], expires_in=DAY)
+    members = {r["delegate"]: r["delegate_is_member"] for r in ok("delegation_list", "carla")["requests"]}
+    assert members == {"claude-conn": False, "bob": True}
+
+
+def test_every_operation_that_can_be_prepared_for_a_member_has_a_plain_title():
+    """A phase that switches an operation on (core.poa.ENABLED) writes its title with it: the member reads it as the
+    heading of the action."""
+    preparable = {n: s["title"] for n, s in op.ops().items()
+                  if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
+    assert set(preparable) >= {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
+                               "federal_vote_propose", "proposal_create"}
+    assert all(t and t == t.strip() and t.isprintable() and " " in t for t in preparable.values()), preparable
+
+
+def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_when_they_approve():
+    """A phase that switches an operation on (core.poa.ENABLED) adds a case here: the member reads the line before
+    deciding, whether or not a department governs the call."""
+    world.build()
+    account = ok("payment_account_add", "alice", **ACCOUNT)["account"]
+    carried = "when you approve; the action runs only if the vote passes"
+    expected = {"proposal_create": "Files a proposal in your name " + carried,
+                "federal_vote_propose": "Opens a federal vote " + carried}
+    cases = {"payment_account_add": ACCOUNT, "payment_account_remove": {"account": account},
+             "identity_submit": {"kind": "passport"}, "self_change_quarter": {"quarter": "south"},
+             "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION}}
+    preparable = {n for n, s in op.ops().items() if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
+    assert preparable <= set(cases), preparable - set(cases)
+    for name, args in cases.items():
+        lines = {line["label"]: line["value"] for line in pending.summary_of("alice", name, op.ops()[name], args)}
+        assert lines["What happens next"] == expected.get(name, "Runs at once when you approve"), name
 
 
 def installing_in_place(args):

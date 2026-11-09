@@ -247,11 +247,11 @@ def delegation_list(c, args):
     """Your grants given (``as_grantor``) and received (``as_delegate``), ``count`` of each at a time (default 100,
     at most 500) from rows ``from_grantor`` and ``from_delegate`` (default 1), and your open ``requests`` either way.
     ``next`` maps grantor and delegate to the ``from_grantor`` and ``from_delegate`` of the next page (null at the
-    end)."""
+    end). A request says whether its delegate is a member (``delegate_is_member``) or an AI connection."""
     requests = open_requests("grantor", c.user) + open_requests("delegate", c.user)
-    return {**mine(c.user, args), "requests": [view(r, "id", "grantor", "delegate", "scope", "label", "description",
-                                                    "starts_at", "expires_at", "request_expires_at")
-                                               for r in requests]}
+    return {**mine(c.user, args), "requests": [{**view(r, "id", "grantor", "delegate", "scope", "label", "description",
+                                                       "starts_at", "expires_at", "request_expires_at"),
+                                                "delegate_is_member": User[r.delegate] is not None} for r in requests]}
 
 
 @op("self.data_view", read=True, returns="operations")

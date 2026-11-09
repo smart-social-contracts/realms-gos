@@ -15,7 +15,9 @@ from core.db import Conflict, Fail, Forbidden, JSON_MAX, NotFound, Unavailable, 
 TTL = 86400  # a pending action lasts a day
 APPROVING_TTL = 600  # an approval still running after this long ended in a trap
 OPEN_MAX = 10  # actions waiting between one member and one delegate
-CARRIES = ("proposal_create", "federal_vote_propose")  # operations that carry a call of their own, ``action``
+# The operations that carry a call of their own, ``action``, and what approving them starts.
+OPENS = {"proposal_create": "Files a proposal in your name", "federal_vote_propose": "Opens a federal vote"}
+CARRIES = tuple(OPENS)
 # The characters of a call's arguments as canonical JSON: a Json field holds 65,536, and the page shows the whole call.
 ARGS_MAX = 32 * 1024
 NOTE_MAX = 500
@@ -119,17 +121,17 @@ def risk_of(name):
 
 def summary_of(user, name, spec, args):
     """The realm's words about the call, a label and a value per line: each argument under its own name, a lower-case
-    word, then what the operation says of its effect (its ``summary`` hook) and where a governed call goes, under labels
-    of several words that start with a capital. An argument can never take a label of the realm's: a label of the realm's
-    has a space in it, and an argument's name is a single word."""
+    word, then what the operation says of its effect (its ``summary`` hook) and what happens when the member approves
+    it, under labels of several words that start with a capital. An argument can never take a label of the realm's: a
+    label of the realm's has a space in it, and an argument's name is a single word."""
     for key in args:
         if not (key.isascii() and key.isidentifier() and key == key.lower()):
             raise Fail(f"'{key}' is not an argument name: they are lower-case words")
     lines = [{"label": key, "value": shown(key, value, args)} for key, value in sorted(args.items())]
     if spec["summary"]:
         lines += spec["summary"](user, args)
-    if spec["governed"]:
-        lines.append({"label": "What happens next", "value": consequence(spec["governed"](args))})
+    department = spec["governed"](args) if spec["governed"] else None
+    lines.append({"label": "What happens next", "value": consequence(department, name)})
     return lines
 
 
@@ -160,18 +162,34 @@ def amount(units, decimals):
     return f"{whole}.{part:0{decimals}d}".rstrip("0").rstrip(".") if decimals else str(whole)
 
 
-def consequence(department):
+def consequence(department, name):
+    """What approving the call of ``name`` does: a call no department governs, or one a department decides alone, runs
+    at once. One that carries an action only starts the vote that decides whether the action runs."""
     from core.op import direct
 
+    if name in CARRIES:
+        return f"{OPENS[name]} when you approve; the action runs only if the vote passes"
     if department is None or direct(department):
-        return "Runs at once"
+        return "Runs at once when you approve"
     return f"Files a proposal under {department.id}; the realm votes"
+
+
+def title_of(name):
+    """The plain name of operation ``name`` that heads its action, written beside the operation: the realm's, never the
+    delegate's. An operation without one shows its own name."""
+    from core.op import ops
+
+    spec = ops().get(name)
+    return (spec and spec["title"]) or name
 
 
 def card(a, result=None):
     """An action as a client reads it. ``result`` replaces the stored one: the approval's own reply carries what is not
-    kept (``blank``)."""
-    return {**view(a, *CARD), "result": a.result if result is None else result}
+    kept (``blank``). ``title`` and ``delegate_is_member`` (a member, or an AI connection) are the realm's own words."""
+    from ggg import User
+
+    return {**view(a, *CARD), "title": title_of(a.method), "delegate_is_member": User[a.delegate] is not None,
+            "result": a.result if result is None else result}
 
 
 # ---- States

@@ -500,7 +500,7 @@ def proposing_action(user, args):
     return lines + [{"label": "What changes", "value": effect}]
 
 
-@op("proposal.create", returns="proposal", summary=proposing_action)
+@op("proposal.create", returns="proposal", summary=proposing_action, title="File a proposal that carries an action")
 def proposal_create(c, args):
     """File a proposal: ``title``, optional ``description``, ``department`` (default the whole realm) and ``action``
     (``{op, args}``, run once accepted; a department's proposal may only carry actions that department or one under it

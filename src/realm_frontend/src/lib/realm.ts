@@ -12,6 +12,7 @@ import { Actor, pollForResponse, requestIdOf } from '@dfinity/agent';
 import { IDL } from '@dfinity/candid';
 // @ts-expect-error canisters.js has no type declarations
 import { backend, quarterBackend } from '$lib/canisters';
+import { noteIfSent } from '$lib/stores/approvalSent';
 
 export type Reply = { ok: true; [key: string]: any } | { ok: false; error: string };
 
@@ -36,7 +37,9 @@ async function call(actor: any, method: 'read' | 'run', name: string, args: obje
 	const out = await actor[method](name, JSON.stringify(args ?? {})).catch((e: unknown) =>
 		method === 'run' ? stillProcessing(actor, e) : Promise.reject(e)
 	);
-	return JSON.parse(out);
+	const reply = JSON.parse(out);
+	if (method === 'run') noteIfSent(reply, args);
+	return reply;
 }
 
 export const read = (name: string, args: object = {}) => call(backend, 'read', name, args);
