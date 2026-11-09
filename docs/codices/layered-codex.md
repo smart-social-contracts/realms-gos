@@ -1605,7 +1605,8 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   it cannot reach is recorded in the `FederationMessage` of the call and holds up no other. A staged codex the
   capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`; the same
   codex announced for another time replaces the staging. These messages are the realm's own: `federation_message`
-  does not relay them for a member, whatever they hold. The job a quarter runs names no proposal, so the
+  does not relay them for a member, whatever they hold, and no chapter, hook or forbid runs on them (they are reserved like
+  the revert they carry: a codex cannot refuse its own revert). The job a quarter runs names no proposal, so the
   capital's proposal id is never one of the quarter's, and a job that ends without the switch cancels its task.
 - **Staging in a quarter.** A quarter runs the same install job, in staging mode: the change list and every chapter
   it lacks are read from the capital by checksum (`legislation_chapter`; the capital keeps the change list's
@@ -1619,7 +1620,8 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   is T plus one round trip. It then reports to its capital. A codex the capital has left (withdrawn, reverted, or
   replaced by a newer one) is never activated, even by a quarter that missed the message and keeps its codex: its
   job fails and says so. A capital that does not answer leaves the quarter on its codex and the job paused, for an
-  admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile.
+  admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile. The 24 hours of the job
+  cover its work, not the wait for T, however far away T is.
 - **A quarter ready after T** goes through the same confirmation before it switches.
 - **A revert.** When the capital restores an earlier codex (`codex_revert`, `codex_revert_fast`), it tells each
   active quarter `codex.revert`, and each restores that codex from its own history at once: nothing is downloaded

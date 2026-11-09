@@ -22,16 +22,16 @@ import json
 
 from api import codex as runtime
 from api import installs, links, quarters, tasks
-from core import chain, compliance
+from core import chain, compliance, legislation
 from core import layered_codex as store
 from core.db import Conflict, Fail, each, find, next_id
 from core.op import op
 from ggg import FederationMessage, InstallJob, LayeredCodex, Quarter, Task, TaskSchedule
 
-STAGE, UNSTAGE, REVERT = "codex.stage", "codex.unstage", "codex.revert"
-# The federation_message topics of this module. A local holder of quarter.sync can relay any other topic to the quarters,
-# but never these: only the capital's install and revert send them.
-OWN = (STAGE, UNSTAGE, REVERT)
+# The federation_message topics of this module (core.legislation lists them: no chapter, hook or forbid runs on a message
+# that carries one). A local holder of quarter.sync can relay any other topic to the quarters, but never these: only the
+# capital's install and revert send them.
+STAGE, UNSTAGE, REVERT = OWN = legislation.PROPAGATION
 # Seconds the capital gives the quarters that switched at T to say so before it judges the others: they report
 # within moments, and a flag raised in between would be a flag withdrawn at once.
 JUDGE_AFTER = 60
@@ -189,8 +189,7 @@ def codex_switch_staged(c, args):
         raise Conflict(f"{job.id} switches at {announced['at']}")
     if job.status == "running" and job.step == installs.WAIT:
         if installs.announced_by_my_capital(job):
-            job.step = "confirm"
-            installs.arm(job.id)
+            installs.leave_wait(job)
         else:
             installs.fail(job, installs.LEFT)
     return {"job": job.id, "status": job.status, "step": job.step}

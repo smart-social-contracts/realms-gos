@@ -86,6 +86,22 @@ def launch(job):
     return job
 
 
+def began(job):
+    """When the 24 hours of ``job`` began: when it started, or, for a quarter's job that waited for its switch time, when it
+    left the wait: the limit covers the work, not the wait."""
+    return job.staged.get("left_wait", job.started_at)
+
+
+def leave_wait(job):
+    """A quarter's job whose switch time has come goes on to ask its capital (``confirm``), with 24 hours from now."""
+    staged = job.staged
+    staged["left_wait"] = chain.now()
+    job.staged = staged
+    job.step = "confirm"
+    arm(job.id)
+    watch(job.id, TIMEOUT)
+
+
 def announced(job):
     """Whether ``job`` stages a codex that a capital announced to this quarter (api.propagation)."""
     return "announced" in job.staged
@@ -178,7 +194,7 @@ def codex_install_resume(c, args):
         raise Conflict(f"{job.id} is {job.status}, not paused")
     job.status = "running"
     arm(job.id)
-    watch(job.id, max(job.started_at + TIMEOUT - chain.now(), 0))
+    watch(job.id, max(began(job) + TIMEOUT - chain.now(), 0))
     return {"job": job.id, "step": job.step}
 
 
@@ -188,7 +204,7 @@ def step(job_id):
     job = InstallJob[job_id]
     if job is None or job.status != "running" or job.step == WAIT:
         return
-    if chain.now() - job.started_at > TIMEOUT:
+    if chain.now() - began(job) > TIMEOUT:
         fail(job, TIMED_OUT)
         return
     try:
@@ -211,7 +227,7 @@ def step(job_id):
 def expire(job_id):
     """The 24 hours are over: a job still at work fails. A staged job waits for its switch as before."""
     job = InstallJob[job_id]
-    if job is not None and job.status == "running" and job.step != WAIT and chain.now() - job.started_at >= TIMEOUT:
+    if job is not None and job.status == "running" and job.step != WAIT and chain.now() - began(job) >= TIMEOUT:
         fail(job, TIMED_OUT)
 
 
