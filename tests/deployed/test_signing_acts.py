@@ -140,3 +140,18 @@ def test_a_verdict_edited_after_it_was_prepared_is_not_issued_on_the_old_card(re
     fresh = prepare(realm, people, verdict)
     assert json.dumps("The fine is ten times higher") in [line["value"] for line in fresh["summary"]]
     assert next(iter(tap(realm, people, fresh)["Ok"]["status"])) == "Done" and status(realm, verdict) == "issued"
+
+
+def test_a_verdict_reads_in_the_judges_language_on_the_wasm_with_the_hidden_characters_escaped(realm, people):
+    alice, claude = people["alice"], people["claude-conn"]
+    verdict = drafted(realm, people)
+    written = "Resolución: se anula la denegación; col·lecció 判决书"
+    fine = [{"kind": "fine", "target": f"User:{people['bob']}", "amount": 5, "symbol": "€uro"}]
+    filed = ok(realm, "verdict_modify_terms", claude, verdict=verdict, decision=written + "\u202e\u200b\u2028",
+               penalties=fine, on_behalf_of=alice)
+    card = ok(realm, "action_get", alice, query=True, action=filed["pending"])["action"]
+    shown = {line["label"]: line["value"] for line in card["summary"]}
+    assert shown["Verdict text"] == '"' + written + '\\u202e\\u200b\\u2028"'
+    assert "5 \"€uro\" on" in shown["Verdict penalties"] and '"symbol":"€uro"' in shown["penalties"]
+    assert not {ord(c) for line in card["summary"] for c in line["value"]} & {0x202E, 0x200B, 0x2028}
+    ok(realm, "action_decline", alice, action=filed["pending"])

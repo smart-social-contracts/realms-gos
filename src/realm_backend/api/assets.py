@@ -6,7 +6,7 @@ from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Rea
 from api import codex
 from api.licenses import active, principals
 from core.op import op
-from core.pending import canonical, quoted, you_sign
+from core.pending import quoted, readable, you_sign
 from api.proposals import day_of, launched, realm_wide, whole
 
 LAND = "LAND"
@@ -372,7 +372,7 @@ def issuing_credential(user, args):
     expires = whole("expires_at", args.get("expires_at") or 0)
     return you_sign(f"Issues a {quoted(args['schema'])} credential from organization {quoted(args['organization'])} "
                     f"to {quoted(args['holder'])}",
-                    ("Credential claims", canonical(args.get("fields", {}))),
+                    ("Credential claims", readable(args.get("fields", {}))),
                     ("Credential subject", quoted(args.get("subject", "")) if args.get("subject") else "none"),
                     ("Credential payload", f"hash {quoted(args.get('payload_hash', ''))}, "
                                            f"kept at {quoted(args.get('payload_ref', ''))}"),

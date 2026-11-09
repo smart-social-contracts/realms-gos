@@ -29,6 +29,16 @@ CARD = ("id", "grantor", "delegate", "grant", "method", "args", "summary", "risk
 REFUSALS = {"not_found": NotFound, "forbidden": Forbidden, "conflict": Conflict, "unavailable": Unavailable}
 
 
+# What a line of the realm's cannot show as it is, written as a \uXXXX escape: the control characters (a line break could
+# start a line of the realm's own), the line and paragraph separators, the bidi controls (they reorder what is around
+# them) and the zero-width characters (they hide), and the surrogates, which no reply can carry. Letters, marks, digits,
+# punctuation and spaces of every script stay as they are, so that an official reads the act in their own language.
+UNSAFE = {cp: "\\u%04x" % cp for cp in (
+    *range(0x20), *range(0x7F, 0xA0), 0x061C, *range(0x200B, 0x2010), 0x2028, 0x2029, *range(0x202A, 0x202F), 0x2060,
+    *range(0x2066, 0x206A), *range(0xD800, 0xE000), 0xFEFF)}
+ESCAPES = {**UNSAFE, ord('"'): '\\"', ord("\\"): "\\\\", ord("\n"): "\\n", ord("\r"): "\\r", ord("\t"): "\\t"}
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
@@ -137,8 +147,15 @@ def summary_of(user, name, spec, args):
 
 
 def quoted(text):
-    """Text the delegate supplied, inside a sentence of the realm's: quoted, so that it cannot pass for the realm's words."""
-    return json.dumps(str(text))
+    """Text the delegate supplied, inside a sentence of the realm's: quoted, so that it cannot pass for the realm's words.
+    It is a JSON string, with the characters of ``UNSAFE`` escaped and every other as it is."""
+    return '"' + str(text).translate(ESCAPES) + '"'
+
+
+def readable(value):
+    """``value`` as JSON for a line of the realm's, as ``canonical`` writes it but with the characters of every script as
+    they are, those of ``UNSAFE`` escaped. For showing, never for sealing."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).translate(UNSAFE)
 
 
 def you_sign(sentence, *details):
@@ -168,7 +185,7 @@ def shown(key, value, args):
             return quoted(value)
         member = User[value] if len(value) <= 64 else None
         return f"{value} ({quoted(member.nickname)})" if member and member.nickname else value
-    return canonical(value)
+    return readable(value)
 
 
 def amount(units, decimals):

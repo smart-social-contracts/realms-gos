@@ -9,7 +9,7 @@ from ggg import (AllocationRule, Budget, Contract, Department, External, Financi
                  Transfer, Treasury)
 from ggg.finance.budget import KINDS
 from core.op import op
-from core.pending import canonical, money, quoted, you_sign
+from core.pending import money, quoted, readable, you_sign
 from core.ratio import ONE, PERCENT
 from api.proposals import realm_wide, root
 
@@ -936,9 +936,9 @@ def reporting(user, args):
     return you_sign(f"Issues a {quoted(kind)} report of fiscal period {quoted(p.id)}, "
                     + (f"which replaces report {previous[-1].id}" if previous else "the first of its kind"),
                     ("Report totals", f"debit {s['debit']}, credit {s['credit']}"),
-                    ("Report fund balances", canonical(s["fund_balances"])),
-                    ("Report accounts", canonical(s["accounts"])),
-                    ("Report adjustments", canonical(s["adjustments"]) if "adjustments" in s else "none"),
+                    ("Report fund balances", readable(s["fund_balances"])),
+                    ("Report accounts", readable(s["accounts"])),
+                    ("Report adjustments", readable(s["adjustments"]) if "adjustments" in s else "none"),
                     ("Report source hash", "sha256:" + p.source_hash))
 
 

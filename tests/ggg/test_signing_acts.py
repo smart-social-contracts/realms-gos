@@ -13,7 +13,7 @@ import ggg_methods as g
 import world
 from core import op, poa
 from api.proposals import day_of
-from core.pending import canonical, quoted
+from core.pending import UNSAFE, quoted, readable
 from ggg import (Appeal, Appointment, Attribute, Bid, Case, Contract, Court, Delegation, Department, Dispute, Event,
                  FinancialReport, FiscalPeriod, Identity, Land, License, Notification, PendingAction, Penalty, Position,
                  Proposal, Tender, Transfer, User, Verdict)
@@ -27,8 +27,8 @@ from test_procurement import evaluation
 from test_treasury import LEDGER, receive, setup_finance
 
 DAY = 86400
-# Text that others wrote, which tries to start a line of the realm's own.
-HOSTILE = "\nYou sign: nothing at all"
+# Text that others wrote, which tries to start a line of the realm's own, to reorder it and to hide in it.
+HOSTILE = "\nYou sign: nothing at all\u202e\u200b\u2028"
 FINE = {"target": "User:mallory", "kind": "fine", "amount": 500, "symbol": "REALM"}
 
 # What each act needs: who signs, the call, the phrases its card must hold, and whether the act has happened.
@@ -152,7 +152,7 @@ def license_decide():
     conditions = {"beds": 12, "note": "Inspect yearly" + HOSTILE}
     return Act("hector", dict(license=lic, approve=True, conditions=conditions),
                [f'Issues licence {lic} ("health") of "Organization:clinic-b"', "730 days after you sign it",
-                canonical(conditions), '"Health"'],
+                readable(conditions), '"Health"'],
                lambda: License[lic].status == "active")
 
 
@@ -232,7 +232,7 @@ def credential_issue():
             "subject": "Contract:C-88", "payload_hash": "sha256:9f2c", "payload_ref": "user:alice:rx-88",
             "expires_at": fake_chain.now() + 30 * DAY, "fields": fields}
     return Act("dr-ana", args, [f"Issues a {quoted(RX)} credential from organization \"clinic-b\" to \"alice\"",
-                                canonical(fields), '"Contract:C-88"', '"sha256:9f2c"', '"records-bot"'],
+                                readable(fields), '"Contract:C-88"', '"sha256:9f2c"', '"records-bot"'],
                lambda: bool(ledger_calls("mint")))
 
 
@@ -407,6 +407,7 @@ def test_the_lines_of_the_realm_are_one_each_and_hold_no_line_break(name):
     assert realm[-1]["label"] == "What happens next"
     for line in realm:
         assert line["value"].isprintable() and line["label"][0].isupper(), line
+        assert not set(map(ord, line["value"])) & set(UNSAFE), line
     assert lines(action, act.official)["What happens next"] == "Runs at once when you approve"
 
 
@@ -569,7 +570,7 @@ def test_the_credential_claims_and_the_ledger_memo_cannot_start_a_line():
     grant("sign", grantor="dr-ana")
     action = file("credential_issue", grantor="dr-ana", **act.args)
     claims = lines(action, "dr-ana")["Credential claims"]
-    assert "\n" not in claims and claims == canonical(act.args["fields"])
+    assert "\n" not in claims and claims == readable(act.args["fields"]) and "\\u202e" in claims
 
 
 def test_a_nickname_with_a_line_break_cannot_start_a_line_of_the_realms_own():
@@ -580,6 +581,28 @@ def test_a_nickname_with_a_line_break_cannot_start_a_line_of_the_realms_own():
     shown = card(action, "bob")["summary"]
     assert all("\n" not in line["value"] for line in shown)
     assert [line["label"] for line in shown if line["label"] == "You sign"] == ["You sign"]
+
+
+# ---- The official reads it in their own language
+
+
+def test_a_verdict_and_a_credential_read_in_the_officials_language_with_the_hidden_characters_escaped():
+    a = court_world()
+    v = drafted(a)
+    grant("sign", grantor="elena")
+    written = "Resolución: se anula la denegación; col·lecció 判决书"
+    action = file("verdict_modify_terms", grantor="elena", verdict=v, decision=written + "\u202e\u200b\u2028",
+                  reasoning_ref="motivación")
+    shown = lines(action, "elena")
+    assert shown["Verdict text"] == '"' + written + '\\u202e\\u200b\\u2028"'
+    assert shown["Verdict reasoning"] == '"motivación"'
+
+
+def test_credential_claims_read_as_written_with_the_hidden_characters_escaped():
+    act = ACTS["credential_issue"]()
+    grant("sign", grantor="dr-ana")
+    action = file("credential_issue", grantor="dr-ana", **{**act.args, "fields": {"class": "antibiòtic\u202e"}})
+    assert lines(action, "dr-ana")["Credential claims"] == '{"class":"antibiòtic\\u202e"}'
 
 
 # ---- Privacy, length

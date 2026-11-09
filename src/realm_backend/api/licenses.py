@@ -1,6 +1,6 @@
 from core import chain, localtime
 from core.db import Conflict, Fail, Forbidden, Unavailable, deref, each, find, next_id, page, page_by, view
-from core.pending import canonical, quoted, you_sign
+from core.pending import quoted, readable, you_sign
 from ggg import Calendar, Department, License, Organization, Procedure
 from core.op import op
 from api.proposals import day_of, realm_wide, whole
@@ -114,7 +114,7 @@ def deciding_licence(user, args):
         expires = f"{cycle // 86400} days after you sign it"
     issuer = find(Department, args.get("department") or (lic.issued_by.id if lic.issued_by else ""))
     return you_sign(f"Issues {of_the_licence(lic)}, which expires {expires}",
-                    ("Licence conditions", canonical({**(lic.conditions or {}), **args.get("conditions", {})})),
+                    ("Licence conditions", readable({**(lic.conditions or {}), **args.get("conditions", {})})),
                     ("Issuing department", quoted(issuer.id)))
 
 

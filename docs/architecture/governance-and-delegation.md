@@ -301,8 +301,11 @@ The delegate prepares it, and only the member's own approval runs it. The code i
    plain name ("Add a payout account"), which the realm writes beside the operation (`title=`). `summary` (a label and a
    value per line) and `risk` are the realm's own words, written from the stored arguments and the operation's `summary`
    hook, never from text the delegate supplies: each argument appears under its own lower-case name, the lines the realm
-   adds start with a capital, and the delegate's text inside them is quoted. Every card ends its realm lines with "What
-   happens next": "Runs at once when you approve", or the proposal that approving files when a department governs the
+   adds start with a capital, and the delegate's text inside them is quoted: a JSON string in which the letters, marks,
+   digits, punctuation and spaces of every script stay as written, so that an official reads "resolución" or "判决书" as
+   it is, and only the characters that could forge or reorder a line or hide in it are escaped as `\uXXXX`: control
+   characters and line breaks, bidi controls and zero-width characters (`UNSAFE` in `core/pending.py`). Every card ends its realm lines with
+   "What happens next": "Runs at once when you approve", or the proposal that approving files when a department governs the
    call. A call that carries an action (`proposal_create`, `federal_vote_propose`) says that approving only starts the
    vote, and that the action runs only if the vote passes. Only `note` is the delegate's, and a client shows it apart.
    `hash` is the sha256 (the canister's native one) of the canonical JSON of the realm's canister id, the id, the call,
