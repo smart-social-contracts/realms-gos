@@ -2,6 +2,7 @@ from core import auth, chain, language
 from core.db import Conflict, Fail, Forbidden, deref, find, next_id, page_by, view
 from ggg import Department, Dispatch, Document, External, KeyEnvelope, Realm
 from core.op import op
+from core.pending import named, principals, quoted
 from api.external import queue
 from api.proposals import appointed, holders, root
 
@@ -75,7 +76,18 @@ def crypto_public_key(c, args):
     return {"public_key": blob_hex(reply)}
 
 
-@op("self.data_manage", returns="encrypted_key", secret=("encrypted_key",))
+def deriving(user, args, grant):
+    """The key goes to whoever holds the transport key, for good: the one sentence the member must read."""
+    return [{"label": "Warning about your key",
+             "value": f"This gives {named(grant)} a permanent copy of your key. "
+                      "Revoking power of attorney does not take it back."},
+            {"label": "What changes",
+             "value": "Your key is sent encrypted to the transport key above, and whoever holds the matching private key "
+                      "opens everything that was ever wrapped for you"}]
+
+
+@op("self.data_manage", returns="encrypted_key", secret=("encrypted_key",), delivers=("encrypted_key",),
+    summary=deriving, title="Hand over a copy of your key")
 def crypto_derive_key(c, args):
     """Your vetKey, encrypted to ``transport_public_key`` (hex). It opens only what was wrapped for you."""
     reply = yield from chain.call(MGMT, "vetkd_derive_key", f'(record {{ input = blob "{blob(c.user.encode().hex())}"; '
@@ -84,21 +96,47 @@ def crypto_derive_key(c, args):
     return {"encrypted_key": blob_hex(reply)}
 
 
-@op("self.data_manage", returns="granted", secret=("keys",))
+def granting(user, args, grant):
+    """Who gets a key to the scope. When it is the delegate alone, the scope is all of yours that it reads."""
+    manager(args["scope"], user)
+    names, scope = principals(args["keys"], "keys"), quoted(args["scope"])
+    if set(args["keys"]) == {grant.delegate}:
+        effect = f"{named(grant)} will be able to read {scope}, and nothing else of yours"
+    else:
+        effect = f"{names} will be able to read {scope}"
+    return [{"label": "Keys go to", "value": names}, {"label": "What changes", "value": effect}]
+
+
+@op("self.data_manage", returns="granted", secret=("keys",), summary=granting, title="Give someone a key")
 def crypto_grant(c, args):
     """Store wrapped keys at ``scope``: ``keys`` maps principal to wrapped key. Replaces earlier wraps."""
     manager(args["scope"], c.user)
     return {"granted": grant(args["scope"], args["keys"], c.user)}
 
 
-@op("self.data_manage", returns="revoked")
+def revoking(user, args, grant):
+    """Who loses the key to the scope; you may be among them."""
+    manager(args["scope"], user)
+    names = principals(args["principals"], "principals")
+    you = ", and so do you" if user in args["principals"] else ""
+    return [{"label": "Loses access", "value": names},
+            {"label": "What changes", "value": f"{names} lose their key to {quoted(args['scope'])}{you}"}]
+
+
+@op("self.data_manage", returns="revoked", summary=revoking, title="Take keys away")
 def crypto_revoke(c, args):
     """Delete the wrapped keys of ``principals`` at ``scope`` (managers only). Returns ``revoked``."""
     manager(args["scope"], c.user)
     return {"revoked": revoke(args["scope"], args["principals"])}
 
 
-@op("self.data_manage", read=True, returns="envelope")
+def own_envelope(args):
+    """Reading your own envelope takes no permission, so that a principal that is no member, such as an AI connection given
+    one scope's key, reads the key it was given: an envelope is useless without the key it is wrapped for."""
+    return "self.join"
+
+
+@op("self.data_manage", read=True, returns="envelope", perm_for=own_envelope)
 def crypto_envelope(c, args):
     """Your wrapped key at ``scope``: nobody can read another principal's envelope."""
     e = find(KeyEnvelope, f"{args['scope']}|{c.user}")
@@ -137,7 +175,24 @@ def stored_languages(args):
     language.require_all(args["languages"])
 
 
-@op("document.manage", check=stored_languages, private=("keys",), secret=("keys",))
+def document_line(doc):
+    return {"label": "Document", "value": f"{doc.id} {quoted(doc.title)} of {quoted(doc.department)}"}
+
+
+def storing(user, args, grant):
+    """A document stored with ``keys`` gives those principals its key: that is what asks the member."""
+    staff(args["department"], user)
+    doc = find(Document, args["document"]) if args.get("document") else None
+    if doc and doc.department != args["department"]:
+        raise Fail(f"{doc.id} belongs to {doc.department}")
+    names = principals(args.get("keys") or {}, "keys")
+    what = f"Replaces {doc.id}" if doc else "Stores a new document"
+    return [{"label": "Keys go to", "value": names},
+            {"label": "What changes", "value": f"{what}, and {names} will be able to read it"}]
+
+
+@op("document.manage", check=stored_languages, private=("keys",), secret=("keys",), summary=storing,
+    title="Store a document and give out its key")
 def document_store(c, args):
     """Store a ``department`` document (or replace ``document``): ``title``, ``languages`` (BCP 47 tags), ``ref`` and
     ``hash`` of its ciphertext, optional ``kind`` (minutes, an ordinance), ``facts`` (what legislation reads about
@@ -173,7 +228,20 @@ def recipient_of(args):
         raise Fail("a basis states its legal_basis and its purpose")
 
 
-@op("document.manage", private=("keys",), secret=("keys",), returns="granted")
+def sharing(user, args, grant):
+    doc = find(Document, args["document"])
+    staff(doc.department, user)
+    recipient_of(args)
+    kind, _, who = args["recipient"].partition(":")
+    recipient = f"{kind} {principals([who], 'recipients')}" if kind == "User" else f"{kind} {quoted(who)}"
+    names = principals(args["keys"], "keys")
+    return [document_line(doc), {"label": "Shared with", "value": recipient},
+            {"label": "Keys go to", "value": names},
+            {"label": "What changes", "value": f"{names} will be able to read {doc.id}"}]
+
+
+@op("document.manage", private=("keys",), secret=("keys",), returns="granted", summary=sharing,
+    title="Share a document")
 def document_share(c, args):
     """Share ``document`` with ``recipient`` (``User:id``, ``Organization:id`` or ``External:id``), who must exist:
     ``keys`` maps principal to wrapped key (for an External, the principal that delivers to it). State the ``basis``
@@ -190,7 +258,17 @@ def sent_to(doc, journal):
     return any(p["journal"] == journal.id and Dispatch[p["dispatch"]].status != "failed" for p in doc.publications)
 
 
-@op("document.manage", returns="document")
+def publishing(user, args, grant):
+    doc = find(Document, args["document"])
+    staff(doc.department, user)
+    journal = f", and sent to the journal {quoted(args['to'])}" if args.get("to") else ""
+    return [document_line(doc),
+            {"label": "What changes",
+             "value": f"The content at {quoted(args['ref'])} becomes public: anyone, signed in or not, reads it, and it "
+                      f"cannot be taken back{journal}"}]
+
+
+@op("document.manage", returns="document", summary=publishing, title="Publish a document")
 def document_publish(c, args):
     """Make ``document`` public: the content in clear is at ``ref``, with its ``hash``, and anyone reads the record
     with document_get, signed in or not. Publish only what everyone may read: a published copy holds no personal
@@ -213,7 +291,15 @@ def document_publish(c, args):
     return {"document": doc.id}
 
 
-@op("document.manage", returns="revoked")
+def revoking_document(user, args, grant):
+    doc = find(Document, args["document"])
+    staff(doc.department, user)
+    names = principals(args["principals"], "principals")
+    return [document_line(doc), {"label": "Loses access", "value": names},
+            {"label": "What changes", "value": f"{names} can no longer open {doc.id}"}]
+
+
+@op("document.manage", returns="revoked", summary=revoking_document, title="Take a document's keys away")
 def document_revoke(c, args):
     """Delete the wrapped keys of ``principals`` for ``document``. Returns ``revoked``."""
     doc = find(Document, args["document"])
@@ -221,7 +307,16 @@ def document_revoke(c, args):
     return {"revoked": revoke(scope_of(doc), args["principals"])}
 
 
-@op("document.manage")
+def deleting(user, args, grant):
+    doc = find(Document, args["document"])
+    staff(doc.department, user)
+    return [document_line(doc),
+            {"label": "What changes",
+             "value": "The document and every key to it are deleted for good. This cannot be undone. A document with "
+                      "many keys is deleted over several calls, and each one asks you"}]
+
+
+@op("document.manage", summary=deleting, title="Delete a document")
 def document_delete(c, args):
     """Delete ``document``'s wrapped keys, ``count`` per call (default 100, at most 500), then the document itself:
     call again until ``deleted`` is true. Returns ``revoked`` (this call's principals) and ``deleted``."""

@@ -90,7 +90,7 @@ def prepare(grant, user, by, name, spec, args, note="", origin="user", declared=
     if len([a for a in list(each(PendingAction, "open_link", pair)) if settled(a).open_link]) >= OPEN_MAX:
         raise Conflict(f"{by} has {OPEN_MAX} actions waiting for {user}: wait for answers first")
     aid, now = next_id(PendingAction, "AC"), chain.now()
-    lines = summary_of(user, name, spec, args)
+    lines = summary_of(user, name, spec, args, grant)
     if len(json.dumps(lines)) > JSON_MAX - 1000:
         raise Fail("the call is too long to show the member")
     PendingAction(id=aid, grantor=user, delegate=by, grant=grant.id, method=name, args=args,
@@ -120,17 +120,18 @@ def risk_of(name):
     return poa.GROUPS[group][2] if group else ""
 
 
-def summary_of(user, name, spec, args):
-    """The realm's words about the call, a label and a value per line: each argument under its own name, a lower-case
-    word, then what the operation says of its effect (its ``summary`` hook) and what happens when the member approves
-    it, under labels of several words that start with a capital. An argument can never take a label of the realm's: a
-    label of the realm's has a space in it, and an argument's name is a single word."""
+def summary_of(user, name, spec, args, grant):
+    """The realm's words about the call that the delegate of ``grant`` prepares for ``user``, a label and a value per line:
+    each argument under its own name, a lower-case word, then what the operation says of its effect (its ``summary``
+    hook) and what happens when the member approves it, under labels of several words that start with a capital. An
+    argument can never take a label of the realm's: a label of the realm's has a space in it, and an argument's name is a
+    single word."""
     for key in args:
         if not (key.isascii() and key.isidentifier() and key == key.lower()):
             raise Fail(f"'{key}' is not an argument name: they are lower-case words")
     lines = [{"label": key, "value": shown(key, value, args)} for key, value in sorted(args.items())]
     if spec["summary"]:
-        lines += spec["summary"](user, args)
+        lines += spec["summary"](user, args, grant)
     department = spec["governed"](args) if spec["governed"] else None
     lines.append({"label": "What happens next", "value": consequence(department, name)})
     return lines
@@ -141,10 +142,55 @@ def quoted(text):
     return json.dumps(str(text))
 
 
+def named(grant):
+    """The delegate of ``grant`` as a sentence of the realm's names it: the label the grant gives, quoted since the
+    requester chose it, else the delegate's principal."""
+    return quoted(grant.label) if grant.label else grant.delegate
+
+
+def moment(seconds):
+    """``seconds`` since 1970, a time the member reads: UTC, to the minute."""
+    from core.civil import civil_from_days
+
+    days, rest = divmod(seconds, 86400)
+    year, month, day = civil_from_days(days)
+    return f"{year:04d}-{month:02d}-{day:02d} {rest // 3600:02d}:{rest % 3600 // 60:02d} UTC"
+
+
+def nicknamed(value):
+    """``value`` with the nickname of the member it names, if it names one."""
+    from ggg import User
+
+    member = User[value] if isinstance(value, str) and len(value) <= 64 else None
+    return f"{value} ({quoted(member.nickname)})" if member and member.nickname else value
+
+
+def principal(value):
+    """``value``, a principal a delegate named, as the realm's own line shows it: with the nickname of the member it
+    names, if it names one. Text that is not a principal's is refused, since it would stand in the realm's sentence
+    as the delegate's words, unquoted."""
+    if not chain.is_principal(value):
+        raise Fail(f"{quoted(value)[:60]} is not a principal")
+    return nicknamed(value)
+
+
+def principals(value, what):
+    """The principals in ``value`` (a list, or a mapping of principal to key) as the member reads them, refused if
+    ``value`` is neither or names anything but principals. ``what`` names the argument."""
+    if not isinstance(value, (list, dict)) or not all(isinstance(p, str) for p in value):
+        raise Fail(f"{what} are principals")
+    return ", ".join(principal(p) for p in sorted(value)) or "no one"
+
+
+def held(value):
+    """A principal the realm itself holds, such as an admin: shown as a principal, or quoted if what it holds is not one."""
+    return nicknamed(value) if chain.is_principal(value) else quoted(value)
+
+
 def shown(key, value, args):
     """An argument as the member reads it: a principal with its nickname, an amount in the token's decimals when the
     call names the token, any structure as JSON, and text with a line break or another unprintable character quoted."""
-    from ggg import Token, User
+    from ggg import Token
 
     token = Token[str(args["symbol"])] if args.get("symbol") else None
     if key == "amount" and isinstance(value, int) and not isinstance(value, bool) and token:
@@ -152,8 +198,7 @@ def shown(key, value, args):
     if isinstance(value, str):
         if not value.isprintable():  # a line break could start a line of the realm's own
             return quoted(value)
-        member = User[value] if len(value) <= 64 else None
-        return f"{value} ({quoted(member.nickname)})" if member and member.nickname else value
+        return nicknamed(value)
     return canonical(value)
 
 
@@ -184,13 +229,44 @@ def title_of(name):
     return (spec and spec["title"]) or name
 
 
-def card(a, result=None):
-    """An action as a client reads it. ``result`` replaces the stored one: the approval's own reply carries what is not
-    kept (``blank``). ``title`` and ``delegate_is_member`` (a member, or an AI connection) are the realm's own words."""
+def reads(c, a):
+    """Whether the call ``c`` reads the action ``a``: its grantor in person, or the delegate that prepared it. A delegate
+    acting for the grantor reads the actions it prepared and no others: another delegate's card holds what that
+    delegate asked for, its codes, keys and private data among them."""
+    if c.delegated:
+        return (c.user, c.by) == (a.grantor, a.delegate)
+    return c.user in (a.grantor, a.delegate)
+
+
+def card(c, a, result=None):
+    """An action as the call ``c`` reads it. ``result`` replaces the stored one: the approval's own reply carries what is
+    not kept (``blank``). ``title`` and ``delegate_is_member`` (a member, or an AI connection) are the realm's own words.
+    Only the grantor or the delegate, calling in person, reads the secret fields of the call the action holds; to any
+    other reader, such as a task or an extension, they are blank (``without_secrets``)."""
     from ggg import User
 
-    return {**view(a, *CARD), "title": title_of(a.method), "delegate_is_member": User[a.delegate] is not None,
-            "result": a.result if result is None else result}
+    out = {**view(a, *CARD), "title": title_of(a.method), "delegate_is_member": User[a.delegate] is not None,
+           "result": a.result if result is None else result}
+    return out if reads(c, a) and c.origin == "user" else without_secrets(a.method, out)
+
+
+def without_secrets(method, shown):
+    """``shown``, a card or an exported row of an action whose call is to operation ``method``, with the secret fields of
+    that call blank in its ``args`` and ``result`` and left out of its ``summary``, and those of a call it carries too
+    (a proposal's action). The summary line of an argument is made again from the argument without them."""
+    from core import legislation
+
+    hidden = secrets_of(method, delivered=False)
+    args = legislation.carried(blank(method, shown["args"], delivered=False))
+    lines = [{"label": line["label"], "value": shown_line(line, args)} for line in shown["summary"]
+             if line["label"] not in hidden]
+    return {**shown, "args": args, "result": legislation.carried(blank(method, shown["result"], delivered=False)),
+            "summary": lines}
+
+
+def shown_line(line, args):
+    """The summary line of an argument as it reads from ``args``; the realm's own lines are kept."""
+    return line["value"] if line["label"] not in args else shown(line["label"], args[line["label"]], args)
 
 
 # ---- States
@@ -227,13 +303,24 @@ def settled(a):
     return a
 
 
-def blank(name, value):
-    """``value``, the reply of operation ``name``, with its secrets (core.op.redacted's) blanked at any depth: the action
-    keeps the reply for whoever reads it later."""
+def secrets_of(name, delivered=True):
+    """The names of the fields of a call to operation ``name`` that its audit event keeps out: those in SECRET, its
+    ``private`` and its ``secret`` ones. The secrets the operation ``delivers`` are not among them when ``delivered``: the
+    member approved handing them to the delegate."""
     from core.op import SECRET, ops
 
     spec = ops().get(name)
-    hidden = set(SECRET) | set(spec["private"] if spec else ()) | set(spec["secret"] if spec else ())
+    hidden = set(SECRET)
+    if spec:
+        hidden |= set(spec["private"]) | (set(spec["secret"]) - (set(spec["delivers"]) if delivered else set()))
+    return hidden
+
+
+def blank(name, value, delivered=True):
+    """``value``, the reply of operation ``name``, with its secrets (``secrets_of``) blanked at any depth: the action keeps
+    the reply for whoever reads it later. A secret the operation ``delivers`` stays, unless ``delivered`` is false; a name
+    in SECRET is blanked whatever an operation delivers."""
+    hidden = secrets_of(name, delivered)
 
     def clean(x):
         if isinstance(x, dict):

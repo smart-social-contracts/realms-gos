@@ -192,7 +192,33 @@ ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_s
                     "task_logs",
                     "task_reschedule",
                     "task_run",
-                    "task_schedule"}
+                    "task_schedule",
+                    # Keys and private data, joining, power over people, power of attorney onward and the upgrade
+                    # approvals: each asks the member each time, except what is read and what only removes power.
+                    "crypto_access",
+                    "crypto_derive_key",
+                    "crypto_envelope",
+                    "crypto_grant",
+                    "crypto_public_key",
+                    "crypto_revoke",
+                    "crypto_scopes",
+                    "delegation_accept",
+                    "delegation_grant",
+                    "delegation_request_decide",
+                    "delegation_revoke",
+                    "document_delete",
+                    "document_get",
+                    "document_list",
+                    "document_publish",
+                    "document_revoke",
+                    "document_share",
+                    "document_store",
+                    "invite_create",
+                    "orchestration_decide",
+                    "organization_edit",
+                    "private_data_update",
+                    "realm_join",
+                    "representative_add"}
 
 # The origins whose delegated call may wait for the member's tap: someone's call is in progress, and its reply says that
 # the action waits. A task runs unattended, so it runs only what its grant covers directly (the model's "Tasks"), and so
@@ -246,6 +272,17 @@ def split(named):
     a group that takes no place has "" for it."""
     group, _, place = named.partition(":")
     return group, place
+
+
+def label_of(named):
+    """A group as a grant names it, in the realm's words: its label ("office:Health" is 'Office work: "Health"', the place
+    quoted), or what "everything" stands for."""
+    from core.pending import quoted
+
+    if named == EVERYTHING_SCOPE:
+        return "Everything you can do in this realm, now and later"
+    group, place = split(named)
+    return f"{GROUPS[group][0]}: {quoted(place)}" if place else GROUPS[group][0]
 
 
 def inbox_recipient(name, args):
