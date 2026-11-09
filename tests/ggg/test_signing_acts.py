@@ -504,6 +504,49 @@ def test_a_governed_signing_act_files_a_proposal_when_the_department_decides_by_
     assert (p.proposer, p.prepared_by, p.status) == ("bob", "claude-conn", "voting")
 
 
+# ---- What the card says is what is signed
+
+
+def test_a_verdict_edited_after_it_was_prepared_is_not_signed_until_it_is_prepared_again():
+    a = court_world()
+    paco = world.person("paco").id
+    world.seat("justice.judge2", paco, a["depts"]["Justice"], "resolution.issue", "resolution.modify_terms")
+    other = ok("judge_appoint", "ctl", user=paco, court=a["north"])["judge"]
+    v = drafted(a)
+    case = Verdict[v].case.id
+    ok("case_assign", "ctl", case=case, judge=other)
+    grant("sign", grantor="elena")
+    stale = file("verdict_issue", grantor="elena", verdict=v)
+    assert "Refusal annulled" in json.dumps(card(stale, "elena")["summary"])
+    ok("verdict_modify_terms", paco, verdict=v, decision="Refusal upheld; the fine is 10 times higher")
+    out = approve(stale, "elena")
+    assert not out["ok"] and out["kind"] == "conflict" and "has changed" in out["error"]
+    assert Verdict[v].status == "draft" and card(stale, "elena")["status"] == "pending"
+    ok("action_decline", "elena", action=stale)
+    fresh = file("verdict_issue", grantor="elena", verdict=v)
+    assert "the fine is 10 times higher" in json.dumps(card(fresh, "elena")["summary"])
+    assert approved(fresh, "elena")["status"] == "done" and Verdict[v].status == "issued"
+
+
+def test_a_report_whose_figures_moved_after_it_was_prepared_is_not_signed_until_it_is_prepared_again():
+    act = ACTS["report_issue"]()
+    grant("sign", grantor="bob")
+    stale = file("report_issue", grantor="bob", **act.args)
+    receive(500, payer="dana")  # the ledger grows
+    assert "has changed" in approve(stale, "bob")["error"] and FinancialReport.count() == 0
+    fresh = file("report_issue", grantor="bob", **act.args)
+    assert approved(fresh, "bob")["status"] == "done" and FinancialReport.count() == 1
+
+
+def test_an_act_whose_record_moved_on_is_refused_at_approval_and_left_for_the_official_to_decline():
+    act, _, action = prepared("license_suspend")
+    ok("license_revoke", act.official, license=act.args["license"])
+    out = approve(action, act.official)
+    assert not out["ok"] and out["kind"] == "conflict" and "has changed" in out["error"]
+    assert card(action, act.official)["status"] == "pending"
+    assert ok("action_decline", act.official, action=action)["action"]["status"] == "declined"
+
+
 # ---- Hostile text
 
 def test_a_court_name_and_a_title_that_read_like_lines_of_the_realm_stay_inside_quotes():

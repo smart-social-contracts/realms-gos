@@ -287,8 +287,13 @@ def approve(c, aid, sent):
         raise Fail(f"the hash does not match {a.id}: read it again")
     if seal(a.id, a.method, a.args, a.grantor, a.delegate, a.grant, a.expires_at) != a.hash:
         raise Conflict(f"{a.id} no longer matches its own hash: the record was changed")
+    spec = ops()[a.method]
+    # A signing act is described from the records it acts on, which the hash does not seal (a draft verdict can be
+    # edited, a ledger grows): the official signs what they were shown, or nothing.
+    if spec["signing"] and summary_of(a.grantor, a.method, spec, a.args) != a.summary:
+        raise Conflict(f"what {a.id} shows has changed since it was prepared: decline it and ask for it again")
     a.decided_at = chain.now()
-    if ops()[a.method]["read"]:  # a read is approved once, and its delegate collects it
+    if spec["read"]:  # a read is approved once, and its delegate collects it
         a.status = "approved"
         return a, None
     # Before anything awaits: a second approval that arrives while the call waits on another canister meets this.
