@@ -20,6 +20,9 @@ from ggg.governance.links import RECORD_MAX
 VERSION_MAX = 64
 MOST_CHAPTERS = 64
 NOTES_MAX = 8 * 1024  # characters of a release's notes, as JSON
+# GGG's typed methods carry a release's times in nanoseconds, as a nat64: a record is refused for a time they cannot
+# encode, since the typed ``ggg_legislation_releases`` would trap for every reader.
+TIME_MAX = (2**64 - 1) // 1_000_000_000
 READ_PAGE = 100  # releases asked of a capital at a time
 MOST_RELEASES = 1000  # in a record read from a sync source
 RELEASE_FIELDS = {"source", "version", "published", "effective_from", "commit", "chapters", "calendar", "notes"}
@@ -82,7 +85,7 @@ def ask_realm(key, method, args):
 
 def releases_from_capital(key):
     """``(source, releases)`` as the capital ``key`` lists them, a page at a time. A generator."""
-    source, releases, start = None, [], 1
+    source, releases, start, size = None, [], 1, 0
     for page_number in range(MOST_RELEASES // READ_PAGE + 1):
         reply = yield from ask_realm(key, "legislation_releases", {"from": start, "count": READ_PAGE})
         page, start = reply.get("releases"), reply.get("next")
@@ -91,8 +94,11 @@ def releases_from_capital(key):
         if page_number == 0:
             source = reply.get("source")
         releases += page
+        size += len(json.dumps(page))
         if len(releases) > MOST_RELEASES:
             break
+        if size > RECORD_MAX:
+            raise Fail(f"{key}: a record is at most {RECORD_MAX // 1024} KB")
         if start is None:
             return source, releases
     raise Fail(f"{key}: a record lists at most {MOST_RELEASES} releases")
@@ -147,15 +153,16 @@ def checked_release(entry, key):
             raise Fail(f"{key}: {source} {field} is 1 to {VERSION_MAX} characters")
     no_at(source, entry["version"])
     for field in ("published", "effective_from"):
-        if type(entry[field]) is not int or entry[field] < 0:
-            raise Fail(f"{key}: {source} {field} is a time in seconds")
+        if type(entry[field]) is not int or not 0 <= entry[field] <= TIME_MAX:
+            raise Fail(f"{key}: {source} {field} is a time in seconds, from 0 to {TIME_MAX}")
     chapters = entry["chapters"]
     if not isinstance(chapters, dict) or len(chapters) > MOST_CHAPTERS:
         raise Fail(f"{key}: {source} lists at most {MOST_CHAPTERS} chapters, as {{domain: sha256:<hex>}}")
     for domain, checksum in chapters.items():
         if domain == change_list.CALENDAR:
             raise Fail(f"{key}: {source} lists its calendar as calendar, not among its chapters")
-        change_list.chapter_id(f"{source}/{domain}")
+        if domain not in change_list.DOMAINS:
+            raise Fail(f"{key}: {source}/{domain}: {domain!r} is not a GGG domain")
         if not pinned(checksum):
             raise Fail(f"{key}: {source}/{domain} is sha256:<64 hex digits>")
     calendar = entry["calendar"] or None

@@ -101,6 +101,9 @@ def test_a_realm_without_a_layer_of_its_own_has_an_empty_record():
     ([entry(version="1.0@2")], "eu/es", "hold no '@'"),
     ([entry(published="2026-01-15")], "eu/es", "published is a time in seconds"),
     ([entry(effective_from=-1)], "eu/es", "effective_from is a time in seconds"),
+    ([entry(published=2**64)], "eu/es", "published is a time in seconds"),
+    ([entry(effective_from=records.TIME_MAX + 1)], "eu/es", "effective_from is a time in seconds"),
+    ([entry(published=True)], "eu/es", "published is a time in seconds"),
     ([entry(notes=["x"])], "eu/es", "notes are at most"),
     ([entry(source="EU")], "eu/es", "is not a source id"),
     ([{**entry(), "extra": 1}], "eu/es", "a release has calendar, chapters"),
@@ -115,6 +118,21 @@ def test_a_realm_without_a_layer_of_its_own_has_an_empty_record():
 def test_what_a_record_must_look_like(releases, source, reason):
     capital(*releases, source=source)
     failing(SRC, reason)
+
+
+def test_the_latest_time_a_record_may_give_is_the_latest_the_typed_methods_encode():
+    import ggg_api
+
+    assert ggg_api.to_ggg(records.TIME_MAX, "Timestamp") < 2**64 <= ggg_api.to_ggg(records.TIME_MAX + 1, "Timestamp")
+    capital(entry("eu/es", published=records.TIME_MAX, effective_from=records.TIME_MAX))
+    assert read(SRC)["releases"][0]["published"] == records.TIME_MAX
+
+
+def test_a_record_above_the_size_the_realm_keeps_is_refused_after_the_page_that_passes_it(monkeypatch):
+    monkeypatch.setattr(records, "RECORD_MAX", 2048)
+    pages = capital(*[entry("eu/es", f"1.{n}.0") for n in range(250)])
+    failing(SRC, "a record is at most 2 KB")
+    assert len(pages.sent("legislation_releases")) == 1  # the first page of 100 passed it: no more were asked for
 
 
 def test_a_record_above_the_size_the_realm_keeps_is_refused(monkeypatch):

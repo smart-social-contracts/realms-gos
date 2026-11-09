@@ -1179,8 +1179,8 @@ JSON file at its URL, `{"source": "<its source id>", "releases": [...]}`, with t
 `chapters` a domain to its checksum), the layers it relays first and its own layer last, oldest first. A realm's
 link pins its content, so the file must be exactly the bytes whose checksum the link names. Either record is
 refused if it lists more than 1000 releases or more than 512 KB, if a release has other fields than
-`legislation_releases` gives, a checksum that is not `sha256:` and 64 hex digits, a domain GGG does not have, or
-`calendar` among its chapters, if it lists a relayed layer twice or a version of its own layer twice, or its own
+`legislation_releases` gives, a checksum that is not `sha256:` and 64 hex digits, a domain GGG does not have,
+`calendar` among its chapters, or a time GGG's typed methods cannot encode (in seconds, from 0 to 18446744073), if it lists a relayed layer twice or a version of its own layer twice, or its own
 layer before a relayed one. What was read is kept with the time (`SourceRecord`), for the compliance check (§11).
 
 **What the resolver takes.** The library function `realms.legislation.plan(realm, relays, own)` (the
