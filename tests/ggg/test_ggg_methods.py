@@ -7,11 +7,12 @@ import ggg_methods as g
 import world
 from core import op
 from core.candid import Reader
-from ggg import Department, KeyEnvelope, Mandate, Procedure, Proposal, Quarter, Realm, User, UserProfile
-from kit import ok
+from ggg import Budget, Department, KeyEnvelope, Mandate, Procedure, Proposal, Quarter, Realm, User, UserProfile
+from kit import ok, rows
 from mirror import FakePrincipal as P
 from test_assets import RX, agora, license_clinic, prescribe
 from test_crypto import REPORT, health
+from test_treasury import draft, setup_finance
 
 
 def caller(principal):
@@ -21,6 +22,18 @@ def caller(principal):
 def do(update):
     """Run an update method to its reply, as the canister drives its generator."""
     return op.run(update)
+
+
+def test_budget_propose_by_fund_reaches_the_operation_through_candid():
+    """GGG D19: the fund in ``BudgetProposeArgs`` proposes that fund's draft lines, and without one every fund's."""
+    setup_finance()
+    draft("ROOT", "salaries", 500)
+    draft("ROADS", "capital", 300)
+    caller("bob")
+    assert do(g.ggg_budget_propose({"period": "FY2026", "years": None, "fund": "ROOT"})) == {"Ok": {"Done": None}}
+    assert {b.fund.id: b.status for b in rows(Budget)} == {"ROOT": "adopted", "ROADS": "draft"}
+    assert do(g.ggg_budget_propose({"period": "FY2026", "years": None, "fund": None})) == {"Ok": {"Done": None}}
+    assert {b.fund.id: b.status for b in rows(Budget)} == {"ROOT": "adopted", "ROADS": "adopted"}
 
 
 def test_private_data_and_wrapped_keys_are_blobs():

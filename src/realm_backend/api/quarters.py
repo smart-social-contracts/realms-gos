@@ -3,6 +3,7 @@ import json
 import math
 
 from core import chain
+from core import compliance
 from api import assets, proposals
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, view
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
@@ -475,7 +476,13 @@ def quarter_sync(c, args):
     return {"directory": directory(), "codex": codex(), "index": q.index, "zones": zone_definitions()}
 
 
-@op("quarter.sync")
+def reporting_quarter(args, proposal=""):
+    """The fact of a quarter_report call that is not one of its arguments (GGG's derived facts): the compliance of the
+    quarter reporting."""
+    return {"follower_compliance": compliance.of_reporting_quarter()}
+
+
+@op("quarter.sync", derived=reporting_quarter)
 def quarter_report(c, args):
     """On the capital, record a quarter's ``population``, ``codex_id``, ``codex_version``, ``zones`` (zone id to how many
     of its members live there) and optional federal vote ``leg``. Returns the ``quarter`` and ``drifting``: whether its

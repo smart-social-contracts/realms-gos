@@ -113,7 +113,7 @@ def permissions(principal):
         return {"all"}
     if principal == chain.ANONYMOUS:
         return set()
-    from ggg import Appointment, Authority, GuestUser, Quarter, Realm, User
+    from ggg import Appointment, Authority, Follower, GuestUser, Quarter, Realm, SyncSource, User
 
     realm = Realm["1"]
     if realm and realm.installer_canister_id and realm.installer_canister_id == principal:
@@ -130,6 +130,7 @@ def permissions(principal):
     if guest:
         held |= set(guest.permissions or [])
     held |= {"quarter.sync"} if Quarter[principal] else set()
+    held |= {"link.sync"} if Follower[principal] or SyncSource[principal] else set()  # the capitals of its links
     for a in each(Appointment, "user", principal):
         pos = a.position
         if a.status != "active" or (pos.organization and pos.organization.status != "active"):

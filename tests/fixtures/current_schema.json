@@ -1762,6 +1762,60 @@
   },
   "version": 1
  },
+ "Follower": {
+  "fields": {
+   "compliance": {
+    "default": "\"unknown\"",
+    "kind": "property",
+    "type": "String"
+   },
+   "ended_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "ended_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "layers": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "population": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "reported_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "status": {
+    "default": "requested",
+    "kind": "property",
+    "type": "String"
+   },
+   "unsent": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
  "Forward": {
   "fields": {
    "destination": {
@@ -3477,6 +3531,11 @@
     "kind": "property",
     "type": "String"
    },
+   "compliance": {
+    "default": "\"unknown\"",
+    "kind": "property",
+    "type": "String"
+   },
    "id": {
     "has_default": false,
     "kind": "property",
@@ -3809,6 +3868,73 @@
   "relationships": {},
   "version": 1
  },
+ "Release": {
+  "fields": {
+   "calendar": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "chapters": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "commit": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "effective_from": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "notes": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "published": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "rank": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "relayed": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "source": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "version": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
  "Request": {
   "fields": {
    "body": {
@@ -3875,6 +4001,47 @@
  },
  "Row": {
   "fields": {},
+  "relationships": {},
+  "version": 1
+ },
+ "SyncSource": {
+  "fields": {
+   "checksum": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "ended_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "ended_by": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "name": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "requested",
+    "kind": "property",
+    "type": "String"
+   },
+   "unsent": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   }
+  },
   "relationships": {},
   "version": 1
  },
