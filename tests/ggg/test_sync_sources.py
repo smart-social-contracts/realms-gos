@@ -5,7 +5,7 @@ method name. tests/deployed/test_sync_sources.py runs the same flows between rea
 import fake_chain
 import pytest
 import world
-from api import links
+from api import codex, links
 from core import legislation, op
 from core.db import Fail
 from fake_chain import peer, rejects
@@ -459,6 +459,34 @@ def test_a_notice_that_a_link_ended_is_accepted_while_the_codex_is_not_loaded_an
     ok("link_notify", FOL, side="follower", status={"Ended": {"by": FOL, "at": fake_chain.now()}})
     assert status(Follower[FOL])["Ended"]["by"] == FOL  # nothing refused it, and the hook that could not run did not
     assert LOG == []
+
+
+LEGACY = """
+from ggg_sdk import hook, realm
+
+@hook
+def leave(args):
+    realm.effect("sync_source_remove", source={"Realm": "src"})
+    return {}
+
+@hook
+def accept(args):
+    realm.effect("follower_accept", follower="fol")
+    return {}
+"""
+
+
+def test_a_legacy_codex_cannot_link_the_realm_or_end_a_link_for_it():
+    peer(SRC, realm_info=realm_info(), link_notify=UNANSWERED)
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    Realm["1"].require_marketplace_approval = False
+    manifest = {"id": "test", "version": "1.0.0", "codex_api_version": 2, "hooks": ["leave", "accept"],
+                "capabilities": ["sync_source_remove", "follower_accept"]}
+    ok("codex_install", "ctl", manifest=manifest, source=LEGACY)
+    for name in ("leave", "accept"):
+        (effect,) = op.run(codex.hook(name, {}))["effects"]
+        assert not effect["ok"] and "takes the realm's vote" in effect["error"]
+    assert status(SyncSource[SRC]) == "requested" and Follower[FOL] is None
 
 
 def test_a_sync_source_removal_is_reserved_so_no_legislation_runs_for_it():
