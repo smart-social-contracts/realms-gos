@@ -40,11 +40,14 @@ THIS_PHASE = frozenset((
     "tender_notice", "tender_open", "transfer_revert", "treasury_view", "user_add", "user_edit", "user_get",
     "user_import", "user_list", "user_remove", "user_set_status", "verdict_draft"))
 # What the other phases switch on, in these groups or besides the 24 of LEGACY: each names its own here. The pending
-# doors, and the operations that run other operations (the ten task operations and the shell).
+# doors, the operations that run other operations (the ten task operations and the shell), and the keys, joining, people
+# and power of attorney onward that sit in the office, orgs and admin groups.
 OTHER_PHASES = frozenset((
     "payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter", "federal_vote_propose",
     "action_get", "action_list", "shell", "task_add_schedule", "task_cancel", "task_create", "task_delete", "task_edit",
-    "task_list", "task_logs", "task_reschedule", "task_run", "task_schedule"))
+    "task_list", "task_logs", "task_reschedule", "task_run", "task_schedule",
+    "document_delete", "document_get", "document_list", "document_publish", "document_revoke", "document_share",
+    "document_store", "invite_create", "orchestration_decide", "organization_edit", "representative_add"))
 SWITCHED_ON = sorted(n for n in poa.ENABLED if poa.row(n)[1] in GROUPS)
 
 
