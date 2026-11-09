@@ -1639,7 +1639,8 @@ proposal's `effective_at` (§5.2).
    realm hardcodes no structure, no size and no m-of-n: its seats and its policy (m of n, quorum, veto) are
    whatever the admins set, and the votes, vetoes, audit and power-of-attorney rules that already exist apply.
    The seat holders of that department hold `codex.revert_fast`: only its seats give it, and no profile may list
-   it. `codex_revert_fast` is governed by the department under its own policy, and runs under the voting window
+   it. Whoever holds `all` (the admins and the controllers) passes the permission check too, and a team whose policy
+   is direct (one of one) lets them revert fast without a seat. `codex_revert_fast` is governed by the department under its own policy, and runs under the voting window
    recorded with the codex it restores, as a member revert does, so that a codex cannot shorten the window to
    expire the team's vote. It can only restore the **previous** codex, named when it is filed like any revert, and
    is refused while no team is designated, whatever files or replays it. Each use is recorded on the audit log with an Event: who
@@ -1648,12 +1649,14 @@ proposal's `effective_at` (§5.2).
    a chapter. That operation, `it_team_set` (`""` designates none), is governed like the realm's other admin
    settings: direct during setup, a realm-wide vote after launch. It is reserved like the others, and no
    call of a codex (an effect of a chapter, or of a legacy codex), nor a proposal that one files, however deep
-   it is nested, may change the team's department (its policy, its positions, who holds them, an invite to
-   them, an expulsion, its place in the realm or its deletion) or the standing of a member who holds a seat in it
-   (their status, their roles, a profile they have, the authority the team was given). A department, a seat or a
-   member is named as the operations find it, by its name or by its internal id. A department that is the team
-   cannot be deleted until another is designated. A realm that was launched before `it_team_set` existed has
-   no founder permission to set the team: the realm votes on it.
+   it is nested, may change the team's department (its policy, its positions, who holds them, an invite to a
+   seat of it, an expulsion, its place in the realm or its deletion) or take something from a member who holds a
+   seat in it: a status other than active, a role, a permission from a profile they have, the authority the team
+   was given. A department, a seat or a member is named as the operations find it, by its name or by its
+   internal id, each operation in its own class (`user_set_status` finds a member, `user_remove` and
+   `role_revoke` a user). A department that is the team cannot be deleted until another is designated. A
+   realm still in setup when it was upgraded to the release that has `it_team_set` has a founder profile
+   without `it_team.set` (existing profiles are not rewritten): its admins designate the team.
 4. **Reserved operations:** `codex.revert`, `codex.revert_fast`, `it_team.set` and
    `sync_source_remove` (no chapter can forbid a follower's leaving).
    - No chapter may forbid them, guard them or hook them. The checker refuses it, and the runtime

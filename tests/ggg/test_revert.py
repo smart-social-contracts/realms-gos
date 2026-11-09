@@ -11,8 +11,8 @@ import fake_chain
 import world
 from core import auth, op
 from core.ratio import PERCENT
-from ggg import Appointment, Authority, Codex, Department, Event, Invite, LayeredCodex, Position, Proposal, Realm, \
-    User, UserProfile
+from ggg import (Appointment, Authority, Codex, Department, Event, Invite, LayeredCodex, Member, Position, Proposal,
+                 Realm, User, UserProfile)
 from kit import call, denied, later, ok, rows
 from test_codex import SOURCE, build, manifest, vote_through
 from test_legislation_runtime import (BROKEN_GUARD, DENY_ALL, TOWN, activate, failures, fresh_realm, layered,  # noqa: F401
@@ -43,7 +43,7 @@ def it_team(holders=("bob", "carla", "alice"), policy=None):
     """The department ``IT`` with a seat for each of ``holders``, designated as the IT admin team."""
     team = Department["IT"] or Department(id="IT", parent=Department["Administration"])
     for holder in holders:
-        world.seat(f"it.{holder}", holder, team)
+        world.seat(f"it.{holder}", holder, team, "user.view")
     if policy:
         world.policy(team, *policy)
     ok("it_team_set", "ctl", department="IT")
@@ -342,7 +342,6 @@ CHANGES = [
     ("appoint_acting", {"position": "it.bob", "user": "dana"}),
     ("appointment_end", {"appointment": "it.bob:bob"}),
     ("invite_create", {"position": "it.bob"}),
-    ("invite_create", {"department": "IT"}),
     ("user_set_status", {"user": "bob", "status": "banned"}),
     ("user_remove", {"user": "bob"}),
     ("role_revoke", {"user": "bob", "profile": "member"}),
@@ -389,6 +388,36 @@ def test_a_codex_cannot_change_the_team_nor_carry_a_change_to_a_vote_however_it_
     deeper = as_codex("proposal_create", {"title": "x", "action": nested})  # filed on replay, so checked at every depth
     assert (deeper["ok"], deeper["kind"]) == (False, "forbidden") and "no codex may" in deeper["error"]
     assert Proposal.max_id() == 0 and Department["IT"] is not None and Invite.max_id() == 0
+
+
+@pytest.mark.parametrize("naming", ["by internal id", "by an integer"])
+def test_a_member_whose_user_has_another_internal_id_is_found_as_the_status_operation_finds_them(naming):
+    build()
+    it_team(("bob",))
+    Member["bob"].delete()  # a quarter move deletes a member's row and makes it again: the ids of User and Member drift
+    Member(id="bob", joined_at=fake_chain.now())
+    assert Member["bob"]._id != User["bob"]._id
+    by_member = str(Member["bob"]._id) if naming == "by internal id" else Member["bob"]._id
+    banned = as_codex("user_set_status", {"user": by_member, "status": "banned"})  # user_set_status finds a Member
+    assert (banned["ok"], banned["kind"]) == (False, "forbidden") and "no codex may" in banned["error"]
+    by_user = str(User["bob"]._id) if naming == "by internal id" else User["bob"]._id
+    removed = as_codex("user_remove", {"user": by_user})  # user_remove and role_revoke find a User
+    assert (removed["ok"], removed["kind"]) == (False, "forbidden") and "no codex may" in removed["error"]
+    assert Member["bob"].status == "active"
+
+
+@pytest.mark.parametrize("name,args", [
+    # What takes nothing from the team or its seat holders is not refused for being theirs.
+    ("invite_create", {"department": "IT", "profile": "plain"}),
+    ("user_set_status", {"user": "bob", "status": "active"}),
+    ("profile_edit", {"profile": "it.bob", "description": "the IT team's seat"}),
+    ("profile_edit", {"profile": "it.bob", "allowed_to": ["user.view"]})])
+def test_a_codex_may_do_what_takes_nothing_from_the_team(name, args):
+    build()
+    it_team(("bob",))
+    UserProfile(id="plain", allowed_to=[])
+    done = as_codex(name, args)
+    assert "no codex may" not in done.get("error", ""), done
 
 
 @pytest.mark.parametrize("name,args", [
@@ -444,21 +473,25 @@ from realms.legislation import above
 
 class Register(above("register")):
     def on_t_codex_poke(self, event):
-        self.ggg.department_set_policy(department=__ID__, m=1, n=1)
-        self.ggg.proposal_create(title="by id", department="Administration", action={"op": "department_set_policy",
-            "args": {"department": __ID__, "m": 1, "n": 1}})
+        action = {"op": "department_set_policy", "args": {"department": __ID__, "m": 1, "n": 1}}
+        if event.args["what"] == "directly":
+            self.ggg.department_set_policy(department=__ID__, m=1, n=1)
+        if event.args["what"] == "in a proposal":  # the effects stop at the first that fails: this one runs alone
+            self.ggg.proposal_create(title="by id", department="Administration", action=action)
 '''
 
 
+@pytest.mark.parametrize("what,error", [
+    ("directly", "department_set_policy: department_set_policy changes the IT admin team: no codex may"),
+    ("in a proposal", "proposal_create: department_set_policy changes the IT admin team: no codex may")])
 @pytest.mark.parametrize("written", ["__ID__", '"__ID__"'], ids=["an integer", "text"])
-def test_a_chapter_that_names_the_team_by_its_internal_id_changes_nothing(written):
+def test_a_chapter_that_names_the_team_by_its_internal_id_changes_nothing(written, what, error):
     build()
     team = it_team(("bob",))
     world.policy(team, 2, 2)
     town({(TOWN, "register"): CHANGE_THE_TEAM_BY_ID.replace('"__ID__"', written).replace("__ID__", str(team._id))})
-    ok("t_codex_poke")
-    error = failures()["x/town/register.py"]["on_t_codex_poke"]["error"]
-    assert error == "department_set_policy: department_set_policy changes the IT admin team: no codex may"
+    ok("t_codex_poke", what=what)
+    assert failures()["x/town/register.py"]["on_t_codex_poke"]["error"] == error
     assert Department["IT"].policy == {"m": 2, "n": 2, "quorum": 0, "veto": []} and Proposal.max_id() == 0
 
 

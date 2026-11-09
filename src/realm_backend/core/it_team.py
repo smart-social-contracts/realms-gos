@@ -11,7 +11,7 @@ PERMISSION = "codex.revert_fast"
 BY_DEPARTMENT = ("department_edit", "department_delete", "department_set_policy", "department_expel", "position_create")
 BY_POSITION = ("position_edit", "position_close", "appoint", "appoint_acting", "invite_create")
 BY_APPOINTMENT = ("appointment_end",)
-# The operations that change the standing of a member, by the ``user`` they name: their status, their roles.
+# The operations that take something from a member, by the ``user`` they name: their status, their roles, their account.
 BY_USER = ("user_set_status", "user_remove", "role_revoke")
 # The operations that carry a call to a vote, by ``action``.
 CARRIERS = ("proposal_create", "federal_vote_propose")
@@ -45,19 +45,24 @@ def _row(cls, value):
     return cls[str(value)] if value not in (None, "") else None
 
 
+def _seat_of(position, team):
+    """Whether ``position`` is a seat of the department ``team``."""
+    return bool(position and position.department and position.department.id == team)
+
+
 def _holds_seat(user, team):
     """Whether ``user`` holds an active seat in the department ``team``."""
     from ggg import Appointment
 
-    return any(a.status == "active" and a.position.department and a.position.department.id == team
-               for a in each(Appointment, "user", user))
+    return any(a.status == "active" and _seat_of(a.position, team) for a in each(Appointment, "user", user))
 
 
-def _profile_of_team(profile, team):
+def _held_by_team(profile, team):
     """Whether ``profile`` is one that a seat of the team gives, or that a holder of such a seat has."""
     from ggg import Department, User
 
-    for position in Department[team].positions:
+    department = Department[team]
+    for position in department.positions if department else []:
         if position.profile and position.profile.id == profile:
             return True
         for appointment in position.appointments:
@@ -67,11 +72,19 @@ def _profile_of_team(profile, team):
     return False
 
 
+def _removes_from(profile, args):
+    """Whether the ``profile_edit`` with ``args`` takes a permission from ``profile``: it replaces ``allowed_to`` by a
+    list that lacks one the profile has."""
+    given = args.get("allowed_to")
+    return "allowed_to" in args and (not isinstance(given, list) or not set(profile.allowed_to or []) <= set(map(str, given)))
+
+
 def _changes(name, args, team):
     """Whether the call ``name`` with ``args`` designates the team, or changes its department (its policy, its seats, who
-    holds them, an invite to them, its place in the realm, its existence) or the standing of a member who holds a seat
-    in it (their status, their roles, a profile they have, the authority the team was given)."""
-    from ggg import Appointment, Authority, Department, Position, User, UserProfile
+    holds them, an invite to one of them, its place in the realm, its existence), or takes something from a member who
+    holds a seat in it (their status, their roles, a permission of a profile they have, the authority the team was
+    given)."""
+    from ggg import Appointment, Authority, Department, Member, Position, User, UserProfile
 
     if name == "it_team_set":
         return True
@@ -81,18 +94,19 @@ def _changes(name, args, team):
         named = _row(Department, args.get("department"))
         return named is not None and named.id == team
     if name in BY_POSITION:
-        seat = _row(Position, args.get("position"))
-        named = _row(Department, args.get("department")) if name == "invite_create" else None
-        return any(d is not None and d.id == team for d in (seat.department if seat else None, named))
+        return _seat_of(_row(Position, args.get("position")), team)
     if name in BY_APPOINTMENT:
-        seat = _row(Appointment, args.get("appointment"))
-        return bool(seat and seat.position.department and seat.position.department.id == team)
+        appointment = _row(Appointment, args.get("appointment"))
+        return bool(appointment) and _seat_of(appointment.position, team)
     if name in BY_USER:
-        member = _row(User, args.get("user"))
+        if name == "user_set_status" and args.get("status") == "active":
+            return False
+        # Each operation finds its user in its own class, and a member and a user need not share an internal id.
+        member = _row(Member if name == "user_set_status" else User, args.get("user"))
         return member is not None and _holds_seat(member.id, team)
     if name == "profile_edit":
         profile = _row(UserProfile, args.get("profile"))
-        return profile is not None and _profile_of_team(profile.id, team)
+        return profile is not None and _held_by_team(profile.id, team) and _removes_from(profile, args)
     if name == "authority_revoke":
         authority = _row(Authority, args.get("authority"))
         return authority is not None and authority.target == f"Department:{team}"

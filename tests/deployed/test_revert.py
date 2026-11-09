@@ -16,6 +16,7 @@ from test_legislation_runtime import DENY_ALL, TOWN, failures, run
 
 PERCENT = 1_000_000
 DAY = 86400
+STAND_IN_URL = "https://legislation.example.test/eu/releases.json"
 # GGG's codex_revert: an optional record that names the codex to restore, or none for the one the active codex replaced.
 REVERT_ARGS = Types.Opt(Types.Record({"codex": Types.Opt(Types.Text)}))
 GOVERNED = Types.Variant({"Proposed": Types.Text, "Done": Types.Opt(Types.Text)})
@@ -225,7 +226,24 @@ def test_f_no_chapter_runs_for_the_reserved_operations_and_the_checker_refuses_a
         assert errors and name in errors[0], (name, errors)
 
 
-def test_g_the_team_and_the_recorded_rules_survive_an_upgrade(realm, people):
+def test_g_a_codex_that_blocks_every_proposal_cannot_block_a_realm_leaving_its_sync_source(realm, people):
+    ctl, alice, bob, founder, mallory = (people[n] for n in ("ctl", "alice", "bob", "founder", "mallory"))
+    source = {"Record": {"url": STAND_IN_URL, "checksum": "sha256:" + "a" * 64}}
+    ok(realm, "sync_source_add", ctl, source=source, name="The EU")  # a stand-in record is active on this vote
+    ok(realm, "governance_update", ctl, voting_threshold=50 * PERCENT)
+    ok(realm, "department_set_policy", ctl, department="Administration", m=2, n=3)  # now a vote decides what the realm does
+    blocker(realm, "four")
+    assert realm.call("proposal_create", {"title": "anything"}, sender=alice)["kind"] == "forbidden"  # the codex blocks it
+    filed = ok(realm, "sync_source_remove", ctl, source=source)  # a proposal with no guard, no forbid and no hook
+    assert [s["status"] for s in ok(realm, "realm_info", alice, query=True)["sync_sources"]] == ["active"]
+    for voter in (founder, alice, bob, mallory):
+        ok(realm, "proposal_vote", voter, proposal=filed["proposal"], choice="yes")
+    assert ok(realm, "proposal_get", alice, query=True, proposal=filed["proposal"])["proposal"]["status"] == "executed"
+    ended = ok(realm, "realm_info", alice, query=True)["sync_sources"]
+    assert len(ended) == 1 and "Ended" in ended[0]["status"]
+
+
+def test_h_the_team_and_the_recorded_rules_survive_an_upgrade(realm, people):
     alice = people["alice"]
     before = run(realm, "import json\nfrom ggg import LayeredCodex\n"
                  "print(json.dumps({r.id: r.voting_rule for r in LayeredCodex.load_some(1, LayeredCodex.max_id())}))")
@@ -238,7 +256,7 @@ def test_g_the_team_and_the_recorded_rules_survive_an_upgrade(realm, people):
     assert after == before
 
 
-def test_h_a_legacy_codex_records_the_rule_too_and_is_restored_by_its_checksum(wasm_of, people):
+def test_i_a_legacy_codex_records_the_rule_too_and_is_restored_by_its_checksum(wasm_of, people):
     ctl, founder = people["ctl"], people["founder"]
     realm = new_realm(wasm_of("production"), people)
     ok(realm, "governance_update", ctl, voting_threshold=60 * PERCENT)
