@@ -7,7 +7,8 @@ import fake_chain
 import world
 from api import setup, tasks
 from core import op, poa
-from ggg import Delegation, Event, Extension, PaymentAccount, PendingAction, Proposal, Task, Transfer, User, Vote
+from ggg import (Delegation, Event, Extension, PaymentAccount, PendingAction, Proposal, Task, TaskExecution, TaskSchedule,
+                 Transfer, User, Vote)
 from kit import call, denied, fire_timers, later, ok, rows
 from test_delegation_groups import finance_for_carla
 
@@ -142,6 +143,29 @@ def test_a_tied_task_fails_at_its_next_step_once_its_grant_has_ended(ending, rea
     assert Task["motions"].status == "failed" and Proposal.count() == 1
     run = run_of("motions")
     assert run["status"] == "failed" and reason in run["result"]
+
+
+@pytest.mark.parametrize("ending", ("revoked", "replaced", "expired"))
+def test_a_tied_task_whose_grant_has_ended_fires_no_more(ending):
+    build()
+    g = grant("admin", "propose")
+    made("motions", [MOTION])
+    as_carla("task_add_schedule", task="motions", run_at=fake_chain.now() + DAY, repeat_every=DAY)
+    later(DAY)
+    fire_timers()
+    assert Proposal.count() == 1 and not TaskSchedule["motions@1"].disabled
+    end(ending, g)
+    later(DAY)
+    fire_timers()
+    assert Task["motions"].status == "failed" and TaskSchedule["motions@1"].disabled
+    runs = TaskExecution.count()
+    for _ in range(3):
+        later(DAY)
+        fire_timers()
+    assert TaskExecution.count() == runs and Proposal.count() == 1
+    fake_chain.state["timers"] = []
+    setup.start()  # nor is it armed again after an upgrade
+    assert fake_chain.state["timers"] == []
 
 
 def test_a_scheduled_task_fails_when_its_grant_ended_before_its_time():

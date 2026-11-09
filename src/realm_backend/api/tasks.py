@@ -111,6 +111,7 @@ def step_reply(task, call):
     try:
         grant = standing(info.get("grant"))
     except Forbidden as e:
+        unschedule(task)  # the grant is gone for good: nothing fires again
         return json.dumps({"ok": False, "error": str(e), "kind": e.kind})
     user = info["creator"]
     by = grant.delegate if grant else user
@@ -178,9 +179,13 @@ def rearm(start=1):
         chain.set_timer(0, lambda n=ids[PAGE]: rearm(n))
 
 
-def stop(task):
+def unschedule(task):
     for s in task.schedules:
         enable(s, False)
+
+
+def stop(task):
+    unschedule(task)
     task.status = "cancelled"
 
 
