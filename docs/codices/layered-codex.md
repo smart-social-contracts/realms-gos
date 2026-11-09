@@ -1248,8 +1248,8 @@ never needs the record, except to check compliance (§11).
   vouches for them lists them. `legislation_releases` answers the relayed ones top to bottom, then its own,
   oldest first; `legislation_chapter` answers the text stored under a checksum. A release is kept under
   `<source>@<version>`, so neither holds an `@`.
-- `Quarter.compliance` is stored and read like a follower's; nothing writes it yet (the scheduled checks,
-  D7, and the switch of a codex across the quarters will).
+- `Quarter.compliance` is stored and read like a follower's. The capital writes it from what a quarter reports it
+  runs, when a codex is switched across the quarters (§9.5); the scheduled checks (D7) write a follower's.
 
 ---
 

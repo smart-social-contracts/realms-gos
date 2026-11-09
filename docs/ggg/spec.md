@@ -233,8 +233,8 @@ Realms GOS also differs from the model in what it keeps:
   `Unavailable`;
 - the check for a cycle (I-NEST-2) runs when the vote applies, not when a proposal that carries it is filed: filing
   makes no call to another realm. A vote refused at the end of the vote leaves the proposal `failed`;
-- `Quarter.compliance` is stored and read, and nothing writes it yet: it reads `Unknown` until the scheduled checks
-  and the switch of a codex across the quarters set it;
+- `Quarter.compliance` is written by the capital when a quarter reports the layered codex it runs, and a minute
+  after the capital switches codex (§9.5 of the layered codex); it reads `Unknown` until a quarter has reported one;
 - only the last 2,000 events are kept, and older ones are deleted rather than archived (I-EXT-4).
 
 A realm created before attributes and requests existed keeps the `member` profile it stored, which lacks
