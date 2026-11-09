@@ -432,8 +432,9 @@ def db_convert_indexes(c, args):
 @op("shell.execute")
 def shell(c, args):
     """Evaluate one expression ``expr`` in the sandbox; ``ops.<name>(args)`` calls an operation as you, through Cedar.
+    Called by your delegate, it calls them as the delegate for you, so under the grant.
     Example: ``{"expr": "ops.proposal_list({'status': 'voting'})"}``."""
     def as_caller(_, kw):
-        return call(kw["name"], kw["args"], user=c.user, origin="shell")
+        return call(kw["name"], kw["args"], user=c.user, origin="shell", by=c.by)
 
     return {"result": sandbox.execute(SHELL % args["expr"], "main", {}, as_caller, ("op",))}

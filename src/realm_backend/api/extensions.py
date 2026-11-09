@@ -6,7 +6,7 @@ from core.candid import quote
 from core import sandbox
 from core.db import Fail, Forbidden, Unavailable, find, page, view
 from ggg import Department, Extension, Realm, User, UserProfile
-from core.op import dispatch, op, run
+from core.op import dispatch, on_behalf, op, run
 from api.proposals import appointed, realm_wide
 
 SIDEBAR = ("show_in_sidebar", "sidebar_label", "categories", "icon")
@@ -138,7 +138,8 @@ def extension_uninstall(c, args):
 @op("extension.call")
 def extension_call(c, args):
     """Run ``function`` of ``extension``'s backend with ``args`` (its keyword arguments); it can call only its declared
-    operations, as you (I-EXT-1). The extension must be available to you. Returns ``result``."""
+    operations, as you (I-EXT-1). Called by your delegate, it calls them as the delegate for you, so under the grant.
+    The extension must be available to you. Returns ``result``."""
     ext = find(Extension, args["extension"])
     if not ext.source:
         raise Fail(f"{ext.id} has no backend")
@@ -147,8 +148,8 @@ def extension_call(c, args):
     declared = ext.operations
 
     def rpc(name, payload):
-        return json.loads(run(dispatch(name, json.dumps(payload), origin="extension", signer=c.user,
-                                       declared=declared)))
+        return json.loads(run(dispatch(name, json.dumps(on_behalf(c.user, c.by, payload)), origin="extension",
+                                       signer=c.by, declared=declared)))
 
     return {"result": sandbox.execute(ext.source, args["function"], args.get("args") or {}, rpc, declared)}
 

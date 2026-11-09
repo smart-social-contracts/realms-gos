@@ -3,8 +3,8 @@ import json
 from core import auth
 from core import chain
 from core.db import PAGE, PAGE_MAX, Conflict, Fail, Forbidden, find, next_id, page, view
-from ggg import Event, Task, TaskExecution, TaskSchedule, TaskStep
-from core.op import dispatch, op, ops, redacted
+from ggg import Delegation, Event, Task, TaskExecution, TaskSchedule, TaskStep
+from core.op import dispatch, on_behalf, op, ops, redacted
 from core.ratio import upgrade_call
 
 BUSY = ("running", "waiting")
@@ -22,12 +22,19 @@ ENABLED = (TaskSchedule.get_full_type_name(), "enabled", "1")
 
 
 def meta(task):
-    """What the realm keeps about a task: its ``creator``, and the ``event`` of the last operation it ran."""
+    """What the realm keeps about a task: its ``creator``, the ``grant`` its steps were written under (a delegate's
+    power of attorney, "" for the member's own) and the ``event`` of the last operation it ran."""
     return json.loads(task.metadata)
 
 
 def creator(task):
     return meta(task)["creator"]
+
+
+def tie(task):
+    """The id of the power of attorney the steps of ``task`` run under, "" for a member's own. A task made before grants
+    were recorded has none."""
+    return meta(task).get("grant", "")
 
 
 def scheduled(task):
@@ -47,6 +54,8 @@ def owned(c, args):
         raise Forbidden(f"task '{task.name}' is the realm's own: only the vote that scheduled it governs it")
     if c.user != creator(task) and "all" not in auth.permissions(c.user):
         raise Forbidden(f"task '{task.name}' is not yours")
+    if c.delegated and tie(task) != c.grant:  # else it could run what the member wrote, with the member's own authority
+        raise Forbidden(f"task '{task.name}' was not made under this power of attorney")
     return task
 
 
@@ -81,6 +90,34 @@ def define(task, steps, reason=None):
         TaskStep(task=task, run_next_after=wait, action=json.dumps(call))
 
 
+def standing(grant_id):
+    """The power of attorney ``grant_id``, which the steps of a task run under (None for the member's own). Forbidden once
+    it was revoked, replaced or has expired: a proposal may outlast its grant because a vote takes days, but a task
+    would keep acting with nobody's consent."""
+    if not grant_id:
+        return None
+    grant = find(Delegation, grant_id)
+    if grant.status != "active" or not auth.in_force(grant, chain.now()):
+        what = "been revoked or replaced" if grant.status == "revoked" else "expired"
+        raise Forbidden(f"the power of attorney {grant.id} the task was made under has {what}")
+    return grant
+
+
+def step_reply(task, call):
+    """The reply of one step, as ``dispatch`` gives it: its operation run as the task's creator. A step a delegate wrote
+    runs as that delegate for the creator, under the grant it was written under, so it can do what the grant covers
+    directly and no more."""
+    info = meta(task)
+    try:
+        grant = standing(info.get("grant"))
+    except Forbidden as e:
+        return json.dumps({"ok": False, "error": str(e), "kind": e.kind})
+    user = info["creator"]
+    by = grant.delegate if grant else user
+    return (yield from dispatch(call["op"], json.dumps(on_behalf(user, by, call["args"])), origin="task", signer=by,
+                                bound=grant))
+
+
 def execute(task, start=0, ex=None):
     """Run the steps from ``start`` through ``dispatch`` as the task's creator, pausing where a step waits."""
     ex = ex or TaskExecution(name=f"{task.name}#{len(children(task, 'executions')) + 1}", task=task, status="running",
@@ -88,8 +125,7 @@ def execute(task, start=0, ex=None):
     task.status, steps, out = "running", ordered(task), {}
     for i in range(start, len(steps)):
         call = upgrade_call(json.loads(steps[i].action))  # a step stored by the previous release has its arguments
-        reply = yield from dispatch(call["op"], json.dumps(call["args"]), origin="task", signer=creator(task))
-        out = json.loads(reply)
+        out = json.loads((yield from step_reply(task, call)))
         steps[i].status = "completed" if out["ok"] else "failed"
         if not out["ok"]:
             return finish(task, ex, "failed", out)
@@ -150,8 +186,9 @@ def stop(task):
 
 @op("task.create")
 def task_create(c, args):
-    """Create task ``name`` of ``steps``: ``[{op, args, wait}]``, each run as you, ``wait`` seconds before the next.
-    Returns ``task``."""
+    """Create task ``name`` of ``steps``: ``[{op, args, wait}]``, each run as you, ``wait`` seconds before the next. A
+    delegate's task runs as the delegate for you, under the grant it was made under, while that grant stands. Returns
+    ``task``."""
     steps = checked(args["steps"])
     if args["name"].startswith(OWN):
         raise Forbidden(f"task names starting with '{OWN}' are the realm's own")
@@ -159,7 +196,7 @@ def task_create(c, args):
         raise Forbidden(f"task names starting with '{SCHEDULED}-' are named by task_schedule")
     if Task[args["name"]]:
         raise Conflict(f"task '{args['name']}' exists")
-    task = Task(name=args["name"], metadata=json.dumps({"creator": c.user}), status="pending")
+    task = Task(name=args["name"], metadata=json.dumps({"creator": c.user, "grant": c.grant}), status="pending")
     define(task, steps)
     return {"task": task.name}
 
@@ -174,6 +211,7 @@ def task_edit(c, args):
     for s in task.steps:
         s.delete()
     define(task, steps)
+    task.metadata = json.dumps({**meta(task), "grant": c.grant})  # the steps are now the editor's
 
 
 @op("task.delete")
@@ -233,10 +271,12 @@ def task_schedule(c, args):
     again, so it obeys the legislation in force at that time, and a task that is refused ends failed and changes
     nothing. Its operation's audit event, with origin task, is the task's ``event``. Only a user calling for themselves
     schedules: a codex, an extension or the replay of a proposal is refused, as the task would run as the canister or as
-    someone who did not choose it. Returns ``task``."""
+    someone who did not choose it. A delegate's task is tied to its grant: it runs only what the grant covers directly,
+    and fails once the grant is revoked, replaced or has expired. Returns ``task``."""
     if c.origin != "user":
         raise Fail(f"a task is scheduled by a user calling for themselves, not by a {c.origin}")
-    task = Task(name=next_id(Task, SCHEDULED), metadata=json.dumps({"creator": c.user}), status="pending")
+    task = Task(name=next_id(Task, SCHEDULED), metadata=json.dumps({"creator": c.user, "grant": c.grant}),
+                status="pending")
     define(task, checked([args]), args.get("reason"))
     when = TaskSchedule(name=f"{task.name}@1", task=task, last_run_at=0, run_at=int(args["at"]), repeat_every=0)
     enable(when, True)
@@ -276,8 +316,9 @@ def shown(step):
 
 
 def summary(task):
-    return {"name": task.name, "status": task.status, "creator": creator(task), "event": meta(task).get("event"),
-            "steps": [shown(s) for s in ordered(task)],
+    info = meta(task)
+    return {"name": task.name, "status": task.status, "creator": info["creator"], "grant": info.get("grant", ""),
+            "event": info.get("event"), "steps": [shown(s) for s in ordered(task)],
             "schedules": [view(s, "name", "run_at", "repeat_every", "last_run_at", "disabled") for s in task.schedules]}
 
 

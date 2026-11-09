@@ -95,11 +95,12 @@ def ops():
 
 
 def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, proposal="", legacy=False, prepared=None,
-             note=""):
+             note="", bound=None):
     """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded; ``legacy``
     marks a legacy codex's effect (``Call.legacy``). A delegate's call that asks the member each time is filed as a
-    pending action with the delegate's ``note`` instead of run (core.pending); ``prepared`` is the pending action whose
-    approval this call is, which the audit log names.
+    pending action with the delegate's ``note`` instead of run (core.pending), unless a task makes it; ``prepared`` is
+    the pending action whose approval this call is, which the audit log names. A delegate acts under the grant it holds
+    now, or under ``bound`` (a Delegation) when the call carries out something it wrote under that grant: a task.
 
     A refusal replies ``ok`` false with the ``error`` for people and its ``kind`` for programs: GGG's error in
     snake case (``not_found``, ``forbidden``, ``conflict``, ...), see core.db.Fail."""
@@ -118,10 +119,11 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
             raise Forbidden(f"{name} is the member's own act: it takes no on_behalf_of")
         # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
         user = by if origin == "replay" else claimed or by
-        asked = pending.asked_under(user, by, spec, args) if origin == "user" and user != by and not query else None
+        asking = origin in poa.ASKING_ORIGINS and user != by and not query
+        asked = pending.asked_under(user, by, spec, args) if asking else None
         if asked:
-            return json.dumps({"ok": True, **pending.prepare(asked, user, by, name, spec, args, note)})
-        grant = auth.authorize(user, by, name, spec, args, origin, declared)
+            return json.dumps({"ok": True, **pending.prepare(asked, user, by, name, spec, args, note, origin, declared)})
+        grant = auth.authorize(user, by, name, spec, args, origin, declared, bound)
         # The facts of a call are its arguments as GGG defines them, and ``on_behalf_of`` is one: a forbid may refuse a
         # delegate's vote. ``claimed`` was taken out of ``args`` above, for the operations never read it; a claim of
         # oneself is no delegation, and the call a member approves from a pending action is the delegate's, so it
@@ -224,6 +226,15 @@ def run(gen):
     raise RuntimeError("a query cannot call other canisters")
 
 
-def call(name, args=None, user=None, origin="user"):
-    """Run an operation from Python (REPL, codex effects, replays) and return its result as a dict."""
-    return json.loads(run(dispatch(name, json.dumps(args or {}), origin=origin, signer=user)))
+def on_behalf(user, by, args):
+    """The arguments of a call that ``by`` signs for ``user``. When they differ the call is a delegate's, so it is made
+    for ``user`` whatever ``args`` claim, and meets the grant like any call of the delegate's own. The operations that
+    run others (tasks, the shell, extension calls) pass the delegate on with this."""
+    return {**args, "on_behalf_of": user} if by != user else args
+
+
+def call(name, args=None, user=None, origin="user", by=None):
+    """Run an operation from Python (REPL, codex effects, replays, the shell) and return its result as a dict. ``by`` is
+    the delegate that signs for ``user`` under a power of attorney."""
+    signer = by or user
+    return json.loads(run(dispatch(name, json.dumps(on_behalf(user, signer, args or {})), origin=origin, signer=signer)))
