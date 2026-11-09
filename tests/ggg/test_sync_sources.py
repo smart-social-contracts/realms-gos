@@ -311,6 +311,40 @@ def test_a_walk_that_fails_after_the_other_sides_notice_leaves_no_link_on_either
     assert "not the capital" in denied("link_notify", "ctl", side="sync_source", status="requested")
 
 
+def test_a_new_vote_waits_while_the_vote_before_it_is_still_being_checked_even_if_its_link_has_ended():
+    seen = []
+
+    def src_info(_):  # during the walk of the first vote: the link is ended, and the same vote is cast again
+        seen.append(direct("sync_source_remove", "ctl", source={"Realm": SRC}))
+        seen.append(direct("sync_source_add", "ctl", source={"Realm": SRC}, name="Again"))
+        return realm_info()
+
+    peer(SRC, realm_info=src_info, link_notify={"ok": True, "status": "active"})
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert seen[0]["ok"] and not seen[1]["ok"] and "still being checked" in seen[1]["error"]
+    assert not SyncSource[SRC].checking  # the first walk cleared its own mark, and nobody else's
+    peer(SRC, realm_info=realm_info(), link_notify={"ok": True, "status": "active"})
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Again")  # now the key is free
+    assert status(SyncSource[SRC]) == "active" and SyncSource[SRC].name == "Again"
+
+
+def test_the_same_for_an_accepted_follower():
+    peer(SRC, realm_info=realm_info(), link_notify=UNANSWERED)
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    seen = []
+
+    def src_info(_):
+        seen.append(direct("follower_remove", "ctl", follower=FOL))
+        seen.append(direct("follower_accept", "ctl", follower=FOL))
+        return realm_info()
+
+    peer(SRC, realm_info=src_info)
+    peer(FOL, link_notify={"ok": True, "status": "active"})
+    ok("follower_accept", "ctl", follower=FOL)
+    assert seen[0]["ok"] and not seen[1]["ok"] and "still being checked" in seen[1]["error"]
+    assert not Follower[FOL].checking and status(Follower[FOL])["Ended"]["by"] == ME
+
+
 def test_either_side_ends_a_link_and_tells_the_other_and_a_new_vote_opens_a_new_link():
     source = peer(SRC, realm_info=realm_info(), link_notify={"ok": True, "status": "active"})
     follower = peer(FOL, link_notify={"ok": True, "status": "active"})

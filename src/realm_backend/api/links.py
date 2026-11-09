@@ -102,6 +102,15 @@ def valid_follower(args):
     capital_of(args.get("follower"))
 
 
+def refuse_standing(old, key, what):
+    """A vote on ``key`` is a Conflict while the link under it stands, and while the vote that made it is still being
+    checked, even if the link has been ended since: that vote's walk would clear the ``checking`` mark of the next one."""
+    if old is not None and old.checking:
+        raise Conflict(f"the vote on {key} is still being checked")
+    if old is not None and old.status != "ended":
+        raise Conflict(f"{key} is already a {what}")
+
+
 def open_link(cls, key, **fields):
     """This side's vote: the link recorded as ``requested``, in place of an ended one under the same key. Returns the
     row and what it replaced, for ``undo``. It is written before the check for a cycle reads any other realm, so that a
@@ -263,8 +272,7 @@ def sync_source_add(c, args):
         return {}
     if key == chain.self_id():
         raise Conflict("a realm does not take legislation from itself")
-    if old is not None and old.status != "ended":
-        raise Conflict(f"{key} is already a sync source")
+    refuse_standing(old, key, "sync source")
     return (yield from vote_link(SyncSource, key, (key, chain.self_id()), name=args["name"]))
 
 
@@ -287,8 +295,7 @@ def follower_accept(c, args):
     if key == chain.self_id():
         raise Conflict("a realm is not its own follower")
     old = Follower[key]
-    if old is not None and old.status != "ended":
-        raise Conflict(f"{key} is already a follower")
+    refuse_standing(old, key, "follower")
     return (yield from vote_link(Follower, key, (chain.self_id(), key)))
 
 
