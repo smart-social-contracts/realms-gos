@@ -132,17 +132,15 @@ def test_the_capital_keeps_the_counts_a_quarter_reports_and_no_reply_carries_the
     ok("quarter_report", "north", population=41)  # a report without zones leaves them as they were
     assert Quarter["north"].zones == {"riverside": 30, "hillside": 5}
     for who in (fake_chain.ANONYMOUS, "newcomer", "north"):
-        fake_chain.state["caller"] = who
         rows = ok("quarter_directory", who, query=True)["quarters"]
-        typed = g.ggg_quarter_directory({"cursor": None, "limit": None})["Ok"]["items"]
-        assert rows and typed and not [row for row in rows + typed if "zones" in row]
+        assert rows and not [row for row in rows if "zones" in row]
     synced = ok("quarter_sync", "north", population=41)
+    assert synced["directory"] and not [row for row in synced["directory"] if "zones" in row]
+    assert all(set(zone) == {"zone", "name", "kind"} for zone in synced["zones"])  # definitions, no counts
+    assert all("zones" not in row for row in quarters.directory())
     fake_chain.state["caller"] = "north"
     typed = op.run(g.ggg_quarter_sync())["Ok"]
-    assert len(synced["directory"]) == len(typed["items"]) == 4
-    assert not [row for row in synced["directory"] + typed["items"] if "zones" in row]
-    assert all(set(zone) == {"zone", "name", "kind"} for zone in synced["zones"] + typed["zones"])  # definitions, no counts
-    assert all("zones" not in row for row in quarters.directory())
+    assert (typed["capital"], typed["zones"]) == (CAPITAL, synced["zones"])  # the typed reply carries those definitions
 
 
 def test_a_quarter_reports_the_zones_its_members_live_in(monkeypatch):

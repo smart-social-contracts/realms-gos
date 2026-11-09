@@ -818,12 +818,12 @@ def directory(out):
 
 def synced(out, args):
     """quarter_sync's reply. The capital answers with the directory it sends its quarters and the zones the realm
-    defines, and the reply is those: what it keeps of a quarter's zones is for placing members and goes in no reply. A
-    quarter's own call returns a summary, so its reply is its view of the directory, which defines nothing."""
+    defines, and the reply is those. The counts it keeps of a quarter's zones are for placing members and go in no
+    reply, since a small count singles out a person. A quarter's own call returns a summary, so its reply is its view
+    of the directory, which defines nothing."""
     if "directory" not in out:
         return directory(local("quarter_directory"))
-    capital = next((q["id"] for q in out["directory"] if q["capital"]), None)
-    return {**directory({"capital": capital, "quarters": out["directory"]}), "zones": out["zones"]}
+    return {**directory({"capital": chain.self_id(), "quarters": out["directory"]}), "zones": out["zones"]}
 
 
 def local(name, **args):
