@@ -103,7 +103,10 @@ def switch(waiting):
     realm's own source id (its own layer). The runtime loads it first: a codex that does not load raises before
     anything changes. The ``on_codex_activate`` hooks run in the next message (``hooks``): a hook never fails the
     switch (§9.3), nor the proposal execution or install step that made it."""
+    from api import installs  # it imports this module
+
     legislation.load(waiting)
+    installs.keep_relayed(waiting)
     switch_to(waiting, active())
     waiting.installed_at = chain.now()
     store.remember_source(waiting.layers[-1])

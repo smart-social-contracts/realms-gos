@@ -3996,6 +3996,35 @@
   "relationships": {},
   "version": 1
  },
+ "SourceRecord": {
+  "fields": {
+   "checked_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "releases": {
+    "constraints": {
+     "max_length": 524288
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "source": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
  "SyncSource": {
   "fields": {
    "checksum": {

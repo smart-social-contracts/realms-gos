@@ -1,6 +1,6 @@
 """Links between realms (docs/codices/layered-codex.md §8, §11): the sync sources a realm takes legislation from, the
 followers that take it from the realm, and the releases it publishes and relays. Data only: the rules are in
-api.links.
+api.links, which also reads the sync sources' records.
 
 A link has the same four fields on both sides: its ``status`` (``requested`` after this side's vote, ``active`` once
 the other side's is in too, ``ended``), who ended it and when, and ``unsent``, whether the other side still has to be
@@ -22,6 +22,21 @@ class SyncSource(Row):
     ended_by = String(default="")
     ended_at = Integer(default=0)
     unsent = Boolean(default=False, indexed=True)
+
+
+RECORD_MAX = 1 << 19  # characters of a sync source's record as JSON
+
+
+class SourceRecord(Row):
+    """The published record of a sync source as this realm last read it, and when. It has a row of its own, not a field
+    of ``SyncSource``: a record can be hundreds of kilobytes, and a row is read whole by every message that touches it
+    (the realm lists its sync sources in ``realm_info``)."""
+
+    __alias__ = "id"
+    id = String()  # the sync source's: its capital, or the url of its stand-in record
+    source = String(default="")  # the source id of the record's own layer, "" when it has none yet
+    releases = Json([], max_length=RECORD_MAX)  # the layers it relays, top to bottom, then its own, oldest first
+    checked_at = Integer(default=0)
 
 
 class Follower(Row):

@@ -313,6 +313,8 @@ def test_j_what_each_step_costs(net, site, people, costs):
                   LAB % args + f"installs.receive_change_list(job, 200, {net.web.responses[args['url']].body!r})")
     costs.measure(lab, "install step 2: check the change list (first use: the library compiles)", LAB % args + "installs.check_change_list(job)")
     costs.measure(lab, "install step 2: check the change list (again)", LAB % args + "installs.check_change_list(job)")
+    costs.measure(lab, "install step 3: the records (an own layer reads none), the relays and the early check",
+                  LAB % args + "from core.op import run\nrun(installs.read_records(job, installs.prepared(job)[0]))")
     for index, entry in enumerate(listed["set"]):
         body = net.web.responses[entry["url"]].body
         size = "256 KB" if len(body) > 100_000 else "small"

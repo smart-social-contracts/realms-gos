@@ -5,7 +5,9 @@ then runs one step per message:
 
 1. ``fetch_change_list``: the change list by HTTPS outcall, kept under the proposal's checksum;
 2. ``check_change_list``: its rules, by itself and against this realm (core.change_list.apply);
-3. ``fetch_chapters``: each chapter not stored yet, one per message, from its URL or a mirror, kept under its checksum;
+3. ``fetch_chapters``: first, for a release, the records of the sync sources are read (api.links) and the one that
+   vouches for it chosen; then each chapter not stored yet, one per message, from the capital of the sync source that
+   vouches for its layer or from its URL or a mirror, kept under its checksum;
 4. ``check_sources``: the chapters against the records of the sync sources (core.change_list.vouch);
 5. ``build``: the layer paths (``plan``), every chapter loaded and checked in a fresh sandbox, the Cedar its forbids
    become validated by the realm's engine (core.legislation.build), then the codex row, ``pending``;
@@ -25,13 +27,13 @@ finished 15 minutes after it was armed (a step that ran out of instructions leav
 
 import json
 
-from api import codex
+from api import codex, links
 from core import chain
 from core import change_list
 from core import layered_codex as store
 from core import legislation
 from core.db import JSON_MAX, Conflict, Fail, each, find, next_id, view
-from core.op import GENERATOR, op
+from core.op import GENERATOR, audit, op
 from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal
 
 STEPS = ("fetch_change_list", "check_change_list", "fetch_chapters", "check_sources", "build", "switch")
@@ -42,16 +44,7 @@ STEP_LIMIT = 15 * 60  # seconds a step may take, outcall included, before the jo
 REUSED = ("status", "chapters", "proposal", "failures", "activates_at", "installed_at", "previous")  # of a row kept
 MAX_CHANGE_LIST = 64 * 1024
 MAX_CHAPTER = store.MAX_CHAPTER
-# The replica counts a reply's headers and its framing against max_response_bytes, not only its body: room for them,
-# so that a chapter of exactly 256 KB arrives. The body itself is held to the limit (``decoded``).
-HEADROOM = 8 * 1024
 HEX = "0123456789abcdef"
-
-
-def relays():
-    """The records of the realm's sync sources (§8), in the shape ``plan`` takes: none until the realm has links
-    (realms-gos#491 reads them)."""
-    return []
 
 
 def job_of(proposal):
@@ -219,7 +212,7 @@ def fetch_change_list(job):
     """Step 1: the change list's bytes, unless they are stored already."""
     url, checksum = job.change_list["url"], job.change_list["checksum"]
     if ChapterSource[checksum] is None:
-        status, body = yield from fetched(url, MAX_CHANGE_LIST)
+        status, body = yield from store.fetched(url, MAX_CHANGE_LIST)
         job = InstallJob[job.id]
         if job.status != "running":
             return None
@@ -230,7 +223,7 @@ def fetch_change_list(job):
 def receive_change_list(job, status, body):
     """The reply to step 1's outcall: the bytes the proposal's checksum names, stored under it."""
     url = job.change_list["url"]
-    text = decoded(url, status, body, MAX_CHANGE_LIST)
+    text = store.decoded(url, status, body, MAX_CHANGE_LIST)
     try:
         store.store_chapter(job.change_list["checksum"], text)
     except Fail as e:
@@ -244,9 +237,13 @@ def check_change_list(job):
 
 
 def fetch_chapters(job):
-    """Step 3: the first chapter of the change list not stored yet, from its URL or a mirror; the step runs again,
-    in the next message, until none is missing."""
+    """Step 3: the records are read first, in the first message (``read_records``); then the first chapter of the
+    change list not stored yet, from the capital of the sync source that vouches for its layer, its URL or a mirror;
+    the step runs again, in the next message, until none is missing."""
     listed, _, _ = prepared(job)
+    if "relays" not in job.staged:
+        yield from read_records(job, listed)
+        return "fetch_chapters" if InstallJob[job.id].status == "running" else None
     for entry in listed["set"]:
         if ChapterSource[entry["sha256"]] is None:
             yield from fetch_chapter(job, entry)
@@ -254,15 +251,48 @@ def fetch_chapters(job):
     return "check_sources"
 
 
+def read_records(job, listed):
+    """Read the records of the sync sources, when the change list installs a release, and stage what step 4 and 5
+    check against: the ``relays`` for ``plan`` (core.change_list.relays_for) and the record that vouches for the release
+    (``vouching``). Then the change list is checked against them at once, so that a release no record vouches for
+    fails before any chapter is fetched. A generator."""
+    release = listed["release"]
+    found = (yield from links.read_active_records()) if release is not None else []
+    job = InstallJob[job.id]
+    if job.status != "running":
+        return
+    _, realm, _ = prepared(job)
+    runs = installed_layers(codex.active(), realm)
+    staged = job.staged
+    staged["relays"] = change_list.relays_for(runs, found, release)
+    job.staged = staged
+    vouched(job)
+    if release is not None:
+        staged["vouching"] = change_list.vouching(found, release)
+        job.staged = staged
+
+
 def fetch_chapter(job, entry):
-    """The bytes of ``entry`` from the first of its URLs that serves the right ones, stored in the message that
-    receives them. A generator."""
+    """The bytes of ``entry``, stored in the message that receives them: from the capital of the sync source that
+    vouches for the layer, when a realm does, else from the first of its URLs that serves the right ones. A capital that
+    serves other bytes than the record names is noted (``refused_by_capital``) before the URLs are tried. A generator."""
     refusals = []
+    capital = vouching_capital(job, entry)
+    if capital is not None:
+        try:
+            reply = yield from links.ask_realm(capital, "legislation_chapter", {"chapter": entry["sha256"]})
+            job = InstallJob[job.id]
+            if job.status != "running":
+                return
+            receive_from_capital(job, entry, capital, reply.get("text"))
+            return
+        except Fail as e:
+            refusals.append(str(e))
     for index, url in enumerate(entry["urls"]):
-        if InstallJob[job.id].status != "running":  # stopped while an earlier URL was being tried
+        if InstallJob[job.id].status != "running":  # stopped while an earlier route was being tried
             return
         try:
-            status, body = yield from fetched(url, MAX_CHAPTER)
+            status, body = yield from store.fetched(url, MAX_CHAPTER)
             job = InstallJob[job.id]
             if job.status != "running":
                 return
@@ -273,19 +303,54 @@ def fetch_chapter(job, entry):
     raise Fail(f"{entry['chapter']}: " + "; ".join(refusals))
 
 
+def vouching_capital(job, entry):
+    """The capital to ask for the chapter ``entry``: the sync source that vouches for the release it is a part of, when
+    that is a realm. None for the realm's own chapters and for a stand-in record, which have only their URLs."""
+    vouching = job.staged.get("vouching")
+    if vouching is None or entry["source"] != vouching["release"]["source"] or not links.is_realm_key(vouching["key"]):
+        return None
+    return vouching["key"]
+
+
+def receive_from_capital(job, entry, capital, text):
+    """The capital's answer for one chapter: the size and the checksum the change list gives, or a refusal."""
+    if not isinstance(text, str):
+        raise Fail(f"{capital}: no text for {entry['sha256']}")
+    if len(text.encode()) != entry["size"]:
+        raise refused_by_capital(capital, entry, f"{len(text.encode())} bytes, the change list says {entry['size']}")
+    try:
+        store.store_chapter(entry["sha256"], text)
+    except Fail as e:
+        raise refused_by_capital(capital, entry, str(e))
+    stage_fetched(job, entry, {"route": "capital"})
+
+
+def refused_by_capital(capital, entry, why):
+    """Note in the audit log that a sync source's capital served other bytes than its record names, and return the
+    Fail that sends the install on to the chapter's URLs."""
+    audit("install_chapter_refused", "", capital, "install",
+          {"source": capital, "chapter": entry["chapter"], "sha256": entry["sha256"]}, {"error": why})
+    return Fail(f"{capital}: {why}")
+
+
 def receive_chapter(job, entry, index, status, body):
     """The reply to one of step 3's outcalls: the size and the checksum the change list gives, or a refusal.
     The bytes are stored now, and where and when they came from is noted for the codex row (§8)."""
     url = entry["urls"][index]
-    text = decoded(url, status, body, MAX_CHAPTER)
+    text = store.decoded(url, status, body, MAX_CHAPTER)
     if len(body) != entry["size"]:
         raise Fail(f"{url}: {len(body)} bytes, the change list says {entry['size']}")
     try:
         store.store_chapter(entry["sha256"], text)
     except Fail as e:
         raise Fail(f"{url}: {e}")
+    stage_fetched(job, entry, {"route": "https", "url": index})
+
+
+def stage_fetched(job, entry, came):
+    """Note how and when the bytes of ``entry`` arrived: ``came`` is its route, and for https the index of its URL."""
     staged = job.staged
-    staged.setdefault("fetched", {})[entry["sha256"]] = {"url": index, "at": chain.now()}
+    staged.setdefault("fetched", {})[entry["sha256"]] = {**came, "at": chain.now()}
     job.staged = staged
 
 
@@ -327,6 +392,15 @@ def build(job):
     return WAIT if when > chain.now() else "switch"
 
 
+def keep_relayed(row):
+    """At the switch to ``row``: if its install brought a release, this realm's record lists it, as the record that
+    vouches for it lists it (api.links.relay_release)."""
+    job = store.live_job()
+    vouching = job.staged.get("vouching") if job is not None and job.staged.get("codex") == row.id else None
+    if vouching is not None:
+        links.relay_release(vouching["release"], vouching["order"])
+
+
 def finish(job):
     """Step 6, the switch: the pending codex becomes active and the previous one is kept, in this message. The
     active codex is checked first: already this one, nothing happens; another than the change list replaces, the
@@ -354,27 +428,6 @@ RUN = {"fetch_change_list": fetch_change_list, "check_change_list": check_change
 # ---- What the steps share.
 
 
-def fetched(url, most):
-    """``(status, body)`` of a GET of ``url`` by HTTPS outcall, for a body of at most ``most`` bytes; a call that fails
-    is a Fail naming the URL."""
-    try:
-        return (yield from chain.http_get(url, most + HEADROOM))
-    except Exception as e:  # a failed call is a plain Exception, as chain.call raises it
-        raise Fail(f"{url}: {e}")
-
-
-def decoded(url, status, body, most):
-    """The text of a reply: a 200 of at most ``most`` bytes of UTF-8."""
-    if status != 200:
-        raise Fail(f"{url}: HTTP {status}")
-    if len(body) > most:
-        raise Fail(f"{url}: {len(body)} bytes is above {most // 1024} KB")
-    try:
-        return body.decode("utf-8")
-    except UnicodeDecodeError:
-        raise Fail(f"{url}: not UTF-8")
-
-
 def prepared(job):
     """The stored change list, parsed and applied to this realm: ``(change list, the realm's source id, its own layer
     after the change)``. Steps 2 to 5 start here; it reads only stored rows, so it answers the same every time."""
@@ -385,9 +438,13 @@ def prepared(job):
 
 
 def vouched(job):
-    """``prepared`` and then the records: the plan of the new codex, who vouches for each chapter, the change list."""
+    """``prepared`` and then the records the job staged: the plan of the new codex, who vouches for each chapter, the
+    change list."""
     listed, realm, own = prepared(job)
-    planned, vouched_by = change_list.vouch(listed, realm, relays(), own)
+    brought = (listed["release"] or {}).get("source")  # the layer a release replaces is vouched for anew
+    kept = {layer["source"]: layer["vouched_by"] for layer in installed_layers(codex.active(), realm)
+            if layer["source"] != brought}
+    planned, vouched_by = change_list.vouch(listed, realm, job.staged["relays"], own, kept)
     return planned, vouched_by, listed
 
 
@@ -404,6 +461,26 @@ def own_layer(current, realm):
             else:
                 chapters[domain] = entry["sha256"]
     return {"chapters": chapters, "calendar": calendar}
+
+
+def installed_layers(current, realm):
+    """The layers from above that the active codex runs, top to bottom, as it runs them: each ``{source, version,
+    chapters, calendar, vouched_by}``, the release it installed and the source whose record vouched for it. None under
+    a legacy codex or none."""
+    if not isinstance(current, LayeredCodex):
+        return []
+    layers = {}
+    for chapter, entry in current.chapters.items():
+        source, _, domain = chapter.rpartition("/")
+        if source == realm:
+            continue
+        layer = layers.setdefault(source, {"source": source, "version": entry["version"], "chapters": {},
+                                           "calendar": None, "vouched_by": entry["vouched_by"]})
+        if domain == change_list.CALENDAR:
+            layer["calendar"] = entry["sha256"]
+        else:
+            layer["chapters"][domain] = entry["sha256"]
+    return [layers[source] for source in current.layers if source in layers]
 
 
 def activates_at_of(job):
@@ -423,8 +500,9 @@ def entries_of(job, planned, vouched_by, listed):
     for chapter, item in change_list.named(planned):
         sha256 = item["sha256"]
         if chapter in urls and sha256 in fetched_now:
-            came = {"route": "https", "url": urls[chapter]["urls"][fetched_now[sha256]["url"]],
-                    "fetched_at": fetched_now[sha256]["at"], "size": urls[chapter]["size"]}
+            now = fetched_now[sha256]
+            came = {"route": now["route"], "url": urls[chapter]["urls"][now["url"]] if now["route"] == "https" else "",
+                    "fetched_at": now["at"], "size": urls[chapter]["size"]}
         elif chapter in before and before[chapter]["sha256"] == sha256:
             came = {k: before[chapter].get(k) for k in ("route", "url", "fetched_at", "size")}
         else:
