@@ -793,6 +793,66 @@ def test_without_the_cedar_tools_it_says_what_to_install(world, monkeypatch):
     assert out.exit_code == 2 and "scripts/cedar_tools.sh" in out.output
 
 
+def test_the_realms_the_time_budget_does_not_reach_are_listed_as_not_analysed_and_fail(
+    world, monkeypatch
+):
+    from types import SimpleNamespace
+
+    head = world.change({"eu/es/tax.py": tax("1.00", rustic("0.90"))})
+    monkeypatch.setattr(legislation, "time", SimpleNamespace(monotonic=lambda: 0.0))
+    out = world.diff(world.base, head, "--budget", "1")  # the deadline is 1: long past
+    assert out.exit_code == 1
+    assert "**2 failure(s)**" in out.output
+    assert "- FAILED eu/es: not analysed (time budget)" in out.output
+    assert f"- FAILED {VALENCIA}: not analysed (time budget)" in out.output
+    assert out.output.startswith("<!-- realms-legislation-diff -->")
+
+
+def test_a_budget_that_runs_out_part_way_stops_the_realm_and_says_so(
+    world, monkeypatch
+):
+    from realms.cli.commands import legislation_proof
+
+    head = world.change({"eu/es/tax.py": tax("1.00", rustic("0.90"))})
+    ask, calls = legislation_proof.Solver.ask, []
+
+    def short_of_time(self, *args):
+        calls.append(args)
+        if len(calls) > 3:
+            raise legislation_proof.OutOfTime()
+        return ask(self, *args)
+
+    monkeypatch.setattr(legislation_proof.Solver, "ask", short_of_time)
+    spain = world.realm(world.base, head, "eu/es")
+    assert spain.problems == ["not analysed (time budget): stopped part-way"]
+    assert spain.folded == [] and spain.failures() == [
+        "eu/es: not analysed (time budget): stopped part-way"
+    ]
+
+
+def test_a_solver_with_a_deadline_stops_a_running_query_and_starts_no_new_one(world):
+    import time
+
+    from realms.cli.commands.legislation_proof import OutOfTime
+
+    codex = loaded(world, world.base, "eu/es")
+    schema = codex.cedar_schema(context={"op": "String"})
+    for deadline in (time.monotonic() - 1, time.monotonic() + 0.0001):
+        solver = Solver(*world.tools, schema, deadline)
+        with pytest.raises(OutOfTime):
+            solver.always_denies(
+                "tax_policy_propose.taxes", ["permit (principal, action, resource);"]
+            )
+    assert (
+        Solver(*world.tools, schema, time.monotonic() + 600)
+        .always_denies(
+            "tax_policy_propose.taxes", ["permit (principal, action, resource);"]
+        )
+        .proved
+        is False
+    )
+
+
 def test_a_realm_that_is_no_source_is_refused_like_check_does(world, tmp_path):
     head = world.change({"eu/es/tax.py": tax("1.00", rustic("0.90"))})
     out = world.diff(world.base, head, "--realm", "eu/xx")

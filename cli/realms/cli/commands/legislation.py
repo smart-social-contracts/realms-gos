@@ -18,6 +18,7 @@ read here, so a body beside the line, such as EMSHI, is checked as a realm of it
 own ``realm.py``: the one a source above keeps beside its releases is that source's, as ``plan`` skips a relayed one.
 """
 
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -392,13 +393,19 @@ def diff_command(
     out: Optional[Path] = typer.Option(
         None, "--out", help="Write the report here (Markdown), not to the output"
     ),
+    budget: Optional[float] = typer.Option(
+        None,
+        "--budget",
+        min=1,
+        help="Seconds after which no query is started: the realms not reached are listed as not analysed, which fails",
+    ),
 ) -> None:
     """Compare the tree at two commits for every realm the change reaches, and write the report of §12.3.
 
     Needs the pinned Cedar CLI and cvc5 (CEDAR_CLI, CVC5; scripts/cedar_tools.sh). Exits 1 when the report lists a
     failure: a forbid that can error, a nothing-permitted operation, a forbid that never fires, a query the solver did
-    not decide, a codex that does not load or a test case that fails. Exits 2 for a refusal: a realm or commit that
-    is not there, missing tools.
+    not decide, a codex that does not load, a realm the --budget left no time for, or a test case that fails.
+    Exits 2 for a refusal: a realm or commit that is not there, missing tools.
     """
     try:
         tools = cedar_tools("analysis of a change")
@@ -410,8 +417,9 @@ def diff_command(
             realms, head_commit = [data["realm"]], change_list_commit(data) or None
         head_commit = commit_of(tree, head_commit or head)
         comparison = Comparison(
-            tree, base_commit, head_commit, ggg_operations(), facts, check_view(), tools
-        )
+            tree, base_commit, head_commit, ggg_operations(), facts, check_view(), tools,
+            None if budget is None else time.monotonic() + budget,
+        )  # fmt: skip
         results = [comparison.realm(r) for r in comparison.affected(realms)]
     except MissingTools as e:
         console.print(f"[red]{e}[/red]")

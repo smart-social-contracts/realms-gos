@@ -9,6 +9,7 @@ realm is affected when a source on its layer path changed a chapter or a calenda
 
 import difflib
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Dict, List, Optional, Set, Tuple
@@ -22,11 +23,12 @@ from realms.cli.commands.legislation_diff import (
 )
 from realms.cli.commands.legislation_layout import CASES_SUFFIX, git
 from realms.cli.commands.legislation_load import CommitFiles, layers_of, load_realm
-from realms.cli.commands.legislation_proof import Solver
+from realms.cli.commands.legislation_proof import OutOfTime, Solver
 from realms.cli.commands.legislation_resolve import view_lines
 from realms.legislation import LegislationError
 from realms.legislation.view import flatten
 
+NOT_ANALYSED = "not analysed (time budget)"
 MARKER = "<!-- realms-legislation-diff -->"  # a comment on the pull request that holds a report is replaced, not added to
 
 
@@ -105,7 +107,10 @@ def changed_files(tree, base: str, head: str) -> Dict[str, Set[str]]:
 class Comparison:
     """The tree at two commits, the realms the change reaches, and what happens to each."""
 
-    def __init__(self, tree, base, head, operations, facts, ggg, tools):
+    def __init__(self, tree, base, head, operations, facts, ggg, tools, deadline=None):
+        """``deadline`` (``time.monotonic()``): no query starts after it, and the realms not reached are reported as
+        not analysed (``--budget``)."""
+        self.deadline = deadline
         self.tree, self.operations, self.facts, self.ggg, self.tools = (
             tree,
             operations,
@@ -132,6 +137,15 @@ class Comparison:
         return [r for r in known if any(s in self.changed for s in layers_of(r, known))]
 
     def realm(self, realm: str) -> RealmDiff:
+        """What the change does to ``realm``; within the time budget, or the realm as not analysed."""
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            return RealmDiff(realm, problems=[NOT_ANALYSED])
+        try:
+            return self.analyse_realm(realm)
+        except OutOfTime:
+            return RealmDiff(realm, problems=[f"{NOT_ANALYSED}: stopped part-way"])
+
+    def analyse_realm(self, realm: str) -> RealmDiff:
         result = RealmDiff(realm)
         old, new = self.load(self.old, realm), self.load(self.new, realm)
         result.problems = [
@@ -195,7 +209,10 @@ class Comparison:
     def analyse(self, realm, old, new, actions, generic) -> List[ActionResult]:
         cli, cvc5 = self.tools
         solver = Solver(
-            cli, cvc5, new.cedar_schema(generic=generic, context={"op": "String"})
+            cli,
+            cvc5,
+            new.cedar_schema(generic=generic, context={"op": "String"}),
+            self.deadline,
         )
         return [
             analyse_action(solver, action, old, new, generic, self.errors)
@@ -229,7 +246,9 @@ class Comparison:
         if not with_maxima:
             return lines
         cli, cvc5 = self.tools
-        solver = Solver(cli, cvc5, codex.cedar_schema(context={"op": "String"}))
+        solver = Solver(
+            cli, cvc5, codex.cedar_schema(context={"op": "String"}), self.deadline
+        )
         bound = {
             f.id.rsplit("/", 1)[-1]: f for f in codex.forbids() if f.domain == domain
         }

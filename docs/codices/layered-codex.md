@@ -1780,7 +1780,7 @@ The analysis uses the Cedar semantics of the CLI's version (4.14.1), while the c
 difference is not expected to matter; the two versions are aligned at basilisk's next bump.
 
 Built ([realms-codices#13](https://github.com/smart-social-contracts/realms-codices/issues/13)):
-`realms legislation diff [TREE] --base REV [--head REV] [--realm ID]... [--change-list FILE] [--out FILE]`.
+`realms legislation diff [TREE] --base REV [--head REV] [--realm ID]... [--change-list FILE] [--out FILE] [--budget SECONDS]`.
 
 - **What is compared.** The tree at two commits, read with git (never the working copy), as `check` reads it: every
   source is a realm whose layers are its ancestors. The realms analysed are those with a source on their layer path
@@ -1825,6 +1825,10 @@ Built ([realms-codices#13](https://github.com/smart-social-contracts/realms-codi
   the realms that run the chapter, so that their cases run.
 - **Tools.** The pinned Cedar CLI and cvc5 (`CEDAR_CLI`, `CVC5`; `scripts/cedar_tools.sh`); without them it exits 2 and
   says so. Up to four SymCC queries run at once.
+- **Time budget.** With `--budget SECONDS` no query starts after that time and a running one is stopped. A realm the
+  budget did not reach is listed as `not analysed (time budget)`, and one it stopped part-way as `not analysed (time
+  budget): stopped part-way` (its partial answers are dropped); both are failures, so a pull request cannot pass on
+  what was not analysed. The report is written whatever the budget does.
 - **Limits.** With the settings open, the schema is the new codex's, so an old forbid that reads a setting the new
   codex no longer has is not analysed (SymCC refuses it, and it is reported as undecided). The links between realms
   are not read, as with `check`.

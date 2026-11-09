@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import List, NamedTuple, Optional
 
@@ -22,6 +23,10 @@ from realms.legislation.periods import UNITS
 SYMCC_TIMEOUT = 300  # seconds for one query; the CLI itself stops cvc5 after 60
 PERMIT_ALL = '@id("harness/permit_all")\npermit (principal, action, resource);'
 PERIOD_COUNT_MAX = 1_000_000  # GGG's range for a Period's count
+
+
+class OutOfTime(Exception):
+    """The time budget of the command (``realms legislation diff --budget``) ran out before the query was answered."""
 
 
 class Answer(NamedTuple):
@@ -35,8 +40,17 @@ class Answer(NamedTuple):
 class Solver:
     """The Cedar CLI's ``symcc`` for one schema."""
 
-    def __init__(self, cedar_cli: str, cvc5: str, schema: str):
+    def __init__(
+        self,
+        cedar_cli: str,
+        cvc5: str,
+        schema: str,
+        deadline: Optional[float] = None,
+    ):
+        """``deadline`` is a ``time.monotonic()`` value after which no query is started and a running one is stopped
+        (``OutOfTime``)."""
         self.cedar_cli, self.cvc5, self.schema = cedar_cli, cvc5, schema
+        self.deadline = deadline
 
     def never_errors(self, action: str, policy: str) -> Answer:
         return self.ask(action, "never-errors", {"-p": [policy]})
@@ -56,6 +70,10 @@ class Solver:
         )
 
     def ask(self, action: str, check: str, sets: dict) -> Answer:
+        left = None if self.deadline is None else self.deadline - time.monotonic()
+        if left is not None and left <= 0:
+            raise OutOfTime()
+        allowed = SYMCC_TIMEOUT if left is None else min(SYMCC_TIMEOUT, left)
         with tempfile.TemporaryDirectory() as folder:
             schema = Path(folder, "realm.cedarschema")
             schema.write_text(self.schema)
@@ -71,10 +89,12 @@ class Solver:
             ]  # fmt: skip
             try:
                 done = subprocess.run(
-                    command, capture_output=True, text=True, timeout=SYMCC_TIMEOUT,
+                    command, capture_output=True, text=True, timeout=allowed,
                     env={**os.environ, "CVC5": self.cvc5},
                 )  # fmt: skip
             except subprocess.TimeoutExpired:
+                if allowed < SYMCC_TIMEOUT:
+                    raise OutOfTime()  # stopped by the budget, not by the solver's own limit
                 return Answer(None, None, f"no answer in {SYMCC_TIMEOUT} s")
         said = (done.stdout + done.stderr).strip()
         verdict = verdict_of(done.stdout)
