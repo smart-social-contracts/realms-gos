@@ -7,9 +7,12 @@ import pytest
 import fake_chain
 import keys_people
 import world
+from core import legislation
+from ggg import Proposal
 from kit import call, ok
 from test_delegation_affairs import lend
 from test_legislation_review import notices, register, t_poke  # noqa: F401  t_poke keeps a ``code`` secret
+from test_legislation_views import get, t_view_secret  # noqa: F401  t_view_secret keeps a ``code`` secret
 from test_legislation_runtime import TOWN, activate, layered
 from test_legislation_runtime import fresh_realm  # noqa: F401  the autouse fixture
 from test_pending_actions import approved, card, confirm_ops, grant  # noqa: F401  confirm_ops: a direct operation with a secret
@@ -95,3 +98,17 @@ def test_the_reply_of_a_call_forwarded_for_a_member_reaches_the_hook_without_the
     out = ok("call_for", "claude-conn", method="t_direct_secret", args={}, grantor="alice")
     assert out["token"] == "S3CRET-TOKEN"  # the delegate gets its reply
     assert "S3CRET-TOKEN" not in seen("call_for") and "'n': 1" in seen("call_for")
+
+
+def test_a_proposal_that_carries_a_proposal_shows_the_secrets_of_neither_call():
+    inner = {"op": "t_view_secret", "args": {"what": "x", "code": "S3CRET"}}
+    outer = {"op": "proposal_create", "args": {"title": "inner", "action": inner}}
+    Proposal(id="P9", title="nest", action=outer, result={"ok": True, "proposal": "P-10"}, status="voting")
+    assert get("Proposal", "P9")["action"] == {
+        "op": "proposal_create", "args": {"title": "inner", "action": {"op": "t_view_secret", "args": {"what": "x"}}}}
+
+
+def test_a_dict_that_names_an_operation_twice_loses_the_secrets_of_both():
+    both = {"op": "t_view_secret", "method": "crypto_grant", "args": {"code": "S3CRET", "keys": {"a": "b"}, "scope": "s"}}
+    assert legislation._carried({"steps": [both]}) == {
+        "steps": [{"op": "t_view_secret", "method": "crypto_grant", "args": {"scope": "s"}}]}

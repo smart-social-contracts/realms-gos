@@ -575,19 +575,19 @@ def _secret(op, args=None):
 
 
 def _carried(value):
-    """``value``, the arguments or the result of an operation, without the secret fields of the calls it carries. A
-    dict that names an operation (``op`` or ``method``) beside its ``args`` is a call: a proposal's action, a step of a
-    task, what ``call_for`` forwards, the card of a pending action. Its arguments lose that operation's secret fields,
-    and so do the ``result`` of a card and the lines of its ``summary`` that show them (a line is labelled with the
-    argument it shows)."""
+    """``value``, the arguments or the result of an operation, without the secret fields of the calls it carries, at any
+    depth. A dict that names an operation (``op`` or ``method``, or both) beside its ``args`` is a call: a proposal's
+    action, a step of a task, what ``call_for`` forwards, the card of a pending action. Its arguments lose the secret
+    fields of the operations it names, and so do the ``result`` of a card and the lines of its ``summary`` that show them
+    (a line is labelled with the argument it shows)."""
     if isinstance(value, list):
         return [_carried(v) for v in value]
     if not isinstance(value, dict):
         return value
     out = {k: _carried(v) for k, v in value.items()}
-    name = value.get("op") or value.get("method")
-    if isinstance(name, str) and name in ops() and isinstance(value.get("args"), dict):
-        secret = _secret(name)
+    names = [n for n in (value.get("op"), value.get("method")) if isinstance(n, str) and n in ops()]
+    if names and isinstance(value.get("args"), dict):
+        secret = tuple(dict.fromkeys(f for n in names for f in _secret(n)))
         out["args"] = _public(out["args"], secret)
         if isinstance(out.get("result"), dict):
             out["result"] = _public(out["result"], secret)
@@ -658,9 +658,8 @@ def _shown(entity, row, fields):
     if entity in CONDITIONAL and not CONDITIONAL[entity][1](data):
         data[CONDITIONAL[entity][0]] = None
     if entity == "Proposal" and isinstance(data["action"], dict):
-        secret = _secret(data["action"].get("op"))
-        data["action"] = {k: _public(v, secret) if k == "args" else v for k, v in data["action"].items()}
-        data["result"] = _public(data["result"], secret)
+        data["result"] = _carried(_public(data["result"], _secret(data["action"].get("op"))))
+        data["action"] = _carried(data["action"])
     return data
 
 
