@@ -39,11 +39,12 @@ THIS_PHASE = frozenset((
     "tax_policy_view", "tender_cancel", "tender_close", "tender_create", "tender_get", "tender_list",
     "tender_notice", "tender_open", "transfer_revert", "treasury_view", "user_add", "user_edit", "user_get",
     "user_import", "user_list", "user_remove", "user_set_status", "verdict_draft"))
-# What the phases before it switched on besides the 24 of LEGACY, and what the phases after it switch on in these
-# groups: each of them names its own here.
-EARLIER_PHASES = frozenset(("payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
-                            "federal_vote_propose", "action_get", "action_list"))
-LATER_PHASES = frozenset()
+# What the other phases switch on, in these groups or besides the 24 of LEGACY: each names its own here. The pending
+# doors, and the operations that run other operations (the ten task operations and the shell).
+OTHER_PHASES = frozenset((
+    "payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter", "federal_vote_propose",
+    "action_get", "action_list", "shell", "task_add_schedule", "task_cancel", "task_create", "task_delete", "task_edit",
+    "task_list", "task_logs", "task_reschedule", "task_run", "task_schedule"))
 SWITCHED_ON = sorted(n for n in poa.ENABLED if poa.row(n)[1] in GROUPS)
 
 
@@ -100,7 +101,7 @@ def test_an_operation_runs_under_a_grant_that_names_its_group_and_not_under_one_
 def test_this_phase_switches_on_exactly_these_operations_of_its_groups():
     in_groups = {n for n in poa.ENABLED if poa.row(n)[1] in GROUPS}
     assert THIS_PHASE <= poa.ENABLED
-    unexplained = in_groups - poa.LEGACY - EARLIER_PHASES - THIS_PHASE - LATER_PHASES
+    unexplained = in_groups - poa.LEGACY - OTHER_PHASES - THIS_PHASE
     assert not unexplained, f"an operation was switched on that no phase accounts for: {sorted(unexplained)}"
     assert len(THIS_PHASE) == 104 and all(poa.row(n)[0] == "direct" for n in THIS_PHASE - {"contract_create"})
 
