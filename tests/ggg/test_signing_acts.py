@@ -36,7 +36,8 @@ Act = namedtuple("Act", "official args says happened")
 
 
 def signing_acts():
-    return sorted(n for n, s in op.ops().items() if s["signing"])
+    """The signing operations of the realm: other tests register some of their own, which no table classifies."""
+    return sorted(n for n, s in op.ops().items() if s["signing"] and poa.row(n))
 
 
 # ---- The worlds

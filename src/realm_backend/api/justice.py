@@ -262,8 +262,8 @@ def evaluating_evidence(user, args):
     item = next((i for i in case.evidence or [] if i["id"] == args["evidence"]), None)
     if item is None:
         raise NotFound(f"unknown evidence '{args['evidence']}' in {case.id}")
-    verdict = "Admits" if args.get("admitted", True) else "Excludes"
-    return you_sign(f"{verdict} evidence {item['id']} in case {case.id} {quoted(case.title)}",
+    verb = "Admits" if args.get("admitted", True) else "Excludes"
+    return you_sign(f"{verb} evidence {item['id']} in case {case.id} {quoted(case.title)}",
                     ("Evidence", f"submitted by {quoted(item['by'])}, hash {quoted(item['hash'])}"))
 
 
