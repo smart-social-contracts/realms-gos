@@ -271,9 +271,15 @@ def test_activation_runs_on_codex_activate_once_and_a_revert_does_not():
 
 
 def test_a_quarter_does_not_run_on_codex_activate():
-    Realm["1"].is_quarter = True
+    Realm["1"].is_quarter, Realm["1"].is_capital = True, False
     town()
     assert LOG == []
+
+
+def test_a_capital_with_quarters_runs_on_codex_activate():
+    Realm["1"].is_quarter = True  # registering a quarter sets it on the capital too
+    first = town()
+    assert LOG == [("activated " + first.id[:13], "codex")]
 
 
 def test_the_codex_loads_on_first_use_after_a_new_heap_and_a_legacy_install_unloads_it():

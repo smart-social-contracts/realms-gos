@@ -123,7 +123,8 @@ def test_quarter_settles_and_reports_its_leg(monkeypatch):
     assert out["leg"] == "passed" and out["reported"]
     sent = json.loads(fake_chain.state["calls"][-1][2])
     assert sent["leg"] == {"vote": "FV-3", "outcome": "passed", "yes": 2, "no": 0, "abstain": 0, "eligible": 7,
-                           "hash": body["hash"]}
+                           "hash": body["hash"], "codex": ""}  # the codex this quarter ran, none here
+    assert sent["codex"] == ""  # and the call carries it too
     assert "match" in call("federation_message", CAPITAL, topic="federal_vote.result",
                            body={"vote": "FV-3", "status": "passed", "hash": "x"})["error"]
     ok("federation_message", CAPITAL, topic="federal_vote.result",
