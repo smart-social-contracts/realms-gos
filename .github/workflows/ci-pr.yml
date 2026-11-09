@@ -127,8 +127,10 @@ jobs:
       - name: Realm wasms on PocketIC
         run: pytest -q tests/deployed
 
-  # casals up from an empty replica + the cross-quarter live suite; the job
-  # body is realms-e2e.yml (also runnable by hand via workflow_dispatch).
+  # casals up from an empty replica, one extension put on the marketplace and verified, then the
+  # standalone realm UI suite in a browser. The job body is realms-e2e.yml (also runnable by hand via
+  # workflow_dispatch); its cross-quarter and GGG conformance steps skip themselves while
+  # casals.local.json has no demo-backend.
   e2e:
     needs: [lint, unit]
     uses: ./.github/workflows/realms-e2e.yml

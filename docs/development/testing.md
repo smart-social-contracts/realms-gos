@@ -126,8 +126,8 @@ demand, and uploads both folders.
 
 ## In CI
 
-[`tests.yml`](../../.github/workflows/tests.yml) is the unit gate. It runs on every pull request and every push to
-`main` and `feat/layered-codex`, needs no secrets and no replica, and is the one place these suites run: `tests/ggg`
+[`tests.yml`](../../.github/workflows/tests.yml) is the unit gate. It runs on every pull request to `main` or a
+`feat/**` branch and every push to `main` and `feat/layered-codex`, needs no secrets and no replica, and is the one place these suites run: `tests/ggg`
 (with `cedarpy`, once through each operation's `ggg_` method, with coverage floors), `tests/backend`, the layered
 codex library (`cli/tests/test_legislation*.py`, with the pinned Cedar tools), the extension sandbox ratchet and the
 generated GGG methods and zone data. The realm backend and the marketplace both pin `ic-python-db` 0.14.0, so

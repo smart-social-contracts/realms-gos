@@ -1,15 +1,16 @@
 # tests.yml — the unit gate: no canister, no replica, no secrets.
 #
-# Runs on every pull request and every push to main or feat/layered-codex. It is the one place
-# the unit suites run: tests/ggg, tests/backend, the layered codex library, the sandbox ratchet and
-# the GGG checks. ci-pr.yml (on pull requests too) and ci-main.yml (by hand only) keep what the full
-# mundus bring-up needs: lint, the packed wasms, e2e, the frontend and the CLI.
+# Runs on every pull request to main or a feat/** branch, and on every push to main or
+# feat/layered-codex. It is the one place the unit suites run: tests/ggg, tests/backend, the layered
+# codex library, the sandbox ratchet and the GGG checks. ci-pr.yml (on pull requests too) and
+# ci-main.yml (by hand only) keep what the full mundus bring-up needs: lint, the packed wasms, e2e,
+# the frontend and the CLI.
 
 name: Tests
 
 on:
   pull_request:
-    branches: [main, feat/layered-codex]
+    branches: [main, "feat/**"]
   push:
     branches: [main, feat/layered-codex]
   workflow_dispatch:
