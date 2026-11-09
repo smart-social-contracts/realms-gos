@@ -279,12 +279,12 @@ def reason(name, spec, context, held):
     """Why the call was refused, and the permission that would have allowed it, if one would."""
     if context["signing"] and context["signer_agent"]:
         return f"{name} must be done by a human, not an agent", None
+    if context["origin"] in ("extension", "codex") and name not in context["declared"]:
+        return f"{name} is not declared by this {context['origin']}", None
     if context["delegated"]:
         return f"{name} cannot be done under this power of attorney: {why_not(spec, context)}", None
     if context["user"] in context["parties"] or context["signer"] in context["parties"]:
         return f"{name}: you are a party to this matter", None
-    if context["origin"] in ("extension", "codex") and name not in context["declared"]:
-        return f"{name} is not declared by this {context['origin']}", None
     return f"{name} needs {context['permission']}", context["permission"] or None
 
 

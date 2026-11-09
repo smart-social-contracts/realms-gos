@@ -27,11 +27,13 @@ class Call:
     accepted proposal whose replay this is, if any; ``grant`` is the power of attorney a delegate acts under;
     ``legacy`` marks an effect of a legacy codex, which acts for the realm (api.members.within): only the legacy
     hook path (core.sandbox.call) sets it, and a call without it holds nothing of the realm's. ``prepared_by`` is the
-    delegate that prepared the call, when the member approved it from a pending action: the call is the member's own."""
+    delegate that prepared the call, when the member approved it from a pending action: the call is the member's own.
+    ``root`` is the origin of the outermost call: what a task's step runs through the shell or an extension is still a
+    task's."""
 
-    def __init__(self, user, by, origin, proposal="", grant="", legacy=False, prepared_by=""):
+    def __init__(self, user, by, origin, proposal="", grant="", legacy=False, prepared_by="", root=""):
         self.user, self.by, self.origin, self.proposal, self.grant = user, by, origin, proposal, grant
-        self.legacy, self.prepared_by = legacy, prepared_by
+        self.legacy, self.prepared_by, self.root = legacy, prepared_by, root or origin
 
     @property
     def delegated(self):
@@ -99,11 +101,14 @@ def ops():
 
 
 def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, proposal="", legacy=False, prepared=None,
-             note=""):
+             note="", bound=None, root=None):
     """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded; ``legacy``
     marks a legacy codex's effect (``Call.legacy``). A delegate's call that asks the member each time is filed as a
-    pending action with the delegate's ``note`` instead of run (core.pending); ``prepared`` is the pending action whose
-    approval this call is, which the audit log names.
+    pending action with the delegate's ``note`` instead of run (core.pending), unless a task makes it; ``prepared`` is
+    the pending action whose approval this call is, which the audit log names. A delegate acts under the grant it holds
+    now, or under ``bound`` (a Delegation) when the call carries out something it wrote under that grant: a task.
+    ``root`` is the origin of the outermost call that led here (``origin`` when none did): a call made through the shell
+    or an extension by a task is a task's, and asks nobody.
 
     A refusal replies ``ok`` false with the ``error`` for people and its ``kind`` for programs: GGG's error in
     snake case (``not_found``, ``forbidden``, ``conflict``, ...), see core.db.Fail."""
@@ -122,10 +127,11 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
             raise Forbidden(f"{name} is the member's own act: it takes no on_behalf_of")
         # A replay runs what a vote accepted, as its recorded signer. Stored args name no one else.
         user = by if origin == "replay" else claimed or by
-        asked = pending.asked_under(user, by, spec, args) if origin == "user" and user != by and not query else None
+        asking = origin in poa.ASKING_ORIGINS and (root or origin) in poa.ASKING_ORIGINS and user != by and not query
+        asked = pending.asked_under(user, by, spec, args) if asking else None
         if asked:
-            return json.dumps({"ok": True, **pending.prepare(asked, user, by, name, spec, args, note)})
-        grant = auth.authorize(user, by, name, spec, args, origin, declared)
+            return json.dumps({"ok": True, **pending.prepare(asked, user, by, name, spec, args, note, origin, declared)})
+        grant = auth.authorize(user, by, name, spec, args, origin, declared, bound)
         # The facts of a call are its arguments as GGG defines them, and ``on_behalf_of`` is one: a forbid may refuse a
         # delegate's vote. ``claimed`` was taken out of ``args`` above, for the operations never read it; a claim of
         # oneself is no delegation, and the call a member approves from a pending action is the delegate's, so it
@@ -139,7 +145,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
         from core import legislation
 
-        call = Call(user, by, origin, proposal, grant, legacy, prepared.delegate if prepared else "")
+        call = Call(user, by, origin, proposal, grant, legacy, prepared.delegate if prepared else "", root)
         record = None if spec["read"] else (lambda out: acted(name, user, by, origin, args, out, grant, prepared))
         # A delegate's governed call is always a proposal: where the department decides directly, the member's own
         # vote is what lets it through. The filing is a proposal_create to the legislation.
@@ -228,6 +234,16 @@ def run(gen):
     raise RuntimeError("a query cannot call other canisters")
 
 
-def call(name, args=None, user=None, origin="user"):
-    """Run an operation from Python (REPL, codex effects, replays) and return its result as a dict."""
-    return json.loads(run(dispatch(name, json.dumps(args or {}), origin=origin, signer=user)))
+def on_behalf(user, by, args):
+    """The arguments of a call that ``by`` signs for ``user``. When they differ the call is a delegate's, so it is made
+    for ``user`` whatever ``args`` claim, and meets the grant like any call of the delegate's own. The operations that
+    run others (tasks, the shell, extension calls) pass the delegate on with this."""
+    return {**args, "on_behalf_of": user} if by != user else args
+
+
+def call(name, args=None, user=None, origin="user", by=None, root=None):
+    """Run an operation from Python (REPL, codex effects, replays, the shell) and return its result as a dict. ``by`` is
+    the delegate that signs for ``user`` under a power of attorney; ``root`` the origin of the call that led here."""
+    signer = by or user
+    return json.loads(run(dispatch(name, json.dumps(on_behalf(user, signer, args or {})), origin=origin, signer=signer,
+                                   root=root)))

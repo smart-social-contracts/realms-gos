@@ -88,8 +88,9 @@ def test_only_the_creator_acts_on_a_task():
         assert "not yours" in denied(name, "mallory", task="roadworks")
     assert "notification_send" in Task["payroll"].steps[0].action
     ok("task_edit", "carla", task="roadworks", steps=CHECK + CHECK)
-    ok("task_edit", "ctl", task="roadworks", steps=CHECK)
-    ok("task_run", "carla", task="roadworks")
+    ok("task_edit", "ctl", task="roadworks", steps=CHECK)  # the steps are ctl's now, and run with ctl's authority
+    assert "not yours" in denied("task_run", "carla", task="roadworks")
+    ok("task_run", "ctl", task="roadworks")
     assert Notification.count() == 1
 
 

@@ -1,12 +1,16 @@
 """Power of attorney for a member's own affairs, office work, organizations and administration (phase 7a): the rest of
 the direct tier, and the groups a grant names for one department (office:Health) or one organization (orgs:clinic-b)."""
+import datetime
+import json
+
 import pytest
 
 import fake_chain
 import world
 from core import op, poa
-from ggg import (Appointment, Authority, Contract, Delegation, Event, Notification, Organization, PendingAction,
-                 Proposal, User)
+from api import setup
+from ggg import (Appointment, Attribute, Authority, Contract, Delegation, Event, Notification, Organization,
+                 PendingAction, Proposal, TaskExecution, User)
 from kit import call, denied, ok, rows
 from test_delegation_groups import DAY, reached, without_argument_checks
 from test_orgs import org_admin
@@ -14,6 +18,33 @@ from test_pending_actions import approved, card
 
 # The groups whose direct operations a grant reaches from this phase (the others belong to later phases).
 GROUPS = ("see", "profile", "vote", "propose", "filings", "justice", "money", "office", "orgs", "admin")
+# What this phase switches on: the direct operations of those groups that no other phase owns, and contract_create.
+THIS_PHASE = frozenset((
+    "allocation_rule_draft", "allocation_rule_propose", "appointment_end", "attribute_list", "authority_revoke",
+    "bids_reveal", "budget_amend", "budget_draft", "budget_extend", "budget_propose", "budget_view",
+    "case_assign", "codex_activate", "codex_status", "contract_create", "court_create", "delegable_operations",
+    "delegation_activity", "delegation_groups", "delegation_list", "department_chart", "department_expel",
+    "department_get", "department_list", "dispatch_confirm", "dispatch_list", "dispute_list_all",
+    "enforcement_escalate", "enforcement_notify", "enforcement_record", "events", "external_add",
+    "external_list", "external_report", "federal_vote_cancel", "invite_list", "invite_revoke", "invoice_create",
+    "invoice_item_add", "invoice_refresh", "judge_revoke", "land_list", "land_map", "land_mint_nft",
+    "land_register", "ledger_view", "loan_create", "loan_list", "loan_repay", "mandate_assign_executor",
+    "mandate_create", "mandate_revoke", "notification_send", "organization_get", "organization_list",
+    "organization_register", "organization_set_status", "payroll_run", "period_close", "procedure_define",
+    "procedure_list", "proposal_execute", "proposal_finalize", "proposal_get", "proposal_linked_from",
+    "proposal_list", "proposal_open", "proposal_stop", "quarter_add", "quarter_configure", "quarter_deregister",
+    "quarter_join_federation", "quarter_register", "quarter_secede", "realm_export", "realm_monitor",
+    "report_view", "representative_remove", "request_decide", "request_list", "request_set_due",
+    "resolution_query", "role_revoke", "tax_assess", "tax_policy_draft", "tax_policy_propose",
+    "tax_policy_view", "tender_cancel", "tender_close", "tender_create", "tender_get", "tender_list",
+    "tender_notice", "tender_open", "transfer_revert", "treasury_view", "user_add", "user_edit", "user_get",
+    "user_import", "user_list", "user_remove", "user_set_status", "verdict_draft"))
+# What the other phases switch on, in these groups or besides the 24 of LEGACY: each names its own here. The pending
+# doors, and the operations that run other operations (the ten task operations and the shell).
+OTHER_PHASES = frozenset((
+    "payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter", "federal_vote_propose",
+    "action_get", "action_list", "shell", "task_add_schedule", "task_cancel", "task_create", "task_delete", "task_edit",
+    "task_list", "task_logs", "task_reschedule", "task_run", "task_schedule"))
 SWITCHED_ON = sorted(n for n in poa.ENABLED if poa.row(n)[1] in GROUPS)
 
 
@@ -65,6 +96,14 @@ def test_an_operation_runs_under_a_grant_that_names_its_group_and_not_under_one_
     lend(grantor, other, delegate="agent-2")
     assert reached(acting(grantor, name, **args)), name
     assert "does not cover" in denied(name, "agent-2", on_behalf_of=grantor, **args)
+
+
+def test_this_phase_switches_on_exactly_these_operations_of_its_groups():
+    in_groups = {n for n in poa.ENABLED if poa.row(n)[1] in GROUPS}
+    assert THIS_PHASE <= poa.ENABLED
+    unexplained = in_groups - poa.LEGACY - OTHER_PHASES - THIS_PHASE
+    assert not unexplained, f"an operation was switched on that no phase accounts for: {sorted(unexplained)}"
+    assert len(THIS_PHASE) == 104 and all(poa.row(n)[0] == "direct" for n in THIS_PHASE - {"contract_create"})
 
 
 # ---- Office work follows the seats
@@ -250,7 +289,7 @@ def test_a_grant_names_a_department_only_where_the_grantor_sits_and_an_organizat
 def test_a_group_with_a_place_is_named_with_one_that_exists_and_a_group_without_a_place_is_named_without():
     world.build()
     base = dict(delegate="claude-conn", expires_in=DAY)
-    for named in ("office:Nowhere", "orgs:nowhere", "office", "orgs", "vote:Health", "office:"):
+    for named in ("office:Nowhere", "orgs:nowhere", "office", "orgs", "vote:Health", "vote:", "office:"):
         assert "not a group" in denied("delegation_grant", "ctl", groups=[named], **base), named
     assert "office:<department> names one" in denied("delegation_grant", "ctl", groups=["office"], **base)
 
@@ -350,6 +389,59 @@ def test_the_reads_of_administration_are_direct():
     assert ok("realm_export", "claude-conn", on_behalf_of="ctl", entity="User")["rows"]
 
 
+def export_as_delegate(entity):
+    return call("realm_export", "claude-conn", on_behalf_of="ctl", entity=entity, count=500)
+
+
+@pytest.mark.parametrize("entity", sorted(setup.PRIVATE))
+def test_a_delegates_export_refuses_what_only_its_owners_may_read_and_the_members_own_export_is_unchanged(entity):
+    world.build()
+    world.person("ctl")
+    lend("ctl", "admin")
+    refused = export_as_delegate(entity)
+    assert not refused["ok"] and f"does not export {entity}" in refused["error"]
+    assert ok("realm_export", "ctl", entity=entity)["entity"] == entity
+
+
+def test_an_admin_grant_does_not_export_identity_proofs():
+    world.build()
+    world.person("ctl")
+    Attribute(id="A-1", human="h-bob", kind="disability", value="33 percent", status="Verified")
+    lend("ctl", "admin")
+    assert "does not export Attribute" in denied("realm_export", "claude-conn", on_behalf_of="ctl", entity="Attribute")
+    assert [(r["kind"], r["value"]) for r in ok("realm_export", "ctl", entity="Attribute")["rows"]] == [
+        ("disability", "33 percent")]
+
+
+@pytest.mark.parametrize("entity, fields", sorted(setup.WITHHELD.items()))
+def test_a_delegates_export_withholds_private_fields_and_returns_the_rest_as_the_member_would(entity, fields):
+    world.build()
+    world.person("ctl")
+    User["bob"].private_data, User["bob"].home_zone = "ciphertext", "cell-7"
+    TaskExecution(name="E-1", status="completed", result='{"token": "S3CRET"}')
+    lend("ctl", "admin")
+    own = ok("realm_export", "ctl", entity=entity, count=500)["rows"]
+    theirs = ok("realm_export", "claude-conn", on_behalf_of="ctl", entity=entity, count=500)["rows"]
+    assert own and all(field in row for row in own for field in fields)
+    assert all(field not in row for row in theirs for field in fields)
+    assert theirs == [{k: v for k, v in row.items() if k not in fields} for row in own]
+    assert "ciphertext" not in str(theirs) and "S3CRET" not in str(theirs) and "cell-7" not in str(theirs)
+
+
+def test_a_delegates_export_of_an_entity_that_holds_nothing_private_is_the_members_own():
+    world.build()
+    world.person("ctl")
+    lend("ctl", "admin")
+    for entity in ("Department", "Member", "Position", "Appointment"):
+        assert export_as_delegate(entity)["rows"] == ok("realm_export", "ctl", entity=entity, count=500)["rows"], entity
+
+
+def test_every_entity_a_delegate_does_not_export_is_one_of_the_realms():
+    import ggg
+
+    assert set(setup.PRIVATE) | set(setup.WITHHELD) <= set(dir(ggg))
+
+
 # ---- Contracts
 
 
@@ -374,6 +466,30 @@ def test_a_contract_under_a_grant_is_prepared_for_the_members_approval_and_stays
     assert card(a, "carla")["title"] == "Sign a contract"
     assert approved(a, "carla")["status"] == "done"
     assert Contract.count() == 1 and Contract["C-1"].value == 50000 and Contract["C-1"].mandate.id == m
+
+
+def day(seconds):
+    return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%d")
+
+
+def test_a_contract_needs_no_mandate_and_its_card_shows_its_parties_amount_and_term_as_quoted_realm_lines():
+    mandate_for_carla()
+    lend("carla", "money")
+    ends = fake_chain.now() + 30 * DAY
+    hostile = 'Evil Ltd"\nWhat happens next: Runs at once when you approve'
+    a = ok("contract_create", "claude-conn", on_behalf_of="carla", title="Chairs", value=1200, symbol="REALM",
+           parties=["Organization:buildco", hostile], ends_at=ends)["pending"]
+    summary = card(a, "carla")["summary"]
+    lines = {line["label"]: line["value"] for line in summary}
+    assert lines["Contract parties"] == '"Organization:buildco", ' + json.dumps(hostile)
+    assert lines["Contract amount"] == '1200 "REALM"'
+    assert lines["Contract term"] == f"from {day(fake_chain.now())} until {day(ends)}"
+    assert [line["label"] for line in summary].count("What happens next") == 1 and "Under mandate" not in lines
+    assert approved(a, "carla")["status"] == "done"
+    assert Contract["C-1"].mandate is None and Contract["C-1"].value == 1200
+    b = ok("contract_create", "claude-conn", on_behalf_of="carla", title="Free work")["pending"]
+    lines = {line["label"]: line["value"] for line in card(b, "carla")["summary"]}
+    assert lines["Contract parties"] == "none named" and lines["Contract term"].endswith("with no end")
 
 
 def test_a_contract_prepared_within_the_cap_is_refused_at_approval_if_the_mandate_no_longer_allows_it():

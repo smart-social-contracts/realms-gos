@@ -189,10 +189,12 @@ every group, those the member gains later included, and every operation a later 
   tier. This release enables the 24 operations that were delegable once phase 0 had closed its holes, and the five
   that phase 0 removed, which come back as pending actions: `payment_account_add`, `payment_account_remove`,
   `identity_submit`, `self_change_quarter` and `federal_vote_propose` (and `proposal_create` with an action), with
-  `action_get` and `action_list`. It also enables the rest of a member's own affairs, office work, organisations and
-  administration: every direct operation of the groups `see`, `profile`, `vote`, `propose`, `filings`, `justice`,
-  `money`, `office`, `orgs` and `admin` that no other phase keeps (tasks, the shell and extension calls, the setup
-  operations, and the operations that ask each time, `contract_create` excepted) ([below](#office-work-and-organisations)).
+  `action_get` and `action_list`. It also enables the operations that run other operations: the ten task operations,
+  `shell` and `extension_call` ([below](#inner-calls-tasks-the-shell-and-extension-calls)). And it enables the rest of a
+  member's own affairs, office work, organisations and administration: every direct operation of the groups `see`,
+  `profile`, `vote`, `propose`, `filings`, `justice`, `money`, `office`, `orgs` and `admin` that no other phase keeps
+  (the setup operations, and the operations that ask each time, `contract_create` excepted)
+  ([below](#office-work-and-organisations)).
   It also enables keys and private data, joining, power over people, power of attorney onward and the upgrade approvals,
   each asking the member each time where it hands something over ([below](#keys-joining-people-and-power-of-attorney-onward)).
 - **Grants made before groups** name permissions (`operations`) and keep covering exactly those 24 operations (`LEGACY`),
@@ -207,9 +209,10 @@ Two groups are granted for one place: `office:<department>` (`office:Health`) an
 
 - **Office work follows the seats.** `office:Health` covers an operation of the group when the member holds its
   permission through an active seat in Health: the seat's profile, the department's own permissions and the authorities
-  granted to the department (`auth.permissions_via`). A permission held through a realm-wide profile, or through a seat in
-  another department, is not Health's office work: `*` covers it, an office group does not. A member seated in Health and
-  Finance can lend each office to a different delegate.
+  granted to the department (`auth.permissions_via`). It covers what a seat in Health allows wherever that applies: an
+  operation is not tied to one department, so a permission the seat gives counts for every use of it. A permission held
+  through a realm-wide profile, or through a seat in another department, is not Health's office work: `*` covers it, an
+  office group does not. A member seated in Health and Finance can lend each office to a different delegate.
 - **Organisations follow the admins.** `orgs:clinic-b` covers an operation of the group when the member is one of Clinic
   B's admins (`Organization.admins`) and the call names `clinic-b` as its `organization`.
 - **The inbox of an office or an organisation.** `notification_list` and `notification_read` for `Department:<d>` are
@@ -227,7 +230,11 @@ Two groups are granted for one place: `office:<department>` (`office:Health`) an
   checks that they administer it.
 - **Administration** (group `admin`): a governed operation (an appointment ended, a mandate granted, a user removed) is
   filed as a proposal tied to the grant, as for any delegate; `events`, `realm_monitor` and `realm_export` are read at
-  once.
+  once. A full export is the member's own act: a delegate gets what its own reads would give. Its `realm_export` refuses
+  the entities that hold what only their owners may read (`PRIVATE` in `api/setup.py`: identity proofs and personal
+  data, keys and the records they open, invite codes, grants, requests and prepared actions, other members' notices,
+  payout accounts, tax declarations, requests for information and sealed bids) and leaves out of the others a member's
+  private data and home zone and the results of task runs (`WITHHELD`).
 - **A contract** (`contract_create`) asks each time: the delegate prepares it, and it runs on the member's tap. The
   mandate's rules (active, within its limit, ending before it expires, the member in the executor department) are
   checked when it is prepared, so the member is not asked to approve what cannot run, and again when it is approved.
@@ -244,8 +251,7 @@ Two groups are granted for one place: `office:<department>` (`office:Health`) an
   expiry.
 - Payout accounts, identity proofs, moving to another quarter, federal votes and a proposal that carries an action are
   never done directly under a grant: under a grant by groups they are prepared, and wait for the member's tap
-  ([below](#pending-actions-the-members-tap)). Under a grant made before groups they stay refused. Tasks, the shell
-  and extension calls are not done directly under a grant either, and a later release switches them on.
+  ([below](#pending-actions-the-members-tap)). Under a grant made before groups they stay refused.
 - A proposal a delegate files with `proposal_create` is a motion: it carries no action. With an action it is a pending
   action (under a grant by groups) or refused (under an old grant).
 - A grant to the realm's own principal is refused: the effects of a codex's chapters act as the realm, and would act
@@ -369,6 +375,49 @@ What the member reads before approving:
 - **An upgrade approval** (`orchestration_decide`): the Casals action by id, whether the member approves or rejects it,
   and that an approved upgrade takes effect at once. The realm holds only the action's id, not the upgrade (the baton
   does), so the card tells the member to read it in Casals before approving.
+
+### Inner calls: tasks, the shell and extension calls
+
+A task, a shell expression and an extension's backend run other operations for the member. When a delegate calls
+them under a grant, each inner call is made **as the delegate, on behalf of the member** (`core.op.on_behalf`), so it
+meets the grant like any other delegated call. What the member's own call would do is unchanged.
+
+- **Covered.** The inner operation must be enabled and in one of the grant's groups, or the grant must name `*`. `shell`
+  and the task operations are in the `admin` group ("Run the realm"). `extension_call` is in no group: every grant by
+  groups reaches it, for as long as the grant may last, and a grant that names permissions never does. What the
+  extension then calls needs its own group.
+- **Direct, or prepared.** An inner call that is direct runs at once. One that asks the member each time is prepared as
+  a pending action, from the shell and from an extension, and the audit `Event` names the origin (`shell`,
+  `extension`). A task step is refused instead: nobody is there to be told when a task runs, and a task runs only
+  what its grant covers directly. So is anything a task runs through the shell or an extension: a call carries the
+  origin of the outermost call (`Call.root`), and prepares only if that is not a task's.
+- **Declared.** An extension's calls are limited to the operations its manifest declares, under a grant too. An
+  undeclared one is refused, and not prepared either.
+- **Whatever the code says.** The `on_behalf_of` in an inner call's arguments is replaced by the member's when a
+  delegate made the call, so a shell expression, an extension or a task step cannot use a grant that another member gave
+  the delegate. An extension never names anyone, in a member's own call either: it holds no power of attorney to lend,
+  so a member's call of it acts for that member and files nothing for a grantor of theirs. The member's own shell and
+  tasks may keep naming a grantor the member holds a grant from: the member wrote that code.
+- **Audit.** Each inner call's `Event` has `user` the member, `by` the delegate, `grant` and the origin (`task`,
+  `shell`, `extension`).
+
+A task a delegate makes under a grant (`task_create`, `task_edit`, `task_schedule`) is **tied to that grant**
+(`grant` in the task's metadata, listed by `task_list`). Its steps run as the delegate for the member, under that grant,
+whoever starts the run: a timer, `task_run`, the wait between steps, a schedule armed again after an upgrade.
+
+- **It stops with the grant.** Before each step the grant must be active and in force. Once it is revoked, replaced or
+  has expired, the step is refused, the task ends `failed` and the run records why. A proposal may outlast an expired
+  grant because a vote takes days; a task would go on acting with nobody's consent.
+- **A delegate acts on its own tasks.** `task_run`, `task_edit`, the schedules, `task_cancel` and `task_delete` are
+  refused for a delegate on a task that was not made under the grant it holds, else it could run, or plant steps in, a
+  task the member wrote, with the member's own authority. A grant that replaced the one a task was tied to has no say
+  in it.
+- **Editing makes the task the editor's.** The steps run with the authority of whoever wrote them. When anyone but
+  its creator edits a task (the member editing a delegate's, or someone who holds `all` editing another member's), the
+  editor becomes its creator: the steps run as the editor from then on, never as the earlier creator, and a task a
+  member edits is no longer tied.
+- **Tasks the member made are unchanged**, and so is the realm's own scheduler (`rearm`, the tasks of scheduled
+  proposals).
 
 ### The member's pages
 

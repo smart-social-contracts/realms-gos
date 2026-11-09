@@ -117,3 +117,14 @@ def test_the_coverage_ends_with_the_seat(realm, people):
     ok(realm, "appointment_end", people["ctl"], appointment=registry["positions"][0]["holders"][0]["id"])
     assert "does not cover" in str(titles(realm, claude, alice, "Registry"))
     assert "Err" in invites(realm, claude, alice)
+
+
+def test_a_contract_is_prepared_with_its_parties_amount_and_term_on_the_real_wasm(realm, people):
+    ctl, claude = people["ctl"], people["claude-conn"]
+    ok(realm, "delegation_grant", ctl, delegate=claude, groups=["money"], expires_in=30 * DAY)
+    prepared = ok(realm, "contract_create", claude, on_behalf_of=ctl, title="Chairs", value=1200, parties=["BuildCo"],
+                  ends_at=realm.now() + 30 * DAY)
+    lines = {line["label"]: line["value"] for line in ok(realm, "action_get", ctl, query=True,
+                                                         action=prepared["pending"])["action"]["summary"]}
+    assert lines["Contract parties"] == '"BuildCo"' and lines["Contract amount"].startswith("1200 ")
+    assert lines["Contract term"].startswith("from 2021-") and " until 2021-" in lines["Contract term"]
