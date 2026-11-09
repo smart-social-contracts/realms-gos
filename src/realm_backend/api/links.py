@@ -402,6 +402,13 @@ def published_as():
     return first.source if first is not None else None
 
 
+def brought_by_install():
+    """The layer from above that the install in progress brings, if there is one and it has read its records."""
+    job = store.live_job()
+    vouching = ((job.staged.get("layers") or {}).get("vouching")) if job is not None else None
+    return vouching["release"]["source"] if vouching else None
+
+
 def check_from_above(source, version):
     """Refuse a release that this realm cannot keep as a layer from above: one with an ``@`` in its id, and one of the
     layer the realm publishes. The install task asks before it fetches anything, so that the switch cannot fail on it."""
@@ -435,10 +442,14 @@ def legislation_release_publish(c, args):
     ``effective_from`` it is in force and ``notes`` by language. Every checksum is already stored by the realm,
     installed or pending (InvalidArgument), so a release can always be served. The realm publishes under one source id,
     the one of its first release, which is not a layer it relays (InvalidArgument), and a version once (Conflict): a
-    release is never edited or removed, and a correction is a new version."""
+    release is never edited or removed, and a correction is a new version. A layer that an install in progress brings
+    from above is refused too, so that the switch cannot fail on it."""
     source, version = args["source"], args["version"]
     if any(r.source == source for r in each(Release, "relayed", True)):
         raise Fail(f"{source} is a layer this realm relays: it publishes under its own source id")
+    if source == brought_by_install():
+        raise Fail(f"{source} is a layer an install in progress brings from above: it publishes under its own "
+                   f"source id")
     own = published_as()
     if own is not None and own != source:
         raise Fail(f"this realm publishes as {own}")

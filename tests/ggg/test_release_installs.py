@@ -13,8 +13,8 @@ from core import layered_codex as store
 from fake_chain import peer, rejects
 from fixtures import legislation as arcadia
 from ggg import SourceRecord, SyncSource
-from kit import ok
-from test_installs import WEB, active_id, chapter_text, failing, install, job, status
+from kit import denied, ok
+from test_installs import WEB, active_id, chapter_text, failing, install, job, run_job, run_until, status
 from test_installs import change_list as listing
 
 SRC, OTHER = "src", "other"
@@ -298,6 +298,21 @@ def test_a_release_of_the_layer_the_realm_publishes_is_refused_before_anything_i
     failing(release_list("1.0.0"), "arcadia is the source id this realm publishes under: it is not a layer from above")
     assert job()["step"] == "fetch_chapters" and asked(SRC, "legislation_releases") == []
     assert active_id() is None
+
+
+def test_a_release_of_the_layer_an_install_brings_cannot_be_published_before_the_switch():
+    sha256 = store.checksum("town tax")
+    store.store_chapter(sha256, "town tax")
+    publish = {"source": "arcadia", "version": "9.9.9", "effective_from": 1_900_000_000, "commit": "c" * 40,
+               "chapters": [{"domain": "tax", "checksum": sha256}]}
+    capital(entry("1.0.0"))
+    ok("codex_install", "ctl", **release_list())
+    run_until("build")  # the records are read and staged; the switch is still to come
+    assert "arcadia is a layer an install in progress brings" in denied("legislation_release_publish", "ctl", **publish)
+    run_job()
+    assert job()["status"] == "done" and status()["codex"]["layers"] == ["arcadia", "town"]
+    assert "arcadia is a layer this realm relays" in denied("legislation_release_publish", "ctl", **publish)  # and after
+    assert ok("legislation_release_publish", "ctl", **{**publish, "source": "town"})["release"] == "town@9.9.9"
 
 
 def test_two_sync_sources_that_relay_different_releases_of_a_layer_are_refused():
