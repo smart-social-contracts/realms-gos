@@ -140,8 +140,8 @@ def test_a_plain_member_reads_the_groups_she_can_grant(realm, people):
     out = realm.ggg("ggg_delegation_groups", GROUPS_ARGS, {"cursor": [], "limit": [], "on_behalf_of": []},
                     GROUP_PAGE, people["bob"], query=True)
     groups = {g["id"]: g for g in out["Ok"]["items"]}
-    assert list(groups) == ["see", "profile", "vote", "propose", "filings", "justice", "payout", "identity",
-                            "membership"] and out["Ok"]["next"] == []
+    assert list(groups) == ["see", "profile", "vote", "propose", "filings", "justice", "payout", "identity", "keys",
+                            "poa", "membership"] and out["Ok"]["next"] == []
     vote = groups["vote"]
     assert vote["label"] == "Vote for me" and vote["longest"] == 365 * DAY * NS and not vote["confirms"]
     assert [(o["operation"], o["permission"], o["tier"]) for o in vote["operations"]] == [
