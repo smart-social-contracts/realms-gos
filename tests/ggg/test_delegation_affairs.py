@@ -5,8 +5,9 @@ import pytest
 import fake_chain
 import world
 from core import op, poa
-from ggg import (Appointment, Authority, Contract, Delegation, Event, Notification, Organization, PendingAction,
-                 Proposal, User)
+from api import setup
+from ggg import (Appointment, Attribute, Authority, Contract, Delegation, Event, Notification, Organization,
+                 PendingAction, Proposal, TaskExecution, User)
 from kit import call, denied, ok, rows
 from test_delegation_groups import DAY, reached, without_argument_checks
 from test_orgs import org_admin
@@ -348,6 +349,59 @@ def test_the_reads_of_administration_are_direct():
     assert ok("events", "claude-conn", on_behalf_of="ctl")["events"]
     assert ok("realm_monitor", "claude-conn", on_behalf_of="ctl")["status"]
     assert ok("realm_export", "claude-conn", on_behalf_of="ctl", entity="User")["rows"]
+
+
+def export_as_delegate(entity):
+    return call("realm_export", "claude-conn", on_behalf_of="ctl", entity=entity, count=500)
+
+
+@pytest.mark.parametrize("entity", sorted(setup.PRIVATE))
+def test_a_delegates_export_refuses_what_only_its_owners_may_read_and_the_members_own_export_is_unchanged(entity):
+    world.build()
+    world.person("ctl")
+    lend("ctl", "admin")
+    refused = export_as_delegate(entity)
+    assert not refused["ok"] and f"does not export {entity}" in refused["error"]
+    assert ok("realm_export", "ctl", entity=entity)["entity"] == entity
+
+
+def test_an_admin_grant_does_not_export_identity_proofs():
+    world.build()
+    world.person("ctl")
+    Attribute(id="A-1", human="h-bob", kind="disability", value="33 percent", status="Verified")
+    lend("ctl", "admin")
+    assert "does not export Attribute" in denied("realm_export", "claude-conn", on_behalf_of="ctl", entity="Attribute")
+    assert [(r["kind"], r["value"]) for r in ok("realm_export", "ctl", entity="Attribute")["rows"]] == [
+        ("disability", "33 percent")]
+
+
+@pytest.mark.parametrize("entity, fields", sorted(setup.WITHHELD.items()))
+def test_a_delegates_export_withholds_private_fields_and_returns_the_rest_as_the_member_would(entity, fields):
+    world.build()
+    world.person("ctl")
+    User["bob"].private_data, User["bob"].home_zone = "ciphertext", "cell-7"
+    TaskExecution(name="E-1", status="completed", result='{"token": "S3CRET"}')
+    lend("ctl", "admin")
+    own = ok("realm_export", "ctl", entity=entity, count=500)["rows"]
+    theirs = ok("realm_export", "claude-conn", on_behalf_of="ctl", entity=entity, count=500)["rows"]
+    assert own and all(field in row for row in own for field in fields)
+    assert all(field not in row for row in theirs for field in fields)
+    assert theirs == [{k: v for k, v in row.items() if k not in fields} for row in own]
+    assert "ciphertext" not in str(theirs) and "S3CRET" not in str(theirs) and "cell-7" not in str(theirs)
+
+
+def test_a_delegates_export_of_an_entity_that_holds_nothing_private_is_the_members_own():
+    world.build()
+    world.person("ctl")
+    lend("ctl", "admin")
+    for entity in ("Department", "Member", "Position", "Appointment"):
+        assert export_as_delegate(entity)["rows"] == ok("realm_export", "ctl", entity=entity, count=500)["rows"], entity
+
+
+def test_every_entity_a_delegate_does_not_export_is_one_of_the_realms():
+    import ggg
+
+    assert set(setup.PRIVATE) | set(setup.WITHHELD) <= set(dir(ggg))
 
 
 # ---- Contracts

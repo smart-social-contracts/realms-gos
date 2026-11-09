@@ -393,21 +393,35 @@ def realm_monitor(c, args):
 
 # Entities whose rows hold personal data in clear: exporting them takes their readers' permission too (I-PRV-1).
 READERS = {"Attribute": "attribute.review"}
+# What a delegate's export leaves out. A full export is the member's own act: a delegate gets what its own reads would
+# give. Refused whole: identity proofs and personal data (``READERS`` too), keys and the records they open, invite
+# codes (an id is a code's digest), grants, requests and prepared actions, other members' notices, payout accounts,
+# declarations, requests for information and sealed bids. Withheld from the rest: a member's private data and home zone,
+# and the results of a task's runs.
+PRIVATE = set(READERS) | {
+    "Bid", "BidScore", "Delegation", "DelegationRequest", "Document", "Human", "Identity", "Invite", "KeyEnvelope",
+    "Notification", "PaymentAccount", "PendingAction", "Request", "TaxDeclaration"}
+WITHHELD = {"User": ("private_data", "home_zone"), "TaskExecution": ("result",)}
 
 
 @op("db.export", read=True, returns="rows")
 def realm_export(c, args):
     """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it. An entity whose rows are
     large returns fewer rows than ``count`` asks for: follow ``next``, never compute ``from``. Exporting ``Attribute``
-    takes attribute.review as well, since its rows hold personal data in clear."""
+    takes attribute.review as well, since its rows hold personal data in clear. A delegate exports neither the entities
+    in ``PRIVATE`` nor the fields in ``WITHHELD``: the full export is the member's own act."""
     cls = getattr(ggg, args["entity"], None)
     if not (isinstance(cls, type) and issubclass(cls, Entity)):
         raise Fail(f"unknown entity '{args['entity']}'")
+    if c.delegated and args["entity"] in PRIVATE:
+        raise Forbidden(f"a delegate does not export {args['entity']}: it holds what only its owners may read")
     reader = READERS.get(args["entity"])
     if reader and not {"all", reader} & auth.permissions(c.user):
         raise Forbidden(f"exporting {args['entity']} needs {reader}")
+    left_out = WITHHELD.get(args["entity"], ()) if c.delegated else ()
     rows, nxt = page(cls, args, most=getattr(cls, "export_most", PAGE_MAX))
-    return {"entity": args["entity"], "rows": [view(r) for r in rows], "next": nxt}
+    return {"entity": args["entity"], "rows": [{k: v for k, v in view(r).items() if k not in left_out} for r in rows],
+            "next": nxt}
 
 
 @op("db.convert")
