@@ -132,6 +132,8 @@ def staff(department, principal):
 
 
 def stored_languages(args):
+    if "languages" not in args:
+        raise Fail("languages is required: the BCP 47 tags of the document's languages, such as [en]")
     language.require_all(args["languages"])
 
 

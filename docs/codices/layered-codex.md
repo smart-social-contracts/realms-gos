@@ -194,6 +194,7 @@ The rules:
   is an empty chapter. No other `.py` files are allowed in a source folder.
 - **Calendar file** = `calendar.json`, one per source at most, beside its chapters (§3.4). A source
   that sets no holidays, such as EMSHI, has none.
+- **Test cases** = `<domain>.cases.json`, beside the chapter they test (§12.1).
 - **The `realm` domain** (the realm's own hooks, such as `on_realm_join`; its entry point
   `on_codex_activate`, the hook on GGG's `codex_activate`; and `compute_realm_join`, which GGG asks for
   the quarter of a new member) may only be filled in the realm's own layer.
@@ -337,7 +338,7 @@ class Procedure(above("procedure")):
 
     over_six_months = forbid("procedure_define",
         F.decision_deadline.is_some() & (F.decision_deadline > months(6))     # GGG's fact, a Period: another unit fails closed (§6)
-        & F.longer_deadline_legislation.is_none(),
+        & F.legislation.is_none(),
         legislation="Ley 39/2015 Art. 21.2")
 
     @fixed(legislation="Ley 39/2015 Art. 30")
@@ -543,15 +544,16 @@ kind of GGG's fact schema so that every implementation rounds the same way. The 
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
 `times()` takes no rounding argument and a chapter names no rule.
 
-**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row,
-the object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
+**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row, the
+object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
 currency (GGG's model), and it reaches the chapter as a `Money` of that currency's decimals, so that
-`subject.assessed_value.times(entry.rate)` rounds to its cent. A codex therefore computes a tax on land only when it
-is billed in the accounting currency, and `tax_assess` refuses the call otherwise; a tax on land in another token has
-its own rate, amount or brackets. Only a `compute_` method knows the token: anywhere else an amount read is a `Money`
-without decimals, and `times()` says so instead of guessing. A chapter's own amounts are `Money(units, decimals)`,
-the decimals those of the amounts it read (`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the
-same kind, `sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
+`subject.assessed_value.times(entry.rate)` rounds to its cent. Every amount a chapter reads is in it, so a codex
+computes a tax only when it is billed in the accounting currency, whatever the tax's subject: `tax_assess` refuses a
+codex's answer for one billed in another token, and such a tax has its own rate, amount or brackets. Only a `compute_`
+method knows the token: anywhere else an amount read is a `Money` without decimals, and `times()` says so instead of
+guessing. A chapter's own amounts are `Money(units, decimals)`, the decimals those of the amounts it read
+(`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the same kind:
+`sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
 (`realms.legislation.rates.times`): there is one implementation.
 
 **Round once.** GGG rounds an amount where it is complete (D23), not at each step: a tax by brackets adds the exact
@@ -863,8 +865,9 @@ class Tax(above("tax")):
     @fixed(legislation="TRLRHL Arts. 61, 65, 71 and 74")
     def compute_tax_assess(self, entry, subject):
         """GGG asks for the invoice items of each subject of each entry."""
-        if entry.code != "ibi_urban":
+        if entry.code != "ibi_urban" or subject.assessed_value is None:     # a parcel never assessed owes no IBI yet
             return []
+        # Each invoice line is rounded once: the quota, then the bonus on the rounded quota.
         gross = subject.assessed_value.times(entry.rate)            # nearest cent, half away from zero
         net = gross - gross.times(self.ibi_bonus(subject.owner))
         items = [{"concept": entry.code, "amount": gross, "legislation": "TRLRHL Art. 71.1"}]
@@ -909,8 +912,8 @@ class Tax(above("tax")):
   from whoever proposes the rate.
 - **The amount** is computed by `compute_tax_assess`, which GGG calls for each entry and subject, page
   by page. The subject is the view of the parcel (`Land.get`'s, with its `assessed_value` and `area`), whose
-  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax on land computed by a
-  codex is billed in (§4.5), and GGG's rounding rule applies to `times()`.
+  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax computed by a codex is
+  billed in (§4.5), and GGG's rounding rule applies to `times()`.
 
 ### 5.7 A body beside the line
 
@@ -1323,7 +1326,7 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   (`core/sandbox.py`'s `Resident`), never into its own interpreter: the subinterpreter imports the library from
   the sources the realm bundles, builds the `Codex`, loads the chapters top to bottom and runs the checks of
   §12.2, then answers each call. A query cannot keep what it loads, so the load happens where the realm starts.
-  Cedar is parsed once per activation (D4). That matches today's lazy-load pattern in
+  Cedar is parsed once per activation (§9.4). That matches today's lazy-load pattern in
   [`core/auth.py`](../../src/realm_backend/core/auth.py).
 - **Methods:** around a GGG operation `op`, the realm runs the guards `check_<op>` before it, the
   `compute_<op>` methods during it when GGG asks, and the hooks `on_<op>` after it succeeds. Each is answered by
@@ -1398,12 +1401,14 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   | one `build` of the example: 7 chapters, a calendar, the flattened views | 1,045 M |
 
   A load, about 1 B in all, is paid once per activation and once per upgrade (in `post_upgrade`, where the
-  realm starts), never in a query; the library's import from text is most of it. A guard or a hook costs
+  realm starts), never in a query; the library's import from text is most of it. A codex that holds forbids adds
+  about 0.5 B: the Cedar generated in the sandbox and parsed by the realm's engine (§9.4). A guard or a hook costs
   about as much as a small database read.
 
 ### 9.4 Cedar changes
 
-In [`core/auth.py`](../../src/realm_backend/core/auth.py) (see [Authorization](../architecture/authorization.md)):
+In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`](../../src/realm_backend/core/forbids.py)
+(see [Authorization](../architecture/authorization.md)):
 
 1. **One Cedar action per GGG operation,** named as the operation, e.g.
    `Realm::Action::"tax_policy_propose"`, each `in [Realm::Action::"call"]`. Each action's Cedar
@@ -1412,22 +1417,104 @@ In [`core/auth.py`](../../src/realm_backend/core/auth.py) (see [Authorization](.
    same forbids run at draft. Like the others, those actions are `in [Realm::Action::"call"]`; their
    `facts` are the element's type, and one request is made per element. A forbid without `each` names
    the operation, whose `facts` are its args (§6).
+   - **The fact schema** is GGG's `facts.json`, which the realm bundles as
+     [`ggg_facts.py`](../../src/realm_backend/ggg_facts.py), generated by `scripts/ggg_candid.py` (CI checks it is
+     current). It keeps the facts Cedar can compare: text (a principal, a variant's tag), whole numbers with their
+     ranges, Booleans, Periods, sets of text, and records, which a forbid can only test for (`F.basis.is_none()`,
+     §5.4). A `Value`, a blob or a list of records is not a fact, so a rule on one is a guard. What an operation
+     keeps from the legislation (`secret=`: an invite code, a request's reply, keys) is no fact either, and no list of
+     it is one: a forbid that names it is refused when the codex is built.
+   - **The schema the realm loads declares `call` and the actions its forbids name,** not the 254 of every operation:
+     that schema is 101 KB, which costs 5.4 B instructions for the engine to parse, against 94 M for the one that is
+     loaded (measured below). `realms legislation check` (§12.1) will import the same fact schema and validate against
+     all of them.
 2. **Today's `POLICIES`** use `action == Realm::Action::"call"`; they become
    `action in Realm::Action::"call"`. `GUARDRAILS` (`principal, action, resource`) are unchanged.
    `context.op` stays for compatibility.
 3. **Load order:** `GUARDRAILS + POLICIES + generated forbids of every chapter`, parsed once per codex
    activation. The generated rules name their action in the head (the operation, or
    `<operation>.<list>`), so a decision only evaluates rules for that action.
+   - The Cedar is generated in the codex sandbox, which hands over the policies, the schema and the facts of the
+     actions the policies name; the realm's engine then parses and validates them strictly (`core.auth.use_forbids`),
+     and every decision after that evaluates what it holds, with no parse. `load` does it at the switch, so a codex
+     whose Cedar does not validate raises before the switch; `warm` does it at the realm's start, and the same
+     forbids again (a reload after the sandbox spent its budget) are not parsed again. Step 5 of the install (`build`)
+     validates the same Cedar and puts the running policies back, so an install that would not validate fails there.
+     A codex that forbids nothing leaves the realm's own policies in force, and a legacy codex or none loads what it
+     loads today.
+   - **The realm loads forbids from the sandbox and nothing else.** It accepts the text only as the grammar the
+     generator writes (`core.forbids.only_forbids` and `targets`), and no more: outside strings only words, spaces,
+     line breaks and Cedar's punctuation, so no comment of either kind (a `//` comment ends at `\r` as at `\n`, and a
+     scan that missed that let a `permit` through), no non-ASCII; inside strings no control character; no `permit`
+     word; each policy a forbid whose scope is exactly what the generator writes for the actions it names, with the
+     principal and the resource unconstrained, so no forbid of one person; and the operation of each action one of the
+     realm's own (`ops()`), never `call` (a forbid of which would refuse every permission decision) and never a
+     reserved one, whatever the sandbox says. A smuggled `permit` fails the switch, the realm's start and install
+     step 5. The engine's API does not yet list the effect and scope of a policy; when it does, the engine will check
+     the same (realms-gos#611, smart-social-contracts/basilisk#64).
+   - **No generated forbid may target a reserved operation (§10.4).** The library refuses it when the chapter loads;
+     the realm checks the policies it is about to load as well (`core.forbids.targets`), and refuses a policy that
+     names an action without facts or no action at all (that would forbid every operation). And no forbid is asked of
+     a reserved operation, nor of the `proposal_create`, the vote or the execution of a proposal about one.
+   - **A codex that does not load still refuses.** Its forbids cannot be read then, but each successful load keeps the
+     operations they name on the codex row (`LayeredCodex.forbids`). Until the codex is reverted, a call of one of
+     them is refused, a read as well as a write: what the forbids would have judged is not let through unjudged. The
+     operations no forbid names are read as before, and a revert is a reserved operation.
+4. **The requests of a call.** The permission decision is what it was: one request on `call`, before anything else. A
+   call whose operation a generated forbid names then makes, under the context `origin: "forbids"` (nothing in it but
+   the operation and its facts; one `permit` for that origin is loaded with the forbids, so that only a forbid can
+   refuse it): one request on the operation's own action, if a forbid names it, with its args in GGG's form
+   (`ggg_api.ggg_args`: renamed arguments, nanoseconds, variants), the principal the call acts for (`on_behalf_of`,
+   when the call names someone other than its signer, so that a rule can refuse a delegate's vote) and the facts the
+   operation derives (`derived=` on
+   `@op`), and one request per element for each list a forbid ranges over: the element of the argument, or, where the
+   list is not an argument, what `lists=` on `@op` gives (`tax_policy_propose`: the saved policy's entries). A list of
+   more than 500 elements is refused with `invalid_argument` where it is given, at draft and at propose, so that no
+   replay is asked for more. Any refusal is a `Denied` that names the list and the position of the element, and the
+   forbids that fired: `taxes[1]: refused by eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)`. The engine says only allow
+   or deny, so the names are found after the refusal, by asking the sandbox, whose bound forbids evaluate the same
+   facts in plain Python as Cedar does (§6, rule 7); an allowed call never pays for it, and a sandbox that cannot
+   answer, or answers anything but a short list of ids and citations, leaves the plain reason. An operation no forbid
+   names is decided once, on `call`, as before.
+5. **A proposal is asked when it is filed.** A governed call that becomes a proposal is asked as `proposal_create`
+   before it is filed, as well as under its own operation; `proposal_create` and `federal_vote_propose` ask the
+   forbids of the action they carry. A proposal that could only fail is never put to the vote, and the records its
+   action would fix (a budget's draft lines) stay as they were. A call a delegate prepares for the member's approval
+   (a pending action) is asked when it is prepared, and so is the action a prepared `proposal_create` or
+   `federal_vote_propose` carries, so a forbidden action is never prepared; it is asked again when the member approves
+   it. Both name the member as `on_behalf_of`.
+6. **The replay of an accepted proposal** meets the same forbids, with no permit or guardrail in the way: the vote
+   was the permission, but the forbids of the legislation in force when it executes still hold. The facts it
+   derives are computed for that proposal (`derived(args, proposal)`: a budget's totals are those of the lines
+   the proposal fixed). A replay a forbid refuses ends the proposal `failed` with the forbid's reason, and
+   `proposals.end` releases what it fixed. An operation no forbid names asks Cedar nothing at replay.
 
-Costs, by the Cedar engine's own notes
-([`cedar_api.rs`](https://github.com/smart-social-contracts/basilisk/blob/main/basilisk/compiler/cpython_canister_template/src/cedar_api.rs)
-in basilisk):
+Costs, measured on PocketIC (basilisk 0.15.1, the realm's production wasm, 9 November 2026), with the forbids of §5.6
+(three policies on two actions, 1.2 KB of Cedar and 1.3 KB of schema); the design had estimated parsing at about 20 M
+instructions and a decision at about 0.7 M:
 
-- parsing is about 20 M instructions, once per activation;
-- a decision is about 0.7 M instructions, about 0.3 M cycles.
+| What | Instructions |
+|---|---|
+| engine: parse and validate the realm's policies, the schema and the forbids, once per activation | 94 M |
+| the same with the schema of every operation (101 KB), which the realm does not load | 5,435 M |
+| handing that schema over from the sandbox: the JSON encoding and decoding of 101 K characters (451 M before the fast JSON of #582; 4.6 k instructions per character in the canister's own) | 16 M |
+| the sandbox generates the Cedar and hands it over: mostly reading GGG's fact schema (compile and its actions, about 175 M) and importing the generator (about 230 M) | 437 M |
+| the same for a codex that holds no forbid | 1 M |
+| `cedar()` in the sandbox, of its 10 M bytecode budget per spawn (shared with every guard and hook after it): the example above / the whole València corpus (14 chapters, 6 forbids) | 0.27 M / 0.85 M |
+| a permission decision, one request on `call`: no layered codex / forbids in force | 3.5 M / 3.8 M |
+| the forbids of one call: one request on the operation's action, or per list element | 4.1 M each |
+| the forbids of a draft of 1 / 2 / 5 / 20 entries | 4.4 / 8.4 / 20.5 / 81.2 M |
+| the forbids of a proposal of a saved policy of 2 entries (it reads the policy too) | 9.7 M |
+| the forbids of a realm with no layered codex | 9 k |
+| naming the forbids behind a refusal (one call to the sandbox), only when a request is refused | 0.9 M |
+| install step 5 (`build`) of a codex with these forbids, in all | 1,753 M |
+| a codex with these forbids, loaded and activated: the sandbox 1,134 M, the Cedar 437 M, the engine 94 M, in all (the sandbox of a codex without forbids: 1,121 M) | 1,677 M |
 
-Building the `F` trees and Cedar text is an estimated 10–30 M instructions, once. All of it is
-negligible next to an update call's base fee of about 5 M cycles.
+The engine does not parse again: the forbids of a draft of 5 entries cost 20.5 M each time, against 94 M for one
+parse. A request costs about 4 M, not 0.7 M: that is the whole crossing into the engine, with the request and its
+entities validated against the schema. The cost of a call's forbids grows with the elements it carries (4.1 M each),
+so the most a call can ask, 500 elements, is about 2 B; an update call has 40 B. All of it is small next to an update
+call's base fee of about 5 M cycles.
 
 ### 9.5 Updating a realm's own quarters
 
@@ -1599,17 +1686,49 @@ It uses Python's parser (`ast`), so it runs only off-chain:
   chapters and its calendar listed, never the `realm` domain, every checksum the sha256 of the bytes. A realm loads
   only its own `realm.py`: one beside a source's releases is that source's own. realms-codices CI runs this command and
   has no checker of its own;
-- every rule in §4: file and class names, base, imports, banned constructs, citations, marks, `uses`,
-  and that every `on_`, `check_` and `compute_` method names a GGG operation;
-- the `F` expression rules (§6): the operation named, `each` naming the list it ranges over (for
-  `tax_policy_propose`, the saved policy's `taxes`), `S.` naming a setting of the chapter's own domain,
-  `pct()` literals that fit the scale, and each setting's `check=`;
+- every rule in §4: file and class names, base, imports, banned constructs (`exec`, `eval`, `compile`,
+  `globals`, `locals`, `setattr`, `open`, dunder names, defaults, attribute stores), citations, marks (an
+  extension that calls `super()`), `uses`, and that every `on_`, `check_` and `compute_` method names a GGG
+  operation;
+- the `F` expression rules (§6), by binding every forbid to GGG's fact schema: the operation named, `each` naming
+  the list it ranges over (for `tax_policy_propose`, the saved policy's `taxes`), `S.` naming a setting of the
+  chapter's own domain, `pct()` literals that fit the scale, optional facts compared after `is_some()`, arithmetic
+  that cannot overflow, and each setting's `check=`;
 - reserved operations (§10.4);
-- cycles across `uses`, for every realm that a change affects;
-- every chapter's own `cases.json`, if present, run on the resolved domains;
-- **Python versus Cedar agreement:** generated facts are evaluated both ways and must agree;
-- **Never errors:** the generated Cedar of every forbid is proved never to error (§6, rule 9), with the
-  analysis tool of §12.3.
+- cycles across `uses`, an undeclared or missing domain, and a chain deeper than the limit, for every realm of the
+  tree: each source is checked as a realm with the sources above it as its layers;
+- the test cases of each chapter, `<domain>.cases.json` (below);
+- **Python versus Cedar agreement:** generated facts, drawn around every literal and endpoint the forbids name,
+  the 64-bit extremes and the edges of each fact's range, are decided in plain Python and by Cedar (`cedarpy`, the
+  canister's Cedar line), with the realm's settings folded in and left open, and must agree;
+- **Never errors:** the generated Cedar of every forbid is proved never to error (§6, rule 9) for each action it
+  names, by the Cedar CLI's `symcc` with cvc5 (§12.3), pinned by version and checksum (`scripts/cedar_tools.sh`). A
+  query the solver does not decide is a problem, never a pass. Without cedarpy, the Cedar CLI and cvc5 a tree
+  with a forbid is not checked: the command exits with code 2 and says what to install, and `--no-analysis` goes
+  without them.
+
+A refusal of a layer is printed once, though every realm below it runs the layer.
+
+**Test cases.** A chapter's cases are `<domain>.cases.json`, beside it. Each is run on the codex of one realm:
+the one named by its optional `realm` (a source id), else the chapter's own source with the sources above it, in
+UTC. A case has a `name` and one kind of test, evaluated in-process with the library, and says what it expects:
+
+| Kind | Fields | Runs |
+|---|---|---|
+| `call` | `call`, `args` (plain data), `returns` | a public member of the resolved domain: a helper called with the arguments, or a setting read |
+| `guard` | `guard` (an operation), `args`, `approvals`, `now` (seconds), `denies` (a reason, or null) | the domain's `check_<operation>` on the operation's arguments, with those departments' approvals and that time |
+| `forbid` | `forbid` (an operation), `each`, `facts`, `fires` (forbid ids) | the realm's forbids on that operation (and list) in plain Python, with its settings folded: those that fire must be exactly `fires` |
+| `compute` | `compute` (an operation), `args` (the arguments of `compute_<operation>`), `decimals` (the token's), `records`, `returns` | the domain's `compute_<operation>`, run by the realm's own sandbox program (`core.legislation_sandbox`), which reads GGG's entities from `records` (`{"Land": [{"id": "L-1", "owner": "User:alice", "assessed_value": 20000000}], "Human": [...]}`) and hands the chapter the subject as the view `Land.get` gives, with money in `decimals`; `returns` is the invoice items |
+
+```json
+[
+  {"name": "València may charge 1.24 %", "realm": "eu/es/vc/46250-valencia", "forbid": "tax_policy_propose",
+   "each": "taxes", "facts": {"code": "ibi_urban", "rate": 1240001}, "fires": ["eu/es/tax/ibi_urban_cap"]}
+]
+```
+
+A case that does not come out as written is a problem, `<source>/<domain>.cases.json: case "<name>": <what>`.
+Hooks are not run by `check`.
 
 ### 12.2 In-canister checks (install step 5, no parser)
 
@@ -1664,11 +1783,44 @@ difference is not expected to matter; the two versions are aligned at basilisk's
 Given a realm's links and a commit, it prints the layer paths, the flattened view and the generated
 Cedar, with the same `realms.legislation` code the canister runs.
 
+Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
+`realms legislation resolve [TREE] --realm <source id> [--commit REV] [--sync-source ID]... [--record FILE]... [--own FILE] [--facts FILE]`.
+
+- **Records.** A sync source's record (§8) is the tree's own `releases.json` (`--sync-source`: the newest release of
+  the source and of each source above it) or a file in the shape of §8 (`--record`). Reading them from the sync
+  sources' realms comes with the published record (D6, [#491](https://github.com/smart-social-contracts/realms-gos/issues/491)).
+- **Files.** The tree is read with git, never from the working copy: a relayed layer at the commit its release
+  names, the realm's own layer (its folder, or the layer in `--own`) at `--commit`, and every file against the
+  checksum its record lists.
+- **Output.** The codex id (§9.1), the layers, each domain's layer path and flattened view, and the Cedar of every
+  forbid when `--facts` gives a fact schema in the shape the generator reads (`cedar.FactSchema`). It calls no network.
+
 ### 12.5 `realms legislation propose`
 
 Given the realm, the chapters to set or remove, and a commit, it writes the change list (with
 `replaces` read from the realm's `ggg_codex_status`) and the report. It prints the `Code { url;
 checksum }` to submit.
+
+Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
+`realms legislation propose [TREE] --realm <source id> --commit REV --set <chapter>... --remove <chapter>... --url URL --out FILE`,
+with `--replaces <codex id | none>` or `--network`, `--canister` and `--identity`, and optionally
+`--summary LANG=TEXT`, `--report FILE --report-url URL` and `--repo OWNER/NAME`.
+
+- **The file.** The change list as canonical JSON (§9.1: sorted keys, no spaces, UTF-8, no newline at the end),
+  so the checksum a proposal pins is the checksum of the file. Each chapter's URL names the commit in full, and its
+  sha256 and size are those of the bytes at that commit. `--url` is where the change list will be served.
+- **`replaces`** is given, or read from the realm's `codex_status` when `--network`, `--canister` and `--identity`
+  are all given; the command says which it reads before it does. No network is reached otherwise, there is no
+  default network, and no identity is chosen for the caller.
+- **Refused.** What the realm would refuse (§7): a chapter outside the realm's own layer (a layer from above comes
+  as a release), a name that is not a GGG domain or `calendar`, a chapter of 0 bytes, above 256 KB or not UTF-8, more
+  than 50 chapters, a change list above 64 KB, an address that is not https. A `release` is always `null`:
+  installing a release is the realm's own "Propose install" (§11).
+- **Stricter and looser than the realm.** The same chapter in `--set` and `--remove` is refused by the command; the
+  realm accepts it, if the codex has the chapter, and applies the removal first. A `--remove` of a chapter the codex does not have passes the
+  command, which does not know the codex, and can only fail at the realm (§9.2 step 2).
+- **The report** (§12.3, C4) is attached, not written: `--report` is the file and `--report-url` where it is served.
+- **Output.** The `Code { url; checksum }` to submit.
 
 ---
 

@@ -1,6 +1,6 @@
 import json
 
-from core import chain
+from core import auth, chain
 from api import proposals
 from api import quarters
 from core.db import PAGE_MAX, Conflict, Fail, Forbidden, each, find, next_id, page
@@ -133,6 +133,8 @@ def federal_vote_propose(c, args):
     """Propose a federal vote titled ``title`` on ``action`` (``{"op": …, "args": …}``), held in every active quarter
     under the published rule; a quarter passes it to the capital. Returns ``vote``."""
     action = {**args["action"], "title": args["title"]}
+    proposals.check_action(action)
+    auth.refuse_forbidden_action(c.user, action)
     if not quarters.federated():
         return (yield from open_vote(action, c.user, c.by, chain.self_id(), c.prepared_by))
     reply = yield from quarters.ask(quarters.capital(), "federation_message",

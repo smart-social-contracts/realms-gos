@@ -121,6 +121,15 @@ def test_a_document_has_a_kind_languages_and_facts_and_replaces_them():
     assert Document.max_id() == 1
 
 
+def test_a_document_without_languages_is_refused_by_name():
+    """GGG's DocumentStoreArgs has no default for ``languages``: an older caller is told what it left out."""
+    health()
+    args = {k: v for k, v in REPORT.items() if k != "languages"}
+    out = call("document_store", "carla", department="Health", **args)
+    assert out["kind"] == "invalid_argument" and out["error"].startswith("languages is required")
+    assert Document.max_id() == 0
+
+
 def test_document_list_filters_by_kind_and_language():
     health()
     reports = ok("document_store", "carla", department="Health", kind="report", **{**REPORT, "languages": ["en", "es-ES"]})

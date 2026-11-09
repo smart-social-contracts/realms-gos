@@ -1,5 +1,5 @@
-from core import chain, poa
-from core.db import Forbidden, each
+from core import chain, forbids, poa
+from core.db import Fail, Forbidden, each
 
 CONTEXT = {"op": "String", "permission": "String", "user": "String", "signer": "String", "origin": "String",
            "read": "Bool", "public": "Bool", "signing": "Bool", "delegable": "Bool", "delegated": "Bool",
@@ -10,11 +10,12 @@ SCHEMA = """namespace Realm {
   action call appliesTo { principal: [User], resource: [Realm], context: { %s } };
 }""" % ", ".join(f"{k}: {v}" for k, v in CONTEXT.items())
 
+# Every operation's Cedar action is ``in`` ``call`` (§9.4), so the permits and guardrails cover it too.
 POLICIES = """
-permit (principal, action == Realm::Action::"call", resource) when { context.public };
-permit (principal, action == Realm::Action::"call", resource)
+permit (principal, action in Realm::Action::"call", resource) when { context.public };
+permit (principal, action in Realm::Action::"call", resource)
   when { principal.permissions.contains("all") || principal.permissions.contains(context.permission) };
-permit (principal, action == Realm::Action::"call", resource)
+permit (principal, action in Realm::Action::"call", resource)
   when { context.origin == "codex" && context.declared.contains(context.op) };
 """
 
@@ -44,17 +45,66 @@ class SignIn(Denied):
     kind = "unauthenticated"
 
 
+# The generated forbids of a layered codex are asked on their own, apart from the permission decision: the request
+# carries only the operation and its facts, under this origin, which this permit lets through so that only a forbid
+# can refuse it. That is how an accepted proposal's replay meets the legislation's forbids, with no permit or guardrail
+# to deny it (the vote was the permission).
+FORBIDS_ONLY = 'permit (principal, action in Realm::Action::"call", resource) when { context.origin == "forbids" };\n'
+BLANK = {k: "" if t == "String" else False if t == "Bool" else [] for k, t in CONTEXT.items()}
+BASE = GUARDRAILS + POLICIES
+# What the Cedar engine holds: the realm's own policies, and with a layered codex the generated forbids and the schema
+# they validate against (``forbids``: core.legislation's ``generated``).
+live = {"schema": SCHEMA, "policies": BASE, "forbids": None, "unloaded": frozenset()}
+
+
+def _canister_load(schema, policies):
+    from ic_basilisk_toolkit import cedar
+
+    try:
+        cedar.load(schema, policies)
+    except cedar.CedarError as e:
+        raise Fail(f"the Cedar policies do not validate: {e}")
+
+
 def _canister_decide(principal, action, resource, entities, context):
     from ic_basilisk_toolkit import cedar
 
     if not _canister_decide.loaded:
-        cedar.load(SCHEMA, GUARDRAILS + POLICIES)
+        load(live["schema"], live["policies"])
         _canister_decide.loaded = True
     return cedar.is_authorized(principal, action, resource, entities, context)
 
 
 _canister_decide.loaded = False
+load = _canister_load  # the engine and its parse, which tests replace along with ``decide``
 decide = _canister_decide
+
+
+def use_forbids(generated=None, unloaded=()):
+    """Put the forbids generated for the codex now running (core.legislation's ``generated``), or none, in force.
+    The engine parses them once, here, and every decision after this evaluates them without parsing again (§9.4); the
+    same forbids again, as when a codex is loaded anew, are not parsed again. Fail when they do not validate: nothing
+    changes. ``unloaded`` names the operations whose forbids are unknown because the codex did not load: they are
+    refused (``refuse_forbidden``)."""
+    if generated is None:
+        if live["forbids"] is not None:
+            live.update(schema=SCHEMA, policies=BASE, forbids=None)
+            _canister_decide.loaded = False  # the realm's own policies are parsed again at the next decision
+        live["unloaded"] = frozenset(unloaded)
+        return
+    policies = BASE + FORBIDS_ONLY + generated["policies"]
+    if not (_canister_decide.loaded and live["policies"] == policies and live["schema"] == generated["schema"]):
+        load(generated["schema"], policies)
+    live.update(schema=generated["schema"], policies=policies, forbids=generated, unloaded=frozenset())
+    _canister_decide.loaded = True
+
+
+def check_forbids(generated):
+    """Install step 5: whether the engine accepts the forbids generated for a codex, parsed and validated strictly
+    against their schema. The policies in force stay in force."""
+    load(generated["schema"], BASE + FORBIDS_ONLY + generated["policies"])
+    if _canister_decide.loaded:  # the engine holds the codex just checked: put the running policies back
+        load(live["schema"], live["policies"])
 
 
 def permissions(principal):
@@ -152,6 +202,46 @@ def authorize(user, by, name, spec, args, origin="user", declared=(), grant=None
     if not decide(f'Realm::User::"{user}"', 'Realm::Action::"call"', 'Realm::Realm::"1"', entities, context):
         raise Denied(*reason(name, spec, context, held))
     return grant.id if grant else ""
+
+
+def refuse_forbidden(user, name, spec, args, proposal):
+    """Refuse the call with Denied when a forbid of the running codex's legislation fires on its facts (§6, §9.4): one
+    request on the operation's action, and one per element of each list a forbid ranges over. It follows ``authorize``
+    for every origin, a replay among them, where ``proposal`` is the proposal being executed. With no forbid on
+    ``name``, or none may be asked of it, nothing is. A refusal names the forbids that fired, the id and citation of
+    each, found only then."""
+    in_force = live["forbids"]
+    if in_force is None and not live["unloaded"]:
+        return
+    from core import legislation  # it imports core.op, which imports this module
+
+    if legislation.is_reserved(name, args):  # a reserved operation, and a proposal or a vote about one: no forbid (§10.4)
+        return
+    if name in live["unloaded"]:  # a read too: the realm refuses what a forbid it cannot load would have judged
+        raise Denied(f"{name} is forbidden by the legislation, which does not load: revert the codex to use it")
+    if in_force is None:
+        return
+    entities = [{"uid": {"type": "Realm::User", "id": user}, "attrs": {"permissions": [], "banned": False}, "parents": []},
+                {"uid": {"type": "Realm::Realm", "id": "1"}, "attrs": {}, "parents": []}]
+    for action, label, facts in forbids.requests(name, spec, args, proposal, in_force["targeted"], in_force["types"]):
+        context = {**BLANK, "op": name, "origin": "forbids", "facts": facts}
+        if not decide(f'Realm::User::"{user}"', f'Realm::Action::"{action}"', 'Realm::Realm::"1"', entities, context):
+            raise Denied(f"{name} is forbidden by the legislation: {label}{refused_by(legislation.firing(action, facts))}")
+
+
+def refuse_forbidden_action(user, action):
+    """``refuse_forbidden`` for the call an ``action`` (``{op, args}``) carries to a vote or a replay: asked where it is
+    filed or prepared, before it fixes anything, and asked again when it runs. ``action`` names an operation of the
+    realm (api.proposals.check_action)."""
+    from core.op import ops  # it imports this module
+
+    refuse_forbidden(user, action["op"], ops()[action["op"]], action.get("args") or {}, "")
+
+
+def refused_by(firing):
+    """``: refused by <id> (<citation>)`` for the forbids that fired (core.legislation.firing), or nothing."""
+    by = ", ".join(f["id"] + (f" ({f['legislation']})" if f["legislation"] else "") for f in firing)
+    return f": refused by {by}" if by else ""
 
 
 def reason(name, spec, context, held):

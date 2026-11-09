@@ -36,11 +36,17 @@ class Resolution:
         return {domain: self.view(domain) for domain in self.plan.paths}
 
 
-def resolve(plan, chapters, calendars=None, operations=None, modules=None):
+def resolve(plan, chapters, calendars=None, operations=None, modules=None, facts=None):
     """Load ``plan`` into a codex. ``chapters`` maps a checksum to a chapter's source text, ``calendars``
-    a checksum to a parsed ``calendar.json``; ``operations`` and ``modules`` are the ``Codex``'s.
+    a checksum to a parsed ``calendar.json``; ``operations``, ``modules`` and ``facts`` are the ``Codex``'s.
     """
-    codex = Codex(plan.layers, realm=plan.realm, operations=operations, modules=modules)
+    codex = Codex(
+        plan.layers,
+        realm=plan.realm,
+        operations=operations,
+        modules=modules,
+        facts=facts,
+    )
     for entry in plan.calendars:
         codex.calendar_layer(
             entry["source"],

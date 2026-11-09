@@ -131,8 +131,9 @@ def entry_of(policy, code):
     return entry
 
 
-def symbol_of(policy):
-    return policy.document.get("symbol") or currency()
+def symbol_of(policy, accounting=None):
+    """The token ``policy`` bills in: its own, or the accounting currency (``accounting``, when the caller has read it)."""
+    return policy.document.get("symbol") or accounting or currency()
 
 
 def key(declarant, code, period):
@@ -143,14 +144,14 @@ def declared(declarant, period, code):
     return first(TaxDeclaration, "key", key(declarant, code, period)) is not None
 
 
-def levy(policy, entry, declarant, period, base, items):
-    """Record that ``declarant`` owes ``items`` for ``period`` on ``base``, and bill them: an invoice for what they come
-    to, none when it is nothing. Nothing is written if the items are not an amount of money."""
+def levy(symbol, entry, declarant, period, base, items):
+    """Record that ``declarant`` owes ``items`` for ``period`` on ``base``, and bill them in token ``symbol``: an invoice
+    for what they come to, none when it is nothing. Nothing is written if the items are not an amount of money."""
     did, amount = next_id(TaxDeclaration, "TD"), total(items)
     invoice = None
     if amount != 0:
         due = chain.now() + int(entry["facts"].get("due_days", 30)) * 86400
-        invoice = new_invoice(declarant, items, symbol_of(policy), due, f"TaxDeclaration:{did}")
+        invoice = new_invoice(declarant, items, symbol, due, f"TaxDeclaration:{did}")
     return TaxDeclaration(id=did, declarant=declarant, period=period, base=entry["code"],
                           key=key(declarant, entry["code"], period), amount=base,
                           status="assessed" if invoice else "settled", invoice=invoice.id if invoice else "")
@@ -169,17 +170,17 @@ def subjects_of(entry, payer):
     return [payer]
 
 
-def assessment(entry, payer, base, symbol, decimals):
+def assessment(entry, payer, base, symbol, decimals, accounting):
     """The items ``payer`` owes under ``entry``, billed in token ``symbol`` of ``decimals``: what the active codex
     computes for each subject they hold under it, or, when no codex answers, the charge of the entry's own rate, amount
-    or brackets on ``base``. A parcel's value is in the accounting currency, so a codex does not compute a tax on land
-    billed in another token: that refuses the call."""
+    or brackets on ``base``. The amounts a chapter reads (a parcel's value) are in the ``accounting`` currency, so a codex
+    does not compute a tax billed in another token, whatever its subject: that refuses the call."""
     answers = {}
     for subject in subjects_of(entry, payer):
         answers[subject] = yield from codex.compute("tax_assess", {"entry": entry, "subject": subject}, decimals=decimals)
-        if answers[subject] is not None and entry["subject"] == "Land" and symbol != currency():
-            raise Fail(f"tax '{entry['code']}' on land is billed in {symbol}, but a parcel's value is in {currency()}: "
-                       f"a codex computes a tax on land in the accounting currency only")
+        if answers[subject] is not None and symbol != accounting:
+            raise Fail(f"tax '{entry['code']}' is billed in {symbol}, but a codex computes a tax in the accounting "
+                       f"currency, {accounting}, only: the amounts it reads are in it")
     if all(answer is None for answer in answers.values()):
         return reference_items(entry, base, decimals)
     items = []
@@ -225,7 +226,13 @@ def tax_policy_draft(c, args):
     return {"policy": p.id}
 
 
-@op("tax.manage", governed=realm_wide)
+def saved_entries(args):
+    """The entries of the saved policy ``tax_policy_propose`` names: the list its forbids range over (GGG's
+    ``tax_policy_propose.taxes``)."""
+    return find(TaxPolicy, args["policy"]).taxes
+
+
+@op("tax.manage", governed=realm_wide, lists={"taxes": saved_entries})
 def tax_policy_propose(c, args):
     """Adopt the draft tax ``policy``, superseding the one in force."""
     p = find(TaxPolicy, args["policy"])
@@ -252,7 +259,8 @@ def tax_assess(c, args):
     entries = [entry_of(policy, args["tax"])] if args.get("tax") else [
         t for t in policy.taxes if enabled(t) and t["subject"] != "Declaration"]
     start, count = window(args)
-    symbol = symbol_of(policy)
+    accounting = currency()
+    symbol = symbol_of(policy, accounting)
     find(Token, symbol)  # the invoices are in it
     decimals = decimals_of(symbol)
     invoices, skipped, due = [], 0, []
@@ -263,14 +271,14 @@ def tax_assess(c, args):
                 skipped += 1
                 continue
             base = taxable(entry, declarant)
-            items = yield from assessment(entry, declarant, base, symbol, decimals)
+            items = yield from assessment(entry, declarant, base, symbol, decimals, accounting)
             checked_total(items)
             due.append((entry, declarant, base, items))
     for entry, declarant, base, items in due:
         if declared(declarant, period, entry["code"]):  # a call that ran while the codex was asked billed them
             skipped += 1
             continue
-        d = levy(policy, entry, declarant, period, base, items)
+        d = levy(symbol, entry, declarant, period, base, items)
         if d.invoice:
             invoices.append(d.invoice)
     last = max([(Land if t["subject"] == "Land" else Member).max_id() for t in entries], default=0)
@@ -301,8 +309,9 @@ def tax_declare(c, args):
         raise Fail("a declared amount cannot be negative")
     if declared(declarant, period, entry["code"]):
         raise Conflict(f"{declarant} has already declared {entry['code']} for {period}")
-    items = reference_items(entry, amount, decimals_of(symbol_of(policy)))
-    d = levy(policy, entry, declarant, period, amount, items)
+    symbol = symbol_of(policy)
+    items = reference_items(entry, amount, decimals_of(symbol))
+    d = levy(symbol, entry, declarant, period, amount, items)
     return {"declaration": d.id, "invoice": d.invoice, "owed": total(items)}
 
 
