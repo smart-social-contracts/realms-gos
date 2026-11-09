@@ -8,9 +8,8 @@ import pytest
 import fake_chain
 import world
 from core import op, poa
-from api import setup
-from ggg import (Appointment, Attribute, Authority, Contract, Delegation, Event, Notification, Organization,
-                 PendingAction, Proposal, TaskExecution, User)
+from ggg import (Appointment, Authority, Contract, Delegation, Event, Notification, Organization, PendingAction,
+                 Proposal, User)
 from kit import call, denied, ok, rows
 from test_delegation_groups import DAY, reached, without_argument_checks
 from test_orgs import org_admin
@@ -33,7 +32,7 @@ THIS_PHASE = frozenset((
     "organization_register", "organization_set_status", "payroll_run", "period_close", "procedure_define",
     "procedure_list", "proposal_execute", "proposal_finalize", "proposal_get", "proposal_linked_from",
     "proposal_list", "proposal_open", "proposal_stop", "quarter_add", "quarter_configure", "quarter_deregister",
-    "quarter_join_federation", "quarter_register", "quarter_secede", "realm_export", "realm_monitor",
+    "quarter_join_federation", "quarter_register", "quarter_secede", "realm_monitor",
     "report_view", "representative_remove", "request_decide", "request_list", "request_set_due",
     "resolution_query", "role_revoke", "tax_assess", "tax_policy_draft", "tax_policy_propose",
     "tax_policy_view", "tender_cancel", "tender_close", "tender_create", "tender_get", "tender_list",
@@ -106,7 +105,7 @@ def test_this_phase_switches_on_exactly_these_operations_of_its_groups():
     assert THIS_PHASE <= poa.ENABLED
     unexplained = in_groups - poa.LEGACY - OTHER_PHASES - THIS_PHASE
     assert not unexplained, f"an operation was switched on that no phase accounts for: {sorted(unexplained)}"
-    assert len(THIS_PHASE) == 104 and all(poa.row(n)[0] == "direct" for n in THIS_PHASE - {"contract_create"})
+    assert len(THIS_PHASE) == 103 and all(poa.row(n)[0] == "direct" for n in THIS_PHASE - {"contract_create"})
 
 
 # ---- Office work follows the seats
@@ -389,60 +388,22 @@ def test_the_reads_of_administration_are_direct():
     ok("notification_send", "ctl", recipient="User:alice", title="Hello")
     assert ok("events", "claude-conn", on_behalf_of="ctl")["events"]
     assert ok("realm_monitor", "claude-conn", on_behalf_of="ctl")["status"]
-    assert ok("realm_export", "claude-conn", on_behalf_of="ctl", entity="User")["rows"]
 
 
-def export_as_delegate(entity):
-    return call("realm_export", "claude-conn", on_behalf_of="ctl", entity=entity, count=500)
-
-
-@pytest.mark.parametrize("entity", sorted(setup.PRIVATE))
-def test_a_delegates_export_refuses_what_only_its_owners_may_read_and_the_members_own_export_is_unchanged(entity):
-    world.build()
+def test_a_delegate_does_not_export_the_realm_under_any_group_everything_included():
+    """A full export is the member's own act: it gives every row and field of an entity, whatever the delegate may read."""
+    depts = world.build()
+    org_admin("dr-ana")
     world.person("ctl")
-    lend("ctl", "admin")
-    refused = export_as_delegate(entity)
-    assert not refused["ok"] and f"does not export {entity}" in refused["error"]
-    assert ok("realm_export", "ctl", entity=entity)["entity"] == entity
-
-
-def test_an_admin_grant_does_not_export_identity_proofs():
-    world.build()
-    world.person("ctl")
-    Attribute(id="A-1", human="h-bob", kind="disability", value="33 percent", status="Verified")
-    lend("ctl", "admin")
-    assert "does not export Attribute" in denied("realm_export", "claude-conn", on_behalf_of="ctl", entity="Attribute")
-    assert [(r["kind"], r["value"]) for r in ok("realm_export", "ctl", entity="Attribute")["rows"]] == [
-        ("disability", "33 percent")]
-
-
-@pytest.mark.parametrize("entity, fields", sorted(setup.WITHHELD.items()))
-def test_a_delegates_export_withholds_private_fields_and_returns_the_rest_as_the_member_would(entity, fields):
-    world.build()
-    world.person("ctl")
-    User["bob"].private_data, User["bob"].home_zone = "ciphertext", "cell-7"
-    TaskExecution(name="E-1", status="completed", result='{"token": "S3CRET"}')
-    lend("ctl", "admin")
-    own = ok("realm_export", "ctl", entity=entity, count=500)["rows"]
-    theirs = ok("realm_export", "claude-conn", on_behalf_of="ctl", entity=entity, count=500)["rows"]
-    assert own and all(field in row for row in own for field in fields)
-    assert all(field not in row for row in theirs for field in fields)
-    assert theirs == [{k: v for k, v in row.items() if k not in fields} for row in own]
-    assert "ciphertext" not in str(theirs) and "S3CRET" not in str(theirs) and "cell-7" not in str(theirs)
-
-
-def test_a_delegates_export_of_an_entity_that_holds_nothing_private_is_the_members_own():
-    world.build()
-    world.person("ctl")
-    lend("ctl", "admin")
-    for entity in ("Department", "Member", "Position", "Appointment"):
-        assert export_as_delegate(entity)["rows"] == ok("realm_export", "ctl", entity=entity, count=500)["rows"], entity
-
-
-def test_every_entity_a_delegate_does_not_export_is_one_of_the_realms():
-    import ggg
-
-    assert set(setup.PRIVATE) | set(setup.WITHHELD) <= set(dir(ggg))
+    world.person("hana")
+    seat_in(depts["Health"], "health.officer", "hana", "db.export")
+    plain = [g for g in poa.enabled_by_group() if g not in poa.PARAMETERS] + ["*"]
+    grants = [("ctl", group) for group in plain] + [("hana", "office:Health"), ("dr-ana", "orgs:clinic-b")]
+    for i, (grantor, group) in enumerate(grants):
+        lend(grantor, group, delegate=f"agent-{i}")
+        error = denied("realm_export", f"agent-{i}", on_behalf_of=grantor, entity="User")
+        assert "does not cover" in error, (group, error)
+    assert ok("realm_export", "ctl", entity="User")["rows"]
 
 
 # ---- Contracts
