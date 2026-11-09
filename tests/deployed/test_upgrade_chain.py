@@ -5,9 +5,11 @@ to an entity that has no ``migrate()``. A realm installed from the previous rele
 has no stored schema yet, so the other upgrade tests never meet the check; a staging realm, upgraded many times, does.
 Hence the previous release is upgraded over itself first, which is what stores its schema.
 
-The previous release's wasm is named by ``REALM_PREVIOUS_WASM`` (skipped when unset).
+The previous release's wasm is named by ``REALM_PREVIOUS_WASM`` (skipped when unset). Without it the same check runs on
+every PR, with no replica, against a stored schema: tests/ggg/test_schema_upgrade.py.
 """
 
+import json
 import os
 
 import pytest
@@ -15,15 +17,16 @@ from pic import Canister
 
 PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
 RATE_LIMIT = 600  # seconds the replica wants between install_code messages as dear as installing this wasm
+STORED = "import json\nfrom ic_python_db import Database\nprint(json.dumps(Database.get_instance().load('_system', '_schema')['%s']))"
 
 
 @pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")
 def test_a_realm_upgraded_before_upgrades_to_this_release(wasm_of, people):
     realm = Canister(PREVIOUS, installer=people["installer"])
-    before = realm.call("status", query=True)["version"]
     realm.wait(RATE_LIMIT)
     realm.upgrade()  # the previous release over itself: its schema is stored now
     realm.wait(RATE_LIMIT)
     realm.upgrade(wasm_of("production"))  # raises if a field was added without a default or a migrate()
-    status = realm.call("status", query=True)
-    assert status["ok"] and status["version"] != before, (before, status)
+    assert realm.call("status", query=True)["ok"]
+    # The check ran against the previous schema and stored this release's: Event.grant is new, and Event has a migrate().
+    assert json.loads(realm.shell(STORED % "Event"))["has_migrate"] is True
