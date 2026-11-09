@@ -374,6 +374,12 @@ def record():
     return sorted(each(Release, "relayed", True), key=lambda r: r.rank) + list(each(Release, "relayed", False))
 
 
+def published_as():
+    """The source id this realm publishes under, the one of its first release; None before it has published."""
+    first = next(iter(each(Release, "relayed", False)), None)
+    return first.source if first is not None else None
+
+
 def valid_release(args):
     for key, most in (("source", NAME_MAX), ("version", VERSION_MAX), ("commit", VERSION_MAX)):
         if not isinstance(args.get(key), str) or not 0 < len(args[key]) <= most:
@@ -402,9 +408,9 @@ def legislation_release_publish(c, args):
     source, version = args["source"], args["version"]
     if any(r.source == source for r in each(Release, "relayed", True)):
         raise Fail(f"{source} is a layer this realm relays: it publishes under its own source id")
-    own = next(iter(each(Release, "relayed", False)), None)
-    if own is not None and own.source != source:
-        raise Fail(f"this realm publishes as {own.source}")
+    own = published_as()
+    if own is not None and own != source:
+        raise Fail(f"this realm publishes as {own}")
     if Release[f"{source}@{version}"] is not None:
         raise Conflict(f"{source} {version} is published already")
     stored = [c["checksum"] for c in args["chapters"]] + ([args["calendar"]] if args.get("calendar") else [])
@@ -444,6 +450,8 @@ def relay_release(release, order):
     source = release["source"]
     if source not in order:
         raise Fail(f"the record that vouches for {source} does not list it")
+    if source == published_as():
+        raise Fail(f"{source} is the source id this realm publishes under: it is not a layer from above")
     relayed = [r for r in record() if r.relayed]
     for old in [r for r in relayed if r.source == source]:
         old.delete()

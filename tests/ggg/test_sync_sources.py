@@ -443,3 +443,14 @@ def test_the_record_lists_the_relayed_layers_top_to_bottom_then_the_realms_own()
     assert [r["source"] for r in page["releases"]] == ["eu", "eu/es"] and page["next"] == 3
     last = ok("legislation_releases", fake_chain.ANONYMOUS, count=2, **{"from": 3})
     assert [r["source"] for r in last["releases"]] == ["x/town"] and last["next"] is None
+
+
+def test_a_layer_from_above_is_never_the_source_id_the_realm_publishes_under():
+    ok("legislation_release_publish", "ctl", **release())
+    with pytest.raises(Fail, match="x/town is the source id this realm publishes under"):
+        links.relay_release(relayed("x/town", "2.0.0", stored("tax 1.0.0")), ["x/town", "eu"])
+    assert [(r["source"], r["version"]) for r in ok("legislation_releases", fake_chain.ANONYMOUS)["releases"]] == [
+        ("x/town", "1.0.0")]  # nothing was written, and the realm can still publish
+    ok("legislation_release_publish", "ctl", **release("1.1.0"))
+    assert [r["version"] for r in ok("legislation_releases", fake_chain.ANONYMOUS)["releases"]] == ["1.0.0", "1.1.0"]
+    links.relay_release(relayed("eu", "1.0.0", stored("eu tax")), ["eu", "x/town"])  # another layer is still welcome
