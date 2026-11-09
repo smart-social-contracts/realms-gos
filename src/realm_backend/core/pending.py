@@ -71,7 +71,7 @@ def prepare(grant, user, by, name, spec, args, note=""):
     from ggg import PendingAction
 
     needed = spec["perm_for"](args) if spec["perm_for"] else spec["perm"]
-    if not poa.covered(grant, name, spec, needed):
+    if not poa.covered(grant, name, spec, needed, args):
         raise auth.Denied(f"{name} cannot be done under this power of attorney: this grant does not cover it")
     auth.authorize(user, user, name, spec, args)
     auth.refuse_forbidden(user, name, spec, {**args, "on_behalf_of": user}, "")  # a forbidden action is never prepared
@@ -203,7 +203,7 @@ def holds(a):
 
     grant, spec = Delegation[a.grant], ops().get(a.method)
     return bool(grant and spec and grant.status == "active" and auth.in_force(grant, chain.now())
-                and poa.covered(grant, a.method, spec, spec["perm"]))
+                and poa.covered(grant, a.method, spec, spec["perm"], a.args))
 
 
 def close(a, state):

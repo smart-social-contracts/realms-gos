@@ -723,7 +723,35 @@ def origin_of(args):
     return {"kind": kind, "procedure": procedure, "tender": tender}
 
 
-@op("contract.create_under_mandate", returns="contract")
+def check_mandate(user, m, args):
+    """Refuse the contract of ``args`` for ``user`` under mandate ``m`` unless the mandate is active, ``user`` heads or
+    holds a seat in its executor department, the contract's ``value`` is within the mandate's ``max_value`` and it ends
+    before the mandate expires."""
+    if m.status != "active" or (m.expires_at and chain.now() > m.expires_at):
+        raise Conflict(f"mandate {m.id} is not active")
+    if m.executor is None or not seated(user, m.executor):
+        raise Forbidden(f"only the executor department's staff may contract under mandate {m.id}")
+    limit, value = int((m.scope or {}).get("max_value", 0)), int(args.get("value", 0))
+    if limit and value > limit:
+        raise Fail(f"{value} exceeds mandate {m.id}'s limit of {limit}")
+    if m.expires_at and int(args.get("ends_at", 0)) > m.expires_at:
+        raise Fail(f"the contract outlasts mandate {m.id}")
+
+
+def contracting(user, args):
+    """What a contract signed for ``user`` changes: the realm is bound to its parties as soon as it is approved. It is
+    refused here, as it is when approved, if its mandate does not allow it."""
+    m = find(Mandate, args["mandate"]) if args.get("mandate") else None
+    lines = []
+    if m is not None:
+        check_mandate(user, m, args)
+        limit = int((m.scope or {}).get("max_value", 0))
+        cap = f", up to {limit}" if limit else ""
+        lines.append({"label": "Under mandate", "value": f"{m.id} {quoted(m.title)}{cap}"})
+    return lines + [{"label": "What changes", "value": "An active contract binds the realm to its parties at once"}]
+
+
+@op("contract.create_under_mandate", returns="contract", summary=contracting, title="Sign a contract")
 def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
     now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``, and what is contracted
@@ -732,17 +760,9 @@ def contract_create(c, args):
     Under a mandate, the mandate must be active, ``value`` within its ``max_value``, the contract must end before the
     mandate expires, and you must head or hold an active seat in the mandate's executor department."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
-    value = int(args.get("value", 0))
     if m is not None:
-        if m.status != "active" or (m.expires_at and chain.now() > m.expires_at):
-            raise Conflict(f"mandate {m.id} is not active")
-        if m.executor is None or not seated(c.user, m.executor):
-            raise Forbidden(f"only the executor department's staff may contract under mandate {m.id}")
-        limit = int((m.scope or {}).get("max_value", 0))
-        if limit and value > limit:
-            raise Fail(f"{value} exceeds mandate {m.id}'s limit of {limit}")
-        if m.expires_at and int(args.get("ends_at", 0)) > m.expires_at:
-            raise Fail(f"the contract outlasts mandate {m.id}")
+        check_mandate(c.user, m, args)
+    value = int(args.get("value", 0))
     k = Contract(id=next_id(Contract, "C"), title=args["title"], parties=args.get("parties", []), mandate=m,
                  **origin_of(args), value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency,
                  terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",

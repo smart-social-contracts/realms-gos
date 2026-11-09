@@ -844,7 +844,8 @@ def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_whe
                 "federal_vote_propose": "Opens a federal vote " + carried}
     cases = {"payment_account_add": ACCOUNT, "payment_account_remove": {"account": account},
              "identity_submit": {"kind": "passport"}, "self_change_quarter": {"quarter": "south"},
-             "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION}}
+             "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION},
+             "contract_create": {"title": "Road"}}
     preparable = {n for n, s in op.ops().items() if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
     assert preparable <= set(cases), preparable - set(cases)
     for name, args in cases.items():
@@ -959,9 +960,9 @@ def test_the_audit_log_of_call_for_hides_the_secrets_of_the_operation_it_forward
     assert [e.result for e in events if e.op == "call_for"] == [{"n": 1}]
 
 
-def test_the_operations_a_grant_by_groups_reaches_in_this_release_are_those_of_phase_3_and_these_seven():
-    assert poa.ENABLED - poa.LEGACY == {"payment_account_add", "payment_account_remove", "identity_submit",
-                                        "self_change_quarter", "federal_vote_propose", "action_get", "action_list"}
+def test_the_operations_a_grant_by_groups_reaches_in_this_release_include_those_of_phase_3_and_these_seven():
+    assert {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
+            "federal_vote_propose", "action_get", "action_list"} <= poa.ENABLED - poa.LEGACY
 
 
 def test_a_members_own_act_takes_no_on_behalf_of_not_even_for_oneself():

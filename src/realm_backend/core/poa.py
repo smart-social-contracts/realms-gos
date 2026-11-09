@@ -8,7 +8,7 @@ guardrails), and ``notice`` tells the member what a delegate did.
 """
 from core import chain
 from core.db import Fail, Forbidden, next_id
-from ggg_delegation import EVERYTHING, GROUPS, OPERATIONS
+from ggg_delegation import EVERYTHING, GROUPS, OPERATIONS, PARAMETERS
 
 EVERYTHING_SCOPE = "*"
 TOPIC = "poa"  # of the notices that tell the member what a delegate did
@@ -16,6 +16,10 @@ NOTICE_WINDOW = 3600  # a delegate's acts within an hour share one notice
 NOTICE_ACTS = 10
 # Marking notices read leaves no notice: it would be an unread one about clearing the inbox.
 NO_NOTICE = {"notification_read"}
+# The operations that read or mark an inbox, and the group the inbox of each kind of recipient belongs to. A grant of
+# "See my affairs" reads the member's own inbox only: an office's is office work, an organization's is its admins'.
+INBOXES = ("notification_list", "notification_read")
+INBOX_GROUPS = {"Department": "office", "Organization": "orgs"}
 
 # (tier, group, group once the realm has launched, condition under which it asks each time), as in OPERATIONS, for
 # the operations Realms GOS adds to GGG's: the tasks, the shell, extensions and the host's and the operator's own.
@@ -66,7 +70,113 @@ LEGACY = frozenset((
 # deletes the gate. The five that phase 0 closed come back as pending actions (core.pending), and the member's
 # own pending actions are read like any other record.
 ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
-                    "federal_vote_propose", "action_get", "action_list"}
+                    "federal_vote_propose", "action_get", "action_list",
+                    # A member's own affairs, office work, organizations and administration: the direct operations
+                    # of those groups that no other phase owns, and contract_create, which is prepared.
+                    "allocation_rule_draft",
+                    "allocation_rule_propose",
+                    "appointment_end",
+                    "attribute_list",
+                    "authority_revoke",
+                    "bids_reveal",
+                    "budget_amend",
+                    "budget_draft",
+                    "budget_extend",
+                    "budget_propose",
+                    "budget_view",
+                    "case_assign",
+                    "codex_activate",
+                    "codex_status",
+                    "contract_create",
+                    "court_create",
+                    "delegable_operations",
+                    "delegation_activity",
+                    "delegation_groups",
+                    "delegation_list",
+                    "department_chart",
+                    "department_expel",
+                    "department_get",
+                    "department_list",
+                    "dispatch_confirm",
+                    "dispatch_list",
+                    "dispute_list_all",
+                    "enforcement_escalate",
+                    "enforcement_notify",
+                    "enforcement_record",
+                    "events",
+                    "external_add",
+                    "external_list",
+                    "external_report",
+                    "federal_vote_cancel",
+                    "invite_list",
+                    "invite_revoke",
+                    "invoice_create",
+                    "invoice_item_add",
+                    "invoice_refresh",
+                    "judge_revoke",
+                    "land_list",
+                    "land_map",
+                    "land_mint_nft",
+                    "land_register",
+                    "ledger_view",
+                    "loan_create",
+                    "loan_list",
+                    "loan_repay",
+                    "mandate_assign_executor",
+                    "mandate_create",
+                    "mandate_revoke",
+                    "notification_send",
+                    "organization_get",
+                    "organization_list",
+                    "organization_register",
+                    "organization_set_status",
+                    "payroll_run",
+                    "period_close",
+                    "procedure_define",
+                    "procedure_list",
+                    "proposal_execute",
+                    "proposal_finalize",
+                    "proposal_get",
+                    "proposal_linked_from",
+                    "proposal_list",
+                    "proposal_open",
+                    "proposal_stop",
+                    "quarter_add",
+                    "quarter_configure",
+                    "quarter_deregister",
+                    "quarter_join_federation",
+                    "quarter_register",
+                    "quarter_secede",
+                    "realm_export",
+                    "realm_monitor",
+                    "report_view",
+                    "representative_remove",
+                    "request_decide",
+                    "request_list",
+                    "request_set_due",
+                    "resolution_query",
+                    "role_revoke",
+                    "tax_assess",
+                    "tax_policy_draft",
+                    "tax_policy_propose",
+                    "tax_policy_view",
+                    "tender_cancel",
+                    "tender_close",
+                    "tender_create",
+                    "tender_get",
+                    "tender_list",
+                    "tender_notice",
+                    "tender_open",
+                    "transfer_revert",
+                    "treasury_view",
+                    "user_add",
+                    "user_edit",
+                    "user_get",
+                    "user_import",
+                    "user_list",
+                    "user_remove",
+                    "user_set_status",
+                    "verdict_draft"}
 
 # Whether the arguments of a call make an operation ask each time. They are read only under a grant by groups: a
 # grant made before groups keeps the behaviour phase 0 gave its operations (proposal_create refuses an action itself).
@@ -110,6 +220,56 @@ def group_of(name):
     return after_launch if after_launch and launched() else group
 
 
+def split(named):
+    """``(group, place)`` of a group as a grant names it. "office:Health" is the group office for the department Health;
+    a group that takes no place has "" for it."""
+    group, _, place = named.partition(":")
+    return group, place
+
+
+def inbox_recipient(name, args):
+    """The recipient whose inbox the call of ``name`` reads or marks, or None for any other call, and for one that
+    leaves it out to mean the member's own."""
+    if name not in INBOXES:
+        return None
+    if name == "notification_read" and not args.get("all"):
+        from ggg import Notification
+
+        found = Notification[str(args.get("notification") or "")]
+        return found.recipient if found else None
+    return args.get("recipient")
+
+
+def about(name, args):
+    """``(group, place)`` of the call of ``name`` with ``args``: the group a grant must name for it, and the department
+    or organization within that group the call names, or "" if it names none. An operation is in its own group, but
+    the inbox of an office or an organization is in that office's or organization's, and an operation of an
+    organization names its ``organization``."""
+    kind, _, place = (inbox_recipient(name, args) or "").partition(":")
+    if kind in INBOX_GROUPS:
+        return INBOX_GROUPS[kind], place
+    group = group_of(name)
+    return group, str(args.get("organization") or "") if group == "orgs" else ""
+
+
+def place_of(group, place):
+    """The department (for ``group`` office) or organization (for orgs) with id ``place``, or None."""
+    from ggg import Department, Organization
+
+    return (Department if group == "office" else Organization)[place]
+
+
+def stands(principal, group, place):
+    """Whether ``principal`` still holds what a grant of ``group`` for ``place`` stands on: a seat in the department, or
+    adminship of the organization."""
+    from core import auth
+
+    if group == "office":
+        return bool(auth.seats_in(principal, place))
+    org = place_of(group, place)
+    return bool(org and principal in (org.admins or []))
+
+
 def is_legacy(name, spec):
     """Whether a grant that names permissions can cover ``name``."""
     return name in LEGACY or (spec["tier"] is None and spec["delegable"])
@@ -137,22 +297,55 @@ def longest(group, everything):
 def longest_grant(groups):
     """The longest, in seconds, that a grant naming ``groups`` may last: the shortest of theirs."""
     everything = EVERYTHING_SCOPE in groups
-    limits = [longest(g, everything) for g in groups if g != EVERYTHING_SCOPE]
+    limits = [longest(split(g)[0], everything) for g in groups if g != EVERYTHING_SCOPE]
     if everything:
         limits.append(EVERYTHING["longest"])
     return min(limits)
 
 
-def covered(grant, name, spec, permission, at=None):
-    """Whether ``grant`` reaches the call of ``name``, which needs ``permission``, at time ``at`` (default now). The
-    limits are read when the call is made, so a stricter one binds a grant made before it."""
+def places(groups, group):
+    """The departments or organizations that ``groups`` name for ``group``: "office:Health" names Health."""
+    return [place for named in groups for kind, place in [split(named)] if kind == group and place]
+
+
+def names_place(grant, group, place, permission):
+    """Whether a grant by groups names ``group``, without saying everything, for a call that needs ``permission`` and
+    names ``place`` ("" if it names none). A group that takes a place is named for one, and the grantor must still stand
+    on it whenever the grant is used. A call that names its place (an organization's operation, an inbox) is covered by
+    that place's group. Office work names none: it is covered by a department in which the grantor holds the permission
+    through a seat."""
+    groups = grant_groups(grant)
+    if group not in PARAMETERS:
+        return group in groups
+    if place:
+        return f"{group}:{place}" in groups and stands(grant.grantor, group, place)
+    if group != "office":
+        return False
+    from core import auth
+
+    return any("all" in held or permission in held
+               for held in (auth.permissions_via(grant.grantor, d) for d in places(groups, group)))
+
+
+def reads_inbox(grant, recipient):
+    """Whether ``grant`` reaches the inbox of ``recipient`` ("Department:Health"), if it is one by groups: it names that
+    office or organization, or says everything."""
+    groups = grant_groups(grant)
+    kind, _, place = recipient.partition(":")
+    group = INBOX_GROUPS.get(kind)
+    return bool(groups is not None and group and (EVERYTHING_SCOPE in groups or names_place(grant, group, place, None)))
+
+
+def covered(grant, name, spec, permission, args, at=None):
+    """Whether ``grant`` reaches the call of ``name`` with ``args``, which needs ``permission``, at time ``at`` (default
+    now). The limits are read when the call is made, so a stricter one binds a grant made before it."""
     groups = grant_groups(grant)
     if groups is None:
         return is_legacy(name, spec) and permission in (grant.scope or {}).get("operations", ())
     if name not in ENABLED or spec["tier"] in EVERYTHING["never"]:
         return False
-    everything, group = EVERYTHING_SCOPE in groups, group_of(name)
-    if not everything and group not in groups:
+    (group, place), everything = about(name, args), EVERYTHING_SCOPE in groups
+    if not everything and not names_place(grant, group, place, permission):
         return False
     # The grant counts from when it began to act: its start, or its acceptance if that came later.
     return (at or chain.now()) - max(grant.starts_at, grant.accepted_at) < longest(group, everything)
@@ -184,37 +377,79 @@ def enabled_by_group():
     return out
 
 
-def check_groups(groups, held=None):
-    """Refuse a list of groups that a grant cannot name: an unknown one, one with no operation enabled yet, and, if
-    ``held`` (the grantor's permissions) is given, one in which the grantor holds none of them."""
+def check_place(group, place, grantor):
+    """Refuse a department or organization that does not exist and, when the ``grantor`` is known, one that they do not
+    stand on: they hold no seat in the department, or do not administer the organization."""
+    if place_of(group, place) is None:
+        raise Fail(f"{group}:{place} is not a group: there is no {PARAMETERS[group]} {place}")
+    if grantor and not stands(grantor, group, place):
+        raise Forbidden(f"you hold no seat in {place}" if group == "office" else f"you do not administer {place}")
+
+
+def check_groups(groups, grantor=None):
+    """Refuse a list of groups that a grant cannot name: an unknown one, one with no operation enabled yet, a place that
+    does not exist, and, if the ``grantor`` is given, one in which they hold nothing: none of its operations, or no
+    standing on the department or organization it names."""
     if not groups:
         raise Fail("name at least one group")
-    enabled = enabled_by_group()
-    for group in dict.fromkeys(groups):
-        if group == EVERYTHING_SCOPE:
+    from core import auth
+
+    enabled, held = enabled_by_group(), auth.permissions(grantor) if grantor else None
+    for named in dict.fromkeys(groups):
+        if named == EVERYTHING_SCOPE:
             continue
-        if group not in GROUPS:
-            raise Fail(f"{group} is not a group")
+        group, place = split(named)
+        if group not in GROUPS or bool(place) != (group in PARAMETERS):
+            hint = f" ({group}:<{PARAMETERS[group]}> names one)" if group in PARAMETERS else ""
+            raise Fail(f"{named} is not a group{hint}")
         if group not in enabled:
-            raise Fail(f"{group} cannot be granted yet")
-        if held is not None and "all" not in held and not any(spec["perm"] in held for _, spec in enabled[group]):
+            raise Fail(f"{named} cannot be granted yet")
+        if place:
+            check_place(group, place, grantor)
+        elif held is not None and "all" not in held and not any(spec["perm"] in held for _, spec in enabled[group]):
             raise Forbidden(f"you hold nothing in {group}")
 
 
-def vocabulary(held):
-    """The groups a member holding the permissions ``held`` can grant, as every client shows them: label, summary,
-    risk and longest duration, whether some of the group's operations ask each time, and the operations in it the
-    member holds, each with its tier."""
-    out = []
+def held_places(principal, group):
+    """The ids of the departments (group office) or organizations (orgs) that ``principal`` can name in ``group``: those
+    where they hold a seat and, for an organization, administer it. An organization they administer without a seat is
+    not listed: finding it would read every organization (check_groups still takes it by name)."""
+    from core import auth
+
+    seats = auth.seats(principal)
+    if group == "office":
+        return sorted({a.position.department.id for a in seats if a.position.department})
+    return sorted({a.position.organization.id for a in seats
+                   if a.position.organization and stands(principal, group, a.position.organization.id)})
+
+
+def vocabulary(principal):
+    """The groups ``principal`` can grant, as every client shows them: label, summary, risk and longest duration,
+    whether some of the group's operations ask each time, and the operations in it they hold, each with its tier.
+    A group that takes a place has one entry for each department or organization they stand on ("office:Health",
+    labelled "Office work: Health"), with the operations their seat in the department gives them."""
+    from core import auth
+
+    held, out = auth.permissions(principal), []
     for group, operations in enabled_by_group().items():
-        mine = [(name, spec) for name, spec in operations if "all" in held or spec["perm"] in held]
-        if mine:
-            label, summary, risk, seconds = GROUPS[group]
-            out.append({"id": group, "label": label, "summary": summary, "risk": risk, "longest": seconds,
-                        "confirms": any(spec["tier"] == "confirm" or spec["confirm_if"] for _, spec in mine),
-                        "operations": [{"operation": name, "permission": spec["perm"], "tier": spec["tier"],
-                                        "confirm_if": spec["confirm_if"]} for name, spec in mine]})
-    return sorted(out, key=lambda g: list(GROUPS).index(g["id"]))
+        if group == "office":
+            offered = {d: auth.permissions_via(principal, d) for d in held_places(principal, group)}
+        elif group in PARAMETERS:
+            offered = {o: held for o in held_places(principal, group)}
+        else:
+            offered = {"": held}
+        for place, permissions in offered.items():
+            mine = [(name, spec) for name, spec in operations
+                    if "all" in permissions or spec["perm"] in permissions]
+            if mine or place:
+                label, summary, risk, seconds = GROUPS[group]
+                out.append({"id": f"{group}:{place}" if place else group,
+                            "label": f"{label}: {place}" if place else label, "summary": summary, "risk": risk,
+                            "longest": seconds,
+                            "confirms": any(spec["tier"] == "confirm" or spec["confirm_if"] for _, spec in mine),
+                            "operations": [{"operation": name, "permission": spec["perm"], "tier": spec["tier"],
+                                            "confirm_if": spec["confirm_if"]} for name, spec in mine]})
+    return sorted(out, key=lambda g: list(GROUPS).index(split(g["id"])[0]))
 
 
 def notice(grant_id, name, args, out):
