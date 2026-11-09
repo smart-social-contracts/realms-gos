@@ -4,9 +4,9 @@ member approves it with ``ggg_action_approve``, and then the delegate holds that
 """
 
 import pytest
-from ic.candid import Types, encode
+from ic.candid import Types, decode, encode
 from test_delegation_groups import launch, ok
-from test_pending_actions import ACTION, APPROVE, BLOB, CALL_FOR, CALL_FOR_REPLY, TEXT
+from test_pending_actions import ACTION, APPROVE, BLOB, CALL_FOR, CALL_FOR_REPLY, READ_FOR, TEXT
 
 DAY = 86400
 WRAPPED = Types.Record({"principal": Types.Principal, "wrapped_dek": BLOB})
@@ -39,6 +39,13 @@ def test_a_key_prepared_for_the_assistant_alone_is_stored_only_when_the_member_a
     assert lines["Keys go to"] == claude
     assert lines["What changes"] == f'{claude} will be able to read "{scope}", and nothing else of yours'
     assert realm.shell(ENVELOPES).strip() == "[]"  # nothing is stored yet
+
+    # a second delegate of the member, holding "See my affairs", reads no card of another delegate's
+    mallory = people["mallory"]
+    ok(realm, "delegation_grant", alice, delegate=mallory, groups=["see"], expires_in=30 * DAY)
+    peek = {"method": "ggg_action_get", "arg": encode([{"type": TEXT, "value": action["id"]}]), "on_behalf_of": alice}
+    read = realm.ggg("ggg_read_for", READ_FOR, peek, BLOB, mallory, query=True)
+    assert decode(bytes(read["Ok"]))[0]["value"] == []
 
     tap = {"action": action["id"], "hash": action["hash"], "on_behalf_of": []}
     assert "Err" in realm.ggg("ggg_action_approve", APPROVE, tap, ACTION, claude)  # the delegate's own tap is refused
