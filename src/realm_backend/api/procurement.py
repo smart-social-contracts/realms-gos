@@ -249,6 +249,8 @@ def awarding(user, args):
     return you_sign(f"Awards tender {t.id} {quoted(t.title)} to bid {b.id} of {quoted(b.vendor.id)}, which scored "
                     f"{b.score} (the best scored {best.score}), and signs an active contract between "
                     f"{quoted('Department:' + t.requester.id)} and {quoted('Organization:' + b.vendor.id)}",
+                    ("Contract terms", f"price {b.price}, terms kept at {quoted(b.payload_ref)}, "
+                                       f"hash {quoted(b.payload_hash)}"),
                     ("Award justification", quoted(why) if why else "none"))
 
 

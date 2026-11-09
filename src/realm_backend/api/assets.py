@@ -368,16 +368,29 @@ def signer(c, args):
     return rule, org, find(NFTToken, rule["collection"])
 
 
+def licences_held(issuer, kinds):
+    """The active licences of ``issuer`` of the ``kinds`` that issuing a credential needs, as the card names them: a
+    renewal replaces the licence by another, and the card changes with it."""
+    held = [(kind, active(issuer, kind)) for kind in dict.fromkeys(filter(None, kinds))]
+    return ", ".join(f"{lic.id if lic else 'none'} ({quoted(kind)})" for kind, lic in held) or "none needed"
+
+
 def issuing_credential(user, args):
     expires = whole("expires_at", args.get("expires_at") or 0)
+    rule = schema_of(args["schema"])
+    collection = find(NFTToken, rule["collection"])
+    issuer = f"Organization:{find(Organization, args['organization']).id}"
+    needed = (rule["license"], collection.required_license)
     return you_sign(f"Issues a {quoted(args['schema'])} credential from organization {quoted(args['organization'])} "
                     f"to {quoted(args['holder'])}",
                     ("Credential claims", readable(args.get("fields", {}))),
+                    ("Credential issuer licence", licences_held(issuer, needed)),
+                    ("Credential collection", quoted(collection.id)),
                     ("Credential subject", quoted(args.get("subject", "")) if args.get("subject") else "none"),
                     ("Credential payload", f"hash {quoted(args.get('payload_hash', ''))}, "
                                            f"kept at {quoted(args.get('payload_ref', ''))}"),
                     ("Credential expiry", f"expires {day_of(expires)}" if expires else "never expires"),
-                    ("Prepared by", quoted(args["prepared_by"]) if args.get("prepared_by") else "nobody"))
+                    ("Credential prepared by", quoted(args["prepared_by"]) if args.get("prepared_by") else "nobody"))
 
 
 @op("credential.sign", signing=True, summary=issuing_credential, title="Issue a credential")

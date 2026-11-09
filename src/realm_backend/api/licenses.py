@@ -113,9 +113,11 @@ def deciding_licence(user, args):
         cycle = Calendar["1"].license_review_cycle if Calendar["1"] else 2 * 365 * 86400
         expires = f"{cycle // 86400} days after you sign it"
     issuer = find(Department, args.get("department") or (lic.issued_by.id if lic.issued_by else ""))
-    return you_sign(f"Issues {of_the_licence(lic)}, which expires {expires}",
-                    ("Licence conditions", readable({**(lic.conditions or {}), **args.get("conditions", {})})),
-                    ("Issuing department", quoted(issuer.id)))
+    conditions = {**(lic.conditions or {}), **args.get("conditions", {})}
+    renewed = License[conditions.get("renews") or "-"]
+    ends = f"; it ends licence {renewed.id}, which is active" if renewed and renewed.status == "active" else ""
+    return you_sign(f"Issues {of_the_licence(lic)}, which expires {expires}{ends}",
+                    ("Licence conditions", readable(conditions)), ("Issuing department", quoted(issuer.id)))
 
 
 @op("license.issue", signing=True, parties=holders, returns="license", summary=deciding_licence,

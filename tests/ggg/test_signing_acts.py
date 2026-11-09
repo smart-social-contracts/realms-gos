@@ -23,6 +23,7 @@ from test_justice import PLANS, agora as court_world, trial
 from test_licenses import agora as licence_world, apply_clinic
 from test_members import registry_with_reviewer
 from test_pending_actions import approve, approved, card, file, grant
+from api.procurement import seal
 from test_procurement import evaluation
 from test_treasury import LEDGER, receive, setup_finance
 
@@ -136,7 +137,8 @@ def penalty_execute():
     later(15 * DAY)
     ok("verdict_finalize", "elena", verdict=v)
     pen = Verdict[v].penalties[0].id
-    return Act("dana", dict(penalty=pen), [f"penalty {pen}", 'fine of 0.000005 REALM on "User:mallory"', "Invoices the target"],
+    return Act("dana", dict(penalty=pen), [f"penalty {pen}", 'fine of 0.000005 REALM on "User:mallory", due 30 days after you sign',
+                                           "Invoices the target"],
                lambda: Penalty[pen].status == "executed")
 
 
@@ -233,7 +235,7 @@ def credential_issue():
             "subject": "Contract:C-88", "payload_hash": "sha256:9f2c", "payload_ref": "user:alice:rx-88",
             "expires_at": fake_chain.now() + 30 * DAY, "fields": fields}
     return Act("dr-ana", args, [f"Issues a {quoted(RX)} credential from organization \"clinic-b\" to \"alice\"",
-                                readable(fields), '"Contract:C-88"', '"sha256:9f2c"', '"records-bot"'],
+                                readable(fields), 'LIC-1 ("health")', '"CRED"', '"Contract:C-88"', '"sha256:9f2c"', '"records-bot"'],
                lambda: bool(ledger_calls("mint")))
 
 
@@ -262,7 +264,8 @@ def tender_award():
     t, b1, b2 = evaluation()
     scored({b1: {"price": 9, "quality": 8}, b2: {"price": 7, "quality": 7}})
     return Act("carla", dict(tender=t), [f"Awards tender {t}", f"to bid {b1}", "which scored 86 (the best scored 86)",
-                                         '"Department:Infrastructure"', '"Organization:buildco"'],
+                                         '"Department:Infrastructure"', '"Organization:buildco"',
+                                         f'price 48000, terms kept at "vetkey:buildco:{t}", hash "{seal(48000, "n1")}"'],
                lambda: Tender[t].status == "contracted")
 
 
@@ -587,6 +590,40 @@ def test_a_nickname_with_a_line_break_cannot_start_a_line_of_the_realms_own():
     shown = card(action, "bob")["summary"]
     assert all("\n" not in line["value"] for line in shown)
     assert [line["label"] for line in shown if line["label"] == "You sign"] == ["You sign"]
+
+
+# ---- What a renewal changes
+
+
+def test_a_licence_renewed_after_a_credential_was_prepared_changes_the_card_and_blocks_the_tap():
+    act = ACTS["credential_issue"]()
+    grant("sign", grantor="dr-ana")
+    stale = file("credential_issue", grantor="dr-ana", **act.args)
+    assert lines(stale, "dr-ana")["Credential issuer licence"] == f'LIC-1 ({quoted("health")})'
+    renewal = ok("license_renew", "dr-ana", license="LIC-1")["license"]
+    ok("license_decide", "hector", license=renewal, approve=True)
+    out = approve(stale, "dr-ana")
+    assert not out["ok"] and "has changed" in out["error"] and not act.happened()
+    fresh = file("credential_issue", grantor="dr-ana", **act.args)
+    assert lines(fresh, "dr-ana")["Credential issuer licence"] == f'{renewal} ({quoted("health")})'
+    assert approved(fresh, "dr-ana")["status"] == "done" and act.happened()
+
+
+def test_the_card_names_who_prepared_a_credential_and_the_collection_it_goes_on():
+    act = ACTS["credential_issue"]()
+    grant("sign", grantor="dr-ana")
+    shown = lines(file("credential_issue", grantor="dr-ana", **act.args), "dr-ana")
+    assert shown["Credential prepared by"] == quoted("records-bot") and shown["Credential collection"] == quoted("CRED")
+    assert "Prepared by" not in shown
+
+
+def test_approving_a_renewal_says_that_it_ends_the_licence_it_renews():
+    lic = licence()
+    renewal = ok("license_renew", "dr-ana", license=lic)["license"]
+    grant("sign", grantor="hector")
+    action = file("license_decide", grantor="hector", license=renewal, approve=True)
+    assert f"it ends licence {lic}, which is active" in lines(action, "hector")["You sign"]
+    assert approved(action, "hector")["status"] == "done" and License[lic].status == "expired"
 
 
 # ---- The official reads it in their own language

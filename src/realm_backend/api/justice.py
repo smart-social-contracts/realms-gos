@@ -464,7 +464,9 @@ EFFECTS = {"fine": "Invoices the target", "restitution": "Invoices the target", 
 def executing_penalty(user, args):
     p = find(Penalty, args["penalty"])
     effect = EFFECTS.get(p.kind, "Only marks the penalty executed: its own operation carries it out")
-    return you_sign(f"Carries out penalty {p.id} of {of_the_verdict(p.verdict)}: {in_words(terms_of(p))}",
+    undated = p.kind in ("fine", "restitution") and not p.due_at
+    due = f", due {PAY_WITHIN // 86400} days after you sign" if undated else ""
+    return you_sign(f"Carries out penalty {p.id} of {of_the_verdict(p.verdict)}: {in_words(terms_of(p))}{due}",
                     ("Penalty effect", effect))
 
 
