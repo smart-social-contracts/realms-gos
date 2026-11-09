@@ -83,7 +83,8 @@ ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_s
                     "task_schedule"}
 
 # The origins whose delegated call may wait for the member's tap: someone's call is in progress, and its reply says that
-# the action waits. A task runs unattended, so it runs only what its grant covers directly (the model's "Tasks").
+# the action waits. A task runs unattended, so it runs only what its grant covers directly (the model's "Tasks"), and so
+# does anything it runs through the shell or an extension: a call asks only if its origin and its root are in this list.
 ASKING_ORIGINS = ("user", "shell", "extension")
 
 # Whether the arguments of a call make an operation ask each time. They are read only under a grant by groups: a

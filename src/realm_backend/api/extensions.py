@@ -148,8 +148,10 @@ def extension_call(c, args):
     declared = ext.operations
 
     def rpc(name, payload):
-        return json.loads(run(dispatch(name, json.dumps(on_behalf(c.user, c.by, payload)), origin="extension",
-                                       signer=c.by, declared=declared)))
+        # It acts for the member who called it, whoever it names: it holds no power of attorney to lend.
+        args = {k: v for k, v in payload.items() if k != "on_behalf_of"}
+        return json.loads(run(dispatch(name, json.dumps(on_behalf(c.user, c.by, args)), origin="extension",
+                                       signer=c.by, declared=declared, root=c.root)))
 
     return {"result": sandbox.execute(ext.source, args["function"], args.get("args") or {}, rpc, declared)}
 

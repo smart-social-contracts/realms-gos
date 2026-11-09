@@ -959,7 +959,7 @@ def test_the_audit_log_of_call_for_hides_the_secrets_of_the_operation_it_forward
     assert [e.result for e in events if e.op == "call_for"] == [{"n": 1}]
 
 
-def test_the_operations_a_grant_by_groups_reaches_in_this_release_are_those_of_phase_3_and_these_seven_and_the_rest():
+def test_the_operations_a_grant_by_groups_reaches_in_this_release_are_those_of_phase_3_the_pending_doors_and_the_inner_calls():
     pending_doors = {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
                      "federal_vote_propose", "action_get", "action_list"}
     inner_calls = {"extension_call", "shell", "task_add_schedule", "task_cancel", "task_create", "task_delete",

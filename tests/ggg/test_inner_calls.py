@@ -26,8 +26,8 @@ def vote(proposal):
     return rpc("proposal_vote", proposal=proposal, choice="yes")
 
 
-def vote_as_bob(proposal):
-    return rpc("proposal_vote", proposal=proposal, choice="no", on_behalf_of="bob")
+def vote_for(proposal, who):
+    return rpc("proposal_vote", proposal=proposal, choice="no", on_behalf_of=who)
 
 
 def motion(title):
@@ -40,6 +40,10 @@ def rename(nickname):
 
 def add_account(address):
     return rpc("payment_account_add", network="ICP", address=address, symbol="REALM", label="Savings")
+
+
+def add_account_for(address, who):
+    return rpc("payment_account_add", network="ICP", address=address, symbol="REALM", on_behalf_of=who)
 
 
 def prove_identity():
@@ -201,6 +205,26 @@ def test_a_tied_task_cannot_reach_what_its_grant_does_not_cover_directly(step, r
     assert User["carla"].nickname == "Carla" and PaymentAccount.count() == 0 and PendingAction.count() == 0
 
 
+NESTED = {
+    "shell": {"op": "shell", "args": {"expr": "ops.payment_account_add(network='ICP', address='aaaaa-bbbbb', symbol='REALM')"}},
+    "extension": {"op": "extension_call", "args": {"extension": "assistant", "function": "add_account",
+                                                    "args": {"address": "aaaaa-bbbbb"}}},
+    "shell then extension": {"op": "shell", "args": {
+        "expr": "ops.extension_call({'extension': 'assistant', 'function': 'add_account', 'args': {'address': 'aaaaa-bbbbb'}})"}},
+}
+
+
+@pytest.mark.parametrize("step", NESTED.values(), ids=NESTED)
+def test_what_a_task_runs_through_the_shell_or_an_extension_asks_the_member_nothing(step):
+    """The task is unattended whatever it runs through: it prepares nothing and runs only what its grant covers directly."""
+    build()
+    grant("admin", "payout")
+    made("nested", [step])
+    as_carla("task_run", task="nested")
+    assert "asks the member each time" in run_of("nested")["result"]
+    assert PendingAction.count() == 0 and PaymentAccount.count() == 0
+
+
 def test_a_delegate_cannot_run_what_the_member_wrote_with_the_members_authority():
     """Else it would plant steps in the member's own task, or run them, and the steps would run as the member."""
     build()
@@ -228,6 +252,16 @@ def test_a_delegate_edits_and_runs_the_tasks_it_made_and_the_member_makes_them_t
     ok("task_edit", "carla", task="motions", steps=[RENAME])  # the steps are carla's now: they are not held to the grant
     assert tasks.tie(Task["motions"]) == ""
     assert ok("task_run", "carla", task="motions")["status"] == "completed" and User["carla"].nickname == "Carla II"
+
+
+def test_a_tied_task_step_that_names_another_grantor_acts_for_the_creator():
+    build()
+    grant("admin", "vote")
+    grant("vote", grantor="bob")
+    p = ok("proposal_create", "dana", title="Park")["proposal"]
+    made("vote", [{"op": "proposal_vote", "args": {"proposal": p, "choice": "no", "on_behalf_of": "bob"}}])
+    assert as_carla("task_run", task="vote")["status"] == "completed"
+    assert Vote[f"{p}:bob"] is None and Vote[f"{p}:carla"].choice == "no"
 
 
 def test_a_grant_that_was_replaced_cannot_act_on_the_tasks_of_the_one_before():
@@ -333,8 +367,10 @@ def test_a_governed_call_from_the_shell_or_a_task_is_a_proposal_tied_to_the_gran
 # ---- Extension calls
 
 
-def extension(function, grantor="alice", **args):
-    out = call("extension_call", "claude-conn", on_behalf_of=grantor, extension="assistant", function=function, args=args)
+def extension(function, caller="claude-conn", **args):
+    """What the extension's ``function`` replies when ``caller`` runs it: for alice, if it is her delegate."""
+    extra = {"on_behalf_of": "alice"} if caller == "claude-conn" else {}
+    out = call("extension_call", caller, extension="assistant", function=function, args=args, **extra)
     assert out["ok"], out
     return out["result"]
 
@@ -384,8 +420,21 @@ def test_an_extension_cannot_claim_to_act_for_someone_else():
     grant("vote", grantor="alice")
     grant("vote", grantor="bob")
     p = ok("proposal_create", "dana", title="Park")["proposal"]
-    assert extension("vote_as_bob", proposal=p)["ok"]
+    assert extension("vote_for", proposal=p, who="bob")["ok"]
     assert Vote[f"{p}:bob"] is None and Vote[f"{p}:alice"].choice == "no"
+
+
+def test_an_extension_a_member_calls_acts_for_that_member_whoever_it_names():
+    """Bob holds Alice's grants. An extension he calls has none to lend: it votes for him, and files nothing for her."""
+    build()
+    ok("delegation_accept", "bob", delegation=grant("vote", "payout", grantor="alice", delegate="bob"))
+    p = ok("proposal_create", "dana", title="Park")["proposal"]
+    assert extension("vote_for", "bob", proposal=p, who="alice")["ok"]
+    assert Vote[f"{p}:alice"] is None and Vote[f"{p}:bob"].choice == "no"
+    assert extension("add_account_for", "bob", address="evil", who="alice")["ok"]
+    assert PendingAction.count() == 0 and {a.owner for a in rows(PaymentAccount)} == {"User:bob"}
+    [e] = events("payment_account_add")
+    assert (e.user, e.by, e.origin, e.grant) == ("bob", "bob", "extension", None)
 
 
 def test_an_extension_call_of_the_member_alone_runs_as_before():

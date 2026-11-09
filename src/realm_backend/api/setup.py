@@ -435,6 +435,6 @@ def shell(c, args):
     Called by your delegate, it calls them as the delegate for you, so under the grant.
     Example: ``{"expr": "ops.proposal_list({'status': 'voting'})"}``."""
     def as_caller(_, kw):
-        return call(kw["name"], kw["args"], user=c.user, origin="shell", by=c.by)
+        return call(kw["name"], kw["args"], user=c.user, origin="shell", by=c.by, root=c.root)
 
     return {"result": sandbox.execute(SHELL % args["expr"], "main", {}, as_caller, ("op",))}
