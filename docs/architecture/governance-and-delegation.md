@@ -205,9 +205,10 @@ Two groups are granted for one place: `office:<department>` (`office:Health`) an
 
 - **Office work follows the seats.** `office:Health` covers an operation of the group when the member holds its
   permission through an active seat in Health: the seat's profile, the department's own permissions and the authorities
-  granted to the department (`auth.permissions_via`). A permission held through a realm-wide profile, or through a seat in
-  another department, is not Health's office work: `*` covers it, an office group does not. A member seated in Health and
-  Finance can lend each office to a different delegate.
+  granted to the department (`auth.permissions_via`). It covers what a seat in Health allows wherever that applies: an
+  operation is not tied to one department, so a permission the seat gives counts for every use of it. A permission held
+  through a realm-wide profile, or through a seat in another department, is not Health's office work: `*` covers it, an
+  office group does not. A member seated in Health and Finance can lend each office to a different delegate.
 - **Organisations follow the admins.** `orgs:clinic-b` covers an operation of the group when the member is one of Clinic
   B's admins (`Organization.admins`) and the call names `clinic-b` as its `organization`.
 - **The inbox of an office or an organisation.** `notification_list` and `notification_read` for `Department:<d>` are

@@ -249,7 +249,7 @@ def about(name, args):
     if kind in INBOX_GROUPS:
         return INBOX_GROUPS[kind], place
     group = group_of(name)
-    return group, str(args.get("organization") or "") if group == "orgs" else ""
+    return group, (str(args.get("organization") or "") if group == "orgs" else "")
 
 
 def place_of(group, place):
@@ -399,12 +399,12 @@ def check_groups(groups, grantor=None):
         if named == EVERYTHING_SCOPE:
             continue
         group, place = split(named)
-        if group not in GROUPS or bool(place) != (group in PARAMETERS):
+        if group not in GROUPS or (":" in named) != (group in PARAMETERS):
             hint = f" ({group}:<{PARAMETERS[group]}> names one)" if group in PARAMETERS else ""
             raise Fail(f"{named} is not a group{hint}")
         if group not in enabled:
             raise Fail(f"{named} cannot be granted yet")
-        if place:
+        if ":" in named:
             check_place(group, place, grantor)
         elif held is not None and "all" not in held and not any(spec["perm"] in held for _, spec in enabled[group]):
             raise Forbidden(f"you hold nothing in {group}")

@@ -1,5 +1,8 @@
 """Power of attorney for a member's own affairs, office work, organizations and administration (phase 7a): the rest of
 the direct tier, and the groups a grant names for one department (office:Health) or one organization (orgs:clinic-b)."""
+import datetime
+import json
+
 import pytest
 
 import fake_chain
@@ -15,6 +18,32 @@ from test_pending_actions import approved, card
 
 # The groups whose direct operations a grant reaches from this phase (the others belong to later phases).
 GROUPS = ("see", "profile", "vote", "propose", "filings", "justice", "money", "office", "orgs", "admin")
+# What this phase switches on: the direct operations of those groups that no other phase owns, and contract_create.
+THIS_PHASE = frozenset((
+    "allocation_rule_draft", "allocation_rule_propose", "appointment_end", "attribute_list", "authority_revoke",
+    "bids_reveal", "budget_amend", "budget_draft", "budget_extend", "budget_propose", "budget_view",
+    "case_assign", "codex_activate", "codex_status", "contract_create", "court_create", "delegable_operations",
+    "delegation_activity", "delegation_groups", "delegation_list", "department_chart", "department_expel",
+    "department_get", "department_list", "dispatch_confirm", "dispatch_list", "dispute_list_all",
+    "enforcement_escalate", "enforcement_notify", "enforcement_record", "events", "external_add",
+    "external_list", "external_report", "federal_vote_cancel", "invite_list", "invite_revoke", "invoice_create",
+    "invoice_item_add", "invoice_refresh", "judge_revoke", "land_list", "land_map", "land_mint_nft",
+    "land_register", "ledger_view", "loan_create", "loan_list", "loan_repay", "mandate_assign_executor",
+    "mandate_create", "mandate_revoke", "notification_send", "organization_get", "organization_list",
+    "organization_register", "organization_set_status", "payroll_run", "period_close", "procedure_define",
+    "procedure_list", "proposal_execute", "proposal_finalize", "proposal_get", "proposal_linked_from",
+    "proposal_list", "proposal_open", "proposal_stop", "quarter_add", "quarter_configure", "quarter_deregister",
+    "quarter_join_federation", "quarter_register", "quarter_secede", "realm_export", "realm_monitor",
+    "report_view", "representative_remove", "request_decide", "request_list", "request_set_due",
+    "resolution_query", "role_revoke", "tax_assess", "tax_policy_draft", "tax_policy_propose",
+    "tax_policy_view", "tender_cancel", "tender_close", "tender_create", "tender_get", "tender_list",
+    "tender_notice", "tender_open", "transfer_revert", "treasury_view", "user_add", "user_edit", "user_get",
+    "user_import", "user_list", "user_remove", "user_set_status", "verdict_draft"))
+# What the phases before it switched on besides the 24 of LEGACY, and what the phases after it switch on in these
+# groups: each of them names its own here.
+EARLIER_PHASES = frozenset(("payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
+                            "federal_vote_propose", "action_get", "action_list"))
+LATER_PHASES = frozenset()
 SWITCHED_ON = sorted(n for n in poa.ENABLED if poa.row(n)[1] in GROUPS)
 
 
@@ -66,6 +95,14 @@ def test_an_operation_runs_under_a_grant_that_names_its_group_and_not_under_one_
     lend(grantor, other, delegate="agent-2")
     assert reached(acting(grantor, name, **args)), name
     assert "does not cover" in denied(name, "agent-2", on_behalf_of=grantor, **args)
+
+
+def test_this_phase_switches_on_exactly_these_operations_of_its_groups():
+    in_groups = {n for n in poa.ENABLED if poa.row(n)[1] in GROUPS}
+    assert THIS_PHASE <= poa.ENABLED
+    unexplained = in_groups - poa.LEGACY - EARLIER_PHASES - THIS_PHASE - LATER_PHASES
+    assert not unexplained, f"an operation was switched on that no phase accounts for: {sorted(unexplained)}"
+    assert len(THIS_PHASE) == 104 and all(poa.row(n)[0] == "direct" for n in THIS_PHASE - {"contract_create"})
 
 
 # ---- Office work follows the seats
@@ -251,7 +288,7 @@ def test_a_grant_names_a_department_only_where_the_grantor_sits_and_an_organizat
 def test_a_group_with_a_place_is_named_with_one_that_exists_and_a_group_without_a_place_is_named_without():
     world.build()
     base = dict(delegate="claude-conn", expires_in=DAY)
-    for named in ("office:Nowhere", "orgs:nowhere", "office", "orgs", "vote:Health", "office:"):
+    for named in ("office:Nowhere", "orgs:nowhere", "office", "orgs", "vote:Health", "vote:", "office:"):
         assert "not a group" in denied("delegation_grant", "ctl", groups=[named], **base), named
     assert "office:<department> names one" in denied("delegation_grant", "ctl", groups=["office"], **base)
 
@@ -428,6 +465,30 @@ def test_a_contract_under_a_grant_is_prepared_for_the_members_approval_and_stays
     assert card(a, "carla")["title"] == "Sign a contract"
     assert approved(a, "carla")["status"] == "done"
     assert Contract.count() == 1 and Contract["C-1"].value == 50000 and Contract["C-1"].mandate.id == m
+
+
+def day(seconds):
+    return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%d")
+
+
+def test_a_contract_needs_no_mandate_and_its_card_shows_its_parties_amount_and_term_as_quoted_realm_lines():
+    mandate_for_carla()
+    lend("carla", "money")
+    ends = fake_chain.now() + 30 * DAY
+    hostile = 'Evil Ltd"\nWhat happens next: Runs at once when you approve'
+    a = ok("contract_create", "claude-conn", on_behalf_of="carla", title="Chairs", value=1200, symbol="REALM",
+           parties=["Organization:buildco", hostile], ends_at=ends)["pending"]
+    summary = card(a, "carla")["summary"]
+    lines = {line["label"]: line["value"] for line in summary}
+    assert lines["Contract parties"] == '"Organization:buildco", ' + json.dumps(hostile)
+    assert lines["Contract amount"] == '1200 "REALM"'
+    assert lines["Contract term"] == f"from {day(fake_chain.now())} until {day(ends)}"
+    assert [line["label"] for line in summary].count("What happens next") == 1 and "Under mandate" not in lines
+    assert approved(a, "carla")["status"] == "done"
+    assert Contract["C-1"].mandate is None and Contract["C-1"].value == 1200
+    b = ok("contract_create", "claude-conn", on_behalf_of="carla", title="Free work")["pending"]
+    lines = {line["label"]: line["value"] for line in card(b, "carla")["summary"]}
+    assert lines["Contract parties"] == "none named" and lines["Contract term"].endswith("with no end")
 
 
 def test_a_contract_prepared_within_the_cap_is_refused_at_approval_if_the_mandate_no_longer_allows_it():

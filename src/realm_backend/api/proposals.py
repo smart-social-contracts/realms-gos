@@ -1,6 +1,7 @@
 import json
 
 from core import auth, chain, ranges
+from core.civil import civil_from_days
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
 from ggg import (Appointment, Calendar, Contract, Delegation, Department, Mandate, Member, Proposal, ProposalEdge,
                  Realm, Task, TaskSchedule, Tender, Vote)
@@ -738,9 +739,15 @@ def check_mandate(user, m, args):
         raise Fail(f"the contract outlasts mandate {m.id}")
 
 
+def day_of(seconds):
+    """The date, in UTC, of a time in seconds since 1970 (a canister has no ``datetime.date``)."""
+    return "%d-%02d-%02d" % civil_from_days(seconds // 86400)
+
+
 def contracting(user, args):
-    """What a contract signed for ``user`` changes: the realm is bound to its parties as soon as it is approved. It is
-    refused here, as it is when approved, if its mandate does not allow it."""
+    """What a contract signed for ``user`` changes: the realm is bound to its parties as soon as it is approved. The
+    member reads its parties, amount and term, the delegate's own words quoted. It is refused here, as it is when
+    approved, if its mandate does not allow it; a contract needs no mandate, since the member approves each one."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
     lines = []
     if m is not None:
@@ -748,7 +755,16 @@ def contracting(user, args):
         limit = int((m.scope or {}).get("max_value", 0))
         cap = f", up to {limit}" if limit else ""
         lines.append({"label": "Under mandate", "value": f"{m.id} {quoted(m.title)}{cap}"})
-    return lines + [{"label": "What changes", "value": "An active contract binds the realm to its parties at once"}]
+    parties = args.get("parties") or []
+    named = ", ".join(quoted(p) for p in (parties if isinstance(parties, list) else [parties])) or "none named"
+    value, starts, ends = (whole(name, args.get(name) or 0) for name in ("value", "starts_at", "ends_at"))
+    symbol = args.get("symbol") or Realm["1"].accounting_currency
+    return lines + [
+        {"label": "Contract parties", "value": named},
+        {"label": "Contract amount", "value": f"{value} {quoted(symbol)}"},
+        {"label": "Contract term",
+         "value": f"from {day_of(starts or chain.now())} " + (f"until {day_of(ends)}" if ends else "with no end")},
+        {"label": "What changes", "value": "An active contract binds the realm to its parties at once"}]
 
 
 @op("contract.create_under_mandate", returns="contract", summary=contracting, title="Sign a contract")
