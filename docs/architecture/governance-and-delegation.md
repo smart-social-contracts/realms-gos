@@ -284,6 +284,28 @@ The delegate prepares it, and only the member's own approval runs it. The code i
    revoked, replaced, has ended or no longer covers the operation, whenever it is read, listed, approved or counted
    against the limit of 10.
 
+### The member's pages
+
+All three share one frame (`ConsentShell`): they do nothing inside another site's frame (the same parents as
+`frame-ancestors`) and show nothing until the member is signed in.
+
+- **`/delegations/confirm/<id>`** shows one action from `action_get` and nothing else the link carries. The heading
+  is the operation's `title`; the delegate's arguments sit apart from the realm's own lines (a one-word lower-case
+  label is an argument), and `note` is shown as the delegate's words. Approve sends `{action, hash}` of the card shown;
+  nothing on the page can be edited. An expired, void, declined, withdrawn, done or failed action shows its state with
+  no buttons, and the delegate who opens the link reads the action but cannot decide it.
+- **`/delegations/authorize/<request>`** lists the groups a request asks for (label, what it allows, its risk, a badge
+  where some of it asks each time, all from `delegable_operations`). The member can untick groups and shorten the
+  expiry, never widen either. "Everything" appears only when the request asks for it and is never ticked until the
+  member ticks it. A request that names permissions (an older client) shows them as before.
+- **`/delegations`** lists, top to bottom: what waits for the member (pending actions as the same cards, and open
+  requests with a link to review), their grants (groups as chips, Activity, Revoke, Revoke all), the activity of a grant
+  (from `delegation_activity`, saying how far back the audit log reaches), the grants to them, and the manual grant by
+  groups (30 days suggested).
+
+When a `run` replies `{pending, approve_link}` the realm client (`$lib/realm`) shows one notice, "Sent to the member for
+approval", with the link: a human delegate is told in one place, whichever page made the call.
+
 The guardrails make delegation safe by construction: a delegate can only do what its grant covers, only on `direct`
 operations, never on `signing` ones, and never with `all`. The audit `Event` records both the grantor (`user`) and the
 signer (`by`). `codex_status` reports `agents` and `delegable` empty: no signing permission is open to an agent or to
