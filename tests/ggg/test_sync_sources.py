@@ -531,6 +531,17 @@ def test_a_layer_from_above_is_never_the_source_id_the_realm_publishes_under():
     links.relay_release(relayed("eu", "1.0.0", stored("eu tax")), ["eu", "x/town"])  # another layer is still welcome
 
 
+def test_a_release_is_kept_under_its_source_and_version_so_neither_holds_an_at():
+    """Relayed ``a`` ``b@1`` and own ``a@b`` ``1`` would be one id."""
+    for odd in (release(source="a@b"), release("1@2")):
+        assert "hold no '@'" in denied("legislation_release_publish", "ctl", **odd)
+    assert ok("legislation_releases", fake_chain.ANONYMOUS)["releases"] == []
+    for source, version in (("a@b", "1"), ("a", "b@1")):
+        with pytest.raises(Fail, match="hold no '@'"):
+            links.relay_release(relayed(source, version, stored("eu tax")), [source])
+    assert ok("legislation_releases", fake_chain.ANONYMOUS)["releases"] == []
+
+
 def test_a_realm_with_a_link_that_has_not_ended_does_not_become_a_quarter():
     url = "https://example.org/releases.json"
     peer(SRC, realm_info=realm_info(), link_notify=UNANSWERED)

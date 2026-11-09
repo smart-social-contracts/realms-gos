@@ -396,10 +396,17 @@ def published_as():
     return first.source if first is not None else None
 
 
+def no_at(source, version):
+    """A release is kept under ``<source>@<version>``: with an ``@`` in either part, two releases could share an id."""
+    if "@" in source or "@" in version:
+        raise Fail("a release's source and version hold no '@'")
+
+
 def valid_release(args):
     for key, most in (("source", NAME_MAX), ("version", VERSION_MAX), ("commit", VERSION_MAX)):
         if not isinstance(args.get(key), str) or not 0 < len(args[key]) <= most:
             raise Fail(f"{key} is 1 to {most} characters")
+    no_at(args["source"], args["version"])
     chapters = args.get("chapters")
     if not (isinstance(chapters, list) and len(chapters) <= MOST_CHAPTERS and all(
             isinstance(c, dict) and set(c) == {"domain", "checksum"} and isinstance(c["domain"], str)
@@ -466,6 +473,7 @@ def relay_release(release, order):
     source = release["source"]
     if source not in order:
         raise Fail(f"the record that vouches for {source} does not list it")
+    no_at(source, release["version"])
     if source == published_as():
         raise Fail(f"{source} is the source id this realm publishes under: it is not a layer from above")
     relayed = [r for r in record() if r.relayed]
