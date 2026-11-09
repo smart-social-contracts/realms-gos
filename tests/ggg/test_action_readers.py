@@ -100,8 +100,8 @@ def test_nothing_of_a_card_is_in_a_notice_an_event_or_what_a_second_delegate_rea
 def test_a_delegate_does_not_export_the_pending_actions():
     two_delegates()
     lend("ctl", "admin", delegate="agent-4")
-    assert "does not export PendingAction" in denied("realm_export", "agent-4", entity="PendingAction", on_behalf_of="ctl")
-    assert ok("realm_export", "ctl", entity="PendingAction")["rows"]  # the member's own full export is theirs
+    assert "does not cover" in denied("realm_export", "agent-4", entity="PendingAction", on_behalf_of="ctl")  # the member's own act
+    assert ok("realm_export", "ctl", entity="PendingAction")["rows"]
 
 
 def test_an_export_of_the_pending_actions_blanks_the_secrets_of_their_calls_whoever_exports():
