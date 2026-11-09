@@ -300,11 +300,15 @@ meets the grant like any other delegated call. What the member's own call would 
 - **Direct, or prepared.** An inner call that is direct runs at once. One that asks the member each time is prepared as
   a pending action, from the shell and from an extension, and the audit `Event` names the origin (`shell`,
   `extension`). A task step is refused instead: nobody is there to be told when a task runs, and a task runs only
-  what its grant covers directly.
+  what its grant covers directly. So is anything a task runs through the shell or an extension: a call carries the
+  origin of the outermost call (`Call.root`), and prepares only if that is not a task's.
 - **Declared.** An extension's calls are limited to the operations its manifest declares, under a grant too. An
   undeclared one is refused, and not prepared either.
-- **Whatever the code says.** The `on_behalf_of` in an inner call's arguments is replaced by the member's, so a shell
-  expression, an extension or a task step cannot use a grant that another member gave the delegate.
+- **Whatever the code says.** The `on_behalf_of` in an inner call's arguments is replaced by the member's when a
+  delegate made the call, so a shell expression, an extension or a task step cannot use a grant that another member gave
+  the delegate. An extension never names anyone, in a member's own call either: it holds no power of attorney to lend,
+  so a member's call of it acts for that member and files nothing for a grantor of theirs. The member's own shell and
+  tasks may keep naming a grantor the member holds a grant from: the member wrote that code.
 - **Audit.** Each inner call's `Event` has `user` the member, `by` the delegate, `grant` and the origin (`task`,
   `shell`, `extension`).
 
@@ -319,8 +323,10 @@ whoever starts the run: a timer, `task_run`, the wait between steps, a schedule 
   refused for a delegate on a task that was not made under the grant it holds, else it could run, or plant steps in, a
   task the member wrote, with the member's own authority. A grant that replaced the one a task was tied to has no say
   in it.
-- **Editing makes the steps the editor's.** When the member edits a task a delegate made, its steps are the member's
-  and the task is no longer tied.
+- **Editing makes the task the editor's.** The steps run with the authority of whoever wrote them. When anyone but
+  its creator edits a task (the member editing a delegate's, or someone who holds `all` editing another member's), the
+  editor becomes its creator: the steps run as the editor from then on, never as the earlier creator, and a task a
+  member edits is no longer tied.
 - **Tasks the member made are unchanged**, and so is the realm's own scheduler (`rearm`, the tasks of scheduled
   proposals).
 

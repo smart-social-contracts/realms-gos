@@ -22,8 +22,9 @@ ENABLED = (TaskSchedule.get_full_type_name(), "enabled", "1")
 
 
 def meta(task):
-    """What the realm keeps about a task: its ``creator``, the ``grant`` its steps were written under (a delegate's
-    power of attorney, "" for the member's own) and the ``event`` of the last operation it ran."""
+    """What the realm keeps about a task: its ``creator``, whose authority its steps run with, the ``grant`` they were
+    written under (a delegate's power of attorney, "" for the member's own) and the ``event`` of the last operation it
+    ran. Whoever edits the steps becomes the creator: they run with the authority of whoever wrote them."""
     return json.loads(task.metadata)
 
 
@@ -209,14 +210,14 @@ def task_create(c, args):
 @op("task.edit")
 def task_edit(c, args):
     """Replace the steps of your ``task`` (any task if you hold all) with ``steps`` (``[{op, args, wait}]``), unless
-    it is running or waiting."""
+    it is running or waiting. The task is yours from then on: its steps run as you, never as its earlier creator."""
     task, steps = owned(c, args), checked(args["steps"])
     if task.status in BUSY:
         raise Conflict(f"task '{task.name}' is {task.status}")
     for s in task.steps:
         s.delete()
     define(task, steps)
-    task.metadata = json.dumps({**meta(task), "grant": c.grant})  # the steps are now the editor's
+    task.metadata = json.dumps({**meta(task), "creator": c.user, "grant": c.grant})  # the steps are now the editor's
 
 
 @op("task.delete")

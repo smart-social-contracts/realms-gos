@@ -254,6 +254,17 @@ def test_a_delegate_edits_and_runs_the_tasks_it_made_and_the_member_makes_them_t
     assert ok("task_run", "carla", task="motions")["status"] == "completed" and User["carla"].nickname == "Carla II"
 
 
+def test_the_steps_run_as_whoever_wrote_them_so_a_task_edited_by_another_becomes_the_editors():
+    """Else someone holding all could edit another member's task and have the steps run with that member's authority."""
+    build()
+    ok("task_create", "carla", name="rename", steps=[MOTION])
+    ok("task_edit", "ctl", task="rename", steps=[RENAME])
+    assert tasks.creator(Task["rename"]) == "ctl" and "not yours" in denied("task_run", "carla", task="rename")
+    ok("task_run", "ctl", task="rename")
+    assert User["carla"].nickname == "Carla" and {e.user for e in events("profile_update")} <= {"ctl"}
+    assert "not yours" in denied("task_edit", "carla", task="rename", steps=[MOTION])
+
+
 def test_a_tied_task_step_that_names_another_grantor_acts_for_the_creator():
     build()
     grant("admin", "vote")
