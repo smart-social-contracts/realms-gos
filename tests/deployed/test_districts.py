@@ -6,6 +6,7 @@ A capital and two quarters on one PocketIC instance, the capital running the tow
 the portal sends them: ``join_targets`` on the capital, then ``realm_join`` on the quarter it names."""
 
 import hashlib
+import json
 
 import pytest
 from ic.candid import Types, decode
@@ -75,6 +76,22 @@ def names_of(realm):
     return {z["id"]: z["name"] for z in realm.ok("land_map", "founder", query=True)["zones"]}
 
 
+def directory_of(capital, who):
+    """The rows of the capital's public ``quarter_directory`` as ``who`` reads them: they hold no zone counts, whoever reads."""
+    rows = capital.ok("quarter_directory", who, query=True)["quarters"]
+    assert not [row for row in rows if "zones" in row]
+    return rows
+
+
+def reported_to(capital):
+    """The zone counts the capital keeps of its quarters, read in its heap: no operation returns them. The anonymous
+    principal and a quarter read the directory and find none."""
+    directory_of(capital, Principal.anonymous().to_str())
+    kept = capital.shell("import json\nfrom ggg import Quarter\n"
+                         "print(json.dumps({q.id: q.zones for q in Quarter.load_some(1, Quarter.max_id())}))")
+    return json.loads(kept)
+
+
 def join(capital, quarter, who, zone):
     """A joiner as the portal sends them: the capital says where, they join the quarter they were offered, and it reports."""
     sent = capital.ok("join_targets", who, query=True, home_zone=zone)["default"]
@@ -110,10 +127,8 @@ def test_b_a_zone_spans_several_quarters_and_each_counts_its_own_members(federat
     for quarter in (north, south):
         quarter.ok("quarter_sync", "ctl")
     assert zones_of(north) == {"riverside": 1, "hillside": 1} and zones_of(south) == {"hillside": 2}
-    held = {q["id"]: q["zones"] for q in capital.ok("quarter_directory", "founder", query=True)["quarters"]}
-    assert held[north.cid] == zones_of(north) and held[south.cid] == zones_of(south)
-    assert [capital.ok("quarter_directory", "founder", query=True)["quarters"][0]["zones"]] == [{}]  # the capital holds none
-    populations = {q["id"]: q["population"] for q in capital.ok("quarter_directory", "founder", query=True)["quarters"]}
+    assert reported_to(capital) == {north.cid: zones_of(north), south.cid: zones_of(south)}
+    populations = {q["id"]: q["population"] for q in directory_of(capital, "founder")}
     assert (populations[north.cid], populations[south.cid]) == (4, 3)  # south is the least populated
 
 
@@ -135,5 +150,4 @@ def test_d_capacity_decides_before_the_zone(federation):
     join(capital, south, person("f"), "riverside")
     join(capital, south, person("g"), "hillside")
     assert zones_of(south) == {"riverside": 1, "hillside": 3}
-    held = {q["id"]: q["zones"] for q in capital.ok("quarter_directory", "founder", query=True)["quarters"]}
-    assert held[south.cid] == zones_of(south) and held[north.cid] == zones_of(north)
+    assert reported_to(capital) == {north.cid: zones_of(north), south.cid: zones_of(south)}

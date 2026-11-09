@@ -41,7 +41,7 @@ MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rub
         ("DocumentStoreArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentShareArgs", "keys"): ("principal", "wrapped_dek"), ("BidScoreArgs", "scores"): ("criterion", "score"),
         ("Fund", "balances"): ("symbol", "amount"), ("Release", "chapters"): ("domain", "checksum"),
-        ("Quarter", "zones"): (0, 1), ("QuarterReportArgs", "zones"): (0, 1)}
+        ("QuarterReportArgs", "zones"): (0, 1)}
 # GGG lists of records that Realms GOS keeps as a map from one field to the rest.
 KEYED = {("BidsRevealArgs", "openings"): "bid"}
 # Set to a list by the tests: every required field a reply had no value for is added to it.
@@ -816,6 +816,16 @@ def directory(out):
     return {"capital": out.get("capital"), "items": out.get("quarters", []), "next": None}
 
 
+def synced(out, args):
+    """quarter_sync's reply. The capital answers with the directory it sends its quarters and the zones the realm
+    defines, and the reply is those: what it keeps of a quarter's zones is for placing members and goes in no reply. A
+    quarter's own call returns a summary, so its reply is its view of the directory, which defines nothing."""
+    if "directory" not in out:
+        return directory(local("quarter_directory"))
+    capital = next((q["id"] for q in out["directory"] if q["capital"]), None)
+    return {**directory({"capital": capital, "quarters": out["directory"]}), "zones": out["zones"]}
+
+
 def local(name, **args):
     """Another operation's reply, as the caller."""
     from core.op import call
@@ -848,7 +858,7 @@ BUILD = {
     "tender_get": lambda o, a: {"tender": o["tender"], "bids": o["tender"].get("bids", []), "next": None},
     "invoice_refresh": lambda o, a: {"items": list(o.get("invoices") or {}), "next": nxt(o)},
     "quarter_directory": lambda o, a: directory(o),
-    "quarter_sync": lambda o, a: {**directory(local("quarter_directory")), "zones": o.get("zones")},
+    "quarter_sync": synced,
     "federal_vote_propose": federal_vote,
     "department_chart": chart,
     "proposal_get": proposal_detail,

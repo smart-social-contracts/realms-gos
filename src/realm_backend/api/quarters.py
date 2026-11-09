@@ -91,20 +91,17 @@ def zone_definitions():
 
 def zones_of(cid):
     """The zones ``cid`` holds members of: this realm's own, or what the quarter last reported; None where this realm
-    is a quarter and knows only itself."""
+    is a quarter and knows only itself. Only the capital's placement reads them: a small count singles out a person, so
+    no reply carries one."""
     if cid == chain.self_id():
         return zones_held()
     return None if federated() else Quarter[cid].zones
 
 
-def directory(zones=False):
-    """The capital and every quarter. ``zones`` adds the zones each holds members of; the sync broadcast leaves them out,
-    since every quarter would store them."""
+def directory():
     rows = [me()] + [view(q, *FIELDS) for q in known()]
     for row in rows:
         row["capital"], row["drifting"] = row["id"] == capital(), drifting(row["codex_version"])
-        if zones:
-            row["zones"] = zones_of(row["id"])
     return rows
 
 
@@ -389,7 +386,7 @@ def quarter_join_federation(c, args):
 def quarter_directory(c, args):
     """The capital and every quarter with its status, population and codex, and whether that codex drifts from the
     capital's. Returns ``capital`` and ``quarters``."""
-    return {"capital": capital(), "quarters": directory(zones=True)}
+    return {"capital": capital(), "quarters": directory()}
 
 
 def joiner_zone(c, args):

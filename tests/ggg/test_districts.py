@@ -1,11 +1,12 @@
 """Districts are zones (realms-gos#502, docs/codices/layered-codex.md §3 and §2 rule 13): the realm's own chapter maps its
 subdivisions to zones when its codex activates, and ``compute_realm_join`` may keep neighbours together, with capacity
-deciding first. A quarter reports the zones its members live in, and the capital offers them to the chapter."""
+deciding first. A quarter reports the zones its members live in, and the capital offers them to the chapter and to no one else."""
 
 import json
 
 import fake_chain
 import ggg_methods as g
+from core import op
 from kit import ok
 from test_legislation_runtime import TOWN, activate, fresh_realm, layered  # noqa: F401 (the fixture applies here too)
 from test_quarters import CAPITAL, quarter, reply
@@ -123,13 +124,25 @@ def test_join_targets_never_says_the_zone():
     assert "riverside" not in json.dumps(out)
 
 
-def test_the_capital_lists_the_zones_each_quarter_reported_and_the_sync_broadcast_does_not():
+def test_the_capital_keeps_the_counts_a_quarter_reports_and_no_reply_carries_them():
+    """A small count singles out a person: the counts are for the placement, and not for the anonymous principal that reads
+    the directory (public), nor for a quarter that is sent the directory."""
     town()
-    rows = {q["id"]: q for q in ok("quarter_directory", "newcomer", query=True)["quarters"]}
-    assert rows["north"]["zones"] == {"riverside": 30, "hillside": 5} and rows["east"]["zones"] == {}
-    assert all("zones" not in q for q in quarters.directory())  # what the quarters are sent
-    reported = ok("quarter_report", "north", population=41)  # a report without zones leaves them as they were
-    assert Quarter["north"].zones == {"riverside": 30, "hillside": 5} and reported["quarter"] == "north"
+    assert Quarter["north"].zones == {"riverside": 30, "hillside": 5}
+    ok("quarter_report", "north", population=41)  # a report without zones leaves them as they were
+    assert Quarter["north"].zones == {"riverside": 30, "hillside": 5}
+    for who in (fake_chain.ANONYMOUS, "newcomer", "north"):
+        fake_chain.state["caller"] = who
+        rows = ok("quarter_directory", who, query=True)["quarters"]
+        typed = g.ggg_quarter_directory({"cursor": None, "limit": None})["Ok"]["items"]
+        assert rows and typed and not [row for row in rows + typed if "zones" in row]
+    synced = ok("quarter_sync", "north", population=41)
+    fake_chain.state["caller"] = "north"
+    typed = op.run(g.ggg_quarter_sync())["Ok"]
+    assert len(synced["directory"]) == len(typed["items"]) == 4
+    assert not [row for row in synced["directory"] + typed["items"] if "zones" in row]
+    assert all(set(zone) == {"zone", "name", "kind"} for zone in synced["zones"] + typed["zones"])  # definitions, no counts
+    assert all("zones" not in row for row in quarters.directory())
 
 
 def test_a_quarter_reports_the_zones_its_members_live_in(monkeypatch):
@@ -148,14 +161,6 @@ def test_a_quarter_reports_the_zones_its_members_live_in(monkeypatch):
     sent = json.loads(fake_chain.state["calls"][-1][2])
     assert sent["zones"] == {"riverside": 3, "old-town": 1}
     assert [Zone[z].population for z in ("riverside", "hillside", "old-town")] == [3, 0, 1]
-
-
-def test_a_quarter_knows_only_its_own_zones(monkeypatch):
-    quarter(monkeypatch, "north", "south")
-    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
-    ok("user_edit", "ctl", user="alice", home_zone="riverside")
-    rows = {q["id"]: q for q in ok("quarter_directory", "alice", query=True)["quarters"]}
-    assert rows["north"]["zones"] == {"riverside": 1} and rows["south"]["zones"] is None
 
 
 def test_the_capital_sends_its_quarters_the_zones_it_defines_without_a_population():

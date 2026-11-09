@@ -48,9 +48,9 @@ realms realm call capital quarter_configure '{"quarter": "<canister id>", "statu
   instead (for example, by region). A layered codex's `compute_realm_join` may instead keep neighbours
   together: given the joiner's optional `home_zone` and the quarters below capacity with the zones
   each holds members of, it may choose the quarter that holds the joiner's zone.
-- `quarter_directory` (public) lists the capital and every quarter with its population, codex and
-  `zones`, the districts its members live in with how many (a quarter reports them in `quarter_sync`;
-  the capital's reply to the quarters leaves them out).
+- `quarter_directory` (public) lists the capital and every quarter with its population and codex. The
+  districts each quarter's members live in, with how many, are reported in `quarter_sync` for the
+  capital's placement alone: a small count singles out a person, so no reply carries one.
 - `scale_status` (public) compares populations with the capacity.
 - `self_change_quarter` moves your membership to another quarter. The old quarter keeps a signed
   `Forward` record and makes you a guest there.
