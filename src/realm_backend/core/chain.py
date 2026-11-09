@@ -3,7 +3,7 @@ import json
 from basilisk import Duration, Principal, ic
 
 from core.candid import quote, unquote
-from core.principal import valid as is_principal  # the in-process tests' chain accepts their fixtures' names too
+from core import principal
 
 ANONYMOUS = "2vxsx-fae"
 # An HTTPS outcall is paid for by every node of the subnet; this is the largest subnet, and what a smaller one does
@@ -21,6 +21,12 @@ def caller():
 
 def is_controller(principal):
     return principal != ANONYMOUS and ic.is_controller(Principal.from_str(principal))
+
+
+def is_principal(text):
+    """Whether ``text`` is the text form of a principal, checksum included (core.principal). The in-process tests' chain
+    accepts the names of their fixtures too."""
+    return principal.valid(text)
 
 
 def self_id():

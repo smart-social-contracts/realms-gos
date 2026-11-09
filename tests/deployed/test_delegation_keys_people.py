@@ -57,7 +57,7 @@ def test_a_key_prepared_for_the_assistant_alone_is_stored_only_when_the_member_a
     own = realm.ggg("ggg_crypto_envelope", TEXT, scope, Types.Opt(ENVELOPE), claude, query=True)["Ok"][0]
     assert bytes(own["wrapped_dek"]) == b"wrapped-for-claude" and str(own["principal"]) == claude
     other = realm.ggg("ggg_crypto_envelope", TEXT, f"user:{alice}:old", Types.Opt(ENVELOPE), claude, query=True)
-    assert "Err" in other  # the scope it was not given has no envelope for it: not found
+    assert other == {"Ok": []}  # the scope it was not given has no envelope for it: GGG's opt turns not found into none
 
 
 def test_text_that_only_looks_like_a_principal_is_refused_when_the_action_is_prepared_and_a_real_principal_is_not(realm, people):
