@@ -15,8 +15,9 @@ Loading: after an upgrade (``warm``, from setup.start) or on first use, the acti
 ``ChapterSource`` and loaded through core.legislation_sandbox, the program of the subinterpreter. Failures: a guard
 that raises denies ("legislation error in <chapter>"), a hook that raises never fails its caller; both count per
 chapter and method on the codex row (``failures``), which ``codex_status`` shows, and an entry clears when that
-method next succeeds; a failure on a query path (``compute_realm_join`` from ``join_targets``) is not kept, as a
-query keeps no writes. Nothing reverts by itself. Reserved operations (§10.4) run no chapter, nor does a proposal or
+method next succeeds, and the IT admin team is notified of a method's first failure and again after a day (``_record``);
+a failure on a query path (``compute_realm_join`` from ``join_targets``) is not kept, as a query keeps no writes.
+Nothing reverts by itself. Reserved operations (§10.4) run no chapter, nor does a proposal or
 a federal vote about one. Effects go through the codex caller (origin ``codex``) like a legacy codex's, except that
 a governed operation always becomes a proposal the realm files; a chapter's own effects run no legislation again.
 What an operation keeps secret (core.op's ``secret=``: key material and credentials) never reaches a chapter; the
@@ -28,9 +29,10 @@ import json
 from core import auth, chain
 from core import civil
 from core import compliance
+from core import it_team
 from core import localtime
 from core import sandbox
-from core.db import PAGE, Fail, Forbidden, first, view
+from core.db import PAGE, Fail, Forbidden, first, next_id, view
 from core.op import GENERATOR, Call, filing, ops
 import core.legislation_sandbox  # bundled with the realm for its text (core.sandbox.module_source); the realm runs only its pure ``readable``
 import ggg_facts  # GGG's fact schema: the sandbox imports it from text, and the realm builds the Cedar schema from it
@@ -47,6 +49,7 @@ ACTIVATE = "codex_activate"
 # Instructions the realm spends answering one sandbox call's reads, at most: past it the reads are refused and the
 # call fails, so a chapter that loops on reads costs the caller this much and never the whole message.
 READS = 2_000_000_000
+REMINDER = 24 * 3600  # seconds a method keeps failing before the IT admin team is told again
 # What a chapter may read of GGG's entities, and nothing else: what legislation needs to decide, never a key, a code,
 # a person's private data, a sealed bid, who voted what, a grant or a payment account, nor what one member was told.
 # A Request leaves out its ``body`` and ``reply`` (personal data) and its ``decision`` (free text until GGG types it as
@@ -647,14 +650,33 @@ def _shown(entity, row, fields):
 
 
 def _record(file, method, error):
-    """One more failure of ``method`` of chapter ``file``, with its error, on the running codex's row."""
+    """One more failure of ``method`` of chapter ``file``, with its error, on the running codex's row. The IT admin team
+    is told of the first failure of a method, and again when it fails once more at least a day after the last time
+    (``notified``)."""
     codex = _row_of_running()
     if codex is None:
         return
     failures = codex.failures
-    count = failures.get(file, {}).get(method, {}).get("count", 0)
-    failures.setdefault(file, {})[method] = {"count": count + 1, "error": error[:500], "at": chain.now()}
+    entry = failures.get(file, {}).get(method, {})
+    told = entry.get("notified", 0)
+    if not told or chain.now() - told >= REMINDER:
+        told = chain.now() if _tell_it_team(file, method, error) else told
+    failures.setdefault(file, {})[method] = {"count": entry.get("count", 0) + 1, "error": error[:500], "at": chain.now(),
+                                             **({"notified": told} if told else {})}
     codex.failures, _state["failing"] = failures, True
+
+
+def _tell_it_team(file, method, error):
+    """Leave the IT admin team a notification that ``method`` of chapter ``file`` fails (§9.3). False when the realm has
+    designated no team. It names the failing method and its error, and never runs legislation."""
+    from ggg import Notification
+
+    team = it_team.department()
+    if team is None:
+        return False
+    Notification(id=next_id(Notification, "N"), recipient=f"Department:{team.id}", topic="codex.failing",
+                 title=f"The codex fails: {method} of {file}", body=error[:500], sender=chain.self_id(), at=chain.now())
+    return True
 
 
 def _clear(files, method):

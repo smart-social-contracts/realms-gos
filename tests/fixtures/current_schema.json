@@ -2517,10 +2517,19 @@
     "default": "pending",
     "kind": "property",
     "type": "String"
+   },
+   "voting_rule": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
    }
   },
+  "has_migrate": true,
   "relationships": {},
-  "version": 1
+  "version": 2
  },
  "LedgerEntry": {
   "fields": {
@@ -3702,6 +3711,11 @@
     "default": false,
     "kind": "property",
     "type": "Boolean"
+   },
+   "it_team": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
    },
    "languages": {
     "constraints": {

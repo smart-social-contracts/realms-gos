@@ -1,15 +1,16 @@
 import json
 
 from core import chain
+from core import it_team
 from core import layered_codex as store
 from core import legislation
 from core import sandbox
-from core.db import Conflict, Fail, find, first, latest, view, window
+from core.db import Conflict, Fail, NotFound, find, first, latest, view, window
 from ggg import Codex, InstallJob, LayeredCodex, Realm
 from core.op import op
 from api import extensions
 from api.extensions import checksum, trust
-from api.proposals import realm_wide
+from api.proposals import realm_wide, rule_to_record
 
 API = 2  # the hook contract codices declare as `codex_api_version`
 SHOWN = ("id", "version", "status", "checksum", "capabilities", "installed_at", "previous")
@@ -91,10 +92,14 @@ def compute(name, context, decimals=None):
 
 
 def switch_to(row, replaced):
-    """Make ``row`` the active codex in place of ``replaced``, which is kept to revert to."""
-    row.previous, row.status = replaced.id if replaced else "", "active"
+    """Make ``row`` the active codex in place of ``replaced``, which is kept to revert to, and record the realm's voting
+    rule and window with it: what will decide a vote to revert to this codex (§10.1)."""
+    record = rule_to_record()
+    row.previous, row.status, row.voting_rule = replaced.id if replaced else "", "active", record
     if replaced:
         replaced.status = "inactive"
+        if not replaced.voting_rule:  # it became active before the realm recorded rules: the rule in force until now
+            replaced.voting_rule = record
 
 
 def switch(waiting):
@@ -187,19 +192,121 @@ def codex_uninstall(c, args):
     return {"codex": codex.id}
 
 
-@op("codex.revert", governed=realm_wide)
-def codex_revert(c, args):
-    """Go back to the codex the active one replaced, of either kind, if this realm still runs its codex API."""
-    codex = active()
-    if codex is None or not codex.previous:
+def legacy_with_checksum(digest):
+    """The legacy codex whose ``checksum`` is ``digest``. It is not indexed: a realm has few legacy codices."""
+    return next((row for row in Codex.load_some(1, max(Codex.max_id(), 1)) if row.checksum == digest), None)
+
+
+def named(value):
+    """The codex of either kind that ``value`` names: a layered codex by its id, which is its checksum; a legacy codex by
+    its ``checksum`` (with or without the ``sha256:`` GGG writes) or by the ``name@version`` the history lists it by."""
+    if not isinstance(value, str) or not value:
+        raise Fail("codex is the checksum of the codex to restore")
+    found = Codex[value] if "@" in value else LayeredCodex[value] or legacy_with_checksum(value.removeprefix("sha256:"))
+    if found is None:
+        raise NotFound(f"{value} is not in the history of this realm's codices")
+    return found
+
+
+def restoring(args):
+    """The earlier codex a revert restores: the one ``args["codex"]`` names, else the one the active codex replaced. The
+    active codex is not an earlier one, nor is a pending one: only ``codex_activate`` activates that."""
+    current = active()
+    if current is None:
+        raise Conflict("no codex is active")
+    if args.get("codex"):
+        target = named(args["codex"])
+    elif current.previous:
+        target = find_codex(current.previous)
+    else:
         raise Conflict("there is no previous codex to revert to")
-    prior = find_codex(codex.previous)
-    if isinstance(prior, Codex):
-        runnable(prior.manifest or {})
-    codex.status, prior.status = "reverted", "active"
-    if isinstance(codex, LayeredCodex) or isinstance(prior, LayeredCodex):
-        legislation.warm(prior if isinstance(prior, LayeredCodex) else None)  # a revert runs no on_codex_activate
-    return {"codex": prior.id}
+    if target.id == current.id:
+        raise Conflict(f"{target.id} is the active codex already")
+    if target.status == "pending":
+        raise Conflict(f"{target.id} is pending: codex_activate activates it")
+    return target
+
+
+def only_previous(target):
+    previous = active().previous
+    if target.id != previous:
+        raise Conflict(f"codex_revert_fast restores only the previous codex ({previous or 'none'})")
+
+
+def restore(target):
+    """The revert: ``target``, an earlier codex of either kind, is the active codex again and the one it replaces is
+    reverted. No ``on_codex_activate`` hook runs (§10.5), and nothing else about the codex changes: it keeps the voting
+    rule and window it was recorded with. Returns ``codex``."""
+    if isinstance(target, Codex):
+        runnable(target.manifest or {})
+    current = active()
+    current.status, target.status = "reverted", "active"
+    if isinstance(current, LayeredCodex) or isinstance(target, LayeredCodex):
+        legislation.warm(target if isinstance(target, LayeredCodex) else None)
+    return {"codex": target.id}
+
+
+def recorded_rule(action):
+    """The rule and window recorded with the codex that ``action`` restores, when it is a revert (``codex_revert``, or
+    ``codex_revert_fast``, which keeps its department's rule but runs under the window) and that codex has them: what
+    decides its vote (§10.1). None for any other action, and for a codex with no record: its vote follows the rule and
+    window in force."""
+    if not (isinstance(action, dict) and action.get("op") in ("codex_revert", "codex_revert_fast")
+            and (action.get("args") or {}).get("codex")):
+        return None
+    return named(action["args"]["codex"]).voting_rule or None
+
+
+def names_the_codex(args):
+    """A revert that becomes a proposal names the codex it restores, found when it is filed, so that what the vote
+    approves is what runs."""
+    return {**args, "codex": restoring(args).id}
+
+
+def filed_revert(args, proposal):
+    """A revert filed as a proposal names a codex that can be restored now."""
+    if not args.get("codex"):
+        raise Fail("a revert filed as a proposal names the codex it restores")
+    restoring(args)
+
+
+def fast_target(args):
+    """The codex a fast revert restores: the previous one, and only while a team is designated, whatever files or
+    replays the revert."""
+    it_team_governs(args)
+    target = restoring(args)
+    only_previous(target)
+    return target
+
+
+def filed_fast_revert(args, proposal):
+    filed_revert(args, proposal)
+    fast_target(args)
+
+
+def it_team_governs(args):
+    """The IT admin team's department governs a fast revert, under its own policy; no team, no fast revert."""
+    team = it_team.department()
+    if team is None:
+        raise Conflict("this realm has designated no IT admin team: codex_revert_fast is refused")
+    return team
+
+
+@op("codex.revert", governed=realm_wide, names=names_the_codex, fixes=filed_revert)
+def codex_revert(c, args):
+    """Go back to an earlier codex of either kind, if this realm still runs its codex API: the one named by ``codex`` (its
+    checksum), else the one the active codex replaced. Filed as a proposal, it names the codex it restores, and the vote
+    follows the rule recorded with that codex. No legislation runs for it, and no ``on_codex_activate`` hook. Returns
+    ``codex``."""
+    return restore(restoring(args))
+
+
+@op("codex.revert_fast", governed=it_team_governs, names=names_the_codex, fixes=filed_fast_revert)
+def codex_revert_fast(c, args):
+    """Go back to the codex the active one replaced, on the approval of the IT admin team (``it_team_set``): its
+    department's own policy decides, m of n, quorum and veto. Refused when no team is designated. No legislation runs
+    for it, and no ``on_codex_activate`` hook. Returns ``codex``."""
+    return restore(fast_target(args))
 
 
 def shown(codex):
@@ -225,7 +332,8 @@ def codex_status(c, args):
     ``next``, the ``from`` of the next page (null at the end). The history lists the legacy codices, then the layered
     ones. A layered codex shows its layers, layer paths and chapters (source, version, checksum, who vouched for it,
     route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
-    ``job`` the install job running or paused, else the latest, with its step, status and error."""
+    ``job`` the install job running or paused, else the latest, with its step, status and error. ``it_team`` is the
+    department the admins designated to revert fast ("" for none)."""
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
     legacy_codex = codex if isinstance(codex, Codex) else None
@@ -238,4 +346,4 @@ def codex_status(c, args):
             "config": config(legacy_codex) if legacy_codex else {},
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
             "pending": shown(waiting) if waiting else None,
-            "job": view(job, *JOB_SHOWN) if job else None}
+            "job": view(job, *JOB_SHOWN) if job else None, "it_team": it_team.department_id()}

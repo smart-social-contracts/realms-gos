@@ -735,7 +735,7 @@ def test_a_codex_whose_guards_refuse_every_proposal_cannot_block_a_revert():
     first.status = "inactive"
     blocker = activate(layered({(TOWN, "procedure"): DENY_ALL}, layers=[TOWN], previous=first.id))
     assert call("proposal_create", "alice", title="x", action={"op": "t_act", "args": {}})["error"] == "nothing may be proposed"
-    pid = ok("proposal_create", "alice", title="revert", action={"op": "codex_revert", "args": {}})["proposal"]
+    pid = ok("proposal_create", "alice", title="revert", action={"op": "codex_revert", "args": {"codex": first.id}})["proposal"]
     for voter in world.PEOPLE:
         ok("proposal_vote", voter, proposal=pid, choice="yes")  # no guard on a vote about a reserved operation either
     assert ok("proposal_get", query=True, proposal=pid)["proposal"]["status"] == "executed"

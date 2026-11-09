@@ -1,4 +1,4 @@
-from core import chain, forbids, poa
+from core import chain, forbids, it_team, poa
 from core.db import Fail, Forbidden, each
 
 CONTEXT = {"op": "String", "permission": "String", "user": "String", "signer": "String", "origin": "String",
@@ -119,6 +119,7 @@ def permissions(principal):
     if realm and realm.installer_canister_id and realm.installer_canister_id == principal:
         return {"all"}
 
+    team = it_team.department_id()
     held = {"self.join"}
     user = User[principal]
     if user:
@@ -141,6 +142,8 @@ def permissions(principal):
             held |= {p.id for p in pos.department.permissions}
             held |= {op for auth in each(Authority, "target", f"Department:{pos.department.id}")
                      for op in auth.operations or []}
+            if team and pos.department.id == team:
+                held.add(it_team.PERMISSION)  # the seat holders of the IT admin team (§10.2)
     return held
 
 

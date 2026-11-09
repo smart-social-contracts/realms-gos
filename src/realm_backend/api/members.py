@@ -2,6 +2,7 @@ import hashlib
 
 from core import auth
 from core import chain
+from core import it_team
 from api import delegation
 from api import assets, orgs
 from core import language
@@ -378,6 +379,7 @@ def profile_create(c, args):
     if UserProfile[args["profile"]]:
         raise Conflict(f"profile {args['profile']} exists")
     within(c, args.get("allowed_to", []))
+    it_team.refuse_grant(args.get("allowed_to"))
     UserProfile(id=args["profile"], description=args.get("description", ""), allowed_to=args.get("allowed_to", []))
     return {"profile": args["profile"]}
 
@@ -388,6 +390,7 @@ def profile_edit(c, args):
     leave out stays. An optional ``department`` decides as in user_add."""
     p = find(UserProfile, args["profile"])
     within(c, args.get("allowed_to", []))
+    it_team.refuse_grant(args.get("allowed_to"))
     p.description, p.allowed_to = args.get("description", p.description), args.get("allowed_to", p.allowed_to)
 
 

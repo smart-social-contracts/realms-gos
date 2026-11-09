@@ -801,13 +801,14 @@ class LocalRegime(above("local_regime")):
 def test_a_reserved_operation_and_a_proposal_about_one_meet_no_forbid(agora, requests):
     """§10.4: no chapter's forbid runs on a reserved operation, nor on the proposal_create, the vote or the execution
     of a proposal whose action is one. The same forbids on proposal_create and proposal_vote hold for any other."""
-    codex_of({("x/town", "local_regime"): PROPOSALS, (SPAIN, "tax"): SPAIN_TAX})
+    earlier = layered({(SPAIN, "tax"): SPAIN_TAX}, layers=[SPAIN], status="inactive")
+    codex_of({("x/town", "local_regime"): PROPOSALS, (SPAIN, "tax"): SPAIN_TAX}, previous=earlier.id)
     assert set(auth.live["forbids"]["targeted"]) >= {"proposal_create", "proposal_vote"}
     assert "forbidden by the legislation" in denied("proposal_create", "alice", title="blocked")
     other = ok("proposal_create", "alice", title="a motion")["proposal"]
     assert "forbidden by the legislation" in denied("proposal_vote", "bob", proposal=other, choice="yes")
 
-    revert = {"op": "codex_revert", "args": {}}
+    revert = {"op": "codex_revert", "args": {"codex": earlier.id}}
     before = len(requests.asked)
     blocked = ok("proposal_create", "alice", title="blocked", action=revert)["proposal"]  # filing: no forbid
     assert {action for action, _ in requests.asked[before:]} == {"call"}

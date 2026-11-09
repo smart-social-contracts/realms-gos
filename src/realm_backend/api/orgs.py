@@ -1,10 +1,11 @@
 from core import chain
+from core import it_team
 from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
-from ggg import Appointment, Authority, Department, Organization, Position, Proposal, User, UserProfile
+from ggg import Appointment, Authority, Department, Organization, Position, Proposal, Realm, User, UserProfile
 from core.op import op
 from core.ratio import ONE, refuse_renamed
-from api.proposals import PENDING, holders, realm_wide, root
+from api.proposals import PENDING, holders, launched, realm_wide, root
 
 ORG_MOVES = {"active": {"suspended", "dissolved"}, "suspended": {"active", "dissolved"}, "dissolved": set()}
 SEAT_FIELDS = ("title", "salary", "salary_period")
@@ -126,6 +127,8 @@ def department_delete(c, args):
     d = dept(args)
     if d.is_root:
         raise Fail("the root department cannot be deleted")
+    if d.id == it_team.department_id():
+        raise Conflict(f"{d.id} is the IT admin team: designate another with it_team_set first")
     if list(d.children) or any(p.status != "closed" for p in d.positions):
         raise Conflict(f"{d.id} still has sub-departments or open positions")
     # d.proposals holds every proposal the department ever had, more than a call may load: look at the pending ones.
@@ -154,6 +157,17 @@ def department_set_policy(c, args):
     if outsiders:
         raise Fail(f"veto holders must hold a seat in {d.id}: {', '.join(outsiders)}")
     d.policy = {"m": m, "n": n, "quorum": quorum, "veto": list(veto)}
+
+
+@op("it_team.set", governed=launched)
+def it_team_set(c, args):
+    """Designate ``department`` as the IT admin team (docs/codices/layered-codex.md §10), or "" for none: its seat holders
+    start ``codex_revert_fast`` and are told when a codex method fails, and its own policy (m of n, quorum, veto) decides
+    a fast revert. Direct during setup, a realm-wide vote after launch. No codex can make this call or change the
+    department. Returns ``department``."""
+    team = find(Department, args["department"]).id if args["department"] else ""  # its alias, however it was named
+    Realm["1"].it_team = team
+    return {"department": team}
 
 
 def seat_view(pos):
