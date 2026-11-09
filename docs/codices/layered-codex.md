@@ -1584,6 +1584,38 @@ codex, and a new codex reaches them in four steps:
 The switch cannot be atomic across canisters. During it, calls between quarters carry the sender's
 codex checksum, so a receiver can tell which legislation the sender ran.
 
+**How the realm does it** ([`api/propagation.py`](../../src/realm_backend/api/propagation.py)):
+
+- **Announcing.** When the capital's install job has staged the codex (step 5), it tells each active
+  quarter, in a message of its own per quarter, `codex.stage`: the codex's checksum, the change list's
+  checksum and T (the proposal's `effective_at`, or the moment the job started when there is none). A quarter
+  it cannot reach is recorded in the `FederationMessage` of the call and holds up no other. A staged codex the
+  capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`.
+- **Staging in a quarter.** A quarter runs the same install job, in staging mode: the change list and every chapter
+  it lacks are read from the capital by checksum (`legislation_chapter`; the capital keeps the change list's
+  bytes in `ChapterSource` like a chapter's), and nothing changes while it stages. One install at a time still
+  holds: a quarter refuses the announcement while an install of its own runs, and a newer announcement replaces a
+  staging in progress. An upgrade pauses the job like any other, and `codex_install_resume` resumes it.
+- **The switch.** The quarter schedules `codex_switch_staged` at T as a task of the realm's own, which
+  `tasks.rearm()` arms again after an upgrade. A quarter staged by T switches then, in one message, with no
+  `on_codex_activate`; it reports to its capital at once.
+- **A quarter ready after T** asks its capital which codex it runs before it switches, and switches only to the
+  one it staged. A codex the capital has left (reverted, or replaced by a newer one) is never activated; the
+  job fails and says so.
+- **Compliance.** The capital sets `Quarter.compliance` when a quarter reports the codex it runs (`quarter_sync`,
+  `quarter_report`, a leg): compliant when it is the codex in force, or the pending one once its time has come;
+  otherwise non-compliant since that codex took effect, naming the layers that differ. A minute after the
+  capital switches it judges the quarters that reported before and have not said they switched, so that one
+  that was not ready reads non-compliant since T without waiting for its next report. `quarter_directory`
+  shows the flag.
+- **What calls carry and what is recorded.** A call to a canister of the federation carries the checksum of the
+  codex its sender runs. The receiver keeps it, with the sender's flag, on the `FederationMessage` (a move is
+  the `user.arrive` message), on the `FederalVoteLeg`, and the origin quarter on the `Forward`. Legislation
+  decides on them as the call arrives: a guard on `federation_message` reads its `codex` argument, and a chapter
+  reads the quarters' `codex_id` and `compliance` and the legs' `codex` and `compliance` (`VIEWS` in
+  `core/legislation.py`). The message and move records themselves stay outside that view: they say who moved and
+  what was said.
+
 **Quarters in different time zones.** T is an exact UTC instant, so every quarter switches at the same
 moment, whatever its zone (§4.5). The vote's deadline, and any working days counted up to T, belong to
 a realm-wide vote and are counted on the capital's clock. The UI shows T in the realm's official time,

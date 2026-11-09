@@ -15,6 +15,7 @@ from ggg import (FederalVoteLeg, FederationMessage, Forward, InstallJob, Layered
 from kit import call, fire_timers, later, ok, rows
 from test_federation import leg, open_fv
 from test_installs import HOUR, change_list, expected_id, fire_due, install, job, own_layer, run_job, schedule, sha, status
+from test_legislation_runtime import TOWN, activate, layered
 from test_quarters import CAPITAL, capital, quarter
 
 STAGED = {"ok": True, "staged": "started", "job": "J-1"}
@@ -360,9 +361,6 @@ def test_a_message_from_a_quarter_is_recorded_with_its_codex_and_the_flag_the_ca
     ok("federation_message", "south", topic="ping", body={}, codex=OTHER)
     message = rows(FederationMessage)[-1]
     assert (message.source, message.codex) == ("south", OTHER) and compliance.of(message.compliance) != "compliant"
-    shown = legislation._read({"entity": "FederationMessage", "method": "get", "id": message.id})
-    assert (shown["codex"], shown["compliance"]["NonCompliant"]["stale"]) == (OTHER, ["arcadia"])
-    assert "body" not in shown and "response" not in shown  # what the quarter said is not for legislation
 
 
 def test_a_vote_leg_is_recorded_with_the_codex_of_its_quarter_and_its_flag(monkeypatch):
@@ -378,6 +376,31 @@ def test_a_vote_leg_is_recorded_with_the_codex_of_its_quarter_and_its_flag(monke
     assert legislation._read({"entity": "FederalVoteLeg", "method": "get", "id": south.id})["codex"] == OTHER
 
 
+FEDERATION_CHAPTER = '''
+from ggg import Quarter
+from realms.legislation import above
+
+class Federation(above("federation")):
+    def check_federation_message(self, args):
+        if args.codex == "%(other)s":
+            return self.deny("the sender runs " + args.codex[:13])
+        if args.topic == "user.arrive" and Quarter.get(args.body["from"]).compliance != "compliant":
+            return self.deny("moves in from a quarter that is not compliant are refused")
+'''
+
+
+def test_legislation_decides_on_a_message_by_the_codex_it_carries_and_the_flag_of_its_sender(monkeypatch):
+    quarter(monkeypatch, "north", "south")
+    activate(layered({(TOWN, "federation"): FEDERATION_CHAPTER % {"other": OTHER}}, layers=[TOWN]))
+    assert call("federation_message", "south", topic="ping", body={}, codex=OTHER)["error"] == "the sender runs sha256:bbbbbb"
+    assert ok("federation_message", "south", topic="ping", body={}, codex=expected_id(own_layer()))
+    arrival = {"user": "bob", "from": "south", "moved_at": 1, "signature": "x"}
+    Quarter["south"].compliance = compliance.valid("compliant")
+    assert "signature does not match" in call("federation_message", "south", topic="user.arrive", body=arrival)["error"]
+    Quarter["south"].compliance = compliance.valid({"NonCompliant": {"since": 5, "stale": ["arcadia"]}})
+    assert "not compliant are refused" in call("federation_message", "south", topic="user.arrive", body=arrival)["error"]
+
+
 def test_a_move_carries_the_codex_of_the_quarter_it_leaves_and_is_recorded_with_the_flag_of_the_one_it_enters(monkeypatch):
     quarter(monkeypatch, "north", "south")
     LayeredCodex(id=OTHER, status="active", layers=["arcadia"], layer_paths={}, chapters={})
@@ -387,8 +410,6 @@ def test_a_move_carries_the_codex_of_the_quarter_it_leaves_and_is_recorded_with_
     assert south.sent("federation_message")[0]["codex"] == OTHER
     moved = Forward[out["forward"]]
     assert moved.codex == OTHER and compliance.of(moved.compliance) == {"NonCompliant": {"since": 5, "stale": ["arcadia"]}}
-    assert legislation._read({"entity": "Forward", "method": "get", "id": moved.id})["compliance"] == compliance.of(
-        moved.compliance)
 
 
 def test_a_quarter_drifts_when_its_layered_codex_is_not_its_capitals(monkeypatch):

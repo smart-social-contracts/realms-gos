@@ -61,6 +61,11 @@ capital's directory back. The capital flags a quarter whose codex **drifts** fro
 `federation_message` carries other messages between registered canisters (for example
 `user.arrive` when a member moves).
 
+A call between the capital and a quarter carries the checksum of the codex its sender runs, and the
+receiver records it. A new layered codex reaches the quarters at one switch time: the capital announces
+it, each quarter stages it from the capital, and the capital flags a quarter that is not ready by then as
+non-compliant ([the layered codex, §9.5](../codices/layered-codex.md#95-updating-a-realms-own-quarters)).
+
 A realm can also take legislation from other realms it chooses by vote, its **sync sources**, with
 no parent realm. Those links, the releases a sync source publishes, how a follower installs them, and
 how a new codex reaches a realm's own quarters at one switch time are in
