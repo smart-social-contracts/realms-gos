@@ -441,6 +441,8 @@ def test_a_forbid_reads_the_principal_a_call_acts_for(agora):
     assert "proposal_vote is forbidden by the legislation: its arguments: refused by " \
            "x/town/local_regime/no_delegate_votes (members vote themselves)" in message
     ok("proposal_vote", "alice", proposal=motion, choice="yes")  # her own vote is her own
+    another = ok("proposal_create", "alice", title="another motion")["proposal"]
+    ok("proposal_vote", "alice", proposal=another, choice="yes", on_behalf_of="alice")  # a claim of oneself is none
 
 
 def test_a_governed_call_that_becomes_a_proposal_meets_the_forbids_of_proposal_create(agora):

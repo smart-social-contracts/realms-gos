@@ -118,9 +118,10 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
             return json.dumps({"ok": True, **pending.prepare(asked, user, by, name, spec, args, note)})
         grant = auth.authorize(user, by, name, spec, args, origin, declared)
         # The facts of a call are its arguments as GGG defines them, and ``on_behalf_of`` is one: a forbid may refuse a
-        # delegate's vote. ``claimed`` was taken out of ``args`` above, for the operations never read it; the call a
-        # member approves from a pending action is the delegate's, so it states the member as it was prepared.
-        acting = claimed or (user if origin == "confirmed" else None)
+        # delegate's vote. ``claimed`` was taken out of ``args`` above, for the operations never read it; a claim of
+        # oneself is no delegation, and the call a member approves from a pending action is the delegate's, so it
+        # states the member as it was prepared.
+        acting = (claimed if claimed != by else None) or (user if origin == "confirmed" else None)
         stated = {**args, "on_behalf_of": acting} if acting else args
         auth.refuse_forbidden(user, name, spec, stated, proposal)
         ranges.check(name, args)
