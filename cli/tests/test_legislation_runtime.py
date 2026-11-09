@@ -77,6 +77,16 @@ class Alpha(above("alpha")):
     def probe_data(self):
         beta = self.legislation.beta.give_self()
         return beta.name(), beta.rate(), beta.amount(), self.legislation.beta.setting
+
+    def probe_returned_list(self):
+        items = self.legislation.beta.give_list()
+        items.append(3)
+        return items
+
+    def probe_handed_list(self):
+        mine = [1, 2]
+        self.legislation.beta.add_to(mine)
+        return mine
 """
 BETA = """
 from realms.legislation import Ref, above, days
@@ -99,6 +109,13 @@ class Beta(above("beta")):
 
     def amount(self):
         return days(30)
+
+    def give_list(self):
+        return [1, 2]
+
+    def add_to(self, items):
+        items.append(3)
+        return items
 
     def _secret(self):
         return "the secret"
@@ -137,11 +154,60 @@ def test_plain_data_crosses_a_setting_too_and_the_view_is_usable():
 def test_crossing_passes_data_wraps_a_chapter_and_refuses_the_rest():
     c = codex(gamma=GAMMA)
     chapter = c.instance("gamma", c.context())
-    assert crossing([1, "a", {"k": days(2)}, Money(100, 2)], "f.py") == [1, "a", {"k": days(2)}, Money(100, 2)]
+    assert crossing([1, "a", {"k": days(2)}, Money(100, 2)], "f.py") == (1, "a", {"k": days(2)}, Money(100, 2))
     assert isinstance(crossing(chapter, "f.py"), Public)
     for value in (Public(chapter), chapter.name, object(), 1.5):
         with pytest.raises(LegislationError, match="only plain data crosses"):
             crossing(value, "f.py")
+
+
+def test_crossing_hands_over_frozen_values():
+    value = crossing([1, {"k": [days(2)]}], "f.py")
+    assert value == (1, {"k": (days(2),)}) and isinstance(value, tuple)
+    with pytest.raises(TypeError):
+        value[1]["k"] = 1
+
+
+def test_a_value_returned_to_another_domain_cannot_be_mutated_by_it():
+    with pytest.raises(AttributeError, match="append"):
+        alpha().probe_returned_list()
+
+
+def test_a_value_handed_to_another_domain_cannot_be_mutated_by_it():
+    with pytest.raises(AttributeError, match="append"):
+        alpha().probe_handed_list()
+
+
+# ── A chapter's module-level constants cannot change between calls (realms-gos#621) ──────────────────────────
+
+CONSTANTS = """from realms.legislation import above
+
+CODES = ['ibi']
+RATES = {'general': 1, 'tags': ['a']}
+
+class Register(above('register')):
+    def read(self):
+        return CODES[0], len(CODES), RATES['general'], len(RATES), len(RATES['tags'])
+
+    def mutate(self, x):
+        """
+UNTOUCHED = ("ibi", 1, 1, 2, 1)
+MUTATIONS = {
+    "append to a list": "CODES.append(x)",
+    "extend a list": "CODES.extend([x])",
+    "assign into a list": "CODES[0] = x",
+    "assign into a dict": "RATES['general'] = x",
+    "update a dict": "RATES.update({'new': x})",
+    "append to a list inside a dict": "RATES['tags'].append(x)",
+}
+
+
+@pytest.mark.parametrize("statement", sorted(MUTATIONS))
+def test_a_module_level_constant_cannot_change_between_calls(statement):
+    c = codex(register=CONSTANTS + MUTATIONS[statement] + "\n")
+    with pytest.raises((AttributeError, TypeError)):
+        c.instance("register", c.context()).mutate("new")
+    assert c.instance("register", c.context()).read() == UNTOUCHED
 
 
 # ── self and a hook's event are bound once (realms-gos#579, the fourth review) ─────────────────────────────────

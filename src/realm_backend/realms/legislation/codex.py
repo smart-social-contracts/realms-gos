@@ -26,7 +26,7 @@ from realms.legislation.chapter import (
 )
 from realms.legislation.context import Context
 from realms.legislation.errors import LegislationError, Refused
-from realms.legislation.sealed import Sealed
+from realms.legislation.sealed import Sealed, freeze
 from realms.legislation.subset import FRAME_ATTRIBUTES
 
 SDK, GGG = "realms.legislation", "ggg"
@@ -266,9 +266,11 @@ class Codex(metaclass=Sealed):
     def _the_chapter(self, space, load, imported):
         """The one class of the file, built by the SDK's metaclass; everything else at module level is
         a name an import bound (the SDK's or the ``ggg`` view's, by ``subset``'s check) or a constant.
+        The constants are frozen here: the methods read them as globals, and a list or a dict that a method
+        changed would keep the change for every later call.
         """
         found = []
-        for key, value in space.items():
+        for key, value in list(space.items()):
             if key in ("__name__", "__builtins__", "__doc__") or key in imported:
                 continue
             if isinstance(value, ChapterMeta) and value.__file__ == load.file:
@@ -285,6 +287,8 @@ class Codex(metaclass=Sealed):
                     None,
                     load.file,
                 )
+            else:
+                space[key] = freeze(value)
         if len(found) != 1:
             raise Refused(
                 f"one class per file, {camel(load.domain)}, extending above({load.domain!r})",

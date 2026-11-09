@@ -370,7 +370,8 @@ The rules (the checker enforces them, §12):
 
 1. **One class per file,** named after the domain in CamelCase (`tax` → `Tax`, `data_protection` →
    `DataProtection`), with the base `above("<its own domain>")`. Nothing else at module level except
-   imports from the SDK and constants.
+   imports from the SDK and constants. The constants are frozen once the file has loaded (a list is a tuple, a
+   dict read-only), so a method cannot leave a change in one for the next call.
 2. **Imports only from the SDK** (`realms.legislation`) and from `ggg`, for read-only access to GGG's
    entities (`from ggg import Land, Member`). No other import, anywhere in the file. A chapter cannot
    write an entity; it queues operations.
@@ -1367,10 +1368,11 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
     button that starts `codex.revert_fast`.
 
   No banner for members.
-- **Across domains:** what crosses a domain boundary is plain data, or the called chapter seen through its
-  public view (its public members only, never the `self` API): a method that returns `self` hands back the view,
-  a bound method or a view of other domains is refused
-  ([#543](https://github.com/smart-social-contracts/realms-gos/issues/543)).
+- **Across domains:** what crosses a domain boundary is plain data, frozen on the way (a list is a tuple, a
+  dict read-only), or the called chapter seen through its public view (its public members only, never the `self`
+  API): a method that returns `self` hands back the view, a bound method or a view of other domains is refused
+  ([#543](https://github.com/smart-social-contracts/realms-gos/issues/543),
+  [#621](https://github.com/smart-social-contracts/realms-gos/issues/621)).
 - **Effects** go through the codex caller as a legacy codex's do: origin `codex`, the realm as signer, Cedar's
   guardrails. A layered codex declares no capability list: the GGG page (§1, "Effects are operations") has a
   hook queue GGG operations "which the GOS runs as the realm, under the same permissions as any caller", and
