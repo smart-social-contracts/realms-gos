@@ -63,17 +63,18 @@ def asked_under(user, by, spec, args):
     return grant if poa.asks(grant, spec, args) else None
 
 
-def prepare(grant, user, by, name, spec, args, note=""):
+def prepare(grant, user, by, name, spec, args, note="", origin="user", declared=()):
     """File the call of ``name`` with ``args`` that the delegate ``by`` makes for ``user`` under ``grant``, in place of
-    running it. The grant must cover it and the member, acting for themselves, be allowed it now. Returns the action's id,
-    the path of the page where the member decides, and when it lapses."""
+    running it. The grant must cover it and the member, acting for themselves, be allowed it now (an extension's call
+    only if it declared the operation, ``origin`` and ``declared``). Returns the action's id, the path of the page where
+    the member decides, and when it lapses."""
     from core.op import audit, ops
     from ggg import PendingAction
 
     needed = spec["perm_for"](args) if spec["perm_for"] else spec["perm"]
     if not poa.covered(grant, name, spec, needed):
         raise auth.Denied(f"{name} cannot be done under this power of attorney: this grant does not cover it")
-    auth.authorize(user, user, name, spec, args)
+    auth.authorize(user, user, name, spec, args, origin, declared)
     auth.refuse_forbidden(user, name, spec, {**args, "on_behalf_of": user}, "")  # a forbidden action is never prepared
     carried = args.get("action") if name in CARRIES else None
     if isinstance(carried, dict) and carried.get("op") in ops() and isinstance(carried.get("args") or {}, dict):
@@ -95,7 +96,7 @@ def prepare(grant, user, by, name, spec, args, note=""):
     PendingAction(id=aid, grantor=user, delegate=by, grant=grant.id, method=name, args=args,
                   hash=seal(aid, name, args, user, by, grant.id, now + TTL), summary=lines, risk=risk_of(name),
                   note=note, filed_at=now, expires_at=now + TTL, open_link=pair)
-    audit(name, user, by, "user", args, {"pending": aid}, grant.id)
+    audit(name, user, by, origin, args, {"pending": aid}, grant.id)
     tell(grant, aid, name)
     return {"pending": aid, "approve_link": LINK + aid, "expires_at": now + TTL}
 
