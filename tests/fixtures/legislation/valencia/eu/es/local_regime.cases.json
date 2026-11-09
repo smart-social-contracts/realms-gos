@@ -1,0 +1,13 @@
+[
+  {"name": "an ordinance with no effective date is refused", "guard": "proposal_create", "now": 1800000000,
+   "args": {"action": {"Code": {"url": "https://example.org/change.json", "checksum": "sha256:x"}}, "effective_at": null},
+   "denies": "an ordinance takes effect at the earliest 15 working days after the vote closes (Art. 65.2)"},
+  {"name": "an ordinance a week away is refused", "guard": "proposal_create", "now": 1800000000,
+   "args": {"action": {"Code": {"url": "https://example.org/change.json", "checksum": "sha256:x"}}, "effective_at": 1800604800},
+   "denies": "an ordinance takes effect at the earliest 15 working days after the vote closes (Art. 65.2)"},
+  {"name": "an ordinance 40 days away is allowed", "guard": "proposal_create", "now": 1800000000,
+   "args": {"action": {"Code": {"url": "https://example.org/change.json", "checksum": "sha256:x"}}, "effective_at": 1803456000},
+   "denies": null},
+  {"name": "a proposal that is not an ordinance is left alone", "guard": "proposal_create", "now": 1800000000,
+   "args": {"action": {"Transfer": {}}, "effective_at": null}, "denies": null}
+]

@@ -40,7 +40,7 @@ class Call:
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
        returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None, summary=None,
-       lists=None):
+       title=None, lists=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -65,6 +65,8 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     releases(args, proposal) -> runs when that proposal ends without the call having run: it frees what ``fixes`` tied.
     summary(user, args) -> lines (``{label, value}``) about what the call does for ``user``, in the realm's words, for an
     operation that asks the member each time (core.pending): the member reads them before approving.
+    title -> the operation's plain name as the member reads it, the heading of a pending action ("Add a payout
+    account"). The realm writes it, never the delegate; an operation that can be prepared for the member has one.
     lists -> for each list of GGG's facts that is not one of the call's arguments, ``{list: fn(args)}`` giving its
     elements (GGG's form), such as the saved policy's entries that ``tax_policy_propose`` names by id; the forbids that
     range over the list judge each of them.
@@ -76,7 +78,7 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,
                             "secret": tuple(secret), "fixes": fixes, "releases": releases, "summary": summary,
-                            "lists": lists or {}}
+                            "title": title, "lists": lists or {}}
         poa.classify(OPS[fn.__name__], fn.__name__)
         return fn
     return wrap

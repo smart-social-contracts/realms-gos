@@ -1,5 +1,7 @@
-A copy of `legislation/` of smart-social-contracts/realms-codices (without its README), as of its commit
-`7f76eb521351e47aac4c1dfb46f6333f7f202546`: the sources of the design's examples (docs/codices/layered-codex.md §5)
-with their releases. Public and illustrative. `cli/tests/test_legislation_tree.py` loads València from it, and
-`tests/ggg/test_legislation_valencia.py` runs its chapters in the realm's runtime. Refresh it by copying the folder
-again when the tree changes.
+A copy of `legislation/` of smart-social-contracts/realms-codices (without its README): the sources of the design's
+examples (docs/codices/layered-codex.md §5) with their releases, cases and chapters. Public and illustrative.
+
+`cli/tests/test_legislation_tree.py` loads València from it, and `tests/ggg/test_legislation_valencia.py` runs its
+chapters in the realm's runtime. The same file also compares it with `codices/legislation`, the `codices` submodule
+at the commit this repository pins, and fails if they differ: refresh it by copying the folder again (without the
+README) whenever the pin moves.

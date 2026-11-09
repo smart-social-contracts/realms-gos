@@ -9,7 +9,6 @@ proof, when ``CEDAR_CLI`` and ``CVC5`` point at them.
 """
 
 import os
-import random
 import subprocess
 
 import cedarpy
@@ -28,9 +27,14 @@ from realms.legislation import (
     when,
     years,
 )
+from realms.cli.commands.legislation_analysis import (
+    Draw,
+    agree,
+    never_errors_problems,
+    symcc,
+)
 from realms.legislation.cedar import FactSchema
 from realms.legislation.expressions import I64_MAX, I64_MIN
-from realms.legislation.periods import UNITS
 
 LAYERS = ("eu", "eu/es", "eu/es/vc", "eu/es/vc/46250-valencia")
 VALENCIA = "eu/es/vc/46250-valencia"
@@ -364,222 +368,65 @@ def test_a_chapter_with_forbids_passes_the_syntax_tree_check_too():
 
 # ── Python and Cedar agree (§6 rule 7) ────────────────────────────────────────
 
-ENTITIES = [
-    {
-        "uid": {"type": "Realm::User", "id": "u"},
-        "attrs": {"permissions": ["all"], "banned": False},
-        "parents": [],
-    },
-    {"uid": {"type": "Realm::Realm", "id": "1"}, "attrs": {}, "parents": []},
-]
-PERMIT_ALL = "permit (principal, action, resource);\n"
-
-
-def plain(value):
-    """A fact or setting value as the Cedar context carries it."""
-    if hasattr(value, "to_json"):
-        return value.to_json()
-    if isinstance(value, (list, tuple)):
-        return [plain(v) for v in value]
-    return value
-
-
-def literals(node, found):
-    """Every int and str literal in a tree, and in the folded settings."""
-    from realms.legislation import expressions as e
-    from realms.legislation.cedar import children
-
-    if isinstance(node, e.Literal):
-        found.extend(
-            v
-            for v in (node.value if isinstance(node.value, tuple) else [node.value])
-            if isinstance(v, (int, str)) and not isinstance(v, bool)
-        )
-    for child in children(node):
-        literals(child, found)
-    return found
-
-
-def endpoints(forbid, found):
-    """The folded value of every comparison side and between() bound that reads no fact (1240000 for
-    València's urban cap), and the count of every Period a rule names or a setting holds.
-    """
-    from realms.legislation import expressions as e
-    from realms.legislation.cedar import children
-
-    def reads_a_fact(node):
-        return isinstance(node, e.Fact) or any(reads_a_fact(c) for c in children(node))
-
-    def value(node):
-        got = e._eval(node, e.Env({}, dict(forbid.settings), None), False)
-        period = e.as_period(got)
-        if period is not None:
-            found.append(period[0])
-        elif isinstance(got, int) and not isinstance(got, bool):
-            found.append(got)
-
-    def walk(node):
-        if isinstance(node, e.Compare):
-            for side in (node.left, node.right):
-                if not reads_a_fact(side):
-                    value(side)
-        if isinstance(node, e.Between):
-            value(node.low)
-            value(node.high)
-        for child in children(node):
-            walk(child)
-
-    walk(forbid.expression)
-    return found
-
-
-class Draw:
-    """Generated values: around every literal, every Period count and every folded comparison endpoint
-    (±1), 0, the 64-bit extremes, the range's edges and beyond, and random values inside and outside
-    the range."""
-
-    def __init__(self, seed, forbids):
-        self.random = random.Random(seed)
-        pool = []
-        for f in forbids:
-            literals(f.expression, pool)
-            endpoints(f, pool)
-            pool.extend(
-                v
-                for v in f.settings.values()
-                if isinstance(v, int) and not isinstance(v, bool)
-            )
-        self.ints = sorted(
-            {v for v in pool if isinstance(v, int)} | {0, I64_MIN, I64_MAX}
-        )
-        self.ints += [
-            v + d for v in self.ints for d in (-1, 1) if I64_MIN <= v + d <= I64_MAX
-        ]
-        self.strings = sorted(
-            {v for v in pool if isinstance(v, str)} | {"", "x", "ibi_urbano"}
-        )
-
-    def long(self, bounds):
-        choice = self.random.random()
-        if bounds and choice < 0.35:
-            low, high = bounds
-            return self.random.choice(
-                [low, high, low - 1, high + 1, self.random.randint(low, high)]
-            )
-        if choice < 0.75:
-            return self.random.choice(self.ints)
-        return self.random.randint(I64_MIN, I64_MAX)
-
-    def value(self, kind, bounds=None):
-        if kind == "Long":
-            return self.long(bounds)
-        if kind == "String":
-            return self.random.choice(self.strings)
-        if kind == "Bool":
-            return self.random.random() < 0.5
-        if kind == "Period":
-            return {
-                "count": self.long(None),
-                "unit": self.random.choice(UNITS + ("Week", "")),
-            }
-        if kind == "Set<String>":
-            return self.random.sample(
-                self.strings, self.random.randint(0, len(self.strings))
-            )
-        raise AssertionError(kind)
-
-    def facts(self, action):
-        out = {}
-        for name, fact in action.facts.items():
-            if fact.optional and self.random.random() < 0.25:
-                continue
-            out[name] = self.value(fact.type, fact.range)
-        return out
-
-    def settings(self, bound):
-        return {name: self.value_like(value) for name, value in bound.settings.items()}
-
-    def value_like(self, value):
-        if isinstance(value, bool):
-            return self.value("Bool")
-        if isinstance(value, int):
-            return self.long(None)
-        if isinstance(value, str):
-            return self.value("String")
-        if hasattr(value, "to_json"):
-            return self.value("Period")
-        return self.random.sample(
-            self.strings, self.random.randint(1, len(self.strings))
-        )
-
-
-def agree(c, generic, per_action, seed=2026):
-    """Python and Cedar on generated facts: the forbids that fire must be the same set, and Cedar must
-    report no evaluation error. Returns how many requests were checked."""
-    forbids = c.forbids()
-    schema = c.cedar_schema(generic, context={"op": "String"})
-    policies = PERMIT_ALL + c.cedar(generic)
-    draw, checked = Draw(seed, forbids), 0
-    for name, action in c.facts.actions.items():
-        on_action = [f for f in forbids if name in f.actions]
-        if not on_action:
-            continue
-        requests, expected = [], []
-        for _ in range(per_action):
-            facts = draw.facts(action)
-            context = {"op": name, "facts": facts}
-            settings = (
-                {}
-            )  # one open value per domain and setting, shared by every forbid that reads it
-            if generic:
-                for f in on_action:
-                    settings.setdefault(f.domain, {}).update(draw.settings(f))
-                settings = {d: s for d, s in settings.items() if s}
-            if (
-                settings
-            ):  # the schema has a settings record only for an action whose forbids read some
-                context["settings"] = {
-                    d: {k: plain(v) for k, v in s.items()} for d, s in settings.items()
-                }
-            requests.append(
-                {
-                    "principal": 'Realm::User::"u"',
-                    "action": f'Realm::Action::"{name}"',
-                    "resource": 'Realm::Realm::"1"',
-                    "context": context,
-                }
-            )
-            expected.append(
-                {
-                    f.id
-                    for f in on_action
-                    if f.evaluate(
-                        facts, settings.get(f.domain, {}) if generic else None
-                    )
-                }
-            )
-        results = cedarpy.is_authorized_batch(requests, policies, ENTITIES, schema)
-        for request, result, fired in zip(requests, results, expected):
-            assert not result.diagnostics.errors, (
-                request["context"],
-                result.diagnostics.errors,
-            )
-            by_cedar = (
-                set(result.diagnostics.id_annotations_by_reason.values())
-                if result.decision == cedarpy.Decision.Deny
-                else set()
-            )
-            assert by_cedar == fired, (request["context"], by_cedar, fired)
-        checked += len(requests)
-    return checked
-
 
 def test_python_and_cedar_agree_on_10000_generated_fact_sets():
-    assert agree(with_edges(), generic=False, per_action=2500) == 10_000
+    assert agree(with_edges(), generic=False, per_action=2500) == (10_000, [])
 
 
 def test_python_and_cedar_agree_with_the_settings_left_open():
-    assert agree(with_edges(), generic=True, per_action=1000) == 4_000
+    assert agree(with_edges(), generic=True, per_action=1000) == (4_000, [])
+
+
+class Rewritten:
+    """A codex or a forbid whose Cedar is ``rewrite`` of what it generated: the Cedar says one thing, Python another."""
+
+    def __init__(self, inner, rewrite):
+        self.inner, self.rewrite = inner, rewrite
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def cedar(self, generic=False):
+        text = self.inner.cedar(generic)
+        return (
+            self.rewrite(text)
+            if isinstance(text, str)
+            else "".join(self.rewrite(t) for t in text)
+        )
+
+    def forbids(self):
+        return [
+            Rewritten(f, self.rewrite) if hasattr(f, "cedar") else f
+            for f in self.inner.forbids()
+        ]
+
+
+def test_agree_reports_where_cedar_decides_otherwise_than_python():
+    c = with_edges()
+    assert agree(c, generic=False, per_action=300)[1] == []
+    checked, problems = agree(
+        Rewritten(c, lambda cedar: cedar.replace("<= 1300000", "<= 1300001")),
+        generic=False,
+        per_action=2500,
+    )
+    assert checked == 10_000 and problems
+    assert any(
+        "Cedar forbids" in p and "Python" in p and "ibi_urban_range" in p
+        for p in problems
+    ), problems[:3]
+
+
+def test_agree_reports_a_forbid_that_makes_cedar_error():
+    c = with_edges()
+
+    def erroring(cedar):
+        return cedar.replace(
+            "context.facts.rate >= 400000",
+            "context.facts.rate + 9223372036854775807 >= 400000",
+        )
+
+    problems = agree(Rewritten(c, erroring), generic=False, per_action=2500)[1]
+    assert any("Cedar errors on" in p for p in problems), problems[:3]
 
 
 def test_the_generated_facts_reach_the_edges_and_both_decisions():
@@ -809,7 +656,7 @@ def test_arithmetic_that_could_overflow_within_the_ranges_is_refused():
 
 
 @pytest.fixture(scope="module")
-def cedar_cli():
+def cedar_tools():
     cli, cvc5 = os.environ.get("CEDAR_CLI"), os.environ.get("CVC5")
     if not (cli and cvc5 and os.path.exists(cli) and os.path.exists(cvc5)):
         pytest.skip(
@@ -819,92 +666,77 @@ def cedar_cli():
         "4.14.1"
         in subprocess.run([cli, "--version"], capture_output=True, text=True).stdout
     )
-    return cli
+    return cli, cvc5
 
 
-def test_every_generated_forbid_never_errors(cedar_cli, tmp_path):
+def test_every_generated_forbid_never_errors(cedar_tools):
     """SymCC's proof (R1, #481) on the installed Cedar of every forbid of the design's chapters and the
     edge cases, for every action each one names."""
     c = with_edges()
-    schema = tmp_path / "realm.cedarschema"
-    schema.write_text(c.cedar_schema(context={"op": "String"}))
-    proved = 0
-    for bound in c.forbids():
-        policy = tmp_path / (bound.id.replace("/", "__") + ".cedar")
-        policy.write_text(bound.cedar() + "\n")
-        for action in bound.actions:
-            out = subprocess.run(
-                [
-                    cedar_cli,
-                    "symcc",
-                    "--principal-type",
-                    "Realm::User",
-                    "--action",
-                    f'Realm::Action::"{action}"',
-                    "--resource-type",
-                    "Realm::Realm",
-                    "--schema",
-                    str(schema),
-                    "never-errors",
-                    "--policies",
-                    str(policy),
-                ],
-                capture_output=True,
-                text=True,
-                env={**os.environ, "CVC5": os.environ["CVC5"]},
-            )
-            assert out.returncode == 0 and "VERIFIED" in out.stdout, (
-                bound.id,
-                action,
-                out.stdout,
-                out.stderr,
-            )
-            proved += 1
-    assert proved == 13 + 4  # 4 forbids on two actions each, the others on one
+    assert never_errors_problems(c, *cedar_tools) == []
+    assert (
+        sum(len(f.actions) for f in c.forbids()) == 13 + 4
+    )  # 4 forbids on two actions each, the others on one
 
 
-def test_the_unbounded_sum_would_error_and_the_bounded_one_does_not(
-    cedar_cli, tmp_path
-):
+def test_the_unbounded_sum_would_error_and_the_bounded_one_does_not(cedar_tools):
     """The R1 finding, reproduced on the generator's output: the bounded form of F.rate + F.surcharge
     passes never-errors; the same comparison written by hand without the bounds does not.
     """
     c = with_edges()
     added = [f for f in c.forbids() if f.id.endswith("two_facts_added")][0]
-    schema = tmp_path / "s.cedarschema"
-    schema.write_text(c.cedar_schema(context={"op": "String"}))
+    schema = c.cedar_schema(context={"op": "String"})
     unbounded = added.cedar().replace(
         "(context.facts.rate < 0 || context.facts.rate > 100000000 || context.facts.surcharge < 0 || context.facts.surcharge > 100000000 || ",
         "(",
     )
     assert unbounded != added.cedar()
-    results = {}
-    for name, text in (("bounded", added.cedar()), ("unbounded", unbounded)):
-        policy = tmp_path / f"{name}.cedar"
-        policy.write_text(text + "\n")
-        out = subprocess.run(
-            [
-                cedar_cli,
-                "symcc",
-                "--principal-type",
-                "Realm::User",
-                "--action",
-                'Realm::Action::"document_share"',
-                "--resource-type",
-                "Realm::Realm",
-                "--schema",
-                str(schema),
-                "never-errors",
-                "--policies",
-                str(policy),
-            ],
-            capture_output=True,
-            text=True,
+    proved = {
+        name: symcc(*cedar_tools, schema, text, "document_share")[0]
+        for name, text in (("bounded", added.cedar()), ("unbounded", unbounded))
+    }
+    assert proved == {"bounded": True, "unbounded": False}
+
+
+def test_never_errors_problems_names_the_forbid_that_can_error_on_each_action(
+    cedar_tools,
+):
+    c = with_edges()
+
+    def bounds_removed(cedar):
+        return cedar.replace(
+            "(context.facts.rate < 0 || context.facts.rate > 100000000 || context.facts.surcharge < 0 || context.facts.surcharge > 100000000 || ",
+            "(",
         )
-        results[name] = out.stdout
+
+    problems = never_errors_problems(Rewritten(c, bounds_removed), *cedar_tools)
     assert (
-        "VERIFIED" in results["bounded"] and "DOES NOT HOLD" in results["unbounded"]
-    ), results
+        len(problems) == 1
+        and "two_facts_added can error on document_share" in problems[0]
+    ), problems
+    assert "DOES NOT HOLD" in problems[0]
+    memo = {}
+    assert (
+        never_errors_problems(c, *cedar_tools, memo) == [] and len(memo) == 17
+    )  # one answer per Cedar text and action
+
+
+def test_a_forbid_that_cedar_cannot_prove_is_reported_with_the_request_that_errors(
+    cedar_tools,
+):
+    c = with_edges()
+    added = [f for f in c.forbids() if f.id.endswith("two_facts_added")][0]
+    unbounded = added.cedar().replace(
+        "(context.facts.rate < 0 || context.facts.rate > 100000000 || context.facts.surcharge < 0 || context.facts.surcharge > 100000000 || ",
+        "(",
+    )
+    proved, said = symcc(
+        *cedar_tools,
+        c.cedar_schema(context={"op": "String"}),
+        unbounded,
+        "document_share",
+    )
+    assert proved is False and "DOES NOT HOLD" in said
 
 
 # ── The rules of §6 ───────────────────────────────────────────────────────────

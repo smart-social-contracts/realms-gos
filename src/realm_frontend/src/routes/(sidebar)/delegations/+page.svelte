@@ -1,331 +1,168 @@
 <script lang="ts">
 	import MetaTag from '../../utils/MetaTag.svelte';
-	import { Button, Card, Checkbox, Heading, Input, Label, P, Spinner, Textarea } from 'flowbite-svelte';
+	import { _ } from 'svelte-i18n';
+	import { Button, Card, Heading, P, Spinner } from 'flowbite-svelte';
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { styles, cn } from '$lib/theme/utilities';
-	import { quarter } from '$lib/realm';
-	import { resolveDelegationBackend } from '$lib/stores/delegation.js';
-	import { isAuthenticated, principal } from '$lib/stores/auth';
+	import { isAuthenticated } from '$lib/stores/auth';
 	import {
+		acceptDelegation,
 		delegationsAsDelegate,
 		delegationsAsGrantor,
-		pendingDelegations,
+		loadDelegationGroups,
 		loadDelegations,
-		loadDelegableOperations,
-		grantDelegation,
+		pendingDelegations,
+		revokeAllDelegations,
+		revokeDelegation,
 		setActingOnBehalfOf
 	} from '$lib/stores/delegation.js';
+	import { scopeLabels, type Group, type Scope } from '$lib/utils/authorizeChoices';
+	import { fmtTime } from '$lib/utils/dates';
+	import GrantActivity from '$lib/components/delegation/GrantActivity.svelte';
+	import GrantForm from '$lib/components/delegation/GrantForm.svelte';
+	import WaitingForYou from '$lib/components/delegation/WaitingForYou.svelte';
 
 	const path = '/delegations';
-	const title = 'Power of attorney';
-	const description = 'Let someone, or an AI, act for you within permissions you choose';
 
-	let loading = true;
-	let message = '';
-	let error = '';
+	// The address can prefill the manual grant: ?delegate=…&name=…&description=…&groups=vote,propose&hours=…
+	const query = $page.url.searchParams;
+	const prefill = {
+		delegate: query.get('delegate') || '',
+		name: query.get('name') || '',
+		description: query.get('description') || '',
+		groups: (query.get('groups') || '').split(',').map((id) => id.trim()),
+		hours: Number(query.get('hours')) || 0
+	};
 
-	let delegableOps: { operation: string; label: string; description: string }[] = [];
-	let grantDelegate = '';
-	let grantName = '';
-	let grantDescription = '';
-	let grantOps: string[] = [];
-	let grantStarts = '';
-	let grantExpires = '';
-	let granting = false;
+	let loading = $state(true);
+	let message = $state('');
+	let error = $state('');
+	let groups = $state<Group[]>([]);
+	let activityOf = $state('');
+	// Revoke all ends every grant at once: the button asks here, on the page, before it does.
+	let askingRevokeAll = $state(false);
 
-	function toLocalInput(date: Date) {
-		const pad = (n: number) => String(n).padStart(2, '0');
-		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-	}
-
-	function prefillGrantForm() {
-		const q = $page.url.searchParams;
-		const hours = Number(q.get('hours')) || 24 * 7;
-		const now = new Date();
-		grantDelegate = q.get('delegate') || '';
-		grantName = q.get('name') || '';
-		grantDescription = q.get('description') || '';
-		const wanted = (q.get('ops') || '').split(',').map((s) => s.trim());
-		grantOps = delegableOps.map((o) => o.operation).filter((op) => wanted.includes(op));
-		grantStarts = toLocalInput(now);
-		grantExpires = toLocalInput(new Date(now.getTime() + hours * 3600 * 1000));
-	}
+	const open = (d: { status: string }) => d.status === 'active' || d.status === 'pending';
+	const activeToMe = $derived($delegationsAsDelegate.filter((d: { status: string }) => d.status === 'active'));
+	const activityGrant = $derived($delegationsAsGrantor.find((d: { id: string }) => d.id === activityOf));
+	const everything = $derived($_('delegation.groups.everything'));
 
 	onMount(async () => {
 		if (!$isAuthenticated) {
 			loading = false;
 			return;
 		}
-		await refresh();
 		try {
-			delegableOps = await loadDelegableOperations();
+			groups = await loadDelegationGroups();
 		} catch (e) {
-			console.warn('Failed to load delegable operations:', e);
+			error = e instanceof Error ? e.message : $_('delegation.page.failed');
 		}
-		prefillGrantForm();
-		const acceptId = $page.url.searchParams.get('accept');
-		if (acceptId) await acceptOne(acceptId);
+		await refresh();
+		const acceptId = query.get('accept');
+		if (acceptId) await accept(acceptId);
 	});
-
-	async function submitGrant() {
-		error = '';
-		message = '';
-		const startsAt = Math.floor(new Date(grantStarts).getTime() / 1000);
-		const expiresAt = Math.floor(new Date(grantExpires).getTime() / 1000);
-		if (!grantDelegate.trim()) {
-			error = 'Enter the principal of the person or AI connection you are granting to.';
-			return;
-		}
-		if (!grantOps.length) {
-			error = 'Choose at least one permission.';
-			return;
-		}
-		if (!expiresAt || expiresAt <= startsAt) {
-			error = 'The expiry must be after the start.';
-			return;
-		}
-		granting = true;
-		try {
-			const res = await grantDelegation({
-				grantor: $principal,
-				delegate: grantDelegate.trim(),
-				operations: grantOps,
-				label: grantName.trim(),
-				description: grantDescription.trim(),
-				startsAt: startsAt <= Math.floor(Date.now() / 1000) ? 0 : startsAt,
-				expiresAt
-			});
-			if (res?.success) {
-				message =
-					res.data?.status === 'pending'
-						? 'Granted. It takes effect once the member accepts it.'
-						: 'Granted.';
-				grantDelegate = '';
-				grantName = '';
-				grantDescription = '';
-				grantOps = [];
-				await refresh();
-			} else {
-				error = res?.error || 'Grant failed';
-			}
-		} catch (e: any) {
-			error = e.message || 'Grant failed';
-		} finally {
-			granting = false;
-		}
-	}
-
-	function statusText(d: { status: string; starts_at?: number }) {
-		if (d.status === 'active' && d.starts_at && d.starts_at > Date.now() / 1000) return 'scheduled';
-		return d.status;
-	}
 
 	async function refresh() {
 		loading = true;
-		error = '';
 		await loadDelegations();
 		loading = false;
 	}
 
-	async function acceptOne(delegationId: string) {
+	async function change(done: string, act: () => Promise<{ success: boolean; error?: string }>) {
 		error = '';
 		message = '';
 		try {
-			await resolveDelegationBackend();
-			const res = await quarter.run('delegation_accept', { delegation: delegationId });
-			if (res.ok) {
-				message = 'Delegation accepted.';
+			const res = await act();
+			if (res.success) {
+				message = done;
 				await refresh();
 			} else {
-				error = res.error || 'Accept failed';
+				error = res.error || $_('delegation.page.failed');
 			}
-		} catch (e: any) {
-			error = e.message || 'Accept failed';
+		} catch (e) {
+			error = e instanceof Error ? e.message : $_('delegation.page.failed');
 		}
 	}
 
-	async function revokeOne(delegationId: string) {
+	const accept = (id: string) => change($_('delegation.page.accepted'), () => acceptDelegation(id));
+	const revoke = (id: string) => change($_('delegation.page.revoked'), () => revokeDelegation(id));
+
+	async function revokeAll() {
+		askingRevokeAll = false;
 		error = '';
 		message = '';
-		try {
-			await resolveDelegationBackend();
-			const res = await quarter.run('delegation_revoke', { delegation: delegationId });
-			if (res.ok) {
-				message = 'Delegation revoked.';
-				await refresh();
-			} else {
-				error = res.error || 'Revoke failed';
-			}
-		} catch (e: any) {
-			error = e.message || 'Revoke failed';
+		const res = await revokeAllDelegations().catch((e: Error) => ({ success: false, error: e.message, data: undefined }));
+		if (!res.success) {
+			error = res.error || $_('delegation.page.failed');
+			return;
 		}
+		message = $_('delegation.page.revoked_all', { values: { count: res.data?.revoked } });
+		await refresh();
 	}
 
-	function scopeSummary(scope: { all?: boolean; operations?: string[] }) {
-		if (scope?.all) return 'All operations (admin grantor only)';
-		const ops = scope?.operations || [];
-		return ops.length ? ops.join(', ') : '—';
+	function granted(pending: boolean) {
+		error = '';
+		message = pending ? $_('delegation.page.granted_pending') : $_('delegation.page.granted');
+		refresh();
 	}
 
-	function fmtExpiry(ts: number) {
-		if (!ts) return 'No expiry';
-		return new Date(ts * 1000).toLocaleString();
+	function statusText(d: { status: string; starts_at?: number }) {
+		if (d.status === 'active' && d.starts_at && d.starts_at > Date.now() / 1000) return $_('delegation.page.scheduled');
+		return d.status;
 	}
 
-	function fmtWindow(d: { starts_at?: number; expires_at: number }) {
-		const from = d.starts_at ? `From ${new Date(d.starts_at * 1000).toLocaleString()} · ` : '';
-		return `${from}Expires: ${fmtExpiry(d.expires_at)}`;
-	}
+	const labels = (scope: Scope) => scopeLabels(scope, groups, everything);
+	const expiry = (ts: number) => (ts ? fmtTime(ts) : $_('delegation.page.no_expiry'));
+	const period = (d: { starts_at?: number; expires_at: number }) =>
+		(d.starts_at ? $_('delegation.page.from', { values: { when: fmtTime(d.starts_at) } }) + ' · ' : '') +
+		$_('delegation.page.expires', { values: { when: expiry(d.expires_at) } });
 </script>
 
-<MetaTag {path} {title} {description} />
+{#snippet chips(scope: Scope)}
+	<p class="mt-1 flex flex-wrap gap-1">
+		{#each labels(scope) as label}
+			<span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{label}</span>
+		{/each}
+	</p>
+{/snippet}
+
+<MetaTag {path} title={$_('delegation.page.title')} description={$_('delegation.page.description')} />
 
 <div class="p-4 max-w-4xl mx-auto space-y-6">
-	<Heading tag="h1" class="text-2xl font-bold">Power of attorney</Heading>
-	<P class="text-gray-600">
-		Let another member, or an AI assistant you connected, act for you in this realm: only
-		with the permissions you tick, only between the start and expiry you set. Every action
-		is recorded as done on your behalf, and you can revoke it here at any time. No private
-		keys are shared.
-	</P>
+	<Heading tag="h1" class="text-2xl font-bold">{$_('delegation.page.title')}</Heading>
+	<P class="text-gray-600">{$_('delegation.page.intro')}</P>
 
-	{#if message}
-		<p class="text-green-700 text-sm">{message}</p>
-	{/if}
-	{#if error}
-		<p class="text-red-600 text-sm">{error}</p>
-	{/if}
+	{#if message}<p class="text-green-700 text-sm">{message}</p>{/if}
+	{#if error}<p class="text-red-600 text-sm" role="alert">{error}</p>{/if}
 
 	{#if loading}
 		<Spinner />
 	{:else if !$isAuthenticated}
-		<P>Sign in to manage delegations.</P>
+		<P>{$_('delegation.page.sign_in')}</P>
 	{:else}
-		<Card size="xl" class="shadow-sm">
-			<Heading tag="h2" class="text-lg mb-3">Grant power of attorney</Heading>
-			{#if delegableOps.length === 0}
-				<P class="text-gray-500 text-sm">
-					You hold no permissions in this realm that can be delegated.
-				</P>
-			{:else}
-				<form class="space-y-4" on:submit|preventDefault={submitGrant}>
-					<div>
-						<Label for="poa-delegate" class="mb-1">Grant to (principal)</Label>
-						<Input
-							id="poa-delegate"
-							bind:value={grantDelegate}
-							placeholder="xxxxx-xxxxx-…"
-							class="font-mono text-sm"
-						/>
-						<p class="mt-1 text-xs text-gray-500">
-							A member's principal, or the principal your AI assistant shows for its connection.
-						</p>
-					</div>
-					<div>
-						<Label for="poa-name" class="mb-1">Name</Label>
-						<Input id="poa-name" bind:value={grantName} placeholder="e.g. My Claude" maxlength={256} />
-					</div>
-					<div>
-						<Label for="poa-description" class="mb-1">Description</Label>
-						<Textarea
-							id="poa-description"
-							bind:value={grantDescription}
-							rows={2}
-							maxlength={2048}
-							placeholder="What it is for, e.g. vote on budget proposals while I travel"
-						/>
-					</div>
-					<fieldset>
-						<legend class="mb-2 text-sm font-medium text-gray-900">Permissions</legend>
-						<div class="space-y-2">
-							{#each delegableOps as op (op.operation)}
-								<Checkbox bind:group={grantOps} value={op.operation}>
-									<span>
-										<span class="font-medium">{op.label}</span>
-										<span class="block text-xs text-gray-500">{op.description}</span>
-									</span>
-								</Checkbox>
-							{/each}
-						</div>
-					</fieldset>
-					<div class="grid gap-4 sm:grid-cols-2">
-						<div>
-							<Label for="poa-starts" class="mb-1">Starts</Label>
-							<Input id="poa-starts" type="datetime-local" bind:value={grantStarts} />
-						</div>
-						<div>
-							<Label for="poa-expires" class="mb-1">Expires</Label>
-							<Input id="poa-expires" type="datetime-local" bind:value={grantExpires} />
-						</div>
-					</div>
-					<Button
-						type="submit"
-						color="none"
-						class={cn(styles.button.primary(), 'disabled:opacity-50')}
-						disabled={granting}
-					>
-						{#if granting}<Spinner size="4" class="me-2" />{/if}
-						Grant
-					</Button>
-				</form>
-			{/if}
-		</Card>
+		<WaitingForYou />
 
 		<Card size="xl" class="shadow-sm">
-			<Heading tag="h2" class="text-lg mb-3">Pending — accept to act on behalf</Heading>
-			{#if $pendingDelegations.length === 0}
-				<P class="text-gray-500 text-sm">No pending invitations.</P>
-			{:else}
-				<ul class="divide-y divide-gray-100">
-					{#each $pendingDelegations as d (d.id)}
-						<li class="py-3 flex flex-wrap items-center justify-between gap-2">
-							<div>
-								<p class="font-medium">{d.label || d.grantor}</p>
-								{#if d.description}<p class="text-sm text-gray-600">{d.description}</p>{/if}
-								<p class="text-xs text-gray-500">Scope: {scopeSummary(d.scope)}</p>
-								<p class="text-xs text-gray-500">{fmtWindow(d)}</p>
-							</div>
-							<div class="flex gap-2">
-								<Button size="sm" onclick={() => acceptOne(d.id)}>Accept</Button>
-								<Button size="sm" color="light" onclick={() => revokeOne(d.id)}>Decline</Button>
-							</div>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</Card>
-
-		<Card size="xl" class="shadow-sm">
-			<Heading tag="h2" class="text-lg mb-3">Granted to me (active)</Heading>
-			{#if $delegationsAsDelegate.filter((d) => d.status === 'active').length === 0}
-				<P class="text-gray-500 text-sm">None active.</P>
-			{:else}
-				<ul class="divide-y divide-gray-100">
-					{#each $delegationsAsDelegate.filter((d) => d.status === 'active') as d (d.id)}
-						<li class="py-3 flex flex-wrap items-center justify-between gap-2">
-							<div>
-								<p class="font-medium">{d.label || d.grantor}</p>
-								{#if d.description}<p class="text-sm text-gray-600">{d.description}</p>{/if}
-								<p class="text-xs text-gray-500">{scopeSummary(d.scope)}</p>
-								<p class="text-xs text-gray-500">{fmtWindow(d)}</p>
-							</div>
-							<div class="flex gap-2">
-								<Button size="sm" color="alternative" onclick={() => setActingOnBehalfOf(d.grantor)}>
-									Act as them
-								</Button>
-								<Button size="sm" color="light" onclick={() => revokeOne(d.id)}>Revoke</Button>
-							</div>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</Card>
-
-		<Card size="xl" class="shadow-sm">
-			<Heading tag="h2" class="text-lg mb-3">Granted by me</Heading>
+			<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+				<Heading tag="h2" class="text-lg">{$_('delegation.grants.title')}</Heading>
+				{#if $delegationsAsGrantor.some(open)}
+					{#if askingRevokeAll}
+						<div class="flex flex-wrap items-center gap-2" role="group" aria-label={$_('delegation.grants.revoke_all')}>
+							<span class="text-sm text-red-700">{$_('delegation.grants.revoke_all_ask')}</span>
+							<Button size="sm" color="red" onclick={revokeAll}>{$_('delegation.grants.revoke_all_yes')}</Button>
+							<Button size="sm" color="light" onclick={() => (askingRevokeAll = false)}>
+								{$_('delegation.grants.cancel')}
+							</Button>
+						</div>
+					{:else}
+						<Button size="sm" color="light" onclick={() => (askingRevokeAll = true)}>
+							{$_('delegation.grants.revoke_all')}
+						</Button>
+					{/if}
+				{/if}
+			</div>
 			{#if $delegationsAsGrantor.length === 0}
-				<P class="text-gray-500 text-sm">You have not granted any delegations.</P>
+				<P class="text-gray-500 text-sm">{$_('delegation.grants.none')}</P>
 			{:else}
 				<ul class="divide-y divide-gray-100">
 					{#each $delegationsAsGrantor as d (d.id)}
@@ -333,17 +170,89 @@
 							<div>
 								<p class="font-medium">{d.label || d.delegate}</p>
 								{#if d.description}<p class="text-sm text-gray-600">{d.description}</p>{/if}
-								<p class="text-xs text-gray-500 font-mono">→ {d.delegate}</p>
-								<p class="text-xs text-gray-500">Status: {statusText(d)} · {scopeSummary(d.scope)}</p>
-								<p class="text-xs text-gray-500">{fmtWindow(d)}</p>
+								<p class="text-xs text-gray-500 font-mono break-all">→ {d.delegate}</p>
+								{@render chips(d.scope)}
+								<p class="text-xs text-gray-500">{$_('delegation.page.status')}: {statusText(d)} · {period(d)}</p>
 							</div>
-							{#if d.status === 'active' || d.status === 'pending'}
-								<Button size="sm" color="light" onclick={() => revokeOne(d.id)}>Revoke</Button>
-							{/if}
+							<div class="flex gap-2">
+								<a
+									class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100"
+									href="#poa-activity"
+									onclick={() => (activityOf = d.id)}
+								>
+									{$_('delegation.grants.activity')}
+								</a>
+								{#if open(d)}
+									<Button size="sm" color="light" onclick={() => revoke(d.id)}>{$_('delegation.grants.revoke')}</Button>
+								{/if}
+							</div>
 						</li>
 					{/each}
 				</ul>
 			{/if}
 		</Card>
+
+		<div id="poa-activity">
+			{#if activityGrant}
+				<GrantActivity grantId={activityGrant.id} name={activityGrant.label || activityGrant.delegate} />
+			{:else}
+				<Card size="xl" class="shadow-sm">
+					<Heading tag="h2" class="text-lg mb-3">{$_('delegation.activity.heading')}</Heading>
+					<P class="text-gray-500 text-sm">{$_('delegation.activity.choose')}</P>
+				</Card>
+			{/if}
+		</div>
+
+		<Card size="xl" class="shadow-sm">
+			<Heading tag="h2" class="text-lg mb-3">{$_('delegation.page.pending_title')}</Heading>
+			{#if $pendingDelegations.length === 0}
+				<P class="text-gray-500 text-sm">{$_('delegation.page.pending_none')}</P>
+			{:else}
+				<ul class="divide-y divide-gray-100">
+					{#each $pendingDelegations as d (d.id)}
+						<li class="py-3 flex flex-wrap items-center justify-between gap-2">
+							<div>
+								<p class="font-medium">{d.label || d.grantor}</p>
+								{#if d.description}<p class="text-sm text-gray-600">{d.description}</p>{/if}
+								{@render chips(d.scope)}
+								<p class="text-xs text-gray-500">{period(d)}</p>
+							</div>
+							<div class="flex gap-2">
+								<Button size="sm" onclick={() => accept(d.id)}>{$_('delegation.page.accept')}</Button>
+								<Button size="sm" color="light" onclick={() => revoke(d.id)}>{$_('delegation.page.decline')}</Button>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</Card>
+
+		<Card size="xl" class="shadow-sm">
+			<Heading tag="h2" class="text-lg mb-3">{$_('delegation.page.to_me_title')}</Heading>
+			{#if activeToMe.length === 0}
+				<P class="text-gray-500 text-sm">{$_('delegation.page.to_me_none')}</P>
+			{:else}
+				<ul class="divide-y divide-gray-100">
+					{#each activeToMe as d (d.id)}
+						<li class="py-3 flex flex-wrap items-center justify-between gap-2">
+							<div>
+								<p class="font-medium">{d.label || d.grantor}</p>
+								{#if d.description}<p class="text-sm text-gray-600">{d.description}</p>{/if}
+								{@render chips(d.scope)}
+								<p class="text-xs text-gray-500">{period(d)}</p>
+							</div>
+							<div class="flex gap-2">
+								<Button size="sm" color="alternative" onclick={() => setActingOnBehalfOf(d.grantor)}>
+									{$_('delegation.page.act_as')}
+								</Button>
+								<Button size="sm" color="light" onclick={() => revoke(d.id)}>{$_('delegation.grants.revoke')}</Button>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</Card>
+
+		<GrantForm {groups} {prefill} ongranted={granted} />
 	{/if}
 </div>

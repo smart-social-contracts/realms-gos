@@ -5,6 +5,7 @@
 	import Footer from './Footer.svelte';
 	import DemoBanner from '$lib/components/DemoBanner.svelte';
 	import DelegationBanner from '$lib/components/DelegationBanner.svelte';
+	import ApprovalSentNotice from '$lib/components/ApprovalSentNotice.svelte';
 	import PageBreadcrumb from '$lib/components/PageBreadcrumb.svelte';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
@@ -262,6 +263,7 @@
 				></div>
 			{/if}
 			<DelegationBanner />
+			<ApprovalSentNotice />
 
 			<div
 				class="{isFullBleedExtension ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : ''}"

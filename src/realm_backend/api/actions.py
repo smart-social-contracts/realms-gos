@@ -1,10 +1,12 @@
 """Pending actions (core.pending): what a member reads and decides, and what a delegate prepares and collects.
 
-An action is shown as a card: ``id`` (AC-<n>), ``grantor`` (the member), ``delegate``, ``grant``, ``method`` and ``args`` (the
-exact call), ``summary`` (the realm's own words: ``[{label, value}]``), ``risk``, ``note`` (the delegate's own words, to be
-shown apart), ``status`` (pending, approved, approving, done, failed, declined, withdrawn, expired or void), ``hash``,
-``filed_at``, ``expires_at``, ``decided_at`` and ``result`` (the reply of the call once it ran, ``{ok, ...}``, without its
-secrets). The member decides on the page ``/delegations/confirm/<id>`` of the realm.
+An action is shown as a card: ``id`` (AC-<n>), ``grantor`` (the member), ``delegate``, ``grant``, ``method`` and
+``args`` (the exact call), ``title`` (the operation's plain name, written by the realm), ``delegate_is_member`` (the
+delegate is a member of the realm, not an AI connection), ``summary`` (the realm's own words: ``[{label, value}]``),
+``risk``, ``note`` (the delegate's own words, to be shown apart), ``status`` (pending, approved, approving, done,
+failed, declined, withdrawn, expired or void), ``hash``, ``filed_at``, ``expires_at``, ``decided_at`` and ``result``
+(the reply of the call once it ran, ``{ok, ...}``, without its secrets). The member decides on the page
+``/delegations/confirm/<id>`` of the realm.
 
 In ``summary``, a line whose label is a lower-case word is an argument of the call, with the value the delegate gave it:
 a client shows these apart from the realm's own lines, whose labels have several words ("What changes", "What happens

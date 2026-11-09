@@ -546,6 +546,9 @@ def check(monkeypatch):
         "ggg_operations",
         lambda: frozenset({"user_add"}) | legislation.INTERIM_OPERATIONS,
     )
+    monkeypatch.setattr(
+        legislation, "fact_schema", lambda: {}
+    )  # these trees hold no forbid
 
     def run(tree):
         return CliRunner().invoke(legislation_app, ["check", str(tree)])
