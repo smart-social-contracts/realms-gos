@@ -51,6 +51,16 @@ def window():
     return cal.voting_window if cal else 7 * 86400
 
 
+def window_of(action):
+    """Seconds the proposal that carries ``action`` stays open: the realm's, except that a vote to revert to a codex runs
+    under the window recorded with that codex, as it follows its rule (``default_rule``): a codex that lengthens the
+    window cannot stall the revert that undoes it."""
+    from api import codex
+
+    recorded = codex.recorded_rule(action)
+    return recorded["window"] if recorded else window()
+
+
 def check_action(action):
     """An action must name a known operation and no ``on_behalf_of``: it runs once accepted as its proposer (see
     run_action), not as a member picked by whoever filed it."""
@@ -142,11 +152,20 @@ def filed_for(p, member):
     return grant.grantor == member if grant else bool(p.prepared_by) and p.proposer == member
 
 
+RULE = ("threshold", "quorum", "threshold_of", "casting_vote")
+
+
 def realm_rule():
     """The realm's own rule: over the votes cast, with the casting vote of its governed configuration."""
     rules = settings()
     return {"threshold": int(rules.get("voting_threshold", ONE // 2)), "quorum": int(rules.get("voting_quorum", 0)),
             "threshold_of": "cast", "casting_vote": rules.get("casting_vote", "")}
+
+
+def rule_to_record():
+    """What a codex records when it becomes active: the realm's rule and its voting window, for a vote to revert to
+    it (docs/codices/layered-codex.md §10.1)."""
+    return {**realm_rule(), "window": window()}
 
 
 def default_rule(department, action=None):
@@ -158,7 +177,8 @@ def default_rule(department, action=None):
     if department.is_root:
         from api import codex
 
-        return codex.recorded_rule(action) or realm_rule()
+        recorded = codex.recorded_rule(action)
+        return {name: recorded[name] for name in RULE} if recorded else realm_rule()
     policy = department.policy or {}
     return {"threshold": int(policy.get("m", 1)) * ONE // int(policy.get("n", 1)),
             "quorum": int(policy.get("quorum", 0)), "threshold_of": "eligible", "casting_vote": ""}
@@ -220,13 +240,14 @@ def new_proposal(title, user, by, department, action=None, description="", effec
     it takes the default rule of its scope. ``prepared_by``: the delegate whose pending action the proposer approved."""
     stated = stated or {}
     rule = stricter_rule(department, stated, action)
+    seconds = window_of(action)
     pid = next_id(Proposal, "P")
     fix_records(action, pid)  # the last refusal: a refused proposal leaves no trace
     p = Proposal(id=pid, title=title, description=description, proposer=user,
                  on_behalf_of=user if by != user else "", filed_under=grant, prepared_by=prepared_by,
                  department=department, action=action,
                  kind=stated.get("kind") or "", matter=stated.get("matter") or "", status="voting",
-                 opens_at=chain.now(), deadline=chain.now() + window() if window() else 0,
+                 opens_at=chain.now(), deadline=chain.now() + seconds if seconds else 0,
                  effective_at=effective_at, links=list(links), **rule)
     for link in links:
         ProposalEdge(id=next_id(ProposalEdge, "L"), source=p.id, target=link["proposal"], kind=link["kind"])

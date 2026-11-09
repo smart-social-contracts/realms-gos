@@ -22,8 +22,8 @@ class LayeredCodex(Row):
     activates_at = Integer(default=0)  # seconds: when a pending codex takes effect
     installed_at = Integer(default=0)
     proposal = String(default="")  # the proposal that adopted it
-    # The realm's rule over the votes cast as it was when this codex became active: what decides a vote to revert to it
-    # (§10.1). {} for a codex that became active before the realm recorded it.
+    # The realm's rule over the votes cast and its voting window as they were when this codex became active: what decides
+    # a vote to revert to it (§10.1). {} for a codex that became active before the realm recorded them.
     voting_rule = Json({})
     # {chapter file: {method: {count, error, at}}}: the methods failing now, cleared as each succeeds again (§9.3)
     failures = Json({})

@@ -113,7 +113,8 @@ def test_a_revert_vote_follows_the_rule_recorded_with_the_codex_restored_whateve
     assert one.voting_rule["threshold"] == 60 * PERCENT  # recorded when the codex became active
     settings(50 * PERCENT)
     two, = installed("1.1.0")
-    assert two.voting_rule == {"threshold": 50 * PERCENT, "quorum": 0, "threshold_of": "cast", "casting_vote": ""}
+    assert two.voting_rule == {"threshold": 50 * PERCENT, "quorum": 0, "threshold_of": "cast", "casting_vote": "",
+                               "window": 7 * DAY}
     settings(100 * PERCENT, 100 * PERCENT)  # the rules the codex now running left behind
     revert = ok("proposal_create", "alice", title="back", action={"op": "codex_revert", "args": {"codex": "test@1.0.0"}})
     assert rule_of(revert["proposal"]) == (60 * PERCENT, 25 * PERCENT, "dana")
@@ -125,6 +126,29 @@ def test_a_revert_vote_follows_the_rule_recorded_with_the_codex_restored_whateve
     weaker = call("proposal_create", "alice", title="back", threshold=10 * PERCENT,
                   action={"op": "codex_revert", "args": {"codex": "test@1.0.0"}})
     assert "weaker" in weaker["error"]
+
+
+def test_a_revert_vote_runs_under_the_window_recorded_with_the_codex_restored():
+    build()
+    ok("governance_update", "ctl", voting_window=2 * DAY)
+    one, = installed("1.0.0")
+    assert one.voting_rule["window"] == 2 * DAY
+    ok("governance_update", "ctl", voting_window=400 * DAY)  # what a codex that would stall its own revert leaves behind
+    installed("1.1.0")
+    revert = ok("proposal_create", "alice", title="back", action={"op": "codex_revert", "args": {"codex": "test@1.0.0"}})
+    other = ok("proposal_create", "alice", title="other")
+    assert Proposal[revert["proposal"]].deadline - Proposal[revert["proposal"]].opens_at == 2 * DAY
+    assert Proposal[other["proposal"]].deadline - Proposal[other["proposal"]].opens_at == 400 * DAY
+
+
+def test_a_window_of_no_deadline_is_recorded_too():
+    build()
+    ok("governance_update", "ctl", voting_window=0)
+    installed("1.0.0")
+    ok("governance_update", "ctl", voting_window=3 * DAY)
+    installed("1.1.0")
+    revert = ok("proposal_create", "alice", title="back", action={"op": "codex_revert", "args": {"codex": "test@1.0.0"}})
+    assert Proposal[revert["proposal"]].deadline == 0  # it ends once its outcome is certain
 
 
 def test_a_codex_keeps_the_rule_it_was_recorded_with_when_it_is_restored():
@@ -141,13 +165,15 @@ def test_a_codex_keeps_the_rule_it_was_recorded_with_when_it_is_restored():
     assert rule_of(revert["proposal"])[0] == 60 * PERCENT
 
 
-def test_a_codex_with_no_recorded_rule_is_restored_under_the_rule_in_force():
+def test_a_codex_with_no_recorded_rule_is_restored_under_the_rule_and_window_in_force():
     build()
     one, two = installed("1.0.0", "1.1.0")
     one.voting_rule = {}  # it became active before the realm recorded rules
     settings(70 * PERCENT)
+    ok("governance_update", "ctl", voting_window=5 * DAY)
     revert = ok("proposal_create", "alice", title="back", action={"op": "codex_revert", "args": {"codex": one.id}})
     assert rule_of(revert["proposal"])[0] == 70 * PERCENT
+    assert Proposal[revert["proposal"]].deadline - Proposal[revert["proposal"]].opens_at == 5 * DAY
 
 
 # ── The IT admin team: a department the admins designate ─────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ from ggg import Codex, InstallJob, LayeredCodex, Realm
 from core.op import op
 from api import extensions
 from api.extensions import checksum, trust
-from api.proposals import realm_rule, realm_wide
+from api.proposals import realm_wide, rule_to_record
 
 API = 2  # the hook contract codices declare as `codex_api_version`
 SHOWN = ("id", "version", "status", "checksum", "capabilities", "installed_at", "previous")
@@ -93,9 +93,9 @@ def compute(name, context, decimals=None):
 
 def switch_to(row, replaced):
     """Make ``row`` the active codex in place of ``replaced``, which is kept to revert to, and record the realm's voting
-    rule with it: the rule that will decide a vote to revert to this codex (§10.1)."""
+    rule and window with it: what will decide a vote to revert to this codex (§10.1)."""
     row.previous, row.status = replaced.id if replaced else "", "active"
-    row.voting_rule = realm_rule()
+    row.voting_rule = rule_to_record()
     if replaced:
         replaced.status = "inactive"
 
@@ -231,7 +231,7 @@ def only_previous(target):
 def restore(target):
     """The revert: ``target``, an earlier codex of either kind, is the active codex again and the one it replaces is
     reverted. No ``on_codex_activate`` hook runs (§10.5), and nothing else about the codex changes: it keeps the voting
-    rule it was recorded with. Returns ``codex``."""
+    rule and window it was recorded with. Returns ``codex``."""
     if isinstance(target, Codex):
         runnable(target.manifest or {})
     current = active()
@@ -242,9 +242,9 @@ def restore(target):
 
 
 def recorded_rule(action):
-    """The rule recorded with the codex that ``action`` restores, when it is a ``codex_revert`` and that codex has one:
-    the rule that decides its vote (§10.1). None for any other action, and for a codex that became active before the
-    realm recorded rules."""
+    """The rule and window recorded with the codex that ``action`` restores, when it is a ``codex_revert`` and that
+    codex has them: what decides its vote (§10.1). None for any other action, and for a codex that became active before
+    the realm recorded rules: its vote follows the rule and window in force."""
     if not (isinstance(action, dict) and action.get("op") == "codex_revert" and (action.get("args") or {}).get("codex")):
         return None
     return named(action["args"]["codex"]).voting_rule or None

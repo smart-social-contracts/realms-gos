@@ -1,9 +1,9 @@
 """The revert floor and the IT admin team on the real wasm (docs/codices/layered-codex.md §10, realms-gos#490).
 
 A codex that forbids everything and whose guards refuse every proposal and vote is still reverted: by a vote of the
-members, two codices back and with nothing downloaded, decided by the rule recorded with the codex restored and not by
-the settings the realm has now; and by the IT admin team, under the policy of its department, to the previous codex
-only. No codex changes the team, and the team is told when a codex method fails. The tests run in order on one realm.
+members, two codices back and with nothing downloaded, decided by the rule and window recorded with the codex restored
+and not by the settings the realm has now; and by the IT admin team, under the policy of its department, to the
+previous codex only. No codex changes the team, and the team is told when a codex method fails. The tests run in order on one realm.
 """
 
 import json
@@ -118,8 +118,9 @@ def test_a_there_is_no_fast_revert_while_the_admins_have_designated_no_team(real
     ctl, alice = people["ctl"], people["alice"]
     ok(realm, "governance_update", ctl, voting_threshold=50 * PERCENT)
     first = switch(realm, (TOWN, "water", HARMLESS % "good"))
-    assert first["rule"]["threshold"] == 50 * PERCENT  # the rule in force when it became active, recorded with it
-    ok(realm, "governance_update", ctl, voting_threshold=100 * PERCENT)  # what the codexes after it leave behind
+    assert (first["rule"]["threshold"], first["rule"]["window"]) == (50 * PERCENT, 0)  # in force when it became active
+    # What the codexes after it leave behind: a rule nobody can pass and a window that would stall a revert.
+    ok(realm, "governance_update", ctl, voting_threshold=100 * PERCENT, voting_window=30 * DAY)
     blocker(realm, "one")
     blocker(realm, "two")
     refused = realm.call("codex_revert_fast", {}, sender=ctl)  # a holder of the permission, were there a team
@@ -148,13 +149,16 @@ def test_c_a_member_vote_reverts_two_codexes_back_under_the_rule_recorded_with_t
     pid = ok(realm, "proposal_create", alice, title="revert", action=action)["proposal"]  # no guard, no forbid
     proposal = ok(realm, "proposal_get", alice, query=True, proposal=pid)["proposal"]
     assert proposal["threshold"] == 50 * PERCENT  # the first codex's rule, not the 100 % the realm has now
+    assert proposal["deadline"] == 0  # and its window: no deadline, the vote ends once its outcome is certain
     assert realm.call("proposal_create", {"title": "revert", "action": {"op": "codex_revert", "args": {}}},
                       sender=alice)["kind"] == "invalid_argument"  # a filed revert names the codex it restores
     for voter in (founder, alice, bob):  # three of four: more than half, so that nothing more is awaited
         ok(realm, "proposal_vote", voter, proposal=pid, choice="yes")
     assert ok(realm, "proposal_get", alice, query=True, proposal=pid)["proposal"]["status"] == "executed"
     assert status(realm, alice)["codex"]["id"] == first
-    assert ok(realm, "proposal_create", alice, title="the realm runs on its own rule again")["proposal"]
+    plain = ok(realm, "proposal_create", alice, title="the realm runs on its own rule again")["proposal"]
+    now = ok(realm, "proposal_get", alice, query=True, proposal=plain)["proposal"]
+    assert (now["threshold"], now["deadline"] > 0) == (100 * PERCENT, True)
 
 
 def test_d_the_team_reverts_fast_to_the_previous_codex_only_under_its_own_policy(realm, people):

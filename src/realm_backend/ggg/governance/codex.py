@@ -15,8 +15,9 @@ class Codex(Row):
     source = String(default="")
     installed_at = Integer(default=0)
     previous = String(default="")
-    # The realm's rule over the votes cast as it was when this codex became active: what decides a vote to revert to it
-    # (docs/codices/layered-codex.md §10.1). {} for a codex that became active before the realm recorded it.
+    # The realm's rule over the votes cast and its voting window as they were when this codex became active: what decides
+    # a vote to revert to it (docs/codices/layered-codex.md §10.1). {} for a codex that became active before the realm
+    # recorded them.
     voting_rule = Json({})
 
     @classmethod

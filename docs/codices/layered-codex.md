@@ -1228,7 +1228,7 @@ New entities, beside today's `Codex` ([`api/codex.py`](../../src/realm_backend/a
 ```
 LayeredCodex { id; layers; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, route, fetched_at, url, size}};
            previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal;
-           voting_rule (the realm's rule when it became active, §10.1) }
+           voting_rule (the realm's rule and voting window when it became active, §10.1) }
 ChapterSource { sha256 (key); source text }            the downloaded bytes, stored once
 InstallJob { id; proposal; change_list {url, checksum}; step; staged; status: running | paused | failed | done; error; started_at; finished_at }
 ```
@@ -1604,10 +1604,11 @@ proposal's `effective_at` (§5.2).
    replaced). It needs no download: every codex's chapters are in `ChapterSource`. Filed as a proposal, it
    names the codex it restores, found when it is filed, so that what is voted on is what runs; a
    `proposal_create` that carries a revert naming none is refused. The proposal's voting rules are those of
-   **the codex being restored**: the realm records its rule (threshold, quorum and casting vote) with each
-   codex when it becomes active, and a revert vote follows the rule recorded with the codex it restores, so a
-   bad codex can't change the rules for undoing itself. A revert does not record it again, and a codex that
-   became active before rules were recorded is restored under the rule in force.
+   **the codex being restored**: the realm records its rule (threshold, quorum and casting vote) and its
+   voting window with each codex when it becomes active, and a revert vote follows the rule and runs under the
+   window recorded with the codex it restores, so a bad codex can't change the rules for undoing itself, nor
+   lengthen the window to stall it. A revert does not record them again. A codex that became active before
+   they were recorded has none: its revert is decided by the realm's current rule and window.
 2. **IT admin team:** a **department the realm admins designate** (`it_team_set { department }`), so that the
    realm hardcodes no structure, no size and no m-of-n: its seats and its policy (m of n, quorum, veto) are
    whatever the admins set, and the votes, vetoes, audit and power-of-attorney rules that already exist apply.
