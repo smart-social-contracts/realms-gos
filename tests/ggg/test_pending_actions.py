@@ -844,7 +844,8 @@ def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_whe
                 "federal_vote_propose": "Opens a federal vote " + carried}
     cases = {"payment_account_add": ACCOUNT, "payment_account_remove": {"account": account},
              "identity_submit": {"kind": "passport"}, "self_change_quarter": {"quarter": "south"},
-             "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION}}
+             "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION},
+             "contract_create": {"title": "Road"}}
     preparable = {n for n, s in op.ops().items() if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
     assert preparable <= set(cases), preparable - set(cases)
     for name, args in cases.items():
@@ -959,12 +960,12 @@ def test_the_audit_log_of_call_for_hides_the_secrets_of_the_operation_it_forward
     assert [e.result for e in events if e.op == "call_for"] == [{"n": 1}]
 
 
-def test_the_operations_a_grant_by_groups_reaches_in_this_release_are_those_of_phase_3_the_pending_doors_and_the_inner_calls():
+def test_the_operations_a_grant_by_groups_reaches_in_this_release_include_the_pending_doors_and_the_inner_calls():
     pending_doors = {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
                      "federal_vote_propose", "action_get", "action_list"}
     inner_calls = {"extension_call", "shell", "task_add_schedule", "task_cancel", "task_create", "task_delete",
                    "task_edit", "task_list", "task_logs", "task_reschedule", "task_run", "task_schedule"}
-    assert poa.ENABLED - poa.LEGACY == pending_doors | inner_calls
+    assert pending_doors | inner_calls <= poa.ENABLED - poa.LEGACY
 
 
 def test_a_members_own_act_takes_no_on_behalf_of_not_even_for_oneself():

@@ -1,6 +1,6 @@
 from core import chain, language, poa
 from core.db import Fail, Forbidden, deref, find, next_id, page_by, ref, view
-from ggg import Event, External, Notification, User
+from ggg import Delegation, Event, External, Notification, User
 from core.op import op, ops
 from api.external import queue
 from api.proposals import appointed
@@ -21,11 +21,13 @@ def in_language(n, tag):
 
 
 def addressed_to(c):
-    """The recipients whose notifications the caller reads: themselves and where they hold a seat. A delegate reads
-    only the member's own: the inboxes of an office belong to the people who hold its seats."""
+    """The recipients whose notifications the caller reads: themselves and where they hold a seat. A delegate reads the
+    member's own, and the inbox of an office or organization only when its grant names that one (core.poa.reads_inbox):
+    the inboxes of an office belong to the people who hold its seats."""
+    seats = {ref(a.position.department or a.position.organization) for a in appointed(c.user)}
     if c.delegated:
-        return {f"User:{c.user}"}
-    return {f"User:{c.user}"} | {ref(a.position.department or a.position.organization) for a in appointed(c.user)}
+        return {f"User:{c.user}"} | {r for r in seats if poa.reads_inbox(Delegation[c.grant], r)}
+    return {f"User:{c.user}"} | seats
 
 
 def inbox(c, args):

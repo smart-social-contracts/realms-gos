@@ -47,7 +47,7 @@ def scope_of(args):
 def check_names(scope, grantor=None):
     """Refuse a scope that cannot be granted; ``grantor`` must hold what it names."""
     if "groups" in scope:
-        poa.check_groups(scope["groups"], auth.permissions(grantor) if grantor else None)
+        poa.check_groups(scope["groups"], grantor)
     else:
         check_scope(scope["operations"], grantor)
 
@@ -132,9 +132,10 @@ def issue(grantor, delegate, scope, starts, expires, by, args, acceptance):
 @op("self.delegate", returns="delegation")
 def delegation_grant(c, args):
     """Let ``delegate`` act for you with ``groups`` (ids from ``delegable_operations``, in each of which you hold an
-    operation, or "*" for everything) or with ``operations`` (permission names you hold, as before groups), not both,
-    from ``starts_at`` (default now) until ``expires_at`` or for ``expires_in`` seconds, at most the shortest of the
-    groups' longest, and a year; optional ``label`` and ``description``.
+    operation, such as "vote" or, for one department you sit in or one organization you administer, "office:Health" or
+    "orgs:clinic-b"; or "*" for everything) or with ``operations`` (permission names you hold, as before groups), not
+    both, from ``starts_at`` (default now) until ``expires_at`` or for ``expires_in`` seconds, at most the shortest of
+    the groups' longest, and a year; optional ``label`` and ``description``.
     Returns ``delegation`` and ``status``: pending until a delegate who is a user accepts, otherwise active at once."""
     delegate, scope = args["delegate"], scope_of(args)
     if delegate == c.user:
@@ -260,7 +261,7 @@ def delegable_operations(c, args):
     permission to name. ``groups``: the groups a grant can name (``delegation_groups``)."""
     return {"operations": sorted(({"op": n, "permission": s["perm"]} for n, s in ops().items()
                                   if poa.is_legacy(n, s) and not s["signing"]), key=lambda o: o["op"]),
-            "groups": poa.vocabulary(auth.permissions(c.user))}
+            "groups": poa.vocabulary(c.user)}
 
 
 @op("self.data_view", read=True, returns="groups")
@@ -270,7 +271,7 @@ def delegation_groups(c, args):
     (``confirms``), and the ``operations`` in it you hold, each with its ``tier`` (direct or confirm). A grant may also
     name "*" for everything. ``next`` continues the list (null at the end)."""
     start, count = paging(args)
-    groups = poa.vocabulary(auth.permissions(c.user))
+    groups = poa.vocabulary(c.user)
     return {"groups": groups[start - 1:start - 1 + count], "next": start + count if len(groups) >= start + count else None}
 
 

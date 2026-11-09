@@ -50,12 +50,13 @@ def test_a_group_grant_covers_its_groups_enabled_operations_and_nothing_else():
     assert "does not cover" in denied("proposal_create", "claude-conn", title="x", on_behalf_of="alice")
 
 
-def test_an_operation_of_the_group_that_is_not_enabled_yet_is_refused():
+def test_an_operation_of_the_group_that_is_not_enabled_yet_is_refused(monkeypatch):
     world.build()
     grant("see")
     assert ok("me", "claude-conn", on_behalf_of="alice")["user"]["id"] == "alice"
-    # proposal_list is a direct operation of the see group; a later phase switches it on.
-    assert poa.row("proposal_list")[:2] == ("direct", "see") and "proposal_list" not in poa.ENABLED
+    # proposal_list is a direct operation of the see group, which a phase of the rollout may not have switched on yet.
+    assert poa.row("proposal_list")[:2] == ("direct", "see")
+    monkeypatch.setattr(poa, "ENABLED", poa.ENABLED - {"proposal_list"})
     assert "does not cover" in denied("proposal_list", "claude-conn", on_behalf_of="alice")
 
 
@@ -126,8 +127,8 @@ def test_an_old_grant_of_self_data_view_does_not_reach_attributes():
 
 def test_ops_list_says_which_operations_a_power_of_attorney_reaches_now():
     flags = {o["name"]: o["delegable"] for o in ok("ops_list", fake_chain.ANONYMOUS)["operations"]}
-    assert flags["proposal_vote"] and not flags["proposal_list"] and not flags["attribute_list"]
-    assert not flags["delegation_revoke_all"] and not flags["status"]
+    assert flags["proposal_vote"] and flags["proposal_list"] and flags["attribute_list"]
+    assert not flags["delegation_revoke_all"] and not flags["setup_launch"] and not flags["status"]
 
 
 # ---- What a grant cannot say
@@ -139,7 +140,7 @@ def test_grants_that_cannot_be_made():
     assert "not both" in denied("delegation_grant", "alice", groups=["vote"], operations=["proposal.vote"], **base)
     assert "name at least one" in denied("delegation_grant", "alice", **base)
     assert "not a group" in denied("delegation_grant", "alice", groups=["vote", "nonsense"], **base)
-    assert "not a group" in denied("delegation_grant", "alice", groups=["office:Health"], **base)
+    assert "you hold no seat in Health" in denied("delegation_grant", "alice", groups=["office:Health"], **base)
     assert "cannot be granted yet" in denied("delegation_grant", "alice", groups=["keys"], **base)
     assert "nothing in money" in denied("delegation_grant", "alice", groups=["money"], **base)
     assert "one year" in denied("delegation_grant", "alice", groups=["vote"], delegate="claude-conn",
