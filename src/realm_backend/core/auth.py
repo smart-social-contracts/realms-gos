@@ -229,6 +229,15 @@ def refuse_forbidden(user, name, spec, args, proposal):
             raise Denied(f"{name} is forbidden by the legislation: {label}{refused_by(legislation.firing(action, facts))}")
 
 
+def refuse_forbidden_action(user, action):
+    """``refuse_forbidden`` for the call an ``action`` (``{op, args}``) carries to a vote or a replay: asked where it is
+    filed or prepared, before it fixes anything, and asked again when it runs. ``action`` names an operation of the
+    realm (api.proposals.check_action)."""
+    from core.op import ops  # it imports this module
+
+    refuse_forbidden(user, action["op"], ops()[action["op"]], action.get("args") or {}, "")
+
+
 def refused_by(firing):
     """``: refused by <id> (<citation>)`` for the forbids that fired (core.legislation.firing), or nothing."""
     by = ", ".join(f["id"] + (f" ({f['legislation']})" if f["legislation"] else "") for f in firing)

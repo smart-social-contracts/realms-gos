@@ -75,9 +75,7 @@ def prepare(grant, user, by, name, spec, args, note=""):
     auth.refuse_forbidden(user, name, spec, {**args, "on_behalf_of": user}, "")  # a forbidden action is never prepared
     carried = args.get("action") if name in CARRIES else None
     if isinstance(carried, dict) and carried.get("op") in ops() and isinstance(carried.get("args") or {}, dict):
-        from api import proposals  # it imports this module
-
-        proposals.refuse_forbidden_action(user, carried)  # nor one that carries a forbidden call to the vote
+        auth.refuse_forbidden_action(user, carried)  # nor one that carries a forbidden call to the vote
     ranges.check(name, args)
     if spec["check"]:
         spec["check"](args)
