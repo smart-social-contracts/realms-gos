@@ -397,7 +397,8 @@ def diff_command(
 
     Needs the pinned Cedar CLI and cvc5 (CEDAR_CLI, CVC5; scripts/cedar_tools.sh). Exits 1 when the report lists a
     failure: a forbid that can error, a nothing-permitted operation, a forbid that never fires, a query the solver did
-    not decide, a codex that does not load or a test case that fails.
+    not decide, a codex that does not load or a test case that fails. Exits 2 for a refusal: a realm or commit that
+    is not there, missing tools.
     """
     try:
         tools = cedar_tools("analysis of a change")

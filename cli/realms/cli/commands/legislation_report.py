@@ -18,8 +18,9 @@ from realms.cli.commands.legislation_diff import (
     ActionResult,
     analyse_action,
     folded_line,
+    request_of,
 )
-from realms.cli.commands.legislation_layout import git
+from realms.cli.commands.legislation_layout import CASES_SUFFIX, git
 from realms.cli.commands.legislation_load import CommitFiles, layers_of, load_realm
 from realms.cli.commands.legislation_proof import Solver
 from realms.cli.commands.legislation_resolve import view_lines
@@ -45,15 +46,18 @@ class RealmDiff:
         default_factory=dict
     )  # domain: lines before and after
     cases: List[tuple] = field(default_factory=list)
+    undecided: List[str] = field(
+        default_factory=list
+    )  # questions of the flattened view the solver did not decide
 
     def failures(self) -> List[str]:
         out = [f"{self.realm}: {p}" for p in self.problems]
         out += [
             f"{self.realm}: {f}" for r in self.folded + self.open for f in r.failures()
         ]
-        return out + [
-            f"{self.realm}: {which}: {why}" for which, why in self.cases if why
-        ]
+        out += [f"{self.realm}: undecided: {u}" for u in self.undecided]
+        out += [f"{self.realm}: {which}: {why}" for which, why in self.cases if why]
+        return list(dict.fromkeys(out))  # the same failure of both runs is one
 
     def warnings(self) -> List[str]:
         return [
@@ -79,15 +83,20 @@ def change_list_commit(data: dict) -> str:
 
 
 def changed_files(tree, base: str, head: str) -> Dict[str, Set[str]]:
-    """The chapters (``tax``) and calendars (``calendar``) that differ between two commits, by source."""
+    """The chapters (``tax``), their test cases (``tax.cases.json``) and calendars (``calendar``) that differ between
+    two commits, by source."""
     out = git(
         tree, "diff", "--name-only", "--relative", base, head, "--", "./"
     ).decode()
     changed: Dict[str, Set[str]] = {}
     for line in out.splitlines():
         path = PurePosixPath(line)
-        if path.suffix == ".py" and not path.name.endswith(".cases.json"):
+        if path.suffix == ".py":
             changed.setdefault(path.parent.as_posix(), set()).add(path.stem)
+        elif path.name.endswith(CASES_SUFFIX):  # the cases of a chapter: its change
+            changed.setdefault(path.parent.as_posix(), set()).add(
+                path.name[: -len(CASES_SUFFIX)]
+            )
         elif path.name == "calendar.json":
             changed.setdefault(path.parent.as_posix(), set()).add("calendar")
     return changed
@@ -114,7 +123,12 @@ class Comparison:
         """The realms (sources at the head commit) with a changed source among their layers, or ``only``."""
         known = self.new.sources()
         if only:
-            return [r for r in only if r in known]
+            unknown = [r for r in only if r not in known]
+            if unknown:
+                raise LegislationError(
+                    f"{', '.join(unknown)} has no source.json in the tree at the head commit"
+                )
+            return list(only)
         return [r for r in known if any(s in self.changed for s in layers_of(r, known))]
 
     def realm(self, realm: str) -> RealmDiff:
@@ -127,6 +141,16 @@ class Comparison:
         if result.problems:
             return result
         old, new = old[0] if old else None, new[0]
+        for codex, what in (
+            (old, "does not load at the base commit"),
+            (new, "does not load"),
+        ):
+            try:
+                codex and codex.forbids()  # a forbid that does not bind is a refusal of this realm
+            except LegislationError as e:
+                result.problems.append(f"{what}: {e}")
+        if result.problems:
+            return result
         result.domains = self.reached(realm, new)
         result.cedar = cedar_diff(old, new)
         actions = sorted(
@@ -138,7 +162,7 @@ class Comparison:
                 realm in self.changed
             ):  # the source itself: once more, for every realm that runs it
                 result.open = self.analyse(realm, old, new, actions, generic=True)
-        result.views = self.views(realm, old, new, result.domains, result.folded)
+        result.views = self.views(old, new, result.domains, result.undecided)
         result.cases = case_results(
             self.new, new, realm, lambda ggg: self.load(self.new, realm, ggg)[0]
         )
@@ -179,18 +203,25 @@ class Comparison:
         ]
 
     def views(
-        self, realm, old, new, domains, folded
+        self, old, new, domains, undecided: List[str]
     ) -> Dict[str, Tuple[List[str], List[str]]]:
         views = {}
         for domain in domains:
             views[domain] = (
                 self.view(old, domain),
-                self.view(new, domain, with_maxima=True),
+                self.view(new, domain, undecided, with_maxima=True),
             )
         return views
 
-    def view(self, codex, domain: str, with_maxima: bool = False) -> List[str]:
-        """The flattened view of ``domain`` (§5.9) in ``codex``; with the folded line under each forbid that has one."""
+    def view(
+        self,
+        codex,
+        domain: str,
+        undecided: Optional[List[str]] = None,
+        with_maxima: bool = False,
+    ) -> List[str]:
+        """The flattened view of ``domain`` (§5.9) in ``codex``; with the folded line under each forbid that has one. A
+        folded line the solver cannot decide is added to ``undecided``."""
         if codex is None or domain not in codex.chapters:
             return []
         view = flatten(codex, domain)
@@ -207,7 +238,7 @@ class Comparison:
             out.append(line)
             forbid = bound.get(member["name"])
             maximum = (
-                folded_line(solver, codex, forbid, forbid.actions[0])
+                folded_line(solver, codex, forbid, forbid.actions[0], undecided)
                 if forbid and member["kind"] == "forbid"
                 else None
             )
@@ -331,7 +362,15 @@ def action_lines(results: List[ActionResult], title: str) -> List[str]:
         out += difference("newly allowed", r.allowed, bool(r.statements))
         if r.dead.proved:
             out.append("- nothing permitted: YES, no request can be allowed")
-        out += [f"- never fires: `{f}`" for f in r.never_fires]
+        out += [
+            f"- never fires{' (with the settings left open)' if r.generic else ''}: `{f}`"
+            for f in r.never_fires
+        ]
+        out += [
+            f"- off in this realm: `{f}` reads {', '.join(f'`{n}`' for n in names)} and never fires with this "
+            "realm's settings (another realm that runs the source may switch it on)"
+            for f, names in r.off_here.items()
+        ]
         out += [
             f"- overlap: `{f}` is covered by the other forbids" for f in r.redundant
         ]
@@ -340,7 +379,7 @@ def action_lines(results: List[ActionResult], title: str) -> List[str]:
         out.append("")
     if quiet:
         out += [
-            "Nothing newly forbidden or allowed, nothing dead, no forbid that never fires, can error or overlaps: "
+            "Nothing newly forbidden or allowed, nothing dead, no forbid that never fires, is off, can error or overlaps: "
             + ", ".join(f"`{a}`" for a in quiet)
             + ".",
             "",
@@ -355,7 +394,11 @@ def difference(kind: str, answer, explained: bool) -> List[str]:
         return [f"- {kind}: none (proved)"]
     if answer.proved is None:
         return [f"- {kind}: undecided"]
-    return [] if explained else [f"- {kind}: yes, e.g. `{answer.example}`"]
+    if explained:
+        return []
+    if answer.example is None:
+        return [f"- {kind}: yes, {request_of(answer)}"]
+    return [f"- {kind}: yes, e.g. `{answer.example}`"]
 
 
 def cases_lines(cases: List[tuple]) -> List[str]:

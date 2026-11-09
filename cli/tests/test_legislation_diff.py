@@ -427,6 +427,57 @@ def test_a_forbid_the_others_already_cover_is_an_overlap_and_only_a_warning(worl
     )
 
 
+PRIVACY = """from realms.legislation import F, S, above, forbid, overridable
+
+class Privacy(above('privacy')):
+    strict = overridable(False, legislation='x')
+    no_secret_sharing = forbid('document_share', S.strict & (F.kind == 'secret'), legislation='x')
+"""
+VALENCIA_PRIVACY = "from realms.legislation import above\n\nclass Privacy(above('privacy')):\n    strict = True\n"
+
+
+def share_results(realm_diff, which="folded"):
+    return [r for r in getattr(realm_diff, which) if r.action == "document_share"]
+
+
+def test_a_forbid_that_a_setting_switches_off_in_this_realm_is_information_not_a_failure(
+    world,
+):
+    head = world.change(
+        {"eu/es/privacy.py": PRIVACY, f"{VALENCIA}/privacy.py": VALENCIA_PRIVACY}
+    )
+    spain = world.realm(world.base, head, "eu/es")
+    [folded] = share_results(spain)
+    assert list(folded.off_here) == ["eu/es/privacy/no_secret_sharing"]
+    assert folded.off_here["eu/es/privacy/no_secret_sharing"] == ["strict"]
+    assert folded.never_fires == []
+    [open_] = share_results(spain, "open")
+    assert open_.never_fires == [] and open_.off_here == {}  # with strict open it fires
+    assert spain.failures() == []
+    valencia = world.realm(world.base, head, VALENCIA)
+    assert share_results(valencia)[0].off_here == {}  # strict is on there
+    report = world.diff(world.base, head)
+    assert report.exit_code == 0
+    assert (
+        "- off in this realm: `eu/es/privacy/no_secret_sharing` reads `strict` and never fires"
+        in report.output
+    )
+
+
+def test_a_forbid_that_reads_a_setting_and_never_fires_with_it_open_fails(world):
+    never = PRIVACY.replace(
+        "S.strict & (F.kind == 'secret')",
+        "S.strict & (F.kind == 'a') & (F.kind == 'b')",
+    )
+    head = world.change({"eu/es/privacy.py": never})
+    spain = world.realm(world.base, head, "eu/es")
+    assert any(
+        "no_secret_sharing never fires with the settings left open" in f
+        for f in spain.failures()
+    )
+    assert world.diff(world.base, head).exit_code == 1
+
+
 # ── A forbid that can error, and a query the solver does not decide ──────────────────────────────────────────────
 
 
@@ -520,9 +571,7 @@ def test_the_report_has_the_generated_cedar_diff_and_the_flattened_view_before_a
 ):
     head = world.change({"eu/es/tax.py": tax("1.00", rustic("0.90"))})
     spain = world.realm(world.base, head, "eu/es")
-    assert "-         && context.facts.rate > 1100000" in "\n".join(
-        spain.cedar
-    ).replace("-         ", "-         ")
+    assert "-         && context.facts.rate > 1100000" in "\n".join(spain.cedar)
     assert any(
         "rate > 1000000" in line and line.startswith("+") for line in spain.cedar
     )
@@ -583,6 +632,69 @@ def test_a_codex_that_does_not_load_fails_with_the_refusal(world):
         spain.problems and "does not load" in spain.problems[0] and spain.folded == []
     )
     assert world.diff(world.base, head).exit_code == 1
+
+
+def test_a_forbid_that_does_not_bind_fails_that_realm_and_is_no_usage_error(world):
+    unbound = (
+        "\n    ghost = forbid('document_share', F.nothing == 'x', legislation='x')\n"
+    )
+    head = world.change({"eu/es/tax.py": tax("1.10", rustic("0.90") + unbound)})
+    spain = world.realm(world.base, head, "eu/es")
+    assert spain.folded == [] and spain.failures()
+    assert all("does not load" in f for f in spain.failures())
+    out = world.diff(world.base, head)
+    assert out.exit_code == 1 and "does not load" in out.output
+    fixed = world.change({"eu/es/tax.py": tax("1.10", rustic("0.90"))})
+    again = world.realm(head, fixed, "eu/es")
+    assert any("does not load at the base commit" in f for f in again.failures())
+    assert world.diff(head, fixed).exit_code == 1
+
+
+def test_a_change_to_only_the_cases_of_a_chapter_reaches_the_realms_that_run_them(
+    world,
+):
+    first = world.change({"eu/es/tax.cases.json": CASES})
+    head = world.change({"eu/es/tax.cases.json": [{**CASES[0], "returns": True}]})
+    spain = world.realm(first, head, "eu/es")
+    assert spain.domains == ["tax"] and [why for _, why in spain.cases] == [
+        "returns False, written True"
+    ]
+    out = world.diff(first, head)
+    assert out.exit_code == 1 and "Changed: `eu/es/tax`" in out.output
+
+
+def test_a_flattened_line_the_solver_does_not_decide_is_undecided_and_fails(
+    world, monkeypatch
+):
+    from realms.cli.commands import legislation_proof
+    from realms.cli.commands.legislation_diff import folded_line
+
+    codex = loaded(world, world.base, "eu/es")
+    bound = next(f for f in codex.forbids() if f.id.endswith("ibi_urban_cap"))
+
+    class Undecided:
+        def __getattr__(self, name):
+            return lambda *args: Answer(None, None, "no answer in 0 s")
+
+    undecided = []
+    assert folded_line(Undecided(), codex, bound, bound.actions[0], undecided) is None
+    assert undecided and "no answer in 0 s" in undecided[0]
+    monkeypatch.setattr(legislation_proof, "SYMCC_TIMEOUT", 0.001)
+    head = world.change({"eu/es/tax.py": tax("1.00", rustic("0.90"))})
+    spain = world.realm(world.base, head, "eu/es")
+    assert any("maximum in the flattened view" in u for u in spain.undecided)
+    assert any("maximum in the flattened view" in f for f in spain.failures())
+
+
+def test_an_answer_without_a_request_is_not_printed_as_none(world):
+    from realms.cli.commands.legislation_report import difference
+
+    nameless = Answer(False, None, "")
+    [line] = difference("newly forbidden", nameless, False)
+    assert "None" not in line and line.startswith("- newly forbidden: yes")
+    head = world.change({"eu/es/tax.py": tax("1.10", dead_extra())})
+    spain = world.realm(world.base, head, "eu/es")
+    assert spain.failures() and not any("None" in f for f in spain.failures())
 
 
 def test_a_realm_added_by_the_change_has_everything_it_forbids_newly_forbidden(world):
@@ -679,6 +791,64 @@ def test_without_the_cedar_tools_it_says_what_to_install(world, monkeypatch):
     monkeypatch.delenv("CVC5")
     out = world.diff(world.base, world.base)
     assert out.exit_code == 2 and "scripts/cedar_tools.sh" in out.output
+
+
+def test_a_realm_that_is_no_source_is_refused_like_check_does(world, tmp_path):
+    head = world.change({"eu/es/tax.py": tax("1.00", rustic("0.90"))})
+    out = world.diff(world.base, head, "--realm", "eu/xx")
+    assert out.exit_code == 2 and "eu/xx has no source.json" in out.output
+    listing = tmp_path / "change.json"
+    listing.write_text(json.dumps({"realm": "eu/xx", "set": []}))
+    out = world.diff(world.base, head, "--change-list", str(listing))
+    assert out.exit_code == 2 and "eu/xx has no source.json" in out.output
+
+
+def test_the_report_has_each_section_with_its_heading_and_a_key_line(world):
+    secret = (
+        "\n    secret = forbid('document_share', F.kind == 'secret', legislation='x')\n"
+    )
+    first = world.change(
+        {
+            "eu/es/tax.cases.json": CASES,
+            "eu/es/tax.py": tax("1.10", rustic("0.90") + secret),
+        }
+    )
+    head = world.change({"eu/es/tax.py": tax("1.00", rustic("0.90") + secret)})
+    out = world.diff(first, head)
+    assert out.exit_code == 0, out.output
+    report = out.output
+    ordered = [
+        "<!-- realms-legislation-diff -->",
+        f"## Legislation analysis: `{first[:7]}` → `{head[:7]}`",
+        "**No failure**, 2 realm(s) reached.",
+        "### Dependencies",
+        "Changed: `eu/es/tax`",
+        "| realm | domains reached (changed, or calling one that changed) |",
+        "### `eu/es`",
+        "#### settings folded in as this realm has them",
+        "**tax_policy_propose.taxes**",
+        '- code = "ibi_urban": rate more than 1.00 % (1000000) and at most 1.10 % (1100000) newly forbidden (proved)',
+        "- newly allowed: none (proved)",
+        "#### settings left open: for every realm that runs this source",
+        'code = "ibi_urban", not capital: rate more than 1.00 % (1000000) and at most 1.10 % (1100000) newly forbidden (proved)',
+        "#### Test cases",
+        "1 of 1 pass.",
+        "<summary>Flattened view of the changed domains, before and after</summary>",
+        "for eu/es: maximum 1.00 % (1000000)",
+        "<summary>Generated Cedar, diff</summary>",
+        "+         && context.facts.rate > 1000000",
+        f"### `{VALENCIA}`",
+    ]
+    at = -1
+    for line in ordered:
+        found = report.find(line, at + 1)
+        assert found > at, f"{line!r} is missing or out of order in:\n{report}"
+        at = found
+    assert "Nothing newly forbidden or allowed" in report
+    assert (
+        report.count("`document_share`") == 3
+    )  # the quiet line of eu/es folded and open, and of València
+    assert "**document_share**" not in report  # nothing to say: no block of its own
 
 
 def test_a_commit_git_does_not_have_is_refused(world):

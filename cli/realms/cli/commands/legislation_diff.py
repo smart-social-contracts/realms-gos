@@ -17,7 +17,7 @@ statements that hold for every realm that runs the source: "for capitals".
 import itertools
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from realms.cli.commands.legislation_proof import (
     PERMIT_ALL,
@@ -57,31 +57,52 @@ class ActionResult:
     )  # the differences in words, each proved
     dead: Answer = None  # proved: no request is permitted
     never_fires: List[str] = field(default_factory=list)
+    off_here: Dict[str, List[str]] = field(
+        default_factory=dict
+    )  # forbid -> the settings it reads, when it never fires with this realm's settings
     redundant: List[str] = field(default_factory=list)
     can_error: List[str] = field(default_factory=list)
     undecided: List[str] = field(default_factory=list)
+    generic: bool = False  # asked with the settings left open
 
     def nothing_to_say(self) -> bool:
         """Whether the analysis found nothing for the action: no difference, no dead operation, no forbid that never
-        fires, overlaps or can error, and every query decided."""
+        fires (or is off in this realm), overlaps or can error, and every query decided.
+        """
         return (
             self.forbidden.proved
             and self.allowed.proved
             and self.dead.proved is False
             and not (
-                self.never_fires or self.redundant or self.can_error or self.undecided
+                self.never_fires
+                or self.off_here
+                or self.redundant
+                or self.can_error
+                or self.undecided
             )
         )
 
     def failures(self) -> List[str]:
         out = (
-            [f"{self.action}: nothing is permitted: {self.dead.example}"]
+            [
+                f"{self.action}: nothing is permitted: every request the fact schema allows is forbidden"
+            ]
             if self.dead.proved
             else []
         )
-        out += [f"{self.action}: {f} never fires" for f in self.never_fires]
+        when = " with the settings left open" if self.generic else ""
+        out += [f"{self.action}: {f} never fires{when}" for f in self.never_fires]
         out += self.can_error
         return out + [f"{self.action}: undecided: {u}" for u in self.undecided]
+
+
+def request_of(answer: Answer) -> str:
+    """The request a counterexample names, or why there is none to name."""
+    return (
+        str(answer.example)
+        if answer.example is not None
+        else "(SymCC named no request that could be read)"
+    )
 
 
 def analyse_action(
@@ -93,7 +114,7 @@ def analyse_action(
     old_forbids = forbids_on(old, action, generic) if old else {}
     new_forbids = forbids_on(new, action, generic)
     before, after = policy_set(old_forbids, assumed), policy_set(new_forbids, assumed)
-    result = ActionResult(action)
+    result = ActionResult(action, generic=generic)
     result.forbidden = solver.implies(action, before, after)
     result.allowed = solver.implies(action, after, before)
     result.dead = solver.always_denies(action, after)
@@ -105,7 +126,10 @@ def analyse_action(
     ):
         if answer.proved is None:
             result.undecided.append(f"{kind}: {answer.said}")
-    sweep(solver, action, new_forbids, assumed, result)
+    settings = {
+        f.id: settings_read(f.expression) for f in new.forbids() if action in f.actions
+    }
+    sweep(solver, action, new_forbids, assumed, result, settings, generic)
     if not generic:
         result.can_error = cannot_error(
             solver, action, new, new_forbids, errors, result
@@ -123,13 +147,21 @@ def sweep(
     forbids: dict,
     assumed: Optional[str],
     result: ActionResult,
+    settings: Dict[str, List[str]],
+    generic: bool,
 ) -> None:
-    """Which forbids never fire, and which of the others the rest already cover."""
+    """Which forbids never fire, and which of the others the rest already cover. A forbid that reads a setting and
+    never fires with this realm's settings is **off here**, which is information: another realm that runs the source may
+    switch it on. It fails when it reads no setting, or when it never fires with the settings left open. Overlap is
+    asked of the realm as it is (a forbid covered whatever the settings are is covered with these as well).
+    """
     base = everything_permitted(assumed)
     everything = policy_set(forbids, assumed)
 
     def asked(id_):
         never = solver.equivalent(action, base, [*base, forbids[id_]])
+        if generic:
+            return never, None
         rest = policy_set({k: v for k, v in forbids.items() if k != id_}, assumed)
         return never, solver.equivalent(action, everything, rest)
 
@@ -137,11 +169,14 @@ def sweep(
         answers = dict(zip(forbids, pool.map(asked, forbids)))
     for id_, (never, covered) in answers.items():
         for kind, answer in (("never fires", never), ("redundant", covered)):
-            if answer.proved is None:
+            if answer is not None and answer.proved is None:
                 result.undecided.append(f"{id_} {kind}: {answer.said}")
         if never.proved:
-            result.never_fires.append(id_)
-        elif covered.proved:
+            if settings.get(id_) and not generic:
+                result.off_here[id_] = settings[id_]
+            else:
+                result.never_fires.append(id_)
+        elif covered is not None and covered.proved:
             result.redundant.append(id_)
 
 
@@ -159,7 +194,7 @@ def cannot_error(
             result.undecided.append(f"{bound.id} never errors: {answer.said}")
         elif not answer.proved:
             problems.append(
-                f"{bound.file}:{bound.line}: {bound.id} can error on {action}: {answer.example}"
+                f"{bound.file}:{bound.line}: {bound.id} can error on {action}: {request_of(answer)}"
             )
     return problems
 
@@ -378,13 +413,18 @@ def facts_read_by(forbids: list) -> List[str]:
 # ── The folded line of the flattened view (§5.9) ──────────────────────────────────────────────────────────────────
 
 
-def folded_line(solver: Solver, codex, bound, action: str) -> Optional[str]:
+def folded_line(
+    solver: Solver, codex, bound, action: str, undecided: List[str]
+) -> Optional[str]:
     """``for eu/es/vc/46250-valencia: capital + surface_public_transport → maximum 1.24 % (1240000)`` for a forbid of one
-    fact against a number the settings fold, proved equal to the forbid; None for any other forbid.
+    fact against a number the settings fold, proved equal to the forbid; None for any other forbid. A question the solver
+    did not decide is added to ``undecided`` (a failure), not dropped.
     """
     assumed = assumption(codex, action)
     base = everything_permitted(assumed)
     fires = solver.equivalent(action, base, [*base, bound.cedar()])
+    if fires.proved is None:
+        undecided.append(f"{bound.id} (maximum in the flattened view): {fires.said}")
     if fires.proved is not False or not fires.example:
         return None
     facts = fires.example.get("facts", {})
@@ -413,6 +453,10 @@ def folded_line(solver: Solver, codex, bound, action: str) -> Optional[str]:
             [*base, bound.cedar()],
             [*base, claim(action, x, [run], conditions, "maximum")],
         )
+        if proof.proved is None:
+            undecided.append(
+                f"{bound.id} (maximum in the flattened view): {proof.said}"
+            )
         if proof.proved:
             true = [
                 n

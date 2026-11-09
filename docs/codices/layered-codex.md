@@ -1814,9 +1814,15 @@ Built ([realms-codices#13](https://github.com/smart-social-contracts/realms-codi
   the realm's generator ignores them (Cedar's schema cannot state them), and only this analysis assumes them. The
   assumption is analysis input and is never installed.
 - **Failures and warnings.** The report lists a failure, and the command exits 1, for a forbid that can error, an
-  operation nothing is permitted on, a forbid that never fires, a query the solver did not decide, a codex that does
-  not load and a test case that fails. An overlap is a warning. Newly forbidden and newly allowed are information:
-  they are what a change of legislation is for.
+  operation nothing is permitted on, a forbid that never fires, a query the solver did not decide (also one of the
+  flattened view's maxima), a codex that does not load (a chapter the checker refuses, or a forbid that does not bind
+  to GGG's facts: that realm fails, the others are still analysed) and a test case that fails. A forbid that reads a
+  setting and never fires with the realm's settings is information (`off in this realm`: another realm that runs
+  the source may switch it on); it fails when it reads no setting, or never fires with the settings left open. An
+  overlap is a warning, asked of the realm as it is. Newly forbidden and newly allowed are information: they are what
+  a change of legislation is for. A `--realm`, or the realm of a change list, that is no source of the tree at the
+  head commit exits 2, as `check` does. A change to only the test cases of a chapter (`<domain>.cases.json`) reaches
+  the realms that run the chapter, so that their cases run.
 - **Tools.** The pinned Cedar CLI and cvc5 (`CEDAR_CLI`, `CVC5`; `scripts/cedar_tools.sh`); without them it exits 2 and
   says so. Up to four SymCC queries run at once.
 - **Limits.** With the settings open, the schema is the new codex's, so an old forbid that reads a setting the new
