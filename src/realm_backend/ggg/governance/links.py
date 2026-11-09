@@ -1,6 +1,6 @@
 """Links between realms (docs/codices/layered-codex.md §8, §11): the sync sources a realm takes legislation from, the
 followers that take it from the realm, and the releases it publishes and relays. Data only: the rules are in
-api.links, which also reads the sync sources' records.
+api.links, and core.records reads the sync sources' records.
 
 A link has the same fields on both sides: its ``status`` (``requested`` after this side's vote, ``active`` once the
 other side's is in too, ``ended``), who ended it and when, ``unsent``, whether the other side still has to be told

@@ -1,4 +1,4 @@
-"""The records of the sync sources, read (docs/codices/layered-codex.md §8; api.links): a realm's by its capital's
+"""The records of the sync sources, read (docs/codices/layered-codex.md §8; core.records): a realm's by its capital's
 ``legislation_releases``, a stand-in record by HTTPS, pinned by the checksum of its bytes. The capital is a scripted
 peer. tests/deployed/test_release_installs.py reads records between real realms."""
 
@@ -8,7 +8,7 @@ import json
 import fake_chain
 import pytest
 import world
-from api import links
+from core import records
 from core import op
 from core.db import Fail
 from fake_chain import peer, rejects
@@ -35,7 +35,7 @@ def capital(*releases, source="eu/es"):
 
 
 def read(key):
-    return op.run(links.read_record(key))
+    return op.run(records.read_record(key))
 
 
 def failing(key, reason):
@@ -118,7 +118,7 @@ def test_what_a_record_must_look_like(releases, source, reason):
 
 
 def test_a_record_above_the_size_the_realm_keeps_is_refused(monkeypatch):
-    monkeypatch.setattr(links, "RECORD_MAX", 2048)
+    monkeypatch.setattr(records, "RECORD_MAX", 2048)
     capital(*[entry("eu/es", f"1.{n}.0") for n in range(20)])
     failing(SRC, "a record is at most 2 KB")
 
@@ -145,7 +145,7 @@ def test_a_stand_in_record_is_read_when_its_bytes_are_the_pin():
     found = read(URL)
     assert found["source"] == "eu" and [r["version"] for r in found["releases"]] == ["1.0.0", "1.1.0"]
     assert SourceRecord[URL].releases == found["releases"]
-    assert [call for call in fake_chain.state["calls"] if call[0] == "https"] == [("https", URL, links.RECORD_MAX + 8192)]
+    assert [call for call in fake_chain.state["calls"] if call[0] == "https"] == [("https", URL, records.RECORD_MAX + 8192)]
 
 
 def test_a_stand_in_record_whose_bytes_are_not_its_pin_is_refused():
@@ -171,8 +171,8 @@ def test_what_a_stand_in_record_must_look_like(text, reason):
 def test_a_stand_in_record_nobody_serves_or_above_the_limit_is_a_failure_naming_its_url():
     SyncSource(id=URL, checksum=SUM, name="EU", status="active")
     failing(URL, f"{URL}: HTTP 404")
-    fake_chain.serve(URL, b"x" * (links.RECORD_MAX + 1))
-    failing(URL, f"{URL}: {links.RECORD_MAX + 1} bytes is above 512 KB")
+    fake_chain.serve(URL, b"x" * (records.RECORD_MAX + 1))
+    failing(URL, f"{URL}: {records.RECORD_MAX + 1} bytes is above 512 KB")
     fake_chain.serve(URL, fake_chain.rejects("connection refused"))
     failing(URL, "connection refused")
 
@@ -182,5 +182,5 @@ def test_every_active_sync_source_is_read_in_the_order_of_the_links():
     text = json.dumps({"source": "eu", "releases": [entry("eu")]})
     stand_in(text)
     SyncSource(id="gone", name="Gone", status="ended")
-    found = op.run(links.read_active_records())
+    found = op.run(records.read_active_records())
     assert [r["key"] for r in found] == [SRC, URL]

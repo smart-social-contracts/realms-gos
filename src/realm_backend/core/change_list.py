@@ -2,7 +2,7 @@
 install task checks before it fetches anything (``parse``, ``apply``) and once it has the records (``vouch``).
 
 Plain data in, Fail out. Nothing here reads the database or calls a canister, so tests/ggg checks every rule
-without a realm. ``layers_for`` turns the records the install task read (api.links) into what ``plan`` takes, and
+without a realm. ``layers_for`` turns the records the install task read (core.records) into what ``plan`` takes, and
 ``vouching`` says which record vouches for a release.
 """
 

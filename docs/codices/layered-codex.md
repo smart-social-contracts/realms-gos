@@ -1172,7 +1172,7 @@ becomes official only when the source publishes it by its own vote. A sync sourc
 the releases of every layer it relays, as it installed them. The record is what followers check
 against; the official journal (§9.6) is where people read the same releases.
 
-**Reading a record** ([`api/links.py`](../../src/realm_backend/api/links.py)). A realm's record is read from
+**Reading a record** ([`core/records.py`](../../src/realm_backend/core/records.py)). A realm's record is read from
 its capital, 100 releases at a time. The reply also names `source`, the id of the realm's own layer (null while it
 has none), which tells a record that is a layer's publisher's from one that only relays it. A stand-in record is a
 JSON file at its URL, `{"source": "<its source id>", "releases": [...]}`, with the same releases (times in seconds,

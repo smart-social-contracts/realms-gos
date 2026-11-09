@@ -5,7 +5,7 @@ then runs one step per message:
 
 1. ``fetch_change_list``: the change list by HTTPS outcall, kept under the proposal's checksum;
 2. ``check_change_list``: its rules, by itself and against this realm (core.change_list.apply);
-3. ``fetch_chapters``: first, for a release, the records of the sync sources are read (api.links) and the one that
+3. ``fetch_chapters``: first, for a release, the records of the sync sources are read (core.records) and the one that
    vouches for it chosen; then each chapter not stored yet, one per message, from the capital of the sync source that
    vouches for its layer or from its URL or a mirror, kept under its checksum;
 4. ``check_sources``: the chapters against the records of the sync sources (core.change_list.vouch);
@@ -32,6 +32,7 @@ from core import chain
 from core import change_list
 from core import layered_codex as store
 from core import legislation
+from core import records
 from core.db import JSON_MAX, Conflict, Fail, each, find, next_id, view
 from core.op import GENERATOR, audit, op
 from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal
@@ -257,7 +258,7 @@ def read_records(job, listed):
     who vouches for each, and the record that vouches for the release. Then the change list is checked against them at
     once, so that a release no record vouches for fails before any chapter is fetched. A generator."""
     release = listed["release"]
-    found = (yield from links.read_active_records()) if release is not None else []
+    found = (yield from records.read_active_records()) if release is not None else []
     job = InstallJob[job.id]
     if job.status != "running":
         return
@@ -276,7 +277,7 @@ def fetch_chapter(job, entry):
     capital = vouching_capital(job, entry)
     if capital is not None:
         try:
-            reply = yield from links.ask_realm(capital, "legislation_chapter", {"chapter": entry["sha256"]})
+            reply = yield from records.ask_realm(capital, "legislation_chapter", {"chapter": entry["sha256"]})
             job = InstallJob[job.id]
             if job.status != "running":
                 return
@@ -303,7 +304,7 @@ def vouching_capital(job, entry):
     """The capital to ask for the chapter ``entry``: the sync source that vouches for the release it is a part of, when
     that is a realm. None for the realm's own chapters and for a stand-in record, which have only their URLs."""
     vouching = job.staged["layers"]["vouching"]
-    if vouching is None or entry["source"] != vouching["release"]["source"] or not links.is_realm_key(vouching["key"]):
+    if vouching is None or entry["source"] != vouching["release"]["source"] or not records.is_realm_key(vouching["key"]):
         return None
     return vouching["key"]
 
