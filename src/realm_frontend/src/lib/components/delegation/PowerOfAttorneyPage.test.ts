@@ -47,6 +47,7 @@ const action = (id: string, title: string) => ({
 	id,
 	grantor: 'alice',
 	delegate: 'claude-principal',
+	delegate_is_member: false,
 	grant: 'D-1',
 	method: 'payment_account_add',
 	args: {},

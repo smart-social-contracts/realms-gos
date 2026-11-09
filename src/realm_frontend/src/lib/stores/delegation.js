@@ -24,8 +24,8 @@ export const actingOnBehalfOf = writable(readStored());
  * @typedef {{groups?: string[], operations?: string[]}} Scope
  * @typedef {{id: string, grantor: string, delegate: string, label: string, description: string, scope: Scope,
  *   status: string, starts_at: number, expires_at: number}} Grant
- * @typedef {{id: string, grantor: string, delegate: string, label: string, description: string, scope: Scope,
- *   starts_at: number, expires_at: number, request_expires_at: number}} GrantRequest
+ * @typedef {{id: string, grantor: string, delegate: string, delegate_is_member: boolean, label: string,
+ *   description: string, scope: Scope, starts_at: number, expires_at: number, request_expires_at: number}} GrantRequest
  */
 
 /** Cached delegation lists from delegation_list. @type {import('svelte/store').Writable<Grant[]>} */
@@ -189,12 +189,6 @@ export async function memberNickname(principal) {
 	const realm = await resolveDelegationRealm();
 	const reply = await realm.read('user_get', { user: principal });
 	return reply.ok ? reply.user.nickname || '' : '';
-}
-
-/** Whether ``principal`` is a member of this realm: the other kind of delegate is an AI connection. */
-export async function isRealmMember(principal) {
-	const realm = await resolveDelegationRealm();
-	return (await realm.read('user_get', { user: principal })).ok;
 }
 
 /** An open power of attorney request addressed to (or filed by) the caller, with the choices it leaves them. */

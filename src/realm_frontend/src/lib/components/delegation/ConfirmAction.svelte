@@ -3,12 +3,7 @@
 	import { get } from 'svelte/store';
 	import { Card, Heading, P, Spinner } from 'flowbite-svelte';
 	import { principal } from '$lib/stores/auth';
-	import {
-		delegationsAsDelegate,
-		delegationsAsGrantor,
-		isRealmMember,
-		loadDelegations
-	} from '$lib/stores/delegation.js';
+	import { delegationsAsDelegate, delegationsAsGrantor, loadDelegations } from '$lib/stores/delegation.js';
 	import { grantLabel, loadAction, type ActionCardData } from '$lib/stores/actions';
 	import ActionCard from './ActionCard.svelte';
 
@@ -19,7 +14,6 @@
 	let loading = $state(true);
 	let card = $state<ActionCardData | null>(null);
 	let name = $state('');
-	let delegateIsMember = $state<boolean | undefined>(undefined);
 	let error = $state('');
 
 	async function load() {
@@ -28,10 +22,7 @@
 		try {
 			const [found] = await Promise.all([loadAction(id), loadDelegations()]);
 			card = found;
-			if (found) {
-				name = grantLabel(found, [...get(delegationsAsGrantor), ...get(delegationsAsDelegate)]);
-				delegateIsMember = await isRealmMember(found.delegate);
-			}
+			if (found) name = grantLabel(found, [...get(delegationsAsGrantor), ...get(delegationsAsDelegate)]);
 		} catch (e) {
 			card = null;
 			error = e instanceof Error ? e.message : String(e);
@@ -57,7 +48,7 @@
 		</P>
 	</Card>
 {:else}
-	<ActionCard {card} {name} viewer={$principal} {delegateIsMember} headingTag="h1" />
+	<ActionCard {card} {name} viewer={$principal} headingTag="h1" />
 	<p class="mt-3 text-center text-xs text-gray-500">
 		<a class="underline" href="/delegations">{$_('delegation.confirm.back')}</a>
 	</p>

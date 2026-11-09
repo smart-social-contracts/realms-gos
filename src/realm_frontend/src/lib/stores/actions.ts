@@ -23,6 +23,8 @@ export type ActionCardData = {
 	id: string;
 	grantor: string;
 	delegate: string;
+	/** A member of the realm, as against an AI connection. */
+	delegate_is_member: boolean;
 	grant: string;
 	method: string;
 	args: Record<string, unknown>;

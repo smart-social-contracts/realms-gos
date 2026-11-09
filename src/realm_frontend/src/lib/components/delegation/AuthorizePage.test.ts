@@ -51,6 +51,7 @@ function realmWith(scope: object, permissions: string[] = ['proposal.vote'], mem
 						id: 'DR-1',
 						grantor: 'alice',
 						delegate: 'claude-principal',
+						delegate_is_member: member,
 						scope,
 						label: 'Claude',
 						description: 'vote for me',
@@ -63,7 +64,6 @@ function realmWith(scope: object, permissions: string[] = ['proposal.vote'], mem
 		}
 		if (name === 'me') return { ok: true, permissions };
 		if (name === 'delegable_operations') return { ok: true, operations: [], groups: vocabulary };
-		if (name === 'user_get') return member ? { ok: true, user: {} } : { ok: false, error: 'not found' };
 		throw new Error(`unexpected read ${name}`);
 	});
 	realm.run.mockResolvedValue({ ok: true, delegation: 'D-1', status: 'active' });
@@ -150,6 +150,15 @@ describe('the Authorize page for a request by groups', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		await waitFor(() => expect(screen.getByText('Request declined')).toBeTruthy());
 		expect(decided()).toEqual([['delegation_request_decide', { request: 'DR-1', approve: false }]]);
+	});
+});
+
+describe('the Authorize page for a request from a member', () => {
+	it('says the requester is a member', async () => {
+		realmWith({ groups: ['vote'] }, ['proposal.vote'], true);
+		await open();
+		expect(screen.getByText('A member of this realm.', { exact: false })).toBeTruthy();
+		expect(screen.queryByText(/Not a member/)).toBeNull();
 	});
 });
 

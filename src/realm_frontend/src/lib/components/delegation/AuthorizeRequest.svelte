@@ -6,7 +6,6 @@
 	import {
 		approveDelegationRequest,
 		declineDelegationRequest,
-		isRealmMember,
 		loadDelegationRequest
 	} from '$lib/stores/delegation.js';
 	import { asksEverything, decide, expiryError, type Choice, type Scope } from '$lib/utils/authorizeChoices';
@@ -16,6 +15,7 @@
 	type Request = {
 		id: string;
 		delegate: string;
+		delegate_is_member: boolean;
 		label: string;
 		description: string;
 		scope: Scope;
@@ -31,7 +31,6 @@
 	let loading = $state(true);
 	let error = $state('');
 	let request = $state<Request | null>(null);
-	let delegateIsMember = $state(false);
 	let ticked = $state<string[]>([]);
 	let everything = $state(false);
 	let expiresInput = $state('');
@@ -57,7 +56,6 @@
 			ticked = asksEverything(request.scope) ? [] : request.choices.filter((c) => c.held).map((c) => c.id);
 			everything = false;
 			expiresInput = toLocalInput(new Date(request.expires_at * 1000));
-			delegateIsMember = await isRealmMember(request.delegate);
 		} catch (e) {
 			error = e instanceof Error ? e.message : $_('delegation.authorize.could_not_load');
 		} finally {
@@ -155,7 +153,7 @@
 			<p class="text-xs font-medium text-gray-500 mb-1">{$_('delegation.authorize.requested_by')}</p>
 			<p class="font-mono text-sm break-all">{request.delegate}</p>
 			<p class="text-xs text-gray-500 mt-1">
-				{delegateIsMember ? $_('delegation.action.is_member') : $_('delegation.action.is_ai')}
+				{request.delegate_is_member ? $_('delegation.action.is_member') : $_('delegation.action.is_ai')}
 				{$_('delegation.authorize.recognise')}
 			</p>
 		</div>

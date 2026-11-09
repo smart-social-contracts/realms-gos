@@ -21,7 +21,6 @@
 		card,
 		name,
 		viewer,
-		delegateIsMember = undefined,
 		headingTag = 'h2'
 	}: {
 		card: ActionCardData;
@@ -29,7 +28,6 @@
 		name: string;
 		/** The signed-in principal. Only the action's own member decides it. */
 		viewer: string;
-		delegateIsMember?: boolean;
 		headingTag?: 'h1' | 'h2';
 	} = $props();
 
@@ -75,11 +73,9 @@
 	<div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
 		<p class="text-xs font-medium text-gray-500 mb-1">{$_('delegation.action.principal')}</p>
 		<p class="font-mono text-sm break-all">{current.delegate}</p>
-		{#if delegateIsMember !== undefined}
-			<p class="text-xs text-gray-500 mt-1">
-				{delegateIsMember ? $_('delegation.action.is_member') : $_('delegation.action.is_ai')}
-			</p>
-		{/if}
+		<p class="text-xs text-gray-500 mt-1">
+			{current.delegate_is_member ? $_('delegation.action.is_member') : $_('delegation.action.is_ai')}
+		</p>
 	</div>
 
 	{#if current.status !== 'pending'}

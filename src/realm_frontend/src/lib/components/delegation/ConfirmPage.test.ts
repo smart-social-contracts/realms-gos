@@ -16,8 +16,7 @@ vi.mock('$lib/stores/delegation.js', async () => {
 		resolveDelegationRealm: async () => realm,
 		loadDelegations: async () => {},
 		delegationsAsGrantor: writable([{ id: 'D-1', label: 'My Claude' }]),
-		delegationsAsDelegate: writable([]),
-		isRealmMember: async () => false
+		delegationsAsDelegate: writable([])
 	};
 });
 
@@ -31,6 +30,7 @@ const card = (over: Partial<ActionCardData> = {}): ActionCardData => ({
 	id: 'AC-1',
 	grantor: 'alice',
 	delegate: 'claude-principal',
+	delegate_is_member: false,
 	grant: 'D-1',
 	method: 'payment_account_add',
 	args: { address: 'abcd', symbol: 'ckBTC' },
@@ -192,6 +192,15 @@ describe('the confirm page for an action that is not waiting', () => {
 		await open();
 		expect(screen.getByText(text)).toBeTruthy();
 		expect(buttons()).toEqual([]);
+	});
+});
+
+describe('the confirm page for a delegate who is a member', () => {
+	it('says so', async () => {
+		realm.read.mockResolvedValue({ ok: true, action: card({ delegate_is_member: true }) });
+		await open();
+		expect(screen.getByText('A member of this realm.')).toBeTruthy();
+		expect(screen.queryByText(/Not a member/)).toBeNull();
 	});
 });
 
