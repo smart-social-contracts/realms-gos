@@ -302,3 +302,17 @@ def test_a_quarter_that_missed_the_withdrawal_does_not_switch_at_t_for_the_capit
     assert active(follower) == expected_id(good) and status(follower)["pending"] is None
     assert job(follower)["status"] == "failed"
     assert "a codex it has left is not switched to" in job(follower)["error"]
+
+
+def test_a_switch_time_two_days_away_still_switches_the_quarters_that_waited(net, site, people, reverting):
+    chief, follower, absent = reverting
+    good = layer_of(people)
+    fourth = {**good, "arcadia/procedure": good["arcadia/procedure"] + b"\n# fourth\n"}
+    proposal = chief.govern("codex_install", site.change_list(fourth, replaces=expected_id(good)),
+                            effective_at=chief.now() + 2 * 24 * HOUR)
+    net.wait_until(lambda: job(follower).get("step") == "wait", rounds=2)
+    net.wait(24 * HOUR + 600)  # the first 24 hours of the quarter's job are over: it only waits
+    assert (job(follower)["status"], job(follower)["step"]) == ("running", "wait")
+    chief.run_at_effective_at(proposal)
+    net.wait_until(lambda: active(follower) == expected_id(fourth), rounds=2)
+    assert job(follower)["status"] == "done"

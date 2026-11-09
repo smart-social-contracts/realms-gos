@@ -635,3 +635,72 @@ def test_a_quarter_shows_the_flag_its_capital_gave_it_at_the_last_sync(monkeypat
     assert compliance.of(quarters.own_compliance()) == {"NonCompliant": {"since": 5, "stale": ["arcadia"]}}
     mine = next(r for r in ok("quarter_directory", fake_chain.ANONYMOUS)["quarters"] if r["id"] == "north")
     assert compliance.of(mine["compliance"]) == {"NonCompliant": {"since": 5, "stale": ["arcadia"]}}
+
+
+# ---- What the second review found: a switch time days away, and a codex that refuses its own revert.
+
+DAY = 24 * HOUR
+
+
+def test_a_switch_time_days_away_does_not_fail_the_job_the_24_hours_cover_the_work_not_the_wait(monkeypatch):
+    quarter(monkeypatch, "north")
+    layer = own_layer()
+    listed = change_list(layer)
+    capital_serving(layer, listed, running=expected_id(layer))
+    announce(layer, listed, fake_chain.now() + 2 * DAY)
+    run_job()
+    assert job()["step"] == "wait"
+    later(2 * DAY)
+    fire_timers()  # the watch of the first 24 hours finds the job waiting; the schedule at T sends it to confirm
+    run_job()
+    assert status()["codex"]["id"] == expected_id(layer) and job()["status"] == "done"
+
+
+def test_the_24_hours_of_a_job_that_left_the_wait_count_from_the_time_it_left(monkeypatch):
+    serving, layer = staged_until_t(monkeypatch, running=None)
+    serving.answer("quarter_sync", rejects("the canister is stopped"))
+    fire_timers()
+    run_job()
+    assert job()["status"] == "paused"
+    later(25 * HOUR)
+    ok("codex_install_resume", "ctl", job="J-1")
+    run_job()
+    assert job()["status"] == "failed" and job()["error"] == "not done within 24 hours"
+
+
+DENYING = '''
+from realms.legislation import F, above, forbid
+
+class Federation(above("federation")):
+    no_codex_topics = forbid("federation_message", F.topic.in_(["codex.stage", "codex.unstage", "codex.revert", "ping"]),
+                             legislation="no codex travels")
+
+    def check_federation_message(self, args):
+        if args.topic.startswith("codex.") or args.topic == "hello":
+            return self.deny("legislation refuses " + args.topic)
+
+    def on_federation_message(self, event):
+        self.ggg.notification_send(recipient="User:alice", topic="spy", title="saw " + event.args["topic"], body="")
+'''
+
+
+def test_a_codex_cannot_refuse_the_messages_that_carry_a_codex_across_the_quarters(monkeypatch):
+    quarter(monkeypatch, "north")
+    realm = "from realms.legislation import above\n\nclass Realm(above('realm')):\n    pass\n"
+    first = activate(layered({(TOWN, "realm"): realm}, layers=[TOWN]))
+    first.status = "inactive"
+    second = activate(layered({(TOWN, "realm"): realm, (TOWN, "federation"): DENYING}, layers=[TOWN]))
+    second.previous = first.id
+    layer = own_layer()
+    listed = change_list(layer)
+    capital_serving(layer, listed, running=expected_id(layer))
+    assert "forbidden by the legislation" in call("federation_message", CAPITAL, topic="ping", body={})["error"]  # it bites
+    assert "legislation refuses hello" in call("federation_message", CAPITAL, topic="hello", body={})["error"]
+    body = {"codex": expected_id(layer), "checksum": listed["checksum"], "at": fake_chain.now() + HOUR, "proposal": "P-1"}
+    assert ok("federation_message", CAPITAL, topic="codex.stage", body=body)["staged"] == "started"
+    assert ok("federation_message", CAPITAL, topic="codex.unstage", body={"codex": expected_id(layer)})["unstaged"] is True
+    assert ok("federation_message", CAPITAL, topic="codex.revert", body={"codex": first.id})["reverted"] == "restored"
+    assert status()["codex"]["id"] == first.id
+    assert [n["title"] for n in ok("notification_list", "alice")["notifications"]] == []  # no hook saw them
+    assert legislation.is_reserved("federation_message", {"topic": "codex.revert", "body": {}})
+    assert not legislation.is_reserved("federation_message", {"topic": "ping", "body": {}})
