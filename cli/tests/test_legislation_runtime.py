@@ -269,9 +269,7 @@ def test_self_and_the_event_are_bound_once_in_both_checkers(form):
         subset_ast.check(text, "x/register.py")
 
 
-def test_a_hook_still_adds_to_its_event_and_a_method_to_self():
-    text = HEAD + ("    def on_t(self, event):\n        event.seen = [w for w in ('a',)]\n        self.note = event.seen\n"
-                   "        other = [event for event in ()]\n" if False else
-                   "    def on_t(self, event):\n        event.seen = [w for w in ('a',)]\n        self.note = event.seen\n")
+def test_a_hook_still_adds_to_its_event():
+    text = HEAD + "    def on_t(self, event):\n        event.seen = [w for w in ('a',)]\n"
     Codex(["x"], realm="x", operations=["t"]).load("x", "register", text)
     subset_ast.check(text, "x/register.py")

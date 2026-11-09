@@ -301,7 +301,7 @@ def test_a_chapter_holds_no_banned_construct(tree, construct, expected):
         ),
         (
             "    def helper(self, event):\n        other = [1]\n        other.a = 2\n",
-            "never on anything else",
+            "never on self or anything else",
         ),
         ("    helper = lambda self, x=1: x\n", "a constant expression"),
     ],

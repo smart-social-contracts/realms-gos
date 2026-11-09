@@ -289,3 +289,198 @@ def test_no_cedar_is_injected_through_a_setting_or_a_literal(name):
         "context.facts.rate > 1300000 };" in before
         and 'context.facts.code == "ibi_urban"' in before
     )
+
+
+# The security review before wave 3 (realms-gos#512). One instance runs every layer's code of a domain in a call, so a
+# chapter stores nothing on ``self``: a name stored by one layer would change what another reads, the code of a layer
+# above that is ``fixed`` included.
+ES_SELF = """
+from realms.legislation import above, fixed, overridable
+class Procedure(above("procedure")):
+    limit = fixed(5, legislation="x")
+    capital = overridable(False, legislation="x")
+
+    @fixed(legislation="x")
+    def cap(self):
+        return 5
+
+    @overridable(legislation="x")
+    def charge(self):
+        return self.limit, self.capital, self.cap(), self.approved_by("Junta"), self.running_layer()
+"""
+UNTOUCHED = (5, False, 5, False, "eu/es")
+
+
+def _lower(body):
+    """The lowest layer's ``charge``: ``body`` runs, then the layer above reads from the same instance."""
+    return (
+        H
+        + "class Procedure(above('procedure')):\n    def charge(self):\n        "
+        + body
+        + "\n        return super().charge()\n"
+    )
+
+
+def _self_codex():
+    c = Codex(["eu/es", "x/town"], realm="x/town", operations=["codex_install"])
+    c.load("eu/es", "procedure", ES_SELF)
+    return c
+
+
+SELF_STORES = [
+    "self.total = 1",  # a new name
+    "self.limit = 99",  # a fixed setting of the layer above
+    "self.capital = True",  # an overridable one
+    "self.cap = lambda: 99",  # a fixed method
+    "self.charge = None",  # a member of this chapter
+    "self.approved_by = lambda department: True",  # the self API
+    "self.running_layer = lambda: 'x/town'",
+    "self.now = lambda: 0",
+    "self.deny = lambda reason: None",
+    "self.total += 1",
+]
+
+
+@pytest.mark.parametrize("store", SELF_STORES)
+def test_both_checkers_refuse_a_store_on_self(store):
+    from realms.legislation import subset_ast
+
+    with pytest.raises(Refused, match="never on self or anything else"):
+        _self_codex().load("x/town", "procedure", _lower(store))
+    with pytest.raises(Refused, match="never on self or anything else"):
+        subset_ast.check(_lower(store), "x/town/procedure.py")
+
+
+def test_both_checkers_refuse_an_augmented_store_on_the_event():
+    from realms.legislation import subset_ast
+
+    text = H + (
+        "class Procedure(above('procedure')):\n"
+        "    def on_codex_install(self, event):\n        event.count = 0\n        event.count += 1\n"
+    )
+    with pytest.raises(Refused, match="plain assignment"):
+        _codex().load("x/town", "procedure", text)
+    with pytest.raises(Refused, match="plain assignment"):
+        subset_ast.check(text, "x/town/procedure.py")
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["limit", "capital", "cap", "charge", "approved_by", "running_layer", "total"],
+)
+def test_an_instance_takes_no_attribute_and_the_layers_above_read_what_they_did(name):
+    c = _self_codex()
+    chapter = c.chapters["procedure"][0](c.context())
+    with pytest.raises(
+        LegislationError, match=f"self.{name}: a chapter stores nothing on self"
+    ):
+        setattr(chapter, name, 99)
+    assert chapter.charge() == UNTOUCHED
+
+
+# The checkers read a method's code by the name it is defined under (an on_<op> function has the event as its second
+# parameter), and the runtime by the member's name: a chapter cannot give a function a second name.
+ALIASES = {
+    "a hook under another name": "    def on_codex_install(self, event):\n        event.memo = 'x'\n\n    charge = on_codex_install\n",
+    "a helper under another name": "    def helper(self):\n        return 1\n\n    charge = helper\n",
+    "a lambda": "    charge = lambda self: 1\n",
+}
+
+
+@pytest.mark.parametrize("alias", sorted(ALIASES))
+def test_a_method_is_defined_under_its_own_name(alias):
+    c = Codex(["x/town"], realm="x/town", operations=["codex_install"])
+    text = H + "class Procedure(above('procedure')):\n" + ALIASES[alias]
+    with pytest.raises(
+        Refused, match="charge: a method is defined under its own name, not "
+    ):
+        c.load("x/town", "procedure", text)
+
+
+# A hook may store on its event parameter, so it must be handed the call's own Event: a chapter that called its own hook
+# with an SDK function, or with itself, would turn that store into state kept between calls, or into a store on self.
+HOOK_CALLS = {
+    "an SDK function": "self.on_codex_install(days)",
+    "the chapter itself": "self.on_codex_install(self)",
+    "no event": "self.on_codex_install()",
+    "an event as a keyword": "self.on_codex_install(event=days)",
+}
+
+
+def _hook_chapter(mark, call):
+    """A chapter with a hook, marked ``mark``, that stores on its event, and a method that makes ``call``."""
+    c = Codex(["x/town"], realm="x/town", operations=["codex_install"])
+    text = (
+        f"from realms.legislation import above, days, {mark}\n"
+        "class Procedure(above('procedure')):\n"
+        f"    @{mark}\n    def on_codex_install(self, event):\n        event.memo = 'x'\n\n"
+        f"    def charge(self):\n        {call}\n"
+    )
+    return c.load("x/town", "procedure", text)(c.context())
+
+
+@pytest.mark.parametrize("mark", ["overridable", "extension"])
+@pytest.mark.parametrize("call", sorted(HOOK_CALLS))
+def test_a_hook_runs_with_the_calls_event_only(mark, call):
+    from realms.legislation import days
+
+    chapter = _hook_chapter(mark, HOOK_CALLS[call])
+    with pytest.raises(
+        LegislationError, match="a hook runs with the operation's event"
+    ):
+        chapter.charge()
+    assert not hasattr(days, "memo")
+
+
+@pytest.mark.parametrize("mark", ["overridable", "extension"])
+def test_a_hook_still_runs_with_an_event(mark):
+    from realms.legislation import Event
+
+    chapter = _hook_chapter(mark, "pass")
+    event = Event("a", {}, {}, 0)
+    chapter.on_codex_install(event)
+    assert event.memo == "x"
+
+
+EXPORTED = (
+    "above",
+    "days",
+    "extension",
+    "fixed",
+    "forbid",
+    "months",
+    "overridable",
+    "pct",
+    "when",
+    "working_days",
+    "years",
+)
+
+
+@pytest.mark.parametrize("name", EXPORTED)
+def test_the_functions_a_chapter_imports_refuse_attributes(name):
+    import realms.legislation as sdk
+
+    function = getattr(sdk, name)
+    with pytest.raises(LegislationError, match="never change"):
+        function.memo = 1
+    assert not hasattr(function, "memo")
+
+
+def test_every_other_name_a_chapter_imports_is_a_class_or_an_expression_builder():
+    import realms.legislation as sdk
+
+    assert sorted(set(sdk.__all__) - set(EXPORTED)) == ["F", "Money", "Ref", "S"]
+
+
+def test_the_functions_a_chapter_imports_still_work():
+    import realms.legislation as sdk
+
+    assert (
+        sdk.days(2).to_json() == {"count": 2, "unit": "Day"}
+        and sdk.pct("1.10") is not None
+    )
+    assert (
+        sdk.fixed(5, legislation="x").mark == "fixed"
+        and sdk.overridable(lambda self: 1).mark == "overridable"
+    )

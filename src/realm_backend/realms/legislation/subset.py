@@ -6,7 +6,7 @@ docs/architecture/sandboxing.md): the sandbox stays the barrier around the realm
 this check keeps a chapter to the constructs a reader can follow and the loader can reason about.
 ``ast`` is a stub in the canister, so the check walks the code objects and decodes their bytecode:
 a whitelist of instructions per scope (module, class body, method), no generator, coroutine or
-pattern-matching code, attribute stores only on a local variable, no dunder name anywhere but the
+pattern-matching code, attribute stores only on a hook's event, no dunder name anywhere but the
 ones CPython itself writes in a class body, no frame or traceback attribute, no string holding a
 dunder, no ``metaclass`` keyword, and a module that holds nothing but imports, constant
 assignments and the one class. ``subset_ast`` applies the same rules to the syntax tree, for the
@@ -73,6 +73,7 @@ FLOAT_NAMES = frozenset(("float", "complex", "pow"))
 NO_FLOAT = "no floats in a chapter: money is whole units of the token, a rate is pct(\"1.10\"), a share of money is Money.times(rate)"
 NO_DIVISION = "no `/` in a chapter, it makes a float: use // on whole numbers, or Money.times(rate) for a share of money"
 NO_POWER = "no `**` or pow() in a chapter, a negative power is a float: multiply, or use Money.times(rate)"
+NO_STORE = "a chapter sets attributes on the event a hook was given, by plain assignment, never on self or anything else"
 GENERATOR_FLAGS = (
     0x20 | 0x80 | 0x100 | 0x200
 )  # CO_GENERATOR, CO_COROUTINE, CO_ITERABLE_COROUTINE, CO_ASYNC_GENERATOR
@@ -337,12 +338,9 @@ class Check:
         self.no_defaults(ops)
         self.bound_once(code, ops, {"self", event} - {None}, nested)
         for i, (name, arg) in enumerate(ops):
-            if name == "STORE_ATTR" and not self.on_self_or_event(code, ops, i, event):
+            if name == "STORE_ATTR" and not self.on_the_event(code, ops, i, event):
                 attr = code.co_names[arg]
-                self.refuse(
-                    f".{attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
-                    f".{attr}",
-                )
+                self.refuse(f".{attr} = ...: {NO_STORE}", f".{attr}")
             if name == "CALL_INTRINSIC_1" and arg not in _INTRINSICS:
                 self.refuse("an instruction outside the readable subset", code.co_name)
         for const in code.co_consts:
@@ -378,21 +376,21 @@ class Check:
             return arg >> 1
         return arg
 
-    def on_self_or_event(self, code, ops, i, event):
-        """Whether the object the attribute is stored on was just loaded as ``self`` or as the event the hook was
-        given (``event``): the two objects a call gets fresh, and so the only ones a store cannot turn into state
-        kept between calls. Anything else, a parameter included, may outlive the call: an SDK function, the
-        calendar, a view, another chapter."""
-        if i == 0:
+    def on_the_event(self, code, ops, i, event):
+        """Whether the object the attribute is stored on was just loaded as the event the hook was given (``event``): the
+        one object a call gets fresh that a chapter may write on, and whose fields the layers seal one after another.
+        Nothing else: a store on ``self`` would change what the layers above read, as one instance runs them all, and
+        anything else, a parameter included, may outlive the call: an SDK function, the calendar, a view, another
+        chapter."""
+        if event is None or i == 0:
             return False
-        allowed = {"self", event} - {None}
         name, arg = ops[i - 1]
         if name in ("LOAD_FAST", "LOAD_FAST_CHECK"):
-            return code.co_varnames[arg] in allowed
+            return code.co_varnames[arg] == event
         if name == "LOAD_FAST_LOAD_FAST":
-            return code.co_varnames[arg & 15] in allowed
+            return code.co_varnames[arg & 15] == event
         if name == "LOAD_DEREF":  # a parameter a nested function also reads is a cell on 3.10
-            return self.deref_name(code, arg) in allowed
+            return self.deref_name(code, arg) == event
         return False
 
     @staticmethod
@@ -440,6 +438,11 @@ class Check:
                 and not (scope == "module" and name == "__doc__")
             ):
                 self.refuse(f"{name}: no dunder names in a chapter", name)
+        # Dunder names are refused where the code reads them (co_names) and in strings, not among the variables it binds
+        # (co_varnames, co_cellvars, co_freevars): a local is only a name and reaches nothing. Refusing them there would
+        # also refuse super(): a method that calls it holds the implicit ``__class__`` cell in co_freevars. That cell is
+        # the class that defines the method, which type(self) and above() give already. (subset_ast refuses a dunder
+        # variable the author writes; super() writes none.)
         # The names the code binds as well as those it reads (co_names holds the global and attribute names only).
         for name in (code.co_name, *code.co_names, *code.co_varnames, *code.co_cellvars, *code.co_freevars):
             if name in FLOAT_NAMES:

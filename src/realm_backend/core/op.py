@@ -73,6 +73,8 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     range over the list judge each of them.
     """
     def wrap(fn):
+        if fn.__name__ in OPS:  # a second registration would replace the first one's secret=, permission, governed= silently
+            raise ValueError(f"{fn.__name__} is registered twice")
         OPS[fn.__name__] = {"fn": fn, "perm": perm, "read": read, "delegable": delegable, "governed": governed,
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,

@@ -68,6 +68,17 @@ def test_read_endpoint_refuses_changes_and_unknown_names():
     assert "unknown operation 'nope'" in call("nope")["error"]
 
 
+def test_an_operation_name_is_registered_once():
+    """A second registration would replace the first one's secret=, private=, permission and governed= without a word."""
+    def t_public(c, args):
+        return {}
+
+    registered = op.OPS["t_public"]
+    with pytest.raises(ValueError, match="t_public is registered twice"):
+        op.op("treasury.manage")(t_public)
+    assert op.OPS["t_public"] is registered
+
+
 def test_public_needs_no_sign_in():
     assert ok("t_public", fake_chain.ANONYMOUS)["who"] == fake_chain.ANONYMOUS
 

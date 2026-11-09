@@ -73,6 +73,7 @@ from realms.legislation.rates import pct as pct
 from realms.legislation.rates import times as times
 from realms.legislation.resolver import Resolution as Resolution
 from realms.legislation.resolver import resolve as resolve
+from realms.legislation.sealed import Exported
 
 # What a chapter may import, and nothing else.
 __all__ = [
@@ -92,3 +93,9 @@ __all__ = [
     "working_days",
     "years",
 ]
+
+# The functions in ``__all__`` are wrapped, so that nothing can be stored on them (sealed.py).
+_function = type(lambda: None)
+for _name in __all__:
+    if type(globals()[_name]) is _function:
+        globals()[_name] = Exported(globals()[_name])

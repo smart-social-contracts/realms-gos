@@ -430,17 +430,20 @@ CALENDAR_STATE = register('''    def check_t_poke(self, args):
         c = self.calendar
         c.memo = args.what
 ''')
+SELF_STATE = register('''    def check_t_poke(self, args):
+        self.memo = args.what
+''')
 EVENT_OK = register('''    def on_t_poke(self, event):
         event.seen = [w for w in (event.args.get("what"),) if w]
 ''')
 
 
-@pytest.mark.parametrize("text, line", [(STATEFUL, 6), (CALENDAR_STATE, 6)])
-def test_an_attribute_is_set_on_self_or_on_what_the_method_was_given_never_on_a_local(text, line):
+@pytest.mark.parametrize("text, line", [(STATEFUL, 6), (CALENDAR_STATE, 6), (SELF_STATE, 5)])
+def test_an_attribute_is_set_on_the_event_a_hook_was_given_never_on_self_or_a_local(text, line):
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
                              "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
-    assert out["errors"] == [f"x/town/register.py:{line}: .memo = ...: a chapter sets attributes on self, or on the event a hook "
-                             "was given, never on anything else"]
+    assert out["errors"] == [f"x/town/register.py:{line}: .memo = ...: a chapter sets attributes on the event a hook was "
+                             "given, by plain assignment, never on self or anything else"]
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
                              "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:y"}]}, {"sha256:y": EVENT_OK})
     assert out["errors"] == []  # the event a hook was given takes attributes, as §4.1 says
@@ -537,28 +540,21 @@ KEEP = register('''    def check_t_poke(self, args):
     def keep(self, f, value):
         f.memo = value
 ''').replace("from realms.legislation import above", "from realms.legislation import above, days")
-FRESH = register('''    def check_t_poke(self, args):
-        if args.what == "remember":
-            self.memo = "kept"
-        if args.what == "recall":
-            return self.deny("memo: " + str(getattr(self, "memo", None)))
-
-    def on_t_poke(self, event):
+FRESH = register('''    def on_t_poke(self, event):
         event.count = getattr(event, "count", 0) + 1
         self.ggg.notification_send(recipient="User:alice", title="count", body=str(event.count))
 ''')
 
 
-def test_a_store_through_a_parameter_is_refused_and_self_and_the_event_outlive_no_call():
+def test_a_store_through_a_parameter_is_refused_and_the_event_outlives_no_call():
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
                              "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": KEEP})
-    assert out["errors"] == ["x/town/register.py:8: .memo = ...: a chapter sets attributes on self, or on the event a hook was "
-                             "given, never on anything else"]
+    assert out["errors"] == ["x/town/register.py:8: .memo = ...: a chapter sets attributes on the event a hook was "
+                             "given, by plain assignment, never on self or anything else"]
     activate(layered({(TOWN, "register"): FRESH}, layers=[TOWN]))
-    ok("t_poke", what="remember")
-    assert call("t_poke", what="recall")["error"] == "memo: None"  # a fresh instance per call
-    ok("t_poke", what="again")
-    assert notices("count") == ["1", "1"]  # a fresh event per call (the denied recall ran no hook)
+    ok("t_poke", what="one")
+    ok("t_poke", what="two")
+    assert notices("count") == ["1", "1"]  # a fresh event per call
 
 
 # ── The fourth review: what the legislation reads after G2 ───────────────────────────────────────────────────────

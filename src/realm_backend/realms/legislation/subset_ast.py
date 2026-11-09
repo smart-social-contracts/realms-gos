@@ -17,6 +17,7 @@ from realms.legislation.subset import (
     NO_DIVISION,
     NO_FLOAT,
     NO_POWER,
+    NO_STORE,
     SDK,
     sdk_names,
 )
@@ -47,7 +48,7 @@ class Check:
         except SyntaxError as e:
             raise Refused(e.msg, e.lineno, file)
         self.imported = set()
-        self.allowed = []  # per function being visited: the names a store may target (self, a hook's event)
+        self.allowed = []  # per function being visited: the names bound once (self, a hook's event); only the event takes a store
 
     def refuse(self, node, reason):
         raise Refused(reason, getattr(node, "lineno", None), self.file)
@@ -277,7 +278,8 @@ class Check:
     # ── methods and lambdas ──
 
     def function(self, node, outer_locals, allowed=None):
-        """A method (``allowed`` names what a store may target), or a function nested in one, which inherits it."""
+        """A method (``allowed`` names what is bound once: self and a hook's event, of which only the event takes a store), or a
+        function nested in one, which inherits it."""
         ast = self.ast
         args = node.args
         if args.defaults or any(d is not None for d in args.kw_defaults):
@@ -351,6 +353,8 @@ class Check:
             self.expression(node.value, local)
         elif isinstance(node, ast.AugAssign):
             self.operator(node)
+            if isinstance(node.target, ast.Attribute):  # the realm refuses it: a store on the event is a plain assignment
+                self.refuse(node, f".{node.target.attr} += ...: {NO_STORE}")
             self.target(node.target, local)
             self.expression(node.value, local)
         elif isinstance(node, ast.Return):
@@ -399,11 +403,9 @@ class Check:
             self.identifier(node, node.id, "method")
         elif isinstance(node, ast.Attribute):
             self.identifier(node, node.attr, "method")
-            if not (isinstance(node.value, ast.Name) and self.allowed and node.value.id in self.allowed[-1]):
-                self.refuse(
-                    node,
-                    f".{node.attr} = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else",
-                )
+            # self is bound once, like the event, but a chapter stores on the event only
+            if not (isinstance(node.value, ast.Name) and self.allowed and node.value.id in self.allowed[-1] - {"self"}):
+                self.refuse(node, f".{node.attr} = ...: {NO_STORE}")
         elif isinstance(node, ast.Subscript):
             self.expression(node, local)
         elif isinstance(node, (ast.Tuple, ast.List)):
