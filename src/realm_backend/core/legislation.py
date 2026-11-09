@@ -227,10 +227,11 @@ def run(op, call, args, department, perform, record, read=False):
     """Run GGG operation ``op`` for ``call`` with ``args`` under the legislation: its guards first, then ``perform()``
     (the operation itself, or the filing of the proposal that carries a governed call), then ``record(out)``, the
     audit of the operation, then its hooks, whose effects are audited after it. ``department`` is the one deciding
-    a governed call directly, if any. A read runs no legislation. A generator, as the operation and the effects may
-    call other canisters."""
+    a governed call directly, if any. A read runs no legislation. A hook-only operation (``HOOK_ONLY``) runs no guard,
+    which fails closed when the codex is not loaded: nothing may refuse the notice that a link ended. A generator, as
+    the operation and the effects may call other canisters."""
     legislated = not read and call.origin != "codex" and not is_reserved(op, args) and _ensure()
-    if legislated:
+    if legislated and op not in HOOK_ONLY:
         _guard(op, args, call, department)
     out = perform()
     if isinstance(out, GENERATOR):

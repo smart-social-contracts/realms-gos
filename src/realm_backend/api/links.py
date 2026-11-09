@@ -105,12 +105,14 @@ def valid_follower(args):
 def open_link(cls, key, **fields):
     """This side's vote: the link recorded as ``requested``, in place of an ended one under the same key. Returns the
     row and what it replaced, for ``undo``. It is written before the check for a cycle reads any other realm, so that a
-    vote cast at the same time on the other side sees it (I-NEST-2)."""
+    vote cast at the same time on the other side sees it (I-NEST-2), and it is ``checking`` until the check is over:
+    the other side's notice is refused meanwhile, as if this side had not voted yet, for the check may still undo the
+    vote (I-NEST-1)."""
     old = cls[key]
     before = view(old) if old is not None else None
     if old is not None:
         old.delete()
-    return cls(id=key, **fields), before
+    return cls(id=key, checking=True, **fields), before
 
 
 def undo(link, before):
@@ -126,14 +128,26 @@ def sources():
         yield from each(SyncSource, "status", status)
 
 
+def open_followers():
+    """The followers whose links have not ended."""
+    return [f for status in STATUSES[:2] for f in each(Follower, "status", status)]
+
+
+def open_links():
+    """The links that have not ended, as ``sync source <id>`` and ``follower <id>``."""
+    return [f"sync source {s.id}" for s in sources() if s.status != "ended"] + [f"follower {f.id}" for f in open_followers()]
+
+
 def takes_legislation_from(start, target):
     """Whether realm ``start`` takes legislation from ``target``, directly or through other realms, over links that
     have not ended, as each realm says now. A realm that cannot be read, or a walk past WALK_LIMIT realms, fails the
-    check with Unavailable: never an open link. A generator."""
+    check with Unavailable: never an open link. The followers of this realm take legislation from it, whatever their
+    own realm_info says yet: their vote may not have reached it. A generator."""
     todo, seen = [start], set()
+    followers = {f.id for f in open_followers()} if target == chain.self_id() else set()
     while todo:
         realm = todo.pop()
-        if realm == target:
+        if realm == target or realm in followers:
             return True
         if realm in seen:
             continue
@@ -151,7 +165,7 @@ def sources_of(realm):
         return [s.id for s in sources() if is_realm(s) and s.status != "ended"]
     try:
         info = yield from quarters.ask(realm, "realm_info", {})
-        return [s["source"]["Realm"] for s in info["sync_sources"]
+        return [capital_of(s["source"]["Realm"]) for s in info["sync_sources"]
                 if "Realm" in s["source"] and not isinstance(s["status"], dict)]
     except Exception:  # noqa: BLE001  rejected (stopped, gone, no realm), refused, or an answer that is no realm's
         raise Unavailable(f"{realm} could not be read to check for a cycle")
@@ -168,40 +182,54 @@ def vote_link(cls, key, cycle, **fields):
     except Exception:  # noqa: BLE001  whatever stops the vote, the record written before the first call goes
         undo(link, before)
         raise
-    yield from notify(cls[key])
+    cls[key].checking = False
+    yield from tell(cls[key])  # their vote is in or it is not: this notice completes the link in either order
     return {}
 
 
 def notify(link):
     """Tell the capital at the other side what this side's vote, or its ending, made of ``link``, and read the answer:
     ``active`` means their vote is in. An answer of any kind is an answer, a refusal among them; a call that fails is
-    not, and the notice is sent again (``resend``). A generator."""
+    not, and the link stays ``unsent``. Returns whether it was answered. A generator."""
     cls, key = type(link), link.id
     try:
         reply = yield from quarters.ask(key, "link_notify", {"side": SIDES[cls], "status": link_status(link)})
     except Exception:  # noqa: BLE001  rejected: the realm is stopped, gone, or has no such method
-        again = cls[key]
-        again.unsent = True
-        chain.set_timer(RETRY, lambda: resend(cls, key))
-        return
+        cls[key].unsent = True
+        return False
     link = cls[key]  # the link may have changed while the call was out
     link.unsent = False
-    if reply.get("ok") and reply.get("status") == "active" and link.status == "requested":
+    if isinstance(reply, dict) and reply.get("ok") and reply.get("status") == "active" and link.status == "requested":
         link.status = "active"
+    return True
+
+
+def tell(link):
+    """``notify``, and the timer that sends it again if nobody answered: one chain of timers per link, started when the
+    link first becomes ``unsent``, as the one running sends the link's status as it is then. A generator."""
+    waiting = link.unsent
+    if not (yield from notify(link)) and not waiting:
+        retry_later(type(link), link.id)
+
+
+def retry_later(cls, key):
+    chain.set_timer(RETRY, lambda: resend(cls, key))
 
 
 def resend(cls, key):
-    """A notice nobody answered, sent again with the link's status now. A generator."""
+    """A notice nobody answered, sent again with the link's status now, and the next timer set if nobody answers. The
+    other side ending the link ends the chain: its notice (``received``) settles what this realm had to tell. A
+    generator."""
     link = cls[key]
-    if link is not None and link.unsent:
-        yield from notify(link)
+    if link is not None and link.unsent and not (yield from notify(link)):
+        retry_later(cls, key)
 
 
 def resume():
     """Timers do not survive an upgrade: send again the notices nobody answered."""
     for cls in SIDES:
         for link in each(cls, "unsent", True):
-            chain.set_timer(RETRY, lambda cls=cls, key=link.id: resend(cls, key))
+            retry_later(cls, link.id)
 
 
 def end_link(cls, key):
@@ -211,7 +239,7 @@ def end_link(cls, key):
         raise Conflict("this link has ended")
     link.status, link.ended_by, link.ended_at = "ended", chain.self_id(), chain.now()
     if is_realm(link):
-        yield from notify(link)
+        yield from tell(link)
     return {}
 
 
@@ -289,7 +317,7 @@ def received(link, caller, status):
         raise Fail("a notice that a link ended names its sender as by")
     if at > chain.now() + CLOCK_TOLERANCE:
         raise Fail("a notice that a link ended is not dated ahead of this realm's clock")
-    link.status, link.ended_by, link.ended_at = "ended", by, at
+    link.status, link.ended_by, link.ended_at, link.unsent = "ended", by, at, False
 
 
 def valid_status(status):
@@ -309,13 +337,14 @@ def valid_notice(args):
 
 @op("link.sync", returns="status", check=valid_notice)
 def link_notify(c, args):
-    """From the capital at the other side of a link this realm has voted on: its ``side`` to this realm (``sync_source``
+    """From the capital at the other side of a link this realm has voted on (a vote still being checked for a cycle
+    counts as not voted yet): its ``side`` to this realm (``sync_source``
     or ``follower``) and the link's new ``status`` after its vote (``requested`` or ``active``: its vote is in) or
     ``{"Ended": {"by": <its capital>, "at": <seconds>}}``. Replies this realm's status of the link: ``active`` tells the
     caller its vote completed the link. Legislation may hook it (``on_link_notify``) and never guard or forbid it."""
     cls = Follower if args["side"] == "follower" else SyncSource
     link = cls[c.by]
-    if link is None:
+    if link is None or link.checking:
         raise Forbidden(f"{c.by} is not the capital at the other side of a link this realm has voted on")
     received(link, c.by, args["status"])
     return {"status": link_status(link)}
@@ -374,10 +403,23 @@ def record():
     return sorted(each(Release, "relayed", True), key=lambda r: r.rank) + list(each(Release, "relayed", False))
 
 
+def published_as():
+    """The source id this realm publishes under, the one of its first release; None before it has published."""
+    first = next(iter(each(Release, "relayed", False)), None)
+    return first.source if first is not None else None
+
+
+def no_at(source, version):
+    """A release is kept under ``<source>@<version>``: with an ``@`` in either part, two releases could share an id."""
+    if "@" in source or "@" in version:
+        raise Fail("a release's source and version hold no '@'")
+
+
 def valid_release(args):
     for key, most in (("source", NAME_MAX), ("version", VERSION_MAX), ("commit", VERSION_MAX)):
         if not isinstance(args.get(key), str) or not 0 < len(args[key]) <= most:
             raise Fail(f"{key} is 1 to {most} characters")
+    no_at(args["source"], args["version"])
     chapters = args.get("chapters")
     if not (isinstance(chapters, list) and len(chapters) <= MOST_CHAPTERS and all(
             isinstance(c, dict) and set(c) == {"domain", "checksum"} and isinstance(c["domain"], str)
@@ -402,9 +444,9 @@ def legislation_release_publish(c, args):
     source, version = args["source"], args["version"]
     if any(r.source == source for r in each(Release, "relayed", True)):
         raise Fail(f"{source} is a layer this realm relays: it publishes under its own source id")
-    own = next(iter(each(Release, "relayed", False)), None)
-    if own is not None and own.source != source:
-        raise Fail(f"this realm publishes as {own.source}")
+    own = published_as()
+    if own is not None and own != source:
+        raise Fail(f"this realm publishes as {own}")
     if Release[f"{source}@{version}"] is not None:
         raise Conflict(f"{source} {version} is published already")
     stored = [c["checksum"] for c in args["chapters"]] + ([args["calendar"]] if args.get("calendar") else [])
@@ -444,6 +486,9 @@ def relay_release(release, order):
     source = release["source"]
     if source not in order:
         raise Fail(f"the record that vouches for {source} does not list it")
+    no_at(source, release["version"])
+    if source == published_as():
+        raise Fail(f"{source} is the source id this realm publishes under: it is not a layer from above")
     relayed = [r for r in record() if r.relayed]
     for old in [r for r in relayed if r.source == source]:
         old.delete()
