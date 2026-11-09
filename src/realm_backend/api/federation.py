@@ -86,7 +86,7 @@ def record_leg(q, data):
     leg.outcome, leg.status = "passed" if data["outcome"] == "passed" else "failed", "reported"
     leg.yes, leg.no, leg.abstain, leg.eligible = (int(data.get(k, 0)) for k in ("yes", "no", "abstain", "eligible"))
     leg.codex = data.get("codex", "")
-    leg.compliance = propagation.judge(q, data.get("codex"))
+    leg.compliance = propagation.judge(q, data.get("codex"), propagation.required())
 
 
 def rule_of(v):
@@ -236,7 +236,7 @@ def on_cancel(c, body):
 
 TOPICS = {"user.arrive": quarters.on_arrive, "quarter.secede": quarters.on_secede, "codex": quarters.on_codex,
           propagation.STAGE: propagation.on_stage, propagation.UNSTAGE: propagation.on_unstage,
-          propagation.REVERT: propagation.on_revert, propagation.REQUIRED: propagation.on_required,
+          propagation.REVERT: propagation.on_revert,
           "federal_vote.propose": on_propose, "federal_vote.open": on_open, "federal_vote.result": on_result,
           "federal_vote.cancel": on_cancel}
 

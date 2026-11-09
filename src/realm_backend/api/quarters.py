@@ -73,9 +73,11 @@ def report():
 
 
 def own_compliance():
-    """This realm's own flag. The capital is compliant by definition; a quarter does not judge itself: its capital
-    does, from what it reports (``propagation.judge``)."""
-    return compliance.valid("unknown" if federated() else "compliant")
+    """This realm's own flag. The capital is compliant by definition; a quarter does not judge itself: its capital does,
+    from what it reports (``propagation.judge``), and the quarter shows the flag it was given at its last sync."""
+    if not federated():
+        return compliance.valid("compliant")
+    return (realm().sync_state or {}).get("compliance") or compliance.valid("unknown")
 
 
 def me():
@@ -149,7 +151,7 @@ def record(c, args):
     q.codex_id, q.codex_version = args.get("codex_id", q.codex_id), args.get("codex_version", q.codex_version)
     from api import propagation  # it imports the install task, which imports this module
 
-    q.compliance = propagation.judge(q, args.get("codex_id"))
+    q.compliance = propagation.judge(q, args.get("codex_id"), propagation.required())
     propagation.correct(q)
     q.last_sync = q.last_activity_at = chain.now()
     if q.status == "setup":
@@ -168,10 +170,10 @@ def want_quarter():
 
 
 def apply_directory(reply):
-    seen, index = set(), 0
+    seen, index, flag = set(), 0, None
     for row in reply["directory"]:
         if row["id"] == chain.self_id():
-            index = row["index"]
+            index, flag = row["index"], row.get("compliance")
             continue
         q = Quarter[row["id"]] or Quarter(id=row["id"])
         for k in FIELDS[1:]:
@@ -179,7 +181,7 @@ def apply_directory(reply):
         seen.add(q.id)
     for q in [q for q in known() if q.id not in seen]:
         q.delete()
-    realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index}
+    realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index, "compliance": flag}
 
 
 @op("quarter.register", governed=proposals.realm_wide, returns="quarter")
@@ -444,7 +446,9 @@ def quarter_sync(c, args):
         apply_directory(reply)
         return {"quarters": len(reply["directory"]), "drifting": drifting(codex()["version"])}
     q = record(c, args)
-    return {"directory": directory(), "codex": codex(), "index": q.index}
+    from api import propagation  # it imports the install task, which imports this module
+
+    return {"directory": directory(), "codex": propagation.in_force(), "index": q.index}
 
 
 def reporting_quarter(args, proposal=""):

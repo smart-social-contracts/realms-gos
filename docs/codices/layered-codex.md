@@ -1603,21 +1603,23 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   quarter, in a message of its own per quarter, `codex.stage`: the codex's checksum, the change list's
   checksum and T (the proposal's `effective_at`, or the moment the job started when there is none). A quarter
   it cannot reach is recorded in the `FederationMessage` of the call and holds up no other. A staged codex the
-  capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`. These
-  messages are the realm's own: `federation_message` does not relay them for a member, whatever they hold. The
-  job a quarter runs names no proposal, so the capital's proposal id is never one of the quarter's.
+  capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`; the same
+  codex announced for another time replaces the staging. These messages are the realm's own: `federation_message`
+  does not relay them for a member, whatever they hold. The job a quarter runs names no proposal, so the
+  capital's proposal id is never one of the quarter's, and a job that ends without the switch cancels its task.
 - **Staging in a quarter.** A quarter runs the same install job, in staging mode: the change list and every chapter
   it lacks are read from the capital by checksum (`legislation_chapter`; the capital keeps the change list's
   bytes in `ChapterSource` like a chapter's), and nothing changes while it stages. One install at a time still
   holds: a quarter refuses the announcement while an install of its own runs, and a newer announcement replaces a
   staging in progress. An upgrade pauses the job like any other, and `codex_install_resume` resumes it.
 - **The switch.** The quarter schedules `codex_switch_staged` at T as a task of the realm's own, which
-  `tasks.rearm()` arms again after an upgrade. At T a quarter that is staged asks its capital which codex it
-  requires (the one in force, or the pending one once its time has come, `codex.required`) and switches, with no
-  `on_codex_activate`, only if that is the one it staged; it then reports to its capital. A codex the capital has
-  left (withdrawn, reverted, or replaced by a newer one) is never activated, even by a quarter that missed the
-  message: its job fails and says so. A capital that does not answer leaves the quarter on its codex and the job
-  paused, for an admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile.
+  `tasks.rearm()` arms again after an upgrade. At T, once the capital confirms, a staged quarter switches: it
+  asks its capital which codex it requires (the answer of `quarter_sync`: the one in force, or the pending one once
+  its time has come) and switches, with no `on_codex_activate`, only if that is the one it staged, so the switch
+  is T plus one round trip. It then reports to its capital. A codex the capital has left (withdrawn, reverted, or
+  replaced by a newer one) is never activated, even by a quarter that missed the message and keeps its codex: its
+  job fails and says so. A capital that does not answer leaves the quarter on its codex and the job paused, for an
+  admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile.
 - **A quarter ready after T** goes through the same confirmation before it switches.
 - **A revert.** When the capital restores an earlier codex (`codex_revert`, `codex_revert_fast`), it tells each
   active quarter `codex.revert`, and each restores that codex from its own history at once: nothing is downloaded
@@ -1630,7 +1632,8 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   otherwise non-compliant since that codex took effect (the switch, or the revert that restored it), naming
   the layers that differ. A minute after the capital's codex changes it judges the quarters that reported
   before and have not said they changed, so that one that was not ready reads non-compliant since T without
-  waiting for its next report. `quarter_directory` shows the flag.
+  waiting for its next report. `quarter_directory` shows the flag, and a quarter's own row the flag its capital gave
+  it at its last sync.
 - **What calls carry and what is recorded.** A call to a canister of the federation carries the checksum of the
   codex its sender runs. The receiver keeps it, with the sender's flag, on the `FederationMessage` (a move is
   the `user.arrive` message), on the `FederalVoteLeg`, and the origin quarter on the `Forward`. Legislation

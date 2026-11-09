@@ -24,14 +24,14 @@ from api import codex as runtime
 from api import installs, links, quarters, tasks
 from core import chain, compliance
 from core import layered_codex as store
-from core.db import Conflict, Fail, Forbidden, each, find, next_id
+from core.db import Conflict, Fail, each, find, next_id
 from core.op import op
 from ggg import FederationMessage, InstallJob, LayeredCodex, Quarter, Task, TaskSchedule
 
-STAGE, UNSTAGE, REVERT, REQUIRED = "codex.stage", "codex.unstage", "codex.revert", "codex.required"
+STAGE, UNSTAGE, REVERT = "codex.stage", "codex.unstage", "codex.revert"
 # The federation_message topics of this module. A local holder of quarter.sync can relay any other topic to the quarters,
 # but never these: only the capital's install and revert send them.
-OWN = (STAGE, UNSTAGE, REVERT, REQUIRED)
+OWN = (STAGE, UNSTAGE, REVERT)
 # Seconds the capital gives the quarters that switched at T to say so before it judges the others: they report
 # within moments, and a flag raised in between would be a flag withdrawn at once.
 JUDGE_AFTER = 60
@@ -93,23 +93,6 @@ def tell(cid, topic, body):
 # ---- A quarter: stage what the capital announced, and switch at T.
 
 
-def on_required(c, body):
-    """From a quarter, to its capital: the codex the capital requires of its quarters now, ``codex`` ("" for none): the
-    one in force, or a pending one once its time has come."""
-    if quarters.federated():
-        raise Forbidden("only a capital answers what the realm requires")
-    target = required()
-    return {"codex": target.id if target is not None else ""}
-
-
-def capital_requires():
-    """The codex the capital requires of this quarter now. Raises when it does not answer. A generator."""
-    reply = yield from quarters.ask(quarters.capital(), "federation_message", {"topic": REQUIRED, "body": {}})
-    if not reply.get("ok"):
-        raise Fail(f"the capital refused: {reply.get('error')}")
-    return reply["codex"]
-
-
 def staging(codex_id):
     """The job that stages ``codex_id`` for the capital, if one is running or paused."""
     live = store.live_job()
@@ -118,8 +101,9 @@ def staging(codex_id):
 
 def on_stage(c, body):
     """From the capital: stage the codex ``codex`` (its change list is stored under ``checksum`` there) and switch to
-    it at ``at``. Asking again for a codex being staged, or already active, changes nothing; a newer announcement
-    replaces a staging in progress; another install running here refuses it."""
+    it at ``at``. Asking again for a codex being staged for the same time, or already active, changes nothing; a newer
+    announcement, or the same codex for another time, replaces a staging in progress; another install running here
+    refuses it."""
     quarters.from_capital(c)
     codex_id, checksum, at = body.get("codex"), body.get("checksum"), body.get("at")
     if not (links.pinned(codex_id) and links.pinned(checksum) and isinstance(at, int) and at >= 0):
@@ -129,7 +113,9 @@ def on_stage(c, body):
         return {"staged": "active"}
     running = staging(codex_id)
     if running is not None:
-        return {"staged": "running", "job": running.id}
+        if running.staged["announced"]["at"] == at:
+            return {"staged": "running", "job": running.id}
+        installs.fail(running, "the capital announced it again for another time")
     live = store.live_job()
     if live is not None:
         if not installs.announced(live):
@@ -165,16 +151,28 @@ def on_revert(c, body):
     return {"reverted": "restored", **runtime.restore(runtime.restoring({"codex": body.get("codex")}))}
 
 
+def task_name(job):
+    return f"{tasks.OWN}codex {job.id}"
+
+
 def schedule(job, at):
     """Run ``codex_switch_staged`` for ``job`` at T as a one-step task of the realm's task scheduler, which arms its
     timer again after an upgrade (tasks.rearm). The step runs as the realm itself: the capital's vote is the
-    authority. The task's name starts with ``tasks.OWN``, which no member can create."""
-    name = f"{tasks.OWN}codex {job.id}"
+    authority. The task's name starts with ``tasks.OWN``, the realm's own tasks, which no member can create (the word
+    is "proposal" because a vote schedules the other kind; this one is no proposal's)."""
+    name = task_name(job)
     task = Task(name=name, metadata=json.dumps({"creator": chain.self_id()}), status="pending")
     tasks.define(task, [("codex_switch_staged", {"job": job.id}, 0)])
     when = TaskSchedule(name=f"{name}@1", task=task, last_run_at=0, run_at=at, repeat_every=0)
     tasks.enable(when, True)
     tasks.arm(when)
+
+
+def unschedule(job):
+    """``job`` ended without the switch (it failed, or a newer announcement replaced it): its task does not fire."""
+    task = Task[task_name(job)]
+    if task is not None:
+        tasks.stop(task)
 
 
 @op(None, public=True, returns="job")
@@ -225,12 +223,20 @@ def required():
     return active if isinstance(active, LayeredCodex) else None
 
 
-def judge(quarter, reported):
-    """The flag the capital gives ``quarter`` that reports it runs the codex ``reported`` ("" for none), as the JSON text
-    a row keeps (core.compliance): compliant when it is the codex in force, otherwise non-compliant since that codex
-    took effect (or since the quarter was first found behind), naming the layers that differ. Unchanged when the
-    capital runs no layered codex or the report names no codex (``reported`` is None)."""
+def in_force():
+    """The codex the capital's quarters must run, as the directory names a codex (``id``, ``version``): ``required``, or
+    the capital's own codex when it runs no layered one. What ``quarter_sync`` answers, and a quarter confirms its
+    switch against."""
     target = required()
+    return {"id": target.id, "version": target.id} if target is not None else quarters.codex()
+
+
+def judge(quarter, reported, target):
+    """The flag the capital gives ``quarter`` that reports it runs the codex ``reported`` ("" for none), as the JSON text
+    a row keeps (core.compliance), against ``target``, the codex it must run (``required``): compliant when it is that
+    codex, otherwise non-compliant since it took effect (or since the quarter was first found behind), naming the
+    layers that differ. Unchanged when the capital runs no layered codex or the report names no codex (``reported`` is
+    None)."""
     if target is None or reported is None:
         return quarter.compliance
     if reported == target.id:
@@ -262,7 +268,9 @@ def layer_of(codex, layer):
 def judge_quarters():
     """On the capital, a moment after its codex changed: every active quarter that has reported is judged against the
     codex now in force, so that one that did not change with the others reads non-compliant since the change without
-    waiting for its next report."""
+    waiting for its next report. It is a timer: an upgrade of the capital within the minute loses it, and the flags
+    then follow the quarters' own reports."""
+    target = required()
     for q in each(Quarter, "status", "active"):
         if q.last_sync:
-            q.compliance = judge(q, q.codex_id)
+            q.compliance = judge(q, q.codex_id, target)

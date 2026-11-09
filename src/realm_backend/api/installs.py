@@ -227,6 +227,10 @@ def fail(job, reason):
     A job that has ended keeps its reason: the late reply to an outcall it made changes nothing."""
     if job.status not in ("running", "paused"):
         return
+    from api import propagation  # it imports this module
+
+    if announced(job):
+        propagation.unschedule(job)
     waiting = LayeredCodex[job.staged["codex"]] if job.staged.get("codex") else None
     if waiting is not None and waiting.status == "pending":
         codex_id = waiting.id
@@ -235,8 +239,6 @@ def fail(job, reason):
                 setattr(waiting, field, value)
         else:
             waiting.delete()
-        from api import propagation  # it imports this module
-
         propagation.withdraw(codex_id)
     job.staged, job.status, job.error, job.finished_at = {}, "failed", reason[:500], chain.now()
 
@@ -397,16 +399,16 @@ def build(job):
 
 
 def confirm(job):
-    """A quarter asks the capital which codex it requires now, at the switch time and after it, and goes on to the switch
-    only if that is the codex it staged: one the capital has left, withdrawn, reverted or replaced by a newer, is never
+    """A quarter asks the capital which codex it requires now (``quarter_sync``: the one in force, or a pending one once
+    due), at the switch time and after it, and goes on to the switch only if that is the codex it staged: one the capital has left, withdrawn, reverted or replaced by a newer, is never
     activated. A newer codex the capital announced is staged by its own job. A capital that does not answer leaves the
     quarter on its codex and the job paused, for an admin's ``codex_install_resume`` to ask again. A generator."""
     if not announced_by_my_capital(job):
         raise Fail(LEFT)
-    from api import propagation  # it imports this module
-
     try:
-        required = yield from propagation.capital_requires()
+        reply = yield from quarters.ask(quarters.capital(), "quarter_sync", {})  # no report: nothing of this quarter changes
+        if not reply.get("ok"):
+            raise Fail(f"the capital refused: {reply.get('error')}")
     except Exception as e:  # noqa: BLE001  rejected, trapped or refused: the codex is not confirmed
         job = InstallJob[job.id]
         if job.status == "running":
@@ -416,7 +418,7 @@ def confirm(job):
     if job.status != "running":
         return None
     job.error = ""
-    staged = job.staged["announced"]["codex"]
+    required, staged = reply["codex"]["id"], job.staged["announced"]["codex"]
     if required != staged:
         raise Fail(f"the capital requires {required or 'no codex'}, not {staged}: a codex it has left is not switched to")
     return "switch"
