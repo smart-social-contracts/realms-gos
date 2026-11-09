@@ -18,7 +18,8 @@ from realms.cli.commands.legislation_report import Comparison
 
 VALENCIA = "eu/es/vc/46250-valencia"
 RATE = {"type": "Long", "optional": True, "min": 0, "max": 100_000_000}
-TAX_ENTRY = {"code": "String", "rate": RATE}
+AMOUNT = {"type": "Long", "optional": True, "min": 0, "max": 1_000_000}
+TAX_ENTRY = {"code": "String", "rate": RATE, "amount": AMOUNT}
 KINDS = ["Fine", "Restitution", "CommunityService", "Suspension"]
 PENALTY = {"type": "String", "values": KINDS}  # an enumeration of GGG
 FACTS = {
@@ -372,6 +373,48 @@ def test_a_forbid_of_a_word_outside_the_enumeration_never_fires(world):
     head = world.change({"eu/es/justice.py": justice(["Revocation"])})
     spain = world.realm(world.base, head, "eu/es")
     assert any("eu/es/justice/no_penalties never fires" in f for f in spain.failures())
+
+
+def amount_cap(cap, setting="", gate=""):
+    return f"""from realms.legislation import F, S, above, forbid, overridable, pct
+
+class Tax(above('tax')):
+{setting}
+    cap_without_amount = forbid('tax_policy_propose',
+        {gate}(F.code == 'ibi_urban') & F.amount.is_none() & F.rate.is_some() & (F.rate > pct('{cap}')),
+        each='taxes', legislation='x')
+"""
+
+
+def test_the_words_say_what_the_proof_pinned_an_absent_optional_fact(world):
+    base = world.change({"eu/es/tax.py": amount_cap("2.00")})
+    head = world.change({"eu/es/tax.py": amount_cap("1.00")})
+    [result] = [
+        r
+        for r in world.realm(base, head, "eu/es").folded
+        if r.action == "tax_policy_propose.taxes"
+    ]
+    assert result.statements == [
+        'code = "ibi_urban", no amount: rate more than 1.00 % (1000000) and at most 2.00 % (2000000) newly forbidden'
+    ]
+
+
+def test_the_words_say_what_the_proof_pinned_a_setting_that_is_not_a_boolean(world):
+    setting = "    tier = overridable(1, legislation='x')"
+    base = world.change(
+        {"eu/es/tax.py": amount_cap("2.00", setting, "(S.tier == 1) & ")}
+    )
+    head = world.change(
+        {"eu/es/tax.py": amount_cap("1.00", setting, "(S.tier == 1) & ")}
+    )
+    [result] = [
+        r
+        for r in world.realm(base, head, "eu/es").open
+        if r.action == "tax_policy_propose.taxes"
+    ]
+    assert result.statements == [
+        'code = "ibi_urban", no amount, tier = 1: rate more than 1.00 % (1000000) and at most 2.00 % (2000000) newly forbidden'
+    ]
 
 
 # ── The questions with one answer (points 3 and 4) ───────────────────────────────────────────────────────────────

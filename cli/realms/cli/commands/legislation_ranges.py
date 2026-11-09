@@ -142,46 +142,47 @@ def claim(
     )
 
 
-def around(
+def pins(
     facts_names: List[str], example: dict, skip: str, settings: Optional[dict] = None
-) -> Optional[List[str]]:
-    """The conditions on the other facts (and, with the settings left open, on the settings) that hold in ``example``,
-    for the facts and settings the forbids read: the case the range is stated in. None where one of them cannot be
-    stated (a Period, a set, a record): a range that leaves it free would say more than the example shows, so none is
-    given and the example stands."""
-    conditions = []
+) -> Optional[Tuple[List[str], str]]:
+    """What a range is stated in, from one list of pins: the Cedar conditions that hold in ``example`` for the other
+    facts the forbids read (and, with the settings left open, for the settings), which the proof is asked about, and
+    the same pins in words, which the report prints: ``code = "ibi_urban", no amount, not capital``. The words cannot say
+    more or less than the proof holds. None where a pin cannot be stated (a Period, a set, a record): a range that
+    leaves it free would say more than the example shows, so none is given and the example stands.
+    """
+    conditions, words = [], []
     for fact in facts_names:
         if fact == skip:
             continue
-        text = condition_on(fact, example.get("facts", {}).get(fact))
-        if text is None:
+        pinned = pin(fact, example.get("facts", {}).get(fact), "context.facts", False)
+        if pinned is None:
             return None
-        conditions.append(text)
+        conditions.append(pinned[0])
+        words.append(pinned[1])
     for domain, values in (settings or {}).items():
         record = attribute("context.settings", domain)
         for name, value in values.items():
-            text = condition_on(name, value, record)
-            if text is None:
+            pinned = pin(name, value, record, True)
+            if pinned is None:
                 return None
-            conditions.append(text)
-    return conditions
+            conditions.append(pinned[0])
+            words.append(pinned[1])
+    return conditions, ", ".join(words)
 
 
-def case_words(
-    example: dict, names: List[str], skip: str, settings: Optional[dict] = None
-) -> str:
-    """The case in words: ``code = "ibi_urban"``, and the settings that are true, as ``capital``."""
-    words = []
-    for fact in names:
-        if fact != skip and fact in example.get("facts", {}):
-            value = example["facts"][fact]
-            words.append(
-                f'{fact} = "{value}"' if isinstance(value, str) else f"{fact} = {value}"
-            )
-    for values in (settings or {}).values():
-        words += [
-            f"{name}" if value is True else f"not {name}"
-            for name, value in values.items()
-            if isinstance(value, bool)
-        ]
-    return ", ".join(words)
+def pin(name: str, value, record: str, setting: bool) -> Optional[Tuple[str, str]]:
+    """The condition ``name`` has ``value`` in ``record``, and the words for it; None for a value Cedar compares less
+    simply. An absent fact is pinned absent (``no amount``); a Boolean setting reads ``capital`` or ``not capital``.
+    """
+    condition = condition_on(name, value, record)
+    if condition is None:
+        return None
+    if value is None:
+        return condition, f"no {name}"
+    if isinstance(value, bool):
+        if setting:
+            return condition, name if value else f"not {name}"
+        return condition, f"{name} = {'true' if value else 'false'}"
+    shown_value = f'"{value}"' if isinstance(value, str) else str(value)
+    return condition, f"{name} = {shown_value}"

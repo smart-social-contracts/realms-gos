@@ -29,12 +29,11 @@ from realms.cli.commands.legislation_proof import (
     policy_set,
 )
 from realms.cli.commands.legislation_ranges import (
-    around,
-    case_words,
     claim,
     constants,
     describe,
     facts_read,
+    pins,
     regions,
     settings_read,
     shown,
@@ -359,11 +358,11 @@ def find_ranges(example, newly, differing, old_bound, new_bound, new, action, ge
             )
             if runs:
                 fixed = read_settings(combination, differing)
-                conditions = around(names, example, x, fixed)
-                if conditions is None:
+                pinned = pins(names, example, x, fixed)
+                if pinned is None:
                     cases = None
                     break
-                cases.append((runs, conditions, case_words(example, names, x, fixed)))
+                cases.append((runs, *pinned))
         if cases is not None and any(
             first <= facts[x] <= last for runs, _, _ in cases for first, last in runs
         ):
@@ -445,9 +444,10 @@ def folded_line(
         )
         if run is None or run[1] != high or run[0] == low:
             continue
-        conditions = around(facts_read(bound.expression), fires.example, x)
-        if conditions is None:
+        pinned = pins(facts_read(bound.expression), fires.example, x)
+        if pinned is None:
             continue
+        conditions = pinned[0]
         proof = solver.equivalent(
             action,
             [*base, bound.cedar()],
