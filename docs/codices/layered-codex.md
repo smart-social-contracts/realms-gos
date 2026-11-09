@@ -194,6 +194,7 @@ The rules:
   is an empty chapter. No other `.py` files are allowed in a source folder.
 - **Calendar file** = `calendar.json`, one per source at most, beside its chapters (§3.4). A source
   that sets no holidays, such as EMSHI, has none.
+- **Test cases** = `<domain>.cases.json`, beside the chapter they test (§12.1).
 - **The `realm` domain** (the realm's own hooks, such as `on_realm_join`; its entry point
   `on_codex_activate`, the hook on GGG's `codex_activate`; and `compute_realm_join`, which GGG asks for
   the quarter of a new member) may only be filled in the realm's own layer.
@@ -864,8 +865,9 @@ class Tax(above("tax")):
     @fixed(legislation="TRLRHL Arts. 61, 65, 71 and 74")
     def compute_tax_assess(self, entry, subject):
         """GGG asks for the invoice items of each subject of each entry."""
-        if entry.code != "ibi_urban":
+        if entry.code != "ibi_urban" or subject.assessed_value is None:     # a parcel never assessed owes no IBI yet
             return []
+        # Each invoice line is rounded once: the quota, then the bonus on the rounded quota.
         gross = subject.assessed_value.times(entry.rate)            # nearest cent, half away from zero
         net = gross - gross.times(self.ibi_bonus(subject.owner))
         items = [{"concept": entry.code, "amount": gross, "legislation": "TRLRHL Art. 71.1"}]
@@ -1684,17 +1686,49 @@ It uses Python's parser (`ast`), so it runs only off-chain:
   chapters and its calendar listed, never the `realm` domain, every checksum the sha256 of the bytes. A realm loads
   only its own `realm.py`: one beside a source's releases is that source's own. realms-codices CI runs this command and
   has no checker of its own;
-- every rule in §4: file and class names, base, imports, banned constructs, citations, marks, `uses`,
-  and that every `on_`, `check_` and `compute_` method names a GGG operation;
-- the `F` expression rules (§6): the operation named, `each` naming the list it ranges over (for
-  `tax_policy_propose`, the saved policy's `taxes`), `S.` naming a setting of the chapter's own domain,
-  `pct()` literals that fit the scale, and each setting's `check=`;
+- every rule in §4: file and class names, base, imports, banned constructs (`exec`, `eval`, `compile`,
+  `globals`, `locals`, `setattr`, `open`, dunder names, defaults, attribute stores), citations, marks (an
+  extension that calls `super()`), `uses`, and that every `on_`, `check_` and `compute_` method names a GGG
+  operation;
+- the `F` expression rules (§6), by binding every forbid to GGG's fact schema: the operation named, `each` naming
+  the list it ranges over (for `tax_policy_propose`, the saved policy's `taxes`), `S.` naming a setting of the
+  chapter's own domain, `pct()` literals that fit the scale, optional facts compared after `is_some()`, arithmetic
+  that cannot overflow, and each setting's `check=`;
 - reserved operations (§10.4);
-- cycles across `uses`, for every realm that a change affects;
-- every chapter's own `cases.json`, if present, run on the resolved domains;
-- **Python versus Cedar agreement:** generated facts are evaluated both ways and must agree;
-- **Never errors:** the generated Cedar of every forbid is proved never to error (§6, rule 9), with the
-  analysis tool of §12.3.
+- cycles across `uses`, an undeclared or missing domain, and a chain deeper than the limit, for every realm of the
+  tree: each source is checked as a realm with the sources above it as its layers;
+- the test cases of each chapter, `<domain>.cases.json` (below);
+- **Python versus Cedar agreement:** generated facts, drawn around every literal and endpoint the forbids name,
+  the 64-bit extremes and the edges of each fact's range, are decided in plain Python and by Cedar (`cedarpy`, the
+  canister's Cedar line), with the realm's settings folded in and left open, and must agree;
+- **Never errors:** the generated Cedar of every forbid is proved never to error (§6, rule 9) for each action it
+  names, by the Cedar CLI's `symcc` with cvc5 (§12.3), pinned by version and checksum (`scripts/cedar_tools.sh`). A
+  query the solver does not decide is a problem, never a pass. Without cedarpy, the Cedar CLI and cvc5 a tree
+  with a forbid is not checked: the command exits with code 2 and says what to install, and `--no-analysis` goes
+  without them.
+
+A refusal of a layer is printed once, though every realm below it runs the layer.
+
+**Test cases.** A chapter's cases are `<domain>.cases.json`, beside it. Each is run on the codex of one realm:
+the one named by its optional `realm` (a source id), else the chapter's own source with the sources above it, in
+UTC. A case has a `name` and one kind of test, evaluated in-process with the library, and says what it expects:
+
+| Kind | Fields | Runs |
+|---|---|---|
+| `call` | `call`, `args` (plain data), `returns` | a public member of the resolved domain: a helper called with the arguments, or a setting read |
+| `guard` | `guard` (an operation), `args`, `approvals`, `now` (seconds), `denies` (a reason, or null) | the domain's `check_<operation>` on the operation's arguments, with those departments' approvals and that time |
+| `forbid` | `forbid` (an operation), `each`, `facts`, `fires` (forbid ids) | the realm's forbids on that operation (and list) in plain Python, with its settings folded: those that fire must be exactly `fires` |
+| `compute` | `compute` (an operation), `args` (the arguments of `compute_<operation>`), `decimals` (the token's), `records`, `returns` | the domain's `compute_<operation>`, run by the realm's own sandbox program (`core.legislation_sandbox`), which reads GGG's entities from `records` (`{"Land": [{"id": "L-1", "owner": "User:alice", "assessed_value": 20000000}], "Human": [...]}`) and hands the chapter the subject as the view `Land.get` gives, with money in `decimals`; `returns` is the invoice items |
+
+```json
+[
+  {"name": "València may charge 1.24 %", "realm": "eu/es/vc/46250-valencia", "forbid": "tax_policy_propose",
+   "each": "taxes", "facts": {"code": "ibi_urban", "rate": 1240001}, "fires": ["eu/es/tax/ibi_urban_cap"]}
+]
+```
+
+A case that does not come out as written is a problem, `<source>/<domain>.cases.json: case "<name>": <what>`.
+Hooks are not run by `check`.
 
 ### 12.2 In-canister checks (install step 5, no parser)
 

@@ -39,6 +39,8 @@ dependencies = [
 
 [project.optional-dependencies]
 listings = ["h3>=4.0"]
+# realms legislation check decides the forbids with Cedar as well as with Python: the canister's Cedar line
+legislation = ["cedarpy==4.12.2"]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
