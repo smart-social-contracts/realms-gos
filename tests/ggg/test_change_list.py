@@ -312,9 +312,9 @@ def test_a_new_layer_between_kept_layers_the_record_orders_the_other_way_is_refu
     refused(change_list.layers_for, runs(EU, CV), [reverse], ASK_ES, match="puts eu/es/vc above eu, and this realm runs eu")
 
 
-def test_a_layer_whose_link_ended_keeps_its_place_and_a_related_release_goes_beside_it():
+def test_a_layer_whose_link_ended_keeps_its_place_when_a_layer_the_realm_runs_is_released_from_another_record():
     spain = record("es", "eu/es", EU, ES)  # the publisher's record lists EU and Spain; CV's link has ended
-    found = change_list.layers_for(runs(EU, CV), [spain], ASK_ES)
+    found = change_list.layers_for(runs(EU, ES, CV), [spain], ASK_ES)
     assert order_of(found) == ["eu", "eu/es", "eu/es/vc"]
     assert found["vouchers"] == {"eu": "eu/es/vc", "eu/es": "eu/es", "eu/es/vc": "eu/es/vc"}
     planned, _ = vouched(release=ASK_ES, set=[entry("eu/es/tax"), entry("eu/es/procedure"), entry("eu/es/calendar")],
@@ -322,9 +322,19 @@ def test_a_layer_whose_link_ended_keeps_its_place_and_a_related_release_goes_bes
     assert planned.layers == ["eu", "eu/es", "eu/es/vc", "town"]
 
 
+def test_a_new_layer_beside_a_kept_layer_that_no_record_puts_in_order_with_it_is_refused():
+    spain = record("es", "eu/es", EU, ES)  # CV's link has ended: nothing orders Spain against CV
+    refused(change_list.layers_for, runs(EU, CV), [spain], ASK_ES,
+            match="the record of eu/es does not put eu/es in order against eu/es/vc: layers that no record puts in order")
+    refused(change_list.layers_for, runs(CV, EU), [record("n", "n", ES, EU)], ASK_ES, match="against eu/es/vc")
+    # the layers between the slot's two ends are named in the order the realm runs them
+    refused(change_list.layers_for, runs(EU, CV, release("w", "1", ["tax"])), [record("n", "n", EU, ES)], ASK_ES,
+            match="against eu/es/vc, w")
+
+
 def test_a_new_layer_that_the_record_orders_against_none_of_the_layers_the_realm_runs_is_refused():
     refused(change_list.layers_for, runs(EU), [record("es", "eu/es", ES)], ASK_ES,
-            match="the record of eu/es lists eu/es, and none of the layers this realm runs: nothing places it among them")
+            match="the record of eu/es does not put eu/es in order against eu: layers that no record puts in order")
 
 
 def test_a_record_that_has_moved_on_from_a_layer_the_realm_keeps_is_no_conflict():

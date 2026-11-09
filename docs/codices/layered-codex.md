@@ -1218,8 +1218,9 @@ records of its active sync sources only when it brings a release. **The layers t
 active codex runs them in**, whatever a record says, each as the realm runs it (the release, checksums and voucher
 it was installed with); a record that has moved on to a newer release of one of them is no conflict, since the
 install does not touch it. The release's layer takes the place of its earlier release when the realm runs it
-already. A new layer goes right after the last layer the vouching record lists above it, or before the first it
-lists below it; a record that lists none of the layers the realm runs places nothing, and the install is refused.
+already. A new layer goes right after the last layer the vouching record lists above it and right before the first it
+lists below it, and only there: a layer the realm runs that the record puts in neither relation would have no order
+against the new one, which §3.3 refuses, and so is a record that lists none of the layers the realm runs.
 Every active record must agree with the order that results: one that puts two of the layers the other way round than
 the realm runs them is refused, naming both. `plan` gets the result as one record, named by its last layer. So a
 record that relays several layers is installed in any order, a change to the realm's own layer needs no call to a sync

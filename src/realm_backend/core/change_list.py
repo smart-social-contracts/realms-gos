@@ -245,17 +245,21 @@ def _plain(release):
 
 def _placed(order, source, found):
     """``order``, the layers the realm runs, with the layer ``source`` the vouching record ``found`` lists: where it is
-    already, or in the place that record gives it among the layers it lists."""
+    already, or in the one place that record gives it: right after the last layer it lists above ``source`` and right
+    before the first it lists below it. A layer that the record puts in neither relation lies between them and has no
+    order against ``source``, which §3.3 refuses. A record that puts ``source`` below a layer the realm runs below the
+    layers it puts it above contradicts the realm's order: ``_agrees`` refuses it, naming both."""
     if source in order:
         return order
     at = found["order"].index(source)
     above = [order.index(s) for s in found["order"][:at] if s in order]
     below = [order.index(s) for s in found["order"][at + 1:] if s in order]
-    if order and not (above or below):
-        raise Fail(f"the record of {found['by']} lists {source}, and none of the layers this realm runs: "
-                   f"nothing places it among them")
-    place = max(above) + 1 if above else min(below, default=0)
-    return order[:place] + [source] + order[place:]
+    low = max(above) + 1 if above else 0
+    high = min(below) if below else len(order)
+    if low < high:
+        raise Fail(f"the record of {found['by']} does not put {source} in order against {', '.join(order[low:high])}: "
+                   f"layers that no record puts in order are refused (§3.3)")
+    return order[:low] + [source] + order[low:]
 
 
 def _agrees(record, order):
