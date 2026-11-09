@@ -95,7 +95,7 @@ def on_stage(c, body):
             raise Conflict("an install is running")
         installs.fail(live, f"the capital announced {codex_id}, which replaces it")
     job = store.start_job(str(body.get("proposal") or ""), {"url": "", "checksum": checksum})
-    job.staged = {"announced": {"codex": codex_id, "at": at}}
+    job.staged = {"announced": {"codex": codex_id, "at": at, "capital": c.by}}
     if at > chain.now():
         schedule(job, at)
     installs.launch(job)
@@ -136,7 +136,10 @@ def codex_switch_staged(c, args):
     if chain.now() < announced["at"]:
         raise Conflict(f"{job.id} switches at {announced['at']}")
     if job.status == "running" and job.step == installs.WAIT:
-        installs.switch(job)
+        if installs.announced_by_my_capital(job):
+            installs.switch(job)
+        else:
+            installs.fail(job, installs.LEFT)
     return {"job": job.id, "status": job.status, "step": job.step}
 
 

@@ -50,6 +50,7 @@ MAX_CHAPTER = store.MAX_CHAPTER
 # so that a chapter of exactly 256 KB arrives. The body itself is held to the limit (``decoded``).
 HEADROOM = 8 * 1024
 HEX = "0123456789abcdef"
+LEFT = "this realm is no longer a quarter of the capital that announced the codex"
 
 
 def relays():
@@ -86,8 +87,14 @@ def launch(job):
 
 
 def announced(job):
-    """Whether ``job`` stages a codex that this quarter's capital announced (api.propagation)."""
+    """Whether ``job`` stages a codex that a capital announced to this quarter (api.propagation)."""
     return "announced" in job.staged
+
+
+def announced_by_my_capital(job):
+    """Whether the capital that announced the codex of ``job`` is the capital this realm has now: one that seceded, or
+    joined another federation, since is not a quarter of the realm that decided it."""
+    return quarters.federated() and quarters.capital() == job.staged["announced"]["capital"]
 
 
 def arm(job_id):
@@ -327,6 +334,8 @@ def note_fetched(job, sha256, where):
 def fetch_from_capital(job, sha256, most):
     """The text the capital stores under ``sha256``, of at most ``most`` bytes, kept here under it. False when the job
     was stopped while the call was out. A generator."""
+    if not announced_by_my_capital(job):
+        raise Fail(LEFT)
     reply = yield from quarters.ask(quarters.capital(), "legislation_chapter", {"chapter": sha256})
     if InstallJob[job.id].status != "running":
         return False
@@ -391,6 +400,8 @@ def confirm(job):
     """A quarter that is ready after its switch time asks the capital what it runs now, and goes on to the switch only
     if that is the codex it staged: one the capital has left, reverted or replaced by a newer, is never activated.
     A newer codex the capital announced is staged by its own job. A generator."""
+    if not announced_by_my_capital(job):
+        raise Fail(LEFT)
     reply = yield from quarters.ask(quarters.capital(), "quarter_sync", quarters.report())
     job = InstallJob[job.id]
     if job.status != "running":
