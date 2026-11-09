@@ -3,7 +3,8 @@
 core.legislation spawns one subinterpreter per active layered codex with this file's text as its program (plus
 ``LIBRARY``, the sources of ``realms.legislation``, appended by the realm) and calls the functions below with plain
 data: ``setup`` installs the library and builds an empty ``Codex``, ``load`` adds one chapter, ``finish`` runs the
-install checks; ``views`` and ``cedar`` are the install's report; ``guard``, ``hook_domains`` with ``hook``, and
+install checks; ``views`` is the install's report and ``cedar`` the Cedar the forbids become, over GGG's fact schema
+(``ggg_facts``, which the realm appends to the library's sources); ``guard``, ``hook_domains`` with ``hook``, and
 ``compute`` answer for a GGG operation. The only way out is ``rpc``: ``ggg_read`` for the read-only view of GGG's entities that chapters import,
 and ``local_day`` for the realm's local day of a timestamp.
 
@@ -14,7 +15,8 @@ never imports it. Every import is inside a function, so the text is a program, n
 import sys
 
 # "codex": the Codex; "files": the chapter files loaded; "ready": the load is complete; "entities": the names of the
-# entities a chapter reads; "decimals": the token a compute_ call works in, while it runs (the Money views carry it).
+# entities a chapter reads; "decimals": the token a compute_ call works in, while it runs (the Money views carry it);
+# "forbids": the codex's bound forbids, once `cedar` has made them.
 STATE = {"ready": False, "entities": (), "decimals": None}
 # The argument of a compute_<op> that names the row the operation is about, as "<Entity>:<id>": the chapter is given
 # the view ``ggg.<Entity>.get(id)`` gives of that row, not the reference.
@@ -114,7 +116,7 @@ def ggg_module(entities, money):
     return module
 
 
-def setup(operations, layers, realm, calendars, entities, money, facts=None):
+def setup(operations, layers, realm, calendars, entities, money):
     """An empty codex of ``layers`` with its calendars, ready to load chapters into. Installs the library first when
     the realm appended its sources (``LIBRARY``); on a laptop the library is importable as it is."""
     sources = globals().get("LIBRARY")
@@ -124,8 +126,7 @@ def setup(operations, layers, realm, calendars, entities, money, facts=None):
     from realms.legislation.errors import LegislationError
 
     try:
-        codex = Codex(layers, realm=realm, operations=operations, modules={"ggg": ggg_module(entities, money)},
-                      facts=facts)
+        codex = Codex(layers, realm=realm, operations=operations, modules={"ggg": ggg_module(entities, money)})
         for source, data in calendars:
             codex.calendar_layer(source, data)
     except LegislationError as e:
@@ -168,14 +169,55 @@ def views():
     return {domain: flatten(STATE["codex"], domain) for domain in sorted(STATE["codex"].chapters)}
 
 
-def cedar():
-    """The generated Cedar of every forbid, settings folded (§5.8); needs the fact schema ``setup`` was given."""
+def readable(facts, secret):
+    """GGG's fact schema without what the legislation never sees: the facts ``secret`` names for an operation
+    (``{operation: [names]}``, the operation's ``secret=``), and the lists it names, so that a forbid cannot read one."""
+    out = {}
+    for action, entry in facts.items():
+        operation, _, field = action.partition(".")
+        hidden = secret.get(operation, ())
+        if field not in hidden:
+            out[action] = {**entry, "facts": {n: f for n, f in entry["facts"].items() if n not in hidden}}
+    return out
+
+
+def cedar(context, secret):
+    """The Cedar of every forbid, settings folded (§5.8): the policies, the schema they validate against with the
+    realm's ``context`` fields (§9.4), and the facts of each action the policies name, as ``[type, optional]``. A codex
+    without forbids is none of it, and costs nothing: GGG's fact schema is only read for one that holds a forbid."""
+    codex = STATE["codex"]
+    if not codex.has_forbids():
+        return {"ok": True, "cedar": ""}
+    from ggg_facts import FACTS
+    from realms.legislation import cedar as generator
     from realms.legislation.errors import LegislationError
 
     try:
-        return {"ok": True, "cedar": STATE["codex"].cedar()}
+        codex.use_facts(readable(FACTS, secret))
+        bound = STATE["forbids"] = codex.forbids()
+        named = sorted({action for forbid in bound for action in forbid.actions})
+        return {
+            "ok": True,
+            "cedar": generator.policies(bound),
+            "schema": codex.cedar_schema(context=context, only=named),
+            "facts": {a: {n: [f.type, f.optional] for n, f in codex.facts.actions[a].facts.items()} for a in named},
+        }
     except LegislationError as e:
         return {"ok": False, "error": str(e)}
+
+
+def fired(action, facts):
+    """The forbids on Cedar ``action`` that refuse ``facts``, as ``{"id", "legislation"}``, for the reason a refusal
+    gives. The library evaluates a forbid in plain Python as Cedar does (§6 rule 7, which its tests check), so the
+    realm's engine is not asked again; a forbid it cannot evaluate here is left out."""
+    out = []
+    for forbid in STATE.get("forbids", ()):
+        try:
+            if action in forbid.actions and forbid.evaluate(facts):
+                out.append({"id": forbid.id, "legislation": forbid.legislation})
+        except Exception:  # a reason is a courtesy: the refusal stands without it
+            continue
+    return out
 
 
 def context(now, approvals):

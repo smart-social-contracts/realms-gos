@@ -413,10 +413,10 @@ def test_an_effect_whose_governed_function_raises_is_the_chapters_failure_and_th
 
 def test_a_quarters_report_of_a_leg_of_a_reserved_federal_vote_is_reserved():
     vote = ok("federal_vote_propose", title="revert", action={"op": "codex_revert", "args": {}})["vote"]
-    assert legislation._reserved("quarter_report", {"population": 3, "leg": {"vote": vote, "outcome": "passed"}})
-    assert not legislation._reserved("quarter_report", {"population": 3})
+    assert legislation.is_reserved("quarter_report", {"population": 3, "leg": {"vote": vote, "outcome": "passed"}})
+    assert not legislation.is_reserved("quarter_report", {"population": 3})
     other = ok("federal_vote_propose", title="other", action={"op": "profile_create", "args": {"profile": "p"}})["vote"]
-    assert not legislation._reserved("quarter_report", {"leg": {"vote": other}})
+    assert not legislation.is_reserved("quarter_report", {"leg": {"vote": other}})
 
 
 STATEFUL = register('''    def check_t_poke(self, args):
@@ -472,10 +472,10 @@ def test_the_leg_index_is_filled_for_legs_written_before_it_existed():
     leg = next(iter(FederalVote[vote].legs))
     leg.db().field_index_remove(leg._type, "proposal_id", leg.proposal_id, leg._id)  # as a leg written before the index
     assert first(FederalVoteLeg, "proposal_id", leg.proposal_id) is None
-    assert not legislation._reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})
+    assert not legislation.is_reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})
     federation.index_legs()  # what setup.start runs once, where the realm starts after the upgrade
     assert first(FederalVoteLeg, "proposal_id", leg.proposal_id).id == leg.id
-    assert legislation._reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})
+    assert legislation.is_reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})
 
 
 # ── The third review: a legacy codex keeps acting for the realm; state through a parameter ─────────────────────

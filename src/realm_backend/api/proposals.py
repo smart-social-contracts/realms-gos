@@ -527,6 +527,7 @@ def proposal_create(c, args):
             raise Forbidden("a proposal filed under power of attorney is a motion: it carries no action")
         check_action(action)
         check_scope(department, action)
+        auth.refuse_forbidden_action(c.user, action)  # a proposal that could only fail is never put to the vote
     links = checked_links(c.user, args.get("links"))
     stated = {k: args.get(k) for k in ("kind", "matter", "threshold", "quorum", "threshold_of")}
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),

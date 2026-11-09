@@ -29,7 +29,7 @@ FACTS = {
     "procedure_define": {
         "facts": {
             "decision_deadline": {"type": "Period", "optional": True},
-            "longer_deadline_legislation": {"type": "String", "optional": True},
+            "legislation": {"type": "String", "optional": True},  # GGG's fact on procedure_define
         }
     },
     "document_share": {"facts": {"basis": {"type": "String", "optional": True}}},

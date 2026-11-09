@@ -21,18 +21,26 @@ from ic_python_db import Database  # noqa: E402
 Database.init()
 
 from core import auth  # noqa: E402
+from core.db import Fail  # noqa: E402
 
-POLICIES = auth.GUARDRAILS + auth.POLICIES
-_check = cedarpy.validate_policies(POLICIES, auth.SCHEMA)
-assert _check.validation_passed, _check.errors
+
+def load(schema, policies):
+    """The canister's Cedar load: strict validation of the policies against the schema."""
+    check = cedarpy.validate_policies(policies, schema)
+    if not check.validation_passed:
+        raise Fail(f"the Cedar policies do not validate: {check.errors}")
 
 
 def decide(principal, action, resource, entities, context):
+    """The canister's decision, over the policies and schema in force (``auth.live``), the request validated against it."""
     request = {"principal": principal, "action": action, "resource": resource, "context": context}
-    return cedarpy.is_authorized(request, POLICIES, entities).decision == cedarpy.Decision.Allow
+    result = cedarpy.is_authorized(request, auth.live["policies"], entities, auth.live["schema"])
+    assert not result.diagnostics.errors, result.diagnostics.errors
+    return result.decision == cedarpy.Decision.Allow
 
 
-auth.decide = decide
+load(auth.live["schema"], auth.live["policies"])
+auth.load, auth.decide = load, decide
 for path in sorted(glob.glob(os.path.join(SRC, "*", "*.py"))):
     package, name = path.split(os.sep)[-2], os.path.basename(path)[:-3]
     if package in ("core", "api") and name not in ("__init__", "chain"):

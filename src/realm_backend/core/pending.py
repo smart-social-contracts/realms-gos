@@ -15,6 +15,7 @@ from core.db import Conflict, Fail, Forbidden, JSON_MAX, NotFound, Unavailable, 
 TTL = 86400  # a pending action lasts a day
 APPROVING_TTL = 600  # an approval still running after this long ended in a trap
 OPEN_MAX = 10  # actions waiting between one member and one delegate
+CARRIES = ("proposal_create", "federal_vote_propose")  # operations that carry a call of their own, ``action``
 # The characters of a call's arguments as canonical JSON: a Json field holds 65,536, and the page shows the whole call.
 ARGS_MAX = 32 * 1024
 NOTE_MAX = 500
@@ -64,13 +65,17 @@ def prepare(grant, user, by, name, spec, args, note=""):
     """File the call of ``name`` with ``args`` that the delegate ``by`` makes for ``user`` under ``grant``, in place of
     running it. The grant must cover it and the member, acting for themselves, be allowed it now. Returns the action's id,
     the path of the page where the member decides, and when it lapses."""
-    from core.op import audit
+    from core.op import audit, ops
     from ggg import PendingAction
 
     needed = spec["perm_for"](args) if spec["perm_for"] else spec["perm"]
     if not poa.covered(grant, name, spec, needed):
         raise auth.Denied(f"{name} cannot be done under this power of attorney: this grant does not cover it")
     auth.authorize(user, user, name, spec, args)
+    auth.refuse_forbidden(user, name, spec, {**args, "on_behalf_of": user}, "")  # a forbidden action is never prepared
+    carried = args.get("action") if name in CARRIES else None
+    if isinstance(carried, dict) and carried.get("op") in ops() and isinstance(carried.get("args") or {}, dict):
+        auth.refuse_forbidden_action(user, carried)  # nor one that carries a forbidden call to the vote
     ranges.check(name, args)
     if spec["check"]:
         spec["check"](args)

@@ -207,12 +207,13 @@ from ggg import LayeredCodex
 codex = LayeredCodex[%(codex)r]
 plan, texts = legislation._plan_of(codex), legislation._texts(codex)
 program, _ = sandbox.module_source(legislation.PROGRAM)
-program += f"\\nLIBRARY = {sandbox.module_sources(legislation.LIBRARY)!r}\\n"
+library = {**sandbox.module_sources(legislation.LIBRARY), legislation.FACTS: sandbox.module_source(legislation.FACTS)}
+program += f"\\nLIBRARY = {library!r}\\n"
 t0 = ic.performance_counter(0)
 box = sandbox.Resident(program, legislation._answer, legislation.ACTIONS)
 t1 = ic.performance_counter(0)
 box.call("setup", operations=sorted(ops()), layers=plan["layers"], realm=plan["realm"],
-         calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=sorted(legislation.VIEWS), money=legislation.MONEY, facts=None)
+         calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=sorted(legislation.VIEWS), money=legislation.MONEY)
 t2 = ic.performance_counter(0)
 for c in plan["chapters"]:
     box.call("load", source=c["source"], domain=c["domain"], text=texts[c["sha256"]])
@@ -587,7 +588,7 @@ from core.db import first
 from ggg import FederalVote, FederalVoteLeg
 leg = next(iter(FederalVote[%(vote)r].legs))
 print(json.dumps({"proposal": leg.proposal_id, "indexed": first(FederalVoteLeg, "proposal_id", leg.proposal_id) is not None,
-                  "reserved": legislation._reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})}))
+                  "reserved": legislation.is_reserved("proposal_vote", {"proposal": leg.proposal_id, "choice": "yes"})}))
 '''
 
 
