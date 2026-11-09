@@ -85,7 +85,9 @@ class Solver:
         return Answer(None, None, said)
 
 
-VERDICT = re.compile(r"^\S+ .*: (VERIFIED|DOES NOT HOLD)\s*$")  # "✓ Policy set 1 implies policy set 2: VERIFIED"
+VERDICT = re.compile(
+    r"^\S+ .*: (VERIFIED|DOES NOT HOLD)\s*$"
+)  # "✓ Policy set 1 implies policy set 2: VERIFIED"
 
 
 def verdict_of(output: str) -> Optional[bool]:

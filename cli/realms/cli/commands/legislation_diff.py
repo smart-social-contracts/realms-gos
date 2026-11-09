@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from realms.cli.commands.legislation_proof import (
+    PERMIT_ALL,
     Answer,
     Solver,
     assumption,
@@ -111,7 +112,7 @@ def analyse_action(
         )
     if result.forbidden.proved is False or result.allowed.proved is False:
         result.statements = explain(
-            solver, action, old, new, generic, result, before, after
+            solver, action, old, new, generic, result, before, after, assumed
         )
     return result
 
@@ -171,7 +172,9 @@ NEWLY = {  # (was forbidden, is forbidden) -> in the difference
 }
 
 
-def explain(solver, action, old, new, generic, result, before, after) -> List[str]:
+def explain(
+    solver, action, old, new, generic, result, before, after, assumed
+) -> List[str]:
     """The newly forbidden and newly allowed in words: the range of one fact, found around each example (for each
     combination of the Boolean settings the change reads, when they are left open), written as forbids and proved equal
     to the difference. Nothing is said that is not proved: otherwise the examples stand.
@@ -204,14 +207,14 @@ def explain(solver, action, old, new, generic, result, before, after) -> List[st
         ]
         for kind, (x, cases) in found.items()
     }
-    proof = solver.equivalent(
-        action,
-        [*after, *claims.get("allowed", [])],
-        [*before, *claims.get("forbidden", [])],
-    )
-    if proof.proved is None:
-        result.undecided.append(f"the range of the difference: {proof.said}")
-    if not proof.proved:
+    permits = {
+        kind: [
+            claim(action, x, runs, conditions, f"newly_{kind}_{n}", "permit")
+            for n, (runs, conditions, _) in enumerate(cases)
+        ]
+        for kind, (x, cases) in found.items()
+    }
+    if not exactly(solver, action, claims, permits, before, after, assumed, result):
         return []
     schema = new.facts.actions[action].facts
     return [
@@ -220,6 +223,60 @@ def explain(solver, action, old, new, generic, result, before, after) -> List[st
         for runs, _, words in cases
         for first, last in runs
     ]
+
+
+def exactly(solver, action, claims, permits, before, after, assumed, result) -> bool:
+    """Whether the claims are exactly the difference: ``claims["forbidden"]`` hold for the requests ``after`` forbids and
+    ``before`` does not, ``claims["allowed"]`` for the requests ``before`` forbids and ``after`` does not. Five proofs
+    (X is what ``after`` forbids, Y what ``before`` forbids, F and A the two claims):
+
+    - F lies inside X, and A inside Y: every request ``after`` allows is allowed with F's forbid added, and the same for
+      ``before`` and A;
+    - F misses Y, and A misses X: the permit of F's requests (bar those the fact schema rules out, which both sets forbid)
+      is allowed by ``before``, and the permit of A's by ``after``;
+    - nothing of the difference is left out: ``after`` with A forbidden is the same set as ``before`` with F forbidden.
+
+    A claim wider than the difference breaks one of the first four (a range with a fact left free, or a fact that a
+    forbid both sets share already forbids); one narrower breaks the last. The first undecided answer is a failure.
+    """
+    questions = [
+        (
+            "the range of the difference",
+            solver.equivalent(
+                action,
+                [*after, *claims.get("allowed", [])],
+                [*before, *claims.get("forbidden", [])],
+            ),
+        )
+    ]
+    if "forbidden" in claims:
+        questions += [
+            (
+                "the range newly forbidden lies inside what is forbidden",
+                solver.implies(action, after, [PERMIT_ALL, *claims["forbidden"]]),
+            ),
+            (
+                "the range newly forbidden misses what was forbidden",
+                solver.implies(action, plus(permits["forbidden"], assumed), before),
+            ),
+        ]
+    if "allowed" in claims:
+        questions += [
+            (
+                "the range newly allowed lies inside what was forbidden",
+                solver.implies(action, before, [PERMIT_ALL, *claims["allowed"]]),
+            ),
+            (
+                "the range newly allowed misses what is forbidden",
+                solver.implies(action, plus(permits["allowed"], assumed), after),
+            ),
+        ]
+    proved = True
+    for what, answer in questions:
+        if answer.proved is None:
+            result.undecided.append(f"{what}: {answer.said}")
+        proved = proved and bool(answer.proved)
+    return proved
 
 
 def plus(policies: List[str], extra: Optional[str]) -> List[str]:
@@ -267,14 +324,12 @@ def find_ranges(example, newly, differing, old_bound, new_bound, new, action, ge
             )
             if runs:
                 fixed = read_settings(combination, differing)
-                cases.append(
-                    (
-                        runs,
-                        around(names, example, x, fixed),
-                        case_words(example, names, x, fixed),
-                    )
-                )
-        if any(
+                conditions = around(names, example, x, fixed)
+                if conditions is None:
+                    cases = None
+                    break
+                cases.append((runs, conditions, case_words(example, names, x, fixed)))
+        if cases is not None and any(
             first <= facts[x] <= last for runs, _, _ in cases for first, last in runs
         ):
             return x, cases
@@ -351,6 +406,8 @@ def folded_line(solver: Solver, codex, bound, action: str) -> Optional[str]:
         if run is None or run[1] != high or run[0] == low:
             continue
         conditions = around(facts_read(bound.expression), fires.example, x)
+        if conditions is None:
+            continue
         proof = solver.equivalent(
             action,
             [*base, bound.cedar()],

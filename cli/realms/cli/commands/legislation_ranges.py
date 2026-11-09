@@ -121,9 +121,15 @@ def condition_on(name: str, value, record: str = "context.facts") -> Optional[st
 
 
 def claim(
-    action: str, name: str, runs: List[Tuple[int, int]], around: List[str], label: str
+    action: str,
+    name: str,
+    runs: List[Tuple[int, int]],
+    around: List[str],
+    label: str,
+    effect: str = "forbid",
 ) -> str:
-    """A forbid of ``action`` that fires when the conditions ``around`` hold and the fact ``name`` is in one of ``runs``."""
+    """A policy of ``action`` (a forbid, or with ``effect="permit"`` a permit of exactly the same requests) that holds
+    when the conditions ``around`` hold and the fact ``name`` is in one of ``runs``."""
     inside = " || ".join(
         f"({attribute('context.facts', name)} >= {first} && {attribute('context.facts', name)} <= {last})"
         for first, last in runs
@@ -131,29 +137,33 @@ def claim(
     when = " && ".join([*around, has("context.facts", name), f"({inside})"])
     return (
         f'@id("claim/{label}")\n'
-        f"forbid (principal, action == {NAMESPACE}::Action::{quoted(action)}, resource)\n"
+        f"{effect} (principal, action == {NAMESPACE}::Action::{quoted(action)}, resource)\n"
         f"  when {{ {when} }};"
     )
 
 
 def around(
     facts_names: List[str], example: dict, skip: str, settings: Optional[dict] = None
-) -> List[str]:
+) -> Optional[List[str]]:
     """The conditions on the other facts (and, with the settings left open, on the settings) that hold in ``example``,
-    for the facts and settings the forbids read: the case the range is stated in. A fact whose value Cedar cannot
-    state simply is left out, which a proof then refuses."""
-    conditions = [
-        text
-        for fact in facts_names
-        if fact != skip
-        for text in [condition_on(fact, example.get("facts", {}).get(fact))]
-        if text
-    ]
+    for the facts and settings the forbids read: the case the range is stated in. None where one of them cannot be
+    stated (a Period, a set, a record): a range that leaves it free would say more than the example shows, so none is
+    given and the example stands."""
+    conditions = []
+    for fact in facts_names:
+        if fact == skip:
+            continue
+        text = condition_on(fact, example.get("facts", {}).get(fact))
+        if text is None:
+            return None
+        conditions.append(text)
     for domain, values in (settings or {}).items():
+        record = attribute("context.settings", domain)
         for name, value in values.items():
-            text = condition_on(name, value, f"context.settings.{domain}")
-            if text:
-                conditions.append(text)
+            text = condition_on(name, value, record)
+            if text is None:
+                return None
+            conditions.append(text)
     return conditions
 
 

@@ -27,12 +27,20 @@ FACTS = {
     },
     "tax_policy_draft.taxes": {"facts": TAX_ENTRY},
     "document_share": {"facts": {"kind": "String"}},
+    "loan_create": {
+        "facts": {
+            "term": "Period",
+            "region": "String",
+            "rate": {"type": "Long", "min": 0, "max": 100_000_000},
+        }
+    },
 }
 OPERATIONS = frozenset(
     {
         "tax_policy_propose",
         "tax_policy_draft",
         "document_share",
+        "loan_create",
         "tax_assess",
         "proposal_create",
     }
@@ -226,7 +234,9 @@ def test_a_difference_that_is_no_range_of_a_number_is_given_as_the_request_alone
 def test_a_counterexample_that_carries_the_verdict_word_is_still_a_counterexample(
     world, word
 ):
-    extra = f"\n    named = forbid('document_share', F.kind == '{word}', legislation='x')\n"
+    extra = (
+        f"\n    named = forbid('document_share', F.kind == '{word}', legislation='x')\n"
+    )
     head = world.change({"eu/es/tax.py": tax("1.10", rustic("0.90") + extra)})
     [result] = [
         r
@@ -248,6 +258,76 @@ def test_the_verdict_is_read_from_the_verdict_line_alone():
     assert verdict_of(broken) is False
     assert verdict_of('context: {facts: {kind: "VERIFIED"}}\n') is None
     assert verdict_of("error: cvc5 is missing\n") is None
+
+
+def loans(long_cap, short_cap, extra=""):
+    return f"""from realms.legislation import F, above, forbid, months, pct
+
+class Finance(above('finance')):
+    long_term_cap = forbid('loan_create', (F.term > months(12)) & (F.rate > pct('{long_cap}')), legislation='x')
+    short_term_cap = forbid('loan_create', ~(F.term > months(12)) & (F.rate > pct('{short_cap}')), legislation='x')
+{extra}"""
+
+
+def loan_results_between(world, base, head):
+    return [
+        r for r in world.realm(base, head, "eu/es").folded if r.action == "loan_create"
+    ]
+
+
+def test_caps_that_swap_between_two_terms_state_no_range_of_the_rate(world):
+    base = world.change({"eu/es/finance.py": loans("5.00", "3.00")})
+    head = world.change({"eu/es/finance.py": loans("3.00", "5.00")})
+    [result] = loan_results_between(world, base, head)
+    assert result.forbidden.proved is False and result.allowed.proved is False
+    assert (
+        result.statements == []
+    )  # a rate between 3 and 5 % is allowed for one term and forbidden for the other
+    assert result.undecided == []
+    report = world.diff(base, head).output
+    assert (
+        "newly forbidden: yes, e.g." in report and "newly allowed: yes, e.g." in report
+    )
+
+
+def rate_cap(cap, extra=""):
+    return f"""from realms.legislation import F, above, forbid, pct
+
+class Finance(above('finance')):
+    cap = forbid('loan_create', F.rate > pct('{cap}'), legislation='x')
+{extra}"""
+
+
+def test_a_lowered_cap_on_one_fact_is_a_range_when_nothing_else_cuts_it(world):
+    base = world.change({"eu/es/finance.py": rate_cap("4.00")})
+    head = world.change({"eu/es/finance.py": rate_cap("3.00")})
+    [result] = loan_results_between(world, base, head)
+    assert result.statements == [
+        "rate more than 3.00 % (3000000) and at most 4.00 % (4000000) newly forbidden"
+    ]
+
+
+def test_a_range_that_a_forbid_both_sets_share_cuts_is_not_stated(world):
+    shared = (
+        "    closed = forbid('loan_create', F.region == 'closed', legislation='x')\n"
+    )
+    base = world.change({"eu/es/finance.py": rate_cap("4.00", shared)})
+    head = world.change({"eu/es/finance.py": rate_cap("3.00", shared)})
+    [result] = loan_results_between(world, base, head)
+    assert result.forbidden.proved is False and result.allowed.proved is True
+    assert (
+        result.statements == []
+    )  # rate 3 to 4 % is forbidden before and after for region "closed"
+    assert result.undecided == []
+    assert "newly forbidden: yes, e.g." in world.diff(base, head).output
+
+
+def test_no_range_is_stated_when_a_fact_the_forbids_read_is_a_period(world):
+    base = world.change({"eu/es/finance.py": loans("5.00", "3.00")})
+    head = world.change({"eu/es/finance.py": loans("5.00", "2.00")})
+    [result] = loan_results_between(world, base, head)
+    assert result.forbidden.proved is False
+    assert result.statements == []  # the term is a Period: it cannot be pinned
 
 
 # ── The questions with one answer (points 3 and 4) ───────────────────────────────────────────────────────────────
