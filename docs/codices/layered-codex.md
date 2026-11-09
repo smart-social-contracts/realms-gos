@@ -382,14 +382,14 @@ The rules (the checker enforces them, §12):
    `eval`, `compile`, `globals`, `locals`, `setattr`, `__import__`, `open`, no dunder attribute access
    (`__class__`, `__dict__`, `__bases__`, `__subclasses__`, ...). These are the same restrictions as
    codex code today ([Design choices](../architecture/design-choices.md)). No default arguments either,
-   on a method, a nested function or a lambda, and an attribute is set only on `self` or on the event a
-   hook was given, the two objects a call gets fresh, never on anything else; `self` and that event are
-   bound once, as the method's parameters, and never rebound, deleted or reused as a nested function's
-   parameter. A chapter's class lives as long as the codex runs, so a default or an attribute on an SDK
-   object, a parameter or a view would be state shared by every call. A store on `self` takes a new name:
-   one instance runs every layer's code of a domain in a call, so a name that a class defines (a member, `fixed`
-   or not, or the `self` API: `approved_by`, `now`, `running_layer`, ...) would hide it from the layer above. A
-   hook runs with the operation's own event, and with nothing a chapter makes up.
+   on a method, a nested function or a lambda. An attribute is set only on the event a hook was given, by plain
+   assignment (`event.order = [...]`, never `+=`), and never on `self` or on anything else: one instance runs every
+   layer's code of a domain in a call, so what one layer stored on `self` would change what another reads, a
+   `fixed` method of a layer above included. `self` and that event are bound once, as the method's parameters, and
+   never rebound, deleted or reused as a nested function's parameter. A chapter's class lives as long as the codex
+   runs, so a default or an attribute on an SDK object, a parameter or a view would be state shared by every call.
+   A method is defined under its own name (`charge = on_user_add` is refused), and a hook runs with the
+   operation's own event, and with nothing a chapter makes up.
 6. **No floats.** Money is whole units of the token and a rate is `pct("1.10")`, so a chapter holds no float
    literal, calls no `float()` or `complex()`, and writes no `/` or `/=`, which make a float of two integers
    (`//` divides whole numbers). It writes no `**`, `**=` or `pow()` either: a negative power is a float and a

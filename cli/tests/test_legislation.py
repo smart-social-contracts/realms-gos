@@ -1703,8 +1703,8 @@ def test_a_chapter_cannot_give_a_metaclass_to_skip_the_marks():
         ),
         ("return (i for i in [1])", "no generators, coroutines or async code"),
         ("yield 1", "no generators, coroutines or async code"),
-        ("event.inner.field = 1", "sets attributes on self, or on the event a hook was given"),
-        ("type(self).authority = 1", "sets attributes on self"),
+        ("event.inner.field = 1", "never on self or anything else"),
+        ("type(self).authority = 1", "never on self or anything else"),
         ("with open('x') as f:\n            pass", "a with statement"),
         (
             "try:\n            self.now()\n        except Exception:\n            pass",
@@ -1788,12 +1788,14 @@ def test_a_legitimate_chapter_uses_the_whole_subset():
         "        assert total >= 0, 'never'\n"
         "        if not picked:\n"
         "            raise ValueError('none')\n"
-        "        self.note = label\n"
         "        self.ggg.notification_send(recipient=Ref('user', 'a'), **{'body': label})\n"
         "        return total + seen['a'] if picked else 0\n",
     )
-    chapter = cls(c.context())
-    assert chapter.ibi_bonus(type("L", (), {})()) == 5 and chapter.note == "bonus 4"
+    context = c.context()
+    assert cls(context).ibi_bonus(type("L", (), {})()) == 5
+    assert context.effects.queued == [
+        ["notification_send", {"recipient": {"kind": "user", "id": "a"}, "body": "bonus 4"}]
+    ]
 
 
 def test_a_chapter_cannot_change_a_class_above_or_its_own():
@@ -1814,16 +1816,16 @@ def test_a_chapter_cannot_change_a_class_above_or_its_own():
         "register",
         "from realms.legislation import above\ndel above('register').authority\n",
     )
-    assert ".authority = ...: a chapter sets attributes on self" in refused(
+    assert ".authority = ...: a chapter sets attributes on the event a hook was given" in refused(
         c,
         VALENCIA,
         "register",
         "from realms.legislation import above\nclass Register(above('register')):\n"
         "    def on_user_remove(self, event):\n        type(self).authority = None\n",
     )
-    # Through a local too: an attribute is set on self or on what the method was given, never on a local, so the
+    # Through a local too: an attribute is set on the event a hook was given, never on a local, so the
     # class is out of reach at load time already (and refuses the change at run time besides).
-    assert ".authority = ...: a chapter sets attributes on self, or on the event a hook was given, never on anything else" in refused(
+    assert ".authority = ...: a chapter sets attributes on the event a hook was given, by plain assignment, never on self or anything else" in refused(
         c,
         VALENCIA,
         "register",

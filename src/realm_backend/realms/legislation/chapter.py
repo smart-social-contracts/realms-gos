@@ -401,6 +401,12 @@ def _member(key, value, load, refuse):
             f"{key}: a member is a method, a setting or a forbid, not {type(value).__name__}",
             line,
         )
+    if kind in METHODS and raw.__name__ != key:
+        # The checkers read a method's code under its own name (a hook's event is the second parameter of an
+        # on_<op> function), and the runtime runs it under the member's: they must be one name.
+        refuse(
+            f"{key}: a method is defined under its own name, not {raw.__name__}", line
+        )
     if kind in ("hook", "guard", "compute") and not op:
         refuse(
             f"{key} names no operation: a {kind} is on_<operation>, check_<operation> or compute_<operation>",
@@ -494,17 +500,15 @@ class Chapter(metaclass=ChapterMeta):
     uses = ()
 
     def __init__(self, context):
-        self.__context__ = context
+        object.__setattr__(self, "__context__", context)
 
     def __setattr__(self, name, value):
-        """One instance runs every layer's code of the domain in a call, so a name stored on it that any class
-        defines (a member, fixed or not, or the self API) would hide that member from the code of the layer
-        above. A chapter stores new names only."""
-        if any(name in vars(cls) for cls in type(self).__mro__):
-            raise LegislationError(
-                f"self.{name}: {name} is a member of the chapter or of the self API: a store on self takes a new name"
-            )
-        object.__setattr__(self, name, value)
+        """A chapter writes nothing on self. One instance runs every layer's code of a domain in a call, so a value
+        stored by one layer would change what another reads, the code of a layer above that is ``fixed`` included.
+        """
+        raise LegislationError(
+            f"self.{name}: a chapter stores nothing on self, the instance is shared by the layers of a call"
+        )
 
     @property
     def ggg(self):
