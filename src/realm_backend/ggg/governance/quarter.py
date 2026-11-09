@@ -1,6 +1,6 @@
 from ic_python_db import Integer, String
 
-from core.db import Row
+from core.db import Json, Row
 
 
 class Quarter(Row):
@@ -14,6 +14,7 @@ class Quarter(Row):
     codex_version = String(default="")
     last_sync = Integer(default=0)
     last_activity_at = Integer(default=0)
+    zones = Json({})  # zone id -> members living there, as the quarter last reported (api.quarters.record)
 
 
 class Forward(Row):

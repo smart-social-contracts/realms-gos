@@ -45,8 +45,12 @@ realms realm call capital quarter_configure '{"quarter": "<canister id>", "statu
 
 - `join_targets` (public) suggests the least-populated active quarter. The capital takes joins
   only until it has quarters. If the codex has an `assign_quarter` hook, the hook may choose
-  instead (for example, by region).
-- `quarter_directory` (public) lists the capital and every quarter with its population and codex.
+  instead (for example, by region). A layered codex's `compute_realm_join` may instead keep neighbours
+  together: given the joiner's optional `home_zone` and the quarters below capacity with the zones
+  each holds members of, it may choose the quarter that holds the joiner's zone.
+- `quarter_directory` (public) lists the capital and every quarter with its population, codex and
+  `zones`, the districts its members live in with how many (a quarter reports them in `quarter_sync`;
+  the capital's reply to the quarters leaves them out).
 - `scale_status` (public) compares populations with the capacity.
 - `self_change_quarter` moves your membership to another quarter. The old quarter keeps a signed
   `Forward` record and makes you a guest there.
@@ -56,8 +60,10 @@ The UI calls the active quarter with `quarter.read` / `quarter.run` from
 
 ## Keeping in sync
 
-`quarter_sync`, called on a quarter, reports its population and codex to the capital and takes the
-capital's directory back. The capital flags a quarter whose codex **drifts** from its own.
+`quarter_sync`, called on a quarter, reports its population, codex and the zones its members live in
+to the capital and takes the capital's directory back, with the zones the realm defines: its codex
+defines its districts on the capital alone, and a quarter defines the same by id (a repeat redefines in
+place; a zone the quarter defined itself stays). The capital flags a quarter whose codex **drifts** from its own.
 `federation_message` carries other messages between registered canisters (for example
 `user.arrive` when a member moves).
 

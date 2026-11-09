@@ -78,10 +78,32 @@ def known():
         yield from each(Quarter, "status", status)
 
 
-def directory():
+def zones_held():
+    """The zones of the realm that members live in here, each with how many: what a quarter reports to its capital."""
+    return {z.id: z.population for z in assets.defined_zones() if z.population}
+
+
+def zone_definitions():
+    """The zones of the realm as ``zone_define`` takes them: what the capital sends its quarters, without a population."""
+    return [{"zone": z.id, "name": z.name, "kind": z.kind} for z in assets.defined_zones()]
+
+
+def zones_of(cid):
+    """The zones ``cid`` holds members of: this realm's own, or what the quarter last reported; None where this realm
+    is a quarter and knows only itself."""
+    if cid == chain.self_id():
+        return zones_held()
+    return None if federated() else Quarter[cid].zones
+
+
+def directory(zones=False):
+    """The capital and every quarter. ``zones`` adds the zones each holds members of; the sync broadcast leaves them out,
+    since every quarter would store them."""
     rows = [me()] + [view(q, *FIELDS) for q in known()]
     for row in rows:
         row["capital"], row["drifting"] = row["id"] == capital(), drifting(row["codex_version"])
+        if zones:
+            row["zones"] = zones_of(row["id"])
     return rows
 
 
@@ -89,12 +111,17 @@ def published_rule():
     return {**RULE, "window": proposals.window(), **(realm().manifest_data or {}).get("federation", {}).get("rule", {})}
 
 
+def capacity():
+    """The members one quarter takes: the realm's own figure, else its network's default."""
+    r = realm()
+    return int((r.manifest_data or {}).get("scaling", {}).get("quarter_capacity")
+               or (TEST_CAPACITY if r.network in TEST_NETWORKS else CAPACITY))
+
+
 def scale():
     """Quarter populations against the capacity per quarter; whether a new quarter is ``wanted``; ``in_flight`` once
     one is proposed or being built, and the ``pending`` one Casals is building."""
-    r = realm()
-    n = int((r.manifest_data or {}).get("scaling", {}).get("quarter_capacity")
-            or (TEST_CAPACITY if r.network in TEST_NETWORKS else CAPACITY))
+    r, n = realm(), capacity()
     pops = {row["id"]: row["population"] for row in directory()}
     at = math.ceil(SCALE_AT * n)
     return {"populations": pops, "capacity": n, "scale_at": at, "enabled": r.auto_scale_enabled,
@@ -129,6 +156,8 @@ def record(c, args):
 
         federation.record_leg(q, args["leg"])
     q.population = int(args.get("population", q.population))
+    if "zones" in args:
+        q.zones = {zone: int(n) for zone, n in args["zones"].items()}
     q.codex_id, q.codex_version = args.get("codex_id", q.codex_id), args.get("codex_version", q.codex_version)
     q.last_sync = q.last_activity_at = chain.now()
     if q.status == "setup":
@@ -158,7 +187,19 @@ def apply_directory(reply):
         seen.add(q.id)
     for q in [q for q in known() if q.id not in seen]:
         q.delete()
+    apply_zones(reply.get("zones", []))
     realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index}
+
+
+def apply_zones(definitions):
+    """Define the capital's zones here, by id: the realm's codex defines its districts on the capital alone, and a zone
+    this quarter has already is redefined in place. A zone the quarter defined itself stays; a member's home cell is
+    left as it is."""
+    for d in definitions:
+        try:
+            assets.define_zone(d["zone"], d["name"], d["kind"])
+        except Conflict:  # a member's home cell
+            pass
 
 
 @op("quarter.register", governed=proposals.realm_wide, returns="quarter")
@@ -347,21 +388,34 @@ def quarter_join_federation(c, args):
 def quarter_directory(c, args):
     """The capital and every quarter with its status, population and codex, and whether that codex drifts from the
     capital's. Returns ``capital`` and ``quarters``."""
-    return {"capital": capital(), "quarters": directory()}
+    return {"capital": capital(), "quarters": directory(zones=True)}
+
+
+def joiner_zone(c, args):
+    """The district the joiner states (``home_zone``), else the home zone of a member already known here, else None. It
+    is only used to place them: no reply carries it."""
+    user = User[c.user]
+    return args.get("home_zone") or (user.home_zone if user else "") or None
 
 
 @op(None, read=True, public=True)
 def join_targets(c, args):
-    """Least-populated active quarter; the capital only takes joins until sub-quarters exist."""
+    """Least-populated active quarter; the capital only takes joins until sub-quarters exist. A layered codex's
+    ``compute_realm_join`` may choose among the quarters below capacity, by the optional ``home_zone`` of the joiner
+    and the ``zones`` each quarter holds members of; capacity decides before it does, so a full quarter is never offered
+    while another has room."""
     active = [q for q in directory() if q["status"] == "active"]
     pool = [q for q in active if not q["capital"]] or active
     best = min(pool, key=lambda q: (q["population"], -q["index"]))["id"] if pool else ""
     chosen = run(runtime.hook("assign_quarter", {"user": c.user, "quarters": pool}))
     if chosen and chosen.get("ok") and (chosen.get("result") or {}).get("quarter") in [q["id"] for q in pool]:
         best = chosen["result"]["quarter"]
-    placed = run(runtime.compute("realm_join", {"user": c.user, "quarters": pool}))  # a layered codex's compute_realm_join
-    if placed in [q["id"] for q in pool]:
-        best = placed
+    limit = capacity()
+    room = [{**q, "zones": zones_of(q["id"])} for q in pool if q["population"] < limit]
+    if room:
+        placed = run(runtime.compute("realm_join", {"user": c.user, "home_zone": joiner_zone(c, args), "quarters": room}))
+        if placed in [q["id"] for q in room]:
+            best = placed
     return {"default": best, "targets": [q["id"] for q in pool], "mode": realm().quarter_join_mode}
 
 
@@ -408,22 +462,24 @@ def self_change_quarter(c, args):
 
 @op("quarter.sync")
 def quarter_sync(c, args):
-    """On a quarter: report to the capital and take its directory. On the capital: answer that call, which carries
-    ``population``, ``codex_id``, ``codex_version`` and optionally a federal vote ``leg``."""
+    """On a quarter: report to the capital and take its directory and the zones the realm defines. On the capital: answer
+    that call, which carries ``population``, ``codex_id``, ``codex_version``, optionally the ``zones`` its members live
+    in (zone id to how many) and a federal vote ``leg``."""
     if federated():
-        reply = yield from ask(capital(), "quarter_sync", report())
+        reply = yield from ask(capital(), "quarter_sync", {**report(), "zones": zones_held()})
         if not reply.get("ok"):
             raise Fail(f"the capital refused to sync: {reply.get('error')}")
         apply_directory(reply)
         return {"quarters": len(reply["directory"]), "drifting": drifting(codex()["version"])}
     q = record(c, args)
-    return {"directory": directory(), "codex": codex(), "index": q.index}
+    return {"directory": directory(), "codex": codex(), "index": q.index, "zones": zone_definitions()}
 
 
 @op("quarter.sync")
 def quarter_report(c, args):
-    """On the capital, record a quarter's ``population``, ``codex_id``, ``codex_version`` and optional federal vote
-    ``leg``. Returns the ``quarter`` and ``drifting``: whether its codex differs from the capital's."""
+    """On the capital, record a quarter's ``population``, ``codex_id``, ``codex_version``, ``zones`` (zone id to how many
+    of its members live there) and optional federal vote ``leg``. Returns the ``quarter`` and ``drifting``: whether its
+    codex differs from the capital's."""
     q = record(c, args)
     return {"quarter": q.id, "drifting": drifting(q.codex_version)}
 

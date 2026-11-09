@@ -3511,6 +3511,14 @@
     "default": "setup",
     "kind": "property",
     "type": "String"
+   },
+   "zones": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
    }
   },
   "relationships": {},

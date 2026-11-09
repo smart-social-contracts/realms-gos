@@ -40,7 +40,7 @@ MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rub
         ("CredentialVerifyArgs", "header"): (0, 1), ("KeyGrantArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentStoreArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentShareArgs", "keys"): ("principal", "wrapped_dek"), ("BidScoreArgs", "scores"): ("criterion", "score"),
-        ("Fund", "balances"): ("symbol", "amount")}
+        ("Fund", "balances"): ("symbol", "amount"), ("Quarter", "zones"): (0, 1), ("QuarterReportArgs", "zones"): (0, 1)}
 # GGG lists of records that Realms GOS keeps as a map from one field to the rest.
 KEYED = {("BidsRevealArgs", "openings"): "bid"}
 # Set to a list by the tests: every required field a reply had no value for is added to it.
@@ -841,7 +841,7 @@ BUILD = {
     "tender_get": lambda o, a: {"tender": o["tender"], "bids": o["tender"].get("bids", []), "next": None},
     "invoice_refresh": lambda o, a: {"items": list(o.get("invoices") or {}), "next": nxt(o)},
     "quarter_directory": lambda o, a: directory(o),
-    "quarter_sync": lambda o, a: directory(local("quarter_directory")),
+    "quarter_sync": lambda o, a: {**directory(local("quarter_directory")), "zones": o.get("zones")},
     "federal_vote_propose": federal_vote,
     "department_chart": chart,
     "proposal_get": proposal_detail,
