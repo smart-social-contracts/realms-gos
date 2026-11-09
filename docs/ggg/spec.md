@@ -270,7 +270,7 @@ Next to the model's fields, the `Realm` row holds:
 | `InstallJob` | `id`, `proposal`, `change_list` (`{url, checksum}`), `step`, `staged`, `status` (`running`, `paused`, `failed`, `done`), `error`, `started_at`, `finished_at` | One install of a layered codex. At most one job is `running` or `paused`. | `J-1`, running, fetching chapters |
 
 Extensions are callers of their own (see the model's "Callers"): an extension calls operations
-only as the user using it, and only those its manifest declares.
+only as the user using it (as the delegate for the user, when a delegate calls it), and only those its manifest declares.
 
 ## 4. Codices and extensions
 
@@ -300,14 +300,14 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 
 | Operation | Permission | Flags | Example |
 |---|---|---|---|
-| `task_create`, `task_edit`, `task_delete`, `task_run` (only the task's creator, or a controller; a cancelled task stays cancelled) | `task.*` | delegable | Create a daily invoice check |
+| `task_create`, `task_edit`, `task_delete`, `task_run` (only the task's creator, or a controller; a cancelled task stays cancelled; under a grant, only the tasks made under that grant, whose steps run as the delegate and stop when the grant ends) | `task.*` | delegable | Create a daily invoice check |
 | `task_add_schedule` (a time, and optionally a repeat, for the creator's named task) | `task.schedule` | delegable | Run the invoice check every day from 1 Jan |
 | `task_logs` | `task.view` | read, delegable | Payroll task and its last 3 runs |
 | `proposal_run_scheduled` (runs the action of a proposal waiting for its effective time once that time has come, else does nothing; the task scheduler calls it) | — (public) | | At `effective_at`, the realm runs `P-12`'s transfer |
 | `ops_list` | — (public) | read | geister reads it to build MCP tools |
 | `orchestration_decide` (approve or reject a Casals baton action for this realm) | `orchestration.approve` | confirm | Approve Casals' action "upgrade North to 0.9.1" |
 | `extension_install`, `extension_uninstall` | `extension.install`, `extension.uninstall` | governed, delegable | Install `procurement` 1.0.3 (marketplace-approved) → vote |
-| `extension_call` | `extension.call` + the extension's declared operation | delegable | The voting extension casts Alice's vote through `proposal_vote` |
+| `extension_call` | `extension.call` + the extension's declared operation | delegable (each operation it calls is held to the grant) | The voting extension casts Alice's vote through `proposal_vote` |
 | `extension_set_access`, `sidebar_configure` | `realm.configure` | governed, delegable | Show `vault` only to Finance |
 | `extension_list` | — (public) | read | Alice's sidebar shows `voting`, not `vault`; a visitor's shows the public dashboard |
 | `shell` (REPL; calls operations as the caller) | `shell.execute` | delegable | An admin runs `ops.proposal_list({"status": "voting"})` |
