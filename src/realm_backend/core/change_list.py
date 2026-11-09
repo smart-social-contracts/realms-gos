@@ -26,7 +26,7 @@ def parse(text):
     with its ``chapter`` id, the ``source`` and ``domain`` in it, its ``urls``, the URL then its mirrors, its
     ``sha256`` as ``sha256:<hex>`` and its ``size``), ``remove``, ``release`` and ``summary``."""
     try:
-        data = json.loads(text)
+        data = json.loads(text, object_pairs_hook=_once)
     except ValueError as e:
         raise Fail(f"the change list is not JSON: {e}")
     except RecursionError:
@@ -55,10 +55,27 @@ def parse(text):
     if release is not None and not (isinstance(release, dict) and isinstance(release.get("source"), str)
                                     and isinstance(release.get("version"), str)):
         raise Fail('release is {"source": <source id>, "version": <version>}, or null')
+    both = sorted(set(names) & set(remove))
+    if both:
+        raise Fail(f"{both[0]} is both set and removed")
+    summary = {} if data.get("summary") is None else data["summary"]
+    if not isinstance(summary, dict) or not all(isinstance(v, str) for v in summary.values()):
+        raise Fail('summary is {"<language>": "<text>"}')
     if not chapters and not remove and release is None:
         raise Fail("the change list changes nothing")
     return {"realm": realm, "replaces": replaces, "set": chapters, "remove": remove, "release": release,
-            "summary": data.get("summary") or {}}
+            "summary": summary}
+
+
+def _once(pairs):
+    """A JSON object whose keys are all different: one that repeats a key reads as its last value here and as its
+    first in a tool that stops at the first, so what voters were shown could differ from what is installed."""
+    found = {}
+    for key, value in pairs:
+        if key in found:
+            raise Fail(f"the change list repeats the key {key!r}")
+        found[key] = value
+    return found
 
 
 def _entry(entry):

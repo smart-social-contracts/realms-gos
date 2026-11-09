@@ -241,9 +241,10 @@ def land_unfreeze(c, args):
     return (yield from freeze(args, False))
 
 
-@op("self.data_manage", returns="zone")
+@op("self.data_manage", returns="zone", secret=("zone",))
 def zone_set(c, args):
-    """Make ``zone`` (an h3 cell) your home, with optional ``name`` and ``kind``; it replaces your previous home."""
+    """Make ``zone`` (an h3 cell) your home, with optional ``name`` and ``kind``; it replaces your previous home. The
+    cell is personal data: it reaches neither the legislation nor the audit log (``secret``)."""
     zone = Zone[args["zone"]]
     if zone and zone.defined:
         raise Fail(f"zone {zone.id} is a zone of the realm, not a cell to make your home")
@@ -294,9 +295,9 @@ def leave_home(user):
         user.home_zone = ""
 
 
-@op("self.data_manage", returns="zone")
+@op("self.data_manage", returns="zone", secret=("zone",))
 def zone_clear(c, args):
-    """Stop having ``zone`` as your home."""
+    """Stop having ``zone`` (your home cell) as your home."""
     zone = find(Zone, args["zone"])
     if zone.user != c.user:
         raise Forbidden(f"zone {zone.id} is not your home")

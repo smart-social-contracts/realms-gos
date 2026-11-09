@@ -181,6 +181,25 @@ def test_a_forbid_reaches_no_further_than_the_operations_it_names():
         {"a": ["a.b"]}
 
 
+def test_a_condition_never_names_the_principal_or_the_resource():
+    """The scope leaves both unconstrained so that no forbid is of one person; a condition that names one would be."""
+    facts = {"a": {}}
+    forbid = 'forbid (principal, action == Realm::Action::"a", resource)\n  when { %s };\n'
+    for condition in ('principal == Realm::User::"alice"', 'resource == Realm::Realm::"1"', "principal.banned",
+                      "!(principal.banned)", "context.facts.x && principal in Realm::User::\"a\"",
+                      "true && resource has x", "principal"):
+        with pytest.raises(Fail, match="names the principal or the resource"):
+            forbids.targets(forbid % condition, facts, OPERATIONS, RESERVED)
+        with pytest.raises(Fail, match="names the principal or the resource"):  # the next policy's, too
+            forbids.targets(forbid % "true" + forbid % condition, facts, OPERATIONS, RESERVED)
+    # the words inside a string, an annotation of the policy or a longer word are no use of them
+    notes = '@id("principal resource")\n@legislation("the principal, the resource")\n'
+    fine = forbid % "true" + notes + forbid % 'context.facts["principal"] == "resource"'
+    assert forbids.targets(fine, facts, OPERATIONS, RESERVED) == {"a": ["a"]}
+    assert forbids.targets(forbid % "context.principals.contains(1) && context.resources", facts, OPERATIONS,
+                           RESERVED) == {"a": ["a"]}
+
+
 # ── What the legislation never sees ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -526,6 +545,23 @@ def test_the_realm_loads_forbids_and_nothing_else_from_the_sandbox():
             targets(smuggled + FORBID)  # first or last, it makes no difference
 
 
+def test_a_request_of_the_forbids_origin_is_never_the_permission_decision(agora):
+    """The permit that lets a forbids request through (auth.FORBIDS_ONLY) covers every action in `call`, so that only
+    a forbid can refuse an operation's facts; `call` itself is the permission decision and must never be let through."""
+    valencia()
+    entities = [{"uid": {"type": "Realm::User", "id": "bob"}, "attrs": {"permissions": [], "banned": False}, "parents": []},
+                {"uid": {"type": "Realm::Realm", "id": "1"}, "attrs": {}, "parents": []}]
+    context = {**auth.BLANK, "origin": "forbids"}
+
+    def decide(action, **more):
+        return auth.decide('Realm::User::"bob"', f'Realm::Action::"{action}"', 'Realm::Realm::"1"', entities,
+                           {**context, **more})
+
+    assert not decide("call")
+    assert decide("tax_policy_propose.taxes", facts={"code": "other", "kind": "tax", "subject": "Land"})  # no forbid fires
+    assert not decide("tax_policy_propose.taxes", facts={"code": "ibi_urban", "kind": "tax", "subject": "Land"})  # one does
+
+
 def test_the_comment_that_hides_a_permit_from_a_scan_is_real_to_the_engine():
     """Cedar ends a `//` comment at `\\r` as at `\\n`, so a quote in one that is read as the start of a string hides the
     `permit` after it: the engine grants what no scan that follows only `\\n` sees. The realm refuses such text."""
@@ -560,6 +596,61 @@ def test_a_codex_whose_generated_cedar_smuggles_a_permit_is_not_loaded_nor_built
             "chapters": [{"source": s, "domain": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
     built = legislation.build(plan, {store.checksum(t): t for t in chapters.values()})
     assert any("permits" in e for e in built["errors"])
+    assert auth.live == running and legislation._state["codex"] == first.id
+
+
+def test_the_sandbox_hands_over_policy_text_and_the_realm_builds_the_schema_and_the_fact_types_itself(agora, monkeypatch):
+    """What the realm validates the codex's forbids against, and builds its requests from, is its own: a reply that
+    carries another schema or other fact types (which the sandbox no longer sends) changes nothing."""
+    row = valencia()
+    schema, types = auth.live["schema"], auth.live["forbids"]["types"]
+    legislation.load(None)
+    call_in_box = sandbox.Resident.call
+
+    def doctors(self, fn, **kwargs):
+        reply = call_in_box(self, fn, **kwargs)
+        if fn == "cedar":
+            reply["schema"] = "namespace Realm { entity User; }"  # nothing the policies could validate against
+            reply["facts"] = {action: {fact: ["Bool", True] for fact in facts} for action, facts in types.items()}
+        return reply
+
+    monkeypatch.setattr(sandbox.Resident, "call", doctors)
+    legislation.load(row)
+    assert auth.live["schema"] == schema and auth.live["forbids"]["types"] == types
+    plan = {"realm": SPAIN, "layers": [SPAIN], "calendars": [], "chapters": [
+        {"source": SPAIN, "domain": "tax", "sha256": store.checksum(SPAIN_TAX)}]}
+    assert legislation.build(plan, {store.checksum(SPAIN_TAX): SPAIN_TAX})["errors"] == []
+    assert "forbidden by the legislation" in denied("tax_policy_draft", "bob", **drafted(entry("ibi_urban", CAP + 1)))
+
+
+def test_the_schema_the_realm_builds_is_the_one_the_library_writes_over_all_of_ggg_facts(agora):
+    from core.legislation_sandbox import readable
+    from ggg_facts import FACTS
+    from realms.legislation.cedar import schema
+
+    valencia()
+    named = sorted(action for actions in auth.live["forbids"]["targeted"].values() for action in actions)
+    assert named == ["tax_policy_draft.taxes", "tax_policy_propose.taxes"]
+    whole = FactSchema(readable(FACTS, legislation._secrets()))
+    assert auth.live["schema"] == schema(whole, (), auth.CONTEXT, named)
+
+
+def test_a_forbid_text_that_names_part_of_what_a_forbid_runs_on_is_not_loaded(agora, monkeypatch):
+    """A forbid on tax_policy_propose.taxes runs on tax_policy_draft.taxes too and the generator names both actions:
+    a text that names one alone does not fit the fact schema the realm builds from."""
+    first = valencia()
+    running = dict(auth.live)
+    call_in_box = sandbox.Resident.call
+
+    def narrows(self, fn, **kwargs):
+        reply = call_in_box(self, fn, **kwargs)
+        if fn == "cedar":
+            reply["cedar"] = f"forbid ({forbids.head_of(['tax_policy_propose.taxes'])}\n  when {{ true }};\n"
+        return reply
+
+    monkeypatch.setattr(sandbox.Resident, "call", narrows)
+    with pytest.raises(Fail, match="does not fit GGG's fact schema"):
+        legislation.load(layered({(SPAIN, "tax"): SPAIN_TAX}, layers=[SPAIN]))
     assert auth.live == running and legislation._state["codex"] == first.id
 
 

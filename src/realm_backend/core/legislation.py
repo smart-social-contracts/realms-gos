@@ -31,8 +31,8 @@ from core import localtime
 from core import sandbox
 from core.db import PAGE, Fail, Forbidden, first, view
 from core.op import GENERATOR, Call, filing, ops
-import core.legislation_sandbox  # noqa: F401  bundled with the realm for its text (core.sandbox.module_source); never run here
-import ggg_facts  # noqa: F401  the same: GGG's fact schema, which the sandbox imports from text
+import core.legislation_sandbox  # bundled with the realm for its text (core.sandbox.module_source); the realm runs only its pure ``readable``
+import ggg_facts  # GGG's fact schema: the sandbox imports it from text, and the realm builds the Cedar schema from it
 
 # The operations no chapter may hook, guard or forbid, as realms.legislation.chapter.RESERVED lists them; written here
 # too because the realm compiles the library in its own interpreter only when an install checks a change list, and
@@ -47,7 +47,10 @@ ACTIVATE = "codex_activate"
 READS = 2_000_000_000
 # What a chapter may read of GGG's entities, and nothing else: what legislation needs to decide, never a key, a code,
 # a person's private data, a sealed bid, who voted what, a grant or a payment account, nor what one member was told.
-# Request, Dispatch, Procedure and Loan wait for the security review before they join.
+# A Request leaves out its ``body`` and ``reply`` (personal data) and its ``decision`` (free text until GGG types it as
+# an enum), a Dispatch its ``body``, a Procedure its ``facts``. A member's home cell is as private as ``Human.h3_index``:
+# a Zone has no ``user``, and ROWS_WHERE lets a chapter see the zones the realm defined only; legislation reads a
+# member's district through ``User.home_zone``, the id of such a zone.
 VIEWS = {
     "Appointment": ("id", "position", "user", "kind", "agent", "supervisor", "started_at", "ended_at", "status"),
     "Attribute": ("id", "human", "kind", "value", "status", "issuer", "verified_at", "expires_at"),
@@ -59,6 +62,7 @@ VIEWS = {
     "Contract": ("id", "title", "parties", "mandate", "value", "symbol", "status", "starts_at", "ends_at"),
     "Court": ("id", "name", "operator", "level", "jurisdiction", "parent", "status"),
     "Department": ("id", "description", "parent", "is_root", "head", "policy", "fund"),
+    "Dispatch": ("id", "to", "topic", "title", "document", "codex", "queued_at", "status"),
     "Dispute": ("id", "claimant", "respondent", "subject", "title", "status", "case"),
     "Document": ("id", "department", "title", "kind", "languages", "public", "author", "at"),
     "External": ("id", "name", "kind"),
@@ -73,26 +77,40 @@ VIEWS = {
     "LayeredCodex": ("id", "layers", "layer_paths", "status", "activates_at", "installed_at"),
     "LedgerEntry": ("id", "kind", "category", "debit", "credit", "symbol", "fund", "period", "at", "description"),
     "License": ("id", "kind", "holder", "issued_by", "status", "applied_at", "issued_at", "expires_at", "conditions"),
+    "Loan": ("id", "lender", "amount", "symbol", "term", "rate", "fund", "outstanding", "status"),
     "Mandate": ("id", "title", "scope", "executor", "proposal", "status", "expires_at"),
     "Member": ("id", "status", "joined_at"),
-    "Notification": ("id", "recipient", "topic", "title", "sender", "at"),
+    "Notification": ("id", "recipient", "topic", "sender", "at"),
     "Organization": ("id", "description", "status"),
     "Penalty": ("id", "verdict", "target", "kind", "amount", "symbol", "status", "due_at", "executed_at"),
     "Position": ("id", "department", "organization", "title", "profile", "headcount", "salary", "salary_period", "status"),
+    "Procedure": ("id", "initiated_by", "matter", "decision_deadline", "silence", "legislation"),
     "Proposal": ("id", "title", "description", "proposer", "department", "action", "status", "opens_at", "deadline",
                  "effective_at", "threshold", "quorum", "tally", "result", "links"),
     "Quarter": ("id", "name", "index", "status", "population"),
     "Realm": ("id", "name", "status", "accounting_currency", "accounting_currency_decimals", "is_quarter", "is_capital",
               "quarter_join_mode", "open_registration", "timezone"),
+    "Request": ("id", "kind", "by", "filed_at", "due_at", "extension_limit", "status", "decided_at"),
     "TaxDeclaration": ("id", "declarant", "period", "base", "amount", "status", "invoice"),
     "TaxPolicy": ("id", "status", "document", "taxes", "description", "proposal", "adopted_at"),
     "Tender": ("id", "title", "description", "requester", "status", "opens_at", "closes_at", "winner", "contract"),
     "Transfer": ("id", "sender", "to", "symbol", "amount", "status", "at"),
-    "User": ("id", "nickname", "home_quarter", "profiles"),
+    "User": ("id", "nickname", "home_quarter", "home_zone", "profiles"),
     "UserProfile": ("id", "description", "allowed_to"),
     "Verdict": ("id", "case", "issued_by", "decision", "status", "issued_at"),
-    "Zone": ("id", "name", "kind", "land", "user", "metadata"),
+    "Zone": ("id", "name", "kind", "land"),
 }
+# The field of VIEWS that a chapter reads on some rows only, ``{entity: (field, shown)}``, ``shown(row)`` saying of the
+# row as VIEWS gives it whether the field is for the chapter. On any other row it reads as None, and no ``find`` goes by
+# it. A private document's title is metadata in clear; a dispatch's title is a public document's only when the dispatch
+# carries a document (only api.crypto.document_publish sets one; a notice's topic is the sender's word, and any other
+# notice's title is not for legislation).
+CONDITIONAL = {"Document": ("title", lambda row: bool(row["public"])),
+               "Dispatch": ("title", lambda row: bool(row["document"]))}
+# The entities of which a chapter sees the rows whose field is set and no others, ``{entity: field}``: a zone is the
+# realm's (``defined``) or a member's home cell, which is no row to legislation: it reads as none, in a ``get`` as in a
+# ``page`` or a ``find``.
+ROWS_WHERE = {"Zone": "defined"}
 # The fields of VIEWS that are an amount of money. A chapter reads them as a ``Money``, which rounds as GGG does, in
 # the decimals a ``compute_`` is told (a parcel's value is in the accounting currency, and tax_assess computes a tax on
 # land through a codex only when it is billed in it); the other calls do not know them.
@@ -458,17 +476,37 @@ def _spawn(plan, sources):
 def _generated(box):
     """The forbids of the codex loaded in ``box`` as the realm's Cedar engine takes them: ``{"schema", "policies",
     "targeted", "types"}`` (core.auth.use_forbids), or None when its legislation forbids nothing, so that it costs the
-    engine nothing. Fail when a generated policy names a reserved operation, which the library refuses too (§10.4)."""
+    engine nothing. Only the policy text comes from the sandbox, and it is read, not trusted (core.forbids.targets):
+    the schema and the fact types the realm validates it against and builds its requests from are the realm's own,
+    from GGG's fact schema and the context of core.auth. Fail when a generated policy names a reserved operation,
+    which the library refuses too (§10.4)."""
     try:
-        out = _ok(box.call("cedar", context=auth.CONTEXT, secret=_secrets()))
+        out = _ok(box.call("cedar", secret=_secrets()))
     except RuntimeError as e:  # the sandbox itself failed on the call
         raise Fail(f"the codex does not load: {e}")
     if not out["cedar"]:
         return None
     from core.forbids import targets  # compiled when a codex forbids something, not at every start
 
-    return {"schema": out["schema"], "policies": out["cedar"], "types": out["facts"],
-            "targeted": targets(out["cedar"], out["facts"], ops(), RESERVED)}
+    known = core.legislation_sandbox.readable(ggg_facts.FACTS, _secrets())
+    targeted = targets(out["cedar"], known, ops(), RESERVED)
+    schema, types = _schema_of({a: known[a] for actions in targeted.values() for a in actions})
+    return {"schema": schema, "policies": out["cedar"], "targeted": targeted, "types": types}
+
+
+def _schema_of(facts):
+    """The Cedar schema for the actions in ``facts`` (GGG's fact schema of just those), and the type of each of their
+    facts, ``{action: {fact: [type, optional]}}``, written by the library as the sandbox once wrote them. Fail when the
+    actions are not a closed set (a forbid on one runs on its ``also`` too), which the generator never writes."""
+    from realms.legislation import cedar as generator
+    from realms.legislation.errors import LegislationError
+
+    try:
+        schema = generator.FactSchema(facts)
+        text = generator.schema(schema, (), auth.CONTEXT, sorted(facts))
+    except LegislationError as e:
+        raise Fail(f"a generated forbid does not fit GGG's fact schema: {e}")
+    return text, {a: {n: [f.type, f.optional] for n, f in schema.actions[a].facts.items()} for a in facts}
 
 
 def _ok(reply):
@@ -557,27 +595,48 @@ def _answer(action, kw):
 
 def _read(kw):
     """One row by id, or one page of rows (all, or those whose indexed ``field`` is ``value``), of an entity in
-    VIEWS, as plain data with the fields VIEWS allows and no other."""
+    VIEWS, as plain data with the fields VIEWS allows and no other, and without the rows ROWS_WHERE keeps back."""
     import ggg
 
-    fields = VIEWS.get(kw["entity"])
+    entity = kw["entity"]
+    fields = VIEWS.get(entity)
     if fields is None:
-        raise Fail(f"a chapter does not read {kw['entity']}")
-    cls = getattr(ggg, kw["entity"])
+        raise Fail(f"a chapter does not read {entity}")
+    cls = getattr(ggg, entity)
     if kw["method"] == "get":
         row = cls[str(kw["id"])]
-        return None if row is None else view(row, *fields)
+        return _shown(entity, row, fields) if _seen(entity, row) else None
     start = int(kw.get("start") or 1)
     if kw["method"] == "page":
         rows, after = cls.load_some(start, PAGE), start + PAGE
         after = after if after <= cls.max_id() else None
     elif kw["method"] == "find":
-        if kw["field"] not in fields:
-            raise Fail(f"a chapter does not read {kw['entity']}.{kw['field']}")
+        if kw["field"] not in fields or kw["field"] == CONDITIONAL.get(entity, (None,))[0]:
+            raise Fail(f"a chapter does not read {entity}.{kw['field']}")
         rows, after = cls.find_by(kw["field"], kw["value"], from_id=start, count=PAGE)
     else:
         raise Fail(f"a chapter cannot {kw['method']!r} an entity")
-    return {"rows": [view(r, *fields) for r in rows], "next": after}
+    return {"rows": [_shown(entity, r, fields) for r in rows if _seen(entity, r)], "next": after}
+
+
+def _seen(entity, row):
+    """Whether a chapter sees ``row`` at all (ROWS_WHERE)."""
+    return row is not None and (entity not in ROWS_WHERE or bool(getattr(row, ROWS_WHERE[entity])))
+
+
+def _shown(entity, row, fields):
+    """One row as a chapter sees it: the fields VIEWS allows, less what the row itself keeps back. A row shows the
+    field of CONDITIONAL only when it is for the chapter, and a proposal's carried call and the result of running it
+    show none of the arguments and reply fields its operation keeps secret (``secret=``), as when the call itself
+    crosses (``_public``)."""
+    data = view(row, *fields)
+    if entity in CONDITIONAL and not CONDITIONAL[entity][1](data):
+        data[CONDITIONAL[entity][0]] = None
+    if entity == "Proposal" and isinstance(data["action"], dict):
+        secret = _secret(data["action"].get("op"))
+        data["action"] = {k: _public(v, secret) if k == "args" else v for k, v in data["action"].items()}
+        data["result"] = _public(data["result"], secret)
+    return data
 
 
 def _record(file, method, error):
