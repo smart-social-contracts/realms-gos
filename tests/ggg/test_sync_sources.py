@@ -366,6 +366,17 @@ def test_a_sources_legislation_hooks_a_notice_and_never_guards_or_forbids_it():
             activate(layered({("x/town", "realm"): text}))
 
 
+def test_a_notice_that_a_link_ended_is_accepted_while_the_codex_is_not_loaded_and_other_guards_fail_closed():
+    peer(FOL, link_notify=UNANSWERED)
+    ok("follower_accept", "ctl", follower=FOL)
+    activate(layered({("x/town", "realm"): HOOK_LEAVING}))
+    legislation._drop()  # the sandbox is gone, as after an upgrade whose codex does not load
+    assert "legislation error" in denied("proposal_create", "alice", title="a motion")
+    ok("link_notify", FOL, side="follower", status={"Ended": {"by": FOL, "at": fake_chain.now()}})
+    assert status(Follower[FOL])["Ended"]["by"] == FOL  # nothing refused it, and the hook that could not run did not
+    assert LOG == []
+
+
 def test_a_sync_source_removal_is_reserved_so_no_legislation_runs_for_it():
     assert "sync_source_remove" in legislation.RESERVED and "link_notify" not in legislation.RESERVED
     assert legislation.is_reserved("sync_source_remove", {"source": {"Realm": SRC}})
