@@ -165,20 +165,41 @@ def test_a_source_that_alters_a_chapter_fails_the_install_and_the_old_codex_keep
     assert [(r["source"], r["version"]) for r in town.ok("legislation_releases", None, query=True)["releases"]] == [("arcadia", "2.0.0")]
 
 
-def test_a_stand_in_record_whose_bytes_are_not_its_pin_is_refused_and_pinned_again_it_vouches(net, site):
-    plain = net.realm("plain")
-    record = json.dumps({"source": "arcadia", "releases": [entry("1.0.0"), entry("2.0.0")]}).encode()
-    pin = "sha256:" + hashlib.sha256(record).hexdigest()
-    net.web.serve(STAND_IN, record + b" ")
-    plain.govern("sync_source_add", {"source": {"Record": {"url": STAND_IN, "checksum": pin}}, "name": "Arcadia"})
-    job = failing(net, plain, release_args(site, "1.0.0"), f"{STAND_IN}: the record is sha256:")
-    assert f"the pin is {pin}" in job["error"] and job["step"] == "fetch_chapters"
+STAND_IN_RECORD = json.dumps({"source": "arcadia", "releases": [entry("1.0.0"), entry("2.0.0")]}).encode()
+PIN = "sha256:" + hashlib.sha256(STAND_IN_RECORD).hexdigest()
 
-    net.web.serve(STAND_IN, record)
+
+@pytest.fixture(scope="module")
+def plain(net):
+    """A realm whose only sync source is a stand-in record of arcadia."""
+    realm = net.realm("plain")
+    realm.govern("sync_source_add", {"source": {"Record": {"url": STAND_IN, "checksum": PIN}}, "name": "Arcadia"})
+    return realm
+
+
+def test_a_stand_in_record_whose_bytes_are_not_its_pin_is_refused_and_pinned_again_it_vouches(net, site, plain):
+    net.web.serve(STAND_IN, STAND_IN_RECORD + b" ")
+    job = failing(net, plain, release_args(site, "1.0.0"), f"{STAND_IN}: the record is sha256:")
+    assert f"the pin is {PIN}" in job["error"] and job["step"] == "fetch_chapters"
+
+    net.web.serve(STAND_IN, STAND_IN_RECORD)
     job = install(net, plain, release_args(site, "1.0.0"))
     assert (job["status"], job["error"]) == ("done", "")
     assert routes(plain) == {"arcadia/tax": ("https", "arcadia", "1.0.0"), "arcadia/procedure": ("https", "arcadia", "1.0.0")}
     assert [(r["source"], r["version"]) for r in plain.ok("legislation_releases", None, query=True)["releases"]] == [("arcadia", "1.0.0")]
+
+
+def test_an_upgrade_after_the_records_were_read_keeps_what_the_job_staged_and_the_release_is_kept(net, site, plain):
+    first = active_id(plain)
+    plain.govern("codex_install", release_args(site, "2.0.0", replaces=first))
+    net.upgrade_when(plain, lambda: (status(plain)["job"] or {}).get("step") == "check_sources", rounds=1)
+    job = status(plain)["job"]
+    assert (job["status"], job["step"]) == ("paused", "check_sources")  # the records were read, and staged with the job
+    plain.ok("codex_install_resume", "ctl", job=job["id"])
+    net.wait_until(lambda: status(plain)["job"]["status"] in ("done", "failed"), rounds=2)
+    assert status(plain)["job"]["status"] == "done"
+    assert routes(plain) == {"arcadia/tax": ("https", "arcadia", "2.0.0"), "arcadia/procedure": ("https", "arcadia", "2.0.0")}
+    assert [(r["source"], r["version"]) for r in plain.ok("legislation_releases", None, query=True)["releases"]] == [("arcadia", "2.0.0")]
 
 
 def test_an_upgrade_in_the_middle_of_a_later_install_changes_nothing_in_the_layers_from_above(net, town, site):
@@ -219,8 +240,8 @@ def test_what_reading_a_record_costs(lab, costs, count):
     assert "Traceback" not in out, out
     size = int(lab.shell("import json\nprint(len(json.dumps(releases)))").strip().splitlines()[-1])
     label = f"record of {count} releases ({size // 1024} KB)"
-    costs.measure(lab, f"{label}: check", "from api import links\nrecord = links.checked_record('k', 'eu/es', releases)")
-    costs.measure(lab, f"{label}: keep (write the row)", "links.keep_record(record)")
+    costs.measure(lab, f"{label}: check", "from core import records\nrecord = records.checked_record('k', 'eu/es', releases)")
+    costs.measure(lab, f"{label}: keep (write the row)", "records.keep_record(record)")
     costs.measure(lab, f"{label}: read the row back", "import ggg\nlen(ggg.SourceRecord['k'].releases)")
     costs.measure(lab, f"{label}: place the layer in the codex's order",
                   "from core import change_list\nchange_list.layers_for([], [record], {'source': 'eu/es', 'version': '1.0.0'})")

@@ -402,6 +402,14 @@ def published_as():
     return first.source if first is not None else None
 
 
+def check_from_above(source, version):
+    """Refuse a release that this realm cannot keep as a layer from above: one with an ``@`` in its id, and one of the
+    layer the realm publishes. The install task asks before it fetches anything, so that the switch cannot fail on it."""
+    no_at(source, version)
+    if source == published_as():
+        raise Fail(f"{source} is the source id this realm publishes under: it is not a layer from above")
+
+
 def valid_release(args):
     for key, most in (("source", NAME_MAX), ("version", VERSION_MAX), ("commit", VERSION_MAX)):
         if not isinstance(args.get(key), str) or not 0 < len(args[key]) <= most:
@@ -481,9 +489,7 @@ def relay_release(release, order):
     source = release["source"]
     if source not in order:
         raise Fail(f"the record that vouches for {source} does not list it")
-    no_at(source, release["version"])
-    if source == published_as():
-        raise Fail(f"{source} is the source id this realm publishes under: it is not a layer from above")
+    check_from_above(source, release["version"])
     relayed = [r for r in record() if r.relayed]
     for old in [r for r in relayed if r.source == source]:
         old.delete()

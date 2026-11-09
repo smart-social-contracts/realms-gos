@@ -280,6 +280,17 @@ def test_a_partial_release_is_refused():
     assert asked(SRC, "legislation_chapter") == []
 
 
+def test_a_release_of_the_layer_the_realm_publishes_is_refused_before_anything_is_read():
+    sha256 = store.checksum("town tax")
+    store.store_chapter(sha256, "town tax")
+    ok("legislation_release_publish", "ctl", source="arcadia", version="9.9.9", effective_from=1_900_000_000,
+       commit="c" * 40, chapters=[{"domain": "tax", "checksum": sha256}])  # the realm publishes under arcadia's id
+    capital(entry("1.0.0"))
+    failing(release_list("1.0.0"), "arcadia is the source id this realm publishes under: it is not a layer from above")
+    assert job()["step"] == "fetch_chapters" and asked(SRC, "legislation_releases") == []
+    assert active_id() is None
+
+
 def test_two_sync_sources_that_relay_different_releases_of_a_layer_are_refused():
     capital(entry("1.0.0"))
     capital(entry("2.0.0"), cid=OTHER, source="other/town")

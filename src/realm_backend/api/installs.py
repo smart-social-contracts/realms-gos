@@ -254,17 +254,25 @@ def fetch_chapters(job):
 
 def read_records(job, listed):
     """Read the records of the sync sources, when the change list installs a release, and stage what step 4 and 5
-    check against (core.change_list.layers_for): the layers the new codex has, in the order the active codex runs them,
-    who vouches for each, and the record that vouches for the release. Then the change list is checked against them at
-    once, so that a release no record vouches for fails before any chapter is fetched. A generator."""
+    check against (``stage_layers``). A release this realm could not keep as a layer from above is refused first, before
+    anything is read. A generator."""
     release = listed["release"]
+    if release is not None:
+        links.check_from_above(release["source"], release["version"])
     found = (yield from records.read_active_records()) if release is not None else []
     job = InstallJob[job.id]
     if job.status != "running":
         return
-    _, realm, _ = prepared(job)
+    stage_layers(job, found)
+
+
+def stage_layers(job, found):
+    """Stage the layers the new codex has (core.change_list.layers_for) from the ``found`` records: in the order the
+    active codex runs them, who vouches for each, and the record that vouches for the release. Then the change list is
+    checked against them at once, so that a release no record vouches for fails before any chapter is fetched."""
+    listed, realm, _ = prepared(job)
     staged = job.staged
-    staged["layers"] = change_list.layers_for(installed_layers(codex.active(), realm), found, release)
+    staged["layers"] = change_list.layers_for(installed_layers(codex.active(), realm), found, listed["release"])
     job.staged = staged
     vouched(job)
 
@@ -272,7 +280,8 @@ def read_records(job, listed):
 def fetch_chapter(job, entry):
     """The bytes of ``entry``, stored in the message that receives them: from the capital of the sync source that
     vouches for the layer, when a realm does, else from the first of its URLs that serves the right ones. A capital that
-    serves other bytes than the record names is noted (``refused_by_capital``) before the URLs are tried. A generator."""
+    serves other bytes than the record names is noted (``refused_by_capital``) before the URLs are tried. A
+    generator."""
     refusals = []
     capital = vouching_capital(job, entry)
     if capital is not None:
@@ -303,10 +312,10 @@ def fetch_chapter(job, entry):
 def vouching_capital(job, entry):
     """The capital to ask for the chapter ``entry``: the sync source that vouches for the release it is a part of, when
     that is a realm. None for the realm's own chapters and for a stand-in record, which have only their URLs."""
-    vouching = job.staged["layers"]["vouching"]
-    if vouching is None or entry["source"] != vouching["release"]["source"] or not records.is_realm_key(vouching["key"]):
+    vouching = job.staged["layers"]["vouching"]  # fetch_chapters has staged the layers before it fetches
+    if vouching is None or entry["source"] != vouching["release"]["source"]:
         return None
-    return vouching["key"]
+    return vouching["key"] if records.is_realm_key(vouching["key"]) else None
 
 
 def receive_from_capital(job, entry, capital, text):
@@ -393,7 +402,8 @@ def keep_relayed(row):
     """At the switch to ``row``: if its install brought a release, this realm's record lists it, as the record that
     vouches for it lists it (api.links.relay_release)."""
     job = store.live_job()
-    vouching = job.staged["layers"]["vouching"] if job is not None and job.staged.get("codex") == row.id else None
+    staged = job.staged if job is not None and job.staged.get("codex") == row.id else {}
+    vouching = staged.get("layers", {}).get("vouching")  # a job begun before the layers were staged brings no release
     if vouching is not None:
         links.relay_release(vouching["release"], vouching["order"])
 
@@ -438,6 +448,8 @@ def vouched(job):
     """``prepared`` and then the layers the job staged: the plan of the new codex, who vouches for each chapter, the
     change list."""
     listed, realm, own = prepared(job)
+    if "layers" not in job.staged:  # begun before they were staged: no record was read, and a release finds none
+        stage_layers(job, [])
     layers = job.staged["layers"]
     planned, vouched_by = change_list.vouch(listed, realm, layers["relays"], own, layers["vouchers"])
     return planned, vouched_by, listed
@@ -496,7 +508,8 @@ def entries_of(job, planned, vouched_by, listed):
         sha256 = item["sha256"]
         if chapter in urls and sha256 in fetched_now:
             now = fetched_now[sha256]
-            came = {"route": now["route"], "url": urls[chapter]["urls"][now["url"]] if now["route"] == "https" else "",
+            route = now.get("route", "https")  # a job begun before the route was noted fetched by URL alone
+            came = {"route": route, "url": urls[chapter]["urls"][now["url"]] if route == "https" else "",
                     "fetched_at": now["at"], "size": urls[chapter]["size"]}
         elif chapter in before and before[chapter]["sha256"] == sha256:
             came = {k: before[chapter].get(k) for k in ("route", "url", "fetched_at", "size")}
