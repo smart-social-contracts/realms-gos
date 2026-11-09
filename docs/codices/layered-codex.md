@@ -1778,6 +1778,43 @@ The analysis uses the Cedar semantics of the CLI's version (4.14.1), while the c
 `cedar-policy` 4.12.0 (basilisk's canister template). The forbids use only core operators, so the
 difference is not expected to matter; the two versions are aligned at basilisk's next bump.
 
+Built ([realms-codices#13](https://github.com/smart-social-contracts/realms-codices/issues/13)):
+`realms legislation diff [TREE] --base REV [--head REV] [--realm ID]... [--change-list FILE] [--out FILE]`.
+
+- **What is compared.** The tree at two commits, read with git (never the working copy), as `check` reads it: every
+  source is a realm whose layers are its ancestors. The realms analysed are those with a source on their layer path
+  whose chapter or calendar changed between `--base` and `--head` (default `HEAD`), or `--realm`. A change list
+  (`--change-list`) names the one realm, and the commit its chapters' URLs name is the head; its `replaces` is not
+  read, since a live realm's codex is not (reading it comes with the published record, D6).
+- **Per realm and Cedar action** (the primary action of a forbid; the actions it also applies to run the same
+  forbids), with the settings folded, and, for a realm that is itself a changed source, once more with them left
+  open (`context.settings`), the report gives:
+  - the **newly forbidden** and **newly allowed**, each proved (`implies` of the old set in the new, and of the new in
+    the old) or given with the request that breaks it. Where the difference is a range of one number, the report
+    says it: the trees compare a fact only with constants, so they are evaluated at each constant and beside it, and
+    the runs where the old and new sets differ are written as forbids and proved equal to the difference with
+    `equivalent(new + newly allowed, old + newly forbidden)`; with the settings open, one statement for each
+    combination of the Boolean settings the change reads. A range that is not proved is not printed, only the request;
+  - **nothing permitted** (`always-denies`), **never fires** and **overlap** (`equivalent` with and without the
+    forbid), whether a forbid **can error** (`never-errors`), and each query the solver **did not decide**;
+  - the **flattened view** of the domains the change reaches (those that changed, and those that call one, through
+    `uses`, however far) before and after, with the folded line of each cap (`for València: capital + transport →
+    maximum 1.24 % (1240000)`), proved equal to its forbid like the ranges;
+  - the **generated Cedar** diff, the **dependencies** (changed sources and domains, and for each realm the domains
+    reached) and the realm's **test cases** (§12.1).
+- **Assumptions.** Every set under analysis is the permit-all set plus one forbid that fires on the requests GGG's fact
+  schema rules out (a number outside its range, a Period of a count or a unit GGG does not have), so that every answer
+  holds for the requests the schema allows. It is analysis input and is never installed.
+- **Failures and warnings.** The report lists a failure, and the command exits 1, for a forbid that can error, an
+  operation nothing is permitted on, a forbid that never fires, a query the solver did not decide, a codex that does
+  not load and a test case that fails. An overlap is a warning. Newly forbidden and newly allowed are information:
+  they are what a change of legislation is for.
+- **Tools.** The pinned Cedar CLI and cvc5 (`CEDAR_CLI`, `CVC5`; `scripts/cedar_tools.sh`); without them it exits 2 and
+  says so. Up to four SymCC queries run at once.
+- **Limits.** With the settings open, the schema is the new codex's, so an old forbid that reads a setting the new
+  codex no longer has is not analysed (SymCC refuses it, and it is reported as undecided). The links between realms
+  are not read, as with `check`.
+
 ### 12.4 `realms legislation resolve`: resolver and flattened view
 
 Given a realm's links and a commit, it prints the layer paths, the flattened view and the generated
