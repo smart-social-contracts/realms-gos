@@ -1764,6 +1764,11 @@
  },
  "Follower": {
   "fields": {
+   "checking": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
    "compliance": {
     "default": "\"unknown\"",
     "kind": "property",
@@ -4027,6 +4032,11 @@
  },
  "SyncSource": {
   "fields": {
+   "checking": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
    "checksum": {
     "default": "",
     "kind": "property",

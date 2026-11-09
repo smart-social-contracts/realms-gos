@@ -2,9 +2,10 @@
 followers that take it from the realm, and the releases it publishes and relays. Data only: the rules are in
 api.links, which also reads the sync sources' records.
 
-A link has the same four fields on both sides: its ``status`` (``requested`` after this side's vote, ``active`` once
-the other side's is in too, ``ended``), who ended it and when, and ``unsent``, whether the other side still has to be
-told (api.links sends the notice again until it is answered). A row exists only once this side has voted."""
+A link has the same fields on both sides: its ``status`` (``requested`` after this side's vote, ``active`` once the
+other side's is in too, ``ended``), who ended it and when, ``unsent``, whether the other side still has to be told
+(api.links sends the notice again until it is answered), and ``checking``, while the vote is still being checked for a
+cycle. A row exists only once this side has voted."""
 
 from ic_python_db import Boolean, Integer, String
 
@@ -22,6 +23,7 @@ class SyncSource(Row):
     ended_by = String(default="")
     ended_at = Integer(default=0)
     unsent = Boolean(default=False, indexed=True)
+    checking = Boolean(default=False)  # this side's vote is still being checked for a cycle: the other side's notice waits
 
 
 RECORD_MAX = 1 << 19  # characters of a sync source's record as JSON
@@ -48,6 +50,7 @@ class Follower(Row):
     ended_by = String(default="")
     ended_at = Integer(default=0)
     unsent = Boolean(default=False, indexed=True)
+    checking = Boolean(default=False)  # this side's vote is still being checked for a cycle: the other side's notice waits
     layers = Json([])  # [{version, checksum}]
     compliance = String(default='"unknown"')  # the flag as JSON text (core.compliance)
     population = Integer(default=0)
