@@ -124,7 +124,7 @@ class Cycle(Record): name: text; every: Duration
 class Calendar(Record): id: text; realm: text; epoch: Duration; fiscal_period: Duration; voting_window: Duration; codex_release_cycle: Opt[Duration]; benefit_cycle: Opt[Duration]; service_payment_cycle: Opt[Duration]; license_review_cycle: Opt[Duration]; custom_cycles: Vec["Cycle"]
 class Registry(Record): id: text; description: text; principal_id: Principal
 class QuarterStatus(Variant, total=False): Setup: null; Active: null; Suspended: null; Splitting: null; Merging: null
-class Quarter(Record): id: text; name: text; index: nat; status: "QuarterStatus"; population: nat; codex_id: Opt[text]; codex_version: Opt[text]; compliance: "Compliance"; last_sync: Opt[Timestamp]; last_activity_at: Opt[Timestamp]; zones: Opt[Vec[Tuple[text, nat]]]
+class Quarter(Record): id: text; name: text; index: nat; status: "QuarterStatus"; population: nat; codex_id: Opt[text]; codex_version: Opt[text]; compliance: "Compliance"; last_sync: Opt[Timestamp]; last_activity_at: Opt[Timestamp]
 class Forward(Record): id: text; subject: "Ref"; origin: text; destination: text; moved_at: Timestamp; signature: blob
 class FederalVoteStatus(Variant, total=False): Open: null; Passed: null; Failed: null; Cancelled: null
 class FederalVote(Record): id: text; title: text; origin_quarter: text; action: "ProposalAction"; rule: "Value"; hash: text; deadline: Timestamp; status: "FederalVoteStatus"; tally: "Value"
@@ -665,7 +665,7 @@ SCHEMA["Cycle"] = ("record", {"name": "text", "every": "Duration"})
 SCHEMA["Calendar"] = ("record", {"id": "text", "realm": "text", "epoch": "Duration", "fiscal_period": "Duration", "voting_window": "Duration", "codex_release_cycle": "opt Duration", "benefit_cycle": "opt Duration", "service_payment_cycle": "opt Duration", "license_review_cycle": "opt Duration", "custom_cycles": "vec Cycle"})
 SCHEMA["Registry"] = ("record", {"id": "text", "description": "text", "principal_id": "principal"})
 SCHEMA["QuarterStatus"] = ("variant", {"Setup": "null", "Active": "null", "Suspended": "null", "Splitting": "null", "Merging": "null"})
-SCHEMA["Quarter"] = ("record", {"id": "text", "name": "text", "index": "nat", "status": "QuarterStatus", "population": "nat", "codex_id": "opt text", "codex_version": "opt text", "compliance": "Compliance", "last_sync": "opt Timestamp", "last_activity_at": "opt Timestamp", "zones": "opt vec (text, nat)"})
+SCHEMA["Quarter"] = ("record", {"id": "text", "name": "text", "index": "nat", "status": "QuarterStatus", "population": "nat", "codex_id": "opt text", "codex_version": "opt text", "compliance": "Compliance", "last_sync": "opt Timestamp", "last_activity_at": "opt Timestamp"})
 SCHEMA["Forward"] = ("record", {"id": "text", "subject": "Ref", "origin": "text", "destination": "text", "moved_at": "Timestamp", "signature": "blob"})
 SCHEMA["FederalVoteStatus"] = ("variant", {"Open": "null", "Passed": "null", "Failed": "null", "Cancelled": "null"})
 SCHEMA["FederalVote"] = ("record", {"id": "text", "title": "text", "origin_quarter": "text", "action": "ProposalAction", "rule": "Value", "hash": "text", "deadline": "Timestamp", "status": "FederalVoteStatus", "tally": "Value"})
