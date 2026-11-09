@@ -1231,7 +1231,14 @@ never needs the record, except to check compliance (§11).
   `follower_report` (permission `link.sync`); a quarter links to no realm and makes no call to one.
 - A vote refuses a cycle: it reads the `sync_sources` of `realm_info` along the sources of the other
   realm, at most 32 realms, and a realm it cannot read fails the vote with `Unavailable`. The link is
-  recorded before the walk and undone if the walk refuses it.
+  recorded before the walk, marked `checking` while the walk is out (the other side's notice is refused
+  then, as for a vote not cast), and undone if the walk refuses it. A realm that is already a follower
+  counts as taking legislation from this one. The walk runs when the vote applies, not when a proposal that
+  carries it is filed: filing makes no call to another realm.
+- Calls between realms are **not bounded-wait**, which the model asks for: basilisk 0.15 has no call with
+  a timeout, so a canister that never answers holds the vote's message open and blocks stopping the realm
+  for an upgrade. A rejected call (a stopped realm) is handled, and a vote should name only realms its
+  members trust.
 - A follower's report is kept on its `Follower` row as the follower's own claim, with its time. The
   `follower_compliance` fact of a transfer to `Follower:<capital>` and of a quarter's report is the
   compliance last reported, `Unknown` for any other recipient or a link that is not active.
@@ -1239,7 +1246,10 @@ never needs the record, except to check compliance (§11).
   checksum already in `ChapterSource`, one source id, a version once, never edited), and the releases of
   the layers it runs from above, which the install task keeps with `links.relay_release` as the record that
   vouches for them lists them. `legislation_releases` answers the relayed ones top to bottom, then its own,
-  oldest first; `legislation_chapter` answers the text stored under a checksum.
+  oldest first; `legislation_chapter` answers the text stored under a checksum. A release is kept under
+  `<source>@<version>`, so neither holds an `@`.
+- `Quarter.compliance` is stored and read like a follower's; nothing writes it yet (the scheduled checks,
+  D7, and the switch of a codex across the quarters will).
 
 ---
 
