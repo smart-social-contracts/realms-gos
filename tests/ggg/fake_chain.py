@@ -31,6 +31,13 @@ def is_controller(principal):
     return principal in state["controllers"]
 
 
+def is_principal(text):
+    """Lower-case letters and digits in groups joined by dashes, at most 63 characters: the fixtures' names pass, a phrase
+    with a space or a colon does not. Only the canister checks the checksum (tests/deployed)."""
+    return (isinstance(text, str) and 0 < len(text) <= 63
+            and all(g.isascii() and g.isalnum() and g == g.lower() for g in text.split("-")))
+
+
 def self_id():
     return SELF
 

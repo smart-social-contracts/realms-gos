@@ -30,7 +30,7 @@ from core import civil
 from core import localtime
 from core import sandbox
 from core.db import PAGE, Fail, Forbidden, first, view
-from core.op import GENERATOR, Call, filing, ops
+from core.op import FORWARDING, GENERATOR, Call, filing, ops
 import core.legislation_sandbox  # bundled with the realm for its text (core.sandbox.module_source); the realm runs only its pure ``readable``
 import ggg_facts  # GGG's fact schema: the sandbox imports it from text, and the realm builds the Cedar schema from it
 
@@ -334,7 +334,7 @@ def _guard(op, args, call, department):
     sandbox that fails, refuses it too (fail closed), naming the chapter, and counts."""
     method = f"check_{op}"
     try:
-        outcomes = _call("guard", op=op, args=_public(args, _secret(op)), now=chain.now(),
+        outcomes = _call("guard", op=op, args=carried(_public(args, _secret(op, args))), now=chain.now(),
                          approvals=_approvals(call, department))
     except Fail as e:
         _record("codex", method, str(e))
@@ -354,8 +354,9 @@ def _hooks(op, args, result, call, department):
     """The hooks ``on_<op>`` after the operation, with GGG's event: one sandbox call per domain, so that each domain
     has the reads budget to itself and a domain that fails never costs another its effects. A hook that raises, or
     an effect that fails, never fails the caller: it counts against the chapter. A generator."""
-    method, secret = f"on_{op}", _secret(op)
-    event = {"user": call.user, "args": _public(args, secret), "result": _public(result, secret), "at": chain.now()}
+    method, secret = f"on_{op}", _secret(op, args)
+    event = {"user": call.user, "args": carried(_public(args, secret)), "result": carried(_public(result, secret)),
+             "at": chain.now()}
     approvals = _approvals(call, department)
     try:
         domains = _call("hook_domains", op=op)
@@ -568,9 +569,33 @@ def _public(value, secret):
     return value
 
 
-def _secret(op):
-    spec = ops().get(op)
-    return spec["secret"] if spec else ()
+def _secret(op, args=None):
+    """The fields operation ``op`` keeps secret (``secret=``). With its ``args``, an operation that runs another
+    (core.op.FORWARDING) keeps that one's secret as well: its reply is the other's."""
+    names = {op} | ({str(args.get("method"))} if op in FORWARDING and args else set())
+    return tuple(dict.fromkeys(f for n in names for f in (ops().get(n) or {"secret": ()})["secret"]))
+
+
+def carried(value):
+    """``value``, the arguments or the result of an operation, without the secret fields of the calls it carries, at any
+    depth. A dict that names an operation (``op`` or ``method``, or both) beside its ``args`` is a call: a proposal's
+    action, a step of a task, what ``call_for`` forwards, the card of a pending action. Its arguments lose the secret
+    fields of the operations it names, and so do the ``result`` of a card and the lines of its ``summary`` that show them
+    (a line is labelled with the argument it shows)."""
+    if isinstance(value, list):
+        return [carried(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    out = {k: carried(v) for k, v in value.items()}
+    names = [n for n in (value.get("op"), value.get("method")) if isinstance(n, str) and n in ops()]
+    if names and isinstance(value.get("args"), dict):
+        secret = tuple(dict.fromkeys(f for n in names for f in _secret(n)))
+        out["args"] = _public(out["args"], secret)
+        if isinstance(out.get("result"), dict):
+            out["result"] = _public(out["result"], secret)
+        if isinstance(out.get("summary"), list):
+            out["summary"] = [line for line in out["summary"] if not (isinstance(line, dict) and line.get("label") in secret)]
+    return out
 
 
 def _secrets():
@@ -635,9 +660,8 @@ def _shown(entity, row, fields):
     if entity in CONDITIONAL and not CONDITIONAL[entity][1](data):
         data[CONDITIONAL[entity][0]] = None
     if entity == "Proposal" and isinstance(data["action"], dict):
-        secret = _secret(data["action"].get("op"))
-        data["action"] = {k: _public(v, secret) if k == "args" else v for k, v in data["action"].items()}
-        data["result"] = _public(data["result"], secret)
+        data["result"] = carried(_public(data["result"], _secret(data["action"].get("op"))))
+        data["action"] = carried(data["action"])
     return data
 
 
