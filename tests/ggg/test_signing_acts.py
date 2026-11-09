@@ -13,7 +13,7 @@ import ggg_methods as g
 import world
 from core import op, poa
 from api.proposals import day_of
-from core.pending import HIDDEN, SPACES, quoted, readable
+from core.pending import FSI, HIDDEN, PDI, SPACES, quoted, readable
 from ggg import (Appeal, Appointment, Attribute, Bid, Case, Contract, Court, Delegation, Department, Dispute, Event,
                  FinancialReport, FiscalPeriod, Identity, Land, License, Notification, PendingAction, Penalty, Position,
                  Proposal, Tender, Transfer, User, Verdict)
@@ -329,6 +329,11 @@ def lines(action, who):
     return {line["label"]: line["value"] for line in card(action, who)["summary"]}
 
 
+def plain(text):
+    """``text`` without the isolates its quotations sit in, which no one types."""
+    return text.replace(FSI, "").replace(PDI, "")
+
+
 # ---- Every signing operation is covered
 
 
@@ -395,7 +400,7 @@ def test_prepared_through_a_group_grant_it_files_a_pending_action_that_shows_the
     assert not act.happened()  # nothing ran
     shown = "\n".join(line["value"] for line in c["summary"])
     for phrase in act.says:
-        assert phrase in shown, (phrase, shown)
+        assert plain(phrase) in plain(shown), (phrase, shown)
     # the delegate reads the same card, and the realm's lines are the realm's
     assert card(action, "claude-conn")["summary"] == c["summary"]
 
@@ -407,8 +412,8 @@ def test_the_lines_of_the_realm_are_one_each_and_hold_no_line_break(name):
     assert [line["label"] for line in realm].count("You sign") == 1 and realm[0]["label"] == "You sign"
     assert realm[-1]["label"] == "What happens next"
     for line in realm:
-        assert line["value"].isprintable() and line["label"][0].isupper(), line
-        assert all((char.isprintable() or char in SPACES) and char not in HIDDEN for char in line["value"]), line
+        assert plain(line["value"]).isprintable() and line["label"][0].isupper(), line
+        assert all((char.isprintable() or char in SPACES) and char not in HIDDEN for char in plain(line["value"])), line
     assert lines(action, act.official)["What happens next"] == "Runs at once when you approve"
 
 
@@ -595,8 +600,8 @@ def test_a_verdict_and_a_credential_read_in_the_officials_language_with_the_hidd
     action = file("verdict_modify_terms", grantor="elena", verdict=v, decision=written + "\u202e\u200b\u2028",
                   reasoning_ref="motivación")
     shown = lines(action, "elena")
-    assert shown["Verdict text"] == '"' + written + '\\u202e\\u200b\\u2028"'
-    assert shown["Verdict reasoning"] == '"motivación"'
+    assert shown["Verdict text"] == FSI + '"' + written + '\\u202e\\u200b\\u2028"' + PDI
+    assert shown["Verdict reasoning"] == FSI + '"motivación"' + PDI
 
 
 def test_a_persian_verdict_reads_as_written_and_its_joiners_are_escaped():
@@ -604,7 +609,7 @@ def test_a_persian_verdict_reads_as_written_and_its_joiners_are_escaped():
     v = drafted(a)
     grant("sign", grantor="elena")
     action = file("verdict_modify_terms", grantor="elena", verdict=v, decision="حکم صادر شد؛ هزینه\u200cها بر عهده خوانده است")
-    assert lines(action, "elena")["Verdict text"] == '"حکم صادر شد؛ هزینه\\u200cها بر عهده خوانده است"'
+    assert plain(lines(action, "elena")["Verdict text"]) == '"حکم صادر شد؛ هزینه\\u200cها بر عهده خوانده است"'
 
 
 def test_a_clause_hidden_in_tag_characters_after_the_visible_text_is_on_the_card_as_escapes():
@@ -613,9 +618,10 @@ def test_a_clause_hidden_in_tag_characters_after_the_visible_text_is_on_the_card
     grant("sign", grantor="elena")
     hidden = "".join(chr(0xE0000 + ord(c)) for c in "; fine x1000")
     action = file("verdict_modify_terms", grantor="elena", verdict=v, decision="Refusal annulled" + hidden)
-    shown = lines(action, "elena")["Verdict text"]
+    shown = plain(lines(action, "elena")["Verdict text"])
     assert shown.startswith('"Refusal annulled\\udb40\\udc3b') and shown.count("\\udb40") == len(hidden)
     assert all(ord(char) < 0xE0000 for line in card(action, "elena")["summary"] for char in line["value"])
+    assert lines(action, "elena")["Verdict text"].startswith(FSI + '"Refusal annulled')
 
 
 def test_credential_claims_read_as_written_with_the_hidden_characters_escaped():

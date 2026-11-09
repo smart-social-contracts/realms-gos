@@ -14,6 +14,11 @@ from test_pending_actions import ACTION, APPROVE, CALL_FOR, CALL_FOR_REPLY, TEXT
 DAY = 86400
 JUDGE = ("dispute.accept", "resolution.draft", "resolution.issue", "resolution.modify_terms")
 DECISION = "Refusal annulled; issue the permit within 15 days"
+FSI, PDI = "\u2068", "\u2069"  # the isolate each quotation of the realm sits in
+
+
+def isolated(quotation):
+    return FSI + quotation + PDI
 
 # What the filing of the act and the judge's approval cost in the canister, measured by the controller's shell. The
 # approval writes the card's lines again to compare them with the ones the judge read.
@@ -88,7 +93,7 @@ def test_a_verdict_prepared_through_ggg_call_for_is_issued_by_the_judges_own_tap
 
     # the card holds the text the judge signs, quoted
     lines = {line["label"]: line["value"] for line in action["summary"]}
-    assert lines["Verdict text"] == json.dumps(DECISION) and "Issues verdict" in lines["You sign"]
+    assert lines["Verdict text"] == isolated(json.dumps(DECISION)) and "Issues verdict" in lines["You sign"]
     assert lines["What happens next"] == "Runs at once when you approve"
 
     # the assistant cannot tap, and nobody else can; nothing is signed
@@ -138,7 +143,7 @@ def test_a_verdict_edited_after_it_was_prepared_is_not_issued_on_the_old_card(re
     ok(realm, "action_decline", alice, action=stale["id"])
 
     fresh = prepare(realm, people, verdict)
-    assert json.dumps("The fine is ten times higher") in [line["value"] for line in fresh["summary"]]
+    assert isolated(json.dumps("The fine is ten times higher")) in [line["value"] for line in fresh["summary"]]
     assert next(iter(tap(realm, people, fresh)["Ok"]["status"])) == "Done" and status(realm, verdict) == "issued"
 
 
@@ -154,9 +159,9 @@ def test_a_verdict_reads_in_the_judges_language_on_the_wasm_with_the_hidden_char
     card = ok(realm, "action_get", alice, query=True, action=filed["pending"])["action"]
     shown = {line["label"]: line["value"] for line in card["summary"]}
     escapes = "\\u202e\\u200b\\u200c\\u2028\\ufe0f" + "".join("\\udb40\\udc%02x" % ord(c) for c in clause)
-    assert shown["Verdict text"] == '"' + written + escapes + '"'
-    assert "5 \"€uro\" on" in shown["Verdict penalties"] and '"symbol":"€uro"' in shown["penalties"]
-    assert all(c.isprintable() for line in card["summary"] for c in line["value"])
+    assert shown["Verdict text"] == isolated('"' + written + escapes + '"')
+    assert isolated('"€uro"') in shown["Verdict penalties"] and '"symbol":"€uro"' in shown["penalties"]
+    assert all(c.isprintable() for line in card["summary"] for c in line["value"].replace(FSI, "").replace(PDI, ""))
     ok(realm, "action_decline", alice, action=filed["pending"])
 
 

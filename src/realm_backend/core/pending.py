@@ -64,6 +64,11 @@ def unsafe(text):
     return text.translate(hidden) if hidden else text
 
 
+# A quotation sits in an isolate (first-strong isolate, then pop directional isolate): the direction of its own text
+# cannot reorder the realm's words around it, nor the quotation next to it. The text cannot carry its own, which are escaped.
+FSI, PDI = "\u2068", "\u2069"
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
@@ -173,9 +178,9 @@ def summary_of(user, name, spec, args):
 
 def quoted(text):
     """Text the delegate supplied, inside a sentence of the realm's: quoted, so that it cannot pass for the realm's words.
-    It is a JSON string, with the characters of ``unsafe`` escaped and every other as it is."""
+    It is a JSON string, with the characters of ``unsafe`` escaped and every other as it is, in an isolate (``FSI``)."""
     escaped = str(text).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-    return '"' + unsafe(escaped) + '"'
+    return FSI + '"' + unsafe(escaped) + '"' + PDI
 
 
 def readable(value):
