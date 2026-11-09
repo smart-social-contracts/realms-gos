@@ -11,6 +11,7 @@ from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, 
 from ic_python_db import Entity
 from api import codex, installs
 from core.op import call, op, ops
+from core.pending import quoted
 from api.proposals import root
 
 VERSION = "VERSION_PLACEHOLDER"
@@ -366,10 +367,26 @@ def realm_upgrade(c, args):
     return release
 
 
-@op("orchestration.approve")
+DECISIONS = {"approve": "submit_approval", "reject": "reject_action"}
+
+
+def deciding(user, args, grant):
+    """What deciding a Casals action does. The realm holds the action's id and no more of it: the upgrade it carries is
+    in the baton, so the member is told to read it there."""
+    if args["decision"] not in DECISIONS:
+        raise Fail("decision is approve or reject")
+    action = quoted(args["action_id"])
+    if args["decision"] == "reject":
+        return [{"label": "What changes", "value": f"Rejects Casals action {action}, which then does not run"}]
+    return [{"label": "What changes",
+             "value": f"Approves Casals action {action}. Once it has the approvals it needs, the upgrade it carries "
+                      "takes effect at once. The realm cannot show you the upgrade here: read it in Casals before you approve"}]
+
+
+@op("orchestration.approve", summary=deciding, title="Decide a Casals action")
 def orchestration_decide(c, args):
     """Approve or reject (``decision``) the Casals baton action ``action_id`` for this realm."""
-    method = {"approve": "submit_approval", "reject": "reject_action"}.get(args["decision"])
+    method = DECISIONS.get(args["decision"])
     baton = Realm["1"].manifest_data.get("casals", {}).get("baton_canister_id")
     if method is None:
         raise Fail("decision is approve or reject")

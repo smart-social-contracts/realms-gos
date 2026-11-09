@@ -176,7 +176,33 @@ ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_s
                     "user_list",
                     "user_remove",
                     "user_set_status",
-                    "verdict_draft"}
+                    "verdict_draft",
+                    # Keys and private data, joining, power over people, power of attorney onward and the upgrade
+                    # approvals: each asks the member each time, except what is read and what only removes power.
+                    "crypto_access",
+                    "crypto_derive_key",
+                    "crypto_envelope",
+                    "crypto_grant",
+                    "crypto_public_key",
+                    "crypto_revoke",
+                    "crypto_scopes",
+                    "delegation_accept",
+                    "delegation_grant",
+                    "delegation_request_decide",
+                    "delegation_revoke",
+                    "document_delete",
+                    "document_get",
+                    "document_list",
+                    "document_publish",
+                    "document_revoke",
+                    "document_share",
+                    "document_store",
+                    "invite_create",
+                    "orchestration_decide",
+                    "organization_edit",
+                    "private_data_update",
+                    "realm_join",
+                    "representative_add"}
 
 # Whether the arguments of a call make an operation ask each time. They are read only under a grant by groups: a
 # grant made before groups keeps the behaviour phase 0 gave its operations (proposal_create refuses an action itself).
@@ -225,6 +251,15 @@ def split(named):
     a group that takes no place has "" for it."""
     group, _, place = named.partition(":")
     return group, place
+
+
+def label_of(named):
+    """A group as a grant names it, in the realm's words: its label ("office:Health" is "Office work: Health"), or what
+    "everything" stands for."""
+    if named == EVERYTHING_SCOPE:
+        return "Everything you can do in this realm, now and later"
+    group, place = split(named)
+    return f"{GROUPS[group][0]}: {place}" if place else GROUPS[group][0]
 
 
 def inbox_recipient(name, args):

@@ -193,6 +193,8 @@ every group, those the member gains later included, and every operation a later 
   administration: every direct operation of the groups `see`, `profile`, `vote`, `propose`, `filings`, `justice`,
   `money`, `office`, `orgs` and `admin` that no other phase keeps (tasks, the shell and extension calls, the setup
   operations, and the operations that ask each time, `contract_create` excepted) ([below](#office-work-and-organisations)).
+  It also enables keys and private data, joining, power over people, power of attorney onward and the upgrade approvals,
+  each asking the member each time where it hands something over ([below](#keys-joining-people-and-power-of-attorney-onward)).
 - **Grants made before groups** name permissions (`operations`) and keep covering exactly those 24 operations (`LEGACY`),
   with the behaviour they had then: a proposal with an action stays refused, and payout accounts, identity proofs,
   quarter moves and federal votes stay refused. A later release never widens them. `attribute_list` is not among them: a
@@ -242,9 +244,8 @@ Two groups are granted for one place: `office:<department>` (`office:Health`) an
   expiry.
 - Payout accounts, identity proofs, moving to another quarter, federal votes and a proposal that carries an action are
   never done directly under a grant: under a grant by groups they are prepared, and wait for the member's tap
-  ([below](#pending-actions-the-members-tap)). Under a grant made before groups they stay refused. Power of attorney
-  itself, tasks, keys, the shell and extension calls are not done directly under a grant either, and a later release
-  switches them on.
+  ([below](#pending-actions-the-members-tap)). Under a grant made before groups they stay refused. Tasks, the shell
+  and extension calls are not done directly under a grant either, and a later release switches them on.
 - A proposal a delegate files with `proposal_create` is a motion: it carries no action. With an action it is a pending
   action (under a grant by groups) or refused (under an old grant).
 - A grant to the realm's own principal is refused: the effects of a codex's chapters act as the realm, and would act
@@ -322,6 +323,50 @@ The delegate prepares it, and only the member's own approval runs it. The code i
 6. **Lazy states.** Nothing sweeps. An action reads `expired` once its day has passed and `void` once its grant was
    revoked, replaced, has ended or no longer covers the operation, whenever it is read, listed, approved or counted
    against the limit of 10.
+
+### Keys, joining, people and power of attorney onward
+
+These operations hand over a key, a seat or power that no vote follows, so a delegate only prepares them. Each is
+switched on in `ENABLED`, and each has a `title` and a `summary` hook that writes, in the realm's words, what changes
+hands. A ‹name› below is the grant's label, quoted, or else the delegate's principal.
+
+| Group | Asks each time | Runs at once |
+|---|---|---|
+| `keys` | `crypto_derive_key`, `crypto_grant`, `crypto_revoke`, `private_data_update` | `crypto_public_key`, `crypto_envelope`, `crypto_scopes`, `crypto_access` |
+| `office` | `document_share`, `document_revoke`, `document_delete`, `document_publish`, `document_store` with `keys` | `document_store` without keys, `document_list`, `document_get` |
+| `membership` | `realm_join` | |
+| `office`, `orgs` | `invite_create` that carries a profile or a seat, `representative_add`, `organization_edit` that sets `admins` | `invite_create` without them, `organization_edit` of the description |
+| `poa` | `delegation_grant`, `delegation_accept`, `delegation_request_decide` that approves | `delegation_revoke`, `delegation_request_decide` that declines |
+| `admin` | `orchestration_decide` | |
+
+What the member reads before approving:
+
+- **A key handed over** (`crypto_derive_key`): "This gives ‹name› a permanent copy of your key. Revoking power of
+  attorney does not take it back." The line is labelled "Warning about your key", so that a page can show it apart. The
+  reply of the call, the key encrypted to the delegate's transport key, is the one reply a pending action keeps in its
+  `result` (`delivers=` on the operation): the member and the delegate read it there, and it reaches no audit event, no
+  notice and no other field. A name in `SECRET` is never kept, whatever an operation delivers.
+- **A key given or taken away** (`crypto_grant`, `crypto_revoke`, `document_share`, `document_revoke`): who gets a key to
+  which scope or document, or who loses access (and, if it is the member, that they do too). A grant to the delegate's own
+  principal for one scope says "‹name› will be able to read ‹scope›, and nothing else of yours": it is the safe way for
+  an assistant to read one document. The call is refused, not prepared, when the member does not manage the scope or
+  staff the document's department.
+- **A document deleted or published** (`document_delete`, `document_publish`): the document, and that a deletion cannot be
+  undone and a published record cannot be taken back.
+- **Joining** (`realm_join`): the profile and the seat the invite code carries, and that joining is consent to the
+  realm's terms. A code that is not valid is refused, not prepared.
+- **Power over people** (`invite_create`, `representative_add`, `organization_edit`): the profile and the seat an invite
+  carries, how often and until when it can be used (the code itself is shown to the member once, in the reply to their
+  approval, and never to the delegate); who will act for the organisation and in which seat; the organisation's admins
+  before and after.
+- **Power of attorney onward** (`delegation_grant`, `delegation_accept`, `delegation_request_decide`): the person or AI
+  connection, the groups by their labels ("Everything you can do in this realm, now and later" for `*`), and the expiry.
+  Accepting says "You become ‹grantor›'s attorney for …". Approving a request that replaces the member's present grant to
+  that delegate says so. It is allowed even when that is the grant the action was prepared under: it runs, the old grant
+  ends, and every other action waiting under it reads `void`.
+- **An upgrade approval** (`orchestration_decide`): the Casals action by id, whether the member approves or rejects it,
+  and that an approved upgrade takes effect at once. The realm holds only the action's id, not the upgrade (the baton
+  does), so the card tells the member to read it in Casals before approving.
 
 ### The member's pages
 

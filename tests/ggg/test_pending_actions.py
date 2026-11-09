@@ -11,6 +11,7 @@ import fake_chain
 import ggg_api
 import ggg_delegation
 import ggg_methods as g
+import keys_people
 import world
 from api import extensions, federation
 from core import auth, chain, op, pending, poa
@@ -830,14 +831,14 @@ def test_every_operation_that_can_be_prepared_for_a_member_has_a_plain_title():
     preparable = {n: s["title"] for n, s in op.ops().items()
                   if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
     assert set(preparable) >= {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
-                               "federal_vote_propose", "proposal_create"}
+                               "federal_vote_propose", "proposal_create", *keys_people.NAMES}
     assert all(t and t == t.strip() and t.isprintable() and " " in t for t in preparable.values()), preparable
 
 
 def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_when_they_approve():
     """A phase that switches an operation on (core.poa.ENABLED) adds a case here: the member reads the line before
     deciding, whether or not a department governs the call."""
-    world.build()
+    mine = keys_people.build()
     account = ok("payment_account_add", "alice", **ACCOUNT)["account"]
     carried = "when you approve; the action runs only if the vote passes"
     expected = {"proposal_create": "Files a proposal in your name " + carried,
@@ -846,10 +847,13 @@ def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_whe
              "identity_submit": {"kind": "passport"}, "self_change_quarter": {"quarter": "south"},
              "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION},
              "contract_create": {"title": "Road"}}
+    cases = {name: ("alice", args) for name, args in cases.items()} | {n: (g, a) for n, (g, _, a, _) in mine.items()}
     preparable = {n for n, s in op.ops().items() if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
     assert preparable <= set(cases), preparable - set(cases)
-    for name, args in cases.items():
-        lines = {line["label"]: line["value"] for line in pending.summary_of("alice", name, op.ops()[name], args)}
+    held = Delegation[grant("payout")]
+    for name, (member, args) in cases.items():
+        lines = {line["label"]: line["value"]
+                 for line in pending.summary_of(member, name, op.ops()[name], args, held)}
         assert lines["What happens next"] == expected.get(name, "Runs at once when you approve"), name
 
 

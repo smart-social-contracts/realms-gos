@@ -4,6 +4,7 @@ from core import poa
 from core.db import Conflict, Fail, Forbidden, each, find, next_id, page_by, view, window as paging
 from ggg import Delegation, DelegationRequest, Event, User
 from core.op import op, ops, oldest_event
+from core.pending import moment, principal
 
 DAY = 86400
 YEAR = 365 * DAY
@@ -129,7 +130,40 @@ def issue(grantor, delegate, scope, starts, expires, by, args, acceptance):
     return {"delegation": d.id, "status": d.status}
 
 
-@op("self.delegate", returns="delegation")
+def terms(user, args):
+    """The delegate, scope and window of the grant ``user`` gives with ``args``, refused as ``delegation_grant`` refuses."""
+    delegate, scope = args["delegate"], scope_of(args)
+    if delegate == user:
+        raise Fail("you cannot delegate to yourself")
+    refuse_realm(delegate)
+    check_names(scope, user)
+    starts, expires = window(args, longest(scope))
+    if open_grant(user, delegate):
+        raise Conflict(f"{delegate} already holds a grant from you; revoke it first")
+    return delegate, scope, starts, expires
+
+
+def reach(scope):
+    """What a scope lets its holder do, in the realm's words: its groups by their labels, or its permissions."""
+    return ", ".join(poa.label_of(g) for g in scope["groups"]) if "groups" in scope else ", ".join(scope["operations"])
+
+
+def holder(delegate):
+    """``delegate`` as the member reads it: a member, or an AI connection."""
+    return f"{principal(delegate)}, " + ("a member" if User[delegate] else "an AI connection")
+
+
+def granting(user, args, grant):
+    delegate, scope, _, expires = terms(user, args)
+    waits = "; the grant waits until they accept it" if User[delegate] else ""
+    return [{"label": "Power goes to", "value": holder(delegate) + waits}, {"label": "Groups", "value": reach(scope)},
+            {"label": "Lasts until", "value": moment(expires)},
+            {"label": "What changes",
+             "value": f"{principal(delegate)} can act for you in {reach(scope)} until {moment(expires)}, "
+                      "with no vote to follow; what asks you each time still does"}]
+
+
+@op("self.delegate", returns="delegation", summary=granting, title="Give someone power of attorney")
 def delegation_grant(c, args):
     """Let ``delegate`` act for you with ``groups`` (ids from ``delegable_operations``, in each of which you hold an
     operation, such as "vote" or, for one department you sit in or one organization you administer, "office:Health" or
@@ -137,26 +171,34 @@ def delegation_grant(c, args):
     both, from ``starts_at`` (default now) until ``expires_at`` or for ``expires_in`` seconds, at most the shortest of
     the groups' longest, and a year; optional ``label`` and ``description``.
     Returns ``delegation`` and ``status``: pending until a delegate who is a user accepts, otherwise active at once."""
-    delegate, scope = args["delegate"], scope_of(args)
-    if delegate == c.user:
-        raise Fail("you cannot delegate to yourself")
-    refuse_realm(delegate)
-    check_names(scope, c.user)
-    starts, expires = window(args, longest(scope))
-    if open_grant(c.user, delegate):
-        raise Conflict(f"{delegate} already holds a grant from you; revoke it first")
+    delegate, scope, starts, expires = terms(c.user, args)
     # An AI connection has no User row, hence no inbox: its grant is active at once.
     return issue(c.user, delegate, scope, starts, expires, c.by, args, User[delegate] is not None)
 
 
-@op("self.delegate", returns="delegation")
-def delegation_accept(c, args):
-    """Accept ``delegation``, a pending grant to you that has not expired, so it becomes active."""
+def acceptable(user, args):
+    """The pending grant to ``user`` named in ``args``, which has not expired."""
     d = find(Delegation, args["delegation"])
-    if d.delegate != c.user or d.status != "pending":
+    if d.delegate != user or d.status != "pending":
         raise Conflict(f"{d.id} is not a pending grant to you")
     if status(d) == "expired":
         raise Conflict(f"{d.id} expired at {d.expires_at}")
+    return d
+
+
+def accepting(user, args, grant):
+    d = acceptable(user, args)
+    return [{"label": "Granted by", "value": principal(d.grantor)}, {"label": "Groups", "value": reach(d.scope)},
+            {"label": "Lasts until", "value": moment(d.expires_at)},
+            {"label": "What changes",
+             "value": f"You become {principal(d.grantor)}'s attorney for {reach(d.scope)}, until {moment(d.expires_at)}. "
+                      "It is a responsibility you take on yourself"}]
+
+
+@op("self.delegate", returns="delegation", summary=accepting, title="Accept a power of attorney")
+def delegation_accept(c, args):
+    """Accept ``delegation``, a pending grant to you that has not expired, so it becomes active."""
+    d = acceptable(c.user, args)
     d.status, d.accepted_at = "active", chain.now()
     return {"delegation": d.id}
 
@@ -205,25 +247,52 @@ def delegation_request(c, args):
     return {"request": r.id}
 
 
-@op("self.delegate", returns="delegation")
-def delegation_request_decide(c, args):
-    """Answer ``request``, made to you: ``approve`` true grants it, optionally for fewer ``groups`` (or
-    ``operations``) or an earlier ``expires_at``, and replaces your open grant to that delegate; otherwise it is
-    declined. Returns ``status``, and ``delegation`` when approved."""
+def open_request(user, args):
+    """The request named in ``args``, which is still open and made to ``user``."""
     r = find(DelegationRequest, args["request"])
-    if r.grantor != c.user or r.request_expires_at <= chain.now():
+    if r.grantor != user or r.request_expires_at <= chain.now():
         raise Conflict(f"{r.id} is not an open request to you")
-    if not args.get("approve"):
-        r.delete()
-        return {"status": "declined"}
+    return r
+
+
+def approval(r, user, args):
+    """The scope and the end of the grant ``user`` makes by approving the request ``r`` with ``args``, which may narrow
+    the scope or end it earlier, never widen it."""
     scope = scope_of(args) if args.get("groups") or args.get("operations") else r.scope
     narrower(scope, r.scope)
     until = int(args.get("expires_at") or r.expires_at)
     begin = max(r.starts_at, chain.now())
     if until > r.expires_at or until <= begin:
         raise Fail("the expiry can only be made earlier")
-    check_names(scope, c.user)
+    check_names(scope, user)
     too_long(until - begin, longest(scope))
+    return scope, until
+
+
+def approving(user, args, grant):
+    """What approving a request grants, to whom, and which grant of yours to the same delegate it replaces."""
+    r = open_request(user, args)
+    scope, until = approval(r, user, args)
+    lines = [{"label": "Request from", "value": holder(r.delegate)}, {"label": "Groups", "value": reach(scope)},
+             {"label": "Lasts until", "value": moment(until)}]
+    old = open_grant(r.grantor, r.delegate)
+    replaced = (f". Your present grant {old.id} to them ends and this one takes its place; other actions waiting under "
+                "it are dropped") if old else ""
+    return lines + [{"label": "What changes",
+                     "value": f"{principal(r.delegate)} can act for you in {reach(scope)} until {moment(until)}, "
+                              f"with no vote to follow{replaced}"}]
+
+
+@op("self.delegate", returns="delegation", summary=approving, title="Approve a request for power of attorney")
+def delegation_request_decide(c, args):
+    """Answer ``request``, made to you: ``approve`` true grants it, optionally for fewer ``groups`` (or
+    ``operations``) or an earlier ``expires_at``, and replaces your open grant to that delegate; otherwise it is
+    declined. Returns ``status``, and ``delegation`` when approved."""
+    r = open_request(c.user, args)
+    if not args.get("approve"):
+        r.delete()
+        return {"status": "declined"}
+    scope, until = approval(r, c.user, args)
     old = open_grant(r.grantor, r.delegate)
     if old:
         close(old, "revoked", c.by)
