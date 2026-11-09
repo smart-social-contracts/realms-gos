@@ -32,7 +32,7 @@ THIS_PHASE = frozenset((
     "organization_register", "organization_set_status", "payroll_run", "period_close", "procedure_define",
     "procedure_list", "proposal_execute", "proposal_finalize", "proposal_get", "proposal_linked_from",
     "proposal_list", "proposal_open", "proposal_stop", "quarter_add", "quarter_configure", "quarter_deregister",
-    "quarter_join_federation", "quarter_register", "quarter_secede", "realm_export", "realm_monitor",
+    "quarter_join_federation", "quarter_register", "quarter_secede", "realm_monitor",
     "report_view", "representative_remove", "request_decide", "request_list", "request_set_due",
     "resolution_query", "role_revoke", "tax_assess", "tax_policy_draft", "tax_policy_propose",
     "tax_policy_view", "tender_cancel", "tender_close", "tender_create", "tender_get", "tender_list",
@@ -102,7 +102,7 @@ def test_this_phase_switches_on_exactly_these_operations_of_its_groups():
     assert THIS_PHASE <= poa.ENABLED
     unexplained = in_groups - poa.LEGACY - OTHER_PHASES - THIS_PHASE
     assert not unexplained, f"an operation was switched on that no phase accounts for: {sorted(unexplained)}"
-    assert len(THIS_PHASE) == 104 and all(poa.row(n)[0] == "direct" for n in THIS_PHASE - {"contract_create"})
+    assert len(THIS_PHASE) == 103 and all(poa.row(n)[0] == "direct" for n in THIS_PHASE - {"contract_create"})
 
 
 # ---- Office work follows the seats
@@ -385,7 +385,22 @@ def test_the_reads_of_administration_are_direct():
     ok("notification_send", "ctl", recipient="User:alice", title="Hello")
     assert ok("events", "claude-conn", on_behalf_of="ctl")["events"]
     assert ok("realm_monitor", "claude-conn", on_behalf_of="ctl")["status"]
-    assert ok("realm_export", "claude-conn", on_behalf_of="ctl", entity="User")["rows"]
+
+
+def test_a_delegate_does_not_export_the_realm_under_any_group_everything_included():
+    """A full export is the member's own act: it gives every row and field of an entity, whatever the delegate may read."""
+    depts = world.build()
+    org_admin("dr-ana")
+    world.person("ctl")
+    world.person("hana")
+    seat_in(depts["Health"], "health.officer", "hana", "db.export")
+    plain = [g for g in poa.enabled_by_group() if g not in poa.PARAMETERS] + ["*"]
+    grants = [("ctl", group) for group in plain] + [("hana", "office:Health"), ("dr-ana", "orgs:clinic-b")]
+    for i, (grantor, group) in enumerate(grants):
+        lend(grantor, group, delegate=f"agent-{i}")
+        error = denied("realm_export", f"agent-{i}", on_behalf_of=grantor, entity="User")
+        assert "does not cover" in error, (group, error)
+    assert ok("realm_export", "ctl", entity="User")["rows"]
 
 
 # ---- Contracts

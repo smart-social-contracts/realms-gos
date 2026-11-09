@@ -227,8 +227,8 @@ Two groups are granted for one place: `office:<department>` (`office:Health`) an
   listed, since finding their organisations would read them all; they name it by id (`orgs:<organization>`) and the realm
   checks that they administer it.
 - **Administration** (group `admin`): a governed operation (an appointment ended, a mandate granted, a user removed) is
-  filed as a proposal tied to the grant, as for any delegate; `events`, `realm_monitor` and `realm_export` are read at
-  once.
+  filed as a proposal tied to the grant, as for any delegate; `events` and `realm_monitor` are read at once. A full
+  export is the member's own act: `realm_export` is not delegable in this release, under any group, `*` included.
 - **A contract** (`contract_create`) asks each time: the delegate prepares it, and it runs on the member's tap. The
   mandate's rules (active, within its limit, ending before it expires, the member in the executor department) are
   checked when it is prepared, so the member is not asked to approve what cannot run, and again when it is approved.

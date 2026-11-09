@@ -74,7 +74,8 @@ LEGACY = frozenset((
 ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_submit", "self_change_quarter",
                     "federal_vote_propose", "action_get", "action_list",
                     # A member's own affairs, office work, organizations and administration: the direct operations
-                    # of those groups that no other phase owns, and contract_create, which is prepared.
+                    # of those groups that no other phase owns, and contract_create, which is prepared. Not
+                    # realm_export: a full export is the member's own act, and no delegate gets a part of it.
                     "allocation_rule_draft",
                     "allocation_rule_propose",
                     "appointment_end",
@@ -149,7 +150,6 @@ ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_s
                     "quarter_join_federation",
                     "quarter_register",
                     "quarter_secede",
-                    "realm_export",
                     "realm_monitor",
                     "report_view",
                     "representative_remove",
