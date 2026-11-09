@@ -80,7 +80,8 @@ def known():
 
 
 def zones_held():
-    """The zones of the realm that members live in here, each with how many: what a quarter reports to its capital."""
+    """The zones of the realm that members live in here, each with how many: what a quarter reports to its capital,
+    which places new members by it and tells no one else, since a small count singles out a person."""
     return {z.id: z.population for z in assets.defined_zones() if z.population}
 
 
@@ -91,8 +92,8 @@ def zone_definitions():
 
 def zones_of(cid):
     """The zones ``cid`` holds members of: this realm's own, or what the quarter last reported; None where this realm
-    is a quarter and knows only itself. Only the capital's placement reads them: a small count singles out a person, so
-    no reply carries one."""
+    is a quarter and knows only itself. Only the capital's placement reads them. The decision is one of privacy: a small
+    count singles out a person, so no reply carries one."""
     if cid == chain.self_id():
         return zones_held()
     return None if federated() else Quarter[cid].zones
@@ -154,8 +155,9 @@ def record(c, args):
 
         federation.record_leg(q, args["leg"])
     q.population = int(args.get("population", q.population))
-    if "zones" in args:
-        q.zones = {zone: int(n) for zone, n in args["zones"].items()}
+    if "zones" in args:  # a report keeps the realm's zones only: it is no way to store other keys
+        defined = {z.id for z in assets.defined_zones()}
+        q.zones = {zone: int(n) for zone, n in args["zones"].items() if zone in defined}
     q.codex_id, q.codex_version = args.get("codex_id", q.codex_id), args.get("codex_version", q.codex_version)
     q.last_sync = q.last_activity_at = chain.now()
     if q.status == "setup":
@@ -185,7 +187,7 @@ def apply_directory(reply):
         seen.add(q.id)
     for q in [q for q in known() if q.id not in seen]:
         q.delete()
-    apply_zones(reply.get("zones", []))
+    apply_zones(reply.get("zones") or [])
     realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index}
 
 

@@ -206,3 +206,18 @@ def test_the_typed_join_targets_takes_the_zone_and_a_caller_with_no_argument_sti
     assert g.ggg_join_targets({"home_zone": "riverside"})["Ok"]["default"] == "north"
     for no_zone in ({"home_zone": None}, None):
         assert g.ggg_join_targets(no_zone)["Ok"]["default"] == "east"
+
+
+def test_a_report_keeps_the_zones_the_capital_defined_and_ignores_the_others():
+    town()
+    report("north", 41, {"riverside": 12, "not-a-district": 4, "871f1d489ffffff": 1})
+    assert Quarter["north"].zones == {"riverside": 12}
+    report("north", 41, {})
+    assert Quarter["north"].zones == {}
+
+
+def test_a_quarter_takes_a_sync_reply_with_a_null_for_zones(monkeypatch):
+    quarter(monkeypatch, "north", "south")
+    reply(CAPITAL, "quarter_sync", directory=[], codex={"id": "", "version": ""}, index=1, zones=None)
+    ok("quarter_sync", "ctl")
+    assert Zone.count() == 0
