@@ -566,10 +566,11 @@ def to_realms(x, t):
 
 def request(op, arg_t, arg):
     """The JSON arguments of ``op`` for a GGG argument of type ``arg_t``."""
+    arg_t = unwrap(arg_t) if arg_t else None  # an optional record is asked as the record; none given, as no arguments
     if arg_t is None:
         args = {}
     elif is_record(arg_t) or is_variant(arg_t):
-        args = to_realms(arg, arg_t)
+        args = to_realms(arg, arg_t) or {}
         if "id" in args:  # GetArgs and the like: the operation names the id after what it finds
             args[KEY.get(op, op.split("_")[0])] = args.pop("id")
     else:

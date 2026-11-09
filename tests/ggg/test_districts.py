@@ -5,6 +5,7 @@ deciding first. A quarter reports the zones its members live in, and the capital
 import json
 
 import fake_chain
+import ggg_methods as g
 from kit import ok
 from test_legislation_runtime import TOWN, activate, fresh_realm, layered  # noqa: F401 (the fixture applies here too)
 from test_quarters import CAPITAL, quarter, reply
@@ -192,3 +193,11 @@ def test_a_quarters_own_zone_stays_and_a_members_home_cell_is_left_alone(monkeyp
     ok("quarter_sync", "ctl")
     assert Zone["harbour"].defined and Zone["riverside"].defined  # the quarter's own stays; the next one still arrives
     assert (Zone["871f1d489ffffff"].defined, Zone["871f1d489ffffff"].user) == (False, "alice")
+
+
+def test_the_typed_join_targets_takes_the_zone_and_a_caller_with_no_argument_still_works():
+    town()
+    fake_chain.state["caller"] = "newcomer"
+    assert g.ggg_join_targets({"home_zone": "riverside"})["Ok"]["default"] == "north"
+    for no_zone in ({"home_zone": None}, None):
+        assert g.ggg_join_targets(no_zone)["Ok"]["default"] == "east"

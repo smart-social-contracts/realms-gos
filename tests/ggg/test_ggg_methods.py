@@ -222,3 +222,10 @@ def test_a_capital_counts_its_quarters_members():
     Quarter(id="harbor", population=40, status="active")
     Quarter(id="hills", population=2, status="active")
     assert g.ggg_realm_info()["member_count"] == members + 42
+
+
+def test_an_optional_record_argument_is_asked_as_the_record():
+    for operation, arg_t, arg in (("join_targets", "opt JoinTargetsArgs", {"home_zone": "riverside"}),
+                                  ("codex_revert", "opt CodexRevertArgs", {"codex": "sha256:x"})):
+        assert ggg_api.request(operation, arg_t, arg) == arg
+        assert ggg_api.request(operation, arg_t, None) == {}
