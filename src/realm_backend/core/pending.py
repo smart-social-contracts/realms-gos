@@ -29,14 +29,39 @@ CARD = ("id", "grantor", "delegate", "grant", "method", "args", "summary", "risk
 REFUSALS = {"not_found": NotFound, "forbidden": Forbidden, "conflict": Conflict, "unavailable": Unavailable}
 
 
-# What a line of the realm's cannot show as it is, written as a \uXXXX escape: the control characters (a line break could
-# start a line of the realm's own), the line and paragraph separators, the bidi controls (they reorder what is around
-# them) and the zero-width characters (they hide), and the surrogates, which no reply can carry. Letters, marks, digits,
-# punctuation and spaces of every script stay as they are, so that an official reads the act in their own language.
-UNSAFE = {cp: "\\u%04x" % cp for cp in (
-    *range(0x20), *range(0x7F, 0xA0), 0x061C, *range(0x200B, 0x2010), 0x2028, 0x2029, *range(0x202A, 0x202F), 0x2060,
-    *range(0x2066, 0x206A), *range(0xD800, 0xE000), 0xFEFF)}
-ESCAPES = {**UNSAFE, ord('"'): '\\"', ord("\\"): "\\\\", ord("\n"): "\\n", ord("\r"): "\\r", ord("\t"): "\\t"}
+# What a line of the realm's cannot show as it is is written as an escape, \uXXXX (a pair of them for a character past
+# U+FFFF, as JSON writes it): every character that is not printable (control characters, which could start a line of
+# the realm's own; the line and paragraph separators; the bidi controls, which reorder what is around them; the
+# zero-width and format characters, tag characters and soft hyphen, which hide; the surrogates, private-use and
+# unassigned code points) except the space separators, and the printable characters that render as nothing (the
+# default-ignorables: the combining grapheme joiner, the Hangul fillers, the Mongolian and variation selectors).
+# Letters, marks, digits, punctuation and spaces of every script stay as they are, so that an official reads the act
+# in their own language. A zero-width joiner is escaped too: two zero-width characters are enough to carry hidden bits.
+SPACES = "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000"
+
+
+def escape(char):
+    """``char`` as JSON writes it with ensure_ascii: ``\\uXXXX``, or the escapes of its surrogate pair past U+FFFF."""
+    code = ord(char)
+    if code > 0xFFFF:
+        code -= 0x10000
+        return "\\u%04x\\u%04x" % (0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF))
+    return "\\u%04x" % code
+
+
+HIDDEN = frozenset(map(chr, (
+    0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, *range(0x180B, 0x1810), 0x3164, *range(0xFE00, 0xFE10), 0xFFA0,
+    *range(0xE0100, 0xE01F0))))
+
+
+def unsafe(text):
+    """``text`` with every character that cannot show as it is written as an escape. Text that is plain ASCII has none,
+    and is known so in one pass in C. Otherwise the distinct characters are found, and one pass in C translates those
+    that cannot show: str.translate is dearer than a pass of ``replace`` on text past ASCII, so it is run once."""
+    if text.isascii() and text.isprintable():
+        return text
+    hidden = {ord(char): escape(char) for char in set(text) if char in HIDDEN or not (char.isprintable() or char in SPACES)}
+    return text.translate(hidden) if hidden else text
 
 
 def canonical(value):
@@ -148,14 +173,15 @@ def summary_of(user, name, spec, args):
 
 def quoted(text):
     """Text the delegate supplied, inside a sentence of the realm's: quoted, so that it cannot pass for the realm's words.
-    It is a JSON string, with the characters of ``UNSAFE`` escaped and every other as it is."""
-    return '"' + str(text).translate(ESCAPES) + '"'
+    It is a JSON string, with the characters of ``unsafe`` escaped and every other as it is."""
+    escaped = str(text).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    return '"' + unsafe(escaped) + '"'
 
 
 def readable(value):
     """``value`` as JSON for a line of the realm's, as ``canonical`` writes it but with the characters of every script as
-    they are, those of ``UNSAFE`` escaped. For showing, never for sealing."""
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).translate(UNSAFE)
+    they are, those of ``unsafe`` escaped. For showing, never for sealing."""
+    return unsafe(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
 
 
 def you_sign(sentence, *details):

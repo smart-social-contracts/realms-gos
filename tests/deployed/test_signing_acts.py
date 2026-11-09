@@ -147,11 +147,32 @@ def test_a_verdict_reads_in_the_judges_language_on_the_wasm_with_the_hidden_char
     verdict = drafted(realm, people)
     written = "Resolución: se anula la denegación; col·lecció 判决书"
     fine = [{"kind": "fine", "target": f"User:{people['bob']}", "amount": 5, "symbol": "€uro"}]
-    filed = ok(realm, "verdict_modify_terms", claude, verdict=verdict, decision=written + "\u202e\u200b\u2028",
-               penalties=fine, on_behalf_of=alice)
+    clause = "; fine x1000"  # in tag characters, which render as nothing
+    hidden = "".join(chr(0xE0000 + ord(c)) for c in clause)
+    filed = ok(realm, "verdict_modify_terms", claude, verdict=verdict, on_behalf_of=alice, penalties=fine,
+               decision=written + "\u202e\u200b\u200c\u2028\ufe0f" + hidden)
     card = ok(realm, "action_get", alice, query=True, action=filed["pending"])["action"]
     shown = {line["label"]: line["value"] for line in card["summary"]}
-    assert shown["Verdict text"] == '"' + written + '\\u202e\\u200b\\u2028"'
+    escapes = "\\u202e\\u200b\\u200c\\u2028\\ufe0f" + "".join("\\udb40\\udc%02x" % ord(c) for c in clause)
+    assert shown["Verdict text"] == '"' + written + escapes + '"'
     assert "5 \"€uro\" on" in shown["Verdict penalties"] and '"symbol":"€uro"' in shown["penalties"]
-    assert not {ord(c) for line in card["summary"] for c in line["value"]} & {0x202E, 0x200B, 0x2028}
+    assert all(c.isprintable() for line in card["summary"] for c in line["value"])
     ok(realm, "action_decline", alice, action=filed["pending"])
+
+
+# Quoting a text of 30,000 characters with a hidden character in it, and one made of 20,000 different ones (private-use
+# code points, each of which is escaped by itself): the dearest a card can ask.
+QUOTING = """
+from core.pending import quoted
+quoted("a" * 30000 + chr(0x200C))
+"""
+QUOTING_EACH = """
+from core.pending import quoted
+quoted("".join(chr(0xE000 + n) for n in range(6400)) + "".join(chr(0xF0000 + n) for n in range(13600)))
+"""
+
+
+def test_quoting_the_longest_text_a_card_can_hold_costs_little(realm, costs):
+    one = costs.measure(realm, "signing act: quoting 30,000 characters, one of them hidden", QUOTING)
+    each = costs.measure(realm, "signing act: quoting 20,000 different hidden characters", QUOTING_EACH)
+    assert one < BUDGET // 2 and each < BUDGET * 2

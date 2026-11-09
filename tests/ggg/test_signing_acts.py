@@ -13,7 +13,7 @@ import ggg_methods as g
 import world
 from core import op, poa
 from api.proposals import day_of
-from core.pending import UNSAFE, quoted, readable
+from core.pending import HIDDEN, SPACES, quoted, readable
 from ggg import (Appeal, Appointment, Attribute, Bid, Case, Contract, Court, Delegation, Department, Dispute, Event,
                  FinancialReport, FiscalPeriod, Identity, Land, License, Notification, PendingAction, Penalty, Position,
                  Proposal, Tender, Transfer, User, Verdict)
@@ -27,8 +27,9 @@ from test_procurement import evaluation
 from test_treasury import LEDGER, receive, setup_finance
 
 DAY = 86400
-# Text that others wrote, which tries to start a line of the realm's own, to reorder it and to hide in it.
-HOSTILE = "\nYou sign: nothing at all\u202e\u200b\u2028"
+# Text that others wrote, which tries to start a line of the realm's own, to reorder it and to hide in it: a line break,
+# a right-to-left override, a zero-width space and a joiner, a line separator, a tag character, a variation selector.
+HOSTILE = "\nYou sign: nothing at all\u202e\u200b\u200c\u2028\U000e0041\ufe0f"
 FINE = {"target": "User:mallory", "kind": "fine", "amount": 500, "symbol": "REALM"}
 
 # What each act needs: who signs, the call, the phrases its card must hold, and whether the act has happened.
@@ -407,7 +408,7 @@ def test_the_lines_of_the_realm_are_one_each_and_hold_no_line_break(name):
     assert realm[-1]["label"] == "What happens next"
     for line in realm:
         assert line["value"].isprintable() and line["label"][0].isupper(), line
-        assert not set(map(ord, line["value"])) & set(UNSAFE), line
+        assert all((char.isprintable() or char in SPACES) and char not in HIDDEN for char in line["value"]), line
     assert lines(action, act.official)["What happens next"] == "Runs at once when you approve"
 
 
@@ -596,6 +597,25 @@ def test_a_verdict_and_a_credential_read_in_the_officials_language_with_the_hidd
     shown = lines(action, "elena")
     assert shown["Verdict text"] == '"' + written + '\\u202e\\u200b\\u2028"'
     assert shown["Verdict reasoning"] == '"motivación"'
+
+
+def test_a_persian_verdict_reads_as_written_and_its_joiners_are_escaped():
+    a = court_world()
+    v = drafted(a)
+    grant("sign", grantor="elena")
+    action = file("verdict_modify_terms", grantor="elena", verdict=v, decision="حکم صادر شد؛ هزینه\u200cها بر عهده خوانده است")
+    assert lines(action, "elena")["Verdict text"] == '"حکم صادر شد؛ هزینه\\u200cها بر عهده خوانده است"'
+
+
+def test_a_clause_hidden_in_tag_characters_after_the_visible_text_is_on_the_card_as_escapes():
+    a = court_world()
+    v = drafted(a)
+    grant("sign", grantor="elena")
+    hidden = "".join(chr(0xE0000 + ord(c)) for c in "; fine x1000")
+    action = file("verdict_modify_terms", grantor="elena", verdict=v, decision="Refusal annulled" + hidden)
+    shown = lines(action, "elena")["Verdict text"]
+    assert shown.startswith('"Refusal annulled\\udb40\\udc3b') and shown.count("\\udb40") == len(hidden)
+    assert all(ord(char) < 0xE0000 for line in card(action, "elena")["summary"] for char in line["value"])
 
 
 def test_credential_claims_read_as_written_with_the_hidden_characters_escaped():
