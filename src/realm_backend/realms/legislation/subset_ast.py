@@ -8,6 +8,7 @@ in agreement on what they refuse.
 
 from realms.legislation.errors import Refused
 from realms.legislation.subset import (
+    BOUND_BY_IMPORT,
     CLASS_BODY,
     FLOAT_NAMES,
     FORMAT_METHODS,
@@ -102,6 +103,8 @@ class Check:
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
             self.refuse(node, "a module-level assignment names one constant")
         self.identifier(node, node.targets[0].id, "module")
+        if node.targets[0].id in self.imported:
+            self.refuse(node, f"{node.targets[0].id}: {BOUND_BY_IMPORT}")
         self.constant(node.value)
 
     def constant(self, node, member=False):

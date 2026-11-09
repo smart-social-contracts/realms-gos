@@ -210,6 +210,36 @@ def test_a_module_level_constant_cannot_change_between_calls(statement):
     assert c.instance("register", c.context()).read() == UNTOUCHED
 
 
+# The loader freezes the constants the file defines and leaves the names an import bound alone, so an assignment to
+# one of those would keep a mutable value out of the freeze: an imported name is bound by its import, once.
+IMPORTED = {
+    "an SDK function": "from realms.legislation import above, days\ndays = []\n",
+    "an alias": "from realms.legislation import above, days as d\nd = []\n",
+    "a ggg name": "from realms.legislation import above\nfrom ggg import Land\nLand = {}\n",
+    "the base": "from realms.legislation import above\nabove = 1\n",
+}
+
+
+@pytest.mark.parametrize("form", sorted(IMPORTED))
+def test_an_imported_name_is_bound_once_in_both_checkers(form):
+    text = IMPORTED[form] + "\nclass Register(above('register')):\n    pass\n"
+    with pytest.raises(Refused, match="an imported name is bound by its import and never assigned to"):
+        codex(register=text)
+    with pytest.raises(Refused, match="an imported name is bound by its import and never assigned to"):
+        subset_ast.check(text, "x/town/register.py")
+
+
+USES = "from realms.legislation import above\n\nclass Register(above('register')):\n    uses = []\n\n    def mutate(self, x):\n        self.uses.append(x)\n"
+
+
+def test_uses_is_a_tuple_and_a_method_cannot_extend_it():
+    c = codex(register=USES, alpha=ALPHA, beta=BETA, gamma=GAMMA)
+    assert c.resolved("register").uses == () and c.resolved("alpha").uses == ("beta",)
+    with pytest.raises(AttributeError, match="append"):
+        c.instance("register", c.context()).mutate("beta")
+    assert c.resolved("register").uses == ()
+
+
 # ── self and a hook's event are bound once (realms-gos#579, the fourth review) ─────────────────────────────────
 
 HEAD = "from realms.legislation import above, days\n\nclass Register(above('register')):\n"

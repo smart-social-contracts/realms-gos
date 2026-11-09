@@ -371,7 +371,8 @@ The rules (the checker enforces them, §12):
 1. **One class per file,** named after the domain in CamelCase (`tax` → `Tax`, `data_protection` →
    `DataProtection`), with the base `above("<its own domain>")`. Nothing else at module level except
    imports from the SDK and constants. The constants are frozen once the file has loaded (a list is a tuple, a
-   dict read-only), so a method cannot leave a change in one for the next call.
+   dict read-only: write `list(CODES) + [...]` to build a longer list), so a method cannot leave a change in one
+   for the next call. An imported name is bound by its import and never assigned to.
 2. **Imports only from the SDK** (`realms.legislation`) and from `ggg`, for read-only access to GGG's
    entities (`from ggg import Land, Member`). No other import, anywhere in the file. A chapter cannot
    write an entity; it queues operations.

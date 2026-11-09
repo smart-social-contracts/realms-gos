@@ -21,6 +21,8 @@ import sys
 from realms.legislation.errors import Refused
 
 SDK, GGG = "realms.legislation", "ggg"
+# A name an import statement binds is bound once: the loader freezes the module's constants, and leaves imported names alone.
+BOUND_BY_IMPORT = "an imported name is bound by its import and never assigned to"
 # What CPython itself reads or writes in a class body: the only dunder names a chapter's code may hold,
 # and only there.
 CLASS_BODY = frozenset(
@@ -253,6 +255,8 @@ class Check:
                     )
                 if stored != "__doc__" and stored.startswith("__"):
                     self.refuse(f"{stored}: no dunder names in a chapter", stored)
+                if stored in self.imported and ops[i - 1][0] != "IMPORT_FROM":
+                    self.refuse(f"{stored}: {BOUND_BY_IMPORT}", f"{stored} =")
                 in_class = False
             elif name == "MAKE_FUNCTION" and not in_class:
                 self.refuse(
