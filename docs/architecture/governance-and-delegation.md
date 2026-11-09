@@ -190,11 +190,50 @@ every group, those the member gains later included, and every operation a later 
   that phase 0 removed, which come back as pending actions: `payment_account_add`, `payment_account_remove`,
   `identity_submit`, `self_change_quarter` and `federal_vote_propose` (and `proposal_create` with an action), with
   `action_get` and `action_list`. It also enables the operations that run other operations: the ten task operations,
-  `shell` and `extension_call` ([below](#inner-calls-tasks-the-shell-and-extension-calls)).
+  `shell` and `extension_call` ([below](#inner-calls-tasks-the-shell-and-extension-calls)). And it enables the rest of a
+  member's own affairs, office work, organisations and administration: every direct operation of the groups `see`,
+  `profile`, `vote`, `propose`, `filings`, `justice`, `money`, `office`, `orgs` and `admin` that no other phase keeps
+  (the setup operations, and the operations that ask each time, `contract_create` excepted)
+  ([below](#office-work-and-organisations)).
+  It also enables keys and private data, joining, power over people, power of attorney onward and the upgrade approvals,
+  each asking the member each time where it hands something over ([below](#keys-joining-people-and-power-of-attorney-onward)).
 - **Grants made before groups** name permissions (`operations`) and keep covering exactly those 24 operations (`LEGACY`),
   with the behaviour they had then: a proposal with an action stays refused, and payout accounts, identity proofs,
   quarter moves and federal votes stay refused. A later release never widens them. `attribute_list` is not among them: a
   grant of `self.data_view` was consented as profile, notifications and invoices, and attributes are personal data.
+
+### Office work and organisations
+
+Two groups are granted for one place: `office:<department>` (`office:Health`) and `orgs:<organization>`
+(`orgs:clinic-b`). A bare `office` or `orgs` is not a group. `*` covers both for every place.
+
+- **Office work follows the seats.** `office:Health` covers an operation of the group when the member holds its
+  permission through an active seat in Health: the seat's profile, the department's own permissions and the authorities
+  granted to the department (`auth.permissions_via`). It covers what a seat in Health allows wherever that applies: an
+  operation is not tied to one department, so a permission the seat gives counts for every use of it. A permission held
+  through a realm-wide profile, or through a seat in another department, is not Health's office work: `*` covers it, an
+  office group does not. A member seated in Health and Finance can lend each office to a different delegate.
+- **Organisations follow the admins.** `orgs:clinic-b` covers an operation of the group when the member is one of Clinic
+  B's admins (`Organization.admins`) and the call names `clinic-b` as its `organization`.
+- **The inbox of an office or an organisation.** `notification_list` and `notification_read` for `Department:<d>` are
+  covered by `office:<d>`, and for `Organization:<o>` by `orgs:<o>`, instead of by `see` and `profile`, which reach the
+  member's own inbox only. The member's own rule stays (`addressed_to`): they read an inbox only where they hold a seat.
+  `*` covers the inboxes of all those places. A grant made before groups reaches no inbox but the member's own.
+- **Checked when the grant is made and again at every use.** A grant may name `office:<d>` only where the grantor holds a
+  seat in `d`, and `orgs:<o>` only where they are an admin of `o`; a department or organisation that does not exist is
+  not a group. Losing the seat or the adminship ends the coverage at once, and a governed call filed under the grant is
+  checked again when the vote carries it (`check_grant`), so it fails if the seat is gone by then.
+- **The vocabulary** (`delegable_operations`, `delegation_groups`) has one entry for each department where the member
+  holds a seat, with the operations that seat gives them ("Office work: Health"), and for each organisation they
+  administer and hold a seat in ("Organisations I run: clinic-b"). An administrator with no seat in the organisation is not
+  listed, since finding their organisations would read them all; they name it by id (`orgs:<organization>`) and the realm
+  checks that they administer it.
+- **Administration** (group `admin`): a governed operation (an appointment ended, a mandate granted, a user removed) is
+  filed as a proposal tied to the grant, as for any delegate; `events` and `realm_monitor` are read at once. A full
+  export is the member's own act: `realm_export` is not delegable in this release, under any group, `*` included.
+- **A contract** (`contract_create`) asks each time: the delegate prepares it, and it runs on the member's tap. The
+  mandate's rules (active, within its limit, ending before it expires, the member in the executor department) are
+  checked when it is prepared, so the member is not asked to approve what cannot run, and again when it is approved.
 
 ### Rules for a delegate
 
@@ -208,8 +247,7 @@ every group, those the member gains later included, and every operation a later 
   expiry.
 - Payout accounts, identity proofs, moving to another quarter, federal votes and a proposal that carries an action are
   never done directly under a grant: under a grant by groups they are prepared, and wait for the member's tap
-  ([below](#pending-actions-the-members-tap)). Under a grant made before groups they stay refused. Power of attorney
-  itself and keys are not done directly under a grant either, and a later release switches them on.
+  ([below](#pending-actions-the-members-tap)). Under a grant made before groups they stay refused.
 - A proposal a delegate files with `proposal_create` is a motion: it carries no action. With an action it is a pending
   action (under a grant by groups) or refused (under an old grant).
 - A grant to the realm's own principal is refused: the effects of a codex's chapters act as the realm, and would act
@@ -226,7 +264,8 @@ every group, those the member gains later included, and every operation a later 
   on a proposal that a delegate of the same member filed, or prepared as a pending action the member approved
   (I-ID-13), whoever it was and whatever the status of that grant now. The member votes on it as usual, and a delegate
   of another member may. A delegate withdraws only the proposals it filed under its grant.
-- A delegate reads the member's own notifications, not the inboxes of the offices where the member holds a seat.
+- A delegate reads the member's own notifications. The inbox of an office or organisation where the member holds a seat
+  is read only under a grant that names that office or organisation ([above](#office-work-and-organisations)).
 
 ### What the member is told
 
@@ -274,7 +313,8 @@ The delegate prepares it, and only the member's own approval runs it. The code i
    still active and covers the operation. The realm then sets `approving` and `decided_at` before the call awaits
    another canister, so a second approval meets it; runs the stored call through `dispatch` as the member with origin
    `confirmed` (checked like `user`: permission, guardrails, parties, banned status, now); and stores the reply as
-   `result`, without secrets (they are in the approval's own reply alone), as `done` or `failed`. A governed call goes
+   `result`, without secrets (they are in the approval's own reply alone, bar the one an operation `delivers` to its
+   delegate, below), as `done` or `failed`. A governed call goes
    as the member's own would: at once where the department decides directly, else as the member's own proposal with
    `prepared_by` the delegate. The audit `Event` has `user` and `by` the member, origin `confirmed`, `prepared_by` and
    `grant`. An action left `approving` after a trap reads `failed` after 10 minutes and is never retried.
@@ -283,9 +323,65 @@ The delegate prepares it, and only the member's own approval runs it. The code i
 5. **Reads.** A read in its confirm form is approved, not run: the action is `approved` and stores nothing. The delegate
    collects it once with `action_collect`, before it lapses and while the grant covers it: the realm runs the read as the
    member then and returns the reply. The audit log records `{collected: id}`, never the reply.
-6. **Lazy states.** Nothing sweeps. An action reads `expired` once its day has passed and `void` once its grant was
+6. **Who reads it.** A card holds what the delegate asked for: a joining code, wrapped keys, private data, the key a
+   derivation delivered. `action_get` and `action_list` answer the grantor in person and the delegate that prepared the
+   action. A delegate acting for the member (`on_behalf_of`, `read_for`, a task it made) reads only the actions it
+   prepared, never another delegate's, even under "See my affairs". To any other reader of a card, such as a task or an
+   extension of the member's, the secret fields of the call it holds (`secret=`, `private=`, SECRET) are blank in `args`
+   and `result` and absent from `summary`. A grant's activity (`delegation_activity`) is read the same way: by its
+   grantor and its own delegate, not by another delegate of the member.
+7. **Lazy states.** Nothing sweeps. An action reads `expired` once its day has passed and `void` once its grant was
    revoked, replaced, has ended or no longer covers the operation, whenever it is read, listed, approved or counted
    against the limit of 10.
+
+### Keys, joining, people and power of attorney onward
+
+These operations hand over a key, a seat or power that no vote follows, so a delegate only prepares them. Each is
+switched on in `ENABLED`, and each has a `title` and a `summary` hook that writes, in the realm's words, what changes
+hands. A ‹name› below is the grant's label, quoted, or else the delegate's principal.
+
+| Group | Asks each time | Runs at once |
+|---|---|---|
+| `keys` | `crypto_derive_key`, `crypto_grant`, `crypto_revoke`, `private_data_update` | `crypto_public_key`, `crypto_envelope`, `crypto_scopes`, `crypto_access` |
+| `office` | `document_share`, `document_revoke`, `document_delete`, `document_publish`, `document_store` with `keys` | `document_store` without keys, `document_list`, `document_get` |
+| `membership` | `realm_join` | |
+| `office`, `orgs` | `invite_create` that carries a profile or a seat, `representative_add`, `organization_edit` that sets `admins` | `invite_create` without them, `organization_edit` of the description |
+| `poa` | `delegation_grant`, `delegation_accept`, `delegation_request_decide` that approves | `delegation_revoke`, `delegation_request_decide` that declines |
+| `admin` | `orchestration_decide` | |
+
+What the member reads before approving:
+
+- **A key handed over** (`crypto_derive_key`): "This gives ‹name› a permanent copy of your key. Revoking power of
+  attorney does not take it back." The line is labelled "Warning about your key", so that a page can show it apart. The
+  reply of the call, the key encrypted to the delegate's transport key, is the one secret a pending action keeps in its
+  `result` (`delivers=` on the operation): the member and the delegate that prepared the action read it there, and it
+  reaches no audit event, no notice and no other field. A name in `SECRET` is never kept, whatever an operation delivers.
+- **A key given or taken away** (`crypto_grant`, `crypto_revoke`, `document_share`, `document_revoke`): who gets a key to
+  which scope or document, or who loses access (`crypto_revoke` adds that the member does too, if they are among them).
+  A principal a delegate names must be a principal's text form, or the call is refused when it is prepared: the realm's
+  own line would otherwise carry the delegate's words unquoted. A grant to the delegate's own
+  principal for one scope says "‹name› will be able to read ‹scope›, and nothing else of yours": it is the safe way for
+  an assistant to read one document. The assistant reads it back as itself, with `crypto_envelope` (the envelope
+  addressed to the caller takes no permission, so an AI connection with no profile can) or `document_get`; the scopes it
+  was not given stay closed to it, and so do `crypto_scopes`, `crypto_access` and granting, which need `self.data_manage`.
+  The call is refused, not prepared, when the member does not manage the scope or staff the document's department.
+- **A document deleted or published** (`document_delete`, `document_publish`): the document, and that a deletion cannot be
+  undone and a published record cannot be taken back.
+- **Joining** (`realm_join`): the profile and the seat the invite code carries, and that joining is consent to the
+  realm's terms. A code that is not valid is refused, not prepared.
+- **Power over people** (`invite_create`, `representative_add`, `organization_edit`): the profile and the seat an invite
+  carries, how often and until when it can be used (a code the realm generates is shown to the member once, in the reply
+  to their approval, and never to the delegate; a code the delegate chose is in its own call); who will act for the
+  organisation and in which seat; the organisation's admins before and after. Departments and organisations are named in
+  quotes in these lines.
+- **Power of attorney onward** (`delegation_grant`, `delegation_accept`, `delegation_request_decide`): the person or AI
+  connection, the groups by their labels ("Everything you can do in this realm, now and later" for `*`), and the expiry.
+  Accepting says "You become ‹grantor›'s attorney for …". Approving a request that replaces the member's present grant to
+  that delegate says so. It is allowed even when that is the grant the action was prepared under: it runs, the old grant
+  ends, and every other action waiting under it reads `void`.
+- **An upgrade approval** (`orchestration_decide`): the Casals action by id, whether the member approves or rejects it,
+  and that an approved upgrade takes effect at once. The realm holds only the action's id, not the upgrade (the baton
+  does), so the card tells the member to read it in Casals before approving.
 
 ### Inner calls: tasks, the shell and extension calls
 

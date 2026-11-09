@@ -4,6 +4,7 @@ from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
 from ggg import Appointment, Authority, Department, Organization, Position, Proposal, Realm, User, UserProfile
 from core.op import op
+from core.pending import held, principal, principals, quoted
 from core.ratio import ONE, refuse_renamed
 from api.proposals import PENDING, holders, launched, realm_wide, root
 
@@ -309,13 +310,18 @@ def authority_revoke(c, args):
     find(Authority, args["authority"]).delete()
 
 
-def admin_of(c, args):
+def administered(user, args):
+    """The active organization named in ``args``, which ``user`` administers."""
     org = find(Organization, args["organization"])
-    if c.user not in org.admins:
+    if user not in org.admins:
         raise Forbidden(f"only {org.id}'s admins can do this")
     if org.status != "active":
         raise Conflict(f"{org.id} is {org.status}")
     return org
+
+
+def admin_of(c, args):
+    return administered(c.user, args)
 
 
 @op("organization.add", returns="organization")
@@ -328,7 +334,17 @@ def organization_register(c, args):
     return {"organization": args["organization"]}
 
 
-@op("organization.edit", returns="organization")
+def changing_admins(user, args, grant):
+    """The admins of the organisation before and after: whoever is listed acts for it."""
+    org = administered(user, args)
+    return [{"label": "Admins now", "value": ", ".join(held(a) for a in org.admins or [])},
+            {"label": "Admins after", "value": principals(args.get("admins", org.admins or []), "admins")},
+            {"label": "What changes",
+             "value": f"Whoever is listed after this can edit {quoted(org.id)} and seat people to act for it; "
+                      "those left out lose that power"}]
+
+
+@op("organization.edit", returns="organization", summary=changing_admins, title="Change an organisation's admins")
 def organization_edit(c, args):
     """As an admin of active ``organization``, change its ``description`` or replace its ``admins`` (at least one);
     a field you leave out stays."""
@@ -339,7 +355,17 @@ def organization_edit(c, args):
     return {"organization": org.id}
 
 
-@op("organization.edit", returns="appointment")
+def seating(user, args, grant):
+    """Who will act for the organisation, and in which seat."""
+    org, pos = administered(user, args), Position[args["position"]]
+    seat = quoted(pos.title or pos.id) if pos else f"a new seat {quoted(args.get('title') or args['position'])}"
+    person = principal(args["user"])
+    agent = f", as an agent supervised by {principal(args.get('supervisor'))}" if args.get("agent") else ""
+    return [{"label": "Person seated", "value": person}, {"label": "Seat to fill", "value": seat},
+            {"label": "What changes", "value": f"{person} will act for {quoted(org.id)} in {seat}{agent}"}]
+
+
+@op("organization.edit", returns="appointment", summary=seating, title="Seat someone to act for an organisation")
 def representative_add(c, args):
     """As an admin of ``organization``, seat ``user`` in its seat ``position``, created if new with ``title``,
     ``profile`` and ``headcount`` (default 1); ``agent`` true needs a ``supervisor`` holding a non-agent seat there.

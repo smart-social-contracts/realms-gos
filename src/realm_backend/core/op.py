@@ -43,7 +43,7 @@ class Call:
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
        returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None, summary=None,
-       title=None, lists=None, names=None):
+       title=None, lists=None, delivers=(), names=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -66,12 +66,16 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     names(args) -> the arguments with what the call acts on named, for a call that leaves it to the state of the realm (a
     revert names the codex it restores): a governed call is filed as a proposal with these, so that what the vote
     approves is what runs.
+    delivers -> the ``secret`` reply fields that the member's approval hands to the delegate that prepared the call: the
+    pending action keeps them in its result, where the member and that delegate read them (core.pending.blank). Nothing
+    else keeps them, and a name in SECRET is never kept.
     fixes(args, proposal) -> runs when a proposal that carries the call is filed, by the governed call or by
     ``proposal_create``, before the proposal is written: it refuses a call that has nothing to carry and ties the records
     the call will act on to ``proposal``, so that no other proposal takes them.
     releases(args, proposal) -> runs when that proposal ends without the call having run: it frees what ``fixes`` tied.
-    summary(user, args) -> lines (``{label, value}``) about what the call does for ``user``, in the realm's words, for an
-    operation that asks the member each time (core.pending): the member reads them before approving.
+    summary(user, args, grant) -> lines (``{label, value}``) about what the call does for ``user``, in the realm's words, for
+    an operation that asks the member each time (core.pending): the member reads them before approving. ``grant`` is the
+    power of attorney the delegate prepares it under, whose delegate the lines may name (core.pending.named).
     title -> the operation's plain name as the member reads it, the heading of a pending action ("Add a payout
     account"). The realm writes it, never the delegate; an operation that can be prepared for the member has one.
     lists -> for each list of GGG's facts that is not one of the call's arguments, ``{list: fn(args)}`` giving its
@@ -85,7 +89,7 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
                             "signing": signing, "parties": parties, "public": public, "perm_for": perm_for,
                             "returns": returns, "check": check, "private": private, "derived": derived,
                             "secret": tuple(secret), "fixes": fixes, "releases": releases, "summary": summary,
-                            "title": title, "lists": lists or {}, "names": names}
+                            "title": title, "lists": lists or {}, "delivers": tuple(delivers), "names": names}
         poa.classify(OPS[fn.__name__], fn.__name__)
         return fn
     return wrap

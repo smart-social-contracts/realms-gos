@@ -107,6 +107,11 @@ def plain(value):
     return json.loads(json.dumps(value))
 
 
+# What a legacy codex's effect, which acts as the realm, never does: link the realm to another or publish its record
+# (api.links), which only the realm's own vote may do.
+VOTED = ("sync_source_add", "sync_source_remove", "follower_accept", "follower_remove", "legislation_release_publish")
+
+
 def execute(source, fn, kwargs, rpc, allowed=()):
     """Call ``fn(**kwargs)`` of ``source`` in a fresh subinterpreter and return its plain-data result.
 
@@ -172,9 +177,12 @@ def read(action, args, declared):
 
 def apply(name, args, declared, legacy=False):
     """Run ``name`` as the codex (origin ``codex``, the realm as signer); ``legacy`` marks a legacy codex's effect,
-    which acts for the realm where a layered codex's holds nothing (core.op.Call)."""
+    which acts for the realm where a layered codex's holds nothing (core.op.Call), except in what takes the realm's
+    vote (``VOTED``)."""
     if name not in ops():
         return {"ok": False, "error": f"unknown operation '{name}'"}
+    if legacy and name in VOTED:
+        return {"ok": False, "error": f"{name} takes the realm's vote, which a legacy codex does not hold"}
     reply = yield from dispatch(name, json.dumps(args), origin="codex", signer=chain.self_id(), declared=declared,
                                 legacy=legacy)
     return json.loads(reply)
