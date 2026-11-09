@@ -39,6 +39,8 @@ from realms.cli.commands.legislation_ranges import (
     shown,
 )
 
+SOLVERS = 4  # SymCC runs at once: each starts cvc5, and a codex with hundreds of forbids asks hundreds of questions
+
 
 @dataclass
 class ActionResult:
@@ -130,7 +132,7 @@ def sweep(
         rest = policy_set({k: v for k, v in forbids.items() if k != id_}, assumed)
         return never, solver.equivalent(action, everything, rest)
 
-    with ThreadPoolExecutor() as pool:
+    with ThreadPoolExecutor(SOLVERS) as pool:
         answers = dict(zip(forbids, pool.map(asked, forbids)))
     for id_, (never, covered) in answers.items():
         for kind, answer in (("never fires", never), ("redundant", covered)):
