@@ -304,6 +304,15 @@ def attribute_review(c, args):
     return {"attribute": a.id, "status": a.status}
 
 
+@op("attribute.review", read=True, returns="attributes")
+def attribute_pending_list(c, args):
+    """The attributes awaiting review, with their ``kind`` and ``value`` in clear (I-PRV-1), ``count`` rows at a time
+    (default 100, at most 500) from row ``from`` (default 1). Returns ``attributes`` and ``next`` (null at the end); a
+    page can hold fewer than ``count``: follow ``next``, which goes by row, so that deciding a page skips none."""
+    rows, nxt = page(Attribute, args, keep=lambda a: a.status == "pending")
+    return {"attributes": [view(a) for a in rows], "next": nxt}
+
+
 @op("self.data_view", read=True, returns="attributes")
 def attribute_list(c, args):
     """Your own attributes, all or only those of ``kind``, ``count`` rows at a time (default 100, at most 500) from

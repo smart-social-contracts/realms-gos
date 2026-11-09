@@ -26,6 +26,9 @@ from realms.legislation.subset import CLASS_BODY
 
 # Operations no chapter may hook, guard or forbid (layered-codex.md §10.4).
 RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
+# Operations a chapter may hook but never guard or forbid: a realm must always learn that a link ended, so the source
+# of a follower that leaves hooks link_notify (on_link_notify), and nothing can refuse the notice.
+HOOK_ONLY = ("link_notify",)
 KINDS = (("on_", "hook"), ("check_", "guard"), ("compute_", "compute"))
 METHODS = ("hook", "guard", "compute", "helper")
 _NOTHING = object()
@@ -416,6 +419,10 @@ def _member(key, value, load, refuse):
     if op in RESERVED:
         refuse(
             f"{key}: {op} is reserved; no chapter may hook, guard or forbid it", line
+        )
+    if op in HOOK_ONLY and kind != "hook":
+        refuse(
+            f"{key}: {op} can be hooked only; no chapter may guard or forbid it", line
         )
     if (
         op is not None

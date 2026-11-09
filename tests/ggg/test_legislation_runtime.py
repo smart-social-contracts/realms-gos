@@ -756,10 +756,10 @@ def test_build_returns_the_views_the_errors_and_the_cedar():
     assert out["errors"] == [] and '@id("x/town/tax/cap")' in out["cedar"] and "context.facts.rate > 1100000" in out["cedar"]
 
 
-def test_the_reserved_list_is_the_librarys():
-    from realms.legislation import RESERVED
+def test_the_reserved_list_and_the_hook_only_list_are_the_librarys():
+    from realms.legislation import HOOK_ONLY, RESERVED
 
-    assert legislation.RESERVED == RESERVED
+    assert legislation.RESERVED == RESERVED and legislation.HOOK_ONLY == HOOK_ONLY
 
 
 def test_a_legacy_codex_is_untouched():

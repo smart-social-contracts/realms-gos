@@ -189,7 +189,8 @@ every group, those the member gains later included, and every operation a later 
   tier. This release enables the 24 operations that were delegable once phase 0 had closed its holes, and the five
   that phase 0 removed, which come back as pending actions: `payment_account_add`, `payment_account_remove`,
   `identity_submit`, `self_change_quarter` and `federal_vote_propose` (and `proposal_create` with an action), with
-  `action_get` and `action_list`.
+  `action_get` and `action_list`. It also enables the operations that run other operations: the ten task operations,
+  `shell` and `extension_call` ([below](#inner-calls-tasks-the-shell-and-extension-calls)).
 - **Grants made before groups** name permissions (`operations`) and keep covering exactly those 24 operations (`LEGACY`),
   with the behaviour they had then: a proposal with an action stays refused, and payout accounts, identity proofs,
   quarter moves and federal votes stay refused. A later release never widens them. `attribute_list` is not among them: a
@@ -208,8 +209,7 @@ every group, those the member gains later included, and every operation a later 
 - Payout accounts, identity proofs, moving to another quarter, federal votes and a proposal that carries an action are
   never done directly under a grant: under a grant by groups they are prepared, and wait for the member's tap
   ([below](#pending-actions-the-members-tap)). Under a grant made before groups they stay refused. Power of attorney
-  itself, tasks, keys, the shell and extension calls are not done directly under a grant either, and a later release
-  switches them on.
+  itself and keys are not done directly under a grant either, and a later release switches them on.
 - A proposal a delegate files with `proposal_create` is a motion: it carries no action. With an action it is a pending
   action (under a grant by groups) or refused (under an old grant).
 - A grant to the realm's own principal is refused: the effects of a codex's chapters act as the realm, and would act
@@ -286,6 +286,49 @@ The delegate prepares it, and only the member's own approval runs it. The code i
 6. **Lazy states.** Nothing sweeps. An action reads `expired` once its day has passed and `void` once its grant was
    revoked, replaced, has ended or no longer covers the operation, whenever it is read, listed, approved or counted
    against the limit of 10.
+
+### Inner calls: tasks, the shell and extension calls
+
+A task, a shell expression and an extension's backend run other operations for the member. When a delegate calls
+them under a grant, each inner call is made **as the delegate, on behalf of the member** (`core.op.on_behalf`), so it
+meets the grant like any other delegated call. What the member's own call would do is unchanged.
+
+- **Covered.** The inner operation must be enabled and in one of the grant's groups, or the grant must name `*`. `shell`
+  and the task operations are in the `admin` group ("Run the realm"). `extension_call` is in no group: every grant by
+  groups reaches it, for as long as the grant may last, and a grant that names permissions never does. What the
+  extension then calls needs its own group.
+- **Direct, or prepared.** An inner call that is direct runs at once. One that asks the member each time is prepared as
+  a pending action, from the shell and from an extension, and the audit `Event` names the origin (`shell`,
+  `extension`). A task step is refused instead: nobody is there to be told when a task runs, and a task runs only
+  what its grant covers directly. So is anything a task runs through the shell or an extension: a call carries the
+  origin of the outermost call (`Call.root`), and prepares only if that is not a task's.
+- **Declared.** An extension's calls are limited to the operations its manifest declares, under a grant too. An
+  undeclared one is refused, and not prepared either.
+- **Whatever the code says.** The `on_behalf_of` in an inner call's arguments is replaced by the member's when a
+  delegate made the call, so a shell expression, an extension or a task step cannot use a grant that another member gave
+  the delegate. An extension never names anyone, in a member's own call either: it holds no power of attorney to lend,
+  so a member's call of it acts for that member and files nothing for a grantor of theirs. The member's own shell and
+  tasks may keep naming a grantor the member holds a grant from: the member wrote that code.
+- **Audit.** Each inner call's `Event` has `user` the member, `by` the delegate, `grant` and the origin (`task`,
+  `shell`, `extension`).
+
+A task a delegate makes under a grant (`task_create`, `task_edit`, `task_schedule`) is **tied to that grant**
+(`grant` in the task's metadata, listed by `task_list`). Its steps run as the delegate for the member, under that grant,
+whoever starts the run: a timer, `task_run`, the wait between steps, a schedule armed again after an upgrade.
+
+- **It stops with the grant.** Before each step the grant must be active and in force. Once it is revoked, replaced or
+  has expired, the step is refused, the task ends `failed` and the run records why. A proposal may outlast an expired
+  grant because a vote takes days; a task would go on acting with nobody's consent.
+- **A delegate acts on its own tasks.** `task_run`, `task_edit`, the schedules, `task_cancel` and `task_delete` are
+  refused for a delegate on a task that was not made under the grant it holds, else it could run, or plant steps in, a
+  task the member wrote, with the member's own authority. A grant that replaced the one a task was tied to has no say
+  in it.
+- **Editing makes the task the editor's.** The steps run with the authority of whoever wrote them. When anyone but
+  its creator edits a task (the member editing a delegate's, or someone who holds `all` editing another member's), the
+  editor becomes its creator: the steps run as the editor from then on, never as the earlier creator, and a task a
+  member edits is no longer tied.
+- **Tasks the member made are unchanged**, and so is the realm's own scheduler (`rearm`, the tasks of scheduled
+  proposals).
 
 ### The member's pages
 

@@ -100,8 +100,9 @@ def start(installer=""):
     legislation.warm()  # the active layered codex's sandbox is gone after an upgrade, and a query could not keep one
     installs.pause_after_upgrade()
     tasks.rearm()
-    from api import proposals, quarters
+    from api import links, proposals, quarters
 
+    links.resume()
     proposals.resume()
     quarters.resume()
 
@@ -125,12 +126,15 @@ def version(c, args):
 def realm_info(c, args):
     """The realm's public profile: name, manifesto, welcome message, status, branding, accounting currency,
     whether registration is open and whether it is a capital, its network, time zone and languages, and its test mode
-    and test flags."""
+    and test flags, and its ``sync_sources``: the realms it takes legislation from, each with the status of its link."""
+    from api import links
+
     realm = Realm["1"]
     return {"realm": view(realm, "name", "manifesto", "welcome_message", "status", "logo_url",
                           "background_image_url", "primary_color", "accounting_currency",
                           "open_registration", "is_capital", "network", "timezone", "languages", "test_mode",
-                          "test_flags") if realm else {}}
+                          "test_flags") if realm else {},
+            "sync_sources": [links.source_view(s) for s in links.sources()]}
 
 
 @op(None, read=True, public=True)
@@ -433,8 +437,9 @@ def db_convert_indexes(c, args):
 @op("shell.execute")
 def shell(c, args):
     """Evaluate one expression ``expr`` in the sandbox; ``ops.<name>(args)`` calls an operation as you, through Cedar.
+    Called by your delegate, it calls them as the delegate for you, so under the grant.
     Example: ``{"expr": "ops.proposal_list({'status': 'voting'})"}``."""
     def as_caller(_, kw):
-        return call(kw["name"], kw["args"], user=c.user, origin="shell")
+        return call(kw["name"], kw["args"], user=c.user, origin="shell", by=c.by, root=c.root)
 
     return {"result": sandbox.execute(SHELL % args["expr"], "main", {}, as_caller, ("op",))}

@@ -261,6 +261,20 @@ def test_story_alice_submits_her_large_family_title_and_a_reviewer_verifies_it()
     assert ok("attribute_list", "alice", kind="large_family")["attributes"] == mine
 
 
+def test_a_reviewer_lists_the_attributes_awaiting_review_and_deciding_a_page_skips_none():
+    registry_with_reviewer()
+    ids = [ok("attribute_submit", "alice", kind="student", value=str(i), ref="vault:s")["attribute"] for i in range(5)]
+    assert "attribute.review" in denied("attribute_pending_list", "bob")
+    assert "attribute.review" in denied("attribute_pending_list", "alice")  # not even the person: attribute_list is theirs
+    page = ok("attribute_pending_list", "hector", count=2)
+    assert [(a["id"], a["kind"], a["value"]) for a in page["attributes"]] == [(ids[0], "student", "0"), (ids[1], "student", "1")]
+    for a in page["attributes"]:
+        ok("attribute_review", "hector", attribute=a["id"], status="verified")
+    rest = ok("attribute_pending_list", "hector", **{"from": page["next"]})
+    assert [a["id"] for a in rest["attributes"]] == ids[2:] and rest["next"] is None
+    assert [a["id"] for a in ok("attribute_pending_list", "hector")["attributes"]] == ids[2:]  # decided ones are gone
+
+
 def test_a_rejected_attribute_stays_rejected():
     registry_with_reviewer()
     a = ok("attribute_submit", "alice", kind="disability", value="33", ref="vault:x")["attribute"]

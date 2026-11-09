@@ -39,6 +39,7 @@ on a laptop and in the realm. In the realm, ``Codex.load`` runs inside the subin
 
 # The ``as`` form marks the re-export; the names a chapter may import are listed in ``__all__`` below.
 from realms.legislation.calendar import Calendar as Calendar
+from realms.legislation.chapter import HOOK_ONLY as HOOK_ONLY
 from realms.legislation.chapter import RESERVED as RESERVED
 from realms.legislation.chapter import Chapter as Chapter
 from realms.legislation.chapter import above as above

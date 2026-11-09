@@ -113,7 +113,7 @@ def permissions(principal):
         return {"all"}
     if principal == chain.ANONYMOUS:
         return set()
-    from ggg import Appointment, Authority, GuestUser, Quarter, Realm, User
+    from ggg import Appointment, Authority, Follower, GuestUser, Quarter, Realm, SyncSource, User
 
     realm = Realm["1"]
     if realm and realm.installer_canister_id and realm.installer_canister_id == principal:
@@ -131,6 +131,7 @@ def permissions(principal):
     if guest:
         held |= set(guest.permissions or [])
     held |= {"quarter.sync"} if Quarter[principal] else set()
+    held |= {"link.sync"} if Follower[principal] or SyncSource[principal] else set()  # the capitals of its links
     for a in each(Appointment, "user", principal):
         pos = a.position
         if a.status != "active" or (pos.organization and pos.organization.status != "active"):
@@ -252,12 +253,12 @@ def reason(name, spec, context, held):
     """Why the call was refused, and the permission that would have allowed it, if one would."""
     if context["signing"] and context["signer_agent"]:
         return f"{name} must be done by a human, not an agent", None
+    if context["origin"] in ("extension", "codex") and name not in context["declared"]:
+        return f"{name} is not declared by this {context['origin']}", None
     if context["delegated"]:
         return f"{name} cannot be done under this power of attorney: {why_not(spec, context)}", None
     if context["user"] in context["parties"] or context["signer"] in context["parties"]:
         return f"{name}: you are a party to this matter", None
-    if context["origin"] in ("extension", "codex") and name not in context["declared"]:
-        return f"{name} is not declared by this {context['origin']}", None
     return f"{name} needs {context['permission']}", context["permission"] or None
 
 
