@@ -10,6 +10,7 @@ from ggg import (Appointment, Attribute, Department, Human, Identity, Invite, Me
                  UserProfile)
 from api import codex
 from core.op import op
+from core.pending import moment, quoted
 from api.proposals import root
 
 MOVES = {"active": {"inactive", "suspended", "banned"}, "inactive": {"active", "banned"},
@@ -116,7 +117,21 @@ def redeemable(code, principal):
     return inv
 
 
-@op("self.join", check=check_choices, secret=("code",))
+def seat_line(label, position):
+    return {"label": label, "value": f"{quoted(position.title or position.id)} of {quoted(orgs.body(position).id)}"}
+
+
+def joining(user, args, grant):
+    """What the invite code carries, which joining takes, and that joining is the member's consent to the realm's terms."""
+    inv = redeemable(args["code"], user) if args.get("code") else None
+    lines = [{"label": "Profile you take", "value": quoted(inv.profile)}] if inv else []
+    if inv and inv.position:
+        lines.append(seat_line("Seat you take", find(Position, inv.position)))
+    taken = " with the profile and seat of the code" if inv else ""
+    return lines + [{"label": "What changes", "value": f"You join the realm{taken}, which is your consent to its terms"}]
+
+
+@op("self.join", check=check_choices, secret=("code",), summary=joining, title="Join the realm with an invite code")
 def realm_join(c, args):
     """Join with an invite ``code`` (needed unless registration is open) and an optional ``nickname``,
     ``language`` (a BCP 47 tag) and ``home_zone`` (a zone of the realm). A member can join again with a code to gain its profile and seat. Returns ``user``, ``status`` and ``profiles``.
@@ -179,7 +194,13 @@ def profile_update(c, args):
     return {"user": user.id}
 
 
-@op("self.update_private_data", returns="user", secret=("private_data",))
+def replacing_private_data(user, args, grant):
+    effect = "Your private data is replaced by the text shown here; what is stored now is lost"
+    return [{"label": "What changes", "value": effect}]
+
+
+@op("self.update_private_data", returns="user", secret=("private_data",), summary=replacing_private_data,
+    title="Replace your private data")
 def private_data_update(c, args):
     """Replace your ``private_data``; it is stored as given, so encrypt it first (vetKeys ciphertext). Returns
     ``user``."""
@@ -320,7 +341,30 @@ def fresh_code(c):
     return f"{h[:4]}-{h[4:8]}-{h[8:12]}"
 
 
-@op("invite.manage", secret=("code",))
+def inviting(user, args, grant):
+    """What an invite that carries a profile or a seat lets whoever holds its code take."""
+    profile = find(UserProfile, args.get("profile") or "member")
+    pos = find(Position, args["position"]) if args.get("position") else None
+    if pos and pos.department is None:
+        raise Fail(f"{pos.id} is not a seat of a department")
+    expires = invite_expiry(args)
+    lines = [{"label": "Profile it carries", "value": quoted(profile.id)}]
+    if pos:
+        lines.append(seat_line("Seat it carries", pos))
+    uses, lapse = int(args.get("max_uses", 1)), f"until {moment(expires)}" if expires else "with no end date"
+    effect = (f"Whoever holds the code can use it {uses} time{'' if uses == 1 else 's'} to take the profile"
+              f"{' and seat' if pos else ''} above, {lapse}")
+    return lines + [{"label": "What changes",
+                     "value": effect + ("" if args.get("code") else ". You are shown the code once, when you approve")}]
+
+
+def invite_expiry(args):
+    """When the invite lapses, from ``expires_at`` or ``expires_in`` seconds from now: 0 for never."""
+    lasts = int(args.get("expires_in") or 0)
+    return int(args.get("expires_at") or 0) or (chain.now() + lasts if lasts else 0)
+
+
+@op("invite.manage", secret=("code",), summary=inviting, title="Create an invite that carries a profile or a seat")
 def invite_create(c, args):
     """Create an invite to ``profile`` (default member) and optionally seat ``position`` of ``department``, only with
     permissions you hold: ``code`` (default generated), ``max_uses`` (default 1), ``expires_at`` or ``expires_in``
@@ -334,10 +378,8 @@ def invite_create(c, args):
     code = (args.get("code") or fresh_code(c)).strip().upper()
     if Invite[digest(code)]:
         raise Conflict("this code is taken")
-    lasts = int(args.get("expires_in") or 0)
-    expires = int(args.get("expires_at") or 0) or (chain.now() + lasts if lasts else 0)
     Invite(id=digest(code), profile=profile.id, department=department, position=pos.id if pos else "",
-           max_uses=int(args.get("max_uses", 1)), expires_at=expires, created_by=c.user)
+           max_uses=int(args.get("max_uses", 1)), expires_at=invite_expiry(args), created_by=c.user)
     # Shown once, nested so the audit log never keeps it.
     return {"invite": {"id": digest(code), "code": code}}
 
