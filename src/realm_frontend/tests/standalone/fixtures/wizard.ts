@@ -44,11 +44,13 @@ export async function launchThroughWizard(
 ) {
 	const { codex: CODEX, symbol, welcome: WELCOME, manifesto: MANIFESTO, snap } = choices;
 	await test.step('welcome', async () => {
-		// The wizard shows a spinner while it loads, so the page never looks frozen.
-		await expect(frame.locator('.setup-wizard__loading[role="status"]')).toBeVisible({
-			timeout: 60_000
-		});
+		// The wizard shows a spinner while it loads, so the page never looks frozen. On a quick load the spinner is gone
+		// before the first look (run 42529240855: loaded in two seconds, the spinner never seen, 60 s lost and the realm
+		// never launched), so what has to show is the spinner or, already, the welcome.
 		const begin = frame.locator('.setup-wizard__hero-cta');
+		await expect(
+			frame.locator('.setup-wizard__loading[role="status"]').or(begin).first()
+		).toBeVisible({ timeout: 60_000 });
 		await passDemoNotice(frame, begin);
 		await expect(begin).toBeVisible({ timeout: 120_000 });
 		await expect(frame.locator('.setup-wizard__hero-title')).toHaveText(realm.name);

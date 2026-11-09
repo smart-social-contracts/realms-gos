@@ -23,6 +23,9 @@ class LayeredCodex(Row):
     proposal = String(default="")  # the proposal that adopted it
     # {chapter file: {method: {count, error, at}}}: the methods failing now, cleared as each succeeds again (§9.3)
     failures = Json({})
+    # The operations a forbid of this legislation names, as the last load found them (§9.4): while it does not load,
+    # the realm refuses these, reads among them, as it would have judged them.
+    forbids = Json([])
 
 
 class ChapterSource(Row):

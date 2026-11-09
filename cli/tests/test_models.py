@@ -73,7 +73,7 @@ class TestDeploymentConfig:
 
         # Invalid ports
         with pytest.raises(ValidationError):
-            DeploymentConfig(network="local", port=7999)  # too low
+            DeploymentConfig(network="local", port=4942)  # too low
 
         with pytest.raises(ValidationError):
             DeploymentConfig(network="local", port=8101)  # too high
