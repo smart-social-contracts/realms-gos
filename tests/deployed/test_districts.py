@@ -8,9 +8,10 @@ the portal sends them: ``join_targets`` on the capital, then ``realm_join`` on t
 import hashlib
 
 import pytest
-from ic.candid import Types
+from ic.candid import Types, decode
 from ic.principal import Principal
 from network import Network
+from pic import GGG_ERROR
 from test_legislation_runtime import TOWN, install
 
 CAPACITY = 5
@@ -120,7 +121,9 @@ def test_c_a_member_with_a_home_zone_joins_the_quarter_that_holds_it_while_capac
     capital, north, south = federation
     ask = lambda arg: capital.ggg("ggg_join_targets", JOIN_TARGETS_ARGS, arg, JOIN_TARGETS, person("h"), query=True)  # noqa: E731
     assert ask([{"home_zone": ["riverside"]}])["Ok"]["default"] == [north.cid]  # only north holds it, south has fewer members
-    no_zone = [ask([{"home_zone": []}]), ask([]), capital.raw("ggg_join_targets", query=True)[0]["value"]]  # the last sends no argument
+    sent_nothing = capital.pic.query_call(capital.id, "ggg_join_targets", b"DIDL\x00\x00")  # `()`, as before the argument
+    no_zone = [ask([{"home_zone": []}]), ask([]),
+               decode(bytes(sent_nothing), [Types.Variant({"Ok": JOIN_TARGETS, "Err": GGG_ERROR})])[0]["value"]]
     assert [got["Ok"]["default"] for got in no_zone] == [[south.cid]] * 3  # the least populated
     join(capital, north, person("e"), "riverside")
     assert zones_of(north) == {"riverside": 2, "hillside": 1}  # the population follows the members
