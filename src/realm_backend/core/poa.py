@@ -273,12 +273,14 @@ def split(named):
 
 
 def label_of(named):
-    """A group as a grant names it, in the realm's words: its label ("office:Health" is "Office work: Health"), or what
-    "everything" stands for."""
+    """A group as a grant names it, in the realm's words: its label ("office:Health" is 'Office work: "Health"', the place
+    quoted), or what "everything" stands for."""
+    from core.pending import quoted
+
     if named == EVERYTHING_SCOPE:
         return "Everything you can do in this realm, now and later"
     group, place = split(named)
-    return f"{GROUPS[group][0]}: {place}" if place else GROUPS[group][0]
+    return f"{GROUPS[group][0]}: {quoted(place)}" if place else GROUPS[group][0]
 
 
 def inbox_recipient(name, args):

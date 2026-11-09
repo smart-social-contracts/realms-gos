@@ -176,13 +176,15 @@ def stored_languages(args):
 
 
 def document_line(doc):
-    return {"label": "Document", "value": f"{doc.id} {quoted(doc.title)} of {doc.department}"}
+    return {"label": "Document", "value": f"{doc.id} {quoted(doc.title)} of {quoted(doc.department)}"}
 
 
 def storing(user, args, grant):
     """A document stored with ``keys`` gives those principals its key: that is what asks the member."""
     staff(args["department"], user)
     doc = find(Document, args["document"]) if args.get("document") else None
+    if doc and doc.department != args["department"]:
+        raise Fail(f"{doc.id} belongs to {doc.department}")
     names = principals(args.get("keys") or {}, "keys")
     what = f"Replaces {doc.id}" if doc else "Stores a new document"
     return [{"label": "Keys go to", "value": names},
@@ -231,8 +233,9 @@ def sharing(user, args, grant):
     staff(doc.department, user)
     recipient_of(args)
     kind, _, who = args["recipient"].partition(":")
+    recipient = f"{kind} {principals([who], 'recipients')}" if kind == "User" else f"{kind} {quoted(who)}"
     names = principals(args["keys"], "keys")
-    return [document_line(doc), {"label": "Shared with", "value": f"{kind} {principals([who], 'recipients')}"},
+    return [document_line(doc), {"label": "Shared with", "value": recipient},
             {"label": "Keys go to", "value": names},
             {"label": "What changes", "value": f"{names} will be able to read {doc.id}"}]
 

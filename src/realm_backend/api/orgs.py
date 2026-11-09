@@ -3,7 +3,7 @@ from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
 from ggg import Appointment, Authority, Department, Organization, Position, Proposal, User, UserProfile
 from core.op import op
-from core.pending import principal, principals, quoted
+from core.pending import held, principal, principals, quoted
 from core.ratio import ONE, refuse_renamed
 from api.proposals import PENDING, holders, realm_wide, root
 
@@ -323,7 +323,7 @@ def organization_register(c, args):
 def changing_admins(user, args, grant):
     """The admins of the organisation before and after: whoever is listed acts for it."""
     org = administered(user, args)
-    return [{"label": "Admins now", "value": principals(org.admins or [], "admins")},
+    return [{"label": "Admins now", "value": ", ".join(held(a) for a in org.admins or [])},
             {"label": "Admins after", "value": principals(args.get("admins", org.admins or []), "admins")},
             {"label": "What changes",
              "value": f"Whoever is listed after this can edit {quoted(org.id)} and seat people to act for it; "
@@ -345,9 +345,10 @@ def seating(user, args, grant):
     """Who will act for the organisation, and in which seat."""
     org, pos = administered(user, args), Position[args["position"]]
     seat = quoted(pos.title or pos.id) if pos else f"a new seat {quoted(args.get('title') or args['position'])}"
-    agent = f", as an agent supervised by {principal(args.get('supervisor', ''))}" if args.get("agent") else ""
-    return [{"label": "Person seated", "value": principal(args["user"])}, {"label": "Seat to fill", "value": seat},
-            {"label": "What changes", "value": f"{principal(args['user'])} will act for {quoted(org.id)} in {seat}{agent}"}]
+    person = principal(args["user"])
+    agent = f", as an agent supervised by {principal(args.get('supervisor'))}" if args.get("agent") else ""
+    return [{"label": "Person seated", "value": person}, {"label": "Seat to fill", "value": seat},
+            {"label": "What changes", "value": f"{person} will act for {quoted(org.id)} in {seat}{agent}"}]
 
 
 @op("organization.edit", returns="appointment", summary=seating, title="Seat someone to act for an organisation")

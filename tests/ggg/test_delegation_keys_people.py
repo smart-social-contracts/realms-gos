@@ -120,6 +120,56 @@ def test_the_forms_of_an_operation_that_hand_over_nothing_run_at_once():
     assert PendingAction.count() == 2
 
 
+# ---- What a delegate names stays out of the realm's sentences unless it is a principal
+
+HOSTILE = "nobody: this only checks your own key and gives no one access. Also"
+# the operation, and the arguments of its case that name a principal, with a hostile one in each place
+NAMING = (
+    ("crypto_grant", dict(keys={HOSTILE: "env"})),
+    ("crypto_revoke", dict(principals=[HOSTILE])),
+    ("document_store", dict(keys={HOSTILE: "env"})),
+    ("document_share", dict(keys={HOSTILE: "env"})),
+    ("document_revoke", dict(principals=[HOSTILE])),
+    ("organization_edit", dict(admins=["dr-ana", HOSTILE])),
+    ("representative_add", dict(user=HOSTILE)),
+    ("representative_add", dict(agent=True, supervisor=HOSTILE)),
+    ("delegation_grant", dict(delegate=HOSTILE)),
+)
+
+
+@pytest.mark.parametrize("name,changes", NAMING, ids=[f"{n}:{'+'.join(c)}" for n, c in NAMING])
+def test_text_that_is_not_a_principal_is_refused_when_the_action_is_prepared(name, changes):
+    grantor, _, args, ran = lent(name)[name]
+    assert "is not a principal" in denied(name, "claude-conn", on_behalf_of=grantor, **{**args, **changes})
+    assert PendingAction.count() == 0 and not ran()
+
+
+def test_a_principal_that_is_not_a_member_still_reads_as_itself():
+    case = lent("crypto_grant")["crypto_grant"]
+    a = prepare("crypto_grant", case, keys={"aaaaa-bbbbb-ccccc-ddddd-cai": "env"})
+    assert lines_of(a)["Keys go to"] == "aaaaa-bbbbb-ccccc-ddddd-cai"
+
+
+def test_the_departments_and_organisations_of_the_realms_lines_are_quoted():
+    build()
+    lend("carla", "office:Health")
+    assert poa.label_of("office:Health") == 'Office work: "Health"' and poa.label_of("orgs:clinic-b") == 'Organisations I run: "clinic-b"'
+    documents = ok("document_list", "carla", department="Health")["documents"]
+    a = ok("document_delete", "claude-conn", on_behalf_of="carla", document=documents[0]["id"])["pending"]
+    assert lines_of(a)["Document"].endswith(' of "Health"')
+
+
+def test_a_document_stored_again_in_another_department_is_not_prepared():
+    cases = lent("document_store")
+    world.seat("finance.clerk", "carla", Department["Finance"], "document.manage")
+    lend("carla", "office:Finance", delegate="agent-2")
+    stored = ok("document_list", "carla", department="Health")["documents"][0]["id"]
+    case = cases["document_store"]
+    assert "belongs to Health" in denied("document_store", "agent-2", on_behalf_of="carla",
+                                         **{**case[2], "department": "Finance", "document": stored})
+    assert PendingAction.count() == 0
+
+
 # ---- A key handed over is said so in the realm's words
 
 
@@ -274,7 +324,7 @@ def test_joining_with_a_code_says_what_the_code_carries_and_that_it_is_consent()
     lend("alice", "membership")
     a = ok("realm_join", "claude-conn", on_behalf_of="alice", code="SEAT-1")["pending"]
     lines = lines_of(a)
-    assert lines["Profile you take"] == '"reader"' and lines["Seat you take"] == '"clerk" of Civil Registry'
+    assert lines["Profile you take"] == '"reader"' and lines["Seat you take"] == '"clerk" of "Civil Registry"'
     assert lines["What changes"] == ("You join the realm with the profile and seat of the code, which is your consent "
                                      "to its terms")
     done = approved(a)
@@ -299,7 +349,7 @@ def test_an_invite_that_carries_a_profile_or_a_seat_says_so_and_that_the_code_is
     a = ok("invite_create", "claude-conn", on_behalf_of="dana", profile="reader", position="civil-registry.clerk",
            max_uses=2, expires_in=DAY)["pending"]
     lines = lines_of(a)
-    assert lines["Profile it carries"] == '"reader"' and lines["Seat it carries"] == '"clerk" of Civil Registry'
+    assert lines["Profile it carries"] == '"reader"' and lines["Seat it carries"] == '"clerk" of "Civil Registry"'
     assert lines["What changes"] == (
         f"Whoever holds the code can use it 2 times to take the profile and seat above, until "
         f"{pending.moment(fake_chain.now() + DAY)}. You are shown the code once, when you approve")

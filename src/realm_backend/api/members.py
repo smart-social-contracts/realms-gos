@@ -118,7 +118,7 @@ def redeemable(code, principal):
 
 
 def seat_line(label, position):
-    return {"label": label, "value": f"{quoted(position.title or position.id)} of {orgs.body(position).id}"}
+    return {"label": label, "value": f"{quoted(position.title or position.id)} of {quoted(orgs.body(position).id)}"}
 
 
 def joining(user, args, grant):

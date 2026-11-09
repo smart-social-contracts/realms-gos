@@ -317,7 +317,8 @@ The delegate prepares it, and only the member's own approval runs it. The code i
    still active and covers the operation. The realm then sets `approving` and `decided_at` before the call awaits
    another canister, so a second approval meets it; runs the stored call through `dispatch` as the member with origin
    `confirmed` (checked like `user`: permission, guardrails, parties, banned status, now); and stores the reply as
-   `result`, without secrets (they are in the approval's own reply alone), as `done` or `failed`. A governed call goes
+   `result`, without secrets (they are in the approval's own reply alone, bar the one an operation `delivers` to its
+   delegate, below), as `done` or `failed`. A governed call goes
    as the member's own would: at once where the department decides directly, else as the member's own proposal with
    `prepared_by` the delegate. The audit `Event` has `user` and `by` the member, origin `confirmed`, `prepared_by` and
    `grant`. An action left `approving` after a trap reads `failed` after 10 minutes and is never retried.
@@ -356,11 +357,13 @@ What the member reads before approving:
 
 - **A key handed over** (`crypto_derive_key`): "This gives ‹name› a permanent copy of your key. Revoking power of
   attorney does not take it back." The line is labelled "Warning about your key", so that a page can show it apart. The
-  reply of the call, the key encrypted to the delegate's transport key, is the one reply a pending action keeps in its
-  `result` (`delivers=` on the operation): the member and the delegate read it there, and it reaches no audit event, no
-  notice and no other field. A name in `SECRET` is never kept, whatever an operation delivers.
+  reply of the call, the key encrypted to the delegate's transport key, is the one secret a pending action keeps in its
+  `result` (`delivers=` on the operation): the member and the delegate that prepared the action read it there, and it
+  reaches no audit event, no notice and no other field. A name in `SECRET` is never kept, whatever an operation delivers.
 - **A key given or taken away** (`crypto_grant`, `crypto_revoke`, `document_share`, `document_revoke`): who gets a key to
-  which scope or document, or who loses access (and, if it is the member, that they do too). A grant to the delegate's own
+  which scope or document, or who loses access (`crypto_revoke` adds that the member does too, if they are among them).
+  A principal a delegate names must be a principal's text form, or the call is refused when it is prepared: the realm's
+  own line would otherwise carry the delegate's words unquoted. A grant to the delegate's own
   principal for one scope says "‹name› will be able to read ‹scope›, and nothing else of yours": it is the safe way for
   an assistant to read one document. The assistant reads it back as itself, with `crypto_envelope` (the envelope
   addressed to the caller takes no permission, so an AI connection with no profile can) or `document_get`; the scopes it
@@ -371,9 +374,10 @@ What the member reads before approving:
 - **Joining** (`realm_join`): the profile and the seat the invite code carries, and that joining is consent to the
   realm's terms. A code that is not valid is refused, not prepared.
 - **Power over people** (`invite_create`, `representative_add`, `organization_edit`): the profile and the seat an invite
-  carries, how often and until when it can be used (the code itself is shown to the member once, in the reply to their
-  approval, and never to the delegate); who will act for the organisation and in which seat; the organisation's admins
-  before and after.
+  carries, how often and until when it can be used (a code the realm generates is shown to the member once, in the reply
+  to their approval, and never to the delegate; a code the delegate chose is in its own call); who will act for the
+  organisation and in which seat; the organisation's admins before and after. Departments and organisations are named in
+  quotes in these lines.
 - **Power of attorney onward** (`delegation_grant`, `delegation_accept`, `delegation_request_decide`): the person or AI
   connection, the groups by their labels ("Everything you can do in this realm, now and later" for `*`), and the expiry.
   Accepting says "You become ‹grantor›'s attorney for …". Approving a request that replaces the member's present grant to
