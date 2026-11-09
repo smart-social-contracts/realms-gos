@@ -3,6 +3,7 @@ import json
 import math
 
 from core import chain
+from core import compliance
 from api import assets, proposals
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, view
 from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
@@ -333,10 +334,16 @@ def quarter_secede(c, args):
 @op("quarter.join_federation", governed=proposals.realm_wide)
 def quarter_join_federation(c, args):
     """Make this independent realm a quarter of ``capital`` (its canister id), known here as ``name`` (default
-    "capital"). The capital registers this realm separately. Returns ``capital``."""
+    "capital"). The capital registers this realm separately. A realm with a link that has not ended, to a sync source
+    or from a follower, cannot join: a quarter makes no call to another realm. Returns ``capital``."""
+    from api import links  # it imports this module
+
     r, cid = realm(), args["capital"]
     if r.is_quarter or cid == chain.self_id():
         raise Conflict("this realm already belongs to a federation")
+    open_links = links.open_links()
+    if open_links:  # a quarter makes no call to another realm, so it could not end them (I-NEST-3)
+        raise Conflict(f"end this realm's links before it becomes a quarter: {', '.join(open_links)}")
     r.is_quarter, r.is_capital, r.federation_realm_id = True, False, cid
     # The capital becomes a known quarter so its calls are accepted (I-FED-4).
     Quarter(id=cid, name=args.get("name", "capital"), index=0, status="active")
@@ -420,7 +427,13 @@ def quarter_sync(c, args):
     return {"directory": directory(), "codex": codex(), "index": q.index}
 
 
-@op("quarter.sync")
+def reporting_quarter(args, proposal=""):
+    """The fact of a quarter_report call that is not one of its arguments (GGG's derived facts): the compliance of the
+    quarter reporting."""
+    return {"follower_compliance": compliance.of_reporting_quarter()}
+
+
+@op("quarter.sync", derived=reporting_quarter)
 def quarter_report(c, args):
     """On the capital, record a quarter's ``population``, ``codex_id``, ``codex_version`` and optional federal vote
     ``leg``. Returns the ``quarter`` and ``drifting``: whether its codex differs from the capital's."""

@@ -417,6 +417,19 @@ def test_a_chapter_does_not_hook_guard_or_compute_a_reserved_operation(
     )
 
 
+@pytest.mark.parametrize("prefix", ["check_", "compute_"])
+def test_a_chapter_hooks_a_link_notice_and_never_guards_or_computes_it(tree, prefix):
+    args = {"check_": "args", "compute_": ""}[prefix]
+    body = f"    @fixed(legislation='x')\n    def {prefix}link_notify(self, {args}):\n        return None\n"
+    refused_with(
+        tree,
+        tax_chapter(body.replace(", )", ")"), "above, fixed"),
+        "link_notify can be hooked only; no chapter may guard or forbid it",
+    )
+    hook = "    @fixed(legislation='x')\n    def on_link_notify(self, event):\n        return None\n"
+    kept(tree, tax_chapter(hook, "above, fixed"))
+
+
 def test_domains_that_use_each_other_are_a_cycle(tree):
     write(
         tree,

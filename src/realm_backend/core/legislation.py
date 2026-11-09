@@ -34,10 +34,11 @@ from core.op import FORWARDING, GENERATOR, Call, filing, ops
 import core.legislation_sandbox  # bundled with the realm for its text (core.sandbox.module_source); the realm runs only its pure ``readable``
 import ggg_facts  # GGG's fact schema: the sandbox imports it from text, and the realm builds the Cedar schema from it
 
-# The operations no chapter may hook, guard or forbid, as realms.legislation.chapter.RESERVED lists them; written here
-# too because the realm compiles the library in its own interpreter only when an install checks a change list, and
-# the runtime needs the list before that (a test keeps the two equal).
+# The operations no chapter may hook, guard or forbid, and those it may only hook, as realms.legislation.chapter lists
+# them; written here too because the realm compiles the library in its own interpreter only when an install checks a
+# change list, and the runtime needs the lists before that (a test keeps them equal).
 RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
+HOOK_ONLY = ("link_notify",)
 ACTIONS = ("ggg_read", "local_day")  # what a chapter may ask the realm, through the sandbox's rpc
 # The operation that switches codices: after it the runtime runs the new codex, so the hooks the dispatcher would
 # run for it are the new codex's, which the switch runs once in a message of its own (``activate``), never the old one's.
@@ -223,10 +224,11 @@ def run(op, call, args, department, perform, record, read=False):
     """Run GGG operation ``op`` for ``call`` with ``args`` under the legislation: its guards first, then ``perform()``
     (the operation itself, or the filing of the proposal that carries a governed call), then ``record(out)``, the
     audit of the operation, then its hooks, whose effects are audited after it. ``department`` is the one deciding
-    a governed call directly, if any. A read runs no legislation. A generator, as the operation and the effects may
-    call other canisters."""
+    a governed call directly, if any. A read runs no legislation. A hook-only operation (``HOOK_ONLY``) runs no guard,
+    which fails closed when the codex is not loaded: nothing may refuse the notice that a link ended. A generator, as
+    the operation and the effects may call other canisters."""
     legislated = not read and call.origin != "codex" and not is_reserved(op, args) and _ensure()
-    if legislated:
+    if legislated and op not in HOOK_ONLY:
         _guard(op, args, call, department)
     out = perform()
     if isinstance(out, GENERATOR):
@@ -479,8 +481,8 @@ def _generated(box):
     "targeted", "types"}`` (core.auth.use_forbids), or None when its legislation forbids nothing, so that it costs the
     engine nothing. Only the policy text comes from the sandbox, and it is read, not trusted (core.forbids.targets):
     the schema and the fact types the realm validates it against and builds its requests from are the realm's own,
-    from GGG's fact schema and the context of core.auth. Fail when a generated policy names a reserved operation,
-    which the library refuses too (§10.4)."""
+    from GGG's fact schema and the context of core.auth. Fail when a generated policy names a reserved operation or a
+    hook-only one, which the library refuses too (§10.4)."""
     try:
         out = _ok(box.call("cedar", secret=_secrets()))
     except RuntimeError as e:  # the sandbox itself failed on the call
@@ -490,7 +492,7 @@ def _generated(box):
     from core.forbids import targets  # compiled when a codex forbids something, not at every start
 
     known = core.legislation_sandbox.readable(ggg_facts.FACTS, _secrets())
-    targeted = targets(out["cedar"], known, ops(), RESERVED)
+    targeted = targets(out["cedar"], known, ops(), RESERVED + HOOK_ONLY)
     schema, types = _schema_of({a: known[a] for actions in targeted.values() for a in actions})
     return {"schema": schema, "policies": out["cedar"], "targeted": targeted, "types": types}
 

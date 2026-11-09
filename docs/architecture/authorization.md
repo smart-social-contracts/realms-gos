@@ -132,6 +132,7 @@ A refusal names the forbids that fired, their ids and citations
 | Direct grants (`permission_grant`) | `User.permissions` |
 | A guest from another quarter | `GuestUser.permissions` |
 | A canister registered as a quarter | `quarter.sync` |
+| The capital at the other side of a link this realm has voted on (`SyncSource` or `Follower`) | `link.sync` |
 | Each **active** appointment | the position's profile, the department's permissions, and the operations of `Authority` rows granted to the department |
 
 Profiles are created at setup ([`api/setup.py`](../../src/realm_backend/api/setup.py)): `admin`
