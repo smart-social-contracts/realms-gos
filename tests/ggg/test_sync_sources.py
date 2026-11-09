@@ -227,6 +227,50 @@ def test_a_notice_waiting_when_the_realm_is_upgraded_is_sent_again_at_its_start(
     assert not Follower[FOL].unsent and status(Follower[FOL]) == "active"
 
 
+def test_a_notice_during_our_cycle_walk_is_refused_and_our_own_notice_after_it_completes_the_link():
+    seen = []
+
+    def src_info(_):  # the source votes while the walk is out
+        seen.append(direct("link_notify", SRC, side="sync_source", status="requested"))
+        return realm_info()
+
+    source = peer(SRC, realm_info=src_info, link_notify={"ok": True, "status": "active"})
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert [(n["ok"], n["kind"]) for n in seen] == [(False, "forbidden")]  # not voted yet, as far as the source can tell
+    assert source.sent("link_notify") == [{"side": "follower", "status": "requested"}]
+    assert status(SyncSource[SRC]) == "active" and not SyncSource[SRC].checking  # the answer to our notice completed it
+
+
+def test_the_same_for_a_follower_this_realm_accepts_while_its_walk_is_out():
+    peer(SRC, realm_info=realm_info(), link_notify=UNANSWERED)
+    ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    seen = []
+
+    def src_info(_):  # the follower votes while the walk, which reads this realm's sources, is out
+        seen.append(direct("link_notify", FOL, side="follower", status="requested"))
+        return realm_info()
+
+    peer(SRC, realm_info=src_info)
+    peer(FOL, link_notify={"ok": True, "status": "active"})
+    ok("follower_accept", "ctl", follower=FOL)
+    assert [(n["ok"], n["kind"]) for n in seen] == [(False, "forbidden")]
+    assert status(Follower[FOL]) == "active" and not Follower[FOL].checking
+
+
+def test_a_walk_that_fails_after_the_other_sides_notice_leaves_no_link_on_either_side():
+    seen = []
+
+    def cyclic(_):
+        seen.append(direct("link_notify", SRC, side="sync_source", status="requested"))
+        return realm_info(ME)
+
+    source = peer(SRC, realm_info=cyclic, link_notify=UNANSWERED)
+    assert "a cycle" in denied("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
+    assert [n["kind"] for n in seen] == ["forbidden"] and SyncSource[SRC] is None
+    assert source.sent("link_notify") == []  # and the source was told nothing
+    assert "not the capital" in denied("link_notify", "ctl", side="sync_source", status="requested")
+
+
 def test_either_side_ends_a_link_and_tells_the_other_and_a_new_vote_opens_a_new_link():
     source = peer(SRC, realm_info=realm_info(), link_notify={"ok": True, "status": "active"})
     follower = peer(FOL, link_notify={"ok": True, "status": "active"})

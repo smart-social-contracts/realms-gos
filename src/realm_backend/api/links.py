@@ -105,12 +105,14 @@ def valid_follower(args):
 def open_link(cls, key, **fields):
     """This side's vote: the link recorded as ``requested``, in place of an ended one under the same key. Returns the
     row and what it replaced, for ``undo``. It is written before the check for a cycle reads any other realm, so that a
-    vote cast at the same time on the other side sees it (I-NEST-2)."""
+    vote cast at the same time on the other side sees it (I-NEST-2), and it is ``checking`` until the check is over:
+    the other side's notice is refused meanwhile, as if this side had not voted yet, for the check may still undo the
+    vote (I-NEST-1)."""
     old = cls[key]
     before = view(old) if old is not None else None
     if old is not None:
         old.delete()
-    return cls(id=key, **fields), before
+    return cls(id=key, checking=True, **fields), before
 
 
 def undo(link, before):
@@ -174,7 +176,8 @@ def vote_link(cls, key, cycle, **fields):
     except Exception:  # noqa: BLE001  whatever stops the vote, the record written before the first call goes
         undo(link, before)
         raise
-    yield from notify(cls[key])
+    cls[key].checking = False
+    yield from notify(cls[key])  # their vote is in or it is not: this notice completes the link in either order
     return {}
 
 
@@ -315,13 +318,14 @@ def valid_notice(args):
 
 @op("link.sync", returns="status", check=valid_notice)
 def link_notify(c, args):
-    """From the capital at the other side of a link this realm has voted on: its ``side`` to this realm (``sync_source``
+    """From the capital at the other side of a link this realm has voted on (a vote still being checked for a cycle
+    counts as not voted yet): its ``side`` to this realm (``sync_source``
     or ``follower``) and the link's new ``status`` after its vote (``requested`` or ``active``: its vote is in) or
     ``{"Ended": {"by": <its capital>, "at": <seconds>}}``. Replies this realm's status of the link: ``active`` tells the
     caller its vote completed the link. Legislation may hook it (``on_link_notify``) and never guard or forbid it."""
     cls = Follower if args["side"] == "follower" else SyncSource
     link = cls[c.by]
-    if link is None:
+    if link is None or link.checking:
         raise Forbidden(f"{c.by} is not the capital at the other side of a link this realm has voted on")
     received(link, c.by, args["status"])
     return {"status": link_status(link)}
