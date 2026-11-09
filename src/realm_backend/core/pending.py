@@ -65,7 +65,7 @@ def prepare(grant, user, by, name, spec, args, note=""):
     """File the call of ``name`` with ``args`` that the delegate ``by`` makes for ``user`` under ``grant``, in place of
     running it. The grant must cover it and the member, acting for themselves, be allowed it now. Returns the action's id,
     the path of the page where the member decides, and when it lapses."""
-    from core.op import audit
+    from core.op import audit, ops
     from ggg import PendingAction
 
     needed = spec["perm_for"](args) if spec["perm_for"] else spec["perm"]
@@ -73,11 +73,11 @@ def prepare(grant, user, by, name, spec, args, note=""):
         raise auth.Denied(f"{name} cannot be done under this power of attorney: this grant does not cover it")
     auth.authorize(user, user, name, spec, args)
     auth.refuse_forbidden(user, name, spec, {**args, "on_behalf_of": user}, "")  # a forbidden action is never prepared
-    if name in CARRIES and isinstance(args.get("action"), dict):  # nor one that carries a forbidden call to the vote
+    carried = args.get("action") if name in CARRIES else None
+    if isinstance(carried, dict) and carried.get("op") in ops() and isinstance(carried.get("args") or {}, dict):
         from api import proposals  # it imports this module
 
-        proposals.check_action(args["action"])
-        proposals.refuse_forbidden_action(user, args["action"])
+        proposals.refuse_forbidden_action(user, carried)  # nor one that carries a forbidden call to the vote
     ranges.check(name, args)
     if spec["check"]:
         spec["check"](args)
