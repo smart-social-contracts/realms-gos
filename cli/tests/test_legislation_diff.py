@@ -19,6 +19,8 @@ from realms.cli.commands.legislation_report import Comparison
 VALENCIA = "eu/es/vc/46250-valencia"
 RATE = {"type": "Long", "optional": True, "min": 0, "max": 100_000_000}
 TAX_ENTRY = {"code": "String", "rate": RATE}
+KINDS = ["Fine", "Restitution", "CommunityService", "Suspension"]
+PENALTY = {"type": "String", "values": KINDS}  # an enumeration of GGG
 FACTS = {
     "tax_policy_propose": {"facts": {"policy": "String"}},
     "tax_policy_propose.taxes": {
@@ -27,6 +29,8 @@ FACTS = {
     },
     "tax_policy_draft.taxes": {"facts": TAX_ENTRY},
     "document_share": {"facts": {"kind": "String"}},
+    "verdict_draft": {"facts": {"case": "String"}},
+    "verdict_draft.penalties": {"facts": {"kind": PENALTY}},
     "loan_create": {
         "facts": {
             "term": "Period",
@@ -41,6 +45,7 @@ OPERATIONS = frozenset(
         "tax_policy_draft",
         "document_share",
         "loan_create",
+        "verdict_draft",
         "tax_assess",
         "proposal_create",
     }
@@ -328,6 +333,45 @@ def test_no_range_is_stated_when_a_fact_the_forbids_read_is_a_period(world):
     [result] = loan_results_between(world, base, head)
     assert result.forbidden.proved is False
     assert result.statements == []  # the term is a Period: it cannot be pinned
+
+
+def justice(refused):
+    return f"""from realms.legislation import F, above, forbid
+
+class Justice(above('justice')):
+    no_penalties = forbid('verdict_draft', F.kind.in_({refused!r}), each='penalties', legislation='x')
+"""
+
+
+def test_a_forbid_that_refuses_every_word_of_an_enumeration_makes_the_operation_dead(
+    world,
+):
+    head = world.change({"eu/es/justice.py": justice(KINDS)})
+    spain = world.realm(world.base, head, "eu/es")
+    [result] = [r for r in spain.folded if r.action == "verdict_draft.penalties"]
+    assert result.dead.proved is True
+    assert any(
+        "verdict_draft.penalties: nothing is permitted" in f for f in spain.failures()
+    )
+    assert world.diff(world.base, head).exit_code == 1
+
+
+def test_a_forbid_that_leaves_a_word_of_the_enumeration_open_does_not(world):
+    head = world.change({"eu/es/justice.py": justice(KINDS[:3])})
+    [result] = [
+        r
+        for r in world.realm(world.base, head, "eu/es").folded
+        if r.action == "verdict_draft.penalties"
+    ]
+    assert result.dead.proved is False
+    assert result.forbidden.proved is False
+    assert result.forbidden.example["facts"]["kind"] in KINDS[:3]
+
+
+def test_a_forbid_of_a_word_outside_the_enumeration_never_fires(world):
+    head = world.change({"eu/es/justice.py": justice(["Revocation"])})
+    spain = world.realm(world.base, head, "eu/es")
+    assert any("eu/es/justice/no_penalties never fires" in f for f in spain.failures())
 
 
 # ── The questions with one answer (points 3 and 4) ───────────────────────────────────────────────────────────────

@@ -256,9 +256,11 @@ ALSO = {"tax_policy_propose.taxes": ["tax_policy_draft.taxes"]}
 
 def cedar_fact(fact):
     """A fact of facts.json as the Cedar generator reads it (realms.legislation.cedar.FactType): its type name, or
-    ``{type, optional, min, max}``; None where a forbid cannot read it."""
+    ``{type, optional, min, max, values}``; None where a forbid cannot read it."""
     kind = fact["type"]
-    if kind in ("text", "principal") or "values" in fact:
+    if "values" in fact:
+        entry = {"type": "String", "values": list(fact["values"])}
+    elif kind in ("text", "principal"):
         entry = {"type": "String"}
     elif kind == "bool":
         entry = {"type": "Bool"}
@@ -292,13 +294,15 @@ def facts_module():
         "``FACTS`` is what ``realms.legislation.cedar.FactSchema`` reads, and its shape is stable (the realm's sandbox",
         "imports it, and so will ``realms legislation check`` when it binds forbids, §12.1)::",
         "",
-        '    {action: {"facts": {name: type | {"type", "optional", "min", "max"}}, "also": [action, ...]}}',
+        '    {action: {"facts": {name: type | {"type", "optional", "min", "max", "values"}}, "also": [action, ...]}}',
         "",
         "- ``action`` is a GGG operation (``tax_policy_propose``) or one list of its arguments, ``<operation>.<list>``",
         "  (``tax_policy_propose.taxes``), whose facts are the fields of one element; both are Cedar actions.",
         "- ``type`` is ``String`` (text, a principal, a variant's tag), ``Long``, ``Bool``, ``Period``, ``Set<String>``",
         "  or ``Record`` (a record, which a forbid can only test for: ``F.basis.is_none()``). A ``Long`` has ``min`` and",
-        "  ``max``, GGG's range for it; ``optional`` is only written when true.",
+        "  ``max``, GGG's range for it; ``optional`` is only written when true. A ``String`` that is an enumeration of GGG",
+        "  (a variant's tags, an enum) has ``values``, the words it can have: the realm's generator ignores them, and the",
+        "  analysis of ``realms legislation diff`` assumes them (§12.3).",
         "- ``also`` (only where present) names the other actions that the forbids on this action also apply to:",
         "  those on ``tax_policy_propose.taxes`` run on ``tax_policy_draft.taxes`` too, so a draft is checked as the",
         "  policy proposed from it will be.",

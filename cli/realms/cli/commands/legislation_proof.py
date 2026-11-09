@@ -152,8 +152,9 @@ def read_value(tokens: List[str], i: int):
 
 def assumption(codex, action: str) -> Optional[str]:
     """A forbid that fires on the requests of ``action`` that the fact schema rules out: a number outside the range GGG
-    gives it, a Period of a count or a unit GGG does not have. Added to every set under analysis, it takes them out of
-    the question ("a rate lies between 0 and 100 %"). It is analysis input and is never installed.
+    gives it, a Period of a count or a unit GGG does not have, a word outside the enumeration GGG gives a fact. Added to
+    every set under analysis, it takes them out of the question ("a rate lies between 0 and 100 %"). It is analysis
+    input and is never installed.
     """
     breaks = []
     for name, fact in codex.facts.actions[action].facts.items():
@@ -174,11 +175,14 @@ def assumption(codex, action: str) -> Optional[str]:
 
 
 def fact_outside(name: str, fact) -> Optional[str]:
-    """What it is for the fact ``name`` to be outside what GGG allows, or None where it allows anything."""
+    """What it is for the fact ``name`` to be outside what GGG allows (a range, a Period's count and unit, an
+    enumeration), or None where it allows anything."""
     value = attribute("context.facts", name)
     if fact.type == "Long" and fact.range:
         low, high = fact.range
         return f"({value} < {low} || {value} > {high})"
+    if fact.type == "String" and fact.values:
+        return f"!({' || '.join(f'{value} == {quoted(v)}' for v in fact.values)})"
     if fact.type == "Period":
         units = " || ".join(f"{value}.unit == {quoted(u)}" for u in UNITS)
         return (

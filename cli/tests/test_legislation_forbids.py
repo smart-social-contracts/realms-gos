@@ -33,7 +33,7 @@ from realms.cli.commands.legislation_analysis import (
     never_errors_problems,
     symcc,
 )
-from realms.legislation.cedar import FactSchema
+from realms.legislation.cedar import FactSchema, schema as cedar_schema
 from realms.legislation.expressions import I64_MAX, I64_MIN
 
 LAYERS = ("eu", "eu/es", "eu/es/vc", "eu/es/vc/46250-valencia")
@@ -957,6 +957,22 @@ def test_the_fact_schema_is_checked():
             },
             "has the same facts",
         ),
+        (
+            {"op": {"facts": {"x": {"type": "Long", "values": ["a"]}}}},
+            "distinct, non-empty words of a String",
+        ),
+        (
+            {"op": {"facts": {"x": {"type": "String", "values": []}}}},
+            "distinct, non-empty words",
+        ),
+        (
+            {"op": {"facts": {"x": {"type": "String", "values": ["a", "a"]}}}},
+            "distinct, non-empty words",
+        ),
+        (
+            {"op": {"facts": {"x": {"type": "String", "values": ["a", 1]}}}},
+            "distinct, non-empty words",
+        ),
         ({"op.a.b": {"facts": {}}}, "is not an action name"),
         ({"op": {"rules": {}}}, "an action is {facts"),
         ([], "is a dict of actions"),
@@ -978,6 +994,17 @@ def test_the_fact_schema_is_checked():
         0,
         100_000_000,
     )
+
+
+def test_the_words_of_an_enumeration_are_kept_and_change_no_cedar():
+    """GGG's enumerations (facts.json ``values``) are for the analysis of §12.3: Cedar's schema stays a String."""
+    words = {"op": {"facts": {"kind": {"type": "String", "optional": True, "values": ["A", "B"]}}}}
+    plain = {"op": {"facts": {"kind": {"type": "String", "optional": True}}}}
+    fact = FactSchema(words).actions["op"].facts["kind"]
+    assert fact.values == ("A", "B") and fact.optional and fact.type == "String"
+    assert FactSchema(plain).actions["op"].facts["kind"].values is None
+    assert FactSchema(words).actions["op"].shape() != FactSchema(plain).actions["op"].shape()
+    assert cedar_schema(FactSchema(words)) == cedar_schema(FactSchema(plain))
 
 
 def test_the_schema_declares_only_the_actions_asked_for():
