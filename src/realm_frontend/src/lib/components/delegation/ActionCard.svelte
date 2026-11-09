@@ -42,6 +42,12 @@
 	const who = $derived(name || $_('delegation.action.unnamed'));
 	const canDecide = $derived(current.status === 'pending' && viewer === current.grantor);
 	const proposalLink = (field: string, value: string) => (field === 'proposal' ? `/proposal/${value}` : '');
+	const outcomeColour = (status: string) =>
+		status === 'done'
+			? 'border-green-300 bg-green-50 text-green-900'
+			: status === 'failed'
+				? 'border-red-300 bg-red-50 text-red-900'
+				: 'border-blue-200 bg-blue-50 text-blue-900';
 
 	async function decide(approve: boolean) {
 		busy = true;
@@ -60,7 +66,7 @@
 
 <Card size="xl" class="shadow-sm space-y-4">
 	<div class="space-y-1">
-		<svelte:element this={headingTag} class="text-xl font-bold">
+		<svelte:element this={headingTag} class="text-xl font-bold text-gray-900">
 			{$_('delegation.action.asks', { values: { name: who } })}
 		</svelte:element>
 		<p class="text-xs text-gray-500">{$_('delegation.action.name_unverified')}</p>
@@ -77,7 +83,7 @@
 	</div>
 
 	{#if current.status !== 'pending'}
-		<div class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 space-y-1" role="status">
+		<div class="rounded-lg border p-3 text-sm space-y-1 {outcomeColour(current.status)}" role="status">
 			<p class="font-medium">{$_(`delegation.action.state.${current.status}`)}</p>
 			{#if current.status === 'failed'}
 				<p>{failure(current) || $_('delegation.action.failed_no_reason')}</p>
@@ -101,7 +107,7 @@
 	{/if}
 
 	<div class="space-y-1">
-		<h3 class="text-lg font-semibold">{current.title || current.method}</h3>
+		<h3 class="text-lg font-semibold text-gray-900">{current.title || current.method}</h3>
 		<p class="font-mono text-xs text-gray-500">{current.method}</p>
 	</div>
 

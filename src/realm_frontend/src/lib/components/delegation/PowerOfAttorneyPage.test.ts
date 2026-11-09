@@ -236,6 +236,15 @@ describe('the manual grant', () => {
 		expect(sent.operations).toBeUndefined();
 	});
 
+	it('says so when the groups could not be read, instead of claiming nothing can be delegated', async () => {
+		const read = realm.read.getMockImplementation()!;
+		realm.read.mockImplementation(async (name: string, args: unknown) =>
+			name === 'delegable_operations' ? { ok: false, error: 'sign in first' } : read(name, args)
+		);
+		render(Page);
+		expect((await screen.findByRole('alert')).textContent).toBe('sign in first');
+	});
+
 	it('will not grant with no group ticked', async () => {
 		await open();
 		await fireEvent.input(screen.getByLabelText('Grant to (principal)'), { target: { value: 'some-principal' } });

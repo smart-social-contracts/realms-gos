@@ -50,7 +50,11 @@
 			loading = false;
 			return;
 		}
-		groups = await loadDelegationGroups().catch(() => []);
+		try {
+			groups = await loadDelegationGroups();
+		} catch (e) {
+			error = e instanceof Error ? e.message : $_('delegation.page.failed');
+		}
 		await refresh();
 		const acceptId = query.get('accept');
 		if (acceptId) await accept(acceptId);
@@ -58,7 +62,6 @@
 
 	async function refresh() {
 		loading = true;
-		error = '';
 		await loadDelegations();
 		loading = false;
 	}
@@ -158,7 +161,7 @@
 							</div>
 							<div class="flex gap-2">
 								<a
-									class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-900 hover:bg-gray-100"
+									class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100"
 									href="#poa-activity"
 									onclick={() => (activityOf = d.id)}
 								>

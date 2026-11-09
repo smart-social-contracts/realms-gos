@@ -136,7 +136,8 @@ export async function loadDelegations(backendActor) {
 export async function loadDelegationGroups() {
 	const realm = await resolveDelegationRealm();
 	const reply = await realm.read('delegable_operations');
-	return reply.ok ? reply.groups || [] : [];
+	if (!reply.ok) throw new Error(reply.error);
+	return reply.groups || [];
 }
 
 /** Grant power of attorney from the caller (who is always the grantor) for ``groups``. Times are epoch seconds. */
@@ -181,6 +182,13 @@ export async function revokeAllDelegations() {
 export async function loadDelegationActivity(delegationId, from) {
 	const realm = await resolveDelegationRealm();
 	return realm.read('delegation_activity', { delegation: delegationId, count: 50, from });
+}
+
+/** The nickname of the member ``principal``; empty when they have none or are not a member. */
+export async function memberNickname(principal) {
+	const realm = await resolveDelegationRealm();
+	const reply = await realm.read('user_get', { user: principal });
+	return reply.ok ? reply.user.nickname || '' : '';
 }
 
 /** Whether ``principal`` is a member of this realm: the other kind of delegate is an AI connection. */

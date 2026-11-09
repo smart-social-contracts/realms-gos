@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { _ } from 'svelte-i18n';
-	import { Badge, Checkbox } from 'flowbite-svelte';
+	import { Badge } from 'flowbite-svelte';
 	import { type Choice } from '$lib/utils/authorizeChoices';
 
 	// The groups of a power of attorney to tick, each in the realm's own words: what it allows, what it risks, and
@@ -20,7 +20,9 @@
 		offerEverything?: boolean;
 	} = $props();
 
-	// Flowbite's Checkbox only follows `bind:group` when given `choices`, so each box is told its state and reports back.
+	// Flowbite's Checkbox ignores `bind:group` unless given `choices`, so these are plain checkboxes that report back.
+	const box = 'mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500';
+
 	function tick(id: string, on: boolean) {
 		ticked = on ? [...ticked, id] : ticked.filter((other) => other !== id);
 	}
@@ -30,24 +32,26 @@
 	<legend class="mb-2 text-sm font-medium text-gray-900">{legend}</legend>
 
 	{#if offerEverything}
-		<div class="rounded-lg border border-red-300 bg-red-50 p-3">
-			<Checkbox bind:checked={everything}>
-				<span>
-					<span class="font-medium">{$_('delegation.groups.everything')}</span>
-					<span class="block text-xs text-red-800">{$_('delegation.groups.everything_warning')}</span>
-				</span>
-			</Checkbox>
-		</div>
+		<label class="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 p-3">
+			<input type="checkbox" class={box} bind:checked={everything} />
+			<span>
+				<span class="text-sm font-medium text-gray-900">{$_('delegation.groups.everything')}</span>
+				<span class="block text-xs text-red-800">{$_('delegation.groups.everything_warning')}</span>
+			</span>
+		</label>
 	{/if}
 
 	{#each choices as choice (choice.id)}
-		<Checkbox
-			checked={ticked.includes(choice.id)}
-			onchange={(e: Event) => tick(choice.id, (e.currentTarget as HTMLInputElement).checked)}
-			disabled={!choice.held || everything}
-		>
-			<span class={choice.held ? '' : 'text-gray-400'}>
-				<span class="font-medium">{choice.label}</span>
+		<label class="flex items-start gap-3">
+			<input
+				type="checkbox"
+				class={box}
+				checked={ticked.includes(choice.id)}
+				onchange={(e) => tick(choice.id, e.currentTarget.checked)}
+				disabled={!choice.held || everything}
+			/>
+			<span class={choice.held ? 'text-gray-900' : 'text-gray-400'}>
+				<span class="text-sm font-medium">{choice.label}</span>
 				{#if choice.confirms}
 					<Badge color="yellow" class="ms-2">{$_('delegation.groups.asks_each_time')}</Badge>
 				{/if}
@@ -58,6 +62,6 @@
 					<span class="block text-xs text-amber-700">{choice.risk}</span>
 				{/if}
 			</span>
-		</Checkbox>
+		</label>
 	{/each}
 </fieldset>

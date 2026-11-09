@@ -1,14 +1,18 @@
 <script lang="ts">
 	import { _ } from 'svelte-i18n';
-	import { delegationsAsDelegate } from '$lib/stores/delegation.js';
+	import { memberNickname } from '$lib/stores/delegation.js';
 	import { sentForApproval } from '$lib/stores/approvalSent';
 
 	// Tells a member who acted for another that the act was not done but sent to that member to approve.
 	const sent = $derived($sentForApproval);
-	const member = $derived.by(() => {
-		const grant = $delegationsAsDelegate.find((d: { grantor: string }) => d.grantor === sent?.grantor);
-		return grant?.label || (sent?.grantor ? `${sent.grantor.slice(0, 8)}…${sent.grantor.slice(-6)}` : '');
+	const shortened = (principal: string) => `${principal.slice(0, 8)}…${principal.slice(-6)}`;
+
+	let nickname = $state('');
+	$effect(() => {
+		nickname = '';
+		if (sent?.grantor) memberNickname(sent.grantor).then((name: string) => (nickname = name));
 	});
+	const member = $derived(nickname || (sent?.grantor ? shortened(sent.grantor) : ''));
 </script>
 
 {#if sent}
