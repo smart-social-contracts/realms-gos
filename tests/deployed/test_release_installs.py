@@ -193,3 +193,34 @@ def test_an_upgrade_in_the_middle_of_a_later_install_changes_nothing_in_the_laye
     net.wait_until(lambda: status(town)["job"]["status"] in ("done", "failed"), rounds=2)
     assert status(town)["job"]["status"] == "done"
     assert routes(town) == {"arcadia/tax": ("https", "x/source", "2.0.0"), "arcadia/procedure": ("capital", "x/source", "2.0.0")}
+
+
+# ---- costs: reading a record, run by hand in a realm of its own
+
+RECORD = '''
+domains = ("tax", "procedure", "register", "local_regime", "water", "data_protection", "language", "treasury", "federation")
+releases = [{"source": "eu/es", "version": f"1.{n}.0", "published": n, "effective_from": n, "commit": "c" * 40,
+             "chapters": {d: "sha256:" + f"{n % 256:02x}" * 32 for d in domains}, "calendar": None,
+             "notes": {"en": "x" * 200}} for n in range(COUNT)]
+'''
+
+
+@pytest.fixture(scope="module")
+def lab(net):
+    return net.realm("lab", members=("alice",))
+
+
+@pytest.mark.parametrize("count", [60, 400])
+def test_what_reading_a_record_costs(lab, costs, count):
+    """The checks and the row of a record of ``count`` releases (about 1.2 KB each); the calls that fetch it are not
+    counted, a message's instructions end at each await. The first check also compiles the library (about 0.6 billion,
+    once per upgrade), which step 2 of an install has paid already."""
+    out = lab.shell(RECORD.replace("COUNT", str(count)))
+    assert "Traceback" not in out, out
+    size = int(lab.shell("import json\nprint(len(json.dumps(releases)))").strip().splitlines()[-1])
+    label = f"record of {count} releases ({size // 1024} KB)"
+    costs.measure(lab, f"{label}: check", "from api import links\nrecord = links.checked_record('k', 'eu/es', releases)")
+    costs.measure(lab, f"{label}: keep (write the row)", "links.keep_record(record)")
+    costs.measure(lab, f"{label}: read the row back", "import ggg\nlen(ggg.SourceRecord['k'].releases)")
+    costs.measure(lab, f"{label}: cut to the layers the new codex has",
+                  "from core import change_list\nchange_list.relays_for([], [record], {'source': 'eu/es', 'version': '1.0.0'})")
