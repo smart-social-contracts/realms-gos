@@ -1345,13 +1345,15 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   legislation needs to decide, never a key, a code, a person's private data, a sealed bid, who voted what, a
   grant, a payment account or what one member was told. So a notification shows its recipient, topic, sender and
   time and not its title; a request shows when it was filed, is due and was decided, and not its body, reply or
-  decision (free text); a dispatch shows its title and status and not its body; a procedure and a loan show no
-  `facts`; a document shows its title only when it is public; and a zone shows no member, because a member's home
-  cell is as private as `Human.h3_index` (a chapter reads a member's district as `User.home_zone`, the id of a zone
-  the realm defined, never a cell). The arguments and results it gets carry no key material or credential
-  (`secret=` on the operation: a code, keys, private data, a request's body and reply), and neither do the replies
-  of its effects or the call a proposal carries, while the personal data the audit log keeps out (`private=`) still
-  reaches the legislation that decides on it (I-PRV-1); and no read is answered while the codex loads.
+  decision (free text); a dispatch shows its recipient, topic and status and not its body; a procedure and a loan
+  show no `facts`; a document shows its title only when it is public, and a dispatch only when it publishes a
+  document (topic `publication`); and a chapter sees the zones the realm defined and never a member's home cell, which is as
+  private as `Human.h3_index` (a chapter reads a member's district as `User.home_zone`, the id of a zone the realm
+  defined). The arguments and results it gets carry no key material or credential (`secret=` on the operation: a
+  code, keys, private data, a request's body and reply, the home cell `zone_set` and `zone_clear` take), and neither
+  do the replies of its effects or the call a proposal carries and the result of running it, while the personal data
+  the audit log keeps out (`private=`) still reaches the legislation that decides on it (I-PRV-1); and no read is
+  answered while the codex loads.
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
     hooks still run;
@@ -1509,7 +1511,6 @@ instructions and a decision at about 0.7 M:
 |---|---|
 | engine: parse and validate the realm's policies, the schema and the forbids, once per activation | 94 M |
 | the same with the schema of every operation (101 KB), which the realm does not load | 5,435 M |
-| handing that schema over from the sandbox: the JSON encoding and decoding of 101 K characters (451 M before the fast JSON of #582; 4.6 k instructions per character in the canister's own) | 16 M |
 | the sandbox generates the Cedar and hands over the policy text: mostly reading GGG's fact schema (compile and its actions, about 175 M) and importing the generator (about 230 M) | 437 M |
 | the realm builds the schema and the fact types of the actions the forbids name, in its own interpreter | 2.5 M |
 | the same the first time since the realm last started or was upgraded: it compiles the library's Cedar module (497 M) and reads GGG's fact schema (194 M) and the schema writer's other modules (239 M) | 930 M, once |
@@ -1522,7 +1523,7 @@ instructions and a decision at about 0.7 M:
 | the forbids of a realm with no layered codex | 9 k |
 | naming the forbids behind a refusal (one call to the sandbox), only when a request is refused | 0.9 M |
 | install step 5 (`build`) of a codex with these forbids, in all: the first in a heap / after that (its 930 M is once) | 2,669 M / about 1,740 M |
-| a codex with these forbids, loaded and activated: the sandbox 1,134 M, the Cedar 437 M, the engine 94 M, in all (the sandbox of a codex without forbids: 1,121 M) | 1,677 M |
+| a codex with these forbids, loaded and activated: the sandbox 1,116 M, the Cedar and the realm's schema 442 M, the engine 95 M, in all (the sandbox of a codex without forbids: 1,103 M). The first load since the realm last started or was upgraded also pays the 930 M above: about 2.6 B | 1,658 M |
 
 The engine does not parse again: the forbids of a draft of 5 entries cost 20.5 M each time, against 94 M for one
 parse. A request costs about 4 M, not 0.7 M: that is the whole crossing into the engine, with the request and its

@@ -868,7 +868,7 @@ def schema(fact_schema, forbids=(), context=None, only=None):
     declares them) plus ``facts``; with ``forbids`` (the generic mode) also ``settings``, typed from
     the values the forbids read. ``only`` names the actions to declare besides ``call``: the realm
     declares just those its forbids name, as the schema of every operation is some 100 KB for its
-    Cedar engine to parse and for the sandbox to hand over (§9.4)."""
+    Cedar engine to parse (§9.4)."""
     base = [(name, kind, False) for name, kind in sorted((context or {}).items())]
     open_settings = setting_types(forbids)
     lines = [

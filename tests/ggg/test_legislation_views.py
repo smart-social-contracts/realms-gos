@@ -8,8 +8,8 @@ import pytest
 
 from core import legislation, op
 from core.db import Fail
-from ggg import Dispatch, Document, Loan, Notification, Procedure, Proposal, Request, User, Zone
-from kit import call
+from ggg import Dispatch, Document, Event, Loan, Notification, Procedure, Proposal, Request, User, Zone
+from kit import call, ok, rows
 from test_legislation_runtime import TOWN, activate, layered
 from test_legislation_runtime import fresh_realm  # noqa: F401  the autouse fixture
 
@@ -42,8 +42,8 @@ class Register(above("register")):
             return self.deny(Request.get("R1").reply)
         if args.what == "dispatch body":
             return self.deny(Dispatch.get("D1").body)
-        if args.what == "zone user":
-            return self.deny(Zone.get("%s").user)
+        if args.what == "home cell":
+            return self.deny(str(Zone.get("%s")))
 ''' % CELL
 
 
@@ -67,17 +67,47 @@ def refused(entity, field, value):
 # ── A member's home ──────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_a_zone_ties_no_member_to_a_cell_and_a_member_names_only_a_district():
+def test_a_chapter_sees_the_zones_the_realm_defined_and_never_a_members_home_cell():
     Zone(id=CELL, name="home", kind="residential", user="alice", metadata={"floor": 3})
     Zone(id="centro", name="Centro", kind="district", defined=True)
+    Zone(id="norte", name="Norte", kind="residential", defined=True)
     User["alice"].home_zone = "centro"
-    assert get("Zone", CELL) == {"id": CELL, "name": "home", "kind": "residential", "land": None}
-    assert [z["id"] for z in page("Zone")] == [CELL, "centro"]
+    assert get("Zone", CELL) is None
+    assert get("Zone", "centro") == {"id": "centro", "name": "Centro", "kind": "district", "land": None}
+    assert [z["id"] for z in page("Zone")] == ["centro", "norte"]
     assert all(set(z) == {"id", "name", "kind", "land"} for z in page("Zone"))
     for field in ("user", "metadata", "defined", "population"):
         assert field not in legislation.VIEWS["Zone"]
-    refused("Zone", "user", "alice")  # a find by member would give the same link back
+    refused("Zone", "user", "alice")  # a find by member would give the same link back; no other field is indexed
     assert get("User", "alice")["home_zone"] == "centro"
+
+
+ZONES = '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def check_zone_set(self, args):
+        if args.name == "ask":
+            return self.deny(str(args.zone))
+
+    def check_zone_clear(self, args):
+        return self.deny(str(args.zone))
+
+    def on_zone_set(self, event):
+        self.ggg.notification_send(recipient="User:mallory", title="zone",
+                                   body=str((event.args.get("zone"), event.result.get("zone"), event.args.get("name"))))
+'''
+
+
+def test_a_home_cell_reaches_no_guard_hook_or_audit_entry_of_the_operations_that_take_it():
+    activate(layered({(TOWN, "register"): ZONES}, layers=[TOWN]))
+    assert call("zone_set", "alice", zone=CELL, name="ask")["error"] == "None"  # the guard
+    ok("zone_set", "alice", zone=CELL, name="home")
+    assert Zone[CELL].user == "alice"  # the operation had the cell
+    assert [n.body for n in rows(Notification) if n.title == "zone"] == ["(None, None, 'home')"]  # the hook
+    assert call("zone_clear", "alice", zone=CELL)["error"] == "None"
+    entry = [e for e in rows(Event) if e.op == "zone_set"][-1]
+    assert "zone" not in entry.args and "zone" not in entry.result and entry.args["name"] == "home"  # the audit
 
 
 # ── What one member was told ─────────────────────────────────────────────────────────────────────────────────────
@@ -97,7 +127,7 @@ LOAN = {"id": "L1", "lender": "External:bank", "amount": 1000, "symbol": "REALM"
         "rate": 250, "fund": "ROOT", "outstanding": 900, "status": "active"}
 REQUEST = {"id": "R1", "kind": "licence", "by": "User:alice", "filed_at": 1, "due_at": 2, "extension_limit": 3,
            "status": "decided", "decided_at": 4}
-DISPATCH = {"id": "D1", "to": "External:bulletin", "topic": "ordinance", "title": "Ordinance 1", "document": "doc-1",
+DISPATCH = {"id": "D1", "to": "External:bulletin", "topic": "publication", "title": "Ordinance 1", "document": "doc-1",
             "codex": "c-1", "queued_at": 5, "status": "confirmed"}
 # What each keeps back: the rest of the row, as the entity stores it.
 ENTITIES = [
@@ -126,6 +156,16 @@ def test_a_dispatch_is_found_by_its_recipient_and_its_status():
     assert find("Dispatch", "status", "failed") == []
 
 
+def test_a_dispatch_shows_its_title_only_when_it_publishes_a_document():
+    Dispatch(**DISPATCH)
+    Dispatch(**{**DISPATCH, "id": "D2", "topic": "notice", "title": "Your file has a debt"})
+    assert [(d["id"], d["topic"], d["title"]) for d in page("Dispatch")] == [
+        ("D1", "publication", "Ordinance 1"), ("D2", "notice", None)]
+    assert get("Dispatch", "D2")["title"] is None
+    assert [d["title"] for d in find("Dispatch", "to", "External:bulletin")] == ["Ordinance 1", None]
+    refused("Dispatch", "title", "Your file has a debt")
+
+
 def test_a_chapter_reads_the_new_entities_and_the_home_district_and_nothing_more():
     Procedure(**PROCEDURE, facts={"income": 5})
     Loan(**LOAN)
@@ -138,7 +178,7 @@ def test_a_chapter_reads_the_new_entities_and_the_home_district_and_nothing_more
     assert call("t_view", what="allowed")["error"] == "positive:900:decided:Ordinance 1:centro:Centro"
     assert call("t_view", what="request reply")["error"].endswith("AttributeError: Request has no field 'reply'")
     assert call("t_view", what="dispatch body")["error"].endswith("AttributeError: Dispatch has no field 'body'")
-    assert call("t_view", what="zone user")["error"].endswith("AttributeError: Zone has no field 'user'")
+    assert call("t_view", what="home cell")["error"] == "None"  # no such row, though there is one
 
 
 # ── A document's title ───────────────────────────────────────────────────────────────────────────────────────────
@@ -161,14 +201,17 @@ def test_a_document_shows_its_title_only_when_it_is_public():
 # ── What a proposal carries ──────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_a_proposal_shows_the_call_it_carries_without_the_secrets_of_that_call():
+def test_a_proposal_shows_the_call_it_carries_and_its_result_without_the_secrets_of_that_call():
     carried = {"op": "t_view_secret", "args": {"what": "x", "code": "S3CRET", "more": [{"code": "S3CRET2", "keep": 1}]}}
-    Proposal(id="P1", title="carry", action=carried, status="voting")
-    Proposal(id="P2", title="plain", action={"op": "t_act", "args": {"code": "stays", "what": "y"}}, status="voting")
+    result = {"ok": True, "invite": {"code": "INVITE-CODE", "uses": 0}, "list": [{"code": "S3CRET3", "n": 2}], "done": "x"}
+    plain = {"op": "t_act", "args": {"code": "stays", "what": "y"}}
+    Proposal(id="P1", title="carry", action=carried, result=result, status="voting")
+    Proposal(id="P2", title="plain", action=plain, result={"ok": True, "code": "stays"}, status="voting")
     Proposal(id="P3", title="none", status="voting")
     stripped = {"op": "t_view_secret", "args": {"what": "x", "more": [{"keep": 1}]}}
-    assert get("Proposal", "P1")["action"] == stripped
-    assert [p["action"] for p in page("Proposal")] == [
-        stripped, {"op": "t_act", "args": {"code": "stays", "what": "y"}}, None]
+    cleaned = {"ok": True, "invite": {"uses": 0}, "list": [{"n": 2}], "done": "x"}
+    assert (get("Proposal", "P1")["action"], get("Proposal", "P1")["result"]) == (stripped, cleaned)
+    assert [(p["action"], p["result"]) for p in page("Proposal")] == [
+        (stripped, cleaned), (plain, {"ok": True, "code": "stays"}), (None, None)]
     assert [p["action"] for p in find("Proposal", "status", "voting")][0] == stripped
-    assert Proposal["P1"].action == carried  # what is stored is untouched
+    assert (Proposal["P1"].action, Proposal["P1"].result) == (carried, result)  # what is stored is untouched

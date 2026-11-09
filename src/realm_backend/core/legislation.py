@@ -48,9 +48,9 @@ READS = 2_000_000_000
 # What a chapter may read of GGG's entities, and nothing else: what legislation needs to decide, never a key, a code,
 # a person's private data, a sealed bid, who voted what, a grant or a payment account, nor what one member was told.
 # A Request leaves out its ``body`` and ``reply`` (personal data) and its ``decision`` (free text until GGG types it as
-# an enum), a Dispatch its ``body``, a Procedure its ``facts``; a Zone leaves out its ``user``, since a member's home
-# cell is as private as ``Human.h3_index`` (legislation reads a member's district through ``User.home_zone``, the id
-# of a zone the realm defined, never a cell).
+# an enum), a Dispatch its ``body``, a Procedure its ``facts``. A member's home cell is as private as ``Human.h3_index``:
+# a Zone has no ``user``, and ROWS_WHERE lets a chapter see the zones the realm defined only; legislation reads a
+# member's district through ``User.home_zone``, the id of such a zone.
 VIEWS = {
     "Appointment": ("id", "position", "user", "kind", "agent", "supervisor", "started_at", "ended_at", "status"),
     "Attribute": ("id", "human", "kind", "value", "status", "issuer", "verified_at", "expires_at"),
@@ -100,9 +100,16 @@ VIEWS = {
     "Verdict": ("id", "case", "issued_by", "decision", "status", "issued_at"),
     "Zone": ("id", "name", "kind", "land"),
 }
-# The fields of VIEWS that a row shows only when it is public (its ``public`` field is set): a private document's
-# title is metadata in clear. On any other row they read as None, and no ``find`` goes by one.
-PUBLIC_ONLY = {"Document": ("title",)}
+# The field of VIEWS that a chapter reads on some rows only, ``{entity: (field, shown)}``, ``shown(row)`` saying of the
+# row as VIEWS gives it whether the field is for the chapter. On any other row it reads as None, and no ``find`` goes by
+# it. A private document's title is metadata in clear; a dispatch's title is a public document's only when it
+# publishes one (topic "publication", api.crypto.document_publish), and any other notice's is not for legislation.
+CONDITIONAL = {"Document": ("title", lambda row: bool(row["public"])),
+               "Dispatch": ("title", lambda row: row["topic"] == "publication")}
+# The entities of which a chapter sees the rows whose field is set and no others, ``{entity: field}``: a zone is the
+# realm's (``defined``) or a member's home cell, which is no row to legislation: it reads as none, in a ``get`` as in a
+# ``page`` or a ``find``.
+ROWS_WHERE = {"Zone": "defined"}
 # The fields of VIEWS that are an amount of money. A chapter reads them as a ``Money``, which rounds as GGG does, in
 # the decimals a ``compute_`` is told (a parcel's value is in the accounting currency, and tax_assess computes a tax on
 # land through a codex only when it is billed in it); the other calls do not know them.
@@ -587,39 +594,47 @@ def _answer(action, kw):
 
 def _read(kw):
     """One row by id, or one page of rows (all, or those whose indexed ``field`` is ``value``), of an entity in
-    VIEWS, as plain data with the fields VIEWS allows and no other."""
+    VIEWS, as plain data with the fields VIEWS allows and no other, and without the rows ROWS_WHERE keeps back."""
     import ggg
 
-    fields = VIEWS.get(kw["entity"])
+    entity = kw["entity"]
+    fields = VIEWS.get(entity)
     if fields is None:
-        raise Fail(f"a chapter does not read {kw['entity']}")
-    cls = getattr(ggg, kw["entity"])
+        raise Fail(f"a chapter does not read {entity}")
+    cls = getattr(ggg, entity)
     if kw["method"] == "get":
         row = cls[str(kw["id"])]
-        return None if row is None else _shown(kw["entity"], row, fields)
+        return _shown(entity, row, fields) if _seen(entity, row) else None
     start = int(kw.get("start") or 1)
     if kw["method"] == "page":
         rows, after = cls.load_some(start, PAGE), start + PAGE
         after = after if after <= cls.max_id() else None
     elif kw["method"] == "find":
-        if kw["field"] not in fields or kw["field"] in PUBLIC_ONLY.get(kw["entity"], ()):
-            raise Fail(f"a chapter does not read {kw['entity']}.{kw['field']}")
+        if kw["field"] not in fields or kw["field"] == CONDITIONAL.get(entity, (None,))[0]:
+            raise Fail(f"a chapter does not read {entity}.{kw['field']}")
         rows, after = cls.find_by(kw["field"], kw["value"], from_id=start, count=PAGE)
     else:
         raise Fail(f"a chapter cannot {kw['method']!r} an entity")
-    return {"rows": [_shown(kw["entity"], r, fields) for r in rows], "next": after}
+    return {"rows": [_shown(entity, r, fields) for r in rows if _seen(entity, r)], "next": after}
+
+
+def _seen(entity, row):
+    """Whether a chapter sees ``row`` at all (ROWS_WHERE)."""
+    return row is not None and (entity not in ROWS_WHERE or bool(getattr(row, ROWS_WHERE[entity])))
 
 
 def _shown(entity, row, fields):
-    """One row as a chapter sees it: the fields VIEWS allows, less what the row itself keeps back. A private row
-    shows none of ``PUBLIC_ONLY``, and a proposal's carried call none of the arguments its operation keeps secret
-    (``secret=``), as when the call itself crosses (``_public``)."""
+    """One row as a chapter sees it: the fields VIEWS allows, less what the row itself keeps back. A row shows the
+    field of CONDITIONAL only when it is for the chapter, and a proposal's carried call and the result of running it
+    show none of the arguments and reply fields its operation keeps secret (``secret=``), as when the call itself
+    crosses (``_public``)."""
     data = view(row, *fields)
-    if entity in PUBLIC_ONLY and not data["public"]:
-        data.update({field: None for field in PUBLIC_ONLY[entity]})
-    if entity == "Proposal" and isinstance(data["action"], dict) and "args" in data["action"]:
-        action = data["action"]
-        data["action"] = {**action, "args": _public(action["args"], _secret(action.get("op")))}
+    if entity in CONDITIONAL and not CONDITIONAL[entity][1](data):
+        data[CONDITIONAL[entity][0]] = None
+    if entity == "Proposal" and isinstance(data["action"], dict):
+        secret = _secret(data["action"].get("op"))
+        data["action"] = {k: _public(v, secret) if k == "args" else v for k, v in data["action"].items()}
+        data["result"] = _public(data["result"], secret)
     return data
 
 

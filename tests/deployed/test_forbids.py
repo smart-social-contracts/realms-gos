@@ -77,7 +77,7 @@ t2 = ic.performance_counter(0)
 print(json.dumps({"permission": t1 - t0, "forbids": t2 - t1, "in_force": auth.live["forbids"] is not None}))
 '''
 # Where the cost of putting a codex's forbids in force goes: the sandbox (the library, the fact schema, the chapters),
-# the Cedar it generates and hands over, and the realm's engine parsing and validating it.
+# the Cedar text it generates and the schema the realm builds for it, and the realm's engine parsing and validating it.
 LOAD = '''
 import json
 from core import auth, legislation
@@ -97,22 +97,20 @@ print(json.dumps({"sandbox": t1 - t0, "generate": t2 - t1, "engine": t3 - t2,
                   "policies": len(generated["policies"]) if generated else 0,
                   "schema": len(generated["schema"]) if generated else 0}))
 '''
-# What the schema of every operation, instead of those the forbids name, would cost (§9.4): handing it over from the
-# sandbox, and the engine parsing and validating it with the same policies.
+# What the schema of every operation, instead of those the forbids name, would cost (§9.4): the engine parsing and
+# validating it with the same policies.
 FULL = '''
 import json
-from core import auth, sandbox
+from core import auth
 from ggg_facts import FACTS
 from realms.legislation import cedar as generator
 schema = generator.schema(generator.FactSchema(FACTS), (), auth.CONTEXT)
 policies = auth.live["policies"]
 t0 = ic.performance_counter(0)
-sandbox.plain({"schema": schema})
-t1 = ic.performance_counter(0)
 auth.load(schema, policies)
-t2 = ic.performance_counter(0)
+t1 = ic.performance_counter(0)
 auth.load(auth.live["schema"], policies)
-print(json.dumps({"hand_over": t1 - t0, "engine": t2 - t1, "schema": len(schema)}))
+print(json.dumps({"engine": t1 - t0, "schema": len(schema)}))
 '''
 # What a refusal costs, with and without naming the forbid that fired (one more call to the sandbox, only then).
 REFUSAL = '''
@@ -208,17 +206,15 @@ def test_c_the_forbids_are_parsed_once_when_the_codex_becomes_the_running_one(ca
     costs.report("install a codex with forbids: load (sandbox, generated Cedar, engine) and activate", got["load"] + got["activate"])
     parts = run(capital, LOAD % {"codex": got["codex"]})
     assert parts["sandbox"] + parts["generate"] + parts["engine"] < 3_000_000_000, parts
-    print(f"load of a codex with forbids: sandbox {parts['sandbox']:,}, generated Cedar and schema handed over "
+    print(f"load of a codex with forbids: sandbox {parts['sandbox']:,}, generated Cedar and the realm's schema "
           f"{parts['generate']:,} ({parts['policies']} + {parts['schema']} characters), engine parse and validation "
           f"{parts['engine']:,}")
-    for what, count in (("sandbox, spawn to finish", "sandbox"), ("Cedar generation and handover", "generate"),
+    for what, count in (("sandbox, spawn to finish", "sandbox"), ("Cedar generation and the realm's schema", "generate"),
                         ("Cedar engine: parse and validate", "engine")):
         costs.report(f"load of a codex with forbids: {what}", parts[count])
     full = run(capital, FULL)
-    costs.report("schema of every operation: handed over from the sandbox", full["hand_over"])
     costs.report("schema of every operation: engine parse and validation", full["engine"])
-    print(f"the schema of every operation ({full['schema']:,} characters): handed over {full['hand_over']:,}, "
-          f"engine {full['engine']:,}")
+    print(f"the schema of every operation ({full['schema']:,} characters): engine {full['engine']:,}")
 
 
 def test_d_the_entries_the_forbids_refuse_are_refused_at_draft_and_at_propose(capital, costs):
@@ -292,7 +288,7 @@ def test_i_a_codex_without_forbids_costs_the_engine_and_the_fact_schema_nothing(
     assert capital.shell(IN_FORCE).strip() == "False []"
     parts = run(capital, LOAD % {"codex": got["codex"]})
     assert parts["generate"] < 5_000_000 and parts["engine"] < 1_000_000 and parts["policies"] == 0, parts
-    costs.report("load of a codex without forbids: Cedar generation and handover", parts["generate"])
+    costs.report("load of a codex without forbids: Cedar generation and the realm's schema", parts["generate"])
     costs.report("load of a codex without forbids: sandbox, spawn to finish", parts["sandbox"])
     assert ok(capital, "tax_policy_draft", "ctl", **drafted(entry("ibi_urban", CAP + 1)))["policy"]
 
