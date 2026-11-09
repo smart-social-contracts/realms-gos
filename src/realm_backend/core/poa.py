@@ -26,6 +26,7 @@ INBOX_GROUPS = {"Department": "office", "Organization": "orgs"}
 OWN = {
     "budget_view": ("direct", "see", None, None),
     "tax_policy_view": ("direct", "see", None, None),
+    "journal_capital_issue": ("direct", "see", None, None),
     "task_create": ("direct", "admin", None, None),
     "task_edit": ("direct", "admin", None, None),
     "task_add_schedule": ("direct", "admin", None, None),
@@ -48,6 +49,7 @@ OWN = {
     "extension_call": ("direct", None, None, None),
     # Public reads, and an upgrade step for controllers: no member's act.
     "extension_list": ("none", None, None, None),
+    "journal_issue": ("none", None, None, None),
     "ops_list": ("none", None, None, None),
     "scale_status": ("none", None, None, None),
     "status": ("none", None, None, None),

@@ -1,6 +1,6 @@
 import json
 
-from core import chain
+from core import chain, journal
 from core import layered_codex as store
 from core import legislation
 from core import sandbox
@@ -107,6 +107,7 @@ def switch(waiting):
     switch_to(waiting, active())
     waiting.installed_at = chain.now()
     store.remember_source(waiting.layers[-1])
+    journal.codex_installed(waiting)
     chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
 
 
