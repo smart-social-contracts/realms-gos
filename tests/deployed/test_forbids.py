@@ -138,16 +138,25 @@ unnamed, _ = refused()
 legislation.firing = real
 print(json.dumps({"named": named, "unnamed": unnamed, "message": message}))
 '''
-# The boundary: a policy set the sandbox hands over with a permit smuggled in is refused, one that only says "permit" in a
-# string is not.
+# The boundary on the wasm: a policy set the sandbox hands over is read as the grammar the generator writes. The text of
+# a citation may say "permit"; a `//` comment that ends at `\\r`, a permit, a forbid of `call` or of one person may not.
 BOUNDARY = '''
 import json
 from core import forbids
 forbid = 'forbid (principal, action == Realm::Action::"a", resource)\\n  when { true };\\n'
+cases = {
+    "string": '@legislation("a permit (x); // /*")\\n' + forbid,
+    "review": forbid + '// "\\rpermit (principal, action, resource);\\r// "\\n',
+    "crlf": forbid + "\\r\\npermit (principal, action, resource);\\r\\n",
+    "block": forbid + "/* permit (principal, action, resource); */",
+    "plain": forbid + "permit (principal, action, resource);\\n",
+    "call": 'forbid (principal, action == Realm::Action::"call", resource)\\n  when { true };\\n',
+    "person": 'forbid (principal == Realm::User::"alice", action == Realm::Action::"a", resource)\\n  when { true };\\n',
+}
 got = {}
-for name, text in (("string", '@legislation("a permit (x);")\\n' + forbid), ("smuggled", forbid + "permit (principal, action, resource);\\n")):
+for name, text in cases.items():
     try:
-        got[name] = forbids.targets(text, {"a": {}}, ())
+        got[name] = forbids.targets(text, {"a": {}, "call": {}}, {"a"}, ())
     except Exception as e:
         got[name] = str(e)
 print(json.dumps(got))
@@ -192,7 +201,9 @@ def test_c_the_forbids_are_parsed_once_when_the_codex_becomes_the_running_one(ca
     stored = capital.shell(f"from ggg import LayeredCodex\nprint(LayeredCodex[{got['codex']!r}].forbids)").strip()
     assert stored == "['tax_policy_draft', 'tax_policy_propose']"  # kept for a day the codex does not load
     boundary = run(capital, BOUNDARY)
-    assert boundary["string"] == {"a": ["a"]} and "permits" in boundary["smuggled"], boundary
+    assert boundary["string"] == {"a": ["a"]}, boundary
+    for refused in ("review", "crlf", "block", "plain", "call", "person"):
+        assert isinstance(boundary[refused], str) and "generated" in boundary[refused], (refused, boundary)
     capital.filed = filed
     costs.report("install a codex with forbids: load (sandbox, generated Cedar, engine) and activate", got["load"] + got["activate"])
     parts = run(capital, LOAD % {"codex": got["codex"]})
