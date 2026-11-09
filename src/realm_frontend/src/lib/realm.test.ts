@@ -9,6 +9,8 @@ vi.mock('@dfinity/agent', () => ({
 	requestIdOf: () => 'request-id'
 }));
 
+import { get } from 'svelte/store';
+import { sentForApproval } from '$lib/stores/approvalSent';
 import { on, stillProcessing } from './realm';
 
 function processing() {
@@ -33,4 +35,26 @@ describe('an update the agent gave up on while it was still processing', () => {
 		const actor = { read: vi.fn().mockRejectedValue(processing()) };
 		await expect(on(actor).read('me')).rejects.toThrow('Call was returned undefined');
 	});
+});
+
+describe('a call that was filed for a member to approve instead of done', () => {
+  const filed = '{"ok":true,"pending":"AC-3","approve_link":"/delegations/confirm/AC-3","expires_at":9}';
+
+  it('is noted once, whichever page made it', async () => {
+    sentForApproval.set(null);
+    const actor = { run: vi.fn().mockResolvedValue(filed) };
+    await on(actor).run('payment_account_add', { on_behalf_of: 'alice', address: 'a' });
+    expect(get(sentForApproval)).toEqual({ action: 'AC-3', href: '/delegations/confirm/AC-3', grantor: 'alice' });
+  });
+
+  it('is not noted for a call that was done, or a read', async () => {
+    sentForApproval.set(null);
+    const actor = {
+      run: vi.fn().mockResolvedValue('{"ok":true,"proposal":"P-1"}'),
+      read: vi.fn().mockResolvedValue(filed)
+    };
+    await on(actor).run('proposal_vote', { proposal: 'P-1' });
+    await on(actor).read('action_get', {});
+    expect(get(sentForApproval)).toBeNull();
+  });
 });

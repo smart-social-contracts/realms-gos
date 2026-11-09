@@ -414,7 +414,175 @@
   "delegation": {
     "acting_on_behalf": "Agit au nom de {grantor}",
     "your_identity": "votre identité {you}",
-    "stop_acting": "Arrêter d'agir"
+    "stop_acting": "Arrêter d'agir",
+    "action": {
+      "asks": "{name} asks you to approve one action",
+      "name_unverified": "The name is chosen by the requester and is not verified.",
+      "principal": "Prepared by the principal",
+      "is_member": "A member of this realm.",
+      "is_ai": "Not a member: for example an AI assistant connection.",
+      "arguments": "The call, as {name} gave it",
+      "risk": "Risk:",
+      "next": "What happens next",
+      "note": "{name} says (their own words, not the realm's)",
+      "grant": "Prepared under power of attorney {grant}.",
+      "lapses": "You can decide until {when}.",
+      "signed_in_as": "Signed in as",
+      "recorded": "Recorded as your own act, prepared by {name}.",
+      "approve": "Approve",
+      "decline": "Decline",
+      "unnamed": "An unnamed requester",
+      "only_the_member": "Only the member it was prepared for can approve or decline it.",
+      "failed_no_reason": "The realm gave no reason. It will not be tried again.",
+      "state": {
+        "pending": "Waiting for your decision.",
+        "approved": "Approved. Whoever prepared it can now read it once; nothing else changes.",
+        "approving": "Running now…",
+        "done": "Done.",
+        "failed": "Failed: the realm refused it when it ran.",
+        "declined": "Declined. Nothing ran.",
+        "withdrawn": "Withdrawn by whoever prepared it. Nothing ran.",
+        "expired": "Expired: it waited more than a day. Nothing ran. Ask for it again if you still want it.",
+        "void": "No longer valid: the power of attorney it was prepared under has ended or no longer covers it. Nothing ran."
+      }
+    },
+    "consent": {
+      "framed_title": "Open this page directly",
+      "framed_text": "For your safety, a decision about power of attorney cannot be made inside another site. Open the link in its own browser tab."
+    },
+    "confirm": {
+      "title": "Approve an action",
+      "description": "Review one action prepared for you, then approve or decline it",
+      "sign_in_title": "Sign in to review this action",
+      "sign_in_text": "Someone asked you to approve an action in this realm. Sign in with the account it was prepared for; the action is then shown here.",
+      "missing": "This link has no action in it. Ask for a new link.",
+      "not_available": "Action not available",
+      "not_available_text": "An action can only be opened by the member it was prepared for and by whoever prepared it.",
+      "back": "Power of attorney"
+    },
+    "authorize": {
+      "title": "Authorize power of attorney",
+      "description": "Review a request to act for you in this realm",
+      "sign_in_title": "Sign in to review this request",
+      "sign_in_text": "Someone asked for power of attorney in this realm. Sign in with the account it was addressed to; the request is then shown here.",
+      "missing": "This link has no request in it. Ask for a new link.",
+      "heading": "Authorize {name}",
+      "requested_by": "Requested by principal",
+      "recognise": "Only grant it if you recognise this principal.",
+      "says_it_is_for": "Says it is for",
+      "wants_to": "It wants to act for you to",
+      "untick": "Untick anything you do not want to grant.",
+      "until": "Until",
+      "starts": "Starts {when}.",
+      "starts_now": "Starts at once.",
+      "sooner_not_later": "You can make it end sooner, not later.",
+      "recorded": "Every action is recorded as done on your behalf. You can revoke this at any time.",
+      "request_expires": "This request expires {when}.",
+      "never": "Never, even with everything: Launch, and approving the actions it prepares.",
+      "cancel": "Cancel",
+      "authorize": "Authorize",
+      "holds_none": "You hold none of what was asked for, so there is nothing to grant.",
+      "authorized": "Authorized",
+      "authorized_text": "{name} can now act for you with what you chose, until {until}. You can go back to it now.",
+      "revoke_hint": "Revoke it at any time under",
+      "declined": "Request declined",
+      "declined_text": "Nothing was granted.",
+      "not_available": "Request not available",
+      "not_available_text": "Requests expire after an hour and can only be opened by the member they were sent to.",
+      "could_not_load": "Could not load this request",
+      "failed": "Authorization failed",
+      "could_not_decline": "Could not decline",
+      "error": {
+        "none_chosen": "Choose at least one, or cancel.",
+        "not_asked": "That was not asked for.",
+        "everything_not_asked": "Everything was not asked for.",
+        "too_late": "The expiry can be at most {when}.",
+        "not_future": "The expiry must be in the future and after the start."
+      }
+    },
+    "groups": {
+      "asks_each_time": "Asks you each time",
+      "everything": "Everything",
+      "everything_warning": "Everything you can do in this realm, now and later, for up to 90 days. A few acts still ask you each time.",
+      "not_held": "You hold nothing in this group, so you cannot grant it."
+    },
+    "waiting": {
+      "title": "Waiting for you",
+      "nothing": "Nothing waits for you.",
+      "request": "{name} asks for power of attorney",
+      "review": "Review"
+    },
+    "grants": {
+      "title": "Your grants",
+      "none": "You have not granted any power of attorney.",
+      "revoke_all": "Revoke all",
+      "revoke": "Revoke",
+      "activity": "Activity"
+    },
+    "activity": {
+      "heading": "Activity",
+      "choose": "Choose Activity on a grant to see what its delegate did.",
+      "title": "What {name} did",
+      "none": "Nothing recorded yet.",
+      "older": "Older",
+      "reaches_back": "The realm keeps its most recent events only. This list reaches back to {when}.",
+      "outcome": {
+        "done": "done",
+        "waiting": "waiting for your approval",
+        "approved": "done after your approval",
+        "collected": "read collected"
+      }
+    },
+    "page": {
+      "title": "Power of attorney",
+      "description": "Let someone, or an AI, act for you within groups you choose",
+      "intro": "Let another member, or an AI assistant you connected, act for you in this realm: only within the groups you tick, only between the start and expiry you set. Some acts still ask you each time. Every action is recorded as done on your behalf, and you can revoke it here at any time. No private keys are shared.",
+      "sign_in": "Sign in to manage power of attorney.",
+      "failed": "Something went wrong",
+      "accepted": "Accepted.",
+      "revoked": "Revoked.",
+      "revoked_all": "Revoked {count, plural, one {# grant} other {# grants}}.",
+      "granted": "Granted.",
+      "granted_pending": "Granted. It takes effect once the member accepts it.",
+      "scheduled": "scheduled",
+      "status": "Status",
+      "from": "From {when}",
+      "expires": "Expires: {when}",
+      "no_expiry": "No expiry",
+      "pending_title": "Pending — accept to act on behalf",
+      "pending_none": "No pending invitations.",
+      "accept": "Accept",
+      "decline": "Decline",
+      "to_me_title": "Granted to me (active)",
+      "to_me_none": "None active.",
+      "act_as": "Act as them"
+    },
+    "form": {
+      "title": "Grant power of attorney",
+      "nothing": "You hold nothing in this realm that can be delegated.",
+      "delegate": "Grant to (principal)",
+      "delegate_hint": "A member's principal, or the principal your AI assistant shows for its connection.",
+      "name": "Name",
+      "name_placeholder": "e.g. My Claude",
+      "description": "Description",
+      "description_placeholder": "What it is for, e.g. vote on budget proposals while I travel",
+      "groups": "What it may do for you",
+      "starts": "Starts",
+      "expires": "Expires",
+      "longest": "With these it can last at most {days} days.",
+      "grant": "Grant",
+      "error": {
+        "no_delegate": "Enter the principal of the person or AI connection you are granting to.",
+        "no_group": "Choose at least one.",
+        "expiry": "The expiry must be after the start.",
+        "failed": "Grant failed"
+      }
+    },
+    "sent": {
+      "text": "Sent to {member} for approval.",
+      "link": "See it",
+      "dismiss": "Dismiss"
+    }
   },
   "footer": {
     "built_on_ic": "Construit sur Internet Computer",
