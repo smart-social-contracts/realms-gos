@@ -217,7 +217,7 @@ FACTS = {
     'tender_award': {'facts': {'tender': 'String', 'bid': {'type': 'String', 'optional': True}, 'justification': {'type': 'String', 'optional': True}, 'published_in': 'Set<String>'}},
     'tender_notice': {'facts': {'tender': 'String', 'journal': 'String', 'ref': {'type': 'String', 'optional': True}, 'at': {'type': 'Long', 'min': 0, 'max': 9223372036854775807, 'optional': True}}},
     'quarter_directory': {'facts': {'cursor': {'type': 'String', 'optional': True}, 'limit': {'type': 'Long', 'min': 0, 'max': 4294967295, 'optional': True}}},
-    'join_targets': {'facts': {}},
+    'join_targets': {'facts': {'home_zone': {'type': 'String', 'optional': True}}},
     'quarter_sync': {'facts': {}},
     'quarter_report': {'facts': {'population': {'type': 'Long', 'min': 0, 'max': 9223372036854775807}, 'codex_id': {'type': 'String', 'optional': True}, 'codex_version': {'type': 'String', 'optional': True}, 'leg': {'type': 'Record', 'optional': True}, 'follower_compliance': {'type': 'String', 'values': ['Compliant', 'NonCompliant', 'Unknown']}}},
     'quarter_register': {'facts': {'canister': 'String', 'name': {'type': 'String', 'optional': True}}},

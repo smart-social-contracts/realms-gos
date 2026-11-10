@@ -362,9 +362,16 @@ The realm domain's two entry points are methods of these kinds, so they follow t
 - `on_codex_activate(self, event)`: the hook on GGG's `codex_activate`. It runs once per realm when a
   codex becomes active, not once per quarter, and not on a revert. It replaces today's `init` hook. A
   zone set-up in it needs no check against creating a zone twice: zones are keyed by their primary ids.
-- `compute_realm_join(self, ...)`: GGG asks it, during `realm_join`, which quarter a new member goes to.
-  It may prefer the quarter that holds the member's zone; capacity decides first. It replaces today's
-  `assign_quarter` hook.
+- `compute_realm_join(self, user, home_zone, quarters)`: GGG asks it, when a new member is placed
+  (`join_targets`, which takes the optional `home_zone` the joiner states, else that of a member the realm
+  already knows), which quarter they go to. `quarters` are the quarters below capacity, each with its
+  `population` and its `zones`: what the quarter last reported of the zones its members live in, zone id to
+  how many (empty for none, None where the realm does not know; the counts serve this placement and no
+  reply carries them). It may prefer the quarter that holds the
+  member's zone; capacity decides first, because the realm offers only quarters with room and ignores an
+  answer that is not among them, and asks nothing when none has room. One zone may span several quarters,
+  each counting its own members of it. The home zone is a private choice of the joiner: the realm uses it for
+  this placement only and no reply carries it. It replaces today's `assign_quarter` hook.
 
 The rules (the checker enforces them, §12):
 

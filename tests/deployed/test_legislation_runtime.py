@@ -94,7 +94,7 @@ class Realm(above("realm")):
     def on_codex_activate(self, event):
         self.ggg.notification_send(recipient="User:%(founder)s", topic="codex", title="activated", body=event.args["codex"])
 
-    def compute_realm_join(self, user, quarters):
+    def compute_realm_join(self, user, home_zone, quarters):
         return max(quarters, key=lambda q: q.index).id if quarters else None
 '''
 TOWN_WATER = '''

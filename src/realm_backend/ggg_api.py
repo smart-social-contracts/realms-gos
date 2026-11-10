@@ -40,7 +40,8 @@ MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rub
         ("CredentialVerifyArgs", "header"): (0, 1), ("KeyGrantArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentStoreArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentShareArgs", "keys"): ("principal", "wrapped_dek"), ("BidScoreArgs", "scores"): ("criterion", "score"),
-        ("Fund", "balances"): ("symbol", "amount"), ("Release", "chapters"): ("domain", "checksum")}
+        ("Fund", "balances"): ("symbol", "amount"), ("Release", "chapters"): ("domain", "checksum"),
+        ("QuarterReportArgs", "zones"): (0, 1)}
 # GGG lists of records that Realms GOS keeps as a map from one field to the rest.
 KEYED = {("BidsRevealArgs", "openings"): "bid"}
 # Set to a list by the tests: every required field a reply had no value for is added to it.
@@ -571,10 +572,11 @@ def to_realms(x, t):
 
 def request(op, arg_t, arg):
     """The JSON arguments of ``op`` for a GGG argument of type ``arg_t``."""
+    arg_t = unwrap(arg_t) if arg_t else None  # an optional record is asked as the record; none given, as no arguments
     if arg_t is None:
         args = {}
     elif is_record(arg_t) or is_variant(arg_t):
-        args = to_realms(arg, arg_t)
+        args = to_realms(arg, arg_t) or {}
         if "id" in args:  # GetArgs and the like: the operation names the id after what it finds
             args[KEY.get(op, op.split("_")[0])] = args.pop("id")
     else:
@@ -815,6 +817,16 @@ def directory(out):
     return {"capital": out.get("capital"), "items": out.get("quarters", []), "next": None}
 
 
+def synced(out, args):
+    """quarter_sync's reply. The capital answers with the directory it sends its quarters and the zones the realm
+    defines, and the reply is those. The counts it keeps of a quarter's zones are for placing members and go in no
+    reply, since a small count singles out a person. A quarter's own call returns a summary, so its reply is its view
+    of the directory, which defines nothing."""
+    if "directory" not in out:
+        return directory(local("quarter_directory"))
+    return {**directory({"capital": chain.self_id(), "quarters": out["directory"]}), "zones": out["zones"]}
+
+
 def local(name, **args):
     """Another operation's reply, as the caller."""
     from core.op import call
@@ -847,7 +859,7 @@ BUILD = {
     "tender_get": lambda o, a: {"tender": o["tender"], "bids": o["tender"].get("bids", []), "next": None},
     "invoice_refresh": lambda o, a: {"items": list(o.get("invoices") or {}), "next": nxt(o)},
     "quarter_directory": lambda o, a: directory(o),
-    "quarter_sync": lambda o, a: directory(local("quarter_directory")),
+    "quarter_sync": synced,
     "federal_vote_propose": federal_vote,
     "department_chart": chart,
     "proposal_get": proposal_detail,
