@@ -658,5 +658,6 @@ def test_a_realm_with_a_link_that_has_not_ended_does_not_become_a_quarter():
     ok("sync_source_remove", "ctl", source={"Record": {"url": url, "checksum": CHECKSUM}})
     assert denied("quarter_join_federation", "ctl", capital="capital").endswith(f"follower {FOL}")
     ok("follower_remove", "ctl", follower=FOL)
+    peer("capital", realm_info={"ok": True, "realm": {"timezone": "UTC"}})
     ok("quarter_join_federation", "ctl", capital="capital")  # every link has ended
     assert Realm["1"].is_quarter and Quarter["capital"] is not None

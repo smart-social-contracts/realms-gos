@@ -182,11 +182,78 @@ def test_capital_forgets_a_seceded_quarter():
 
 def test_harbor_joins_agora():
     world.build()
+    reply("agora", "realm_info", realm={"timezone": "UTC"})
     assert "needs quarter.join_federation" in denied("quarter_join_federation", "alice", capital="agora")
     ok("quarter_join_federation", "ctl", capital="agora")
     r = Realm["1"]
     assert r.is_quarter and not r.is_capital and Quarter["agora"].index == 0 and quarters.capital() == "agora"
     assert "already belongs" in call("quarter_join_federation", "ctl", capital="other")["error"]
+
+
+def test_a_new_quarter_starts_on_its_capitals_zone():
+    world.build()
+    reply("agora", "realm_info", realm={"timezone": "Europe/Madrid"})
+    ok("quarter_join_federation", "ctl", capital="agora")
+    assert Realm["1"].timezone == "Europe/Madrid"
+    assert fake_chain.state["calls"][-1][:2] == ("agora", "realm_info")
+
+
+def test_a_realm_that_chose_its_zone_keeps_it_when_it_joins():
+    world.build()
+    reply("agora", "realm_info", realm={"timezone": "Europe/Madrid"})
+    ok("realm_configure", "ctl", timezone="America/Mexico_City")
+    ok("quarter_join_federation", "ctl", capital="agora")
+    assert Realm["1"].timezone == "America/Mexico_City"
+
+
+def test_a_capital_that_cannot_be_reached_or_is_no_realm_is_not_joined():
+    world.build()
+    fake_chain.state["replies"][("agora", "realm_info")] = Exception("agora is stopped")
+    out = call("quarter_join_federation", "ctl", capital="agora")
+    assert out["kind"] == "unavailable" and "agora is stopped" in out["error"]
+    assert "not a realm" in call("quarter_join_federation", "ctl", capital="nobody")["error"]  # it does not answer
+    r = Realm["1"]
+    assert not r.is_quarter and r.timezone == "UTC" and Quarter.count() == 0
+
+
+def test_the_realm_sets_a_quarters_zone_which_the_quarter_applies_first():
+    capital("north")
+    assert "name it with quarter" in call("quarter_configure", "ctl", timezone="Asia/Tokyo")["error"]
+    out = call("quarter_configure", "ctl", quarter="north", timezone="Mars/Olympus")
+    assert out["kind"] == "invalid_argument" and "no zone 'Mars/Olympus'" in out["error"]
+    world.policy(Department["Administration"], 2, 3)
+    filed = Proposal.count()
+    assert "name it with quarter" in call("quarter_configure", "ctl", timezone="Asia/Tokyo")["error"]
+    assert Proposal.count() == filed  # refused before it became a proposal
+    assert ok("quarter_configure", "ctl", quarter="north", timezone="Asia/Tokyo")["requires_vote"]
+    world.policy(Department["Administration"], 1, 1)
+
+    reply("north", "federation_message")
+    ok("quarter_configure", "ctl", quarter="north", timezone="Asia/Tokyo", name="North")
+    sent = json.loads(fake_chain.state["calls"][-1][2])
+    assert sent["topic"] == quarters.LOCAL_SETTINGS and sent["body"] == {"timezone": "Asia/Tokyo"}
+    assert Realm["1"].timezone == "UTC"  # the capital's own zone is set with realm_configure
+
+    fake_chain.state["replies"][("north", "federation_message")] = json.dumps({"ok": False, "error": "no"})
+    assert "refused timezone: no" in call("quarter_configure", "ctl", quarter="north", timezone="UTC", name="N")["error"]
+    fake_chain.state["replies"][("north", "federation_message")] = Exception("north is stopped")
+    out = call("quarter_configure", "ctl", quarter="north", timezone="UTC", name="N")
+    assert out["kind"] == "unavailable" and "cannot be reached" in out["error"]
+    assert Quarter["north"].name == "North"  # nothing changed
+
+
+def test_a_quarter_applies_its_zone_from_its_capital_only_and_no_member_relays_one(monkeypatch):
+    quarter(monkeypatch, "south", "north")
+    body = {"timezone": "Asia/Tokyo"}
+    ok("federation_message", CAPITAL, topic=quarters.LOCAL_SETTINGS, body=body)
+    assert Realm["1"].timezone == "Asia/Tokyo"
+    assert "only this quarter's capital" in denied("federation_message", "north", topic=quarters.LOCAL_SETTINGS,
+                                                   body={"timezone": "UTC"})
+    assert "cannot configure name" in denied("federation_message", CAPITAL, topic=quarters.LOCAL_SETTINGS,
+                                             body={"name": "Mine"})
+    refused = call("federation_message", "ctl", topic=quarters.LOCAL_SETTINGS, body=body, to="north")
+    assert refused["kind"] == "forbidden" and "never relayed" in refused["error"]
+    assert Realm["1"].timezone == "Asia/Tokyo"
 
 
 def test_population_counts_active_members_only():
