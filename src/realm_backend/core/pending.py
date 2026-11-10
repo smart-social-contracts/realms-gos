@@ -315,20 +315,21 @@ def card(c, a, result=None):
 def without_secrets(method, shown):
     """``shown``, a card or an exported row of an action whose call is to operation ``method``, with the secret fields of
     that call blank in its ``args`` and ``result`` and left out of its ``summary``, and those of a call it carries too
-    (a proposal's action). The summary line of an argument is made again from the argument without them."""
+    (a proposal's action). The summary keeps the lines as they were stored, and the line of an argument is made again
+    only where blanking changed that argument: making a line again is the dearest part of reading a page of cards."""
     from core import legislation
 
     hidden = secrets_of(method, delivered=False)
     args = legislation.carried(blank(method, shown["args"], delivered=False))
-    lines = [{"label": line["label"], "value": shown_line(line, args)} for line in shown["summary"]
-             if line["label"] not in hidden]
+    lines = [line if args.get(line["label"]) == shown["args"].get(line["label"]) else remade(line, args)
+             for line in shown["summary"] if line["label"] not in hidden]
     return {**shown, "args": args, "result": legislation.carried(blank(method, shown["result"], delivered=False)),
             "summary": lines}
 
 
-def shown_line(line, args):
-    """The summary line of an argument as it reads from ``args``; the realm's own lines are kept."""
-    return line["value"] if line["label"] not in args else shown(line["label"], args[line["label"]], args)
+def remade(line, args):
+    """The summary line of the argument that ``line`` is for, as it reads from ``args``."""
+    return {"label": line["label"], "value": shown(line["label"], args[line["label"]], args)}
 
 
 # ---- States

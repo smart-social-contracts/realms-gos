@@ -39,8 +39,18 @@ from core.op import call
 out = call("verdict_issue", {{"verdict": "{verdict}"}}, user="{judge}", by="{claude}", origin="task", root="task")
 print(out["ok"], out.get("error"))
 """
+# The largest card a signing act can have: a verdict text of 28,000 characters, which the card holds twice (as an argument and
+# as the text the judge signs) and which is past ASCII.
+LARGEST = 28_000
+FILING_LARGEST = """
+from core.op import call
+decision = ("Considerando la resoluci\\u00f3n que anula la denegaci\\u00f3n. " * 1000)[:{size}]
+out = call("verdict_modify_terms", {{"verdict": "{verdict}", "decision": decision, "on_behalf_of": "{judge}"}}, user="{claude}")
+assert out["ok"] and out["pending"], out
+"""
 VERDICT_STATUS = "from ggg import Verdict\nprint(Verdict['{verdict}'].status)"
 BUDGET = 300_000_000
+QUERY_LIMIT = 5_000_000_000  # what a query may spend
 
 
 @pytest.fixture(scope="module")
@@ -181,3 +191,44 @@ def test_quoting_the_longest_text_a_card_can_hold_costs_little(realm, costs):
     one = costs.measure(realm, "signing act: quoting 30,000 characters, one of them hidden", QUOTING)
     each = costs.measure(realm, "signing act: quoting 20,000 different hidden characters", QUOTING_EACH)
     assert one < BUDGET // 2 and each < BUDGET * 2
+
+
+def test_the_largest_card_a_signing_act_can_have_is_filed_and_approved_within_the_budget(realm, people, costs):
+    alice, claude = people["alice"], people["claude-conn"]
+    verdict = drafted(realm, people)
+    filed = costs.measure(realm, "signing act: a delegate files the largest card (28,000 characters)",
+                          FILING_LARGEST.format(size=LARGEST, verdict=verdict, judge=alice, claude=claude))
+    action = [a for a in ok(realm, "action_list", alice, query=True, status="pending")["actions"]
+              if a["method"] == "verdict_modify_terms" and len(a["args"]["decision"]) == LARGEST][0]
+    approved = costs.measure(realm, "signing act: the judge approves the largest card",
+                             APPROVAL.format(action=action["id"], judge=alice))
+    assert filed < BUDGET and approved < BUDGET
+    assert realm.shell(f"from ggg import Verdict\nprint(len(Verdict['{verdict}'].decision))").strip() == str(LARGEST)
+
+
+# A page of 100 cards that a stranger reads, such as a controller's export (the secrets of the calls they hold stay out): each
+# holds a long text of letters, zero-width characters and line breaks.
+HOSTILE_CARDS = """
+from core import pending
+from ggg import PendingAction
+
+for n in range(100):
+    args = {"network": "ICP", "address": "address-%d" % n, "symbol": "REALM", "label": "\\u00e9\\u200b\\n" * 300}
+    lines = [{"label": key, "value": pending.shown(key, value, args)} for key, value in sorted(args.items())]
+    PendingAction(id="HC-%d" % n, grantor="g", delegate="d", grant="D-0", method="payment_account_add", args=args,
+                  hash="h", summary=lines)
+"""
+EXPORT = """
+from core.op import call
+out = call("realm_export", {{"entity": "PendingAction", "count": 100}}, user="{ctl}")
+assert out["ok"] and len(out["rows"]) == 100 and out["rows"][0]["summary"], out
+"""
+
+
+def test_a_page_of_a_hundred_hostile_cards_is_cheap_to_read_for_a_stranger(realm, people, costs):
+    made = realm.shell(HOSTILE_CARDS)
+    assert "Traceback" not in made, made
+    realm.shell(EXPORT.format(ctl=people["ctl"]))  # the first read compiles what it reads: not part of the cost of a page
+    spent = costs.measure(realm, "pending actions: a stranger exports 100 hostile cards",
+                          EXPORT.format(ctl=people["ctl"]))
+    assert spent < QUERY_LIMIT // 5
