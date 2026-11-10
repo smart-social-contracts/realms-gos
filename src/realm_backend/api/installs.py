@@ -23,11 +23,15 @@ switch checks the active codex first. One job at a time, and a staged job holds 
 ``paused`` for an admin's ``codex_install_resume``; one not done in 24 hours fails, as does a step that has not
 finished 15 minutes after it was armed (a step that ran out of instructions leaves no trace of its own).
 ``codex_status`` shows the job, its step and its error.
+
+A quarter stages the codex its capital announced (api.propagation) with the same job, in staging mode: the bytes of the
+change list and of every chapter come from the capital, by checksum, and the switch is at the time the capital gave.
+A quarter that is ready after that time (``confirm``) switches only if the capital still runs the codex.
 """
 
 import json
 
-from api import codex, links
+from api import codex, links, quarters
 from core import chain
 from core import change_list
 from core import layered_codex as store
@@ -46,6 +50,7 @@ REUSED = ("status", "chapters", "proposal", "failures", "activates_at", "install
 MAX_CHANGE_LIST = 64 * 1024
 MAX_CHAPTER = store.MAX_CHAPTER
 HEX = "0123456789abcdef"
+LEFT = "this realm is no longer a quarter of the capital that announced the codex"
 
 
 def job_of(proposal):
@@ -64,11 +69,42 @@ def start(proposal, url, checksum):
         raise Fail("checksum is sha256:<64 hex digits>")
     if not isinstance(url, str) or not url.startswith("https://"):
         raise Fail("the change list is fetched over https")
-    job = store.start_job(proposal, {"url": url, "checksum": checksum})
+    return launch(store.start_job(proposal, {"url": url, "checksum": checksum}))
+
+
+def launch(job):
+    """The job's first step in the next message, and its 24-hour limit."""
     job.step = STEPS[0]
     arm(job.id)
     watch(job.id, TIMEOUT)
     return job
+
+
+def began(job):
+    """When the 24 hours of ``job`` began: when it started, or, for a quarter's job that waited for its switch time, when it
+    left the wait: the limit covers the work, not the wait."""
+    return job.staged.get("left_wait", job.started_at)
+
+
+def leave_wait(job):
+    """A quarter's job whose switch time has come goes on to ask its capital (``confirm``), with 24 hours from now."""
+    staged = job.staged
+    staged["left_wait"] = chain.now()
+    job.staged = staged
+    job.step = "confirm"
+    arm(job.id)
+    watch(job.id, TIMEOUT)
+
+
+def announced(job):
+    """Whether ``job`` stages a codex that a capital announced to this quarter (api.propagation)."""
+    return "announced" in job.staged
+
+
+def announced_by_my_capital(job):
+    """Whether the capital that announced the codex of ``job`` is the capital this realm has now: one that seceded, or
+    joined another federation, since is not a quarter of the realm that decided it."""
+    return quarters.federated() and quarters.capital() == job.staged["announced"]["capital"]
 
 
 def arm(job_id):
@@ -95,15 +131,20 @@ def begin(c, args):
     if job.status == "done":
         return {"codex": job.staged.get("codex"), "job": job.id}
     if job.status == "running" and job.step in (WAIT, "switch"):
-        try:
-            finish(job)
-        except Fail as e:
-            fail(InstallJob[job.id], str(e))
-            raise
+        switch(job)
         return {"codex": job.staged["codex"], "job": job.id}
     if job.status != "failed":
         fail(job, f"not done at the switch time: it was {job.status} in {job.step}")
     raise Fail(f"the install {job.id} failed in {job.step}: {job.error}")
+
+
+def switch(job):
+    """The switch of a staged job at its time: the job fails with the reason when it cannot (``finish``)."""
+    try:
+        finish(job)
+    except Fail as e:
+        fail(InstallJob[job.id], str(e))
+        raise
 
 
 def prepare(proposal):
@@ -147,7 +188,7 @@ def codex_install_resume(c, args):
         raise Conflict(f"{job.id} is {job.status}, not paused")
     job.status = "running"
     arm(job.id)
-    watch(job.id, max(job.started_at + TIMEOUT - chain.now(), 0))
+    watch(job.id, max(began(job) + TIMEOUT - chain.now(), 0))
     return {"job": job.id, "step": job.step}
 
 
@@ -157,7 +198,7 @@ def step(job_id):
     job = InstallJob[job_id]
     if job is None or job.status != "running" or job.step == WAIT:
         return
-    if chain.now() - job.started_at > TIMEOUT:
+    if chain.now() - began(job) > TIMEOUT:
         fail(job, TIMED_OUT)
         return
     try:
@@ -180,7 +221,7 @@ def step(job_id):
 def expire(job_id):
     """The 24 hours are over: a job still at work fails. A staged job waits for its switch as before."""
     job = InstallJob[job_id]
-    if job is not None and job.status == "running" and job.step != WAIT and chain.now() - job.started_at >= TIMEOUT:
+    if job is not None and job.status == "running" and job.step != WAIT and chain.now() - began(job) >= TIMEOUT:
         fail(job, TIMED_OUT)
 
 
@@ -196,13 +237,19 @@ def fail(job, reason):
     A job that has ended keeps its reason: the late reply to an outcall it made changes nothing."""
     if job.status not in ("running", "paused"):
         return
+    from api import propagation  # it imports this module
+
+    if announced(job):
+        propagation.unschedule(job)
     waiting = LayeredCodex[job.staged["codex"]] if job.staged.get("codex") else None
     if waiting is not None and waiting.status == "pending":
+        codex_id = waiting.id
         if job.staged.get("was"):  # the row this legislation had before the install: back to what it was
             for field, value in job.staged["was"].items():
                 setattr(waiting, field, value)
         else:
             waiting.delete()
+        propagation.withdraw(codex_id)
     job.staged, job.status, job.error, job.finished_at = {}, "failed", reason[:500], chain.now()
 
 
@@ -213,11 +260,15 @@ def fetch_change_list(job):
     """Step 1: the change list's bytes, unless they are stored already."""
     url, checksum = job.change_list["url"], job.change_list["checksum"]
     if ChapterSource[checksum] is None:
-        status, body = yield from store.fetched(url, MAX_CHANGE_LIST)
-        job = InstallJob[job.id]
-        if job.status != "running":
-            return None
-        receive_change_list(job, status, body)
+        if announced(job):
+            if not (yield from fetch_from_capital(job, checksum, MAX_CHANGE_LIST)):
+                return None
+        else:
+            status, body = yield from store.fetched(url, MAX_CHANGE_LIST)
+            job = InstallJob[job.id]
+            if job.status != "running":
+                return None
+            receive_change_list(job, status, body)
     return "check_change_list"
 
 
@@ -278,10 +329,14 @@ def stage_layers(job, found):
 
 
 def fetch_chapter(job, entry):
-    """The bytes of ``entry``, stored in the message that receives them: from the capital of the sync source that
-    vouches for the layer, when a realm does, else from the first of its URLs that serves the right ones. A capital that
-    serves other bytes than the record names is noted (``refused_by_capital``) before the URLs are tried. A
-    generator."""
+    """The bytes of ``entry``, stored in the message that receives them: in a quarter, from the capital that announced
+    the codex; else from the capital of the sync source that vouches for the layer, when a realm does, else from the
+    first of its URLs that serves the right ones. A capital that serves other bytes than the record names is noted
+    (``refused_by_capital``) before the URLs are tried. A generator."""
+    if announced(job):
+        if (yield from fetch_from_capital(job, entry["sha256"], MAX_CHAPTER)):
+            stage_fetched(InstallJob[job.id], entry, {"route": "capital"})
+        return
     refusals = []
     capital = vouching_capital(job, entry)
     if capital is not None:
@@ -360,6 +415,26 @@ def stage_fetched(job, entry, came):
     job.staged = staged
 
 
+def fetch_from_capital(job, sha256, most):
+    """The text the capital stores under ``sha256``, of at most ``most`` bytes, kept here under it. False when the job
+    was stopped while the call was out. A generator."""
+    if not announced_by_my_capital(job):
+        raise Fail(LEFT)
+    reply = yield from quarters.ask(quarters.capital(), "legislation_chapter", {"chapter": sha256})
+    if InstallJob[job.id].status != "running":
+        return False
+    if not reply.get("ok"):
+        raise Fail(f"the capital does not serve {sha256}: {reply.get('error')}")
+    text = reply["text"]
+    if len(text.encode()) > most:
+        raise Fail(f"{sha256} from the capital is above {most // 1024} KB")
+    try:
+        store.store_chapter(sha256, text)
+    except Fail as e:
+        raise Fail(f"{sha256} from the capital: {e}")
+    return True
+
+
 def check_sources(job):
     """Step 4: the change list against the records that vouch for its chapters (core.change_list.vouch), and every
     chapter of the new codex has its bytes stored: a layer from above that the records moved on without this
@@ -382,6 +457,8 @@ def build(job):
         raise Fail(out["errors"][0])
     entries = entries_of(job, planned, vouched_by, listed)
     codex_id = store.codex_id(planned.layers, planned.paths, entries)
+    if announced(job) and codex_id != job.staged["announced"]["codex"]:
+        raise Fail(f"the change list builds {codex_id}, not the {job.staged['announced']['codex']} the capital announced")
     current = codex.active()
     if current is not None and current.id == codex_id:
         raise Conflict(f"{codex_id} is already the active codex")
@@ -395,7 +472,39 @@ def build(job):
     row.layers, row.layer_paths, row.chapters = planned.layers, planned.paths, entries
     row.status, row.activates_at, row.proposal, row.failures = "pending", when, job.proposal, {}
     job.staged = {**job.staged, "codex": codex_id, "was": was, "replaces": listed["replaces"]}
-    return WAIT if when > chain.now() else "switch"
+    from api import propagation  # it imports this module
+
+    propagation.announce(job)
+    if when > chain.now():
+        return WAIT
+    return "confirm" if announced(job) else "switch"
+
+
+def confirm(job):
+    """A quarter asks the capital which codex it requires now (``quarter_sync``: the one in force, or a pending one once
+    due), at the switch time and after it, and goes on to the switch only if that is the codex it staged: one the
+    capital has left, withdrawn, reverted or replaced by a newer, is never activated. A newer codex the capital
+    announced is staged by its own job. A capital that does not answer leaves the quarter on its codex and the job
+    paused, for an admin's ``codex_install_resume`` to ask again. A generator."""
+    if not announced_by_my_capital(job):
+        raise Fail(LEFT)
+    try:
+        reply = yield from quarters.ask(quarters.capital(), "quarter_sync", {})  # an empty report: no change to its record
+        if not reply.get("ok"):
+            raise Fail(f"the capital refused: {reply.get('error')}")
+    except Exception as e:  # noqa: BLE001  rejected, trapped or refused: the codex is not confirmed
+        job = InstallJob[job.id]
+        if job.status == "running":
+            job.status, job.error = "paused", f"the capital did not confirm the codex: {e}"[:500]
+        return None
+    job = InstallJob[job.id]
+    if job.status != "running":
+        return None
+    job.error = ""
+    required, staged = reply["codex"]["id"], job.staged["announced"]["codex"]
+    if required != staged:
+        raise Fail(f"the capital requires {required or 'no codex'}, not {staged}: a codex it has left is not switched to")
+    return "switch"
 
 
 def vouching_of(row):
@@ -444,7 +553,8 @@ def finish(job):
 
 
 RUN = {"fetch_change_list": fetch_change_list, "check_change_list": check_change_list,
-       "fetch_chapters": fetch_chapters, "check_sources": check_sources, "build": build, "switch": finish}
+       "fetch_chapters": fetch_chapters, "check_sources": check_sources, "build": build, "confirm": confirm,
+       "switch": finish}
 
 
 # ---- What the steps share.
@@ -506,7 +616,10 @@ def installed_layers(current, realm):
 
 
 def activates_at_of(job):
-    """When the codex switches: its proposal's ``effective_at``, or 0 for as soon as it is built."""
+    """When the codex switches: its proposal's ``effective_at``, or 0 for as soon as it is built; in a quarter, the time
+    the capital announced."""
+    if announced(job):
+        return job.staged["announced"]["at"]
     proposal = Proposal[job.proposal] if job.proposal else None
     return proposal.effective_at if proposal is not None else 0
 

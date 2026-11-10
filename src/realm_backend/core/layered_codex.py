@@ -59,6 +59,19 @@ def remember_source(realm):
         row.manifest_data = data
 
 
+def in_force_since():
+    """When the codex in force took effect, seconds: its switch time T, or the revert that restored it. None before the
+    realm recorded it."""
+    return ((Realm["1"].manifest_data or {}).get("legislation") or {}).get("since")
+
+
+def remember_in_force(at):
+    row = Realm["1"]
+    data = row.manifest_data or {}
+    data["legislation"] = {**(data.get("legislation") or {}), "since": at}
+    row.manifest_data = data
+
+
 def live_job():
     """The install job that is running or paused, if there is one."""
     return first(InstallJob, "status", "running") or first(InstallJob, "status", "paused")

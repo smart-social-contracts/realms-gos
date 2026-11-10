@@ -58,6 +58,7 @@ OWN = {
     "token_catalog": ("none", None, None, None),
     "version": ("none", None, None, None),
     "proposal_run_scheduled": ("none", None, None, None),
+    "codex_switch_staged": ("none", None, None, None),
     "db_convert_indexes": ("none", None, None, None),
 }
 

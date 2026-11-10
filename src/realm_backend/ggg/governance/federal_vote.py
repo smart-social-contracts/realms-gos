@@ -40,3 +40,5 @@ class FederalVoteLeg(Row):
     eligible = Integer(default=0)
     status = String(default="open")
     hash = String(default="")
+    codex = String(default="")  # the checksum of the codex the quarter ran when it reported the leg
+    compliance = String(default='"unknown"')  # the quarter's flag when it reported, as JSON text (core.compliance)

@@ -5,8 +5,8 @@ import math
 from core import chain
 from core import compliance
 from api import assets, proposals
-from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, view
-from ggg import Codex, Forward, GuestUser, Member, Quarter, Realm, User, UserProfile
+from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, view
+from ggg import Forward, GuestUser, LayeredCodex, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
 from core.op import filing, op, run
 from core.pending import quoted
@@ -21,7 +21,7 @@ MOVES = {"setup": {"active"}, "active": {"suspended", "splitting", "merging"}, "
          "splitting": {"active"}, "merging": {"active"}}
 RULE = {"kind": "majority_of_quarters", "threshold": ONE // 2, "absent": "wait"}
 KINDS, ABSENT = ("majority_of_quarters", "majority_of_members"), ("wait", "no", "ignore")
-FIELDS = ("id", "name", "index", "status", "population", "codex_id", "codex_version", "last_sync")
+FIELDS = ("id", "name", "index", "status", "population", "codex_id", "codex_version", "compliance", "last_sync")
 # Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
 ADOPT_EVERY = 60
 
@@ -49,9 +49,13 @@ def population():
 
 
 def codex():
-    x = first(Codex, "status", "active")
+    """The codex this realm runs, as ``id`` and ``version``. A layered codex has no version: its checksum names it and
+    stands for both, so a quarter on another layered codex drifts."""
+    x = runtime.active()
     if x is None:
         return {"id": "", "version": ""}
+    if isinstance(x, LayeredCodex):
+        return {"id": x.id, "version": x.id}
     return {"id": (x.manifest or {}).get("id", x.id.split("@")[0]), "version": x.version}
 
 
@@ -68,10 +72,19 @@ def report():
     return {"population": population(), "codex_id": mine["id"], "codex_version": mine["version"]}
 
 
+def own_compliance():
+    """This realm's own flag. The capital is compliant by definition; a quarter does not judge itself: its capital does,
+    from what it reports (``propagation.judge``), and the quarter shows the flag it was given at its last sync."""
+    if not federated():
+        return compliance.valid("compliant")
+    return (realm().sync_state or {}).get("compliance") or compliance.valid("unknown")
+
+
 def me():
     r, state = realm(), realm().sync_state or {}
     return {"id": chain.self_id(), "name": r.name, "index": state.get("index", 0) if federated() else 0,
-            "status": "setup" if r.status == "setup" else "active", "last_sync": state.get("at", 0), **report()}
+            "status": "setup" if r.status == "setup" else "active", "last_sync": state.get("at", 0), **report(),
+            "compliance": own_compliance()}
 
 
 def known():
@@ -129,6 +142,11 @@ def scale():
 
 
 def ask(cid, name, payload):
+    """Run operation ``name`` on another realm canister. A call to a canister of this federation, the capital or a
+    quarter, carries the checksum of the codex this realm runs, so that the receiver can tell which legislation the
+    sender ran while a switch is under way (§9.5)."""
+    if Quarter[cid] is not None:
+        payload = {**payload, "codex": codex()["id"]}
     reply = yield from chain.call_op(cid, name, payload)
     return json.loads(reply or '{"ok": false, "error": "no reply"}')
 
@@ -159,6 +177,10 @@ def record(c, args):
         defined = {z.id for z in assets.defined_zones()}
         q.zones = {zone: int(n) for zone, n in args["zones"].items() if zone in defined}
     q.codex_id, q.codex_version = args.get("codex_id", q.codex_id), args.get("codex_version", q.codex_version)
+    from api import propagation  # it imports the install task, which imports this module
+
+    q.compliance = propagation.judge(q, args.get("codex_id"), propagation.required())
+    propagation.correct(q)
     q.last_sync = q.last_activity_at = chain.now()
     if q.status == "setup":
         q.status = "active"
@@ -176,19 +198,19 @@ def want_quarter():
 
 
 def apply_directory(reply):
-    seen, index = set(), 0
+    seen, index, flag = set(), 0, None
     for row in reply["directory"]:
         if row["id"] == chain.self_id():
-            index = row["index"]
+            index, flag = row["index"], row.get("compliance")
             continue
         q = Quarter[row["id"]] or Quarter(id=row["id"])
         for k in FIELDS[1:]:
-            setattr(q, k, row[k])
+            setattr(q, k, row.get(k, getattr(q, k)))  # a capital on the previous release sends no compliance
         seen.add(q.id)
     for q in [q for q in known() if q.id not in seen]:
         q.delete()
     apply_zones(reply.get("zones") or [])
-    realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index}
+    realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index, "compliance": flag}
 
 
 def apply_zones(definitions):
@@ -392,8 +414,8 @@ def quarter_join_federation(c, args):
 
 @op(None, read=True, public=True)
 def quarter_directory(c, args):
-    """The capital and every quarter with its status, population and codex, and whether that codex drifts from the
-    capital's. Returns ``capital`` and ``quarters``."""
+    """The capital and every quarter with its status, population and codex, whether that codex drifts from the
+    capital's, and the ``compliance`` the capital gives it. Returns ``capital`` and ``quarters``."""
     return {"capital": capital(), "quarters": directory()}
 
 
@@ -457,7 +479,7 @@ def self_change_quarter(c, args):
     if not reply.get("ok"):
         raise Fail(f"{dest} refused the move: {reply.get('error')}")
     f = Forward(id=next_id(Forward, "FWD"), subject=subject, origin=here, destination=dest, moved_at=moved_at,
-                signature=signature)
+                signature=signature, codex=codex()["id"], compliance=q.compliance)
     member.delete()
     assets.leave_home(user)
     user.home_quarter, user.profiles = dest, []
@@ -478,7 +500,9 @@ def quarter_sync(c, args):
         apply_directory(reply)
         return {"quarters": len(reply["directory"]), "drifting": drifting(codex()["version"])}
     q = record(c, args)
-    return {"directory": directory(), "codex": codex(), "index": q.index, "zones": zone_definitions()}
+    from api import propagation  # it imports the install task, which imports this module
+
+    return {"directory": directory(), "codex": propagation.in_force(), "index": q.index, "zones": zone_definitions()}
 
 
 def reporting_quarter(args, proposal=""):
