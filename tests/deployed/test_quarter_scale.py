@@ -435,13 +435,15 @@ def jgl_item(capital, seats, bench, when):
 
 def test_the_quarter_and_the_capital_upgrade_with_a_year_in_them(city):
     """post_upgrade on a quarter full of members and a year of bills, and on the capital after the Junta's year, within
-    an install's limit; the first call after it loads the codex again."""
+    an install's limit; the first call after it loads the codex again. The replica charges an install up front and
+    refunds what it did not use a round later, so the cost is read once a round has passed."""
     net, capital, quarter, ctl, size, bench = city
     for name, realm, member in (("quarter", quarter, members(size)[1][1]), ("capital", capital, net.people["alice"])):
-        bench.report(f"post_upgrade's setup.start on the {name} (heap)", heap(realm, START, bench)["spent"])
         before = realm.pic.get_cycles_balance(realm.id)
         realm.upgrade()
+        net.wait(1)
         bench.report(f"upgrade of the {name} (cycles)", before - realm.pic.get_cycles_balance(realm.id))
         _, count = charged(realm, "profile_update", {"nickname": "after"}, member, bench)
         bench.report(f"first call after the upgrade of the {name} (call)", count)
+        bench.report(f"post_upgrade's setup.start on the {name}, run again (heap)", heap(realm, START, bench)["spent"])
     assert quarter.ok("scale_status", "ctl", query=True)["populations"]
