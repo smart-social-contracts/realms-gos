@@ -18,3 +18,4 @@ from .federation import FederationMessage
 from .codex import Codex
 from .layered_codex import ChapterSource, InstallJob, LayeredCodex
 from .journal import JournalEntry
+from .links import Follower, Release, SourceRecord, SyncSource

@@ -9,7 +9,7 @@ of failing.
 
 | File | What it gives a test |
 |---|---|
-| `pic.py` | `Canister`: one canister on its own PocketIC instance. `call` runs an operation, `shell` runs Python in its heap, `wait` moves the clock, `upgrade` upgrades it in place. `Wasm`: a wasm uploaded once, for canisters of one instance to install from |
+| `pic.py` | `Canister`: one canister on its own PocketIC instance. `call` runs an operation, `shell` runs Python in its heap, `wait` moves the clock, `upgrade` upgrades it in place, `stop` and `start` make it reject calls for a while. `Wasm`: a wasm uploaded once, for canisters of one instance to install from |
 | `network.py` | `Network`: several realms of one wasm on **one** instance, for flows that cross canisters |
 | `outcalls.py` | `Web`: the HTTPS outcalls of those canisters, answered from a table of URLs |
 | `costs.py` | `costs`: the instruction counts tests report, printed as a table at the end of the session |

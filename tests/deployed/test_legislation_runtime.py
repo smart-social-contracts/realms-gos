@@ -94,7 +94,7 @@ class Realm(above("realm")):
     def on_codex_activate(self, event):
         self.ggg.notification_send(recipient="User:%(founder)s", topic="codex", title="activated", body=event.args["codex"])
 
-    def compute_realm_join(self, user, quarters):
+    def compute_realm_join(self, user, home_zone, quarters):
         return max(quarters, key=lambda q: q.index).id if quarters else None
 '''
 TOWN_WATER = '''
@@ -411,7 +411,7 @@ def test_h_a_codex_that_refuses_every_proposal_cannot_block_a_revert_which_runs_
     before = titles(town, founder)
     install(town, [(TOWN, "procedure", DENY_ALL)], layers=[TOWN], calendars=(), previous=previous)
     assert proposal(town, founder, "anything")["error"] == "nothing may be proposed"
-    pid = ok(town, "proposal_create", founder, title="revert", action={"op": "codex_revert", "args": {}})["proposal"]
+    pid = ok(town, "proposal_create", founder, title="revert", action={"op": "codex_revert", "args": {"codex": previous}})["proposal"]
     ok(town, "proposal_vote", founder, proposal=pid, choice="yes")  # the only member: the vote ends and the action runs
     assert ok(town, "proposal_get", founder, query=True, proposal=pid)["proposal"]["status"] == "executed"
     assert ok(town, "codex_status", founder, query=True)["codex"]["id"] == previous

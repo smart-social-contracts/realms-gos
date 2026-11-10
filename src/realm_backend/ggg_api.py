@@ -13,10 +13,10 @@ from basilisk import Principal  # tests replace it, to accept their names for pr
 
 import ggg
 import ggg_did
-from api import crypto, tasks
+from api import crypto, links, tasks
 from api.proposals import settings
 from api.setup import VERSION
-from core import chain, pending
+from core import chain, compliance, pending
 from core.candid import Principal as ParsedPrincipal, Reader, idl_hash, quote
 from core.op import dispatch, ops, run as drive
 from core.ratio import ONE
@@ -40,7 +40,8 @@ MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rub
         ("CredentialVerifyArgs", "header"): (0, 1), ("KeyGrantArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentStoreArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentShareArgs", "keys"): ("principal", "wrapped_dek"), ("BidScoreArgs", "scores"): ("criterion", "score"),
-        ("Fund", "balances"): ("symbol", "amount")}
+        ("Fund", "balances"): ("symbol", "amount"), ("Release", "chapters"): ("domain", "checksum"),
+        ("QuarterReportArgs", "zones"): (0, 1)}
 # GGG lists of records that Realms GOS keeps as a map from one field to the rest.
 KEYED = {("BidsRevealArgs", "openings"): "bid"}
 # Set to a list by the tests: every required field a reply had no value for is added to it.
@@ -249,6 +250,7 @@ def realm_fix(r):
     members = quarters.population() + (0 if quarters.federated() else sum(q.population for q in quarters.known()))
     return {"member_count": members, "voting_threshold": int(rules.get("voting_threshold", ONE // 2)),
             "voting_quorum": int(rules.get("voting_quorum", 0)), "casting_vote": rules.get("casting_vote"),
+            "sync_sources": list(links.sources()),
             "installed_version": get(r, "installed_version") or VERSION,
             "accounting_currency_decimals": get(r, "accounting_currency_decimals") if get(r, "accounting_currency") else None}
 
@@ -352,6 +354,10 @@ def named(row):
 
 FIX = {
     "Realm": realm_fix,
+    "SyncSource": lambda s: {"source": links.source_ref(s), "status": links.link_status(s)},
+    "Follower": lambda f: {"capital": get(f, "id"), "status": links.link_status(f),
+                           "compliance": compliance.of(get(f, "compliance"))},
+    "Quarter": lambda q: {"compliance": compliance.of(get(q, "compliance"))},
     "Member": lambda m: {"user": get(m, "user") or ident(m)},
     "User": lambda u: {"private_data": get(u, "private_data") if ident(u) == chain.caller() else None},
     "ProposalAction": action,
@@ -566,10 +572,11 @@ def to_realms(x, t):
 
 def request(op, arg_t, arg):
     """The JSON arguments of ``op`` for a GGG argument of type ``arg_t``."""
+    arg_t = unwrap(arg_t) if arg_t else None  # an optional record is asked as the record; none given, as no arguments
     if arg_t is None:
         args = {}
     elif is_record(arg_t) or is_variant(arg_t):
-        args = to_realms(arg, arg_t)
+        args = to_realms(arg, arg_t) or {}
         if "id" in args:  # GetArgs and the like: the operation names the id after what it finds
             args[KEY.get(op, op.split("_")[0])] = args.pop("id")
     else:
@@ -702,7 +709,7 @@ KEY = {"crypto_envelope": "scope", "crypto_derive_key": "transport_public_key", 
        "federal_vote_finalize": "vote", "federal_vote_cancel": "vote", "tax_policy_propose": "policy",
        "budget_extend": "period",
        "allocation_rule_propose": "rule", "representative_remove": "appointment", "document_get": "document",
-       "dispute_get": "dispute", "report_view": "report"}
+       "dispute_get": "dispute", "report_view": "report", "legislation_chapter": "chapter"}
 # Operations that take ``limit`` as such, not as a page size.
 KEEP_LIMIT = {"document_delete"}
 
@@ -765,6 +772,7 @@ ARGS = {
     "delegation_grant": grouped, "delegation_request": grouped, "delegation_request_decide": grouped,
     "department_set_policy": lambda a, g: {**{k: v for k, v in a.items() if k != "policy"}, **a.get("policy", {})},
     "treasury_configure": lambda a, g: {"config": a},
+    "codex_revert": lambda a, g: a["codex"] or {},  # an optional record, the codex to restore: none, the previous one
     "representative_remove": lambda a, g: seat_owner(a),
     "delegation_list": lambda a, g: {"from_" + a.get("role", "delegate"): a.get("from"), "count": a.get("count")},
     "notification_read": lambda a, g: {**a, "all": True} if "notification" not in a else a,
@@ -809,6 +817,16 @@ def directory(out):
     return {"capital": out.get("capital"), "items": out.get("quarters", []), "next": None}
 
 
+def synced(out, args):
+    """quarter_sync's reply. The capital answers with the directory it sends its quarters and the zones the realm
+    defines, and the reply is those. The counts it keeps of a quarter's zones are for placing members and go in no
+    reply, since a small count singles out a person. A quarter's own call returns a summary, so its reply is its view
+    of the directory, which defines nothing."""
+    if "directory" not in out:
+        return directory(local("quarter_directory"))
+    return {**directory({"capital": chain.self_id(), "quarters": out["directory"]}), "zones": out["zones"]}
+
+
 def local(name, **args):
     """Another operation's reply, as the caller."""
     from core.op import call
@@ -841,7 +859,7 @@ BUILD = {
     "tender_get": lambda o, a: {"tender": o["tender"], "bids": o["tender"].get("bids", []), "next": None},
     "invoice_refresh": lambda o, a: {"items": list(o.get("invoices") or {}), "next": nxt(o)},
     "quarter_directory": lambda o, a: directory(o),
-    "quarter_sync": lambda o, a: directory(local("quarter_directory")),
+    "quarter_sync": synced,
     "federal_vote_propose": federal_vote,
     "department_chart": chart,
     "proposal_get": proposal_detail,
@@ -849,6 +867,7 @@ BUILD = {
     "external_report": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
     "notification_send": lambda o, a: {"Dispatch": o["dispatch"]} if "dispatch" in o else {"Notification": o["notification"]},
     "credential_verify": lambda o, a: {"valid": o.get("valid"), **(o.get("checks") or {})},
+    "legislation_chapter": lambda o, a: o["text"].encode(),
     "codex_status": lambda o, a: {**o, "checksum": (o.get("codex") or {}).get("id"),
                                   "history": [h["id"] for h in o.get("history", [])], "signing": signing()},
 }

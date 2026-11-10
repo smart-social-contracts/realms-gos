@@ -113,8 +113,8 @@ These are settled. Each later section applies them.
 18. **No rule** on hook order between domains, and none on lower layers filling settings that forbids
     above read.
 19. **The realm domain's entry points are GGG hooks:** `on_codex_activate` and `compute_realm_join`. A
-    follower leaving is a GGG event of the links. `sync_source_remove` is reserved: no chapter can
-    forbid, guard or hook it.
+    follower leaving is a GGG event of the links, `link_notify`, which a chapter may hook and never guard
+    or forbid. `sync_source_remove` is reserved: no chapter can forbid, guard or hook it.
 20. **`each="taxes"`** ranges over the saved TaxPolicy's `taxes`, and the same check runs when the
     draft is saved.
 21. **Each realm sets its own `Realm.timezone`** (an IANA name) and never takes it from another realm,
@@ -362,9 +362,16 @@ The realm domain's two entry points are methods of these kinds, so they follow t
 - `on_codex_activate(self, event)`: the hook on GGG's `codex_activate`. It runs once per realm when a
   codex becomes active, not once per quarter, and not on a revert. It replaces today's `init` hook. A
   zone set-up in it needs no check against creating a zone twice: zones are keyed by their primary ids.
-- `compute_realm_join(self, ...)`: GGG asks it, during `realm_join`, which quarter a new member goes to.
-  It may prefer the quarter that holds the member's zone; capacity decides first. It replaces today's
-  `assign_quarter` hook.
+- `compute_realm_join(self, user, home_zone, quarters)`: GGG asks it, when a new member is placed
+  (`join_targets`, which takes the optional `home_zone` the joiner states, else that of a member the realm
+  already knows), which quarter they go to. `quarters` are the quarters below capacity, each with its
+  `population` and its `zones`: what the quarter last reported of the zones its members live in, zone id to
+  how many (empty for none, None where the realm does not know; the counts serve this placement and no
+  reply carries them). It may prefer the quarter that holds the
+  member's zone; capacity decides first, because the realm offers only quarters with room and ignores an
+  answer that is not among them, and asks nothing when none has room. One zone may span several quarters,
+  each counting its own members of it. The home zone is a private choice of the joiner: the realm uses it for
+  this placement only and no reply carries it. It replaces today's `assign_quarter` hook.
 
 The rules (the checker enforces them, §12):
 
@@ -1172,6 +1179,17 @@ becomes official only when the source publishes it by its own vote. A sync sourc
 the releases of every layer it relays, as it installed them. The record is what followers check
 against; the official journal (§9.6) is where people read the same releases.
 
+**Reading a record** ([`core/records.py`](../../src/realm_backend/core/records.py)). A realm's record is read from
+its capital, 100 releases at a time. The reply also names `source`, the id of the realm's own layer (null while it
+has none), which tells a record that is a layer's publisher's from one that only relays it. A stand-in record is a
+JSON file at its URL, `{"source": "<its source id>", "releases": [...]}`, with the same releases (times in seconds,
+`chapters` a domain to its checksum), the layers it relays first and its own layer last, oldest first. A realm's
+link pins its content, so the file must be exactly the bytes whose checksum the link names. Either record is
+refused if it lists more than 1000 releases or more than 512 KB, if a release has other fields than
+`legislation_releases` gives, a checksum that is not `sha256:` and 64 hex digits, a domain GGG does not have,
+`calendar` among its chapters, or a time GGG's typed methods cannot encode (in seconds, from 0 to 18446744073), if it lists a relayed layer twice or a version of its own layer twice, or its own
+layer before a relayed one. What was read is kept with the time (`SourceRecord`), for the compliance check (§11).
+
 **What the resolver takes.** The library function `realms.legislation.plan(realm, relays, own)` (the
 install task's step 5, `realms legislation resolve`) computes the layer paths from plain data. Each
 chosen sync source, one with an active link, is its record as the releases it runs, in layer order:
@@ -1202,6 +1220,19 @@ chosen sync source, one with an active link, is its record as the releases it ru
   order they load), the calendars and the realm chapters it skipped (§3.2). `resolve` loads them into a
   codex and gives the flattened view of §5.9 as plain data.
 
+A follower installs a layer from above as a release, one layer at a time (§7, §9.2). The install reads the
+records of its active sync sources only when it brings a release. **The layers the realm runs keep the order the
+active codex runs them in**, whatever a record says, each as the realm runs it (the release, checksums and voucher
+it was installed with); a record that has moved on to a newer release of one of them is no conflict, since the
+install does not touch it. The release's layer takes the place of its earlier release when the realm runs it
+already. A new layer goes right after the last layer the vouching record lists above it and right before the first it
+lists below it, and only there: a layer the realm runs that the record puts in neither relation would have no order
+against the new one, which §3.3 refuses, and so is a record that lists none of the layers the realm runs.
+Every active record must agree with the order that results: one that puts two of the layers the other way round than
+the realm runs them is refused, naming both. `plan` gets the result as one record, named by its last layer. So a
+record that relays several layers is installed in any order, a change to the realm's own layer needs no call to a sync
+source, and a layer whose link has ended stays where it is.
+
 A follower checks each layer from above against one record:
 
 - **its publisher's**, when the follower syncs from the publisher directly;
@@ -1217,6 +1248,42 @@ Layer paths are computed at install time and **stored in the codex**, with each 
 version, checksum, the record that vouched for it, the route and the fetch time. At run time the realm
 never needs the record, except to check compliance (§11).
 
+**How the realm keeps its links and its record** ([`api/links.py`](../../src/realm_backend/api/links.py)):
+
+- A link is a row on each side, made by that side's vote: `SyncSource` on the follower (a realm by its
+  capital, a stand-in record by its url), `Follower` on the source. Both are `requested` until the
+  other side's vote is in, then `active`; a stand-in record is `active` on the follower's vote alone.
+  Either side ends it (`ended`, with who and when), and an ended link is replaced by a new pair of votes.
+  The follower keeps the layers it installed.
+- The side whose vote changes a link tells the other side's capital with `link_notify` and reads the
+  answer, `active` meaning that their vote is in. A notice nobody answered (the call is rejected) is kept
+  as `unsent` and sent again every minute, also after an upgrade; a refusal is an answer. A vote still
+  `checking` when the realm starts has no walk left (none outlives an upgrade): it ends, by this realm, and
+  the other side is told, so that its key is not locked for good. Only the
+  capital at the other side of a link this realm has voted on may send `link_notify` and
+  `follower_report` (permission `link.sync`); a quarter links to no realm and makes no call to one.
+- A vote refuses a cycle: it reads the `sync_sources` of `realm_info` along the sources of the other
+  realm, at most 32 realms, and a realm it cannot read fails the vote with `Unavailable`. The link is
+  recorded before the walk, marked `checking` while the walk is out (the other side's notice is refused
+  then, as for a vote not cast), and undone if the walk refuses it. A realm that is already a follower
+  counts as taking legislation from this one. The walk runs when the vote applies, not when a proposal that
+  carries it is filed: filing makes no call to another realm.
+- Calls between realms are **not bounded-wait**, which the model asks for: basilisk 0.15 has no call with
+  a timeout, so a canister that never answers holds the vote's message open and blocks stopping the realm
+  for an upgrade. A rejected call (a stopped realm) is handled, and a vote should name only realms its
+  members trust.
+- A follower's report is kept on its `Follower` row as the follower's own claim, with its time. The
+  `follower_compliance` fact of a transfer to `Follower:<capital>` and of a quarter's report is the
+  compliance last reported, `Unknown` for any other recipient or a link that is not active.
+- The record is `Release` rows: the realm's own, published by `legislation_release_publish` (every
+  checksum already in `ChapterSource`, one source id, a version once, never edited), and the releases of
+  the layers it runs from above, which the install task keeps with `links.relay_release` as the record that
+  vouches for them lists them. `legislation_releases` answers the relayed ones top to bottom, then its own,
+  oldest first, and the id of the realm's own layer; `legislation_chapter` answers the text stored under a
+  checksum. A release is kept under `<source>@<version>`, so neither holds an `@`.
+- `Quarter.compliance` is stored and read like a follower's; nothing writes it yet (the scheduled checks,
+  D7, and the switch of a codex across the quarters will).
+
 ---
 
 ## 9. The realm canister
@@ -1227,7 +1294,8 @@ New entities, beside today's `Codex` ([`api/codex.py`](../../src/realm_backend/a
 
 ```
 LayeredCodex { id; layers; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, route, fetched_at, url, size}};
-           previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal }
+           previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal;
+           voting_rule (the realm's rule and voting window when it became active, §10.1) }
 ChapterSource { sha256 (key); source text }            the downloaded bytes, stored once
 InstallJob { id; proposal; change_list {url, checksum}; step; staged; status: running | paused | failed | done; error; started_at; finished_at }
 ```
@@ -1272,19 +1340,29 @@ per message:
    is the active codex's id as `codex_status` shows it (a layered codex's checksum, a legacy codex's
    `name@version`), or null when none is active. A chapter from a layer above comes only as a release of
    that layer, whole.
-3. **Fetch each chapter,** one or a few per message, by the route available: a canister call to the
-   sync source's capital, or an HTTPS outcall to a URL. Check size and sha256, then store it in
-   `ChapterSource`. The realm skips the download if `ChapterSource` already has that sha256.
+3. **Read the records, then fetch each chapter.** For a release install the first message reads the
+   records of the active sync sources (§8) and checks the change list against them at once, so that a
+   release no record vouches for fails before anything is fetched. Then each chapter, one or a few per
+   message, by the route available: a canister call to the capital of the sync source that vouches for
+   the layer (`legislation_chapter`), then the change list's URLs and mirrors, each an HTTPS outcall;
+   the first route whose bytes match the size and sha256 wins. Store it in `ChapterSource`. The realm
+   skips the download if `ChapterSource` already has that sha256. A capital that serves other bytes than
+   its record names is noted in the audit log (`install_chapter_refused`: the capital, the chapter, the
+   checksum asked for) before the URLs are tried, so that a realm can see it. The codex row keeps the
+   route, `capital` or `https`.
 4. **Check sources:**
    - each layer from above must match the record that vouches for it: its publisher's, when the realm
-     syncs from the publisher directly, otherwise the relaying sync source's, whichever route the bytes
-     came by; a copy that does not match is refused;
+     syncs from the publisher directly, otherwise the relaying sync source's (the first of them, in the
+     order of the links), whichever route the bytes came by; a copy that does not match is refused. A
+     layer the realm already runs keeps the voucher it was installed with, and the order it runs in: a
+     record that lists the layers in another order is refused (§8);
    - a release install must match one release exactly and be whole;
    - if two sync sources relay different releases of the same layer, the follower's own legislation
      decides which one it installs. **If its legislation does not choose, the install is refused and
      the old codex keeps running.**
 5. **Build:**
-   - compute the new layer paths from the paths the sync sources relay, then the realm's own layer
+   - compute the new layer paths from the layers the realm runs from above, in the order it runs them,
+     with the release's layer placed by the record that vouches for it, then the realm's own layer
      (`plan`, shape in §8);
    - refuse paths that do not form one chain (§3.3);
    - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`
@@ -1307,7 +1385,8 @@ per message:
    switch, the proposal's execution or the install step that made it.
    **Legislation applies when the proposal passes and its changes are executed,** which is at that
    time. No chapter calls `codex_activate`, and no publication, in the official journal (§9.6) or in an
-   outside gazette, plays a role in when the legislation applies.
+   outside gazette, plays a role in when the legislation applies. A release install also puts the release in
+   the realm's own record, where the record that vouches for it lists it (§8).
 
 The job's other rules:
 
@@ -1376,11 +1455,13 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
     writes.
 - **Making "unhealthy" visible.** `LayeredCodex.failures` holds, per chapter file and method, the failure
   count, the last error and when; `ggg_codex_status` shows it as `failures`, and `healthy` is false while it is
-  not empty. The flag clears when that method next succeeds. There is no automatic revert. Still to add (D5, D8):
-  - **a notification** to the IT admin team (§10) on the first failure, and again after 24 hours if it
-    still fails;
-  - **on the codex page,** the failing chapters and methods, and for IT team members a "revert"
-    button that starts `codex.revert_fast`.
+  not empty. The flag clears when that method next succeeds. There is no automatic revert.
+  - **The IT admin team (§10) is notified** (topic `codex.failing`, to the team's department) on the first
+    failure of a method, and again when it fails once more at least 24 hours after the last notice: the
+    entry's `notified` is the time of that notice. A realm with no team designated notifies no one, and the
+    next failure notifies the team once there is one.
+  - **Still to add (D8), on the codex page:** the failing chapters and methods, and for IT team members a
+    "revert" button that starts `codex.revert_fast`.
 
   No banner for members.
 - **Across domains:** what crosses a domain boundary is plain data, frozen on the way (a list is a tuple, a
@@ -1609,16 +1690,39 @@ proposal's `effective_at` (§5.2).
 ## 10. Revert floor and the IT admin team
 
 1. **Member revert:** `codex.revert` (it exists, `governed=realm_wide`) can restore **any** earlier
-   codex in the history. The proposal's voting rules are the governance settings of **the codex being
-   restored**, so a bad codex can't change the rules for undoing itself.
-2. **IT admin team:** the realm admins define who it is and how many of them must approve. This is
-   **left open on purpose:** no structure (department, positions, list), no size and no m-of-n is
-   hardcoded. [#490](https://github.com/smart-social-contracts/realms-gos/issues/490) proposes the
-   form of the team before any code is written. IT team members can run `codex.revert_fast`, which can
-   only restore the **previous** codex. Each use is recorded on the public record.
+   codex in the history, named by its checksum (`codex_revert { codex }`; none names the codex the active one
+   replaced). It needs no download: every codex's chapters are in `ChapterSource`. Filed as a proposal, it
+   names the codex it restores, found when it is filed, so that what is voted on is what runs; a
+   `proposal_create` that carries a revert naming none is refused. The proposal's voting rules are those of
+   **the codex being restored**: the realm records its rule (threshold, quorum and casting vote) and its
+   voting window with each codex when it becomes active, and a revert vote follows the rule and runs under the
+   window recorded with the codex it restores, so a bad codex can't change the rules for undoing itself, nor
+   lengthen the window to stall it. A revert does not record them again. A codex that became active before
+   they were recorded gets them when the codex after it is switched in (the rule and window in force until
+   then); one replaced before that has none, and its revert is decided by the realm's current rule and
+   window.
+2. **IT admin team:** a **department the realm admins designate** (`it_team_set { department }`), so that the
+   realm hardcodes no structure, no size and no m-of-n: its seats and its policy (m of n, quorum, veto) are
+   whatever the admins set, and the votes, vetoes, audit and power-of-attorney rules that already exist apply.
+   The seat holders of that department hold `codex.revert_fast`: only its seats give it, and no profile may list
+   it. Whoever holds `all` (the admins and the controllers) passes the permission check too, and a team whose policy
+   is direct (one of one) lets them revert fast without a seat. `codex_revert_fast` is governed by the department under its own policy, and runs under the voting window
+   recorded with the codex it restores, as a member revert does, so that a codex cannot shorten the window to
+   expire the team's vote. It can only restore the **previous** codex, named when it is filed like any revert, and
+   is refused while no team is designated, whatever files or replays it. Each use is recorded on the audit log with an Event: who
+   asked, and the codex restored.
 3. **Changing the IT team** is done by the realm admins through the realm's admin operations, never by
-   a chapter. That operation (called `it_team.set` below; #490 proposes its form) is reserved like the
-   others.
+   a chapter. That operation, `it_team_set` (`""` designates none), is governed like the realm's other admin
+   settings: direct during setup, a realm-wide vote after launch. It is reserved like the others, and no
+   call of a codex (an effect of a chapter, or of a legacy codex), nor a proposal that one files, however deep
+   it is nested, may change the team's department (its policy, its positions, who holds them, an invite to a
+   seat of it, an expulsion, its place in the realm or its deletion) or take something from a member who holds a
+   seat in it: a status other than active, a role, a permission from a profile they have, the authority the team
+   was given. A department, a seat or a member is named as the operations find it, by its name or by its
+   internal id, each operation in its own class (`user_set_status` finds a member, `user_remove` and
+   `role_revoke` a user). A department that is the team cannot be deleted until another is designated. A
+   realm still in setup when it was upgraded to the release that has `it_team_set` has a founder profile
+   without `it_team.set` (existing profiles are not rewritten): its admins designate the team.
 4. **Reserved operations:** `codex.revert`, `codex.revert_fast`, `it_team.set` and
    `sync_source_remove` (no chapter can forbid a follower's leaving).
    - No chapter may forbid them, guard them or hook them. The checker refuses it, and the runtime
@@ -1632,9 +1736,14 @@ proposal's `effective_at` (§5.2).
      actions, and the checker guarantees that.
    - A sync source's legislation hooks a follower's leaving on its own side, as a GGG event of the
      links, named in [ggg#3](https://github.com/smart-social-contracts/ggg/issues/3) (§13). That
-     operation runs on the sync source and is not reserved.
+     operation, `link_notify`, runs on the sync source and is not reserved: a chapter may hook it
+     (`on_link_notify`, reading the new `status`, such as `Ended`) and may never guard or forbid it, so a
+     side always learns that a link ended. The checker refuses a guard or a forbid on it.
 5. **History:** every codex ever active is kept, with its chapters in `ChapterSource`, so a revert
-   needs no download. A revert does not clear a non-compliant flag: a follower that reverts below a
+   needs no download. A checksum names a layered codex by its id, and a legacy codex by its `checksum` or by
+   the `name@version` the history lists it by; one that is not in the history is not found, and neither
+   the active codex nor a pending one is an earlier codex (a pending codex is activated by `codex_activate`
+   alone). A revert does not clear a non-compliant flag: a follower that reverts below a
    release already in effect is non-compliant again. A revert does not run `on_codex_activate`.
 
 ---

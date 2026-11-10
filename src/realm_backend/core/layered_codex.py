@@ -1,5 +1,6 @@
 """The rules of a layered codex's storage (docs/codices/layered-codex.md §9.1): its id, the texts of its chapters,
-and the one install job at a time. The install task (§9.2) writes through these."""
+and the one install job at a time. The install task (§9.2) writes through these, and fetches a text by HTTPS with
+``fetched`` and ``decoded``."""
 
 import json
 
@@ -9,6 +10,9 @@ from core.db import Conflict, Fail, first, next_id
 from ggg import ChapterSource, InstallJob, Realm
 
 MAX_CHAPTER = 256 * 1024  # bytes (§7)
+# The replica counts a reply's headers and its framing against max_response_bytes, not only its body: room for them,
+# so that a chapter of exactly 256 KB arrives. The body itself is held to the limit (``decoded``).
+HEADROOM = 8 * 1024
 
 
 def canonical(value):
@@ -66,3 +70,24 @@ def start_job(proposal, change_list):
     if live_job() is not None:
         raise Conflict("an install is running")
     return InstallJob(id=next_id(InstallJob, "J"), proposal=proposal, change_list=change_list, started_at=chain.now())
+
+
+def fetched(url, most):
+    """``(status, body)`` of a GET of ``url`` by HTTPS outcall, for a body of at most ``most`` bytes; a call that fails
+    is a Fail naming the URL."""
+    try:
+        return (yield from chain.http_get(url, most + HEADROOM))
+    except Exception as e:  # a failed call is a plain Exception, as chain.call raises it
+        raise Fail(f"{url}: {e}")
+
+
+def decoded(url, status, body, most):
+    """The text of a reply: a 200 of at most ``most`` bytes of UTF-8."""
+    if status != 200:
+        raise Fail(f"{url}: HTTP {status}")
+    if len(body) > most:
+        raise Fail(f"{url}: {len(body)} bytes is above {most // 1024} KB")
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        raise Fail(f"{url}: not UTF-8")

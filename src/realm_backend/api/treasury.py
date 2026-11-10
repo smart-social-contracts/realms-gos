@@ -3,6 +3,7 @@ import json
 
 from core import candid
 from core import chain
+from core import compliance
 from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page, page_by, view, window
 from ggg import (AllocationRule, Budget, Contract, Department, External, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, Loan, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
@@ -206,7 +207,7 @@ def address(to, symbol):
         for a in each(PaymentAccount, "owner", owner):
             if a.symbol == symbol:
                 return a.address
-    return to.removeprefix("User:")  # a user without an account is paid at their principal
+    return to.removeprefix("User:").removeprefix("Follower:")  # a user, or a follower realm, is paid at its principal
 
 
 def not_the_fee(args):
@@ -272,8 +273,14 @@ def positive(args, key="amount"):
     return amount
 
 
+def paying_a_follower(args, proposal=""):
+    """The fact of a transfer_create call that is not one of its arguments (GGG's derived facts): the compliance its
+    recipient, if a follower, last reported, for the legislation of a source that pays only compliant followers."""
+    return {"follower_compliance": compliance.of_follower(args.get("to"))}
+
+
 @op("transfer.create", governed=fund_department, parties=lambda a: {a.get("to", "")},
-    returns="transfer", check=not_the_fee)
+    returns="transfer", check=not_the_fee, derived=paying_a_follower)
 def transfer_create(c, args):
     """Pay ``amount`` of ``symbol`` (default the realm currency) from ``fund`` to ``to`` (principal, user or org); the
     fund must also cover the ledger fee. Optional ``category`` (default transfer), ``description``, ``contract``.

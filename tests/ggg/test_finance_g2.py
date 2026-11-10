@@ -98,7 +98,8 @@ def test_the_totals_of_a_budget_are_derived_facts_of_the_call():
     draft("ROOT", "fees", 100, kind="revenue")
     draft("ROADS", "capital", 300)
     assert op.ops()["budget_propose"]["derived"]({"period": "FY2026"}) == {"revenue": 1_000, "expense": 300}
-    assert op.ops()["transfer_create"]["derived"] is None
+    # a payment derives no totals: the only fact beyond its arguments is its recipient's compliance, Unknown here
+    assert op.ops()["transfer_create"]["derived"]({"to": "buildco"}) == {"follower_compliance": "Unknown"}
 
 
 def test_a_budget_with_a_total_out_of_range_files_nothing():

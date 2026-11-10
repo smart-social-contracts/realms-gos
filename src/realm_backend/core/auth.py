@@ -1,4 +1,4 @@
-from core import chain, forbids, poa
+from core import chain, forbids, it_team, poa
 from core.db import Fail, Forbidden, each
 
 CONTEXT = {"op": "String", "permission": "String", "user": "String", "signer": "String", "origin": "String",
@@ -113,7 +113,7 @@ def permissions(principal):
         return {"all"}
     if principal == chain.ANONYMOUS:
         return set()
-    from ggg import GuestUser, Quarter, Realm, User
+    from ggg import Follower, GuestUser, Quarter, Realm, SyncSource, User
 
     realm = Realm["1"]
     if realm and realm.installer_canister_id and realm.installer_canister_id == principal:
@@ -130,6 +130,7 @@ def permissions(principal):
     if guest:
         held |= set(guest.permissions or [])
     held |= {"quarter.sync"} if Quarter[principal] else set()
+    held |= {"link.sync"} if Follower[principal] or SyncSource[principal] else set()  # the capitals of its links
     for a in seats(principal):
         held |= seat_permissions(a)
     return held
@@ -156,6 +157,8 @@ def seat_permissions(a):
         held |= {p.id for p in pos.department.permissions}
         held |= {op for auth in each(Authority, "target", f"Department:{pos.department.id}")
                  for op in auth.operations or []}
+        if pos.department.id == it_team.department_id():
+            held.add(it_team.PERMISSION)  # the seat holders of the IT admin team (§10.2)
     return held
 
 

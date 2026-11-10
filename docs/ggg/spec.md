@@ -225,6 +225,16 @@ Realms GOS also differs from the model in what it keeps:
   `realms_gos:installer` and `realms_gos:baton`. `host_install`'s `registry` is kept for
   `realm_register`;
 - a federal vote's title is kept inside its action;
+- calls between realms (a link's notices and reports, and the reads of the check for a cycle) are not bounded-wait:
+  basilisk 0.15 has no call with a timeout, so a canister that never answers holds the message of the vote that
+  called it open, and an open call blocks stopping the realm for an upgrade. The model asks for bounded-wait
+  calls (§10); until basilisk has them, a vote names only realms its members trust. A call that is rejected, a
+  stopped realm among them, is handled: the vote's notice is sent again, and a check that cannot read a realm is
+  `Unavailable`;
+- the check for a cycle (I-NEST-2) runs when the vote applies, not when a proposal that carries it is filed: filing
+  makes no call to another realm. A vote refused at the end of the vote leaves the proposal `failed`;
+- `Quarter.compliance` is stored and read, and nothing writes it yet: it reads `Unknown` until the scheduled checks
+  and the switch of a codex across the quarters set it;
 - only the last 2,000 events are kept, and older ones are deleted rather than archived (I-EXT-4).
 
 A realm created before attributes and requests existed keeps the `member` profile it stored, which lacks
@@ -267,6 +277,8 @@ Next to the model's fields, the `Realm` row holds:
 | `Extension` | `id` (name), `version`, `status`, `operations` (Json: the only operations its frontend and backend may call), `manifest` (Json), `source` (its backend, when the manifest sets `backend`), `access` (Json: profiles and departments), `sidebar` (Json) | A feature package with its own frontend and, optionally, backend code. | `voting` 2.1.0, for `[member]`, in the Governance menu |
 | `LayeredCodex` | `id` (`sha256:` and the checksum of its layers, layer paths and chapter checksums), `layers`, `layer_paths`, `chapters` (Json: chapter id → source, version, sha256, vouched_by, route, fetched_at, url, size), `previous` (a codex of either kind), `status` (`pending`, `active`, `inactive`, `reverted`), `activates_at`, `installed_at`, `proposal` | A realm's legislation built from the chapters of several sources ([layered codex](../codices/layered-codex.md) §9.1). Active in place of a `Codex`, never beside one. | `sha256:4be1…`, active, tax path EU → Spain → CV |
 | `ChapterSource` | `sha256` (key), `source` | The text of a chapter or calendar, stored once under its checksum; at most 256 KB. | the text of `eu/es/tax` |
+| `SyncSource`, `Follower` | `id` (a realm's capital, or a stand-in record's url), `status` (`requested`, `active`, `ended`), `ended_by`, `ended_at`, `unsent`, `checking`; a sync source also `name` and the record's `checksum`, a follower also `layers`, `compliance`, `population`, `reported_at` | The two sides of a link between realms (§8 of the [layered codex](../codices/layered-codex.md)): `Realm.sync_sources` and GGG's `Follower`. | CV's link to València: `active`; València's last report: compliant |
+| `Release` | `id` (`<source>@<version>`), `source`, `version`, `relayed`, `rank`, `published`, `effective_from`, `commit`, `chapters` (domain → sha256), `calendar`, `notes` | One release in the realm's published record: its own, or one it relays from above, as the record that vouches for it lists it. | `eu/es@2.4.0`, relayed, rank 2 |
 | `InstallJob` | `id`, `proposal`, `change_list` (`{url, checksum}`), `step`, `staged`, `status` (`running`, `paused`, `failed`, `done`), `error`, `started_at`, `finished_at` | One install of a layered codex. At most one job is `running` or `paused`. | `J-1`, running, fetching chapters |
 | `JournalEntry` | `id`, `day` (the local day on the capital's clock, `YYYY-MM-DD`), `at` (seconds, UTC), `kind` (`codex_installed`; `codex_reverted` once a revert is an entry), `details` (Json: only the fields the journal extension's personal-data rules allow) | One report of the official journal, appended when the realm learns of it and never changed; an issue is the entries of one day, so a past issue does not change when the realm changes its zone. A quarter records none. | `E-1`, `codex_installed`, on `2026-11-09` |
 
@@ -321,12 +333,14 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `realm_configure_infrastructure` | `realm.configure.infrastructure` | governed, delegable | Frontend, file-registry, marketplace, installer and Casals baton canister ids |
 | `realm_export` | `db.export` | read, delegable | One page of an entity's rows, as stored, for a backup. An entity with large rows (`ChapterSource`: up to 256 KB each) returns fewer rows than `count` asks for: follow `next` |
 | `codex_install_resume` (an admin resumes the install of a layered codex that an upgrade paused: the step it stopped in runs again, for the change list the vote approved; nothing else can change) | `codex.install` | delegable | After an upgrade in the middle of an install, the admin resumes `J-3` |
+| `it_team_set` (designate the department that is the IT admin team, or "" for none; reserved: no codex may call it or change the department) | `it_team.set` | governed, delegable | The admins designate `IT`; after launch the realm votes on a change |
+| `codex_revert_fast` (go back to the codex the active one replaced, decided by the IT admin team's department under its own policy; refused when no team is designated; reserved) | `codex.revert_fast` | governed, delegable | `check_proposal_create` of the new legislation refuses every proposal: two of the three `IT` seats approve the revert |
 | `db_convert_indexes` | `db.convert` | | After an upgrade from a release before ic-python-db 0.13: converts the index lists saved as one array each, a batch per call, until `done` (a list too long for one call is skipped and named in `refused`); a new realm, or one already converted, does nothing |
 | `tax_policy_view` | `realm.data_view` | read, delegable | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
 | `budget_view` | `realm.data_view` | read, delegable | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |
 
 Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.view`,
-`orchestration.approve`, `shell.execute`. (`task.schedule` is the model's; `task.cancel` is no longer used: `task_cancel`
+`orchestration.approve`, `shell.execute`, `it_team.set`, `codex.revert_fast` (held by the seat holders of the IT admin team). (`task.schedule` is the model's; `task.cancel` is no longer used: `task_cancel`
 needs `task.schedule`, and `task_list` needs `realm.monitor`.)
 
 ## 6. Invariants Realms GOS adds

@@ -3,6 +3,7 @@ import sys
 
 from core import auth
 from core import chain
+from core import it_team
 from core import pending
 from core import poa
 from core import ranges
@@ -10,8 +11,8 @@ from core.db import Fail, Forbidden
 
 OPS = {}
 MODULES = ("actions", "assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "installs",
-           "journal", "justice", "licenses", "members", "notifications", "orgs", "procurement", "proposals", "quarters",
-           "requests", "setup", "tasks", "taxes", "treasury")
+           "journal", "justice", "licenses", "links", "members", "notifications", "orgs", "procurement", "proposals",
+           "quarters", "requests", "setup", "tasks", "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
 # Operations that run another operation, named by ``method``, for a member: a log hides that operation's secrets too.
 FORWARDING = ("call_for", "read_for")
@@ -42,7 +43,7 @@ class Call:
 
 def op(perm, read=False, delegable=False, governed=None, signing=False, parties=None, public=False, perm_for=None,
        returns=None, check=None, private=(), derived=None, secret=(), fixes=None, releases=None, summary=None,
-       title=None, lists=None, delivers=(), only_reads=False):
+       title=None, lists=None, delivers=(), only_reads=False, names=None):
     """Register an operation.
 
     governed(args) -> the Department whose policy governs the call; a policy that is not direct turns
@@ -62,6 +63,9 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     keys, private data, a request's body and reply, the cell of zone_set): the legislation never sees them, at any
     depth (I-PRV-1), and nor does the audit log.
     Personal data the audit keeps out (``private``) still reaches the legislation that decides on it.
+    names(args) -> the arguments with what the call acts on named, for a call that leaves it to the state of the realm (a
+    revert names the codex it restores): a governed call is filed as a proposal with these, so that what the vote
+    approves is what runs.
     delivers -> the ``secret`` reply fields that the member's approval hands to the delegate that prepared the call: the
     pending action keeps them in its result, where the member and that delegate read them (core.pending.blank). Nothing
     else keeps them, and a name in SECRET is never kept.
@@ -89,7 +93,7 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
                             "returns": returns, "check": check, "private": private, "derived": derived,
                             "secret": tuple(secret), "fixes": fixes, "releases": releases, "summary": summary,
                             "title": title, "lists": lists or {}, "delivers": tuple(delivers),
-                            "only_reads": only_reads}
+                            "only_reads": only_reads, "names": names}
         poa.classify(OPS[fn.__name__], fn.__name__)
         return fn
     return wrap
@@ -135,6 +139,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         asked = pending.asked_under(user, by, spec, args) if asking else None
         if asked:
             return json.dumps({"ok": True, **pending.prepare(asked, user, by, name, spec, args, note, origin, declared)})
+        if origin == "codex":
+            it_team.refuse_change(name, args)
         grant = auth.authorize(user, by, name, spec, args, origin, declared, bound)
         # The facts of a call are its arguments as GGG defines them, and ``on_behalf_of`` is one: a forbid may refuse a
         # delegate's vote. ``claimed`` was taken out of ``args`` above, for the operations never read it; a claim of
@@ -177,7 +183,10 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
 
 
 def filing(name, args, department):
-    """The proposal a governed call becomes, as ``proposal_create`` takes it: a title, the department and the action."""
+    """The proposal a governed call becomes, as ``proposal_create`` takes it: a title, the department and the action,
+    with what the call acts on named (``names``)."""
+    names = OPS[name]["names"]
+    args = names(args) if names else args
     return {"title": f"{name} {json.dumps(args, sort_keys=True)[:120]}", "department": department.id,
             "action": {"op": name, "args": args}}
 

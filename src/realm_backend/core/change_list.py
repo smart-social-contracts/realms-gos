@@ -2,7 +2,8 @@
 install task checks before it fetches anything (``parse``, ``apply``) and once it has the records (``vouch``).
 
 Plain data in, Fail out. Nothing here reads the database or calls a canister, so tests/ggg checks every rule
-without a realm, and D6 plugs the sync sources' records in as the ``relays`` that ``plan`` takes.
+without a realm. ``layers_for`` turns the records the install task read (core.records) into what ``plan`` takes, and
+``vouching`` says which record vouches for a release.
 """
 
 import json
@@ -26,7 +27,7 @@ def parse(text):
     with its ``chapter`` id, the ``source`` and ``domain`` in it, its ``urls``, the URL then its mirrors, its
     ``sha256`` as ``sha256:<hex>`` and its ``size``), ``remove``, ``release`` and ``summary``."""
     try:
-        data = json.loads(text, object_pairs_hook=_once)
+        data = json.loads(text, object_pairs_hook=no_repeats)
     except ValueError as e:
         raise Fail(f"the change list is not JSON: {e}")
     except RecursionError:
@@ -67,13 +68,14 @@ def parse(text):
             "summary": summary}
 
 
-def _once(pairs):
+def no_repeats(pairs, what="the change list"):
     """A JSON object whose keys are all different: one that repeats a key reads as its last value here and as its
-    first in a tool that stops at the first, so what voters were shown could differ from what is installed."""
+    first in a tool that stops at the first, so what voters were shown could differ from what is installed. ``what``
+    names the document in the refusal."""
     found = {}
     for key, value in pairs:
         if key in found:
-            raise Fail(f"the change list repeats the key {key!r}")
+            raise Fail(f"{what} repeats the key {key!r}")
         found[key] = value
     return found
 
@@ -110,15 +112,23 @@ def library():
     return realms.legislation
 
 
-def chapter_id(chapter):
-    """``(source, domain)`` of the chapter id ``<source id>/<domain>``, the domain one of GGG's or ``calendar``."""
+def source_name(source):
+    """``source``, a source id such as ``eu/es/vc``; a Fail if it is not one."""
     errors = library().LegislationError
     from realms.legislation.codex import source_id
 
+    try:
+        return source_id(source)
+    except errors as e:
+        raise Fail(str(e))
+
+
+def chapter_id(chapter):
+    """``(source, domain)`` of the chapter id ``<source id>/<domain>``, the domain one of GGG's or ``calendar``."""
     source, _, domain = (chapter if isinstance(chapter, str) else "").rpartition("/")
     try:
-        source_id(source)
-    except errors as e:
+        source_name(source)
+    except Fail as e:
         raise Fail(f"{chapter!r} is not a chapter id: {e}")
     if domain != CALENDAR and domain not in DOMAINS:
         raise Fail(f"{chapter!r} is not a chapter id: {domain!r} is not a GGG domain, nor calendar")
@@ -169,29 +179,129 @@ def apply(change_list, realm, active_id, own):
     return realm, {"chapters": chapters, "calendar": calendar}
 
 
-def vouch(change_list, realm, relays, own):
-    """Step 4 (§9.2): the change list against the records of the sync sources (§8), ``relays`` in the shape
-    ``plan`` takes, with ``realm`` and ``own`` as ``apply`` returned them.
+def vouch(change_list, realm, relays, own, vouchers):
+    """Step 4 (§9.2): the change list against the layers the new codex will have (§8), ``relays`` in the shape ``plan``
+    takes, with ``realm`` and ``own`` as ``apply`` returned them. ``vouchers`` says, for each layer from above, the
+    source whose record vouches for it (``layers_for``).
 
-    ``plan`` refuses paths that are not one chain and two sync sources that relay different releases of one layer.
-    A release install must be whole: ``set`` holds exactly the release's chapters as the record lists them (a
-    ``realm`` chapter it lists is skipped, §3.2), with the record's checksums. Returns the ``Plan`` and, for every
-    chapter and calendar of the new codex, the source whose record vouches for it: its publisher's, when the realm
-    syncs from the publisher directly, else the sync source that relays it; the realm's own are the realm's."""
+    A release install must be whole: ``set`` holds exactly the release's chapters as the record lists it (a ``realm``
+    chapter it lists is skipped, §3.2), with the record's checksums. Returns the ``Plan`` and, for every chapter and
+    calendar of the new codex, the source that vouches for it; the realm's own are the realm's."""
     legislation = library()
     try:
         planned = legislation.plan(realm, relays, own)
     except legislation.LegislationError as e:
         raise Fail(str(e))
-    vouchers = {realm: realm}
-    for relay in relays:
-        for release in relay["layers"]:
-            if release["source"] == relay["source"] or release["source"] not in vouchers:
-                vouchers[release["source"]] = relay["source"]
     if change_list["release"] is not None:
         _whole(change_list, realm, _record(relays, change_list["release"]))
-    vouched_by = {chapter: vouchers[item["source"]] for chapter, item in named(planned)}
-    return planned, vouched_by
+    vouchers = {**vouchers, realm: realm}
+    return planned, {chapter: vouchers[item["source"]] for chapter, item in named(planned)}
+
+
+def sources_of(record):
+    """The layers a record lists, top to bottom, each once: the layers it relays, then its own."""
+    found = []
+    for release in record["releases"]:
+        if release["source"] not in found:
+            found.append(release["source"])
+    return found
+
+
+def listed(record, source, version):
+    """The record's release of layer ``source``: the one of ``version`` if it lists it, else the newest it lists, or
+    None for a layer it does not list. A relayed layer has the one release the record relays."""
+    found = [r for r in record["releases"] if r["source"] == source]
+    return next((r for r in found if r["version"] == version), found[-1] if found else None)
+
+
+def layers_for(installed, records, release):
+    """What ``plan`` takes (§8) for an install that leaves the layers from above as they are and, for a ``release``
+    ``{source, version}``, brings one: ``{relays, vouchers, vouching}``. ``installed`` are the layers from above the
+    active codex runs, top to bottom, as it runs them (``{source, version, chapters, calendar, vouched_by}``);
+    ``records`` the sync sources' records that were read, ``{key, source, releases}`` each.
+
+    The layers keep the order the active codex runs them in, whatever a record says: a layer the realm runs takes the
+    place of its earlier release, a new one goes right after the last layer the vouching record lists above it (or
+    before the first it lists below it), and a record that puts two of the layers the other way round than the realm
+    runs them is refused. They go to ``plan`` as one record, named by its last layer. Without a release nothing from
+    outside is needed, and no record is read. A layer that no record lists (its link has ended) stays like the others."""
+    layers = {layer["source"]: layer for layer in installed}
+    vouchers = {layer["source"]: layer["vouched_by"] for layer in installed}
+    order, found = list(layers), None
+    if release is not None:
+        found = vouching(records, release)
+        order = _placed(order, release["source"], found)
+        for record in records:
+            _agrees(record, order)
+        layers[release["source"]], vouchers[release["source"]] = found["release"], found["by"]
+    relay = {"source": order[-1], "layers": [_plain(layers[source]) for source in order]} if order else None
+    return {"relays": [relay] if relay else [], "vouchers": vouchers, "vouching": found}
+
+
+def _plain(release):
+    """A release as ``plan`` takes it (§8): its source, version, chapters and calendar."""
+    return {key: release.get(key) for key in ("source", "version", "chapters", "calendar")}
+
+
+def _placed(order, source, found):
+    """``order``, the layers the realm runs, with the layer ``source`` the vouching record ``found`` lists: where it is
+    already, or in the one place that record gives it: right after the last layer it lists above ``source`` and right
+    before the first it lists below it. A layer that the record puts in neither relation lies between them and has no
+    order against ``source``, which §3.3 refuses. A record that puts ``source`` below a layer the realm runs below the
+    layers it puts it above contradicts the realm's order: ``_agrees`` refuses it, naming both."""
+    if source in order:
+        return order
+    at = found["order"].index(source)
+    above = [order.index(s) for s in found["order"][:at] if s in order]
+    below = [order.index(s) for s in found["order"][at + 1:] if s in order]
+    low = max(above) + 1 if above else 0
+    high = min(below) if below else len(order)
+    if low < high:
+        raise Fail(f"the record of {found['by']} does not put {source} in order against {', '.join(order[low:high])}: "
+                   f"layers that no record puts in order are refused (§3.3)")
+    return order[:low] + [source] + order[low:]
+
+
+def _agrees(record, order):
+    """Refuse a record that puts two of the layers in ``order`` the other way round than the realm runs them."""
+    listed_here = [source for source in sources_of(record) if source in order]
+    for at, above in enumerate(listed_here):
+        for below in listed_here[at + 1:]:
+            if order.index(above) > order.index(below):
+                raise Fail(f"the record of {record['source']} puts {above} above {below}, and this realm runs "
+                           f"{below} above {above}")
+
+
+def vouching(records, release):
+    """The record that vouches for ``release`` ``{source, version}``: its publisher's, when the realm syncs from the
+    publisher directly, else the first record that lists it (the order the links come in). Returns ``{key, by,
+    release, order}``: the sync source's key, its layer, the release as it lists it, and the layers it lists, top to
+    bottom. Refused: a release no record lists, and two records that list different releases of its layer, which only
+    the realm's own legislation may choose between (§9.2 step 4)."""
+    source, version = release["source"], release["version"]
+    holders = [(r, listed(r, source, version)) for r in records]
+    holders = [(record, entry) for record, entry in holders if entry is not None]
+    if not holders:
+        raise Fail(f"no sync source relays {source}: a layer from above comes through a link")
+    exact = [(record, entry) for record, entry in holders if entry["version"] == version]
+    if not exact:
+        record, entry = holders[0]
+        raise Fail(f"the record of {record['source']} relays {source} {entry['version']}, not {version}")
+    record, entry = next((held for held in exact if held[0]["source"] == source), exact[0])
+    for other, theirs in holders:
+        if _compared(theirs) != _compared(entry):
+            differ = (f"{entry['version']} and {theirs['version']}" if entry["version"] != theirs["version"]
+                      else f"{version} with different checksums")
+            raise Fail(f"{source}: sync sources {record['source']} and {other['source']} relay different releases "
+                       f"({differ}). The realm's own legislation chooses which one it installs; until it does, the "
+                       f"install is refused (layered-codex.md §9.2 step 4)")
+    return {"key": record["key"], "by": record["source"], "release": entry, "order": sources_of(record)}
+
+
+def _compared(release):
+    """What two records must agree on for a layer: ``_plain`` without the ``realm`` chapter, which no follower takes."""
+    plain = _plain(release)
+    return {**plain, "chapters": {d: sha for d, sha in plain["chapters"].items() if d != REALM}}
 
 
 def named(planned):

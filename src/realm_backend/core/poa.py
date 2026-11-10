@@ -39,6 +39,10 @@ OWN = {
     "orchestration_decide": ("confirm", "admin", None, None),
     # Resuming an install the realm voted for changes nothing the vote did not approve: as codex_install is.
     "codex_install_resume": ("direct", "setup", "admin", None),
+    # The admins' own settings, as codex_revert and governance_update are: a delegate may be given them in the group of
+    # the setup (the admin's once the realm has launched). A fast revert is the IT team's act, in the admin's group.
+    "it_team_set": ("direct", "setup", "admin", None),
+    "codex_revert_fast": ("direct", "admin", None, None),
     "extension_install": ("direct", "setup", "admin", None),
     "extension_uninstall": ("direct", "setup", "admin", None),
     "extension_set_access": ("direct", "setup", "admin", None),

@@ -2,6 +2,7 @@ import hashlib
 
 from core import auth
 from core import chain
+from core import it_team
 from api import delegation
 from api import assets, orgs
 from core import language
@@ -324,6 +325,15 @@ def attribute_review(c, args):
     return {"attribute": a.id, "status": a.status}
 
 
+@op("attribute.review", read=True, returns="attributes")
+def attribute_pending_list(c, args):
+    """The attributes awaiting review, with their ``kind`` and ``value`` in clear (I-PRV-1), ``count`` rows at a time
+    (default 100, at most 500) from row ``from`` (default 1). Returns ``attributes`` and ``next`` (null at the end); a
+    page can hold fewer than ``count``: follow ``next``, which goes by row, so that deciding a page skips none."""
+    rows, nxt = page(Attribute, args, keep=lambda a: a.status == "pending")
+    return {"attributes": [view(a) for a in rows], "next": nxt}
+
+
 @op("self.data_view", read=True, returns="attributes")
 def attribute_list(c, args):
     """Your own attributes, all or only those of ``kind``, ``count`` rows at a time (default 100, at most 500) from
@@ -411,6 +421,7 @@ def profile_create(c, args):
     if UserProfile[args["profile"]]:
         raise Conflict(f"profile {args['profile']} exists")
     within(c, args.get("allowed_to", []))
+    it_team.refuse_grant(args.get("allowed_to"))
     UserProfile(id=args["profile"], description=args.get("description", ""), allowed_to=args.get("allowed_to", []))
     return {"profile": args["profile"]}
 
@@ -421,6 +432,7 @@ def profile_edit(c, args):
     leave out stays. An optional ``department`` decides as in user_add."""
     p = find(UserProfile, args["profile"])
     within(c, args.get("allowed_to", []))
+    it_team.refuse_grant(args.get("allowed_to"))
     p.description, p.allowed_to = args.get("description", p.description), args.get("allowed_to", p.allowed_to)
 
 

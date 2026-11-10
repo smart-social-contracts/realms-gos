@@ -122,7 +122,7 @@ class Realm(above("realm")):
     def on_codex_activate(self, event):
         self.ggg.t_log(text="activated " + event.args["codex"][:13])
 
-    def compute_realm_join(self, user, quarters):
+    def compute_realm_join(self, user, home_zone, quarters):
         return max(quarters, key=lambda q: q.index).id if quarters else None
 
     def compute_t_day(self, at):
@@ -271,9 +271,15 @@ def test_activation_runs_on_codex_activate_once_and_a_revert_does_not():
 
 
 def test_a_quarter_does_not_run_on_codex_activate():
-    Realm["1"].is_quarter = True
+    Realm["1"].is_quarter, Realm["1"].is_capital = True, False
     town()
     assert LOG == []
+
+
+def test_a_capital_with_quarters_runs_on_codex_activate():
+    Realm["1"].is_quarter = True  # registering a quarter sets it on the capital too
+    first = town()
+    assert LOG == [("activated " + first.id[:13], "codex")]
 
 
 def test_the_codex_loads_on_first_use_after_a_new_heap_and_a_legacy_install_unloads_it():
@@ -729,7 +735,7 @@ def test_a_codex_whose_guards_refuse_every_proposal_cannot_block_a_revert():
     first.status = "inactive"
     blocker = activate(layered({(TOWN, "procedure"): DENY_ALL}, layers=[TOWN], previous=first.id))
     assert call("proposal_create", "alice", title="x", action={"op": "t_act", "args": {}})["error"] == "nothing may be proposed"
-    pid = ok("proposal_create", "alice", title="revert", action={"op": "codex_revert", "args": {}})["proposal"]
+    pid = ok("proposal_create", "alice", title="revert", action={"op": "codex_revert", "args": {"codex": first.id}})["proposal"]
     for voter in world.PEOPLE:
         ok("proposal_vote", voter, proposal=pid, choice="yes")  # no guard on a vote about a reserved operation either
     assert ok("proposal_get", query=True, proposal=pid)["proposal"]["status"] == "executed"
@@ -756,10 +762,10 @@ def test_build_returns_the_views_the_errors_and_the_cedar():
     assert out["errors"] == [] and '@id("x/town/tax/cap")' in out["cedar"] and "context.facts.rate > 1100000" in out["cedar"]
 
 
-def test_the_reserved_list_is_the_librarys():
-    from realms.legislation import RESERVED
+def test_the_reserved_list_and_the_hook_only_list_are_the_librarys():
+    from realms.legislation import HOOK_ONLY, RESERVED
 
-    assert legislation.RESERVED == RESERVED
+    assert legislation.RESERVED == RESERVED and legislation.HOOK_ONLY == HOOK_ONLY
 
 
 def test_a_legacy_codex_is_untouched():
