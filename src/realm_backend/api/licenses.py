@@ -1,8 +1,9 @@
 from core import chain, localtime
 from core.db import Conflict, Fail, Forbidden, Unavailable, deref, each, find, next_id, page, page_by, view
+from core.pending import quoted, readable, you_sign
 from ggg import Calendar, Department, License, Organization, Procedure
 from core.op import op
-from api.proposals import realm_wide
+from api.proposals import day_of, realm_wide, whole
 
 SHOWN = ("id", "kind", "holder", "status", "decision_due", "issued_at", "expires_at")
 NS = 10**9  # the chain counts seconds, localtime nanoseconds
@@ -98,7 +99,29 @@ def license_renew(c, args):
                        args.get("evidence_ref", old.evidence_ref), {**(old.conditions or {}), "renews": old.id})
 
 
-@op("license.issue", signing=True, parties=holders, returns="license")
+def of_the_licence(lic):
+    return f"licence {lic.id} ({quoted(lic.kind)}) of {quoted(lic.holder)}"
+
+
+def deciding_licence(user, args, grant):
+    lic = find(License, args["license"])
+    if not args.get("approve"):
+        return you_sign(f"Rejects the application for {of_the_licence(lic)}")
+    if args.get("expires_at"):
+        expires = f"on {day_of(whole('expires_at', args['expires_at']))}"
+    else:  # the default term runs from the day it is signed: a date would differ between the filing and the approval
+        cycle = Calendar["1"].license_review_cycle if Calendar["1"] else 2 * 365 * 86400
+        expires = f"{cycle // 86400} days after you sign it"
+    issuer = find(Department, args.get("department") or (lic.issued_by.id if lic.issued_by else ""))
+    conditions = {**(lic.conditions or {}), **args.get("conditions", {})}
+    renewed = License[conditions.get("renews") or "-"]
+    ends = f"; it ends licence {renewed.id}, which is active" if renewed and renewed.status == "active" else ""
+    return you_sign(f"Issues {of_the_licence(lic)}, which expires {expires}{ends}",
+                    ("Licence conditions", readable(conditions)), ("Issuing department", quoted(issuer.id)))
+
+
+@op("license.issue", signing=True, parties=holders, returns="license", summary=deciding_licence,
+    title="Issue or reject a licence")
 def license_decide(c, args):
     """Issue the applied-for ``license`` if ``approve`` is true, else reject it; issuing ``department`` defaults to
     the one applied to. On approval: ``expires_at`` (default now plus the licence review cycle, 2 years) and extra
@@ -120,7 +143,15 @@ def license_decide(c, args):
     return {"license": lic.id, "status": lic.status, "expires_at": lic.expires_at}
 
 
-@op("license.revoke", signing=True, parties=holders, returns="license")
+def suspending_licence(user, args, grant):
+    lic = find(License, args["license"])
+    if args.get("resume"):
+        return you_sign(f"Reinstates the suspended {of_the_licence(lic)}")
+    return you_sign(f"Suspends the {lic.status} {of_the_licence(lic)}")
+
+
+@op("license.revoke", signing=True, parties=holders, returns="license", summary=suspending_licence,
+    title="Suspend or reinstate a licence")
 def license_suspend(c, args):
     """Suspend the active ``license``, or with ``resume`` true reinstate a suspended one."""
     lic = find(License, args["license"])
@@ -131,7 +162,13 @@ def license_suspend(c, args):
     return {"license": lic.id, "status": after}
 
 
-@op("license.revoke", signing=True, parties=holders, returns="license")
+def revoking_licence(user, args, grant):
+    lic = find(License, args["license"])
+    return you_sign(f"Revokes for good the {lic.status} {of_the_licence(lic)}")
+
+
+@op("license.revoke", signing=True, parties=holders, returns="license", summary=revoking_licence,
+    title="Revoke a licence")
 def license_revoke(c, args):
     """Revoke the active or suspended ``license`` for good."""
     lic = find(License, args["license"])

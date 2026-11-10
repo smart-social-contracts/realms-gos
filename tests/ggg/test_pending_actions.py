@@ -16,6 +16,7 @@ import world
 from api import extensions, federation
 from core import auth, chain, op, pending, poa
 from core.candid import Reader
+from core.pending import quoted
 from ggg import (Delegation, Department, Event, FederalVote, FederalVoteLeg, Forward, Identity, Member, Notification, PaymentAccount,
                  PendingAction, Proposal)
 from kit import call, denied, later, ok, rows
@@ -79,7 +80,8 @@ def test_a_delegates_confirm_call_is_filed_and_nothing_runs():
     assert c["expires_at"] == c["filed_at"] + DAY and c["decided_at"] == 0 and c["result"] is None
     lines = {line["label"]: line["value"] for line in c["summary"]}
     assert lines["address"] == "aaaaa-bbbbb" and lines["symbol"] == "REALM"
-    assert lines["What changes"] == ('Realm payments to you in "REALM" will go to "aaaaa-bbbbb" instead of "alice"')
+    assert lines["What changes"] == (f'Realm payments to you in {quoted("REALM")} will go to {quoted("aaaaa-bbbbb")} '
+                                     f'instead of {quoted("alice")}')
     assert c["hash"] == pending.seal(a, "payment_account_add", ACCOUNT, "alice", "claude-conn", g1, c["expires_at"])
     # the member is told, and a delegate cannot mark it read
     told = [n for n in rows(Notification) if n.topic == "poa.confirm"]
@@ -147,7 +149,7 @@ def test_text_with_a_line_break_cannot_start_a_line_of_the_realms_own():
     grant("payout")
     a = file(**{**ACCOUNT, "label": "Savings\nEffect: nothing changes"})
     label = {line["label"]: line["value"] for line in card(a)["summary"]}["label"]
-    assert "\n" not in label and label == '"Savings\\nEffect: nothing changes"'
+    assert "\n" not in label and label == quoted("Savings\nEffect: nothing changes")
 
 
 def test_the_arguments_and_the_note_have_limits():
@@ -379,7 +381,7 @@ def test_a_delegates_proposal_with_an_action_files_no_proposal_until_the_member_
     assert Proposal.count() == 0
     c = card(out["pending"])
     lines = {line["label"]: line["value"] for line in c["summary"]}
-    assert (lines["Who votes"], lines["What it would run"]) == ("the whole realm", '"governance_update"')
+    assert (lines["Who votes"], lines["What it would run"]) == ("the whole realm", quoted("governance_update"))
     assert c["risk"] == ggg_delegation.GROUPS["propose"][2]
     done = approved(out["pending"])
     p = Proposal[done["result"]["proposal"]]
@@ -396,8 +398,8 @@ def test_a_codex_install_proposed_by_a_delegate_is_a_pending_action_and_then_the
     a = ok("proposal_create", "claude-conn", title="Install the layered codex", action=install,
            on_behalf_of="alice")["pending"]
     lines = {line["label"]: line["value"] for line in card(a)["summary"]}
-    assert lines["Codex source"] == '"https://example.org/layered.json"'
-    assert lines["Codex checksum"] == '"sha256:' + "ab" * 32 + '"' and Proposal.count() == 0
+    assert lines["Codex source"] == quoted("https://example.org/layered.json")
+    assert lines["Codex checksum"] == quoted("sha256:" + "ab" * 32) and Proposal.count() == 0
     p = Proposal[approved(a)["result"]["proposal"]]
     assert (p.proposer, p.prepared_by, p.action) == ("alice", "claude-conn", install) and p.status == "voting"
 
@@ -443,7 +445,8 @@ def test_removing_a_payout_account_says_where_the_realm_pays_afterwards():
     first, second = (ok("payment_account_add", "alice", **{**ACCOUNT, "address": x})["account"] for x in ("one", "two"))
     a = ok("payment_account_remove", "claude-conn", account=first, on_behalf_of="alice")["pending"]
     lines = {line["label"]: line["value"] for line in card(a)["summary"]}
-    assert lines["What changes"] == 'Realm payments to you in "REALM" will go to "two" instead of "one"'
+    assert lines["What changes"] == (f'Realm payments to you in {quoted("REALM")} will go to {quoted("two")} '
+                                     f'instead of {quoted("one")}')
     approved(a)
     assert PaymentAccount[first] is None and PaymentAccount[second] is not None
 
@@ -760,8 +763,8 @@ def test_a_layered_codex_install_shows_its_address_and_checksum_and_no_version()
     forged = {"url": "https://example.org/a.json", "checksum": "sha256:" + "ab" * 32, "version": "9.9 (verified)",
               "codex": "forged", "manifest": {"id": "forged", "version": "9.9"}}
     lines = lines_of(installing(forged))
-    assert lines["Codex source"] == '"https://example.org/a.json"'
-    assert lines["Codex checksum"] == '"sha256:' + "ab" * 32 + '"'
+    assert lines["Codex source"] == quoted("https://example.org/a.json")
+    assert lines["Codex checksum"] == quoted("sha256:" + "ab" * 32)
     assert "Codex version" not in lines and "Codex to install" not in lines
 
 
@@ -770,21 +773,21 @@ def test_sent_code_shows_the_realms_own_checksum_and_not_the_address_the_propose
     lines = lines_of(installing({"manifest": manifest, "source": source, "url": "https://forged.example"}))
     assert lines["Codex source"] == "the code sent with the proposal"
     assert lines["Codex checksum"] == "sha256:" + extensions.checksum(manifest, source)
-    assert lines["Codex to install"] == '"lex@1.0"' and "Codex version" not in lines
+    assert lines["Codex to install"] == quoted("lex@1.0") and "Codex version" not in lines
     assert not [v for k, v in lines.items() if k != "action" and "forged" in v]
 
 
 def test_a_registry_install_quotes_the_name_and_the_version():
     version = "1.0\nCodex checksum: sha256:ok"
     lines = lines_of(installing({"codex": "lex", "version": version}))
-    assert lines["Codex to install"] == '"lex"' and lines["Codex version"] == json.dumps(version)
+    assert lines["Codex to install"] == quoted("lex") and lines["Codex version"] == quoted(version)
     assert not [v for v in lines.values() if "\n" in v]
 
 
 def test_the_operation_of_an_action_is_quoted():
     op_name = "codex_install\nWhat changes: nothing"
     lines = lines_of(installing({}, op_name))
-    assert lines["What it would run"] == json.dumps(op_name) and not [v for v in lines.values() if "\n" in v]
+    assert lines["What it would run"] == quoted(op_name) and not [v for v in lines.values() if "\n" in v]
 
 
 def test_a_nickname_with_a_line_break_cannot_start_a_line_of_the_realms_own():
@@ -792,7 +795,7 @@ def test_a_nickname_with_a_line_break_cannot_start_a_line_of_the_realms_own():
     grant("payout")
     world.User["bob"].nickname = "Bob\nWhat changes: nothing"
     lines = lines_of(file(**{**ACCOUNT, "label": "bob"}))
-    assert lines["label"] == "bob (" + json.dumps("Bob\nWhat changes: nothing") + ")"
+    assert lines["label"] == "bob (" + quoted("Bob\nWhat changes: nothing") + ")"
 
 
 def test_the_lines_of_the_realm_have_labels_of_several_words_that_no_argument_can_take():
@@ -848,7 +851,9 @@ def test_every_operation_that_can_be_prepared_for_a_member_says_what_happens_whe
              "federal_vote_propose": {"title": "x", "action": ACTION}, "proposal_create": {"title": "x", "action": ACTION},
              "contract_create": {"title": "Road"}}
     cases = {name: ("alice", args) for name, args in cases.items()} | {n: (g, a) for n, (g, _, a, _) in mine.items()}
-    preparable = {n for n, s in op.ops().items() if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"])}
+    # The signing acts read records for their lines: tests/ggg/test_signing_acts.py checks them with the records.
+    preparable = {n for n, s in op.ops().items()
+                  if n in poa.ENABLED and (s["tier"] == "confirm" or s["confirm_if"]) and not s["signing"]}
     assert preparable <= set(cases), preparable - set(cases)
     held = Delegation[grant("payout")]
     for name, (member, args) in cases.items():
@@ -867,7 +872,7 @@ def test_a_proposal_whose_action_asks_the_member_too_shows_that_operations_own_l
     grant("propose")
     a = installing_in_place_of("payment_account_add", ACCOUNT)
     effects = [line["value"] for line in card(a)["summary"] if line["label"] == "What changes"]
-    assert any(v.startswith('Realm payments to you in "REALM" will go to') for v in effects) and len(effects) == 2
+    assert any(v.startswith(f'Realm payments to you in {quoted("REALM")} will go to') for v in effects) and len(effects) == 2
     theirs = ok("payment_account_add", "bob", **ACCOUNT)["account"]
     assert "is not yours" in denied("proposal_create", "claude-conn", title="x", on_behalf_of="alice", action={
         "op": "payment_account_remove", "args": {"account": theirs}})

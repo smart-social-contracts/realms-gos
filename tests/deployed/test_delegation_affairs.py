@@ -9,7 +9,7 @@ import json
 import pytest
 from ic.candid import Types, decode, encode
 from test_delegation_groups import launch, ok
-from test_pending_actions import BLOB, CALL_FOR, CALL_FOR_REPLY, READ_FOR, TEXT
+from test_pending_actions import BLOB, CALL_FOR, CALL_FOR_REPLY, READ_FOR, TEXT, plain
 
 DAY = 86400
 NS = 10**9
@@ -124,7 +124,7 @@ def test_a_contract_is_prepared_with_its_parties_amount_and_term_on_the_real_was
     ok(realm, "delegation_grant", ctl, delegate=claude, groups=["money"], expires_in=30 * DAY)
     prepared = ok(realm, "contract_create", claude, on_behalf_of=ctl, title="Chairs", value=1200, parties=["BuildCo"],
                   ends_at=realm.now() + 30 * DAY)
-    lines = {line["label"]: line["value"] for line in ok(realm, "action_get", ctl, query=True,
-                                                         action=prepared["pending"])["action"]["summary"]}
+    lines = {line["label"]: plain(line["value"]) for line in ok(realm, "action_get", ctl, query=True,
+                                                               action=prepared["pending"])["action"]["summary"]}
     assert lines["Contract parties"] == '"BuildCo"' and lines["Contract amount"].startswith("1200 ")
     assert lines["Contract term"].startswith("from 2021-") and " until 2021-" in lines["Contract term"]

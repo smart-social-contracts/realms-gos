@@ -8,6 +8,7 @@ import pytest
 import fake_chain
 import world
 from core import op, poa
+from core.pending import quoted
 from ggg import (Appointment, Authority, Contract, Delegation, Event, Notification, Organization, PendingAction,
                  Proposal, User)
 from kit import call, denied, ok, rows
@@ -425,7 +426,7 @@ def test_a_contract_under_a_grant_is_prepared_for_the_members_approval_and_stays
     a = out["pending"]
     assert Contract.count() == 0
     lines = {line["label"]: line["value"] for line in card(a, "carla")["summary"]}
-    assert lines["Under mandate"] == f'{m} "Road works", up to 200000'
+    assert lines["Under mandate"] == f'{m} {quoted("Road works")}, up to 200000'
     assert lines["What changes"] == "An active contract binds the realm to its parties at once"
     assert card(a, "carla")["title"] == "Sign a contract"
     assert approved(a, "carla")["status"] == "done"
@@ -445,8 +446,8 @@ def test_a_contract_needs_no_mandate_and_its_card_shows_its_parties_amount_and_t
            parties=["Organization:buildco", hostile], ends_at=ends)["pending"]
     summary = card(a, "carla")["summary"]
     lines = {line["label"]: line["value"] for line in summary}
-    assert lines["Contract parties"] == '"Organization:buildco", ' + json.dumps(hostile)
-    assert lines["Contract amount"] == '1200 "REALM"'
+    assert lines["Contract parties"] == quoted("Organization:buildco") + ", " + quoted(hostile)
+    assert lines["Contract amount"] == f'1200 {quoted("REALM")}'
     assert lines["Contract term"] == f"from {day(fake_chain.now())} until {day(ends)}"
     assert [line["label"] for line in summary].count("What happens next") == 1 and "Under mandate" not in lines
     assert approved(a, "carla")["status"] == "done"
