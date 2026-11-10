@@ -1840,7 +1840,10 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    with the reason: a realm with no layer of its own yet (its first layered codex names it, with a change
    list), a federation with quarters (a quarter cannot stage a release yet), and a release that only a
    stand-in record vouches for, whose chapters no capital serves (it is installed with a change list that
-   gives their URLs).
+   gives their URLs). The follower's own guard or forbid on `codex_install` still runs when the accepted
+   proposal executes, and can delay or refuse the install; if it does, the realm reads `non_compliant`
+   past the release's effective date, visible to all: that is the realm's own legislation over its own
+   install, and the check makes the consequence visible.
 5. **A follower votes when, never whether** (§2, rule 3). Only an install clears the non-compliant
    flag, and it clears it at once.
 6. **Compliance is measured against each sync source's record** and worked out at each check:
