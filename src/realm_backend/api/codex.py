@@ -251,6 +251,7 @@ def restore(target):
     if isinstance(current, LayeredCodex) or isinstance(target, LayeredCodex):
         legislation.warm(target if isinstance(target, LayeredCodex) else None)
     store.remember_in_force(chain.now())
+    journal.codex_reverted(target, current)
     from api import propagation  # it imports the install task, which imports this module
 
     propagation.reverted(target)  # a capital tells its quarters; a quarter reports to its capital

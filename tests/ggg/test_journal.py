@@ -9,13 +9,13 @@ import world
 from core import journal, legislation, localtime
 from ggg import Event, Extension, JournalEntry, LayeredCodex, Realm
 from kit import call, denied, fire_timers, later, ok, rows
-from test_installs import (HOUR, change_list, expected_id, fire_due, install, own_layer, realm,  # noqa: F401
+from test_installs import (HOUR, WEB, change_list, expected_id, fire_due, install, own_layer, realm,  # noqa: F401
                            run_job, schedule, status)
 
 DAY = 86400
 CAPITAL = "capital-canister"
 # What the journal extension's manifest allows an entry to keep (extensions/journal/manifest.json).
-RULES = {"config": {"personal_data": {"entry_fields": ["codex", "layers", "proposal", "activates_at"]}}}
+RULES = {"config": {"personal_data": {"entry_fields": ["codex", "layers", "proposal", "activates_at", "reverted"]}}}
 
 
 @pytest.fixture(autouse=True)
@@ -250,6 +250,83 @@ def test_a_legacy_single_file_install_makes_no_entry(realm):  # noqa: F811
     Realm["1"].require_marketplace_approval = False
     ok("codex_install", "ctl", manifest=manifest(), source=SOURCE)
     assert issue()["entries"] == []
+
+
+# ---- a revert is an entry too, whichever kind of codex it restores
+
+
+def test_a_revert_makes_an_entry_with_the_codex_restored_its_layers_and_the_one_reverted(realm):  # noqa: F811
+    rules()
+    first, second = own_layer(), own_layer("2.0.0")
+    install(change_list(first))
+    install(change_list(second, replaces=expected_id(first), url=WEB + "changes/second.json"))
+    later(60)
+    ok("codex_revert", "ctl")
+    entry = issue()["entries"][-1]
+    assert entry["kind"] == "codex_reverted" and entry["at"] == fake_chain.now()
+    assert entry["details"] == {"codex": expected_id(first), "reverted": expected_id(second),
+                                "layers": [{"source": "arcadia", "versions": []}]}
+
+
+def test_a_revert_to_a_legacy_codex_makes_an_entry_with_no_layers(realm):  # noqa: F811
+    from test_codex import SOURCE, manifest
+
+    rules()
+    Realm["1"].require_marketplace_approval = False
+    for version in ("1.0.0", "1.1.0"):
+        ok("codex_install", "ctl", manifest=manifest(version), source=SOURCE)
+    ok("codex_revert", "ctl")
+    assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [
+        ("codex_reverted", {"codex": "test@1.0.0", "reverted": "test@1.1.0", "layers": []})]
+
+
+# ---- the journal only reports: nothing that goes wrong in it stops a revert or an install
+
+
+@pytest.mark.parametrize("manifest", ["text", {"config": "text"}, {"config": {"personal_data": ["codex"]}},
+                                      {"config": {"personal_data": {"entry_fields": "codex"}}}])
+def test_a_malformed_personal_data_config_keeps_nothing_and_stops_neither_revert(manifest):
+    from test_codex import build
+    from test_revert import installed, it_team
+
+    build()
+    installed("1.0.0", "1.1.0", "1.2.0")
+    Extension(id="journal", manifest=manifest)
+    it_team(("bob",))
+    assert ok("codex_revert", "ctl")["codex"] == "test@1.1.0"
+    assert ok("codex_revert_fast", "bob")["codex"] == "test@1.0.0"
+    assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [("codex_reverted", {})] * 2
+
+
+def broken(*args):
+    raise ValueError("the journal is broken")
+
+
+def failure():
+    return Realm["1"].manifest_data["journal"]["failure"]
+
+
+def test_a_journal_that_fails_does_not_stop_a_revert_and_keeps_the_error(monkeypatch):
+    from test_codex import build
+    from test_revert import installed
+
+    build()
+    installed("1.0.0", "1.1.0")
+    rules()
+    monkeypatch.setattr(journal, "local_day", broken)
+    assert ok("codex_revert", "ctl")["codex"] == "test@1.0.0"
+    monkeypatch.undo()
+    assert issue()["entries"] == [] and issue()["first_day"]
+    assert failure() == {"kind": "codex_reverted", "at": fake_chain.now(), "error": "ValueError: the journal is broken"}
+
+
+def test_a_journal_that_fails_does_not_stop_an_install(realm, monkeypatch):  # noqa: F811
+    rules()
+    layer = own_layer()
+    monkeypatch.setattr(journal, "layers_of", broken)
+    install(change_list(layer))
+    assert status()["codex"]["id"] == expected_id(layer) and issue()["entries"] == []
+    assert failure()["kind"] == "codex_installed"
 
 
 # ---- a quarter issues nothing and shows the capital's
