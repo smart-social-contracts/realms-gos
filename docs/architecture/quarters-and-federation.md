@@ -175,17 +175,19 @@ and syncs it. Against the table:
 
 ## Time zones in a federation
 
-Quarters can lie in different time zones, and each is a full realm with its own `Realm.timezone`
-(not built yet: [#528](https://github.com/smart-social-contracts/realms-gos/issues/528)). The zone is
+Quarters can lie in different time zones, and each is a full realm with its own `Realm.timezone`. The zone is
 one of the two settings that are local, with a default (above).
 
 - A new quarter **starts on its capital's zone,** copied once by `quarter_join_federation` when the
-  joining realm is still on `UTC` (not yet chosen). A realm that already chose a zone keeps it. After
+  joining realm is still on `UTC` (not yet chosen): the join reads the capital's public `realm_info`, and a
+  capital that cannot be reached is not joined. A realm that already chose a zone keeps it. After
   that the zone is the quarter's own.
 - A quarter **changes its own zone** with `realm_configure`, governed on the quarter as today.
 - The realm **sets a quarter's zone** by a realm-wide vote on the capital. The capital sends it to the
-  quarter over `quarter.sync`, and the quarter applies it. A malformed name, or a `timezone` with no
-  `quarter`, is refused before any vote.
+  quarter over `quarter.sync` (a `federation_message` of topic `quarter.local_settings`, which only
+  `quarter_configure` sends and no member or chapter can relay) before it writes anything else, and the
+  quarter applies it; a quarter that refuses it or cannot be reached fails the call, and nothing changes.
+  A malformed name, or a `timezone` with no `quarter`, is refused before any vote.
 
 ```bash
 realms realm call capital quarter_configure '{"quarter": "<canister id>", "timezone": "Asia/Tokyo"}'

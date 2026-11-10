@@ -178,11 +178,13 @@ def read(action, args, declared):
 def apply(name, args, declared, legacy=False):
     """Run ``name`` as the codex (origin ``codex``, the realm as signer); ``legacy`` marks a legacy codex's effect,
     which acts for the realm where a layered codex's holds nothing (core.op.Call), except in what takes the realm's
-    vote (``VOTED``)."""
+    vote (``VOTED``) and its time zone, which no codex sets (GGG I-ADM-4; the layered runtime refuses it too)."""
     if name not in ops():
         return {"ok": False, "error": f"unknown operation '{name}'"}
     if legacy and name in VOTED:
         return {"ok": False, "error": f"{name} takes the realm's vote, which a legacy codex does not hold"}
+    if legacy and "timezone" in args:
+        return {"ok": False, "error": "a codex never sets a time zone"}
     reply = yield from dispatch(name, json.dumps(args), origin="codex", signer=chain.self_id(), declared=declared,
                                 legacy=legacy)
     return json.loads(reply)
