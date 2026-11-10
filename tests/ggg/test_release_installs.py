@@ -134,6 +134,34 @@ def test_the_publishers_stand_in_record_vouches_and_the_chapters_come_by_url():
     assert [r["version"] for r in ok("legislation_releases", "alice")["releases"]] == ["2.0.0"]
 
 
+def served_list(version="1.0.0"):
+    """The change list of arcadia's release ``version`` as a realm can build it from the record that vouches for it: its
+    chapters give no URL and no size, for a realm serves them by checksum."""
+    entries = [{"chapter": f"arcadia/{d}", "sha256": sha(chapter_text(d, version))} for d in BOTH]
+    text = json.dumps({"kind": "realms-gos/legislation-change", "format": 1, "realm": "town", "replaces": None,
+                       "set": entries, "release": {"source": "arcadia", "version": version}}).encode()
+    url = WEB + f"changes/served-{version}.json"
+    fake_chain.serve(url, text)
+    return {"url": url, "checksum": "sha256:" + sha(text)}
+
+
+def test_a_release_that_gives_no_urls_comes_from_the_capital_of_the_record_that_vouches_for_it():
+    capital(entry("1.0.0"))
+    install(served_list())
+    seen = status()
+    assert job()["status"] == "done" and seen["codex"]["id"] == codex_id()
+    row = installed(seen)["arcadia/tax"]
+    assert (row["route"], row["url"], row["size"]) == ("capital", "", len(chapter_text("tax")))
+
+
+def test_a_release_that_gives_no_urls_fails_when_no_realm_vouches_for_it():
+    text = json.dumps({"source": "arcadia", "releases": [entry("1.0.0")]})
+    fake_chain.serve(POINTER, text.encode())
+    SyncSource[SRC].delete()
+    SyncSource(id=POINTER, checksum="sha256:" + sha(text), name="Arcadia", status="active")
+    failing(served_list(), "no URL, and no realm vouches for it")
+
+
 def test_the_publishers_record_vouches_before_the_record_that_relays_the_layer():
     capital(entry("1.0.0"))
     capital(entry("1.0.0"), entry("2.0.0"), source="arcadia", cid=OTHER)
