@@ -85,6 +85,31 @@ def test_what_parse_refuses(bad, match):
     refused(change_list.parse, bad, match=match)
 
 
+ES = {"source": "eu/es", "version": "1"}
+
+
+def served(chapter, **more):
+    """A chapter of a release as a realm serves it: its checksum, no URL and no size."""
+    return {"chapter": chapter, "sha256": SHA["tax"][7:], **more}
+
+
+def test_a_chapter_of_the_release_may_give_no_url_and_no_size_for_a_realm_serves_it():
+    parsed = change_list.parse(text(set=[served("eu/es/tax")], release=ES))
+    assert parsed["set"] == [{"chapter": "eu/es/tax", "source": "eu/es", "domain": "tax", "sha256": SHA["tax"],
+                              "urls": [], "size": None}]
+
+
+@pytest.mark.parametrize("bad", [
+    text(set=[served("town/tax")]),  # the realm's own chapter is fetched by its URL
+    text(set=[served("town/tax")], release=ES),
+    text(set=[served("eu/fr/tax")], release=ES),  # not the release's layer
+    text(set=[served("eu/es/tax", size=100)], release=ES),  # a size but no URL
+    text(set=[served("eu/es/tax", mirrors=[URL + "m/tax.py"])], release=ES),
+])
+def test_any_other_chapter_gives_its_url(bad):
+    refused(change_list.parse, bad, match="fetched over https")
+
+
 def test_a_summary_is_a_text_per_language_and_may_be_left_out():
     chapter = [entry("town/tax")]
     assert change_list.parse(text(set=chapter))["summary"] == {}
