@@ -24,6 +24,10 @@ KINDS, ABSENT = ("majority_of_quarters", "majority_of_members"), ("wait", "no", 
 FIELDS = ("id", "name", "index", "status", "population", "codex_id", "codex_version", "compliance", "last_sync")
 # Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
 ADOPT_EVERY = 60
+# A quarter's own settings that the realm may also set for it by a realm-wide vote (quarter_configure). The capital sends
+# them to the quarter in a federation_message of this topic, which only the capital's quarter_configure sends.
+LOCAL = ("timezone",)
+LOCAL_SETTINGS = "quarter.local_settings"
 
 
 def realm():
@@ -353,16 +357,52 @@ def federal_rule(args):
         raise Fail(f"a federal rule has kind {KINDS}, absent {ABSENT} and a threshold below {ONE} (100 %)")
 
 
-@op("quarter.configure", governed=proposals.realm_wide, check=federal_rule)
+def local_settings(args):
+    """The quarter's own settings a ``quarter_configure`` call sets (``LOCAL``)."""
+    return {k: args[k] for k in LOCAL if k in args}
+
+
+def configuring(args):
+    """The check of ``quarter_configure``: its federal ``rule``, and the settings it sets for one quarter, which need
+    the ``quarter`` and pass ``realm_configure``'s own test (a zone this release has data for)."""
+    from api import setup  # it imports this module
+
+    federal_rule(args)
+    local = local_settings(args)
+    if local and not args.get("quarter"):
+        raise Fail(f"{', '.join(local)} is set for one quarter: name it with quarter")
+    setup.valid_values(local)
+
+
+def set_for_quarter(q, settings):
+    """Send ``settings``, the quarter's own, to quarter ``q`` to apply. A quarter that refuses or cannot be reached
+    fails the call, and so does one that does not say it applied them: a quarter on an older release answers ``ok`` to a
+    topic it does not know, and applies nothing. A generator."""
+    try:
+        reply = yield from ask(q.id, "federation_message", {"topic": LOCAL_SETTINGS, "body": settings})
+    except Exception as e:  # noqa: BLE001  chain.call raises for a quarter that is down: the call fails, it does not trap
+        raise Unavailable(f"{q.name} ({q.id}) cannot be reached: {e}")
+    if not reply.get("ok"):
+        raise Fail(f"{q.name} ({q.id}) refused {', '.join(settings)}: {reply.get('error')}")
+    if not set(settings) <= set(reply.get("configured") or ()):
+        raise Conflict(f"{q.name} ({q.id}) did not apply {', '.join(settings)}: upgrade it to this release first")
+
+
+@op("quarter.configure", governed=proposals.realm_wide, check=configuring)
 def quarter_configure(c, args):
-    """Set ``quarter``'s ``name`` or ``status`` (setup→active, active⇄suspended, active→splitting or merging→active),
-    and realm-wide ``capacity``, ``auto_scale_enabled``, ``quarter_join_mode``, ``federation_codex`` and the federal
-    vote ``rule``: kind majority_of_quarters or majority_of_members, absent wait, no or ignore, threshold below 100 %
-    (100000000), in hundred-millionths."""
+    """Set ``quarter``'s ``name`` or ``status`` (setup→active, active⇄suspended, active→splitting or merging→active)
+    and its own ``timezone``, which the quarter applies, and realm-wide ``capacity``, ``auto_scale_enabled``,
+    ``quarter_join_mode``, ``federation_codex`` and the federal vote ``rule``: kind majority_of_quarters or
+    majority_of_members, absent wait, no or ignore, threshold below 100 % (100000000), in hundred-millionths. A quarter
+    that refuses its ``timezone``, does not apply it (an older release) or cannot be reached fails the call, and nothing
+    changes."""
     q = find(Quarter, args["quarter"]) if args.get("quarter") else None
     status, rule = args.get("status"), args.get("rule")
     if status and (q is None or status not in MOVES.get(q.status, ())):
         raise Conflict(f"a {q.status if q else 'missing'} quarter cannot become {status}")
+    local = local_settings(args)
+    if local:  # first: what this message writes before an await is kept even if the quarter then refuses
+        yield from set_for_quarter(q, local)
     if q is not None:
         q.name, q.status = args.get("name", q.name), status or q.status
     r = realm()
@@ -397,19 +437,58 @@ def quarter_secede(c, args):
 def quarter_join_federation(c, args):
     """Make this independent realm a quarter of ``capital`` (its canister id), known here as ``name`` (default
     "capital"). The capital registers this realm separately. A realm with a link that has not ended, to a sync source
-    or from a follower, cannot join: a quarter makes no call to another realm. Returns ``capital``."""
-    from api import links  # it imports this module
-
+    or from a follower, cannot join: a quarter makes no call to another realm. A realm that has not chosen its time zone
+    (still ``UTC``) starts on the capital's, read once from its ``realm_info``. Returns ``capital``."""
     r, cid = realm(), args["capital"]
-    if r.is_quarter or cid == chain.self_id():
-        raise Conflict("this realm already belongs to a federation")
-    open_links = links.open_links()
-    if open_links:  # a quarter makes no call to another realm, so it could not end them (I-NEST-3)
-        raise Conflict(f"end this realm's links before it becomes a quarter: {', '.join(open_links)}")
+    refuse_join(cid)
+    profile = yield from capital_profile(cid)
+    refuse_join(cid)  # again: the realm may have changed while the capital answered
+    take_defaults(profile)
     r.is_quarter, r.is_capital, r.federation_realm_id = True, False, cid
     # The capital becomes a known quarter so its calls are accepted (I-FED-4).
     Quarter(id=cid, name=args.get("name", "capital"), index=0, status="active")
     return {"capital": cid}
+
+
+def refuse_join(cid):
+    """Refuse to join ``cid`` as a quarter: this realm belongs to a federation already, or has a link that has not
+    ended, to a sync source or from a follower; a quarter makes no call to another realm, so it could not end them
+    (I-NEST-3)."""
+    from api import links  # it imports this module
+
+    if realm().is_quarter or cid == chain.self_id():
+        raise Conflict("this realm already belongs to a federation")
+    open_links = links.open_links()
+    if open_links:
+        raise Conflict(f"end this realm's links before it becomes a quarter: {', '.join(open_links)}")
+
+
+def capital_profile(cid):
+    """The public profile (``realm_info``) of the capital ``cid`` this realm joins. A generator."""
+    try:
+        reply = yield from ask(cid, "realm_info", {})
+    except Exception as e:  # noqa: BLE001  chain.call raises for a canister that cannot be reached
+        raise Unavailable(f"the capital {cid} cannot be reached: {e}")
+    if not reply.get("ok"):
+        raise Fail(f"{cid} is not a realm this realm can join: {reply.get('error')}")
+    return reply["realm"]
+
+
+def take_defaults(profile):
+    """A new quarter's own settings start from its capital's, once, where it has not chosen them: a zone still ``UTC``
+    (GGG I-ADM-4: not yet chosen). After that they are the quarter's own, and the capital's later changes do not follow."""
+    from api import setup  # it imports this module
+
+    if realm().timezone == "UTC" and profile.get("timezone", "UTC") != "UTC":
+        setup.configure(("timezone",), {"timezone": profile["timezone"]})
+
+
+def on_local_settings(c, body):
+    """From the capital: this quarter's own settings, as a realm-wide vote set them (``quarter_configure``)."""
+    from api import setup  # it imports this module
+
+    from_capital(c)
+    return setup.configure(LOCAL, body)
 
 
 @op(None, read=True, public=True)
