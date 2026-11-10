@@ -333,6 +333,33 @@ def test_the_error_is_kept_for_the_it_team_even_when_the_notice_cannot_be_record
     assert issue()["entries"] == [] and failure()["error"] == "ValueError: the journal is broken"
 
 
+class Unwritable(Exception):
+    def __str__(self):
+        raise ValueError("no text")
+
+
+def unwritable(*args):
+    raise Unwritable()
+
+
+def test_an_error_that_cannot_be_written_out_stops_no_revert_and_the_notice_still_goes_in(monkeypatch):
+    from test_codex import build
+    from test_revert import installed
+
+    build()
+    installed("1.0.0", "1.1.0")
+    monkeypatch.setattr(journal, "allowed_fields", unwritable)
+    assert ok("codex_revert", "ctl")["codex"] == "test@1.0.0"
+    monkeypatch.undo()
+    assert [e["kind"] for e in issue()["entries"]] == ["not_recorded"] and failure() is None
+
+
+def test_a_realm_whose_journal_cannot_even_tell_if_it_publishes_still_reverts(monkeypatch):
+    reverted_with_a_broken_journal(monkeypatch, "publishes")
+    assert [e["kind"] for e in issue()["entries"]] == ["not_recorded"]
+    assert failure()["error"] == "ValueError: the journal is broken"
+
+
 def test_a_journal_without_failures_shows_none_to_the_it_team(realm):  # noqa: F811
     assert failure() is None
 

@@ -112,26 +112,27 @@ def reported(kind, change, details):
     """Record an entry of ``kind`` for a change the realm has already made: ``change`` names it by its codices, and the
     function ``details`` gives the rest, so that working it out is guarded too. The journal only reports: whatever goes
     wrong here, the change stands (a revert above all, the realm's floor, §10), and ``not_recorded`` says so."""
-    if not publishes():
-        return
     try:
+        if not publishes():
+            return
         record(kind, **change, **details())
     except Exception as e:  # noqa: BLE001  whatever it is, the switch or the revert that called it goes on
-        not_recorded(kind, change, f"{type(e).__name__}: {e}"[:500])
+        not_recorded(kind, change, e)
 
 
 def not_recorded(kind, change, error):
     """The entry of ``kind`` for ``change`` could not be recorded. The issue of the day says which change it misses, in
     an entry ``not_recorded`` that holds only the kind and the codices' ids: they name no person, and the personal-data
-    rules may be what failed. The error is kept for the IT admin team, who read it in codex_status (``failure``). Each
-    is guarded on its own: neither may stop the change, and one still goes in when the other fails."""
+    rules may be what failed. The ``error`` is kept for the IT admin team, who read it in codex_status (``failure``).
+    Each is guarded on its own, writing the error out too (an exception's text is its own code): neither may stop the
+    change, and one still goes in when the other fails."""
     try:
         append("not_recorded", {"kind": kind, **change})
     except Exception:  # noqa: BLE001  the error below is still kept
         pass
     try:
         realm = Realm["1"]
-        failure = {"kind": kind, **change, "at": chain.now(), "error": error}
+        failure = {"kind": kind, **change, "at": chain.now(), "error": f"{type(error).__name__}: {error}"[:500]}
         realm.manifest_data = {**realm.manifest_data, STATE: {**realm.manifest_data.get(STATE, {}), "failure": failure}}
     except Exception:  # noqa: BLE001  nothing more can be done, and the change stands
         pass
