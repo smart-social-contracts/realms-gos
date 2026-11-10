@@ -330,12 +330,14 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `realm_configure_infrastructure` | `realm.configure.infrastructure` | governed, delegable | Frontend, file-registry, marketplace, installer and Casals baton canister ids |
 | `realm_export` | `db.export` | read, delegable | One page of an entity's rows, as stored, for a backup. An entity with large rows (`ChapterSource`: up to 256 KB each) returns fewer rows than `count` asks for: follow `next` |
 | `codex_install_resume` (an admin resumes the install of a layered codex that an upgrade paused: the step it stopped in runs again, for the change list the vote approved; nothing else can change) | `codex.install` | delegable | After an upgrade in the middle of an install, the admin resumes `J-3` |
+| `it_team_set` (designate the department that is the IT admin team, or "" for none; reserved: no codex may call it or change the department) | `it_team.set` | governed, delegable | The admins designate `IT`; after launch the realm votes on a change |
+| `codex_revert_fast` (go back to the codex the active one replaced, decided by the IT admin team's department under its own policy; refused when no team is designated; reserved) | `codex.revert_fast` | governed, delegable | `check_proposal_create` of the new legislation refuses every proposal: two of the three `IT` seats approve the revert |
 | `db_convert_indexes` | `db.convert` | | After an upgrade from a release before ic-python-db 0.13: converts the index lists saved as one array each, a batch per call, until `done` (a list too long for one call is skipped and named in `refused`); a new realm, or one already converted, does nothing |
 | `tax_policy_view` | `realm.data_view` | read, delegable | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
 | `budget_view` | `realm.data_view` | read, delegable | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |
 
 Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.view`,
-`orchestration.approve`, `shell.execute`. (`task.schedule` is the model's; `task.cancel` is no longer used: `task_cancel`
+`orchestration.approve`, `shell.execute`, `it_team.set`, `codex.revert_fast` (held by the seat holders of the IT admin team). (`task.schedule` is the model's; `task.cancel` is no longer used: `task_cancel`
 needs `task.schedule`, and `task_list` needs `realm.monitor`.)
 
 ## 6. Invariants Realms GOS adds

@@ -52,6 +52,7 @@ class Realm(Row):
     can_test_mode = Boolean(default=False)
     test_mode = Boolean(default=False)
     test_flags = Json({})  # the test_mode_* switches
+    it_team = String(default="")  # the department that reverts a failing codex fast (§10.2): the admins designate it
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):

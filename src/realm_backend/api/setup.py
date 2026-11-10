@@ -30,6 +30,7 @@ PROFILES = {
     "founder": [
         "realm.configure", "realm.configure.branding", "realm.configure.tokens", "realm.configure.infrastructure",
         "realm.configure.trust_policy", "realm.register", "codex.install", "extension.install", "governance.update",
+        "it_team.set",
     ],
 }
 INSTALL = ("network", "can_test_mode", "founder")
