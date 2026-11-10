@@ -102,6 +102,15 @@ def valid_follower(args):
     capital_of(args.get("follower"))
 
 
+def refuse_standing(old, key, what):
+    """A vote on ``key`` is a Conflict while the link under it stands, and while the vote that made it is still being
+    checked, even if the link has been ended since: that vote's walk would clear the ``checking`` mark of the next one."""
+    if old is not None and old.checking:
+        raise Conflict(f"the vote on {key} is still being checked")
+    if old is not None and old.status != "ended":
+        raise Conflict(f"{key} is already a {what}")
+
+
 def open_link(cls, key, **fields):
     """This side's vote: the link recorded as ``requested``, in place of an ended one under the same key. Returns the
     row and what it replaced, for ``undo``. It is written before the check for a cycle reads any other realm, so that a
@@ -122,10 +131,15 @@ def undo(link, before):
         cls(**before)
 
 
+def links_of(cls):
+    """Every link of a kind, ``SyncSource`` or ``Follower``, whatever its status."""
+    for status in STATUSES:
+        yield from each(cls, "status", status)
+
+
 def sources():
     """Every sync source of the realm, whatever the state of its link."""
-    for status in STATUSES:
-        yield from each(SyncSource, "status", status)
+    yield from links_of(SyncSource)
 
 
 def open_followers():
@@ -226,8 +240,15 @@ def resend(cls, key):
 
 
 def resume():
-    """Timers do not survive an upgrade: send again the notices nobody answered."""
+    """Timers and calls in flight do not survive an upgrade. A vote still ``checking`` has no walk left, which only a
+    walk that succeeds clears: it ends, by this realm, and the other side is told like any ended link, so that its key
+    is not locked for good. Then the notices nobody answered are sent again."""
     for cls in SIDES:
+        for link in list(links_of(cls)):
+            if link.checking:
+                link.checking = False
+                if link.status != "ended":
+                    link.status, link.ended_by, link.ended_at, link.unsent = "ended", chain.self_id(), chain.now(), True
         for link in each(cls, "unsent", True):
             retry_later(cls, link.id)
 
@@ -263,8 +284,7 @@ def sync_source_add(c, args):
         return {}
     if key == chain.self_id():
         raise Conflict("a realm does not take legislation from itself")
-    if old is not None and old.status != "ended":
-        raise Conflict(f"{key} is already a sync source")
+    refuse_standing(old, key, "sync source")
     return (yield from vote_link(SyncSource, key, (key, chain.self_id()), name=args["name"]))
 
 
@@ -287,8 +307,7 @@ def follower_accept(c, args):
     if key == chain.self_id():
         raise Conflict("a realm is not its own follower")
     old = Follower[key]
-    if old is not None and old.status != "ended":
-        raise Conflict(f"{key} is already a follower")
+    refuse_standing(old, key, "follower")
     return (yield from vote_link(Follower, key, (chain.self_id(), key)))
 
 

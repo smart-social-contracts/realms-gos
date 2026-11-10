@@ -282,6 +282,24 @@ def test_a_notice_nobody_answers_is_sent_again_when_the_realm_is_back_and_after_
     assert source_of(far)[source.cid] == ended
 
 
+STUCK = '''
+from ggg import SyncSource
+SyncSource(id=%(capital)r, name="stuck", status="requested", checking=True)
+'''
+
+
+def test_a_vote_still_being_checked_when_the_realm_is_upgraded_is_ended_and_its_key_freed(net, far, north):
+    """Only a walk that succeeds clears the mark, and an upgrade drops the walk."""
+    out = far.shell(STUCK % {"capital": north.cid})
+    assert "Traceback" not in out, out
+    far.upgrade()
+    ended = source_of(far)[north.cid]
+    assert ended["Ended"]["by"] == far.cid
+    net.wait(2 * 60)  # the notice goes out; the quarter answers that it is no link's capital
+    assert "unsent" not in far.shell("from ggg import SyncSource\nprint('unsent' if SyncSource[%r].unsent else 'sent')"
+                                     % north.cid)
+
+
 def test_a_follower_leaves_and_the_sources_hook_on_link_notify_sees_ended(source, third, people):
     third.govern("sync_source_remove", {"source": {"Realm": source.cid}})
     ended = source_of(third)[source.cid]
