@@ -9,14 +9,18 @@ import world
 from api import propagation, quarters
 from core import compliance
 from core import legislation
+from core.change_list import layers_for
 from fake_chain import peer, rejects
 from ggg import (FederalVoteLeg, FederationMessage, Forward, InstallJob, LayeredCodex, Proposal, Quarter, Realm, Task,
                  TaskSchedule)
 from kit import call, fire_timers, later, ok, rows
 from test_federation import leg, open_fv
-from test_installs import HOUR, change_list, expected_id, fire_due, install, job, own_layer, run_job, schedule, sha, status
+from test_installs import (HOUR, change_list, chapter_text, expected_id, fire_due, install, job, own_layer, run_job, schedule,
+                           sha, status)
 from test_legislation_runtime import TOWN, activate, layered
 from test_quarters import CAPITAL, capital, quarter
+from test_release_installs import codex_id as release_id
+from test_release_installs import entry as released
 
 STAGED = {"ok": True, "staged": "started", "job": "J-1"}
 OTHER = "sha256:" + "b" * 64
@@ -48,7 +52,8 @@ def test_the_capital_tells_each_active_quarter_what_it_staged_and_when_it_switch
     p = schedule(args)
     run_job()
     assert job()["step"] == "wait"
-    body = {"codex": expected_id(layer), "checksum": args["checksum"], "at": Proposal[p].effective_at, "proposal": p}
+    body = {"codex": expected_id(layer), "checksum": args["checksum"], "at": Proposal[p].effective_at, "proposal": p,
+            "layers": {"relays": [], "vouchers": {}, "vouching": None}}  # an own layer only: nothing from above
     for north_or_south in federation:
         assert north_or_south.sent("federation_message") == [{"topic": "codex.stage", "body": body, "codex": ""}]
     messages = [(m.topic, m.body, list(m.response)) for m in rows(FederationMessage)]
@@ -245,6 +250,55 @@ def test_a_quarter_builds_the_codex_the_capital_announced_and_no_other(monkeypat
     call("federation_message", CAPITAL, topic="codex.stage", body=body)
     run_job()
     assert status()["pending"] is None and "not the " + OTHER + " the capital announced" in job()["error"]
+
+
+def release_from_capital():
+    """Release 1.0.0 of arcadia for the realm ``town``: its chapters, its change list, and the layers a capital that
+    syncs from ``src`` staged for it."""
+    chapters = {f"arcadia/{d}": chapter_text(d) for d in ("tax", "procedure")}
+    release = {"source": "arcadia", "version": "1.0.0"}
+    listed = change_list(chapters, realm="town", release=release)
+    layers = layers_for([], [{"key": "src", "source": "src/town", "releases": [released("1.0.0")]}], release)
+    return chapters, listed, layers
+
+
+def test_a_quarter_stages_a_release_with_the_layers_its_capital_staged_and_reads_no_record(monkeypatch):
+    quarter(monkeypatch, "north")
+    chapters, listed, layers = release_from_capital()
+    capital_serving(chapters, listed, running=release_id())
+    body = {"codex": release_id(), "checksum": listed["checksum"], "at": fake_chain.now() + HOUR, "layers": layers}
+    assert call("federation_message", CAPITAL, topic="codex.stage", body=body)["staged"] == "started"
+    run_job()
+    seen = status()
+    assert (seen["job"]["status"], seen["job"]["step"], seen["pending"]["id"]) == ("running", "wait", release_id())
+    assert {(c["route"], c["vouched_by"]) for c in seen["pending"]["chapters"].values()} == {("capital", "src/town")}
+    assert not [c for c in fake_chain.state["calls"] if c[1] == "legislation_releases"]  # it has no record to read
+    later(HOUR)
+    fire_timers()
+    run_job()
+    assert status()["codex"]["id"] == release_id()
+    assert [(r["source"], r["version"]) for r in ok("legislation_releases", "alice")["releases"]] == [("arcadia", "1.0.0")]
+
+
+def test_a_quarter_told_by_a_capital_on_the_previous_release_reads_its_own_records_and_a_release_fails(monkeypatch):
+    quarter(monkeypatch, "north")
+    chapters, listed, _ = release_from_capital()
+    capital_serving(chapters, listed)
+    body = {"codex": release_id(), "checksum": listed["checksum"], "at": fake_chain.now() + HOUR}  # no layers
+    call("federation_message", CAPITAL, topic="codex.stage", body=body)
+    run_job()
+    assert job()["status"] == "failed" and "no sync source relays arcadia" in job()["error"]
+
+
+@pytest.mark.parametrize("layers", [[], {"relays": {}, "vouchers": {}, "vouching": None},
+                                    {"relays": [], "vouchers": [], "vouching": None},
+                                    {"relays": [], "vouchers": {}, "vouching": "src"}])
+def test_layers_that_are_not_an_install_jobs_are_refused(monkeypatch, layers):
+    quarter(monkeypatch, "north")
+    chapters, listed, _ = release_from_capital()
+    body = {"codex": release_id(), "checksum": listed["checksum"], "at": fake_chain.now() + HOUR, "layers": layers}
+    assert "layers are" in call("federation_message", CAPITAL, topic="codex.stage", body=body)["error"]
+    assert InstallJob.count() == 0
 
 
 def test_a_quarter_that_cannot_stage_keeps_its_codex_and_says_why(monkeypatch):

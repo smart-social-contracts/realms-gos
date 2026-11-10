@@ -2,8 +2,9 @@
 
 One realm-wide vote adopts the codex; its switch time T is the proposal's ``effective_at``, or the acceptance. The
 capital's install job (api.installs) stages it as for any realm, and then tells each active quarter: the codex's
-checksum, the change list's checksum and T (``codex.stage``). A quarter stages the same codex with the same job, taking
-every byte from its capital, and nothing changes while it does. At T it switches by itself, from a task schedule that
+checksum, the change list's checksum, T and the layers from above it staged (``codex.stage``). A quarter stages the same
+codex with the same job, taking every byte and those layers from its capital (it has no sync source of its own), and
+nothing changes while it does. At T it switches by itself, from a task schedule that
 survives an upgrade (``tasks.rearm``). A quarter that is not staged by T keeps its codex and is judged non-compliant
 by the capital; one that finishes later switches then, if the capital still runs that codex (api.installs.confirm).
 The switch cannot be atomic across canisters: calls between quarters carry the sender's codex checksum
@@ -42,10 +43,12 @@ JUDGE_AFTER = 60
 
 def announce(job):
     """The capital has staged the codex of ``job`` (install step 5): every active quarter is told what to stage and
-    when it switches. In the no-``effective_at`` case T is the acceptance, which is the moment the job started."""
+    when it switches, with the layers from above the capital staged from its sync sources' records, which a quarter
+    has none of. In the no-``effective_at`` case T is the acceptance, which is the moment the job started."""
     row = LayeredCodex[job.staged["codex"]]
     tell_all(STAGE, {"codex": row.id, "checksum": job.change_list["checksum"],
-                     "at": row.activates_at or job.started_at, "proposal": job.proposal})
+                     "at": row.activates_at or job.started_at, "proposal": job.proposal,
+                     "layers": job.staged["layers"]})
 
 
 def reverted(target):
@@ -101,13 +104,16 @@ def staging(codex_id):
 
 def on_stage(c, body):
     """From the capital: stage the codex ``codex`` (its change list is stored under ``checksum`` there) and switch to
-    it at ``at``. Asking again for a codex being staged for the same time, or already active, changes nothing; a newer
-    announcement, or the same codex for another time, replaces a staging in progress; another install running here
-    refuses it."""
+    it at ``at``, with the ``layers`` from above the capital staged: the capital is the quarter's authority for them, and
+    the codex id the quarter builds must still be the one announced. Asking again for a codex being staged for the same
+    time, or already active, changes nothing; a newer announcement, or the same codex for another time, replaces a
+    staging in progress; another install running here refuses it."""
     quarters.from_capital(c)
-    codex_id, checksum, at = body.get("codex"), body.get("checksum"), body.get("at")
+    codex_id, checksum, at, layers = body.get("codex"), body.get("checksum"), body.get("at"), body.get("layers")
     if not (links.pinned(codex_id) and links.pinned(checksum) and isinstance(at, int) and at >= 0):
         raise Fail("a codex to stage is {codex, checksum: sha256:<64 hex digits>, at: seconds}")
+    if not (layers is None or staged_layers(layers)):
+        raise Fail("layers are {relays: [...], vouchers: {...}, vouching: {...} or null}")
     current = runtime.active()
     if current is not None and current.id == codex_id:
         return {"staged": "active"}
@@ -125,10 +131,19 @@ def on_stage(c, body):
     job = store.start_job("", {"url": "", "checksum": checksum})
     job.staged = {"announced": {"codex": codex_id, "at": at, "capital": c.by,
                                 "proposal": str(body.get("proposal") or "")}}
+    if layers is not None:  # a capital on the previous release sends none, and the job reads this realm's records
+        job.staged = {**job.staged, "layers": layers}
     if at > chain.now():
         schedule(job, at)
     installs.launch(job)
     return {"staged": "started", "job": job.id}
+
+
+def staged_layers(layers):
+    """Whether ``layers`` has the shape of the layers an install job stages (core.change_list.layers_for)."""
+    return (isinstance(layers, dict) and isinstance(layers.get("relays"), list)
+            and isinstance(layers.get("vouchers"), dict)
+            and (layers.get("vouching") is None or isinstance(layers["vouching"], dict)))
 
 
 def on_unstage(c, body):

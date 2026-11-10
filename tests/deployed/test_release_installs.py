@@ -13,7 +13,7 @@ import json
 import pytest
 from fixtures import legislation as arcadia
 from network import Network
-from test_installs import WEB, Site, active_id, chapter_text, failing, install, status
+from test_installs import HOUR, WEB, Site, active_id, chapter_text, failing, install, status
 from test_sync_sources import RELAY, STORE
 
 STAND_IN = "https://legislation.example.test/arcadia/record.json"
@@ -30,9 +30,9 @@ def entry(version):
     return {**arcadia.layer(version), "published": 5, "effective_from": 6}
 
 
-def release_args(site, version, **kw):
+def release_args(site, version, realm="town", **kw):
     chapters = {f"arcadia/{d}": chapter_text(d, version) for d in BOTH}
-    return site.change_list(chapters, realm="town", release={"source": "arcadia", "version": version}, **kw)
+    return site.change_list(chapters, realm=realm, release={"source": "arcadia", "version": version}, **kw)
 
 
 def relay(realm, version, order):
@@ -214,6 +214,30 @@ def test_an_upgrade_in_the_middle_of_a_later_install_changes_nothing_in_the_laye
     net.wait_until(lambda: status(town)["job"]["status"] in ("done", "failed"), rounds=2)
     assert status(town)["job"]["status"] == "done"
     assert routes(town) == {"arcadia/tax": ("https", "x/source", "2.0.0"), "arcadia/procedure": ("capital", "x/source", "2.0.0")}
+
+
+def test_the_quarters_of_a_capital_stage_the_release_it_installs_and_switch_with_it_at_t(net, site):
+    """A quarter has no sync source of its own: it takes the layers its capital staged, with every byte, and at T the
+    capital and its quarters run the same codex (docs/codices/layered-codex.md §9.5)."""
+    hub = source_with(net, "hub", "1.0.0", "x/hub")  # its own: the tests above moved ``source`` on to other releases
+    seat, north, south = net.realm("seat"), net.realm("north", members=("alice",)), net.realm("south", members=("alice",))
+    net.register_quarters(seat, north, south)
+    link(seat, hub)
+    t = seat.now() + HOUR
+    proposal = seat.govern("codex_install", release_args(site, "1.0.0", realm="seat"), effective_at=t)
+    realms = (seat, north, south)
+    net.wait_until(lambda: all((status(r)["job"] or {}).get("step") == "wait" or (status(r)["job"] or {}).get("status")
+                               == "failed" for r in realms), rounds=2)
+    assert [(status(r)["job"]["status"], status(r)["job"]["error"]) for r in realms] == [("running", "")] * 3
+
+    seat.run_at_effective_at(proposal)
+    net.wait_until(lambda: all(active_id(r) for r in realms), rounds=2)
+    assert active_id(north) == active_id(south) == active_id(seat)
+    for quarter in (north, south):
+        assert routes(quarter) == {"arcadia/tax": ("capital", "x/hub", "1.0.0"),
+                                   "arcadia/procedure": ("capital", "x/hub", "1.0.0")}
+        record = quarter.ok("legislation_releases", None, query=True)["releases"]
+        assert [(r["source"], r["version"]) for r in record] == [("arcadia", "1.0.0")]
 
 
 # ---- costs: reading a record, run by hand in a realm of its own
