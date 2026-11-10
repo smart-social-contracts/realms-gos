@@ -15,7 +15,7 @@ from core.db import Fail, NotFound, each, next_id, view
 from ggg import Extension, JournalEntry, LayeredCodex, Realm
 
 EXTENSION = "journal"
-STATE = "journal"  # in Realm.manifest_data: {"first_day": "YYYY-MM-DD"}
+STATE = "journal"  # in Realm.manifest_data: {"first_day": "YYYY-MM-DD", "failure": the last entry not recorded}
 SHOWN = ("id", "at", "kind", "details")
 
 
@@ -72,12 +72,16 @@ def first_day():
 
 def allowed_fields():
     """The fields of an entry's ``details`` that the journal's personal-data rules let it keep: the journal
-    extension's ``config.personal_data.entry_fields``. With no extension there are no rules, and nothing is kept."""
+    extension's ``config.personal_data.entry_fields``. With no extension there are no rules, and nothing is kept; rules
+    that are not a list of names are read as none, so that a malformed config keeps nothing rather than fail."""
     extension = Extension[EXTENSION]
     if extension is None:
         return []
-    rules = ((extension.manifest or {}).get("config") or {}).get("personal_data") or {}
-    return rules.get("entry_fields") or []
+    try:
+        fields = extension.manifest["config"]["personal_data"]["entry_fields"]
+    except (KeyError, TypeError):
+        return []
+    return [name for name in fields if isinstance(name, str)] if isinstance(fields, list) else []
 
 
 def record(kind, **details):
@@ -100,17 +104,30 @@ def layers_of(codex):
             for source in codex.layers]
 
 
+def reported(kind, details):
+    """Record an entry of ``kind`` for a change the realm has already made, its details given by the function
+    ``details`` so that working them out is guarded too. The journal only reports: whatever goes wrong here, the change
+    stands (a revert above all, the realm's floor, §10), and the error is kept in the journal's state in place of the
+    entry."""
+    try:
+        record(kind, **details())
+    except Exception as e:  # noqa: BLE001  whatever it is, the switch or the revert that called it goes on
+        realm = Realm["1"]
+        failure = {"kind": kind, "at": chain.now(), "error": f"{type(e).__name__}: {e}"[:500]}
+        realm.manifest_data = {**realm.manifest_data, STATE: {**realm.manifest_data.get(STATE, {}), "failure": failure}}
+
+
 def codex_installed(codex):
     """The layered ``codex`` has just become the realm's legislation (api.codex.switch)."""
-    record("codex_installed", codex=codex.id, layers=layers_of(codex), proposal=codex.proposal,
-           activates_at=codex.activates_at)
+    reported("codex_installed", lambda: {"codex": codex.id, "layers": layers_of(codex), "proposal": codex.proposal,
+                                         "activates_at": codex.activates_at})
 
 
 def codex_reverted(restored, reverted):
     """A revert has made the earlier codex ``restored`` the realm's legislation again in place of ``reverted``
     (api.codex.restore). Either may be a legacy codex, which has no layers."""
-    record("codex_reverted", codex=restored.id, reverted=reverted.id,
-           layers=layers_of(restored) if isinstance(restored, LayeredCodex) else [])
+    reported("codex_reverted", lambda: {"codex": restored.id, "reverted": reverted.id,
+                                        "layers": layers_of(restored) if isinstance(restored, LayeredCodex) else []})
 
 
 # ---- Issues

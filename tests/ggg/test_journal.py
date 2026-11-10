@@ -280,6 +280,55 @@ def test_a_revert_to_a_legacy_codex_makes_an_entry_with_no_layers(realm):  # noq
         ("codex_reverted", {"codex": "test@1.0.0", "reverted": "test@1.1.0", "layers": []})]
 
 
+# ---- the journal only reports: nothing that goes wrong in it stops a revert or an install
+
+
+@pytest.mark.parametrize("manifest", ["text", {"config": "text"}, {"config": {"personal_data": ["codex"]}},
+                                      {"config": {"personal_data": {"entry_fields": "codex"}}}])
+def test_a_malformed_personal_data_config_keeps_nothing_and_stops_neither_revert(manifest):
+    from test_codex import build
+    from test_revert import installed, it_team
+
+    build()
+    installed("1.0.0", "1.1.0", "1.2.0")
+    Extension(id="journal", manifest=manifest)
+    it_team(("bob",))
+    assert ok("codex_revert", "ctl")["codex"] == "test@1.1.0"
+    assert ok("codex_revert_fast", "bob")["codex"] == "test@1.0.0"
+    assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [("codex_reverted", {})] * 2
+
+
+def broken(*args):
+    raise ValueError("the journal is broken")
+
+
+def failure():
+    return Realm["1"].manifest_data["journal"]["failure"]
+
+
+def test_a_journal_that_fails_does_not_stop_a_revert_and_keeps_the_error(monkeypatch):
+    from test_codex import build
+    from test_revert import installed
+
+    build()
+    installed("1.0.0", "1.1.0")
+    rules()
+    monkeypatch.setattr(journal, "local_day", broken)
+    assert ok("codex_revert", "ctl")["codex"] == "test@1.0.0"
+    monkeypatch.undo()
+    assert issue()["entries"] == [] and issue()["first_day"]
+    assert failure() == {"kind": "codex_reverted", "at": fake_chain.now(), "error": "ValueError: the journal is broken"}
+
+
+def test_a_journal_that_fails_does_not_stop_an_install(realm, monkeypatch):  # noqa: F811
+    rules()
+    layer = own_layer()
+    monkeypatch.setattr(journal, "layers_of", broken)
+    install(change_list(layer))
+    assert status()["codex"]["id"] == expected_id(layer) and issue()["entries"] == []
+    assert failure()["kind"] == "codex_installed"
+
+
 # ---- a quarter issues nothing and shows the capital's
 
 
