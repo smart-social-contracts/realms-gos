@@ -305,6 +305,28 @@ def test_hooks_fire_from_their_operations():
     assert "N-welcome newbie" in notes
 
 
+ZONING = '''
+from ggg_sdk import hook, realm
+
+
+@hook
+def zone(args):
+    realm.effect("realm_configure", timezone="Asia/Tokyo")
+    realm.effect("setup_step", step="realm", timezone="Asia/Tokyo")
+    return {}
+'''
+
+
+def test_a_legacy_codex_never_sets_a_time_zone():
+    build()
+    m = manifest(capabilities=["realm_configure", "setup_step"], hooks=["zone"])
+    ok("codex_install", "ctl", manifest=m, source=ZONING)
+    effects = hook("zone")["effects"]
+    assert [(e["op"], e["ok"], e["error"]) for e in effects] == [
+        ("realm_configure", False, "a codex never sets a time zone"), ("setup_step", False, "a codex never sets a time zone")]
+    assert Realm["1"].timezone == "UTC"
+
+
 TOWN_TAX = "from realms.legislation import above\n\nclass Tax(above('tax')):\n    pass\n"
 
 
