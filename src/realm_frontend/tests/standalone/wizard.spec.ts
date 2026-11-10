@@ -186,10 +186,18 @@ async function settle(page: Page, timeout = 45_000): Promise<boolean> {
 	return false;
 }
 
+// Playwright's tracer (trace: 'retain-on-failure' in the config) injects its snapshot script into every frame, and
+// Chromium logs this when the frame is sandboxed without allow-scripts, as the journal's printable sheet is. It is the
+// tracer's script, not the page's: the journal extension's own tests check, with the trace off, that its sheet has no
+// script and that its page logs no error. Only this exact text, with 'about:srcdoc' as the frame, is let through.
+const TRACER_IN_SANDBOXED_SRCDOC =
+	"Blocked script execution in 'about:srcdoc' because the document's frame is sandboxed and the 'allow-scripts' permission is not set.";
+
 function collectErrors(page: Page): string[] {
 	const errors: string[] = [];
 	page.on('console', (msg) => {
-		if (msg.type() === 'error') errors.push(`console: ${msg.text()}`);
+		if (msg.type() === 'error' && msg.text() !== TRACER_IN_SANDBOXED_SRCDOC)
+			errors.push(`console: ${msg.text()}`);
 	});
 	page.on('pageerror', (err) => errors.push(`page error: ${err.message}`));
 	return errors;

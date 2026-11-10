@@ -1,6 +1,6 @@
 import json
 
-from core import auth, build_variant, chain, language, legislation, localtime, zones
+from core import auth, build_variant, chain, journal, language, legislation, localtime, zones
 import constants
 import ggg
 from core import sandbox
@@ -93,6 +93,7 @@ def start(installer=""):
     # release lacks traps the upgrade on purpose: tz names only grow, and the realm must not turn UTC without a word.
     if Realm["1"].timezone != "UTC":  # a UTC realm needs no zone file, nor the reader
         localtime.use(Realm["1"].timezone)
+    journal.fix_first_day()  # on the realm's clock
     if not Realm["1"].manifest_data.get(LEG_INDEX):
         from api import federation
 
@@ -193,6 +194,7 @@ def configure(fields, values):
             setattr(realm, k, v)
     if "timezone" in values:
         localtime.use(realm.timezone)  # from now on; nothing stored is rewritten
+        journal.fix_first_day()  # a zone west of the old one can put today before the journal's first day
     return {"configured": sorted(values)}
 
 

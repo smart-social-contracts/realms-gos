@@ -1,6 +1,6 @@
 import json
 
-from core import chain
+from core import chain, journal
 from core import change_list
 from core import it_team
 from core import layered_codex as store
@@ -119,6 +119,7 @@ def switch(waiting):
     waiting.installed_at = chain.now()
     store.remember_source(waiting.layers[-1])
     store.remember_in_force(waiting.activates_at if 0 < waiting.activates_at <= chain.now() else chain.now())
+    journal.codex_installed(waiting)
     chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
     from api import propagation  # it imports the install task, which imports this module
 
@@ -268,6 +269,7 @@ def restore(target):
     if isinstance(current, LayeredCodex) or isinstance(target, LayeredCodex):
         legislation.warm(target if isinstance(target, LayeredCodex) else None)
     store.remember_in_force(chain.now())
+    journal.codex_reverted(target, current)
     from api import propagation  # it imports the install task, which imports this module
 
     propagation.reverted(target)  # a capital tells its quarters; a quarter reports to its capital
