@@ -104,6 +104,9 @@ class Water(above("water")):
     def check_proposal_create(self, args):
         if args.title == "break the water":
             raise ValueError("no water here")
+        if args.title == "spin":
+            while True:
+                pass
 '''
 TOWN_REGISTER = '''
 from realms.legislation import above
@@ -228,6 +231,67 @@ import json
 from core import legislation
 print(json.dumps({"codex": legislation._state["codex"] if isinstance(legislation._state["codex"], str) else None,
                   "loaded": legislation._state["box"] is not None}))
+'''
+# Guard calls straight into the running sandbox, which ``_call`` would replace once spent: how many it answered, and
+# the error of the first it did not, with what that call and an answered one cost on average.
+SPEND = '''
+import json
+from core import chain, legislation, sandbox
+guard = {"op": "proposal_create", "args": {"title": "spend", "action": None}, "now": chain.now(), "approvals": []}
+calls, error, failed, start = 0, None, 0, ic.performance_counter(0)
+for _ in range(%(count)d):
+    t = ic.performance_counter(0)
+    try:
+        legislation._ask("guard", guard)
+    except sandbox.Spent as e:
+        error, failed = str(e), ic.performance_counter(0) - t
+        break
+    calls += 1
+print(json.dumps({"calls": calls, "error": error, "failed": failed,
+                  "answered": (ic.performance_counter(0) - start - failed) // max(calls, 1)}))
+'''
+RELOAD = '''
+import json
+from core import legislation
+from ggg import LayeredCodex
+t = ic.performance_counter(0)
+legislation.warm(LayeredCodex[legislation._state["codex"]])
+print(json.dumps({"cost": ic.performance_counter(0) - t, "loaded": legislation._state["box"] is not None}))
+'''
+# The meter's two ways of ending a call, from a sandbox of its own with a small budget: a loop trips it, and a loop
+# inside an ``except`` body keeps running past it until the grace margin ends it. Then a call after each, and an
+# error of the program's own.
+METER = '''
+import json
+from core import sandbox
+program = """
+def spin():
+    while True:
+        pass
+
+def spin_in_handler():
+    try:
+        raise ValueError("caught")
+    except ValueError:
+        while True:
+            pass
+
+def fail():
+    raise ValueError("not the meter")
+
+def answer():
+    return 1
+"""
+out = {}
+for first in ("spin", "spin_in_handler", "fail"):
+    box, out[first] = sandbox.Resident(program, lambda action, kw: None, budget=100_000), []
+    for fn in (first, "answer"):
+        try:
+            out[first].append(box.call(fn))
+        except RuntimeError as e:
+            out[first].append([type(e).__name__, str(e)])
+    box.close()
+print(json.dumps(out))
 '''
 # A codex row made active without loading it, as a realm finds one after an upgrade; its chapter cannot load.
 BROKEN = '''
@@ -378,6 +442,47 @@ def test_e_a_hook_that_exhausts_the_budget_fails_alone_and_the_codex_reloads(tow
     assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
     assert "x/town/register.py" in failures(town, founder)  # the loop still counts until the hook next succeeds
     ok(town, "proposal_create", founder, title="fine again")
+    assert failures(town, founder) == {}
+
+
+def test_e1_both_ways_the_meter_ends_a_call_leave_a_spent_sandbox(town):
+    """realms-gos#670: a sandbox whose budget ran out tells so in two texts, and only one names BudgetExceeded."""
+    got = run(town, METER)
+    tripped = "sandboxed call raised: BudgetExceeded: instruction budget (100000) exhausted"
+    killed = "sandboxed call raised: RuntimeError: instruction budget (100000) exhausted; sandbox terminated after grace period"
+    assert got["spin"] == [["Spent", tripped], ["Spent", tripped]], got
+    assert got["spin_in_handler"] == [["Spent", killed], ["Spent", killed]], got
+    assert got["fail"] == [["RuntimeError", "sandboxed call raised: ValueError: not the meter"], 1], got
+
+
+def test_e2_a_sandbox_spent_over_thousands_of_calls_is_replaced_and_the_next_guarded_operation_runs(town, people, costs):
+    """realms-gos#670: the budget is the sandbox's, over all its calls; the call that finds it spent loads the codex
+    again and is asked once more."""
+    founder = people["founder"]
+    calls, got = 0, {"error": None}
+    while got["error"] is None:
+        got = run(town, SPEND % {"count": 1000})
+        calls += got["calls"]
+        assert calls < 100_000, "the sandbox's budget is never spent"
+    print(f"the sandbox was spent after {calls:,} guard calls ({got['answered']:,} instructions each); the call that "
+          f"found it spent cost {got['failed']:,}: {got['error']}")
+    assert calls > 1000 and "instruction budget (10000000) exhausted" in got["error"], got
+    assert run(town, STATE)["loaded"]  # the spent sandbox is still the running one: the next call replaces it
+    assert ok(town, "proposal_create", founder, title="after the sandbox was spent")["proposal"]
+    assert failures(town, founder) == {}
+    reload = run(town, RELOAD)
+    assert reload["loaded"], reload
+    costs.report("a guard call into the codex sandbox (proposal_create)", got["answered"])
+    costs.report("the guard call that finds the codex sandbox spent", got["failed"])
+    costs.report("loading the codex again (warm)", reload["cost"])
+
+
+def test_e3_a_guard_that_alone_spends_the_budget_denies_after_one_more_try_and_the_next_operation_runs(town, people):
+    founder = people["founder"]
+    error = proposal(town, founder, "spin")["error"]
+    assert error.startswith("legislation error: the codex sha256:") and "instruction budget (10000000) exhausted" in error, error
+    assert failures(town, founder)["codex"]["check_proposal_create"]["count"] == 1
+    assert ok(town, "proposal_create", founder, title="fine after the spin")["proposal"]
     assert failures(town, founder) == {}
 
 

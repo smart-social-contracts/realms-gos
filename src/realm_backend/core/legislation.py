@@ -426,16 +426,18 @@ def _effect(name, args):
 
 
 def _call(fn, **kwargs):
-    """Ask the running codex's sandbox. A spent budget reloads the codex and, unless the call had already read past
-    its budget, asks once more, so a long-lived sandbox never fails a call for the calls before it; a sandbox that
-    fails otherwise, or a codex that did not load, raises Fail."""
+    """Ask the running codex's sandbox. A spent budget (``sandbox.Spent``, whatever the meter's text) reloads the codex
+    and, unless the call had already read past its budget, asks once more, so a long-lived sandbox never fails a call
+    for the calls before it; a call that spends a fresh sandbox too, a sandbox that fails otherwise, or a codex that
+    did not load, raises Fail."""
     if _state["box"] is None:
         raise Fail(f"the codex {_state['codex']} is not loaded")
     try:
         return _ask(fn, kwargs)
+    except sandbox.Spent:
+        pass
     except RuntimeError as e:
-        if "BudgetExceeded" not in str(e):
-            raise Fail(f"the codex {_state['codex']} failed: {e}")
+        raise Fail(f"the codex {_state['codex']} failed: {e}")
     stopped = _state["reads"]["stopped"]
     from ggg import LayeredCodex
 
