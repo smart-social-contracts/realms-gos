@@ -4167,6 +4167,11 @@
  },
  "SyncSource": {
   "fields": {
+   "check_error": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
    "checked_at": {
     "default": 0,
     "kind": "property",

@@ -7,6 +7,7 @@ rules in process.
 The realms are built once for the module and the tests below use them in order.
 """
 
+import hashlib
 import json
 
 import pytest
@@ -89,6 +90,14 @@ def installable(*arcadia_releases):
     it publishes in force from 2030 (``PUBLISH``)."""
     own = {"source": "x/source", "version": "1.0.0", "effective_from": PUBLISH["effective_from"]}
     return [{"source": "arcadia", "version": v, "effective_from": at} for v, at in arcadia_releases] + [own]
+
+
+def layer_checksum(release):
+    """§11.8's checksum of a layer, written out: what a source computes for an entry of its record."""
+    layer = {"source": release["source"], "version": release["version"], "calendar": release["calendar"] or "",
+             "chapters": {domain: sha for domain, sha in release["chapters"].items() if domain != "realm"}}
+    text = json.dumps(layer, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(text.encode()).hexdigest()
 
 
 def stale_since(at):
@@ -177,8 +186,11 @@ def test_the_source_receives_the_report(net, source, town):
     check_now(net, town)
     followers = source.ok("follower_list", "founder", query=True)["followers"]
     report = next(f for f in followers if f["id"] == town.cid)
-    assert [layer["version"] for layer in report["layers"]] == ["2.0.0"]
-    assert report["layers"][0]["checksum"].startswith("sha256:") and report["compliance"] == "compliant"
+    published = next(r for r in source.ok("legislation_releases", None, query=True)["releases"]
+                     if r["source"] == "arcadia")
+    assert published["version"] == "2.0.0" and published["calendar"] == ""  # a release with no calendar
+    assert report["layers"] == [{"version": "2.0.0", "checksum": layer_checksum(published)}]  # found by its checksum
+    assert report["compliance"] == "compliant"
     assert report["population"] == len(town.members) and report["reported_at"] > 0
 
 

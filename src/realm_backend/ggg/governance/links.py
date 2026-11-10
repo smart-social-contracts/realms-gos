@@ -28,6 +28,7 @@ class SyncSource(Row):
     # releases it could install from it.
     compliance = String(default='"unknown"')  # the flag as JSON text (core.compliance)
     checked_at = Integer(default=0)
+    check_error = String(default="")  # why the last check found no flag, "" when it found one
     installable = Json([])  # [{source, version, effective_from}]
 
 

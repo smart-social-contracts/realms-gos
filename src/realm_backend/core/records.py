@@ -19,6 +19,7 @@ from ggg.governance.links import RECORD_MAX
 
 VERSION_MAX = 64
 MOST_CHAPTERS = 64
+MOST_LAYERS = 16  # in a record, and in a follower's report: a chain is at most 8 deep (§4.4)
 NOTES_MAX = 8 * 1024  # characters of a release's notes, as JSON
 # GGG's typed methods carry a release's times in nanoseconds, as a nat64: a record is refused for a time they cannot
 # encode, since the typed ``ggg_legislation_releases`` would trap for every reader.
@@ -137,6 +138,8 @@ def checked_record(key, source, releases):
         raise Fail(f"{key}: a record lists its own layer last, below the layers it relays")
     if len(set(relayed)) != len(relayed) or len(set(own)) != len(own):
         raise Fail(f"{key}: a record lists a layer relayed twice, or a version of its own layer twice")
+    if len(relayed) + bool(own) > MOST_LAYERS:
+        raise Fail(f"{key}: a record lists at most {MOST_LAYERS} layers")
     if len(json.dumps(entries)) > RECORD_MAX:
         raise Fail(f"{key}: a record is at most {RECORD_MAX // 1024} KB")
     return {"key": key, "source": source, "releases": entries, "checked_at": chain.now()}

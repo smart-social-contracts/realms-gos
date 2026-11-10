@@ -18,7 +18,7 @@ from core import compliance
 from core import layered_codex as store
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, page, view, window
 from core.op import op
-from core.records import MOST_CHAPTERS, NOTES_MAX, VERSION_MAX, is_realm_key, no_at, pinned
+from core.records import MOST_CHAPTERS, MOST_LAYERS, NOTES_MAX, VERSION_MAX, is_realm_key, no_at, pinned
 from ggg import ChapterSource, Follower, Release, SyncSource
 
 SIDES = {SyncSource: "follower", Follower: "sync_source"}  # what a link's owner is to the realm it notifies
@@ -26,7 +26,6 @@ CLOCK_TOLERANCE = 5 * 60  # seconds a subnet's clock may differ from this one's
 WALK_LIMIT = 32  # realms read by one check for a cycle
 RETRY = 60  # seconds before a notice nobody answered is sent again
 NAME_MAX, URL_MAX = 200, 500
-MOST_LAYERS = 16  # a chain is at most 8 deep (§4.4)
 STATUSES = ("requested", "active", "ended")
 
 

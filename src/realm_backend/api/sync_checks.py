@@ -5,8 +5,10 @@ every ``interval`` hours: 24 until the admins set another with ``codex_check_con
 check at once. For each source it keeps on the link what it found: the realm's compliance against that record (core.
 compliance), when, and the releases it could install from it. It logs the releases no check had found before
 (``FoundRelease``), for the official journal, and reports to the capital of each realm it syncs from what it runs, a
-``ReportedLayer`` per layer from above, its compliance against that source and its population. A record that cannot be
-read makes the flag ``unknown``. After every install and revert the flags are judged again from the records kept.
+``ReportedLayer`` per layer from above, its compliance against that source and its population. Each source is checked
+on its own: one whose check fails, a record that cannot be read or is refused among the reasons, is ``unknown`` with
+the reason, and the others are checked all the same. After every install and revert the flags are judged again from
+the records kept.
 
 Only the capital checks, as a quarter calls no other realm. Both operations are the admins' and reserved (§10.4): no
 chapter hooks, guards or forbids them.
@@ -15,7 +17,7 @@ chapter hooks, guards or forbids them.
 from api import codex, installs, links, quarters
 from core import chain, change_list, compliance, records
 from core import layered_codex as store
-from core.db import Fail, each, page, view
+from core.db import Fail, each, first, page, view
 from core.op import op
 from ggg import FoundRelease, Realm, SourceRecord, SyncSource
 
@@ -76,10 +78,13 @@ def arm():
 
 
 def resume():
-    """Timers do not survive an upgrade: the next check is set again for its time, at once if that has passed."""
+    """Timers do not survive an upgrade: the next check is set again for its time, at once if that has passed. A realm
+    that had sync sources before it had checks starts them now."""
     due = settings().get("due")
     if due:
         chain.set_timer(max(due - chain.now(), 0), lambda: scheduled(due))
+    elif first(SyncSource, "status", "active") is not None:
+        schedule()
 
 
 def valid_interval(args):
@@ -91,10 +96,12 @@ def valid_interval(args):
 @op("realm.configure", check=valid_interval)
 def codex_check_config(c, args):
     """Check the sync sources every ``interval`` hours (1 to 168; 24 until set), the next check that many hours from
-    now. The admins' setting, outside legislation: no chapter hooks, guards or forbids it. Returns ``interval`` and
-    ``due``."""
+    now; before the realm's first sync source the interval is only kept. The admins' setting, outside legislation: no
+    chapter hooks, guards or forbids it. Returns ``interval`` and ``due``."""
+    links.only_capital()
     remember(interval=args["interval"])
-    schedule()
+    if settings().get("due"):
+        schedule()
     return schedule_view()
 
 
@@ -115,25 +122,28 @@ def check():
     if quarters.federated():
         return
     for link in list(each(SyncSource, "status", "active")):
-        yield from check_source(link.id)
+        try:
+            yield from check_source(link.id)
+        except Exception as e:  # noqa: BLE001  whatever fails for one source, the others are still checked
+            failed(link.id, e)
 
 
 def check_source(key):
-    """Read the record of sync source ``key`` and keep what it says; report to its capital if it is a realm. A source
-    that cannot be read, or whose link is no longer active, is ``unknown``. A generator."""
-    try:
-        record = yield from records.read_record(key)
-    except Fail:
-        record = None
+    """Read the record of sync source ``key`` and keep what it says; report to its capital if it is a realm. A record
+    that cannot be read, or is refused, raises Fail. A generator."""
+    record = yield from records.read_record(key)
     link = SyncSource[key]
-    link.checked_at = chain.now()
-    if record is None:
-        link.compliance = compliance.valid("unknown")
-        return
+    link.checked_at, link.check_error = chain.now(), ""
     keep_found(record)
     judge(link, record)
     if links.is_realm(link):
         yield from report(key, compliance.of(link.compliance))
+
+
+def failed(key, error):
+    """The check of sync source ``key`` failed with ``error``: the realm's flag against it is ``unknown``, and why."""
+    link = SyncSource[key]
+    link.checked_at, link.compliance, link.check_error = chain.now(), compliance.valid("unknown"), str(error)[:300]
 
 
 def layers_run():
@@ -196,7 +206,7 @@ def rejudge_source(key):
 def found():
     """What the last check found for each active sync source, as ``codex_status`` shows it."""
     return [{"source": link.id, "name": link.name, "compliance": compliance.of(link.compliance),
-             "checked_at": link.checked_at, "installable": link.installable}
+             "checked_at": link.checked_at, "error": link.check_error, "installable": link.installable}
             for link in each(SyncSource, "status", "active")]
 
 

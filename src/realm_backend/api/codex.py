@@ -368,7 +368,8 @@ def codex_status(c, args):
     ``job`` the install job running or paused, else the latest, with its step, status and error. ``it_team`` is the
     department the admins designated to revert fast ("" for none). ``sync_sources`` is what the last check of each
     active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the realm's
-    ``compliance`` against its record, ``checked_at`` and the releases ``installable`` from it; ``check`` the
+    ``compliance`` against its record, ``checked_at``, the ``error`` that left it ``unknown`` ("" for none) and the
+    releases ``installable`` from it; ``check`` the
     ``interval`` of the checks, in hours, and when the next is ``due`` (0 before the realm's first sync source)."""
     from api import sync_checks  # it imports the install task, which imports this module
 

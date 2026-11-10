@@ -312,9 +312,10 @@ def compared(release):
 
 def layer_checksum(release):
     """The checksum of a layer as a follower reports it (GGG's ``ReportedLayer``, §11.8): of ``compared`` as canonical
-    JSON. The release a follower runs and the entry of a record that lists it have the same, so a sync source finds
-    the layer by it in its own record."""
-    return checksum(canonical(compared(release)))
+    JSON, with no calendar written ``""`` as ``legislation_releases`` publishes it (the follower reads it as None). The
+    release a follower runs and the entry of a record that lists it have the same, so a sync source finds the layer by
+    it in its own record."""
+    return checksum(canonical({**compared(release), "calendar": release.get("calendar") or ""}))
 
 
 def of_release(realm, replaces, release):

@@ -13,7 +13,7 @@ from api import quarters, setup, sync_checks
 from core import change_list, compliance, legislation, op
 from fake_chain import peer, rejects
 from fixtures import legislation as arcadia
-from ggg import FoundRelease, Proposal, Quarter, Realm, SyncSource
+from ggg import FoundRelease, Notification, Proposal, Quarter, Realm, SyncSource
 from kit import denied, fire_timers, later, ok
 from test_installs import FOUR, WEB, active_id, fire_due, job, run_job, status
 from test_installs import change_list as listing
@@ -33,6 +33,10 @@ class Water(above("water")):
     def check_proposal_create(self, args):
         if args.effective_at is None or args.effective_at < self.now() + 15 * 86400:
             return self.deny("a proposal takes effect 15 days after it is filed, at the earliest")
+
+    def on_proposal_create(self, event):
+        self.ggg.notification_send(recipient="User:bob", topic="filed", title="a proposal was filed",
+                                   body=event.result["proposal"])
 '''
 
 
@@ -43,10 +47,10 @@ def entry(version, effective_from, as_version=None):
             "effective_from": effective_from}
 
 
-def source(*releases, publisher="arcadia"):
-    """The capital ``SRC``, which accepts this realm, lists ``releases`` as the record of ``publisher``, serves their
+def source(*releases, publisher="arcadia", cid=SRC):
+    """The capital ``cid``, which accepts this realm, lists ``releases`` as the record of ``publisher``, serves their
     chapters and takes the follower's reports."""
-    return peer(SRC, realm_info={"ok": True, "sync_sources": []}, link_notify={"ok": True, "status": "active"},
+    return peer(cid, realm_info={"ok": True, "sync_sources": []}, link_notify={"ok": True, "status": "active"},
                 legislation_releases={"ok": True, "releases": list(releases), "next": None, "source": publisher},
                 legislation_chapter=lambda a: {"ok": True, "text": arcadia.chapter(a["chapter"]).decode()},
                 follower_report={"ok": True, "follower": ME})
@@ -115,9 +119,11 @@ def realm():
 
 def test_the_realm_checks_from_its_first_sync_source_on_every_interval_the_admins_set():
     assert status()["check"] == {"interval": 24, "due": 0}  # no sync source, no check
+    assert ok("codex_check_config", "ctl", interval=6) == {"ok": True, "interval": 6, "due": 0}  # kept for later
+    assert fake_chain.state["timers"] == []
     capital = source(entry("1.0.0", 6))
     link()
-    assert status()["check"] == {"interval": 24, "due": fake_chain.now() + DAY}
+    assert status()["check"] == {"interval": 6, "due": fake_chain.now() + 6 * HOUR}
     due = fake_chain.now() + 2 * HOUR
     assert ok("codex_check_config", "ctl", interval=2) == {"ok": True, "interval": 2, "due": due}
     for bad in (0, 169, "2", 1.5):
@@ -154,9 +160,16 @@ def test_the_next_check_is_set_again_at_the_realms_start_for_its_time():
     assert len(capital.sent("legislation_releases")) == 1
 
 
+def test_a_realm_that_had_sync_sources_before_it_had_checks_starts_them_at_its_start():
+    SyncSource(id=SRC, name="Arcadia", status="active")
+    setup.start()
+    assert status()["check"]["due"] == fake_chain.now() + DAY and len(fake_chain.state["timers"]) == 1
+
+
 def test_a_quarter_checks_nothing_and_calls_no_other_realm():
     Realm["1"].is_quarter, Realm["1"].is_capital = True, False
     assert "a quarter calls no other realm" in denied("codex_check_now", "ctl")
+    assert "a quarter calls no other realm" in denied("codex_check_config", "ctl", interval=2)
     capital = source(entry("1.0.0", 6))
     SyncSource(id=SRC, name="Arcadia", status="active")
     op.run(sync_checks.check())
@@ -216,14 +229,51 @@ def test_a_record_that_cannot_be_read_is_unknown_and_an_install_leaves_it_so():
     source(entry("1.0.0", 6))
     link()
     check_now()
-    assert checked()["compliance"] == stale_since(6)
+    assert checked()["compliance"] == stale_since(6) and checked()["error"] == ""
     peer(SRC, legislation_releases=rejects("Canister is stopped"), follower_report={"ok": True})
     check_now()
     assert checked()["compliance"] == "unknown" and checked()["checked_at"] == fake_chain.now()
+    assert "Canister is stopped" in checked()["error"]
     install(listing({"town/water": WATER.encode() + b"\n"}, realm="town", replaces=active_id(),
                     url=WEB + "changes/water-2.json"))
     fire_due()
     assert checked()["compliance"] == "unknown"
+
+
+def test_each_source_is_checked_on_its_own_and_one_that_fails_is_unknown_with_the_reason():
+    own_layer()
+    many = [{**entry("1.0.0", 6), "source": f"far/l{n}"} for n in range(17)]  # more layers than a chain can have
+    broken = peer("broken", realm_info={"ok": True, "sync_sources": []}, link_notify={"ok": True, "status": "active"},
+                  legislation_releases={"ok": True, "releases": many, "next": None, "source": "far"})
+    ok("sync_source_add", "ctl", source={"Realm": "broken"}, name="Broken")  # checked first: its link came first
+    capital = source(entry("1.0.0", 6))
+    link()
+    check_now()
+    found = {s["source"]: s for s in status()["sync_sources"]}
+    assert broken.sent("legislation_releases") and found["broken"]["compliance"] == "unknown"
+    assert "a record lists at most 16 layers" in found["broken"]["error"]
+    assert found[SRC]["compliance"] == stale_since(6) and found[SRC]["error"] == ""  # still checked and judged
+    assert capital.sent("follower_report")
+
+
+def test_an_unexpected_error_in_one_sources_check_leaves_the_others_checked(monkeypatch):
+    own_layer()
+    source(entry("1.0.0", 6))
+    link()
+    source(entry("1.0.0", 6), cid="other")
+    ok("sync_source_add", "ctl", source={"Realm": "other"}, name="Other")
+    judge = sync_checks.judge
+
+    def broken_for_src(link, record):
+        if link.id == SRC:
+            raise KeyError("a bug")
+        judge(link, record)
+
+    monkeypatch.setattr(sync_checks, "judge", broken_for_src)
+    check_now()
+    found = {s["source"]: s for s in status()["sync_sources"]}
+    assert (found[SRC]["compliance"], found[SRC]["error"]) == ("unknown", "'a bug'")
+    assert (found["other"]["compliance"], found["other"]["error"]) == (stale_since(6), "")
 
 
 def test_the_flag_is_judged_against_each_record():
@@ -263,6 +313,12 @@ def test_the_source_receives_the_followers_report():
     layer = {"version": "1.0.0", "checksum": change_list.layer_checksum(entry("1.0.0", 6))}  # found in its record
     assert capital.sent("follower_report")[-1] == {"layers": [layer], "compliance": "compliant",
                                                    "population": quarters.population()}
+    # A realm publishes a release with no calendar as "" (the town relays arcadia now, to followers of its own), and
+    # the follower reads it as None: both give the layer one checksum.
+    published = ok("legislation_releases", "stranger")["releases"]
+    assert [(r["source"], r["calendar"]) for r in published] == [("arcadia", "")]
+    assert entry("1.0.0", 6)["calendar"] is None
+    assert change_list.layer_checksum(published[0]) == layer["checksum"]
     Quarter(id="q1", status="active", population=40)
     check_now()
     assert capital.sent("follower_report")[-1]["population"] == quarters.population() + 40
@@ -309,6 +365,9 @@ def test_a_propose_install_runs_no_guard_or_forbid_of_the_codex_and_the_vote_dec
     accepted = propose("1.0.0", title="blocked")
     assert accepted.status == "executed" and running() == {"1.0.0"}
     assert accepted.proposer == "alice"
+    fire_due()  # a hook's effects run in the messages after the call
+    told = [n.body for n in Notification.load_some(1, Notification.max_id() or 1) if n.topic == "filed"]
+    assert rejected.id in told and accepted.id in told  # the town's hook ran on both proposal_creates
 
 
 def test_a_propose_install_builds_the_whole_release_and_keeps_the_realms_own_layer():
