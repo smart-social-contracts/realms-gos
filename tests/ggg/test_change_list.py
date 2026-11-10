@@ -185,7 +185,8 @@ THROUGH_CV = [{"source": "eu/es/vc", "layers": [ES, CV]}]
 
 def vouched(set=(), release=None, relays=THROUGH_CV, own=TOWN_OWN):
     listed = change_list.parse(text(realm="town", set=set or [entry("town/tax", SHA["other"])], release=release))
-    return change_list.vouch(listed, "town", relays, own)
+    vouchers = {layer["source"]: relay["source"] for relay in relays for layer in relay["layers"]}  # the record that lists it
+    return change_list.vouch(listed, "town", relays, own, vouchers)
 
 
 def test_the_relaying_sync_source_vouches_for_the_layers_it_relays_and_the_realm_for_its_own():
@@ -195,14 +196,6 @@ def test_the_relaying_sync_source_vouches_for_the_layers_it_relays_and_the_realm
                              "water": ["town"]}
     assert vouched_by == {"eu/es/tax": "eu/es/vc", "eu/es/procedure": "eu/es/vc", "eu/es/vc/local_regime": "eu/es/vc",
                           "town/tax": "town", "town/water": "town", "eu/es/calendar": "eu/es/vc"}
-
-
-def test_the_publishers_own_record_vouches_when_the_realm_syncs_from_it_directly():
-    direct = THROUGH_CV + [{"source": "eu/es", "layers": [ES]}]
-    _, vouched_by = vouched(relays=direct)
-    assert vouched_by["eu/es/tax"] == "eu/es" and vouched_by["eu/es/vc/local_regime"] == "eu/es/vc"
-    _, vouched_by = vouched(relays=direct[::-1])  # whichever order the links come in
-    assert vouched_by["eu/es/tax"] == "eu/es"
 
 
 def test_a_release_is_installed_whole_as_its_record_lists_it():
@@ -253,3 +246,135 @@ def test_a_realm_with_no_sync_sources_runs_its_own_layer_alone():
     planned, vouched_by = vouched(relays=[])
     assert planned.layers == ["town"] and planned.paths == {"tax": ["town"], "water": ["town"]}
     assert vouched_by == {"town/tax": "town", "town/water": "town"}
+
+
+# ---- the layers of an install that leaves the layers from above as they are, and brings a release
+
+
+def record(key, source, *releases):
+    return {"key": key, "source": source, "releases": list(releases)}
+
+
+def runs(*releases, voucher="eu/es/vc"):
+    return [{**r, "vouched_by": voucher} for r in releases]
+
+
+EU = release("eu", "1.0.0", ["tax"])
+ASK_ES = {"source": "eu/es", "version": "1.0.0"}
+CV_RECORD = record("cv", "eu/es/vc", EU, ES, CV)
+
+
+def order_of(found):
+    return [layer["source"] for relay in found["relays"] for layer in relay["layers"]]
+
+
+def test_without_a_release_the_layers_from_above_stay_as_installed_and_no_record_is_needed():
+    found = change_list.layers_for(runs(EU, ES), [], None)
+    assert found["relays"] == [{"source": "eu/es", "layers": [EU, ES]}]  # one record, named by its last layer
+    assert found["vouchers"] == {"eu": "eu/es/vc", "eu/es": "eu/es/vc"} and found["vouching"] is None
+    assert change_list.layers_for([], [], None) == {"relays": [], "vouchers": {}, "vouching": None}
+
+
+def test_the_layers_the_realm_runs_keep_their_order_and_a_new_one_goes_where_the_vouching_record_puts_it():
+    only_eu_and_cv = change_list.layers_for(runs(EU, CV), [CV_RECORD], ASK_ES)
+    assert order_of(only_eu_and_cv) == ["eu", "eu/es", "eu/es/vc"]  # between the two the record lists it between
+    assert only_eu_and_cv["vouchers"]["eu/es"] == "eu/es/vc" and only_eu_and_cv["vouching"]["by"] == "eu/es/vc"
+    assert order_of(change_list.layers_for(runs(CV), [CV_RECORD], ASK_ES)) == ["eu/es", "eu/es/vc"]  # before the one below
+    assert order_of(change_list.layers_for(runs(EU), [CV_RECORD], ASK_ES)) == ["eu", "eu/es"]  # after the one above
+    assert order_of(change_list.layers_for([], [CV_RECORD], ASK_ES)) == ["eu/es"]
+
+
+def test_a_layer_the_realm_already_runs_takes_the_place_of_its_earlier_release_and_has_a_new_voucher():
+    newer = release("eu/es", "1.1.0", ["tax", "procedure"], SHA["calendar"])
+    found = change_list.layers_for(runs(EU, ES, CV), [record("es", "eu/es", ES, newer)], {"source": "eu/es", "version": "1.1.0"})
+    assert order_of(found) == ["eu", "eu/es", "eu/es/vc"]
+    assert found["relays"][0]["layers"][1]["version"] == "1.1.0" and found["relays"][0]["layers"][2] == CV
+    assert found["vouchers"] == {"eu": "eu/es/vc", "eu/es": "eu/es", "eu/es/vc": "eu/es/vc"}  # Spain's own record now
+
+
+def test_a_record_that_puts_the_layers_the_realm_runs_the_other_way_round_is_refused_naming_both():
+    flipped = record("cv", "eu/es/vc", ES, EU, CV)
+    refused(change_list.layers_for, runs(EU, ES), [flipped], ASK_ES,
+            match="the record of eu/es/vc puts eu/es above eu, and this realm runs eu above eu/es")
+    flipped = record("cv", "eu/es/vc", CV, EU)  # the release is for a layer the realm does not run: CV and EU swap
+    refused(change_list.layers_for, runs(EU, CV), [flipped], {"source": "eu", "version": "1.0.0"},
+            match="puts eu/es/vc above eu, and this realm runs eu above eu/es/vc")
+
+
+def test_a_record_that_does_not_vouch_is_held_to_the_order_too():
+    other = record("other", "elsewhere", CV, EU)
+    refused(change_list.layers_for, runs(EU, CV), [CV_RECORD, other], {"source": "eu/es/vc", "version": "2.0.0"},
+            match="the record of elsewhere puts eu/es/vc above eu, and this realm runs eu above eu/es/vc")
+
+
+def test_a_new_layer_between_kept_layers_the_record_orders_the_other_way_is_refused():
+    reverse = record("cv", "eu/es/vc", CV, ES, EU)  # CV above Spain above EU, but the realm runs EU above CV
+    refused(change_list.layers_for, runs(EU, CV), [reverse], ASK_ES, match="puts eu/es/vc above eu, and this realm runs eu")
+
+
+def test_a_layer_whose_link_ended_keeps_its_place_when_a_layer_the_realm_runs_is_released_from_another_record():
+    spain = record("es", "eu/es", EU, ES)  # the publisher's record lists EU and Spain; CV's link has ended
+    found = change_list.layers_for(runs(EU, ES, CV), [spain], ASK_ES)
+    assert order_of(found) == ["eu", "eu/es", "eu/es/vc"]
+    assert found["vouchers"] == {"eu": "eu/es/vc", "eu/es": "eu/es", "eu/es/vc": "eu/es/vc"}
+    planned, _ = vouched(release=ASK_ES, set=[entry("eu/es/tax"), entry("eu/es/procedure"), entry("eu/es/calendar")],
+                         relays=found["relays"])
+    assert planned.layers == ["eu", "eu/es", "eu/es/vc", "town"]
+
+
+def test_a_new_layer_beside_a_kept_layer_that_no_record_puts_in_order_with_it_is_refused():
+    spain = record("es", "eu/es", EU, ES)  # CV's link has ended: nothing orders Spain against CV
+    refused(change_list.layers_for, runs(EU, CV), [spain], ASK_ES,
+            match="the record of eu/es does not put eu/es in order against eu/es/vc: layers that no record puts in order")
+    refused(change_list.layers_for, runs(CV, EU), [record("n", "n", ES, EU)], ASK_ES, match="against eu/es/vc")
+    # the layers between the slot's two ends are named in the order the realm runs them
+    refused(change_list.layers_for, runs(EU, CV, release("w", "1", ["tax"])), [record("n", "n", EU, ES)], ASK_ES,
+            match="against eu/es/vc, w")
+
+
+def test_a_new_layer_that_the_record_orders_against_none_of_the_layers_the_realm_runs_is_refused():
+    refused(change_list.layers_for, runs(EU), [record("es", "eu/es", ES)], ASK_ES,
+            match="the record of eu/es does not put eu/es in order against eu: layers that no record puts in order")
+
+
+def test_a_record_that_has_moved_on_from_a_layer_the_realm_keeps_is_no_conflict():
+    newer = release("eu/es", "1.1.0", ["tax", "procedure"], SHA["calendar"])
+    behind = record("cv", "eu/es/vc", EU, newer, CV)
+    found = change_list.layers_for(runs(EU, ES), [behind], {"source": "eu/es/vc", "version": "2.0.0"})
+    assert found["relays"] == [{"source": "eu/es/vc", "layers": [EU, ES, CV]}]  # Spain stays at 1.0.0
+
+
+def test_the_publishers_record_vouches_when_the_realm_syncs_from_it_and_the_first_record_else():
+    es = record("es", "eu/es", ES)
+    through_cv = record("cv", "eu/es/vc", EU, ES, CV)
+    for records in ([es, through_cv], [through_cv, es]):
+        found = change_list.vouching(records, ASK_ES)
+        assert (found["key"], found["by"], found["order"]) == ("es", "eu/es", ["eu/es"])
+    found = change_list.vouching([through_cv], ASK_ES)
+    assert (found["key"], found["by"], found["release"], found["order"]) == ("cv", "eu/es/vc", ES, ["eu", "eu/es", "eu/es/vc"])
+    assert change_list.vouching([record("other", "eu/es/x", ES), through_cv], ASK_ES)["key"] == "other"
+
+
+def test_a_publishers_record_lists_the_version_asked_for_among_its_own():
+    old, new = release("eu/es", "1.0.0", ["tax"]), release("eu/es", "1.1.0", ["tax"])
+    publisher = record("es", "eu/es", old, new)
+    for version, expected in (("1.0.0", old), ("1.1.0", new)):
+        found = change_list.layers_for([], [publisher], {"source": "eu/es", "version": version})
+        assert found["relays"] == [{"source": "eu/es", "layers": [expected]}] and found["vouching"]["release"] == expected
+
+
+def test_what_no_record_vouches_for_is_refused():
+    refused(change_list.vouching, [CV_RECORD], {"source": "eu/es", "version": "1.1.0"}, match="relays eu/es 1.0.0, not 1.1.0")
+    refused(change_list.vouching, [CV_RECORD], {"source": "eu/es/x", "version": "1"}, match="no sync source relays eu/es/x")
+    refused(change_list.vouching, [], ASK_ES, match="no sync source relays eu/es")
+
+
+def test_two_records_that_list_different_releases_of_the_layer_are_refused_and_so_is_a_publisher_ahead_of_its_relays():
+    newer = release("eu/es", "1.1.0", ["tax", "procedure"], SHA["calendar"])
+    refused(change_list.vouching, [CV_RECORD, record("es", "eu/es", newer)], ASK_ES,
+            match="sync sources eu/es/vc and eu/es relay different releases \\(1.0.0 and 1.1.0\\)")
+    other_sums = {**ES, "chapters": {**ES["chapters"], "tax": SHA["other"]}}
+    refused(change_list.vouching, [CV_RECORD, record("x", "x", other_sums)], ASK_ES, match="1.0.0 with different checksums")
+    ahead = record("es", "eu/es", ES, newer)  # the publisher also lists 1.0.0: relays that lag are not in conflict with it
+    assert change_list.vouching([CV_RECORD, ahead], ASK_ES)["key"] == "es"
+    refused(change_list.vouching, [CV_RECORD, ahead], {"source": "eu/es", "version": "1.1.0"}, match="relay different releases")

@@ -1,6 +1,6 @@
 """Links between realms (GGG's model §10 and §11; docs/codices/layered-codex.md §8, §11): the realms this one takes
-legislation from, its sync sources, and those that take it from this one, its followers, and the releases it
-publishes.
+legislation from, its sync sources, and those that take it from this one, its followers, the releases it
+publishes, and the records of its sync sources, which it reads.
 
 A link is a row on each side, made by that side's vote (``sync_source_add``, ``follower_accept``): ``requested`` until
 the other side's vote is in, then ``active`` (a stand-in record, which cannot vote, is active on the follower's vote
@@ -15,19 +15,18 @@ import json
 from api import proposals, quarters
 from core import chain
 from core import compliance
+from core import layered_codex as store
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, page, view, window
 from core.op import op
+from core.records import MOST_CHAPTERS, NOTES_MAX, VERSION_MAX, is_realm_key, no_at, pinned
 from ggg import ChapterSource, Follower, Release, SyncSource
 
 SIDES = {SyncSource: "follower", Follower: "sync_source"}  # what a link's owner is to the realm it notifies
 CLOCK_TOLERANCE = 5 * 60  # seconds a subnet's clock may differ from this one's
 WALK_LIMIT = 32  # realms read by one check for a cycle
 RETRY = 60  # seconds before a notice nobody answered is sent again
-NAME_MAX, URL_MAX, VERSION_MAX = 200, 500, 64
+NAME_MAX, URL_MAX = 200, 500
 MOST_LAYERS = 16  # a chain is at most 8 deep (§4.4)
-MOST_CHAPTERS = 64
-NOTES_MAX = 8 * 1024  # characters of a release's notes, as JSON
-HEX = "0123456789abcdef"
 STATUSES = ("requested", "active", "ended")
 
 
@@ -40,8 +39,7 @@ def only_capital():
 
 
 def is_realm(link):
-    """Whether the link is to a realm, not to a stand-in record, which is kept under its url."""
-    return not link.id.startswith("https://")
+    return is_realm_key(link.id)
 
 
 def link_status(link):
@@ -57,11 +55,6 @@ def source_ref(source):
 def source_view(source):
     """A sync source as GGG's ``Realm.sync_sources`` lists it, in the realm's JSON."""
     return {"source": source_ref(source), "name": source.name, "status": link_status(source)}
-
-
-def pinned(checksum):
-    return isinstance(checksum, str) and checksum.startswith("sha256:") and len(checksum) == 71 \
-        and all(ch in HEX for ch in checksum[7:])
 
 
 def capital_of(text):
@@ -428,10 +421,19 @@ def published_as():
     return first.source if first is not None else None
 
 
-def no_at(source, version):
-    """A release is kept under ``<source>@<version>``: with an ``@`` in either part, two releases could share an id."""
-    if "@" in source or "@" in version:
-        raise Fail("a release's source and version hold no '@'")
+def brought_by_install():
+    """The layer from above that the install in progress brings, if there is one and it has read its records."""
+    job = store.live_job()
+    vouching = ((job.staged.get("layers") or {}).get("vouching")) if job is not None else None
+    return vouching["release"]["source"] if vouching else None
+
+
+def check_from_above(source, version):
+    """Refuse a release that this realm cannot keep as a layer from above: one with an ``@`` in its id, and one of the
+    layer the realm publishes. The install task asks before it fetches anything, so that the switch cannot fail on it."""
+    no_at(source, version)
+    if source == published_as():
+        raise Fail(f"{source} is the source id this realm publishes under: it is not a layer from above")
 
 
 def valid_release(args):
@@ -459,10 +461,14 @@ def legislation_release_publish(c, args):
     ``effective_from`` it is in force and ``notes`` by language. Every checksum is already stored by the realm,
     installed or pending (InvalidArgument), so a release can always be served. The realm publishes under one source id,
     the one of its first release, which is not a layer it relays (InvalidArgument), and a version once (Conflict): a
-    release is never edited or removed, and a correction is a new version."""
+    release is never edited or removed, and a correction is a new version. A layer that an install in progress brings
+    from above is refused too, so that the switch cannot fail on it."""
     source, version = args["source"], args["version"]
     if any(r.source == source for r in each(Release, "relayed", True)):
         raise Fail(f"{source} is a layer this realm relays: it publishes under its own source id")
+    if source == brought_by_install():
+        raise Fail(f"{source} is a layer an install in progress brings from above: it publishes under its own "
+                   f"source id")
     own = published_as()
     if own is not None and own != source:
         raise Fail(f"this realm publishes as {own}")
@@ -479,16 +485,24 @@ def legislation_release_publish(c, args):
     return {"release": release.id}
 
 
+def record_source():
+    """The source id of the realm's own layer: the one its releases are published under, else the one its first layered
+    codex set; None before either."""
+    return published_as() or store.own_source()
+
+
 @op(None, read=True, public=True, returns="releases")
 def legislation_releases(c, args):
     """The realm's published record, ``count`` releases at a time (default 100, at most 500) from position ``from``
     (default 1): the releases of the layers it relays, top layer first, each as it installed it, then its own, oldest
     first. Each has its ``source``, ``version``, ``published`` and ``effective_from`` times, ``commit``, ``chapters`` (a
-    domain to its checksum), ``calendar`` and ``notes``. Returns ``releases`` and ``next``."""
+    domain to its checksum), ``calendar`` and ``notes``. Returns ``releases``, ``next`` and ``source``: the id of the
+    realm's own layer, which tells a follower whether the record is its publisher's (None while the realm has none)."""
     start, count = window(args)
     rows = record()
     end = start - 1 + count
-    return {"releases": [release_of(r) for r in rows[start - 1:end]], "next": end + 1 if end < len(rows) else None}
+    return {"releases": [release_of(r) for r in rows[start - 1:end]], "next": end + 1 if end < len(rows) else None,
+            "source": record_source()}
 
 
 @op(None, read=True, public=True)
@@ -505,9 +519,7 @@ def relay_release(release, order):
     source = release["source"]
     if source not in order:
         raise Fail(f"the record that vouches for {source} does not list it")
-    no_at(source, release["version"])
-    if source == published_as():
-        raise Fail(f"{source} is the source id this realm publishes under: it is not a layer from above")
+    check_from_above(source, release["version"])
     relayed = [r for r in record() if r.relayed]
     for old in [r for r in relayed if r.source == source]:
         old.delete()

@@ -5,7 +5,8 @@ from ggg.finance import (AllocationRule, Bid, BidScore, Budget, FinancialReport,
                          Transfer, Treasury)
 from ggg.governance import (Calendar, ChapterSource, Codex, Contract, FederalVote, FederalVoteLeg, FederationMessage,
                             Follower, Forward, GuestUser, InstallJob, LayeredCodex, License, Mandate, Procedure,
-                            Proposal, ProposalEdge, Quarter, Realm, Registry, Release, Request, SyncSource, Vote)
+                            Proposal, ProposalEdge, Quarter, Realm, Registry, Release, Request, SourceRecord,
+                            SyncSource, Vote)
 from ggg.identity import (Attribute, Delegation, DelegationRequest, Human, Identity, Member, Organization,
                           PendingAction)
 from ggg.justice import Appeal, Case, Court, Dispute, Judge, Penalty, Verdict
