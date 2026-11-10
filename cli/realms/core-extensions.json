@@ -12,7 +12,8 @@
     "task_monitor",
     "access_manager",
     "mundus_explorer",
-    "role_manager"
+    "role_manager",
+    "journal"
   ],
   "defaults": {
     "ai_assistant_enabled": true,

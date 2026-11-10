@@ -2257,6 +2257,40 @@
   },
   "version": 2
  },
+ "JournalEntry": {
+  "fields": {
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "day": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "details": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
  "Judge": {
   "fields": {
    "appointed_at": {

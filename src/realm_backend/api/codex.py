@@ -1,6 +1,6 @@
 import json
 
-from core import chain
+from core import chain, journal
 from core import it_team
 from core import layered_codex as store
 from core import legislation
@@ -118,6 +118,7 @@ def switch(waiting):
     waiting.installed_at = chain.now()
     store.remember_source(waiting.layers[-1])
     store.remember_in_force(waiting.activates_at if 0 < waiting.activates_at <= chain.now() else chain.now())
+    journal.codex_installed(waiting)
     chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
     from api import propagation  # it imports the install task, which imports this module
 
