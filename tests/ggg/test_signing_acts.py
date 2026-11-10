@@ -340,10 +340,19 @@ def plain(text):
 # ---- Every signing operation is covered
 
 
+# The one read in the group: it lists the attributes awaiting review with their kind and value in clear, which are third
+# parties' personal data, so GGG asks the reviewer each time (a read in its confirm form, collected after the tap). It is
+# not a signing act, and not yet enabled: it needs a card for a read of personal data.
+THE_READ_IN_THE_GROUP = {"attribute_pending_list"}
+
+
 def test_every_signing_operation_is_in_the_sign_group_enabled_and_tested():
     in_group = {n for n, row in {**ggg_delegation.OPERATIONS, **poa.OWN}.items() if row[1] == "sign"}
-    assert set(signing_acts()) == in_group == set(ACTS) and len(ACTS) == 26
-    assert in_group <= poa.ENABLED and all(ggg_delegation.OPERATIONS[n][0] == "confirm" for n in in_group)
+    assert set(signing_acts()) == in_group - THE_READ_IN_THE_GROUP == set(ACTS) and len(ACTS) == 26
+    assert in_group - THE_READ_IN_THE_GROUP <= poa.ENABLED
+    assert all(ggg_delegation.OPERATIONS[n][0] == "confirm" for n in in_group)
+    assert all(op.ops()[n]["read"] and not op.ops()[n]["signing"] for n in THE_READ_IN_THE_GROUP)
+    assert not THE_READ_IN_THE_GROUP & poa.ENABLED  # enabling it is its own change: the test above then names it
 
 
 def test_every_signing_operation_has_a_title_and_a_summary():
