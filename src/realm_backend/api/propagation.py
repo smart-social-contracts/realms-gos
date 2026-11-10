@@ -25,7 +25,7 @@ from api import codex as runtime
 from api import installs, links, quarters, tasks
 from core import chain, compliance, legislation
 from core import layered_codex as store
-from core.db import Conflict, Fail, each, find, next_id
+from core.db import JSON_MAX, Conflict, Fail, each, find, next_id
 from core.op import op
 from ggg import FederationMessage, InstallJob, LayeredCodex, Quarter, Task, TaskSchedule
 
@@ -44,11 +44,30 @@ JUDGE_AFTER = 60
 def announce(job):
     """The capital has staged the codex of ``job`` (install step 5): every active quarter is told what to stage and
     when it switches, with the layers from above the capital staged from its sync sources' records, which a quarter
-    has none of. In the no-``effective_at`` case T is the acceptance, which is the moment the job started."""
+    has none of. In the no-``effective_at`` case T is the acceptance, which is the moment the job started.
+
+    Both ends keep the message in a ``FederationMessage``, whose body holds at most ``JSON_MAX`` characters: a body
+    above it would be lost in the quarter with no trace, and the quarter would drift. So a capital with quarters
+    refuses to stage a codex it cannot announce, and its install fails with the reason."""
     row = LayeredCodex[job.staged["codex"]]
-    tell_all(STAGE, {"codex": row.id, "checksum": job.change_list["checksum"],
-                     "at": row.activates_at or job.started_at, "proposal": job.proposal,
-                     "layers": job.staged["layers"]})
+    body = {"codex": row.id, "checksum": job.change_list["checksum"], "at": row.activates_at or job.started_at,
+            "proposal": job.proposal, "layers": for_quarters(job.staged["layers"])}
+    size = len(json.dumps(body))
+    if size > JSON_MAX and audience():
+        raise Fail(f"the layers from above are too big to announce to the quarters: {size} characters, at most "
+                   f"{JSON_MAX}")
+    tell_all(STAGE, body)
+
+
+def for_quarters(layers):
+    """``layers`` as a quarter needs them: the order of the record that vouches for a release is cut to the layers the
+    new codex runs, among which the quarter places the release in its own record (links.relay_release). The record
+    may list up to a thousand layers; a codex runs a few."""
+    vouching = layers["vouching"]
+    if vouching is None:
+        return layers
+    running = {layer["source"] for relay in layers["relays"] for layer in relay["layers"]}
+    return {**layers, "vouching": {**vouching, "order": [source for source in vouching["order"] if source in running]}}
 
 
 def reverted(target):
@@ -76,11 +95,14 @@ def withdraw(codex_id):
 
 def tell_all(topic, body):
     """``body`` to every active quarter, each call in a message of its own: one that cannot be reached holds up no
-    other, and the record of the message says which did not answer. Nothing to do on a quarter, which has none."""
-    if quarters.federated():
-        return
-    for q in each(Quarter, "status", "active"):
+    other, and the record of the message says which did not answer."""
+    for q in audience():
         chain.set_timer(0, lambda cid=q.id: tell(cid, topic, body))
+
+
+def audience():
+    """The quarters a capital tells: the active ones. None on a quarter, which has no quarters of its own."""
+    return [] if quarters.federated() else list(each(Quarter, "status", "active"))
 
 
 def tell(cid, topic, body):
