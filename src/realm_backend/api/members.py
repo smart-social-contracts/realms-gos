@@ -11,8 +11,8 @@ from ggg import (Appointment, Attribute, Department, Human, Identity, Invite, Me
                  UserProfile)
 from api import codex
 from core.op import op
-from core.pending import moment, quoted
-from api.proposals import root
+from core.pending import moment, quoted, you_sign
+from api.proposals import day_of, root
 
 MOVES = {"active": {"inactive", "suspended", "banned"}, "inactive": {"active", "banned"},
          "suspended": {"active", "banned"}, "banned": set()}
@@ -290,7 +290,16 @@ def identity_owner(args):
     return {find(Identity, args["identity"]).human.user}
 
 
-@op("identity.review", signing=True, parties=identity_owner, returns="identity")
+def reviewing_identity(user, args, grant):
+    i = find(Identity, args["identity"])
+    proof = quoted(i.kind) + (f" ({quoted(i.category)})" if i.category else "")
+    return you_sign(f"Marks identity proof {i.id} of {quoted(i.human.user)} as {quoted(args['status'])}",
+                    ("Identity proof", f"{proof}, issued by {quoted(i.issuer)}, kept at {quoted(i.ref)}, "
+                     + (f"expires {day_of(i.expires_at)}" if i.expires_at else "never expires")))
+
+
+@op("identity.review", signing=True, parties=identity_owner, returns="identity", summary=reviewing_identity,
+    title="Verify or reject an identity proof")
 def identity_review(c, args):
     """Decide a pending ``identity``: ``status`` verified or rejected. Returns ``status``."""
     i = find(Identity, args["identity"])
@@ -315,7 +324,16 @@ def attribute_owner(args):
     return {Human[find(Attribute, args["attribute"]).human].user}
 
 
-@op("attribute.review", signing=True, parties=attribute_owner, returns="attribute")
+def reviewing_attribute(user, args, grant):
+    a = find(Attribute, args["attribute"])
+    # Its kind and value are personal data (I-PRV-1), and the delegate reads this card: they stay out of it.
+    return you_sign(f"Marks attribute {a.id} of {quoted(Human[a.human].user)} as {quoted(args['status'])}",
+                    ("Attribute details", "Its kind and value are personal data, so they are not shown here: "
+                                          "read them where you review attributes before you approve"))
+
+
+@op("attribute.review", signing=True, parties=attribute_owner, returns="attribute", summary=reviewing_attribute,
+    title="Verify or reject an attribute")
 def attribute_review(c, args):
     """Decide a pending ``attribute``: ``status`` verified or rejected. Returns ``attribute`` and ``status``."""
     a = find(Attribute, args["attribute"])

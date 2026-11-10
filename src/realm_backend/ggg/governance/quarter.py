@@ -26,3 +26,5 @@ class Forward(Row):
     destination = String(default="")
     moved_at = Integer(default=0)
     signature = String(default="")
+    codex = String(default="")  # the checksum of the codex this quarter ran when the member moved
+    compliance = String(default='"unknown"')  # the destination's flag as this quarter knew it, as JSON text

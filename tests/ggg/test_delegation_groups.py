@@ -142,7 +142,7 @@ def test_grants_that_cannot_be_made():
     assert "name at least one" in denied("delegation_grant", "alice", **base)
     assert "not a group" in denied("delegation_grant", "alice", groups=["vote", "nonsense"], **base)
     assert "you hold no seat in Health" in denied("delegation_grant", "alice", groups=["office:Health"], **base)
-    assert "cannot be granted yet" in denied("delegation_grant", "alice", groups=["sign"], **base)
+    assert "cannot be granted yet" in denied("delegation_grant", "alice", groups=["setup"], **base)
     assert "nothing in money" in denied("delegation_grant", "alice", groups=["money"], **base)
     assert "one year" in denied("delegation_grant", "alice", groups=["vote"], delegate="claude-conn",
                                 expires_in=366 * DAY)
@@ -181,7 +181,7 @@ def test_everything_is_cut_to_90_days_at_use_whatever_the_group_allows(monkeypat
 def test_requests_and_decisions_by_group():
     world.build()
     ask = dict(grantor="alice", expires_in=7 * DAY)
-    assert "cannot be granted yet" in denied("delegation_request", "claude-conn", groups=["sign"], **ask)
+    assert "cannot be granted yet" in denied("delegation_request", "claude-conn", groups=["setup"], **ask)
     assert "not a group" in denied("delegation_request", "claude-conn", groups=["nonsense"], **ask)
     assert "90 days" in denied("delegation_request", "claude-conn", groups=["*"], grantor="alice", expires_in=91 * DAY)
     r = ok("delegation_request", "claude-conn", groups=["vote", "propose"], **ask)["request"]
