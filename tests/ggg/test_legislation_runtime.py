@@ -122,7 +122,7 @@ class Realm(above("realm")):
     def on_codex_activate(self, event):
         self.ggg.t_log(text="activated " + event.args["codex"][:13])
 
-    def compute_realm_join(self, user, quarters):
+    def compute_realm_join(self, user, home_zone, quarters):
         return max(quarters, key=lambda q: q.index).id if quarters else None
 
     def compute_t_day(self, at):

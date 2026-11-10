@@ -7,6 +7,7 @@ upgrade pauses a job for an admin; a stopped scheduled install leaves nothing pe
 
 import hashlib
 import json
+import os
 
 import pytest
 from fixtures import legislation as arcadia
@@ -287,6 +288,30 @@ def test_i_a_job_paused_for_more_than_24_hours_fails_when_resumed(net, town, sit
     assert (job["status"], job["error"]) == ("failed", "not done within 24 hours") and active_id(town) == current
 
 
+PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+
+
+@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")
+def test_l_an_install_begun_on_the_previous_release_finishes_after_the_upgrade(wasm_of, people):
+    """What the previous release staged for a job has chapters fetched without a route and no layers: the upgrade keeps
+    the job, and an admin's resume finishes it, with the chapters fetched by URL. The last chapter is held back (the
+    outcall nobody answers), so that the job is still fetching when the upgrade comes."""
+    old = Network(PREVIOUS, people)
+    realm, held = old.realm("old"), WEB + "arcadia/realm.py"
+    layer = own_layer(people["founder"])
+    realm.govern("codex_install", Site(old.web).change_list(layer))
+    old.web.no_answer(held)
+    old.wait_until(lambda: held in [url for _, url in old.web.asked], rounds=1)
+    realm.upgrade(wasm_of("production"))
+    job = status(realm)["job"]
+    assert (job["status"], job["step"]) == ("paused", "fetch_chapters")
+    old.web.serve(held, layer["arcadia/realm"])
+    realm.ok("codex_install_resume", "ctl", job=job["id"])
+    assert settled(old, realm)["status"] == "done"
+    assert active_id(realm) == expected_id(layer)
+    assert {c["route"] for c in status(realm)["codex"]["chapters"].values()} == {"https"}
+
+
 # ---- costs: each step's work, run by hand in a realm of its own on the data the install above used
 
 LAB = '''
@@ -313,6 +338,8 @@ def test_j_what_each_step_costs(net, site, people, costs):
                   LAB % args + f"installs.receive_change_list(job, 200, {net.web.responses[args['url']].body!r})")
     costs.measure(lab, "install step 2: check the change list (first use: the library compiles)", LAB % args + "installs.check_change_list(job)")
     costs.measure(lab, "install step 2: check the change list (again)", LAB % args + "installs.check_change_list(job)")
+    costs.measure(lab, "install step 3: the records (an own layer reads none), the relays and the early check",
+                  LAB % args + "from core.op import run\nrun(installs.read_records(job, installs.prepared(job)[0]))")
     for index, entry in enumerate(listed["set"]):
         body = net.web.responses[entry["url"]].body
         size = "256 KB" if len(body) > 100_000 else "small"

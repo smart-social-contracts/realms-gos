@@ -439,6 +439,23 @@ def test_a_step_that_never_finishes_is_given_up_after_its_time(realm):
     assert active_id() is None
 
 
+def test_a_job_begun_before_the_layers_were_staged_finishes_by_url(realm):
+    """What an upgrade leaves of a job begun by an earlier release of this code: chapters fetched without a route, and
+    no layers staged. The change list brings no release, so nothing is missing."""
+    layer = own_layer()
+    ok("codex_install", "ctl", **change_list(layer))
+    run_until("check_sources")
+    before = InstallJob["J-1"]
+    staged = before.staged
+    del staged["layers"]
+    for fetched in staged["fetched"].values():
+        del fetched["route"]
+    before.staged = staged
+    run_job()
+    assert job()["status"] == "done" and active_id() == expected_id(layer)
+    assert {c["route"] for c in status()["codex"]["chapters"].values()} == {"https"}
+
+
 def test_a_watch_whose_step_finished_in_time_does_nothing(realm):
     ok("codex_install", "ctl", **change_list(own_layer()))
     run_job()  # every step done: the watches are the delayed timers left over

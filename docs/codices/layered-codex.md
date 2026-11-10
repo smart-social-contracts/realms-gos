@@ -362,9 +362,16 @@ The realm domain's two entry points are methods of these kinds, so they follow t
 - `on_codex_activate(self, event)`: the hook on GGG's `codex_activate`. It runs once per realm when a
   codex becomes active, not once per quarter, and not on a revert. It replaces today's `init` hook. A
   zone set-up in it needs no check against creating a zone twice: zones are keyed by their primary ids.
-- `compute_realm_join(self, ...)`: GGG asks it, during `realm_join`, which quarter a new member goes to.
-  It may prefer the quarter that holds the member's zone; capacity decides first. It replaces today's
-  `assign_quarter` hook.
+- `compute_realm_join(self, user, home_zone, quarters)`: GGG asks it, when a new member is placed
+  (`join_targets`, which takes the optional `home_zone` the joiner states, else that of a member the realm
+  already knows), which quarter they go to. `quarters` are the quarters below capacity, each with its
+  `population` and its `zones`: what the quarter last reported of the zones its members live in, zone id to
+  how many (empty for none, None where the realm does not know; the counts serve this placement and no
+  reply carries them). It may prefer the quarter that holds the
+  member's zone; capacity decides first, because the realm offers only quarters with room and ignores an
+  answer that is not among them, and asks nothing when none has room. One zone may span several quarters,
+  each counting its own members of it. The home zone is a private choice of the joiner: the realm uses it for
+  this placement only and no reply carries it. It replaces today's `assign_quarter` hook.
 
 The rules (the checker enforces them, §12):
 
@@ -1172,6 +1179,17 @@ becomes official only when the source publishes it by its own vote. A sync sourc
 the releases of every layer it relays, as it installed them. The record is what followers check
 against; the official journal (§9.6) is where people read the same releases.
 
+**Reading a record** ([`core/records.py`](../../src/realm_backend/core/records.py)). A realm's record is read from
+its capital, 100 releases at a time. The reply also names `source`, the id of the realm's own layer (null while it
+has none), which tells a record that is a layer's publisher's from one that only relays it. A stand-in record is a
+JSON file at its URL, `{"source": "<its source id>", "releases": [...]}`, with the same releases (times in seconds,
+`chapters` a domain to its checksum), the layers it relays first and its own layer last, oldest first. A realm's
+link pins its content, so the file must be exactly the bytes whose checksum the link names. Either record is
+refused if it lists more than 1000 releases or more than 512 KB, if a release has other fields than
+`legislation_releases` gives, a checksum that is not `sha256:` and 64 hex digits, a domain GGG does not have,
+`calendar` among its chapters, or a time GGG's typed methods cannot encode (in seconds, from 0 to 18446744073), if it lists a relayed layer twice or a version of its own layer twice, or its own
+layer before a relayed one. What was read is kept with the time (`SourceRecord`), for the compliance check (§11).
+
 **What the resolver takes.** The library function `realms.legislation.plan(realm, relays, own)` (the
 install task's step 5, `realms legislation resolve`) computes the layer paths from plain data. Each
 chosen sync source, one with an active link, is its record as the releases it runs, in layer order:
@@ -1202,6 +1220,19 @@ chosen sync source, one with an active link, is its record as the releases it ru
   order they load), the calendars and the realm chapters it skipped (§3.2). `resolve` loads them into a
   codex and gives the flattened view of §5.9 as plain data.
 
+A follower installs a layer from above as a release, one layer at a time (§7, §9.2). The install reads the
+records of its active sync sources only when it brings a release. **The layers the realm runs keep the order the
+active codex runs them in**, whatever a record says, each as the realm runs it (the release, checksums and voucher
+it was installed with); a record that has moved on to a newer release of one of them is no conflict, since the
+install does not touch it. The release's layer takes the place of its earlier release when the realm runs it
+already. A new layer goes right after the last layer the vouching record lists above it and right before the first it
+lists below it, and only there: a layer the realm runs that the record puts in neither relation would have no order
+against the new one, which §3.3 refuses, and so is a record that lists none of the layers the realm runs.
+Every active record must agree with the order that results: one that puts two of the layers the other way round than
+the realm runs them is refused, naming both. `plan` gets the result as one record, named by its last layer. So a
+record that relays several layers is installed in any order, a change to the realm's own layer needs no call to a sync
+source, and a layer whose link has ended stays where it is.
+
 A follower checks each layer from above against one record:
 
 - **its publisher's**, when the follower syncs from the publisher directly;
@@ -1226,7 +1257,9 @@ never needs the record, except to check compliance (§11).
   The follower keeps the layers it installed.
 - The side whose vote changes a link tells the other side's capital with `link_notify` and reads the
   answer, `active` meaning that their vote is in. A notice nobody answered (the call is rejected) is kept
-  as `unsent` and sent again every minute, also after an upgrade; a refusal is an answer. Only the
+  as `unsent` and sent again every minute, also after an upgrade; a refusal is an answer. A vote still
+  `checking` when the realm starts has no walk left (none outlives an upgrade): it ends, by this realm, and
+  the other side is told, so that its key is not locked for good. Only the
   capital at the other side of a link this realm has voted on may send `link_notify` and
   `follower_report` (permission `link.sync`); a quarter links to no realm and makes no call to one.
 - A vote refuses a cycle: it reads the `sync_sources` of `realm_info` along the sources of the other
@@ -1246,8 +1279,8 @@ never needs the record, except to check compliance (§11).
   checksum already in `ChapterSource`, one source id, a version once, never edited), and the releases of
   the layers it runs from above, which the install task keeps with `links.relay_release` as the record that
   vouches for them lists them. `legislation_releases` answers the relayed ones top to bottom, then its own,
-  oldest first; `legislation_chapter` answers the text stored under a checksum. A release is kept under
-  `<source>@<version>`, so neither holds an `@`.
+  oldest first, and the id of the realm's own layer; `legislation_chapter` answers the text stored under a
+  checksum. A release is kept under `<source>@<version>`, so neither holds an `@`.
 - `Quarter.compliance` is stored and read like a follower's. The capital writes it from what a quarter reports it
   runs, when a codex is switched across the quarters (§9.5); the scheduled checks (D7) write a follower's.
 
@@ -1307,19 +1340,29 @@ per message:
    is the active codex's id as `codex_status` shows it (a layered codex's checksum, a legacy codex's
    `name@version`), or null when none is active. A chapter from a layer above comes only as a release of
    that layer, whole.
-3. **Fetch each chapter,** one or a few per message, by the route available: a canister call to the
-   sync source's capital, or an HTTPS outcall to a URL. Check size and sha256, then store it in
-   `ChapterSource`. The realm skips the download if `ChapterSource` already has that sha256.
+3. **Read the records, then fetch each chapter.** For a release install the first message reads the
+   records of the active sync sources (§8) and checks the change list against them at once, so that a
+   release no record vouches for fails before anything is fetched. Then each chapter, one or a few per
+   message, by the route available: a canister call to the capital of the sync source that vouches for
+   the layer (`legislation_chapter`), then the change list's URLs and mirrors, each an HTTPS outcall;
+   the first route whose bytes match the size and sha256 wins. Store it in `ChapterSource`. The realm
+   skips the download if `ChapterSource` already has that sha256. A capital that serves other bytes than
+   its record names is noted in the audit log (`install_chapter_refused`: the capital, the chapter, the
+   checksum asked for) before the URLs are tried, so that a realm can see it. The codex row keeps the
+   route, `capital` or `https`.
 4. **Check sources:**
    - each layer from above must match the record that vouches for it: its publisher's, when the realm
-     syncs from the publisher directly, otherwise the relaying sync source's, whichever route the bytes
-     came by; a copy that does not match is refused;
+     syncs from the publisher directly, otherwise the relaying sync source's (the first of them, in the
+     order of the links), whichever route the bytes came by; a copy that does not match is refused. A
+     layer the realm already runs keeps the voucher it was installed with, and the order it runs in: a
+     record that lists the layers in another order is refused (§8);
    - a release install must match one release exactly and be whole;
    - if two sync sources relay different releases of the same layer, the follower's own legislation
      decides which one it installs. **If its legislation does not choose, the install is refused and
      the old codex keeps running.**
 5. **Build:**
-   - compute the new layer paths from the paths the sync sources relay, then the realm's own layer
+   - compute the new layer paths from the layers the realm runs from above, in the order it runs them,
+     with the release's layer placed by the record that vouches for it, then the realm's own layer
      (`plan`, shape in §8);
    - refuse paths that do not form one chain (§3.3);
    - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`
@@ -1342,7 +1385,8 @@ per message:
    switch, the proposal's execution or the install step that made it.
    **Legislation applies when the proposal passes and its changes are executed,** which is at that
    time. No chapter calls `codex_activate`, and no publication, in the official journal (§9.6) or in an
-   outside gazette, plays a role in when the legislation applies.
+   outside gazette, plays a role in when the legislation applies. A release install also puts the release in
+   the realm's own record, where the record that vouches for it lists it (§8).
 
 The job's other rules:
 
@@ -1391,9 +1435,10 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
   private as `Human.h3_index` (a chapter reads a member's district as `User.home_zone`, the id of a zone the realm
   defined). The arguments and results it gets carry no key material or credential (`secret=` on the operation: a
   code, keys, private data, a request's body and reply, the home cell `zone_set` and `zone_clear` take), and neither
-  do the replies of its effects or the call a proposal carries and the result of running it, while the personal data
-  the audit log keeps out (`private=`) still reaches the legislation that decides on it (I-PRV-1); and no read is
-  answered while the codex loads.
+  do the replies of its effects or the call a proposal carries and the result of running it, nor any call that an
+  operation carries into a guard or a hook (the steps of a task, what `call_for` forwards, a pending action's card),
+  while the personal data the audit log keeps out (`private=`) still reaches the legislation that decides on it
+  (I-PRV-1); and no read is answered while the codex loads.
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
     hooks still run;

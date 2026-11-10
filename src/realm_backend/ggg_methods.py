@@ -372,7 +372,7 @@ def ggg_tender_notice(a: TenderNoticeArgs) -> Async[TenderReply]: return (yield 
 @query
 def ggg_quarter_directory(a: ListArgs) -> QuarterDirectoryReply: return read("quarter_directory", "ListArgs", a, "QuarterDirectoryReply")
 @query
-def ggg_join_targets() -> JoinTargetsReply: return read("join_targets", None, None, "JoinTargetsReply")
+def ggg_join_targets(a: Opt[JoinTargetsArgs] = None) -> JoinTargetsReply: return read("join_targets", "opt JoinTargetsArgs", a, "JoinTargetsReply")
 @update
 def ggg_quarter_sync() -> Async[QuarterDirectoryReply]: return (yield from run("quarter_sync", None, None, "QuarterDirectoryReply"))
 @update
@@ -432,7 +432,7 @@ def ggg_codex_install(a: CodexSource) -> Async[GovernedReply]: return (yield fro
 @update
 def ggg_codex_uninstall() -> Async[GovernedReply]: return (yield from run("codex_uninstall", None, None, "GovernedReply"))
 @update
-def ggg_codex_revert(a: Opt[CodexRevertArgs]) -> Async[GovernedReply]: return (yield from run("codex_revert", "opt CodexRevertArgs", a, "GovernedReply"))
+def ggg_codex_revert(a: Opt[CodexRevertArgs] = None) -> Async[GovernedReply]: return (yield from run("codex_revert", "opt CodexRevertArgs", a, "GovernedReply"))
 @update
 def ggg_codex_activate(a: CodexActivateArgs) -> Async[GovernedReply]: return (yield from run("codex_activate", "CodexActivateArgs", a, "GovernedReply"))
 @update

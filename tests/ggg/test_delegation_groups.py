@@ -50,12 +50,13 @@ def test_a_group_grant_covers_its_groups_enabled_operations_and_nothing_else():
     assert "does not cover" in denied("proposal_create", "claude-conn", title="x", on_behalf_of="alice")
 
 
-def test_an_operation_of_the_group_that_is_not_enabled_yet_is_refused():
+def test_an_operation_of_the_group_that_is_not_enabled_yet_is_refused(monkeypatch):
     world.build()
     grant("see")
     assert ok("me", "claude-conn", on_behalf_of="alice")["user"]["id"] == "alice"
-    # proposal_list is a direct operation of the see group; a later phase switches it on.
-    assert poa.row("proposal_list")[:2] == ("direct", "see") and "proposal_list" not in poa.ENABLED
+    # proposal_list is a direct operation of the see group, which a phase of the rollout may not have switched on yet.
+    assert poa.row("proposal_list")[:2] == ("direct", "see")
+    monkeypatch.setattr(poa, "ENABLED", poa.ENABLED - {"proposal_list"})
     assert "does not cover" in denied("proposal_list", "claude-conn", on_behalf_of="alice")
 
 
@@ -102,6 +103,7 @@ def test_an_old_grant_covers_exactly_the_legacy_operations(name, monkeypatch):
 def test_everything_covers_exactly_the_enabled_operations(name, monkeypatch):
     world.build()
     world.person("ctl")
+    fake_chain.state["replies"][("aaaaa-aa", "vetkd_public_key")] = '(record { 2_345 = blob "\\0a" })'  # crypto_public_key
     without_argument_checks(monkeypatch, name)
     ok("delegation_grant", "ctl", delegate="claude-conn", groups=["*"], expires_in=DAY)
     assert reached(call(name, "claude-conn", on_behalf_of="ctl")) == (name in poa.ENABLED)
@@ -126,8 +128,8 @@ def test_an_old_grant_of_self_data_view_does_not_reach_attributes():
 
 def test_ops_list_says_which_operations_a_power_of_attorney_reaches_now():
     flags = {o["name"]: o["delegable"] for o in ok("ops_list", fake_chain.ANONYMOUS)["operations"]}
-    assert flags["proposal_vote"] and not flags["proposal_list"] and not flags["attribute_list"]
-    assert not flags["delegation_revoke_all"] and not flags["status"]
+    assert flags["proposal_vote"] and flags["proposal_list"] and flags["attribute_list"]
+    assert not flags["delegation_revoke_all"] and not flags["setup_launch"] and not flags["status"]
 
 
 # ---- What a grant cannot say
@@ -139,8 +141,8 @@ def test_grants_that_cannot_be_made():
     assert "not both" in denied("delegation_grant", "alice", groups=["vote"], operations=["proposal.vote"], **base)
     assert "name at least one" in denied("delegation_grant", "alice", **base)
     assert "not a group" in denied("delegation_grant", "alice", groups=["vote", "nonsense"], **base)
-    assert "not a group" in denied("delegation_grant", "alice", groups=["office:Health"], **base)
-    assert "cannot be granted yet" in denied("delegation_grant", "alice", groups=["keys"], **base)
+    assert "you hold no seat in Health" in denied("delegation_grant", "alice", groups=["office:Health"], **base)
+    assert "cannot be granted yet" in denied("delegation_grant", "alice", groups=["sign"], **base)
     assert "nothing in money" in denied("delegation_grant", "alice", groups=["money"], **base)
     assert "one year" in denied("delegation_grant", "alice", groups=["vote"], delegate="claude-conn",
                                 expires_in=366 * DAY)
@@ -179,7 +181,7 @@ def test_everything_is_cut_to_90_days_at_use_whatever_the_group_allows(monkeypat
 def test_requests_and_decisions_by_group():
     world.build()
     ask = dict(grantor="alice", expires_in=7 * DAY)
-    assert "cannot be granted yet" in denied("delegation_request", "claude-conn", groups=["keys"], **ask)
+    assert "cannot be granted yet" in denied("delegation_request", "claude-conn", groups=["sign"], **ask)
     assert "not a group" in denied("delegation_request", "claude-conn", groups=["nonsense"], **ask)
     assert "90 days" in denied("delegation_request", "claude-conn", groups=["*"], grantor="alice", expires_in=91 * DAY)
     r = ok("delegation_request", "claude-conn", groups=["vote", "propose"], **ask)["request"]
@@ -510,7 +512,8 @@ def test_revoke_all_is_refused_under_any_grant():
 def test_the_vocabulary_lists_the_groups_the_caller_can_grant():
     depts = world.build()
     groups = {g["id"]: g for g in ok("delegable_operations", "alice")["groups"]}
-    assert list(groups) == ["see", "profile", "vote", "propose", "filings", "justice", "payout", "identity", "membership"]
+    assert list(groups) == ["see", "profile", "vote", "propose", "filings", "justice", "payout", "identity", "keys", "poa",
+                            "membership"]
     vote = groups["vote"]
     label, summary, risk, longest = ggg_delegation.GROUPS["vote"]
     assert (vote["label"], vote["summary"], vote["risk"], vote["longest"]) == (label, summary, risk, longest)
@@ -538,7 +541,7 @@ def test_the_groups_are_paged():
     rest = ok("delegation_groups", "alice", count=4, **{"from": first["next"]})
     assert [g["id"] for g in rest["groups"]] == ["filings", "justice", "payout", "identity"] and rest["next"] == 9
     last = ok("delegation_groups", "alice", count=4, **{"from": rest["next"]})
-    assert [g["id"] for g in last["groups"]] == ["membership"] and last["next"] is None
+    assert [g["id"] for g in last["groups"]] == ["keys", "poa", "membership"] and last["next"] is None
 
 
 # ---- The tables

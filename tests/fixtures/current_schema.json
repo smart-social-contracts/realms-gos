@@ -3614,6 +3614,14 @@
     "default": "setup",
     "kind": "property",
     "type": "String"
+   },
+   "zones": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
    }
   },
   "relationships": {},
@@ -4042,6 +4050,35 @@
  },
  "Row": {
   "fields": {},
+  "relationships": {},
+  "version": 1
+ },
+ "SourceRecord": {
+  "fields": {
+   "checked_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "releases": {
+    "constraints": {
+     "max_length": 524288
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "source": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
   "relationships": {},
   "version": 1
  },

@@ -1009,7 +1009,7 @@ def account_owner(user, args):
     return f"Organization:{org}"
 
 
-def adding_account(user, args):
+def adding_account(user, args, grant):
     """What a payout account added for ``user`` changes: the realm pays an owner at the first account that names the token."""
     owner, symbol = account_owner(user, args), args.get("symbol", "")
     who = "you" if owner == f"User:{user}" else owner
@@ -1024,7 +1024,7 @@ def adding_account(user, args):
     return [{"label": "What changes", "value": effect}]
 
 
-def removing_account(user, args):
+def removing_account(user, args, grant):
     """What removing a payout account of ``user`` changes: where the realm pays the owner in that token afterwards."""
     a = find(PaymentAccount, args["account"])
     if a.owner != account_owner(user, args):

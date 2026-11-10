@@ -261,12 +261,24 @@ def zone_set(c, args):
 def zone_define(c, args):
     """Define ``zone``, such as a district, that members name as their home zone: its ``name`` and ``kind``. The
     same id again redefines it. Returns ``zone``."""
-    zone = Zone[args["zone"]]
+    return {"zone": define_zone(args["zone"], args["name"], args["kind"]).id}
+
+
+def define_zone(zone_id, name, kind):
+    """The zone of the realm ``zone_id``, created or redefined in place (its population stays). A member's home cell
+    is no zone of the realm."""
+    zone = Zone[zone_id]
     if zone and not zone.defined:
         raise Conflict(f"zone {zone.id} is a member's home cell")
-    zone = zone or Zone(id=args["zone"], defined=True)
-    zone.name, zone.kind = args["name"], args["kind"]
-    return {"zone": zone.id}
+    zone = zone or Zone(id=zone_id, defined=True)
+    zone.name, zone.kind = name, kind
+    return zone
+
+
+def defined_zones():
+    """The zones of the realm. A member's home cell has a user and a zone of the realm has none, so the index on
+    ``user`` finds them without reading every cell."""
+    return [z for z in each(Zone, "user", "") if z.defined]
 
 
 def defined_zone(zone_id):
