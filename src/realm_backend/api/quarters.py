@@ -376,13 +376,16 @@ def configuring(args):
 
 def set_for_quarter(q, settings):
     """Send ``settings``, the quarter's own, to quarter ``q`` to apply. A quarter that refuses or cannot be reached
-    fails the call. A generator."""
+    fails the call, and so does one that does not say it applied them: a quarter on an older release answers ``ok`` to a
+    topic it does not know, and applies nothing. A generator."""
     try:
         reply = yield from ask(q.id, "federation_message", {"topic": LOCAL_SETTINGS, "body": settings})
     except Exception as e:  # noqa: BLE001  chain.call raises for a quarter that is down: the call fails, it does not trap
         raise Unavailable(f"{q.name} ({q.id}) cannot be reached: {e}")
     if not reply.get("ok"):
         raise Fail(f"{q.name} ({q.id}) refused {', '.join(settings)}: {reply.get('error')}")
+    if not set(settings) <= set(reply.get("configured") or ()):
+        raise Conflict(f"{q.name} ({q.id}) did not apply {', '.join(settings)}: upgrade it to this release first")
 
 
 @op("quarter.configure", governed=proposals.realm_wide, check=configuring)
@@ -391,7 +394,8 @@ def quarter_configure(c, args):
     and its own ``timezone``, which the quarter applies, and realm-wide ``capacity``, ``auto_scale_enabled``,
     ``quarter_join_mode``, ``federation_codex`` and the federal vote ``rule``: kind majority_of_quarters or
     majority_of_members, absent wait, no or ignore, threshold below 100 % (100000000), in hundred-millionths. A quarter
-    that refuses its ``timezone`` or cannot be reached fails the call, and nothing changes."""
+    that refuses its ``timezone``, does not apply it (an older release) or cannot be reached fails the call, and nothing
+    changes."""
     q = find(Quarter, args["quarter"]) if args.get("quarter") else None
     status, rule = args.get("status"), args.get("rule")
     if status and (q is None or status not in MOVES.get(q.status, ())):

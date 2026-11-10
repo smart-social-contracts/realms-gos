@@ -228,12 +228,15 @@ def test_the_realm_sets_a_quarters_zone_which_the_quarter_applies_first():
     assert ok("quarter_configure", "ctl", quarter="north", timezone="Asia/Tokyo")["requires_vote"]
     world.policy(Department["Administration"], 1, 1)
 
-    reply("north", "federation_message")
+    reply("north", "federation_message", message="FM-1", configured=["timezone"])
     ok("quarter_configure", "ctl", quarter="north", timezone="Asia/Tokyo", name="North")
     sent = json.loads(fake_chain.state["calls"][-1][2])
     assert sent["topic"] == quarters.LOCAL_SETTINGS and sent["body"] == {"timezone": "Asia/Tokyo"}
     assert Realm["1"].timezone == "UTC"  # the capital's own zone is set with realm_configure
 
+    reply("north", "federation_message", message="FM-2")  # an older quarter: ok to a topic it does not know
+    out = call("quarter_configure", "ctl", quarter="north", timezone="UTC", name="N")
+    assert out["kind"] == "conflict" and "did not apply timezone: upgrade it" in out["error"]
     fake_chain.state["replies"][("north", "federation_message")] = json.dumps({"ok": False, "error": "no"})
     assert "refused timezone: no" in call("quarter_configure", "ctl", quarter="north", timezone="UTC", name="N")["error"]
     fake_chain.state["replies"][("north", "federation_message")] = Exception("north is stopped")

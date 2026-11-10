@@ -41,6 +41,9 @@ class Procedure(above("procedure")):
         if title == "relayed zone":
             self.ggg.federation_message(topic="quarter.local_settings", body={"timezone": "Asia/Seoul"})
 '''
+# A quarter's heap made to answer as the previous release does, which has no handler for quarter.local_settings, and back.
+OLD_RELEASE = "from api import federation, quarters\ndel federation.TOPICS[quarters.LOCAL_SETTINGS]"
+THIS_RELEASE = "from api import federation, quarters\nfederation.TOPICS[quarters.LOCAL_SETTINGS] = quarters.on_local_settings"
 
 
 @pytest.fixture(scope="module")
@@ -120,7 +123,7 @@ def test_a_malformed_zone_or_one_without_a_quarter_is_refused_before_any_vote(fe
     assert zone(east) == TOKYO
 
 
-def test_a_quarter_that_refuses_or_cannot_be_reached_leaves_everything_unchanged(net, federation):
+def test_a_quarter_that_refuses_cannot_be_reached_or_runs_an_older_release_leaves_everything_unchanged(net, federation):
     capital, east, _ = federation
     stray = net.realm("stray")  # registered by the capital, but it never joined: it takes no call from it
     capital.ok("quarter_register", "ctl", quarter=stray.cid, name="Stray")
@@ -135,6 +138,14 @@ def test_a_quarter_that_refuses_or_cannot_be_reached_leaves_everything_unchanged
                        sender=net.people["ctl"])
     east.start()
     assert not out["ok"] and out["kind"] == "unavailable" and "cannot be reached" in out["error"], out
+    assert (zone(east), label(capital, east)) == (TOKYO, "east")
+
+    # A quarter on an older release does not know the topic: it answers ok and applies nothing.
+    assert "Traceback" not in east.shell(OLD_RELEASE)
+    out = capital.call("quarter_configure", {"quarter": east.cid, "timezone": "Asia/Seoul", "name": "Renamed"},
+                       sender=net.people["ctl"])
+    assert "Traceback" not in east.shell(THIS_RELEASE)
+    assert not out["ok"] and out["kind"] == "conflict" and "did not apply timezone" in out["error"], out
     assert (zone(east), label(capital, east)) == (TOKYO, "east")
 
 
