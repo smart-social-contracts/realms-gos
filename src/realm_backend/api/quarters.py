@@ -37,6 +37,9 @@ DEFAULTS = {"timezone": "UTC", "welcome_message": ""}
 # capital pushes its synced settings when they change and a quarter syncs when it starts after an upgrade, so this only
 # catches up what a quarter missed while it was down; each sync carries the whole directory (up to MAX_QUARTERS rows).
 SYNC_EVERY, SYNC_MIN, SYNC_MAX = 3600, 3600, 7 * 24 * 3600
+# A quarter that starts after an upgrade syncs within this many seconds, at a moment its canister id sets: the quarters
+# of a federation upgraded together do not all call their capital in the same round.
+RESUME_SPREAD = 120
 # Whether this heap has armed the catch-up timer: one chain of them, armed again after an upgrade (resume).
 _catch_up = {"armed": False}
 # The settings a capital keeps in sync for its quarters (the last section of this module), sent in messages of
@@ -375,7 +378,7 @@ def resume():
     if pending():
         chain.set_timer(ADOPT_EVERY, adopt)
     if federated():
-        catch_up_in(0)
+        catch_up_in(sum(chain.self_id().encode()) % RESUME_SPREAD)
 
 
 def catch_up_in(seconds):
@@ -387,15 +390,18 @@ def catch_up_in(seconds):
 
 def catch_up():
     """A quarter's catch-up sync with its capital, every ``sync_every`` seconds the capital sets, for as long as it is a
-    quarter. A sync that fails is tried again at the next."""
+    quarter. A sync that fails is tried again at the next; its error is kept in ``sync_state`` until one succeeds."""
     _catch_up["armed"] = False
     if not federated():
         return
     catch_up_in((realm().sync_state or {}).get("sync_every", SYNC_EVERY))
     try:
         yield from sync()
-    except Exception:  # noqa: BLE001  a capital that is down or upgrading: the next catch-up tries again
-        pass
+        error = ""
+    except Exception as e:  # noqa: BLE001  a capital that is down or upgrading: the next catch-up tries again
+        error = str(e)[:300]
+    r = realm()
+    r.sync_state = {**(r.sync_state or {}), "catch_up_error": error}  # so that a quarter stuck behind shows why
 
 
 @op("quarter.deregister", governed=proposals.realm_wide)
@@ -535,8 +541,7 @@ def refuse_join(cid):
 
 
 def capital_profile(cid):
-    """The public profile (``realm_info``) of the capital ``cid``: what a realm that joins it reads, and where a quarter
-    reads the capital's images (changed_images). A generator."""
+    """The public profile (``realm_info``) of the capital ``cid`` this realm joins. A generator."""
     try:
         reply = yield from ask(cid, "realm_info", {})
     except Exception as e:  # noqa: BLE001  chain.call raises for a canister that cannot be reached
@@ -753,7 +758,15 @@ def push_settings():
     whole set, so a repeated or late one does no harm."""
     from api import propagation  # it imports the install task, which imports this module
 
-    propagation.tell_all(SETTINGS_TOPIC, synced_values())
+    propagation.tell_all(SETTINGS_TOPIC, synced_values(), recorded=settings_reply)
+
+
+def settings_reply(reply):
+    """A quarter's reply to a settings push, as the capital records it: a quarter on an older release answers ``ok`` to
+    a topic it does not know and applies nothing, so a reply without ``configured`` is a Conflict."""
+    if reply.get("ok") and "configured" not in reply:
+        return {"ok": False, "kind": Conflict.kind, "error": "it applied nothing: upgrade it to this release first"}
+    return reply
 
 
 def refuse_synced(values):
@@ -778,33 +791,59 @@ def on_settings(c, body):
 
 
 def apply_settings(values):
-    """On a quarter, the capital's synced settings (a push, or its answer to ``quarter_sync``): write them directly. The
-    images are read first, so that a capital that cannot be reached leaves nothing half applied. A quarter still in
-    ``setup`` keeps its stage and remembers the capital's for its own ``setup_launch``; a launched one takes the
-    capital's and runs its codex's ``on_stage_change`` when it changes. A generator."""
+    """On a quarter, the capital's synced settings (a push, or its answer to ``quarter_sync``): written directly. A
+    quarter still in ``setup`` keeps its stage and remembers the capital's for its own ``setup_launch``; a launched one
+    takes the capital's and runs its codex's ``on_stage_change`` when it changes. The images come last, so that one
+    that cannot be read now holds up none of the rest. Returns what it ``configured``, ``images`` among them once they
+    are the capital's, else the ``images_error``. A generator."""
     r = realm()
-    images = yield from changed_images(values.get("images") or {})
-    for k in SYNCED:
-        if k in values and k != "status":
-            setattr(r, k, values[k])
-    for k, value in images.items():
-        setattr(r, k, value)
-    stage = values["status"]
-    r.sync_state = {**(r.sync_state or {}), "stage": stage,
-                    "images": {k: (values.get("images") or {}).get(k, "") for k in SYNCED_IMAGES}}
-    if r.status not in ("setup", stage):
-        r.status = stage
-        yield from runtime.hook("on_stage_change", {"stage": stage})
-    return {"configured": sorted(values)}
+    configured = [k for k in SYNCED if k in values and k != "status"]
+    for k in configured:
+        setattr(r, k, values[k])
+    stage = values.get("status")
+    if stage:
+        configured.append("status")
+        r.sync_state = {**(r.sync_state or {}), "stage": stage}
+        if r.status not in ("setup", stage):
+            r.status = stage
+            yield from runtime.hook("on_stage_change", {"stage": stage})
+    failed = {}
+    if "images" in values:
+        error = yield from take_images(values["images"])
+        configured += [] if error else ["images"]
+        failed = {"images_error": error} if error else {}
+    return {"configured": sorted(configured), **failed}
 
 
-def changed_images(digests):
-    """The capital's images whose digest differs from the one this quarter last took: read from its ``realm_info``, or
-    none where its digest is "". A generator."""
-    taken = (realm().sync_state or {}).get("images") or {}
-    changed = [k for k in SYNCED_IMAGES if taken.get(k) != digests.get(k, "")]
-    profile = (yield from capital_profile(capital())) if any(digests.get(k) for k in changed) else {}
-    return {k: profile.get(k, "") for k in changed}
+def take_images(digests):
+    """Take each of the capital's images whose digest differs from the one this quarter last took, one read a call
+    (``realm_image``). An image that cannot be read keeps its old digest, so the next sync tries again. Returns the
+    first error, "" when every image is the capital's. A generator."""
+    r = realm()
+    for image in SYNCED_IMAGES:
+        digest, state = digests.get(image, ""), r.sync_state or {}
+        if (state.get("images") or {}).get(image) == digest:
+            continue
+        try:
+            value = (yield from read_image(image)) if digest else ""
+        except Fail as e:
+            return f"{image}: {e}"
+        setattr(r, image, value)
+        forget_digests((image,))  # a quarter that secedes and becomes a capital takes them again
+        state = r.sync_state or {}
+        r.sync_state = {**state, "images": {**(state.get("images") or {}), image: digest}}
+    return ""
+
+
+def read_image(image):
+    """The capital's ``image``, read with its ``realm_image``. A generator."""
+    try:
+        reply = yield from ask(capital(), "realm_image", {"image": image})
+    except Exception as e:  # noqa: BLE001  chain.call raises for a capital that cannot be reached
+        raise Unavailable(f"the capital {capital()} cannot be reached: {e}")
+    if not reply.get("ok"):
+        raise Fail(f"the capital did not give its {image}: {reply.get('error')}")
+    return reply["value"]
 
 
 def on_arrive(c, body):

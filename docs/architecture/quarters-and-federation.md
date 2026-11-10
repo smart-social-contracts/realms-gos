@@ -121,23 +121,31 @@ the federation already has (`quarter.sync`):
   relay. A quarter accepts it from its capital only and writes the fields directly. The message always
   carries the whole set, so a repeated or late one does no harm.
 - **Images travel as digests.** A branding image is a data URL of up to 960,000 characters, too big to
-  send with every push and sync, or to keep in a message's record. The push and the sync carry each
-  image's sha256 instead, which the capital takes once after each change, and a quarter whose image
-  differs reads the images once from the capital's `realm_info`.
+  send with every push and sync, or to keep in a message's record, and two of them with the rest of
+  `realm_info` may not fit in the 2 MiB a reply to another canister may be. The push and the sync carry
+  each image's sha256 instead, which the capital takes once after each change, and a quarter whose image
+  differs reads that image alone from the capital's public `realm_image`. The quarter writes the other
+  settings first: an image it cannot read now holds up none of them, keeps its old digest, and is read
+  again at the next sync; its reply says so (`images_error`).
 - **A quarter that fails does not stop the push.** The capital's relay of a `federation_message` to all
   its quarters stops at the first quarter it cannot reach: the failed call raises and the operation
   traps. The settings push instead sends each quarter a message of its own, as the messages that carry
   a codex do ([the layered codex, §9.5](../codices/layered-codex.md#95-updating-a-realms-own-quarters)),
-  and records each quarter's reply, a failure included, in the `FederationMessage` of that message. The
+  and records each quarter's reply, a failure included, in the `FederationMessage` of that message. A
+  quarter on an older release answers `ok` to a topic it does not know and applies nothing: a reply that
+  does not say what it `configured` is recorded as a `Conflict`, to upgrade the quarter. The
   capital's value stands, so one quarter cannot stop the realm's name from changing. This differs from
   setting one quarter's zone below, where the quarter is the target and its refusal fails the call.
 - **Catch-up.** The capital's answer to `quarter_sync` carries the same set of values, next to the
   directory and the codex, and the quarter applies them. A quarter syncs when it starts after an
-  upgrade, on a timer, every `sync_every` seconds, and whenever it runs `quarter_sync` itself, so a
+  upgrade, on a timer every `sync_every` seconds, and whenever it runs `quarter_sync` itself, so a
   quarter that missed a push, because it was down, upgrading or suspended, has the current values at
   its next sync. The capital sets `sync_every` with `quarter_configure`, from an hour (the default) to a
   week, and the quarters learn it at their next sync: pushes on change already exist, so the timer only
-  catches up, and each sync carries the whole directory.
+  catches up, and each sync carries the whole directory. After an upgrade a quarter syncs within two
+  minutes, at a moment its canister id sets, so that quarters upgraded together do not all call their
+  capital at once. The error of a catch-up that failed stays in the quarter's `sync_state` until one
+  succeeds, so a quarter stuck behind shows why.
 - **Refusal.** On a quarter, `realm_configure`, `realm_configure_branding`, `realm_configure_tokens`
   and `setup_step` refuse a call that carries a synced field, with `Forbidden` naming the capital. The
   whole call is refused, before it becomes a proposal, so before any vote on the quarter. The

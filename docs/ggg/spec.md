@@ -331,6 +331,7 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `journal_capital_issue` (on a quarter, the capital's issue of `day`, asked of the capital by an update, because a read cannot call another canister; it changes nothing, so it leaves no audit event and runs no legislation) | `realm.data_view` | delegable | A quarter's journal page shows the capital's issue |
 | `shell` (REPL; calls operations as the caller) | `shell.execute` | delegable | An admin runs `ops.proposal_list({"status": "voting"})` |
 | `status`, `version` | — (public) | read | Thin summaries of `realm_info` |
+| `realm_image` | — (public) | read | One branding image (`logo_url` or `background_image_url`): what a quarter reads of its capital's when it changes, one a call, since two may not fit in one reply |
 | `token_catalog` | — (public) | read | The ICRC-1 ledgers this GOS ships with, not the realm's registered tokens |
 | `scale_status` | — (public) | read | Quarter populations against this GOS's auto-scale capacity |
 | `quarter_add` (on the capital: Casals grows the realm's stand by <stand>-quarter-<n>, then the capital makes that canister a quarter and registers it; filed by the realm itself once a quarter is wanted) | `quarter.register` | governed, delegable | The members vote for a fourth quarter → Casals builds `agora-quarter-4` |

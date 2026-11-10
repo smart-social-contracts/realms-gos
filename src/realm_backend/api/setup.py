@@ -145,6 +145,16 @@ def realm_info(c, args):
 
 
 @op(None, read=True, public=True)
+def realm_image(c, args):
+    """One of the realm's branding images, ``image`` (``logo_url`` or ``background_image_url``), as ``value``. A quarter
+    reads its capital's this way when one changes (api.quarters), one image a call: two images and the rest of
+    ``realm_info`` may not fit in the 2 MiB a reply to another canister may be."""
+    if args["image"] not in IMAGES:
+        raise Fail(f"image is one of {', '.join(IMAGES)}")
+    return {"image": args["image"], "value": getattr(Realm["1"], args["image"])}
+
+
+@op(None, read=True, public=True)
 def token_catalog(c, args):
     """The tokens a realm may adopt as its treasury token: ``symbol``, ``name``, ``description``, ``ledger``,
     ``indexer``, ``decimals`` and whether it is ``monetary`` (real money). Any other ICRC-1 ledger is added by hand."""

@@ -16,6 +16,12 @@ from test_propagation import rows
 SETTINGS_TOPIC = "realm.settings"  # api.quarters
 AGR = {"accounting_currency": "AGR", "accounting_currency_decimals": 2}
 LOGO = "data:image/png;base64," + "A" * 900_000  # an image near the most a realm keeps (setup.IMAGE_MAX)
+IMAGE_MAX, TEXT_MAX = 960_000, 20_000  # api.setup
+# A quarter's or a capital's heap made to answer as the previous release does, and back again.
+OLD_QUARTER = "from api import federation, quarters\nfederation._kept = federation.TOPICS.pop(quarters.SETTINGS_TOPIC)"
+NEW_QUARTER = "from api import federation, quarters\nfederation.TOPICS[quarters.SETTINGS_TOPIC] = federation._kept"
+NO_IMAGE_READ = "from core import op\nop._kept = op.OPS.pop('realm_image')"
+IMAGE_READ = "from core import op\nop.OPS['realm_image'] = op._kept"
 ADOPT_EVERY = 60  # api.quarters
 GOVERNANCE = "import json\nfrom api import proposals\nprint(json.dumps([proposals.window(), proposals.settings()]))"
 ADOPT = ("from api import quarters\nfrom core import chain\nquarters.set_pending(%r)\n"
@@ -133,13 +139,62 @@ def test_a_quarter_that_is_down_holds_up_no_other_and_catches_up_at_its_next_syn
     assert info(south)["name"] == "Àgora Nova"
 
 
+def test_an_image_the_quarter_cannot_read_holds_up_none_of_the_rest_and_an_older_quarter_is_a_conflict(net, federation):
+    capital, north, south = federation
+    assert "Traceback" not in capital.shell(NO_IMAGE_READ)
+    capital.ok("realm_configure_branding", "ctl", logo_url="data:image/png;base64,QUJD", primary_color="#2A2A2A")
+    capital.ok("realm_configure", "ctl", name="Àgora d'imatges")
+    net.wait(5)
+    assert "Traceback" not in capital.shell(IMAGE_READ)
+    seen = info(north)
+    assert (seen["name"], seen["primary_color"], seen["logo_url"]) == ("Àgora d'imatges", "#2A2A2A", LOGO)
+    told = [m["response"][north.cid] for m in rows(capital, "FederationMessage", "topic", "response")
+            if m["topic"] == SETTINGS_TOPIC and north.cid in m["response"]][-1]
+    assert told["ok"] and "images" not in told["configured"] and "realm_image" in told["images_error"], told
+    north.ok("quarter_sync", "ctl")  # it kept its old digest, so the next sync reads the image
+    assert info(north)["logo_url"] == "data:image/png;base64,QUJD"
+
+    assert "Traceback" not in south.shell(OLD_QUARTER)
+    capital.ok("realm_configure", "ctl", manifesto="Una sola ciutat, sempre")
+    net.wait(5)
+    assert "Traceback" not in south.shell(NEW_QUARTER)
+    told = [m["response"][south.cid] for m in rows(capital, "FederationMessage", "topic", "response")
+            if m["topic"] == SETTINGS_TOPIC and south.cid in m["response"]][-1]
+    assert told["kind"] == "conflict" and "upgrade it to this release first" in told["error"], told
+    south.ok("quarter_sync", "ctl")
+
+
+def test_at_the_most_a_realm_keeps_the_images_and_texts_reach_the_quarters_and_a_realm_can_join(net, federation):
+    capital, north, south = federation
+    images = {k: f"data:image/png;base64,{k[0]}" + "B" * (IMAGE_MAX - 23) for k in ("logo_url", "background_image_url")}
+    for name, value in images.items():
+        capital.ok("realm_configure_branding", "ctl", **{name: value})  # one at a time: an ingress message is 2 MiB too
+    capital.ok("realm_configure", "ctl", manifesto="à" * TEXT_MAX, terms="é" * TEXT_MAX)
+
+    def arrived(quarter):
+        seen = info(quarter)
+        return {k: seen[k] for k in images} == images and len(seen["terms"]) == TEXT_MAX
+
+    # The texts are written first and each image is read in a call of its own: an image this size takes many rounds
+    net.wait_until(lambda: arrived(north) and arrived(south), step=5)
+    joiner = net.realm("joiner")
+    joiner.ok("quarter_join_federation", "ctl", capital=capital.cid)  # it reads the capital's realm_info
+    capital.ok("quarter_register", "ctl", quarter=joiner.cid, name="Joiner")
+    joiner.ok("quarter_sync", "ctl")
+    assert info(joiner)["logo_url"] == images["logo_url"]
+    capital.ok("quarter_deregister", "ctl", quarter=joiner.cid)
+    capital.ok("realm_configure_branding", "ctl", logo_url=LOGO, background_image_url="")
+    capital.ok("realm_configure", "ctl", manifesto="Una sola ciutat, i prou", terms="Respecta els veïns")
+    net.wait_until(lambda: all(info(q)["logo_url"] == LOGO for q in (north, south)), step=5)
+
+
 def test_a_push_that_does_not_come_from_the_capital_is_refused(net, federation):
     _, north, _ = federation
     for who in ("ctl", "alice"):
         out = north.call("federation_message", {"topic": SETTINGS_TOPIC, "body": {"name": "Fake", "status": "beta"}},
                          sender=net.people[who])
         assert not out["ok"], out
-    assert info(north)["name"] == "Àgora Nova"
+    assert info(north)["name"] == "Àgora d'imatges"
 
 
 def test_a_quarter_refuses_a_synced_setting_before_any_vote_and_still_takes_its_local_ones(net, federation):

@@ -71,21 +71,24 @@ def withdraw(codex_id):
     tell_all(UNSTAGE, {"codex": codex_id})
 
 
-def tell_all(topic, body):
+def tell_all(topic, body, recorded=None):
     """``body`` to every active quarter, each call in a message of its own: one that cannot be reached holds up no
-    other, and the record of the message says which did not answer. Nothing to do on a quarter, which has none."""
+    other, and the record of the message says which did not answer. ``recorded(reply)``, when given, is a reply as the
+    record keeps it. Nothing to do on a quarter, which has none."""
     if quarters.federated():
         return
     for q in each(Quarter, "status", "active"):
-        chain.set_timer(0, lambda cid=q.id: tell(cid, topic, body))
+        chain.set_timer(0, lambda cid=q.id: tell(cid, topic, body, recorded))
 
 
-def tell(cid, topic, body):
+def tell(cid, topic, body, recorded=None):
     """One ``federation_message`` to the quarter ``cid``, recorded with its reply. A generator."""
     try:
         reply = yield from quarters.ask(cid, "federation_message", {"topic": topic, "body": body})
     except Exception as e:  # noqa: BLE001  a quarter that is down, stopped or upgrading: its reply is the record
         reply = {"ok": False, "error": str(e)[:300]}
+    if recorded:
+        reply = recorded(reply)
     FederationMessage(id=next_id(FederationMessage, "FM"), topic=topic, source=chain.self_id(), body=body,
                       response={cid: reply}, codex=quarters.codex()["id"], compliance=quarters.own_compliance())
 

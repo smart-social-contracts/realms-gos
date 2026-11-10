@@ -5,6 +5,7 @@ import json
 
 import fake_chain
 from api import quarters
+from fake_chain import peer, rejects
 from ggg import Department, FederationMessage, Proposal, Realm
 from kit import call, fire_timers, ok, rows
 from test_quarters import CAPITAL, capital, quarter, reply
@@ -39,6 +40,12 @@ def test_a_change_of_a_synced_setting_is_pushed_to_every_active_quarter_each_in_
     records = {next(iter(m.response)): m.response for m in rows(FederationMessage) if m.topic == quarters.SETTINGS_TOPIC}
     assert records["south"]["south"]["ok"] and "north is stopped" in records["north"]["north"]["error"]
     assert Realm["1"].name == "Agora"  # the capital's value stands whatever a quarter answers
+
+    reply("south", "federation_message", message="FM-9")  # an older quarter: ok to a topic it does not know
+    ok("realm_configure", "ctl", manifesto="Again")
+    fire_timers()
+    (latest,) = [m.response for m in rows(FederationMessage) if m.topic == quarters.SETTINGS_TOPIC][-1:]
+    assert latest["south"]["kind"] == "conflict" and "upgrade it to this release first" in latest["south"]["error"]
 
     fake_chain.state["calls"].clear()
     ok("realm_configure", "ctl", welcome_message="Hello", open_registration=True)  # local settings: nothing to push
@@ -139,18 +146,42 @@ def test_a_quarter_applies_the_capitals_push_and_no_one_else_s(monkeypatch):
     assert r.name == "Agora"
 
 
-def test_a_quarter_reads_the_capitals_images_only_when_their_digest_changes(monkeypatch):
+def test_a_quarter_reads_each_changed_image_on_its_own_and_only_when_its_digest_changes(monkeypatch):
     quarter(monkeypatch, "south")
-    reply(CAPITAL, "realm_info", realm={"logo_url": "data:logo", "background_image_url": ""})
-    with_logo = {**SETTINGS, "images": {"logo_url": "d1", "background_image_url": ""}}
-    push(with_logo)
-    assert Realm["1"].logo_url == "data:logo"
-    fake_chain.state["calls"].clear()
-    push(with_logo)
-    assert [m for _, m, _ in fake_chain.state["calls"]] == []  # the same digest: nothing to read
-    fake_chain.state["replies"][(CAPITAL, "realm_info")] = Exception("capital is stopped")
-    out = push({**SETTINGS, "name": "Later", "images": {"logo_url": "d2", "background_image_url": ""}})
-    assert not out["ok"] and Realm["1"].name == "Agora"  # nothing half applied
+    capital_canister = peer(CAPITAL, realm_image=lambda args: {"ok": True, "value": "data:" + args["image"]})
+    both = {**SETTINGS, "images": {"logo_url": "d1", "background_image_url": "d2"}}
+    assert "images" in push(both)["configured"]
+    assert (Realm["1"].logo_url, Realm["1"].background_image_url) == ("data:logo_url", "data:background_image_url")
+    assert [a["image"] for a in capital_canister.sent("realm_image")] == ["logo_url", "background_image_url"]
+    push(both)
+    assert len(capital_canister.sent("realm_image")) == 2  # the same digests: nothing to read
+    push({**SETTINGS, "images": {"logo_url": "d1", "background_image_url": ""}})
+    assert Realm["1"].background_image_url == "" and len(capital_canister.sent("realm_image")) == 2  # none: no read
+
+
+def test_an_image_that_cannot_be_read_holds_up_none_of_the_other_settings(monkeypatch):
+    quarter(monkeypatch, "south")
+    capital_canister = peer(CAPITAL, realm_image=rejects("IC0504: the reply is too large"))
+    out = push({**SETTINGS, "name": "Later", "status": "production", "images": {"logo_url": "d3", "background_image_url": ""}})
+    assert out["ok"] and "images" not in out["configured"] and "IC0504" in out["images_error"]
+    r = Realm["1"]
+    assert (r.name, r.status, r.accounting_currency) == ("Later", "production", "AGR")
+    capital_canister.answer("realm_image", {"ok": True, "value": "data:logo"})
+    push({**SETTINGS, "name": "Later", "images": {"logo_url": "d3", "background_image_url": ""}})
+    assert r.logo_url == "data:logo"  # its digest was not taken, so the next push read it
+
+
+def test_a_push_without_a_stage_leaves_the_stage(monkeypatch):
+    quarter(monkeypatch, "south")
+    out = push({"name": "Agora"})
+    assert out["configured"] == ["name"] and Realm["1"].status == "beta"
+
+
+def test_realm_image_gives_one_image():
+    world.build()
+    ok("realm_configure_branding", "ctl", logo_url="data:logo")
+    assert ok("realm_image", fake_chain.ANONYMOUS, image="logo_url")["value"] == "data:logo"
+    assert "image is one of" in call("realm_image", fake_chain.ANONYMOUS, image="name")["error"]
 
 
 def test_a_quarter_in_setup_keeps_its_stage_and_launches_on_its_capitals(monkeypatch):
@@ -187,11 +218,18 @@ def test_a_quarter_catches_up_on_a_timer_from_when_it_starts_and_one_that_secede
     fake_chain.state["timers"].clear()
     quarters.resume()
     quarters.resume()  # armed once, however often the realm starts
-    assert [delay for delay, _ in fake_chain.state["timers"]] == [0]
+    (delay,) = [delay for delay, _ in fake_chain.state["timers"]]
+    assert delay == sum(b"south") % quarters.RESUME_SPREAD  # a moment of its own, not every quarter at once
     fake_chain.state["replies"][(CAPITAL, "quarter_sync")] = Exception("capital is upgrading")
     Realm["1"].sync_state = {**Realm["1"].sync_state, "sync_every": 7200}
-    fire_timers()  # the sync fails quietly, and the next is armed
+    fire_timers()  # the sync fails, its error is kept, and the next is armed
     assert [delay for delay, _ in fake_chain.state["timers"]] == [7200]
+    assert "capital is upgrading" in Realm["1"].sync_state["catch_up_error"]
+    directory = [{"id": i, "name": i, "index": x, "status": "active", "population": 1, "codex_id": "", "codex_version": "",
+                  "last_sync": 0} for x, i in enumerate((CAPITAL, "south"))]
+    reply(CAPITAL, "quarter_sync", directory=directory, codex={"id": "", "version": ""}, index=1)
+    fire_timers()
+    assert Realm["1"].sync_state["catch_up_error"] == ""
     Realm["1"].is_quarter = False
     fire_timers()
     assert fake_chain.state["timers"] == []
