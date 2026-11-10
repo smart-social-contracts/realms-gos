@@ -33,6 +33,43 @@ def of(text):
     return json.loads(text or '"unknown"')
 
 
+def by_layer(record):
+    """The releases a sync source's ``record`` lists, per layer: ``{source: [release, ...]}``, oldest first."""
+    layers = {}
+    for release in record["releases"]:
+        layers.setdefault(release["source"], []).append(release)
+    return layers
+
+
+def missed(releases, running):
+    """The releases of one layer, oldest first, that come after ``running``, the version the realm runs (None when it
+    runs none): all of them when the record does not list it."""
+    versions = [release["version"] for release in releases]
+    return releases[versions.index(running) + 1:] if running in versions else releases
+
+
+def judged(record, running, now):
+    """The flag of a realm that runs ``running`` (``{source: version}``, its layers from above) against the ``record``
+    of one of its sync sources, at ``now`` (§11.6): compliant while every layer the record lists is at least the latest
+    release of it in effect; else non-compliant since the earliest release in effect it misses, naming the stale
+    layers. Releases are never removed from a record, so only a change of what the realm runs, an install or a revert,
+    can turn a non-compliant flag compliant."""
+    stale, since = [], []
+    for source, releases in by_layer(record).items():
+        in_effect = [r["effective_from"] for r in missed(releases, running.get(source)) if r["effective_from"] <= now]
+        if in_effect:
+            stale.append(source)
+            since.append(min(in_effect))
+    return {"NonCompliant": {"since": min(since), "stale": stale}} if stale else "compliant"
+
+
+def installable(record, running):
+    """The newest release of each layer the ``record`` lists that the realm, running ``running``, has not installed:
+    what "Propose install" offers (§11.3), each as ``{source, version, effective_from}``."""
+    newest = [missed(releases, running.get(source))[-1:] for source, releases in by_layer(record).items()]
+    return [{key: r[key] for key in ("source", "version", "effective_from")} for found in newest for r in found]
+
+
 def tag(value):
     """The case of GGG's ``Compliance`` a flag is, the value of the ``follower_compliance`` fact."""
     return "NonCompliant" if isinstance(value, dict) else value.capitalize()

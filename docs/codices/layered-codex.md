@@ -753,8 +753,9 @@ once per realm when the codex becomes active. The install appears in the realm's
 GGG's.
 
 The guard applies to the realm's own ordinances only. A proposal that installs a release from a sync
-source (§11.4) runs no guard of the codex on `proposal_create`: the follower votes only on when to
-install (§2, rule 3), and the source's own legislation set the release's date. A proposal whose action
+source (§11.4) runs no guard and no forbid of the codex on `proposal_create` (its hooks still run): the
+follower votes only on when to install (§2, rule 3), and the source's own legislation set the release's
+date. A proposal whose action
 is a reserved operation, such as `codex.revert`, runs no legislation at all (§10.4), so this guard can
 neither refuse nor delay a revert.
 
@@ -1761,8 +1762,9 @@ proposal's `effective_at` (§5.2).
    `role_revoke` a user). A department that is the team cannot be deleted until another is designated. A
    realm still in setup when it was upgraded to the release that has `it_team_set` has a founder profile
    without `it_team.set` (existing profiles are not rewritten): its admins designate the team.
-4. **Reserved operations:** `codex.revert`, `codex.revert_fast`, `it_team.set` and
-   `sync_source_remove` (no chapter can forbid a follower's leaving).
+4. **Reserved operations:** `codex.revert`, `codex.revert_fast`, `it_team.set`,
+   `sync_source_remove` (no chapter can forbid a follower's leaving), and `codex_check_config` and
+   `codex_check_now`, when the realm checks its sync sources (§11.2).
    - No chapter may forbid them, guard them or hook them. The checker refuses it, and the runtime
      never calls chapters for them.
    - A proposal whose action is a reserved operation runs no legislation at all: no chapter's guard,
@@ -1797,10 +1799,18 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
 2. **The realm checks on a schedule.** A timer reads each sync source's record, one query per source,
    and stores what it finds with `checked_at`.
    - **The interval is set by the realm admins:** default every 24 hours, allowed from 1 hour to 7
-     days. Operation `codex.check_config { interval }`; the unit, hours, is in the operation's schema,
-     not in the name.
-   - **Admins can force a check now** with `codex.check_now`, which runs the same check at once.
-   - Both are admin operations, outside legislation. Chapters can't change them.
+     days. Operation `codex_check_config { interval }`; the unit, hours, is in the operation's schema,
+     not in the name. The next check is that many hours from the change.
+   - **Admins can force a check now** with `codex_check_now`, which runs the same check at once (in
+     the next message), and the interval counts from it.
+   - Both are admin operations (permission `realm.configure`, not governed), outside legislation: they
+     are reserved (§10.4), so chapters can't change them.
+   - The realm checks from its first sync source on, and only its capital checks (a quarter calls no
+     other realm). The check is built in
+     [`api/sync_checks.py`](../../src/realm_backend/api/sync_checks.py).
+   - **What the check found is a public read,** `codex_releases_found` (paged): every release a check
+     found in a record for the first time, once, with the sync source whose record listed it and when.
+     It is what the official journal reports (§9.6).
 3. **The codex page shows the result,** for example: "Spain published 2.4.0, effective 1 Jan 2027.
    Last checked 3 Nov 2026 14:00. [Propose install]".
 4. **Proposing the install:** anyone with `proposal.create` can press the button. The realm builds
@@ -1808,7 +1818,15 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    install proposal. The release is installed whole (§3.2). It is voted under the realm's normal rules
    and installed by the normal install task (§9.2). No guard of the codex runs on that
    `proposal_create`: a statutory wait in the realm's own legislation, such as §5.2's, does not apply to
-   a release whose date the source's legislation set.
+   a release whose date the source's legislation set. No forbid of the codex runs on it either; its
+   hooks do. The action is `codex_install(Release { source; version })` (GGG's `CodexSource.Release`):
+   the install reads the records of the active sync sources and builds the change list from the one that
+   vouches for the release (§9.2 step 4), the whole release, with the realm's own layer unchanged. The
+   chapters come from that record's capital by checksum (§9.2 step 3), or are stored already. Refused,
+   with the reason: a realm with no layer of its own yet (its first layered codex names it, with a change
+   list), a federation with quarters (a quarter cannot stage a release yet), and a release that only a
+   stand-in record vouches for, whose chapters no capital serves (it is installed with a change list that
+   gives their URLs).
 5. **A follower votes when, never whether** (§2, rule 3). Only an install clears the non-compliant
    flag, and it clears it at once.
 6. **Compliance is measured against each sync source's record** and worked out at each check:
@@ -1818,16 +1836,25 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    - **`non_compliant` since `<effective_from>`:** otherwise, naming the stale layers;
    - **`unknown`:** a sync source's record couldn't be read at the last check.
 
-   It is also recomputed right after every install. The status and `checked_at` are shown in
-   `ggg_codex_status`. The cost is one query per sync source per check: negligible even hourly.
+   It is also recomputed right after every install and every revert, from the record the last check
+   kept (a record that could not be read stays `unknown` until a check reads it). It is worked out
+   afresh each time: a record only moves forward, since releases are never edited or removed, so only
+   a change of what the realm runs, an install or a revert, turns a non-compliant flag compliant. The
+   status and `checked_at` of each sync source are shown in `codex_status` (`sync_sources`, with the
+   releases the realm could install from it). The cost is one query per sync source per check:
+   negligible even hourly.
 7. **What follows is the sync source's own legislation,** never the follower's votes. For example, a
    `forbid` in Spain's treasury chapter can test GGG's `follower_compliance` fact of the recipient of a
    transfer. Voting against the install doesn't avoid the flag. Challenging a release is a justice case
    (`ggg_dispute_file`).
 8. **Followers report.** At each sync, the follower's capital reports to each sync source's capital a
-   `ReportedLayer {version, checksum}` for every layer it runs, its compliance against that source and
-   its population. It does not send a layer's source: the sync source finds the layer by its checksum
-   in its own record. The source keeps the last report on the follower's entry, with its time, and may
+   `ReportedLayer {version, checksum}` for every layer from above it runs, its compliance against that
+   source and its population (its capital's members and those its quarters reported). It does not send
+   a layer's source: the sync source finds the layer by its checksum in its own record. A layer's
+   checksum is the sha256 of `{source, version, chapters, calendar}` as canonical JSON (§9.1), its
+   chapters without the `realm` chapter, which no follower takes: the same for the release a follower
+   runs and for the entry of the record that lists it. A report the source refuses or does not answer
+   is sent again at the next check. The source keeps the last report on the follower's entry, with its time, and may
    query the follower at any moment. The follower's own `ggg_codex_status` is the authority. Which
    followers a sync source counts, for its population or a vote, is its own legislation's choice, so
    nobody is counted twice.

@@ -11,8 +11,8 @@ from core.db import Fail, Forbidden
 
 OPS = {}
 MODULES = ("actions", "assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "installs", "justice", "licenses",
-           "links", "members", "notifications", "orgs", "procurement", "propagation", "proposals", "quarters", "requests", "setup", "tasks",
-           "taxes", "treasury")
+           "links", "members", "notifications", "orgs", "procurement", "propagation", "proposals", "quarters", "requests",
+           "setup", "sync_checks", "tasks", "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
 # Operations that run another operation, named by ``method``, for a member: a log hides that operation's secrets too.
 FORWARDING = ("call_for", "read_for")

@@ -39,6 +39,11 @@ def status(link):
     return links.link_status(link)
 
 
+def retries():
+    """The timers that send a notice again: the realm also checks its sync sources on a timer (api.sync_checks)."""
+    return [cb for secs, cb in fake_chain.state["timers"] if secs == links.RETRY]
+
+
 # ---- I-NEST-1: a link is active only after both votes
 
 
@@ -234,16 +239,16 @@ def test_a_notice_nobody_answered_is_sent_again_until_it_is():
     source.answer("link_notify", {"ok": True, "status": "active"})
     fire_timers()
     assert not SyncSource[SRC].unsent and status(SyncSource[SRC]) == "active"
-    assert fake_chain.state["timers"] == []
+    assert retries() == []
 
 
 def test_one_chain_of_timers_serves_a_link_and_ends_when_the_other_side_ends_it():
     source = peer(SRC, realm_info=realm_info(), link_notify=rejects("the canister is stopped"))
     ok("sync_source_add", "ctl", source={"Realm": SRC}, name="Src")
     ok("sync_source_remove", "ctl", source={"Realm": SRC})  # a second notice to the same stopped realm
-    assert len(source.sent("link_notify")) == 2 and len(fake_chain.state["timers"]) == 1
+    assert len(source.sent("link_notify")) == 2 and len(retries()) == 1
     fire_timers()  # sends the status as it is now, and sets the next timer
-    assert len(source.sent("link_notify")) == 3 and len(fake_chain.state["timers"]) == 1
+    assert len(source.sent("link_notify")) == 3 and len(retries()) == 1
     assert source.sent("link_notify")[-1]["status"]["Ended"]["by"] == ME
 
     follower = peer(FOL, link_notify=rejects("the canister is stopped"))

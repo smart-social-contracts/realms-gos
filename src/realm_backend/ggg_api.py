@@ -383,8 +383,8 @@ FIX = {
     "UserEntry": lambda e: entry(get(e, "user") or e),
     "Verdict": lambda v: {"issued_by": get(v, "issued_by") or ""},
     "License": lambda lic: {"issued_by": get(lic, "issued_by") or ""},
-    "CodexSource": lambda c: c if "Package" in c or "Registry" in c else
-    {"Package": c} if "manifest" in c else {"Registry": c},
+    "CodexSource": lambda c: c if "Package" in c or "Registry" in c or "Release" in c else
+    {"Package": c} if "manifest" in c else {"Registry": c} if "codex" in c else {"Release": c},
     "SetupStep": lambda s: s if len(s) == 1 else {camel(s.get("step")): {k: v for k, v in s.items() if k != "step"}},
     "DepartmentEditArgsHead": lambda h: h if isinstance(h, dict) else {"Set": h} if h else {"Clear": None},
 }

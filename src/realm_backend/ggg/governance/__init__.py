@@ -17,4 +17,4 @@ from .federal_vote import FederalVote, FederalVoteLeg
 from .federation import FederationMessage
 from .codex import Codex
 from .layered_codex import ChapterSource, InstallJob, LayeredCodex
-from .links import Follower, Release, SourceRecord, SyncSource
+from .links import Follower, FoundRelease, Release, SourceRecord, SyncSource

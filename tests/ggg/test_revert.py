@@ -618,7 +618,8 @@ def test_a_reserved_operation_and_a_proposal_about_one_are_reserved_and_the_list
     from core import legislation
     from realms.legislation import RESERVED
 
-    assert set(RESERVED) == {"codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove"}
+    assert set(RESERVED) == {"codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove",
+                             "codex_check_config", "codex_check_now"}
     for name in RESERVED:
         assert legislation.is_reserved(name, {})
         assert legislation.is_reserved("proposal_create", {"action": {"op": name, "args": {}}})

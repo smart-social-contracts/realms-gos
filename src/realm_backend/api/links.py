@@ -264,7 +264,10 @@ def sync_source_add(c, args):
     ``requested`` until it accepts this one, and ``active`` then, in either order; a stand-in record cannot vote, so its
     link is active on this vote, and a second add of the same url pins the new checksum. A source that takes legislation
     from this realm, directly or through others, is a cycle (Conflict); one that cannot be read is Unavailable. Only
-    the capital of a federation links it to other realms."""
+    the capital of a federation links it to other realms. From its first sync source on, the realm checks them on a
+    schedule (api.sync_checks)."""
+    from api import sync_checks  # it imports this module
+
     only_capital()
     ref, key = args["source"], source_key(args["source"])
     old = SyncSource[key]
@@ -274,11 +277,14 @@ def sync_source_add(c, args):
         else:
             old.checksum, old.name, old.status = ref["Record"]["checksum"], args["name"], "active"
             old.ended_by, old.ended_at = "", 0
+        sync_checks.arm()
         return {}
     if key == chain.self_id():
         raise Conflict("a realm does not take legislation from itself")
     refuse_standing(old, key, "sync source")
-    return (yield from vote_link(SyncSource, key, (key, chain.self_id()), name=args["name"]))
+    out = yield from vote_link(SyncSource, key, (key, chain.self_id()), name=args["name"])
+    sync_checks.arm()
+    return out
 
 
 @op("sync_source.manage", governed=proposals.realm_wide, check=valid_remove)
