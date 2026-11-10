@@ -4,6 +4,7 @@ import math
 
 from core import chain
 from core import compliance
+from core import sandbox
 from api import assets, proposals
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, view
 from ggg import Forward, GuestUser, LayeredCodex, Member, Quarter, Realm, User, UserProfile
@@ -24,10 +25,30 @@ KINDS, ABSENT = ("majority_of_quarters", "majority_of_members"), ("wait", "no", 
 FIELDS = ("id", "name", "index", "status", "population", "codex_id", "codex_version", "compliance", "last_sync")
 # Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
 ADOPT_EVERY = 60
-# A quarter's own settings that the realm may also set for it by a realm-wide vote (quarter_configure). The capital sends
-# them to the quarter in a federation_message of this topic, which only the capital's quarter_configure sends.
-LOCAL = ("timezone",)
+# What adopt() does for a quarter Casals has built, in order.
+ADOPTION = ("join", "configure", "register", "sync", "launch")
+# A quarter's own settings that the realm may also set for it by a realm-wide vote (quarter_configure). The capital
+# sends them to the quarter in a federation_message of this topic, which only the capital's quarter_configure sends. A
+# new quarter starts from its capital's where it still has the default, which means not yet chosen.
+LOCAL = ("timezone", "welcome_message")
 LOCAL_SETTINGS = "quarter.local_settings"
+DEFAULTS = {"timezone": "UTC", "welcome_message": ""}
+# Seconds between a quarter's catch-up syncs with its capital, which sets them (quarter_configure ``sync_every``). The
+# capital pushes its synced settings when they change and a quarter syncs when it starts after an upgrade, so this only
+# catches up what a quarter missed while it was down; each sync carries the whole directory (up to MAX_QUARTERS rows).
+SYNC_EVERY, SYNC_MIN, SYNC_MAX = 3600, 3600, 7 * 24 * 3600
+# Whether this heap has armed the catch-up timer: one chain of them, armed again after an upgrade (resume).
+_catch_up = {"armed": False}
+# The settings a capital keeps in sync for its quarters (the last section of this module), sent in messages of
+# SETTINGS_TOPIC, which only the capital sends.
+SYNCED = ("name", "manifesto", "terms", "logo_url", "background_image_url", "primary_color", "accounting_currency",
+          "accounting_currency_decimals", "languages", "status")
+SYNCED_IMAGES = ("logo_url", "background_image_url")
+SETTINGS_TOPIC = "realm.settings"
+# The operations that set a synced field, as the action of a federal vote: only the capital replays such an action.
+SETTING_OPS = ("realm_configure", "realm_configure_branding", "realm_configure_tokens", "setup_step", "setup_launch")
+# manifest_data key on the capital: the sha256 of each image as it is now, so that a sync does not hash ~1 MB each time.
+DIGESTS = "image_digests"
 
 
 def realm():
@@ -85,8 +106,11 @@ def own_compliance():
 
 
 def me():
+    """This realm's row of the directory. A quarter's name there is its label, the one its capital registered it under,
+    which it learns at each sync: ``Realm.name`` is the realm's."""
     r, state = realm(), realm().sync_state or {}
-    return {"id": chain.self_id(), "name": r.name, "index": state.get("index", 0) if federated() else 0,
+    return {"id": chain.self_id(), "name": state.get("label", r.name) if federated() else r.name,
+            "index": state.get("index", 0) if federated() else 0,
             "status": "setup" if r.status == "setup" else "active", "last_sync": state.get("at", 0), **report(),
             "compliance": own_compliance()}
 
@@ -202,10 +226,10 @@ def want_quarter():
 
 
 def apply_directory(reply):
-    seen, index, flag = set(), 0, None
+    seen, index, flag, label = set(), 0, None, realm().name
     for row in reply["directory"]:
         if row["id"] == chain.self_id():
-            index, flag = row["index"], row.get("compliance")
+            index, flag, label = row["index"], row.get("compliance"), row["name"]
             continue
         q = Quarter[row["id"]] or Quarter(id=row["id"])
         for k in FIELDS[1:]:
@@ -214,7 +238,9 @@ def apply_directory(reply):
     for q in [q for q in known() if q.id not in seen]:
         q.delete()
     apply_zones(reply.get("zones") or [])
-    realm().sync_state = {"at": chain.now(), "codex": reply["codex"], "index": index, "compliance": flag}
+    r = realm()
+    r.sync_state = {**(r.sync_state or {}), "at": chain.now(), "codex": reply["codex"], "index": index,
+                    "compliance": flag, "label": label, "sync_every": reply.get("sync_every", SYNC_EVERY)}
 
 
 def apply_zones(definitions):
@@ -294,45 +320,82 @@ def quarter_add(c, args):
 
 
 def adopt():
-    """Once Casals has built the pending quarter: make it a quarter of this capital (the capital is one of its
-    controllers) and register it. Until then, look again in ADOPT_EVERY seconds."""
+    """Once Casals has built the pending quarter, make it a quarter of this capital (the capital is one of its
+    controllers): it joins, takes the capital's ``open_registration`` so that the members it is offered to can join it,
+    is registered, syncs, which brings it the realm's name and stage, and launches on that stage. Until Casals has built
+    it, and after a step that failed, look again in ADOPT_EVERY seconds; a step already done is not done again."""
     p = pending()
     if not p:
         return
-    cas = casals()
     try:
-        arg = json.dumps({"stand": cas["casals_stand"]})
-        view_ = json.loads((yield from chain.call_text(cas["conductor_canister_id"], "orchestra_get", arg)) or "{}")
-        row = next((x for x in view_.get("canisters", []) if x.get("name") == p["member"]), None)
-        if row is None or row.get("status") != "ready" or not row.get("canister_id"):
+        cid = p.get("canister") or (yield from built(p["member"]))
+        if not cid:
             chain.set_timer(ADOPT_EVERY, adopt)
             return
-        cid = row["canister_id"]
-        joined = json.loads((yield from chain.call_op(cid, "quarter_join_federation", {"capital": chain.self_id()}))
-                            or "{}")
-        if not joined.get("ok") and "already belongs" not in str(joined.get("error")):
-            raise Fail(f"{p['member']} did not join: {joined.get('error')}")
-        # The quarter takes the capital's registration rule, so the members it is offered to can join it.
-        named = json.loads((yield from chain.call_op(cid, "setup_step", {
-            "step": "realm", "name": p["name"], "open_registration": bool(realm().open_registration)})) or "{}")
-        if not named.get("ok"):
-            raise Fail(f"{p['member']} was not configured: {named.get('error')}")
-        if not Quarter[cid]:
-            register(cid, p["name"])
+        for step in ADOPTION:
+            if step not in p.get("done", []):
+                yield from adoption_step(step, cid, p["name"])
+                p = {**p, "canister": cid, "done": [*p.get("done", []), step]}
+                set_pending(p)
         set_pending(None)
-        # Its first report makes it active, and joinable (join_targets offers active quarters).
-        synced = json.loads((yield from chain.call_op(cid, "quarter_sync", {})) or "{}")
-        if not synced.get("ok"):
-            Quarter[cid].status = "setup"
     except Exception as e:
         set_pending({**p, "error": str(e)[:300]})
         chain.set_timer(ADOPT_EVERY, adopt)
 
 
+def built(member):
+    """The canister id of ``member`` once Casals reports it ready, else None. A generator."""
+    cas = casals()
+    arg = json.dumps({"stand": cas["casals_stand"]})
+    view_ = json.loads((yield from chain.call_text(cas["conductor_canister_id"], "orchestra_get", arg)) or "{}")
+    row = next((x for x in view_.get("canisters", []) if x.get("name") == member), None)
+    return row["canister_id"] if row and row.get("status") == "ready" and row.get("canister_id") else None
+
+
+def adoption_step(step, cid, name):
+    """One step of ``adopt`` for the quarter ``cid``, registered here as ``name``: it fails unless the quarter says it
+    is done. A generator."""
+    if step == "register":
+        if not Quarter[cid]:
+            register(cid, name)
+        return
+    registration = {"step": "realm", "open_registration": bool(realm().open_registration)}
+    operation, args = {"join": ("quarter_join_federation", {"capital": chain.self_id()}),
+                       "configure": ("setup_step", registration),
+                       "sync": ("quarter_sync", {}),
+                       "launch": ("setup_launch", {})}[step]
+    reply = json.loads((yield from chain.call_op(cid, operation, args)) or "{}")
+    if not reply.get("ok") and not (step == "join" and "already belongs" in str(reply.get("error"))):
+        raise Fail(f"{cid} did not {step}: {reply.get('error')}")
+
+
 def resume():
-    """Timers do not survive an upgrade: keep looking for a quarter Casals is still building."""
+    """Timers do not survive an upgrade: keep looking for a quarter Casals is still building, and on a quarter, sync
+    with the capital now and catch up from then on."""
     if pending():
         chain.set_timer(ADOPT_EVERY, adopt)
+    if federated():
+        catch_up_in(0)
+
+
+def catch_up_in(seconds):
+    """Arm this quarter's next catch-up sync in ``seconds``, unless it is armed already."""
+    if not _catch_up["armed"]:
+        _catch_up["armed"] = True
+        chain.set_timer(seconds, catch_up)
+
+
+def catch_up():
+    """A quarter's catch-up sync with its capital, every ``sync_every`` seconds the capital sets, for as long as it is a
+    quarter. A sync that fails is tried again at the next."""
+    _catch_up["armed"] = False
+    if not federated():
+        return
+    catch_up_in((realm().sync_state or {}).get("sync_every", SYNC_EVERY))
+    try:
+        yield from sync()
+    except Exception:  # noqa: BLE001  a capital that is down or upgrading: the next catch-up tries again
+        pass
 
 
 @op("quarter.deregister", governed=proposals.realm_wide)
@@ -363,11 +426,13 @@ def local_settings(args):
 
 
 def configuring(args):
-    """The check of ``quarter_configure``: its federal ``rule``, and the settings it sets for one quarter, which need
-    the ``quarter`` and pass ``realm_configure``'s own test (a zone this release has data for)."""
+    """The check of ``quarter_configure``: its federal ``rule``, its ``sync_every``, and the settings it sets for one
+    quarter, which need the ``quarter`` and pass ``realm_configure``'s own test (a zone this release has data for)."""
     from api import setup  # it imports this module
 
     federal_rule(args)
+    if "sync_every" in args and not SYNC_MIN <= int(args["sync_every"]) <= SYNC_MAX:
+        raise Fail(f"sync_every is in seconds, from {SYNC_MIN} (an hour) to {SYNC_MAX} (a week)")
     local = local_settings(args)
     if local and not args.get("quarter"):
         raise Fail(f"{', '.join(local)} is set for one quarter: name it with quarter")
@@ -390,12 +455,13 @@ def set_for_quarter(q, settings):
 
 @op("quarter.configure", governed=proposals.realm_wide, check=configuring)
 def quarter_configure(c, args):
-    """Set ``quarter``'s ``name`` or ``status`` (setup→active, active⇄suspended, active→splitting or merging→active)
-    and its own ``timezone``, which the quarter applies, and realm-wide ``capacity``, ``auto_scale_enabled``,
-    ``quarter_join_mode``, ``federation_codex`` and the federal vote ``rule``: kind majority_of_quarters or
+    """Set ``quarter``'s ``name`` (its label) or ``status`` (setup→active, active⇄suspended, active→splitting or
+    merging→active) and its own ``timezone`` and ``welcome_message``, which the quarter applies, and realm-wide
+    ``capacity``, ``auto_scale_enabled``, ``quarter_join_mode``, ``federation_codex``, ``sync_every`` (the seconds
+    between a quarter's catch-up syncs, an hour to a week) and the federal vote ``rule``: kind majority_of_quarters or
     majority_of_members, absent wait, no or ignore, threshold below 100 % (100000000), in hundred-millionths. A quarter
-    that refuses its ``timezone``, does not apply it (an older release) or cannot be reached fails the call, and nothing
-    changes."""
+    that refuses its own settings, does not apply them (an older release) or cannot be reached fails the call, and
+    nothing changes."""
     q = find(Quarter, args["quarter"]) if args.get("quarter") else None
     status, rule = args.get("status"), args.get("rule")
     if status and (q is None or status not in MOVES.get(q.status, ())):
@@ -414,6 +480,8 @@ def quarter_configure(c, args):
         data["scaling"] = {**data.get("scaling", {}), "quarter_capacity": int(args["capacity"])}
     if rule:
         data["federation"] = {**data.get("federation", {}), "rule": {**RULE, **rule}}
+    if "sync_every" in args:
+        data["federation"] = {**data.get("federation", {}), "sync_every": int(args["sync_every"])}
     r.manifest_data = data
     return {"quarter": view(q, *FIELDS) if q else None, "rule": published_rule()}
 
@@ -437,16 +505,19 @@ def quarter_secede(c, args):
 def quarter_join_federation(c, args):
     """Make this independent realm a quarter of ``capital`` (its canister id), known here as ``name`` (default
     "capital"). The capital registers this realm separately. A realm with a link that has not ended, to a sync source
-    or from a follower, cannot join: a quarter makes no call to another realm. A realm that has not chosen its time zone
-    (still ``UTC``) starts on the capital's, read once from its ``realm_info``. Returns ``capital``."""
+    or from a follower, cannot join: a quarter makes no call to another realm. Nor can a realm whose accounting
+    currency differs from the capital's. The join reads the capital's ``realm_info``: a realm that has not chosen its
+    time zone, welcome message or currency starts on the capital's. Returns ``capital``."""
     r, cid = realm(), args["capital"]
     refuse_join(cid)
     profile = yield from capital_profile(cid)
     refuse_join(cid)  # again: the realm may have changed while the capital answered
+    refuse_currency(profile)
     take_defaults(profile)
     r.is_quarter, r.is_capital, r.federation_realm_id = True, False, cid
     # The capital becomes a known quarter so its calls are accepted (I-FED-4).
     Quarter(id=cid, name=args.get("name", "capital"), index=0, status="active")
+    catch_up_in(SYNC_EVERY)
     return {"capital": cid}
 
 
@@ -464,23 +535,44 @@ def refuse_join(cid):
 
 
 def capital_profile(cid):
-    """The public profile (``realm_info``) of the capital ``cid`` this realm joins. A generator."""
+    """The public profile (``realm_info``) of the capital ``cid``: what a realm that joins it reads, and where a quarter
+    reads the capital's images (changed_images). A generator."""
     try:
         reply = yield from ask(cid, "realm_info", {})
     except Exception as e:  # noqa: BLE001  chain.call raises for a canister that cannot be reached
         raise Unavailable(f"the capital {cid} cannot be reached: {e}")
     if not reply.get("ok"):
-        raise Fail(f"{cid} is not a realm this realm can join: {reply.get('error')}")
+        raise Fail(f"{cid} is not a realm: {reply.get('error')}")
     return reply["realm"]
 
 
+def refuse_currency(profile):
+    """A realm whose accounting currency differs from the capital's, in its code or its decimals, cannot join: amounts
+    are integers in units of 10**decimals, so taking the capital's would rescale its books. A blank code has not been
+    chosen."""
+    r = realm()
+    mine = (r.accounting_currency, r.accounting_currency_decimals)
+    theirs = (profile.get("accounting_currency"), profile.get("accounting_currency_decimals"))
+    if r.accounting_currency and mine != theirs:
+        raise Conflict(f"this realm keeps its accounts in {mine[0]} with {mine[1]} decimals and the capital in "
+                       f"{theirs[0]} with {theirs[1]}: change this realm's accounting currency first, through its own "
+                       f"governance")
+
+
 def take_defaults(profile):
-    """A new quarter's own settings start from its capital's, once, where it has not chosen them: a zone still ``UTC``
-    (GGG I-ADM-4: not yet chosen). After that they are the quarter's own, and the capital's later changes do not follow."""
+    """A new quarter starts from its capital's settings where it has not chosen its own: its own settings (``LOCAL``)
+    still at their default (``DEFAULTS``: ``UTC`` means no zone chosen, GGG I-ADM-4), and a blank accounting currency,
+    which takes the capital's code and decimals. Read once: after that its own settings are its own, and the capital
+    keeps the currency in sync."""
     from api import setup  # it imports this module
 
-    if realm().timezone == "UTC" and profile.get("timezone", "UTC") != "UTC":
-        setup.configure(("timezone",), {"timezone": profile["timezone"]})
+    r = realm()
+    unchosen = [k for k in LOCAL if getattr(r, k) == DEFAULTS[k]]
+    taken = {k: profile[k] for k in unchosen if profile.get(k, DEFAULTS[k]) != DEFAULTS[k]}
+    if not r.accounting_currency and profile.get("accounting_currency"):
+        taken.update({k: profile[k] for k in ("accounting_currency", "accounting_currency_decimals")})
+    if taken:
+        setup.configure(tuple(taken), taken)
 
 
 def on_local_settings(c, body):
@@ -569,19 +661,35 @@ def self_change_quarter(c, args):
 
 @op("quarter.sync")
 def quarter_sync(c, args):
-    """On a quarter: report to the capital and take its directory and the zones the realm defines. On the capital: answer
-    that call, which carries ``population``, ``codex_id``, ``codex_version``, optionally the ``zones`` its members live
-    in (zone id to how many) and a federal vote ``leg``."""
+    """On a quarter: report to the capital and take its directory, the zones the realm defines and the settings it keeps
+    in sync; a quarter may run it at any time, besides its catch-up timer. On the capital: answer that call, which
+    carries ``population``, ``codex_id``, ``codex_version``, optionally the ``zones`` its members live in (zone id to
+    how many) and a federal vote ``leg``; the answer carries the synced ``settings`` and ``sync_every``."""
     if federated():
-        reply = yield from ask(capital(), "quarter_sync", {**report(), "zones": zones_held()})
-        if not reply.get("ok"):
-            raise Fail(f"the capital refused to sync: {reply.get('error')}")
-        apply_directory(reply)
+        reply = yield from sync()
         return {"quarters": len(reply["directory"]), "drifting": drifting(codex()["version"])}
     q = record(c, args)
     from api import propagation  # it imports the install task, which imports this module
 
-    return {"directory": directory(), "codex": propagation.in_force(), "index": q.index, "zones": zone_definitions()}
+    return {"directory": directory(), "codex": propagation.in_force(), "index": q.index, "zones": zone_definitions(),
+            "settings": synced_values(), "sync_every": sync_every()}
+
+
+def sync():
+    """On a quarter: report to the capital, and take back its directory, the zones the realm defines, the settings it
+    keeps in sync and how often to catch up. A generator; returns the capital's answer."""
+    reply = yield from ask(capital(), "quarter_sync", {**report(), "zones": zones_held()})
+    if not reply.get("ok"):
+        raise Fail(f"the capital refused to sync: {reply.get('error')}")
+    apply_directory(reply)
+    if "settings" in reply:  # a capital on the previous release sends none
+        yield from apply_settings(reply["settings"])
+    return reply
+
+
+def sync_every():
+    """On the capital, the seconds between its quarters' catch-up syncs (quarter_configure ``sync_every``)."""
+    return int((realm().manifest_data or {}).get("federation", {}).get("sync_every", SYNC_EVERY))
 
 
 def reporting_quarter(args, proposal=""):
@@ -597,6 +705,106 @@ def quarter_report(c, args):
     codex differs from the capital's."""
     q = record(c, args)
     return {"quarter": q.id, "drifting": drifting(q.codex_version)}
+
+
+# ---- The settings the realm keeps in sync for its quarters (realms-gos#528; "What the realm sets for its quarters" in
+# docs/architecture/quarters-and-federation.md): its identity and its shared foundations, one face for the whole realm.
+#
+# The capital owns them. It pushes them to every active quarter whenever an operation changes one (push_settings), and
+# its answer to quarter_sync carries them for a quarter that missed a push. A quarter refuses to set one itself
+# (refuse_synced) and writes what its capital sends directly (apply_settings), never through realm_configure. The voting
+# rules are not among them: they belong in the codex, which reaches every quarter at one switch time.
+#
+# The branding images are data URLs of up to setup.IMAGE_MAX characters each, too big for every push and sync and for
+# the record of a message: those carry each image's sha256 instead, and a quarter whose image differs reads the images
+# once from the capital's realm_info.
+
+
+def synced_values():
+    """Every synced field of this realm, each image as its digest (``images``): what the capital sends its quarters."""
+    r = realm()
+    texts = {k: getattr(r, k) for k in SYNCED if k not in SYNCED_IMAGES}
+    return {**texts, "images": {k: image_digest(k) for k in SYNCED_IMAGES}}
+
+
+def image_digest(image):
+    """The sha256 of the capital's ``image``, "" for none; computed once after each change (``forget_digests``)."""
+    r = realm()
+    known = (r.manifest_data or {}).get(DIGESTS, {})
+    if image not in known:
+        value = getattr(r, image)
+        known = {**known, image: sandbox.sha256(value) if value else ""}
+        r.manifest_data = {**(r.manifest_data or {}), DIGESTS: known}
+    return known[image]
+
+
+def forget_digests(values):
+    """The images in ``values`` are being set: their digests are taken again when next needed."""
+    r = realm()
+    known = (r.manifest_data or {}).get(DIGESTS, {})
+    if any(image in known for image in values):
+        r.manifest_data = {**r.manifest_data, DIGESTS: {k: v for k, v in known.items() if k not in values}}
+
+
+def push_settings():
+    """On a capital, once an operation has changed a synced field: send them all to every active quarter, each in a
+    message of its own, so that a quarter that cannot be reached holds up no other and the record of its message says
+    so (propagation.tell_all). The capital's values stand whatever a quarter answers. The message always carries the
+    whole set, so a repeated or late one does no harm."""
+    from api import propagation  # it imports the install task, which imports this module
+
+    propagation.tell_all(SETTINGS_TOPIC, synced_values())
+
+
+def refuse_synced(values):
+    """On a quarter, refuse a call that sets a synced field: the capital owns it."""
+    synced = sorted(set(values) & set(SYNCED))
+    if synced and federated():
+        raise Forbidden(f"{', '.join(synced)} is kept in sync from the capital {capital()}: the realm changes it "
+                        f"there, by a realm-wide vote")
+
+
+def changes_synced(action):
+    """Whether a federal vote's ``action`` changes a synced field: a quarter skips its replay, since the capital replays
+    it and pushes the change."""
+    op, args = action.get("op"), action.get("args") or {}
+    return op in SETTING_OPS and (op == "setup_launch" or bool(set(args) & set(SYNCED)))
+
+
+def on_settings(c, body):
+    """From the capital: the synced settings, pushed when one changed."""
+    from_capital(c)
+    return (yield from apply_settings(body))
+
+
+def apply_settings(values):
+    """On a quarter, the capital's synced settings (a push, or its answer to ``quarter_sync``): write them directly. The
+    images are read first, so that a capital that cannot be reached leaves nothing half applied. A quarter still in
+    ``setup`` keeps its stage and remembers the capital's for its own ``setup_launch``; a launched one takes the
+    capital's and runs its codex's ``on_stage_change`` when it changes. A generator."""
+    r = realm()
+    images = yield from changed_images(values.get("images") or {})
+    for k in SYNCED:
+        if k in values and k != "status":
+            setattr(r, k, values[k])
+    for k, value in images.items():
+        setattr(r, k, value)
+    stage = values["status"]
+    r.sync_state = {**(r.sync_state or {}), "stage": stage,
+                    "images": {k: (values.get("images") or {}).get(k, "") for k in SYNCED_IMAGES}}
+    if r.status not in ("setup", stage):
+        r.status = stage
+        yield from runtime.hook("on_stage_change", {"stage": stage})
+    return {"configured": sorted(values)}
+
+
+def changed_images(digests):
+    """The capital's images whose digest differs from the one this quarter last took: read from its ``realm_info``, or
+    none where its digest is "". A generator."""
+    taken = (realm().sync_state or {}).get("images") or {}
+    changed = [k for k in SYNCED_IMAGES if taken.get(k) != digests.get(k, "")]
+    profile = (yield from capital_profile(capital())) if any(digests.get(k) for k in changed) else {}
+    return {k: profile.get(k, "") for k in changed}
 
 
 def on_arrive(c, body):

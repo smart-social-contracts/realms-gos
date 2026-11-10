@@ -51,8 +51,10 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     perm_for(args) -> the permission this call needs, when it depends on the arguments (``perm`` otherwise).
     returns -> the key of the reply holding the model's result: the record (by id), the list of a page, the value,
     or for a governed operation the id of the record it created. Without it, the reply itself is the result.
-    check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm. It runs
-    before ``governed`` turns the call into a proposal, so a call that cannot succeed files nothing.
+    check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm, or by a state
+    of it, such as a setting a quarter's capital keeps in sync. It runs before ``governed`` turns the call into a
+    proposal, so a call that cannot succeed files nothing; the operation refuses again when it runs, since the state can
+    change during a vote.
     delegable -> only for an operation that GGG's tiers (ggg_delegation) and core.poa.OWN do not classify, a test's: a
     classified operation is delegable when its tier is direct.
     private -> the arguments that hold personal data or key material: the audit log never keeps them (I-ALL-5).

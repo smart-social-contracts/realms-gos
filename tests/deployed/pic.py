@@ -26,6 +26,8 @@ CONTROLLER = "kber3-kmjak-kngoi-c3iyv-ix4le-p27yv-3fzmi-vnnab-xtjtf-ndfta-wqe"
 _HASH = Types.Record({"hash": Types.Vec(Types.Nat8)})
 _UPLOAD = Types.Record({"canister_id": Types.Principal, "chunk": Types.Vec(Types.Nat8)})
 _CANISTER = Types.Record({"canister_id": Types.Principal})
+_CONTROLLERS = Types.Record({"canister_id": Types.Principal,
+                             "settings": Types.Record({"controllers": Types.Opt(Types.Vec(Types.Principal))})})
 _UPGRADE_FLAGS = Types.Record({
     "skip_pre_upgrade": Types.Opt(Types.Bool),
     "wasm_memory_persistence": Types.Opt(Types.Variant({"keep": Types.Null, "replace": Types.Null})),
@@ -125,6 +127,14 @@ class Canister:
 
     def start(self):
         self._lifecycle("start_canister")
+
+    def add_controller(self, principal):
+        """Make ``principal`` a controller of the canister besides the test's, as Casals makes a capital a controller of
+        the quarters it builds for it."""
+        self.pic.set_sender(Principal.from_str(CONTROLLER))
+        controllers = [Principal.from_str(CONTROLLER).bytes, Principal.from_str(principal).bytes]
+        _management(self.pic, self.id, "update_settings", _CONTROLLERS,
+                    {"canister_id": self.id.bytes, "settings": {"controllers": [controllers]}})
 
     def _lifecycle(self, method):
         self.pic.set_sender(Principal.from_str(CONTROLLER))

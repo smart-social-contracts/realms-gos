@@ -215,8 +215,9 @@ Where the two interfaces cannot say the same thing, the `ggg.did` methods do thi
 Realms GOS also differs from the model in what it keeps:
 
 - `Event` does not yet record whether the caller acted as an agent, nor its supervisor (I-ALL-7);
-- `realm_configure` and its variants also take Realms GOS settings (`ai_assistant_enabled`,
-  `test_mode`, `primary_color`, token and NFT canister ids), which `ggg.did` would carry as
+- `realm_configure` and its variants also take Realms GOS settings (`ai_assistant_enabled`, `terms`,
+  `test_mode`, `primary_color`, token and NFT canister ids), and `quarter_configure` takes `sync_every`, the
+  seconds between a quarter's catch-up syncs (an hour to a week), which `ggg.did` would carry as
   `realms_gos_` fields, and setup has `install` and `infrastructure` steps of its own
   (`realm_configure_infrastructure` is a Realms GOS operation, not GGG). They do what GGG's
   `host_install` and `host_infrastructure` do, which run the same code; the GaaS installer still
@@ -267,6 +268,8 @@ Next to the model's fields, the `Realm` row holds:
 - scaling and sync: `auto_scale_enabled`, `scale_in_flight`, `scale_requested_at`,
   `bootstrap_state`, `sync_state`, `codex_install_state`, `last_activity_at`;
 - `ai_assistant_enabled`;
+- `terms`, the realm's terms text (at most 20,000 characters, as is the `manifesto`), which `realm_configure` sets
+  and `realm_info` shows; a capital keeps it in sync for its quarters with the rest of its identity;
 - test flags: `can_test_mode`, `test_mode` and the `test_mode_*` switches.
 
 ## 3. Entities Realms GOS adds

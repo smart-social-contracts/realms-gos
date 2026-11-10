@@ -10,6 +10,7 @@ class Realm(Row):
     id = String(default="1")
     name = String(default="")
     manifesto = String(default="")
+    terms = String(default="")  # the realm's terms text, which a member accepts on joining (Realms GOS adds it)
     welcome_message = String(default="")
     status = String(default="setup")  # setup | alpha | beta | production | deprecation | terminated
     manifest_data = Json({})

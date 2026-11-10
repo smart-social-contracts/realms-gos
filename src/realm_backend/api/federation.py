@@ -220,8 +220,12 @@ def mirrored(c, body):
 
 
 def on_result(c, body):
+    """A quarter runs a passed vote's action too, except one that changes a setting the capital keeps in sync: the
+    capital ran it, and its push brings the change here (a quarter would refuse it)."""
     v = mirrored(c, body)
     v.status = body["status"]
+    if v.status == "passed" and quarters.changes_synced(v.action):
+        return {"status": v.status, "result": {"ok": True, "skipped": "the capital's settings push carries it"}}
     if v.status == "passed":
         return {"status": v.status, "result": (yield from execute(v))}
     return {"status": v.status}
@@ -235,14 +239,14 @@ def on_cancel(c, body):
 
 
 TOPICS = {"user.arrive": quarters.on_arrive, "quarter.secede": quarters.on_secede, "codex": quarters.on_codex,
-          quarters.LOCAL_SETTINGS: quarters.on_local_settings,
+          quarters.LOCAL_SETTINGS: quarters.on_local_settings, quarters.SETTINGS_TOPIC: quarters.on_settings,
           propagation.STAGE: propagation.on_stage, propagation.UNSTAGE: propagation.on_unstage,
           propagation.REVERT: propagation.on_revert,
           "federal_vote.propose": on_propose, "federal_vote.open": on_open, "federal_vote.result": on_result,
           "federal_vote.cancel": on_cancel}
 # The realm's own messages: only its own operations send them (an install, a revert, a realm-wide vote's
-# quarter_configure), so federation_message never relays one for a member, or a chapter.
-OWN = propagation.OWN + (quarters.LOCAL_SETTINGS,)
+# quarter_configure, a change of a synced setting), so federation_message never relays one for a member, or a chapter.
+OWN = propagation.OWN + (quarters.LOCAL_SETTINGS, quarters.SETTINGS_TOPIC)
 
 
 @op("quarter.sync")

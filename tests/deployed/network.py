@@ -23,10 +23,11 @@ class Network:
         self.people = people
         self.web = Web(self.pic)
 
-    def realm(self, name, members=("alice", "bob")):
+    def realm(self, name, members=("alice", "bob"), launch=True):
         """A launched, open realm called ``name`` whose members are the founder and ``members``, ready to vote: a
-        proposal closes as soon as its outcome is certain."""
-        return Realm(self, name, members)
+        proposal closes as soon as its outcome is certain. With ``launch`` False it stays in setup, the founder its
+        only member."""
+        return Realm(self, name, members if launch else (), launch)
 
     def register_quarters(self, capital, *quarters):
         """Make each of ``quarters`` a quarter of ``capital``, the way a federation is built (api.quarters.adopt), then
@@ -66,7 +67,7 @@ class Network:
 
 
 class Realm(Canister):
-    def __init__(self, network, name, members):
+    def __init__(self, network, name, members, launch=True):
         super().__init__(None, installer=network.people["installer"], pic=network.pic, wasm=network.wasm)
         self.network, self.name = network, name
         self.cid = self.id.to_str()
@@ -74,6 +75,8 @@ class Realm(Canister):
         self.ok("setup_step", "installer", step="install", network="local", founder=network.people["founder"])
         self.ok("setup_step", "founder", step="realm", name=name, open_registration=True)
         self.ok("setup_step", "founder", step="trust_policy", require_marketplace_approval=False)
+        if not launch:
+            return
         self.ok("setup_launch", "founder")
         for member in members:
             self.ok("realm_join", member)
