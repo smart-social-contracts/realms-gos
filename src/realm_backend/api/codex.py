@@ -345,7 +345,8 @@ def codex_status(c, args):
     ones. A layered codex shows its layers, layer paths and chapters (source, version, checksum, who vouched for it,
     route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
     ``job`` the install job running or paused, else the latest, with its step, status and error. ``it_team`` is the
-    department the admins designated to revert fast ("" for none)."""
+    department the admins designated to revert fast ("" for none). ``journal_failure`` is the last entry the official
+    journal could not record (the change it was for, when, and why), or None."""
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
     legacy_codex = codex if isinstance(codex, Codex) else None
@@ -358,4 +359,5 @@ def codex_status(c, args):
             "config": config(legacy_codex) if legacy_codex else {},
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
             "pending": shown(waiting) if waiting else None,
-            "job": view(job, *JOB_SHOWN) if job else None, "it_team": it_team.department_id()}
+            "job": view(job, *JOB_SHOWN) if job else None, "it_team": it_team.department_id(),
+            "journal_failure": journal.failure()}
