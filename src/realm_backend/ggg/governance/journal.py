@@ -15,5 +15,5 @@ class JournalEntry(Row):
     id = String()
     day = String(default="", indexed=True)
     at = Integer(default=0)  # seconds, UTC: when the realm learned of it
-    kind = String(default="")  # codex_installed (codex_reverted comes with the revert hook)
+    kind = String(default="")  # codex_installed, codex_reverted
     details = Json({})  # only the fields the journal's personal-data rules allow (core.journal.record)

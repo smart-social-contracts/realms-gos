@@ -1,7 +1,8 @@
 """The realm's official journal on the real wasm (docs/codices/layered-codex.md §9.6, realms-extensions#54): an issue
 for every day from the realm's first one, the day ending at midnight on the capital's clock across a change of summer
-time, an install as an entry, an upgrade that keeps the journal, a scheduled install the journal cannot move, and a
-quarter that issues nothing and shows its capital's issue. tests/ggg/test_journal.py runs the same rules in process.
+time, an install and a revert as entries, an upgrade that keeps the journal, a scheduled install the journal cannot
+move, and a quarter that issues nothing and shows its capital's issue. tests/ggg/test_journal.py runs the same rules in
+process.
 
 The tests of this module run in order on one network: the clock only goes forward.
 """
@@ -16,7 +17,7 @@ DAY = 86400
 HOUR = 3600
 # What the journal extension's manifest allows an entry to keep (extensions/journal/manifest.json).
 RULES = ("import ggg\nggg.Extension(id='journal', manifest={'config': {'personal_data': {'entry_fields': "
-         "['codex', 'layers', 'proposal', 'activates_at']}}})")
+         "['codex', 'layers', 'proposal', 'activates_at', 'reverted']}}})")
 RECORD = "from core import journal\nfor _ in range({times}):\n    journal.record('codex_installed')"
 WATER = b'from realms.legislation import above\n\nclass Water(above("water")):\n    pass\n'
 # A query may spend 5 billion instructions: an issue of this many entries costs a small part of it.
@@ -167,3 +168,13 @@ def test_i_a_realm_west_of_utc_started_after_utc_midnight_has_an_issue_for_today
     record(west)
     today = issue(west)
     assert (today["day"], today["first_day"], today["number"], len(today["entries"])) == ("2021-11-02", "2021-11-02", 1, 1)
+
+
+def test_j_a_revert_by_a_vote_is_an_entry_naming_the_codex_restored_and_the_one_reverted(capital):
+    reverted = status(capital)["codex"]
+    capital.govern("codex_revert", {"codex": reverted["previous"]})
+    assert active_id(capital) == reverted["previous"]
+    entry = issue(capital)["entries"][-1]
+    assert entry["kind"] == "codex_reverted" and entry["at"] <= capital.now()
+    assert entry["details"] == {"codex": reverted["previous"], "reverted": reverted["id"],
+                                "layers": [{"source": "arcadia", "versions": []}]}

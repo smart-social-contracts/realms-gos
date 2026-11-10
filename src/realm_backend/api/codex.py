@@ -246,6 +246,7 @@ def restore(target):
     current.status, target.status = "reverted", "active"
     if isinstance(current, LayeredCodex) or isinstance(target, LayeredCodex):
         legislation.warm(target if isinstance(target, LayeredCodex) else None)
+    journal.codex_reverted(target, current)
     return {"codex": target.id}
 
 

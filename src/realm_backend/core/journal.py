@@ -12,7 +12,7 @@ realm's operations run it, never when the journal prints it.
 
 from core import chain, civil, localtime
 from core.db import Fail, NotFound, each, next_id, view
-from ggg import Extension, JournalEntry, Realm
+from ggg import Extension, JournalEntry, LayeredCodex, Realm
 
 EXTENSION = "journal"
 STATE = "journal"  # in Realm.manifest_data: {"first_day": "YYYY-MM-DD"}
@@ -104,6 +104,13 @@ def codex_installed(codex):
     """The layered ``codex`` has just become the realm's legislation (api.codex.switch)."""
     record("codex_installed", codex=codex.id, layers=layers_of(codex), proposal=codex.proposal,
            activates_at=codex.activates_at)
+
+
+def codex_reverted(restored, reverted):
+    """A revert has made the earlier codex ``restored`` the realm's legislation again in place of ``reverted``
+    (api.codex.restore). Either may be a legacy codex, which has no layers."""
+    record("codex_reverted", codex=restored.id, reverted=reverted.id,
+           layers=layers_of(restored) if isinstance(restored, LayeredCodex) else [])
 
 
 # ---- Issues
