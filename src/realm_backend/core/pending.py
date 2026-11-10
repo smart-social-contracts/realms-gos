@@ -29,6 +29,46 @@ CARD = ("id", "grantor", "delegate", "grant", "method", "args", "summary", "risk
 REFUSALS = {"not_found": NotFound, "forbidden": Forbidden, "conflict": Conflict, "unavailable": Unavailable}
 
 
+# What a line of the realm's cannot show as it is is written as an escape, \uXXXX (a pair of them for a character past
+# U+FFFF, as JSON writes it): every character that is not printable (control characters, which could start a line of
+# the realm's own; the line and paragraph separators; the bidi controls, which reorder what is around them; the
+# zero-width and format characters, tag characters and soft hyphen, which hide; the surrogates, private-use and
+# unassigned code points) except the space separators, and the printable characters that render as nothing (the
+# default-ignorables: the combining grapheme joiner, the Hangul fillers, the Mongolian and variation selectors).
+# Letters, marks, digits, punctuation and spaces of every script stay as they are, so that an official reads the act
+# in their own language. A zero-width joiner is escaped too: two zero-width characters are enough to carry hidden bits.
+SPACES = "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000"
+
+
+def escape(char):
+    """``char`` as JSON writes it with ensure_ascii: ``\\uXXXX``, or the escapes of its surrogate pair past U+FFFF."""
+    code = ord(char)
+    if code > 0xFFFF:
+        code -= 0x10000
+        return "\\u%04x\\u%04x" % (0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF))
+    return "\\u%04x" % code
+
+
+HIDDEN = frozenset(map(chr, (
+    0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, *range(0x180B, 0x1810), 0x3164, *range(0xFE00, 0xFE10), 0xFFA0,
+    *range(0xE0100, 0xE01F0))))
+
+
+def unsafe(text):
+    """``text`` with every character that cannot show as it is written as an escape. Text that is plain ASCII has none,
+    and is known so in one pass in C. Otherwise the distinct characters are found, and one pass in C translates those
+    that cannot show: str.translate is dearer than a pass of ``replace`` on text past ASCII, so it is run once."""
+    if text.isascii() and text.isprintable():
+        return text
+    hidden = {ord(char): escape(char) for char in set(text) if char in HIDDEN or not (char.isprintable() or char in SPACES)}
+    return text.translate(hidden) if hidden else text
+
+
+# A quotation sits in an isolate (first-strong isolate, then pop directional isolate): the direction of its own text
+# cannot reorder the realm's words around it, nor the quotation next to it. The text cannot carry its own, which are escaped.
+FSI, PDI = "\u2068", "\u2069"
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
@@ -138,8 +178,30 @@ def summary_of(user, name, spec, args, grant):
 
 
 def quoted(text):
-    """Text the delegate supplied, inside a sentence of the realm's: quoted, so that it cannot pass for the realm's words."""
-    return json.dumps(str(text))
+    """Text the delegate supplied, inside a sentence of the realm's: quoted, so that it cannot pass for the realm's words.
+    It is a JSON string, with the characters of ``unsafe`` escaped and every other as it is, in an isolate (``FSI``)."""
+    escaped = str(text).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    return FSI + '"' + unsafe(escaped) + '"' + PDI
+
+
+def readable(value):
+    """``value`` as JSON for a line of the realm's, as ``canonical`` writes it but with the characters of every script as
+    they are, those of ``unsafe`` escaped. For showing, never for sealing."""
+    return unsafe(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+
+
+def you_sign(sentence, *details):
+    """The lines of a signing act (an operation's ``summary``): one sentence for what the official signs, then ``(label,
+    value)`` details for the texts it carries, whole. Whatever a delegate or another member wrote is in them quoted."""
+    return [{"label": "You sign", "value": sentence}] + [{"label": label, "value": value} for label, value in details]
+
+
+def money(units, symbol):
+    """``units`` of the token ``symbol`` in its own decimals; a symbol that is no token of the realm is quoted."""
+    from ggg import Token
+
+    token = Token[str(symbol)]
+    return f"{amount(units, token.decimals)} {token.id}" if token else f"{units} {quoted(symbol)}"
 
 
 def named(grant):
@@ -199,7 +261,7 @@ def shown(key, value, args):
         if not value.isprintable():  # a line break could start a line of the realm's own
             return quoted(value)
         return nicknamed(value)
-    return canonical(value)
+    return readable(value)
 
 
 def amount(units, decimals):
@@ -253,20 +315,21 @@ def card(c, a, result=None):
 def without_secrets(method, shown):
     """``shown``, a card or an exported row of an action whose call is to operation ``method``, with the secret fields of
     that call blank in its ``args`` and ``result`` and left out of its ``summary``, and those of a call it carries too
-    (a proposal's action). The summary line of an argument is made again from the argument without them."""
+    (a proposal's action). The summary keeps the lines as they were stored, and the line of an argument is made again
+    only where blanking changed that argument: making a line again is the dearest part of reading a page of cards."""
     from core import legislation
 
     hidden = secrets_of(method, delivered=False)
     args = legislation.carried(blank(method, shown["args"], delivered=False))
-    lines = [{"label": line["label"], "value": shown_line(line, args)} for line in shown["summary"]
-             if line["label"] not in hidden]
+    lines = [line if args.get(line["label"]) == shown["args"].get(line["label"]) else remade(line, args)
+             for line in shown["summary"] if line["label"] not in hidden]
     return {**shown, "args": args, "result": legislation.carried(blank(method, shown["result"], delivered=False)),
             "summary": lines}
 
 
-def shown_line(line, args):
-    """The summary line of an argument as it reads from ``args``; the realm's own lines are kept."""
-    return line["value"] if line["label"] not in args else shown(line["label"], args[line["label"]], args)
+def remade(line, args):
+    """The summary line of the argument that ``line`` is for, as it reads from ``args``."""
+    return {"label": line["label"], "value": shown(line["label"], args[line["label"]], args)}
 
 
 # ---- States
@@ -352,6 +415,7 @@ def approve(c, aid, sent):
     """Run the call of the action ``aid`` as its grantor, on the grantor's own approval that sends its hash. A generator.
     Returns the action and the reply of the call; the call's own refusal fails the action, it does not undo the approval."""
     from core.op import dispatch, ops
+    from ggg import Delegation
 
     a = decision(c, aid)
     if a.status != "pending":
@@ -360,8 +424,13 @@ def approve(c, aid, sent):
         raise Fail(f"the hash does not match {a.id}: read it again")
     if seal(a.id, a.method, a.args, a.grantor, a.delegate, a.grant, a.expires_at) != a.hash:
         raise Conflict(f"{a.id} no longer matches its own hash: the record was changed")
+    spec = ops()[a.method]
+    # A signing act is described from the records it acts on, which the hash does not seal (a draft verdict can be
+    # edited, a ledger grows): the official signs what they were shown, or nothing.
+    if spec["signing"] and summary_of(a.grantor, a.method, spec, a.args, Delegation[a.grant]) != a.summary:
+        raise Conflict(f"what {a.id} shows has changed since it was prepared: decline it and ask for it again")
     a.decided_at = chain.now()
-    if ops()[a.method]["read"]:  # a read is approved once, and its delegate collects it
+    if spec["read"]:  # a read is approved once, and its delegate collects it
         a.status = "approved"
         return a, None
     # Before anything awaits: a second approval that arrives while the call waits on another canister meets this.

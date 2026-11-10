@@ -60,6 +60,7 @@ OWN = {
     "token_catalog": ("none", None, None, None),
     "version": ("none", None, None, None),
     "proposal_run_scheduled": ("none", None, None, None),
+    "codex_switch_staged": ("none", None, None, None),
     "db_convert_indexes": ("none", None, None, None),
 }
 
@@ -197,6 +198,34 @@ ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_s
                     "task_reschedule",
                     "task_run",
                     "task_schedule",
+                    # The signing acts: each is prepared by the assistant and signed by the official's own tap, never
+                    # done under a grant (the guardrails keep a delegated signing call forbidden).
+                    "appeal_decide",
+                    "attribute_review",
+                    "bid_score",
+                    "contract_terminate",
+                    "credential_issue",
+                    "credential_revoke",
+                    "dispute_accept",
+                    "dispute_reject",
+                    "evidence_evaluate",
+                    "identity_review",
+                    "land_assess",
+                    "land_freeze",
+                    "land_transfer",
+                    "land_unfreeze",
+                    "license_decide",
+                    "license_revoke",
+                    "license_suspend",
+                    "penalty_execute",
+                    "report_issue",
+                    "tender_award",
+                    "token_force_transfer",
+                    "token_freeze",
+                    "verdict_finalize",
+                    "verdict_issue",
+                    "verdict_link_contract",
+                    "verdict_modify_terms",
                     # Keys and private data, joining, power over people, power of attorney onward and the upgrade
                     # approvals: each asks the member each time, except what is read and what only removes power.
                     "crypto_access",

@@ -197,6 +197,8 @@ every group, those the member gains later included, and every operation a later 
   ([below](#office-work-and-organisations)).
   It also enables keys and private data, joining, power over people, power of attorney onward and the upgrade approvals,
   each asking the member each time where it hands something over ([below](#keys-joining-people-and-power-of-attorney-onward)).
+  And it enables the 26 signing acts of the group `sign`, which are prepared by the assistant and signed by the
+  official's own tap ([below](#signing-acts-the-officials-own-tap)).
 - **Grants made before groups** name permissions (`operations`) and keep covering exactly those 24 operations (`LEGACY`),
   with the behaviour they had then: a proposal with an action stays refused, and payout accounts, identity proofs,
   quarter moves and federal votes stay refused. A later release never widens them. `attribute_list` is not among them: a
@@ -301,8 +303,15 @@ The delegate prepares it, and only the member's own approval runs it. The code i
    plain name ("Add a payout account"), which the realm writes beside the operation (`title=`). `summary` (a label and a
    value per line) and `risk` are the realm's own words, written from the stored arguments and the operation's `summary`
    hook, never from text the delegate supplies: each argument appears under its own lower-case name, the lines the realm
-   adds start with a capital, and the delegate's text inside them is quoted. Every card ends its realm lines with "What
-   happens next": "Runs at once when you approve", or the proposal that approving files when a department governs the
+   adds start with a capital, and the delegate's text inside them is quoted: a JSON string in which the letters, marks,
+   digits, punctuation and spaces of every script stay as written, so that an official reads "resolución" or "判决书" as
+   it is. Every character that is not printable is written as a `\uXXXX` escape (a surrogate pair past U+FFFF):
+   control characters and line breaks, bidi controls, zero-width characters and joiners, tag characters, the soft
+   hyphen, private-use and unassigned code points; so are the printable characters that render as nothing (variation
+   selectors, the combining grapheme joiner, the Hangul fillers). Only the space separators stay (`unsafe` in
+   `core/pending.py`), so nothing in a quoted text can start a line of the realm's, reorder it or hide a clause.
+   Every card ends its realm lines with
+   "What happens next": "Runs at once when you approve", or the proposal that approving files when a department governs the
    call. A call that carries an action (`proposal_create`, `federal_vote_propose`) says that approving only starts the
    vote, and that the action runs only if the vote passes. Only `note` is the delegate's, and a client shows it apart.
    `hash` is the sha256 (the canister's native one) of the canonical JSON of the realm's canister id, the id, the call,
@@ -333,6 +342,41 @@ The delegate prepares it, and only the member's own approval runs it. The code i
 7. **Lazy states.** Nothing sweeps. An action reads `expired` once its day has passed and `void` once its grant was
    revoked, replaced, has ended or no longer covers the operation, whenever it is read, listed, approved or counted
    against the limit of 10.
+
+### Signing acts: the official's own tap
+
+A signing act is a verdict, a licence decision, a credential, an identity review, a freeze, a forced transfer, a bid's
+score, a tender's award, a contract's termination or the treasury report: an operation flagged `signing`, whose signer is
+personally accountable for it. All 26 are in the group `sign` ("Sign acts of my office"), tier `confirm`, and a grant of
+the group has no department or organisation to name: it covers the acts of every office the grantor holds.
+
+- **A delegated signing call stays forbidden.** The guardrails of `core/auth.py` are untouched: a signing call made as a
+  delegate is refused (`delegated && signing`), whatever the grant and whatever its tier, and an agent never signs
+  (`signing && signer_agent`). So `codex_status` still reports `agents` and `delegable` empty. What the assistant does is
+  prepare the act, as for any call that asks each time ([above](#pending-actions-the-members-tap)).
+- **The tap is the official's own call.** Approving runs the stored call as the official, with origin `confirmed`, so the
+  rules of a signing call apply to it as to one the official makes alone: the permission, an official who is an agent is
+  refused ("must be done by a human"), and a party to the matter is refused. An official who became an agent or a party
+  after the act was prepared finds the action `failed` when they tap; one who is one at the filing is refused then. The
+  signer the act records is the official; the audit `Event` has `prepared_by` the assistant.
+- **The card is the act.** The `summary` of a signing operation begins with "You sign", one sentence for what the
+  official signs, and then lines for the texts it carries, whole: a verdict's text, reasoning and penalties ("Verdict
+  text", "Verdict reasoning", "Verdict penalties"), a licence's conditions and term, a credential's claims, an identity
+  proof, a forced transfer's amount, from and to, a bid's marks, an award's bid and contract, a termination's contract,
+  a report's totals, fund balances and accounts. Many of these acts have only an id for arguments, so the realm reads
+  the text from the records it acts on when it files the action. Anything a delegate or another member wrote is
+  quoted in the realm's lines, so it cannot pass for one of them. The text is shown whole: a card past what a record
+  holds (about 64,000 characters, the arguments and the lines together) is refused when it is prepared, never cut.
+  `attribute_review` is the exception: an attribute's kind and value are personal data that the assistant, who reads
+  the card, cannot otherwise read, so the card names the attribute and the person and sends the official to where
+  they review attributes.
+- **What was shown is what is signed.** The hash seals the arguments only, and the records can change before the tap (a
+  co-judge edits a draft verdict, the ledger grows under a report). At approval the realm writes the lines again, and
+  if they differ from the ones the official read it refuses with a conflict. The action stays pending: the official
+  declines it, and the assistant prepares it again.
+- **A governed act** (moving a parcel or tokens by court order, freezing a token account, awarding a tender) follows the
+  rule of its department as the official's own call would: it runs at once where the department decides directly, and
+  otherwise the approval files the official's proposal, with `prepared_by` the assistant.
 
 ### Keys, joining, people and power of attorney onward
 
@@ -454,7 +498,8 @@ approval", with the link: a human delegate is told in one place, whichever page 
 a path under `/delegations/confirm/`; any other `approve_link` is ignored.
 
 The guardrails make delegation safe by construction: a delegate can only do what its grant covers, only on `direct`
-operations, never on `signing` ones, and never with `all`. The audit `Event` records both the grantor (`user`) and the
+operations, never on `signing` ones (it prepares them, and the official signs, [above](#signing-acts-the-officials-own-tap)),
+and never with `all`. The audit `Event` records both the grantor (`user`) and the
 signer (`by`). `codex_status` reports `agents` and `delegable` empty: no signing permission is open to an agent or to
 a delegate, whatever the codex says.
 

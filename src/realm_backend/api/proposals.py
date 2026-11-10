@@ -7,7 +7,7 @@ from ggg import (Appointment, Calendar, Contract, Delegation, Department, Mandat
                  Realm, Task, TaskSchedule, Tender, Vote)
 from api import tasks
 from core.op import dispatch, op, ops
-from core.pending import quoted
+from core.pending import quoted, you_sign
 from core.ratio import ONE, refuse_renamed
 
 CHOICES = ("yes", "no", "abstain")
@@ -806,7 +806,13 @@ def contract_create(c, args):
     return {"contract": k.id}
 
 
-@op("contract.terminate", signing=True, returns="contract")
+def terminating(user, args, grant):
+    k = find(Contract, args["contract"])
+    parties = ", ".join(quoted(p) for p in k.parties) or "no named party"
+    return you_sign(f"Terminates contract {k.id} {quoted(k.title)} between {parties}, which is {k.status}")
+
+
+@op("contract.terminate", signing=True, returns="contract", summary=terminating, title="Terminate a contract")
 def contract_terminate(c, args):
     """Terminate ``contract``, unless it is already terminated or fulfilled."""
     k = find(Contract, args["contract"])

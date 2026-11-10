@@ -28,6 +28,7 @@ import json
 
 from core import auth, chain
 from core import civil
+from core import compliance
 from core import it_team
 from core import localtime
 from core import sandbox
@@ -41,6 +42,9 @@ import ggg_facts  # GGG's fact schema: the sandbox imports it from text, and the
 # change list, and the runtime needs the lists before that (a test keeps them equal).
 RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
 HOOK_ONLY = ("link_notify",)
+# The federation_message topics that carry a codex across a realm's quarters (api.propagation): like the reserved
+# operations, no chapter, hook or forbid runs on a message that carries one, or a codex could refuse its own revert.
+PROPAGATION = ("codex.stage", "codex.unstage", "codex.revert")
 ACTIONS = ("ggg_read", "local_day")  # what a chapter may ask the realm, through the sandbox's rpc
 # The operation that switches codices: after it the runtime runs the new codex, so the hooks the dispatcher would
 # run for it are the new codex's, which the switch runs once in a message of its own (``activate``), never the old one's.
@@ -70,6 +74,7 @@ VIEWS = {
     "Dispute": ("id", "claimant", "respondent", "subject", "title", "status", "case"),
     "Document": ("id", "department", "title", "kind", "languages", "public", "author", "at"),
     "External": ("id", "name", "kind"),
+    "FederalVoteLeg": ("id", "vote", "quarter", "outcome", "status", "codex", "compliance"),
     "FiscalPeriod": ("id", "name", "starts_at", "ends_at", "status"),
     "Fund": ("id", "name", "kind", "department", "balances", "allocation_rule"),
     "Human": ("id", "user"),
@@ -91,7 +96,7 @@ VIEWS = {
     "Procedure": ("id", "initiated_by", "matter", "decision_deadline", "silence", "legislation"),
     "Proposal": ("id", "title", "description", "proposer", "department", "action", "status", "opens_at", "deadline",
                  "effective_at", "threshold", "quorum", "tally", "result", "links"),
-    "Quarter": ("id", "name", "index", "status", "population"),
+    "Quarter": ("id", "name", "index", "status", "population", "codex_id", "compliance"),
     "Realm": ("id", "name", "status", "accounting_currency", "accounting_currency_decimals", "is_quarter", "is_capital",
               "quarter_join_mode", "open_registration", "timezone"),
     "Request": ("id", "kind", "by", "filed_at", "due_at", "extension_limit", "status", "decided_at"),
@@ -279,8 +284,9 @@ def _ensure():
 
 def is_reserved(op, args):
     """Whether ``op`` is a reserved operation, or about one (§10.4): a proposal or a federal vote whose action is
-    reserved, their votes, legs, messages and stops. No chapter runs for them."""
-    if op in RESERVED:
+    reserved, their votes, legs, messages and stops, and the messages that carry a codex across the quarters. No
+    chapter runs for them."""
+    if op in RESERVED or (op == "federation_message" and args.get("topic") in PROPAGATION):
         return True
     action = _action_about(op, args)
     return isinstance(action, dict) and action.get("op") in RESERVED
@@ -661,6 +667,8 @@ def _shown(entity, row, fields):
     show none of the arguments and reply fields its operation keeps secret (``secret=``), as when the call itself
     crosses (``_public``)."""
     data = view(row, *fields)
+    if "compliance" in data:  # a flag is kept as JSON text; a chapter reads its value (core.compliance)
+        data["compliance"] = compliance.of(data["compliance"])
     if entity in CONDITIONAL and not CONDITIONAL[entity][1](data):
         data[CONDITIONAL[entity][0]] = None
     if entity == "Proposal" and isinstance(data["action"], dict):

@@ -6,7 +6,7 @@ member approves it with ``ggg_action_approve``, and then the delegate holds that
 import pytest
 from ic.candid import Types, decode, encode
 from test_delegation_groups import launch, ok, refused
-from test_pending_actions import ACTION, APPROVE, BLOB, CALL_FOR, CALL_FOR_REPLY, READ_FOR, TEXT
+from test_pending_actions import ACTION, APPROVE, BLOB, CALL_FOR, CALL_FOR_REPLY, READ_FOR, TEXT, plain
 
 DAY = 86400
 WRAPPED = Types.Record({"principal": Types.Principal, "wrapped_dek": BLOB})
@@ -35,7 +35,7 @@ def test_a_key_prepared_for_the_assistant_alone_is_stored_only_when_the_member_a
                                                "note": ["to read my notes"]}, CALL_FOR_REPLY, claude)
     action = out["Ok"]["Pending"]
     assert next(iter(action["status"])) == "Pending"
-    lines = {line["label"]: line["value"] for line in action["summary"]}
+    lines = {line["label"]: plain(line["value"]) for line in action["summary"]}
     assert lines["Keys go to"] == claude
     assert lines["What changes"] == f'{claude} will be able to read "{scope}", and nothing else of yours'
     assert realm.shell(ENVELOPES).strip() == "[]"  # nothing is stored yet

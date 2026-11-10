@@ -1550,6 +1550,16 @@
     "kind": "property",
     "type": "Integer"
    },
+   "codex": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "compliance": {
+    "default": "\"unknown\"",
+    "kind": "property",
+    "type": "String"
+   },
    "eligible": {
     "default": 0,
     "kind": "property",
@@ -1616,6 +1626,16 @@
     "default": "{}",
     "kind": "property",
     "type": "Json"
+   },
+   "codex": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "compliance": {
+    "default": "\"unknown\"",
+    "kind": "property",
+    "type": "String"
    },
    "id": {
     "has_default": false,
@@ -1823,6 +1843,16 @@
  },
  "Forward": {
   "fields": {
+   "codex": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "compliance": {
+    "default": "\"unknown\"",
+    "kind": "property",
+    "type": "String"
+   },
    "destination": {
     "default": "",
     "kind": "property",

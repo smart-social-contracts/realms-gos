@@ -233,8 +233,8 @@ Realms GOS also differs from the model in what it keeps:
   `Unavailable`;
 - the check for a cycle (I-NEST-2) runs when the vote applies, not when a proposal that carries it is filed: filing
   makes no call to another realm. A vote refused at the end of the vote leaves the proposal `failed`;
-- `Quarter.compliance` is stored and read, and nothing writes it yet: it reads `Unknown` until the scheduled checks
-  and the switch of a codex across the quarters set it;
+- `Quarter.compliance` is written by the capital when a quarter reports the layered codex it runs, and a minute
+  after the capital switches codex (§9.5 of the layered codex); it reads `Unknown` until a quarter has reported one;
 - only the last 2,000 events are kept, and older ones are deleted rather than archived (I-EXT-4).
 
 A realm created before attributes and requests existed keeps the `member` profile it stored, which lacks
@@ -317,6 +317,7 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `task_add_schedule` (a time, and optionally a repeat, for the creator's named task) | `task.schedule` | delegable | Run the invoice check every day from 1 Jan |
 | `task_logs` | `task.view` | read, delegable | Payroll task and its last 3 runs |
 | `proposal_run_scheduled` (runs the action of a proposal waiting for its effective time once that time has come, else does nothing; the task scheduler calls it) | — (public) | | At `effective_at`, the realm runs `P-12`'s transfer |
+| `codex_switch_staged` (a quarter switches to the codex it staged from its capital once the capital's switch time has come, else does nothing; the task scheduler calls it) | — (public) | | At `effective_at`, each quarter switches to the codex the realm voted for |
 | `ops_list` | — (public) | read | geister reads it to build MCP tools |
 | `orchestration_decide` (approve or reject a Casals baton action for this realm) | `orchestration.approve` | confirm | Approve Casals' action "upgrade North to 0.9.1" |
 | `extension_install`, `extension_uninstall` | `extension.install`, `extension.uninstall` | governed, delegable | Install `procurement` 1.0.3 (marketplace-approved) → vote |

@@ -1281,8 +1281,8 @@ never needs the record, except to check compliance (§11).
   vouches for them lists them. `legislation_releases` answers the relayed ones top to bottom, then its own,
   oldest first, and the id of the realm's own layer; `legislation_chapter` answers the text stored under a
   checksum. A release is kept under `<source>@<version>`, so neither holds an `@`.
-- `Quarter.compliance` is stored and read like a follower's; nothing writes it yet (the scheduled checks,
-  D7, and the switch of a codex across the quarters will).
+- `Quarter.compliance` is stored and read like a follower's. The capital writes it from what a quarter reports it
+  runs, when a codex is switched across the quarters (§9.5); the scheduled checks (D7) write a follower's.
 
 ---
 
@@ -1641,6 +1641,55 @@ codex, and a new codex reaches them in four steps:
 
 The switch cannot be atomic across canisters. During it, calls between quarters carry the sender's
 codex checksum, so a receiver can tell which legislation the sender ran.
+
+**How the realm does it** ([`api/propagation.py`](../../src/realm_backend/api/propagation.py)):
+
+- **Announcing.** When the capital's install job has staged the codex (step 5), it tells each active
+  quarter, in a message of its own per quarter, `codex.stage`: the codex's checksum, the change list's
+  checksum and T (the proposal's `effective_at`, or the moment the job started when there is none). A quarter
+  it cannot reach is recorded in the `FederationMessage` of the call and holds up no other. A staged codex the
+  capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`; the same
+  codex announced for another time replaces the staging. These messages are the realm's own: `federation_message`
+  does not relay them for a member, whatever they hold, and no chapter, hook or forbid runs on them (they are reserved like
+  the revert they carry: a codex cannot refuse its own revert). The job a quarter runs names no proposal, so the
+  capital's proposal id is never one of the quarter's, and a job that ends without the switch cancels its task.
+- **Staging in a quarter.** A quarter runs the same install job, in staging mode: the change list and every chapter
+  it lacks are read from the capital by checksum (`legislation_chapter`; the capital keeps the change list's
+  bytes in `ChapterSource` like a chapter's), and nothing changes while it stages. One install at a time still
+  holds: a quarter refuses the announcement while an install of its own runs, and a newer announcement replaces a
+  staging in progress. An upgrade pauses the job like any other, and `codex_install_resume` resumes it.
+- **The switch.** The quarter schedules `codex_switch_staged` at T as a task of the realm's own, which
+  `tasks.rearm()` arms again after an upgrade. At T, once the capital confirms, a staged quarter switches: it
+  asks its capital which codex it requires (the answer of `quarter_sync`: the one in force, or the pending one once
+  its time has come) and switches, with no `on_codex_activate`, only if that is the one it staged, so the switch
+  is T plus one round trip. It then reports to its capital. A codex the capital has left (withdrawn, reverted, or
+  replaced by a newer one) is never activated, even by a quarter that missed the message and keeps its codex: its
+  job fails and says so. A capital that does not answer leaves the quarter on its codex and the job paused, for an
+  admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile. The 24 hours of the job
+  cover its work, not the wait for T, however far away T is.
+- **A quarter ready after T** goes through the same confirmation before it switches.
+- **Upgrading.** Upgrade a federation's capital before its quarters: a quarter confirms its switch against the
+  codex the capital's `quarter_sync` names, and an older capital names its active codex only.
+- **A revert.** When the capital restores an earlier codex (`codex_revert`, `codex_revert_fast`), it tells each
+  active quarter `codex.revert`, and each restores that codex from its own history at once: nothing is downloaded
+  and no `on_codex_activate` runs. The quarter reports what it runs; a quarter that never ran that codex refuses,
+  and the capital's record of the message says so. A quarter that missed the message and next reports a codex the
+  realm voted out is told again, so a quarter that was down catches up at its next report, and a bad codex does not
+  keep running in the quarters once the realm has voted it out.
+- **Compliance.** The capital sets `Quarter.compliance` when a quarter reports the codex it runs (`quarter_sync`,
+  `quarter_report`, a leg): compliant when it is the codex in force, or the pending one once its time has come;
+  otherwise non-compliant since that codex took effect (the switch, or the revert that restored it), naming
+  the layers that differ. A minute after the capital's codex changes it judges the quarters that reported
+  before and have not said they changed, so that one that was not ready reads non-compliant since T without
+  waiting for its next report. `quarter_directory` shows the flag, and a quarter's own row the flag its capital gave
+  it at its last sync.
+- **What calls carry and what is recorded.** A call to a canister of the federation carries the checksum of the
+  codex its sender runs. The receiver keeps it, with the sender's flag, on the `FederationMessage` (a move is
+  the `user.arrive` message), on the `FederalVoteLeg`, and the origin quarter on the `Forward`. Legislation
+  decides on them as the call arrives: a guard on `federation_message` reads its `codex` argument, and a chapter
+  reads the quarters' `codex_id` and `compliance` and the legs' `codex` and `compliance` (`VIEWS` in
+  `core/legislation.py`). The message and move records themselves stay outside that view: they say who moved and
+  what was said.
 
 **Quarters in different time zones.** T is an exact UTC instant, so every quarter switches at the same
 moment, whatever its zone (§4.5). The vote's deadline, and any working days counted up to T, belong to
