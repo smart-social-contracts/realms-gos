@@ -303,30 +303,83 @@ def broken(*args):
 
 
 def failure():
-    return Realm["1"].manifest_data["journal"]["failure"]
+    """What the IT admin team reads of the journal's last failure."""
+    return ok("codex_status", "ctl")["journal_failure"]
 
 
-def test_a_journal_that_fails_does_not_stop_a_revert_and_keeps_the_error(monkeypatch):
+def reverted_with_a_broken_journal(monkeypatch, *breaks):
+    """Two legacy codices, then a revert to the first while each function named in ``breaks`` raises."""
     from test_codex import build
     from test_revert import installed
 
     build()
     installed("1.0.0", "1.1.0")
     rules()
-    monkeypatch.setattr(journal, "local_day", broken)
+    for name in breaks:
+        monkeypatch.setattr(journal, name, broken)
     assert ok("codex_revert", "ctl")["codex"] == "test@1.0.0"
     monkeypatch.undo()
-    assert issue()["entries"] == [] and issue()["first_day"]
-    assert failure() == {"kind": "codex_reverted", "at": fake_chain.now(), "error": "ValueError: the journal is broken"}
 
 
-def test_a_journal_that_fails_does_not_stop_an_install(realm, monkeypatch):  # noqa: F811
+def test_a_revert_whose_entry_fails_stands_and_its_issue_says_which_revert_it_misses(monkeypatch):
+    reverted_with_a_broken_journal(monkeypatch, "allowed_fields")
+    missing = {"kind": "codex_reverted", "codex": "test@1.0.0", "reverted": "test@1.1.0"}
+    assert [(e["kind"], e["details"], e["at"]) for e in issue()["entries"]] == [("not_recorded", missing, fake_chain.now())]
+    assert failure() == {**missing, "at": fake_chain.now(), "error": "ValueError: the journal is broken"}
+
+
+def test_the_error_is_kept_for_the_it_team_even_when_the_notice_cannot_be_recorded(monkeypatch):
+    reverted_with_a_broken_journal(monkeypatch, "allowed_fields", "append")
+    assert issue()["entries"] == [] and failure()["error"] == "ValueError: the journal is broken"
+
+
+class Unwritable(Exception):
+    def __str__(self):
+        raise ValueError("no text")
+
+
+def unwritable(*args):
+    raise Unwritable()
+
+
+def test_an_error_that_cannot_be_written_out_stops_no_revert_and_the_notice_still_goes_in(monkeypatch):
+    from test_codex import build
+    from test_revert import installed
+
+    build()
+    installed("1.0.0", "1.1.0")
+    monkeypatch.setattr(journal, "allowed_fields", unwritable)
+    assert ok("codex_revert", "ctl")["codex"] == "test@1.0.0"
+    monkeypatch.undo()
+    assert [e["kind"] for e in issue()["entries"]] == ["not_recorded"] and failure() is None
+
+
+def test_a_realm_whose_journal_cannot_even_tell_if_it_publishes_still_reverts(monkeypatch):
+    reverted_with_a_broken_journal(monkeypatch, "publishes")
+    assert [e["kind"] for e in issue()["entries"]] == ["not_recorded"]
+    assert failure()["error"] == "ValueError: the journal is broken"
+
+
+def test_a_journal_without_failures_shows_none_to_the_it_team(realm):  # noqa: F811
+    assert failure() is None
+
+
+def test_an_install_whose_entry_fails_stands_and_its_issue_says_which_codex_it_misses(realm, monkeypatch):  # noqa: F811
     rules()
     layer = own_layer()
     monkeypatch.setattr(journal, "layers_of", broken)
     install(change_list(layer))
-    assert status()["codex"]["id"] == expected_id(layer) and issue()["entries"] == []
-    assert failure()["kind"] == "codex_installed"
+    assert status()["codex"]["id"] == expected_id(layer)
+    assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [
+        ("not_recorded", {"kind": "codex_installed", "codex": expected_id(layer)})]
+    assert failure()["kind"] == "codex_installed" and failure()["codex"] == expected_id(layer)
+
+
+def test_a_quarter_records_no_notice_either(monkeypatch):
+    quarter()
+    monkeypatch.setattr(journal, "allowed_fields", broken)
+    journal.codex_reverted(LayeredCodex(id="sha256:a"), LayeredCodex(id="sha256:b"))
+    assert JournalEntry.count() == 0 and journal.failure() is None
 
 
 # ---- a quarter issues nothing and shows the capital's

@@ -1730,7 +1730,9 @@ issue. A quarter's `journal_issue` returns `issued: false` and names its capital
 capital for its issue through the quarter, as an update, because a read cannot call another canister. The extension's
 manifest holds the personal-data rules as an allow-list of the fields an entry may keep, which the realm applies when
 it records the entry; rules that are not a list of names keep nothing. Nothing that goes wrong in the journal stops
-the switch or the revert it reports: the error is kept in the journal's state in place of the entry.
+the switch or the revert it reports. The issue of that day then holds an entry `not_recorded` instead, which names
+the change it misses by its codices, and the page shows it as a notice; the error itself is for the IT admin team,
+in `codex_status` (`journal_failure`).
 
 No chapter publishes to the journal or waits for a publication: a codex install appears in the realm's
 journal by the extension's own rule, and the statutory waits a chapter needs are expressed through the
