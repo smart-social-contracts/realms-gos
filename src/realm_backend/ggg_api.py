@@ -772,7 +772,6 @@ ARGS = {
     "delegation_grant": grouped, "delegation_request": grouped, "delegation_request_decide": grouped,
     "department_set_policy": lambda a, g: {**{k: v for k, v in a.items() if k != "policy"}, **a.get("policy", {})},
     "treasury_configure": lambda a, g: {"config": a},
-    "codex_revert": lambda a, g: a["codex"] or {},  # an optional record, the codex to restore: none, the previous one
     "representative_remove": lambda a, g: seat_owner(a),
     "delegation_list": lambda a, g: {"from_" + a.get("role", "delegate"): a.get("from"), "count": a.get("count")},
     "notification_read": lambda a, g: {**a, "all": True} if "notification" not in a else a,
