@@ -12,7 +12,7 @@ import pytest
 from api import codex as codex_api
 from api import proposals, taxes
 from core import layered_codex as store
-from core import legislation, localtime, op
+from core import legislation, localtime, op, sandbox
 from core.db import each
 
 from ggg import Attribute, Codex, Human, Invoice, Land, LayeredCodex, Quarter, Realm, TaxDeclaration, Token
@@ -410,6 +410,75 @@ class Water(above("water")):
     with pytest.raises(Exception, match="compute_t_day is defined in realm, water: one domain answers"):
         op.run(codex_api.compute("t_day", {"at": 1}))
     assert failures()["x/town/realm.py"]["compute_t_day"]["count"] == 1
+
+
+# ── A spent sandbox (realms-gos#670) ─────────────────────────────────────────────────────────────────────────────
+
+BudgetExceeded = type("BudgetExceeded", (Exception,), {})
+# How the meter ends a call, as the sandbox raises it inside: the catchable trip, and the kill past the grace margin.
+METER = {"budget exceeded": BudgetExceeded("instruction budget (10000000) exhausted"),
+         "terminated": RuntimeError("instruction budget (10000000) exhausted; sandbox terminated after grace period")}
+KILLED = f"sandboxed call raised: RuntimeError: {METER['terminated']}"
+
+
+def guard_fails(monkeypatch, error, asked, stop_reads=None):
+    """Every sandbox's ``guard`` fails with ``error`` from now on, counting in ``asked``; ``stop_reads`` stops its reads
+    first, as the realm does to a call that read past its budget."""
+    real = sandbox.Resident._call
+
+    def failing(self, fn, kwargs):
+        if fn != "guard":
+            return real(self, fn, kwargs)
+        asked.append(fn)
+        if stop_reads:
+            legislation._state["reads"]["stopped"] = stop_reads
+        raise RuntimeError(error)
+
+    monkeypatch.setattr(sandbox.Resident, "_call", failing)
+
+
+@pytest.mark.parametrize("meter", METER.values(), ids=METER.keys())
+def test_a_spent_sandbox_is_loaded_again_and_the_call_asked_once_more(meter):
+    town()
+    spent = legislation._state["box"]
+
+    def dead(**kwargs):
+        raise meter
+
+    spent.space["guard"] = dead  # every guard on this sandbox fails now, as on a spent one
+    assert call("t_act", basis="consent")["error"] == "consent is not a basis between public authorities"
+    assert legislation._state["box"] not in (None, spent)
+    assert ok("t_act", what="fine")["done"] == "fine"
+    assert failures() == {}
+
+
+def test_a_call_that_spends_a_fresh_sandbox_too_fails_after_one_more_try(monkeypatch):
+    town()
+    asked = []
+    guard_fails(monkeypatch, KILLED, asked)
+    error = call("t_act", what="anything")["error"]
+    assert error.startswith("legislation error: the codex sha256:") and error.endswith(KILLED)
+    assert asked == ["guard", "guard"]
+    assert failures()["codex"]["check_t_act"]["count"] == 1
+    monkeypatch.undo()
+    assert ok("t_act", what="fine")["done"] == "fine"  # the sandbox it spent is replaced on the next call
+    assert failures() == {}
+
+
+def test_a_sandbox_that_fails_otherwise_is_not_asked_again(monkeypatch):
+    town()
+    asked = []
+    guard_fails(monkeypatch, "sandboxed call raised: MemoryError: ", asked)
+    assert call("t_act", what="anything")["error"].endswith("failed: sandboxed call raised: MemoryError: ")
+    assert asked == ["guard"]
+
+
+def test_a_spent_call_whose_reads_were_stopped_fails_and_is_not_asked_again(monkeypatch):
+    town()
+    asked, stopped = [], "the chapters read for more than 2,000,000,000 instructions in one call: the call stops"
+    guard_fails(monkeypatch, KILLED, asked, stop_reads=stopped)
+    assert call("t_act", what="anything")["error"] == f"legislation error: {stopped}"
+    assert asked == ["guard"] and legislation._state["box"] is not None  # the spent sandbox is replaced all the same
 
 
 def test_the_local_day_is_the_realms_own():
