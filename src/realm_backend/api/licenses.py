@@ -1,11 +1,11 @@
 from core import chain, localtime
 from core.db import Conflict, Fail, Forbidden, Unavailable, deref, each, find, next_id, page, page_by, view
 from core.pending import quoted, readable, you_sign
-from ggg import Calendar, Department, License, Organization, Procedure
+from ggg import Calendar, Department, Land, License, Organization, Procedure
 from core.op import op
 from api.proposals import day_of, realm_wide, whole
 
-SHOWN = ("id", "kind", "holder", "status", "decision_due", "issued_at", "expires_at")
+SHOWN = ("id", "kind", "holder", "status", "decision_due", "issued_at", "expires_at", "land")
 NS = 10**9  # the chain counts seconds, localtime nanoseconds
 # The operations' text for GGG's PeriodUnit, as the legislation library tags it.
 PERIOD_UNITS = {"day": "Day", "working_day": "WorkingDay", "month": "Month", "year": "Year"}
@@ -69,12 +69,13 @@ def decision_due(kind, applied_at):
     return end // NS
 
 
-def application(c, kind, holder, department, evidence_ref, conditions):
+def application(c, kind, holder, department, evidence_ref, conditions, land=""):
     applicant(holder, c.user)
     issuer = find(Department, department) if department else None
+    parcel = find(Land, land).id if land else ""
     now = chain.now()
     lic = License(id=next_id(License, "LIC"), kind=kind, holder=holder, status="applied", applied_at=now,
-                  decision_due=decision_due(kind, now), evidence_ref=evidence_ref, conditions=conditions)
+                  decision_due=decision_due(kind, now), evidence_ref=evidence_ref, conditions=conditions, land=parcel)
     if issuer:
         lic.issued_by = issuer
     return {"license": lic.id}
@@ -83,9 +84,10 @@ def application(c, kind, holder, department, evidence_ref, conditions):
 @op("license.apply", returns="license")
 def license_apply(c, args):
     """Apply for a licence of ``kind`` for ``holder`` (default you, or ``Organization:id`` of one you administer), to
-    issuing ``department`` (optional), with optional ``evidence_ref`` and ``conditions``. Returns ``license``."""
+    issuing ``department`` (optional), with optional ``evidence_ref``, ``conditions`` and the parcel ``land`` it is for,
+    which must exist. Returns ``license``."""
     return application(c, args["kind"], args.get("holder") or f"User:{c.user}", args.get("department"),
-                       args.get("evidence_ref", ""), args.get("conditions", {}))
+                       args.get("evidence_ref", ""), args.get("conditions", {}), args.get("land", ""))
 
 
 @op("license.apply", returns="license")
@@ -96,7 +98,7 @@ def license_renew(c, args):
     if old.status not in ("active", "expired"):
         raise Conflict(f"{old.id} is {old.status}")
     return application(c, old.kind, old.holder, old.issued_by.id if old.issued_by else None,
-                       args.get("evidence_ref", old.evidence_ref), {**(old.conditions or {}), "renews": old.id})
+                       args.get("evidence_ref", old.evidence_ref), {**(old.conditions or {}), "renews": old.id}, old.land)
 
 
 def of_the_licence(lic):
@@ -120,8 +122,16 @@ def deciding_licence(user, args, grant):
                     ("Licence conditions", readable(conditions)), ("Issuing department", quoted(issuer.id)))
 
 
+def in_zones(args, proposal=""):
+    """The fact of a license_decide call that is not one of its arguments (GGG's derived facts): the zones of the parcel
+    the licence is for, for the legislation of a plan that holds back the decisions on its parcels."""
+    lic = License[args.get("license") or "-"]
+    parcel = Land[lic.land] if lic and lic.land else None
+    return {"zones": list(parcel.lies_in or []) if parcel else []}
+
+
 @op("license.issue", signing=True, parties=holders, returns="license", summary=deciding_licence,
-    title="Issue or reject a licence")
+    title="Issue or reject a licence", derived=in_zones)
 def license_decide(c, args):
     """Issue the applied-for ``license`` if ``approve`` is true, else reject it; issuing ``department`` defaults to
     the one applied to. On approval: ``expires_at`` (default now plus the licence review cycle, 2 years) and extra

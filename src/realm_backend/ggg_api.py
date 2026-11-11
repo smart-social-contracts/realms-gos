@@ -28,7 +28,7 @@ STANDARDS = (("ICRC-10", "https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-1
 # GGG fields Realms GOS names otherwise.
 RENAME = {("DelegationGrantArgs", "scope"): "operations", ("DelegationRequestArgs", "scope"): "operations",
           ("DelegationDecideArgs", "scope"): "operations", ("QuarterRegisterArgs", "canister"): "quarter",
-          ("ResolutionQueryArgs", "search"): "text",
+          ("ResolutionQueryArgs", "search"): "text", ("Land", "zones"): "lies_in",
           # The member a delegate calls for is not who the call_for operation acts as: the delegate acts as itself.
           ("CallForArgs", "on_behalf_of"): "grantor", ("ReadForArgs", "on_behalf_of"): "grantor"}
 # GGG times that Realms GOS rounds up to the second, where it rounds every other time down: a time something must not

@@ -18,7 +18,7 @@ CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar 
 REALM = "realm"  # the domain only the realm's own layer fills (§3)
 # GGG's domain list, the ggg submodule's domains.json (tests/ggg keeps the two equal).
 DOMAINS = ("realm", "tax", "procedure", "register", "local_regime", "water", "data_protection", "language",
-           "treasury", "federation")
+           "treasury", "federation", "planning")
 HEX = "0123456789abcdef"
 
 
