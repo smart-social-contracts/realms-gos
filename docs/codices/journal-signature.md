@@ -1,123 +1,163 @@
-# The signed official journal
+# Signed documents, and the signed official journal
 
-Design of the signature on every closed issue of a realm's official journal
-([layered-codex.md §9.6](layered-codex.md#96-the-official-journal-extension-journal)). The user's requirement:
-*there should be a digital signature that proves that the journal was produced by the canister of such a realm.*
+Design of the signature by a realm's canister on its documents, with the official journal
+([layered-codex.md §9.6](layered-codex.md#96-the-official-journal-extension-journal)) as the first user. The user's
+requirement: *there should be a digital signature that proves that the journal was produced by the canister of such a
+realm*, and other documents (certificates, decisions) will need the same.
 
-Status: design for review, November 2026. Nothing here is built yet.
+Status: design for review, November 2026. The journal's part is built with it; no other kind yet.
 
 ## 1. What it gives a reader
 
-A closed issue carries a **signature** that anyone can check, on screen, from a printed or PDF copy, and offline. It
-proves that **the code running in this realm's canister** produced that exact content, and, through a **hash chain**,
-that no issue was altered or dropped later without leaving evidence. Today's issue is shown as *provisional, not yet
-signed*.
+A signed document carries a **proof** that anyone can check, on screen, from a printed or PDF copy, and offline, with one
+standalone page ([§7](#7-verifying)). It proves that **the code running in this realm's canister** produced that exact
+content, and, for a chained kind such as the journal, that no document was altered or dropped later without leaving
+evidence. A document not yet signed is shown as *provisional*.
 
 ## 2. Decisions
 
 | | Decision | Why |
 |---|---|---|
-| Signer | The IC's **threshold Schnorr**: management canister `sign_with_schnorr`, **Ed25519**, key derived for the realm's own principal | The key is bound to the canister id by the IC, not by us: only the canister can ask for a signature under it. No key is stored |
-| Call | `chain.call("aaaaa-aa", ...)` with Candid text, as `api/crypto.py` does for vetKD | No Basilisk binding needed. Spiked on PocketIC: the 64-byte reply verifies as plain RFC 8032 Ed25519 (`cryptography`, `openssl`, libsodium, WebCrypto) |
-| Why not ECDSA | Same price and API, but secp256k1 verifies only through a library, needs a pre-hash, and no browser supports it | Ed25519 is the one a printed copy's verifier can check with the tool at hand |
-| Key name | `dfx_test_key` when `Realm.network` is `local`; `test_key_1` on the other test networks (`quarters.TEST_NETWORKS`: test, staging, demo); **`key_1` on production** | `test_key_1` lives on a 13-node subnet and is for testing. Each issue records its key, so a realm that changes network keeps its old issues valid |
-| Derivation path | `["realms:journal"]`, fixed for ever | Domain separation: this key signs journal digests and nothing else. The path is in each issue |
-| What is signed | `SHA-256(canonical)`, 32 bytes | A fixed-size message: no size limit to meet (the IC docs state none), and the same digest is the chain link and the source of the code |
-| Canonical form | UTF-8 JSON, keys sorted, no spaces, ASCII escapes, integers only | Stored with the issue and served as it is: a verifier never re-serializes, so no language's JSON quirks matter |
-| When | A timer at the end of the realm's local day signs every closed, unsigned day in order. Retried hourly on failure; re-set in `post_upgrade` like `sync_checks.resume` | An update is needed (a query cannot call the management canister), so "lazily on first read" is out |
-| Stored | One row per closed issue: canonical text, digest, signature, code, time. Never recomputed | Threshold Ed25519 on mainnet is not promised to be deterministic (the docs are silent; PocketIC's is): a second signature may differ |
+| Facility | `core/signing.py`: one key per **kind**, one canonical form, one proof shape, optional chain, batches. `core/journal_signing.py` is the journal's use of it | The next kinds add a body and a trigger, not a signer |
+| Signer | The IC's **threshold Schnorr**: management canister `sign_with_schnorr`, **Ed25519**, key derived for the realm's own principal | The IC binds the key to the canister id, not we: only the canister can ask for a signature under it. No key is stored |
+| Call | `chain.call("aaaaa-aa", ...)` with Candid text, as `api/crypto.py` does for vetKD | No Basilisk binding. Spiked on PocketIC: the 64-byte reply verifies as plain RFC 8032 Ed25519 |
+| Why not ECDSA | Same price, but secp256k1 needs a library to verify, and no browser supports it | WebCrypto verifies Ed25519 in current browsers |
+| Key name | `dfx_test_key` when `Realm.network` is `local`; `test_key_1` on `test`, `staging`, `demo`; **`key_1`** otherwise | `test_key_1` lives on a 13-node subnet and is for testing. A document records its key, so a realm that changes network keeps old ones valid |
+| Derivation path | `["realms:<kind>"]`, e.g. `realms:journal`, `realms:certificate`, fixed for ever | **Domain separation**: the journal's key cannot sign a certificate. A new kind is a new key, with no setup |
+| What is signed | A 32-byte **root**: the Merkle root of the documents of one batch, which for a batch of one is the document's own digest | One verification rule for both; the signature costs the same for one document or a thousand |
+| Canonical form | UTF-8 JSON, keys sorted, no spaces, ASCII escapes, integers only. Stored and served as it is | A verifier never re-serializes, so no language's JSON quirks matter |
+| When | A sweep every hour signs what has closed, oldest first, in as few batches as it can. A failure is retried at the next sweep | A signature needs an update (a query cannot call the management canister); a sweep also covers downtime and upgrades |
+| Stored | One `SignedDocument` row per document: canonical text, digest, root, Merkle path, signature, code. Never recomputed | Threshold Ed25519 on mainnet is not promised to be deterministic (PocketIC's is): a second signature may differ |
+| CLI | None. Verification is one standalone HTML page | The canister makes the signature; a reader needs only to check it |
 
-### Open decision: every day, or only days with entries
-
-Signing **every** closed day (recommended) keeps the chain trivial: issue *n* links to issue *n-1*, a gap in the numbers is
-a dropped issue. It costs one signature a day (§6). Signing **only days with entries** makes an empty day cost nothing:
-the next signed issue says which issue precedes it, so the days between are empty by its signature. It is cheaper for
-a realm with few news, a little harder to explain.
-
-## 3. What is signed
+## 3. The document and its proof
 
 ```
-{"v":1,"realm":"<canister id>","number":12,"day":"2026-11-10","timezone":"Europe/Madrid",
- "entries":[{"id":"E31","at":1794000000,"kind":"codex_installed","details":{...}}, ...],
- "previous":"<hex SHA-256 of issue 11's canonical text, null for issue 1>",
- "signed_at":1794009601,
+{"v":1,"kind":"journal","realm":"<canister id>","subject":"2026-11-10",
+ "body":{"number":12,"timezone":"Europe/Madrid","entries":[{"id":"E31","at":1794000000,"kind":"codex_installed","details":{...}}]},
+ "prev":"<hex digest of the previous document of the kind, or null>","signed_at":1794009601,
  "key":{"algorithm":"ed25519","name":"key_1","path":"realms:journal","public_key":"<hex>"}}
 ```
 
-- The entries are the stored facts (`id`, `at`, `kind`, `details`), never rendered text.
-- The realm's **name is not signed**: the canister id is the identity, the name a label the realm may change.
-- `signed_at` is the time of the signature, not of the day. An issue signed late (a realm upgraded onto this release,
-  or a failed call retried) says so.
+`kind` and `subject` name the document (a journal's subject is its day, a certificate's its id); `body` is the kind's own
+content, as stored facts, never rendered text. `prev` links a **chained** kind to the one before it; other kinds leave it
+null. The realm's name is not signed: the canister id is the identity, the name a label.
 
-## 4. How it is read
+The **proof** is what the realm serves: `canonical` (the text above), `digest` (SHA-256 of it), `root`, `path`, `signature`
+and `code`. The kind, subject, `signed_at`, key and `prev` are *inside* the signed text and are not repeated beside it: a
+field outside the text is one a verifier could be lied about. `signed_at` is the time of the signature, not of the day: a
+document signed late says so.
 
-- `journal_issue {day}` (public read, as now) gains `status` (`provisional` for today, `signed`, or `unsigned` for a
-  closed day awaiting its signature) and, when signed, `proof`: `canonical` (the signed text), `digest`, `signature`,
-  `public_key`, `key_id`, `algorithm`, `derivation_path`, `previous`, `code`, `signed_at`. The existing fields stay.
-- `journal_issue {code}` finds the issue by its verification code.
-- **Verification code**: the first 80 bits of the digest in base32, as `XXXX-XXXX-XXXX-XXXX`, printed on every issue
-  like a Spanish CSV. It is a lookup key, not the proof: the page shows the issue the canister holds under it, next to
-  what is printed.
+**Verification code**: the first 80 bits of the digest in base32, `XXXX-XXXX-XXXX-XXXX`, printed on every document like a
+Spanish CSV. It finds the document; the signature proves it.
 
-## 5. Verifying
+## 4. Batches
 
-1. **Intact.** `SHA-256(canonical)` is `digest`; the signature verifies under `public_key`; `canonical` names this canister,
-   this day and number; the entries shown equal the signed ones; `previous` equals the digest of the previous issue
-   (`--chain` walks back to issue 1).
-2. **From this canister.** The key is the one the IC derives for that canister, which a verifier establishes without
-   trusting the realm: offline, with DFINITY's `@dfinity/ic-pub-key` (`forMainnetKey("key_1")` and the path
-   `canister id + "realms:journal"`), or by asking any canister to call `schnorr_public_key` with `canister_id` set to the
-   realm (spiked: a canister may ask for another's key). `realms journal verify` prints the exact command and takes
-   `--expect-key <hex>` to check it. Without it the CLI says only *the key is what the realm reports*.
-3. **On screen, print and offline.** The verify page (QR on the sheet, in realms-extensions) runs step 1 in the browser with
-   WebCrypto. A sheet carries the code, canister id, digest, signature and key, and says which of its text is signed.
-   For offline checking the page offers the **signed copy** (the `proof` as a `.json` file): `realms journal verify --file`
-   needs no network.
+A batch is the documents of one kind signed together. Their digests are the leaves of a Merkle tree: a node is
+`SHA-256(0x01 ‖ left ‖ right)`, an odd node moves up unchanged, and a leaf is the digest itself (a document's text starts
+with `{`, a node's input with `0x01`, so a leaf cannot pass for a node). One signature covers the root, and each document
+keeps its **path**: the sibling digests from its leaf up, each marked left or right. Checking a document is: hash the
+text, climb the path to the root, check the signature of the root. A batch of one has an empty path and root = digest.
 
-CLI: `realms journal verify <canister> <day>` (`--file`, `--chain`, `--expect-key`). New dependency: `cryptography`, for
-Ed25519 verification. A verifier that decides whether a signature is genuine should not rest on hand-written curve code.
+The journal signs one document a day, so its batches are of one, except after downtime: the days that closed meanwhile
+are one batch, one signature. A kind with documents on demand (certificates) queues them and signs the queue in the same
+sweep: its cost per document goes to near zero, and a document waits at most an hour.
 
-## 6. Costs
+## 5. The journal, the first kind
 
-| | Fee per signature | Per realm per year, one a day |
+- **Subject** a day (`YYYY-MM-DD`), **body** `number`, `timezone` and `entries`, **chained**.
+- A day that has closed on the capital's clock is signed by the next sweep, **every day, with entries or not**: the chain is
+  consecutive, so a gap in the numbers is a dropped issue. Late signing is allowed (a realm upgraded onto this release signs
+  its closed days at once, oldest first).
+- `journal_issue {day}` (public read, as now) gains `status`: `provisional` (the open day), `signed` or `unsigned` (closed,
+  awaiting its signature, or failed), and, when signed, `proof`. `journal_issue {code}` finds an issue by its code.
+- A quarter issues and signs nothing; its capital does.
+- **A zone change west after a day is signed** would send the next entry into the signed day. An entry is stamped
+  `max(local day, last signed day + 1)`, and `journal_issue` treats that day as the open one; the journal's first day does
+  not move once a day is signed.
+
+## 6. Reading
+
+`signature_proof {kind, subject}` or `{code}` (public read) returns any kind's proof: the one call the verify page needs.
+`journal_issue` adds the issue's entries as displayed, so a verifier can check them against the signed ones. The proof is
+stored, so a second read returns the same signature.
+
+## 7. Verifying
+
+One page, `docs/verify/index.html`: a single file, no build, no framework, no external script. It takes the proof as pasted
+JSON, an uploaded file, or fetched from a realm by canister id and code (or kind and subject), and shows **valid** or
+**invalid** with the reason, the canister id, the kind, subject and number, and the chain link. It checks:
+
+1. `SHA-256(canonical)` is `digest`; the path climbs from the digest to `root`; the signature of `root` verifies under the
+   public key in the text (WebCrypto Ed25519, in current Chrome, Firefox and Safari).
+2. The text names the canister the proof was fetched from; the displayed entries equal the signed ones.
+3. `prev` is the digest of the previous document, fetched by its code (the code of `prev`).
+4. **The key is the canister's.** See below.
+
+**How a reader knows the key belongs to the canister.** The key is derived by the IC from its master key, the canister id and
+the path; nobody else can ask for a signature under it. Establishing that the key in the text *is* that derived key needs the
+master key, which a page cannot get from a canister: a query reply is not certified, and checking a certificate needs BLS
+verification, a library of its own. So the page:
+- fetches the proof with a **tiny inline query** (an anonymous `query` request over the IC HTTP API: about 150 lines of CBOR
+  and Candid text, no agent-js). The reply needs no trust: the signature binds the content;
+- shows the key, its name and path, and says plainly that it is **the key the realm reports** until checked;
+- takes an **expected key** and compares. The reader derives it independently, offline, with DFINITY's
+  [`@dfinity/ic-pub-key`](https://docs.internetcomputer.org/guides/chain-fusion/offline-key-derivation/)
+  (`PublicKeyWithChainCode.forMainnetKey("key_1")`, `DerivationPath.withCanisterPrefix(canister, [path])`); the page prints
+  the snippet filled in. Or by asking any canister for `schnorr_public_key` with `canister_id` set to the realm's (spiked: a
+  canister may ask for another's key).
+
+Deriving the key inside the page (HKDF and Edwards point addition on BigInt, with the master keys embedded) would make it fully
+offline; it is not in this version, since the master keys must be checked against the registry first.
+
+If the browser has no WebCrypto Ed25519 the page says so and prints the commands to check the signature with OpenSSL or
+Python's `cryptography`; it carries no curve code of its own.
+
+**Where to publish.** Not from a realm's own frontend: the signer must not serve its own verifier. A GitHub Pages site of the
+organization, deployed by a workflow that publishes `docs/verify/` alone, plus the same file attached to each release so it
+runs from disk. A sheet's QR code points to it with `?canister=…&code=…`.
+
+## 8. Costs
+
+| | Fee per signature | A realm, one a day, one year |
 |---|---|---|
 | `key_1` (34-node subnet), docs | 26,153,846,153 cycles (~$0.0357) | ~9.5T cycles, ~$13 |
 | `test_key_1` (13-node subnet), docs | 10,000,000,000 cycles (~$0.0137) | ~3.7T cycles, ~$5 |
 | PocketIC, measured | 26.18B cycles for all three key names (26.15B fee + ~30M of the realm's own work) | |
 
 1 XDR = 1 trillion cycles = $1.366 (docs, 22 May 2026). `schnorr_public_key` is free. A call with too few cycles attached is
-rejected and refunded, and the error names the fee. The realm attaches 60B and gets the unused part back, so a larger subnet
-does not break it. Storage is one row of a few KB a day. A federation signs only at its capital.
+rejected and refunded, and the error names the fee. The realm attaches 60B and gets the unused part back. Batching makes the
+signature cost the same for one document or many. Storage: a few KB a document. A federation signs only at its capital.
 
-## 7. Key management
+## 9. Key management
 
-- **Upgrade**: stable memory and issues stay; the timer is set again.
-- **Reinstall** wipes the issues, not the key (it depends on the canister id and path only). Copies already out still verify.
-  The new journal restarts at issue 1, a second validly signed issue 1 for that canister: the signature cannot tell. That is
-  a controller's act, visible in the canister's change history, and governed by whoever holds the controllers.
-- **Subnet key resharing** keeps the public key. A key that is retired makes signing fail: issues stay `unsigned`, the failure
-  is kept for the IT admin team, and signatures already made stay valid.
-- **A change of key name** (network setting) starts signing under the other key; each issue carries its own.
+- **Upgrade**: stable memory and documents stay; the sweep starts again.
+- **Reinstall** wipes the documents, not the key (it depends on the canister id and path only). Copies already out still
+  verify. The journal restarts at issue 1, a second validly signed issue 1 for that canister: the signature cannot tell. That is
+  a controller's act, visible in the canister's change history.
+- **Subnet key resharing** keeps the public key. A key that is retired makes signing fail: documents stay `unsigned`, the
+  failure is kept for the IT admin team (`codex_status`), signatures already made stay valid.
+- **A change of key name** (the network setting) signs under the other key; each document carries its own.
 - **A new canister id** is a new identity.
 
-## 8. Threat model
+## 10. Threat model
 
 **Proves:** the content is exactly what the canister signed at `signed_at`; it was signed by code running as this canister;
-with two adjacent issues in hand, an altered or dropped issue is caught (a fork shows as two issues with one `previous`).
+with two adjacent documents of a chained kind in hand, an alteration or a drop is caught (a fork shows as two documents with
+one `prev`).
 
 **Does not prove:** that the content is true or complete beyond what the realm recorded; that the canister ran its published
-release (a controller can upgrade it to code that signs anything: compare the module hash and controllers on the IC); that
-a later issue does not exist (an old copy stays valid, and the newest issues can be withheld); that a printed text matches
-the signed one unless it is checked; the realm's name; that a provisional issue is final.
+release (a controller can upgrade it to code that signs anything: compare the module hash and controllers on the IC); that a
+later document does not exist (an old copy stays valid, and the newest can be withheld); that a printed text matches the signed
+one unless it is checked; the realm's name; that a provisional document is final; that the key is the canister's, until the
+reader checks it ([§7](#7-verifying)).
 
-**Certified data and certified queries** add nothing to the authenticity of an issue, which its signature already carries.
-They would only authenticate the live reply (freshness, the head of the chain) against a node that withholds. Basilisk
-exposes `set_certified_data`, so it can come later; not in this version.
+**Certified data and certified queries** add nothing to the authenticity of a document, which its signature carries. They would
+authenticate the live reply (freshness, the head of the chain) against a node that withholds. Basilisk exposes
+`set_certified_data`, so it can come later; not in this version.
 
-## 9. Edge cases
+## 11. Adding a kind
 
-- **A zone change west after a day is signed** would send the next entry into the signed day. An entry is stamped
-  `max(local day, last signed day + 1)`, and `journal_issue` treats that day as today.
-- **A failed signature** leaves the day `unsigned`, retried hourly; nothing else in the realm waits for it.
-- **Concurrent closes** keep the first signature stored; a second reply is dropped.
-- **A quarter** issues nothing and signs nothing; its capital does.
+Pick a name (lowercase letters, digits, dashes). Build the body from stored facts and call `signing.sign_batch(kind,
+documents, chained)` from a sweep: `documents` are `(subject, body)` in order. Read the proof with `signing.proof(kind,
+subject)`. Nothing else: the key, the path, the code, the tree and `signature_proof` are the facility's.
