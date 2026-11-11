@@ -831,6 +831,18 @@ def test_build_returns_the_views_the_errors_and_the_cedar():
     assert out["errors"] == [] and '@id("x/town/tax/cap")' in out["cedar"] and "context.facts.rate > 1100000" in out["cedar"]
 
 
+def test_the_flattened_view_of_every_domain_is_a_public_read():
+    assert ok("codex_views", "stranger", query=True)["views"] == {}  # no layered codex is running
+    town()
+    views = ok("codex_views", "stranger", query=True)["views"]
+    assert sorted(views) == ["data_protection", "local_regime", "procedure", "realm"]
+    assert views["data_protection"]["path"] == ["eu", "eu/es", TOWN]
+    guard = next(m for m in views["data_protection"]["members"] if m["name"] == "check_t_act")
+    assert (guard["kind"], guard["mark"]) == ("guard", "extension")
+    assert [(layer["source"], layer["legislation"]) for layer in guard["layers"]][:2] == [
+        ("eu", "GDPR Art. 6"), ("eu/es", "Ley Orgánica 3/2018 Art. 8")]
+
+
 def test_the_reserved_list_and_the_hook_only_list_are_the_librarys():
     from realms.legislation import HOOK_ONLY, RESERVED
 

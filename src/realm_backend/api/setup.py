@@ -134,14 +134,16 @@ def realm_info(c, args):
     """The realm's public profile: name, manifesto, terms, welcome message, status, branding, accounting currency and
     its decimals, whether registration is open and whether it is a capital, its network, time zone and languages, and
     its test mode and test flags, and its ``sync_sources``: the realms it takes legislation from, each with the status
-    of its link."""
-    from api import links
+    of its link. ``official_timezone`` is the zone of the realm's official time: its own, or on a quarter its
+    capital's as of the last sync (``timezone`` is the quarter's own)."""
+    from api import links, quarters
 
     realm = Realm["1"]
-    return {"realm": view(realm, "name", "manifesto", "terms", "welcome_message", "status", "logo_url",
-                          "background_image_url", "primary_color", "accounting_currency",
-                          "accounting_currency_decimals", "open_registration", "is_capital", "network", "timezone",
-                          "languages", "test_mode", "test_flags") if realm else {},
+    return {"realm": {**view(realm, "name", "manifesto", "terms", "welcome_message", "status", "logo_url",
+                             "background_image_url", "primary_color", "accounting_currency",
+                             "accounting_currency_decimals", "open_registration", "is_capital", "network", "timezone",
+                             "languages", "test_mode", "test_flags"),
+                      "official_timezone": quarters.official_timezone()} if realm else {},
             "sync_sources": [links.source_view(s) for s in links.sources()]}
 
 

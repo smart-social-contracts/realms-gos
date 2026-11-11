@@ -99,6 +99,23 @@ def test_the_capitals_later_change_does_not_follow_and_a_quarter_changes_its_own
     west.ok("realm_configure", "ctl", timezone=MEXICO)
 
 
+def official_zone(realm):
+    return realm.ok("realm_info", None, query=True)["realm"]["official_timezone"]
+
+
+def test_a_quarter_shows_its_capitals_zone_as_the_official_one_and_learns_its_change_at_the_next_sync(federation):
+    capital, east, west = federation
+    assert (official_zone(capital), official_zone(east), official_zone(west)) == (MADRID, MADRID, MADRID)
+    assert zone(west) == MEXICO  # the quarter's own zone is its own, whatever the official one is
+    capital.ok("realm_configure", "ctl", timezone="Atlantic/Canary")
+    assert official_zone(capital) == "Atlantic/Canary" and official_zone(west) == MADRID  # not until it syncs
+    west.ok("quarter_sync", "ctl")
+    assert (official_zone(west), zone(west)) == ("Atlantic/Canary", MEXICO)
+    capital.ok("realm_configure", "ctl", timezone=MADRID)
+    west.ok("quarter_sync", "ctl")
+    assert official_zone(west) == MADRID
+
+
 def test_a_realm_wide_vote_sets_a_quarters_zone_and_the_quarter_applies_it(federation):
     capital, east, _ = federation
     capital.govern("quarter_configure", {"quarter": east.cid, "timezone": TOKYO})
