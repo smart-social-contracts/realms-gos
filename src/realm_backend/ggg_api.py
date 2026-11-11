@@ -801,6 +801,12 @@ def proposal_detail(out, args):
             "replaced_by": out["proposal"].get("replaced_by") or None}
 
 
+def voted(out, args):
+    """proposal_vote's reply: the ballot cast, which the reply holds, since the vote that completed a tied first vote
+    opened a second one that has none."""
+    return Shown({**out, "id": out["vote"], "proposal": args["proposal"]})
+
+
 def nxt(out):
     return None if out.get("next") is None else str(out["next"])
 
@@ -865,6 +871,7 @@ BUILD = {
     "federal_vote_propose": federal_vote,
     "department_chart": chart,
     "proposal_get": proposal_detail,
+    "proposal_vote": voted,
     "enforcement_record": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
     "external_report": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
     "notification_send": lambda o, a: {"Dispatch": o["dispatch"]} if "dispatch" in o else {"Notification": o["notification"]},

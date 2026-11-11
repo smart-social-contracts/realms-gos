@@ -7,7 +7,7 @@ from ggg.identity.organization import KINDS
 from core.op import op
 from core.pending import held, principal, principals, quoted
 from core.ratio import ONE, refuse_renamed
-from api.proposals import PENDING, holders, launched, realm_wide, root
+from api.proposals import BASES, PENDING, holders, launched, realm_wide, root
 
 ORG_MOVES = {"active": {"suspended", "dissolved"}, "suspended": {"active", "dissolved"}, "dissolved": set()}
 SEAT_FIELDS = ("title", "salary", "salary_period")
@@ -140,25 +140,31 @@ def department_delete(c, args):
 
 
 def policy_args(args):
-    """``(m, n, quorum, veto)`` of a ``department_set_policy`` call, refused if they make no policy."""
+    """``(m, n, quorum, veto, threshold_of)`` of a ``department_set_policy`` call, refused if they make no policy."""
     refuse_renamed(args, {"quorum_percent": "quorum"})
     m, n, quorum, veto = int(args["m"]), int(args["n"]), int(args.get("quorum", 0)), args.get("veto", [])
     if not 1 <= m <= n or not 0 <= quorum <= ONE:
         raise Fail(f"a policy needs 1 <= m <= n and a quorum between 0 and {ONE} (100 %)")
-    return m, n, quorum, veto
+    basis = args.get("threshold_of")
+    if basis not in (None, *BASES):
+        raise Fail(f"threshold_of is one of {', '.join(BASES)}")
+    return m, n, quorum, veto, basis
 
 
 @op("org.set_policy", governed=dept, check=policy_args)
 def department_set_policy(c, args):
     """Set how ``department`` approves: ``m`` of ``n`` approvals (1 ≤ m ≤ n), ``quorum`` (the share of its members who
     must vote, 0 to 100000000 hundred-millionths, so 50 % is 50000000; default 0) and ``veto``, principals holding a
-    seat in it who can block (default none)."""
+    seat in it who can block (default none). ``threshold_of`` ``cast`` makes it decide by a majority of the votes cast
+    instead, as a council does: the yes votes must exceed the no votes, with ``quorum`` of ``n`` voting, a tie goes to a
+    second vote, and a tie in that one to its head's casting vote; ``m`` is not used then. Absent or ``eligible``, it
+    decides ``m`` of ``n``."""
     d = dept(args)
-    m, n, quorum, veto = policy_args(args)
+    m, n, quorum, veto, basis = policy_args(args)
     outsiders = sorted(set(veto) - holders(d))
     if outsiders:
         raise Fail(f"veto holders must hold a seat in {d.id}: {', '.join(outsiders)}")
-    d.policy = {"m": m, "n": n, "quorum": quorum, "veto": list(veto)}
+    d.policy = {"m": m, "n": n, "quorum": quorum, "veto": list(veto), **({"threshold_of": basis} if basis else {})}
 
 
 @op("it_team.set", governed=launched)

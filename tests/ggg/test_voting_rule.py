@@ -325,7 +325,7 @@ def test_a_proposal_of_the_last_release_gets_the_rule_it_was_decided_by(voters):
     assert rule(realm_wide) == (50 * PERCENT, 0, "cast", "")
     assert rule(department) == (66_666_666, 20 * PERCENT, "eligible", "")
     assert "required" not in Proposal[department].tally and Proposal[department].tally["seats"] == 3
-    assert Database.get_instance().load("Proposal", Proposal[department]._id)["__version__"] == 3
+    assert Database.get_instance().load("Proposal", Proposal[department]._id)["__version__"] == Proposal.__version__
     vote(department, "yes", "bob")  # it was open: the electorate is counted when it is next read
     assert Proposal[department].status == "voting"
     vote(department, "yes", "dana")

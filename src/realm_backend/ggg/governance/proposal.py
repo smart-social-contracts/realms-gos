@@ -1,4 +1,4 @@
-from ic_python_db import Integer, ManyToOne, OneToMany, String
+from ic_python_db import Boolean, Integer, ManyToOne, OneToMany, String
 
 from core.db import Json, Row
 from core.ratio import ONE, PERCENT, upgrade_call
@@ -6,7 +6,9 @@ from core.ratio import ONE, PERCENT, upgrade_call
 
 class Proposal(Row):
     __alias__ = "id"
-    __version__ = 4  # 2: threshold and quorum in hundred-millionths, not whole percents; 3: the rule is stored; 4: tags
+    # 2: threshold and quorum in hundred-millionths, not whole percents; 3: the rule is stored; 4: tags, majority_of_cast,
+    # first_vote
+    __version__ = 4
     id = String()
     title = String(default="")
     description = String(default="")
@@ -29,7 +31,9 @@ class Proposal(Row):
     threshold = Integer(default=ONE // 2)
     quorum = Integer(default=0)
     threshold_of = String(default="cast")  # cast | eligible
-    casting_vote = String(default="")  # the realm's casting member when it was filed; a realm-wide proposal only
+    casting_vote = String(default="")  # the scope's casting member when the vote opened: the realm's, or a department's head
+    majority_of_cast = Boolean(default=False)  # a department that counts the votes cast decides it (ggg I-GOV-3, I-GOV-14)
+    first_vote = Json(None)  # the count of a first vote that tied; ``tally`` is then the second vote's
     tally = Json({})
     result = Json(None)
     links = Json([])  # [{"kind": "replaces" | "relates_to", "proposal": id}], fixed at creation like the action
@@ -40,6 +44,7 @@ class Proposal(Row):
     @classmethod
     def migrate(cls, obj, from_version, to_version):
         obj.setdefault("tags", [])  # a Json field a stored row lacks reads as the text of its default
+        obj.setdefault("first_vote", None)
         # quorum_percent, the old field, shows a row still in whole percents: a row without it is converted already.
         if "quorum_percent" in obj:
             obj["quorum"] = obj.pop("quorum_percent") * PERCENT

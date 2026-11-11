@@ -183,11 +183,15 @@ def default_rule(department, recorded=None):
     """The rule that decides the proposals of ``department`` unless a proposer states a stricter one (ggg I-GOV-3). The
     realm's own, except that a vote to revert to a codex follows the rule ``recorded`` with that codex (api.codex), so that
     the codex it undoes cannot have changed it (docs/codices/layered-codex.md §10.1); a department's m of the n seats of
-    its policy, rounded down, with the policy's quorum. A department's threshold is a share of its policy's n, never of
-    the seats that happen to be filled: a vacancy does not make a vote easier."""
+    its policy, rounded down, with the policy's quorum, or, where its policy counts the votes cast, a majority of them
+    with the quorum over its n and its head's casting vote (``majority_of_cast``). A department's threshold is a share
+    of its policy's n, never of the seats that happen to be filled: a vacancy does not make a vote easier."""
     if department.is_root:
         return {name: recorded[name] for name in RULE} if recorded else realm_rule()
     policy = department.policy or {}
+    if policy.get("threshold_of") == "cast":
+        return {"threshold": ONE // 2, "quorum": int(policy.get("quorum", 0)), "threshold_of": "cast",
+                "casting_vote": department.head or "", "majority_of_cast": True}
     return {"threshold": int(policy.get("m", 1)) * ONE // int(policy.get("n", 1)),
             "quorum": int(policy.get("quorum", 0)), "threshold_of": "eligible", "casting_vote": ""}
 
@@ -285,9 +289,10 @@ def arm(p):
 
 
 def expire(pid):
-    """At its deadline, a proposal still open is settled."""
+    """At its deadline, a proposal still open is settled. The timer of a first vote that ended early, in a tie, finds the
+    second vote's deadline ahead and leaves it."""
     p = Proposal[pid]
-    if p is not None and p.status == "voting":
+    if p is not None and p.status == "voting" and chain.now() > p.deadline:
         yield from settle(p, True)
 
 
@@ -370,9 +375,12 @@ def run_action(p):
 
 def settle(p, final):
     """Close ``p`` once its outcome is certain (``final``: its deadline has passed) and, if it passed, run its
-    action at once. Returns the outcome, or None while it is still open."""
+    action at once. A tied first vote of a department that counts the votes cast is put to a second vote instead: the
+    outcome is ``tied`` and the proposal stays open. Returns the outcome, or None while it is still open."""
     result = outcome(p, final)
-    if result is not None:
+    if result == "tied":
+        second_vote(p)
+    elif result is not None:
         close(p, result)
         if p.status == "accepted" and p.action:
             yield from run_action(p)
@@ -426,8 +434,10 @@ def count(p):
 
 
 def quorum_met(p, tally, size):
-    """Whether the votes cast reach the quorum of ``p``."""
-    return sum(tally.values()) * ONE >= p.quorum * max(size, 1)
+    """Whether the votes cast reach the quorum of ``p``: of the ``size`` eligible, or, where a department counts the votes
+    cast, of its policy's n seats, so that a vacancy never makes the vote easier (ggg I-GOV-3)."""
+    of = p.tally["seats"] if p.majority_of_cast else size
+    return sum(tally.values()) * ONE >= p.quorum * max(of, 1)
 
 
 def veto_pending(p):
@@ -448,17 +458,67 @@ def department_outcome(p, tally, size, vetoed, final):
     return "rejected" if final else None
 
 
+def majority_outcome(p, tally, size, vetoed, final):
+    """The outcome of a department's vote that counts the votes cast, once it has ended (ggg I-GOV-3, I-GOV-14): None
+    before, since only everyone having voted ends it early. A veto holder's no, or a quorum of the policy's n not reached,
+    rejects it. The yes votes must *exceed* the threshold of the yes and no votes: that accepts it, less rejects it, and
+    exactly at it is a tie, which a first vote puts to a second ("tied") and a second vote leaves to the casting member's
+    yes. Under ``eligible`` the yes votes must also *reach* the threshold of the policy's n: it only adds to what the
+    default requires."""
+    if not final:
+        return None
+    cast = tally["yes"] + tally["no"]
+    if vetoed or not quorum_met(p, tally, size):
+        return "rejected"
+    if tally["yes"] * ONE > p.threshold * cast:
+        majority = True
+    elif cast and tally["yes"] * ONE == p.threshold * cast:
+        if p.first_vote is None:
+            return "tied"
+        majority = casting_yes(p)
+    else:
+        majority = False
+    absolute = p.threshold_of == "cast" or tally["yes"] * ONE >= p.threshold * p.tally["seats"]
+    return "accepted" if majority and absolute else "rejected"
+
+
+def second_vote(p):
+    """Put the tied first vote of ``p`` to a second vote on the same proposal (ggg I-GOV-14): the rule, the casting vote,
+    the action and the electorate stay; the first vote's count is kept in ``first_vote``, the ballots start empty, so every
+    member votes again, and it opens now and lasts as long as the first did. A first vote that ended after the
+    proposal's ``effective_at`` expires it instead."""
+    if p.effective_at and vote_end(p) > p.effective_at:
+        close(p, "expired")
+        return
+    tally, size, _ = count(p)
+    seats, veto = p.tally["seats"], p.tally.get("veto", [])
+    window = p.deadline - p.opens_at if p.deadline else 0
+    p.first_vote = {**tally, "eligible": size, "seats": seats}
+    for vote in list(p.votes):
+        vote.delete()
+    p.tally = {**{c: 0 for c in CHOICES}, "eligible": size, "seats": seats, "veto": veto}
+    p.opens_at = chain.now()
+    p.deadline = p.opens_at + window if window else 0
+    if p.deadline:
+        arm(p)
+
+
 def exceeds(p, tally, size):
     """Whether the yes votes of a realm-wide proposal exceed its threshold of the votes cast, or of all the eligible."""
     basis = size if p.threshold_of == "eligible" else tally["yes"] + tally["no"]
     return tally["yes"] * ONE > p.threshold * basis
 
 
+def casting_yes(p):
+    """Whether the casting member of ``p``, who is still one of the voters, voted yes."""
+    caster = Vote[f"{p.id}:{p.casting_vote}"] if p.casting_vote and eligible(p, p.casting_vote) else None
+    return caster is not None and caster.choice == "yes"
+
+
 def decided_by_casting_vote(p, tally):
     """Whether the yes votes stand exactly at the threshold of the yes and no votes cast and the realm's casting member,
     who is still one of the voters, voted yes (ggg I-GOV-3). Only the votes cast can tie."""
-    caster = Vote[f"{p.id}:{p.casting_vote}"] if p.casting_vote and eligible(p, p.casting_vote) else None
-    return (p.threshold_of == "cast" and caster is not None and caster.choice == "yes"
+    return (p.threshold_of == "cast" and casting_yes(p)
             and tally["yes"] * ONE == p.threshold * (tally["yes"] + tally["no"]))
 
 
@@ -474,7 +534,7 @@ def outcome(p, final):
     # A vote ends at its deadline, or earlier, the moment every eligible member has voted (ggg I-GOV-7).
     final = final or (size > 0 and sum(tally.values()) >= size)
     if scoped_to_department(p):
-        return department_outcome(p, tally, size, vetoed, final)
+        return (majority_outcome if p.majority_of_cast else department_outcome)(p, tally, size, vetoed, final)
     if not p.deadline and not final:
         # No deadline: open until certain. Yes alone over the threshold of everyone eligible passes it; if even all the
         # rest voting yes could not pass it, it fails; once everyone has voted, it is decided as is.
@@ -646,9 +706,11 @@ def proposal_vote(c, args):
     tally[args["choice"]] = tally.get(args["choice"], 0) + 1
     p.tally = tally
     v.choice, v.cast_by, v.cast_at = args["choice"], c.by, chain.now()
+    # The ballot is in the reply itself: the vote that completes a tied first vote opens a second one with no ballots.
+    ballot = {"vote": v.id, "voter": v.voter, "choice": v.choice, "cast_by": v.cast_by, "cast_at": v.cast_at}
     # The deciding vote closes the proposal and runs its action.
     settled = yield from settle(p, False)
-    return {"vote": v.id, **({"status": p.status} if settled else {})}
+    return {**ballot, **({"status": p.status} if settled else {})}
 
 
 @op("proposal.manage", returns="proposal")
