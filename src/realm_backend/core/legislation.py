@@ -421,7 +421,7 @@ def _entity_refs(value):
     the way the realm's operations take an entity: ``"External:AGE"``."""
     if isinstance(value, dict):
         if set(value) == {"kind", "id"} and all(isinstance(v, str) for v in value.values()):
-            return f"{value['kind'].capitalize()}:{value['id']}"
+            return f"{value['kind'][:1].upper() + value['kind'][1:]}:{value['id']}"
         return {k: _entity_refs(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_entity_refs(v) for v in value]

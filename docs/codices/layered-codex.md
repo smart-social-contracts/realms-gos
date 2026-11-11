@@ -745,16 +745,16 @@ class LocalRegime(above("local_regime")):
                 title=TITLES["ca-valencia"], body=event.result["codex"], translations=notice)
 ```
 
-The runtime runs Spain's, then CV's, then València's `on_codex_install` when the proposal is accepted,
-and the communications of Art. 65.2 go out then. The codex waits `pending` and switches at the
-proposal's `effective_at` (§9.2 step 6). Spain's guard on `proposal_create` makes the proposer set it
-at least 15 working days after the vote can close (`working_days(15)`, counted on the realm's calendar
-by Spain's procedure chapter, §4), so the Art. 65.2 period is expressed by the proposal, not by a
-chapter calling `codex_activate` after a wait. The period really runs from the authorities' receipt of
-the communication, which the guard cannot know at creation, so the proposer leaves a margin:
-`effective_at` never moves after acceptance. If it proves too early, another proposal stops the
-scheduled one, and a new proposal sets the right date. The realm domain's `on_codex_activate` hook runs
-once per realm when the codex becomes active. The install appears in the realm's official journal
+The runtime runs Spain's, then CV's, then València's `on_codex_install` when the install proposal executes. An
+ordinance with an `effective_at` waits `pending` from its acceptance and executes at that time, which is the switch
+(§9.2 step 6): the hooks do not run in between, so the communications of Art. 65.2 go out on the day the ordinance takes
+effect. **The period of Art. 65.2 is not modelled yet**, and a follow-up will: the period really runs from the
+authorities' receipt of the communication, which no chapter sends before the switch. What the realm enforces today is
+Spain's guard on `proposal_create`, which makes the proposer set `effective_at` at least 15 working days after the
+vote can close (`working_days(15)`, counted on the realm's calendar by Spain's procedure chapter, §4), so the proposer
+leaves a margin, and `effective_at` never moves after acceptance. If it proves too early, another proposal stops the
+scheduled one, and a new proposal sets the right date. No chapter calls `codex_activate` after a wait.
+The realm domain's `on_codex_activate` hook runs once per realm when the codex becomes active. The install appears in the realm's official journal
 (§9.6), which reports it and plays no role in when it applies. The event's arguments and result are the
 operation's, as the realm gives them.
 

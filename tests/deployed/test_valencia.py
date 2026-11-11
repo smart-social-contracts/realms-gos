@@ -394,17 +394,23 @@ def test_g_the_ordinance_guard_refuses_an_ordinance_that_takes_effect_too_soon(v
     assert motion["ok"], motion
 
 
+def dispatches(realm):
+    return ok(realm, "dispatch_list", "ctl", query=True)["dispatches"]
+
+
 def notices(realm, who):
     return [n["title"] for n in realm.ok("notification_list", who, query=True)["notifications"] if n["topic"] == "ordinance"]
 
 
 def test_h_the_sample_change_list_adds_valencias_tax_chapter_and_the_ordinance_hooks_run_down_the_layers(net, valencia):
     measured(valencia, "the realm's own layer by a change list")
-    before, told = active_id(valencia), len(ok(valencia, "dispatch_list", "ctl", query=True)["dispatches"])
+    ok(valencia, "profile_update", "alice", language="es")  # Alice reads in Spanish, the others in the default
+    before, told = active_id(valencia), len(dispatches(valencia))
     heard = {who: len(notices(valencia, who)) for who in valencia.members}
     proposal = file_ordinance(net, valencia, sample_change_list(net, replaces=before))
     pending = status(valencia)["pending"]
     assert pending["status"] == "pending" and active_id(valencia) == before
+    assert len(dispatches(valencia)) == told  # accepted and staged: the hooks run when the proposal executes
 
     valencia.run_at_effective_at(proposal)
     now = status(valencia)["codex"]
@@ -413,11 +419,11 @@ def test_h_the_sample_change_list_adds_valencias_tax_chapter_and_the_ordinance_h
     sample = json.loads((CHANGES / VALENCIA / IBI_BONUS).read_text())["set"][0]
     assert now["chapters"][sample["chapter"]]["url"] == sample["url"]
 
-    # Spain's hook tells the authorities, CV's sets the languages, València's tells every member (§5.2).
-    sent = ok(valencia, "dispatch_list", "ctl", query=True)["dispatches"][told:]
-    assert [(d["to"], d["topic"], d["title"]) for d in sent] == [("AGE", "ordinance", "Comunicació d'acord"),
-                                                                ("GVA", "ordinance", "Comunicació d'acord")]
+    # Spain's hook tells the authorities, CV's sets the languages, València's tells every member in hers (§5.2).
+    assert [(d["to"], d["topic"], d["title"]) for d in dispatches(valencia)[told:]] == [
+        ("AGE", "ordinance", "Comunicació d'acord"), ("GVA", "ordinance", "Comunicació d'acord")]
     assert {who: len(notices(valencia, who)) for who in valencia.members} == {who: n + 1 for who, n in heard.items()}
+    assert notices(valencia, "alice")[-1] == "Nueva ordenanza" and notices(valencia, "bob")[-1] == "Nova ordenança"
 
 
 def test_i_the_taxes_forbids_fold_in_valencias_settings_at_draft_and_at_propose(valencia):
@@ -484,8 +490,9 @@ def share(realm, recipient, legal_basis, **basis):
 
 def test_l_the_guards_of_the_eu_spain_and_valencia_run_in_that_order_and_the_first_deny_stops(valencia):
     ok(valencia, "external_add", "ctl", external="BUILDCO", name="BuildCo", kind="company", channel="manual")
-    assert "consent is not a basis" in share(valencia, "External:AGE", "gdpr-6-1-a")["error"]  # the EU's guard
-    assert "name the legislation" in share(valencia, "External:AGE", "gdpr-6-1-c")["error"]  # Spain's
+    # València's guard would refuse a company too, so each reason shows that the layer above denies first.
+    assert "consent is not a basis" in share(valencia, "External:BUILDCO", "gdpr-6-1-a")["error"]  # the EU's guard
+    assert "name the legislation" in share(valencia, "External:BUILDCO", "gdpr-6-1-c")["error"]  # Spain's
     task = {"legislation": "Ley 7/1985"}
     assert "Junta de Govern Local" in share(valencia, "External:BUILDCO", "gdpr-6-1-c", **task)["error"]  # València's
     through = share(valencia, "External:AGE", "gdpr-6-1-c", **task)  # no guard refuses it: the document is missing
