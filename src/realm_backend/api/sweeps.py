@@ -123,7 +123,7 @@ def sweep_now(fund=None):
     """Sweep every rule, or the one of ``fund`` (ggg I-FED-5). A generator; returns the sweeps it touched."""
     try:
         yield from quarters.sync()
-    except Exception:  # noqa: BLE001  the capital cannot be reached: the rules it last sent stand
+    except Exception:  # noqa: BLE001, S110  the capital cannot be reached: the rules it last sent stand
         pass
     config = held()
     touched = []
@@ -164,8 +164,7 @@ def record(to, rule):
     if fund is None or token is None or any(s.epoch == epoch for s in of_rule(rule)):
         return None
     amount = treasury.balance(fund, token.id) - rule["keep"] - token.fee
-    period = treasury.period_at(chain.now())
-    if amount <= 0 or (period is not None and period.status != "open"):  # a closed period takes no entries (I-FIN-5)
+    if amount <= 0:
         return None
     return Sweep(id=next_id(Sweep, "SW"), quarter=chain.self_id(), fund=fund.id, symbol=token.id, into=rule["into"],
                  rule=rule_key(rule), to=to, epoch=epoch, amount=amount, fee=token.fee, created_at=chain.now())
@@ -228,11 +227,12 @@ def named(value):
 
 def mark_sent(s, block):
     """The ledger gave a block: the quarter books the sweep, ``amount`` out of its fund in the category ``sweep`` and the
-    ledger's ``fee`` in ``ledger_fee`` (ggg I-FED-7)."""
+    ledger's ``fee`` in ``ledger_fee`` (ggg I-FED-7). The money has moved, so the entries are booked even where the period
+    that covers now has closed."""
     fund = Fund[s.fund]
     lines = [("asset", "cash", 0, s.amount + s.fee, fund), ("equity", CATEGORY, s.amount, 0, fund),
              ("expense", treasury.FEE, s.fee, 0, fund)]
-    treasury.post(treasury.period(), lines, s.symbol, f"sweep {s.id} (block {block})", sweep=s)
+    treasury.post(treasury.booking_period(), lines, s.symbol, f"sweep {s.id} (block {block})", sweep=s)
     s.status, s.block = "sent", str(block)
 
 
@@ -273,7 +273,8 @@ def quarter_sweep_report(c, args):
     booked = Sweep(id=key, quarter=quarter.id, rule=f"{args['fund']}:{args['symbol']}", status="booked",
                    reported_at=chain.now(), **moved)
     lines = [("asset", "cash", booked.amount, 0, into), ("equity", CATEGORY, 0, booked.amount, into)]
-    treasury.post(treasury.period(), lines, booked.symbol, f"sweep {booked.id} (block {booked.block})", sweep=booked)
+    treasury.post(treasury.booking_period(), lines, booked.symbol, f"sweep {booked.id} (block {booked.block})",
+                  sweep=booked)
     return {"sweep": booked.id}
 
 

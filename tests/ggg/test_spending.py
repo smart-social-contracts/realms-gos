@@ -4,6 +4,7 @@ contract."""
 
 import fake_chain
 from api import treasury
+from core.db import each
 from ggg import Budget, Department, Fund, FiscalPeriod, LedgerEntry, Proposal, Transfer
 from ic_python_db import Database
 from kit import call, fire_timers, later, ok
@@ -266,6 +267,21 @@ def test_the_pass_after_an_upgrade_reads_every_page_of_transfers(monkeypatch):
     assert Transfer.paid_on(k) == 300
 
 
+def test_the_pass_after_an_upgrade_indexes_the_status_of_a_pending_transfer_of_the_release_before():
+    staged_line()
+    fake_chain.state["replies"][ICRC1] = Exception("the ledger is down")
+    pending = pay(100)["transfer"]
+    row = Transfer[pending]
+    Database.get_instance().field_index_remove("Transfer", "status", "pending", row._id)  # not in the index of its release
+    stored_as_version_1(Transfer, pending, drop=("contract",))
+    assert not list(each(Transfer, "status", "pending"))
+
+    treasury.resume()
+    fire_timers()
+    refused = call("period_close", "bob", period="FY2026")
+    assert refused["kind"] == "conflict" and pending in refused["error"]
+
+
 def test_an_old_transfer_that_is_read_before_the_pass_takes_its_contract_from_its_ledger_entries():
     staged_line(10_000)
     k = contract(500)
@@ -289,7 +305,7 @@ def test_a_period_does_not_close_while_it_holds_a_scheduled_transfer():
     staged_line()
     owed = schedule()
     refused = call("period_close", "bob", period="FY2026")
-    assert refused["kind"] == "conflict" and f"FY2026 holds 1 transfers still scheduled or sending, among them {owed}" in refused["error"]
+    assert refused["kind"] == "conflict" and f"FY2026 holds 1 transfers still scheduled, sending or pending, among them {owed}" in refused["error"]
     assert FiscalPeriod["FY2026"].status == "open"
 
     ok("transfer_pay", "ctl", transfer=owed)
@@ -300,6 +316,17 @@ def test_a_period_closes_once_its_scheduled_transfer_is_cancelled():
     staged_line()
     owed = schedule()
     ok("transfer_revert", "ctl", transfer=owed)
+    assert ok("period_close", "bob", period="FY2026")["status"] == "closed"
+
+
+def test_a_period_does_not_close_while_a_rejected_transfer_waits_to_be_reverted():
+    staged_line()
+    fake_chain.state["replies"][ICRC1] = Exception("the ledger is down")
+    pending = pay(100)["transfer"]
+    assert Transfer[pending].status == "pending"
+    assert call("period_close", "bob", period="FY2026")["kind"] == "conflict"
+
+    ok("transfer_revert", "ctl", transfer=pending)
     assert ok("period_close", "bob", period="FY2026")["status"] == "closed"
 
 
@@ -354,7 +381,6 @@ def test_a_ledger_that_refuses_a_scheduled_transfer_fails_it_and_gives_back_what
 
 def test_a_voted_scheduled_transfer_whose_due_date_passes_during_the_vote_fails_when_it_applies():
     """ggg I-FIN-10 states it literally: ``due_at`` must lie after the call that applies it."""
-    from test_treasury import adopt
     import world
 
     staged_line(10_000)

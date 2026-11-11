@@ -285,19 +285,30 @@ def reserve(p, fund, to, symbol, amount, category, description="", payroll=None,
 
 def resume(start=1):
     """A transfer of an earlier release is migrated, and indexed, when it is first read, so what the indexes find (the
-    payments on a contract) is complete only once every one is. After an upgrade, read them all: a page a message."""
-    rows = Transfer.load_some(start, MIGRATE_PAGE)
-    if len(rows) == MIGRATE_PAGE:
-        chain.set_timer(0, lambda n=int(rows[-1]._id) + 1: resume(n))
+    payments on a contract, the transfers still owed) is complete only once every one is. After an upgrade, read them all,
+    a page a message: the rebuild of the status index loads each page, which migrates it."""
+    cursor = Transfer.rebuild_field_index("status", from_id=start, batch=MIGRATE_PAGE)
+    if cursor is not None:
+        chain.set_timer(0, lambda: resume(cursor))
+
+
+def open_or_none(p):
+    """``p`` when it is an open fiscal period. A period that has closed takes no entry (I-FIN-5): what is booked in none
+    refunds a fund or moves money the books must show, and leaves the closed period's statements as they were (a restating
+    report corrects them)."""
+    return p if p is not None and p.status == "open" else None
+
+
+def booking_period():
+    """The period an entry that cannot be refused is booked in: the one covering now, if it is open."""
+    return open_or_none(period_at(chain.now()))
 
 
 def booked_period(t):
     """The fiscal period ``t`` was booked in, which takes its reversal while it is open: a transfer scheduled in one
-    period can be cancelled in a later one. A period that has closed takes no entry (I-FIN-5), so the reversal is booked
-    in none: it refunds the fund and leaves the closed period as it was. A period does not close while it holds a transfer
-    that is scheduled or sending (``period_close``), so this is the exception."""
-    p = next(iter(t.ledger_entries)).period
-    return p if p is not None and p.status == "open" else None
+    period can be cancelled in a later one. A period does not close while it holds a transfer that is scheduled, sending
+    or pending (``period_close``), so a closed one is the exception, and the reversal is booked in none."""
+    return open_or_none(next(iter(t.ledger_entries)).period)
 
 
 def reverse(t, why, status="failed"):
@@ -750,22 +761,23 @@ def period_open(c, args):
 
 
 def unsettled_in(p):
-    """The ids of the transfers booked in period ``p`` that are still owed (scheduled) or in flight (sending)."""
-    return [t.id for status in ("scheduled", "sending") for t in each(Transfer, "status", status)
+    """The ids of the transfers booked in period ``p`` that are still owed (scheduled), in flight (sending) or waiting to
+    be reverted (pending): each ends with a reversal or a cancellation, which books in the period."""
+    return [t.id for status in ("scheduled", "sending", "pending") for t in each(Transfer, "status", status)
             if next(iter(t.ledger_entries)).period == p]
 
 
 @op("org.manage_budget", governed=realm_wide)
 def period_close(c, args):
     """Close the fiscal ``period`` and its adopted budgets. Nothing can be booked while a closed period covers now. A
-    period that holds a scheduled or sending transfer does not close: cancel or pay it first."""
+    period that holds a scheduled, sending or pending transfer does not close: cancel, pay or revert it first."""
     p = find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Conflict(f"{p.id} is {p.status}")
     unsettled = unsettled_in(p)
     if unsettled:
-        raise Conflict(f"{p.id} holds {len(unsettled)} transfers still scheduled or sending, among them "
-                       f"{', '.join(unsettled[:10])}: cancel or pay them first")
+        raise Conflict(f"{p.id} holds {len(unsettled)} transfers still scheduled, sending or pending, among "
+                       f"them {', '.join(unsettled[:10])}: cancel, pay or revert them first")
     p.status = "closed"
     for b in p.budgets:
         if b.status in IN_FORCE:
