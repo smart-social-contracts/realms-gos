@@ -1,6 +1,6 @@
 from ic_python_db import Integer, ManyToOne, OneToMany, String
 
-from core.db import Row
+from core.db import Row, each
 
 
 class Transfer(Row):
@@ -20,3 +20,10 @@ class Transfer(Row):
     at = Integer(default=0)
     payroll = String(indexed=True)  # "payroll 2026-11 Infrastructure" on the transfers of a payroll run
     ledger_entries = OneToMany("LedgerEntry", "transfer")
+    contract = String(default="", indexed=True)  # the contract it pays: the payments on a contract never exceed its value
+
+    @classmethod
+    def paid_on(cls, contract):
+        """What has been paid on ``contract`` (an id): its transfers that neither failed nor were cancelled, so a
+        scheduled one, which is owed, counts (ggg I-FIN-11)."""
+        return sum(t.amount for t in each(cls, "contract", contract) if t.status not in ("failed", "cancelled"))

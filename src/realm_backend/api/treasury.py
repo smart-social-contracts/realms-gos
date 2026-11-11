@@ -225,8 +225,9 @@ def reserve(p, fund, to, symbol, amount, category, description="", payroll=None,
     fee = find(Token, symbol).fee
     lines = spending(fund, category, amount, fee) + [("asset", "cash", 0, amount + fee, fund)]
     refuse_overspend(p, lines)  # post refuses too, but only after the transfer row below is written
+    paid_for = refs["contract"].id if "contract" in refs else ""
     t = Transfer(id=next_id(Transfer, "TR"), sender=f"Fund:{fund.id}", to=to, symbol=symbol, amount=amount,
-                 status="sending", at=chain.now(), payroll=payroll)
+                 status="sending", at=chain.now(), payroll=payroll, contract=paid_for)
     post(p, lines, symbol, description or f"{t.id} to {to}", transfer=t, **refs)
     return t
 
