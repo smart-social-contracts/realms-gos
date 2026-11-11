@@ -5,6 +5,7 @@ from core.db import Json, Row
 
 class Contract(Row):
     __alias__ = "id"
+    __version__ = 2  # 2: split
     id = String()
     title = String(default="")
     parties = Json([])  # ["Organization:buildco", "Department:infrastructure"]
@@ -19,5 +20,11 @@ class Contract(Row):
     status = String(default="draft")  # draft | active | fulfilled | terminated | disputed
     starts_at = Integer(default=0)
     ends_at = Integer(default=0)
+    split = Json([])  # how value is spread over fiscal periods: [{"period": "FY2026", "amount": 30000}]; empty: not spread
     trades = OneToMany("Trade", "contract")
     ledger_entries = OneToMany("LedgerEntry", "contract")
+
+    @classmethod
+    def migrate(cls, obj, from_version, to_version):
+        obj.setdefault("split", [])  # a Json field a stored row lacks reads as the text of its default
+        return obj

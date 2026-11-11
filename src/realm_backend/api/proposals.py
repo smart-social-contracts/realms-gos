@@ -3,11 +3,11 @@ import json
 from core import auth, chain, ranges
 from core.civil import civil_from_days
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
-from ggg import (Appointment, Calendar, Contract, Delegation, Department, Mandate, Member, Proposal, ProposalEdge,
-                 Realm, Task, TaskSchedule, Tender, Vote)
+from ggg import (Appointment, Calendar, Contract, ContractAmendment, Delegation, Department, Mandate, Member, Proposal,
+                 ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
 from api import tasks
 from core.op import dispatch, op, ops
-from core.pending import quoted, you_sign
+from core.pending import quoted, readable, you_sign
 from core.ratio import ONE, refuse_renamed
 
 CHOICES = ("yes", "no", "abstain")
@@ -21,6 +21,8 @@ NOT_RUN = ("rejected", "expired", "withdrawn", "failed")
 MAX_LINKS = 16  # a proposal's own links, so that a reply never outgrows the Internet Computer's limits
 LINK_KINDS = ("replaces", "relates_to")
 MAX_TAGS, MAX_TAG = 16, 64  # a proposal's tags, and the code points of one (ggg I-GOV-15)
+MAX_PERIODS = 64  # the fiscal periods a contract's value is spread over (ggg I-GOV-16)
+TERMS = ("value", "split", "starts_at", "ends_at")  # what contract_amend may change
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
 
@@ -789,10 +791,16 @@ def check_mandate(user, m, args):
         raise Conflict(f"mandate {m.id} is not active")
     if m.executor is None or not seated(user, m.executor):
         raise Forbidden(f"only the executor department's staff may contract under mandate {m.id}")
-    limit, value = int((m.scope or {}).get("max_value", 0)), int(args.get("value", 0))
+    within_mandate(m, args)
+
+
+def within_mandate(m, terms):
+    """Refuse the ``value`` and ``ends_at`` of a contract's ``terms`` unless they are within mandate ``m``'s
+    ``max_value`` and term (ggg I-GOV-4)."""
+    limit, value = int((m.scope or {}).get("max_value", 0)), int(terms.get("value", 0))
     if limit and value > limit:
         raise Fail(f"{value} exceeds mandate {m.id}'s limit of {limit}")
-    if m.expires_at and int(args.get("ends_at", 0)) > m.expires_at:
+    if m.expires_at and int(terms.get("ends_at", 0)) > m.expires_at:
         raise Fail(f"the contract outlasts mandate {m.id}")
 
 
@@ -829,18 +837,105 @@ def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
     now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``, and what is contracted
     (``kind``: works, supplies, services), by which ``procedure`` and from which ``tender``, whose kind and procedure
-    the contract takes. Returns ``contract``.
+    the contract takes, and optionally a ``split`` of the value over fiscal periods (``[{"period": "FY2026", "amount":
+    30000}]``, at most 64, each named once, adding up to ``value``). Returns ``contract``.
     Under a mandate, the mandate must be active, ``value`` within its ``max_value``, the contract must end before the
     mandate expires, and you must head or hold an active seat in the mandate's executor department."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
     if m is not None:
         check_mandate(c.user, m, args)
-    value = int(args.get("value", 0))
+    value, split = int(args.get("value", 0)), args.get("split") or []
+    starts, ends = int(args.get("starts_at", chain.now())), int(args.get("ends_at", 0))
+    checked_terms({"value": value, "split": split, "starts_at": starts, "ends_at": ends})
     k = Contract(id=next_id(Contract, "C"), title=args["title"], parties=args.get("parties", []), mandate=m,
                  **origin_of(args), value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency,
                  terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
-                 starts_at=int(args.get("starts_at", chain.now())), ends_at=int(args.get("ends_at", 0)))
+                 starts_at=starts, ends_at=ends, split=split)
     return {"contract": k.id}
+
+
+def checked_terms(terms):
+    """Refuse the ``terms`` (value, split, starts_at, ends_at) of a contract that break its rules (ggg I-GOV-16): a split
+    names each fiscal period once, at most 64 of them, and adds up to the value; a contract does not start after it
+    ends."""
+    split = terms["split"]
+    if not isinstance(split, list) or any(
+            not isinstance(p, dict) or set(p) != {"period", "amount"} or not isinstance(p["period"], str)
+            or not p["period"] or type(p["amount"]) is not int or p["amount"] < 0 for p in split):
+        raise Fail("split is a list of {period, amount}, each amount a whole number")
+    if len(split) > MAX_PERIODS or len({p["period"] for p in split}) != len(split):
+        raise Fail(f"a contract is spread over at most {MAX_PERIODS} fiscal periods, each named once")
+    if split and sum(p["amount"] for p in split) != terms["value"]:
+        raise Fail("the periods of a split add up to the contract's value")
+    if terms["ends_at"] and terms["starts_at"] > terms["ends_at"]:
+        raise Fail("a contract does not start after it ends")
+
+
+def terms_of(k):
+    return {"value": k.value, "split": list(k.split or []), "starts_at": k.starts_at, "ends_at": k.ends_at}
+
+
+def amended_terms(args):
+    """The contract ``args`` amend, the terms it has and those it would have after, or why it cannot be amended (ggg
+    I-GOV-16): one that has ended is not; the new terms meet the rules of a new contract, its mandate's limits, and the
+    value is not below what has been paid on it (ggg I-FIN-11)."""
+    k = find(Contract, args["contract"])
+    if k.status in ("terminated", "fulfilled"):
+        raise Conflict(f"{k.id} is {k.status}: a contract that has ended is not amended")
+    before = terms_of(k)
+    after = {**before, **{name: args[name] if name == "split" else whole(name, args[name])
+                          for name in TERMS if args.get(name) is not None}}
+    if after == before:
+        raise Fail("the amendment changes no term")
+    checked_terms(after)
+    if k.mandate is not None:
+        within_mandate(k.mandate, after)
+    paid = Transfer.paid_on(k.id)
+    if after["value"] < paid:
+        raise Conflict(f"a value of {after['value']} is below the {paid} paid on {k.id}")
+    return k, before, after
+
+
+def contract_owner(args):
+    """The department that governs ``contract``: its mandate's executor, else its tender's requester, else the root."""
+    k = find(Contract, args["contract"])
+    if k.mandate is not None and k.mandate.executor is not None:
+        return k.mandate.executor
+    tender = Tender[k.tender] if k.tender else None
+    return tender.requester if tender is not None and tender.requester is not None else root()
+
+
+def amending(user, args, grant):
+    k, before, after = amended_terms(args)
+    changes = [{"label": f"New {name.replace('_', ' ')}", "value": f"{readable(after[name])}, was {readable(before[name])}"}
+               for name in TERMS if after[name] != before[name]]
+    return changes + [{"label": "What changes", "value": f"The terms of contract {k.id} change; what the realm owes its "
+                                                         "parties changes with them"}]
+
+
+@op("contract.amend", governed=contract_owner, check=amended_terms, returns="contract", summary=amending,
+    title="Amend a contract")
+def contract_amend(c, args):
+    """Change the terms of ``contract`` that you give: its ``value``, its ``split`` over fiscal periods (empty clears it),
+    ``starts_at`` and ``ends_at``, keeping its id, parties and history; each change is recorded with the proposal that
+    carried it. The new terms meet the rules of a new contract and its mandate's limits, and a ``value`` is not below
+    what has been paid on it; a contract that has ended is not amended. Governed by the contract's owner: its mandate's
+    executor, else its tender's requester, else the root. Returns ``contract``."""
+    k, before, after = amended_terms(args)
+    k.value, k.split, k.starts_at, k.ends_at = after["value"], after["split"], after["starts_at"], after["ends_at"]
+    n = len(list(each(ContractAmendment, "contract", k.id))) + 1
+    ContractAmendment(id=f"{k.id}.{n}", contract=k.id, before=before, after=after, proposal=c.proposal or "",
+                      at=chain.now())
+    return {"contract": k.id}
+
+
+@op("realm.data_view", read=True, returns="contract")
+def contract_get(c, args):
+    """``contract`` and its amendments, oldest first, ``count`` at a time (default 100, at most 500) from row ``from``
+    (default 1); ``next`` continues them (null at the end)."""
+    k = find(Contract, args["contract"])
+    amendments, nxt = page_by(ContractAmendment, "contract", k.id, args)
+    return {"contract": view(k), "amendments": [view(a) for a in amendments], "next": nxt}
 
 
 def terminating(user, args, grant):
