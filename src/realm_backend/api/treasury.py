@@ -19,6 +19,7 @@ CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate", "sweep")
 EPOCHS = {"monthly": 30 * 86400, "quarterly": 91 * 86400, "yearly": 365 * 86400}
 REGISTRY = 100  # tokens, and NFT collections, a realm can register: treasury_view lists them all
 REFRESH = 20  # invoices one invoice_refresh checks, one ledger call each
+MIGRATE_PAGE = 500  # transfers one message of the pass after an upgrade reads
 MONEY_MAX = 2**53 - 1  # GGG's Money
 FEE = "ledger_fee"  # the category of the ledger's fee on a payment: a cost of paying, not a budgeted one
 IN_FORCE = ("adopted", "extended")  # the statuses of a budget line that caps spending
@@ -258,8 +259,9 @@ def charged_line(p, fund, category):
 
 
 def standing_line(t):
-    """The line that stands now for the one ``t`` was charged to: it, or the line that replaced it and carried its money."""
-    return next(b for b in each(Budget, "slot", Budget[t.budget].slot) if caps_spending(b))
+    """The line that stands now for the one ``t`` was charged to: it, or the line that replaced it and carried its money;
+    none once its period has closed."""
+    return next((b for b in each(Budget, "slot", Budget[t.budget].slot) if caps_spending(b)), None)
 
 
 def reserve(p, fund, to, symbol, amount, category, description="", payroll=None, committed=False, due_at=0, **refs):
@@ -281,21 +283,31 @@ def reserve(p, fund, to, symbol, amount, category, description="", payroll=None,
     return t
 
 
+def resume(start=1):
+    """A transfer of an earlier release is migrated, and indexed, when it is first read, so what the indexes find (the
+    payments on a contract) is complete only once every one is. After an upgrade, read them all: a page a message."""
+    rows = Transfer.load_some(start, MIGRATE_PAGE)
+    if len(rows) == MIGRATE_PAGE:
+        chain.set_timer(0, lambda n=int(rows[-1]._id) + 1: resume(n))
+
+
 def booked_period(t):
-    """The fiscal period ``t`` was booked in, which takes its reversal while it is open (I-FIN-5): a transfer scheduled
-    in one period can be cancelled in a later one."""
+    """The fiscal period ``t`` was booked in, which takes its reversal while it is open: a transfer scheduled in one
+    period can be cancelled in a later one. A period that has closed takes no entry (I-FIN-5), so the reversal is booked
+    in none: it refunds the fund and leaves the closed period as it was. A period does not close while it holds a transfer
+    that is scheduled or sending (``period_close``), so this is the exception."""
     p = next(iter(t.ledger_entries)).period
-    if p is not None and p.status != "open":
-        raise Conflict(f"fiscal period {p.id} is {p.status}")
-    return p
+    return p if p is not None and p.status == "open" else None
 
 
 def reverse(t, why, status="failed"):
-    """Undo the books of ``t`` and give back what it charged, to the stage it came from (ggg I-FIN-9)."""
+    """Undo the books of ``t`` and give back what it charged, to the stage it came from (ggg I-FIN-9). It refuses nothing:
+    a transfer whose call has been made must end in a final state."""
     lines = [(e.kind, e.category, e.credit, e.debit, e.fund) for e in t.ledger_entries]
     post(booked_period(t), lines, t.symbol, f"reversal of {t.id}: {why}", transfer=t)
-    if t.committed:
-        standing_line(t).committed += t.amount
+    line = standing_line(t) if t.committed else None
+    if line is not None:
+        line.committed += t.amount
     t.status = status
 
 
@@ -737,12 +749,23 @@ def period_open(c, args):
     return {"period": p.id}
 
 
+def unsettled_in(p):
+    """The ids of the transfers booked in period ``p`` that are still owed (scheduled) or in flight (sending)."""
+    return [t.id for status in ("scheduled", "sending") for t in each(Transfer, "status", status)
+            if next(iter(t.ledger_entries)).period == p]
+
+
 @op("org.manage_budget", governed=realm_wide)
 def period_close(c, args):
-    """Close the fiscal ``period`` and its adopted budgets. Nothing can be booked while a closed period covers now."""
+    """Close the fiscal ``period`` and its adopted budgets. Nothing can be booked while a closed period covers now. A
+    period that holds a scheduled or sending transfer does not close: cancel or pay it first."""
     p = find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Conflict(f"{p.id} is {p.status}")
+    unsettled = unsettled_in(p)
+    if unsettled:
+        raise Conflict(f"{p.id} holds {len(unsettled)} transfers still scheduled or sending, among them "
+                       f"{', '.join(unsettled[:10])}: cancel or pay them first")
     p.status = "closed"
     for b in p.budgets:
         if b.status in IN_FORCE:

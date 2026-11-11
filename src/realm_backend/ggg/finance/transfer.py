@@ -16,7 +16,7 @@ class Transfer(Row):
     # scheduled (owed by due_at, no money moved) | sending (ledger call in flight) | pending (call rejected)
     # | completed | failed (ledger refused, fund refunded) | cancelled (a scheduled one, revoked, fund refunded)
     # | unconfirmed (the ledger's answer is unclear: tokens may have moved, fund not refunded)
-    status = String(default="sending")
+    status = String(default="sending", indexed=True)
     # the ledger's raw answer, or the call's rejection; empty when the ledger refused and the fund was refunded
     reply = String(default="")
     at = Integer(default=0)

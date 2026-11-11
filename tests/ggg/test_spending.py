@@ -3,13 +3,16 @@ transfers charged to it from its committed money or its available credit, schedu
 contract."""
 
 import fake_chain
-from ggg import Budget, Department, LedgerEntry, Transfer
+from api import treasury
+from ggg import Budget, Department, Fund, FiscalPeriod, LedgerEntry, Proposal, Transfer
 from ic_python_db import Database
-from kit import call, ok
+from kit import call, fire_timers, later, ok
 from test_ratios import stored_as_version_1
-from test_treasury import draft, fund_roads_with_budget, ledger_ok, propose
+from test_treasury import LEDGER, draft, finish, fund_roads_with_budget, ledger_ok, propose, start, suspended
 
 DAY = 86_400
+ICRC1 = (LEDGER, "icrc1_transfer")
+TOO_OLD = "(variant { Err = variant { TooOld } })"
 
 
 def figures(budget):
@@ -226,14 +229,141 @@ def test_two_voted_payments_that_together_overpay_a_contract_cannot_both_execute
 
 # --- transfers of the release before --------------------------------------------------------------
 
-def test_a_transfer_of_the_release_before_is_found_by_its_contract_once_it_is_read_again():
+def stored_as_the_release_before(transfer_id, contract):
+    """Save the transfer as the last release did: no contract on the row, and no entry in the index that finds it by contract."""
+    row = Transfer[transfer_id]
+    Database.get_instance().field_index_remove("Transfer", "contract", contract, row._id)
+    stored_as_version_1(Transfer, transfer_id, drop=("contract",))
+
+
+def test_the_payments_on_a_contract_include_the_transfers_of_the_release_before_once_the_upgrade_has_read_them():
+    staged_line(10_000)
+    k = contract(500)
+    assert pay(400, contract=k)["status"] == "completed"
+    stored_as_the_release_before("TR-1", k)
+    assert Transfer.paid_on(k) == 0  # until the pass after the upgrade has read the row
+
+    treasury.resume()
+    fire_timers()  # nothing has read the old row but the pass
+    assert Transfer.paid_on(k) == 400
+    over = pay(400, contract=k)
+    assert over["kind"] == "conflict" and "has 100 left of its value" in over["error"]
+    assert Database.get_instance().load("Transfer", Transfer["TR-1"]._id)["__version__"] == 2
+
+
+def test_the_pass_after_an_upgrade_reads_every_page_of_transfers(monkeypatch):
+    staged_line(10_000)
+    k = contract(500)
+    for _ in range(3):
+        assert pay(100, contract=k)["status"] == "completed"
+    for n in (1, 2, 3):
+        stored_as_the_release_before(f"TR-{n}", k)
+    monkeypatch.setattr(treasury, "MIGRATE_PAGE", 2)
+
+    treasury.resume()
+    assert len(fake_chain.state["timers"]) == 1 and Transfer.paid_on(k) == 200
+    fire_timers()
+    assert Transfer.paid_on(k) == 300
+
+
+def test_an_old_transfer_that_is_read_before_the_pass_takes_its_contract_from_its_ledger_entries():
     staged_line(10_000)
     k = contract(500)
     assert pay(200, contract=k)["status"] == "completed"
     entry = next(e for e in LedgerEntry.load_some(1, LedgerEntry.max_id()) if e.transfer)
-    assert entry.contract.id == k  # the previous release recorded the contract here only
-    stored_as_version_1(Transfer, "TR-1", drop=("contract",))
+    assert entry.contract.id == k  # the release before recorded the contract here only
+    stored_as_the_release_before("TR-1", k)
 
-    assert Transfer["TR-1"].contract == k
+    assert Transfer["TR-1"].contract == k  # read by anything else, the row migrates as well
     assert Transfer.paid_on(k) == 200
-    assert Database.get_instance().load("Transfer", Transfer["TR-1"]._id)["__version__"] == 2
+
+
+# --- what is owed or in flight keeps its period open ----------------------------------------------
+
+def schedule(amount=100, **args):
+    return ok("transfer_create", "ctl", fund="ROADS", to="buildco", amount=amount, category="capital",
+              due_at=fake_chain.state["now"] + DAY, **args)["transfer"]
+
+
+def test_a_period_does_not_close_while_it_holds_a_scheduled_transfer():
+    staged_line()
+    owed = schedule()
+    refused = call("period_close", "bob", period="FY2026")
+    assert refused["kind"] == "conflict" and f"FY2026 holds 1 transfers still scheduled or sending, among them {owed}" in refused["error"]
+    assert FiscalPeriod["FY2026"].status == "open"
+
+    ok("transfer_pay", "ctl", transfer=owed)
+    assert ok("period_close", "bob", period="FY2026")["status"] == "closed"
+
+
+def test_a_period_closes_once_its_scheduled_transfer_is_cancelled():
+    staged_line()
+    owed = schedule()
+    ok("transfer_revert", "ctl", transfer=owed)
+    assert ok("period_close", "bob", period="FY2026")["status"] == "closed"
+
+
+def test_a_period_does_not_close_while_a_transfer_is_in_flight(monkeypatch):
+    staged_line()
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    message = start("transfer_create", "ctl", fund="ROADS", to="buildco", amount=100, category="capital")
+    assert call("period_close", "bob", period="FY2026")["kind"] == "conflict"
+    finish(message, "(variant { Ok = 9 : nat })")
+    assert ok("period_close", "bob", period="FY2026")["status"] == "closed"
+
+
+# --- a transfer whose call has been made ends in a final state ------------------------------------
+
+def close_the_period_under(transfer_id):
+    """A period that has closed with the transfer open in it: a row the rule above would not have let through."""
+    next(iter(Transfer[transfer_id].ledger_entries)).period.status = "closed"
+
+
+def test_a_refusing_ledger_fails_a_scheduled_transfer_paid_after_its_period_closed_and_refunds_the_fund():
+    b = staged_line()
+    ok("budget_stage", "bob", budget=b, commit=100)
+    owed = schedule(100, committed=True)
+    fund_before = treasury.balance(Fund["ROADS"], "REALM")
+    close_the_period_under(owed)
+    fake_chain.state["replies"][ICRC1] = TOO_OLD
+
+    out = ok("transfer_pay", "ctl", transfer=owed)
+    assert out["status"] == "failed" and Transfer[owed].status == "failed"
+    assert treasury.balance(Fund["ROADS"], "REALM") == fund_before + 100 + 10  # the amount and the fee come back
+
+
+def test_a_scheduled_transfer_can_be_cancelled_after_its_period_closed():
+    staged_line()
+    owed = schedule(100)
+    close_the_period_under(owed)
+    assert ok("transfer_revert", "ctl", transfer=owed)["status"] == "cancelled"
+
+
+def test_a_ledger_that_refuses_a_scheduled_transfer_fails_it_and_gives_back_what_it_charged():
+    b = staged_line()
+    ok("budget_stage", "bob", budget=b, commit=100)
+    owed = schedule(100, committed=True)
+    assert figures(b) == (0, 0, 100)
+    fake_chain.state["replies"][ICRC1] = TOO_OLD
+
+    assert ok("transfer_pay", "ctl", transfer=owed)["status"] == "failed"
+    assert figures(b) == (0, 100, 0)
+
+
+# --- a decision of the model -----------------------------------------------------------------------
+
+def test_a_voted_scheduled_transfer_whose_due_date_passes_during_the_vote_fails_when_it_applies():
+    """ggg I-FIN-10 states it literally: ``due_at`` must lie after the call that applies it."""
+    from test_treasury import adopt
+    import world
+
+    staged_line(10_000)
+    infrastructure = Department["Infrastructure"]
+    world.grant(infrastructure, "transfer.create")
+    world.policy(infrastructure, 1, 2)
+    p = ok("transfer_create", "carla", fund="ROADS", to="buildco", amount=100, category="capital",
+           due_at=fake_chain.state["now"] + DAY)["proposal"]
+
+    later(2 * DAY)
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert "due_at must lie after the call" in Proposal[p].result["error"] and Transfer.count() == 0
