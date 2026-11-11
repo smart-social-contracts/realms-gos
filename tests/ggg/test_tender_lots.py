@@ -39,7 +39,8 @@ def test_a_tender_names_its_lots():
 
 @pytest.mark.parametrize("lots, why", [
     ([{"id": "1", "title": "a"}, {"id": "1", "title": "b"}], "named once"),
-    ([{"id": "", "title": "a"}], "an id and a title"),
+    ([{"id": "", "title": "a"}], "an id, a title"),
+    ([{"id": "1", "title": "a", "estimated_value": "lots"}], "whole estimated_value"),
     ([{"id": str(i), "title": "t"} for i in range(65)], "at most 64"),
 ])
 def test_lots_out_of_bounds_are_refused_and_leave_no_tender(lots, why):
@@ -114,11 +115,14 @@ def test_a_lots_contract_is_made_by_its_award_and_a_lot_is_named_only_with_its_t
     t, ids = evaluation()
     ok("bid_score", "carla", bid=ids["b1"], scores={"price": 9, "quality": 8})
     made = ok("tender_award", "carla", tender=t, lot="1")["contract"]
-    assert "named only with the tender" in call("contract_create", "ctl", title="x", lot="1")["error"]
-    assert "has lots" in call("contract_create", "ctl", title="x", tender=t)["error"]
-    assert "no lot 9" in call("contract_create", "ctl", title="x", tender=t, lot="9")["error"]
-    assert f"with contract {made}" in call("contract_create", "ctl", title="x", tender=t, lot="1")["error"]
-    assert "is open" in call("contract_create", "ctl", title="x", tender=t, lot="2")["error"]
+    for args, kind, why in (({"lot": "1"}, "invalid_argument", "named only with the tender"),
+                            ({"tender": t}, "invalid_argument", "has lots"),
+                            ({"tender": t, "lot": "9"}, "invalid_argument", "no lot 9"),
+                            ({"tender": t, "lot": "1"}, "conflict", "signed by its award"),  # awarded, contract made
+                            ({"tender": t, "lot": "2"}, "conflict", "signed by its award")):  # still open
+        out = call("contract_create", "ctl", title="x", **args)
+        assert (out["kind"], why in out["error"]) == (kind, True), (args, out)
+    assert Contract.count() == 1 and Contract[made].lot == "1"
 
 
 def test_a_lot_nobody_bid_on_cannot_be_awarded_only_left_void():

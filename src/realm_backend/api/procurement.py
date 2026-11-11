@@ -68,12 +68,14 @@ def rubric_of(args):
 
 def lots_of(args):
     """The ``lots`` of a ``tender_create`` call as stored, all open: each has an ``id`` named once in the tender, a
-    ``title`` and an optional ``estimated_value``; at most 64 (ggg I-PRC-5)."""
+    ``title`` and an optional ``estimated_value``, a whole number; at most 64 (ggg I-PRC-5)."""
     lots = args.get("lots") or []
     if not isinstance(lots, list) or len(lots) > MAX_LOTS or any(
             not isinstance(lot, dict) or not isinstance(lot.get("id"), str) or not lot["id"]
-            or not isinstance(lot.get("title"), str) for lot in lots):
-        raise Fail(f"a tender has at most {MAX_LOTS} lots, each with an id and a title")
+            or not isinstance(lot.get("title"), str)
+            or not (lot.get("estimated_value") is None or type(lot["estimated_value"]) is int and lot["estimated_value"] >= 0)
+            for lot in lots):
+        raise Fail(f"a tender has at most {MAX_LOTS} lots, each with an id, a title and, if it has one, a whole estimated_value")
     if len({lot["id"] for lot in lots}) != len(lots):
         raise Fail("each lot is named once in the tender")
     return [{"id": lot["id"], "title": lot["title"], "estimated_value": lot.get("estimated_value"), "status": "open",

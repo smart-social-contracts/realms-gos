@@ -469,16 +469,16 @@ def majority_outcome(p, tally, size, vetoed, final):
     before, since only everyone having voted ends it early. A veto holder's no, or a quorum of the policy's n not reached,
     rejects it. The yes votes must *exceed* the threshold of the yes and no votes: that accepts it, less rejects it, and
     exactly at it is a tie, which a first vote puts to a second ("tied") and a second vote leaves to the casting member's
-    yes. Under ``eligible`` the yes votes must also *reach* the threshold of the policy's n: it only adds to what the
-    default requires."""
+    yes. Under ``eligible`` that majority stays at a half of the votes cast and the threshold is a share of the policy's n:
+    the yes votes must also *reach* it, which only adds to what the default requires."""
     if not final:
         return None
-    cast = tally["yes"] + tally["no"]
+    cast, over_cast = tally["yes"] + tally["no"], p.threshold if p.threshold_of == "cast" else ONE // 2
     if vetoed or not quorum_met(p, tally, size):
         return "rejected"
-    if tally["yes"] * ONE > p.threshold * cast:
+    if tally["yes"] * ONE > over_cast * cast:
         majority = True
-    elif cast and tally["yes"] * ONE == p.threshold * cast:
+    elif cast and tally["yes"] * ONE == over_cast * cast:
         if p.first_vote is None:
             return "tied"
         majority = casting_yes(p)
@@ -852,22 +852,20 @@ def origin_of(args):
     return {"kind": kind, "procedure": procedure, "tender": tender}
 
 
-def lot_of(args):
-    """The lot a new contract is made under: named only with its tender, which then needs one, and one that is awarded
-    and has no contract yet (ggg I-PRC-5)."""
-    name, tender = args.get("lot", ""), find(Tender, args["tender"]) if args.get("tender") else None
-    if not name:
-        if tender is not None and tender.lots:
-            raise Fail(f"{tender.id} has lots: name one")
-        return ""
+def refuse_lot(args):
+    """Refuse a new contract that names a lot, or names the tender of lots without one (ggg I-PRC-5): a lot's contract is
+    signed by its award (``tender_award``), so none is made for a lot any other way."""
+    tender, name = find(Tender, args["tender"]) if args.get("tender") else None, args.get("lot")
     if tender is None:
-        raise Fail("a lot is named only with the tender it belongs to")
-    lot = next((x for x in tender.lots if x["id"] == name), None)
-    if lot is None:
+        if name:
+            raise Fail("a lot is named only with the tender it belongs to")
+    elif not name:
+        if tender.lots:
+            raise Fail(f"{tender.id} has lots: name one")
+    elif not any(lot["id"] == name for lot in tender.lots):
         raise Fail(f"{tender.id} has no lot {name}")
-    if lot["status"] != "awarded" or lot["contract"]:
-        raise Conflict(f"lot {name} of {tender.id} is {lot['status']}" + (f", with contract {lot['contract']}" if lot["contract"] else ""))
-    return name
+    else:
+        raise Conflict(f"a lot's contract is signed by its award: the contract of lot {name} of {tender.id} is not made here")
 
 
 def framework_of(args):
@@ -947,7 +945,7 @@ def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
     now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``, and what is contracted
     (``kind``: works, supplies, services), by which ``procedure`` and from which ``tender``, whose kind and procedure
-    the contract takes (a tender with lots needs the awarded ``lot`` as well, which has no contract yet). Optional
+    the contract takes (the contract of a tender's lot is signed by its award, not here). Optional
     ``split`` spreads the value over fiscal periods (``[{"period": "FY2026", "amount": 30000}]``, at most 64, each
     named once, adding up to ``value``). Optional ``framework`` says it is a call-off under an agreement another body
     holds: ``{"holder": {"External": id}`` or ``{"Realm": the capital's principal}}, "reference", "winners"}``; the
@@ -958,14 +956,15 @@ def contract_create(c, args):
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
     if m is not None:
         check_mandate(c.user, m, args)
-    lot, framework = lot_of(args), framework_of(args)
+    refuse_lot(args)
+    framework = framework_of(args)
     value, split = int(args.get("value", 0)), args.get("split") or []
     starts, ends = int(args.get("starts_at", chain.now())), int(args.get("ends_at", 0))
     checked_terms({"value": value, "split": split, "starts_at": starts, "ends_at": ends})
     k = Contract(id=next_id(Contract, "C"), title=args["title"], parties=args.get("parties", []), mandate=m,
                  **origin_of(args), value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency,
                  terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
-                 starts_at=starts, ends_at=ends, split=split, lot=lot, framework=framework)
+                 starts_at=starts, ends_at=ends, split=split, framework=framework)
     return {"contract": k.id}
 
 

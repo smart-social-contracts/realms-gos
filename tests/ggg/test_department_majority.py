@@ -222,6 +222,20 @@ def test_eligible_adds_an_absolute_majority_of_the_policys_n_to_the_majority_of_
     assert Proposal[tied].status == "voting" and Proposal[tied].first_vote["yes"] == 2
 
 
+def test_under_eligible_a_stricter_threshold_is_a_share_of_the_policys_n_not_of_the_votes_cast():
+    council()  # n = 4: three yes reach 75 % of it, and beat one no at a half of the votes cast
+    p = file(threshold=75 * PERCENT, threshold_of="eligible")
+    vote(p, alice="yes", carla="yes", dana="yes", bob="no")
+    assert Proposal[p].status == "accepted"
+
+
+def test_under_eligible_the_majority_of_the_votes_cast_stays_at_a_half_with_its_own_tie():
+    council(n=2)  # four seated voters: two yes and two no tie at a half of the votes cast, whatever the share of n
+    p = file(threshold=75 * PERCENT, threshold_of="eligible")
+    vote(p, alice="yes", carla="yes", dana="no", bob="no")
+    assert Proposal[p].status == "voting" and Proposal[p].first_vote["yes"] == 2
+
+
 def test_a_policy_may_count_the_votes_cast_and_is_otherwise_m_of_n():
     world.build()
     assert "threshold_of is one of" in call("department_set_policy", "ctl", department="Civil Registry", m=1, n=2,
