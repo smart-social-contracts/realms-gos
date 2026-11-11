@@ -650,7 +650,9 @@ root department's included, use its own zone. The calendar's holidays are the re
 every quarter (§3.4): a quarter's zone decides only where its days begin and end.
 
 The UI shows a realm-wide time in the official time (the capital's), with the quarter's local time
-beside it when they differ.
+beside it when they differ. `realm_info` gives both zones: `timezone` is the realm's own and
+`official_timezone` the capital's, which a quarter keeps from the answer to its last `quarter_sync`
+(its own until the first), so a change of the capital's zone reaches it at its next sync.
 
 For example, a codex switch set for 1 December 2026, 00:00 in Europe/Madrid is the instant 23:00 UTC
 on 30 November. It is 08:00 on 1 December in a quarter on Asia/Tokyo and 17:00 on 30 November in one
@@ -973,6 +975,9 @@ forbid (principal,
 ```
 
 ### 5.9 What a member sees: the flattened view
+
+The realm serves it as the public read `codex_views` (the domain's layer path and a row for each member, with the
+layers that define it and the legislation each cites); the codex page shows it.
 
 ```
 tax, as it applies in València (codex sha256:3f1c…), path Spain → València:
@@ -1461,8 +1466,9 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
     failure of a method, and again when it fails once more at least 24 hours after the last notice: the
     entry's `notified` is the time of that notice. A realm with no team designated notifies no one, and the
     next failure notifies the team once there is one.
-  - **Still to add (D8), on the codex page:** the failing chapters and methods, and for IT team members a
-    "revert" button that starts `codex.revert_fast`.
+  - **On the codex page** (the `codex_viewer` extension, [#493](https://github.com/smart-social-contracts/realms-gos/issues/493)):
+    the failing chapters and methods, and for IT team members a "revert" button that starts `codex.revert_fast`.
+    The team's notification links to that page.
 
   No banner for members.
 - **Across domains:** what crosses a domain boundary is plain data, frozen on the way (a list is a tuple, a

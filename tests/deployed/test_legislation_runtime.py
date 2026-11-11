@@ -391,6 +391,16 @@ def test_a_activation_loads_the_chapters_once_and_runs_on_codex_activate(town, p
     assert got["load"] < 2_000_000_000, got
 
 
+def test_a1_the_flattened_view_is_a_query_of_the_sandbox_the_realm_loaded(town, people):
+    views = ok(town, "codex_views", people["alice"], query=True)["views"]
+    assert sorted(views) == ["data_protection", "local_regime", "procedure", "realm", "register", "water"]
+    assert views["data_protection"]["path"] == ["eu", "eu/es", TOWN]
+    guard = next(m for m in views["data_protection"]["members"] if m["name"] == "check_proposal_create")
+    assert (guard["kind"], guard["mark"]) == ("guard", "extension")
+    assert [(layer["source"], layer["legislation"]) for layer in guard["layers"]] == [
+        ("eu", "GDPR Art. 6"), ("eu/es", "Ley Orgánica 3/2018 Art. 8"), (TOWN, None)]
+
+
 def test_b_guards_deny_down_the_layers_and_hooks_notify_as_the_codex(town, people):
     founder = people["founder"]
     assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"

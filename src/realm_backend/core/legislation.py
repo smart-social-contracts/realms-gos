@@ -55,6 +55,7 @@ ACTIVATE = "codex_activate"
 # call fails, so a chapter that loops on reads costs the caller this much and never the whole message.
 READS = 2_000_000_000
 REMINDER = 24 * 3600  # seconds a method keeps failing before the IT admin team is told again
+CODEX_PAGE = "/extensions/codex_viewer"  # where an IT admin team notification takes them: the failing chapters, and the revert
 # What a chapter may read of GGG's entities, and nothing else: what legislation needs to decide, never a key, a code,
 # a person's private data, a sealed bid, who voted what, a grant or a payment account, nor what one member was told.
 # A Request leaves out its ``body`` and ``reply`` (personal data) and its ``decision`` (free text until GGG types it as
@@ -275,6 +276,12 @@ def compute(op, decimals=None, **kwargs):
         raise Fail(f"legislation error in {file}: {outcome['error']}")
     _clear(outcome["files"], method)
     return outcome["result"]
+
+
+def views():
+    """The flattened view of every domain of the running layered codex (§5.9), ``{domain: {"domain", "path",
+    "members"}}``, as the sandbox keeps it loaded; empty when no layered codex is active. It reads no row of GGG."""
+    return _call("views") if _ensure() else {}
 
 
 def _ensure():
@@ -717,7 +724,8 @@ def _tell_it_team(file, method, error):
     if team is None:
         return False
     Notification(id=next_id(Notification, "N"), recipient=f"Department:{team.id}", topic="codex.failing",
-                 title=f"The codex fails: {method} of {file}", body=error[:500], sender=chain.self_id(), at=chain.now())
+                 title=f"The codex fails: {method} of {file}", body=error[:500], href=CODEX_PAGE, sender=chain.self_id(),
+                 at=chain.now())
     return True
 
 

@@ -140,8 +140,11 @@ the federation already has (`quarter.sync`):
   directory and the codex, and the quarter applies them. A quarter syncs when it starts after an
   upgrade, on a timer every `sync_every` seconds, and whenever it runs `quarter_sync` itself, so a
   quarter that missed a push, because it was down, upgrading or suspended, has the current values at
-  its next sync. The capital sets `sync_every` with `quarter_configure`, from an hour (the default) to a
-  week, and the quarters learn it at their next sync: pushes on change already exist, so the timer only
+  its next sync. The answer also names the capital's time zone, `official_timezone`, which the quarter
+  keeps beside its own and `realm_info` shows: the realm's official time is the capital's, and the UI shows
+  a realm-wide time in it with the quarter's own time beside it when the two clocks differ. It is not a
+  synced setting, so the quarter's own zone stays its own. The capital sets `sync_every` with
+  `quarter_configure`, from an hour (the default) to a week, and the quarters learn it at their next sync: pushes on change already exist, so the timer only
   catches up, and each sync carries the whole directory. After an upgrade a quarter syncs within two
   minutes, at a moment its canister id sets, so that quarters upgraded together do not all call their
   capital at once. The error of a catch-up that failed stays in the quarter's `sync_state` until one
