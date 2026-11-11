@@ -3,6 +3,7 @@
 from ggg.finance import (AllocationRule, Bid, BidScore, Budget, FinancialReport, FiscalPeriod, Fund, Invoice,
                          LedgerEntry, Loan, NFTToken, PaymentAccount, TaxDeclaration, TaxPolicy, Tender, Token, Trade,
                          Transfer, Treasury)
+from ggg.finance import Sweep
 from ggg.governance import (Calendar, ChapterSource, Codex, Contract, FederalVote, FederalVoteLeg, FederationMessage,
                             Follower, Forward, FoundRelease, GuestUser, InstallJob, JournalEntry, LayeredCodex,
                             License, Mandate, Procedure, Proposal, ProposalEdge, Quarter, Realm, Registry, Release,

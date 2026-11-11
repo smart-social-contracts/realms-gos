@@ -68,6 +68,11 @@ def federated():
     return r.is_quarter and not r.is_capital
 
 
+def is_capital():
+    """True on the capital of a federation: a realm with quarters of its own."""
+    return realm().is_quarter and realm().is_capital
+
+
 def capital():
     return realm().federation_realm_id if federated() else chain.self_id()
 
@@ -241,6 +246,10 @@ def apply_directory(reply):
     for q in [q for q in known() if q.id not in seen]:
         q.delete()
     apply_zones(reply.get("zones") or [])
+    if "sweep" in reply:  # a capital on the previous release sends none
+        from api import sweeps  # it imports this module
+
+        sweeps.keep(reply["sweep"])
     r = realm()
     r.sync_state = {**(r.sync_state or {}), "at": chain.now(), "codex": reply["codex"], "index": index,
                     "compliance": flag, "label": label, "sync_every": reply.get("sync_every", SYNC_EVERY)}
@@ -379,6 +388,9 @@ def resume():
         chain.set_timer(ADOPT_EVERY, adopt)
     if federated():
         catch_up_in(sum(chain.self_id().encode()) % RESUME_SPREAD)
+        from api import sweeps  # it imports this module
+
+        sweeps.resume()
 
 
 def catch_up_in(seconds):
@@ -676,8 +688,10 @@ def quarter_sync(c, args):
     q = record(c, args)
     from api import propagation  # it imports the install task, which imports this module
 
+    from api import sweeps  # it imports this module
+
     return {"directory": directory(), "codex": propagation.in_force(), "index": q.index, "zones": zone_definitions(),
-            "settings": synced_values(), "sync_every": sync_every()}
+            "settings": synced_values(), "sync_every": sync_every(), "sweep": sweeps.rules_for_quarters()}
 
 
 def sync():

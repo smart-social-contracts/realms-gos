@@ -23,6 +23,8 @@ MONEY_MAX = 2**53 - 1  # GGG's Money
 FEE = "ledger_fee"  # the category of the ledger's fee on a payment: a cost of paying, not a budgeted one
 IN_FORCE = ("adopted", "extended")  # the statuses of a budget line that caps spending
 ITEM_FIELDS = ("concept", "amount", "quantity", "unit", "legislation")
+TRANSFER = ("id", "sender", "to", "symbol", "amount", "ledger_tx", "status", "at", "payroll", "due_at", "budget", "committed",
+            "contract")  # what a list of transfers shows
 LINE = ("id", "category", "kind", "planned", "reserved", "committed", "actual", "status", "proposal")  # what a line shows
 PERIOD_UNITS = ("day", "working_day", "month", "year")
 
@@ -39,6 +41,15 @@ def account(owner, sub=None):
 
 def text(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def icrc1_arg(to, amount, memo, fee=None, created_at=None):
+    """The argument of an ICRC-1 transfer of ``amount`` to the account ``to`` (as ``account`` writes it), with ``memo``
+    and, when given, the ``fee`` and the ``created_at`` time in seconds that make it recognisable as a repeat."""
+    fee_text = f"opt ({fee} : nat)" if fee is not None else "null"
+    time_text = f"opt ({created_at * 1_000_000_000} : nat64)" if created_at is not None else "null"
+    return (f"(record {{ to = {to}; amount = {amount} : nat; fee = {fee_text}; memo = opt {blob(memo)}; "
+            f"from_subaccount = null; created_at_time = {time_text} }})")
 
 
 def subaccount(invoice_id):
@@ -290,8 +301,7 @@ def reverse(t, why, status="failed"):
 
 def send(t):
     token = find(Token, t.symbol)
-    arg = (f"(record {{ to = {account(address(t.to, t.symbol))}; amount = {t.amount} : nat; fee = null; "
-           f"memo = opt {blob(t.id.encode())}; from_subaccount = null; created_at_time = null }})")
+    arg = icrc1_arg(account(address(t.to, t.symbol)), t.amount, t.id.encode())
     try:
         reply = yield from chain.call(token.ledger, "icrc1_transfer", arg)
     except Exception as e:
@@ -420,7 +430,7 @@ def transfer_list(c, args):
     def wanted(t):
         return args.get("fund") in (None, t.sender.removeprefix("Fund:")) and args.get("status") in (None, t.status)
     rows, nxt = page(Transfer, args, wanted)
-    return {"transfers": [view(t) for t in rows], "next": nxt}
+    return {"transfers": [view(t, *TRANSFER) for t in rows], "next": nxt}
 
 
 # --- invoices -------------------------------------------------------------------------------------
@@ -638,16 +648,28 @@ def report_view(c, args):
     return {"reports": [view(r, "id", "kind", "as_of", "issued_by", "supersedes") for r in rows], "next": nxt}
 
 
-@op("treasury.manage", governed=realm_wide)
-def treasury_configure(c, args):
-    """Update the treasury settings in ``config``: ``epoch``, ``anchor_month``, ``source_fund`` (receives invoice
-    payments) and ``auto_allocate`` (split them by its adopted allocation rule). Returns the merged ``config``."""
-    t = Treasury["1"] or Treasury(id="1")
+def configuring(args):
+    """What a treasury_configure call meets whatever the vote decides: the settings it knows, and sweep rules only on a
+    capital, for its own funds and tokens (the sweep module)."""
     unknown = set(args["config"]) - set(CONFIG)
     if unknown:
         raise Fail(f"unknown treasury settings: {', '.join(sorted(unknown))}")
     if "source_fund" in args["config"]:
         find(Fund, args["config"]["source_fund"])
+    if "sweep" in args["config"]:
+        from api import sweeps  # it imports this module
+
+        sweeps.refuse_bad_rules(args["config"]["sweep"])
+
+
+@op("treasury.manage", governed=realm_wide, check=configuring)
+def treasury_configure(c, args):
+    """Update the treasury settings in ``config``: ``epoch``, ``anchor_month``, ``source_fund`` (receives invoice
+    payments), ``auto_allocate`` (split them by its adopted allocation rule) and, on a capital, ``sweep``: the rules by
+    which its quarters move what is paid in them into its funds, each a quarter ``fund`` and ``symbol``, the capital fund
+    ``into``, and what the quarter ``keep``s; the rules given replace the earlier ones and reach the quarters with
+    quarter_sync. Returns the merged ``config``."""
+    t = Treasury["1"] or Treasury(id="1")
     t.config = {**(t.config or {}), **args["config"]}
     return {"config": t.config}
 

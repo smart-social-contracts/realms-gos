@@ -14,6 +14,7 @@ from basilisk import Principal  # tests replace it, to accept their names for pr
 import ggg
 import ggg_did
 from api import crypto, links, tasks
+from api.treasury import EPOCHS
 from api.proposals import settings
 from api.setup import VERSION
 from core import chain, compliance, pending
@@ -388,10 +389,6 @@ FIX = {
     "SetupStep": lambda s: s if len(s) == 1 else {camel(s.get("step")): {k: v for k, v in s.items() if k != "step"}},
     "DepartmentEditArgsHead": lambda h: h if isinstance(h, dict) else {"Set": h} if h else {"Clear": None},
 }
-
-
-# Realms GOS names its treasury epochs; GGG has their length.
-EPOCHS = {"monthly": 30 * 86400, "quarterly": 91 * 86400, "yearly": 365 * 86400}
 
 
 def entry(user):
@@ -823,7 +820,8 @@ def synced(out, args):
     of the directory, which defines nothing."""
     if "directory" not in out:
         return directory(local("quarter_directory"))
-    return {**directory({"capital": chain.self_id(), "quarters": out["directory"]}), "zones": out["zones"]}
+    return {**directory({"capital": chain.self_id(), "quarters": out["directory"]}), "zones": out["zones"],
+            "sweep": out.get("sweep")}
 
 
 def local(name, **args):
