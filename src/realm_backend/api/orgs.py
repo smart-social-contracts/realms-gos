@@ -3,6 +3,7 @@ from core import it_team
 from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
 from ggg import Appointment, Authority, Department, Organization, Position, Proposal, Realm, User, UserProfile
+from ggg.identity.organization import KINDS
 from core.op import op
 from core.pending import held, principal, principals, quoted
 from core.ratio import ONE, refuse_renamed
@@ -324,13 +325,22 @@ def admin_of(c, args):
     return administered(c.user, args)
 
 
+def kind_of(args, default):
+    """The ``kind`` an organization call names, or ``default`` when it names none."""
+    kind = args.get("kind", default)
+    if kind not in KINDS:
+        raise Fail(f"kind is one of {', '.join(KINDS)}")
+    return kind
+
+
 @op("organization.add", returns="organization")
 def organization_register(c, args):
-    """Register ``organization`` (a new name) with an optional ``description``; you become its only admin.
-    Returns ``organization``."""
+    """Register ``organization`` (a new name) with an optional ``description`` and ``kind`` (company, party, union,
+    association, or other, the default); you become its only admin. Returns ``organization``."""
     if Organization[args["organization"]]:
         raise Conflict(f"organization {args['organization']} exists")
-    Organization(id=args["organization"], description=args.get("description", ""), admins=[c.user])
+    Organization(id=args["organization"], description=args.get("description", ""), admins=[c.user],
+                 kind=kind_of(args, "other"))
     return {"organization": args["organization"]}
 
 
@@ -346,11 +356,12 @@ def changing_admins(user, args, grant):
 
 @op("organization.edit", returns="organization", summary=changing_admins, title="Change an organisation's admins")
 def organization_edit(c, args):
-    """As an admin of active ``organization``, change its ``description`` or replace its ``admins`` (at least one);
-    a field you leave out stays."""
+    """As an admin of active ``organization``, change its ``description``, its ``kind`` or replace its ``admins`` (at
+    least one); a field you leave out stays."""
     org = admin_of(c, args)
     if "admins" in args and not args["admins"]:
         raise Conflict("an organization keeps at least one admin")
+    org.kind = kind_of(args, org.kind)
     org.description, org.admins = args.get("description", org.description), args.get("admins", org.admins)
     return {"organization": org.id}
 
@@ -408,13 +419,15 @@ def organization_set_status(c, args):
 def organization_get(c, args):
     """``organization`` with its status and admins, and its ``positions`` with their holders."""
     org = find(Organization, args["organization"])
-    return {"organization": view(org, "id", "description", "status", "admins"),
+    return {"organization": view(org, "id", "description", "status", "admins", "kind"),
             "positions": [seat_view(p) for p in org.positions]}
 
 
 @op("realm.data_view", read=True, returns="organizations")
 def organization_list(c, args):
     """Organizations, ``count`` rows at a time (default 100, at most 500) from row ``from``, optionally only those with
-    ``status``. Returns ``organizations`` and ``next``; a filtered page can be short or empty, so follow ``next``."""
-    rows, nxt = page(Organization, args, lambda o: not args.get("status") or o.status == args["status"])
-    return {"organizations": [view(o, "id", "description", "status") for o in rows], "next": nxt}
+    ``status`` or ``kind``. Returns ``organizations`` and ``next``; a filtered page can be short or empty, so follow
+    ``next``."""
+    wanted = {f: args[f] for f in ("status", "kind") if args.get(f)}
+    rows, nxt = page(Organization, args, lambda o: all(getattr(o, f) == v for f, v in wanted.items()))
+    return {"organizations": [view(o, "id", "description", "status", "kind") for o in rows], "next": nxt}
