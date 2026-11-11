@@ -55,6 +55,7 @@ ACTIVATE = "codex_activate"
 # call fails, so a chapter that loops on reads costs the caller this much and never the whole message.
 READS = 2_000_000_000
 REMINDER = 24 * 3600  # seconds a method keeps failing before the IT admin team is told again
+CODEX_PAGE = "/extensions/codex_viewer"  # where an IT admin team notification takes them: the failing chapters, and the revert
 # What a chapter may read of GGG's entities, and nothing else: what legislation needs to decide, never a key, a code,
 # a person's private data, a sealed bid, who voted what, a grant or a payment account, nor what one member was told.
 # A Request leaves out its ``body`` and ``reply`` (personal data) and its ``decision`` (free text until GGG types it as
@@ -277,6 +278,12 @@ def compute(op, decimals=None, **kwargs):
     return outcome["result"]
 
 
+def views():
+    """The flattened view of every domain of the running layered codex (§5.9), ``{domain: {"domain", "path",
+    "members"}}``, as the sandbox keeps it loaded; empty when no layered codex is active. It reads no row of GGG."""
+    return _call("views") if _ensure() else {}
+
+
 def _ensure():
     """Whether a layered codex is active, loading it on first use: a new heap, or a query after one."""
     if _state["codex"] is UNKNOWN:
@@ -416,11 +423,24 @@ def _effects(effects):
     return []
 
 
+def _entity_refs(value):
+    """``value`` with each GGG ``Ref`` in it, ``{kind, id}`` as a chapter's ``Ref("external", "AGE")`` crosses, written
+    the way the realm's operations take an entity: ``"External:AGE"``."""
+    if isinstance(value, dict):
+        if set(value) == {"kind", "id"} and all(isinstance(v, str) for v in value.values()):
+            return f"{value['kind'][:1].upper() + value['kind'][1:]}:{value['id']}"
+        return {k: _entity_refs(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_entity_refs(v) for v in value]
+    return value
+
+
 def _effect(name, args):
     """One effect, as a reply ``{ok, ...}``: a governed operation becomes a proposal the realm files, whatever its
     department's policy, never a direct call; a reserved operation, an operation about a proposal or a vote on one,
     and an effect that would set a time zone (§4.5) are refused; whatever else fails is the chapter's failure,
     never the caller's."""
+    args = _entity_refs(args)
     if name in RESERVED or is_reserved(name, args):
         return {"ok": False, "error": f"{name} is about a reserved operation: no chapter may call it"}
     if "timezone" in args:
@@ -717,7 +737,8 @@ def _tell_it_team(file, method, error):
     if team is None:
         return False
     Notification(id=next_id(Notification, "N"), recipient=f"Department:{team.id}", topic="codex.failing",
-                 title=f"The codex fails: {method} of {file}", body=error[:500], sender=chain.self_id(), at=chain.now())
+                 title=f"The codex fails: {method} of {file}", body=error[:500], href=CODEX_PAGE, sender=chain.self_id(),
+                 at=chain.now())
     return True
 
 

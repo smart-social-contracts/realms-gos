@@ -294,10 +294,22 @@ for first in ("spin", "spin_in_handler", "fail"):
 print(json.dumps(out))
 '''
 # The running codex's sandbox killed by the meter, as a long-lived one can end: its budget run out in an except body.
+# It keeps a ``guard``: the next guarded operation asks the dead sandbox for it, and a sandbox without one fails as a
+# missing function, which denies the operation, instead of as a spent budget, which reloads the codex.
 KILL = '''
 import json
 from core import legislation, sandbox
-program = "def guard(**kwargs):\\n    return []\\n\\ndef spin():\\n    try:\\n        raise ValueError()\\n    except ValueError:\\n        while True:\\n            pass\\n"
+program = """
+def guard(**kwargs):
+    return []
+
+def spin():
+    try:
+        raise ValueError()
+    except ValueError:
+        while True:
+            pass
+"""
 box = sandbox.Resident(program, legislation._answer, budget=100_000)
 try:
     box.call("spin")
@@ -305,7 +317,7 @@ except RuntimeError as e:
     error = str(e)
 legislation._state["box"].close()
 legislation._state["box"] = box
-print(json.dumps({"error": error, "loaded": legislation._state["box"] is not None}))
+print(json.dumps({"error": error}))
 '''
 # A codex row made active without loading it, as a realm finds one after an upgrade; its chapter cannot load.
 BROKEN = '''
@@ -389,6 +401,16 @@ def test_a_activation_loads_the_chapters_once_and_runs_on_codex_activate(town, p
     print(f"load: {got['load']:,} instructions (spawn {parts['spawn']:,}, the library imported from text {parts['library']:,}, "
           f"{parts['count']} chapters {parts['chapters']:,}, checks {parts['checks']:,}); activate (hook and effect): {got['activate']:,}")
     assert got["load"] < 2_000_000_000, got
+
+
+def test_a1_the_flattened_view_is_a_query_of_the_sandbox_the_realm_loaded(town, people):
+    views = ok(town, "codex_views", people["alice"], query=True)["views"]
+    assert sorted(views) == ["data_protection", "local_regime", "procedure", "realm", "register", "water"]
+    assert views["data_protection"]["path"] == ["eu", "eu/es", TOWN]
+    guard = next(m for m in views["data_protection"]["members"] if m["name"] == "check_proposal_create")
+    assert (guard["kind"], guard["mark"]) == ("guard", "extension")
+    assert [(layer["source"], layer["legislation"]) for layer in guard["layers"]] == [
+        ("eu", "GDPR Art. 6"), ("eu/es", "Ley Orgánica 3/2018 Art. 8"), (TOWN, None)]
 
 
 def test_b_guards_deny_down_the_layers_and_hooks_notify_as_the_codex(town, people):
@@ -507,10 +529,9 @@ def test_e4_a_sandbox_the_meter_killed_is_replaced_by_the_next_guarded_operation
     then a guarded operation runs."""
     founder = people["founder"]
     got = run(town, KILL)
-    assert got["error"].endswith("sandbox terminated after grace period") and got["loaded"], got
+    assert got["error"].endswith("sandbox terminated after grace period"), got
     assert ok(town, "proposal_create", founder, title="after the kill")["proposal"]
     assert failures(town, founder) == {}
-
 
 
 def test_f_what_crosses_a_domain_boundary_is_plain_data_or_the_public_view(town, people):

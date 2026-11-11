@@ -15,7 +15,7 @@ from core import layered_codex as store
 from core import legislation, localtime, op, sandbox
 from core.db import each
 
-from ggg import Attribute, Codex, Human, Invoice, Land, LayeredCodex, Quarter, Realm, TaxDeclaration, Token
+from ggg import Attribute, Codex, Dispatch, External, Human, Invoice, Land, LayeredCodex, Quarter, Realm, TaxDeclaration, Token
 from kit import call, ok, rows
 from test_taxes import CENTS, adopt_policy, setup_taxes
 from test_treasury import setup_finance
@@ -388,6 +388,23 @@ class Register(above("register")):
     assert "on_t_act" not in failures().get("x/town/register.py", {})
     # the nested t_act ran as the codex: no guard and no hook ran again for it
     assert LOG[before:] == [("es:unknown op", "codex"), ("town:es:ctl", "codex")]
+
+
+def test_a_hooks_effect_names_an_entity_as_a_ref_and_the_realm_takes_it_as_kind_and_id_in_text():
+    """A chapter writes ``Ref("external", "AGE")`` as GGG's Ref; the realm's ``notification_send`` takes ``External:AGE``."""
+    town({(TOWN, "register"): '''
+from realms.legislation import Ref, above
+
+class Register(above("register")):
+    def on_t_act(self, event):
+        self.ggg.notification_send(recipient=Ref("external", "AGE"), topic="ordinance", title="told", body="x")
+        self.ggg.notification_send(recipient=Ref("user", "alice"), topic="ordinance", title="told", body="x")
+'''})
+    External(id="AGE", name="AGE", kind="authority", channel="manual")
+    ok("t_act", what="adopted", basis="task", legislation="x")
+    assert failures() == {}
+    assert [(d.to, d.title) for d in each(Dispatch, "to", "AGE")] == [("AGE", "told")]
+    assert [n["title"] for n in ok("notification_list", "alice", query=True)["notifications"]] == ["told"]
 
 
 def test_compute_answers_through_the_seam_and_places_a_member_in_a_quarter():
@@ -829,6 +846,18 @@ def test_build_returns_the_views_the_errors_and_the_cedar():
                              "chapters": [{"source": TOWN, "domain": "tax", "sha256": store.checksum(forbid)}]},
                             {store.checksum(forbid): forbid})
     assert out["errors"] == [] and '@id("x/town/tax/cap")' in out["cedar"] and "context.facts.rate > 1100000" in out["cedar"]
+
+
+def test_the_flattened_view_of_every_domain_is_a_public_read():
+    assert ok("codex_views", "stranger", query=True)["views"] == {}  # no layered codex is running
+    town()
+    views = ok("codex_views", "stranger", query=True)["views"]
+    assert sorted(views) == ["data_protection", "local_regime", "procedure", "realm"]
+    assert views["data_protection"]["path"] == ["eu", "eu/es", TOWN]
+    guard = next(m for m in views["data_protection"]["members"] if m["name"] == "check_t_act")
+    assert (guard["kind"], guard["mark"]) == ("guard", "extension")
+    assert [(layer["source"], layer["legislation"]) for layer in guard["layers"]][:2] == [
+        ("eu", "GDPR Art. 6"), ("eu/es", "Ley Orgánica 3/2018 Art. 8")]
 
 
 def test_the_reserved_list_and_the_hook_only_list_are_the_librarys():

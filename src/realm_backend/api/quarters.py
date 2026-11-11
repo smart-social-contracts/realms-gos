@@ -252,7 +252,8 @@ def apply_directory(reply):
         sweeps.keep(reply["sweep"])
     r = realm()
     r.sync_state = {**(r.sync_state or {}), "at": chain.now(), "codex": reply["codex"], "index": index,
-                    "compliance": flag, "label": label, "sync_every": reply.get("sync_every", SYNC_EVERY)}
+                    "compliance": flag, "label": label, "sync_every": reply.get("sync_every", SYNC_EVERY),
+                    "official_timezone": reply.get("official_timezone", "")}  # a capital on the previous release sends none
 
 
 def apply_zones(definitions):
@@ -681,7 +682,8 @@ def quarter_sync(c, args):
     """On a quarter: report to the capital and take its directory, the zones the realm defines and the settings it keeps
     in sync; a quarter may run it at any time, besides its catch-up timer. On the capital: answer that call, which
     carries ``population``, ``codex_id``, ``codex_version``, optionally the ``zones`` its members live in (zone id to
-    how many) and a federal vote ``leg``; the answer carries the synced ``settings`` and ``sync_every``."""
+    how many) and a federal vote ``leg``; the answer carries the synced ``settings``, ``sync_every`` and the capital's
+    ``official_timezone``."""
     if federated():
         reply = yield from sync()
         return {"quarters": len(reply["directory"]), "drifting": drifting(codex()["version"])}
@@ -691,7 +693,8 @@ def quarter_sync(c, args):
     from api import sweeps  # it imports this module
 
     return {"directory": directory(), "codex": propagation.in_force(), "index": q.index, "zones": zone_definitions(),
-            "settings": synced_values(), "sync_every": sync_every(), "sweep": sweeps.rules_for_quarters()}
+            "settings": synced_values(), "sync_every": sync_every(), "official_timezone": realm().timezone,
+            "sweep": sweeps.rules_for_quarters()}
 
 
 def sync():
@@ -704,6 +707,16 @@ def sync():
     if "settings" in reply:  # a capital on the previous release sends none
         yield from apply_settings(reply["settings"])
     return reply
+
+
+def official_timezone():
+    """The zone of the realm's official time (docs/codices/layered-codex.md §4.5): the capital's. A quarter keeps the one
+    its capital named at its last sync, its own until the first, and so learns a change of the capital's at its next sync.
+    The zone is not a synced setting: the quarter's own stays its own."""
+    own = realm().timezone
+    if not federated():
+        return own
+    return (realm().sync_state or {}).get("official_timezone") or own
 
 
 def sync_every():

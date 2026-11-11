@@ -13,7 +13,7 @@ makes none (``only_capital``).
 import json
 
 from api import proposals, quarters
-from core import chain
+from core import chain, journal
 from core import compliance
 from core import layered_codex as store
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, page, view, window
@@ -487,6 +487,7 @@ def legislation_release_publish(c, args):
                       effective_from=args["effective_from"], commit=args["commit"],
                       chapters={c["domain"]: c["checksum"] for c in args["chapters"]},
                       calendar=args.get("calendar") or "", notes=args.get("notes") or {})
+    journal.release_published(release)
     return {"release": release.id}
 
 
