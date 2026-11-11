@@ -419,7 +419,7 @@ def test_h_the_sample_change_list_adds_valencias_tax_chapter_and_the_ordinance_h
     sample = json.loads((CHANGES / VALENCIA / IBI_BONUS).read_text())["set"][0]
     assert now["chapters"][sample["chapter"]]["url"] == sample["url"]
 
-    # Spain's hook tells the authorities, CV's sets the languages, València's tells every member in hers (§5.2).
+    # Spain's hook tells the authorities, CV's sets the languages, València's tells every member in their language (§5.2).
     assert [(d["to"], d["topic"], d["title"]) for d in dispatches(valencia)[told:]] == [
         ("AGE", "ordinance", "Comunicació d'acord"), ("GVA", "ordinance", "Comunicació d'acord")]
     assert {who: len(notices(valencia, who)) for who in valencia.members} == {who: n + 1 for who, n in heard.items()}
