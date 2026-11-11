@@ -42,7 +42,9 @@ and `query=True` reads. A realm's id is `realm.cid`.
   once the proposal is scheduled, and `realm.run_at_effective_at(id)` lets the time pass and returns it, executed.
   Linking two realms by both votes is two such calls, one on each side.
 - **Quarters.** `net.register_quarters(capital, north, south)` makes each a quarter of `capital`, the way
-  `api.quarters.adopt` does, and lets them sync until each knows the others.
+  `api.quarters.adopt` does, and lets them sync until each knows the others. `net.realm(name, launch=False)` leaves a
+  realm in setup, and `realm.add_controller(capital.cid)` makes the capital one of its controllers, as Casals does for
+  a quarter it builds.
 - **Time.** `net.wait(seconds)` moves the clock of the whole instance and runs the timers that fall due and the
   calls they make. `net.wait_until(reached, step=1, rounds=1)` moves it a step at a time until `reached()` (it fails
   after `limit` steps, 200 by default), to stop a flow of timer steps between two of them. Wait on the network, not

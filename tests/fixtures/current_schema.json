@@ -3866,6 +3866,11 @@
     "kind": "property",
     "type": "Json"
    },
+   "terms": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
    "test_flags": {
     "constraints": {
      "max_length": 65536

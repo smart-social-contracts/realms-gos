@@ -215,8 +215,9 @@ Where the two interfaces cannot say the same thing, the `ggg.did` methods do thi
 Realms GOS also differs from the model in what it keeps:
 
 - `Event` does not yet record whether the caller acted as an agent, nor its supervisor (I-ALL-7);
-- `realm_configure` and its variants also take Realms GOS settings (`ai_assistant_enabled`,
-  `test_mode`, `primary_color`, token and NFT canister ids), which `ggg.did` would carry as
+- `realm_configure` and its variants also take Realms GOS settings (`ai_assistant_enabled`, `terms`,
+  `test_mode`, `primary_color`, token and NFT canister ids), and `quarter_configure` takes `sync_every`, the
+  seconds between a quarter's catch-up syncs (an hour to a week), which `ggg.did` would carry as
   `realms_gos_` fields, and setup has `install` and `infrastructure` steps of its own
   (`realm_configure_infrastructure` is a Realms GOS operation, not GGG). They do what GGG's
   `host_install` and `host_infrastructure` do, which run the same code; the GaaS installer still
@@ -267,6 +268,8 @@ Next to the model's fields, the `Realm` row holds:
 - scaling and sync: `auto_scale_enabled`, `scale_in_flight`, `scale_requested_at`,
   `bootstrap_state`, `sync_state`, `codex_install_state`, `last_activity_at`;
 - `ai_assistant_enabled`;
+- `terms`, the realm's terms text (at most 20,000 characters, as is the `manifesto`), which `realm_configure` sets
+  and `realm_info` shows; a capital keeps it in sync for its quarters with the rest of its identity;
 - test flags: `can_test_mode`, `test_mode` and the `test_mode_*` switches.
 
 ## 3. Entities Realms GOS adds
@@ -328,6 +331,7 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `journal_capital_issue` (on a quarter, the capital's issue of `day`, asked of the capital by an update, because a read cannot call another canister; it changes nothing, so it leaves no audit event and runs no legislation) | `realm.data_view` | delegable | A quarter's journal page shows the capital's issue |
 | `shell` (REPL; calls operations as the caller) | `shell.execute` | delegable | An admin runs `ops.proposal_list({"status": "voting"})` |
 | `status`, `version` | — (public) | read | Thin summaries of `realm_info` |
+| `realm_image` | — (public) | read | One branding image (`logo_url` or `background_image_url`): what a quarter reads of its capital's when it changes, one a call, since two may not fit in one reply |
 | `token_catalog` | — (public) | read | The ICRC-1 ledgers this GOS ships with, not the realm's registered tokens |
 | `scale_status` | — (public) | read | Quarter populations against this GOS's auto-scale capacity |
 | `quarter_add` (on the capital: Casals grows the realm's stand by <stand>-quarter-<n>, then the capital makes that canister a quarter and registers it; filed by the realm itself once a quarter is wanted) | `quarter.register` | governed, delegable | The members vote for a fourth quarter → Casals builds `agora-quarter-4` |

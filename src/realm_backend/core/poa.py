@@ -54,6 +54,7 @@ OWN = {
     # Public reads, and an upgrade step for controllers: no member's act.
     "extension_list": ("none", None, None, None),
     "journal_issue": ("none", None, None, None),
+    "realm_image": ("none", None, None, None),
     "ops_list": ("none", None, None, None),
     "scale_status": ("none", None, None, None),
     "status": ("none", None, None, None),
