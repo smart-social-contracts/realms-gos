@@ -1744,8 +1744,9 @@ other core extensions of [`core-extensions.json`](../../core-extensions.json)
 **How it is built.** An entry (`JournalEntry`) is appended when the realm learns of what it reports, and is never
 changed: the switch of a layered codex, every revert (§10), each release the realm's checks find for the first time
 (`release_found`, stamped with the check's time, §11.2) and, on a sync source, each release it publishes
-(`release_published`). A release's entry names its `source` and `version` and the time it is `effective_from`. It
-holds the instant and the realm's local day on the capital's clock at that moment, so a change of the realm's zone
+(`release_published`). A release's entry names its `source` and `version` and the time it is `effective_from`. An
+install's and a revert's entry name the `proposal` that decided it, if any, and the `vote` it ended with (the votes for,
+against and abstaining, and how many could vote: counts, never who voted). It holds the instant and the realm's local day on the capital's clock at that moment, so a change of the realm's zone
 moves no past issue. An issue
 is not stored. `journal_issue {day}` returns the entries of a day, numbered from the journal's first day (the local
 day the realm first started with the journal, moved back if the realm then sets a zone west of UTC), for every day
