@@ -748,7 +748,7 @@ class LocalRegime(above("local_regime")):
 The runtime runs Spain's, then CV's, then València's `on_codex_install` when the install proposal executes. An
 ordinance with an `effective_at` waits `pending` from its acceptance and executes at that time, which is the switch
 (§9.2 step 6): the hooks do not run in between, so the communications of Art. 65.2 go out on the day the ordinance takes
-effect. **The period of Art. 65.2 is not modelled yet**, and a follow-up will: the period really runs from the
+effect. **The period of Art. 65.2 is not modelled yet**, and [#680](https://github.com/smart-social-contracts/realms-gos/issues/680) will: the period really runs from the
 authorities' receipt of the communication, which no chapter sends before the switch. What the realm enforces today is
 Spain's guard on `proposal_create`, which makes the proposer set `effective_at` at least 15 working days after the
 vote can close (`working_days(15)`, counted on the realm's calendar by Spain's procedure chapter, §4), so the proposer
