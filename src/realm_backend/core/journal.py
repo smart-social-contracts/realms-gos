@@ -15,7 +15,7 @@ from core.db import Fail, NotFound, each, next_id, view
 from ggg import Extension, JournalEntry, LayeredCodex, Realm
 
 EXTENSION = "journal"
-STATE = "journal"  # in Realm.manifest_data: {"first_day": "YYYY-MM-DD", "failure": the last entry not recorded}
+STATE = "journal"  # in Realm.manifest_data: {"first_day": "YYYY-MM-DD", "failure": the last entry not recorded, why}
 SHOWN = ("id", "at", "kind", "details")
 
 
@@ -91,9 +91,13 @@ def record(kind, **details):
     if not publishes():
         return None
     allowed = allowed_fields()
+    return append(kind, {name: value for name, value in details.items() if name in allowed})
+
+
+def append(kind, details):
+    """Append an entry of ``kind`` with ``details`` as they are, stamped now, and return it."""
     at = chain.now()
-    return JournalEntry(id=next_id(JournalEntry, "E"), day=local_day(at), at=at, kind=kind,
-                        details={name: value for name, value in details.items() if name in allowed})
+    return JournalEntry(id=next_id(JournalEntry, "E"), day=local_day(at), at=at, kind=kind, details=details)
 
 
 def layers_of(codex):
@@ -104,30 +108,52 @@ def layers_of(codex):
             for source in codex.layers]
 
 
-def reported(kind, details):
-    """Record an entry of ``kind`` for a change the realm has already made, its details given by the function
-    ``details`` so that working them out is guarded too. The journal only reports: whatever goes wrong here, the change
-    stands (a revert above all, the realm's floor, §10), and the error is kept in the journal's state in place of the
-    entry."""
+def reported(kind, change, details):
+    """Record an entry of ``kind`` for a change the realm has already made: ``change`` names it by its codices, and the
+    function ``details`` gives the rest, so that working it out is guarded too. The journal only reports: whatever goes
+    wrong here, the change stands (a revert above all, the realm's floor, §10), and ``not_recorded`` says so."""
     try:
-        record(kind, **details())
+        if not publishes():
+            return
+        record(kind, **change, **details())
     except Exception as e:  # noqa: BLE001  whatever it is, the switch or the revert that called it goes on
+        not_recorded(kind, change, e)
+
+
+def not_recorded(kind, change, error):
+    """The entry of ``kind`` for ``change`` could not be recorded. The issue of the day says which change it misses, in
+    an entry ``not_recorded`` that holds only the kind and the codices' ids: they name no person, and the personal-data
+    rules may be what failed. The ``error`` is kept for the IT admin team, who read it in codex_status (``failure``).
+    Each is guarded on its own, writing the error out too (an exception's text is its own code): neither may stop the
+    change, and one still goes in when the other fails."""
+    try:
+        append("not_recorded", {"kind": kind, **change})
+    except Exception:  # noqa: BLE001  the error below is still kept
+        pass
+    try:
         realm = Realm["1"]
-        failure = {"kind": kind, "at": chain.now(), "error": f"{type(e).__name__}: {e}"[:500]}
+        failure = {"kind": kind, **change, "at": chain.now(), "error": f"{type(error).__name__}: {error}"[:500]}
         realm.manifest_data = {**realm.manifest_data, STATE: {**realm.manifest_data.get(STATE, {}), "failure": failure}}
+    except Exception:  # noqa: BLE001  nothing more can be done, and the change stands
+        pass
+
+
+def failure():
+    """The last entry the journal could not record, which change it was for, when and why; None if there is none."""
+    return Realm["1"].manifest_data.get(STATE, {}).get("failure")
 
 
 def codex_installed(codex):
     """The layered ``codex`` has just become the realm's legislation (api.codex.switch)."""
-    reported("codex_installed", lambda: {"codex": codex.id, "layers": layers_of(codex), "proposal": codex.proposal,
-                                         "activates_at": codex.activates_at})
+    reported("codex_installed", {"codex": codex.id},
+             lambda: {"layers": layers_of(codex), "proposal": codex.proposal, "activates_at": codex.activates_at})
 
 
 def codex_reverted(restored, reverted):
     """A revert has made the earlier codex ``restored`` the realm's legislation again in place of ``reverted``
     (api.codex.restore). Either may be a legacy codex, which has no layers."""
-    reported("codex_reverted", lambda: {"codex": restored.id, "reverted": reverted.id,
-                                        "layers": layers_of(restored) if isinstance(restored, LayeredCodex) else []})
+    reported("codex_reverted", {"codex": restored.id, "reverted": reverted.id},
+             lambda: {"layers": layers_of(restored) if isinstance(restored, LayeredCodex) else []})
 
 
 # ---- Issues

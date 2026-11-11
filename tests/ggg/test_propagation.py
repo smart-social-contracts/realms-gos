@@ -3,20 +3,28 @@ quarters what it staged, a quarter stages it from its capital and switches at T,
 calls between quarters carry the sender's codex checksum. The other canisters are scripted peers
 (tests/ggg/test_scripted_peers.py). tests/deployed/test_propagation.py runs the same on a federation of real wasms."""
 
+import json
+
 import fake_chain
 import pytest
 import world
 from api import propagation, quarters
+from core import change_list as change_list_rules
 from core import compliance
 from core import legislation
+from core.change_list import layers_for
+from core.db import JSON_MAX
 from fake_chain import peer, rejects
 from ggg import (FederalVoteLeg, FederationMessage, Forward, InstallJob, LayeredCodex, Proposal, Quarter, Realm, Task,
                  TaskSchedule)
 from kit import call, fire_timers, later, ok, rows
 from test_federation import leg, open_fv
-from test_installs import HOUR, change_list, expected_id, fire_due, install, job, own_layer, run_job, schedule, sha, status
+from test_installs import (HOUR, change_list, chapter_text, expected_id, fire_due, install, job, own_layer, run_job, schedule,
+                           sha, status)
 from test_legislation_runtime import TOWN, activate, layered
 from test_quarters import CAPITAL, capital, quarter
+from test_release_installs import codex_id as release_id
+from test_release_installs import entry as released
 
 STAGED = {"ok": True, "staged": "started", "job": "J-1"}
 OTHER = "sha256:" + "b" * 64
@@ -48,7 +56,8 @@ def test_the_capital_tells_each_active_quarter_what_it_staged_and_when_it_switch
     p = schedule(args)
     run_job()
     assert job()["step"] == "wait"
-    body = {"codex": expected_id(layer), "checksum": args["checksum"], "at": Proposal[p].effective_at, "proposal": p}
+    body = {"codex": expected_id(layer), "checksum": args["checksum"], "at": Proposal[p].effective_at, "proposal": p,
+            "layers": {"relays": [], "vouchers": {}, "vouching": None}}  # an own layer only: nothing from above
     for north_or_south in federation:
         assert north_or_south.sent("federation_message") == [{"topic": "codex.stage", "body": body, "codex": ""}]
     messages = [(m.topic, m.body, list(m.response)) for m in rows(FederationMessage)]
@@ -74,11 +83,62 @@ def test_a_quarter_that_cannot_be_reached_holds_up_no_other_and_the_record_says_
     assert answers["north"] == {"ok": False, "error": "federation_message on north failed: the canister is stopped"}
 
 
-def test_a_realm_without_quarters_announces_to_no_one():
+def test_a_realm_without_quarters_announces_to_no_one(monkeypatch):
     world.build()
     ok("governance_update", "ctl", voting_window=0)
+    monkeypatch.setattr(propagation, "JSON_MAX", 10)  # nobody to tell: no announcement is too big
     install(change_list(own_layer()))
-    assert FederationMessage.count() == 0
+    assert FederationMessage.count() == 0 and job()["status"] == "done"
+
+
+def worst_layers():
+    """The layers a capital stages at the worst it expects: 16 layers of every domain and a calendar, source ids of 64
+    characters, a release with the most notes a record allows, and a record that vouches for it listing a thousand
+    layers, which alone would take the body past what a message's record holds."""
+    def source(n):
+        return f"eu/{n:04d}-" + "x" * 56
+
+    def release(n):
+        return {"source": source(n), "version": "9" * 64, "chapters": {d: OTHER for d in change_list_rules.DOMAINS},
+                "calendar": OTHER}
+
+    running = [release(n) for n in range(16)]
+    order = [source(n) for n in range(1000)]
+    vouching = {"key": "src", "by": source(999), "order": order,
+                "release": {**running[-1], "published": 5, "effective_from": 6, "commit": "c" * 64,
+                            "notes": {"en": "x" * (8 * 1024 - 12)}}}
+    return {"relays": [{"source": source(15), "layers": running}], "vouchers": {r["source"]: source(999) for r in running},
+            "vouching": vouching}
+
+
+def staged_job(layers):
+    LayeredCodex(id=OTHER, activates_at=fake_chain.now() + HOUR)
+    job = InstallJob(id="J-1", proposal="P-1", change_list={"url": "", "checksum": OTHER}, started_at=fake_chain.now())
+    job.staged = {"codex": OTHER, "layers": layers}
+    return job
+
+
+def test_at_the_worst_a_quarter_is_told_the_order_of_the_layers_the_codex_runs_and_the_message_is_recorded(federation):
+    layers = worst_layers()
+    assert len(json.dumps(layers)) > JSON_MAX  # as the capital staged them, the body could not be recorded
+    propagation.announce(staged_job(layers))
+    fire_timers()
+    for quarter_peer in federation:
+        body = quarter_peer.sent("federation_message")[0]["body"]
+        assert body["layers"]["vouching"]["order"] == [r["source"] for r in layers["relays"][0]["layers"]]
+        assert body["layers"]["relays"] == layers["relays"] and len(json.dumps(body)) <= JSON_MAX
+    assert sorted(list(m.response)[0] for m in rows(FederationMessage)) == ["north", "south"]
+
+
+def test_a_capital_that_cannot_announce_a_codex_to_its_quarters_fails_the_install_and_switches_nothing(
+        federation, monkeypatch):
+    monkeypatch.setattr(propagation, "JSON_MAX", 100)
+    install(change_list(own_layer()))
+    seen = status()
+    assert seen["job"]["status"] == "failed" and "too big to announce to the quarters" in seen["job"]["error"]
+    assert seen["codex"] is None and seen["pending"] is None
+    for quarter_peer in federation:
+        assert [m["topic"] for m in quarter_peer.sent("federation_message") if m["topic"] == "codex.stage"] == []
 
 
 def test_stopping_the_proposal_tells_the_quarters_to_drop_what_they_staged(federation):
@@ -245,6 +305,55 @@ def test_a_quarter_builds_the_codex_the_capital_announced_and_no_other(monkeypat
     call("federation_message", CAPITAL, topic="codex.stage", body=body)
     run_job()
     assert status()["pending"] is None and "not the " + OTHER + " the capital announced" in job()["error"]
+
+
+def release_from_capital():
+    """Release 1.0.0 of arcadia for the realm ``town``: its chapters, its change list, and the layers a capital that
+    syncs from ``src`` staged for it."""
+    chapters = {f"arcadia/{d}": chapter_text(d) for d in ("tax", "procedure")}
+    release = {"source": "arcadia", "version": "1.0.0"}
+    listed = change_list(chapters, realm="town", release=release)
+    layers = layers_for([], [{"key": "src", "source": "src/town", "releases": [released("1.0.0")]}], release)
+    return chapters, listed, layers
+
+
+def test_a_quarter_stages_a_release_with_the_layers_its_capital_staged_and_reads_no_record(monkeypatch):
+    quarter(monkeypatch, "north")
+    chapters, listed, layers = release_from_capital()
+    capital_serving(chapters, listed, running=release_id())
+    body = {"codex": release_id(), "checksum": listed["checksum"], "at": fake_chain.now() + HOUR, "layers": layers}
+    assert call("federation_message", CAPITAL, topic="codex.stage", body=body)["staged"] == "started"
+    run_job()
+    seen = status()
+    assert (seen["job"]["status"], seen["job"]["step"], seen["pending"]["id"]) == ("running", "wait", release_id())
+    assert {(c["route"], c["vouched_by"]) for c in seen["pending"]["chapters"].values()} == {("capital", "src/town")}
+    assert not [c for c in fake_chain.state["calls"] if c[1] == "legislation_releases"]  # it has no record to read
+    later(HOUR)
+    fire_timers()
+    run_job()
+    assert status()["codex"]["id"] == release_id()
+    assert [(r["source"], r["version"]) for r in ok("legislation_releases", "alice")["releases"]] == [("arcadia", "1.0.0")]
+
+
+def test_a_quarter_told_by_a_capital_on_the_previous_release_reads_its_own_records_and_a_release_fails(monkeypatch):
+    quarter(monkeypatch, "north")
+    chapters, listed, _ = release_from_capital()
+    capital_serving(chapters, listed)
+    body = {"codex": release_id(), "checksum": listed["checksum"], "at": fake_chain.now() + HOUR}  # no layers
+    call("federation_message", CAPITAL, topic="codex.stage", body=body)
+    run_job()
+    assert job()["status"] == "failed" and "no sync source relays arcadia" in job()["error"]
+
+
+@pytest.mark.parametrize("layers", [[], {"relays": {}, "vouchers": {}, "vouching": None},
+                                    {"relays": [], "vouchers": [], "vouching": None},
+                                    {"relays": [], "vouchers": {}, "vouching": "src"}])
+def test_layers_that_are_not_an_install_jobs_are_refused(monkeypatch, layers):
+    quarter(monkeypatch, "north")
+    chapters, listed, _ = release_from_capital()
+    body = {"codex": release_id(), "checksum": listed["checksum"], "at": fake_chain.now() + HOUR, "layers": layers}
+    assert "layers are" in call("federation_message", CAPITAL, topic="codex.stage", body=body)["error"]
+    assert InstallJob.count() == 0
 
 
 def test_a_quarter_that_cannot_stage_keeps_its_codex_and_says_why(monkeypatch):

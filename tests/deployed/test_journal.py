@@ -1,8 +1,8 @@
 """The realm's official journal on the real wasm (docs/codices/layered-codex.md §9.6, realms-extensions#54): an issue
 for every day from the realm's first one, the day ending at midnight on the capital's clock across a change of summer
-time, an install and a revert as entries (a malformed config stops no revert), an upgrade that keeps the journal, a
-scheduled install the journal cannot move, and a quarter that issues nothing and shows its capital's issue.
-tests/ggg/test_journal.py runs the same rules in process.
+time, an install and a revert as entries (a malformed config or a failing journal stops no revert), an upgrade that
+keeps the journal, a scheduled install the journal cannot move, and a quarter that issues nothing and shows its
+capital's issue. tests/ggg/test_journal.py runs the same rules in process.
 
 The tests of this module run in order on one network: the clock only goes forward.
 """
@@ -19,6 +19,10 @@ HOUR = 3600
 RULES = ("import ggg\nggg.Extension(id='journal', manifest={'config': {'personal_data': {'entry_fields': "
          "['codex', 'layers', 'proposal', 'activates_at', 'reverted']}}})")
 MALFORMED = "import ggg\nggg.Extension['journal'].manifest = {'config': 'text'}"
+# The journal breaks inside the canister until MEND: the revert it reports must stand all the same.
+BREAK = ("from core import journal\ndef broken(*args):\n    raise ValueError('the journal is broken')\n"
+         "journal.kept = journal.allowed_fields\njournal.allowed_fields = broken")
+MEND = "from core import journal\njournal.allowed_fields = journal.kept"
 RECORD = "from core import journal\nfor _ in range({times}):\n    journal.record('codex_installed')"
 WATER = b'from realms.legislation import above\n\nclass Water(above("water")):\n    pass\n'
 # A query may spend 5 billion instructions: an issue of this many entries costs a small part of it.
@@ -188,3 +192,17 @@ def test_k_a_malformed_personal_data_config_stops_no_revert_and_keeps_nothing(ca
     assert active_id(capital) == back
     entry = issue(capital)["entries"][-1]
     assert (entry["kind"], entry["details"]) == ("codex_reverted", {})
+
+
+def test_l_a_revert_whose_entry_fails_stands_and_the_issue_and_the_it_team_say_which_revert(capital):
+    [back] = [codex["id"] for codex in status(capital)["history"] if codex["status"] == "reverted"]
+    current = active_id(capital)
+    assert "Traceback" not in capital.shell(BREAK)
+    capital.govern("codex_revert", {"codex": back})
+    assert "Traceback" not in capital.shell(MEND)
+    assert active_id(capital) == back
+    missing = {"kind": "codex_reverted", "codex": back, "reverted": current}
+    entry = issue(capital)["entries"][-1]
+    assert (entry["kind"], entry["details"]) == ("not_recorded", missing)
+    seen = status(capital)["journal_failure"]
+    assert seen == {**missing, "at": entry["at"], "error": "ValueError: the journal is broken"}

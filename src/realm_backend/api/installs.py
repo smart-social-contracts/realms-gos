@@ -28,7 +28,8 @@ finished 15 minutes after it was armed (a step that ran out of instructions leav
 ``codex_status`` shows the job, its step and its error.
 
 A quarter stages the codex its capital announced (api.propagation) with the same job, in staging mode: the bytes of the
-change list and of every chapter come from the capital, by checksum, and the switch is at the time the capital gave.
+change list and of every chapter come from the capital, by checksum, as do the layers from above (the quarter reads no
+records), and the switch is at the time the capital gave.
 A quarter that is ready after that time (``confirm``) switches only if the capital still runs the codex.
 """
 
@@ -344,9 +345,10 @@ def check_change_list(job):
 
 
 def fetch_chapters(job):
-    """Step 3: the records are read first, in the first message (``read_records``); then the first chapter of the
-    change list not stored yet, from the capital of the sync source that vouches for its layer, its URL or a mirror;
-    the step runs again, in the next message, until none is missing."""
+    """Step 3: the records are read first, in the first message (``read_records``), unless the job has its layers
+    already (a quarter's, from its capital); then the first chapter of the change list not stored yet, from the capital
+    of the sync source that vouches for its layer, its URL or a mirror; the step runs again, in the next message, until
+    none is missing."""
     listed, _, _ = prepared(job)
     if "layers" not in job.staged:
         yield from read_records(job, listed)
@@ -419,7 +421,7 @@ def fetch_chapter(job, entry):
             return
         except Fail as e:
             refusals.append(str(e))
-    raise Fail(f"{entry['chapter']}: " + "; ".join(refusals))
+    raise Fail(f"{entry['chapter']}: " + ("; ".join(refusals) or "no URL, and no realm vouches for it"))
 
 
 def vouching_capital(job, entry):
@@ -700,15 +702,18 @@ def entries_of(job, planned, vouched_by, listed):
         if chapter in urls and sha256 in fetched_now:
             now = fetched_now[sha256]
             route = now.get("route", "https")  # a job begun before the route was noted fetched by URL alone
-            # a release's change list, built by the realm, gives no size: the bytes the checksum names give it
-            size = urls[chapter]["size"] or len(ChapterSource[sha256].source.encode())
             came = {"route": route, "url": urls[chapter]["urls"][now["url"]] if route == "https" else "",
-                    "fetched_at": now["at"], "size": size}
+                    "fetched_at": now["at"], "size": stored_size(sha256)}
         elif chapter in before and before[chapter]["sha256"] == sha256:
             came = {k: before[chapter].get(k) for k in ("route", "url", "fetched_at", "size")}
         else:
-            came = {"route": "stored", "url": "", "fetched_at": chain.now(),
-                    "size": len(ChapterSource[sha256].source.encode())}
+            came = {"route": "stored", "url": "", "fetched_at": chain.now(), "size": stored_size(sha256)}
         entries[chapter] = {"source": item["source"], "version": item["version"], "sha256": sha256,
                             "vouched_by": vouched_by[chapter], **came}
     return entries
+
+
+def stored_size(sha256):
+    """The size of the bytes stored under ``sha256``: the change list's when it gives one, which they were checked
+    against, and for a chapter a realm served, the only size there is."""
+    return len(ChapterSource[sha256].source.encode())

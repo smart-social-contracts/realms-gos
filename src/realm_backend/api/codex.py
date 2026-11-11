@@ -366,8 +366,9 @@ def codex_status(c, args):
     ones. A layered codex shows its layers, layer paths and chapters (source, version, checksum, who vouched for it,
     route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
     ``job`` the install job running or paused, else the latest, with its step, status and error. ``it_team`` is the
-    department the admins designated to revert fast ("" for none). ``sync_sources`` is what the last check of each
-    active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the realm's
+    department the admins designated to revert fast ("" for none). ``journal_failure`` is the last entry the official
+    journal could not record (the change it was for, when, and why), or None. ``sync_sources`` is what the last check
+    of each active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the realm's
     ``compliance`` against its record, ``checked_at``, the ``error`` that left it ``unknown`` ("" for none) and the
     releases ``installable`` from it; ``check`` the
     ``interval`` of the checks, in hours, and when the next is ``due`` (0 before the realm's first sync source)."""
@@ -386,4 +387,5 @@ def codex_status(c, args):
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
             "pending": shown(waiting) if waiting else None,
             "job": view(job, *JOB_SHOWN) if job else None, "it_team": it_team.department_id(),
-            "sync_sources": sync_checks.found(), "check": sync_checks.schedule_view()}
+            "journal_failure": journal.failure(), "sync_sources": sync_checks.found(),
+            "check": sync_checks.schedule_view()}

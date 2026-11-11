@@ -1125,7 +1125,7 @@ The change list:
 | `realm` | must equal the realm's own source id |
 | `replaces` | must equal the current codex's checksum; otherwise the install is refused as stale |
 | `set[].chapter` | `<source id>/<domain>`. The source must be in one of the realm's layer paths (§3.3); the domain must be in the GGG list. A calendar is set the same way, under the id `<source id>/calendar`, e.g. `eu/es/calendar` |
-| `set[].url`, `mirrors` | https only. The first URL whose bytes match `sha256` and `size` wins. For a layer from above, the bytes may instead come from the sync source's capital (§9.2) |
+| `set[].url`, `mirrors` | https only. The first URL whose bytes match `sha256` and `size` wins. For a layer from above, the bytes may instead come from the sync source's capital (§9.2). A chapter of the `release` may give no `url`, `mirrors` or `size`: a realm then serves its bytes by checksum, the sync source's capital, or a quarter's capital (§9.5) |
 | `remove` | chapters to empty. Allowed only for the realm's own layer. A chapter is not both in `set` and in `remove` |
 | `release` | for legislation from above: `{"source": "eu/es", "version": "2.4.0"}`. `set` must then contain exactly that release's chapters on the realm's layer paths, and its calendar (§3.2) |
 | `report` | optional analysis report (§12.3). The UI shows it, labelled as not checked by the realm |
@@ -1647,7 +1647,8 @@ codex checksum, so a receiver can tell which legislation the sender ran.
 
 - **Announcing.** When the capital's install job has staged the codex (step 5), it tells each active
   quarter, in a message of its own per quarter, `codex.stage`: the codex's checksum, the change list's
-  checksum and T (the proposal's `effective_at`, or the moment the job started when there is none). A quarter
+  checksum, T (the proposal's `effective_at`, or the moment the job started when there is none) and the layers
+  from above it staged from its sync sources' records (step 3). A quarter
   it cannot reach is recorded in the `FederationMessage` of the call and holds up no other. A staged codex the
   capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`; the same
   codex announced for another time replaces the staging. These messages are the realm's own: `federation_message`
@@ -1656,9 +1657,11 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   capital's proposal id is never one of the quarter's, and a job that ends without the switch cancels its task.
 - **Staging in a quarter.** A quarter runs the same install job, in staging mode: the change list and every chapter
   it lacks are read from the capital by checksum (`legislation_chapter`; the capital keeps the change list's
-  bytes in `ChapterSource` like a chapter's), and nothing changes while it stages. One install at a time still
-  holds: a quarter refuses the announcement while an install of its own runs, and a newer announcement replaces a
-  staging in progress. An upgrade pauses the job like any other, and `codex_install_resume` resumes it.
+  bytes in `ChapterSource` like a chapter's), and nothing changes while it stages. A quarter has no sync source:
+  it reads no record and takes the layers from above that its capital announced, its authority for them (so a
+  capital is upgraded before its quarters); the codex it builds must still be the one announced. One install at a
+  time still holds: a quarter refuses the announcement while an install of its own runs, and a newer announcement
+  replaces a staging in progress. An upgrade pauses the job like any other, and `codex_install_resume` resumes it.
 - **The switch.** The quarter schedules `codex_switch_staged` at T as a task of the realm's own, which
   `tasks.rearm()` arms again after an upgrade. At T, once the capital confirms, a staged quarter switches: it
   asks its capital which codex it requires (the answer of `quarter_sync`: the one in force, or the pending one once
@@ -1731,7 +1734,9 @@ issue. A quarter's `journal_issue` returns `issued: false` and names its capital
 capital for its issue through the quarter, as an update, because a read cannot call another canister. The extension's
 manifest holds the personal-data rules as an allow-list of the fields an entry may keep, which the realm applies when
 it records the entry; rules that are not a list of names keep nothing. Nothing that goes wrong in the journal stops
-the switch or the revert it reports: the error is kept in the journal's state in place of the entry.
+the switch or the revert it reports. The issue of that day then holds an entry `not_recorded` instead, which names
+the change it misses by its codices, and the page shows it as a notice; the error itself is for the IT admin team,
+in `codex_status` (`journal_failure`).
 
 No chapter publishes to the journal or waits for a publication: a codex install appears in the realm's
 journal by the extension's own rule, and the statutory waits a chapter needs are expressed through the

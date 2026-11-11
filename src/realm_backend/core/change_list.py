@@ -25,7 +25,8 @@ HEX = "0123456789abcdef"
 def parse(text):
     """The change list in ``text``, checked for shape and limits: its ``realm``, ``replaces``, ``set`` (each entry
     with its ``chapter`` id, the ``source`` and ``domain`` in it, its ``urls``, the URL then its mirrors, its
-    ``sha256`` as ``sha256:<hex>`` and its ``size``), ``remove``, ``release`` and ``summary``."""
+    ``sha256`` as ``sha256:<hex>`` and its ``size``), ``remove``, ``release`` and ``summary``. A chapter of the release
+    may give no URL and no size (``urls`` empty, ``size`` None): a realm serves its bytes, by checksum."""
     try:
         data = json.loads(text, object_pairs_hook=no_repeats)
     except ValueError as e:
@@ -45,17 +46,17 @@ def parse(text):
         raise Fail("set is a list of chapters")
     if len(entries) > MAX_CHAPTERS:
         raise Fail(f"a change list sets at most {MAX_CHAPTERS} chapters, not {len(entries)}")
-    chapters = [_entry(e) for e in entries]
+    release = data.get("release")
+    if release is not None and not (isinstance(release, dict) and isinstance(release.get("source"), str)
+                                    and isinstance(release.get("version"), str)):
+        raise Fail('release is {"source": <source id>, "version": <version>}, or null')
+    chapters = [_entry(e, release) for e in entries]
     names = [c["chapter"] for c in chapters]
     if len(set(names)) != len(names):
         raise Fail("set names a chapter twice")
     remove = data.get("remove", [])
     if not isinstance(remove, list) or not all(isinstance(r, str) for r in remove):
         raise Fail("remove is a list of chapter ids")
-    release = data.get("release")
-    if release is not None and not (isinstance(release, dict) and isinstance(release.get("source"), str)
-                                    and isinstance(release.get("version"), str)):
-        raise Fail('release is {"source": <source id>, "version": <version>}, or null')
     both = sorted(set(names) & set(remove))
     if both:
         raise Fail(f"{both[0]} is both set and removed")
@@ -86,9 +87,20 @@ def no_repeats(pairs, what="the change list"):
     return found
 
 
-def _entry(entry):
+def _entry(entry, release):
     chapter = entry.get("chapter")
     source, domain = chapter_id(chapter)
+    sha256 = entry.get("sha256")
+    if not isinstance(sha256, str) or len(sha256) != 64 or any(ch not in HEX for ch in sha256):
+        raise Fail(f"{chapter}: sha256 is 64 hex digits")
+    served_by_a_realm = release is not None and source == release["source"] and not {"url", "mirrors", "size"} & set(entry)
+    urls, size = ([], None) if served_by_a_realm else (_urls(chapter, entry), _size(chapter, entry))
+    return {"chapter": chapter, "source": source, "domain": domain, "urls": urls, "sha256": "sha256:" + sha256,
+            "size": size}
+
+
+def _urls(chapter, entry):
+    """The chapter's URL, then its mirrors."""
     mirrors = entry.get("mirrors") or []
     if not isinstance(mirrors, list):
         raise Fail(f"{chapter}: mirrors is a list of URLs")
@@ -98,14 +110,14 @@ def _entry(entry):
     for url in urls:
         if not isinstance(url, str) or not url.startswith("https://"):
             raise Fail(f"{chapter}: a chapter is fetched over https, not {url!r}")
-    sha256 = entry.get("sha256")
-    if not isinstance(sha256, str) or len(sha256) != 64 or any(ch not in HEX for ch in sha256):
-        raise Fail(f"{chapter}: sha256 is 64 hex digits")
+    return urls
+
+
+def _size(chapter, entry):
     size = entry.get("size")
     if isinstance(size, bool) or not isinstance(size, int) or not 0 < size <= MAX_CHAPTER:
         raise Fail(f"{chapter}: size is between 1 and {MAX_CHAPTER} bytes ({MAX_CHAPTER // 1024} KB)")
-    return {"chapter": chapter, "source": source, "domain": domain, "urls": urls, "sha256": "sha256:" + sha256,
-            "size": size}
+    return size
 
 
 def library():
