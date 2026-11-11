@@ -1,6 +1,7 @@
 import json
 
 from core import chain, journal
+from core import change_list
 from core import it_team
 from core import layered_codex as store
 from core import legislation
@@ -123,6 +124,9 @@ def switch(waiting):
     from api import propagation  # it imports the install task, which imports this module
 
     chain.set_timer(0, propagation.after_switch)  # a quarter reports to its capital; a capital judges its quarters
+    from api import sync_checks  # it imports the install task, which imports this module
+
+    sync_checks.rejudge()
 
 
 def hooks(codex_id):
@@ -133,20 +137,34 @@ def hooks(codex_id):
         yield from legislation.activate(row)
 
 
-@op("codex.install", governed=realm_wide, returns="codex")
+def filed_install(args, proposal):
+    """A "Propose install" (§11.4) that this realm could not build is refused when it is filed
+    (api.installs.release_of), rather than when the vote has passed."""
+    if change_list.names_release(args):
+        from api import installs  # it imports this module
+
+        installs.release_of(args)
+
+
+@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install)
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
     The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``.
     A change list's ``url`` and ``checksum`` (``sha256:<hex>``, GGG's Code action) install a layered codex instead:
     the install task fetches, checks and builds it step by step (api.installs), and the call returns its ``job``; a
-    proposal with an ``effective_at`` stages it at acceptance and switches at that time. One install at a time."""
-    if "checksum" in args:
-        from api import installs  # it imports this module
+    proposal with an ``effective_at`` stages it at acceptance and switches at that time. One install at a time.
+    A release's ``source`` and ``version`` (GGG's ``CodexSource.Release``, the "Propose install" of §11.4) install
+    that release of a layer from above whole, from the record of the sync source that vouches for it, the realm's own
+    layer unchanged; refused in a realm that has no layer of its own yet, and in a federation. Anyone with
+    ``proposal.create`` may file it, and no guard or forbid of the codex runs on that ``proposal_create``
+    (core.legislation.proposes_release)."""
+    from api import installs  # it imports this module
 
+    if "checksum" in args or change_list.names_release(args):
         return installs.begin(c, args)
     if store.live_job() is not None:
         raise Conflict("an install is running")
-    if "source" in args:
+    if "manifest" in args:
         manifest, source, namespace = args["manifest"], args["source"], None
     else:
         namespace = f"ext/{args['codex']}/{args['version']}"
@@ -255,6 +273,9 @@ def restore(target):
     from api import propagation  # it imports the install task, which imports this module
 
     propagation.reverted(target)  # a capital tells its quarters; a quarter reports to its capital
+    from api import sync_checks  # it imports the install task, which imports this module
+
+    sync_checks.rejudge()
     return {"codex": target.id}
 
 
@@ -346,7 +367,13 @@ def codex_status(c, args):
     route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
     ``job`` the install job running or paused, else the latest, with its step, status and error. ``it_team`` is the
     department the admins designated to revert fast ("" for none). ``journal_failure`` is the last entry the official
-    journal could not record (the change it was for, when, and why), or None."""
+    journal could not record (the change it was for, when, and why), or None. ``sync_sources`` is what the last check
+    of each active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the realm's
+    ``compliance`` against its record, ``checked_at``, the ``error`` that left it ``unknown`` ("" for none) and the
+    releases ``installable`` from it; ``check`` the
+    ``interval`` of the checks, in hours, and when the next is ``due`` (0 before the realm's first sync source)."""
+    from api import sync_checks  # it imports the install task, which imports this module
+
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
     legacy_codex = codex if isinstance(codex, Codex) else None
@@ -360,4 +387,5 @@ def codex_status(c, args):
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
             "pending": shown(waiting) if waiting else None,
             "job": view(job, *JOB_SHOWN) if job else None, "it_team": it_team.department_id(),
-            "journal_failure": journal.failure()}
+            "journal_failure": journal.failure(), "sync_sources": sync_checks.found(),
+            "check": sync_checks.schedule_view()}

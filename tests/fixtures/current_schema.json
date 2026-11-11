@@ -1887,6 +1887,55 @@
   "relationships": {},
   "version": 1
  },
+ "FoundRelease": {
+  "fields": {
+   "effective_from": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "found_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "found_in": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "notes": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "published": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "source": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "version": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
  "Fund": {
   "fields": {
    "allocation_rule": {
@@ -4123,6 +4172,16 @@
  },
  "SyncSource": {
   "fields": {
+   "check_error": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "checked_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
    "checking": {
     "default": false,
     "kind": "property",
@@ -4130,6 +4189,11 @@
    },
    "checksum": {
     "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "compliance": {
+    "default": "\"unknown\"",
     "kind": "property",
     "type": "String"
    },
@@ -4147,6 +4211,14 @@
     "has_default": false,
     "kind": "property",
     "type": "String"
+   },
+   "installable": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
    },
    "name": {
     "default": "",

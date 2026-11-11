@@ -106,11 +106,12 @@ def start(installer=""):
     legislation.warm()  # the active layered codex's sandbox is gone after an upgrade, and a query could not keep one
     installs.pause_after_upgrade()
     tasks.rearm()
-    from api import links, proposals, quarters
+    from api import links, proposals, quarters, sync_checks
 
     links.resume()
     proposals.resume()
     quarters.resume()
+    sync_checks.resume()
 
 
 @op(None, read=True, public=True)

@@ -27,6 +27,7 @@ personal data the audit log keeps out still reaches the legislation that decides
 import json
 
 from core import auth, chain
+from core import change_list
 from core import civil
 from core import compliance
 from core import it_team
@@ -40,7 +41,8 @@ import ggg_facts  # GGG's fact schema: the sandbox imports it from text, and the
 # The operations no chapter may hook, guard or forbid, and those it may only hook, as realms.legislation.chapter lists
 # them; written here too because the realm compiles the library in its own interpreter only when an install checks a
 # change list, and the runtime needs the lists before that (a test keeps them equal).
-RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
+RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove", "codex_check_config",
+            "codex_check_now")
 HOOK_ONLY = ("link_notify",)
 # The federation_message topics that carry a codex across a realm's quarters (api.propagation): like the reserved
 # operations, no chapter, hook or forbid runs on a message that carries one, or a codex could refuse its own revert.
@@ -237,7 +239,7 @@ def run(op, call, args, department, perform, record, read=False):
     which fails closed when the codex is not loaded: nothing may refuse the notice that a link ended. A generator, as
     the operation and the effects may call other canisters."""
     legislated = not read and call.origin != "codex" and not is_reserved(op, args) and _ensure()
-    if legislated and op not in HOOK_ONLY:
+    if legislated and op not in HOOK_ONLY and not proposes_release(op, args):
         _guard(op, args, call, department)
     out = perform()
     if isinstance(out, GENERATOR):
@@ -290,6 +292,16 @@ def is_reserved(op, args):
         return True
     action = _action_about(op, args)
     return isinstance(action, dict) and action.get("op") in RESERVED
+
+
+def proposes_release(op, args):
+    """Whether ``op`` is the ``proposal_create`` of a "Propose install" (§11.4), whose action installs a release of a
+    layer from above (core.change_list.names_release). No guard or forbid of the codex runs on it: the realm votes
+    only on when to install that legislation, whose date the source's legislation set (§2, rule 3). Its hooks run,
+    and the vote follows the realm's rules like any proposal's."""
+    action = args.get("action") if op == "proposal_create" else None
+    return isinstance(action, dict) and action.get("op") == "codex_install" and change_list.names_release(
+        action.get("args"))
 
 
 def _action_about(op, args):

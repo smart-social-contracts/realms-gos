@@ -43,6 +43,9 @@ OWN = {
     # the setup (the admin's once the realm has launched). A fast revert is the IT team's act, in the admin's group.
     "it_team_set": ("direct", "setup", "admin", None),
     "codex_revert_fast": ("direct", "admin", None, None),
+    # When the realm checks its sync sources: the admins' setting and act, outside legislation (§11.2).
+    "codex_check_config": ("direct", "admin", None, None),
+    "codex_check_now": ("direct", "admin", None, None),
     "extension_install": ("direct", "setup", "admin", None),
     "extension_uninstall": ("direct", "setup", "admin", None),
     "extension_set_access": ("direct", "setup", "admin", None),
@@ -59,6 +62,7 @@ OWN = {
     "scale_status": ("none", None, None, None),
     "status": ("none", None, None, None),
     "token_catalog": ("none", None, None, None),
+    "codex_releases_found": ("none", None, None, None),
     "version": ("none", None, None, None),
     "proposal_run_scheduled": ("none", None, None, None),
     "codex_switch_staged": ("none", None, None, None),
