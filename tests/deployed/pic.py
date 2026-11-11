@@ -51,12 +51,13 @@ GGG_ERROR = Types.Variant({
     "GenericError": Types.Record({"error_code": Types.Nat, "message": Types.Text})})
 
 
-def new_pocket_ic():
+def new_pocket_ic(subnet_config=None):
     """A PocketIC instance whose requests wait while the server is busy with a round. A round that takes long, such as
     the install of an 11 MB wasm on a loaded machine, makes it answer 409 to anything else, which the client takes as
     an error. Only a 409 is tried again, for up to ten minutes: a server that is gone, or a request it refuses, fails
-    at once, and one that stays busy fails with a ``RetryError``."""
-    pic = PocketIC()
+    at once, and one that stays busy fails with a ``RetryError``. ``subnet_config`` is a ``pocket_ic.SubnetConfig``;
+    the default is one application subnet, which holds no threshold keys."""
+    pic = PocketIC(subnet_config)
     busy = Retry(total=None, connect=0, read=0, redirect=0, other=0, status=600, status_forcelist=(409,),
                  allowed_methods=None, backoff_factor=0.05, backoff_max=1, raise_on_status=True)
     pic.server.request_client.mount("http://", HTTPAdapter(max_retries=busy))

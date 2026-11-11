@@ -1,6 +1,7 @@
 import fake_chain
+import pytest
 import world
-from ggg import Document, Event, KeyEnvelope, Organization
+from ggg import Document, Event, KeyEnvelope, Organization, Realm
 from kit import call, denied, direct, ok
 
 REPORT = {"title": "Inspection report, Clinic B", "ref": "files/health/DOC-1.enc", "hash": "sha256:ab12",
@@ -96,10 +97,23 @@ def test_vetkd_public_key_and_sign_in():
     world.build()
     fake_chain.state["replies"][("aaaaa-aa", "vetkd_public_key")] = '(record { public_key = blob "\\01\\02\\"" })'
     assert ok("crypto_public_key", "alice")["public_key"] == "010222"
-    assert 'name = "test_key_1"' in fake_chain.state["calls"][-1][2]
     for name, args in [("crypto_public_key", {}), ("crypto_derive_key", {"transport_public_key": "00"}),
                        ("crypto_grant", {"scope": "user:x:y", "keys": {}}), ("crypto_scopes", {})]:
         denied(name, fake_chain.ANONYMOUS, **args)
+
+
+@pytest.mark.parametrize("network, key", [
+    ("local", "dfx_test_key"), ("test", "test_key_1"), ("staging", "test_key_1"), ("demo", "test_key_1"),
+    ("ic", "key_1"), ("production", "key_1"), ("", "key_1"), ("somewhere-new", "key_1")])
+def test_vetkd_uses_the_ic_key_of_the_realms_network(network, key):
+    world.build()
+    Realm["1"].network = network
+    fake_chain.state["replies"][("aaaaa-aa", "vetkd_public_key")] = '(record { public_key = blob "\\01" })'
+    fake_chain.state["replies"][("aaaaa-aa", "vetkd_derive_key")] = '(record { encrypted_key = blob "\\02" })'
+    ok("crypto_public_key", "alice")
+    ok("crypto_derive_key", "alice", transport_public_key="beef")
+    asked = [call[2] for call in fake_chain.state["calls"] if call[1] in ("vetkd_public_key", "vetkd_derive_key")]
+    assert len(asked) == 2 and all(f'name = "{key}"' in args for args in asked)
 
 
 def test_a_document_has_a_kind_languages_and_facts_and_replaces_them():

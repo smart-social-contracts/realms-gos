@@ -7,13 +7,14 @@ from core import compliance
 from core import sandbox
 from api import assets, proposals
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, view
+from core.ic_keys import TEST_NETWORKS
 from ggg import Forward, GuestUser, LayeredCodex, Member, Quarter, Realm, User, UserProfile
 from api import codex as runtime
 from core.op import filing, op, run
 from core.pending import quoted
 from core.ratio import ONE, PERCENT
 
-CAPACITY, TEST_CAPACITY, TEST_NETWORKS, SCALE_AT = 2000, 10, ("test", "staging", "demo", "local"), 0.9
+CAPACITY, TEST_CAPACITY, SCALE_AT = 2000, 10, 0.9
 GUEST = ["self.data_view", "realm.data_view"]
 # Every sync carries the whole directory, so a federation has a fixed most quarters.
 MAX_QUARTERS = 500
