@@ -911,7 +911,7 @@ class LocalRegime(above("local_regime")):
 
     @extension(legislation="Llei 4/1983; Llei 8/2010")
     def on_codex_install(self, event):
-        event.languages_missing = ["ca-valencia"] if event.order == ("es",) else []
+        event.languages = ["es", "ca-valencia"] if event.order == ("es",) else []
 
     @extension(legislation="x")
     def check_proposal_create(self, args):
@@ -925,13 +925,16 @@ class LocalRegime(above("local_regime")):
 VALENCIA_LOCAL_REGIME = """
 from realms.legislation import above
 
+TITLES = {"ca-valencia": "Nova ordenança", "es": "Nueva ordenanza"}
+
 class LocalRegime(above("local_regime")):
     notified = ["Ajuntament"]
     scopes = {"town": "Ajuntament"}
 
     def on_codex_install(self, event):
-        title = "Nova ordenança" + (" (traducció pendent)" if event.languages_missing else "")
-        self.ggg.notification_send(recipient="members", topic="ordinance", title=title, body=event.result["codex"])
+        notice = [{"language": l, "title": TITLES[l], "body": event.result["codex"]} for l in event.languages]
+        self.ggg.notification_send(recipient="members", topic="ordinance", title=TITLES["ca-valencia"],
+                                   body=event.result["codex"], translations=notice)
 
     def check_proposal_create(self, args):
         if args.get("recipient") == "bad":
@@ -956,15 +959,16 @@ def chain():
 def test_extension_hooks_run_every_layer_top_to_bottom_sharing_the_event():
     c = chain()
     ctx = c.context()
-    event = Event("alice", {"document": "D-1"}, {"codex": "C-2"}, 9)
+    event = Event("alice", {"checksum": "sha256:x"}, {"codex": "C-2"}, 9)
     c.instance("local_regime", ctx).on_codex_install(event)
     assert [e[0] for e in ctx.effects.queued] == [
         "notification_send",
         "notification_send",
     ]
     assert ctx.effects.queued[0][1]["recipient"] == {"kind": "external", "id": "AGE"}
-    assert ctx.effects.queued[1][1]["title"] == "Nova ordenança (traducció pendent)"
-    assert event.languages_missing == ("ca-valencia",)  # sealed after CV's hook
+    notice = ctx.effects.queued[1][1]["translations"]  # València tells in the languages CV set on the event
+    assert [t["language"] for t in notice] == ["es", "ca-valencia"]
+    assert event.languages == ("es", "ca-valencia")  # sealed after CV's hook
 
 
 def test_a_lower_layer_reads_but_cannot_change_what_a_layer_above_set_on_the_event():
