@@ -82,6 +82,15 @@ def test_a_governed_call_files_its_scopes_default_rule():
     assert rule(realm_wide) == (70 * PERCENT, 0, "cast", "")
 
 
+def test_a_head_who_holds_no_seat_is_not_one_of_the_voters():
+    civil_registry(2, n=3, voters=("alice",))
+    Department["Civil Registry"].head = "mallory"  # a member, with no seat in it
+    p = file("Civil Registry")
+    assert Proposal[p].tally["eligible"] == 3  # dana, bob and alice
+    out = call("proposal_vote", "mallory", proposal=p, choice="yes")
+    assert out["kind"] == "forbidden" and "not eligible" in out["error"]
+
+
 def test_the_electorate_is_counted_when_the_vote_opens():
     world.build()
     p = file()

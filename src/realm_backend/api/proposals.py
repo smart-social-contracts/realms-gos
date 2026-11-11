@@ -394,19 +394,25 @@ def file_replay(filing, user, by, grant="", prepared_by=""):
     return {"proposal": p.id, "requires_vote": True}
 
 
+def has_seat(principal, department):
+    """``principal`` holds an active seat in ``department``."""
+    return any(a.position.department and a.position.department.id == department.id for a in appointed(principal))
+
+
 def seated(principal, department):
     """``principal`` heads ``department`` or holds an active seat in it."""
-    return principal == department.head or any(
-        a.position.department and a.position.department.id == department.id for a in appointed(principal))
+    return principal == department.head or has_seat(principal, department)
 
 
 def eligible(p, principal):
+    """Whether ``principal`` may vote on ``p``: a member for a realm-wide proposal, a seat holder for a department's. A
+    head who holds no seat in it does not vote, nor cast the deciding vote (ggg I-GOV-2, I-GOV-3)."""
     if p.department is None:
         return False
     if p.department.is_root:
         m = Member[principal]
         return m is not None and m.status == "active"
-    return seated(principal, p.department)
+    return has_seat(principal, p.department)
 
 
 def electorate_size(p):
@@ -414,7 +420,7 @@ def electorate_size(p):
         return 0
     if p.department.is_root:
         return Member.count_by("status", "active")
-    return len(holders(p.department) | ({p.department.head} - {""}))
+    return len(holders(p.department))
 
 
 def scoped_to_department(p):

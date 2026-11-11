@@ -38,7 +38,8 @@ def test_a_proposal_carries_the_tags_it_was_filed_with():
 ])
 def test_tags_out_of_bounds_are_refused_and_leave_no_proposal(tags, why):
     world.build()
-    assert why in call("proposal_create", "alice", title="x", tags=tags)["error"]
+    out = call("proposal_create", "alice", title="x", tags=tags)
+    assert out["kind"] == "invalid_argument" and why in out["error"]
     assert Proposal.count() == 0
 
 
@@ -64,9 +65,9 @@ def test_a_list_finds_the_proposals_carrying_any_of_the_tags_with_its_status():
 def test_only_a_drafts_tags_are_replaced_and_only_by_its_proposer():
     world.build()
     voting = file("Open", tags=["parks"])
-    assert "only a draft" in call("proposal_set_tags", "alice", proposal=voting, tags=["roads"])["error"]
+    assert call("proposal_set_tags", "alice", proposal=voting, tags=["roads"])["kind"] == "conflict"
     Proposal[voting].status = "draft"
-    assert "not your proposal" in denied("proposal_set_tags", "bob", proposal=voting, tags=["roads"])
+    assert call("proposal_set_tags", "bob", proposal=voting, tags=["roads"])["kind"] == "forbidden"
     assert "no whitespace" in call("proposal_set_tags", "alice", proposal=voting, tags=[" x"])["error"]
     ok("proposal_set_tags", "alice", proposal=voting, tags=["roads"])
     assert Proposal[voting].tags == ["roads"]

@@ -126,6 +126,16 @@ def test_a_tie_in_the_second_vote_is_decided_by_the_casting_vote_only_when_it_vo
     assert Proposal[p].first_vote is not None  # there is no third vote
 
 
+def test_a_head_who_holds_no_seat_neither_votes_nor_casts_the_deciding_vote():
+    council(head="mallory")  # a member, with no seat in Civil Registry
+    p = file()
+    assert Proposal[p].casting_vote == "mallory" and Proposal[p].tally["eligible"] == 4
+    assert call("proposal_vote", "mallory", proposal=p, choice="yes")["kind"] == "forbidden"
+    vote(p, alice="yes", carla="no", dana="abstain", bob="abstain")
+    vote(p, alice="yes", carla="no")
+    assert finalized(p) == "rejected"
+
+
 def test_with_no_head_a_tie_in_the_second_vote_rejects():
     council(head="")
     p = file()

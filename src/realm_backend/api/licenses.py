@@ -69,7 +69,7 @@ def decision_due(kind, applied_at):
     return end // NS
 
 
-def application(c, kind, holder, department, evidence_ref, conditions, land=""):
+def application(c, kind, holder, department, evidence_ref, conditions, land):
     applicant(holder, c.user)
     issuer = find(Department, department) if department else None
     parcel = find(Land, land).id if land else ""
@@ -125,9 +125,8 @@ def deciding_licence(user, args, grant):
 def in_zones(args, proposal=""):
     """The fact of a license_decide call that is not one of its arguments (GGG's derived facts): the zones of the parcel
     the licence is for, for the legislation of a plan that holds back the decisions on its parcels."""
-    lic = License[args.get("license") or "-"]
-    parcel = Land[lic.land] if lic and lic.land else None
-    return {"zones": list(parcel.lies_in or []) if parcel else []}
+    land = find(License, args["license"]).land
+    return {"zones": Land[land].lies_in if land else []}
 
 
 @op("license.issue", signing=True, parties=holders, returns="license", summary=deciding_licence,
