@@ -109,9 +109,10 @@ def layers_of(codex):
 
 
 def reported(kind, change, details):
-    """Record an entry of ``kind`` for a change the realm has already made: ``change`` names it by its codices, and the
-    function ``details`` gives the rest, so that working it out is guarded too. The journal only reports: whatever goes
-    wrong here, the change stands (a revert above all, the realm's floor, §10), and ``not_recorded`` says so."""
+    """Record an entry of ``kind`` for something the realm has already done or learned: ``change`` names it, by its
+    codices or by a release's source and version, and the function ``details`` gives the rest, so that working it out
+    is guarded too. The journal only reports: whatever goes wrong here, the change stands (a revert above all, the
+    realm's floor, §10; a check goes on), and ``not_recorded`` says so."""
     try:
         if not publishes():
             return
@@ -122,10 +123,10 @@ def reported(kind, change, details):
 
 def not_recorded(kind, change, error):
     """The entry of ``kind`` for ``change`` could not be recorded. The issue of the day says which change it misses, in
-    an entry ``not_recorded`` that holds only the kind and the codices' ids: they name no person, and the personal-data
-    rules may be what failed. The ``error`` is kept for the IT admin team, who read it in codex_status (``failure``).
-    Each is guarded on its own, writing the error out too (an exception's text is its own code): neither may stop the
-    change, and one still goes in when the other fails."""
+    an entry ``not_recorded`` that holds only the kind and what names it, the codices' ids or a release's source and
+    version: they name no person, and the personal-data rules may be what failed. The ``error`` is kept for the IT admin
+    team, who read it in codex_status (``failure``). Each is guarded on its own, writing the error out too (an
+    exception's text is its own code): neither may stop the change, and one still goes in when the other fails."""
     try:
         append("not_recorded", {"kind": kind, **change})
     except Exception:  # noqa: BLE001  the error below is still kept
@@ -154,6 +155,23 @@ def codex_reverted(restored, reverted):
     (api.codex.restore). Either may be a legacy codex, which has no layers."""
     reported("codex_reverted", {"codex": restored.id, "reverted": reverted.id},
              lambda: {"layers": layers_of(restored) if isinstance(restored, LayeredCodex) else []})
+
+
+def release_found(found):
+    """A check of the sync sources has found ``found`` (a ``FoundRelease``), a release no check had found before
+    (api.sync_checks.keep_found): it is stamped with the check's time, the moment the realm learned of it."""
+    reported("release_found", named(found), lambda: {"effective_from": found.effective_from})
+
+
+def release_published(release):
+    """The realm, a sync source itself, has published ``release`` (a ``Release``) of its own layer
+    (api.links.legislation_release_publish)."""
+    reported("release_published", named(release), lambda: {"effective_from": release.effective_from})
+
+
+def named(release):
+    """What names a release in an entry, and in the notice of one that could not be recorded."""
+    return {"source": release.source, "version": release.version}
 
 
 # ---- Issues

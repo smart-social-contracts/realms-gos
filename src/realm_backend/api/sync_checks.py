@@ -15,7 +15,7 @@ chapter hooks, guards or forbids them.
 """
 
 from api import codex, installs, links, quarters
-from core import chain, change_list, compliance, records
+from core import chain, change_list, compliance, journal, records
 from core import layered_codex as store
 from core.db import Fail, each, first, page, view
 from core.op import op
@@ -159,13 +159,15 @@ def judge(link, record):
 
 
 def keep_found(record):
-    """Log the releases of ``record`` that no check has found before, with the time it was read."""
+    """Log the releases of ``record`` that no check has found before, with the time it was read, and report each in the
+    official journal (§9.6)."""
     for release in record["releases"]:
         key = f"{release['source']}@{release['version']}"
         if FoundRelease[key] is None:
-            FoundRelease(id=key, source=release["source"], version=release["version"], published=release["published"],
-                         effective_from=release["effective_from"], notes=release["notes"], found_in=record["key"],
-                         found_at=record["checked_at"])
+            found = FoundRelease(id=key, source=release["source"], version=release["version"],
+                                 published=release["published"], effective_from=release["effective_from"],
+                                 notes=release["notes"], found_in=record["key"], found_at=record["checked_at"])
+            journal.release_found(found)
 
 
 def population():

@@ -1,8 +1,9 @@
 """The realm's official journal on the real wasm (docs/codices/layered-codex.md §9.6, realms-extensions#54): an issue
 for every day from the realm's first one, the day ending at midnight on the capital's clock across a change of summer
-time, an install and a revert as entries (a malformed config or a failing journal stops no revert), an upgrade that
-keeps the journal, a scheduled install the journal cannot move, and a quarter that issues nothing and shows its
-capital's issue. tests/ggg/test_journal.py runs the same rules in process.
+time, an install and a revert as entries (a malformed config or a failing journal stops no revert), the releases a
+check finds and the ones the realm publishes as entries, an upgrade that keeps the journal, a scheduled install the
+journal cannot move, and a quarter that issues nothing and shows its capital's issue. tests/ggg/test_journal.py runs
+the same rules in process.
 
 The tests of this module run in order on one network: the clock only goes forward.
 """
@@ -12,12 +13,14 @@ from datetime import datetime, timezone
 import pytest
 from network import Network
 from test_installs import Site, active_id, expected_id, install, own_layer, settled, status
+from test_release_installs import PUBLISH, link, source_with
+from test_sync_checks import check_now
 
 DAY = 86400
 HOUR = 3600
 # What the journal extension's manifest allows an entry to keep (extensions/journal/manifest.json).
 RULES = ("import ggg\nggg.Extension(id='journal', manifest={'config': {'personal_data': {'entry_fields': "
-         "['codex', 'layers', 'proposal', 'activates_at', 'reverted']}}})")
+         "['codex', 'layers', 'proposal', 'activates_at', 'reverted', 'source', 'version', 'effective_from']}}})")
 MALFORMED = "import ggg\nggg.Extension['journal'].manifest = {'config': 'text'}"
 # The journal breaks inside the canister until MEND: the revert it reports must stand all the same.
 BREAK = ("from core import journal\ndef broken(*args):\n    raise ValueError('the journal is broken')\n"
@@ -28,6 +31,14 @@ WATER = b'from realms.legislation import above\n\nclass Water(above("water")):\n
 # A query may spend 5 billion instructions: an issue of this many entries costs a small part of it.
 BUSY_DAY = 60
 READ_BUDGET = 500_000_000
+# The first check of a realm can find every release of a record, at most a thousand (core.records.MOST_RELEASES).
+# FIND logs them and reports each in the journal, as that check does.
+FIND = ("from api import sync_checks\n"
+        "releases = [{{'source': 'big', 'version': '%d.0.0' % n, 'published': 5, 'effective_from': 6, 'notes': {{}}}}\n"
+        "            for n in range({count})]\n"
+        "sync_checks.keep_found({{'key': 'src', 'releases': releases, 'checked_at': ic.time() // 10**9}})")
+MOST_RELEASES = 1000
+FIRST_CHECK_BUDGET = 20_000_000_000  # half of what a message may spend
 
 
 @pytest.fixture(scope="module")
@@ -206,3 +217,48 @@ def test_l_a_revert_whose_entry_fails_stands_and_the_issue_and_the_it_team_say_w
     assert (entry["kind"], entry["details"]) == ("not_recorded", missing)
     seen = status(capital)["journal_failure"]
     assert seen == {**missing, "at": entry["at"], "error": "ValueError: the journal is broken"}
+
+
+@pytest.fixture(scope="module")
+def source(net):
+    return source_with(net, "source", "1.0.0", "x/source")
+
+
+@pytest.fixture(scope="module")
+def town(net, source):
+    realm = net.realm("town", members=("alice",))
+    realm.shell(RULES)
+    link(realm, source)
+    return realm
+
+
+def test_m_a_release_a_check_finds_is_an_entry_once_stamped_with_the_check_and_installs_nothing(net, source, town):
+    check_now(net, town)
+    check_now(net, town)  # a release found before is not found again
+    entries = issue(town)["entries"]
+    assert [(e["kind"], e["details"]) for e in entries] == [
+        ("release_found", {"source": "arcadia", "version": "1.0.0", "effective_from": 6}),
+        ("release_found", {"source": "x/source", "version": "1.0.0", "effective_from": PUBLISH["effective_from"]})]
+    found = town.call("codex_releases_found", {}, query=True)["releases"]
+    assert [e["at"] for e in entries] == [r["found_at"] for r in found]
+    assert status(town)["codex"] is None and status(town)["pending"] is None  # reporting a release installs none
+
+
+def test_n_a_release_the_realm_publishes_is_an_entry_stamped_when_it_was_published(net, source):
+    [first] = [e for e in issue(source)["entries"] if e["kind"] == "release_published"]
+    assert first["details"] == {}  # published before the journal had rules: the entry is there, with no detail
+    source.shell(RULES)
+    source.govern("legislation_release_publish", {"source": "x/source", **PUBLISH, "version": "1.1.0"})
+    last = issue(source)["entries"][-1]
+    published = {r["version"]: r["published"] for r in source.call("legislation_releases", {}, query=True)["releases"]}
+    assert (last["kind"], last["details"], last["at"]) == (
+        "release_published", {"source": "x/source", "version": "1.1.0", "effective_from": PUBLISH["effective_from"]},
+        published["1.1.0"])
+
+
+def test_o_what_the_first_check_costs_when_it_finds_every_release_of_a_record(net, costs):
+    realm = net.realm("big", members=("alice",))
+    realm.shell(RULES)
+    spent = costs.measure(realm, f"journal: the first check finds {MOST_RELEASES} releases and reports them",
+                          FIND.format(count=MOST_RELEASES))
+    assert len(issue(realm)["entries"]) == MOST_RELEASES and spent < FIRST_CHECK_BUDGET, spent
