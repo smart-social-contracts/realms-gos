@@ -165,7 +165,8 @@ def codex_reverted(restored, reverted, proposal=""):
     (api.codex.restore), by the accepted ``proposal`` that carried it, if any. Either codex may be a legacy codex, which
     has no layers."""
     reported("codex_reverted", {"codex": restored.id, "reverted": reverted.id},
-             lambda: {"layers": layers_of(restored) if isinstance(restored, LayeredCodex) else [], **decision(proposal)})
+             lambda: {"layers": layers_of(restored) if isinstance(restored, LayeredCodex) else [],
+                      **decision(proposal)})
 
 
 def release_found(found):

@@ -20,7 +20,8 @@ DAY = 86400
 HOUR = 3600
 # What the journal extension's manifest allows an entry to keep (extensions/journal/manifest.json).
 RULES = ("import ggg\nggg.Extension(id='journal', manifest={'config': {'personal_data': {'entry_fields': "
-         "['codex', 'layers', 'proposal', 'vote', 'activates_at', 'reverted', 'source', 'version', 'effective_from']}}})")
+         "['codex', 'layers', 'proposal', 'vote', 'activates_at', 'reverted', 'source', 'version', "
+         "'effective_from']}}})")
 MALFORMED = "import ggg\nggg.Extension['journal'].manifest = {'config': 'text'}"
 # The journal breaks inside the canister until MEND: the revert it reports must stand all the same.
 BREAK = ("from core import journal\ndef broken(*args):\n    raise ValueError('the journal is broken')\n"

@@ -9,7 +9,7 @@ import world
 from core import journal, legislation, localtime
 import test_sync_checks as checks
 import test_sync_sources as sources
-from ggg import Event, Extension, FoundRelease, JournalEntry, LayeredCodex, Realm, Release
+from ggg import Event, Extension, FoundRelease, JournalEntry, LayeredCodex, Proposal, Realm, Release
 from kit import call, denied, fire_timers, later, ok, rows
 from test_installs import (FOUR, HOUR, WEB, change_list, expected_id, fire_due, install, own_layer, realm,  # noqa: F401
                            run_job, schedule, status)
@@ -249,7 +249,8 @@ def test_publishing_changes_no_activates_at_and_no_install(realm):  # noqa: F811
 def test_an_install_decided_by_a_vote_names_the_proposal_and_how_the_vote_went(realm):  # noqa: F811
     rules()
     action = {"op": "codex_install", "args": change_list(own_layer())}
-    p = ok("proposal_create", "alice", title="Legislation", action=action, effective_at=fake_chain.now() + HOUR)["proposal"]
+    p = ok("proposal_create", "alice", title="Legislation", action=action,
+           effective_at=fake_chain.now() + HOUR)["proposal"]
     ok("proposal_vote", "elena", proposal=p, choice="no")
     for voter in FOUR:
         ok("proposal_vote", voter, proposal=p, choice="yes")
@@ -261,6 +262,17 @@ def test_an_install_decided_by_a_vote_names_the_proposal_and_how_the_vote_went(r
     assert entry["details"]["proposal"] == p
     assert entry["details"]["vote"] == {"yes": 4, "no": 1, "abstain": 0, "eligible": 7}
     assert "carla" not in str(entry["details"])  # the count only, never who voted
+
+
+def test_a_departments_vote_gives_the_entry_its_counts_and_never_its_seats_or_veto_holders():
+    world.build()
+    rules()
+    Proposal(id="P-9", tally={"yes": 2, "no": 0, "abstain": 1, "eligible": 3, "seats": 3, "veto": ["2vxsx-fae"]})
+    journal.codex_installed(LayeredCodex(id="sha256:ab", proposal="P-9"))
+    [entry] = issue()["entries"]
+    assert entry["details"]["proposal"] == "P-9"
+    assert entry["details"]["vote"] == {"yes": 2, "no": 0, "abstain": 1, "eligible": 3}  # no seats, no veto holders
+    assert "2vxsx-fae" not in str(entry)
 
 
 def test_an_install_nobody_proposed_has_no_vote(realm):  # noqa: F811
@@ -396,7 +408,8 @@ def test_a_revert_decided_by_a_vote_names_the_proposal_and_how_the_vote_went(rea
     first, second = own_layer(), own_layer("2.0.0")
     install(change_list(first))
     install(change_list(second, replaces=expected_id(first), url=WEB + "changes/second.json"))
-    p = ok("proposal_create", "alice", title="Back", action={"op": "codex_revert", "args": {"codex": expected_id(first)}})["proposal"]
+    action = {"op": "codex_revert", "args": {"codex": expected_id(first)}}
+    p = ok("proposal_create", "alice", title="Back", action=action)["proposal"]
     for voter in FOUR:
         ok("proposal_vote", voter, proposal=p, choice="yes")
     assert LayeredCodex[expected_id(first)].status == "active"
