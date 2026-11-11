@@ -20,6 +20,7 @@ PENDING = OPEN + ("accepted", "execution_scheduled")
 NOT_RUN = ("rejected", "expired", "withdrawn", "failed")
 MAX_LINKS = 16  # a proposal's own links, so that a reply never outgrows the Internet Computer's limits
 LINK_KINDS = ("replaces", "relates_to")
+MAX_TAGS, MAX_TAG = 16, 64  # a proposal's tags, and the code points of one (ggg I-GOV-15)
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
 
@@ -80,6 +81,22 @@ def check_scope(department, action):
             return
         governing = governing.parent
     raise Forbidden(f"{action['op']} is not governed by {department.id}: only a realm-wide proposal can run it")
+
+
+def checked_tags(tags):
+    """The ``tags`` of a proposal as stored, or a refusal (ggg I-GOV-15): at most 16 of 1 to 64 code points, with no
+    control character and no whitespace at either end, none named twice. They are compared exactly, never normalised."""
+    tags = [] if tags is None else tags
+    if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+        raise Fail("tags is a list of text")
+    if len(tags) > MAX_TAGS or len(set(tags)) != len(tags):
+        raise Fail(f"a proposal has at most {MAX_TAGS} tags, each named once")
+    for tag in tags:
+        if not 1 <= len(tag) <= MAX_TAG:
+            raise Fail(f"a tag is 1 to {MAX_TAG} code points")
+        if tag != tag.strip() or any(c < " " or "\x7f" <= c <= "\x9f" for c in tag):
+            raise Fail("a tag has no control character and no whitespace at either end")
+    return list(tags)
 
 
 def checked_links(user, links):
@@ -223,7 +240,7 @@ def end(p, status):
 
 
 def new_proposal(title, user, by, department, action=None, description="", effective_at=0, links=(), grant="",
-                 stated=None, prepared_by=""):
+                 stated=None, prepared_by="", tags=()):
     """File a proposal. ``stated``: the proposer's ``kind``, ``matter`` and stricter rule; a proposal filed without
     it takes the default rule of its scope. ``prepared_by``: the delegate whose pending action the proposer approved."""
     from api import codex
@@ -239,7 +256,7 @@ def new_proposal(title, user, by, department, action=None, description="", effec
                  department=department, action=action,
                  kind=stated.get("kind") or "", matter=stated.get("matter") or "", status="voting",
                  opens_at=chain.now(), deadline=chain.now() + seconds if seconds else 0,
-                 effective_at=effective_at, links=list(links), **rule)
+                 effective_at=effective_at, links=list(links), tags=list(tags), **rule)
     for link in links:
         ProposalEdge(id=next_id(ProposalEdge, "L"), source=p.id, target=link["proposal"], kind=link["kind"])
         if link["kind"] == "replaces":
@@ -538,6 +555,8 @@ def proposal_create(c, args):
     ``effective_at`` the proposal ends ``expired`` and nothing runs.
     Optional ``links``, at most 16 of ``{kind, proposal}`` (``replaces`` or ``relates_to``), each proposal named once and
     fixed at creation: ``replaces`` names a withdrawn proposal of yours that no other proposal replaces yet.
+    Optional ``tags``, at most 16 words of 1 to 64 code points of your own choosing, such as ``parks``, each named once,
+    compared exactly: ``proposal_list`` finds proposals by them.
     Under a power of attorney a proposal is a motion: it carries no action.
     Returns ``proposal``.
     Example: ``{"title": "Bike lane on Main St", "department": "infrastructure"}`` → ``P-7``."""
@@ -549,10 +568,10 @@ def proposal_create(c, args):
         check_action(action)
         check_scope(department, action)
         auth.refuse_forbidden_action(c.user, action)  # a proposal that could only fail is never put to the vote
-    links = checked_links(c.user, args.get("links"))
+    links, tags = checked_links(c.user, args.get("links")), checked_tags(args.get("tags"))
     stated = {k: args.get(k) for k in ("kind", "matter", "threshold", "quorum", "threshold_of")}
     p = new_proposal(args["title"], c.user, c.by, department, action, args.get("description", ""),
-                     effective_at_of(args), links, c.grant, stated, c.prepared_by)
+                     effective_at_of(args), links, c.grant, stated, c.prepared_by, tags)
     return {"proposal": p.id}
 
 
@@ -567,6 +586,19 @@ def proposal_withdraw(c, args):
     if p.status not in OPEN:
         raise Conflict(f"{p.id} is {p.status}; only an open proposal can be withdrawn")
     end(p, "withdrawn")
+    return {"proposal": p.id}
+
+
+@op("proposal.create", returns="proposal")
+def proposal_set_tags(c, args):
+    """Replace the ``tags`` of ``proposal``, a draft of yours (``proposal_create`` documents the tags); once it is open
+    its tags stay. Returns ``proposal``."""
+    p = find(Proposal, args["proposal"])
+    if p.proposer != c.user:
+        raise Forbidden(f"{p.id} is not your proposal")
+    if p.status != "draft":
+        raise Conflict(f"{p.id} is {p.status}; only a draft's tags are replaced")
+    p.tags = checked_tags(args["tags"])
     return {"proposal": p.id}
 
 
@@ -701,12 +733,17 @@ def proposal_get(c, args):
 
 @op("realm.data_view", read=True, returns="proposals")
 def proposal_list(c, args):
-    """Proposals (id, title, status, deadline, effective_at, proposer), or only those with ``status`` (e.g. voting),
-    ``count`` at a time (default 100, at most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next``
-    (null at the end)."""
+    """Proposals (id, title, status, deadline, effective_at, proposer, tags), or only those with ``status`` (e.g.
+    voting) and carrying at least one of ``tags`` (at most 16, compared exactly), ``count`` at a time (default 100, at
+    most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the end); a filtered page can
+    be short or empty, so follow ``next``."""
+    tags = args.get("tags") or []
+    if len(tags) > MAX_TAGS:
+        raise Fail(f"a list filters by at most {MAX_TAGS} tags")
     rows, nxt = page_by(Proposal, "status", args["status"], args) if args.get("status") else page(Proposal, args)
-    return {"proposals": [view(p, "id", "title", "status", "deadline", "effective_at", "proposer") for p in rows],
-            "next": nxt}
+    carrying = [p for p in rows if not tags or set(tags) & set(p.tags or [])]
+    return {"proposals": [view(p, "id", "title", "status", "deadline", "effective_at", "proposer", "tags")
+                          for p in carrying], "next": nxt}
 
 
 @op("mandate.create", governed=realm_wide, returns="mandate")

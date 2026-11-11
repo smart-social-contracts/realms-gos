@@ -6,7 +6,7 @@ from core.ratio import ONE, PERCENT, upgrade_call
 
 class Proposal(Row):
     __alias__ = "id"
-    __version__ = 3  # 2: threshold and quorum in hundred-millionths, not whole percents; 3: the rule is stored
+    __version__ = 4  # 2: threshold and quorum in hundred-millionths, not whole percents; 3: the rule is stored; 4: tags
     id = String()
     title = String(default="")
     description = String(default="")
@@ -33,11 +33,13 @@ class Proposal(Row):
     tally = Json({})
     result = Json(None)
     links = Json([])  # [{"kind": "replaces" | "relates_to", "proposal": id}], fixed at creation like the action
+    tags = Json([])  # the proposer's own words for what it is about, replaced only while a draft (ggg I-GOV-15)
     replaced_by = String(default="")  # the one proposal that replaces this withdrawn one
     votes = OneToMany("Vote", "proposal")
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
+        obj.setdefault("tags", [])  # a Json field a stored row lacks reads as the text of its default
         # quorum_percent, the old field, shows a row still in whole percents: a row without it is converted already.
         if "quorum_percent" in obj:
             obj["quorum"] = obj.pop("quorum_percent") * PERCENT
