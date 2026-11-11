@@ -357,6 +357,11 @@ Methods are named after GGG operations. `<op>` is the name of a GGG operation, s
 Any domain's chapter may define a method for any GGG operation (water and waste both hook
 `tax_policy_propose`). This design sets no order between domains.
 
+A guard and a hook read the operation's arguments as the realm takes them: an action is `{op, args}` (a change of
+legislation is `action.op == "codex_install"` with a `checksum` in `action.args`, never GGG's `Code` variant) and
+an entity is the text `"External:<id>"`. An effect names an entity the way GGG does, `Ref("external", "AGE")`, and
+the realm hands the operation `"External:AGE"`.
+
 The realm domain's two entry points are methods of these kinds, so they follow the same naming rule:
 
 - `on_codex_activate(self, event)`: the hook on GGG's `codex_activate`. It runs once per realm when a
@@ -422,7 +427,7 @@ The rules (the checker enforces them, §12):
 - **Hooks:** every layer's definition runs, top to bottom. Each queues GGG operations with
   `self.ggg.<op>(...)`. The event object is shared down the chain: a layer may add attributes to it,
   and lower layers can read but not change attributes set above. Example: CV sets
-  `event.languages_missing`, and València reads it.
+  `event.languages`, and València reads it.
 - **Guards:** every layer's definition runs, top to bottom. Returning `None` continues; returning
   `self.deny(reason)` stops and refuses the operation. If all return `None`, the guard allows.
 - **Helpers and settings returning values:** results merge in layer order.
@@ -698,7 +703,8 @@ class LocalRegime(above("local_regime")):
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def check_proposal_create(self, args):
-        if "Code" not in args.action:                        # only this realm's own change of legislation (see below)
+        action = args.action                                 # as the realm files it: {op, args}, never GGG's variant
+        if action is None or action.op != "codex_install" or "checksum" not in action.args:   # only this realm's own change of legislation (see below)
             return None
         earliest_close_day = self.local_day(self.now())      # a vote may close as soon as its outcome is certain
         if args.effective_at is None \
@@ -714,29 +720,29 @@ class LocalRegime(above("local_regime")):
 
 ```python
 # legislation/eu/es/vc/local_regime.py
-from ggg import Document
-
 class LocalRegime(above("local_regime")):
     uses = ["language"]
 
     @extension(legislation="Llei 4/1983; Llei 8/2010")
     def on_codex_install(self, event):
-        languages = Document.get(event.args["document"]).languages
-        event.languages_missing = [l for l in self.legislation.language.co_official
-                                   if l not in languages]
+        # the notice of an ordinance goes out in every co-official language: the layers below read it from the event
+        event.languages = list(self.legislation.language.co_official)
 ```
 
 ```python
 # legislation/eu/es/vc/46250-valencia/local_regime.py
 from ggg import Member
 
+TITLES = {"ca-valencia": "Nova ordenança", "es": "Nueva ordenanza"}
+
 class LocalRegime(above("local_regime")):
 
     def on_codex_install(self, event):
-        title = "Nova ordenança" + (" (traducció pendent)" if event.languages_missing else "")
+        notice = [{"language": l, "title": TITLES[l], "body": event.result["codex"]}
+                  for l in event.languages if l in TITLES]
         for m in Member.each():                              # a member's id is its user's id
             self.ggg.notification_send(recipient=Ref("user", m.id), topic="ordinance",
-                title=title, body=event.result["codex"])
+                title=TITLES["ca-valencia"], body=event.result["codex"], translations=notice)
 ```
 
 The runtime runs Spain's, then CV's, then València's `on_codex_install` when the proposal is accepted,
@@ -749,8 +755,13 @@ the communication, which the guard cannot know at creation, so the proposer leav
 `effective_at` never moves after acceptance. If it proves too early, another proposal stops the
 scheduled one, and a new proposal sets the right date. The realm domain's `on_codex_activate` hook runs
 once per realm when the codex becomes active. The install appears in the realm's official journal
-(§9.6), which reports it and plays no role in when it applies. The event's arguments and result are
-GGG's.
+(§9.6), which reports it and plays no role in when it applies. The event's arguments and result are the
+operation's, as the realm gives them.
+
+A realm installs the layers it takes legislation from first and its own layer last. Its chapters read what the
+layers above set (València's hook reads `event.languages`, which CV's sets), and would run without it in a codex that has
+its own layer alone. The realm's first layered install names its own source id (§9.2 step 2), so it is a release by a
+change list; the other releases come by "Propose install" (§11.4), and the realm's own layer by an ordinance.
 
 The guard applies to the realm's own ordinances only. A proposal that installs a release from a sync
 source (§11.4) runs no guard and no forbid of the codex on `proposal_create` (its hooks still run): the
@@ -805,8 +816,9 @@ from ggg import External
 
 class DataProtection(above("data_protection")):
     def check_document_share(self, args):
-        # the recipient's kind is read from GGG's entity, never from the args
-        recipient = External.get(args.recipient.id) if args.recipient.kind == "external" else None
+        # the recipient is "External:<id>" as the realm takes it; its kind is read from GGG's entity, never from the args
+        kind, _, who = args.recipient.partition(":")
+        recipient = External.get(who) if kind == "External" else None
         if recipient is not None and recipient.kind != "authority" \
                 and not self.approved_by("Junta de Govern Local"):
             return self.deny("a recipient that is not an authority needs the Junta de Govern Local")
@@ -814,7 +826,7 @@ class DataProtection(above("data_protection")):
 
 The guards run EU, then Spain, then València, and the first deny stops the operation. The arguments
 are those GGG defines for sharing a document (§13): `basis {legal_basis, purpose, legislation,
-special_category}`, `recipient` (a `Ref`) and `facts`.
+special_category}`, `recipient` (`"External:<id>"`, as the realm takes an entity) and `facts`.
 
 ### 5.5 Refused: overriding fixed legislation
 

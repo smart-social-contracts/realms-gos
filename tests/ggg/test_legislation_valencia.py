@@ -12,7 +12,7 @@ import pytest
 
 from core import legislation, op
 from core.db import each
-from ggg import Department, Document, External, Invoice, Land, Member, TaxPolicy
+from ggg import Department, External, Invoice, Land, Member, TaxPolicy
 from kit import call, ok
 import world
 from test_legislation_runtime import activate, fresh_realm, layered  # noqa: F401  the autouse fixture
@@ -127,23 +127,23 @@ def test_the_ibi_is_assessed_on_the_parcels_value_less_the_verified_large_family
 
 
 def test_an_ordinance_must_take_effect_15_working_days_after_the_vote_can_close(codex):
-    code = {"Code": {"url": "https://example.org/change.json", "checksum": "sha256:x"}}
+    code = {"op": "codex_install", "args": {"url": "https://example.org/change.json", "checksum": "sha256:x"}}  # as a realm files it
     assert "15 working days" in guard("proposal_create", {"action": code, "effective_at": None})
     assert "15 working days" in guard("proposal_create", {"action": code, "effective_at": NOW + 7 * DAY})
     assert guard("proposal_create", {"action": code, "effective_at": NOW + 40 * DAY}) is None
-    assert guard("proposal_create", {"action": {"Transfer": {}}, "effective_at": None}) is None  # not an ordinance
+    assert guard("proposal_create", {"action": {"op": "transfer_create", "args": {}}, "effective_at": None}) is None  # not an ordinance
 
 
-def test_an_ordinance_installed_tells_the_authorities_then_every_member_in_the_languages_it_has(codex):
+def test_an_ordinance_installed_tells_the_authorities_then_every_member_in_the_co_official_languages(codex):
     Member(id="zoe", joined_at=1)
-    Document(id="D1", title="Ordenança", languages=["es"])  # the co-official Valencian is missing
-    effects = hook("codex_install", "local_regime", {"document": "D1"}, {"codex": "sha256:abc"})
+    effects = hook("codex_install", "local_regime", {"url": "https://example.org/change.json", "checksum": "sha256:x"},
+                   {"codex": "sha256:abc", "job": "J-1"})
     sent = [(args["recipient"]["id"], args["title"]) for _, args in effects]
     assert sent[:2] == [("AGE", "Comunicació d'acord"), ("GVA", "Comunicació d'acord")]
-    assert ("zoe", "Nova ordenança (traducció pendent)") in sent
-    Document(id="D2", title="Ordenança", languages=["es", "ca-valencia"])
-    complete = hook("codex_install", "local_regime", {"document": "D2"}, {"codex": "sha256:abc"})
-    assert {args["title"] for _, args in complete[2:]} == {"Nova ordenança"}
+    assert ("zoe", "Nova ordenança") in sent
+    notice = next(args for _, args in effects if args["recipient"]["id"] == "zoe")["translations"]
+    assert [(t["language"], t["title"]) for t in notice] == [("es", "Nueva ordenanza"), ("ca-valencia", "Nova ordenança")]
+    assert {t["body"] for t in notice} == {"sha256:abc"}  # Spain's language first, then the Comunitat's
 
 
 # ── Data protection (§5.4): the guards stack down the layers ─────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ def share(basis, recipient, approvals=()):
 def test_the_guards_of_the_eu_spain_and_valencia_run_in_that_order(codex):
     External(id="AGE", name="Administración General del Estado", kind="authority")
     External(id="BUILDCO", name="BuildCo", kind="company")
-    authority, company = {"kind": "external", "id": "AGE"}, {"kind": "external", "id": "BUILDCO"}
+    authority, company = "External:AGE", "External:BUILDCO"  # as the realm takes a recipient
     assert "consent is not a basis" in share({"legal_basis": "gdpr-6-1-a"}, authority)
     assert "name the legislation" in share({"legal_basis": "gdpr-6-1-c"}, authority)
     task = {"legal_basis": "gdpr-6-1-c", "legislation": "Ley 7/1985"}
