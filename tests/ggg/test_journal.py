@@ -7,7 +7,9 @@ import fake_chain
 import pytest
 import world
 from core import journal, legislation, localtime
-from ggg import Event, Extension, JournalEntry, LayeredCodex, Realm
+import test_sync_checks as checks
+import test_sync_sources as sources
+from ggg import Event, Extension, FoundRelease, JournalEntry, LayeredCodex, Realm, Release
 from kit import call, denied, fire_timers, later, ok, rows
 from test_installs import (HOUR, WEB, change_list, expected_id, fire_due, install, own_layer, realm,  # noqa: F401
                            run_job, schedule, status)
@@ -15,7 +17,8 @@ from test_installs import (HOUR, WEB, change_list, expected_id, fire_due, instal
 DAY = 86400
 CAPITAL = "capital-canister"
 # What the journal extension's manifest allows an entry to keep (extensions/journal/manifest.json).
-RULES = {"config": {"personal_data": {"entry_fields": ["codex", "layers", "proposal", "activates_at", "reverted"]}}}
+FIELDS = ["codex", "layers", "proposal", "activates_at", "reverted", "source", "version", "effective_from"]
+RULES = {"config": {"personal_data": {"entry_fields": FIELDS}}}
 
 
 @pytest.fixture(autouse=True)
@@ -250,6 +253,102 @@ def test_a_legacy_single_file_install_makes_no_entry(realm):  # noqa: F811
     Realm["1"].require_marketplace_approval = False
     ok("codex_install", "ctl", manifest=manifest(), source=SOURCE)
     assert issue()["entries"] == []
+
+
+# ---- the releases of the sync sources are entries, and so are the realm's own
+
+
+def release_entries():
+    return [(e["kind"], e["details"], e["at"]) for e in issue()["entries"]]
+
+
+def found(version, effective_from):
+    return ("release_found", {"source": "arcadia", "version": version, "effective_from": effective_from})
+
+
+def test_a_release_the_check_finds_is_an_entry_once_stamped_with_the_time_of_the_check(realm):  # noqa: F811
+    rules()
+    checks.source(checks.entry("1.0.0", 6))
+    checks.link()
+    checks.check_now()
+    first = fake_chain.now()
+    assert release_entries() == [(*found("1.0.0", 6), first)]
+    later(HOUR)
+    checks.source(checks.entry("1.0.0", 6), checks.entry("2.0.0", 100))
+    checks.check_now()
+    checks.check_now()
+    assert release_entries() == [(*found("1.0.0", 6), first), (*found("2.0.0", 100), fake_chain.now())]
+    assert [r.found_at for r in rows(FoundRelease)] == [first, fake_chain.now()]  # the entry is the log's time
+
+
+def test_an_entry_of_a_release_found_belongs_to_the_day_it_was_found_on_the_capitals_clock(realm):  # noqa: F811
+    rules()
+    zone("Asia/Tokyo")
+    at(2026, 11, 9, 20)  # 05:00 on the 10th in Tokyo
+    checks.source(checks.entry("1.0.0", 6))
+    checks.link()
+    checks.check_now()
+    assert [e["kind"] for e in issue("2026-11-10")["entries"]] == ["release_found"]
+    assert issue("2026-11-09")["entries"] == []
+
+
+def test_a_release_the_realm_publishes_is_an_entry_with_the_time_it_was_published(realm):  # noqa: F811
+    rules()
+    later(60)
+    ok("legislation_release_publish", "ctl", **sources.release())
+    published = Release["x/town@1.0.0"].published
+    assert release_entries() == [("release_published", {"source": "x/town", "version": "1.0.0",
+                                                         "effective_from": 1_900_000_000}, published)]
+    assert published == fake_chain.now()
+
+
+def test_a_release_refused_makes_no_entry(realm):  # noqa: F811
+    rules()
+    denied("legislation_release_publish", "ctl", **sources.release(commit=""))
+    assert issue()["entries"] == []
+
+
+def test_releases_found_and_published_change_no_activates_at_and_no_install(realm):  # noqa: F811
+    rules()
+    layer = own_layer()
+    p = schedule(change_list(layer))
+    run_job()
+    staged = LayeredCodex[expected_id(layer)]
+    due = staged.activates_at
+    checks.source(checks.entry("1.0.0", fake_chain.now() - 1))  # in force already: no install follows it
+    checks.link()
+    checks.check_now()
+    ok("legislation_release_publish", "ctl", **sources.release())
+    assert [kind for kind, _, _ in release_entries()] == ["release_found", "release_published"]
+    assert (staged.status, staged.activates_at) == ("pending", due) and status()["codex"] is None
+    assert FoundRelease.count() == 1 and LayeredCodex.count() == 1 and p
+    later(due - fake_chain.now())
+    fire_timers()
+    fire_due()
+    assert LayeredCodex[expected_id(layer)].activates_at == due and status()["codex"]["id"] == expected_id(layer)
+
+
+def test_a_release_whose_entry_fails_stands_and_the_check_goes_on(realm, monkeypatch):  # noqa: F811
+    rules()
+    monkeypatch.setattr(journal, "allowed_fields", broken)
+    checks.source(checks.entry("1.0.0", 6), checks.entry("2.0.0", 100))
+    checks.link()
+    checks.check_now()
+    assert FoundRelease.count() == 2 and checks.checked()["error"] == ""  # both found, and the check did not fail
+    assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [
+        ("not_recorded", {"kind": "release_found", "source": "arcadia", "version": version})
+        for version in ("1.0.0", "2.0.0")]
+    assert failure()["kind"] == "release_found" and failure()["error"] == "ValueError: the journal is broken"
+    ok("legislation_release_publish", "ctl", **sources.release())
+    assert Release["x/town@1.0.0"] is not None
+    assert failure()["version"] == "1.0.0" and failure()["source"] == "x/town"
+
+
+def test_a_realm_without_the_rules_keeps_no_detail_of_a_release_and_still_records_it(realm):  # noqa: F811
+    checks.source(checks.entry("1.0.0", 6))
+    checks.link()
+    checks.check_now()
+    assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [("release_found", {})]
 
 
 # ---- a revert is an entry too, whichever kind of codex it restores
