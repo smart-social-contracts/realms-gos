@@ -3,8 +3,8 @@ import json
 from core import auth, chain, ranges
 from core.civil import civil_from_days
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
-from ggg import (Appointment, Calendar, Contract, ContractAmendment, Delegation, Department, Mandate, Member, Proposal,
-                 ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
+from ggg import (Appointment, Calendar, Contract, ContractAmendment, Delegation, Department, External, Mandate, Member,
+                 Proposal, ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
 from api import tasks
 from core.op import dispatch, op, ops
 from core.pending import quoted, readable, you_sign
@@ -22,6 +22,7 @@ MAX_LINKS = 16  # a proposal's own links, so that a reply never outgrows the Int
 LINK_KINDS = ("replaces", "relates_to")
 MAX_TAGS, MAX_TAG = 16, 64  # a proposal's tags, and the code points of one (ggg I-GOV-15)
 MAX_PERIODS = 64  # the fiscal periods a contract's value is spread over (ggg I-GOV-16)
+MAX_REFERENCE, MAX_WINNERS = 128, 32  # the code points of a framework's reference, and the winners it lists (I-PRC-6)
 TERMS = ("value", "split", "starts_at", "ends_at")  # what contract_amend may change
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
@@ -801,6 +802,29 @@ def lot_of(args):
     return name
 
 
+def framework_of(args):
+    """The framework agreement a new contract is a call-off under, as stored, or a refusal (ggg I-PRC-6). The realm
+    checks what it holds: an External holder is one it knows, a realm holder is not the realm itself, and, where
+    ``winners`` are listed, a party of the contract is one of them. That the agreement exists and is in force, and
+    covers this purchase, only its holder knows: the field is the realm's claim."""
+    framework = args.get("framework")
+    if not framework:
+        return None
+    holder, reference, winners = framework["holder"], framework["reference"], framework.get("winners") or []
+    if not isinstance(reference, str) or not 1 <= len(reference) <= MAX_REFERENCE:
+        raise Fail(f"a framework's reference is 1 to {MAX_REFERENCE} code points")
+    if not isinstance(winners, list) or len(winners) > MAX_WINNERS or not all(isinstance(w, str) for w in winners):
+        raise Fail(f"a framework lists at most {MAX_WINNERS} winners, each an organization's id")
+    if "External" in holder:
+        find(External, holder["External"])
+    elif holder.get("Realm") == chain.self_id() or not chain.is_principal(holder.get("Realm")):
+        raise Fail("a framework held by a realm names another realm by its capital; this realm's own tender is the "
+                   "contract's tender")
+    if winners and not any(f"Organization:{w}" in args.get("parties", []) for w in winners):
+        raise Fail("none of the contract's parties is a winner of its framework")
+    return {"holder": holder, "reference": reference, "winners": list(winners)}
+
+
 def check_mandate(user, m, args):
     """Refuse the contract of ``args`` for ``user`` under mandate ``m`` unless the mandate is active, ``user`` heads or
     holds a seat in its executor department, the contract's ``value`` is within the mandate's ``max_value`` and it ends
@@ -855,22 +879,25 @@ def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
     now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``, and what is contracted
     (``kind``: works, supplies, services), by which ``procedure`` and from which ``tender``, whose kind and procedure
-    the contract takes (a tender with lots needs the awarded ``lot`` as well, which has no contract yet), and optionally a
-    ``split`` of the value over fiscal periods (``[{"period": "FY2026", "amount":
-    30000}]``, at most 64, each named once, adding up to ``value``). Returns ``contract``.
+    the contract takes (a tender with lots needs the awarded ``lot`` as well, which has no contract yet). Optional
+    ``split`` spreads the value over fiscal periods (``[{"period": "FY2026", "amount": 30000}]``, at most 64, each
+    named once, adding up to ``value``). Optional ``framework`` says it is a call-off under an agreement another body
+    holds: ``{"holder": {"External": id}`` or ``{"Realm": the capital's principal}}, "reference", "winners"}``; the
+    realm checks that an External is known, that a realm is not this one, and that a party is among the winners listed.
+    Returns ``contract``.
     Under a mandate, the mandate must be active, ``value`` within its ``max_value``, the contract must end before the
     mandate expires, and you must head or hold an active seat in the mandate's executor department."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
     if m is not None:
         check_mandate(c.user, m, args)
-    lot = lot_of(args)
+    lot, framework = lot_of(args), framework_of(args)
     value, split = int(args.get("value", 0)), args.get("split") or []
     starts, ends = int(args.get("starts_at", chain.now())), int(args.get("ends_at", 0))
     checked_terms({"value": value, "split": split, "starts_at": starts, "ends_at": ends})
     k = Contract(id=next_id(Contract, "C"), title=args["title"], parties=args.get("parties", []), mandate=m,
                  **origin_of(args), value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency,
                  terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
-                 starts_at=starts, ends_at=ends, split=split, lot=lot)
+                 starts_at=starts, ends_at=ends, split=split, lot=lot, framework=framework)
     return {"contract": k.id}
 
 
