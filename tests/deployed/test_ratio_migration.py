@@ -72,13 +72,14 @@ print(json.dumps({f"{entity.__name__}:{alias}": db.load(entity.__name__, entity[
 
 
 def versions(saved):
-    """The version each row is saved at: the rows that migrate to the ratios' form are at 2, a proposal at 3 (it also keeps
-    its voting rule since realms-gos#547) and a tax policy at 3 (its taxes are typed entries since realms-gos#547)."""
+    """The version each row is saved at: the rows that migrate to the ratios' form are at 2, a proposal at 4 (it also keeps
+    its voting rule since realms-gos#547, and its tags and the first vote of a tie since GGG G4) and a tender at 4 (its lots,
+    since GGG G4) and a tax policy at 3 (its taxes are typed entries since realms-gos#547)."""
     return {key: row["__version__"] for key, row in saved.items()}
 
 
-CURRENT = {"Proposal:P-1": 3, "Department:Finance": 2, "Realm:1": 2, "AllocationRule:AR-1": 2, "Tender:T-1": 3,
-           "TaxPolicy:TAX-POLICY-1": 3, "Proposal:P-2": 3}
+CURRENT = {"Proposal:P-1": 4, "Department:Finance": 2, "Realm:1": 2, "AllocationRule:AR-1": 2, "Tender:T-1": 4,
+           "TaxPolicy:TAX-POLICY-1": 3, "Proposal:P-2": 4}
 
 
 def ok(realm, op, who, query=False, **args):

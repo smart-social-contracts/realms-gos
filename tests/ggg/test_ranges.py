@@ -41,7 +41,8 @@ def test_a_time_is_bounded_in_seconds_because_the_operations_take_seconds():
 
 
 def test_the_bounds_follow_the_shape_the_operation_takes_where_it_differs_from_ggg_did():
-    assert RANGES["treasury_configure"] == {"config": {"epoch": (0, LONG // 10**9), "anchor_month": (0, 255)}}
+    assert RANGES["treasury_configure"] == {"config": {"epoch": (0, LONG // 10**9), "anchor_month": (0, 255),
+                                                       "sweep": [{"keep": (0, MONEY)}]}}
     assert RANGES["setup_step"] == {"accounting_currency_decimals": (0, 255)}  # the tokens step, whose fields are flat
     assert RANGES["department_set_policy"].keys() == {"m", "n", "quorum"}
 
