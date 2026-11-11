@@ -16,3 +16,4 @@ class License(Row):
     expires_at = Integer(default=0)
     evidence_ref = String(default="")
     conditions = Json({})
+    land = String(default="")  # the parcel it is for, when it is for one

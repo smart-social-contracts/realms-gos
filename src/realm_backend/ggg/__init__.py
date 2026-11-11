@@ -4,10 +4,10 @@ from ggg.finance import (AllocationRule, Bid, BidScore, Budget, FinancialReport,
                          LedgerEntry, Loan, NFTToken, PaymentAccount, TaxDeclaration, TaxPolicy, Tender, Token, Trade,
                          Transfer, Treasury)
 from ggg.finance import Sweep
-from ggg.governance import (Calendar, ChapterSource, Codex, Contract, FederalVote, FederalVoteLeg, FederationMessage,
-                            Follower, Forward, FoundRelease, GuestUser, InstallJob, JournalEntry, LayeredCodex,
-                            License, Mandate, Procedure, Proposal, ProposalEdge, Quarter, Realm, Registry, Release,
-                            Request, SourceRecord, SyncSource, Vote)
+from ggg.governance import (Calendar, ChapterSource, Codex, Contract, ContractAmendment, FederalVote, FederalVoteLeg,
+                            FederationMessage, Follower, Forward, FoundRelease, GuestUser, InstallJob, JournalEntry,
+                            LayeredCodex, License, Mandate, Procedure, Proposal, ProposalEdge, Quarter, Realm,
+                            Registry, Release, Request, SourceRecord, SyncSource, Vote)
 from ggg.identity import (Attribute, Delegation, DelegationRequest, Human, Identity, Member, Organization,
                           PendingAction)
 from ggg.justice import Appeal, Case, Court, Dispute, Judge, Penalty, Verdict
