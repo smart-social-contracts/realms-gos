@@ -294,10 +294,22 @@ for first in ("spin", "spin_in_handler", "fail"):
 print(json.dumps(out))
 '''
 # The running codex's sandbox killed by the meter, as a long-lived one can end: its budget run out in an except body.
+# It keeps a ``guard``: the next guarded operation asks the dead sandbox for it, and a sandbox without one fails as a
+# missing function, which denies the operation, instead of as a spent budget, which reloads the codex.
 KILL = '''
 import json
 from core import legislation, sandbox
-program = "def guard(**kwargs):\\n    return []\\n\\ndef spin():\\n    try:\\n        raise ValueError()\\n    except ValueError:\\n        while True:\\n            pass\\n"
+program = """
+def guard(**kwargs):
+    return []
+
+def spin():
+    try:
+        raise ValueError()
+    except ValueError:
+        while True:
+            pass
+"""
 box = sandbox.Resident(program, legislation._answer, budget=100_000)
 try:
     box.call("spin")
@@ -305,7 +317,7 @@ except RuntimeError as e:
     error = str(e)
 legislation._state["box"].close()
 legislation._state["box"] = box
-print(json.dumps({"error": error, "loaded": legislation._state["box"] is not None}))
+print(json.dumps({"error": error}))
 '''
 # A codex row made active without loading it, as a realm finds one after an upgrade; its chapter cannot load.
 BROKEN = '''
@@ -507,10 +519,9 @@ def test_e4_a_sandbox_the_meter_killed_is_replaced_by_the_next_guarded_operation
     then a guarded operation runs."""
     founder = people["founder"]
     got = run(town, KILL)
-    assert got["error"].endswith("sandbox terminated after grace period") and got["loaded"], got
+    assert got["error"].endswith("sandbox terminated after grace period"), got
     assert ok(town, "proposal_create", founder, title="after the kill")["proposal"]
     assert failures(town, founder) == {}
-
 
 
 def test_f_what_crosses_a_domain_boundary_is_plain_data_or_the_public_view(town, people):
