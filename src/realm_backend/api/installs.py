@@ -57,9 +57,11 @@ HEX = "0123456789abcdef"
 LEFT = "this realm is no longer a quarter of the capital that announced the codex"
 NO_OWN_LAYER = ("this realm has no layer of its own yet: its first layered codex names it, with a change list; a "
                 "release is installed after that")
-# A quarter stages what its capital announces from the records of its own sync sources, and it has none, so it cannot
-# stage a release yet; a release built from a record has no change list to announce either.
+# A quarter stages what its capital announces: the change list, by its checksum, and the layers the capital staged. A
+# release built from a record has no change list to announce, so a federation installs a release with one.
 FEDERATED = "a federation installs a release with a change list: its quarters cannot stage one built from a record"
+NO_ROUTE = ("no URL, and no realm vouches for it: a release that a stand-in record vouches for is installed with a change "
+            "list that gives its chapters' URLs")
 
 
 def job_of(proposal):
@@ -396,9 +398,6 @@ def fetch_chapter(job, entry):
         return
     refusals = []
     capital = vouching_capital(job, entry)
-    if capital is None and not entry["urls"]:
-        raise Fail(f"{entry['chapter']}: no capital serves it and the release names no URL: a release that a stand-in "
-                   f"record vouches for is installed with a change list that gives its chapters' URLs")
     if capital is not None:
         try:
             reply = yield from records.ask_realm(capital, "legislation_chapter", {"chapter": entry["sha256"]})
@@ -421,7 +420,7 @@ def fetch_chapter(job, entry):
             return
         except Fail as e:
             refusals.append(str(e))
-    raise Fail(f"{entry['chapter']}: " + ("; ".join(refusals) or "no URL, and no realm vouches for it"))
+    raise Fail(f"{entry['chapter']}: " + ("; ".join(refusals) or NO_ROUTE))
 
 
 def vouching_capital(job, entry):

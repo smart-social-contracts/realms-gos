@@ -407,7 +407,7 @@ def test_a_release_only_a_stand_in_record_vouches_for_is_refused_naming_the_chap
        name="Arcadia")
     propose("1.0.0")
     assert job()["status"] == "failed" and running() == set()
-    assert "no capital serves it and the release names no URL" in job()["error"]
+    assert "arcadia/procedure: no URL, and no realm vouches for it" in job()["error"]
     assert "installed with a change list that gives its chapters' URLs" in job()["error"]
 
 

@@ -1843,9 +1843,10 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    vouches for the release (§9.2 step 4), the whole release, with the realm's own layer unchanged. The
    chapters come from that record's capital by checksum (§9.2 step 3), or are stored already. Refused,
    with the reason: a realm with no layer of its own yet (its first layered codex names it, with a change
-   list), a federation with quarters (a quarter cannot stage a release yet), and a release that only a
-   stand-in record vouches for, whose chapters no capital serves (it is installed with a change list that
-   gives their URLs). The follower's own guard or forbid on `codex_install` still runs when the accepted
+   list), a federation with quarters (its quarters stage the change list the capital announces, and a
+   release built from a record has none: a federation installs a release with a change list), and a
+   release that only a stand-in record vouches for, whose chapters no capital serves (it is installed
+   with a change list that gives their URLs). The follower's own guard or forbid on `codex_install` still runs when the accepted
    proposal executes, and can delay or refuse the install; if it does, the realm reads `non_compliant`
    past the release's effective date, visible to all: that is the realm's own legislation over its own
    install, and the check makes the consequence visible.
