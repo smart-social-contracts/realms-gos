@@ -10,6 +10,7 @@ makes the next read come from there.
 import json
 import os
 
+import mock_ledger
 import pytest
 from pic import Canister
 
@@ -293,6 +294,108 @@ def test_a_budget_whose_total_is_out_of_range_is_refused_and_files_nothing(realm
     assert out["kind"] == "invalid_argument" and "largest amount" in out["error"]
     seen = ok(realm, "budget_view", people["alice"], query=True, period="FY2028")
     assert [b for f in seen["funds"] for b in f["budgets"]] == []  # nothing is in force
+
+
+# --- spending stages, scheduled transfers and contracts (ggg I-FIN-9 to I-FIN-11) ------------------
+
+OPS = 40_000_000  # what FY2026 plans for the operations of ROOT
+PAID_IN = 100_000_000  # what the mock ledger says an invoice is paid with
+MARK = 1_000_000
+
+
+@pytest.fixture(scope="module")
+def spending(realm, people):
+    """ROOT, holding what an invoice paid, with an adopted expense line for its operations, and DOM pointed at a ledger
+    that answers every transfer ``Ok``, on a clock inside FY2026, the period the line is in. Returns the id of the line."""
+    ctl, alice = people["ctl"], people["alice"]
+    if not FY2026["starts_at"] <= realm.now() < FY2026["ends_at"]:
+        realm.wait(FY2026["starts_at"] + 86_400 - realm.now())
+    ok(realm, "token_register", ctl, symbol="DOM", ledger=mock_ledger.install(realm.pic, 10**9))
+    ok(realm, "budget_draft", ctl, fund="ROOT", period="FY2026", category="ops", kind="expense", planned=OPS)
+    ok(realm, "budget_propose", ctl, period="FY2026", fund="ROOT")
+    invoice = ok(realm, "invoice_create", ctl, payer=alice, amount=PAID_IN, items=[{"concept": "fee", "amount": PAID_IN}])
+    assert ok(realm, "invoice_check", alice, invoice=invoice["invoice"])["status"] == "paid"
+    return line_of(realm, ctl)["id"]
+
+
+def line_of(realm, who):
+    lines = ok(realm, "budget_list", who, query=True, fund="ROOT", period="FY2026")["budgets"]
+    (line,) = [b for b in lines if b["category"] == "ops"]
+    return line
+
+
+def stages(realm, who):
+    line = line_of(realm, who)
+    return line["reserved"], line["committed"], line["actual"]
+
+
+def pay_ops(realm, who, to, amount, **args):
+    return realm.call("transfer_create", {"fund": "ROOT", "to": to, "amount": amount, "category": "ops", **args}, sender=who)
+
+
+def test_money_is_staged_on_a_line_and_charged_to_it_from_the_committed_money_or_the_credit(realm, people, spending):
+    ctl, alice = people["ctl"], people["alice"]
+    ok(realm, "budget_stage", ctl, budget=spending, reserve=10 * MARK, commit=20 * MARK)
+    assert stages(realm, ctl) == (10 * MARK, 20 * MARK, 0)
+
+    paid = pay_ops(realm, ctl, alice, 15 * MARK, committed=True)
+    assert paid["ok"] and (paid["status"], paid["ledger_tx"]) == ("completed", "1")
+    short = pay_ops(realm, ctl, alice, 6 * MARK, committed=True)
+    assert short["kind"] == "conflict" and f"has {5 * MARK} committed; the transfer of {6 * MARK} is {MARK} short" in short["error"]
+    assert stages(realm, ctl) == (10 * MARK, 5 * MARK, 15 * MARK)
+    seen = ok(realm, "budget_view", alice, query=True, period="FY2026")
+    (shown,) = [b for f in seen["funds"] for b in f["budgets"] if b["id"] == spending]
+    assert (shown["reserved"], shown["committed"]) == (10 * MARK, 5 * MARK)
+
+
+def test_a_scheduled_transfer_is_owed_until_it_is_paid_or_cancelled(realm, people, spending):
+    ctl, alice = people["ctl"], people["alice"]
+    due = realm.now() + 86_400
+    owed = pay_ops(realm, ctl, alice, 3 * MARK, committed=True, due_at=due)
+    assert owed["ok"] and owed["status"] == "scheduled" and stages(realm, ctl) == (10 * MARK, 2 * MARK, 18 * MARK)
+    (listed,) = ok(realm, "transfer_list", ctl, query=True, fund="ROOT", status="scheduled")["transfers"]
+    assert (listed["id"], listed["due_at"], listed["committed"]) == (owed["transfer"], due, True)
+    assert refused(realm, "period_close", ctl, period="FY2026")["kind"] == "conflict"  # what is owed keeps its period open
+
+    assert ok(realm, "transfer_pay", ctl, transfer=owed["transfer"])["status"] == "completed"
+    assert stages(realm, ctl) == (10 * MARK, 2 * MARK, 18 * MARK)  # paying moves no budget money
+    cancelled = pay_ops(realm, ctl, alice, 2 * MARK, committed=True, due_at=due)["transfer"]
+    assert stages(realm, ctl) == (10 * MARK, 0, 20 * MARK)
+    assert ok(realm, "transfer_revert", ctl, transfer=cancelled)["status"] == "cancelled"
+    assert stages(realm, ctl) == (10 * MARK, 2 * MARK, 18 * MARK)  # back to the committed money it came from
+
+
+def test_the_payments_on_a_contract_never_exceed_its_value(realm, people, spending):
+    ctl, alice = people["ctl"], people["alice"]
+    contract = ok(realm, "contract_create", ctl, title="Bike lane", value=5 * MARK, symbol="DOM")["contract"]
+    assert pay_ops(realm, ctl, alice, 3 * MARK, contract="C-404")["kind"] == "not_found"
+    assert pay_ops(realm, ctl, alice, 3 * MARK, contract=contract)["status"] == "completed"
+    over = pay_ops(realm, ctl, alice, 3 * MARK, contract=contract)
+    assert over["kind"] == "conflict" and f"has {2 * MARK} left of its value" in over["error"]
+
+
+def test_a_transfer_of_the_release_before_is_found_by_its_contract_once_the_upgrade_has_read_it(realm, people, spending):
+    """A transfer saved without a contract, and not in the index that finds it by one, is read by the pass the upgrade runs
+    and by nothing else: the payments on the contract are counted, and a transfer past its value is refused."""
+    ctl, alice = people["ctl"], people["alice"]
+    contract = ok(realm, "contract_create", ctl, title="Footbridge", value=5 * MARK, symbol="DOM")["contract"]
+    old = pay_ops(realm, ctl, alice, 4 * MARK, contract=contract)["transfer"]
+    run(realm, f'''
+from ic_python_db import Database
+import ggg
+
+db = Database.get_instance()
+key = ggg.Transfer[{old!r}]._id
+db.field_index_remove("Transfer", "contract", {contract!r}, key)
+row = {{k: v for k, v in db.load("Transfer", key).items() if k != "contract"}}
+db.save("Transfer", key, {{**row, "__version__": 1}})
+''')
+    realm.upgrade()
+
+    assert int(run(realm, f'import ggg; print(ggg.Transfer.paid_on({contract!r}))')) == 4 * MARK
+    over = pay_ops(realm, ctl, alice, 2 * MARK, contract=contract)
+    assert over["kind"] == "conflict" and f"has {MARK} left of its value" in over["error"]
+    assert pay_ops(realm, ctl, alice, MARK, contract=contract)["status"] == "completed"
 
 
 def test_a_second_upgrade_changes_nothing(realm, people):

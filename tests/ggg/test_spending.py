@@ -66,6 +66,14 @@ def test_budget_list_shows_each_line_with_its_stages():
     assert ok("budget_list", "bob", fund="ROOT")["budgets"] == []
 
 
+def test_a_budget_line_of_the_release_before_holds_nothing_reserved_or_committed():
+    b = staged_line()
+    stored_as_version_1(Budget, b, drop=("reserved", "committed"), __version__=2)  # the version the lines had before
+    assert figures(b) == (0, 0, 0)
+    ok("budget_stage", "bob", budget=b, reserve=10)
+    assert figures(b) == (10, 0, 0)
+
+
 # --- charging a transfer to its line --------------------------------------------------------------
 
 def test_a_transfer_is_charged_to_its_line_from_its_committed_money_or_its_credit_and_refused_when_short():

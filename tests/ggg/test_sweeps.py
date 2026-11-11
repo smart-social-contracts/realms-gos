@@ -5,7 +5,7 @@ import pytest
 
 import fake_chain
 from api import quarters, sweeps, treasury
-from ggg import LedgerEntry, Quarter, Realm, Sweep
+from ggg import FiscalPeriod, LedgerEntry, Quarter, Realm, Sweep
 from kit import call, direct, fire_timers, later, ok
 from test_quarters import CAPITAL
 from test_treasury import LEDGER, finish, ledger_ok, receive, setup_finance, start, suspended
@@ -164,6 +164,15 @@ def test_a_quarter_moves_what_its_fund_holds_above_what_it_keeps_and_the_fee_and
 
     assert sweep_now() == []  # one sweep a rule and treasury epoch
     assert len(transfers()) == 1
+
+
+def test_a_sweep_is_booked_in_no_period_when_the_period_that_covers_now_has_closed(monkeypatch):
+    north(monkeypatch)
+    ledger_ok()
+    FiscalPeriod["FY2026"].status = "closed"  # the money moves all the same: its books cannot wait for a period
+    (s,) = sweep_now()
+    assert s.status == "booked" and held() == 100
+    assert {e.period for e in LedgerEntry.load_some(1, LedgerEntry.max_id()) if e.sweep} == {None}
 
 
 def test_nothing_is_swept_when_the_fund_holds_no_more_than_it_keeps_and_the_fee(monkeypatch):
