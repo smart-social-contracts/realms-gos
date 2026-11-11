@@ -153,13 +153,14 @@ def test_a_veto_holders_no_rejects_a_tied_first_vote_instead_of_putting_it_to_a_
 def test_the_timer_of_a_first_vote_that_ended_early_leaves_the_second_vote_open():
     council()
     p = file()
+    first_deadline = Proposal[p].deadline
     later(2 * DAY)
     vote(p, alice="yes", carla="no", dana="abstain", bob="abstain")  # the second vote opens, until day 9
     later(5 * DAY + 1)  # the first vote's own deadline has passed
-    op.run(proposals.expire(p))
+    op.run(proposals.expire(p, first_deadline))
     assert Proposal[p].status == "voting"
     later(3 * DAY)
-    op.run(proposals.expire(p))
+    op.run(proposals.expire(p, Proposal[p].deadline))
     assert Proposal[p].status == "rejected"  # the second vote ended with nobody voting: no majority
 
 

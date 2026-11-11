@@ -285,14 +285,14 @@ def open_vote(p):
 
 
 def arm(p):
-    chain.set_timer(max(p.deadline - chain.now(), 0) + 1, lambda pid=p.id: expire(pid))
+    chain.set_timer(max(p.deadline - chain.now(), 0) + 1, lambda pid=p.id, deadline=p.deadline: expire(pid, deadline))
 
 
-def expire(pid):
-    """At its deadline, a proposal still open is settled. The timer of a first vote that ended early, in a tie, finds the
-    second vote's deadline ahead and leaves it."""
+def expire(pid, deadline):
+    """At its deadline, a proposal still open is settled. The timer of a first vote that tied and ended early finds the
+    second vote's deadline instead of its own, and leaves it."""
     p = Proposal[pid]
-    if p is not None and p.status == "voting" and chain.now() > p.deadline:
+    if p is not None and p.status == "voting" and p.deadline == deadline:
         yield from settle(p, True)
 
 
