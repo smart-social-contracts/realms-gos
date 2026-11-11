@@ -416,11 +416,24 @@ def _effects(effects):
     return []
 
 
+def _entity_refs(value):
+    """``value`` with each GGG ``Ref`` in it, ``{kind, id}`` as a chapter's ``Ref("external", "AGE")`` crosses, written
+    the way the realm's operations take an entity: ``"External:AGE"``."""
+    if isinstance(value, dict):
+        if set(value) == {"kind", "id"} and all(isinstance(v, str) for v in value.values()):
+            return f"{value['kind'].capitalize()}:{value['id']}"
+        return {k: _entity_refs(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_entity_refs(v) for v in value]
+    return value
+
+
 def _effect(name, args):
     """One effect, as a reply ``{ok, ...}``: a governed operation becomes a proposal the realm files, whatever its
     department's policy, never a direct call; a reserved operation, an operation about a proposal or a vote on one,
     and an effect that would set a time zone (§4.5) are refused; whatever else fails is the chapter's failure,
     never the caller's."""
+    args = _entity_refs(args)
     if name in RESERVED or is_reserved(name, args):
         return {"ok": False, "error": f"{name} is about a reserved operation: no chapter may call it"}
     if "timezone" in args:
