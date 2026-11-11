@@ -293,6 +293,20 @@ for first in ("spin", "spin_in_handler", "fail"):
     box.close()
 print(json.dumps(out))
 '''
+# The running codex's sandbox killed by the meter, as a long-lived one can end: its budget run out in an except body.
+KILL = '''
+import json
+from core import legislation, sandbox
+program = "def guard(**kwargs):\\n    return []\\n\\ndef spin():\\n    try:\\n        raise ValueError()\\n    except ValueError:\\n        while True:\\n            pass\\n"
+box = sandbox.Resident(program, legislation._answer, budget=100_000)
+try:
+    box.call("spin")
+except RuntimeError as e:
+    error = str(e)
+legislation._state["box"].close()
+legislation._state["box"] = box
+print(json.dumps({"error": error, "loaded": legislation._state["box"] is not None}))
+'''
 # A codex row made active without loading it, as a realm finds one after an upgrade; its chapter cannot load.
 BROKEN = '''
 import json
@@ -484,6 +498,19 @@ def test_e3_a_guard_that_alone_spends_the_budget_denies_after_one_more_try_and_t
     assert failures(town, founder)["codex"]["check_proposal_create"]["count"] == 1
     assert ok(town, "proposal_create", founder, title="fine after the spin")["proposal"]
     assert failures(town, founder) == {}
+
+
+def test_e4_a_sandbox_the_meter_killed_is_replaced_by_the_next_guarded_operation(town, people):
+    """realms-gos#670: a sandbox whose budget ran out while an except body ran is killed, with a text that names no
+    BudgetExceeded. The running codex's sandbox is put in that state, as a chapter cannot get it there on purpose (it
+    writes no except body, and the realm's sandbox catches a chapter's error ``as e``, where the meter trips softly);
+    then a guarded operation runs."""
+    founder = people["founder"]
+    got = run(town, KILL)
+    assert got["error"].endswith("sandbox terminated after grace period") and got["loaded"], got
+    assert ok(town, "proposal_create", founder, title="after the kill")["proposal"]
+    assert failures(town, founder) == {}
+
 
 
 def test_f_what_crosses_a_domain_boundary_is_plain_data_or_the_public_view(town, people):
