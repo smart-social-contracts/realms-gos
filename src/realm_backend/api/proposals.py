@@ -783,6 +783,24 @@ def origin_of(args):
     return {"kind": kind, "procedure": procedure, "tender": tender}
 
 
+def lot_of(args):
+    """The lot a new contract is made under: named only with its tender, which then needs one, and one that is awarded
+    and has no contract yet (ggg I-PRC-5)."""
+    name, tender = args.get("lot", ""), find(Tender, args["tender"]) if args.get("tender") else None
+    if not name:
+        if tender is not None and tender.lots:
+            raise Fail(f"{tender.id} has lots: name one")
+        return ""
+    if tender is None:
+        raise Fail("a lot is named only with the tender it belongs to")
+    lot = next((x for x in tender.lots if x["id"] == name), None)
+    if lot is None:
+        raise Fail(f"{tender.id} has no lot {name}")
+    if lot["status"] != "awarded" or lot["contract"]:
+        raise Conflict(f"lot {name} of {tender.id} is {lot['status']}" + (f", with contract {lot['contract']}" if lot["contract"] else ""))
+    return name
+
+
 def check_mandate(user, m, args):
     """Refuse the contract of ``args`` for ``user`` under mandate ``m`` unless the mandate is active, ``user`` heads or
     holds a seat in its executor department, the contract's ``value`` is within the mandate's ``max_value`` and it ends
@@ -837,20 +855,22 @@ def contract_create(c, args):
     """Record an active contract: ``title``, optional ``parties``, ``terms_ref``, ``terms_hash``, ``starts_at`` (default
     now), ``ends_at``, ``value`` in ``symbol`` (default the realm currency) and ``mandate``, and what is contracted
     (``kind``: works, supplies, services), by which ``procedure`` and from which ``tender``, whose kind and procedure
-    the contract takes, and optionally a ``split`` of the value over fiscal periods (``[{"period": "FY2026", "amount":
+    the contract takes (a tender with lots needs the awarded ``lot`` as well, which has no contract yet), and optionally a
+    ``split`` of the value over fiscal periods (``[{"period": "FY2026", "amount":
     30000}]``, at most 64, each named once, adding up to ``value``). Returns ``contract``.
     Under a mandate, the mandate must be active, ``value`` within its ``max_value``, the contract must end before the
     mandate expires, and you must head or hold an active seat in the mandate's executor department."""
     m = find(Mandate, args["mandate"]) if args.get("mandate") else None
     if m is not None:
         check_mandate(c.user, m, args)
+    lot = lot_of(args)
     value, split = int(args.get("value", 0)), args.get("split") or []
     starts, ends = int(args.get("starts_at", chain.now())), int(args.get("ends_at", 0))
     checked_terms({"value": value, "split": split, "starts_at": starts, "ends_at": ends})
     k = Contract(id=next_id(Contract, "C"), title=args["title"], parties=args.get("parties", []), mandate=m,
                  **origin_of(args), value=value, symbol=args.get("symbol") or Realm["1"].accounting_currency,
                  terms_ref=args.get("terms_ref", ""), terms_hash=args.get("terms_hash", ""), status="active",
-                 starts_at=starts, ends_at=ends, split=split)
+                 starts_at=starts, ends_at=ends, split=split, lot=lot)
     return {"contract": k.id}
 
 

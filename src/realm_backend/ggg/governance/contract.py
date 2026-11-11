@@ -21,6 +21,7 @@ class Contract(Row):
     starts_at = Integer(default=0)
     ends_at = Integer(default=0)
     split = Json([])  # how value is spread over fiscal periods: [{"period": "FY2026", "amount": 30000}]; empty: not spread
+    lot = String(default="")  # the lot of its tender it was awarded under, when the tender has lots
     trades = OneToMany("Trade", "contract")
     ledger_entries = OneToMany("LedgerEntry", "contract")
 
