@@ -14,6 +14,7 @@ class Bid(Row):
     payload_hash = String(default="")
     price = Integer(default=0)  # revealed with the bid
     score = Integer(default=0)
+    lot = String(default="")  # the lot of its tender it prices, when the tender has lots
     scores = OneToMany("BidScore", "bid")
 
 

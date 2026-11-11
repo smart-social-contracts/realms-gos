@@ -28,7 +28,7 @@ STANDARDS = (("ICRC-10", "https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-1
 # GGG fields Realms GOS names otherwise.
 RENAME = {("DelegationGrantArgs", "scope"): "operations", ("DelegationRequestArgs", "scope"): "operations",
           ("DelegationDecideArgs", "scope"): "operations", ("QuarterRegisterArgs", "canister"): "quarter",
-          ("ResolutionQueryArgs", "search"): "text",
+          ("ResolutionQueryArgs", "search"): "text", ("Land", "zones"): "lies_in",
           # The member a delegate calls for is not who the call_for operation acts as: the delegate acts as itself.
           ("CallForArgs", "on_behalf_of"): "grantor", ("ReadForArgs", "on_behalf_of"): "grantor"}
 # GGG times that Realms GOS rounds up to the second, where it rounds every other time down: a time something must not
@@ -801,6 +801,12 @@ def proposal_detail(out, args):
             "replaced_by": out["proposal"].get("replaced_by") or None}
 
 
+def voted(out, args):
+    """proposal_vote's reply: the ballot cast, which the reply holds, since the vote that completed a tied first vote
+    opened a second one that has none."""
+    return Shown({**out, "id": out["vote"], "proposal": args["proposal"]})
+
+
 def nxt(out):
     return None if out.get("next") is None else str(out["next"])
 
@@ -855,6 +861,9 @@ BUILD = {
     "treasury_view": treasury,
     "department_get": lambda o, a: detail("department", o),
     "organization_get": lambda o, a: detail("organization", o),
+    "contract_get": lambda o, a: {"contract": ggg.Contract[o["contract"]["id"]],
+                                  "amendments": [ggg.ContractAmendment[x["id"]] for x in o["amendments"]],
+                                  "next": nxt(o)},
     "tender_get": lambda o, a: {"tender": o["tender"], "bids": o["tender"].get("bids", []), "next": None},
     "invoice_refresh": lambda o, a: {"items": list(o.get("invoices") or {}), "next": nxt(o)},
     "quarter_directory": lambda o, a: directory(o),
@@ -862,6 +871,7 @@ BUILD = {
     "federal_vote_propose": federal_vote,
     "department_chart": chart,
     "proposal_get": proposal_detail,
+    "proposal_vote": voted,
     "enforcement_record": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
     "external_report": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
     "notification_send": lambda o, a: {"Dispatch": o["dispatch"]} if "dispatch" in o else {"Notification": o["notification"]},

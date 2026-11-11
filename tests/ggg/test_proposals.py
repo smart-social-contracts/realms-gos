@@ -430,6 +430,7 @@ def test_a_governed_call_under_power_of_attorney_replays_as_the_grantor():
     world.build()
     world.policy(Department["Infrastructure"], 2, 3)
     Department["Infrastructure"].head = "bob"
+    world.seat("infrastructure.board", "bob", Department["Infrastructure"])  # a head votes with the seat they hold
     Delegation(id="d1", grantor="carla", delegate="claude-conn", status="active",
                scope={"operations": ["proposal.vote"]}, expires_at=fake_chain.now() + 86400)
     p = ok("t_governed_whoami", "claude-conn", on_behalf_of="carla")["proposal"]
