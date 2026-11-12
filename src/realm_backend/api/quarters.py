@@ -177,12 +177,17 @@ def directory():
     return [flagged(row) for row in [me()] + [view(q, *FIELDS) for q in known()]]
 
 
+def shown_population(q):
+    """The population the row of quarter ``q`` shows the quarters: the one it last told, which is within a step of the
+    quarter's own. A row that told none shows the quarter's own until the quarter reports (``drifted``): a row from before
+    this release."""
+    return q.told_population or q.population
+
+
 def announced(q):
-    """The row of quarter ``q`` as its capital sends it to the quarters, in a full answer and in a delta alike: with the
-    population it last told them, which is within a step of the quarter's own. A row that told none shows the quarter's own
-    until the quarter reports (``drifted``): a row from before this release."""
+    """The row of quarter ``q`` as its capital sends it to the quarters, in a full answer and in a delta alike."""
     row = view(q, *FIELDS)
-    row["population"] = q.told_population or q.population
+    row["population"] = shown_population(q)
     return flagged(row)
 
 
@@ -244,7 +249,7 @@ def record(c, args):
         federation.record_leg(q, args["leg"])
     from api import propagation  # it imports the install task, which imports this module
 
-    now = chain.now()
+    now, shown = chain.now(), shown_population(q)  # what its row shows the quarters until this report
     changed = put(q, population=int(args.get("population", q.population)),
                   codex_id=args.get("codex_id", q.codex_id), codex_version=args.get("codex_version", q.codex_version),
                   compliance=propagation.judge(q, args.get("codex_id"), propagation.required()),
@@ -254,7 +259,7 @@ def record(c, args):
         known = q.zones  # a zone the realm defined stays defined: only the others need a look
         changed += put(q, zones={zone: int(n) for zone, n in args["zones"].items() if zone in known or held_zone(zone)})
     propagation.correct(q)
-    notable = bool(set(changed) & set(NOTABLE)) or drifted(q)
+    notable = bool(set(changed) & set(NOTABLE)) or drifted(q, shown)
     if notable:
         announce(q)
     full = scale_at(capacity())
@@ -263,12 +268,13 @@ def record(c, args):
     return q, notable or bool(args.get("leg"))
 
 
-def drifted(q):
+def drifted(q, shown):
     """Whether the population of ``q`` has moved from the one its row last carried to the quarters by a step, or is the
     first it has to tell: a row that told none (a quarter that reports for the first time, an active one before it did, a
-    row from before this was kept) tells the population it has, so that it carries one that stays."""
+    row from before this was kept) tells the population it has, so that it carries one that stays, and tells 0 when it
+    showed some and has none now. ``shown`` is the population the row showed before this report."""
     if not q.told_population:
-        return q.population > 0
+        return q.population > 0 or shown > 0
     return abs(q.population - q.told_population) >= max(1, capacity() // POPULATION_STEP)
 
 
