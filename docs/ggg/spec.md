@@ -186,6 +186,10 @@ same rows.
   notice to the tender in the order recorded, and the derived fact `published_in` of `tender_award` is the journals of
   its notices, each once. A contract made from a tender (`contract_create` with `tender`, or `tender_award`) takes its
   kind and procedure, and `contract_create` refuses others.
+- `contract_get` says besides, for the page of a contract, what an amendment of it is held to: `paid`, the least its value
+  may be amended to (I-FIN-11), `governed_by`, the department that governs it, `needs_vote`, whether that department's
+  policy makes a member's amendment a proposal, and `budgets`, the budget lines its payments are charged to (`id`,
+  `fund`, `period`, `category`). A page states them instead of repeating the rules.
 
 Where the two interfaces cannot say the same thing, the `ggg.did` methods do this:
 
@@ -328,8 +332,9 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `extension_call` | `extension.call` + the extension's declared operation | delegable (each operation it calls is held to the grant) | The voting extension casts Alice's vote through `proposal_vote` |
 | `extension_set_access`, `sidebar_configure` | `realm.configure` | governed, delegable | Show `vault` only to Finance |
 | `extension_list` | — (public) | read | Alice's sidebar shows `voting`, not `vault`; a visitor's shows the public dashboard |
-| `journal_issue` (the issue of `day`, default today, or of the verification `code`: the realm's name, its `number`, counted from the journal's first day, the day's entries, its `status`, which is `provisional` today, `signed`, or `unsigned` for a closed day not yet signed, and, when signed, its `proof`; every day from the first to today has one, a future day has none; on a quarter `issued` is false and the capital's id is named) | — (public) | read | Today's issue of the official journal lists the codex installed that morning and is provisional; the day before it is empty and signed |
-| `signature_proof` (the proof that the realm's canister signed a document, by its `kind` and `subject`, or by its verification `code`: the signed `canonical` text, its `digest`, the batch's `root`, its `path` to it, the `signature` and the `code`) | — (public) | read | The proof of `journal` `2026-11-09`, checked by `docs/verify/index.html` |
+| `journal_issue` (the issue of `day`, default today, or of the verification `code`: the realm's name, its `number`, counted from the journal's first day, the day's entries, its `status`, which is `provisional` today, `signed`, or `unsigned` for a closed day with no signature, which anyone may ask for with `journal_sign`, and, when signed, its `proof`; every day from the first to today has one, a future day has none; on a quarter `issued` is false and the capital's id is named) | — (public) | read | Today's issue of the official journal lists the codex installed that morning and is provisional; the day before it is empty and signed |
+| `signature_proof` (the proof that the realm's canister made and, once it is signed, signed a document, by its `kind` and `subject`, or by its verification `code`: the `canonical` text, its `digest`, the batch's `root`, its `path` to it, the `signature`, empty until the document is signed, and the `code`) | — (public) | read | The proof of `journal` `2026-11-09`, checked by `docs/verify/index.html` |
+| `journal_sign` (signs the official journal's issue of `day` now if nobody has, and returns its proof: for anyone, an anonymous caller too, at most once a day, so the realm's cost is never above that of signing every day; an issue already signed is returned as it is, one being signed by another call is `pending`; a day not closed, before the journal's first day, or a quarter's is refused; it runs no legislation and leaves an audit event only when it makes a signature) | — (public) | | Anyone asks for the signature of yesterday's issue and is given its proof |
 | `journal_capital_issue` (on a quarter, the capital's issue of `day`, asked of the capital by an update, because a read cannot call another canister; it changes nothing, so it leaves no audit event and runs no legislation) | `realm.data_view` | delegable | A quarter's journal page shows the capital's issue |
 | `shell` (REPL; calls operations as the caller) | `shell.execute` | delegable | An admin runs `ops.proposal_list({"status": "voting"})` |
 | `status`, `version` | — (public) | read | Thin summaries of `realm_info` |
@@ -348,6 +353,7 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `db_convert_indexes` | `db.convert` | | After an upgrade from a release before ic-python-db 0.13: converts the index lists saved as one array each, a batch per call, until `done` (a list too long for one call is skipped and named in `refused`); a new realm, or one already converted, does nothing |
 | `tax_policy_view` | `realm.data_view` | read, delegable | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
 | `budget_view` | `realm.data_view` | read, delegable | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |
+| `contract_list` (one page of contracts, `from` and `count`, optionally only those with a `status`; each with its parties, value, term, `split`, tender and `lot`, `framework` and mandate) | `realm.data_view` | read, delegable | The contracts page lists `C-9` and the call-off `C-14`; GGG has `contract_get` for one and no list |
 
 Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.view`,
 `orchestration.approve`, `shell.execute`, `it_team.set`, `codex.revert_fast` (held by the seat holders of the IT admin team). (`task.schedule` is the model's; `task.cancel` is no longer used: `task_cancel`

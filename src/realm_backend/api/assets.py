@@ -201,14 +201,15 @@ def land_list(c, args):
 @op("realm.data_view", read=True)
 def land_map(c, args):
     """The ``parcels`` overlapping the viewport of ``w`` × ``h`` cells (default and at most 32) from ``x``, ``y``
-    (default 0), and one page (``from``, ``count``) of the ``zones`` not tied to a parcel; ``next`` continues the
-    zones. A page can hold fewer zones than ``count``: follow ``next``."""
+    (default 0), and one page (``from``, ``count``) of the ``zones`` not tied to a parcel, each with whether the realm
+    ``defined`` it (zone_define) or it is a member's home cell; ``next`` continues the zones. A page can hold fewer zones
+    than ``count``: follow ``next``."""
     x, y, w, h = (int(args.get(k, d)) for k, d in (("x", 0), ("y", 0), ("w", VIEW), ("h", VIEW)))
     if not (1 <= w <= VIEW and 1 <= h <= VIEW):
         raise Fail(f"a map viewport is 1 to {VIEW} cells wide and high")
     zones, more = page(Zone, args, lambda z: z.land is None)
     return {"parcels": [view(p, *PARCEL) for p in parcels_in(x, y, w, h)],
-            "zones": [view(z, "id", "name", "kind", "population") for z in zones], "next": more}
+            "zones": [view(z, "id", "name", "kind", "population", "defined") for z in zones], "next": more}
 
 
 @op("nft.mint", returns="token_id")

@@ -269,6 +269,84 @@ def test_a_chain_link_is_checked_by_fetching_the_previous_document_by_its_code()
     assert page("checkPrevious", json.loads(first["canonical"]), {"$fetcher": {}})["status"] == "note"  # the first
 
 
+# ---- A realm signs a day when asked, so the documents before a signed one are often only made
+
+def days(signer, count):
+    return signer.make([(f"2026-11-{9 + n:02d}", issue_body(n + 1)) for n in range(count)])
+
+
+def test_a_document_made_and_signed_later_verifies_and_says_when_it_was_made():
+    signer = Signer(CANISTER)
+    made = days(signer, 3)
+    proof = signer.sign_made(made[2])
+    result = page("verifyProof", proof, {"canister": CANISTER, "requested": {"kind": "journal", "subject": "2026-11-11"}})
+    assert result["valid"] is True and all(c["status"] in ("pass", "note") for c in result["checks"])
+    assert page("timeRow", result["doc"]) == ["Made at", "2026-09-21T14:13:20.000Z"]
+    assert page("timeRow", json.loads(one()[1]["canonical"])) == ["Signed at", "2026-09-21T14:13:20.000Z"]  # an earlier release's
+    assert page("timeRow", {}) == ["Signed at", ""]
+
+
+def test_the_document_before_may_be_only_made_and_the_link_is_its_digest():
+    signer = Signer(CANISTER)
+    made = days(signer, 3)
+    signed = signer.sign_made(made[2])
+    doc = json.loads(signed["canonical"])
+    assert code(doc["prev"]) == made[1]["code"] and made[1]["signature"] == ""
+    link = page("checkPrevious", doc, {"$fetcher": {made[1]["code"]: made[1]}})
+    assert link["status"] == "pass" and "made and not signed" in link["detail"]
+    altered = {**made[1], "canonical": made[1]["canonical"].replace("2026-11-10", "2026-11-12")}
+    assert page("checkPrevious", doc, {"$fetcher": {made[1]["code"]: altered}})["status"] == "fail"  # not the one it names
+
+
+def test_the_walk_back_through_days_nobody_signed_is_checked_by_their_digests_and_a_signed_one_in_full():
+    signer = Signer(CANISTER)
+    made = days(signer, 5)
+    made[1] = signer.sign_made(made[1])  # the second day was signed on request too
+    after = json.loads(signer.sign_made(made[4])["canonical"])
+    for position in (3, 2, 1, 0):
+        earlier = page("checkEarlier", made[position], after, {"canister": CANISTER, "requested": {"code": made[position]["code"]}})
+        assert earlier["ok"] is True and earlier["signed"] is (position == 1)
+        after = earlier["doc"]
+    assert after["prev"] is None
+
+
+def test_the_walk_stops_at_an_earlier_document_that_is_not_the_one_named_another_realms_or_badly_signed():
+    signer = Signer(CANISTER)
+    made = days(signer, 3)
+    after = json.loads(signer.sign_made(made[2])["canonical"])
+    options = {"canister": CANISTER}
+    altered = {**made[1], "canonical": made[1]["canonical"].replace("2026-11-10", "2026-11-12")}
+    assert page("checkEarlier", altered, after, options)["ok"] is False
+    stranger = Signer("aaaaa-aa", kind="journal")
+    stranger.head = None
+    foreign = stranger.make([("2026-11-10", issue_body(2))])[0]
+    assert page("checkEarlier", foreign, {**after, "prev": foreign["digest"]}, options)["ok"] is False  # another realm's
+    other_kind = Signer(CANISTER, kind="certificate").make([("C-1", {"holder": 1})])[0]
+    assert page("checkEarlier", other_kind, {**after, "prev": other_kind["digest"]}, options)["ok"] is False
+    forged = {**signer.sign_made(made[1]), "signature": "00" * 64}
+    assert page("checkEarlier", forged, after, options)["ok"] is False  # signed, and the signature does not verify
+
+
+def test_a_document_that_is_only_made_is_neither_valid_nor_red_and_never_reads_as_signed():
+    signer = Signer(CANISTER)
+    made = days(signer, 1)[0]
+    result = page("verifyProof", made, {"canister": CANISTER})
+    assert result["valid"] is False and result["shaped"] is False and result["unsigned"] is True
+    assert all(c["status"] == "pass" for c in result["checks"])  # its text hashes to its digest, and the code is the digest's
+    said = page("verdictOf", result)
+    assert said["level"] == "neutral" and said["title"] == "Made, not signed yet" and "Request signature" in said["detail"]
+    assert "valid" not in said["title"].lower()
+
+
+def test_a_made_document_whose_text_or_code_was_changed_is_red_and_not_the_neutral_kind():
+    signer = Signer(CANISTER)
+    made = days(signer, 1)[0]
+    for changed in ({**made, "canonical": made["canonical"].replace("2026-11-09", "2026-11-12")}, {**made, "code": "AAAA-AAAA-AAAA-AAAA"}):
+        result = page("verifyProof", changed, {"canister": CANISTER})
+        assert result["unsigned"] is False and result["valid"] is False
+        assert page("verdictOf", result)["level"] == "fail"
+
+
 # ---- The query to a realm: what the IC's HTTP interface and Candid expect
 
 

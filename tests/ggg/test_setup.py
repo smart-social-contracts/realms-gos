@@ -8,7 +8,7 @@ import fake_chain
 import world
 from api import setup
 from ggg import Department, Realm, Registry
-from kit import call, denied, ok
+from kit import call, denied, direct, ok
 
 APPROVED = json.dumps({"approved": True, "approver": "market"})
 
@@ -122,6 +122,27 @@ def test_the_realm_stores_its_languages_and_refuses_what_is_no_tag():
     world.policy(Department["Administration"], 2, 3)
     assert call("realm_configure", "ctl", languages=["klingon!"])["kind"] == "invalid_argument"
     assert ok("realm_configure", "ctl", languages=["es"])["requires_vote"]
+
+
+def test_the_realm_signs_its_journal_on_request_unless_set_to_daily_and_refuses_what_is_no_mode():
+    world.build()
+    assert Realm["1"].journal_signing == "on_request"
+    ok("setup_step", "ctl", step="install", network="local", founder="frank")
+    ok("setup_step", "frank", step="realm", name="Agora", journal_signing="daily")
+    assert Realm["1"].journal_signing == "daily"
+    assert ok("setup_state", "frank")["realm"]["journal_signing"] == "daily"
+    assert ok("realm_info", fake_chain.ANONYMOUS)["realm"]["journal_signing"] == "daily"
+    for mode in ("yearly", "", True, ["daily"]):
+        out = call("setup_step", "frank", step="realm", journal_signing=mode)
+        assert not out["ok"] and out["kind"] == "invalid_argument", (mode, out)
+    out = direct("setup_step", "frank", step="realm", journal_signing=None)  # GGG's method drops a null: asked of the operation
+    assert not out["ok"] and out["kind"] == "invalid_argument", out
+    assert Realm["1"].journal_signing == "daily"
+    ok("setup_launch", "frank")
+    world.policy(Department["Administration"], 2, 3)
+    assert call("realm_configure", "ctl", journal_signing="nightly")["kind"] == "invalid_argument"  # refused before a vote
+    assert ok("realm_configure", "ctl", journal_signing="on_request")["requires_vote"]
+    assert Realm["1"].journal_signing == "daily"  # the vote has not been held
 
 
 def release(sha256="aa", approval=APPROVED):
