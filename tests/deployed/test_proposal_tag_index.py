@@ -290,6 +290,20 @@ def test_a_tag_of_64_four_byte_characters_is_filed_and_found(realm, people):
     assert one_page(realm, tags=[RARE], count=500)["ids"] == rare_ids() + [mine]
 
 
+def test_a_tag_that_ends_like_an_index_entry_hides_no_proposal(realm, people):
+    """``rare|n0000000000`` is ``rare`` and what the index adds for an entry of it: its count key sorted among the entries
+    of ``rare`` from the proposal 100 on (the rare tag is on P-100 and every hundredth after it)."""
+    expected = one_page(realm, tags=[RARE], count=500)["ids"]
+    filed = realm.call("proposal_create", {"title": "Look-alike", "tags": ["rare|n0000000000"]}, sender=people["alice"])
+    assert filed["ok"], filed
+    for count in (1, 2, 7):
+        pages, _ = every_page(realm, tags=[RARE], count=count)
+        assert [i for page in pages for i in page] == expected, count
+        assert all(len(page) == count for page in pages[:-1]), count
+    both, _ = every_page(realm, tags=[RARE, "rare|n0000000000"], count=2)
+    assert [i for page in both for i in page] == sorted(expected + [filed["proposal"]], key=lambda i: int(i.split("-")[1]))
+
+
 def test_filing_a_proposal_costs_the_lists_of_its_tags(realm, costs):
     filing_costs(realm, costs, "current")
 
