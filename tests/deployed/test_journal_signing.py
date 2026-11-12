@@ -3,9 +3,11 @@
 the key the IC derives for the canister, and an altered or dropped issue shows. tests/ggg/test_journal_signing.py runs the
 same rules in process with a fake key.
 
-The instance has a fiduciary subnet, which holds the keys. Proofs are checked three ways: in Python with ``cryptography``
-(verify_page.reference_valid), by the verify page's own script under Node (docs/verify/index.html), and, for the key, by
-asking the IC through another canister, which may ask for any canister's key.
+The instance has a fiduciary subnet, which holds the keys: only ``key_1`` on the pocket-ic that CI runs (dfx 0.31's also
+has ``dfx_test_key`` and ``test_key_1``, dfx 0.32's does not), so the realms are ``ic`` realms, which sign with ``key_1``,
+and the names the other networks use are checked in the wasm without signing. Proofs are checked three ways: in Python
+with ``cryptography`` (verify_page.reference_valid), by the verify page's own script under Node (docs/verify/index.html),
+and, for the key, by asking the IC through another canister, which may ask for any canister's key.
 
 The tests of this module run in order on one network: the clock only goes forward."""
 
@@ -37,12 +39,16 @@ def net(wasm_of, people):
 
 @pytest.fixture(scope="module")
 def capital(net):
-    return net.realm("capital", members=("alice",))
+    realm = net.realm("capital", members=("alice",))
+    shell(realm, "from ggg import Realm\nRealm['1'].network = 'ic'")  # the network whose key every pocket-ic holds
+    return realm
 
 
 @pytest.fixture(scope="module")
 def other(net):
-    return net.realm("other", members=("alice",))
+    realm = net.realm("other", members=("alice",))
+    shell(realm, "from ggg import Realm\nRealm['1'].network = 'ic'")  # its own journal signs with key_1 too
+    return realm
 
 
 def wait(net, seconds):
@@ -122,12 +128,12 @@ def test_a_an_issue_closed_is_signed_and_its_signature_verifies_under_the_key_th
     assert (doc["kind"], doc["realm"], doc["subject"], doc["prev"]) == ("journal", capital.cid, first, None)
     assert doc["body"]["number"] == 1 and doc["body"]["entries"] == closed["entries"] and len(closed["entries"]) == 1
     assert doc["key"]["algorithm"] == "ed25519" and doc["key"]["path"] == "realms:journal"
-    assert doc["key"]["name"] == "dfx_test_key"  # a local network's own key
+    assert doc["key"]["name"] == "key_1"  # an ic realm's key
     assert proof["root"] == proof["digest"] and proof["path"] == []  # a batch of one
     assert reference_valid(proof)
-    key = derived_key(net, other, capital.cid, "dfx_test_key")
+    key = derived_key(net, other, capital.cid, "key_1")
     assert doc["key"]["public_key"] == key  # the IC's own answer for this canister, not the realm's word
-    assert derived_key(net, other, other.cid, "dfx_test_key") != key  # another canister, another key
+    assert derived_key(net, other, other.cid, "key_1") != key  # another canister, another key
     if NODE:
         result = page("verifyProof", proof, {"canister": capital.cid, "expectedKey": key})
         assert result["valid"] is True and all(c["status"] == "pass" for c in result["checks"]), result["checks"]
@@ -223,17 +229,14 @@ def test_f_a_dropped_issue_leaves_a_gap_in_the_chain_that_a_later_issue_shows(ne
 # ---- The keys, an upgrade, and what it costs
 
 
-def test_g_each_network_signs_with_its_own_key_and_the_chain_goes_on_across_a_change(net, capital, other):
-    before = proof_of(capital, closed_days(capital)[-1])
-    for network, name in (("staging", "test_key_1"), ("ic", "key_1")):
+def test_g_each_network_names_its_own_key_and_an_ic_realm_signs_with_key_1(capital):
+    names = {"local": "dfx_test_key", "test": "test_key_1", "staging": "test_key_1", "demo": "test_key_1",
+             "ic": "key_1", "": "key_1"}
+    for network, name in names.items():
         shell(capital, f"from ggg import Realm\nRealm['1'].network = '{network}'")
-        wait(net, DAY)
-        proof = proof_of(capital, closed_days(capital)[-1])
-        doc = document(proof)
-        assert doc["key"]["name"] == name and doc["prev"] == before["digest"] and reference_valid(proof)
-        assert doc["key"]["public_key"] == derived_key(net, other, capital.cid, name)
-        assert doc["key"]["public_key"] != document(before)["key"]["public_key"]
-        before = proof
+        assert shell(capital, "from core import signing\nprint(signing.key_name())").strip() == name
+    shell(capital, "from ggg import Realm\nRealm['1'].network = 'ic'")  # nothing is signed meanwhile: no time passed
+    assert document(proof_of(capital, closed_days(capital)[-1]))["key"]["name"] == "key_1"
 
 
 def test_h_an_upgrade_keeps_the_documents_and_the_sweep_goes_on(net, capital):
