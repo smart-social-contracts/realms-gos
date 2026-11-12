@@ -255,6 +255,29 @@ def test_an_install_that_names_a_release_and_a_change_list_is_refused_where_it_i
     assert file_install(town, "1.0.0")  # a plain release is filed
 
 
+def test_an_install_with_ill_typed_arguments_is_refused_and_a_stored_one_fails_and_concludes_instead_of_trapping(
+        net, source, town):
+    """A manifest that is null made the install raise, so the call trapped: in a vote's execution the trap rolled the
+    vote back and the proposal never concluded (review of #695). The real wasm refuses it where it is filed; one stored
+    before that (set through the controller's shell) fails, with the reason recorded, when its vote closes."""
+    reason = "manifest is the codex's manifest.json"
+    malformed = {"source": "arcadia", "version": "1.0.0", "manifest": None}
+    action = {"op": "codex_install", "args": malformed}
+    refused = town.call("proposal_create", {"title": "Null manifest", "action": action}, sender=net.people["alice"])
+    assert not refused["ok"] and reason in refused["error"]
+    direct = town.call("codex_install", malformed, sender=net.people["ctl"])
+    assert not direct["ok"] and reason in direct["error"]
+
+    pid = file_install(town, "1.0.0")  # a plain release, then stored as it would have been before the refusal
+    stored = town.shell("from ggg import Proposal\n"
+                        f"Proposal[{pid!r}].action = {action!r}\n"
+                        "print('stored')")
+    assert "Traceback" not in stored
+    assert vote(town, pid, "yes") == "failed"  # the last vote's message completes: it did not trap
+    row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    assert row["status"] == "failed" and reason in row["result"]["error"]
+
+
 def test_an_unreadable_record_reads_unknown(net, source, town):
     source.stop()
     try:

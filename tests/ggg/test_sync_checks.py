@@ -577,16 +577,24 @@ def test_a_mixed_proposal_stored_before_it_was_refused_runs_as_the_release_and_i
     assert Proposal[pid].status == "executed" and running() == {"1.0.0"}  # it ran as the release
 
 
-def test_a_plain_change_list_and_a_plain_release_are_described_as_they_were():
+def test_a_plain_change_list_is_described_as_it_was_and_a_plain_release_as_the_release_it_installs():
+    """A change list and a codex package read as they did. A plain release read as "the code sent with the proposal"
+    (its arguments have no manifest) before ``codex_lines`` followed ``names_release``: it now says which release, and
+    from where."""
     from api import proposals
     import ggg_api
 
-    lines = dict(proposals.codex_lines(CHANGE_LIST_PIN))
-    assert set(lines) == {"Codex source", "Codex checksum"} and "Release to install" not in lines
+    q = proposals.quoted
+    assert proposals.codex_lines(CHANGE_LIST_PIN) == [("Codex source", q(CHANGE_LIST_PIN["url"])),
+                                                      ("Codex checksum", q(CHANGE_LIST_PIN["checksum"]))]
     assert "Code" in ggg_api.action({"op": "codex_install", "args": CHANGE_LIST_PIN})
+    package = proposals.codex_lines({"manifest": {"id": "lex", "version": "1.0"}, "source": "def hook(): pass"})
+    assert [label for label, _ in package] == ["Codex source", "Codex checksum", "Codex to install"]
+    assert package[2] == ("Codex to install", q("lex@1.0"))
+    from_record = "the record of the sync source that vouches for it, whole; the realm's own layer stays as it is"
+    assert proposals.codex_lines({"source": "arcadia", "version": "1.0.0"}) == [
+        ("Release to install", q("arcadia 1.0.0")), ("Installed from", from_record)]
     assert "Call" in ggg_api.action({"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0"}})
-    package = dict(proposals.codex_lines({"manifest": {"id": "lex", "version": "1.0"}, "source": "def hook(): pass"}))
-    assert package["Codex to install"] == proposals.quoted("lex@1.0") and "Release to install" not in package
 
 
 def test_the_change_list_of_a_release_is_the_whole_release_with_its_calendar_and_without_the_realm_chapter():

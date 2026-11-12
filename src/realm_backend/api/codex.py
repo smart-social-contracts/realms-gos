@@ -138,11 +138,56 @@ def hooks(codex_id):
         yield from legislation.activate(row)
 
 
+def text_arg(args, key, what):
+    """``args[key]`` as text, or a Fail that says what ``key`` is: an argument of another type than the one the install
+    reads is refused here, where a call is filed or made, rather than raising inside it (a trap)."""
+    value = args.get(key)
+    if not isinstance(value, str) or not value:
+        raise Fail(f"{key} is {what}")
+    return value
+
+
+def check_install_args(args):
+    """``codex_install``'s ``args`` are of the types the install reads, or a Fail names the one that is not. Without it
+    an argument of another type raises inside the install (a manifest that is null, an empty string or a list, sent
+    code that is not text): the operation then traps, and a trap inside a vote's execution or a timer rolls the message
+    back, so a proposal that carries it may never conclude. Asked when the install is filed (``filed_install``) and at
+    the start of the call, whether a member's, a controller's or an accepted vote's: a proposal stored with such
+    arguments before then fails, with the reason recorded. The shape of the arguments is not judged here: a release
+    with a change list beside it is refused when it is filed (core.change_list.names_both) and still runs, as the
+    release, when stored."""
+    if not isinstance(args, dict):
+        raise Fail("an install takes a record of arguments")
+    if "checksum" in args or change_list.names_release(args):
+        if "checksum" in args and not isinstance(args["checksum"], str):
+            raise Fail("checksum is sha256:<64 hex digits>")
+        if "url" in args and not isinstance(args["url"], str):
+            raise Fail("url is the address of the change list, https")
+        if change_list.names_release(args):
+            text_arg(args, "source", "the id of a layer from above: folder names of lowercase letters, digits, -")
+            text_arg(args, "version", "the release's version: 1 to 64 characters")
+    elif "manifest" in args:
+        manifest = args["manifest"]
+        if not isinstance(manifest, dict) or not manifest:
+            raise Fail("manifest is the codex's manifest.json: a record that is not empty")
+        text_arg(args, "source", "the codex's code: text")
+        for key in ("id", "version"):
+            if not isinstance(manifest.get(key), str) or not manifest[key]:
+                raise Fail(f"the manifest's {key} is text that is not empty")
+        if not isinstance(manifest.get("capabilities", []), list):
+            raise Fail("the manifest's capabilities is a list")
+    elif "codex" in args or "version" in args:
+        text_arg(args, "codex", "the name of a codex of the file registry: text")
+        text_arg(args, "version", "the version of that codex: text")
+
+
 def filed_install(args, proposal):
     """A "Propose install" (§11.4) that this realm could not build is refused when it is filed
-    (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a change
-    list at once (core.change_list.names_both): the realm would install the release, and a reader that tests the checksum
-    first would describe the change list."""
+    (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a
+    change list at once (core.change_list.names_both): the realm would install the release, and a reader that tests
+    the checksum first would describe the change list. So is one whose arguments are not of the types the install
+    reads (``check_install_args``)."""
+    check_install_args(args)
     if change_list.names_release(args):
         from api import installs  # it imports this module
 
@@ -165,6 +210,7 @@ def codex_install(c, args):
     (core.legislation.proposes_release)."""
     from api import installs  # it imports this module
 
+    check_install_args(args)
     if "checksum" in args or change_list.names_release(args):
         return installs.begin(c, args)
     if store.live_job() is not None:

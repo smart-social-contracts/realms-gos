@@ -1906,14 +1906,18 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    vouches for the release (§9.2 step 4), the whole release, with the realm's own layer unchanged. The
    chapters come from that record's capital by checksum (§9.2 step 3), or are stored already. Refused,
    with the reason: a realm with no layer of its own yet (its first layered codex names it, with a change
-   list), a federation with quarters (its quarters stage the change list the capital announces, and a
-   release built from a record has none: a federation installs a release with a change list), and a
-   release that only a stand-in record vouches for, whose chapters no capital serves (it is installed
-   with a change list that gives their URLs), and an action that names a release and a change list (`url` or `checksum`)
-   at once: the realm installs the release and never reads the change list, so a vote would be told one install and the
-   realm would run another. It is refused where it is filed and where `codex_install` is called with no vote behind it;
-   a proposal stored with both before that still runs, as the release, and is described as one. The follower's own guard
-   or forbid on `codex_install` still runs when the accepted
+   list); a federation with quarters (its quarters stage the change list the capital announces, and a
+   release built from a record has none: a federation installs a release with a change list); a release
+   that only a stand-in record vouches for, whose chapters no capital serves (it is installed with a change
+   list that gives their URLs); and an action that names a release and a change list (`url` or `checksum`)
+   at once. The realm installs the release and never reads the change list, so a vote would be told one
+   install and the realm would run another: such an action is refused where it is filed and where
+   `codex_install` is called with no vote behind it, and a proposal stored with both before that still runs,
+   as the release, and is described as one. The arguments of an install are of the types it reads (a
+   manifest is a record that is not empty, a source, a version and a codex name are text): one that is not
+   is refused where the install is filed and where `codex_install` is called, and a proposal stored with one
+   fails, with the reason recorded, rather than raising in the message of its vote or its timer. The
+   follower's own guard or forbid on `codex_install` still runs when the accepted
    proposal executes, and can delay or refuse the install; if it does, the realm reads `non_compliant`
    past the release's effective date, visible to all: that is the realm's own legislation over its own
    install, and the check makes the consequence visible.

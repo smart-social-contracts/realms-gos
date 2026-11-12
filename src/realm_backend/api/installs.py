@@ -103,7 +103,7 @@ def start(proposal, args):
     """A new job for ``args``: a change list at ``url`` with its ``checksum`` (``sha256:<hex>``), or a release's
     ``source`` and ``version``; its first step and its 24-hour limit armed. Refused while another job runs or is
     paused."""
-    if not proposal and change_list.names_both(args):  # a vote already carried one stored before it was refused: it runs
+    if not proposal and change_list.names_both(args):  # a vote that carried one stored before it was refused still runs
         raise Fail(MIXED)
     if change_list.names_release(args):
         release_of(args)
