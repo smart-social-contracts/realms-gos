@@ -6,6 +6,8 @@ never conclude. They are refused when the install is filed and when it is called
 reason recorded, and concludes.
 """
 
+import os
+
 import fake_chain
 import pytest
 import world
@@ -47,6 +49,11 @@ MALFORMED = {
 }
 
 
+# Through the GGG methods (GGG_MIRROR) a call's arguments are Candid values: a text that is null is not one, and the
+# mirror turns it into an empty text or none, so the realm never sees the null these cases are about.
+NULL_TEXT = {"code that is null", "a codex version that is null", "a release whose version is null"}
+
+
 @pytest.fixture(autouse=True)
 def realm():
     world.build()
@@ -62,6 +69,8 @@ def vote_yes(proposal):
 
 @pytest.mark.parametrize("name", list(MALFORMED))
 def test_arguments_of_the_wrong_types_are_refused_when_the_install_is_filed_and_when_it_is_called(name):
+    if name in NULL_TEXT and os.environ.get("GGG_MIRROR"):
+        pytest.skip("GGG's Candid types carry no null text: the mirror changes the argument")
     args, reason = MALFORMED[name]
     action = {"op": "codex_install", "args": args}
     assert reason in denied("proposal_create", "alice", title="Install", action=action)
