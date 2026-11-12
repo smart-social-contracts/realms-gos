@@ -8,7 +8,7 @@ import fake_chain
 import world
 from api import setup
 from ggg import Department, Realm, Registry
-from kit import call, denied, ok
+from kit import call, denied, direct, ok
 
 APPROVED = json.dumps({"approved": True, "approver": "market"})
 
@@ -132,9 +132,11 @@ def test_the_realm_signs_its_journal_on_request_unless_set_to_daily_and_refuses_
     assert Realm["1"].journal_signing == "daily"
     assert ok("setup_state", "frank")["realm"]["journal_signing"] == "daily"
     assert ok("realm_info", fake_chain.ANONYMOUS)["realm"]["journal_signing"] == "daily"
-    for mode in ("yearly", "", None, True, ["daily"]):
+    for mode in ("yearly", "", True, ["daily"]):
         out = call("setup_step", "frank", step="realm", journal_signing=mode)
         assert not out["ok"] and out["kind"] == "invalid_argument", (mode, out)
+    out = direct("setup_step", "frank", step="realm", journal_signing=None)  # GGG's method drops a null: asked of the operation
+    assert not out["ok"] and out["kind"] == "invalid_argument", out
     assert Realm["1"].journal_signing == "daily"
     ok("setup_launch", "frank")
     world.policy(Department["Administration"], 2, 3)
