@@ -354,7 +354,8 @@ def test_j_what_each_step_costs(net, site, people, costs):
 
 
 # The hook notes that it ran, then asks for the realm's vetKD key: PocketIC has no such key, the management canister
-# rejects the call after the await, and the effect traps. The note, written before the await, stays.
+# rejects the call after the await, and the effect traps. The effects run in a message of their own: the note, written
+# before the await, stays, the switch stands, and the failure is the chapter's, on the codex (§9.3).
 TRAPPING_REALM_CHAPTER = '''
 from realms.legislation import above
 
@@ -378,7 +379,33 @@ def test_k_the_switch_stands_when_the_realm_hook_traps_after_a_call_it_made(net,
     titles = [n["title"] for n in town.ok("notification_list", "founder", query=True)["notifications"][before:]]
     assert titles == ["about to call"]  # written before the await, so the call was made
     seen = status(town)
-    assert seen["codex"]["id"] == expected_id(layer) and seen["failures"] == {} and seen["healthy"]  # no trace of the trap
+    assert seen["codex"]["id"] == expected_id(layer) and not seen["healthy"]
+    failed = seen["failures"]["arcadia/realm.py"]["on_codex_activate"]
+    assert failed["count"] == 1 and failed["error"].startswith("the effects were rejected: ") and "vetkd_public_key" in failed["error"]
     with pytest.raises(Exception, match="vetkd_public_key") as rejected:  # what the hook's call met: the same, directly
         town.call("crypto_public_key", {}, sender=people["founder"])
     assert "trap" in str(rejected.value).lower()
+
+
+# An effect whose arguments are malformed: a number where the notification's recipient is text. The operation fails by
+# an exception, which traps; it used to take the whole message with it (realms-gos#679).
+MALFORMED_REALM_CHAPTER = '''
+from realms.legislation import above
+
+class Realm(above("realm")):
+    def on_codex_activate(self, event):
+        self.ggg.notification_send(recipient=123, topic="codex", title="malformed", body="")
+'''
+
+
+def test_m_a_malformed_effect_is_the_chapters_failure_and_the_switch_stands(net, town, site, people):
+    current = active_id(town)
+    layer = {**own_layer(people["founder"]), "arcadia/realm": MALFORMED_REALM_CHAPTER.encode()}
+    town.govern("codex_install", site.change_list(layer, replaces=current))
+    job = settled(net, town)
+    assert (job["status"], job["step"]) == ("done", "switch"), job
+    net.wait(5)  # the hook's message: the effects run in a message of their own, which traps
+    seen = status(town)
+    assert seen["codex"]["id"] == expected_id(layer) and seen["codex"]["previous"] == current and not seen["healthy"]
+    failed = seen["failures"]["arcadia/realm.py"]["on_codex_activate"]
+    assert failed["count"] == 1 and failed["error"].startswith("the effects were rejected: "), failed

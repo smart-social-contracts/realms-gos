@@ -51,6 +51,15 @@ def run(name: text, args: text) -> Async[text]:
     return (yield from dispatch(name, args))
 
 
+@update
+def hook_effects(effects: text) -> Async[text]:
+    """One hook domain's effects, in a message of their own so that a trap in one ends only that message. Only the
+    realm itself calls it (core.legislation)."""
+    from core import legislation
+
+    return (yield from legislation.hook_effects(effects))
+
+
 @query
 def http_transform(args: HttpTransformArgs) -> HttpResponse:
     """What every node's reply to an HTTPS outcall (core.chain.http_get) is passed through before the replica

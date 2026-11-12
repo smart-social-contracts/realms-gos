@@ -242,12 +242,24 @@ def oldest_event():
     return Event[str(max(1, Event.max_id() - EVENTS_KEPT + 1))]
 
 
+_synchronous = []  # the generators ``run`` is driving now: nothing in them can wait for another canister
+
+
 def run(gen):
+    _synchronous.append(gen)
     try:
         next(gen)
     except StopIteration as done:
         return done.value
+    finally:
+        _synchronous.pop()
     raise RuntimeError("a query cannot call other canisters")
+
+
+def awaitable():
+    """Whether the message running now may call other canisters: not while ``run`` drives it, as it does a query, the
+    shell and an extension's calls."""
+    return not _synchronous
 
 
 def on_behalf(user, by, args):
