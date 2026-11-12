@@ -69,14 +69,21 @@ def hook(name, context=None):
 
     A generator (``out = yield from codex.hook(...)``). Returns None when no codex is active or it has no such
     hook, else ``{ok, result, effects}`` or ``{ok: false, error}``. A failing hook never fails the caller; it
-    marks the codex unhealthy until a hook succeeds again.
+    marks the codex unhealthy until a hook succeeds again. It fails however it does: an error inside it, a function
+    the code does not define, a signature that does not take what the realm gives it, a spent budget. None of them
+    reaches the caller as an exception, and so none traps the message of a vote, a timer or an install it runs in.
     """
     codex = active_legacy()
     if codex is None or name not in (codex.manifest or {}).get("hooks", []):
         return None
     realm = Realm["1"]
     facts = {"codex": codex.id, "config": config(codex), "now": chain.now(), "realm": view(realm, *REALM_FIELDS)}
-    out = yield from sandbox.call(codex.source, name, context or {}, facts, codex.capabilities or [])
+    try:
+        out = yield from sandbox.call(codex.source, name, context or {}, facts, codex.capabilities or [])
+    except Exception as e:  # noqa: BLE001  the hook's own failure, whatever it is, is the codex's: never the caller's
+        undefined = isinstance(e, KeyError) and e.args == (name,)  # the code has no function of that name
+        detail = f"the code does not define the hook {name}" if undefined else str(e)
+        out = {"ok": False, "error": f"{type(e).__name__}: {detail}"}
     failed = [e for e in out.get("effects", []) if not e.get("ok")]
     error = out.get("error") or "; ".join(f"{e['op']}: {e.get('error')}" for e in failed)
     problem = {"codex": codex.id, "hook": name, "error": error, "at": chain.now()} if error else {}
@@ -138,17 +145,43 @@ def hooks(codex_id):
         yield from legislation.activate(row)
 
 
+def defined_by(code):
+    """The names a module's ``code`` can bind at its top level: every name it uses (a ``def`` stores its name) and the
+    name of every function it defines."""
+    return set(code.co_names) | {const.co_name for const in code.co_consts if hasattr(const, "co_name")}
+
+
+def check_hooks(manifest, source):
+    """A manifest that lists a hook its ``source`` does not define is refused before anything is installed: the codex
+    would switch in, and its hook could never run (``hook`` would find no function and mark it unhealthy for good). The
+    names are judged on the compiled code, no code runs. A manifest or source of another type, or code that does not
+    compile, is left to the checks of those."""
+    hooks = manifest.get("hooks") if isinstance(manifest, dict) else None
+    if not isinstance(hooks, list) or not isinstance(source, str):
+        return
+    try:
+        code = compile(source, "hooks.py", "exec")
+    except (SyntaxError, ValueError):
+        return
+    for name in hooks:
+        if isinstance(name, str) and name not in defined_by(code):
+            raise Fail(f"the manifest lists the hook {name}, which the code does not define")
+
+
 def filed_install(args, proposal):
     """A "Propose install" (§11.4) that this realm could not build is refused when it is filed
     (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a change
     list at once (core.change_list.names_both): the realm would install the release, and a reader that tests the checksum
-    first would describe the change list."""
+    first would describe the change list. So is code whose manifest lists a hook it does not define
+    (``check_hooks``)."""
     if change_list.names_release(args):
         from api import installs  # it imports this module
 
         if change_list.names_both(args):
             raise Fail(installs.MIXED)
         installs.release_of(args)
+    elif "manifest" in args:
+        check_hooks(args["manifest"], args.get("source"))
 
 
 @op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install)
@@ -175,6 +208,7 @@ def codex_install(c, args):
         namespace = f"ext/{args['codex']}/{args['version']}"
         manifest, source = yield from fetch(namespace)
     runnable(manifest)
+    check_hooks(manifest, source)
     digest = checksum(manifest, source)
     yield from trust(digest, namespace)
     compile(source, "hooks.py", "exec")
