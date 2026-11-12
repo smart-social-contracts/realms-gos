@@ -186,6 +186,10 @@ same rows.
   notice to the tender in the order recorded, and the derived fact `published_in` of `tender_award` is the journals of
   its notices, each once. A contract made from a tender (`contract_create` with `tender`, or `tender_award`) takes its
   kind and procedure, and `contract_create` refuses others.
+- `contract_get` says besides, for the page of a contract, what an amendment of it is held to: `paid`, the least its value
+  may be amended to (I-FIN-11), `governed_by`, the department that governs it, `needs_vote`, whether that department's
+  policy makes a member's amendment a proposal, and `budgets`, the budget lines its payments are charged to (`id`,
+  `fund`, `period`, `category`). A page states them instead of repeating the rules.
 
 Where the two interfaces cannot say the same thing, the `ggg.did` methods do this:
 
@@ -348,6 +352,7 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `db_convert_indexes` | `db.convert` | | After an upgrade from a release before ic-python-db 0.13: converts the index lists saved as one array each, a batch per call, until `done` (a list too long for one call is skipped and named in `refused`); a new realm, or one already converted, does nothing |
 | `tax_policy_view` | `realm.data_view` | read, delegable | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
 | `budget_view` | `realm.data_view` | read, delegable | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |
+| `contract_list` (one page of contracts, `from` and `count`, optionally only those with a `status`; each with its parties, value, term, `split`, tender and `lot`, `framework` and mandate) | `realm.data_view` | read, delegable | The contracts page lists `C-9` and the call-off `C-14`; GGG has `contract_get` for one and no list |
 
 Permissions these add: `extension.install`, `extension.uninstall`, `extension.call`, `task.create`, `task.edit`, `task.delete`, `task.run`, `task.view`,
 `orchestration.approve`, `shell.execute`, `it_team.set`, `codex.revert_fast` (held by the seat holders of the IT admin team). (`task.schedule` is the model's; `task.cancel` is no longer used: `task_cancel`
