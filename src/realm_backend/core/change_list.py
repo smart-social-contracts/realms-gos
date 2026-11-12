@@ -75,6 +75,15 @@ def names_release(args):
     return isinstance(args, dict) and "source" in args and "manifest" not in args
 
 
+def names_both(args):
+    """Whether ``codex_install``'s ``args`` name a release (``source`` and ``version``) and a change list (``url`` or
+    ``checksum``) at once. The realm installs the release then (``names_release``) and never reads the change list, while a
+    reader that tests the checksum first describes a change list: the voters would be told one install and the realm run
+    another. Refused when the install is filed (api.codex.filed_install) and when it is called with no vote behind it
+    (api.installs.start); a proposal stored before that runs as the release, as it always did."""
+    return names_release(args) and ("checksum" in args or "url" in args)
+
+
 def no_repeats(pairs, what="the change list"):
     """A JSON object whose keys are all different: one that repeats a key reads as its last value here and as its
     first in a tool that stops at the first, so what voters were shown could differ from what is installed. ``what``

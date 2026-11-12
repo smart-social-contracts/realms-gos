@@ -570,10 +570,17 @@ def effective_at_of(args):
 
 def codex_lines(what):
     """What a ``codex_install`` action would put in place, as (label, value), by the branch the install itself takes
-    (api.codex): a layered codex by its url and checksum, code sent with the call, or a codex of the registry by its name
-    and version. Everything the proposer wrote is quoted; the checksum of sent code is the realm's own."""
+    (api.codex): a release of a layer from above by its source and version (``names_release``: first, so that a proposal
+    stored with a change list beside it reads as the release that runs), a layered codex by its url and checksum, code
+    sent with the call, or a codex of the registry by its name and version. Everything the proposer wrote is quoted; the
+    checksum of sent code is the realm's own."""
     from api.extensions import checksum
+    from core import change_list
 
+    if change_list.names_release(what):  # the branch the install takes first, whatever else the arguments carry
+        return [("Release to install", quoted(f"{what.get('source')} {what.get('version')}")),
+                ("Installed from", "the record of the sync source that vouches for it, whole; the realm's own layer "
+                                   "stays as it is")]
     if "checksum" in what:
         return [("Codex source", quoted(what.get("url", ""))), ("Codex checksum", quoted(what["checksum"]))]
     if "source" in what:

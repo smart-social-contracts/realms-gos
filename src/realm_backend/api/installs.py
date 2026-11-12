@@ -55,6 +55,9 @@ MAX_CHANGE_LIST = 64 * 1024
 MAX_CHAPTER = store.MAX_CHAPTER
 HEX = "0123456789abcdef"
 LEFT = "this realm is no longer a quarter of the capital that announced the codex"
+MIXED = ("an install names a release (source and version) or a change list (url and checksum), not both: the realm "
+         "installs the release and never reads the change list, so a vote would be told one install and the realm run "
+         "another")
 NO_OWN_LAYER = ("this realm has no layer of its own yet: its first layered codex names it, with a change list; a "
                 "release is installed after that")
 # A quarter stages what its capital announces: the change list, by its checksum, and the layers the capital staged. A
@@ -100,6 +103,8 @@ def start(proposal, args):
     """A new job for ``args``: a change list at ``url`` with its ``checksum`` (``sha256:<hex>``), or a release's
     ``source`` and ``version``; its first step and its 24-hour limit armed. Refused while another job runs or is
     paused."""
+    if not proposal and change_list.names_both(args):  # a vote already carried one stored before it was refused: it runs
+        raise Fail(MIXED)
     if change_list.names_release(args):
         release_of(args)
     else:

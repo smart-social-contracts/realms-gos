@@ -17,7 +17,7 @@ from api import crypto, links, tasks
 from api.treasury import EPOCHS
 from api.proposals import settings
 from api.setup import VERSION
-from core import chain, compliance, pending
+from core import chain, change_list, compliance, pending
 from core.candid import Principal as ParsedPrincipal, Reader, idl_hash, quote
 from core.op import dispatch, ops, run as drive
 from core.ratio import ONE
@@ -299,7 +299,8 @@ def action(a):
     if not a.get("op"):
         return {"Motion": None}
     op, args = a["op"], a.get("args") or {}
-    if op == "codex_install" and args.get("checksum"):
+    # An install that names a release runs as one, whatever change list it carries beside it (core.change_list).
+    if op == "codex_install" and args.get("checksum") and not change_list.names_release(args):
         return {"Code": {"url": args.get("url", ""), "checksum": args["checksum"]}}
     return {"Call": call_record(op, args)}
 

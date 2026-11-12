@@ -140,10 +140,14 @@ def hooks(codex_id):
 
 def filed_install(args, proposal):
     """A "Propose install" (§11.4) that this realm could not build is refused when it is filed
-    (api.installs.release_of), rather than when the vote has passed."""
+    (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a change
+    list at once (core.change_list.names_both): the realm would install the release, and a reader that tests the checksum
+    first would describe the change list."""
     if change_list.names_release(args):
         from api import installs  # it imports this module
 
+        if change_list.names_both(args):
+            raise Fail(installs.MIXED)
         installs.release_of(args)
 
 
