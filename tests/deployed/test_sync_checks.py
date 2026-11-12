@@ -242,7 +242,7 @@ def test_a_release_filed_by_hand_that_is_older_than_what_the_town_runs_is_marked
 def test_an_install_that_names_a_release_and_a_change_list_is_refused_where_it_is_filed(net, source, town):
     """The realm installs the release and never reads the change list, so a vote would be told one install and the realm
     would run another: the real wasm refuses the shape when it is filed, and a plain release is filed as it was."""
-    pin = {"url": net.web + "changes/mixed.json", "checksum": "sha256:" + "a" * 64}
+    pin = {"url": "https://legislation.example.test/changes/mixed.json", "checksum": "sha256:" + "a" * 64}
     mixed = {"source": "arcadia", "version": "1.0.0", **pin}
     action = {"op": "codex_install", "args": mixed}
     before = len(town.ok("proposal_list", "alice", query=True, count=500)["proposals"])
