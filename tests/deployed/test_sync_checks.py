@@ -362,11 +362,11 @@ def plain(net):
 
 
 @pytest.mark.parametrize("name", list(SURROGATES))
-def test_text_that_is_not_utf8_is_a_refusal_and_a_stored_one_concludes_failed_with_approval_on(net, plain, name):
+def test_text_that_is_not_utf8_is_refused_where_the_install_is_called_and_filed_with_approval_on(net, plain, name):
     """The canister's JSON accepts a lone surrogate, and hashing the text raised a UnicodeEncodeError that dispatch
-    trapped on: the direct call and the filing were rejected, and a stored proposal trapped its deciding vote for ever
-    (review of #697). In a manifest value it shows only here: the canister's json.dumps ignores ensure_ascii. The
-    stored proposal is read through the shell: a view of it traps (a separate bug)."""
+    trapped on: the direct call and the filing were rejected (review of #697). In a manifest value it shows only here:
+    the canister's json.dumps ignores ensure_ascii. A stored proposal with one is not a case here: the canister's
+    database cannot encode it, so the shell cannot write one (the in-process test runs the stored vote and timer)."""
     args = SURROGATES[name]
     reason = "the manifest and the code are UTF-8 text"
     set_policy = ("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = {}\n"
@@ -377,16 +377,7 @@ def test_text_that_is_not_utf8_is_a_refusal_and_a_stored_one_concludes_failed_wi
     action = {"op": "codex_install", "args": args}
     refused = plain.call("proposal_create", {"title": "Install", "action": action}, sender=net.people["alice"])
     assert not refused["ok"] and reason in refused["error"]
-    road = {"op": "mandate_create", "args": {"title": "Road works"}}
-    pid = plain.ok("proposal_create", "alice", title="Road works", action=road)["proposal"]
-    store_action(plain, pid, args)
-    shown = f"from ggg import Proposal\nprint('STATUS', Proposal[{pid!r}].status)"
-    for member in plain.members:
-        if "STATUS voting" not in plain.shell(shown):
-            break
-        plain.ok("proposal_vote", member, proposal=pid, choice="yes")  # no trap
-    out = plain.shell(f"from ggg import Proposal\np = Proposal[{pid!r}]\nprint('STATUS', p.status, p.result)")
-    assert "STATUS failed" in out and reason in out, out
+    assert plain.ok("proposal_list", "alice", query=True)["proposals"] == []  # nothing was filed
 
 
 def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(
