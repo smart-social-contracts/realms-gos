@@ -1,7 +1,7 @@
 
 from core import candid
-from core import chain
-from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, view
+from core import chain, sync_log
+from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, put, view
 from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Realm, User, Verdict, Zone
 from api import codex
 from api.licenses import active, principals
@@ -15,6 +15,12 @@ PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_i
 ZONES_MAX = 8  # the zones a parcel lies in (ggg I-AST-6)
 CELL = 16  # the side of a spatial index cell, and the most a parcel spans
 VIEW = 32  # the most a map viewport spans
+# The census of the zones members live in: ``held`` is each zone with its population (``populated``), read from the rows
+# once and kept by ``move_home`` and ``leave_home`` after that, so that a quarter does not read every zone to report them;
+# ``generation`` counts the changes, and ``taken`` is the generation the capital last took (api.quarters.sync): a quarter
+# reports the census while they differ, and the capital's take is acknowledged only when it has been made. None is stored:
+# they start afresh after an upgrade, which is when the next report must carry the whole census.
+census = {"held": None, "generation": 1, "taken": 0}
 
 
 # --- ledger (ICRC-7, smart-social-contracts/ic-tokens), spoken in candid text ---
@@ -322,8 +328,10 @@ def define_zone(zone_id, name, kind):
     zone = Zone[zone_id]
     if zone and not zone.defined:
         raise Conflict(f"zone {zone.id} is a member's home cell")
+    created = zone is None
     zone = zone or Zone(id=zone_id, defined=True)
-    zone.name, zone.kind = name, kind
+    if put(zone, name=name, kind=kind) or created:
+        sync_log.note("zone", zone_id)  # the capital's quarters take it at their next sync
     return zone
 
 
@@ -331,6 +339,22 @@ def defined_zones():
     """The zones of the realm. A member's home cell has a user and a zone of the realm has none, so the index on
     ``user`` finds them without reading every cell."""
     return [z for z in each(Zone, "user", "") if z.defined]
+
+
+def populated():
+    """The zones of the realm that members live in, each with how many."""
+    if census["held"] is None:
+        census["held"] = {z.id: z.population for z in defined_zones() if z.population}
+    return dict(census["held"])
+
+
+def counted(zone):
+    """The population of ``zone`` changed: the census has it as it is now."""
+    census["generation"] += 1
+    if census["held"] is not None:
+        census["held"].pop(zone.id, None)
+        if zone.population and zone.defined:
+            census["held"][zone.id] = zone.population
 
 
 def defined_zone(zone_id):
@@ -348,6 +372,7 @@ def move_home(user, zone_id):
     if user.home_zone != zone.id:
         leave_home(user)
         zone.population += 1
+        counted(zone)
         user.home_zone = zone.id
 
 
@@ -356,6 +381,7 @@ def leave_home(user):
     home = Zone[user.home_zone] if user.home_zone else None
     if home:
         home.population -= 1
+        counted(home)
         user.home_zone = ""
 
 

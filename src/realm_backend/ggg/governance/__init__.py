@@ -13,7 +13,7 @@ from .guest_user import GuestUser
 from .realm import Realm
 from .calendar import Calendar
 from .registry import Registry
-from .quarter import Quarter, Forward
+from .quarter import Forward, Quarter, SyncChange
 from .federal_vote import FederalVote, FederalVoteLeg
 from .federation import FederationMessage
 from .codex import Codex

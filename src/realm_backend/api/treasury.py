@@ -3,7 +3,7 @@ import json
 
 from core import candid
 from core import chain
-from core import compliance
+from core import compliance, sync_log
 from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page, page_by, view, window
 from ggg import (AllocationRule, Budget, Contract, Department, External, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, Loan, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
@@ -696,6 +696,12 @@ def treasury_configure(c, args):
     quarter_sync. Returns the merged ``config``."""
     t = Treasury["1"] or Treasury(id="1")
     t.config = {**(t.config or {}), **args["config"]}
+    if "sweep" in args["config"]:
+        sync_log.note("sweep")  # the quarters take the rules at their next sync
+    if "epoch" in args["config"]:
+        from api import sweeps  # it imports this module
+
+        sweeps.resume()  # a quarter that holds rules sweeps at the end of an epoch that has a length now
     return {"config": t.config}
 
 
