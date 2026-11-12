@@ -39,7 +39,12 @@ class Transfer(Row):
         return obj
 
     @classmethod
-    def paid_on(cls, contract):
-        """What has been paid on ``contract`` (an id): its transfers that neither failed nor were cancelled, so a
+    def counted_on(cls, contract):
+        """The transfers that count as paid on ``contract`` (an id): those that neither failed nor were cancelled, so a
         scheduled one, which is owed, counts (ggg I-FIN-11)."""
-        return sum(t.amount for t in each(cls, "contract", contract) if t.status not in ("failed", "cancelled"))
+        return [t for t in each(cls, "contract", contract) if t.status not in ("failed", "cancelled")]
+
+    @classmethod
+    def paid_on(cls, contract):
+        """What has been paid on ``contract`` (an id): the amounts of its counted transfers."""
+        return sum(t.amount for t in cls.counted_on(contract))
