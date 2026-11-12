@@ -646,7 +646,8 @@ def treasury_view(c, args):
 @op("treasury.view", read=True, returns="entries")
 def ledger_view(c, args):
     """One page of ledger entries (``from``, ``count``), optionally filtered by ``transaction``, ``symbol``, ``kind``,
-    ``fund`` and ``period``; ``next`` continues it. A page can hold fewer matches than ``count``: follow ``next``."""
+    ``fund`` and ``period``; ``next`` continues it. An entry that books a sweep names it (``sweep``). A page can hold
+    fewer matches than ``count``: follow ``next``."""
     keys = {k: args[k] for k in ("transaction", "symbol", "kind") if k in args}
 
     def keep(e):
@@ -656,7 +657,8 @@ def ledger_view(c, args):
     rows, nxt = page(LedgerEntry, args, keep)
     return {"entries": [{**view(e, "id", "transaction", "kind", "category", "debit", "credit", "symbol", "at",
                                 "description", "user"),
-                         "fund": e.fund.id if e.fund else "", "period": e.period.id if e.period else ""}
+                         "fund": e.fund.id if e.fund else "", "period": e.period.id if e.period else "",
+                         "sweep": e.sweep.id if e.sweep else ""}
                         for e in rows], "next": nxt}
 
 
