@@ -60,7 +60,8 @@ keeps its **path**: the sibling digests from its leaf up, each marked left or ri
 text, climb the path to the root, check the signature of the root. A batch of one has an empty path and root = digest.
 
 The journal signs one document a day, so its batches are of one, except after downtime: the days that closed meanwhile
-are one batch, one signature. A kind with documents on demand (certificates) queues them and signs the queue in the same
+are one batch, one signature, at most 31 days to a batch (a batch is made in one message), so that 40 days stopped is two
+signatures. A kind with documents on demand (certificates) queues them and signs the queue in the same
 sweep: its cost per document goes to near zero, and a document waits at most an hour.
 
 ## 5. The journal, the first kind
@@ -123,11 +124,15 @@ runs from disk. A sheet's QR code points to it with `?canister=…&code=…`.
 |---|---|---|
 | `key_1` (34-node subnet), docs | 26,153,846,153 cycles (~$0.0357) | ~9.5T cycles, ~$13 |
 | `test_key_1` (13-node subnet), docs | 10,000,000,000 cycles (~$0.0137) | ~3.7T cycles, ~$5 |
-| PocketIC, measured | 26.18B cycles for all three key names (26.15B fee + ~30M of the realm's own work) | |
+| PocketIC, measured | 26.1B cycles for all three key names: the 26.15B fee and about 30M of the realm's own work | |
 
 1 XDR = 1 trillion cycles = $1.366 (docs, 22 May 2026). `schnorr_public_key` is free. A call with too few cycles attached is
 rejected and refunded, and the error names the fee. The realm attaches 60B and gets the unused part back. Batching makes the
-signature cost the same for one document or many. Storage: a few KB a document. A federation signs only at its capital.
+signature cost the same for one document or many: on PocketIC a day's signature cost 26.1B cycles, and 40 days stopped cost
+two. An idle realm there burns about 0.7B cycles a day, so the signature is the larger part of a realm's daily cost.
+In instructions (PocketIC): reading a signed issue 10.5M, writing one issue's text and digest 19M, the tree of a month of
+issues 480M, finding a proof by its code 2.4M, so a batch of 31 is about 1.1B, well under a message's limit. Storage: a few
+KB a document. A federation signs only at its capital.
 
 ## 9. Key management
 

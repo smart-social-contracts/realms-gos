@@ -93,7 +93,7 @@ def test_a_a_new_realm_has_a_journal_and_an_issue_for_today_with_no_entries(capi
     today = date(capital.now())
     assert out["ok"] and out["issued"] is True and out["capital"] == capital.cid
     assert out["issue"] == {"realm": "capital", "day": today, "number": 1, "first_day": today, "today": today,
-                            "timezone": "UTC", "entries": []}
+                            "timezone": "UTC", "entries": [], "status": "provisional"}
 
 
 def test_b_every_day_from_the_first_has_an_issue_and_a_day_after_today_or_before_the_first_has_none(net, capital):

@@ -1732,8 +1732,10 @@ other core extensions of [`core-extensions.json`](../../core-extensions.json)
 - **One issue every day,** even on a day with no entries. The day is the realm's local day on the
   capital's clock (the realm's official time), computed in Realms GOS from the capital's own zone
   (§4.5). A quarter's zone plays no part in it.
-- **The canister serves the JSON, which is the authority.** The PDF is a browser print route with the
-  realm's logo; it is never checksummed.
+- **The canister serves the JSON, which is the authority, and signs it.** A day that has closed is signed by
+  the realm's canister, and anyone can verify the signature ([the signed official journal](journal-signature.md)).
+  The PDF is a browser print route with the realm's logo; the verification code printed on it finds the
+  signed issue.
 - **Personal-data rules live in the extension's config,** not in a chapter.
 - **The official journal plays no role in when legislation applies.** Legislation applies when the
   proposal passes and its changes are executed (§9.2 step 6). No publication gates, in the official
@@ -1747,10 +1749,12 @@ changed: the switch of a layered codex, every revert (§10), each release the re
 (`release_published`). A release's entry names its `source` and `version` and the time it is `effective_from`. It
 holds the instant and the realm's local day on the capital's clock at that moment, so a change of the realm's zone
 moves no past issue. An issue
-is not stored. `journal_issue {day}` returns the entries of a day, numbered from the journal's first day (the local
-day the realm first started with the journal, moved back if the realm then sets a zone west of UTC), for every day
-from that one to today, with or without entries; a later day, or one before the first, is not found. No timer makes an
-issue. A quarter's `journal_issue` returns `issued: false` and names its capital; `journal_capital_issue` asks the
+is the entries of its day. `journal_issue {day}` returns the entries of a day, numbered from the journal's first day (the
+local day the realm first started with the journal, moved back if the realm then sets a zone west of UTC, until a day is
+signed), for every day from that one to today, with or without entries; a later day, or one before the first, is not
+found. Today's issue is `provisional`. When a day has closed, an hourly sweep has the realm's canister sign it, with the
+issue before it linked by digest; the signed text, the signature and a verification code are stored and served as the
+issue's `proof`, and no entry is ever stamped into a signed day (`journal-signature.md`). A quarter's `journal_issue` returns `issued: false` and names its capital; `journal_capital_issue` asks the
 capital for its issue through the quarter, as an update, because a read cannot call another canister. The extension's
 manifest holds the personal-data rules as an allow-list of the fields an entry may keep, which the realm applies when
 it records the entry; rules that are not a list of names keep nothing. Nothing that goes wrong in the journal stops

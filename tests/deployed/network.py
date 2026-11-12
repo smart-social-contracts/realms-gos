@@ -17,8 +17,8 @@ ACCEPTED = ("executed", "execution_scheduled")
 
 
 class Network:
-    def __init__(self, wasm_path, people):
-        self.pic = new_pocket_ic()
+    def __init__(self, wasm_path, people, keys=False):
+        self.pic = new_pocket_ic(keys)
         self.wasm = Wasm(self.pic, wasm_path)
         self.people = people
         self.web = Web(self.pic)

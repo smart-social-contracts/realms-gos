@@ -15,6 +15,7 @@ from pathlib import Path
 from ic.candid import Types, decode, encode
 from ic.principal import Principal
 from pocket_ic import PocketIC
+from pocket_ic.subnet_config import SubnetConfig
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -51,12 +52,15 @@ GGG_ERROR = Types.Variant({
     "GenericError": Types.Record({"error_code": Types.Nat, "message": Types.Text})})
 
 
-def new_pocket_ic():
+def new_pocket_ic(keys=False):
     """A PocketIC instance whose requests wait while the server is busy with a round. A round that takes long, such as
     the install of an 11 MB wasm on a loaded machine, makes it answer 409 to anything else, which the client takes as
     an error. Only a 409 is tried again, for up to ten minutes: a server that is gone, or a request it refuses, fails
-    at once, and one that stays busy fails with a ``RetryError``."""
-    pic = PocketIC()
+    at once, and one that stays busy fails with a ``RetryError``.
+
+    With ``keys`` the instance has a fiduciary subnet as well, which holds the threshold keys (``dfx_test_key``,
+    ``test_key_1``, ``key_1``) that the management canister signs with: an instance without one finds no key."""
+    pic = PocketIC(SubnetConfig(application=1, fiduciary=True)) if keys else PocketIC()
     busy = Retry(total=None, connect=0, read=0, redirect=0, other=0, status=600, status_forcelist=(409,),
                  allowed_methods=None, backoff_factor=0.05, backoff_max=1, raise_on_status=True)
     pic.server.request_client.mount("http://", HTTPAdapter(max_retries=busy))

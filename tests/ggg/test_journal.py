@@ -69,7 +69,7 @@ def test_a_new_realm_has_a_journal_and_an_issue_for_today_with_no_entries():
     out = ok("journal_issue", fake_chain.ANONYMOUS)  # public: a visitor reads it
     assert out["issued"] is True and out["capital"] == fake_chain.self_id()
     assert out["issue"] == {"realm": "Agora", "day": "2026-11-09", "number": 1, "first_day": "2026-11-09",
-                            "today": "2026-11-09", "timezone": "UTC", "entries": []}
+                            "today": "2026-11-09", "timezone": "UTC", "entries": [], "status": "provisional"}
 
 
 def test_every_day_from_the_first_to_today_has_an_issue_with_or_without_entries():
