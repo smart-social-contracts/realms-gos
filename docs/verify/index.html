@@ -462,15 +462,36 @@ async function fetchProof(host, canister, which) {
 
 // The link of a document to the one before it: that one is fetched by its code and must be what this one names.
 async function checkPrevious(doc, fetcher) {
-  if (doc.prev === null) return { status: "note", name: "Link to the previous document", detail: "none: this is the first of its chain, or its kind is not chained" };
+  if (doc.prev === null) return { status: "note", name: CHAIN_CHECK, detail: "none: this is the first of its chain, or its kind is not chained" };
   const previous = await fetcher({ code: codeOf(doc.prev) });
   const text = toHex(await sha256(textEncoder.encode(previous.canonical)));
   const linked = previous.digest.toLowerCase() === doc.prev.toLowerCase() && text === doc.prev.toLowerCase();
-  return { status: linked ? "pass" : "fail", name: "Link to the previous document",
+  return { status: linked ? "pass" : "fail", name: CHAIN_CHECK,
     detail: linked ? `the document before it is ${previous.code}` : "the document the realm gives as the previous one is not the one this names", previous };
 }
 
 const DEFAULT_HOST = "https://icp-api.io";
+const CHAIN_CHECK = "Link to the previous document";
+
+// What to tell the reader first, and in which colour: ``pass`` (green) only for a document whose key is the one the reader
+// derived; ``note`` (amber) for one that is signed but not settled, a key not yet checked or a document it follows that
+// could not be confirmed; ``fail`` (red) for one whose own signature or binding fails. A failed link to the previous
+// document alone is amber: the document's own signature verifies, and the realm withholds or changed the one before it.
+function verdictOf(result) {
+  const keyChecked = result.checks.some((c) => c.name === "The key is the expected one" && c.status === "pass");
+  const chainBroken = result.checks.some((c) => c.name === CHAIN_CHECK && c.status === "fail");
+  if (!result.supported) return { level: "note", title: "This browser cannot check the signature", detail: "" };
+  if (!result.valid) return { level: "fail", title: "Not valid: do not rely on this document", detail: "See what failed below." };
+  if (chainBroken) {
+    return { level: "note", title: "This document is signed by the realm, but the document it follows could not be confirmed",
+      detail: "The realm withholds that document or changed it. This one is intact; the record before it is in doubt." };
+  }
+  if (keyChecked) {
+    return { level: "pass", title: "Valid: signed by the key you derived for this canister", detail: "The content is exactly what the canister signed." };
+  }
+  return { level: "note", title: "The signature is valid, but the key is not yet checked as the canister's",
+    detail: "The content is exactly what the holder of the key in the document signed. Derive that key for the canister, below, to know it is the canister's." };
+}
 
 // What a link may ask the page: which document of which canister. Nothing a link says is trusted: not a key, which the
 // reader must derive and give, and not a replica, which the reader may choose in "Network" and which a link cannot.
@@ -520,7 +541,7 @@ function snippets(doc, proof) {
 
 if (typeof module !== "undefined") {
   module.exports = { toHex, fromHex, codeOf, climb, ed25519, findProof, verifyProof, checkPrevious, principalBytes, principalText,
-    cbor, cborDecode, candidTexts, candidText, readOp, fetchProof, requestFromUrl, hostNote, snippets, shapedDocument };
+    cbor, cborDecode, candidTexts, candidText, readOp, fetchProof, requestFromUrl, hostNote, snippets, shapedDocument, verdictOf };
 }
 
 // ---- The page
@@ -571,19 +592,10 @@ if (typeof document !== "undefined") {
     $("host-note").textContent = asked ? hostNote(asked) : "";
     $("host-note").hidden = !$("host-note").textContent;
     const verdict = $("verdict");
-    const keyChecked = result.checks.some((c) => c.name === "The key is the expected one" && c.status === "pass");
-    if (!result.supported) {
-      verdict.className = "verdict note"; verdict.textContent = "This browser cannot check the signature";
-    } else if (result.valid) {
-      verdict.className = keyChecked ? "verdict pass" : "verdict note";
-      verdict.textContent = keyChecked ? "Valid: signed by the key you derived for this canister" : "The signature is valid, but the key is not yet checked as the canister's";
-      const small = node("small", keyChecked ? "The content is exactly what the canister signed." :
-        "The content is exactly what the holder of the key in the document signed. Derive that key for the canister, below, to know it is the canister's.");
-      verdict.append(small);
-    } else {
-      verdict.className = "verdict fail"; verdict.textContent = "Not valid: do not rely on this document";
-      verdict.append(node("small", "See what failed below."));
-    }
+    const said = verdictOf(result);
+    verdict.className = `verdict ${said.level}`;
+    verdict.textContent = said.title;
+    if (said.detail) verdict.append(node("small", said.detail));
 
     const facts = $("facts");
     facts.replaceChildren();
@@ -627,10 +639,9 @@ if (typeof document !== "undefined") {
         } catch (error) {
           // a realm that refuses the previous document has dropped it or hides it; one that cannot be reached is only not asked
           result.checks.push(error.refused
-            ? { status: "fail", name: "Link to the previous document", detail: `the realm does not serve the document this one follows: ${error.message}` }
-            : { status: "note", name: "Link to the previous document", detail: `not checked: ${error.message}` });
+            ? { status: "fail", name: CHAIN_CHECK, detail: `the realm does not serve the document this one follows: ${error.message}` }
+            : { status: "note", name: CHAIN_CHECK, detail: `not checked: ${error.message}` });
         }
-        result.valid = result.valid && !result.checks.some((c) => c.status === "fail");
       }
       show(result, proof, from, asked);
     } catch (error) {

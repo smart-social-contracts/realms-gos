@@ -99,6 +99,39 @@ def test_a_key_that_is_no_key_is_an_invalid_document_and_not_a_browser_that_cann
     assert result["supported"] is True and result["valid"] is False
 
 
+# ---- The verdict: green only for a key the reader derived, red for a document that fails, amber for the rest
+
+
+def test_the_verdict_is_amber_while_the_key_is_not_checked_and_red_for_a_key_that_is_not_the_one_derived():
+    _, proof = one()
+    unchecked = page("verdictOf", page("verifyProof", proof, {"canister": CANISTER}))
+    assert unchecked["level"] == "note" and "key is not yet checked" in unchecked["title"]
+    wrong = page("verdictOf", page("verifyProof", proof, {"canister": CANISTER, "expectedKey": "00" * 32}))
+    assert wrong["level"] == "fail"
+
+
+def test_a_proof_whose_own_signature_or_binding_fails_is_red():
+    _, proof = one()
+    for options, changed in (({"canister": "aaaaa-aa"}, proof), ({"canister": CANISTER, "requested": {"code": "AAAA-AAAA-AAAA-AAAA"}}, proof),
+                             ({"canister": CANISTER}, {**proof, "signature": "00" * 64})):
+        said = page("verdictOf", page("verifyProof", changed, options))
+        assert said["level"] == "fail" and said["title"].startswith("Not valid"), options
+
+
+def test_a_chain_link_that_alone_fails_is_amber_with_its_own_words_and_not_red():
+    signer, proof = one()
+    result = page("verifyProof", proof, {"canister": CANISTER, "expectedKey": signer.public.hex()})
+    assert page("verdictOf", result)["level"] == "pass"  # the document, on its own, is right and its key is the reader's
+    broken = {**result, "checks": result["checks"] + [{"status": "fail", "name": "Link to the previous document", "detail": "x"}]}
+    said = page("verdictOf", broken)
+    assert said["level"] == "note" and "signed by the realm, but the document it follows could not be confirmed" in said["title"]
+    assert "withholds" in said["detail"]
+    # ...while a document that fails itself stays red, whatever its chain link says
+    ruined = page("verifyProof", {**proof, "signature": "00" * 64}, {"canister": CANISTER})
+    ruined["checks"].append({"status": "fail", "name": "Link to the previous document", "detail": "x"})
+    assert page("verdictOf", ruined)["level"] == "fail"
+
+
 # ---- What the page will not trust from a link, and what it will not put in a command
 
 
