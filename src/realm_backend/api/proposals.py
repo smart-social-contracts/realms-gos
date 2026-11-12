@@ -27,9 +27,8 @@ MAX_REFERENCE, MAX_WINNERS = 128, 32  # the code points of a framework's referen
 TERMS = ("value", "split", "starts_at", "ends_at")  # what contract_amend may change
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
-# Kept in the realm's manifest_data: true once every proposal is listed under its tags (``Proposal.with_tags``). A new
-# realm has them all; one upgraded from a release that did not list them gets there by ``backfill_tags``. The proposals
-# it reads per message.
+# Kept in the realm's manifest_data: true once every proposal is on the lists of its tags (``Proposal.with_tags``), which
+# ``relist_tags`` brings about after every upgrade. The proposals it reads per message.
 TAG_INDEX = "tag_index"
 TAG_INDEX_PAGE = 200
 
@@ -312,19 +311,20 @@ def resume(start=1):
         chain.set_timer(0, lambda n=nxt: resume(n))
 
 
-def backfill_tags(start=1):
-    """After an upgrade from a release that kept no list of the proposals that carry a tag, list each proposal under its
-    tags, a page per message, then record it (``TAG_INDEX``). Until then ``proposal_list`` finds by tag as that release
-    did, by reading the proposals: slow, but it misses none. An upgrade in the middle starts again, and listing a
-    proposal twice changes nothing."""
+def relist_tags(start=None):
+    """After an upgrade, put every proposal on the lists of its tags again, a page per message, then record that the lists
+    are right (``TAG_INDEX``). The release before may have kept no lists, as one the realm was rolled back to does: what
+    it filed or re-tagged is on none or on the wrong ones. So the lists are not trusted until the pass is done, and until
+    then ``proposal_list`` with ``tags`` finds as that release did, by reading the proposals: slow, but it misses none.
+    An upgrade in the middle starts again, and listing a proposal twice changes nothing."""
     realm = Realm["1"]
-    if realm.manifest_data.get(TAG_INDEX):
-        return
-    rows, nxt = page(Proposal, {"from": start, "count": TAG_INDEX_PAGE})
+    if start is None:
+        realm.manifest_data = {k: v for k, v in realm.manifest_data.items() if k != TAG_INDEX}
+    rows, nxt = page(Proposal, {"from": start or 1, "count": TAG_INDEX_PAGE})
     for p in rows:
-        p.index_tags()
+        p.list_tags()
     if nxt:
-        chain.set_timer(0, lambda n=nxt: backfill_tags(n))
+        chain.set_timer(0, lambda n=nxt: relist_tags(n))
     else:
         realm.manifest_data = {**realm.manifest_data, TAG_INDEX: True}
 
@@ -872,7 +872,7 @@ def proposal_list(c, args):
     voting) and carrying at least one of ``tags`` (at most 16, compared exactly), ``count`` at a time (default 100, at
     most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the end). A page is full
     unless it is the last, however few proposals carry the tags, and ``next`` is the id of the next proposal that
-    matches. Only in the first minutes after an upgrade from a release that did not list proposals under their tags
+    matches. Only in the minutes after an upgrade, while the realm puts its proposals on the lists of their tags again,
     can a page with ``tags`` be short or empty: follow ``next``."""
     tags, status = args.get("tags") or [], args.get("status")
     if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):

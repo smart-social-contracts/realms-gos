@@ -10,8 +10,9 @@ The realm is run two ways, as test_index_upgrade.py does:
   that release saved, and what a tag cost there is measured before the upgrade;
 - from this release's wasm, whose lists under the tags are then taken away: the form the previous release left.
 
-Either is upgraded, and ``backfill_tags`` lists the proposals a page at a time. The instruction counts go to the table the
-session ends with."""
+Either is upgraded, and ``relist_tags`` lists the proposals a page at a time, after this upgrade and every one after it:
+the last test rolls the realm back, in effect, and upgrades it again. The instruction counts go to the table the session
+ends with."""
 
 import json
 import os
@@ -62,7 +63,8 @@ for i in range(%(first)d, %(last)d + 1):
         result={"outcome": "accepted"}, tags=tags)
 print(Proposal.count())
 '''
-# What the previous release left: no list under any tag, and no note that there is one
+# What the previous release left: no list under any tag, no record of what the proposals are on, and no note that
+# there are lists
 FORGET = '''
 from ggg import Proposal, Realm
 from ic_python_db import Database
@@ -73,9 +75,27 @@ for tag in tags:
     base = db._fi_key("Proposal", "tags", tag)
     db._ix_drain(base, db._ix_count(base))
     db._db_storage.remove(base + "|c")
+for i in range(1, %(last)d + 1):
+    db.delete("_tag_lists", str(i))
 realm = Realm["1"]
 realm.manifest_data = {k: v for k, v in realm.manifest_data.items() if k != "tag_index"}
 print(len(tags))
+'''
+# What the release before this one does to a realm rolled back to it: it re-tags a proposal and files another with
+# no list kept. Returns the id it filed.
+RELEASE_BEFORE = '''
+from ggg import Department, Proposal
+
+keep = Proposal.list_tags
+Proposal.list_tags = lambda self: None
+try:
+    Proposal["P-100"].tags = ["area-0"]  # was area-0 and rare
+    Proposal["P-101"].tags = ["area-1", "rare"]  # was area-1
+    filed = Proposal(id=f"P-{Proposal.max_id() + 1}", title="Filed by the release before", proposer="2vxsx-fae",
+                     department=Department["Administration"], status="draft", tags=["rare"])
+finally:
+    Proposal.list_tags = keep
+print(filed.id)
 '''
 STATE = '''
 import json
@@ -94,13 +114,13 @@ reply = json.loads(op.run(op.dispatch("proposal_list", %(args)r)))
 print(json.dumps({"ids": [p["id"] for p in reply["proposals"]], "next": reply["next"], "ok": reply["ok"],
                   "instructions": ic.performance_counter(0) - before}))
 '''
-# The first page of the pass that lists the proposals, with the instructions it used
+# The first message of the pass that lists the proposals, with the instructions it used
 PASS = '''
 from basilisk import ic
 from api import proposals
 
 before = ic.performance_counter(0)
-proposals.backfill_tags()
+proposals.relist_tags()
 print(ic.performance_counter(0) - before)
 '''
 
@@ -193,9 +213,9 @@ def realm(request, wasm_of, people, costs):
         costs.report("by tag (rare or common) and status voting, count 100, previous release", voting["instructions"])
         filing_costs(realm, costs, "previous")
     else:
-        run(realm, FORGET)
+        run(realm, FORGET % {"last": PROPOSALS})
         first_page = int(run(realm, PASS).strip().splitlines()[-1])
-        costs.report(f"backfill_tags, the first message: {INDEX_PAGE} proposals listed", first_page)
+        costs.report(f"relist_tags, one message: {INDEX_PAGE} proposals listed", first_page)
         assert first_page < 2_000_000_000  # a message may spend 40 billion
     realm.upgrade(current)
     return realm
@@ -209,14 +229,21 @@ def test_the_realm_answers_by_tag_whether_or_not_the_pass_has_listed_the_proposa
     assert one_page(realm, tags=[RARE, "nothing"], status="voting")["ids"] == ["P-4000"]
 
 
-def test_the_pass_lists_every_proposal_a_message_at_a_time_and_then_stops(realm):
+def wait_for_the_pass(realm):
     for _ in range(3 * PROPOSALS // INDEX_PAGE):
         if pass_is_done(realm):
-            break
+            return
         realm.wait(1)
     assert pass_is_done(realm)
+
+
+def test_the_pass_lists_every_proposal_a_message_at_a_time_and_then_stops(realm, costs):
+    wait_for_the_pass(realm)
     realm.wait(1)  # nothing is left to do: the note stays as it is
     assert pass_is_done(realm)
+    again = int(run(realm, PASS).strip().splitlines()[-1])  # a pass on lists that are right: the rows, and no write
+    costs.report(f"relist_tags, one message: {INDEX_PAGE} proposals already listed", again)
+    wait_for_the_pass(realm)
 
 
 def test_a_page_of_the_rare_tag_is_full_in_one_call_and_costs_what_it_holds(realm, costs):
@@ -265,6 +292,21 @@ def test_a_tag_of_64_four_byte_characters_is_filed_and_found(realm, people):
 
 def test_filing_a_proposal_costs_the_lists_of_its_tags(realm, costs):
     filing_costs(realm, costs, "current")
+
+
+def test_an_upgrade_after_a_rollback_puts_right_what_the_release_before_filed_and_retagged(realm, people):
+    """It kept no lists, so those of this release are wrong for P-100 and P-101 and miss what it filed. The next upgrade
+    does the pass again, so the realm answers right straight away (from the proposals) and after it (from the lists)."""
+    before = one_page(realm, tags=[RARE], count=500)["ids"]
+    filed = run(realm, RELEASE_BEFORE).strip().splitlines()[-1]
+    expected = sorted((set(before) - {"P-100"}) | {"P-101", filed}, key=lambda i: int(i.split("-")[1]))
+    assert one_page(realm, tags=[RARE], count=500)["ids"] == before  # the lists say what they said
+    realm.wait(600)  # the replica wants time between installs of a wasm this size
+    realm.upgrade()
+    assert one_page(realm, tags=[RARE], count=500)["ids"] == expected
+    wait_for_the_pass(realm)
+    assert one_page(realm, tags=[RARE], count=500)["ids"] == expected
+    assert "P-100" in one_page(realm, tags=["area-0"], count=500)["ids"]  # what it kept is still listed
 
 
 def test_a_realm_created_by_this_release_needs_no_pass(wasm_of, people):

@@ -1,6 +1,7 @@
 """proposal_list by tag reads the lists of the tags (Proposal.with_tags), not the proposals: its pages are full, in the
 order of an unfiltered list, and cost what the page costs, whatever the realm holds. A realm upgraded from a release
-that kept no such lists answers by reading the proposals until ``backfill_tags`` has listed them all."""
+that kept no such lists answers by reading the proposals until ``relist_tags`` has listed them all, which it does
+again after every upgrade, so that a rollback to such a release leaves no list wrong."""
 
 import random
 
@@ -50,9 +51,10 @@ def loaded_proposals(monkeypatch):
 
 
 def forget_the_lists():
-    """The realm as the release before this one left it: no list under any tag, and no note that there is one."""
+    """The realm as the release before this one left it: no list under any tag, no record of what proposals are on, and no
+    note that there are lists."""
     storage = Database.get_instance()._db_storage
-    for key in [k for k in storage.keys() if k.startswith("_fi:Proposal:tags:")]:
+    for key in [k for k in storage.keys() if k.startswith(("_fi:Proposal:tags:", "_tag_lists@"))]:
         storage.remove(key)
     realm = Realm["1"]
     realm.manifest_data = {k: v for k, v in realm.manifest_data.items() if k != proposals.TAG_INDEX}
@@ -224,7 +226,10 @@ def test_a_proposal_filed_in_the_upgrade_window_is_listed_and_the_pass_lists_the
     read = loaded_proposals(monkeypatch)
     assert found(tags=["rare"], count=2) == ["P-4", "P-8", "P-12", new]
     assert sorted(map(int, read)) == [4, 8, 12, number(new)]  # now by the lists: only the rows of the pages
-    assert setup.start() is None and not fire_timers()  # done: nothing to do after the next upgrade
+    setup.start()  # the next upgrade: the lists are not trusted until the pass has been through again
+    assert not Realm["1"].manifest_data.get(proposals.TAG_INDEX)
+    while not Realm["1"].manifest_data.get(proposals.TAG_INDEX):
+        fire_timers()
 
 
 def test_an_upgrade_in_the_middle_of_the_pass_starts_it_again(monkeypatch):
@@ -241,6 +246,70 @@ def test_an_upgrade_in_the_middle_of_the_pass_starts_it_again(monkeypatch):
         fire_timers()
     assert found(tags=["rare"]) == ["P-4", "P-8", "P-12"]
     assert fake.field_index_count("Proposal", "tags", "rare") == 3
+
+
+def listed(tag):
+    """The ids on the list of ``tag``, as the lists themselves hold them."""
+    return Proposal.with_tags([tag], 1, 10_000)
+
+
+def finish_the_pass():
+    while not Realm["1"].manifest_data.get(proposals.TAG_INDEX):
+        fire_timers()
+
+
+def test_what_a_release_without_lists_filed_or_retagged_is_put_right_by_the_next_upgrade(monkeypatch):
+    """A rollback to the release before this one, then an upgrade again: the lists stand as the rollback left them."""
+    world.build()
+    a, b, c = file("A", tags=["parks"]), file("B", tags=["parks", "roads"]), file("C", tags=["roads"])
+    for p in (a, b, c):
+        Proposal[p].status = "draft"
+    with monkeypatch.context() as release_before:
+        release_before.setattr(Proposal, "list_tags", lambda self: None)
+        ok("proposal_set_tags", "alice", proposal=a, tags=["roads"])  # renamed
+        ok("proposal_set_tags", "alice", proposal=b, tags=[])  # removed
+        d = file("D", tags=["parks", "green"])  # filed
+    assert listed("parks") == [number(a), number(b)] and listed("green") == []  # wrong, and the flag says they are right
+    monkeypatch.setattr(proposals, "TAG_INDEX_PAGE", 2)
+    setup.start()  # the upgrade after the rollback
+    assert not Realm["1"].manifest_data.get(proposals.TAG_INDEX)
+    expected = {"parks": [d], "roads": [a, c], "green": [d]}
+    while True:
+        for tag, ids in expected.items():
+            assert found(tags=[tag]) == ids  # right at every step
+        if Realm["1"].manifest_data.get(proposals.TAG_INDEX):
+            break
+        fire_timers()
+    for tag, ids in expected.items():
+        assert listed(tag) == [number(i) for i in ids]  # and the lists themselves are exact
+
+
+def test_after_any_rollbacks_the_next_upgrade_leaves_every_list_exact(monkeypatch):
+    world.build()
+    vocabulary = ["a", "b", "a|c", "a|n000000000001", "c", "x" * 64]
+    shuffle = random.Random(3)
+    drafts = []
+
+    def file_draft():
+        drafts.append(file(f"d{len(drafts)}", tags=shuffle.sample(vocabulary, shuffle.randint(0, 3))))
+        Proposal[drafts[-1]].status = "draft"
+
+    def retag():
+        ok("proposal_set_tags", "alice", proposal=shuffle.choice(drafts), tags=shuffle.sample(vocabulary, shuffle.randint(0, 4)))
+
+    for _ in range(6):
+        file_draft()
+    for _ in range(4):
+        with monkeypatch.context() as release_before:  # rolled back, and a while of what it does
+            release_before.setattr(Proposal, "list_tags", lambda self: None)
+            for step in range(12):
+                (file_draft if step % 4 == 0 else retag)()
+        setup.start()  # upgraded again
+        finish_the_pass()
+        for _ in range(3):  # and a while of this release's own
+            (file_draft if shuffle.random() < 0.3 else retag)()
+        for tag in vocabulary:
+            assert listed(tag) == [number(p) for p in drafts if tag in Proposal[p].tags], tag
 
 
 def test_a_new_realm_has_every_proposal_listed_from_the_start():

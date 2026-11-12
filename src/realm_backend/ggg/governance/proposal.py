@@ -4,6 +4,9 @@ from core.db import Json, Row, indexed_ids
 from core.ratio import ONE, PERCENT, upgrade_call
 
 
+LISTED = "_tag_lists"  # the tags each proposal is on the lists of, under its id: {"tags": [...]}; none for a proposal with none
+
+
 class Proposal(Row):
     __alias__ = "id"
     # 2: threshold and quorum in hundred-millionths, not whole percents; 3: the rule is stored; 4: tags, majority_of_cast,
@@ -42,24 +45,34 @@ class Proposal(Row):
     votes = OneToMany("Vote", "proposal")
 
     # A proposal has several tags, which a field index (one value per row) cannot hold. Each tag has a list of its own in
-    # the same store, ``_fi:Proposal:tags:<tag>``, of the ids of the proposals that carry it: written here, whenever the
-    # tags are, and read a page at a time by ``with_tags``. Assign the tags only through ``set_tags``.
+    # the same store, ``_fi:Proposal:tags:<tag>``, of the ids of the proposals that carry it, and read a page at a time
+    # by ``with_tags``. ``list_tags`` writes them, and keeps beside them what each proposal is listed under, so that it
+    # can take a proposal off a list when the tags changed without it (a release that kept no lists). Assign the tags
+    # only through ``set_tags``.
     def __init__(self, **kw):
         super().__init__(**kw)
         if not kw.get("_loaded"):
-            self.index_tags()
+            self.list_tags()
 
-    def index_tags(self):
-        """List the proposal under each of its tags. Doing it again changes nothing."""
+    def list_tags(self):
+        """Make the lists of the tags say what the tags of this proposal say: take it off the lists it is on and no longer
+        belongs to, put it on those it belongs to. Doing it again changes nothing."""
+        db, kind = self.db(), self._type
+        listed = (db.load(LISTED, self._id) or {}).get("tags", [])
+        for tag in set(listed) - set(self.tags):
+            db.field_index_remove(kind, "tags", tag, self._id)
         for tag in self.tags:
-            self.db().field_index_add(self._type, "tags", tag, self._id)
+            db.field_index_add(kind, "tags", tag, self._id)
+        if listed != self.tags:
+            if self.tags:
+                db.save(LISTED, self._id, {"tags": self.tags})
+            else:
+                db.delete(LISTED, self._id)
 
     def set_tags(self, tags):
         """Replace the tags, and the lists that find the proposal by them."""
-        for tag in set(self.tags) - set(tags):
-            self.db().field_index_remove(self._type, "tags", tag, self._id)
         self.tags = tags
-        self.index_tags()
+        self.list_tags()
 
     @classmethod
     def with_tags(cls, tags, start, count):

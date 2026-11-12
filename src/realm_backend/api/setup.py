@@ -12,7 +12,7 @@ from ic_python_db import Entity
 from api import codex, installs
 from core.op import call, op, ops
 from core.pending import quoted, without_secrets
-from api.proposals import TAG_INDEX, root
+from api.proposals import root
 
 VERSION = "VERSION_PLACEHOLDER"
 RELEASE_WASM = "realm_backend.wasm.gz"  # as `realms files publish-release` stores it
@@ -84,9 +84,8 @@ def start(installer=""):
     if Realm["1"] is None:
         realm = Realm(id="1", principal_id=chain.self_id())
         realm.calendar, realm.treasury = Calendar(id="1"), Treasury(id="1")
-        # a new database holds no list saved the old way, no leg that predates its index, and no proposal that is not
-        # listed under its tags
-        realm.manifest_data = {INDEX_CONVERSION: {"done": True}, LEG_INDEX: True, TAG_INDEX: True}
+        # a new database holds no list saved the old way, and no leg that predates its index
+        realm.manifest_data = {INDEX_CONVERSION: {"done": True}, LEG_INDEX: True}
         Department(id="Administration", is_root=True, description="The realm's root department")
     installer = (installer or "").strip()
     if installer and not Realm["1"].installer_canister_id:
@@ -111,7 +110,7 @@ def start(installer=""):
 
     links.resume()
     proposals.resume()
-    proposals.backfill_tags()
+    proposals.relist_tags()
     quarters.resume()
     sync_checks.resume()
     treasury.resume()
