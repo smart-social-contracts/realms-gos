@@ -4481,10 +4481,23 @@
     "kind": "property",
     "type": "Json"
    },
+   "layer": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
    "name": {
     "default": "",
     "kind": "property",
     "type": "String"
+   },
+   "notes": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
    },
    "status": {
     "default": "requested",
