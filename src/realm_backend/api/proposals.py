@@ -2,7 +2,8 @@ import json
 
 from core import auth, chain, ranges
 from core.civil import civil_from_days
-from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, first, next_id, page, page_by, view
+from core.db import (Conflict, Fail, Forbidden, Unavailable, each, find, first, has_indexed, indexed_ids, next_id, page,
+                     page_by, view, window as page_window)
 from ggg import (Appointment, Budget, Calendar, Contract, ContractAmendment, Delegation, Department, External, Mandate,
                  Member, Proposal, ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
 from api import tasks
@@ -28,6 +29,10 @@ CONTRACT_LISTED = ("id", "title", "parties", "mandate", "kind", "procedure", "te
                    "starts_at", "ends_at", "split", "framework")  # what a list of contracts shows
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
+# Kept in the realm's manifest_data: true once every proposal is on the lists of its tags (``Proposal.with_tags``), which
+# ``relist_tags`` brings about after every upgrade. The proposals it reads per message.
+TAG_INDEX = "tag_index"
+TAG_INDEX_PAGE = 200
 
 
 def root():
@@ -309,6 +314,24 @@ def resume(start=1):
             arm(p)
     if nxt:
         chain.set_timer(0, lambda n=nxt: resume(n))
+
+
+def relist_tags(start=None):
+    """After an upgrade, put every proposal on the lists of its tags again, a page per message, then record that the lists
+    are right (``TAG_INDEX``). The release before may have kept no lists, as one the realm was rolled back to does: what
+    it filed or re-tagged is on none or on the wrong ones. So the lists are not trusted until the pass is done, and until
+    then ``proposal_list`` with ``tags`` finds as that release did, by reading the proposals: slow, but it misses none.
+    An upgrade in the middle starts again, and listing a proposal twice changes nothing."""
+    realm = Realm["1"]
+    if start is None:
+        realm.manifest_data = {k: v for k, v in realm.manifest_data.items() if k != TAG_INDEX}
+    rows, nxt = page(Proposal, {"from": start or 1, "count": TAG_INDEX_PAGE})
+    for p in rows:
+        p.list_tags()
+    if nxt:
+        chain.set_timer(0, lambda n=nxt: relist_tags(n))
+    else:
+        realm.manifest_data = {**realm.manifest_data, TAG_INDEX: True}
 
 
 def close(p, result):
@@ -685,7 +708,7 @@ def proposal_set_tags(c, args):
         raise Forbidden(f"{p.id} is not your proposal")
     if p.status != "draft":
         raise Conflict(f"{p.id} is {p.status}; only a draft's tags are replaced")
-    p.tags = checked_tags(args["tags"])
+    p.set_tags(checked_tags(args["tags"]))
     return {"proposal": p.id}
 
 
@@ -827,19 +850,53 @@ def proposal_get(c, args):
     return {**shown, "release_change": change} if change else shown
 
 
+def id_sources(tags, status, count):
+    """Where the ids of a listing by ``tags`` (and ``status``, if given) come from: the shorter list, as far as reading
+    goes, the tags' or the status's, and how each id is checked in the other, by its index. An id of the status costs a
+    read for each tag it is checked in, an id of the tags a read for the status."""
+    if status and Proposal.count_by("status", status) * len(tags) < Proposal.count_with_tags(tags):
+        return (lambda cursor: indexed_ids(Proposal, "status", status, cursor, count + 1),
+                lambda i: any(Proposal.is_listed_under(tag, i) for tag in tags))
+    return (lambda cursor: Proposal.with_tags(tags, cursor, count + 1),
+            lambda i: not status or has_indexed(Proposal, "status", status, i))
+
+
+def listed_by_tags(tags, status, args):
+    """One page of the proposals that carry at least one of ``tags`` and, if given, have ``status``: the rows, and the id
+    the next page starts at (None at the end). Only the ids are read until they are on the page, so what it costs is
+    the page, and the ids of the shorter list that the other leaves out."""
+    start, count = page_window(args)
+    ids_from, matches = id_sources(tags, status, count)
+    ids, cursor = [], start
+    while len(ids) <= count:  # the one past the page is where the next one starts
+        found = ids_from(cursor)
+        ids += [i for i in found if matches(i)]
+        if len(found) <= count:
+            break
+        cursor = found[-1] + 1
+    return [Proposal.load(str(i)) for i in ids[:count]], ids[count] if len(ids) > count else None
+
+
 @op("realm.data_view", read=True, returns="proposals")
 def proposal_list(c, args):
     """Proposals (id, title, status, deadline, effective_at, proposer, tags), or only those with ``status`` (e.g.
     voting) and carrying at least one of ``tags`` (at most 16, compared exactly), ``count`` at a time (default 100, at
-    most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the end); a filtered page can
-    be short or empty, so follow ``next``."""
-    tags = args.get("tags") or []
+    most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the end). A page is full
+    unless it is the last, however few proposals carry the tags, and ``next`` is the id of the next proposal that
+    matches. Only in the minutes after an upgrade, while the realm puts its proposals on the lists of their tags again,
+    can a page with ``tags`` be short or empty: follow ``next``."""
+    tags, status = args.get("tags") or [], args.get("status")
+    if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+        raise Fail("tags is a list of text")
     if len(tags) > MAX_TAGS:
         raise Fail(f"a list filters by at most {MAX_TAGS} tags")
-    rows, nxt = page_by(Proposal, "status", args["status"], args) if args.get("status") else page(Proposal, args)
-    carrying = [p for p in rows if not tags or set(tags) & set(p.tags or [])]
+    if tags and Realm["1"].manifest_data.get(TAG_INDEX):
+        rows, nxt = listed_by_tags(tags, status, args)
+    else:
+        rows, nxt = page_by(Proposal, "status", status, args) if status else page(Proposal, args)
+        rows = [p for p in rows if not tags or set(tags) & set(p.tags or [])]
     return {"proposals": [view(p, "id", "title", "status", "deadline", "effective_at", "proposer", "tags")
-                          for p in carrying], "next": nxt}
+                          for p in rows], "next": nxt}
 
 
 @op("mandate.create", governed=realm_wide, returns="mandate")
