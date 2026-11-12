@@ -5,7 +5,7 @@ import pytest
 
 import fake_chain
 from api.procurement import seal
-from ggg import Contract, Tender
+from ggg import Contract, Realm, Tender
 from kit import call, denied, later, ok
 from test_procurement import DAY, RUBRIC, agora, bid, tender
 
@@ -71,6 +71,7 @@ def test_a_bid_prices_one_lot_when_the_tender_has_lots_and_none_when_it_has_none
 
 def test_each_lot_is_awarded_on_its_own_to_its_best_bid_and_has_its_own_contract():
     t, ids = evaluation()
+    Realm["1"].accounting_currency = "REALM"
     ok("bid_score", "carla", bid=ids["b1"], scores={"price": 9, "quality": 8})
     ok("bid_score", "carla", bid=ids["b3"], scores={"price": 7, "quality": 7})
     ok("bid_score", "carla", bid=ids["b2"], scores={"price": 5, "quality": 5})
@@ -86,6 +87,9 @@ def test_each_lot_is_awarded_on_its_own_to_its_best_bid_and_has_its_own_contract
     assert "not open for an award" in denied("tender_award", "carla", tender=t, lot="1")
     three = ok("tender_award", "carla", tender=t, lot="3")  # different lots, different vendors
     assert Contract[three["contract"]].parties[1] == "Organization:roadcorp"
+    # each lot's contract is worth its own winning bid, in the realm's currency
+    assert [(Contract[c["contract"]].value, Contract[c["contract"]].symbol) for c in (one, three)] == \
+        [(48_000, "REALM"), (4_000, "REALM")]
     assert Tender[t].lots[0] == {"id": "1", "title": "Bike lanes", "estimated_value": 40_000, "status": "awarded",
                                  "winner": ids["b1"], "contract": one["contract"]}
 
