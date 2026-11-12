@@ -303,7 +303,8 @@ def test_an_upgrade_after_a_rollback_puts_right_what_the_release_before_filed_an
     assert one_page(realm, tags=[RARE], count=500)["ids"] == before  # the lists say what they said
     realm.wait(600)  # the replica wants time between installs of a wasm this size
     realm.upgrade()
-    assert one_page(realm, tags=[RARE], count=500)["ids"] == expected
+    pages, _ = every_page(realm, tags=[RARE], count=500)  # by the scan until the pass is done: its pages can be short
+    assert [i for page in pages for i in page] == expected
     wait_for_the_pass(realm)
     assert one_page(realm, tags=[RARE], count=500)["ids"] == expected
     assert "P-100" in one_page(realm, tags=["area-0"], count=500)["ids"]  # what it kept is still listed
