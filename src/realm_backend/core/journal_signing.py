@@ -41,12 +41,18 @@ def body(issue):
     return {"number": issue["number"], "timezone": issue["timezone"], "entries": issue["entries"]}
 
 
+def issues(days):
+    """The documents of ``days`` as they are now. Signing takes a few calls, and a change of the realm's zone to the
+    west in the meantime can put an entry into a day that has closed, or move the first day: a batch whose issues are
+    not what they were is not kept (core.signing.sign_batch)."""
+    return [(day, body(journal.issue(day))) for day in days]
+
+
 def sign_closed():
     """Sign the days that have closed, a batch at a time, until none is left or a batch fails: the failure is kept
     (core.signing.failures) and the next sweep tries again. A generator."""
     while days := closed_days():
-        documents = [(day, body(journal.issue(day))) for day in days]
-        if not (yield from signing.sign_batch(KIND, documents, chained=True)):
+        if not (yield from signing.sign_batch(KIND, issues(days), chained=True, fresh=lambda: issues(days))):
             return
 
 

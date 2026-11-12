@@ -2,7 +2,8 @@
 design's own rules (tests/deployed/verify_page.py), and its request to a realm against what the IC's HTTP interface and
 Candid expect. The canister's own proofs go through the same page in test_journal_signing.py.
 
-Skipped where there is no Node (22 or later, for WebCrypto's Ed25519) or no ``cryptography``."""
+Needs Node 22 or later (WebCrypto's Ed25519), ``cryptography`` and ``cbor2``, which CI installs; without Node the tests are
+skipped, and without the packages the module fails to import, so that a CI that lacks them is red and not quiet."""
 
 import hashlib
 import json
@@ -12,7 +13,7 @@ import pytest
 from ic.candid import Types, decode, encode
 from ic.principal import Principal
 
-from verify_page import NODE, Signer, code, issue_body, page
+from verify_page import NODE, Signer, canonical as canonical_text, code, issue_body, page
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="no node")
 
@@ -62,6 +63,86 @@ def test_the_canister_and_the_key_are_compared_when_they_are_given():
     assert other_key["valid"] is False and check(other_key, "The key is the expected one")["status"] == "fail"
     elsewhere = page("verifyProof", proof, {"canister": "aaaaa-aa"})
     assert elsewhere["valid"] is False and check(elsewhere, "The text names the canister")["status"] == "fail"
+
+
+def test_a_proof_is_the_one_asked_for_by_its_code_or_by_its_kind_and_subject_and_another_genuine_one_is_not():
+    signer = Signer(CANISTER)
+    first, second = signer.sign([("2026-11-09", issue_body(1)), ("2026-11-10", issue_body(2))])
+    ok = page("verifyProof", second, {"canister": CANISTER, "requested": {"code": second["code"].lower().replace("-", " ")}})
+    assert ok["valid"] is True and check(ok, "The document is the one asked for")["status"] == "pass"
+    assert page("verifyProof", second, {"requested": {"kind": "journal", "subject": "2026-11-10"}})["valid"] is True
+    for asked in ({"code": first["code"]}, {"kind": "journal", "subject": "2026-11-09"}, {"kind": "certificate", "subject": "2026-11-10"}):
+        result = page("verifyProof", second, {"canister": CANISTER, "requested": asked})  # a genuine proof, but not that one
+        assert result["valid"] is False and check(result, "The document is the one asked for")["status"] == "fail"
+
+
+def test_the_key_of_a_document_is_the_one_of_its_kind_and_nothing_else_is_accepted_for_a_name_or_a_path():
+    signer = Signer(CANISTER)
+    for field, value in (("path", "realms:certificate"), ("name", "key 1; touch /tmp/x"), ("name", "KEY_1")):
+        doc = json.loads(signer.sign([("2026-11-09", issue_body(1))])[0]["canonical"])
+        doc["key"][field] = value
+        text = canonical_text(doc)
+        forged = signer.sign_text(text)
+        assert page("verifyProof", forged)["valid"] is False and page("verifyProof", forged)["shaped"] is False, (field, value)
+
+
+def test_a_document_of_a_realm_that_is_no_canister_id_is_not_well_formed():
+    for realm in ("not a canister", "AAAAA-AA", "rrkah-fqaaa-aaaaa-aaaaq-caa"):
+        proof = Signer(realm).sign([("2026-11-09", issue_body(1))])[0]
+        assert page("verifyProof", proof)["shaped"] is False, realm
+
+
+def test_a_key_that_is_no_key_is_an_invalid_document_and_not_a_browser_that_cannot_check():
+    signer = Signer(CANISTER)
+    signer.public = bytes([0xFF]) * 32
+    result = page("verifyProof", signer.sign([("2026-11-09", issue_body(1))])[0])
+    assert result["supported"] is True and result["valid"] is False
+
+
+# ---- What the page will not trust from a link, and what it will not put in a command
+
+
+def test_a_link_can_ask_for_a_document_and_nothing_else_least_of_all_a_key_or_a_replica():
+    link = "?canister=aaaaa-aa&code=AAAA-AAAA-AAAA-AAAA&kind=journal&subject=2026-11-09&key=" + "ab" * 32 + "&host=https://evil.example"
+    assert page("requestFromUrl", link) == {"canister": "aaaaa-aa", "code": "AAAA-AAAA-AAAA-AAAA", "kind": "journal",
+                                            "subject": "2026-11-09"}
+    assert page("requestFromUrl", "") == {"canister": "", "code": "", "kind": "", "subject": ""}
+
+
+def test_a_replica_other_than_the_public_one_is_named_to_the_reader():
+    assert page("hostNote", "https://icp-api.io") == page("hostNote", "https://icp-api.io/") == ""
+    note = page("hostNote", "https://evil.example")
+    assert "https://evil.example" in note and "a key you derived yourself" in note
+    assert page("hostNote", "http://127.0.0.1:4943").startswith("This proof was fetched from http://127.0.0.1:4943")
+
+
+HOSTILE = "'; touch /tmp/PWNED_BY_PROOF; echo '"
+
+
+@pytest.mark.parametrize("field", ["signature", "root", "digest"])
+def test_no_command_is_written_from_a_proof_whose_values_are_not_in_their_form(field):
+    _, proof = one()
+    doc = json.loads(proof["canonical"])
+    hostile = {**proof, field: HOSTILE + "0" * (128 if field == "signature" else 64)}
+    assert page("snippets", doc, hostile) is None
+    assert page("verifyProof", hostile)["shaped"] is False
+    assert page("snippets", doc, {**proof, "path": "no"}) is None
+
+
+def test_the_commands_of_a_right_proof_hold_hex_and_nothing_a_shell_would_run():
+    signer, proof = one()
+    commands = page("snippets", json.loads(proof["canonical"]), proof)
+    assert signer.public.hex() in commands["python"] and proof["signature"] in commands["openssl"]
+    assert "PWNED" not in json.dumps(commands) and CANISTER in commands["derive"] and 'forMainnetKey("key_1")' in commands["derive"]
+    assert "realms:journal" in commands["derive"]
+
+
+def test_the_key_of_a_local_replica_has_no_derivation_to_show():
+    signer = Signer(CANISTER, key_name="dfx_test_key")
+    proof = signer.sign([("2026-11-09", issue_body(1))])[0]
+    commands = page("snippets", json.loads(proof["canonical"]), proof)
+    assert commands["derive"] is None and "dfx_test_key" not in commands["python"]
+    assert page("verifyProof", proof)["valid"] is True
 
 
 # ---- A proof that was touched does not

@@ -23,10 +23,12 @@ from ggg import Realm, SignedDocument
 MANAGEMENT = "aaaaa-aa"
 ALGORITHM = "ed25519"
 VERSION = 1  # of the canonical form
-# The most a signature may cost; what it does not cost comes back. The fee is 26,153,846,153 cycles with key_1 (a
-# 34-node subnet) and 10,000,000,000 with test_key_1, and a call with less attached is refused with the fee in the
-# error. A ceiling well above it keeps working if the signing subnet grows.
-SIGN_CYCLES = 60_000_000_000
+# What a signature costs, by key: the fee of the subnet that holds it, 10,000,000,000 cycles for test_key_1 (a 13-node
+# subnet) and 26,153,846,153 for key_1 (34 nodes), which a local key is charged as too. The realm attaches the fee and
+# half as much again, and what is not spent comes back, so that a subnet that grows still signs. A call with less
+# attached is refused with the fee in the error.
+FEES = {"test_key_1": 10_000_000_000}
+DEAREST_FEE = 26_153_846_153
 TEST_NETWORKS = ("test", "staging", "demo")  # with local, the networks that use a test key (as api.quarters sees them)
 KIND_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789-"  # ASCII only: a kind is a path of the key and a part of an id
 BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"  # RFC 4648: the canister's base64 has no b32encode
@@ -45,6 +47,11 @@ def key_name():
     return "test_key_1" if network in TEST_NETWORKS else "key_1"
 
 
+def attached(name):
+    """The cycles a signature with key ``name`` is sent with."""
+    return FEES.get(name, DEAREST_FEE) * 3 // 2
+
+
 def path(kind):
     """The derivation path of ``kind``'s key: what keeps one kind's key from signing another kind's documents."""
     if not kind or any(ch not in KIND_CHARS for ch in kind):
@@ -57,23 +64,24 @@ def blob(data):
     return 'blob "' + "".join("\\%02x" % byte for byte in data) + '"'
 
 
-def key_args(kind):
-    """The fields of a management call that name the key: the derivation path and the key id."""
-    key_id = f'record {{ algorithm = variant {{ {ALGORITHM} }}; name = "{key_name()}" }}'
+def key_args(kind, name):
+    """The fields of a management call that name the key ``name``: the derivation path and the key id."""
+    key_id = f'record {{ algorithm = variant {{ {ALGORITHM} }}; name = "{name}" }}'
     return f"derivation_path = vec {{ {blob(path(kind).encode())} }}; key_id = {key_id}"
 
 
-def public_key(kind):
-    """This canister's public key for ``kind``, 32 bytes. It costs no cycles. A generator."""
-    arg = f"(record {{ canister_id = null; {key_args(kind)} }})"
+def public_key(kind, name):
+    """This canister's public key for ``kind`` under key ``name``, 32 bytes. It costs no cycles. A generator."""
+    arg = f"(record {{ canister_id = null; {key_args(kind, name)} }})"
     reply = yield from chain.call(MANAGEMENT, "schnorr_public_key", arg)
     return Reader(reply).args()[0][idl_hash("public_key")]
 
 
-def sign_root(kind, root):
-    """The signature, 64 bytes, of ``root`` (32 bytes) under this canister's key for ``kind``. A generator."""
+def sign_root(kind, name, root):
+    """The signature, 64 bytes, of ``root`` (32 bytes) under this canister's key ``name`` for ``kind``. A generator."""
     reply = yield from chain.call(MANAGEMENT, "sign_with_schnorr",
-                                  f"(record {{ message = {blob(root)}; {key_args(kind)}; aux = null }})", SIGN_CYCLES)
+                                  f"(record {{ message = {blob(root)}; {key_args(kind, name)}; aux = null }})",
+                                  attached(name))
     signature = Reader(reply).args()[0][idl_hash("signature")]
     if len(signature) != 64:
         raise Exception(f"sign_with_schnorr gave {len(signature)} bytes, not an Ed25519 signature")
@@ -83,10 +91,23 @@ def sign_root(kind, root):
 # ---- The documents as they are signed
 
 
+def escaped(ch):
+    """The JSON escape of a character above ``~``, as CPython's ``ensure_ascii`` writes it: ``\\uXXXX``, and a pair of
+    them for a character above U+FFFF."""
+    code = ord(ch)
+    if code > 0xFFFF:
+        code -= 0x10000
+        return "\\u%04x\\u%04x" % (0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF))
+    return "\\u%04x" % code
+
+
 def canonical(document):
     """The text that is signed: ``document`` as JSON with sorted keys, no spaces and ASCII only, so that it reads the
-    same everywhere. It is kept and served as it is, never written again from the facts."""
-    return json.dumps(document, sort_keys=True, separators=(",", ":"))
+    same everywhere. The escaping is done here and not left to ``json.dumps``: the canister's writes non-ASCII
+    characters as they are (core.fastjson), and the text must be the same there as under CPython. It is kept and served
+    as it is, never written again from the facts."""
+    text = json.dumps(document, sort_keys=True, separators=(",", ":"))
+    return "".join(ch if ch <= "~" else escaped(ch) for ch in text)
 
 
 def digest_of(text):
@@ -160,15 +181,17 @@ def document_id(kind, subject):
     return f"{kind}:{subject}"
 
 
-def sign_batch(kind, documents, chained):
+def sign_batch(kind, documents, chained, fresh=None):
     """Sign ``documents``, a list of ``(subject, body)`` in order, as one batch of ``kind``, and keep them. A
-    ``chained`` kind links each to the one before it, the first to the last signed (``head``). True when the batch is
-    signed or another has signed it meanwhile. A failure is kept for the IT admin team (``failures``, shown in
-    ``codex_status``), nothing is kept of the batch, and the result is False: the owner tries again at its next
-    sweep. A generator."""
+    ``chained`` kind links each to the one before it, the first to the last signed (``head``). ``fresh``, if given, is
+    called when the signature is back and returns the documents as they are by then: a batch whose documents have
+    changed meanwhile is not kept. True when the batch is signed or another has signed it meanwhile. A failure (a realm
+    short of cycles, a call refused, documents changed while it was signed) is kept for the IT admin team
+    (``failures``, shown in ``codex_status``), nothing is kept of the batch, and the result is False: the owner tries
+    again at its next sweep. A generator."""
     subjects = [subject for subject, _ in documents]
     try:
-        yield from sign(kind, documents, chained)
+        yield from sign(kind, documents, chained, fresh)
     except Exception as e:  # noqa: BLE001  whatever it is, only the signature waits
         keep(kind, failure={"subjects": subjects, "at": chain.now(), "error": f"{type(e).__name__}: {e}"[:500]})
         return False
@@ -176,25 +199,32 @@ def sign_batch(kind, documents, chained):
     return True
 
 
-def sign(kind, documents, chained):
-    """What ``sign_batch`` does, raising what goes wrong. The texts are made once the public key is known, and the batch
-    is dropped if it was overtaken while the calls were out, so that each document has one signature. A generator."""
-    previous = head(kind)
+def sign(kind, documents, chained, fresh):
+    """What ``sign_batch`` does, raising what goes wrong. The key is named once, so that a change of network while the
+    calls are out cannot make the text name one key and the signature another. The texts are made once the public key is
+    known, and the batch is dropped if it was overtaken while the calls were out, so that each document has one
+    signature. A generator."""
+    path(kind)  # a kind that is no name is refused before anything else
+    previous, name = head(kind), key_name()
     if any(SignedDocument[document_id(kind, subject)] for subject, _ in documents):
         raise Fail(f"a document of {kind} is signed already")
-    key = yield from public_key(kind)
+    if chain.cycles() < attached(name):
+        raise Fail(f"the realm has {chain.cycles()} cycles and a signature with {name} needs {attached(name)} attached")
+    key = yield from public_key(kind, name)
     texts, link = [], previous["digest"] if previous and chained else None
     for subject, body in documents:
         text = canonical({"v": VERSION, "kind": kind, "realm": chain.self_id(), "subject": subject, "body": body,
                           "prev": link, "signed_at": chain.now(),
-                          "key": {"algorithm": ALGORITHM, "name": key_name(), "path": path(kind),
+                          "key": {"algorithm": ALGORITHM, "name": name, "path": path(kind),
                                   "public_key": key.hex()}})
         texts.append((subject, text, digest_of(text)))
         link = texts[-1][2] if chained else None
     root, paths = merkle([bytes.fromhex(digest) for _, _, digest in texts])
-    signature = yield from sign_root(kind, root)
+    signature = yield from sign_root(kind, name, root)
     if overtaken(kind, previous, chained, texts):
         return
+    if fresh is not None and fresh() != documents:
+        raise Fail("the documents changed while they were signed")
     for (subject, text, digest), leaf_path in zip(texts, paths):
         SignedDocument(id=document_id(kind, subject), code=code_of(digest), canonical=text, digest=digest,
                        root=root.hex(), path=leaf_path, signature=signature.hex())

@@ -44,6 +44,10 @@ def zone(name):
     journal.fix_first_day()
 
 
+def failure_of(kind):
+    return ok("codex_status", "ctl")["signing_failures"].get(kind)
+
+
 def rules():
     Extension(id="journal", manifest={"config": {"personal_data": {"entry_fields": FIELDS}}})
 
@@ -160,6 +164,26 @@ def test_a_signature_made_while_another_was_out_is_dropped():
     op.run(signing.sign_batch("journal", [("2026-11-09", journal_signing.body(journal.issue("2026-11-09")))], True))
     assert len(peer.sent("sign_with_schnorr")) == 2  # both asked,
     assert SignedDocument.count() == 1 and journal.signed_head()["subject"] == "2026-11-09"  # one signature the day
+
+
+def test_an_entry_put_into_a_day_while_it_is_signed_is_not_lost_for_the_batch_is_not_kept():
+    peer = started()
+    at(2026, 11, 10, 0, 5)  # the 9th has closed
+    plain = peer.replies["sign_with_schnorr"]
+
+    def west(arg):
+        peer.answer("sign_with_schnorr", plain)
+        zone("America/Los_Angeles")  # while the call is out: the 9th, 16:05 there, is open again...
+        journal.record("codex_installed", codex="sha256:late")  # ...and an entry is made in it
+        return plain(arg)
+
+    peer.answer("sign_with_schnorr", west)
+    sweep()
+    assert SignedDocument.count() == 0 and "changed while they were signed" in failure_of("journal")["error"]
+    at(2026, 11, 10, 8, 5)  # the 9th has closed in Los Angeles
+    sweep()
+    assert [e["details"]["codex"] for e in signed("2026-11-09")[1]["body"]["entries"]] == ["sha256:late"]
+    assert failure_of("journal") is None
 
 
 # ---- Every day is signed, and each issue links to the one before it

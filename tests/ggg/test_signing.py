@@ -5,6 +5,7 @@ one signature over a Merkle root, the chain a kind may have, and ``signature_pro
 import base64
 import hashlib
 import json
+from types import SimpleNamespace
 
 import fake_chain
 import pytest
@@ -19,6 +20,10 @@ from signing_kit import climb, fake_key, fake_signature, management
 
 def sign(kind, documents, chained=False):
     return op.run(signing.sign_batch(kind, documents, chained))
+
+
+def sign_fresh(kind, documents, fresh):
+    return op.run(signing.sign_batch(kind, documents, False, fresh))
 
 
 def certificates(count):
@@ -225,6 +230,90 @@ def test_the_codes_of_two_documents_differ_and_a_code_is_sixteen_base32_digits_i
     assert len(set(codes)) == 40
     assert all(len(code) == 19 and code.count("-") == 3 and set(code.replace("-", "")) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
                for code in codes)
+
+
+# ---- The canonical form is ASCII with escapes, whoever writes the JSON
+
+
+TEXT = {"b": "é中😀 \x7f \" \\ \n \u2028", "a": [1, None, True], "é": {"z": "x"}}
+
+
+def test_the_text_is_what_ensure_ascii_writes_with_sorted_keys_and_no_spaces():
+    expected = json.dumps(TEXT, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    assert signing.canonical(TEXT) == expected and expected.isascii()
+    assert "\\ud83d\\ude00" in expected and "\\u007f" in expected  # a pair for what is above U+FFFF, and DEL
+    assert json.loads(signing.canonical(TEXT)) == TEXT
+
+
+def test_the_text_is_the_same_when_json_writes_non_ascii_as_it_is_as_the_canisters_does(monkeypatch):
+    expected = signing.canonical(TEXT)
+    monkeypatch.setattr(signing, "json", SimpleNamespace(
+        dumps=lambda document, **kw: json.dumps(document, **{**kw, "ensure_ascii": False})))
+    assert signing.canonical(TEXT) == expected
+
+
+def test_a_signed_document_with_non_ascii_facts_is_ascii_and_reads_back_the_same():
+    world.build()
+    management()
+    sign("certificate", [("C-é", {"holder": "José 中 😀"})])
+    proof = signing.proof("certificate", "C-é")
+    assert proof["canonical"].isascii() and document("certificate", "C-é")["body"] == {"holder": "José 中 😀"}
+    assert proof["digest"] == hashlib.sha256(proof["canonical"].encode()).hexdigest()
+
+
+# ---- What a signature is sent with, and what the realm checks first
+
+
+@pytest.mark.parametrize("network,fee", [("ic", 26_153_846_153), ("", 26_153_846_153), ("local", 26_153_846_153),
+                                         ("staging", 10_000_000_000), ("test", 10_000_000_000)])
+def test_a_signature_is_sent_with_the_fee_of_its_key_and_half_as_much_again(network, fee):
+    world.build()
+    management()
+    Realm["1"].network = network
+    sign("certificate", certificates(1))
+    assert [cycles for _, method, cycles in fake_chain.state["attached"] if method == "sign_with_schnorr"] == [fee * 3 // 2]
+    assert [cycles for _, method, cycles in fake_chain.state["attached"] if method == "schnorr_public_key"] == [0]
+
+
+def test_a_realm_without_the_cycles_asks_for_nothing_and_says_what_it_lacks():
+    world.build()
+    peer = management()
+    fake_chain.state["balance"] = 1_000_000_000
+    assert sign("certificate", certificates(1)) is False
+    error = signing.failures()["certificate"]["error"]
+    assert "1000000000 cycles" in error and "key_1" in error and "39230769229" in error
+    assert peer.calls == [] and SignedDocument.count() == 0
+
+
+def test_the_key_is_named_once_so_that_a_change_of_network_in_flight_cannot_split_text_and_signature():
+    world.build()
+    peer = management()
+    Realm["1"].network = "ic"
+    asked = peer.replies["schnorr_public_key"]
+
+    def moved(arg):
+        Realm["1"].network = "staging"  # while the calls are out
+        return asked(arg)
+
+    peer.answer("schnorr_public_key", moved)
+    sign("certificate", certificates(1))
+    named = Reader(peer.sent("sign_with_schnorr")[0]).args()[0]["key_id"]["name"]
+    assert named == "key_1" == document("certificate", "C-1")["key"]["name"]
+
+
+def test_a_batch_whose_documents_changed_while_it_was_signed_is_not_kept_and_says_so():
+    world.build()
+    management()
+    assert sign_fresh("certificate", certificates(2), lambda: certificates(2)) is True
+    assert sign_fresh("decision", [("D-1", {"n": 1})], lambda: [("D-1", {"n": 2})]) is False
+    assert "changed while they were signed" in signing.failures()["decision"]["error"]
+    assert signing.proof("decision", "D-1") is None and signing.proof("certificate", "C-2") is not None
+
+
+def test_a_bad_kind_is_refused_before_anything_is_asked_of_anyone():
+    world.build()
+    peer = management()
+    assert sign("Bad kind", certificates(1)) is False and peer.calls == [] and fake_chain.state["attached"] == []
 
 
 @pytest.mark.parametrize("n", range(8))

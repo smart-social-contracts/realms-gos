@@ -25,7 +25,7 @@ evidence. A document not yet signed is shown as *provisional*.
 | Key name | `dfx_test_key` when `Realm.network` is `local`; `test_key_1` on `test`, `staging`, `demo`; **`key_1`** otherwise | `test_key_1` lives on a 13-node subnet and is for testing. A document records its key, so a realm that changes network keeps old ones valid |
 | Derivation path | `["realms:<kind>"]`, e.g. `realms:journal`, `realms:certificate`, fixed for ever | **Domain separation**: the journal's key cannot sign a certificate. A new kind is a new key, with no setup |
 | What is signed | A 32-byte **root**: the Merkle root of the documents of one batch, which for a batch of one is the document's own digest | One verification rule for both; the signature costs the same for one document or a thousand |
-| Canonical form | UTF-8 JSON, keys sorted, no spaces, ASCII escapes, integers only. Stored and served as it is | A verifier never re-serializes, so no language's JSON quirks matter |
+| Canonical form | JSON, keys sorted, no spaces, integers only, every character above `~` written as `\uXXXX` (a pair above U+FFFF), as CPython's `ensure_ascii` does. The realm does the escaping itself: its own `json.dumps` writes non-ASCII as it is. Stored and served as it is | A verifier never re-serializes, so no language's JSON quirks matter; the text is the same under CPython and in the canister, which a test holds |
 | When | A sweep every hour signs what has closed, oldest first, in as few batches as it can. A failure is retried at the next sweep | A signature needs an update (a query cannot call the management canister); a sweep also covers downtime and upgrades |
 | Stored | One `SignedDocument` row per document: canonical text, digest, root, Merkle path, signature, code. Never recomputed | Threshold Ed25519 on mainnet is not promised to be deterministic (PocketIC's is): a second signature may differ |
 | CLI | None. Verification is one standalone HTML page | The canister makes the signature; a reader needs only to check it |
@@ -41,7 +41,8 @@ evidence. A document not yet signed is shown as *provisional*.
 
 `kind` and `subject` name the document (a journal's subject is its day, a certificate's its id); `body` is the kind's own
 content, as stored facts, never rendered text. `prev` links a **chained** kind to the one before it; other kinds leave it
-null. The realm's name is not signed: the canister id is the identity, the name a label.
+null. The realm's name is not signed: the canister id is the identity, the name a label. The `timezone` of a journal issue is the
+realm's zone when it was signed, not necessarily the one on its day.
 
 The **proof** is what the realm serves: `canonical` (the text above), `digest` (SHA-256 of it), `root`, `path`, `signature`
 and `code`. The kind, subject, `signed_at`, key and `prev` are *inside* the signed text and are not repeated beside it: a
@@ -90,8 +91,13 @@ JSON, an uploaded file, or fetched from a realm by canister id and code (or kind
 **invalid** with the reason, the canister id, the kind, subject and number, and the chain link. It checks:
 
 1. `SHA-256(canonical)` is `digest`; the path climbs from the digest to `root`; the signature of `root` verifies under the
-   public key in the text (WebCrypto Ed25519, in current Chrome, Firefox and Safari).
-2. The text names the canister the proof was fetched from; the displayed entries equal the signed ones.
+   public key in the text (WebCrypto Ed25519, in current Chrome, Firefox and Safari, found out once with a known key).
+   Every value of the proof must have the form it has when it is right (hex, a canister id, the key's path being
+   `realms:<kind>`): none that has not is shown in a command.
+2. The proof is **the one asked for** (its code, or its kind and subject, is the requested one: an answer to a query is not
+   certified, and could be another genuine document), and the text names the canister it was fetched from. The page shows
+   what was signed, to compare with a printed copy; the realm's own sheet (realms-extensions, journal) checks that the entries
+   it shows are the signed ones.
 3. `prev` is the digest of the previous document, fetched by its code (the code of `prev`).
 4. **The key is the canister's.** See below.
 
@@ -102,11 +108,14 @@ verification, a library of its own. So the page:
 - fetches the proof with a **tiny inline query** (an anonymous `query` request over the IC HTTP API: about 150 lines of CBOR
   and Candid text, no agent-js). The reply needs no trust: the signature binds the content;
 - shows the key, its name and path, and says plainly that it is **the key the realm reports** until checked;
-- takes an **expected key** and compares. The reader derives it independently, offline, with DFINITY's
+- takes an **expected key** and compares. The reader types it: **a link cannot fill it in, nor choose the replica asked**
+  (`?key=` and `?host=` are ignored), since a link from an attacker would otherwise bring its own key and its own replica. A
+  replica other than the Internet Computer's public one is named wherever it was asked. The reader derives the key
+  independently, offline, with DFINITY's
   [`@dfinity/ic-pub-key`](https://docs.internetcomputer.org/guides/chain-fusion/offline-key-derivation/)
   (`PublicKeyWithChainCode.forMainnetKey("key_1")`, `DerivationPath.withCanisterPrefix(canister, [path])`); the page prints
   the snippet filled in. Or by asking any canister for `schnorr_public_key` with `canister_id` set to the realm's (spiked: a
-  canister may ask for another's key).
+  canister may ask for another's key). A local replica's key (`dfx_test_key`) has no published master key: the page says so.
 
 Deriving the key inside the page (HKDF and Edwards point addition on BigInt, with the master keys embedded) would make it fully
 offline; it is not in this version, since the master keys must be checked against the registry first.
@@ -127,7 +136,9 @@ runs from disk. A sheet's QR code points to it with `?canister=…&code=…`.
 | PocketIC, measured | 26.1B cycles for all three key names: the 26.15B fee and about 30M of the realm's own work | |
 
 1 XDR = 1 trillion cycles = $1.366 (docs, 22 May 2026). `schnorr_public_key` is free. A call with too few cycles attached is
-rejected and refunded, and the error names the fee. The realm attaches 60B and gets the unused part back. Batching makes the
+rejected and refunded, and the error names the fee. The realm checks its balance first, and a realm short of cycles says what
+it lacks in `signing_failures` and asks for nothing. It attaches its key's fee and half as much again (15B for `test_key_1`,
+39.2B for the others) and gets the unused part back. Batching makes the
 signature cost the same for one document or many: on PocketIC a day's signature cost 26.1B cycles, and 40 days stopped cost
 two. An idle realm there burns about 0.7B cycles a day, so the signature is the larger part of a realm's daily cost.
 In instructions (PocketIC): reading a signed issue 10.5M, writing one issue's text and digest 19M, the tree of a month of

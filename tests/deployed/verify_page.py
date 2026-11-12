@@ -97,6 +97,12 @@ class Signer:
         self.public = self.private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
         self.realm, self.kind, self.key_name, self.head = realm, kind, key_name, None
 
+    def sign_text(self, text):
+        """A proof of one document written as ``text``, whatever it says: for a text a right signer would never write."""
+        digest = hashlib.sha256(text.encode()).digest()
+        return {"canonical": text, "digest": digest.hex(), "root": digest.hex(), "path": [],
+                "signature": self.private.sign(digest).hex(), "code": code(digest.hex())}
+
     def sign(self, batch, chained=True, signed_at=1_790_000_000):
         """``batch``: ``[(subject, body)]``. The proofs, in order."""
         texts, prev = [], self.head if chained else None

@@ -130,6 +130,7 @@ def test_a_an_issue_closed_is_signed_and_its_signature_verifies_under_the_key_th
     assert doc["key"]["algorithm"] == "ed25519" and doc["key"]["path"] == "realms:journal"
     assert doc["key"]["name"] == "key_1"  # an ic realm's key
     assert proof["root"] == proof["digest"] and proof["path"] == []  # a batch of one
+    assert json.dumps(doc, sort_keys=True, separators=(",", ":")) == proof["canonical"]  # the text CPython writes
     assert reference_valid(proof)
     key = derived_key(net, other, capital.cid, "key_1")
     assert doc["key"]["public_key"] == key  # the IC's own answer for this canister, not the realm's word
@@ -162,6 +163,21 @@ def test_c_each_day_is_signed_as_it_closes_for_one_signature_and_links_to_the_on
     assert all(reference_valid(p) for p in proofs) and len({p["signature"] for p in proofs}) == len(proofs)
     print(f"cycles spent in a day, one signature: {spent}")
     assert all(abs(s - FEE) < SLACK for s in spent), spent  # one threshold signature a day, and nothing else of cost
+
+
+def test_c_a_fact_with_characters_beyond_ascii_is_signed_as_the_same_ascii_text_cpython_writes(net, capital):
+    fact = "sha256:é中😀"
+    shell(capital, f"from core import journal\njournal.record('codex_installed', codex={fact!r})")
+    day = issue(capital)["day"]
+    wait(net, DAY)
+    proof = proof_of(capital, day)
+    text = proof["canonical"]
+    assert text.isascii() and "\\u00e9" in text and "\\u4e2d" in text and "\\ud83d\\ude00" in text  # escapes, a pair for 😀
+    assert json.dumps(json.loads(text), sort_keys=True, separators=(",", ":")) == text  # CPython's text, byte for byte
+    assert document(proof)["body"]["entries"][0]["details"]["codex"] == fact == issue(capital, day)["entries"][0]["details"]["codex"]
+    assert reference_valid(proof)
+    if NODE:
+        assert page("verifyProof", proof, {"canister": capital.cid, "requested": {"kind": "journal", "subject": day}})["valid"] is True
 
 
 def test_d_days_that_closed_while_the_realm_was_stopped_are_signed_in_batches_of_a_month(net, capital):

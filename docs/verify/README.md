@@ -9,8 +9,9 @@ paste the proof as JSON, or open a file. It shows valid or invalid with the reas
 signing time, what was signed, and the link to the previous document. It also prints, for the key in the document, the
 snippet that derives the canister's key offline and the commands that check the signature with Python or OpenSSL.
 
-A link can carry the request: `?canister=<id>&code=<code>` (or `&kind=journal&subject=2026-11-09`), with `&key=<hex>` for the
-expected public key and `&host=<url>` for a replica other than `https://icp-api.io`. A sheet's QR code is such a link.
+A link can carry the request, and only that: `?canister=<id>&code=<code>` (or `&kind=journal&subject=2026-11-09`). It cannot
+carry a key to trust or a replica to ask: the reader types the expected key, and may choose a replica under "Network", which
+the page names whenever it is not `https://icp-api.io`. A sheet's QR code is such a link.
 
 ## What it checks
 
@@ -18,7 +19,8 @@ expected public key and `&host=<url>` for a replica other than `https://icp-api.
    root that was signed.
 2. The root's signature verifies under the key in the text, with the browser's own WebCrypto Ed25519 (current Chrome, Firefox
    and Safari). The page has no curve code of its own: a browser without it says so and shows the commands for other tools.
-3. The text names the canister it was fetched from.
+3. The proof is the one asked for (its code, or its kind and subject, is the requested one), and the text names the canister
+   it was fetched from.
 4. `prev` is the document before it, fetched by its code; the whole chain back to the first can be walked. A realm that
    refuses the previous document has dropped it or hides it, and the page says so.
 5. When an expected key is given, the key in the text is that key. **That is what ties a key to a canister**: derive the key

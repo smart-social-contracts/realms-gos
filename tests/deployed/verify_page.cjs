@@ -16,7 +16,7 @@ const request = JSON.parse(payload);
 
 let seen = null;
 const sandbox = {
-  module: { exports: {} }, crypto: globalThis.crypto, TextEncoder, TextDecoder, URLSearchParams, console, Date, BigInt,
+  module: { exports: {} }, crypto: globalThis.crypto, TextEncoder, TextDecoder, URLSearchParams, console, Date, BigInt, btoa,
   fetch: async (url, init) => {
     seen = { url, headers: init.headers, method: init.method, body: Buffer.from(init.body).toString("hex") };
     const reply = Buffer.from(request.fetch.body, "hex");

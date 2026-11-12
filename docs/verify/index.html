@@ -95,7 +95,7 @@
       <input type="file" id="file" accept=".json,application/json,text/plain">
     </div>
 
-    <label for="expected">Expected public key, in hex (optional: see "Is this key the canister's?" below)</label>
+    <label for="expected">Expected public key, in hex, derived by you (optional: see "Is this key the canister's?" below). A link cannot fill this in.</label>
     <input type="text" id="expected" autocomplete="off" spellcheck="false">
     <details>
       <summary>Network</summary>
@@ -106,6 +106,7 @@
   </fieldset>
 
   <section id="result" hidden aria-live="polite">
+    <div id="host-note" class="verdict note" hidden></div>
     <div id="verdict" class="verdict"></div>
     <h2>The document</h2>
     <dl id="facts"></dl>
@@ -208,12 +209,34 @@ async function climb(digestHex, path) {
   return toHex(node);
 }
 
+// RFC 8032, section 7.1, the first test: a key, and its signature of the empty message.
+const KNOWN_KEY = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+const KNOWN_SIGNATURE = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155" +
+  "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+let ed25519Supported = null;
+
+// Whether this browser verifies Ed25519, found out once with a key and signature that are known to be right: a key of a
+// document that does not import is then an invalid key, not a browser that cannot check.
+async function supportsEd25519() {
+  if (ed25519Supported === null) {
+    try {
+      const key = await crypto.subtle.importKey("raw", fromHex(KNOWN_KEY), "Ed25519", false, ["verify"]);
+      ed25519Supported = await crypto.subtle.verify("Ed25519", key, fromHex(KNOWN_SIGNATURE), new Uint8Array(0));
+    } catch (error) {
+      ed25519Supported = false;
+    }
+  }
+  return ed25519Supported;
+}
+
+// ``{supported, valid, error}``: ``valid`` is whether the signature of the message verifies under the key.
 async function ed25519(publicKeyHex, signatureHex, messageHex) {
+  if (!(await supportsEd25519())) return { supported: false };
   let key;
   try {
     key = await crypto.subtle.importKey("raw", fromHex(publicKeyHex), "Ed25519", false, ["verify"]);
   } catch (error) {
-    return { supported: false };
+    return { supported: true, valid: false, error: "the key in the document is not an Ed25519 key" };
   }
   return { supported: true, valid: await crypto.subtle.verify("Ed25519", key, fromHex(signatureHex), fromHex(messageHex)) };
 }
@@ -232,13 +255,34 @@ function findProof(value) {
 
 const isHex = (text, length) => typeof text === "string" && text.length === length && /^[0-9a-f]+$/i.test(text);
 
-// Checks a proof. ``options``: canister (the one it was fetched from), expectedKey (hex). Returns {checks, doc, valid}:
-// ``valid`` is true when the text, the root and the signature agree and nothing else failed; the checks say the rest.
+// A canister id: its text form with its checksum, as the Internet Computer writes it.
+function isCanisterId(text) {
+  try { principalBytes(text); return typeof text === "string" && text === text.toLowerCase(); } catch (error) { return false; }
+}
+
+// Whether ``doc`` is a signed document of version 1 with every value the page prints or puts in a command in the form it
+// has when it is right: hex where hex belongs, a canister id, names of letters and digits, the key's path being its kind's.
+function shapedDocument(doc, proof) {
+  const key = doc && doc.key;
+  return Boolean(doc && doc.v === 1 && typeof doc.kind === "string" && /^[a-z0-9-]+$/.test(doc.kind) && isCanisterId(doc.realm) &&
+    typeof doc.subject === "string" && key && key.algorithm === "ed25519" && isHex(key.public_key, 64) &&
+    typeof key.name === "string" && /^[a-z0-9_]+$/.test(key.name) && key.path === `realms:${doc.kind}` &&
+    (doc.prev === null || isHex(doc.prev, 64)) && proof && isHex(proof.digest, 64) && isHex(proof.root, 64) &&
+    isHex(proof.signature, 128) && Array.isArray(proof.path) && typeof proof.code === "string");
+}
+
+// The code of a document as written however a person types it: capitals and digits only.
+const normalCode = (code) => String(code).toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+// Checks a proof. ``options``: canister (the one it was fetched from), requested (what it was asked for: ``{code}`` or
+// ``{kind, subject}``), expectedKey (hex, as the reader gave it). Returns {checks, doc, valid, supported, shaped}:
+// ``valid`` is true when the text, the root and the signature agree and nothing else failed; the checks say the rest;
+// ``shaped`` that every value of the proof has the form it has when it is right, so that it is safe to print in a command.
 async function verifyProof(proof, options = {}) {
   const checks = [];
   const add = (status, name, detail = "") => checks.push({ status, name, detail });
   let doc = null;
-  const stop = () => ({ checks, doc, valid: false, supported: true });
+  const stop = () => ({ checks, doc, valid: false, supported: true, shaped: false });
 
   if (!proof || typeof proof.canonical !== "string") { add("fail", "The proof is well formed", "there is no signed text"); return stop(); }
   try {
@@ -247,11 +291,10 @@ async function verifyProof(proof, options = {}) {
     add("fail", "The proof is well formed", "the signed text is not JSON"); return stop();
   }
   const key = doc && doc.key;
-  const shaped = doc && doc.v === 1 && typeof doc.kind === "string" && typeof doc.realm === "string" &&
-    typeof doc.subject === "string" && key && key.algorithm === "ed25519" && isHex(key.public_key, 64) &&
-    isHex(proof.digest, 64) && isHex(proof.root, 64) && isHex(proof.signature, 128) && Array.isArray(proof.path) &&
-    typeof proof.code === "string";
-  if (!shaped) { add("fail", "The proof is well formed", "a field is missing or of the wrong kind, or the text is not version 1"); return stop(); }
+  if (!shapedDocument(doc, proof)) {
+    add("fail", "The proof is well formed", "a field is missing or not in its form, the key's path is not its kind's, or the text is not version 1");
+    return stop();
+  }
   add("pass", "The proof is well formed");
 
   const digest = toHex(await sha256(textEncoder.encode(proof.canonical)));
@@ -272,7 +315,16 @@ async function verifyProof(proof, options = {}) {
     add("note", "The signature of the root is valid", "this browser cannot verify Ed25519: use a current Chrome, Firefox or Safari, or the commands below");
   } else {
     add(signed.valid ? "pass" : "fail", "The signature of the root is valid for the key in the text",
-      signed.valid ? "" : "the signature does not match: the document is not what the key signed");
+      signed.valid ? "" : signed.error || "the signature does not match: the document is not what the key signed");
+  }
+
+  if (options.requested) {
+    // An answer to a query is not certified: it can be another genuine document than the one asked for.
+    const asked = options.requested;
+    const same = asked.code ? normalCode(asked.code) === normalCode(codeOf(proof.digest))
+      : asked.kind === doc.kind && asked.subject === doc.subject;
+    add(same ? "pass" : "fail", "The document is the one asked for",
+      same ? "" : "the realm answered with another document than the one asked for");
   }
 
   if (options.canister) {
@@ -291,7 +343,7 @@ async function verifyProof(proof, options = {}) {
   }
 
   const failed = checks.some((check) => check.status === "fail");
-  return { checks, doc, valid: !failed && signed.supported && signed.valid, supported: signed.supported };
+  return { checks, doc, valid: !failed && signed.supported && signed.valid, supported: signed.supported, shaped: true };
 }
 
 // ---- Asking a realm: a query over the Internet Computer's HTTP interface, anonymously, with no library
@@ -418,9 +470,57 @@ async function checkPrevious(doc, fetcher) {
     detail: linked ? `the document before it is ${previous.code}` : "the document the realm gives as the previous one is not the one this names", previous };
 }
 
+const DEFAULT_HOST = "https://icp-api.io";
+
+// What a link may ask the page: which document of which canister. Nothing a link says is trusted: not a key, which the
+// reader must derive and give, and not a replica, which the reader may choose in "Network" and which a link cannot.
+function requestFromUrl(search) {
+  const params = new URLSearchParams(search);
+  const field = (name) => (params.get(name) || "").trim();
+  return { canister: field("canister"), code: field("code"), kind: field("kind"), subject: field("subject") };
+}
+
+// What to tell the reader when the proof was fetched from a replica other than the Internet Computer's public one: a
+// replica that is not trusted can answer with a proof of its own making.
+function hostNote(host) {
+  if (host.replace(/\/+$/, "").toLowerCase() === DEFAULT_HOST) return "";
+  return `This proof was fetched from ${host}, not from the Internet Computer's public replica (${DEFAULT_HOST}). ` +
+    "A replica you do not trust can answer with a document it made itself: only a key you derived yourself settles it.";
+}
+
+// The commands and the code the page shows for a document, written only from one whose every value has passed the form
+// it has when it is right (``shapedDocument``): a value that was not, put in a command, would run on the reader's machine.
+// null when the document is not so. ``derive`` is null for a key that cannot be derived offline (a local replica's).
+function snippets(doc, proof) {
+  if (!shapedDocument(doc, proof)) return null;
+  const key = doc.key;
+  const pem = btoa(String.fromCharCode(...fromHex("302a300506032b6570032100" + key.public_key)));
+  const derivable = key.name === "key_1" || key.name === "test_key_1";
+  return {
+    derive: derivable ? [
+      'import { schnorr } from "@dfinity/ic-pub-key";',
+      'import { Principal } from "@dfinity/principal";',
+      `const master = schnorr.ed25519.PublicKeyWithChainCode.forMainnetKey("${key.name}");`,
+      `const path = schnorr.ed25519.DerivationPath.withCanisterPrefix(Principal.fromText("${doc.realm}"), [new TextEncoder().encode("${key.path}")]);`,
+      "console.log(master.deriveSubkeyWithChainCode(path).public_key.toHex());",
+    ].join("\n") : null,
+    python: [
+      "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey",
+      `key = Ed25519PublicKey.from_public_bytes(bytes.fromhex("${key.public_key}"))`,
+      `key.verify(bytes.fromhex("${proof.signature}"), bytes.fromhex("${proof.root}"))  # raises InvalidSignature if wrong`,
+    ].join("\n"),
+    openssl: [
+      `printf '%s' '${proof.root}' | xxd -r -p > root.bin`,
+      `printf '%s' '${proof.signature}' | xxd -r -p > signature.bin`,
+      `printf -- '-----BEGIN PUBLIC KEY-----\\n${pem}\\n-----END PUBLIC KEY-----\\n' > key.pem`,
+      "openssl pkeyutl -verify -pubin -inkey key.pem -rawin -in root.bin -sigfile signature.bin",
+    ].join("\n"),
+  };
+}
+
 if (typeof module !== "undefined") {
   module.exports = { toHex, fromHex, codeOf, climb, ed25519, findProof, verifyProof, checkPrevious, principalBytes, principalText,
-    cbor, cborDecode, candidTexts, candidText, readOp, fetchProof };
+    cbor, cborDecode, candidTexts, candidText, readOp, fetchProof, requestFromUrl, hostNote, snippets, shapedDocument };
 }
 
 // ---- The page
@@ -436,7 +536,7 @@ if (typeof document !== "undefined") {
   }
 
   function canister() { return $("canister").value.trim(); }
-  function host() { return $("host").value.trim() || "https://icp-api.io"; }
+  function host() { return $("host").value.trim() || DEFAULT_HOST; }
   function which() {
     if ($("code").value.trim()) return { code: $("code").value.trim() };
     if ($("kind").value.trim() && $("subject").value.trim()) return { kind: $("kind").value.trim(), subject: $("subject").value.trim() };
@@ -451,7 +551,8 @@ if (typeof document !== "undefined") {
       return { proof: findProof(JSON.parse(await file.text())), canister: "" };
     }
     if (!canister()) throw new Error("give the realm's canister id");
-    return { proof: await fetchProof(host(), canister(), which()), canister: canister() };
+    const requested = which();
+    return { proof: await fetchProof(host(), canister(), requested), canister: canister(), requested, host: host() };
   }
 
   function addCheck(list, check) {
@@ -464,9 +565,11 @@ if (typeof document !== "undefined") {
     try { return JSON.stringify(JSON.parse(text), null, 2); } catch (error) { return text; }
   }
 
-  function show(result, proof, from) {
-    const doc = result.doc;
+  function show(result, proof, from, asked) {
+    const doc = result.shaped ? result.doc : null;
     $("result").hidden = false;
+    $("host-note").textContent = asked ? hostNote(asked) : "";
+    $("host-note").hidden = !$("host-note").textContent;
     const verdict = $("verdict");
     const keyChecked = result.checks.some((c) => c.name === "The key is the expected one" && c.status === "pass");
     if (!result.supported) {
@@ -486,8 +589,8 @@ if (typeof document !== "undefined") {
     facts.replaceChildren();
     const rows = doc ? [["Realm canister", doc.realm], ["Kind", doc.kind], ["Subject", doc.subject],
       ["Signed at", typeof doc.signed_at === "number" ? new Date(doc.signed_at * 1000).toISOString() : ""],
-      ["Public key", doc.key ? doc.key.public_key : ""], ["Key", doc.key ? `${doc.key.algorithm}, ${doc.key.name}, path ${doc.key.path}` : ""],
-      ["Verification code", proof.code], ["Digest", proof.digest]] : [];
+      ["Public key", doc.key.public_key], ["Key", `${doc.key.algorithm}, ${doc.key.name}, path ${doc.key.path}`],
+      ["Verification code", proof.code], ["Digest", proof.digest], ...(asked ? [["Asked", asked]] : [])] : [];
     for (const [name, value] of rows) { facts.append(node("dt", name), node("dd", String(value))); }
 
     const list = $("checks");
@@ -498,27 +601,13 @@ if (typeof document !== "undefined") {
     $("body").textContent = doc ? JSON.stringify(doc.body, null, 2) : "";
     $("key-details").hidden = !doc;
     $("tools-details").hidden = !doc;
+    for (const id of ["derive", "tool-python", "tool-openssl"]) $(id).textContent = ""; // nothing of an earlier document stays
     if (doc) {
-      const name = doc.key.name === "key_1" ? "key_1" : doc.key.name;
-      $("derive").textContent = [
-        'import { schnorr } from "@dfinity/ic-pub-key";',
-        'import { Principal } from "@dfinity/principal";',
-        `const master = schnorr.ed25519.PublicKeyWithChainCode.forMainnetKey(${JSON.stringify(name)});`,
-        `const path = schnorr.ed25519.DerivationPath.withCanisterPrefix(Principal.fromText(${JSON.stringify(doc.realm)}), [new TextEncoder().encode(${JSON.stringify(doc.key.path)})]);`,
-        "console.log(master.deriveSubkeyWithChainCode(path).public_key.toHex());",
-      ].join("\n");
-      $("tool-python").textContent = [
-        "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey",
-        `key = Ed25519PublicKey.from_public_bytes(bytes.fromhex("${doc.key.public_key}"))`,
-        `key.verify(bytes.fromhex("${proof.signature}"), bytes.fromhex("${proof.root}"))  # raises InvalidSignature if wrong`,
-      ].join("\n");
-      const pem = btoa(String.fromCharCode(...fromHex("302a300506032b6570032100" + doc.key.public_key)));
-      $("tool-openssl").textContent = [
-        `printf '%s' '${proof.root}' | xxd -r -p > root.bin`,
-        `printf '%s' '${proof.signature}' | xxd -r -p > signature.bin`,
-        `printf -- '-----BEGIN PUBLIC KEY-----\\n${pem}\\n-----END PUBLIC KEY-----\\n' > key.pem`,
-        "openssl pkeyutl -verify -pubin -inkey key.pem -rawin -in root.bin -sigfile signature.bin",
-      ].join("\n");
+      const commands = snippets(doc, proof);
+      $("derive").textContent = commands.derive ||
+        `This is the key of a local replica (${doc.key.name}): its master key is not published, so it cannot be derived offline. It means nothing against the Internet Computer.`;
+      $("tool-python").textContent = commands.python;
+      $("tool-openssl").textContent = commands.openssl;
     }
     $("chain-buttons").hidden = !(doc && from);
     $("walk-state").textContent = "";
@@ -529,10 +618,10 @@ if (typeof document !== "undefined") {
     const button = $("verify");
     button.disabled = true;
     try {
-      const { proof, canister: from } = await load();
+      const { proof, canister: from, requested, host: asked } = await load();
       if (!proof) throw new Error("there is no proof in what was given");
-      const result = await verifyProof(proof, { canister: from, expectedKey: $("expected").value });
-      if (result.doc && from) {
+      const result = await verifyProof(proof, { canister: from, requested, expectedKey: $("expected").value });
+      if (result.shaped && from) {
         try {
           result.checks.push(await checkPrevious(result.doc, (which) => fetchProof(host(), from, which)));
         } catch (error) {
@@ -543,7 +632,7 @@ if (typeof document !== "undefined") {
         }
         result.valid = result.valid && !result.checks.some((c) => c.status === "fail");
       }
-      show(result, proof, from);
+      show(result, proof, from, asked);
     } catch (error) {
       $("result").hidden = false;
       $("verdict").className = "verdict fail";
@@ -565,7 +654,8 @@ if (typeof document !== "undefined") {
       while (doc.prev !== null) {
         state.textContent = `Checking document ${++count} before this one…`;
         const previous = await fetchProof(host(), current.from, { code: codeOf(doc.prev) });
-        const result = await verifyProof(previous, { canister: current.from, expectedKey: $("expected").value });
+        const result = await verifyProof(previous, { canister: current.from, requested: { code: codeOf(doc.prev) },
+          expectedKey: $("expected").value });
         const linked = toHex(await sha256(textEncoder.encode(previous.canonical))) === doc.prev.toLowerCase();
         if (!result.valid || !linked) { state.textContent = `Document ${count} before this one is not valid or is not the one named.`; return; }
         doc = result.doc;
@@ -582,11 +672,11 @@ if (typeof document !== "undefined") {
   $("verify").addEventListener("click", run);
   $("walk").addEventListener("click", walk);
 
-  const params = new URLSearchParams(location.search);
-  for (const [name, id] of [["canister", "canister"], ["code", "code"], ["kind", "kind"], ["subject", "subject"], ["key", "expected"], ["host", "host"]]) {
-    if (params.get(name)) $(id).value = params.get(name);
+  const asked = requestFromUrl(location.search);
+  for (const name of ["canister", "code", "kind", "subject"]) {
+    if (asked[name]) $(name).value = asked[name];
   }
-  if (params.get("canister") && (params.get("code") || (params.get("kind") && params.get("subject")))) run();
+  if (asked.canister && (asked.code || (asked.kind && asked.subject))) run();
 }
 </script>
 </body>
