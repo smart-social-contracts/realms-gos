@@ -228,11 +228,10 @@ def audit(name, user, by, origin, args, out, grant="", prepared_by=""):
     if len(json.dumps(kept)) > AUDIT_ARGS_MAX:
         kept = {"keys": sorted(kept)}
     shown = {k: v for k, v in redacted(name, out, args).items() if isinstance(v, (str, int, bool))}
-    Event(id=str(Event.max_id() + 1), op=name, user=user, by=by, origin=origin, args=kept, result=shown, at=chain.now(),
+    newest = Event.max_id() + 1
+    Event(id=str(newest), op=name, user=user, by=by, origin=origin, args=kept, result=shown, at=chain.now(),
           grant=grant or None, prepared_by=prepared_by)
-    old = Event[str(Event.max_id() - EVENTS_KEPT)]
-    if old:
-        old.delete()
+    Event.forget(str(newest - EVENTS_KEPT))
 
 
 def oldest_event():
