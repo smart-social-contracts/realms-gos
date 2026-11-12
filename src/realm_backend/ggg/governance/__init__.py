@@ -5,6 +5,7 @@ from .proposal_edge import ProposalEdge
 from .vote import Vote
 from .mandate import Mandate
 from .contract import Contract
+from .contract_amendment import ContractAmendment
 from .license import License
 from .procedure import Procedure
 from .request import Request

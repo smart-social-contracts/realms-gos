@@ -34,7 +34,7 @@ from realms.legislation.paths import REALM
 # (tests/ggg keeps those two equal, and cli/tests keeps this one equal to the canister's).
 GGG_DOMAINS = (
     "realm", "tax", "procedure", "register", "local_regime", "water", "data_protection", "language",
-    "treasury", "federation",
+    "treasury", "federation", "planning",
 )  # fmt: skip
 SOURCE_FILES = ("source.json", "releases.json", "calendar.json")
 CASES_SUFFIX = ".cases.json"

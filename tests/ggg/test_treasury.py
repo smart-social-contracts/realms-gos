@@ -244,14 +244,14 @@ def test_payment_up_to_the_plan_is_allowed_and_one_unit_over_is_refused():
 
     refused = pay_capital(1)
     assert refused["ok"] is False and refused["kind"] == "conflict"
-    for fact in (b, "500 for capital", "500 is spent", "1 was asked"):
+    for fact in (b, "(ROADS, FY2026, capital)", "has 0 available", "the transfer of 1 is 1 short"):
         assert fact in refused["error"]
     assert (Transfer.count(), LedgerEntry.count(), funds()["ROADS"], Budget[b].actual) == (transfers, entries, held, 500)
 
 
 def test_a_payment_in_one_step_past_the_plan_is_refused_whole():
     b = fund_roads_with_budget(500)
-    assert "501 was asked" in pay_capital(501)["error"]
+    assert "the transfer of 501 is 1 short" in pay_capital(501)["error"]
     assert Transfer.count() == 0 and Budget[b].actual == 0
 
 
@@ -296,7 +296,8 @@ def test_a_failed_payment_frees_its_budget():
     assert pay_capital(500)["status"] == "completed"
 
 
-def test_a_voted_payment_past_the_plan_fails_with_its_reason_and_pays_nothing():
+def voted_payment_setup():
+    """Roads with a capital line of 500, and Infrastructure deciding by two votes: carla's payment is a proposal."""
     depts = setup_finance()
     allocate(ROADS=100)
     receive(10_000)
@@ -305,15 +306,29 @@ def test_a_voted_payment_past_the_plan_fails_with_its_reason_and_pays_nothing():
     ledger_ok()
     world.grant(depts["Infrastructure"], "transfer.create")
     world.policy(depts["Infrastructure"], 1, 2)
+    return b, depts["Infrastructure"]
 
-    p = ok("transfer_create", "carla", fund="ROADS", to="buildco", amount=501, category="capital")["proposal"]
-    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
-    assert Proposal[p].status == "failed" and "501 was asked" in Proposal[p].result["error"]
-    assert (Transfer.count(), Budget[b].actual, funds()["ROADS"]) == (0, 0, 10_000)
-    assert not [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer"]
+
+def test_a_payment_past_the_plan_is_refused_when_it_is_filed():
+    b, _ = voted_payment_setup()
+
+    out = call("transfer_create", "carla", fund="ROADS", to="buildco", amount=501, category="capital")
+    assert out["kind"] == "conflict" and "has 500 available; the transfer of 501 is 1 short" in out["error"]
+    assert (Proposal.count(), Transfer.count(), Budget[b].actual) == (0, 0, 0)
 
     within = ok("transfer_create", "carla", fund="ROADS", to="buildco", amount=500, category="capital")["proposal"]
     assert adopt(within)["status"] == "completed" and Budget[b].actual == 500
+
+
+def test_a_voted_payment_the_plan_can_no_longer_meet_fails_with_its_reason_and_pays_nothing():
+    b, infrastructure = voted_payment_setup()
+    p = ok("transfer_create", "carla", fund="ROADS", to="buildco", amount=500, category="capital")["proposal"]
+    world.policy(infrastructure, 1, 1)  # while the vote is open, the line spends elsewhere
+    assert pay_capital(1, "carla")["status"] == "completed"
+
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert Proposal[p].status == "failed" and "has 499 available; the transfer of 500 is 1 short" in Proposal[p].result["error"]
+    assert (Transfer.count(), Budget[b].actual, funds()["ROADS"]) == (1, 1, 10_000 - 1 - 10)  # only the one unit, and its fee
 
 
 def test_a_payroll_past_the_plan_is_refused_before_anyone_is_paid():
@@ -324,17 +339,17 @@ def test_a_payroll_past_the_plan_is_refused_before_anyone_is_paid():
     draft("ROADS", "payroll", 3_999)
     propose()
     entries = LedgerEntry.count()  # the first salary fits the plan: only the check up front keeps it from being paid
-    assert "4000 was asked" in call("payroll_run", "bob", department="Infrastructure", period="2026-11")["error"]
+    assert "the transfer of 4000 is 1 short" in call("payroll_run", "bob", department="Infrastructure", period="2026-11")["error"]
     assert (Transfer.count(), LedgerEntry.count(), Budget["B-2"].actual) == (0, entries, 0)
 
 
 def test_payment_after_an_amendment_that_raises_the_plan_is_allowed():
     b = fund_roads_with_budget(500)
-    assert pay_capital(500)["status"] == "completed" and "budget" in pay_capital(1)["error"]
+    assert pay_capital(500)["status"] == "completed" and "has 0 available" in pay_capital(1)["error"]
     new = ok("budget_amend", "bob", budget=b, planned=800)["budget"]
     assert Budget[new].actual == 500
     assert pay_capital(300)["status"] == "completed" and Budget[new].actual == 800
-    assert "budget" in pay_capital(1)["error"]
+    assert "has 0 available" in pay_capital(1)["error"]
 
 
 def test_governed_budget_is_adopted_by_its_proposal():
@@ -495,13 +510,13 @@ def test_ledger_reply_does_not_complete_a_reverted_transfer(monkeypatch):
     monkeypatch.setattr(fake_chain, "call", suspended)
     message = start("transfer_create", "ctl", fund="ROADS", to="buildco", amount=50)
     t = Transfer["TR-1"]
-    treasury.reverse(t, treasury.period(), "reverted while in flight")
+    treasury.reverse(t, "reverted while in flight")
     out = finish(message, "(variant { Ok = 9 : nat })")
     assert (out["status"], out["ledger_tx"], t.status, t.ledger_tx) == ("failed", "9", "failed", "")
     assert funds()["ROADS"] == 100 and len(t.ledger_entries) == 6 and balanced()
     message = start("transfer_create", "ctl", fund="ROADS", to="buildco", amount=50)
     t = Transfer["TR-2"]
-    treasury.reverse(t, treasury.period(), "reverted while in flight")
+    treasury.reverse(t, "reverted while in flight")
     assert finish(message, RuntimeError("canister stopped"))["status"] == "failed"
     assert t.status == "failed" and funds()["ROADS"] == 100
 

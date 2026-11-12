@@ -3,7 +3,7 @@ from core.ratio import PERCENT
 import fake_chain
 import world
 from ggg import Appointment, Authority, Department, Organization, Position, Proposal
-from kit import denied, later, ok
+from kit import call, denied, later, ok
 
 DAY = 86400
 
@@ -198,3 +198,22 @@ def test_a_department_has_a_kind_that_legislation_can_address():
     assert Department["Finance"].kind == "committee" and Department["Finance"].description == "Money"
     assert ok("department_get", "ctl", department="Council")["department"]["kind"] == "plenary"
     assert {d["id"]: d["kind"] for d in ok("department_list", "ctl")["departments"]}["Finance"] == "committee"
+
+
+def test_an_organization_has_a_kind_that_tells_a_party_from_a_company():
+    world.build()
+    org_admin("dr-ana")
+    assert Organization["clinic-b"].kind == "other"  # registered without one
+    ok("organization_register", "dr-ana", organization="harbour-party", kind="party")
+    ok("organization_register", "dr-ana", organization="harbour-union", kind="union")
+    assert Organization["harbour-party"].kind == "party"
+    assert "kind is one of" in call("organization_register", "dr-ana", organization="x", kind="club")["error"]
+    ok("organization_edit", "dr-ana", organization="harbour-party", kind="association")
+    ok("organization_edit", "dr-ana", organization="harbour-party", description="Harbour")  # a field left out stays
+    assert Organization["harbour-party"].kind == "association"
+    assert "kind is one of" in call("organization_edit", "dr-ana", organization="harbour-party", kind="club")["error"]
+    org_admin("bob")
+    assert "admins" in denied("organization_edit", "bob", organization="harbour-party", kind="party")
+    assert ok("organization_get", "bob", organization="harbour-party")["organization"]["kind"] == "association"
+    listed = ok("organization_list", "bob", kind="union")["organizations"]
+    assert [(o["id"], o["kind"]) for o in listed] == [("harbour-union", "union")]

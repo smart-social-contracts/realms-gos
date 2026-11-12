@@ -1,5 +1,6 @@
 """A department's vote on the real wasm (ggg I-GOV-7, realms-gos#524): a veto holder who has not voted keeps it open,
-a no can be replaced when the approvals are out of reach, and the policy's quorum applies.
+a no can be replaced when the approvals are out of reach, and the policy's quorum applies; and a department that counts
+the votes cast (ggg I-GOV-14) puts a tie to a second vote and decides it at its deadline.
 
 It uses the realm's voting window and its deadline timers, which plain Python fakes.
 """
@@ -19,8 +20,9 @@ def ok(realm, op, who, query=False, **args):
 
 @pytest.fixture(scope="module")
 def realm(wasm_of, people):
-    """A launched realm and two departments of four seats each, held by Alice, Bob, Mallory and the founder: the
-    Council decides 2 of 4 and the founder holds a veto; the Board decides 1 of 4 with a quorum of 50 %."""
+    """A launched realm and three departments of four seats each, held by Alice, Bob, Mallory and the founder: the
+    Council decides 2 of 4 and the founder holds a veto; the Board decides 1 of 4 with a quorum of 50 %; the Parliament
+    decides by a majority of the votes cast, with Alice as its head."""
     realm = Canister(wasm_of("production"), installer=people["installer"])
     ctl, founder = people["ctl"], people["founder"]
     ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
@@ -31,12 +33,15 @@ def realm(wasm_of, people):
     for member in holders[:-1]:
         ok(realm, "realm_join", member)
     for department, policy in (("Council", {"m": 2, "n": 4, "veto": [founder]}),
-                               ("Board", {"m": 1, "n": 4, "quorum": 50 * PERCENT})):
+                               ("Board", {"m": 1, "n": 4, "quorum": 50 * PERCENT}),
+                               ("Parliament", {"m": 1, "n": 4, "threshold_of": "cast"})):
         ok(realm, "department_create", ctl, department=department)
         seat = f"{department.lower()}.member"
         ok(realm, "position_create", ctl, department=department, position=seat, headcount=4)
         for member in holders:
             ok(realm, "appoint", ctl, position=seat, user=member)
+        if department == "Parliament":
+            ok(realm, "department_edit", ctl, department=department, head=people["alice"])
         ok(realm, "department_set_policy", ctl, department=department, **policy)  # last: it ends the direct policy
     return realm
 
@@ -93,3 +98,19 @@ def test_the_quorum_of_a_departments_policy_applies(realm, people):
     vote(realm, people, short, "alice", "yes")
     realm.wait(WEEK + 3600)
     assert status(realm, people, short) == "rejected"
+
+
+def test_a_tie_is_put_to_a_second_vote_and_a_tie_in_that_one_goes_to_the_heads_casting_vote_at_its_deadline(realm, people):
+    p = file(realm, people, "Parliament")
+    realm.wait(2 * 86400)
+    for who, choice in (("alice", "yes"), ("bob", "no"), ("mallory", "abstain"), ("founder", "abstain")):
+        vote(realm, people, p, who, choice)  # everyone has voted: 1 yes, 1 no
+    first = ok(realm, "proposal_get", people["alice"], query=True, proposal=p)
+    assert first["proposal"]["status"] == "voting" and first["proposal"]["first_vote"]["yes"] == 1
+    assert first["votes"] == [] and first["proposal"]["tally"]["yes"] == 0  # the second vote starts with no ballots
+    vote(realm, people, p, "alice", "yes")  # the head, whose yes decides a tie
+    vote(realm, people, p, "bob", "no")
+    realm.wait(5 * 86400 + 3600)  # the first vote's own deadline has passed: its timer must leave the second vote open
+    assert status(realm, people, p) == "voting"
+    realm.wait(3 * 86400)
+    assert status(realm, people, p) == "accepted"  # the second vote's timer settled the tie by the casting vote

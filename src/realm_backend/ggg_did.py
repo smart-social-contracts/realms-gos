@@ -29,10 +29,11 @@ class Invite(Record): id: text; profile: Opt[text]; department: Opt[text]; posit
 class DelegationStatus(Variant, total=False): Pending: null; Active: null; Revoked: null; Expired: null; Declined: null
 class Delegation(Record): id: text; grantor: Principal; delegate: Principal; scope: Vec[text]; status: "DelegationStatus"; label: text; description: text; requires_acceptance: bool; granted_by: Principal; accepted_at: Opt[Timestamp]; starts_at: Opt[Timestamp]; expires_at: Timestamp; revoked_at: Opt[Timestamp]; revoked_by: Opt[Principal]
 class DelegationRequest(Record): id: text; grantor: Principal; delegate: Principal; scope: Vec[text]; label: text; description: text; starts_at: Opt[Timestamp]; expires_at: Timestamp; request_expires_at: Timestamp
-class Policy(Record): m: nat; n: nat; quorum: nat; veto: Vec[Principal]
+class Policy(Record): m: nat; n: nat; quorum: nat; veto: Vec[Principal]; threshold_of: Opt["ThresholdBasis"]
 class Department(Record): id: text; description: text; kind: Opt[text]; parent: Opt[text]; is_root: bool; head: Opt[Principal]; policy: "Policy"; target_policy: Opt["Policy"]; fund: Opt[text]
 class OrganizationStatus(Variant, total=False): Active: null; Suspended: null; Dissolved: null
-class Organization(Record): id: text; description: text; status: "OrganizationStatus"; admins: Vec[Principal]
+class OrganizationKind(Variant, total=False): Company: null; Party: null; Union: null; Association: null; Other: null
+class Organization(Record): id: text; description: text; status: "OrganizationStatus"; admins: Vec[Principal]; kind: "OrganizationKind"
 class PositionStatus(Variant, total=False): Open: null; Frozen: null; Closed: null
 class Position(Record): id: text; department: Opt[text]; organization: Opt[text]; title: text; profile: Opt[text]; headcount: nat; salary: nat; salary_period: Opt[Duration]; status: "PositionStatus"; inherit_from_capital: bool
 class AppointmentKind(Variant, total=False): Substantive: null; Acting: null
@@ -48,14 +49,20 @@ class ProposalLinkKind(Variant, total=False): Replaces: null; RelatesTo: null
 class ProposalLink(Record): kind: "ProposalLinkKind"; proposal: text
 class ThresholdBasis(Variant, total=False): Cast: null; Eligible: null
 class Tally(Record): yes: nat; no: nat; abstain: nat; eligible: Opt[nat]; seats: Opt[nat]
-class Proposal(Record): id: text; title: text; description: text; proposer: Principal; on_behalf_of: Opt[Principal]; prepared_by: Opt[Principal]; department: Opt[text]; kind: Opt[text]; matter: Opt[text]; action: "ProposalAction"; status: "ProposalStatus"; opens_at: Opt[Timestamp]; deadline: Opt[Timestamp]; effective_at: Opt[Timestamp]; threshold: nat; quorum: nat; threshold_of: "ThresholdBasis"; casting_vote: Opt[Principal]; tally: "Tally"; result: Opt["ProposalResult"]; links: Vec["ProposalLink"]
+class Proposal(Record): id: text; title: text; description: text; proposer: Principal; on_behalf_of: Opt[Principal]; prepared_by: Opt[Principal]; department: Opt[text]; kind: Opt[text]; matter: Opt[text]; action: "ProposalAction"; status: "ProposalStatus"; opens_at: Opt[Timestamp]; deadline: Opt[Timestamp]; effective_at: Opt[Timestamp]; threshold: nat; quorum: nat; threshold_of: "ThresholdBasis"; casting_vote: Opt[Principal]; tally: "Tally"; result: Opt["ProposalResult"]; links: Vec["ProposalLink"]; tags: Vec[text]; majority_of_cast: Opt[bool]; first_vote: Opt["Tally"]
 class VoteChoice(Variant, total=False): Yes: null; No: null; Abstain: null
 class Vote(Record): id: text; proposal: text; voter: Principal; cast_by: Opt[Principal]; choice: "VoteChoice"; cast_at: Timestamp
 class MandateStatus(Variant, total=False): Active: null; Completed: null; Revoked: null; Expired: null
 class Mandate(Record): id: text; title: text; scope: "Value"; max_value: Opt[nat]; symbol: Opt[text]; executor: Opt[text]; proposal: Opt[text]; status: "MandateStatus"; expires_at: Opt[Timestamp]
 class ContractStatus(Variant, total=False): Draft: null; Active: null; Fulfilled: null; Terminated: null; Disputed: null
-class Contract(Record): id: text; title: text; parties: Vec["Ref"]; mandate: Opt[text]; kind: Opt[text]; procedure: Opt[text]; tender: Opt[text]; value: nat; symbol: text; terms_ref: text; terms_hash: text; status: "ContractStatus"; starts_at: Opt[Timestamp]; ends_at: Opt[Timestamp]
-class TreasuryConfig(Record): epoch: Duration; anchor_month: nat8; source_fund: text; auto_allocate: bool
+class Contract(Record): id: text; title: text; parties: Vec["Ref"]; mandate: Opt[text]; kind: Opt[text]; procedure: Opt[text]; tender: Opt[text]; value: nat; symbol: text; terms_ref: text; terms_hash: text; status: "ContractStatus"; starts_at: Opt[Timestamp]; ends_at: Opt[Timestamp]; split: Vec["PeriodAmount"]; lot: Opt[text]; framework: Opt["Framework"]
+class FrameworkHolder(Variant, total=False): External: text; Realm: Principal
+class Framework(Record): holder: "FrameworkHolder"; reference: text; winners: Vec[text]
+class PeriodAmount(Record): period: text; amount: nat
+class ContractTerms(Record): value: nat; split: Vec["PeriodAmount"]; starts_at: Opt[Timestamp]; ends_at: Opt[Timestamp]
+class ContractAmendment(Record): id: text; contract: text; before: "ContractTerms"; after: "ContractTerms"; proposal: Opt[text]; at: Timestamp
+class ContractDetail(Record): contract: "Contract"; amendments: Vec["ContractAmendment"]; next: Opt[text]
+class TreasuryConfig(Record): epoch: Duration; anchor_month: nat8; source_fund: text; auto_allocate: bool; sweep: Vec["SweepRule"]
 class Treasury(Record): id: text; config: "TreasuryConfig"; debt_outstanding: nat
 class Token(Record): id: text; ledger: Principal; indexer: Opt[Principal]; decimals: nat8; fee: nat
 class NFTToken(Record): id: text; canister: Principal; name: text; description: text; transferable: bool; required_license: Opt[text]; supply_cap: Opt[nat]; total_supply: nat
@@ -65,17 +72,17 @@ class FiscalPeriodStatus(Variant, total=False): Open: null; Closed: null; Archiv
 class FiscalPeriod(Record): id: text; name: text; starts_at: Timestamp; ends_at: Timestamp; status: "FiscalPeriodStatus"; statements: "Value"; source_hash: text
 class BudgetStatus(Variant, total=False): Draft: null; Proposed: null; Adopted: null; Amended: null; Extended: null; Closed: null
 class BudgetKind(Variant, total=False): Revenue: null; Expense: null
-class Budget(Record): id: text; fund: text; period: text; category: text; kind: "BudgetKind"; planned: nat; actual: nat; status: "BudgetStatus"; proposal: Opt[text]
+class Budget(Record): id: text; fund: text; period: text; category: text; kind: "BudgetKind"; planned: nat; actual: nat; status: "BudgetStatus"; proposal: Opt[text]; reserved: nat; committed: nat
 class AdoptionStatus(Variant, total=False): Draft: null; Proposed: null; Adopted: null; Superseded: null
 class Allocation(Record): fund: text; share: nat
 class AllocationRule(Record): id: text; source_fund: text; rules: Vec["Allocation"]; status: "AdoptionStatus"; proposal: Opt[text]
 class LedgerKind(Variant, total=False): Asset: null; Liability: null; Equity: null; Revenue: null; Expense: null
-class LedgerEntry(Record): id: text; transaction: text; kind: "LedgerKind"; category: text; debit: nat; credit: nat; symbol: text; fund: Opt[text]; period: Opt[text]; transfer: Opt[text]; invoice: Opt[text]; user: Opt[Principal]; organization: Opt[text]; contract: Opt[text]; case: Opt[text]; penalty: Opt[text]; appeal: Opt[text]; at: Timestamp; description: text
+class LedgerEntry(Record): id: text; transaction: text; kind: "LedgerKind"; category: text; debit: nat; credit: nat; symbol: text; fund: Opt[text]; period: Opt[text]; transfer: Opt[text]; invoice: Opt[text]; user: Opt[Principal]; organization: Opt[text]; contract: Opt[text]; case: Opt[text]; penalty: Opt[text]; appeal: Opt[text]; sweep: Opt[text]; at: Timestamp; description: text
 class InvoiceStatus(Variant, total=False): Pending: null; Paid: null; Overdue: null; Cancelled: null
 class InvoiceItem(Record): concept: text; amount: int; quantity: Opt[nat]; unit: Opt[text]; legislation: Opt[text]
 class Invoice(Record): id: text; payer: "Ref"; amount: nat; items: Vec["InvoiceItem"]; facts: "Value"; symbol: text; due_at: Opt[Timestamp]; status: "InvoiceStatus"; reason: Opt["Ref"]; paid_at: Opt[Timestamp]; payment: Opt["Value"]
-class TransferStatus(Variant, total=False): Sending: null; Pending: null; Completed: null; Failed: null
-class Transfer(Record): id: text; sender: "Ref"; to: "Ref"; symbol: text; amount: nat; ledger_tx: Opt[nat]; invoice: Opt[text]; status: "TransferStatus"; at: Timestamp; payroll: Opt[text]
+class TransferStatus(Variant, total=False): Scheduled: null; Sending: null; Pending: null; Completed: null; Failed: null; Cancelled: null
+class Transfer(Record): id: text; sender: "Ref"; to: "Ref"; symbol: text; amount: nat; ledger_tx: Opt[nat]; invoice: Opt[text]; status: "TransferStatus"; at: Timestamp; payroll: Opt[text]; due_at: Opt[Timestamp]; budget: Opt[text]; committed: bool; contract: Opt[text]
 class TradeStatus(Variant, total=False): Pending: null; Completed: null; Failed: null
 class Trade(Record): id: text; contract: Opt[text]; leg_a: text; leg_b: text; status: "TradeStatus"
 class PaymentAccount(Record): id: text; owner: "Ref"; network: text; address: text; symbol: text; label: text; verified: bool
@@ -87,10 +94,10 @@ class LoanStatus(Variant, total=False): Active: null; Repaid: null
 class Loan(Record): id: text; lender: text; amount: nat; symbol: text; term: "Period"; rate: nat; fund: text; outstanding: nat; status: "LoanStatus"; facts: "Value"
 class TaxDeclaration(Record): id: text; declarant: "Ref"; period: text; base: text; amount: nat; status: "TaxDeclarationStatus"; invoice: Opt[text]
 class LandStatus(Variant, total=False): Active: null; Disputed: null; Revoked: null
-class Land(Record): id: text; x: nat; y: nat; width: nat; height: nat; kind: text; assessed_value: Opt[nat]; area: Opt[nat]; assessed_at: Opt[Timestamp]; assessment_ref: Opt[text]; owner: "Ref"; status: "LandStatus"; token_id: Opt[nat]; registered_by: Principal; metadata: "Value"
+class Land(Record): id: text; x: nat; y: nat; width: nat; height: nat; kind: text; assessed_value: Opt[nat]; area: Opt[nat]; assessed_at: Opt[Timestamp]; assessment_ref: Opt[text]; owner: "Ref"; status: "LandStatus"; token_id: Opt[nat]; registered_by: Principal; metadata: "Value"; zones: Vec[text]
 class Zone(Record): id: text; name: text; kind: text; land: Opt[text]; user: Opt[Principal]; metadata: "Value"; population: nat
 class LicenseStatus(Variant, total=False): Applied: null; Active: null; Rejected: null; Suspended: null; Revoked: null; Expired: null
-class License(Record): id: text; kind: text; holder: "Ref"; issued_by: text; status: "LicenseStatus"; applied_at: Timestamp; decision_due: Opt[Timestamp]; issued_at: Opt[Timestamp]; expires_at: Opt[Timestamp]; evidence_ref: Opt[text]; conditions: "Value"
+class License(Record): id: text; kind: text; holder: "Ref"; issued_by: text; status: "LicenseStatus"; applied_at: Timestamp; decision_due: Opt[Timestamp]; issued_at: Opt[Timestamp]; expires_at: Opt[Timestamp]; evidence_ref: Opt[text]; conditions: "Value"; land: Opt[text]
 class Silence(Variant, total=False): Positive: null; Negative: null
 class Procedure(Record): id: text; initiated_by: text; matter: Opt[text]; decision_deadline: Opt["Period"]; silence: Opt["Silence"]; legislation: Opt[text]; facts: "Value"
 class RequestStatus(Variant, total=False): Filed: null; Decided: null
@@ -115,8 +122,10 @@ class Penalty(Record): id: text; verdict: text; target: "Ref"; kind: "PenaltyKin
 class TenderStatus(Variant, total=False): Draft: null; Open: null; Closed: null; Evaluation: null; Awarded: null; Contracted: null; Cancelled: null
 class Criterion(Record): criterion: text; weight: nat
 class Notice(Record): journal: text; published_at: Timestamp; ref: Opt[text]
-class Tender(Record): id: text; title: text; description: text; requester: text; kind: Opt[text]; procedure: Opt[text]; estimated_value: Opt[nat]; status: "TenderStatus"; opens_at: Opt[Timestamp]; closes_at: Opt[Timestamp]; rubric: Vec["Criterion"]; winner: Opt[text]; contract: Opt[text]; notices: Vec["Notice"]
-class Bid(Record): id: text; tender: text; vendor: text; submitted_at: Timestamp; sealed: bool; payload_ref: text; payload_hash: text; price: Opt[nat]; score: Opt[nat]
+class LotStatus(Variant, total=False): Open: null; Awarded: null; Void: null
+class Lot(Record): id: text; title: text; estimated_value: Opt[nat]; status: "LotStatus"; winner: Opt[text]; contract: Opt[text]
+class Tender(Record): id: text; title: text; description: text; requester: text; kind: Opt[text]; procedure: Opt[text]; estimated_value: Opt[nat]; status: "TenderStatus"; opens_at: Opt[Timestamp]; closes_at: Opt[Timestamp]; rubric: Vec["Criterion"]; winner: Opt[text]; contract: Opt[text]; notices: Vec["Notice"]; lots: Vec["Lot"]
+class Bid(Record): id: text; tender: text; vendor: text; submitted_at: Timestamp; sealed: bool; payload_ref: text; payload_hash: text; price: Opt[nat]; score: Opt[nat]; lot: Opt[text]
 class BidScore(Record): id: text; bid: text; evaluator: Principal; criterion: text; score: nat; scored_at: Timestamp
 class RealmStatus(Variant, total=False): Setup: null; Alpha: null; Beta: null; Production: null; Deprecation: null; Terminated: null
 class Realm(Record): id: text; name: text; manifesto: text; welcome_message: text; status: "RealmStatus"; calendar: Opt[text]; treasury: Opt[text]; accounting_currency: Opt[text]; accounting_currency_decimals: Opt[nat8]; is_quarter: bool; is_capital: bool; federation_realm_id: Opt[text]; federation_codex: Opt[text]; quarter_join_mode: Opt[text]; sync_sources: Vec["SyncSource"]; trusted_principals: Vec[Principal]; require_marketplace_approval: bool; trusted_approvers: Vec[text]; voting_threshold: nat; voting_quorum: nat; casting_vote: Opt[Principal]; open_registration: bool; logo_url: Opt[text]; background_image_url: Opt[text]; installed_version: text; network: text; timezone: text; languages: Vec[text]; member_count: nat
@@ -214,7 +223,7 @@ class DepartmentPage(Record): items: Vec["Department"]; next: Opt[text]
 class ChartArgs(Record): department: Opt[text]; cursor: Opt[text]; limit: Opt[nat32]
 class Chart(Record): department: "Department"; positions: nat; seats: nat; filled: nat; children: Vec["Department"]; next: Opt[text]
 class OrganizationDetail(Record): organization: "Organization"; seats: Vec["Seat"]; next: Opt[text]
-class OrganizationListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; status: Opt["OrganizationStatus"]
+class OrganizationListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; status: Opt["OrganizationStatus"]; kind: Opt["OrganizationKind"]
 class OrganizationPage(Record): items: Vec["Organization"]; next: Opt[text]
 class DepartmentCreateArgs(Record): department: text; parent: Opt[text]; description: text; kind: Opt[text]
 class DepartmentEditArgs(Record): department: text; description: Opt[text]; kind: Opt[text]; parent: Opt[text]; head: Opt["DepartmentEditArgsHead"]
@@ -226,21 +235,23 @@ class PositionEditArgsStatus(Variant, total=False): Open: null; Frozen: null
 class AppointArgs(Record): position: text; user: Principal; agent: bool; supervisor: Opt[Principal]
 class ExpelArgs(Record): department: text; user: Principal
 class AuthorityGrantArgs(Record): department: text; target: "Ref"; operations: Vec[text]
-class OrganizationRegisterArgs(Record): organization: text; description: text
-class OrganizationEditArgs(Record): organization: text; description: Opt[text]; admins: Opt[Vec[Principal]]
+class OrganizationRegisterArgs(Record): organization: text; description: text; kind: Opt["OrganizationKind"]
+class OrganizationEditArgs(Record): organization: text; description: Opt[text]; admins: Opt[Vec[Principal]]; kind: Opt["OrganizationKind"]
 class RepresentativeAddArgs(Record): organization: text; position: text; user: Principal; agent: bool; supervisor: Opt[Principal]; title: Opt[text]; profile: Opt[text]; headcount: Opt[nat]
 class OrganizationStatusArgs(Record): organization: text; status: "OrganizationStatus"
 class ProposalDetail(Record): proposal: "Proposal"; votes: Vec["Vote"]; next: Opt[text]; replaced_by: Opt[text]
 class ProposalLinkPage(Record): items: Vec["ProposalLink"]; next: Opt[text]
-class ProposalListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; status: Opt["ProposalStatus"]
+class ProposalListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; status: Opt["ProposalStatus"]; tags: Opt[Vec[text]]
 class ProposalPage(Record): items: Vec["Proposal"]; next: Opt[text]
-class ProposalCreateArgs(Record): title: text; description: text; department: Opt[text]; kind: Opt[text]; matter: Opt[text]; threshold: Opt[nat]; quorum: Opt[nat]; threshold_of: Opt["ThresholdBasis"]; action: "ProposalAction"; effective_at: Opt[Timestamp]; links: Opt[Vec["ProposalLink"]]; on_behalf_of: Opt[Principal]
+class ProposalCreateArgs(Record): title: text; description: text; department: Opt[text]; kind: Opt[text]; matter: Opt[text]; threshold: Opt[nat]; quorum: Opt[nat]; threshold_of: Opt["ThresholdBasis"]; action: "ProposalAction"; effective_at: Opt[Timestamp]; links: Opt[Vec["ProposalLink"]]; tags: Opt[Vec[text]]; on_behalf_of: Opt[Principal]
 class ProposalVoteArgs(Record): proposal: text; choice: "VoteChoice"; on_behalf_of: Opt[Principal]
 class ProposalWithdrawArgs(Record): proposal: text; on_behalf_of: Opt[Principal]
+class ProposalSetTagsArgs(Record): proposal: text; tags: Vec[text]; on_behalf_of: Opt[Principal]
 class MandateCreateArgs(Record): title: text; scope: "Value"; max_value: Opt[nat]; symbol: Opt[text]; executor: Opt[text]; expires_at: Opt[Timestamp]
 class MandateRevokeArgs(Record): mandate: text
 class MandateExecutorArgs(Record): mandate: text; executor: text
-class ContractCreateArgs(Record): title: text; parties: Vec["Ref"]; mandate: Opt[text]; kind: Opt[text]; procedure: Opt[text]; tender: Opt[text]; value: nat; symbol: text; terms_ref: text; terms_hash: text; starts_at: Opt[Timestamp]; ends_at: Opt[Timestamp]
+class ContractCreateArgs(Record): title: text; parties: Vec["Ref"]; mandate: Opt[text]; kind: Opt[text]; procedure: Opt[text]; tender: Opt[text]; value: nat; symbol: text; terms_ref: text; terms_hash: text; starts_at: Opt[Timestamp]; ends_at: Opt[Timestamp]; split: Opt[Vec["PeriodAmount"]]; lot: Opt[text]; framework: Opt["Framework"]
+class ContractAmendArgs(Record): contract: text; value: Opt[nat]; split: Opt[Vec["PeriodAmount"]]; starts_at: Opt[Timestamp]; ends_at: Opt[Timestamp]
 class GovernanceUpdateArgs(Record): voting_window: Opt[Duration]; voting_threshold: Opt[nat]; voting_quorum: Opt[nat]; casting_vote: Opt["DepartmentEditArgsHead"]
 class TreasuryView(Record): treasury: Opt["Treasury"]; tokens: Vec["Token"]; nft_tokens: Vec["NFTToken"]; funds: Vec["Fund"]; next: Opt[text]
 class LedgerArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; transaction: Opt[text]; symbol: Opt[text]; kind: Opt["LedgerKind"]; fund: Opt[text]; period: Opt[text]
@@ -248,10 +259,10 @@ class LedgerPage(Record): items: Vec["LedgerEntry"]; next: Opt[text]
 class ReportArgs(Record): id: Opt[text]; cursor: Opt[text]; limit: Opt[nat32]
 class ReportPage(Record): items: Vec["FinancialReport"]; next: Opt[text]
 class Account(Record): owner: Principal; subaccount: Opt[blob]
-class TreasuryConfigureArgs(Record): epoch: Opt[Duration]; anchor_month: Opt[nat8]; source_fund: Opt[text]; auto_allocate: Opt[bool]
+class TreasuryConfigureArgs(Record): epoch: Opt[Duration]; anchor_month: Opt[nat8]; source_fund: Opt[text]; auto_allocate: Opt[bool]; sweep: Opt[Vec["SweepRule"]]
 class TokenRegisterArgs(Record): symbol: text; ledger: Principal; indexer: Opt[Principal]; decimals: Opt[nat8]; fee: Opt[nat]
 class NFTTokenRegisterArgs(Record): symbol: text; canister: Principal; name: Opt[text]; description: Opt[text]; transferable: Opt[bool]; required_license: Opt[text]; supply_cap: Opt[nat]
-class TransferCreateArgs(Record): fund: text; to: "Ref"; amount: nat; symbol: Opt[text]; category: Opt[text]; description: Opt[text]; contract: Opt[text]; on_behalf_of: Opt[Principal]
+class TransferCreateArgs(Record): fund: text; to: "Ref"; amount: nat; symbol: Opt[text]; category: Opt[text]; description: Opt[text]; contract: Opt[text]; on_behalf_of: Opt[Principal]; due_at: Opt[Timestamp]; committed: Opt[bool]
 class TransferRevertArgs(Record): transfer: text; reason: Opt[text]
 class InvoiceCreateArgs(Record): payer: "Ref"; amount: nat; symbol: Opt[text]; due_at: Opt[Timestamp]; reason: Opt["Ref"]; items: Vec["InvoiceItem"]; facts: Opt["Value"]
 class InvoiceItemAddArgs(Record): invoice: text; item: "InvoiceItem"
@@ -266,6 +277,11 @@ class FundCreateArgs(Record): fund: text; name: Opt[text]; kind: Opt[text]; depa
 class PeriodOpenArgs(Record): period: text; name: Opt[text]; starts_at: Timestamp; ends_at: Timestamp
 class BudgetDraftArgs(Record): fund: text; period: text; category: text; kind: "BudgetKind"; planned: nat
 class BudgetAmendArgs(Record): budget: text; planned: nat
+class BudgetStageArgs(Record): budget: text; reserve: int; commit: int
+class BudgetListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; fund: Opt[text]; period: Opt[text]
+class BudgetPage(Record): items: Vec["Budget"]; next: Opt[text]
+class TransferListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; fund: Opt[text]; status: Opt["TransferStatus"]
+class TransferPage(Record): items: Vec["Transfer"]; next: Opt[text]
 class BudgetProposeArgs(Record): period: text; years: Opt[nat]; fund: Opt[text]
 class AllocationRuleDraftArgs(Record): source_fund: text; rules: Vec["Allocation"]
 class PayrollRunArgs(Record): department: text; period: text; symbol: Opt[text]
@@ -294,6 +310,7 @@ class LandTransferArgs(Record): land: text; to: "Ref"; order: text
 class LandMintArgs(Record): land: text; prepared_by: Opt[Principal]
 class LandAssessArgs(Record): land: text; value: Opt[nat]; area: Opt[nat]; reference: Opt[text]; legislation: Opt[text]
 class LandFreezeArgs(Record): land: text; reason: Opt[text]
+class LandZoneSetArgs(Record): land: text; zones: Vec[text]
 class ZoneDefineArgs(Record): zone: text; name: text; kind: text
 class ZoneSetArgs(Record): zone: text; name: Opt[text]; kind: Opt[text]; on_behalf_of: Opt[Principal]
 class ZoneClearArgs(Record): zone: text; on_behalf_of: Opt[Principal]
@@ -312,7 +329,7 @@ class RequestListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; kind: Opt[t
 class RequestPage(Record): items: Vec["Request"]; next: Opt[text]
 class RequestSetDueArgs(Record): request: text; due_at: Timestamp; extension_limit: Opt[Timestamp]
 class RequestDecideArgs(Record): request: text; decision: text; reply: Opt[text]
-class LicenseApplyArgs(Record): kind: text; holder: Opt["Ref"]; department: Opt[text]; evidence_ref: Opt[text]; conditions: Opt["Value"]; on_behalf_of: Opt[Principal]
+class LicenseApplyArgs(Record): kind: text; holder: Opt["Ref"]; department: Opt[text]; evidence_ref: Opt[text]; conditions: Opt["Value"]; on_behalf_of: Opt[Principal]; land: Opt[text]
 class LicenseRenewArgs(Record): license: text; evidence_ref: Opt[text]; on_behalf_of: Opt[Principal]
 class LicenseDecideArgs(Record): license: text; approve: bool; department: Opt[text]; expires_at: Opt[Timestamp]; conditions: Opt["Value"]
 class LicenseSuspendArgs(Record): license: text; resume: bool
@@ -342,16 +359,26 @@ class JudgeAppointArgs(Record): court: text; user: Principal; specialization: Op
 class TenderListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; status: Opt["TenderStatus"]
 class TenderPage(Record): items: Vec["Tender"]; next: Opt[text]
 class TenderDetail(Record): tender: "Tender"; bids: Vec["Bid"]; next: Opt[text]
-class TenderCreateArgs(Record): requester: text; title: text; description: Opt[text]; kind: Opt[text]; procedure: Opt[text]; estimated_value: Opt[nat]; opens_at: Opt[Timestamp]; closes_at: Opt[Timestamp]; rubric: Vec["Criterion"]
-class BidSubmitArgs(Record): tender: text; vendor: text; payload_ref: text; payload_hash: text; on_behalf_of: Opt[Principal]
+class LotArgs(Record): id: text; title: text; estimated_value: Opt[nat]
+class TenderCreateArgs(Record): requester: text; title: text; description: Opt[text]; kind: Opt[text]; procedure: Opt[text]; estimated_value: Opt[nat]; opens_at: Opt[Timestamp]; closes_at: Opt[Timestamp]; rubric: Vec["Criterion"]; lots: Opt[Vec["LotArgs"]]
+class BidSubmitArgs(Record): tender: text; vendor: text; payload_ref: text; payload_hash: text; on_behalf_of: Opt[Principal]; lot: Opt[text]
 class BidWithdrawArgs(Record): bid: text; on_behalf_of: Opt[Principal]
 class BidOpening(Record): bid: text; price: nat; nonce: text
 class BidsRevealArgs(Record): tender: text; openings: Vec["BidOpening"]
 class BidScoreArgs(Record): bid: text; scores: Vec["BidScoreArgsScores"]
 class BidScoreArgsScores(Record): criterion: text; score: nat
-class TenderAwardArgs(Record): tender: text; bid: Opt[text]; justification: Opt[text]
+class TenderAwardArgs(Record): tender: text; bid: Opt[text]; justification: Opt[text]; lot: Opt[text]
+class TenderLotVoidArgs(Record): tender: text; lot: text; reason: Opt[text]
 class TenderNoticeArgs(Record): tender: text; journal: text; ref: Opt[text]; at: Opt[Timestamp]
-class QuarterDirectory(Record): capital: Opt[text]; items: Vec["Quarter"]; next: Opt[text]; zones: Opt[Vec["ZoneDefineArgs"]]
+class QuarterDirectory(Record): capital: Opt[text]; items: Vec["Quarter"]; next: Opt[text]; zones: Opt[Vec["ZoneDefineArgs"]]; sweep: Opt["SweepConfig"]
+class SweepRule(Record): fund: text; symbol: text; into: text; keep: nat
+class SweepConfig(Record): to: "Account"; rules: Vec["SweepRule"]
+class SweepStatus(Variant, total=False): Sending: null; Sent: null; Booked: null; Failed: null; NeedsCheck: null
+class Sweep(Record): id: text; quarter: text; fund: text; symbol: text; into: text; to: "Account"; epoch: Timestamp; amount: nat; fee: nat; created_at: Timestamp; block: Opt[nat]; status: "SweepStatus"; reason: Opt[text]; reported_at: Opt[Timestamp]
+class SweepPage(Record): items: Vec["Sweep"]; next: Opt[text]
+class QuarterSweepArgs(Record): fund: Opt[text]
+class SweepResolveArgs(Record): sweep: text; block: Opt[nat]
+class SweepListArgs(Record): cursor: Opt[text]; limit: Opt[nat32]; quarter: Opt[text]; status: Opt["SweepStatus"]
 class JoinTargetsArgs(Record): home_zone: Opt[text]
 class JoinTargets(Record): default: Opt[text]; targets: Vec[text]; mode: Opt[text]
 class QuarterReportArgs(Record): population: nat; codex_id: Opt[text]; codex_version: Opt[text]; leg: Opt["FederalVoteLeg"]; zones: Opt[Vec[Tuple[text, nat]]]
@@ -472,15 +499,19 @@ class TextReply(Variant, total=False): Ok: text; Err: "GggError"
 class VoteReply(Variant, total=False): Ok: "Vote"; Err: "GggError"
 class ProposalReply(Variant, total=False): Ok: "Proposal"; Err: "GggError"
 class ContractReply(Variant, total=False): Ok: "Contract"; Err: "GggError"
+class OptContractDetailReply(Variant, total=False): Ok: Opt["ContractDetail"]; Err: "GggError"
 class TreasuryViewReply(Variant, total=False): Ok: "TreasuryView"; Err: "GggError"
 class LedgerPageReply(Variant, total=False): Ok: "LedgerPage"; Err: "GggError"
 class ReportPageReply(Variant, total=False): Ok: "ReportPage"; Err: "GggError"
 class LoanPageReply(Variant, total=False): Ok: "LoanPage"; Err: "GggError"
+class TransferReply(Variant, total=False): Ok: "Transfer"; Err: "GggError"
+class TransferPageReply(Variant, total=False): Ok: "TransferPage"; Err: "GggError"
 class InvoiceCreatedReply(Variant, total=False): Ok: "InvoiceCreated"; Err: "GggError"
 class InvoiceReply(Variant, total=False): Ok: "Invoice"; Err: "GggError"
 class MyInvoicePageReply(Variant, total=False): Ok: "MyInvoicePage"; Err: "GggError"
 class InvoicePageReply(Variant, total=False): Ok: "InvoicePage"; Err: "GggError"
 class NatReply(Variant, total=False): Ok: nat; Err: "GggError"
+class BudgetPageReply(Variant, total=False): Ok: "BudgetPage"; Err: "GggError"
 class LoanReply(Variant, total=False): Ok: "Loan"; Err: "GggError"
 class FinancialReportReply(Variant, total=False): Ok: "FinancialReport"; Err: "GggError"
 class TaxAssessPageReply(Variant, total=False): Ok: "TaxAssessPage"; Err: "GggError"
@@ -517,6 +548,9 @@ class TenderReply(Variant, total=False): Ok: "Tender"; Err: "GggError"
 class QuarterDirectoryReply(Variant, total=False): Ok: "QuarterDirectory"; Err: "GggError"
 class JoinTargetsReply(Variant, total=False): Ok: "JoinTargets"; Err: "GggError"
 class QuarterReportReply(Variant, total=False): Ok: "QuarterReport"; Err: "GggError"
+class VecSweepReply(Variant, total=False): Ok: Vec["Sweep"]; Err: "GggError"
+class SweepReply(Variant, total=False): Ok: "Sweep"; Err: "GggError"
+class SweepPageReply(Variant, total=False): Ok: "SweepPage"; Err: "GggError"
 class ForwardReply(Variant, total=False): Ok: "Forward"; Err: "GggError"
 class FederalVoteReply(Variant, total=False): Ok: "FederalVote"; Err: "GggError"
 class OptValueReply(Variant, total=False): Ok: Opt["Value"]; Err: "GggError"
@@ -570,10 +604,11 @@ SCHEMA["Invite"] = ("record", {"id": "text", "profile": "opt text", "department"
 SCHEMA["DelegationStatus"] = ("variant", {"Pending": "null", "Active": "null", "Revoked": "null", "Expired": "null", "Declined": "null"})
 SCHEMA["Delegation"] = ("record", {"id": "text", "grantor": "principal", "delegate": "principal", "scope": "vec text", "status": "DelegationStatus", "label": "text", "description": "text", "requires_acceptance": "bool", "granted_by": "principal", "accepted_at": "opt Timestamp", "starts_at": "opt Timestamp", "expires_at": "Timestamp", "revoked_at": "opt Timestamp", "revoked_by": "opt principal"})
 SCHEMA["DelegationRequest"] = ("record", {"id": "text", "grantor": "principal", "delegate": "principal", "scope": "vec text", "label": "text", "description": "text", "starts_at": "opt Timestamp", "expires_at": "Timestamp", "request_expires_at": "Timestamp"})
-SCHEMA["Policy"] = ("record", {"m": "nat", "n": "nat", "quorum": "nat", "veto": "vec principal"})
+SCHEMA["Policy"] = ("record", {"m": "nat", "n": "nat", "quorum": "nat", "veto": "vec principal", "threshold_of": "opt ThresholdBasis"})
 SCHEMA["Department"] = ("record", {"id": "text", "description": "text", "kind": "opt text", "parent": "opt text", "is_root": "bool", "head": "opt principal", "policy": "Policy", "target_policy": "opt Policy", "fund": "opt text"})
 SCHEMA["OrganizationStatus"] = ("variant", {"Active": "null", "Suspended": "null", "Dissolved": "null"})
-SCHEMA["Organization"] = ("record", {"id": "text", "description": "text", "status": "OrganizationStatus", "admins": "vec principal"})
+SCHEMA["OrganizationKind"] = ("variant", {"Company": "null", "Party": "null", "Union": "null", "Association": "null", "Other": "null"})
+SCHEMA["Organization"] = ("record", {"id": "text", "description": "text", "status": "OrganizationStatus", "admins": "vec principal", "kind": "OrganizationKind"})
 SCHEMA["PositionStatus"] = ("variant", {"Open": "null", "Frozen": "null", "Closed": "null"})
 SCHEMA["Position"] = ("record", {"id": "text", "department": "opt text", "organization": "opt text", "title": "text", "profile": "opt text", "headcount": "nat", "salary": "nat", "salary_period": "opt Duration", "status": "PositionStatus", "inherit_from_capital": "bool"})
 SCHEMA["AppointmentKind"] = ("variant", {"Substantive": "null", "Acting": "null"})
@@ -589,14 +624,20 @@ SCHEMA["ProposalLinkKind"] = ("variant", {"Replaces": "null", "RelatesTo": "null
 SCHEMA["ProposalLink"] = ("record", {"kind": "ProposalLinkKind", "proposal": "text"})
 SCHEMA["ThresholdBasis"] = ("variant", {"Cast": "null", "Eligible": "null"})
 SCHEMA["Tally"] = ("record", {"yes": "nat", "no": "nat", "abstain": "nat", "eligible": "opt nat", "seats": "opt nat"})
-SCHEMA["Proposal"] = ("record", {"id": "text", "title": "text", "description": "text", "proposer": "principal", "on_behalf_of": "opt principal", "prepared_by": "opt principal", "department": "opt text", "kind": "opt text", "matter": "opt text", "action": "ProposalAction", "status": "ProposalStatus", "opens_at": "opt Timestamp", "deadline": "opt Timestamp", "effective_at": "opt Timestamp", "threshold": "nat", "quorum": "nat", "threshold_of": "ThresholdBasis", "casting_vote": "opt principal", "tally": "Tally", "result": "opt ProposalResult", "links": "vec ProposalLink"})
+SCHEMA["Proposal"] = ("record", {"id": "text", "title": "text", "description": "text", "proposer": "principal", "on_behalf_of": "opt principal", "prepared_by": "opt principal", "department": "opt text", "kind": "opt text", "matter": "opt text", "action": "ProposalAction", "status": "ProposalStatus", "opens_at": "opt Timestamp", "deadline": "opt Timestamp", "effective_at": "opt Timestamp", "threshold": "nat", "quorum": "nat", "threshold_of": "ThresholdBasis", "casting_vote": "opt principal", "tally": "Tally", "result": "opt ProposalResult", "links": "vec ProposalLink", "tags": "vec text", "majority_of_cast": "opt bool", "first_vote": "opt Tally"})
 SCHEMA["VoteChoice"] = ("variant", {"Yes": "null", "No": "null", "Abstain": "null"})
 SCHEMA["Vote"] = ("record", {"id": "text", "proposal": "text", "voter": "principal", "cast_by": "opt principal", "choice": "VoteChoice", "cast_at": "Timestamp"})
 SCHEMA["MandateStatus"] = ("variant", {"Active": "null", "Completed": "null", "Revoked": "null", "Expired": "null"})
 SCHEMA["Mandate"] = ("record", {"id": "text", "title": "text", "scope": "Value", "max_value": "opt nat", "symbol": "opt text", "executor": "opt text", "proposal": "opt text", "status": "MandateStatus", "expires_at": "opt Timestamp"})
 SCHEMA["ContractStatus"] = ("variant", {"Draft": "null", "Active": "null", "Fulfilled": "null", "Terminated": "null", "Disputed": "null"})
-SCHEMA["Contract"] = ("record", {"id": "text", "title": "text", "parties": "vec Ref", "mandate": "opt text", "kind": "opt text", "procedure": "opt text", "tender": "opt text", "value": "nat", "symbol": "text", "terms_ref": "text", "terms_hash": "text", "status": "ContractStatus", "starts_at": "opt Timestamp", "ends_at": "opt Timestamp"})
-SCHEMA["TreasuryConfig"] = ("record", {"epoch": "Duration", "anchor_month": "nat8", "source_fund": "text", "auto_allocate": "bool"})
+SCHEMA["Contract"] = ("record", {"id": "text", "title": "text", "parties": "vec Ref", "mandate": "opt text", "kind": "opt text", "procedure": "opt text", "tender": "opt text", "value": "nat", "symbol": "text", "terms_ref": "text", "terms_hash": "text", "status": "ContractStatus", "starts_at": "opt Timestamp", "ends_at": "opt Timestamp", "split": "vec PeriodAmount", "lot": "opt text", "framework": "opt Framework"})
+SCHEMA["FrameworkHolder"] = ("variant", {"External": "text", "Realm": "principal"})
+SCHEMA["Framework"] = ("record", {"holder": "FrameworkHolder", "reference": "text", "winners": "vec text"})
+SCHEMA["PeriodAmount"] = ("record", {"period": "text", "amount": "nat"})
+SCHEMA["ContractTerms"] = ("record", {"value": "nat", "split": "vec PeriodAmount", "starts_at": "opt Timestamp", "ends_at": "opt Timestamp"})
+SCHEMA["ContractAmendment"] = ("record", {"id": "text", "contract": "text", "before": "ContractTerms", "after": "ContractTerms", "proposal": "opt text", "at": "Timestamp"})
+SCHEMA["ContractDetail"] = ("record", {"contract": "Contract", "amendments": "vec ContractAmendment", "next": "opt text"})
+SCHEMA["TreasuryConfig"] = ("record", {"epoch": "Duration", "anchor_month": "nat8", "source_fund": "text", "auto_allocate": "bool", "sweep": "vec SweepRule"})
 SCHEMA["Treasury"] = ("record", {"id": "text", "config": "TreasuryConfig", "debt_outstanding": "nat"})
 SCHEMA["Token"] = ("record", {"id": "text", "ledger": "principal", "indexer": "opt principal", "decimals": "nat8", "fee": "nat"})
 SCHEMA["NFTToken"] = ("record", {"id": "text", "canister": "principal", "name": "text", "description": "text", "transferable": "bool", "required_license": "opt text", "supply_cap": "opt nat", "total_supply": "nat"})
@@ -606,17 +647,17 @@ SCHEMA["FiscalPeriodStatus"] = ("variant", {"Open": "null", "Closed": "null", "A
 SCHEMA["FiscalPeriod"] = ("record", {"id": "text", "name": "text", "starts_at": "Timestamp", "ends_at": "Timestamp", "status": "FiscalPeriodStatus", "statements": "Value", "source_hash": "text"})
 SCHEMA["BudgetStatus"] = ("variant", {"Draft": "null", "Proposed": "null", "Adopted": "null", "Amended": "null", "Extended": "null", "Closed": "null"})
 SCHEMA["BudgetKind"] = ("variant", {"Revenue": "null", "Expense": "null"})
-SCHEMA["Budget"] = ("record", {"id": "text", "fund": "text", "period": "text", "category": "text", "kind": "BudgetKind", "planned": "nat", "actual": "nat", "status": "BudgetStatus", "proposal": "opt text"})
+SCHEMA["Budget"] = ("record", {"id": "text", "fund": "text", "period": "text", "category": "text", "kind": "BudgetKind", "planned": "nat", "actual": "nat", "status": "BudgetStatus", "proposal": "opt text", "reserved": "nat", "committed": "nat"})
 SCHEMA["AdoptionStatus"] = ("variant", {"Draft": "null", "Proposed": "null", "Adopted": "null", "Superseded": "null"})
 SCHEMA["Allocation"] = ("record", {"fund": "text", "share": "nat"})
 SCHEMA["AllocationRule"] = ("record", {"id": "text", "source_fund": "text", "rules": "vec Allocation", "status": "AdoptionStatus", "proposal": "opt text"})
 SCHEMA["LedgerKind"] = ("variant", {"Asset": "null", "Liability": "null", "Equity": "null", "Revenue": "null", "Expense": "null"})
-SCHEMA["LedgerEntry"] = ("record", {"id": "text", "transaction": "text", "kind": "LedgerKind", "category": "text", "debit": "nat", "credit": "nat", "symbol": "text", "fund": "opt text", "period": "opt text", "transfer": "opt text", "invoice": "opt text", "user": "opt principal", "organization": "opt text", "contract": "opt text", "case": "opt text", "penalty": "opt text", "appeal": "opt text", "at": "Timestamp", "description": "text"})
+SCHEMA["LedgerEntry"] = ("record", {"id": "text", "transaction": "text", "kind": "LedgerKind", "category": "text", "debit": "nat", "credit": "nat", "symbol": "text", "fund": "opt text", "period": "opt text", "transfer": "opt text", "invoice": "opt text", "user": "opt principal", "organization": "opt text", "contract": "opt text", "case": "opt text", "penalty": "opt text", "appeal": "opt text", "sweep": "opt text", "at": "Timestamp", "description": "text"})
 SCHEMA["InvoiceStatus"] = ("variant", {"Pending": "null", "Paid": "null", "Overdue": "null", "Cancelled": "null"})
 SCHEMA["InvoiceItem"] = ("record", {"concept": "text", "amount": "int", "quantity": "opt nat", "unit": "opt text", "legislation": "opt text"})
 SCHEMA["Invoice"] = ("record", {"id": "text", "payer": "Ref", "amount": "nat", "items": "vec InvoiceItem", "facts": "Value", "symbol": "text", "due_at": "opt Timestamp", "status": "InvoiceStatus", "reason": "opt Ref", "paid_at": "opt Timestamp", "payment": "opt Value"})
-SCHEMA["TransferStatus"] = ("variant", {"Sending": "null", "Pending": "null", "Completed": "null", "Failed": "null"})
-SCHEMA["Transfer"] = ("record", {"id": "text", "sender": "Ref", "to": "Ref", "symbol": "text", "amount": "nat", "ledger_tx": "opt nat", "invoice": "opt text", "status": "TransferStatus", "at": "Timestamp", "payroll": "opt text"})
+SCHEMA["TransferStatus"] = ("variant", {"Scheduled": "null", "Sending": "null", "Pending": "null", "Completed": "null", "Failed": "null", "Cancelled": "null"})
+SCHEMA["Transfer"] = ("record", {"id": "text", "sender": "Ref", "to": "Ref", "symbol": "text", "amount": "nat", "ledger_tx": "opt nat", "invoice": "opt text", "status": "TransferStatus", "at": "Timestamp", "payroll": "opt text", "due_at": "opt Timestamp", "budget": "opt text", "committed": "bool", "contract": "opt text"})
 SCHEMA["TradeStatus"] = ("variant", {"Pending": "null", "Completed": "null", "Failed": "null"})
 SCHEMA["Trade"] = ("record", {"id": "text", "contract": "opt text", "leg_a": "text", "leg_b": "text", "status": "TradeStatus"})
 SCHEMA["PaymentAccount"] = ("record", {"id": "text", "owner": "Ref", "network": "text", "address": "text", "symbol": "text", "label": "text", "verified": "bool"})
@@ -628,10 +669,10 @@ SCHEMA["LoanStatus"] = ("variant", {"Active": "null", "Repaid": "null"})
 SCHEMA["Loan"] = ("record", {"id": "text", "lender": "text", "amount": "nat", "symbol": "text", "term": "Period", "rate": "nat", "fund": "text", "outstanding": "nat", "status": "LoanStatus", "facts": "Value"})
 SCHEMA["TaxDeclaration"] = ("record", {"id": "text", "declarant": "Ref", "period": "text", "base": "text", "amount": "nat", "status": "TaxDeclarationStatus", "invoice": "opt text"})
 SCHEMA["LandStatus"] = ("variant", {"Active": "null", "Disputed": "null", "Revoked": "null"})
-SCHEMA["Land"] = ("record", {"id": "text", "x": "nat", "y": "nat", "width": "nat", "height": "nat", "kind": "text", "assessed_value": "opt nat", "area": "opt nat", "assessed_at": "opt Timestamp", "assessment_ref": "opt text", "owner": "Ref", "status": "LandStatus", "token_id": "opt nat", "registered_by": "principal", "metadata": "Value"})
+SCHEMA["Land"] = ("record", {"id": "text", "x": "nat", "y": "nat", "width": "nat", "height": "nat", "kind": "text", "assessed_value": "opt nat", "area": "opt nat", "assessed_at": "opt Timestamp", "assessment_ref": "opt text", "owner": "Ref", "status": "LandStatus", "token_id": "opt nat", "registered_by": "principal", "metadata": "Value", "zones": "vec text"})
 SCHEMA["Zone"] = ("record", {"id": "text", "name": "text", "kind": "text", "land": "opt text", "user": "opt principal", "metadata": "Value", "population": "nat"})
 SCHEMA["LicenseStatus"] = ("variant", {"Applied": "null", "Active": "null", "Rejected": "null", "Suspended": "null", "Revoked": "null", "Expired": "null"})
-SCHEMA["License"] = ("record", {"id": "text", "kind": "text", "holder": "Ref", "issued_by": "text", "status": "LicenseStatus", "applied_at": "Timestamp", "decision_due": "opt Timestamp", "issued_at": "opt Timestamp", "expires_at": "opt Timestamp", "evidence_ref": "opt text", "conditions": "Value"})
+SCHEMA["License"] = ("record", {"id": "text", "kind": "text", "holder": "Ref", "issued_by": "text", "status": "LicenseStatus", "applied_at": "Timestamp", "decision_due": "opt Timestamp", "issued_at": "opt Timestamp", "expires_at": "opt Timestamp", "evidence_ref": "opt text", "conditions": "Value", "land": "opt text"})
 SCHEMA["Silence"] = ("variant", {"Positive": "null", "Negative": "null"})
 SCHEMA["Procedure"] = ("record", {"id": "text", "initiated_by": "text", "matter": "opt text", "decision_deadline": "opt Period", "silence": "opt Silence", "legislation": "opt text", "facts": "Value"})
 SCHEMA["RequestStatus"] = ("variant", {"Filed": "null", "Decided": "null"})
@@ -656,8 +697,10 @@ SCHEMA["Penalty"] = ("record", {"id": "text", "verdict": "text", "target": "Ref"
 SCHEMA["TenderStatus"] = ("variant", {"Draft": "null", "Open": "null", "Closed": "null", "Evaluation": "null", "Awarded": "null", "Contracted": "null", "Cancelled": "null"})
 SCHEMA["Criterion"] = ("record", {"criterion": "text", "weight": "nat"})
 SCHEMA["Notice"] = ("record", {"journal": "text", "published_at": "Timestamp", "ref": "opt text"})
-SCHEMA["Tender"] = ("record", {"id": "text", "title": "text", "description": "text", "requester": "text", "kind": "opt text", "procedure": "opt text", "estimated_value": "opt nat", "status": "TenderStatus", "opens_at": "opt Timestamp", "closes_at": "opt Timestamp", "rubric": "vec Criterion", "winner": "opt text", "contract": "opt text", "notices": "vec Notice"})
-SCHEMA["Bid"] = ("record", {"id": "text", "tender": "text", "vendor": "text", "submitted_at": "Timestamp", "sealed": "bool", "payload_ref": "text", "payload_hash": "text", "price": "opt nat", "score": "opt nat"})
+SCHEMA["LotStatus"] = ("variant", {"Open": "null", "Awarded": "null", "Void": "null"})
+SCHEMA["Lot"] = ("record", {"id": "text", "title": "text", "estimated_value": "opt nat", "status": "LotStatus", "winner": "opt text", "contract": "opt text"})
+SCHEMA["Tender"] = ("record", {"id": "text", "title": "text", "description": "text", "requester": "text", "kind": "opt text", "procedure": "opt text", "estimated_value": "opt nat", "status": "TenderStatus", "opens_at": "opt Timestamp", "closes_at": "opt Timestamp", "rubric": "vec Criterion", "winner": "opt text", "contract": "opt text", "notices": "vec Notice", "lots": "vec Lot"})
+SCHEMA["Bid"] = ("record", {"id": "text", "tender": "text", "vendor": "text", "submitted_at": "Timestamp", "sealed": "bool", "payload_ref": "text", "payload_hash": "text", "price": "opt nat", "score": "opt nat", "lot": "opt text"})
 SCHEMA["BidScore"] = ("record", {"id": "text", "bid": "text", "evaluator": "principal", "criterion": "text", "score": "nat", "scored_at": "Timestamp"})
 SCHEMA["RealmStatus"] = ("variant", {"Setup": "null", "Alpha": "null", "Beta": "null", "Production": "null", "Deprecation": "null", "Terminated": "null"})
 SCHEMA["Realm"] = ("record", {"id": "text", "name": "text", "manifesto": "text", "welcome_message": "text", "status": "RealmStatus", "calendar": "opt text", "treasury": "opt text", "accounting_currency": "opt text", "accounting_currency_decimals": "opt nat8", "is_quarter": "bool", "is_capital": "bool", "federation_realm_id": "opt text", "federation_codex": "opt text", "quarter_join_mode": "opt text", "sync_sources": "vec SyncSource", "trusted_principals": "vec principal", "require_marketplace_approval": "bool", "trusted_approvers": "vec text", "voting_threshold": "nat", "voting_quorum": "nat", "casting_vote": "opt principal", "open_registration": "bool", "logo_url": "opt text", "background_image_url": "opt text", "installed_version": "text", "network": "text", "timezone": "text", "languages": "vec text", "member_count": "nat"})
@@ -755,7 +798,7 @@ SCHEMA["DepartmentPage"] = ("record", {"items": "vec Department", "next": "opt t
 SCHEMA["ChartArgs"] = ("record", {"department": "opt text", "cursor": "opt text", "limit": "opt nat32"})
 SCHEMA["Chart"] = ("record", {"department": "Department", "positions": "nat", "seats": "nat", "filled": "nat", "children": "vec Department", "next": "opt text"})
 SCHEMA["OrganizationDetail"] = ("record", {"organization": "Organization", "seats": "vec Seat", "next": "opt text"})
-SCHEMA["OrganizationListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "status": "opt OrganizationStatus"})
+SCHEMA["OrganizationListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "status": "opt OrganizationStatus", "kind": "opt OrganizationKind"})
 SCHEMA["OrganizationPage"] = ("record", {"items": "vec Organization", "next": "opt text"})
 SCHEMA["DepartmentCreateArgs"] = ("record", {"department": "text", "parent": "opt text", "description": "text", "kind": "opt text"})
 SCHEMA["DepartmentEditArgsHead"] = ("variant", {"Set": "principal", "Clear": "null"})
@@ -767,21 +810,23 @@ SCHEMA["PositionEditArgs"] = ("record", {"position": "text", "status": "opt Posi
 SCHEMA["AppointArgs"] = ("record", {"position": "text", "user": "principal", "agent": "bool", "supervisor": "opt principal"})
 SCHEMA["ExpelArgs"] = ("record", {"department": "text", "user": "principal"})
 SCHEMA["AuthorityGrantArgs"] = ("record", {"department": "text", "target": "Ref", "operations": "vec text"})
-SCHEMA["OrganizationRegisterArgs"] = ("record", {"organization": "text", "description": "text"})
-SCHEMA["OrganizationEditArgs"] = ("record", {"organization": "text", "description": "opt text", "admins": "opt vec principal"})
+SCHEMA["OrganizationRegisterArgs"] = ("record", {"organization": "text", "description": "text", "kind": "opt OrganizationKind"})
+SCHEMA["OrganizationEditArgs"] = ("record", {"organization": "text", "description": "opt text", "admins": "opt vec principal", "kind": "opt OrganizationKind"})
 SCHEMA["RepresentativeAddArgs"] = ("record", {"organization": "text", "position": "text", "user": "principal", "agent": "bool", "supervisor": "opt principal", "title": "opt text", "profile": "opt text", "headcount": "opt nat"})
 SCHEMA["OrganizationStatusArgs"] = ("record", {"organization": "text", "status": "OrganizationStatus"})
 SCHEMA["ProposalDetail"] = ("record", {"proposal": "Proposal", "votes": "vec Vote", "next": "opt text", "replaced_by": "opt text"})
 SCHEMA["ProposalLinkPage"] = ("record", {"items": "vec ProposalLink", "next": "opt text"})
-SCHEMA["ProposalListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "status": "opt ProposalStatus"})
+SCHEMA["ProposalListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "status": "opt ProposalStatus", "tags": "opt vec text"})
 SCHEMA["ProposalPage"] = ("record", {"items": "vec Proposal", "next": "opt text"})
-SCHEMA["ProposalCreateArgs"] = ("record", {"title": "text", "description": "text", "department": "opt text", "kind": "opt text", "matter": "opt text", "threshold": "opt nat", "quorum": "opt nat", "threshold_of": "opt ThresholdBasis", "action": "ProposalAction", "effective_at": "opt Timestamp", "links": "opt vec ProposalLink", "on_behalf_of": "opt principal"})
+SCHEMA["ProposalCreateArgs"] = ("record", {"title": "text", "description": "text", "department": "opt text", "kind": "opt text", "matter": "opt text", "threshold": "opt nat", "quorum": "opt nat", "threshold_of": "opt ThresholdBasis", "action": "ProposalAction", "effective_at": "opt Timestamp", "links": "opt vec ProposalLink", "tags": "opt vec text", "on_behalf_of": "opt principal"})
 SCHEMA["ProposalVoteArgs"] = ("record", {"proposal": "text", "choice": "VoteChoice", "on_behalf_of": "opt principal"})
 SCHEMA["ProposalWithdrawArgs"] = ("record", {"proposal": "text", "on_behalf_of": "opt principal"})
+SCHEMA["ProposalSetTagsArgs"] = ("record", {"proposal": "text", "tags": "vec text", "on_behalf_of": "opt principal"})
 SCHEMA["MandateCreateArgs"] = ("record", {"title": "text", "scope": "Value", "max_value": "opt nat", "symbol": "opt text", "executor": "opt text", "expires_at": "opt Timestamp"})
 SCHEMA["MandateRevokeArgs"] = ("record", {"mandate": "text"})
 SCHEMA["MandateExecutorArgs"] = ("record", {"mandate": "text", "executor": "text"})
-SCHEMA["ContractCreateArgs"] = ("record", {"title": "text", "parties": "vec Ref", "mandate": "opt text", "kind": "opt text", "procedure": "opt text", "tender": "opt text", "value": "nat", "symbol": "text", "terms_ref": "text", "terms_hash": "text", "starts_at": "opt Timestamp", "ends_at": "opt Timestamp"})
+SCHEMA["ContractCreateArgs"] = ("record", {"title": "text", "parties": "vec Ref", "mandate": "opt text", "kind": "opt text", "procedure": "opt text", "tender": "opt text", "value": "nat", "symbol": "text", "terms_ref": "text", "terms_hash": "text", "starts_at": "opt Timestamp", "ends_at": "opt Timestamp", "split": "opt vec PeriodAmount", "lot": "opt text", "framework": "opt Framework"})
+SCHEMA["ContractAmendArgs"] = ("record", {"contract": "text", "value": "opt nat", "split": "opt vec PeriodAmount", "starts_at": "opt Timestamp", "ends_at": "opt Timestamp"})
 SCHEMA["GovernanceUpdateArgs"] = ("record", {"voting_window": "opt Duration", "voting_threshold": "opt nat", "voting_quorum": "opt nat", "casting_vote": "opt DepartmentEditArgsHead"})
 SCHEMA["TreasuryView"] = ("record", {"treasury": "opt Treasury", "tokens": "vec Token", "nft_tokens": "vec NFTToken", "funds": "vec Fund", "next": "opt text"})
 SCHEMA["LedgerArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "transaction": "opt text", "symbol": "opt text", "kind": "opt LedgerKind", "fund": "opt text", "period": "opt text"})
@@ -789,10 +834,10 @@ SCHEMA["LedgerPage"] = ("record", {"items": "vec LedgerEntry", "next": "opt text
 SCHEMA["ReportArgs"] = ("record", {"id": "opt text", "cursor": "opt text", "limit": "opt nat32"})
 SCHEMA["ReportPage"] = ("record", {"items": "vec FinancialReport", "next": "opt text"})
 SCHEMA["Account"] = ("record", {"owner": "principal", "subaccount": "opt blob"})
-SCHEMA["TreasuryConfigureArgs"] = ("record", {"epoch": "opt Duration", "anchor_month": "opt nat8", "source_fund": "opt text", "auto_allocate": "opt bool"})
+SCHEMA["TreasuryConfigureArgs"] = ("record", {"epoch": "opt Duration", "anchor_month": "opt nat8", "source_fund": "opt text", "auto_allocate": "opt bool", "sweep": "opt vec SweepRule"})
 SCHEMA["TokenRegisterArgs"] = ("record", {"symbol": "text", "ledger": "principal", "indexer": "opt principal", "decimals": "opt nat8", "fee": "opt nat"})
 SCHEMA["NFTTokenRegisterArgs"] = ("record", {"symbol": "text", "canister": "principal", "name": "opt text", "description": "opt text", "transferable": "opt bool", "required_license": "opt text", "supply_cap": "opt nat"})
-SCHEMA["TransferCreateArgs"] = ("record", {"fund": "text", "to": "Ref", "amount": "nat", "symbol": "opt text", "category": "opt text", "description": "opt text", "contract": "opt text", "on_behalf_of": "opt principal"})
+SCHEMA["TransferCreateArgs"] = ("record", {"fund": "text", "to": "Ref", "amount": "nat", "symbol": "opt text", "category": "opt text", "description": "opt text", "contract": "opt text", "on_behalf_of": "opt principal", "due_at": "opt Timestamp", "committed": "opt bool"})
 SCHEMA["TransferRevertArgs"] = ("record", {"transfer": "text", "reason": "opt text"})
 SCHEMA["InvoiceCreateArgs"] = ("record", {"payer": "Ref", "amount": "nat", "symbol": "opt text", "due_at": "opt Timestamp", "reason": "opt Ref", "items": "vec InvoiceItem", "facts": "opt Value"})
 SCHEMA["InvoiceItemAddArgs"] = ("record", {"invoice": "text", "item": "InvoiceItem"})
@@ -807,6 +852,11 @@ SCHEMA["FundCreateArgs"] = ("record", {"fund": "text", "name": "opt text", "kind
 SCHEMA["PeriodOpenArgs"] = ("record", {"period": "text", "name": "opt text", "starts_at": "Timestamp", "ends_at": "Timestamp"})
 SCHEMA["BudgetDraftArgs"] = ("record", {"fund": "text", "period": "text", "category": "text", "kind": "BudgetKind", "planned": "nat"})
 SCHEMA["BudgetAmendArgs"] = ("record", {"budget": "text", "planned": "nat"})
+SCHEMA["BudgetStageArgs"] = ("record", {"budget": "text", "reserve": "int", "commit": "int"})
+SCHEMA["BudgetListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "fund": "opt text", "period": "opt text"})
+SCHEMA["BudgetPage"] = ("record", {"items": "vec Budget", "next": "opt text"})
+SCHEMA["TransferListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "fund": "opt text", "status": "opt TransferStatus"})
+SCHEMA["TransferPage"] = ("record", {"items": "vec Transfer", "next": "opt text"})
 SCHEMA["BudgetProposeArgs"] = ("record", {"period": "text", "years": "opt nat", "fund": "opt text"})
 SCHEMA["AllocationRuleDraftArgs"] = ("record", {"source_fund": "text", "rules": "vec Allocation"})
 SCHEMA["PayrollRunArgs"] = ("record", {"department": "text", "period": "text", "symbol": "opt text"})
@@ -835,6 +885,7 @@ SCHEMA["LandTransferArgs"] = ("record", {"land": "text", "to": "Ref", "order": "
 SCHEMA["LandMintArgs"] = ("record", {"land": "text", "prepared_by": "opt principal"})
 SCHEMA["LandAssessArgs"] = ("record", {"land": "text", "value": "opt nat", "area": "opt nat", "reference": "opt text", "legislation": "opt text"})
 SCHEMA["LandFreezeArgs"] = ("record", {"land": "text", "reason": "opt text"})
+SCHEMA["LandZoneSetArgs"] = ("record", {"land": "text", "zones": "vec text"})
 SCHEMA["ZoneDefineArgs"] = ("record", {"zone": "text", "name": "text", "kind": "text"})
 SCHEMA["ZoneSetArgs"] = ("record", {"zone": "text", "name": "opt text", "kind": "opt text", "on_behalf_of": "opt principal"})
 SCHEMA["ZoneClearArgs"] = ("record", {"zone": "text", "on_behalf_of": "opt principal"})
@@ -853,7 +904,7 @@ SCHEMA["RequestListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat3
 SCHEMA["RequestPage"] = ("record", {"items": "vec Request", "next": "opt text"})
 SCHEMA["RequestSetDueArgs"] = ("record", {"request": "text", "due_at": "Timestamp", "extension_limit": "opt Timestamp"})
 SCHEMA["RequestDecideArgs"] = ("record", {"request": "text", "decision": "text", "reply": "opt text"})
-SCHEMA["LicenseApplyArgs"] = ("record", {"kind": "text", "holder": "opt Ref", "department": "opt text", "evidence_ref": "opt text", "conditions": "opt Value", "on_behalf_of": "opt principal"})
+SCHEMA["LicenseApplyArgs"] = ("record", {"kind": "text", "holder": "opt Ref", "department": "opt text", "evidence_ref": "opt text", "conditions": "opt Value", "on_behalf_of": "opt principal", "land": "opt text"})
 SCHEMA["LicenseRenewArgs"] = ("record", {"license": "text", "evidence_ref": "opt text", "on_behalf_of": "opt principal"})
 SCHEMA["LicenseDecideArgs"] = ("record", {"license": "text", "approve": "bool", "department": "opt text", "expires_at": "opt Timestamp", "conditions": "opt Value"})
 SCHEMA["LicenseSuspendArgs"] = ("record", {"license": "text", "resume": "bool"})
@@ -883,16 +934,26 @@ SCHEMA["JudgeAppointArgs"] = ("record", {"court": "text", "user": "principal", "
 SCHEMA["TenderListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "status": "opt TenderStatus"})
 SCHEMA["TenderPage"] = ("record", {"items": "vec Tender", "next": "opt text"})
 SCHEMA["TenderDetail"] = ("record", {"tender": "Tender", "bids": "vec Bid", "next": "opt text"})
-SCHEMA["TenderCreateArgs"] = ("record", {"requester": "text", "title": "text", "description": "opt text", "kind": "opt text", "procedure": "opt text", "estimated_value": "opt nat", "opens_at": "opt Timestamp", "closes_at": "opt Timestamp", "rubric": "vec Criterion"})
-SCHEMA["BidSubmitArgs"] = ("record", {"tender": "text", "vendor": "text", "payload_ref": "text", "payload_hash": "text", "on_behalf_of": "opt principal"})
+SCHEMA["LotArgs"] = ("record", {"id": "text", "title": "text", "estimated_value": "opt nat"})
+SCHEMA["TenderCreateArgs"] = ("record", {"requester": "text", "title": "text", "description": "opt text", "kind": "opt text", "procedure": "opt text", "estimated_value": "opt nat", "opens_at": "opt Timestamp", "closes_at": "opt Timestamp", "rubric": "vec Criterion", "lots": "opt vec LotArgs"})
+SCHEMA["BidSubmitArgs"] = ("record", {"tender": "text", "vendor": "text", "payload_ref": "text", "payload_hash": "text", "on_behalf_of": "opt principal", "lot": "opt text"})
 SCHEMA["BidWithdrawArgs"] = ("record", {"bid": "text", "on_behalf_of": "opt principal"})
 SCHEMA["BidOpening"] = ("record", {"bid": "text", "price": "nat", "nonce": "text"})
 SCHEMA["BidsRevealArgs"] = ("record", {"tender": "text", "openings": "vec BidOpening"})
 SCHEMA["BidScoreArgsScores"] = ("record", {"criterion": "text", "score": "nat"})
 SCHEMA["BidScoreArgs"] = ("record", {"bid": "text", "scores": "vec BidScoreArgsScores"})
-SCHEMA["TenderAwardArgs"] = ("record", {"tender": "text", "bid": "opt text", "justification": "opt text"})
+SCHEMA["TenderAwardArgs"] = ("record", {"tender": "text", "bid": "opt text", "justification": "opt text", "lot": "opt text"})
+SCHEMA["TenderLotVoidArgs"] = ("record", {"tender": "text", "lot": "text", "reason": "opt text"})
 SCHEMA["TenderNoticeArgs"] = ("record", {"tender": "text", "journal": "text", "ref": "opt text", "at": "opt Timestamp"})
-SCHEMA["QuarterDirectory"] = ("record", {"capital": "opt text", "items": "vec Quarter", "next": "opt text", "zones": "opt vec ZoneDefineArgs"})
+SCHEMA["QuarterDirectory"] = ("record", {"capital": "opt text", "items": "vec Quarter", "next": "opt text", "zones": "opt vec ZoneDefineArgs", "sweep": "opt SweepConfig"})
+SCHEMA["SweepRule"] = ("record", {"fund": "text", "symbol": "text", "into": "text", "keep": "nat"})
+SCHEMA["SweepConfig"] = ("record", {"to": "Account", "rules": "vec SweepRule"})
+SCHEMA["SweepStatus"] = ("variant", {"Sending": "null", "Sent": "null", "Booked": "null", "Failed": "null", "NeedsCheck": "null"})
+SCHEMA["Sweep"] = ("record", {"id": "text", "quarter": "text", "fund": "text", "symbol": "text", "into": "text", "to": "Account", "epoch": "Timestamp", "amount": "nat", "fee": "nat", "created_at": "Timestamp", "block": "opt nat", "status": "SweepStatus", "reason": "opt text", "reported_at": "opt Timestamp"})
+SCHEMA["SweepPage"] = ("record", {"items": "vec Sweep", "next": "opt text"})
+SCHEMA["QuarterSweepArgs"] = ("record", {"fund": "opt text"})
+SCHEMA["SweepResolveArgs"] = ("record", {"sweep": "text", "block": "opt nat"})
+SCHEMA["SweepListArgs"] = ("record", {"cursor": "opt text", "limit": "opt nat32", "quarter": "opt text", "status": "opt SweepStatus"})
 SCHEMA["JoinTargetsArgs"] = ("record", {"home_zone": "opt text"})
 SCHEMA["JoinTargets"] = ("record", {"default": "opt text", "targets": "vec text", "mode": "opt text"})
 SCHEMA["QuarterReportArgs"] = ("record", {"population": "nat", "codex_id": "opt text", "codex_version": "opt text", "leg": "opt FederalVoteLeg", "zones": "opt vec (text, nat)"})
@@ -1013,15 +1074,19 @@ SCHEMA["TextReply"] = ("variant", {"Ok": "text", "Err": "GggError"})
 SCHEMA["VoteReply"] = ("variant", {"Ok": "Vote", "Err": "GggError"})
 SCHEMA["ProposalReply"] = ("variant", {"Ok": "Proposal", "Err": "GggError"})
 SCHEMA["ContractReply"] = ("variant", {"Ok": "Contract", "Err": "GggError"})
+SCHEMA["OptContractDetailReply"] = ("variant", {"Ok": "opt ContractDetail", "Err": "GggError"})
 SCHEMA["TreasuryViewReply"] = ("variant", {"Ok": "TreasuryView", "Err": "GggError"})
 SCHEMA["LedgerPageReply"] = ("variant", {"Ok": "LedgerPage", "Err": "GggError"})
 SCHEMA["ReportPageReply"] = ("variant", {"Ok": "ReportPage", "Err": "GggError"})
 SCHEMA["LoanPageReply"] = ("variant", {"Ok": "LoanPage", "Err": "GggError"})
+SCHEMA["TransferReply"] = ("variant", {"Ok": "Transfer", "Err": "GggError"})
+SCHEMA["TransferPageReply"] = ("variant", {"Ok": "TransferPage", "Err": "GggError"})
 SCHEMA["InvoiceCreatedReply"] = ("variant", {"Ok": "InvoiceCreated", "Err": "GggError"})
 SCHEMA["InvoiceReply"] = ("variant", {"Ok": "Invoice", "Err": "GggError"})
 SCHEMA["MyInvoicePageReply"] = ("variant", {"Ok": "MyInvoicePage", "Err": "GggError"})
 SCHEMA["InvoicePageReply"] = ("variant", {"Ok": "InvoicePage", "Err": "GggError"})
 SCHEMA["NatReply"] = ("variant", {"Ok": "nat", "Err": "GggError"})
+SCHEMA["BudgetPageReply"] = ("variant", {"Ok": "BudgetPage", "Err": "GggError"})
 SCHEMA["LoanReply"] = ("variant", {"Ok": "Loan", "Err": "GggError"})
 SCHEMA["FinancialReportReply"] = ("variant", {"Ok": "FinancialReport", "Err": "GggError"})
 SCHEMA["TaxAssessPageReply"] = ("variant", {"Ok": "TaxAssessPage", "Err": "GggError"})
@@ -1058,6 +1123,9 @@ SCHEMA["TenderReply"] = ("variant", {"Ok": "Tender", "Err": "GggError"})
 SCHEMA["QuarterDirectoryReply"] = ("variant", {"Ok": "QuarterDirectory", "Err": "GggError"})
 SCHEMA["JoinTargetsReply"] = ("variant", {"Ok": "JoinTargets", "Err": "GggError"})
 SCHEMA["QuarterReportReply"] = ("variant", {"Ok": "QuarterReport", "Err": "GggError"})
+SCHEMA["VecSweepReply"] = ("variant", {"Ok": "vec Sweep", "Err": "GggError"})
+SCHEMA["SweepReply"] = ("variant", {"Ok": "Sweep", "Err": "GggError"})
+SCHEMA["SweepPageReply"] = ("variant", {"Ok": "SweepPage", "Err": "GggError"})
 SCHEMA["ForwardReply"] = ("variant", {"Ok": "Forward", "Err": "GggError"})
 SCHEMA["FederalVoteReply"] = ("variant", {"Ok": "FederalVote", "Err": "GggError"})
 SCHEMA["OptValueReply"] = ("variant", {"Ok": "opt Value", "Err": "GggError"})
@@ -1129,33 +1197,37 @@ METHODS = {
     "OptProposalDetailReply"), "proposal_linked_from": ("GetArgs", "OptProposalLinkPageReply"), "proposal_list":
     ("ProposalListArgs", "ProposalPageReply"), "proposal_create": ("ProposalCreateArgs", "TextReply"),
     "proposal_vote": ("ProposalVoteArgs", "VoteReply"), "proposal_withdraw": ("ProposalWithdrawArgs",
-    "ProposalReply"), "proposal_open": ("text", "ProposalReply"), "proposal_finalize": ("text", "ProposalReply"),
-    "proposal_execute": ("text", "ProposalReply"), "proposal_stop": ("text", "GovernedReply"), "mandate_create":
-    ("MandateCreateArgs", "GovernedReply"), "mandate_revoke": ("MandateRevokeArgs", "GovernedReply"),
-    "mandate_assign_executor": ("MandateExecutorArgs", "GovernedReply"), "contract_create": ("ContractCreateArgs",
-    "ContractReply"), "contract_terminate": ("text", "ContractReply"), "governance_update": ("GovernanceUpdateArgs",
-    "GovernedReply"), "treasury_view": ("ListArgs", "TreasuryViewReply"), "ledger_view": ("LedgerArgs",
-    "LedgerPageReply"), "report_view": ("ReportArgs", "ReportPageReply"), "loan_list": ("LoanListArgs",
-    "LoanPageReply"), "treasury_configure": ("TreasuryConfigureArgs", "GovernedReply"), "token_register":
-    ("TokenRegisterArgs", "GovernedReply"), "nft_token_register": ("NFTTokenRegisterArgs", "GovernedReply"),
-    "transfer_create": ("TransferCreateArgs", "GovernedReply"), "transfer_revert": ("TransferRevertArgs",
-    "GovernedReply"), "invoice_create": ("InvoiceCreateArgs", "InvoiceCreatedReply"), "invoice_check":
-    ("InvoiceCheckArgs", "InvoiceReply"), "my_invoices": ("MyInvoicesArgs", "MyInvoicePageReply"),
-    "invoice_refresh": ("InvoiceRefreshArgs", "InvoicePageReply"), "invoice_item_add": ("InvoiceItemAddArgs",
-    "InvoiceReply"), "fund_create": ("FundCreateArgs", "GovernedReply"), "period_open": ("PeriodOpenArgs",
-    "GovernedReply"), "period_close": ("text", "GovernedReply"), "budget_draft": ("BudgetDraftArgs",
-    "GovernedReply"), "budget_propose": ("BudgetProposeArgs", "GovernedReply"), "budget_extend": ("text",
-    "NatReply"), "budget_amend": ("BudgetAmendArgs", "GovernedReply"), "allocation_rule_draft":
-    ("AllocationRuleDraftArgs", "GovernedReply"), "allocation_rule_propose": ("text", "GovernedReply"),
-    "payroll_run": ("PayrollRunArgs", "GovernedReply"), "loan_create": ("LoanCreateArgs", "GovernedReply"),
-    "loan_repay": ("LoanRepayArgs", "LoanReply"), "report_issue": ("ReportIssueArgs", "FinancialReportReply"),
-    "tax_policy_draft": ("TaxPolicyDraftArgs", "GovernedReply"), "tax_policy_propose": ("text", "GovernedReply"),
-    "tax_assess": ("TaxAssessArgs", "TaxAssessPageReply"), "tax_declare": ("TaxDeclareArgs", "TaxDeclaredReply"),
-    "payment_account_add": ("PaymentAccountAddArgs", "PaymentAccountReply"), "payment_account_remove":
-    ("PaymentAccountRemoveArgs", "PaymentAccountReply"), "token_force_transfer": ("ForceTransferArgs",
-    "GovernedReply"), "token_freeze": ("FreezeArgs", "GovernedReply"), "land_list": ("LandListArgs",
-    "LandPageReply"), "land_map": ("LandMapArgs", "LandMapReply"), "credential_verify": ("CredentialVerifyArgs",
-    "CredentialCheckReply"), "land_register": ("LandRegisterArgs", "GovernedReply"), "land_transfer":
+    "ProposalReply"), "proposal_set_tags": ("ProposalSetTagsArgs", "ProposalReply"), "proposal_open": ("text",
+    "ProposalReply"), "proposal_finalize": ("text", "ProposalReply"), "proposal_execute": ("text", "ProposalReply"),
+    "proposal_stop": ("text", "GovernedReply"), "mandate_create": ("MandateCreateArgs", "GovernedReply"),
+    "mandate_revoke": ("MandateRevokeArgs", "GovernedReply"), "mandate_assign_executor": ("MandateExecutorArgs",
+    "GovernedReply"), "contract_create": ("ContractCreateArgs", "ContractReply"), "contract_terminate": ("text",
+    "ContractReply"), "contract_amend": ("ContractAmendArgs", "GovernedReply"), "contract_get": ("GetArgs",
+    "OptContractDetailReply"), "governance_update": ("GovernanceUpdateArgs", "GovernedReply"), "treasury_view":
+    ("ListArgs", "TreasuryViewReply"), "ledger_view": ("LedgerArgs", "LedgerPageReply"), "report_view":
+    ("ReportArgs", "ReportPageReply"), "loan_list": ("LoanListArgs", "LoanPageReply"), "treasury_configure":
+    ("TreasuryConfigureArgs", "GovernedReply"), "token_register": ("TokenRegisterArgs", "GovernedReply"),
+    "nft_token_register": ("NFTTokenRegisterArgs", "GovernedReply"), "transfer_create": ("TransferCreateArgs",
+    "GovernedReply"), "transfer_revert": ("TransferRevertArgs", "GovernedReply"), "transfer_pay": ("text",
+    "TransferReply"), "transfer_list": ("TransferListArgs", "TransferPageReply"), "invoice_create":
+    ("InvoiceCreateArgs", "InvoiceCreatedReply"), "invoice_check": ("InvoiceCheckArgs", "InvoiceReply"),
+    "my_invoices": ("MyInvoicesArgs", "MyInvoicePageReply"), "invoice_refresh": ("InvoiceRefreshArgs",
+    "InvoicePageReply"), "invoice_item_add": ("InvoiceItemAddArgs", "InvoiceReply"), "fund_create":
+    ("FundCreateArgs", "GovernedReply"), "period_open": ("PeriodOpenArgs", "GovernedReply"), "period_close":
+    ("text", "GovernedReply"), "budget_draft": ("BudgetDraftArgs", "GovernedReply"), "budget_propose":
+    ("BudgetProposeArgs", "GovernedReply"), "budget_extend": ("text", "NatReply"), "budget_amend":
+    ("BudgetAmendArgs", "GovernedReply"), "budget_stage": ("BudgetStageArgs", "GovernedReply"), "budget_list":
+    ("BudgetListArgs", "BudgetPageReply"), "allocation_rule_draft": ("AllocationRuleDraftArgs", "GovernedReply"),
+    "allocation_rule_propose": ("text", "GovernedReply"), "payroll_run": ("PayrollRunArgs", "GovernedReply"),
+    "loan_create": ("LoanCreateArgs", "GovernedReply"), "loan_repay": ("LoanRepayArgs", "LoanReply"),
+    "report_issue": ("ReportIssueArgs", "FinancialReportReply"), "tax_policy_draft": ("TaxPolicyDraftArgs",
+    "GovernedReply"), "tax_policy_propose": ("text", "GovernedReply"), "tax_assess": ("TaxAssessArgs",
+    "TaxAssessPageReply"), "tax_declare": ("TaxDeclareArgs", "TaxDeclaredReply"), "payment_account_add":
+    ("PaymentAccountAddArgs", "PaymentAccountReply"), "payment_account_remove": ("PaymentAccountRemoveArgs",
+    "PaymentAccountReply"), "token_force_transfer": ("ForceTransferArgs", "GovernedReply"), "token_freeze":
+    ("FreezeArgs", "GovernedReply"), "land_list": ("LandListArgs", "LandPageReply"), "land_map": ("LandMapArgs",
+    "LandMapReply"), "credential_verify": ("CredentialVerifyArgs", "CredentialCheckReply"), "land_register":
+    ("LandRegisterArgs", "GovernedReply"), "land_zone_set": ("LandZoneSetArgs", "GovernedReply"), "land_transfer":
     ("LandTransferArgs", "GovernedReply"), "land_mint_nft": ("LandMintArgs", "NatReply"), "land_assess":
     ("LandAssessArgs", "LandReply"), "land_freeze": ("LandFreezeArgs", "LandReply"), "land_unfreeze": ("text",
     "LandReply"), "zone_define": ("ZoneDefineArgs", "GovernedReply"), "zone_set": ("ZoneSetArgs", "ZoneReply"),
@@ -1186,14 +1258,17 @@ METHODS = {
     "GovernedReply"), "tender_close": ("text", "GovernedReply"), "tender_cancel": ("text", "GovernedReply"),
     "bid_submit": ("BidSubmitArgs", "BidReply"), "bid_withdraw": ("BidWithdrawArgs", "BidReply"), "bids_reveal":
     ("BidsRevealArgs", "GovernedReply"), "bid_score": ("BidScoreArgs", "BidReply"), "tender_award":
-    ("TenderAwardArgs", "GovernedReply"), "tender_notice": ("TenderNoticeArgs", "TenderReply"), "quarter_directory":
-    ("ListArgs", "QuarterDirectoryReply"), "join_targets": ("opt JoinTargetsArgs", "JoinTargetsReply"),
-    "quarter_sync": (None, "QuarterDirectoryReply"), "quarter_report": ("QuarterReportArgs", "QuarterReportReply"),
-    "quarter_register": ("QuarterRegisterArgs", "GovernedReply"), "quarter_deregister": ("text", "GovernedReply"),
-    "quarter_configure": ("QuarterConfigureArgs", "GovernedReply"), "quarter_secede": (None, "GovernedReply"),
-    "quarter_join_federation": ("JoinFederationArgs", "GovernedReply"), "self_change_quarter": ("ChangeQuarterArgs",
-    "ForwardReply"), "federal_vote_propose": ("FederalVoteProposeArgs", "FederalVoteReply"), "federal_vote_cancel":
-    ("text", "GovernedReply"), "federal_vote_finalize": ("text", "FederalVoteReply"), "federation_message":
+    ("TenderAwardArgs", "GovernedReply"), "tender_lot_void": ("TenderLotVoidArgs", "GovernedReply"),
+    "tender_notice": ("TenderNoticeArgs", "TenderReply"), "quarter_directory": ("ListArgs",
+    "QuarterDirectoryReply"), "join_targets": ("opt JoinTargetsArgs", "JoinTargetsReply"), "quarter_sync": (None,
+    "QuarterDirectoryReply"), "quarter_report": ("QuarterReportArgs", "QuarterReportReply"), "quarter_sweep":
+    ("QuarterSweepArgs", "VecSweepReply"), "quarter_sweep_report": ("Sweep", "SweepReply"), "sweep_resolve":
+    ("SweepResolveArgs", "GovernedReply"), "sweep_list": ("SweepListArgs", "SweepPageReply"), "quarter_register":
+    ("QuarterRegisterArgs", "GovernedReply"), "quarter_deregister": ("text", "GovernedReply"), "quarter_configure":
+    ("QuarterConfigureArgs", "GovernedReply"), "quarter_secede": (None, "GovernedReply"), "quarter_join_federation":
+    ("JoinFederationArgs", "GovernedReply"), "self_change_quarter": ("ChangeQuarterArgs", "ForwardReply"),
+    "federal_vote_propose": ("FederalVoteProposeArgs", "FederalVoteReply"), "federal_vote_cancel": ("text",
+    "GovernedReply"), "federal_vote_finalize": ("text", "FederalVoteReply"), "federation_message":
     ("FederationMessageArgs", "OptValueReply"), "follower_list": ("ListArgs", "FollowerPageReply"),
     "sync_source_add": ("SyncSourceAddArgs", "GovernedReply"), "sync_source_remove": ("SyncSourceRemoveArgs",
     "GovernedReply"), "follower_accept": ("FollowerArgs", "GovernedReply"), "follower_remove": ("FollowerArgs",

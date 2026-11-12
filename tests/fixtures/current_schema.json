@@ -246,6 +246,11 @@
     "kind": "property",
     "type": "String"
    },
+   "lot": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
    "payload_hash": {
     "default": "",
     "kind": "property",
@@ -353,6 +358,11 @@
     "kind": "property",
     "type": "String"
    },
+   "committed": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
    "id": {
     "has_default": false,
     "kind": "property",
@@ -372,6 +382,11 @@
     "default": "",
     "kind": "property",
     "type": "String"
+   },
+   "reserved": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
    },
    "slot": {
     "has_default": false,
@@ -635,12 +650,25 @@
     "kind": "property",
     "type": "Integer"
    },
+   "framework": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "null",
+    "kind": "property",
+    "type": "Json"
+   },
    "id": {
     "has_default": false,
     "kind": "property",
     "type": "String"
    },
    "kind": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "lot": {
     "default": "",
     "kind": "property",
     "type": "String"
@@ -657,6 +685,14 @@
     "default": "",
     "kind": "property",
     "type": "String"
+   },
+   "split": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
    },
    "starts_at": {
     "default": 0,
@@ -699,6 +735,7 @@
     "type": "Integer"
    }
   },
+  "has_migrate": true,
   "relationships": {
    "ledger_entries": {
     "inverse": "contract",
@@ -722,6 +759,48 @@
     "type": "OneToMany"
    }
   },
+  "version": 2
+ },
+ "ContractAmendment": {
+  "fields": {
+   "after": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "before": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   },
+   "contract": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "proposal": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
   "version": 1
  },
  "Court": {
@@ -2473,6 +2552,14 @@
     "kind": "property",
     "type": "String"
    },
+   "lies_in": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
    "metadata": {
     "constraints": {
      "max_length": 65536
@@ -2527,7 +2614,7 @@
     "type": "OneToMany"
    }
   },
-  "version": 1
+  "version": 2
  },
  "LayeredCodex": {
   "fields": {
@@ -2724,6 +2811,13 @@
     "target": "FiscalPeriod",
     "type": "ManyToOne"
    },
+   "sweep": {
+    "inverse": "ledger_entries",
+    "kind": "relationship",
+    "many": false,
+    "target": "Sweep",
+    "type": "ManyToOne"
+   },
    "transfer": {
     "inverse": "ledger_entries",
     "kind": "relationship",
@@ -2780,6 +2874,11 @@
     "type": "Integer"
    },
    "kind": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "land": {
     "default": "",
     "kind": "property",
     "type": "String"
@@ -3069,6 +3168,11 @@
    },
    "id": {
     "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "kind": {
+    "default": "other",
     "kind": "property",
     "type": "String"
    },
@@ -3511,6 +3615,14 @@
     "kind": "property",
     "type": "String"
    },
+   "first_vote": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "null",
+    "kind": "property",
+    "type": "Json"
+   },
    "id": {
     "has_default": false,
     "kind": "property",
@@ -3528,6 +3640,11 @@
     "default": "[]",
     "kind": "property",
     "type": "Json"
+   },
+   "majority_of_cast": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
    },
    "matter": {
     "default": "",
@@ -3577,6 +3694,14 @@
     "kind": "property",
     "type": "String"
    },
+   "tags": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
    "tally": {
     "constraints": {
      "max_length": 65536
@@ -3618,7 +3743,7 @@
     "type": "OneToMany"
    }
   },
-  "version": 3
+  "version": 4
  },
  "ProposalEdge": {
   "fields": {
@@ -4170,6 +4295,98 @@
   "relationships": {},
   "version": 1
  },
+ "Sweep": {
+  "fields": {
+   "amount": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "block": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "created_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "epoch": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "fee": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "fund": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "into": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "quarter": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "reason": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "reported_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "rule": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "status": {
+    "default": "sending",
+    "kind": "property",
+    "type": "String"
+   },
+   "symbol": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "to": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "{}",
+    "kind": "property",
+    "type": "Json"
+   }
+  },
+  "relationships": {
+   "ledger_entries": {
+    "inverse": "sweep",
+    "kind": "relationship",
+    "many": true,
+    "target": "LedgerEntry",
+    "type": "OneToMany"
+   }
+  },
+  "version": 1
+ },
  "SyncSource": {
   "fields": {
    "check_error": {
@@ -4551,6 +4768,14 @@
     "kind": "property",
     "type": "String"
    },
+   "lots": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
    "notices": {
     "constraints": {
      "max_length": 65536
@@ -4610,7 +4835,7 @@
     "type": "ManyToOne"
    }
   },
-  "version": 3
+  "version": 4
  },
  "Token": {
   "fields": {
@@ -4720,6 +4945,26 @@
     "kind": "property",
     "type": "Integer"
    },
+   "budget": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "committed": {
+    "default": false,
+    "kind": "property",
+    "type": "Boolean"
+   },
+   "contract": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "due_at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
    "id": {
     "has_default": false,
     "kind": "property",
@@ -4761,6 +5006,7 @@
     "type": "String"
    }
   },
+  "has_migrate": true,
   "relationships": {
    "invoice": {
     "inverse": "transfers",
@@ -4777,7 +5023,7 @@
     "type": "OneToMany"
    }
   },
-  "version": 1
+  "version": 2
  },
  "Treasury": {
   "fields": {

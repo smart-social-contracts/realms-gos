@@ -9,15 +9,15 @@ import world
 from core import journal, legislation, localtime
 import test_sync_checks as checks
 import test_sync_sources as sources
-from ggg import Event, Extension, FoundRelease, JournalEntry, LayeredCodex, Realm, Release
+from ggg import Event, Extension, FoundRelease, JournalEntry, LayeredCodex, Proposal, Realm, Release
 from kit import call, denied, fire_timers, later, ok, rows
-from test_installs import (HOUR, WEB, change_list, expected_id, fire_due, install, own_layer, realm,  # noqa: F401
+from test_installs import (FOUR, HOUR, WEB, change_list, expected_id, fire_due, install, own_layer, realm,  # noqa: F401
                            run_job, schedule, status)
 
 DAY = 86400
 CAPITAL = "capital-canister"
 # What the journal extension's manifest allows an entry to keep (extensions/journal/manifest.json).
-FIELDS = ["codex", "layers", "proposal", "activates_at", "reverted", "source", "version", "effective_from"]
+FIELDS = ["codex", "layers", "proposal", "vote", "activates_at", "reverted", "source", "version", "effective_from"]
 RULES = {"config": {"personal_data": {"entry_fields": FIELDS}}}
 
 
@@ -246,6 +246,42 @@ def test_publishing_changes_no_activates_at_and_no_install(realm):  # noqa: F811
     assert entry["details"]["proposal"] == p and entry["at"] == due
 
 
+def test_an_install_decided_by_a_vote_names_the_proposal_and_how_the_vote_went(realm):  # noqa: F811
+    rules()
+    action = {"op": "codex_install", "args": change_list(own_layer())}
+    p = ok("proposal_create", "alice", title="Legislation", action=action,
+           effective_at=fake_chain.now() + HOUR)["proposal"]
+    ok("proposal_vote", "elena", proposal=p, choice="no")
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=p, choice="yes")
+    run_job()
+    later(HOUR)
+    fire_timers()
+    fire_due()
+    [entry] = issue()["entries"]
+    assert entry["details"]["proposal"] == p
+    assert entry["details"]["vote"] == {"yes": 4, "no": 1, "abstain": 0, "eligible": 7}
+    assert "carla" not in str(entry["details"])  # the count only, never who voted
+
+
+def test_a_departments_vote_gives_the_entry_its_counts_and_never_its_seats_or_veto_holders():
+    world.build()
+    rules()
+    Proposal(id="P-9", tally={"yes": 2, "no": 0, "abstain": 1, "eligible": 3, "seats": 3, "veto": ["2vxsx-fae"]})
+    journal.codex_installed(LayeredCodex(id="sha256:ab", proposal="P-9"))
+    [entry] = issue()["entries"]
+    assert entry["details"]["proposal"] == "P-9"
+    assert entry["details"]["vote"] == {"yes": 2, "no": 0, "abstain": 1, "eligible": 3}  # no seats, no veto holders
+    assert "2vxsx-fae" not in str(entry)
+
+
+def test_an_install_nobody_proposed_has_no_vote(realm):  # noqa: F811
+    rules()
+    install(change_list(own_layer()))
+    [entry] = issue()["entries"]
+    assert entry["details"]["proposal"] == "" and "vote" not in entry["details"]
+
+
 def test_a_legacy_single_file_install_makes_no_entry(realm):  # noqa: F811
     from test_codex import SOURCE, manifest
 
@@ -363,8 +399,23 @@ def test_a_revert_makes_an_entry_with_the_codex_restored_its_layers_and_the_one_
     ok("codex_revert", "ctl")
     entry = issue()["entries"][-1]
     assert entry["kind"] == "codex_reverted" and entry["at"] == fake_chain.now()
-    assert entry["details"] == {"codex": expected_id(first), "reverted": expected_id(second),
+    assert entry["details"] == {"codex": expected_id(first), "reverted": expected_id(second), "proposal": "",
                                 "layers": [{"source": "arcadia", "versions": []}]}
+
+
+def test_a_revert_decided_by_a_vote_names_the_proposal_and_how_the_vote_went(realm):  # noqa: F811
+    rules()
+    first, second = own_layer(), own_layer("2.0.0")
+    install(change_list(first))
+    install(change_list(second, replaces=expected_id(first), url=WEB + "changes/second.json"))
+    action = {"op": "codex_revert", "args": {"codex": expected_id(first)}}
+    p = ok("proposal_create", "alice", title="Back", action=action)["proposal"]
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert LayeredCodex[expected_id(first)].status == "active"
+    entry = issue()["entries"][-1]
+    assert entry["kind"] == "codex_reverted" and entry["details"]["proposal"] == p
+    assert entry["details"]["vote"] == {"yes": 4, "no": 0, "abstain": 0, "eligible": 7}
 
 
 def test_a_revert_to_a_legacy_codex_makes_an_entry_with_no_layers(realm):  # noqa: F811
@@ -376,7 +427,7 @@ def test_a_revert_to_a_legacy_codex_makes_an_entry_with_no_layers(realm):  # noq
         ok("codex_install", "ctl", manifest=manifest(version), source=SOURCE)
     ok("codex_revert", "ctl")
     assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [
-        ("codex_reverted", {"codex": "test@1.0.0", "reverted": "test@1.1.0", "layers": []})]
+        ("codex_reverted", {"codex": "test@1.0.0", "reverted": "test@1.1.0", "layers": [], "proposal": ""})]
 
 
 # ---- the journal only reports: nothing that goes wrong in it stops a revert or an install

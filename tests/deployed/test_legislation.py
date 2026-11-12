@@ -31,19 +31,22 @@ class Procedure(above("procedure")):
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def on_codex_install(self, event):
         event.order = ["es"]
+        event.languages = ["es"]
         self.ggg.notification_send(recipient=Ref("external", "AGE"), topic="ordinance", title="Comunicació", body=event.result["codex"])
 """
 TOWN = """
 from realms.legislation import above, days, working_days
+
+TITLES = {"ca-valencia": "Nova ordenança", "es": "Nueva ordenanza"}
 
 class Procedure(above("procedure")):
     default_decision_deadline = days(60)
     comment_period = working_days(45)
 
     def on_codex_install(self, event):
-        missing = [name for name in ("ca-valencia", "es") if name not in event.args.get("languages", [])]
-        title = f"Nova ordenança{' (traducció pendent)' if missing else ''}"
-        self.ggg.notification_send(recipient="members", topic="ordinance", title=title, body=",".join(event.order))
+        notice = [{"language": l, "title": TITLES[l], "body": event.result["codex"]} for l in event.languages]
+        self.ggg.notification_send(recipient="members", topic="ordinance", title=TITLES["ca-valencia"],
+                                   body=",".join(event.order), translations=notice)
 """
 REFUSED = """
 from realms.legislation import above
@@ -59,7 +62,7 @@ codex.calendar_layer("eu/es", {"weekend": ["sat", "sun"], "years": {"2027": [{"d
 codex.check()
 context = codex.context(now=7)
 chapter = codex.instance("procedure", context)
-chapter.on_codex_install(Event("alice", {"document": "D-1", "languages": ["es"]}, {"codex": "C-1"}, 7))
+chapter.on_codex_install(Event("alice", {"checksum": "sha256:x"}, {"codex": "C-1"}, 7))
 other = Codex(["eu/es", "x/town"], realm="x/town")
 other.load("eu/es", "procedure", ES)
 try:
@@ -101,8 +104,9 @@ def test_a_chapter_loads_through_the_canisters_copy_of_the_library(realm):
             {
                 "recipient": "members",
                 "topic": "ordinance",
-                "title": "Nova ordenança (traducció pendent)",
+                "title": "Nova ordenança",
                 "body": "es",
+                "translations": [{"language": "es", "title": "Nueva ordenanza", "body": "C-1"}],
             },
         ],
     ]
