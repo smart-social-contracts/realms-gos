@@ -483,8 +483,13 @@ function verdictOf(result) {
   if (!result.supported) return { level: "note", title: "This browser cannot check the signature", detail: "" };
   if (!result.valid) return { level: "fail", title: "Not valid: do not rely on this document", detail: "See what failed below." };
   if (chainBroken) {
-    return { level: "note", title: "This document is signed by the realm, but the document it follows could not be confirmed",
-      detail: "The realm withholds that document or changed it. This one is intact; the record before it is in doubt." };
+    // Without a key the reader derived, the realm is never named as the signer: a broken chain must not read stronger than
+    // an intact one.
+    const detail = "The realm withholds that document or changed it. This one is intact; the record before it is in doubt.";
+    return keyChecked
+      ? { level: "note", title: "Signed by the key you derived for this canister, but the document it follows could not be confirmed", detail }
+      : { level: "note", title: "The signature is valid, but the key is not yet checked, and the document it follows could not be confirmed",
+          detail: `${detail} Derive the key for the canister, below, to know whose signature this is.` };
   }
   if (keyChecked) {
     return { level: "pass", title: "Valid: signed by the key you derived for this canister", detail: "The content is exactly what the canister signed." };
@@ -586,10 +591,10 @@ if (typeof document !== "undefined") {
     try { return JSON.stringify(JSON.parse(text), null, 2); } catch (error) { return text; }
   }
 
-  function show(result, proof, from, asked) {
+  function show(result, proof, from, replica) {
     const doc = result.shaped ? result.doc : null;
     $("result").hidden = false;
-    $("host-note").textContent = asked ? hostNote(asked) : "";
+    $("host-note").textContent = replica ? hostNote(replica) : "";
     $("host-note").hidden = !$("host-note").textContent;
     const verdict = $("verdict");
     const said = verdictOf(result);
@@ -602,7 +607,7 @@ if (typeof document !== "undefined") {
     const rows = doc ? [["Realm canister", doc.realm], ["Kind", doc.kind], ["Subject", doc.subject],
       ["Signed at", typeof doc.signed_at === "number" ? new Date(doc.signed_at * 1000).toISOString() : ""],
       ["Public key", doc.key.public_key], ["Key", `${doc.key.algorithm}, ${doc.key.name}, path ${doc.key.path}`],
-      ["Verification code", proof.code], ["Digest", proof.digest], ...(asked ? [["Asked", asked]] : [])] : [];
+      ["Verification code", proof.code], ["Digest", proof.digest], ...(replica ? [["Replica asked", replica]] : [])] : [];
     for (const [name, value] of rows) { facts.append(node("dt", name), node("dd", String(value))); }
 
     const list = $("checks");
@@ -630,7 +635,7 @@ if (typeof document !== "undefined") {
     const button = $("verify");
     button.disabled = true;
     try {
-      const { proof, canister: from, requested, host: asked } = await load();
+      const { proof, canister: from, requested, host: replica } = await load();
       if (!proof) throw new Error("there is no proof in what was given");
       const result = await verifyProof(proof, { canister: from, requested, expectedKey: $("expected").value });
       if (result.shaped && from) {
@@ -643,7 +648,7 @@ if (typeof document !== "undefined") {
             : { status: "note", name: CHAIN_CHECK, detail: `not checked: ${error.message}` });
         }
       }
-      show(result, proof, from, asked);
+      show(result, proof, from, replica);
     } catch (error) {
       $("result").hidden = false;
       $("verdict").className = "verdict fail";
@@ -683,11 +688,11 @@ if (typeof document !== "undefined") {
   $("verify").addEventListener("click", run);
   $("walk").addEventListener("click", walk);
 
-  const asked = requestFromUrl(location.search);
+  const fromLink = requestFromUrl(location.search);
   for (const name of ["canister", "code", "kind", "subject"]) {
-    if (asked[name]) $(name).value = asked[name];
+    if (fromLink[name]) $(name).value = fromLink[name];
   }
-  if (asked.canister && (asked.code || (asked.kind && asked.subject))) run();
+  if (fromLink.canister && (fromLink.code || (fromLink.kind && fromLink.subject))) run();
 }
 </script>
 </body>

@@ -13,7 +13,7 @@ import pytest
 from ic.candid import Types, decode, encode
 from ic.principal import Principal
 
-from verify_page import NODE, Signer, canonical as canonical_text, code, issue_body, page
+from verify_page import NODE, PAGE, Signer, canonical as canonical_text, code, issue_body, page
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="no node")
 
@@ -118,18 +118,30 @@ def test_a_proof_whose_own_signature_or_binding_fails_is_red():
         assert said["level"] == "fail" and said["title"].startswith("Not valid"), options
 
 
-def test_a_chain_link_that_alone_fails_is_amber_with_its_own_words_and_not_red():
+BROKEN_LINK = {"status": "fail", "name": "Link to the previous document", "detail": "x"}
+
+
+def test_a_chain_link_that_alone_fails_is_amber_and_never_reads_stronger_than_an_intact_chain():
     signer, proof = one()
-    result = page("verifyProof", proof, {"canister": CANISTER, "expectedKey": signer.public.hex()})
-    assert page("verdictOf", result)["level"] == "pass"  # the document, on its own, is right and its key is the reader's
-    broken = {**result, "checks": result["checks"] + [{"status": "fail", "name": "Link to the previous document", "detail": "x"}]}
-    said = page("verdictOf", broken)
-    assert said["level"] == "note" and "signed by the realm, but the document it follows could not be confirmed" in said["title"]
-    assert "withholds" in said["detail"]
+    checked = page("verifyProof", proof, {"canister": CANISTER, "expectedKey": signer.public.hex()})
+    assert page("verdictOf", checked)["level"] == "pass"  # the document, on its own, is right and its key is the reader's
+    said = page("verdictOf", {**checked, "checks": checked["checks"] + [BROKEN_LINK]})
+    assert said["level"] == "note" and "withholds" in said["detail"]
+    assert said["title"] == "Signed by the key you derived for this canister, but the document it follows could not be confirmed"
+    # With the key unchecked, the headline is no stronger than the one of an intact chain, which does not name the realm
+    unchecked = page("verifyProof", proof, {"canister": CANISTER})
+    intact = page("verdictOf", unchecked)
+    broken = page("verdictOf", {**unchecked, "checks": unchecked["checks"] + [BROKEN_LINK]})
+    assert intact["level"] == broken["level"] == "note"
+    assert broken["title"] == "The signature is valid, but the key is not yet checked, and the document it follows could not be confirmed"
+    assert "signed by the realm" not in (broken["title"] + broken["detail"]).lower()
     # ...while a document that fails itself stays red, whatever its chain link says
     ruined = page("verifyProof", {**proof, "signature": "00" * 64}, {"canister": CANISTER})
-    ruined["checks"].append({"status": "fail", "name": "Link to the previous document", "detail": "x"})
-    assert page("verdictOf", ruined)["level"] == "fail"
+    assert page("verdictOf", {**ruined, "checks": ruined["checks"] + [BROKEN_LINK]})["level"] == "fail"
+
+
+def test_the_page_never_says_the_realm_signed_something():
+    assert "signed by the realm" not in PAGE.read_text().lower()
 
 
 # ---- What the page will not trust from a link, and what it will not put in a command

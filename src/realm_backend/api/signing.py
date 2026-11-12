@@ -20,6 +20,7 @@ def signature_proof(c, args):
         kind, subject = args.get("kind"), args.get("subject")
         if not isinstance(kind, str) or not isinstance(subject, str):
             raise Fail("give the kind and subject of the document, or its verification code")
+        signing.path(kind)  # a kind that is no name is refused, and is not echoed
     proof = signing.proof(kind, subject)
     if proof is None:
         raise NotFound(f"no signed document {kind[:40]}:{subject[:40]}")

@@ -15,7 +15,7 @@ the same root need not be the same.
 import hashlib
 import json
 
-from core import chain
+from core import chain, ic_keys
 from core.candid import Reader, idl_hash
 from core.db import Fail, NotFound, first
 from ggg import Realm, SignedDocument
@@ -29,7 +29,6 @@ VERSION = 1  # of the canonical form
 # attached is refused with the fee in the error.
 FEES = {"test_key_1": 10_000_000_000}
 DEAREST_FEE = 26_153_846_153
-TEST_NETWORKS = ("test", "staging", "demo")  # with local, the networks that use a test key (as api.quarters sees them)
 KIND_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789-"  # ASCII only: a kind is a path of the key and a part of an id
 BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"  # RFC 4648: the canister's base64 has no b32encode
 CODE_BYTES = 10  # of the digest that the verification code keeps: 80 bits, 16 digits in base32
@@ -37,14 +36,6 @@ STATE = "signing"  # in Realm.manifest_data: {kind: {"head": {"subject", "digest
 
 
 # ---- The key
-
-
-def key_name():
-    """The IC's key this realm signs with: its own on a local replica, a test key on a test network, else ``key_1``."""
-    network = Realm["1"].network
-    if network == "local":
-        return "dfx_test_key"
-    return "test_key_1" if network in TEST_NETWORKS else "key_1"
 
 
 def attached(name):
@@ -205,9 +196,11 @@ def sign(kind, documents, chained, fresh):
     known, and the batch is dropped if it was overtaken while the calls were out, so that each document has one
     signature. A generator."""
     path(kind)  # a kind that is no name is refused before anything else
-    previous, name = head(kind), key_name()
+    previous, name = head(kind), ic_keys.key_name()
     if any(SignedDocument[document_id(kind, subject)] for subject, _ in documents):
         raise Fail(f"a document of {kind} is signed already")
+    # The balance, not what is spendable above the freezing reserve: a call that would take the realm below the reserve
+    # still traps, and nothing is recorded of it (the realm's balance is topped up, as for any other call it makes).
     if chain.cycles() < attached(name):
         raise Fail(f"the realm has {chain.cycles()} cycles and a signature with {name} needs {attached(name)} attached")
     key = yield from public_key(kind, name)

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 import pytest
 from network import Network
+from pocket_ic import SubnetConfig
 from verify_page import NODE, code, page, reference_valid
 
 DAY = 86400
@@ -34,7 +35,7 @@ BURN = {}  # what an idle realm costs a second, measured in test_b: storage is p
 
 @pytest.fixture(scope="module")
 def net(wasm_of, people):
-    return Network(wasm_of("production"), people, keys=True)
+    return Network(wasm_of("production"), people, SubnetConfig(application=1, fiduciary=True))
 
 
 @pytest.fixture(scope="module")
@@ -250,7 +251,7 @@ def test_g_each_network_names_its_own_key_and_an_ic_realm_signs_with_key_1(capit
              "ic": "key_1", "": "key_1"}
     for network, name in names.items():
         shell(capital, f"from ggg import Realm\nRealm['1'].network = '{network}'")
-        assert shell(capital, "from core import signing\nprint(signing.key_name())").strip() == name
+        assert shell(capital, "from core import ic_keys\nprint(ic_keys.key_name())").strip() == name
     shell(capital, "from ggg import Realm\nRealm['1'].network = 'ic'")  # nothing is signed meanwhile: no time passed
     assert document(proof_of(capital, closed_days(capital)[-1]))["key"]["name"] == "key_1"
 

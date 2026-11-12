@@ -222,6 +222,13 @@ def test_the_refusal_does_not_echo_what_it_was_given_beyond_a_few_characters():
     assert out["kind"] == "not_found" and len(out["error"]) < 120
 
 
+@pytest.mark.parametrize("kind", ["certificate:a", "Certificate", "a b", "é" * 3000, "<script>"])
+def test_a_kind_that_is_no_name_is_refused_and_not_echoed(kind):
+    world.build()
+    out = call("signature_proof", "alice", kind=kind, subject="C-1")
+    assert out["kind"] == "invalid_argument" and "lower-case letters" in out["error"] and kind not in out["error"]
+
+
 def test_the_codes_of_two_documents_differ_and_a_code_is_sixteen_base32_digits_in_four_groups():
     world.build()
     management()

@@ -138,7 +138,8 @@ runs from disk. A sheet's QR code points to it with `?canister=…&code=…`.
 1 XDR = 1 trillion cycles = $1.366 (docs, 22 May 2026). `schnorr_public_key` is free. A call with too few cycles attached is
 rejected and refunded, and the error names the fee. The realm checks its balance first, and a realm short of cycles says what
 it lacks in `signing_failures` and asks for nothing. It attaches its key's fee and half as much again (15B for `test_key_1`,
-39.2B for the others) and gets the unused part back. Batching makes the
+39.2B for the others) and gets the unused part back. The check is of the balance, not of what is spendable above the
+freezing reserve: a call that would take the realm below the reserve still traps, and nothing is recorded of it. Batching makes the
 signature cost the same for one document or many: on PocketIC a day's signature cost 26.1B cycles, and 40 days stopped cost
 two. An idle realm there burns about 0.7B cycles a day, so the signature is the larger part of a realm's daily cost.
 In instructions (PocketIC): reading a signed issue 10.5M, writing one issue's text and digest 19M, the tree of a month of
