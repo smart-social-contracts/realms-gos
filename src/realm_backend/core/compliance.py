@@ -59,10 +59,11 @@ def after(releases, layer):
 
 
 def went_back(releases, layer, by):
-    """Whether the source ``by`` (the layer a record is the publisher's own record of), whose record lists ``releases`` of
-    the layer, vouched for what the realm runs of it and now lists only older ones: the source went back (it reverted a
-    layer it relays, §11.6). The record does not list what the realm runs, and everything it lists was published strictly
-    earlier than that, which the realm kept the time of to say so: a tie, or a time not kept, is no step back."""
+    """Whether the source ``by`` (the layer a record is the publisher's own record of), whose record lists ``releases``
+    of the layer, vouched for what the realm runs of it and now lists only older ones: the source went back (it
+    reverted a layer it relays, §11.6). The record does not list what the realm runs, and everything it lists was
+    published strictly earlier than that, which the realm kept the time of to say so: a tie, or a time not kept, is no
+    step back."""
     published = None if layer is None else layer.get("published")
     return (bool(by) and published is not None and layer.get("vouched_by") == by and bool(releases)
             and layer["version"] not in [release["version"] for release in releases]
@@ -87,8 +88,8 @@ def judged(record, running, now):
 
 def installable(record, running):
     """The newest release of each layer the ``record`` lists that comes after what the realm runs of it: what "Propose
-    install" offers (§11.3), each as ``{source, version, effective_from}``. Where the source went back (``went_back``) it
-    offers the release the source now lists, marked ``step_back``: an older release than the one the realm runs."""
+    install" offers (§11.3), each as ``{source, version, effective_from}``. Where the source went back (``went_back``)
+    it offers the release the source now lists, marked ``step_back``: an older release than the one the realm runs."""
     offered = []
     for source, releases in by_layer(record).items():
         layer = running.get(source)
@@ -102,7 +103,8 @@ def installable(record, running):
 
 def notes(record, running):
     """What a flag does not say about the layers the ``record`` lists and the realm runs under a version the record
-    does not list (§11.6): ``{source, kind, runs, lists}`` each, ``lists`` the newest release the record has of the layer.
+    does not list (§11.6): ``{source, kind, runs, lists}`` each, ``lists`` the newest release the record has of the
+    layer.
     ``kind`` is ``went_back`` when the source vouched for what the realm runs and has since gone back to an older
     release (``went_back``), else ``unlisted``: a version this source never listed, or no longer lists, and no listed
     release takes effect after it. A realm that is behind a layer has no note for it."""
@@ -111,8 +113,9 @@ def notes(record, running):
         layer = running.get(source)
         if layer is None or layer["version"] in [release["version"] for release in releases] or after(releases, layer):
             continue
-        found.append({"source": source, "kind": "went_back" if went_back(releases, layer, record.get("source")) else "unlisted",
-                      "runs": layer["version"], "lists": releases[-1]["version"]})
+        back = went_back(releases, layer, record.get("source"))
+        found.append({"source": source, "kind": "went_back" if back else "unlisted", "runs": layer["version"],
+                      "lists": releases[-1]["version"]})
     return found
 
 

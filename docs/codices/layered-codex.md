@@ -1311,7 +1311,8 @@ never needs the record, except to check compliance (§11).
 New entities, beside today's `Codex` ([`api/codex.py`](../../src/realm_backend/api/codex.py)):
 
 ```
-LayeredCodex { id; layers; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, published, route, fetched_at, url, size}};
+LayeredCodex { id; layers; layer_paths;
+           chapters: {chapter id → {source, version, sha256, vouched_by, published, route, fetched_at, url, size}};
            previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal;
            voting_rule (the realm's rule and voting window when it became active, §10.1) }
 ChapterSource { sha256 (key); source text }            the downloaded bytes, stored once
@@ -1942,9 +1943,11 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
      `non_compliant` for it.
 
    `installable` offers only releases that come after what the realm runs (and, for a source that went back, the one
-   step back). A layer installed before the time was kept has none: if the record lists its version, the record's order
-   places it as above; if not, it cannot be placed, and the realm is neither behind nor offered anything for it (only
-   the note), until an install of that layer records its time.
+   step back). A layer installed before the time was kept has none on its chapters: the realm takes it from the
+   releases its checks found (`codex_releases_found` logs every release a check reads in a record, with its `published`
+   and `effective_from`), so a relay that moves forward is still behind on an old install; if the record lists its
+   version, the record's order places it as above; if no check ever found it either, it cannot be placed, and the realm
+   is neither behind nor offered anything for it (only the note), until an install of that layer records its time.
 
    It is also recomputed right after every install and every revert, from the record the last check
    kept (a record that could not be read stays `unknown` until a check reads it). It is worked out

@@ -382,9 +382,12 @@ def codex_status(c, args):
     journal could not record (the change it was for, when, and why), or None. ``signing_failures`` is, for each kind of
     document the realm signs (the journal's issues, so far), the last batch it could not sign (the subjects, when, and
     why), if there is one. ``sync_sources`` is what the last check
-    of each active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the realm's
-    ``compliance`` against its record, ``checked_at``, the ``error`` that left it ``unknown`` ("" for none) and the
-    releases ``installable`` from it; ``check`` the
+    of each active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the ``layer``
+    its record is the own record of (what a codex's ``vouched_by`` names; "" before a check has read it), the realm's
+    ``compliance`` against its record, ``checked_at``, the ``error`` that left it ``unknown`` ("" for none), the
+    releases ``installable`` from it (``step_back`` marks one older than the release the realm runs: the source went
+    back to it) and the ``notes`` on the layers the realm runs and the record does not list (``{source, kind, runs,
+    lists}``, ``kind`` ``unlisted`` or ``went_back``, §11.6); ``check`` the
     ``interval`` of the checks, in hours, and when the next is ``due`` (0 before the realm's first sync source)."""
     from api import sync_checks  # it imports the install task, which imports this module
 

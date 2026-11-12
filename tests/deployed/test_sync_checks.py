@@ -199,7 +199,8 @@ def test_a_source_that_goes_back_is_followed_never_behind_and_its_older_release_
     """The town runs 2.0.0, whose publication time it kept with the layer; the source then relays 1.0.0 only, which was
     published earlier: the flag stays compliant, the note says the source went back, and "Propose install" of 1.0.0 is a
     step back (§11.6). Released together with 2.0.0 (a tie), 1.0.0 would be a note only."""
-    current = next(r for r in source.ok("legislation_releases", None, query=True)["releases"] if r["source"] == "arcadia")
+    releases = source.ok("legislation_releases", None, query=True)["releases"]
+    current = next(r for r in releases if r["source"] == "arcadia")
     assert current["version"] == "2.0.0"
     chapters = status(town)["codex"]["chapters"]
     assert {c["published"] for k, c in chapters.items() if k.startswith("arcadia/")} == {current["published"]}

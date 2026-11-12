@@ -662,7 +662,8 @@ def own_layer(current, realm):
 def installed_layers(current, realm):
     """The layers from above that the active codex runs, top to bottom, as it runs them: each ``{source, version,
     published, chapters, calendar, vouched_by}``, the release it installed, when its publisher published it (None for a
-    layer installed before that was kept) and the source whose record vouched for it. None under a legacy codex or none."""
+    layer installed before that was kept) and the source whose record vouched for it. None under a legacy codex or
+    none."""
     if not isinstance(current, LayeredCodex):
         return []
     layers = {}
@@ -719,9 +720,10 @@ def entries_of(job, planned, vouched_by, listed):
 
 def published_times(job, before):
     """When the publisher published the release of each layer from above that the new codex runs, ``{(source, version):
-    seconds}``: the release this job installs, as the record that vouches for it lists it (every record entry carries it,
-    and a relay copies it), and the releases the active codex already runs, as it kept them. A layer installed before the
-    time was kept has none, which compliance reads as a version it cannot place (§11.6)."""
+    seconds}``: the release this job installs, as the record that vouches for it lists it (every record entry carries
+    it, and a relay copies it), and the releases the active codex already runs, as it kept them. A layer installed
+    before the time was kept has none: ``sync_checks.running_layers`` looks for it among the releases a check found, and
+    compliance reads a version it cannot place as no reason to be behind (§11.6)."""
     times = {(entry["source"], entry["version"]): entry.get("published") for entry in before.values()}
     vouching = job.staged.get("layers", {}).get("vouching")
     if vouching is not None:

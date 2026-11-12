@@ -151,9 +151,23 @@ def layers_run():
     return installs.installed_layers(codex.active(), store.own_source())
 
 
+def running_layers():
+    """The layers from above the realm runs, by source (``layers_run``), each with the time its publisher published the
+    release (``published``): the one the codex kept at install, else, for a codex installed before it was kept, the one
+    a check logged when it read that release in a record (``FoundRelease``, ``keep_found``), else None: a layer that no
+    record can place against the releases it lists (core.compliance, §11.6)."""
+    running = {}
+    for layer in layers_run():
+        published, found = layer["published"], FoundRelease[f"{layer['source']}@{layer['version']}"]
+        if published is None and found is not None:
+            published = found.published
+        running[layer["source"]] = {**layer, "published": published}
+    return running
+
+
 def judge(link, record):
     """The realm's flag against ``record``, the record of ``link``'s sync source, and what it could install from it."""
-    running = {layer["source"]: layer for layer in layers_run()}
+    running = running_layers()
     link.compliance = compliance.valid(compliance.judged(record, running, chain.now()))
     link.installable = compliance.installable(record, running)
     link.notes = compliance.notes(record, running)

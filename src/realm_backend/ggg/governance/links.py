@@ -29,8 +29,10 @@ class SyncSource(Row):
     compliance = String(default='"unknown"')  # the flag as JSON text (core.compliance)
     checked_at = Integer(default=0)
     check_error = String(default="")  # why the last check found no flag, "" when it found one
-    installable = Json([])  # [{source, version, effective_from}], and step_back: true for a release older than the one it runs
-    notes = Json([])  # [{source, kind: unlisted | went_back, runs, lists}]: a layer the realm runs that this record does not list
+    # [{source, version, effective_from}], and step_back: true for a release older than the one the realm runs
+    installable = Json([])
+    # [{source, kind: unlisted | went_back, runs, lists}]: a layer the realm runs that this record does not list
+    notes = Json([])
     layer = String(default="")  # the source id of the record's own layer, which "vouched for" in a codex names
 
 
