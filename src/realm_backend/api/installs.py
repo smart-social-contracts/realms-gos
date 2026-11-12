@@ -1,13 +1,16 @@
 """The install task of a layered codex (docs/codices/layered-codex.md §9.2).
 
-``codex_install`` with a change list (GGG's ``Code { url; checksum }``) starts an ``InstallJob`` and returns. A timer
-then runs one step per message:
+``codex_install`` with a change list (GGG's ``Code { url; checksum }``), or with a release from a sync source (GGG's
+``CodexSource.Release``, the "Propose install" of §11.4), starts an ``InstallJob`` and returns. A timer then runs one
+step per message:
 
-1. ``fetch_change_list``: the change list by HTTPS outcall, kept under the proposal's checksum;
+1. ``fetch_change_list``: the change list by HTTPS outcall, kept under the proposal's checksum. For a release there is
+   none to fetch: the job reads the records of the sync sources and builds it from the one that vouches for the
+   release (``build_release_list``), which leaves the realm's own layer unchanged;
 2. ``check_change_list``: its rules, by itself and against this realm (core.change_list.apply);
-3. ``fetch_chapters``: first, for a release, the records of the sync sources are read (core.records) and the one that
-   vouches for it chosen; then each chapter not stored yet, one per message, from the capital of the sync source that
-   vouches for its layer or from its URL or a mirror, kept under its checksum;
+3. ``fetch_chapters``: first, for a change list that brings a release, the records of the sync sources are read
+   (core.records) and the one that vouches for it chosen; then each chapter not stored yet, one per message, from the
+   capital of the sync source that vouches for its layer or from its URL or a mirror, kept under its checksum;
 4. ``check_sources``: the chapters against the records of the sync sources (core.change_list.vouch);
 5. ``build``: the layer paths (``plan``), every chapter loaded and checked in a fresh sandbox, the Cedar its forbids
    become validated by the realm's engine (core.legislation.build), then the codex row, ``pending``;
@@ -38,9 +41,9 @@ from core import change_list
 from core import layered_codex as store
 from core import legislation
 from core import records
-from core.db import JSON_MAX, Conflict, Fail, each, find, next_id, view
+from core.db import JSON_MAX, Conflict, Fail, each, find, first, next_id, view
 from core.op import GENERATOR, audit, op
-from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal
+from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal, Quarter
 
 STEPS = ("fetch_change_list", "check_change_list", "fetch_chapters", "check_sources", "build", "switch")
 WAIT = "wait"  # staged: the pending codex waits for its proposal's effective_at, which switches it
@@ -52,6 +55,13 @@ MAX_CHANGE_LIST = 64 * 1024
 MAX_CHAPTER = store.MAX_CHAPTER
 HEX = "0123456789abcdef"
 LEFT = "this realm is no longer a quarter of the capital that announced the codex"
+NO_OWN_LAYER = ("this realm has no layer of its own yet: its first layered codex names it, with a change list; a "
+                "release is installed after that")
+# A quarter stages what its capital announces: the change list, by its checksum, and the layers the capital staged. A
+# release built from a record has no change list to announce, so a federation installs a release with one.
+FEDERATED = "a federation installs a release with a change list: its quarters cannot stage one built from a record"
+NO_ROUTE = ("no URL, and no realm vouches for it: a release that a stand-in record vouches for is installed with a change "
+            "list that gives its chapters' URLs")
 
 
 def job_of(proposal):
@@ -62,15 +72,44 @@ def job_of(proposal):
     return found
 
 
-def start(proposal, url, checksum):
-    """A new job for the change list at ``url`` with ``checksum`` (``sha256:<hex>``), its first step and its
-    24-hour limit armed. Refused while another job runs or is paused."""
-    if not (isinstance(checksum, str) and checksum.startswith("sha256:") and len(checksum) == 71
-            and all(ch in HEX for ch in checksum[7:])):
-        raise Fail("checksum is sha256:<64 hex digits>")
-    if not isinstance(url, str) or not url.startswith("https://"):
-        raise Fail("the change list is fetched over https")
-    return launch(store.start_job(proposal, {"url": url, "checksum": checksum}))
+def release_of(args):
+    """The release ``{source, version}`` that ``args`` name, if this realm can build its change list: one it could keep
+    as a layer from above, in a realm that has a layer of its own (which the list keeps unchanged) and is no
+    federation. Asked when the install is filed and again when it starts."""
+    source, version = args["source"], args.get("version")
+    if not isinstance(version, str) or not 0 < len(version) <= records.VERSION_MAX:
+        raise Fail(f"version is 1 to {records.VERSION_MAX} characters")
+    change_list.source_name(source)
+    links.check_from_above(source, version)
+    if store.own_source() is None:
+        raise Fail(NO_OWN_LAYER)
+    if quarters.federated() or first(Quarter, "status", "active") is not None:
+        raise Conflict(FEDERATED)
+    return {"source": source, "version": version}
+
+
+def named_change(args):
+    """What the job of ``codex_install``'s ``args`` installs, as the job keeps it: ``{release}``, or ``{url, checksum}``
+    of a change list."""
+    if change_list.names_release(args):
+        return {"release": {"source": args["source"], "version": args.get("version")}}
+    return {"url": args.get("url", ""), "checksum": args["checksum"]}
+
+
+def start(proposal, args):
+    """A new job for ``args``: a change list at ``url`` with its ``checksum`` (``sha256:<hex>``), or a release's
+    ``source`` and ``version``; its first step and its 24-hour limit armed. Refused while another job runs or is
+    paused."""
+    if change_list.names_release(args):
+        release_of(args)
+    else:
+        checksum, url = args["checksum"], args.get("url", "")
+        if not (isinstance(checksum, str) and checksum.startswith("sha256:") and len(checksum) == 71
+                and all(ch in HEX for ch in checksum[7:])):
+            raise Fail("checksum is sha256:<64 hex digits>")
+        if not isinstance(url, str) or not url.startswith("https://"):
+            raise Fail("the change list is fetched over https")
+    return launch(store.start_job(proposal, named_change(args)))
 
 
 def launch(job):
@@ -124,11 +163,11 @@ def watch(job_id, delay):
 
 
 def begin(c, args):
-    """``codex_install`` with a change list ``url`` and its ``checksum``. For the scheduled proposal whose job staged
-    the codex, this is the switch at its time; otherwise a job starts and the call returns ``job``."""
+    """``codex_install`` with a change list ``url`` and its ``checksum``, or a release. For the scheduled proposal whose
+    job staged the codex, this is the switch at its time; otherwise a job starts and the call returns ``job``."""
     job = job_of(c.proposal) if c.proposal else None
     if job is None:
-        return {"job": start(c.proposal, args["url"], args["checksum"]).id}
+        return {"job": start(c.proposal, args).id}
     if job.status == "done":
         return {"codex": job.staged.get("codex"), "job": job.id}
     if job.status == "running" and job.step in (WAIT, "switch"):
@@ -154,14 +193,13 @@ def prepare(proposal):
     A job that cannot start (another install is running) is recorded as failed, so the switch says why."""
     action = proposal.action or {}
     args = action.get("args") or {}
-    if action.get("op") != "codex_install" or "checksum" not in args:
+    if action.get("op") != "codex_install" or not ("checksum" in args or change_list.names_release(args)):
         return
     try:
-        start(proposal.id, args.get("url", ""), args["checksum"])
+        start(proposal.id, args)
     except Fail as e:
-        InstallJob(id=next_id(InstallJob, "J"), proposal=proposal.id, change_list={"url": args.get("url", ""),
-                   "checksum": args["checksum"]}, status="failed", error=str(e), started_at=chain.now(),
-                   finished_at=chain.now())
+        InstallJob(id=next_id(InstallJob, "J"), proposal=proposal.id, change_list=named_change(args), status="failed",
+                   error=str(e), started_at=chain.now(), finished_at=chain.now())
 
 
 def discard(proposal):
@@ -258,7 +296,10 @@ def fail(job, reason):
 
 
 def fetch_change_list(job):
-    """Step 1: the change list's bytes, unless they are stored already."""
+    """Step 1: the change list's bytes, unless they are stored already; for a release, the list built."""
+    if "release" in job.change_list:
+        yield from build_release_list(job)
+        return "check_change_list" if InstallJob[job.id].status == "running" else None
     url, checksum = job.change_list["url"], job.change_list["checksum"]
     if ChapterSource[checksum] is None:
         if announced(job):
@@ -281,6 +322,22 @@ def receive_change_list(job, status, body):
         store.store_chapter(job.change_list["checksum"], text)
     except Fail as e:
         raise Fail(f"the change list at {url}: {e}")
+
+
+def build_release_list(job):
+    """Step 1 of a release install: the records of the sync sources read, and the change list built from the one that
+    vouches for the release (core.change_list.of_release), staged with the layers they give, so that step 3 reads no
+    record again. A generator."""
+    release = release_of(job.change_list["release"])
+    found = yield from records.read_active_records()
+    job = InstallJob[job.id]
+    if job.status != "running":
+        return
+    current = codex.active()
+    vouching = change_list.vouching(found, release)
+    job.staged = {**job.staged, "listed": change_list.of_release(store.own_source(), current.id if current else None,
+                                                                   vouching["release"])}
+    stage_layers(job, found)
 
 
 def check_change_list(job):
@@ -363,7 +420,7 @@ def fetch_chapter(job, entry):
             return
         except Fail as e:
             refusals.append(str(e))
-    raise Fail(f"{entry['chapter']}: " + ("; ".join(refusals) or "no URL, and no realm vouches for it"))
+    raise Fail(f"{entry['chapter']}: " + ("; ".join(refusals) or NO_ROUTE))
 
 
 def vouching_capital(job, entry):
@@ -476,7 +533,8 @@ def build(job):
     job.staged = {**job.staged, "codex": codex_id, "was": was, "replaces": listed["replaces"]}
     from api import propagation  # it imports this module
 
-    propagation.announce(job)
+    if "release" not in job.change_list:  # a release is installed only where no quarter stages it (``release_of``)
+        propagation.announce(job)
     if when > chain.now():
         return WAIT
     return "confirm" if announced(job) else "switch"
@@ -563,9 +621,13 @@ RUN = {"fetch_change_list": fetch_change_list, "check_change_list": check_change
 
 
 def prepared(job):
-    """The stored change list, parsed and applied to this realm: ``(change list, the realm's source id, its own layer
-    after the change)``. Steps 2 to 5 start here; it reads only stored rows, so it answers the same every time."""
-    listed = change_list.parse(ChapterSource[job.change_list["checksum"]].source)
+    """The stored change list, parsed, or the one a release install built, applied to this realm: ``(change list, the
+    realm's source id, its own layer after the change)``. Steps 2 to 5 start here; it reads only stored rows, so it
+    answers the same every time."""
+    if "release" in job.change_list:
+        listed = job.staged["listed"]
+    else:
+        listed = change_list.parse(ChapterSource[job.change_list["checksum"]].source)
     current, realm = codex.active(), store.own_source()
     realm, own = change_list.apply(listed, realm, current.id if current else None, own_layer(current, realm))
     return listed, realm, own
@@ -599,8 +661,9 @@ def own_layer(current, realm):
 
 def installed_layers(current, realm):
     """The layers from above that the active codex runs, top to bottom, as it runs them: each ``{source, version,
-    chapters, calendar, vouched_by}``, the release it installed and the source whose record vouched for it. None under
-    a legacy codex or none."""
+    published, chapters, calendar, vouched_by}``, the release it installed, when its publisher published it (None for a
+    layer installed before that was kept) and the source whose record vouched for it. None under a legacy codex or
+    none."""
     if not isinstance(current, LayeredCodex):
         return []
     layers = {}
@@ -609,7 +672,8 @@ def installed_layers(current, realm):
         if source == realm:
             continue
         layer = layers.setdefault(source, {"source": source, "version": entry["version"], "chapters": {},
-                                           "calendar": None, "vouched_by": entry["vouched_by"]})
+                                           "calendar": None, "vouched_by": entry["vouched_by"],
+                                           "published": entry.get("published")})
         if domain == change_list.CALENDAR:
             layer["calendar"] = entry["sha256"]
         else:
@@ -627,11 +691,13 @@ def activates_at_of(job):
 
 
 def entries_of(job, planned, vouched_by, listed):
-    """What the codex row keeps per chapter (§8, §9.1): its source, version and checksum, who vouched for it, and
-    how and when its bytes came: fetched by this job, as the active codex already had them, or found stored."""
+    """What the codex row keeps per chapter (§8, §9.1): its source, version and checksum, who vouched for it, when the
+    release it belongs to was published (``published``: compliance orders releases by it, §11.6), and how and when its
+    bytes came: fetched by this job, as the active codex already had them, or found stored."""
     current = codex.active()
     before = current.chapters if isinstance(current, LayeredCodex) else {}
     urls = {entry["chapter"]: entry for entry in listed["set"]}
+    published = published_times(job, before)
     fetched_now = job.staged.get("fetched", {})
     entries = {}
     for chapter, item in change_list.named(planned):
@@ -647,7 +713,23 @@ def entries_of(job, planned, vouched_by, listed):
             came = {"route": "stored", "url": "", "fetched_at": chain.now(), "size": stored_size(sha256)}
         entries[chapter] = {"source": item["source"], "version": item["version"], "sha256": sha256,
                             "vouched_by": vouched_by[chapter], **came}
+        if published.get((item["source"], item["version"])) is not None:
+            entries[chapter]["published"] = published[(item["source"], item["version"])]
     return entries
+
+
+def published_times(job, before):
+    """When the publisher published the release of each layer from above that the new codex runs, ``{(source, version):
+    seconds}``: the release this job installs, as the record that vouches for it lists it (every record entry carries
+    it, and a relay copies it), and the releases the active codex already runs, as it kept them. A layer installed
+    before the time was kept has none: ``sync_checks.running_layers`` looks for it among the releases a check found, and
+    compliance reads a version it cannot place as no reason to be behind (§11.6)."""
+    times = {(entry["source"], entry["version"]): entry.get("published") for entry in before.values()}
+    vouching = job.staged.get("layers", {}).get("vouching")
+    if vouching is not None:
+        release = vouching["release"]
+        times[(release["source"], release["version"])] = release["published"]
+    return times
 
 
 def stored_size(sha256):

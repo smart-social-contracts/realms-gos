@@ -12,7 +12,7 @@ from core.db import Fail, Forbidden
 OPS = {}
 MODULES = ("actions", "assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "installs",
            "journal", "justice", "licenses", "links", "members", "notifications", "orgs", "procurement", "propagation",
-           "proposals", "quarters", "requests", "setup", "tasks", "taxes", "treasury")
+           "proposals", "quarters", "requests", "setup", "signing", "sweeps", "sync_checks", "tasks", "taxes", "treasury")
 SECRET = {"code", "private_data", "payload", "ciphertext"}
 # Operations that run another operation, named by ``method``, for a member: a log hides that operation's secrets too.
 FORWARDING = ("call_for", "read_for")
@@ -51,8 +51,10 @@ def op(perm, read=False, delegable=False, governed=None, signing=False, parties=
     perm_for(args) -> the permission this call needs, when it depends on the arguments (``perm`` otherwise).
     returns -> the key of the reply holding the model's result: the record (by id), the list of a page, the value,
     or for a governed operation the id of the record it created. Without it, the reply itself is the result.
-    check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm. It runs
-    before ``governed`` turns the call into a proposal, so a call that cannot succeed files nothing.
+    check(args) -> raises Fail for arguments the operation would refuse whatever the state of the realm, or by a state
+    of it, such as a setting a quarter's capital keeps in sync. It runs before ``governed`` turns the call into a
+    proposal, so a call that cannot succeed files nothing; the operation refuses again when it runs, since the state can
+    change during a vote.
     delegable -> only for an operation that GGG's tiers (ggg_delegation) and core.poa.OWN do not classify, a test's: a
     classified operation is delegable when its tier is direct.
     private -> the arguments that hold personal data or key material: the audit log never keeps them (I-ALL-5).
@@ -240,12 +242,24 @@ def oldest_event():
     return Event[str(max(1, Event.max_id() - EVENTS_KEPT + 1))]
 
 
+_synchronous = []  # the generators ``run`` is driving now: nothing in them can wait for another canister
+
+
 def run(gen):
+    _synchronous.append(gen)
     try:
         next(gen)
     except StopIteration as done:
         return done.value
+    finally:
+        _synchronous.pop()
     raise RuntimeError("a query cannot call other canisters")
+
+
+def awaitable():
+    """Whether the message running now may call other canisters: not while ``run`` drives it, as it does a query, the
+    shell and an extension's calls."""
+    return not _synchronous
 
 
 def on_behalf(user, by, args):

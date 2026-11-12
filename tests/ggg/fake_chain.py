@@ -20,7 +20,7 @@ class Trap(BaseException):
 def reset():
     state.clear()
     state.update(caller=ANONYMOUS, controllers={"ctl"}, now=1_790_000_000, timers=[], calls=[], replies={}, peers={},
-                 web={})
+                 web={}, attached=[], balance=5_000_000_000_000)
 
 
 def caller():
@@ -62,7 +62,7 @@ def candid_decode(data):
 
 
 def cycles():
-    return 5_000_000_000_000
+    return state["balance"]
 
 
 def memory():
@@ -149,13 +149,31 @@ def send(cid, method, recorded, given, default):
 
 
 def call(cid, method, candid="()", cycles=0):
+    state["attached"].append((cid, method, cycles))
     return send(cid, method, candid, candid, "()")
     yield
 
 
 def call_text(cid, method, arg=None):
+    if cid == SELF and method == "hook_effects":
+        return (yield from own_hook_effects(arg))
     return send(cid, method, arg, arg, "")
     yield
+
+
+def own_hook_effects(effects):
+    """The realm's own ``hook_effects`` (main.py), called by the realm: a trap in it, which ends only that message,
+    is the reject its caller sees, as ``Peer`` makes of a peer's."""
+    from core import legislation
+
+    state["calls"].append((SELF, "hook_effects", effects))
+    caller, state["caller"] = state["caller"], SELF
+    try:
+        return (yield from legislation.hook_effects(effects))
+    except Trap as t:
+        raise Exception(f"hook_effects on {SELF} failed: Canister {SELF} trapped explicitly: {t}")
+    finally:
+        state["caller"] = caller
 
 
 def call_op(cid, name, args):

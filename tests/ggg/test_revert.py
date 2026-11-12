@@ -545,8 +545,9 @@ def test_the_team_is_told_of_a_methods_first_failure_and_again_after_a_day_if_it
     call("t_act", what="break the water")
     title = "The codex fails: check_t_act of x/town/water.py"
     assert inbox() == [(title, "codex.failing")] and inbox("carla") == inbox()
-    body = ok("notification_list", "bob", recipient="Department:IT")["notifications"][0]["body"]
-    assert body == "ValueError: no water here"
+    first = ok("notification_list", "bob", recipient="Department:IT")["notifications"][0]
+    assert first["body"] == "ValueError: no water here"
+    assert first["href"] == "/extensions/codex_viewer"  # the page with the failing chapters and the revert button
     call("t_act", what="break the water")  # failing again at once: told already
     later(DAY - 1)
     call("t_act", what="break the water")
@@ -618,7 +619,8 @@ def test_a_reserved_operation_and_a_proposal_about_one_are_reserved_and_the_list
     from core import legislation
     from realms.legislation import RESERVED
 
-    assert set(RESERVED) == {"codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove"}
+    assert set(RESERVED) == {"codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove",
+                             "codex_check_config", "codex_check_now"}
     for name in RESERVED:
         assert legislation.is_reserved(name, {})
         assert legislation.is_reserved("proposal_create", {"action": {"op": name, "args": {}}})

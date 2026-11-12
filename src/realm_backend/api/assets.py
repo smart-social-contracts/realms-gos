@@ -1,7 +1,7 @@
 
 from core import candid
 from core import chain
-from core.db import Conflict, Fail, Forbidden, deref, each, find, next_id, page, view
+from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, view
 from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Realm, User, Verdict, Zone
 from api import codex
 from api.licenses import active, principals
@@ -11,7 +11,8 @@ from api.proposals import day_of, launched, realm_wide, whole
 
 LAND = "LAND"
 PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id", "assessed_value", "area",
-          "assessed_at", "assessment_ref")
+          "assessed_at", "assessment_ref", "lies_in")
+ZONES_MAX = 8  # the zones a parcel lies in (ggg I-AST-6)
 CELL = 16  # the side of a spatial index cell, and the most a parcel spans
 VIEW = 32  # the most a map viewport spans
 
@@ -137,6 +138,20 @@ def land_register(c, args):
     land = Land(id=next_id(Land, "L"), x=x, y=y, width=w, height=h, cell=cell(x, y),
                 kind=args.get("kind", "unassigned"), owner=owner, registered_by=c.user,
                 metadata=args.get("metadata", {}))
+    return {"land": land.id}
+
+
+@op("realm.configure", governed=launched, returns="land")
+def land_zone_set(c, args):
+    """Replace the zones parcel ``land`` lies in, such as a planning area, by ``zones``: at most 8, each a zone the realm
+    defines (``zone_define``) and named once. Returns ``land``."""
+    land, zones = find(Land, args["land"]), args["zones"]
+    if len(zones) > ZONES_MAX or len(set(zones)) != len(zones):
+        raise Fail(f"a parcel lies in at most {ZONES_MAX} zones, each named once")
+    for zone in zones:
+        if not (Zone[zone] and Zone[zone].defined):
+            raise NotFound(f"{zone} is not a zone of the realm")
+    land.lies_in = zones
     return {"land": land.id}
 
 

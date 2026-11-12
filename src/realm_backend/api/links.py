@@ -13,12 +13,12 @@ makes none (``only_capital``).
 import json
 
 from api import proposals, quarters
-from core import chain
+from core import chain, journal
 from core import compliance
 from core import layered_codex as store
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, page, view, window
 from core.op import op
-from core.records import MOST_CHAPTERS, NOTES_MAX, VERSION_MAX, is_realm_key, no_at, pinned
+from core.records import MOST_CHAPTERS, MOST_LAYERS, NOTES_MAX, VERSION_MAX, is_realm_key, no_at, pinned
 from ggg import ChapterSource, Follower, Release, SyncSource
 
 SIDES = {SyncSource: "follower", Follower: "sync_source"}  # what a link's owner is to the realm it notifies
@@ -26,7 +26,6 @@ CLOCK_TOLERANCE = 5 * 60  # seconds a subnet's clock may differ from this one's
 WALK_LIMIT = 32  # realms read by one check for a cycle
 RETRY = 60  # seconds before a notice nobody answered is sent again
 NAME_MAX, URL_MAX = 200, 500
-MOST_LAYERS = 16  # a chain is at most 8 deep (§4.4)
 STATUSES = ("requested", "active", "ended")
 
 
@@ -264,7 +263,10 @@ def sync_source_add(c, args):
     ``requested`` until it accepts this one, and ``active`` then, in either order; a stand-in record cannot vote, so its
     link is active on this vote, and a second add of the same url pins the new checksum. A source that takes legislation
     from this realm, directly or through others, is a cycle (Conflict); one that cannot be read is Unavailable. Only
-    the capital of a federation links it to other realms."""
+    the capital of a federation links it to other realms. From its first sync source on, the realm checks them on a
+    schedule (api.sync_checks)."""
+    from api import sync_checks  # it imports this module
+
     only_capital()
     ref, key = args["source"], source_key(args["source"])
     old = SyncSource[key]
@@ -274,11 +276,14 @@ def sync_source_add(c, args):
         else:
             old.checksum, old.name, old.status = ref["Record"]["checksum"], args["name"], "active"
             old.ended_by, old.ended_at = "", 0
+        sync_checks.arm()
         return {}
     if key == chain.self_id():
         raise Conflict("a realm does not take legislation from itself")
     refuse_standing(old, key, "sync source")
-    return (yield from vote_link(SyncSource, key, (key, chain.self_id()), name=args["name"]))
+    out = yield from vote_link(SyncSource, key, (key, chain.self_id()), name=args["name"])
+    sync_checks.arm()
+    return out
 
 
 @op("sync_source.manage", governed=proposals.realm_wide, check=valid_remove)
@@ -482,6 +487,7 @@ def legislation_release_publish(c, args):
                       effective_from=args["effective_from"], commit=args["commit"],
                       chapters={c["domain"]: c["checksum"] for c in args["chapters"]},
                       calendar=args.get("calendar") or "", notes=args.get("notes") or {})
+    journal.release_published(release)
     return {"release": release.id}
 
 

@@ -213,7 +213,8 @@ def test_e_no_codex_changes_the_team_and_the_team_is_told_when_a_codex_method_fa
 def test_f_no_chapter_runs_for_the_reserved_operations_and_the_checker_refuses_a_chapter_that_guards_one(realm, people):
     from realms.legislation import RESERVED
 
-    assert set(RESERVED) == {"codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove"}
+    assert set(RESERVED) == {"codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove",
+                             "codex_check_config", "codex_check_now"}
     names = run(realm, "import json\nfrom core import legislation\n"
                 "print(json.dumps({'reserved': list(legislation.RESERVED), 'action': legislation.is_reserved("
                 "'proposal_vote', {'proposal': 'x'}), 'removal': legislation.is_reserved('sync_source_remove', {})}))")

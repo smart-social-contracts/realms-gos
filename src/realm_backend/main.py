@@ -17,6 +17,7 @@ from core import fastjson  # noqa: E402
 fastjson.install()
 
 from api import setup  # noqa: E402
+from core import journal_signing  # noqa: E402
 from core.op import dispatch, run as drive  # noqa: E402
 # basilisk calls a method by looking its name up among main's globals. Reading ``__all__`` loads the module.
 from ggg_methods import *  # noqa: E402, F401, F403
@@ -31,11 +32,13 @@ import core.layered_codex  # noqa: E402, F401
 @init
 def init_(installer: text) -> void:
     setup.start(installer)
+    journal_signing.resume()
 
 
 @post_upgrade
 def post_upgrade_() -> void:
     setup.start()
+    journal_signing.resume()  # timers do not survive an upgrade
 
 
 @query
@@ -46,6 +49,15 @@ def read(name: text, args: text) -> text:
 @update
 def run(name: text, args: text) -> Async[text]:
     return (yield from dispatch(name, args))
+
+
+@update
+def hook_effects(effects: text) -> Async[text]:
+    """One hook domain's effects, in a message of their own so that a trap in one ends only that message. Only the
+    realm itself calls it (core.legislation)."""
+    from core import legislation
+
+    return (yield from legislation.hook_effects(effects))
 
 
 @query

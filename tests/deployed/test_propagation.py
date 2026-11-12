@@ -212,7 +212,9 @@ def test_a_quarter_ready_after_t_does_not_switch_to_a_codex_the_capital_reverted
     net.wait_until(lambda: job(late).get("status") in ("done", "failed"), rounds=2)
     assert job(late)["status"] == "failed" and "a codex it has left is not switched to" in job(late)["error"]
     assert active(late) == first and status(late)["pending"] is None  # it never ran the codex the capital left
-    net.wait(2)
+    # A catch-up sync of late's may fall between T and the revert and be judged then; the capital judges its quarters
+    # again a minute after the revert
+    net.wait(JUDGE_AFTER)
     assert flag(capital, late) == "compliant"  # it runs what the capital runs
 
 

@@ -378,19 +378,20 @@ test('the founder spends from the roads fund on the vault page, within the budge
 });
 
 test('a payment the fund cannot cover is refused and moves nothing', async ({ page }) => {
-	const tooMuch = (await held(ROADS)) + 1;
+	// From a fund no budget governs: the budget line's own refusal comes first, and the next test has it.
+	const tooMuch = (await held(SOURCE)) + 1;
 	const outsider = Ed25519KeyIdentity.generate(new Uint8Array(32).fill(52));
-	const pay = { fund: ROADS, to: principal(payee), amount: tooMuch, symbol: SYMBOL };
+	const pay = { fund: SOURCE, to: principal(payee), amount: tooMuch, symbol: SYMBOL };
 
 	await leavesUnchanged(['Fund', 'Budget', 'Transfer', 'LedgerEntry'], async () => {
 		await refused('transfer_create', pay, member, /needs transfer\.create/);
 		await refused('transfer_create', pay, outsider, /needs transfer\.create/);
-		await refused('transfer_create', pay, founder(), /fund DEPT-INFRA holds \d+ E2E, less than/);
+		await refused('transfer_create', pay, founder(), /fund TREASURY holds \d+ E2E, less than/);
 
 		const { app, frame, close } = await openExtension(page, realm, founder(), 'vault');
 		try {
 			await app.getByRole('button', { name: 'Send', exact: true }).first().click();
-			await app.locator('#v-fund').selectOption(ROADS);
+			await app.locator('#v-fund').selectOption(SOURCE);
 			await app.locator('#v-to').fill(principal(payee));
 			await app.locator('#v-amount').fill((tooMuch / 1e8).toFixed(8));
 			await app.getByRole('button', { name: 'Send', exact: true }).last().click();
@@ -400,6 +401,20 @@ test('a payment the fund cannot cover is refused and moves nothing', async ({ pa
 		} finally {
 			await close();
 		}
+	});
+});
+
+test('a payment the budget line cannot meet is refused first, naming the line and the shortfall', async () => {
+	// The roads fund holds more than its line has available: the line refuses before the fund is asked.
+	const { id, planned, actual } = (await adoptedBudget())!;
+	const over = planned - actual + 1;
+	const pay = { fund: ROADS, to: principal(payee), amount: over, symbol: SYMBOL };
+	const why = new RegExp(
+		`line ${id} \\(${ROADS}, ${period}, ${CATEGORY}\\) has ${planned - actual} available; the transfer of ${over} is 1 short`
+	);
+
+	await leavesUnchanged(['Fund', 'Budget', 'Transfer', 'LedgerEntry'], async () => {
+		await refused('transfer_create', pay, founder(), why);
 	});
 });
 
@@ -479,7 +494,9 @@ test('a payment past the budget of its category is refused and moves nothing', a
 		amount: planned - actual + 1,
 		symbol: SYMBOL
 	};
-	const why = new RegExp(`plans ${planned} .* ${actual} is spent and ${pay.amount} was asked`);
+	const why = new RegExp(
+		`has ${planned - actual} available; the transfer of ${pay.amount} is 1 short`
+	);
 	await leavesUnchanged(['Fund', 'Budget', 'Transfer', 'LedgerEntry'], async () => {
 		await refused('transfer_create', pay, founder(), why);
 

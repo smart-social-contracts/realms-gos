@@ -25,7 +25,8 @@ from realms.legislation.sealed import MappingProxyType, Sealed, freeze
 from realms.legislation.subset import CLASS_BODY
 
 # Operations no chapter may hook, guard or forbid (layered-codex.md §10.4).
-RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
+RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove", "codex_check_config",
+            "codex_check_now")
 # Operations a chapter may hook but never guard or forbid: a realm must always learn that a link ended, so the source
 # of a follower that leaves hooks link_notify (on_link_notify), and nothing can refuse the notice.
 HOOK_ONLY = ("link_notify",)

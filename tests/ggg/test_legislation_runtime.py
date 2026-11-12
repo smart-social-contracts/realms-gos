@@ -9,13 +9,14 @@ import json
 
 import pytest
 
+import fake_chain
 from api import codex as codex_api
 from api import proposals, taxes
 from core import layered_codex as store
-from core import legislation, localtime, op
+from core import legislation, localtime, op, sandbox
 from core.db import each
 
-from ggg import Attribute, Codex, Human, Invoice, Land, LayeredCodex, Quarter, Realm, TaxDeclaration, Token
+from ggg import Attribute, Codex, Dispatch, External, Human, Invoice, Land, LayeredCodex, Quarter, Realm, TaxDeclaration, Token
 from kit import call, ok, rows
 from test_taxes import CENTS, adopt_policy, setup_taxes
 from test_treasury import setup_finance
@@ -41,6 +42,12 @@ def t_log(c, args):
     """The chapters' effect: records what they wrote and who they were."""
     LOG.append((args["text"], c.origin))
     return {"logged": args["text"]}
+
+
+@op.op("treasury.manage")
+def t_break(c, args):
+    """An operation that fails as a message fails, by an exception it does not handle: a trap."""
+    raise TypeError("recipient is text")
 
 
 @op.op("realm.data_view", read=True)
@@ -390,6 +397,109 @@ class Register(above("register")):
     assert LOG[before:] == [("es:unknown op", "codex"), ("town:es:ctl", "codex")]
 
 
+def awaiting(gen):
+    """Drive ``gen`` as the canister's runtime does, which lets it call other canisters: ``op.run`` does not."""
+    try:
+        while True:
+            next(gen)
+    except StopIteration as done:
+        return done.value
+
+
+def test_a_hooks_effect_that_traps_counts_against_its_chapter_and_the_operation_that_ran_the_hook_stands():
+    """An effect that traps ends only the message it runs in: the realm calls its own ``hook_effects`` for each domain
+    (the issue, realms-gos#679, is a chapter whose effect passes a number as the recipient of a notification)."""
+    town({(TOWN, "register"): '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def on_t_act(self, event):
+        if event.args.get("what") == "trap":
+            self.ggg.t_break(recipient=123)
+'''})
+    LOG.clear()
+    fake_chain.state["caller"] = "ctl"
+    out = json.loads(awaiting(op.dispatch("t_act", json.dumps({"what": "trap"}))))
+    assert out["ok"] and out["done"] == "trap"
+    assert LOG == [("es:trap", "codex"), ("town:es:ctl", "codex")]  # the other domains' effects still ran
+    error = failures()["x/town/register.py"]["on_t_act"]["error"]
+    assert error.startswith("the effects were rejected: ") and "t_break: recipient is text" in error
+    assert not ok("codex_status", query=True)["healthy"]
+    ok("t_act", what="fine")
+    assert failures() == {} and ok("codex_status", query=True)["healthy"]
+
+
+@pytest.mark.parametrize("who", ["mallory", "ctl", fake_chain.ANONYMOUS])
+def test_hook_effects_applies_for_the_realm_alone(who):
+    """``hook_effects`` is an update anyone can reach, and it applies operations as the codex: only the realm's own call
+    to itself may run it. A member, a controller and the anonymous caller are refused (a trap), and nothing they carried
+    is applied; the realm itself runs the same effects."""
+    town()
+    LOG.clear()
+    effects = json.dumps([["t_log", {"text": "smuggled"}]])
+    fake_chain.state["caller"] = who
+    with pytest.raises(fake_chain.Trap, match="only the realm applies the effects of its hooks"):
+        awaiting(legislation.hook_effects(effects))
+    assert LOG == []
+    fake_chain.state["caller"] = fake_chain.SELF
+    assert json.loads(awaiting(legislation.hook_effects(effects))) == []
+    assert LOG == [("smuggled", "codex")]
+
+
+REGISTER = '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def on_t_act(self, event):
+        self.ggg.t_log(text="register of %s")
+'''
+
+
+def test_a_codex_switch_that_lands_while_a_domains_effects_wait_ends_the_old_codexs_pass(monkeypatch):
+    """A domain's effects are awaited, and another message can switch the codex meanwhile. The old codex's remaining
+    domains would then be asked of the new codex's sandbox, and their failures recorded on the new codex: the pass
+    ends at the first await that returns on another codex."""
+    old = town({(TOWN, "register"): REGISTER % "old"})
+    chapters = {("eu", "data_protection"): EU_DP, ("eu/es", "data_protection"): ES_DP, ("eu/es", "procedure"): ES_PROCEDURE,
+                ("eu/es", "local_regime"): ES_LOCAL_REGIME, (TOWN, "data_protection"): TOWN_DP,
+                (TOWN, "local_regime"): TOWN_LOCAL_REGIME, (TOWN, "realm"): TOWN_REALM,
+                (TOWN, "register"): REGISTER % "new"}
+    new = layered(chapters, ((f"eu/es", CALENDAR),), layers=["eu", "eu/es", TOWN])
+    effects_of_a_domain, switched = fake_chain.own_hook_effects, []
+
+    def interleaved(effects):
+        if not switched:  # while the first domain's effects wait, another message switches the codex
+            switched.append(True)
+            old.status, new.status = "inactive", "active"
+            legislation.load(new)
+        return (yield from effects_of_a_domain(effects))
+
+    monkeypatch.setattr(fake_chain, "own_hook_effects", interleaved)
+    LOG.clear()
+    fake_chain.state["caller"] = "ctl"
+    assert json.loads(awaiting(op.dispatch("t_act", json.dumps({"what": "x"})))) == {"ok": True, "done": "x"}
+    assert switched and legislation._state["codex"] == new.id
+    assert LOG == [("es:x", "codex"), ("town:es:ctl", "codex")]  # the domain in flight finished; no other ran, on either codex
+    assert LayeredCodex[old.id].failures == {} and LayeredCodex[new.id].failures == {}
+
+
+def test_a_hooks_effect_names_an_entity_as_a_ref_and_the_realm_takes_it_as_kind_and_id_in_text():
+    """A chapter writes ``Ref("external", "AGE")`` as GGG's Ref; the realm's ``notification_send`` takes ``External:AGE``."""
+    town({(TOWN, "register"): '''
+from realms.legislation import Ref, above
+
+class Register(above("register")):
+    def on_t_act(self, event):
+        self.ggg.notification_send(recipient=Ref("external", "AGE"), topic="ordinance", title="told", body="x")
+        self.ggg.notification_send(recipient=Ref("user", "alice"), topic="ordinance", title="told", body="x")
+'''})
+    External(id="AGE", name="AGE", kind="authority", channel="manual")
+    ok("t_act", what="adopted", basis="task", legislation="x")
+    assert failures() == {}
+    assert [(d.to, d.title) for d in each(Dispatch, "to", "AGE")] == [("AGE", "told")]
+    assert [n["title"] for n in ok("notification_list", "alice", query=True)["notifications"]] == ["told"]
+
+
 def test_compute_answers_through_the_seam_and_places_a_member_in_a_quarter():
     town()
     assert op.run(codex_api.compute("tax_assess", {"entry": {"code": "ibi"}, "subject": "Land:1"})) is None  # no chapter
@@ -410,6 +520,75 @@ class Water(above("water")):
     with pytest.raises(Exception, match="compute_t_day is defined in realm, water: one domain answers"):
         op.run(codex_api.compute("t_day", {"at": 1}))
     assert failures()["x/town/realm.py"]["compute_t_day"]["count"] == 1
+
+
+# ── A spent sandbox (realms-gos#670) ─────────────────────────────────────────────────────────────────────────────
+
+BudgetExceeded = type("BudgetExceeded", (Exception,), {})
+# How the meter ends a call, as the sandbox raises it inside: the catchable trip, and the kill past the grace margin.
+METER = {"budget exceeded": BudgetExceeded("instruction budget (10000000) exhausted"),
+         "terminated": RuntimeError("instruction budget (10000000) exhausted; sandbox terminated after grace period")}
+KILLED = f"sandboxed call raised: RuntimeError: {METER['terminated']}"
+
+
+def guard_fails(monkeypatch, error, asked, stop_reads=None):
+    """Every sandbox's ``guard`` fails with ``error`` from now on, counting in ``asked``; ``stop_reads`` stops its reads
+    first, as the realm does to a call that read past its budget."""
+    real = sandbox.Resident._call
+
+    def failing(self, fn, kwargs):
+        if fn != "guard":
+            return real(self, fn, kwargs)
+        asked.append(fn)
+        if stop_reads:
+            legislation._state["reads"]["stopped"] = stop_reads
+        raise RuntimeError(error)
+
+    monkeypatch.setattr(sandbox.Resident, "_call", failing)
+
+
+@pytest.mark.parametrize("meter", METER.values(), ids=METER.keys())
+def test_a_spent_sandbox_is_loaded_again_and_the_call_asked_once_more(meter):
+    town()
+    spent = legislation._state["box"]
+
+    def dead(**kwargs):
+        raise meter
+
+    spent.space["guard"] = dead  # every guard on this sandbox fails now, as on a spent one
+    assert call("t_act", basis="consent")["error"] == "consent is not a basis between public authorities"
+    assert legislation._state["box"] not in (None, spent)
+    assert ok("t_act", what="fine")["done"] == "fine"
+    assert failures() == {}
+
+
+def test_a_call_that_spends_a_fresh_sandbox_too_fails_after_one_more_try(monkeypatch):
+    town()
+    asked = []
+    guard_fails(monkeypatch, KILLED, asked)
+    error = call("t_act", what="anything")["error"]
+    assert error.startswith("legislation error: the codex sha256:") and error.endswith(KILLED)
+    assert asked == ["guard", "guard"]
+    assert failures()["codex"]["check_t_act"]["count"] == 1
+    monkeypatch.undo()
+    assert ok("t_act", what="fine")["done"] == "fine"  # the sandbox it spent is replaced on the next call
+    assert failures() == {}
+
+
+def test_a_sandbox_that_fails_otherwise_is_not_asked_again(monkeypatch):
+    town()
+    asked = []
+    guard_fails(monkeypatch, "sandboxed call raised: MemoryError: ", asked)
+    assert call("t_act", what="anything")["error"].endswith("failed: sandboxed call raised: MemoryError: ")
+    assert asked == ["guard"]
+
+
+def test_a_spent_call_whose_reads_were_stopped_fails_and_is_not_asked_again(monkeypatch):
+    town()
+    asked, stopped = [], "the chapters read for more than 2,000,000,000 instructions in one call: the call stops"
+    guard_fails(monkeypatch, KILLED, asked, stop_reads=stopped)
+    assert call("t_act", what="anything")["error"] == f"legislation error: {stopped}"
+    assert asked == ["guard"] and legislation._state["box"] is not None  # the spent sandbox is replaced all the same
 
 
 def test_the_local_day_is_the_realms_own():
@@ -760,6 +939,18 @@ def test_build_returns_the_views_the_errors_and_the_cedar():
                              "chapters": [{"source": TOWN, "domain": "tax", "sha256": store.checksum(forbid)}]},
                             {store.checksum(forbid): forbid})
     assert out["errors"] == [] and '@id("x/town/tax/cap")' in out["cedar"] and "context.facts.rate > 1100000" in out["cedar"]
+
+
+def test_the_flattened_view_of_every_domain_is_a_public_read():
+    assert ok("codex_views", "stranger", query=True)["views"] == {}  # no layered codex is running
+    town()
+    views = ok("codex_views", "stranger", query=True)["views"]
+    assert sorted(views) == ["data_protection", "local_regime", "procedure", "realm"]
+    assert views["data_protection"]["path"] == ["eu", "eu/es", TOWN]
+    guard = next(m for m in views["data_protection"]["members"] if m["name"] == "check_t_act")
+    assert (guard["kind"], guard["mark"]) == ("guard", "extension")
+    assert [(layer["source"], layer["legislation"]) for layer in guard["layers"]][:2] == [
+        ("eu", "GDPR Art. 6"), ("eu/es", "Ley Orgánica 3/2018 Art. 8")]
 
 
 def test_the_reserved_list_and_the_hook_only_list_are_the_librarys():

@@ -18,6 +18,10 @@ class Budget(Row):
     slot = String(indexed=True)  # "fund:period:category": the versions of one budget line
     kind = String(default="expense")  # revenue | expense
     planned = Integer(default=0)
+    # What an adopted expense line holds besides what it spent (ggg I-FIN-9): set aside for a spending not yet committed,
+    # and promised to a third party and not yet charged. Available credit is planned - reserved - committed - actual.
+    reserved = Integer(default=0)
+    committed = Integer(default=0)
     actual = Integer(default=0)
     # draft | proposed | adopted | amended | closed; extended: copied from the previous period by budget_extend.
     # Amended is replaced by a newer version, adopted or extended; closed is closed with its period.

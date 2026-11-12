@@ -1,10 +1,12 @@
 import json
 
 from core import chain, journal
+from core import change_list
 from core import it_team
 from core import layered_codex as store
 from core import legislation
 from core import sandbox
+from core import signing
 from core.db import Conflict, Fail, NotFound, find, first, latest, view, window
 from ggg import Codex, InstallJob, LayeredCodex, Realm
 from core.op import op
@@ -123,6 +125,9 @@ def switch(waiting):
     from api import propagation  # it imports the install task, which imports this module
 
     chain.set_timer(0, propagation.after_switch)  # a quarter reports to its capital; a capital judges its quarters
+    from api import sync_checks  # it imports the install task, which imports this module
+
+    sync_checks.rejudge()
 
 
 def hooks(codex_id):
@@ -133,20 +138,34 @@ def hooks(codex_id):
         yield from legislation.activate(row)
 
 
-@op("codex.install", governed=realm_wide, returns="codex")
+def filed_install(args, proposal):
+    """A "Propose install" (§11.4) that this realm could not build is refused when it is filed
+    (api.installs.release_of), rather than when the vote has passed."""
+    if change_list.names_release(args):
+        from api import installs  # it imports this module
+
+        installs.release_of(args)
+
+
+@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install)
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
     The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``.
     A change list's ``url`` and ``checksum`` (``sha256:<hex>``, GGG's Code action) install a layered codex instead:
     the install task fetches, checks and builds it step by step (api.installs), and the call returns its ``job``; a
-    proposal with an ``effective_at`` stages it at acceptance and switches at that time. One install at a time."""
-    if "checksum" in args:
-        from api import installs  # it imports this module
+    proposal with an ``effective_at`` stages it at acceptance and switches at that time. One install at a time.
+    A release's ``source`` and ``version`` (GGG's ``CodexSource.Release``, the "Propose install" of §11.4) install
+    that release of a layer from above whole, from the record of the sync source that vouches for it, the realm's own
+    layer unchanged; refused in a realm that has no layer of its own yet, and in a federation. Anyone with
+    ``proposal.create`` may file it, and no guard or forbid of the codex runs on that ``proposal_create``
+    (core.legislation.proposes_release)."""
+    from api import installs  # it imports this module
 
+    if "checksum" in args or change_list.names_release(args):
         return installs.begin(c, args)
     if store.live_job() is not None:
         raise Conflict("an install is running")
-    if "source" in args:
+    if "manifest" in args:
         manifest, source, namespace = args["manifest"], args["source"], None
     else:
         namespace = f"ext/{args['codex']}/{args['version']}"
@@ -240,10 +259,11 @@ def only_previous(target):
         raise Conflict(f"codex_revert_fast restores only the previous codex ({previous or 'none'})")
 
 
-def restore(target):
+def restore(target, proposal=""):
     """The revert: ``target``, an earlier codex of either kind, is the active codex again and the one it replaces is
     reverted. No ``on_codex_activate`` hook runs (§10.5), and nothing else about the codex changes: it keeps the voting
-    rule and window it was recorded with. A capital's quarters restore it too (api.propagation). Returns ``codex``."""
+    rule and window it was recorded with. The ``proposal`` that carried the revert, if any, is named in the journal. A
+    capital's quarters restore it too (api.propagation). Returns ``codex``."""
     if isinstance(target, Codex):
         runnable(target.manifest or {})
     current = active()
@@ -251,10 +271,13 @@ def restore(target):
     if isinstance(current, LayeredCodex) or isinstance(target, LayeredCodex):
         legislation.warm(target if isinstance(target, LayeredCodex) else None)
     store.remember_in_force(chain.now())
-    journal.codex_reverted(target, current)
+    journal.codex_reverted(target, current, proposal)
     from api import propagation  # it imports the install task, which imports this module
 
     propagation.reverted(target)  # a capital tells its quarters; a quarter reports to its capital
+    from api import sync_checks  # it imports the install task, which imports this module
+
+    sync_checks.rejudge()
     return {"codex": target.id}
 
 
@@ -310,7 +333,7 @@ def codex_revert(c, args):
     checksum), else the one the active codex replaced. Filed as a proposal, it names the codex it restores, and the vote
     follows the rule recorded with that codex. No legislation runs for it, and no ``on_codex_activate`` hook. Returns
     ``codex``."""
-    return restore(restoring(args))
+    return restore(restoring(args), c.proposal)
 
 
 @op("codex.revert_fast", governed=it_team_governs, names=names_the_codex, fixes=filed_fast_revert)
@@ -318,7 +341,7 @@ def codex_revert_fast(c, args):
     """Go back to the codex the active one replaced, on the approval of the IT admin team (``it_team_set``): its
     department's own policy decides, m of n, quorum and veto. Refused when no team is designated. No legislation runs
     for it, and no ``on_codex_activate`` hook. Returns ``codex``."""
-    return restore(fast_target(args))
+    return restore(fast_target(args), c.proposal)
 
 
 def shown(codex):
@@ -336,6 +359,16 @@ def history(args):
     return rows, (start + count if start + count <= legacy_count + LayeredCodex.max_id() else None)
 
 
+@op(None, read=True, public=True)
+def codex_views(c, args):
+    """The flattened view (§5.9) of every domain of the active layered codex, as it applies in this realm: the domain's
+    layer ``path`` and a row for each public member of its resolved chapter, with its ``name``, ``kind`` (hook, guard,
+    compute, helper, setting or forbid), ``mark`` and the ``layers`` that define it, each with the ``legislation`` it
+    cites and, for a setting, its ``value``. The chapters are as public as the legislation they hold. Returns ``views``,
+    empty when no layered codex is active."""
+    return {"views": legislation.views()}
+
+
 @op("realm.data_view", read=True)
 def codex_status(c, args):
     """The active codex, whether it is healthy (a legacy codex: its last hook succeeded; a layered codex: no chapter's
@@ -346,7 +379,18 @@ def codex_status(c, args):
     route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
     ``job`` the install job running or paused, else the latest, with its step, status and error. ``it_team`` is the
     department the admins designated to revert fast ("" for none). ``journal_failure`` is the last entry the official
-    journal could not record (the change it was for, when, and why), or None."""
+    journal could not record (the change it was for, when, and why), or None. ``signing_failures`` is, for each kind of
+    document the realm signs (the journal's issues, so far), the last batch it could not sign (the subjects, when, and
+    why), if there is one. ``sync_sources`` is what the last check
+    of each active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the ``layer``
+    its record is the own record of (what a codex's ``vouched_by`` names; "" before a check has read it), the realm's
+    ``compliance`` against its record, ``checked_at``, the ``error`` that left it ``unknown`` ("" for none), the
+    releases ``installable`` from it (``step_back`` marks one older than the release the realm runs: the source went
+    back to it) and the ``notes`` on the layers the realm runs and the record does not list (``{source, kind, runs,
+    lists}``, ``kind`` ``unlisted`` or ``went_back``, §11.6); ``check`` the
+    ``interval`` of the checks, in hours, and when the next is ``due`` (0 before the realm's first sync source)."""
+    from api import sync_checks  # it imports the install task, which imports this module
+
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
     legacy_codex = codex if isinstance(codex, Codex) else None
@@ -360,4 +404,6 @@ def codex_status(c, args):
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
             "pending": shown(waiting) if waiting else None,
             "job": view(job, *JOB_SHOWN) if job else None, "it_team": it_team.department_id(),
-            "journal_failure": journal.failure()}
+            "journal_failure": journal.failure(), "signing_failures": signing.failures(),
+            "sync_sources": sync_checks.found(),
+            "check": sync_checks.schedule_view()}

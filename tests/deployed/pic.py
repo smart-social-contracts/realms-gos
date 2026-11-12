@@ -26,6 +26,8 @@ CONTROLLER = "kber3-kmjak-kngoi-c3iyv-ix4le-p27yv-3fzmi-vnnab-xtjtf-ndfta-wqe"
 _HASH = Types.Record({"hash": Types.Vec(Types.Nat8)})
 _UPLOAD = Types.Record({"canister_id": Types.Principal, "chunk": Types.Vec(Types.Nat8)})
 _CANISTER = Types.Record({"canister_id": Types.Principal})
+_CONTROLLERS = Types.Record({"canister_id": Types.Principal,
+                             "settings": Types.Record({"controllers": Types.Opt(Types.Vec(Types.Principal))})})
 _UPGRADE_FLAGS = Types.Record({
     "skip_pre_upgrade": Types.Opt(Types.Bool),
     "wasm_memory_persistence": Types.Opt(Types.Variant({"keep": Types.Null, "replace": Types.Null})),
@@ -49,12 +51,13 @@ GGG_ERROR = Types.Variant({
     "GenericError": Types.Record({"error_code": Types.Nat, "message": Types.Text})})
 
 
-def new_pocket_ic():
+def new_pocket_ic(subnet_config=None):
     """A PocketIC instance whose requests wait while the server is busy with a round. A round that takes long, such as
     the install of an 11 MB wasm on a loaded machine, makes it answer 409 to anything else, which the client takes as
     an error. Only a 409 is tried again, for up to ten minutes: a server that is gone, or a request it refuses, fails
-    at once, and one that stays busy fails with a ``RetryError``."""
-    pic = PocketIC()
+    at once, and one that stays busy fails with a ``RetryError``. ``subnet_config`` is a ``pocket_ic.SubnetConfig``;
+    the default is one application subnet, which holds no threshold keys."""
+    pic = PocketIC(subnet_config)
     busy = Retry(total=None, connect=0, read=0, redirect=0, other=0, status=600, status_forcelist=(409,),
                  allowed_methods=None, backoff_factor=0.05, backoff_max=1, raise_on_status=True)
     pic.server.request_client.mount("http://", HTTPAdapter(max_retries=busy))
@@ -125,6 +128,14 @@ class Canister:
 
     def start(self):
         self._lifecycle("start_canister")
+
+    def add_controller(self, principal):
+        """Make ``principal`` a controller of the canister besides the test's, as Casals makes a capital a controller of
+        the quarters it builds for it."""
+        self.pic.set_sender(Principal.from_str(CONTROLLER))
+        controllers = [Principal.from_str(CONTROLLER).bytes, Principal.from_str(principal).bytes]
+        _management(self.pic, self.id, "update_settings", _CONTROLLERS,
+                    {"canister_id": self.id.bytes, "settings": {"controllers": [controllers]}})
 
     def _lifecycle(self, method):
         self.pic.set_sender(Principal.from_str(CONTROLLER))

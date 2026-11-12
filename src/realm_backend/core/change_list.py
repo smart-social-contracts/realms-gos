@@ -9,7 +9,7 @@ without a realm. ``layers_for`` turns the records the install task read (core.re
 import json
 
 from core.db import Fail
-from core.layered_codex import MAX_CHAPTER
+from core.layered_codex import MAX_CHAPTER, canonical, checksum
 
 KIND, FORMAT = "realms-gos/legislation-change", 1
 MAX_CHAPTERS = 50
@@ -18,7 +18,7 @@ CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar 
 REALM = "realm"  # the domain only the realm's own layer fills (§3)
 # GGG's domain list, the ggg submodule's domains.json (tests/ggg keeps the two equal).
 DOMAINS = ("realm", "tax", "procedure", "register", "local_regime", "water", "data_protection", "language",
-           "treasury", "federation")
+           "treasury", "federation", "planning")
 HEX = "0123456789abcdef"
 
 
@@ -67,6 +67,12 @@ def parse(text):
         raise Fail("the change list changes nothing")
     return {"realm": realm, "replaces": replaces, "set": chapters, "remove": remove, "release": release,
             "summary": summary}
+
+
+def names_release(args):
+    """Whether ``codex_install``'s ``args`` name a release of a layer from above (GGG's ``CodexSource.Release``:
+    ``source`` and ``version``), not a codex package, which has a ``source`` too, with its ``manifest``."""
+    return isinstance(args, dict) and "source" in args and "manifest" not in args
 
 
 def no_repeats(pairs, what="the change list"):
@@ -301,7 +307,7 @@ def vouching(records, release):
         raise Fail(f"the record of {record['source']} relays {source} {entry['version']}, not {version}")
     record, entry = next((held for held in exact if held[0]["source"] == source), exact[0])
     for other, theirs in holders:
-        if _compared(theirs) != _compared(entry):
+        if compared(theirs) != compared(entry):
             differ = (f"{entry['version']} and {theirs['version']}" if entry["version"] != theirs["version"]
                       else f"{version} with different checksums")
             raise Fail(f"{source}: sync sources {record['source']} and {other['source']} relay different releases "
@@ -310,10 +316,33 @@ def vouching(records, release):
     return {"key": record["key"], "by": record["source"], "release": entry, "order": sources_of(record)}
 
 
-def _compared(release):
+def compared(release):
     """What two records must agree on for a layer: ``_plain`` without the ``realm`` chapter, which no follower takes."""
     plain = _plain(release)
     return {**plain, "chapters": {d: sha for d, sha in plain["chapters"].items() if d != REALM}}
+
+
+def layer_checksum(release):
+    """The checksum of a layer as a follower reports it (GGG's ``ReportedLayer``, §11.8): of ``compared`` as canonical
+    JSON, with no calendar written ``""`` as ``legislation_releases`` publishes it (the follower reads it as None). The
+    release a follower runs and the entry of a record that lists it have the same, so a sync source finds the layer by
+    it in its own record."""
+    return checksum(canonical({**compared(release), "calendar": release.get("calendar") or ""}))
+
+
+def of_release(realm, replaces, release):
+    """The change list of a "Propose install" (§11.4), as ``parse`` returns one: ``release``, as the record that vouches
+    for it lists it, installed whole, and the realm's own layer, ``realm``, unchanged. ``replaces`` is the active
+    codex's id. Its chapters have no URLs and no size: their bytes come from the capital that vouches for them, by
+    checksum, or are stored already (§9.2 step 3)."""
+    source = release["source"]
+    chapters = {f"{source}/{domain}": sha for domain, sha in release["chapters"].items() if domain != REALM}
+    if release.get("calendar"):
+        chapters[f"{source}/{CALENDAR}"] = release["calendar"]
+    entries = [{"chapter": chapter, "source": source, "domain": chapter.rpartition("/")[2], "urls": [], "sha256": sha,
+                "size": None} for chapter, sha in sorted(chapters.items())]
+    return {"realm": realm, "replaces": replaces, "set": entries, "remove": [],
+            "release": {"source": source, "version": release["version"]}, "summary": {}}
 
 
 def named(planned):

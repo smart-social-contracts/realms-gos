@@ -5,6 +5,7 @@ from .proposal_edge import ProposalEdge
 from .vote import Vote
 from .mandate import Mandate
 from .contract import Contract
+from .contract_amendment import ContractAmendment
 from .license import License
 from .procedure import Procedure
 from .request import Request
@@ -18,4 +19,5 @@ from .federation import FederationMessage
 from .codex import Codex
 from .layered_codex import ChapterSource, InstallJob, LayeredCodex
 from .journal import JournalEntry
-from .links import Follower, Release, SourceRecord, SyncSource
+from .signed_document import SignedDocument
+from .links import Follower, FoundRelease, Release, SourceRecord, SyncSource

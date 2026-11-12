@@ -19,6 +19,21 @@ LOADER = ("import sys\n_sdk = type(sys)('ggg_sdk')\nexec(compile(%r, 'ggg_sdk.py
           "sys.modules['ggg_sdk'] = _sdk\n" % sdk.SOURCE)
 
 
+class Spent(RuntimeError):
+    """A call into a ``Resident`` failed because its budget is spent: every later call fails too, until it is
+    replaced."""
+
+
+def is_spent(error):
+    """Whether ``error``, the text of a failed sandbox call, is the meter ending it. basilisk's meter ends a call in
+    one of two ways, and only their text crosses the boundary: ``BudgetExceeded: instruction budget (N) exhausted``,
+    or, when the budget runs out while an ``except`` body runs, 100,000 instructions later, ``RuntimeError:
+    instruction budget (N) exhausted; sandbox terminated after grace period``, which names no BudgetExceeded
+    (realms-gos#670). Either leaves the meter past the budget for good. A chapter that raises the same text only costs
+    its own call a reload."""
+    return "instruction budget (" in error and ") exhausted" in error
+
+
 def module_source(name):
     """The source text of the bundled module ``name``, and whether it is a package. Neither runs the module.
 
@@ -52,7 +67,7 @@ class Resident:
     """A subinterpreter kept open across calls: ``program`` runs once at spawn, then ``call(fn, **kwargs)`` runs
     its top-level functions with plain data in and out, until ``close``. Inside, ``rpc(action, **kw)`` reaches
     ``rpc(action, kw)`` here for the actions in ``allowed``. The budget is per spawn, cumulative over the calls:
-    a call that exhausts it fails with ``BudgetExceeded`` in its error text, and the interpreter is spent.
+    a call that exhausts it raises ``Spent``, and so does every later call.
 
     Without ``_basilisk_sandbox`` (unit tests), the same program runs in a fresh namespace, unmetered."""
 
@@ -81,7 +96,16 @@ class Resident:
             _basilisk_sandbox.revoke_hash(digest)
 
     def call(self, fn, **kwargs):
-        """``fn(**kwargs)`` inside; raises RuntimeError with the error's text when the call itself fails."""
+        """``fn(**kwargs)`` inside; raises RuntimeError with the error's text when the call itself fails, ``Spent``
+        when it failed on the spent budget."""
+        try:
+            return self._call(fn, kwargs)
+        except RuntimeError as e:
+            if is_spent(str(e)):
+                raise Spent(str(e)) from None
+            raise
+
+    def _call(self, fn, kwargs):
         if self.space is not None:
             try:
                 return plain(self.space[fn](**plain(kwargs)))

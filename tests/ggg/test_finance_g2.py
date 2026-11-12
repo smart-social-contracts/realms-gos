@@ -207,7 +207,7 @@ def test_an_extended_line_caps_spending_until_an_adopted_budget_replaces_it():
     fake_chain.state["now"] = FY2027["starts_at"] + 1
     pay = lambda amount: call("transfer_create", "ctl", fund="ROADS", to="buildco", amount=amount, category="capital")  # noqa: E731
     assert pay(300)["status"] == "completed"
-    assert "budget" in pay(1)["error"]
+    assert "has 0 available" in pay(1)["error"]
     extended = next(b for b in FiscalPeriod["FY2027"].budgets if b.category == "capital")
     assert extended.actual == 300
     new = draft("ROADS", "capital", 500, period="FY2027")

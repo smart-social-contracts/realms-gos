@@ -66,7 +66,8 @@ from realms.legislation import above
 
 class DataProtection(above("data_protection")):
     def check_document_share(self, args):
-        recipient = External.get(args.recipient.id) if args.recipient.kind == "external" else None
+        kind, _, who = args.recipient.partition(":")
+        recipient = External.get(who) if kind == "External" else None
         if recipient is not None and recipient.kind != "authority" \\
                 and not self.approved_by("Junta de Govern Local"):
             return self.deny("a recipient that is not an authority needs the Junta de Govern Local")
@@ -118,7 +119,8 @@ class LocalRegime(above("local_regime")):
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def check_proposal_create(self, args):
-        if "Code" not in args.action:
+        action = args.action
+        if action is None or action.op != "codex_install" or "checksum" not in action.args:
             return None
         earliest = self.legislation.procedure.working_days_after(args.earliest_close_day, 15)
         if args.effective_day is None or args.effective_day < earliest:
@@ -132,7 +134,6 @@ class LocalRegime(above("local_regime")):
 """
 
 CV_LOCAL_REGIME = """
-from ggg import Document
 from realms.legislation import above, extension
 
 class LocalRegime(above("local_regime")):
@@ -140,22 +141,23 @@ class LocalRegime(above("local_regime")):
 
     @extension(legislation="Llei 4/1983; Llei 8/2010")
     def on_codex_install(self, event):
-        languages = Document.get(event.args["document"]).languages
-        event.languages_missing = [lang for lang in self.legislation.language.co_official
-                                   if lang not in languages]
+        event.languages = list(self.legislation.language.co_official)
 """
 
 VALENCIA_LOCAL_REGIME = """
 from ggg import Member
 from realms.legislation import Ref, above
 
+TITLES = {"ca-valencia": "Nova ordenança", "es": "Nueva ordenanza"}
+
 class LocalRegime(above("local_regime")):
 
     def on_codex_install(self, event):
-        title = "Nova ordenança" + (" (traducció pendent)" if event.languages_missing else "")
+        notice = [{"language": language, "title": TITLES[language], "body": event.result["codex"]}
+                  for language in event.languages if language in TITLES]
         for m in Member.each():
-            self.ggg.notification_send(recipient=Ref("user", m.user), topic="ordinance",
-                title=title, body=event.result["codex"])
+            self.ggg.notification_send(recipient=Ref("user", m.id), topic="ordinance",
+                title=TITLES["ca-valencia"], body=event.result["codex"], translations=notice)
 """
 
 ES_REGISTER = """
@@ -338,9 +340,8 @@ TOWN = (
 )
 
 ggg = type(sys)("ggg")
-ggg.Document = SimpleNamespace(get=lambda id: SimpleNamespace(languages=["es"]))
 ggg.Member = SimpleNamespace(
-    each=lambda: [SimpleNamespace(user="alice"), SimpleNamespace(user="bob")]
+    each=lambda: [SimpleNamespace(id="alice"), SimpleNamespace(id="bob")]
 )
 ggg.External = SimpleNamespace(
     get=lambda id: SimpleNamespace(kind="authority" if id == "AGE" else "company")
@@ -712,31 +713,40 @@ def test_5_2_a_chain_down_the_layers():
     r = resolved()
     event = Event(
         "alice",
-        {"document": "ordinance-1"},
+        {"url": "https://example.org/change.json", "checksum": "sha256:3f1c"},
         {"codex": "sha256:3f1c"},
         at=0,
     )
     local_regime, _ = chapter(r, "local_regime")
     local_regime.on_codex_install(event)
 
-    def notify(recipient, title):
+    def notify(recipient, title, **more):
         args = {"recipient": recipient, "topic": "ordinance", "title": title}
-        return ["notification_send", {**args, "body": "sha256:3f1c"}]
+        return ["notification_send", {**args, "body": "sha256:3f1c", **more}]
 
-    late = "Nova ordenança (traducció pendent)"  # CV set event.languages_missing, València read it
-    assert event.languages_missing == ("ca-valencia",)
+    # CV set event.languages from the co-official setting (Spain's, then its own), València read it
+    assert event.languages == ("es", "ca-valencia")
+    notice = [
+        {"language": "es", "title": "Nueva ordenanza", "body": "sha256:3f1c"},
+        {"language": "ca-valencia", "title": "Nova ordenança", "body": "sha256:3f1c"},
+    ]
     effects = local_regime.__context__.effects.queued
     assert effects == [
         notify({"kind": "external", "id": "AGE"}, "Comunicació d'acord"),
         notify({"kind": "external", "id": "GVA"}, "Comunicació d'acord"),
-        notify({"kind": "user", "id": "alice"}, late),
-        notify({"kind": "user", "id": "bob"}, late),
+        notify({"kind": "user", "id": "alice"}, "Nova ordenança", translations=notice),
+        notify({"kind": "user", "id": "bob"}, "Nova ordenança", translations=notice),
     ]
+
+
+def an_ordinance():
+    """The action of a proposal to install a change list, as a realm files it."""
+    return SimpleNamespace(op="codex_install", args={"url": "https://example.org/c.json", "checksum": "sha256:x"})
 
 
 def test_5_2_spains_guard_makes_the_proposer_wait_15_working_days():
     args = SimpleNamespace(
-        action={"Code": {}}, earliest_close_day="2026-12-31", effective_day="2027-01-22"
+        action=an_ordinance(), earliest_close_day="2026-12-31", effective_day="2027-01-22"
     )
     town, _ = chapter(resolved(TOWN, [FROM_CV], None), "local_regime")
     assert (
@@ -748,10 +758,12 @@ def test_5_2_spains_guard_makes_the_proposer_wait_15_working_days():
     )
     args.effective_day = "2027-01-25"
     assert valencia.check_proposal_create(args) is None
-    args.action, args.effective_day = {"Other": {}}, None
+    args.action, args.effective_day = SimpleNamespace(op="transfer_create", args={}), None
     assert (
         valencia.check_proposal_create(args) is None
     )  # only a change of legislation is held
+    args.action = SimpleNamespace(op="codex_install", args={"source": "eu/es", "version": "2.6.0"})
+    assert valencia.check_proposal_create(args) is None  # nor the install of a release
 
 
 def test_5_3_working_days_count_with_each_levels_holidays():
@@ -774,10 +786,10 @@ def test_5_3_working_days_count_with_each_levels_holidays():
 def test_5_4_guards_stack_and_the_first_deny_stops():
     guard = chapter(resolved(), "data_protection")[0].check_document_share
 
-    def share(legal_basis, legislation=None, kind="external", to="AGE"):
+    def share(legal_basis, legislation=None, to="AGE"):
         return SimpleNamespace(
             basis=SimpleNamespace(legal_basis=legal_basis, legislation=legislation),
-            recipient=SimpleNamespace(kind=kind, id=to),
+            recipient=f"External:{to}",  # as the realm takes a recipient
         )
 
     assert (
@@ -1094,7 +1106,7 @@ def test_a_guard_that_calls_another_domain_leaves_the_count_as_it_found_it():
     local_regime = r.codex.instance("local_regime", context)
     local_regime.check_proposal_create(
         SimpleNamespace(
-            action={"Code": {}},
+            action=an_ordinance(),
             earliest_close_day="2026-12-31",
             effective_day="2027-02-01",
         )

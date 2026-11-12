@@ -76,6 +76,8 @@ class LocalRegime(above("local_regime")):
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def on_proposal_create(self, event):
         event.order = ["es"]
+        if event.args["title"] == "malformed effect":
+            self.ggg.notification_send(recipient=123, topic="ordinance", title="malformed", body="")
         self.ggg.notification_send(recipient="User:" + event.user, topic="ordinance", title="Comunicació d'acord",
                                    body=event.result["proposal"])
 '''
@@ -104,6 +106,9 @@ class Water(above("water")):
     def check_proposal_create(self, args):
         if args.title == "break the water":
             raise ValueError("no water here")
+        if args.title == "spin":
+            while True:
+                pass
 '''
 TOWN_REGISTER = '''
 from realms.legislation import above
@@ -229,6 +234,93 @@ from core import legislation
 print(json.dumps({"codex": legislation._state["codex"] if isinstance(legislation._state["codex"], str) else None,
                   "loaded": legislation._state["box"] is not None}))
 '''
+# Guard calls straight into the running sandbox, which ``_call`` would replace once spent: how many it answered, and
+# the error of the first it did not, with what that call and an answered one cost on average.
+SPEND = '''
+import json
+from core import chain, legislation, sandbox
+guard = {"op": "proposal_create", "args": {"title": "spend", "action": None}, "now": chain.now(), "approvals": []}
+calls, error, failed, start = 0, None, 0, ic.performance_counter(0)
+for _ in range(%(count)d):
+    t = ic.performance_counter(0)
+    try:
+        legislation._ask("guard", guard)
+    except sandbox.Spent as e:
+        error, failed = str(e), ic.performance_counter(0) - t
+        break
+    calls += 1
+print(json.dumps({"calls": calls, "error": error, "failed": failed,
+                  "answered": (ic.performance_counter(0) - start - failed) // max(calls, 1)}))
+'''
+RELOAD = '''
+import json
+from core import legislation
+from ggg import LayeredCodex
+t = ic.performance_counter(0)
+legislation.warm(LayeredCodex[legislation._state["codex"]])
+print(json.dumps({"cost": ic.performance_counter(0) - t, "loaded": legislation._state["box"] is not None}))
+'''
+# The meter's two ways of ending a call, from a sandbox of its own with a small budget: a loop trips it, and a loop
+# inside an ``except`` body keeps running past it until the grace margin ends it. Then a call after each, and an
+# error of the program's own.
+METER = '''
+import json
+from core import sandbox
+program = """
+def spin():
+    while True:
+        pass
+
+def spin_in_handler():
+    try:
+        raise ValueError("caught")
+    except ValueError:
+        while True:
+            pass
+
+def fail():
+    raise ValueError("not the meter")
+
+def answer():
+    return 1
+"""
+out = {}
+for first in ("spin", "spin_in_handler", "fail"):
+    box, out[first] = sandbox.Resident(program, lambda action, kw: None, budget=100_000), []
+    for fn in (first, "answer"):
+        try:
+            out[first].append(box.call(fn))
+        except RuntimeError as e:
+            out[first].append([type(e).__name__, str(e)])
+    box.close()
+print(json.dumps(out))
+'''
+# The running codex's sandbox killed by the meter, as a long-lived one can end: its budget run out in an except body.
+# It keeps a ``guard``: the next guarded operation asks the dead sandbox for it, and a sandbox without one fails as a
+# missing function, which denies the operation, instead of as a spent budget, which reloads the codex.
+KILL = '''
+import json
+from core import legislation, sandbox
+program = """
+def guard(**kwargs):
+    return []
+
+def spin():
+    try:
+        raise ValueError()
+    except ValueError:
+        while True:
+            pass
+"""
+box = sandbox.Resident(program, legislation._answer, budget=100_000)
+try:
+    box.call("spin")
+except RuntimeError as e:
+    error = str(e)
+legislation._state["box"].close()
+legislation._state["box"] = box
+print(json.dumps({"error": error}))
+'''
 # A codex row made active without loading it, as a realm finds one after an upgrade; its chapter cannot load.
 BROKEN = '''
 import json
@@ -313,6 +405,16 @@ def test_a_activation_loads_the_chapters_once_and_runs_on_codex_activate(town, p
     assert got["load"] < 2_000_000_000, got
 
 
+def test_a1_the_flattened_view_is_a_query_of_the_sandbox_the_realm_loaded(town, people):
+    views = ok(town, "codex_views", people["alice"], query=True)["views"]
+    assert sorted(views) == ["data_protection", "local_regime", "procedure", "realm", "register", "water"]
+    assert views["data_protection"]["path"] == ["eu", "eu/es", TOWN]
+    guard = next(m for m in views["data_protection"]["members"] if m["name"] == "check_proposal_create")
+    assert (guard["kind"], guard["mark"]) == ("guard", "extension")
+    assert [(layer["source"], layer["legislation"]) for layer in guard["layers"]] == [
+        ("eu", "GDPR Art. 6"), ("eu/es", "Ley Orgánica 3/2018 Art. 8"), (TOWN, None)]
+
+
 def test_b_guards_deny_down_the_layers_and_hooks_notify_as_the_codex(town, people):
     founder = people["founder"]
     assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
@@ -368,6 +470,38 @@ def test_d_a_raising_guard_denies_naming_the_chapter_and_a_raising_hook_never_fa
     assert failures(town, founder) == {} and ok(town, "codex_status", founder, query=True)["healthy"]
 
 
+def test_d1_a_member_s_operation_stands_when_a_chapter_of_another_source_queues_an_effect_that_traps(town, people):
+    """Spain's chapter queues an effect with a number where the recipient is text: it fails as a message fails, by a trap
+    (realms-gos#679). The operation is the member's, through ``run``, the update that the frontend and an extension's
+    ``ctx.run`` call and that awaits: it stands, the chapter's failure is recorded, and the trap ends only the message the
+    effects run in."""
+    founder = people["founder"]
+    pid = ok(town, "proposal_create", founder, title="malformed effect")["proposal"]
+    assert ok(town, "proposal_get", founder, query=True, proposal=pid)["proposal"]["status"] == "voting"
+    error = failures(town, founder)["x/town/local_regime.py"]["on_proposal_create"]["error"]
+    assert error.startswith("the effects were rejected: "), error
+    assert not ok(town, "codex_status", founder, query=True)["healthy"]
+    ok(town, "proposal_create", founder, title="fine")
+    assert failures(town, founder) == {} and ok(town, "codex_status", founder, query=True)["healthy"]
+
+
+def test_d2_hook_effects_refuses_every_caller_but_the_realm_itself(town, people):
+    """``hook_effects`` applies operations as the codex, in a message the realm calls on itself; the update is on the
+    canister's interface for anyone to call. The founder, the controller and the anonymous caller are rejected by the real
+    wasm, and what they carried is never applied (no notification is written)."""
+    from ic.candid import Types, encode
+    from ic.principal import Principal
+
+    founder = people["founder"]
+    before = titles(town, founder)
+    effects = json.dumps([["notification_send", {"recipient": "User:" + founder, "topic": "x", "title": "smuggled", "body": ""}]])
+    for who in (Principal.from_str(founder), Principal.from_str(people["ctl"]), Principal.anonymous()):
+        town.pic.set_sender(who)
+        with pytest.raises(Exception, match="only the realm applies the effects of its hooks"):
+            town.pic.update_call(town.id, "hook_effects", encode([{"type": Types.Text, "value": effects}]))
+    assert titles(town, founder) == before
+
+
 def test_e_a_hook_that_exhausts_the_budget_fails_alone_and_the_codex_reloads(town, people):
     founder = people["founder"]
     assert ok(town, "proposal_create", founder, title="loop")["proposal"]
@@ -378,6 +512,59 @@ def test_e_a_hook_that_exhausts_the_budget_fails_alone_and_the_codex_reloads(tow
     assert proposal(town, founder, "consent")["error"] == "consent is not a basis between public authorities"
     assert "x/town/register.py" in failures(town, founder)  # the loop still counts until the hook next succeeds
     ok(town, "proposal_create", founder, title="fine again")
+    assert failures(town, founder) == {}
+
+
+def test_e1_both_ways_the_meter_ends_a_call_leave_a_spent_sandbox(town):
+    """realms-gos#670: a sandbox whose budget ran out tells so in two texts, and only one names BudgetExceeded."""
+    got = run(town, METER)
+    tripped = "sandboxed call raised: BudgetExceeded: instruction budget (100000) exhausted"
+    killed = "sandboxed call raised: RuntimeError: instruction budget (100000) exhausted; sandbox terminated after grace period"
+    assert got["spin"] == [["Spent", tripped], ["Spent", tripped]], got
+    assert got["spin_in_handler"] == [["Spent", killed], ["Spent", killed]], got
+    assert got["fail"] == [["RuntimeError", "sandboxed call raised: ValueError: not the meter"], 1], got
+
+
+def test_e2_a_sandbox_spent_over_thousands_of_calls_is_replaced_and_the_next_guarded_operation_runs(town, people, costs):
+    """realms-gos#670: the budget is the sandbox's, over all its calls; the call that finds it spent loads the codex
+    again and is asked once more."""
+    founder = people["founder"]
+    calls, got = 0, {"error": None}
+    while got["error"] is None:
+        got = run(town, SPEND % {"count": 1000})
+        calls += got["calls"]
+        assert calls < 100_000, "the sandbox's budget is never spent"
+    print(f"the sandbox was spent after {calls:,} guard calls ({got['answered']:,} instructions each); the call that "
+          f"found it spent cost {got['failed']:,}: {got['error']}")
+    assert calls > 1000 and "instruction budget (10000000) exhausted" in got["error"], got
+    assert run(town, STATE)["loaded"]  # the spent sandbox is still the running one: the next call replaces it
+    assert ok(town, "proposal_create", founder, title="after the sandbox was spent")["proposal"]
+    assert failures(town, founder) == {}
+    reload = run(town, RELOAD)
+    assert reload["loaded"], reload
+    costs.report("a guard call into the codex sandbox (proposal_create)", got["answered"])
+    costs.report("the guard call that finds the codex sandbox spent", got["failed"])
+    costs.report("loading the codex again (warm)", reload["cost"])
+
+
+def test_e3_a_guard_that_alone_spends_the_budget_denies_after_one_more_try_and_the_next_operation_runs(town, people):
+    founder = people["founder"]
+    error = proposal(town, founder, "spin")["error"]
+    assert error.startswith("legislation error: the codex sha256:") and "instruction budget (10000000) exhausted" in error, error
+    assert failures(town, founder)["codex"]["check_proposal_create"]["count"] == 1
+    assert ok(town, "proposal_create", founder, title="fine after the spin")["proposal"]
+    assert failures(town, founder) == {}
+
+
+def test_e4_a_sandbox_the_meter_killed_is_replaced_by_the_next_guarded_operation(town, people):
+    """realms-gos#670: a sandbox whose budget ran out while an except body ran is killed, with a text that names no
+    BudgetExceeded. The running codex's sandbox is put in that state, as a chapter cannot get it there on purpose (it
+    writes no except body, and the realm's sandbox catches a chapter's error ``as e``, where the meter trips softly);
+    then a guarded operation runs."""
+    founder = people["founder"]
+    got = run(town, KILL)
+    assert got["error"].endswith("sandbox terminated after grace period"), got
+    assert ok(town, "proposal_create", founder, title="after the kill")["proposal"]
     assert failures(town, founder) == {}
 
 

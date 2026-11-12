@@ -2,17 +2,18 @@
 
 An entry is appended when the realm learns of what it reports, stamped with the instant and with the realm's local day
 on its own clock (core.localtime), which on a capital is the realm's official time (§4.5). Stamping the day, instead of
-working it out when an issue is read, keeps a past issue as it was when the realm changes its zone. An issue is not
-stored: it is the entries of its day, and it exists for every day from the journal's first day to today, with or
-without entries, so no timer makes it and an upgrade loses nothing. A quarter issues nothing: its capital does.
+working it out when an issue is read, keeps a past issue as it was when the realm changes its zone. An issue is the
+entries of its day, and it exists for every day from the journal's first day to today, with or without entries.
+Today's is open; a day that has closed is signed by the realm's canister (core.journal_signing), and no entry is ever
+stamped into a signed day. A quarter issues nothing: its capital does.
 
 The journal only reports. Nothing here reads or writes a codex's ``activates_at``: legislation applies when the
 realm's operations run it, never when the journal prints it.
 """
 
-from core import chain, civil, localtime
+from core import chain, civil, localtime, signing
 from core.db import Fail, NotFound, each, next_id, view
-from ggg import Extension, JournalEntry, LayeredCodex, Realm
+from ggg import Extension, JournalEntry, LayeredCodex, Proposal, Realm
 
 EXTENSION = "journal"
 STATE = "journal"  # in Realm.manifest_data: {"first_day": "YYYY-MM-DD", "failure": the last entry not recorded, why}
@@ -59,12 +60,28 @@ def fix_first_day():
     realm = Realm["1"]
     data, today = realm.manifest_data, local_day(chain.now())
     first = data.get(STATE, {}).get("first_day")
-    if first is None or day_number(today) < day_number(first):
+    # once an issue is signed the numbering is fixed: the issues already signed count from the first day
+    if first is None or (day_number(today) < day_number(first) and signed_head() is None):
         realm.manifest_data = {**data, STATE: {"first_day": today}}
 
 
 def first_day():
     return Realm["1"].manifest_data[STATE]["first_day"]
+
+
+def signed_head():
+    """The last issue signed, ``{"subject": its day, "digest"}``, or None while none is (core.journal_signing)."""
+    return signing.head("journal")
+
+
+def open_day():
+    """The day of the issue that is open, ``YYYY-MM-DD``: the realm's local day, but never one already signed. A change
+    of zone to the west can take the local day back to a signed one, and an entry stamped there would sit in a closed
+    issue: the day after the last signed one is the open day until the clock has reached it."""
+    today, head = local_day(chain.now()), signed_head()
+    if head and day_number(today) <= day_number(head["subject"]):
+        return day_text(day_number(head["subject"]) + 1)
+    return today
 
 
 # ---- Entries
@@ -96,8 +113,7 @@ def record(kind, **details):
 
 def append(kind, details):
     """Append an entry of ``kind`` with ``details`` as they are, stamped now, and return it."""
-    at = chain.now()
-    return JournalEntry(id=next_id(JournalEntry, "E"), day=local_day(at), at=at, kind=kind, details=details)
+    return JournalEntry(id=next_id(JournalEntry, "E"), day=open_day(), at=chain.now(), kind=kind, details=details)
 
 
 def layers_of(codex):
@@ -109,9 +125,10 @@ def layers_of(codex):
 
 
 def reported(kind, change, details):
-    """Record an entry of ``kind`` for a change the realm has already made: ``change`` names it by its codices, and the
-    function ``details`` gives the rest, so that working it out is guarded too. The journal only reports: whatever goes
-    wrong here, the change stands (a revert above all, the realm's floor, §10), and ``not_recorded`` says so."""
+    """Record an entry of ``kind`` for something the realm has already done or learned: ``change`` names it, by its
+    codices or by a release's source and version, and the function ``details`` gives the rest, so that working it out
+    is guarded too. The journal only reports: whatever goes wrong here, the change stands (a revert above all, the
+    realm's floor, §10; a check goes on), and ``not_recorded`` says so."""
     try:
         if not publishes():
             return
@@ -122,10 +139,10 @@ def reported(kind, change, details):
 
 def not_recorded(kind, change, error):
     """The entry of ``kind`` for ``change`` could not be recorded. The issue of the day says which change it misses, in
-    an entry ``not_recorded`` that holds only the kind and the codices' ids: they name no person, and the personal-data
-    rules may be what failed. The ``error`` is kept for the IT admin team, who read it in codex_status (``failure``).
-    Each is guarded on its own, writing the error out too (an exception's text is its own code): neither may stop the
-    change, and one still goes in when the other fails."""
+    an entry ``not_recorded`` that holds only the kind and what names it, the codices' ids or a release's source and
+    version: they name no person, and the personal-data rules may be what failed. The ``error`` is kept for the IT admin
+    team, who read it in codex_status (``failure``). Each is guarded on its own, writing the error out too (an
+    exception's text is its own code): neither may stop the change, and one still goes in when the other fails."""
     try:
         append("not_recorded", {"kind": kind, **change})
     except Exception:  # noqa: BLE001  the error below is still kept
@@ -143,17 +160,46 @@ def failure():
     return Realm["1"].manifest_data.get(STATE, {}).get("failure")
 
 
+def decision(proposal):
+    """The decision behind a change: the id of the ``proposal`` that carried it ("" for a change nobody proposed) and,
+    when the realm still has that proposal, the ``vote`` it ended with: the votes for, against and abstaining, and how
+    many could vote. Counts only: who voted is not for the journal."""
+    row = Proposal[proposal] if proposal else None
+    if row is None or not row.tally:
+        return {"proposal": proposal}
+    return {"proposal": proposal, "vote": {name: row.tally.get(name) for name in ("yes", "no", "abstain", "eligible")}}
+
+
 def codex_installed(codex):
     """The layered ``codex`` has just become the realm's legislation (api.codex.switch)."""
     reported("codex_installed", {"codex": codex.id},
-             lambda: {"layers": layers_of(codex), "proposal": codex.proposal, "activates_at": codex.activates_at})
+             lambda: {"layers": layers_of(codex), "activates_at": codex.activates_at, **decision(codex.proposal)})
 
 
-def codex_reverted(restored, reverted):
+def codex_reverted(restored, reverted, proposal=""):
     """A revert has made the earlier codex ``restored`` the realm's legislation again in place of ``reverted``
-    (api.codex.restore). Either may be a legacy codex, which has no layers."""
+    (api.codex.restore), by the accepted ``proposal`` that carried it, if any. Either codex may be a legacy codex, which
+    has no layers."""
     reported("codex_reverted", {"codex": restored.id, "reverted": reverted.id},
-             lambda: {"layers": layers_of(restored) if isinstance(restored, LayeredCodex) else []})
+             lambda: {"layers": layers_of(restored) if isinstance(restored, LayeredCodex) else [],
+                      **decision(proposal)})
+
+
+def release_found(found):
+    """A check of the sync sources has found ``found`` (a ``FoundRelease``), a release no check had found before
+    (api.sync_checks.keep_found): it is stamped with the check's time, the moment the realm learned of it."""
+    reported("release_found", named(found), lambda: {"effective_from": found.effective_from})
+
+
+def release_published(release):
+    """The realm, a sync source itself, has published ``release`` (a ``Release``) of its own layer
+    (api.links.legislation_release_publish)."""
+    reported("release_published", named(release), lambda: {"effective_from": release.effective_from})
+
+
+def named(release):
+    """What names a release in an entry, and in the notice of one that could not be recorded."""
+    return {"source": release.source, "version": release.version}
 
 
 # ---- Issues
@@ -163,7 +209,7 @@ def issue(day=None):
     """The issue of ``day`` (``YYYY-MM-DD``, default today) of the realm named ``realm``: its ``number``, counted
     from the journal's first day, and the day's ``entries`` in the order they were recorded. A day after today or
     before the first day is not found."""
-    today, first = local_day(chain.now()), first_day()
+    today, first = open_day(), first_day()
     day = today if day is None else day
     number = day_number(day) - day_number(first) + 1
     if day_number(day) > day_number(today):

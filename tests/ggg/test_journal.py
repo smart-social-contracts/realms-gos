@@ -7,15 +7,18 @@ import fake_chain
 import pytest
 import world
 from core import journal, legislation, localtime
-from ggg import Event, Extension, JournalEntry, LayeredCodex, Realm
+import test_sync_checks as checks
+import test_sync_sources as sources
+from ggg import Event, Extension, FoundRelease, JournalEntry, LayeredCodex, Proposal, Realm, Release
 from kit import call, denied, fire_timers, later, ok, rows
-from test_installs import (HOUR, WEB, change_list, expected_id, fire_due, install, own_layer, realm,  # noqa: F401
+from test_installs import (FOUR, HOUR, WEB, change_list, expected_id, fire_due, install, own_layer, realm,  # noqa: F401
                            run_job, schedule, status)
 
 DAY = 86400
 CAPITAL = "capital-canister"
 # What the journal extension's manifest allows an entry to keep (extensions/journal/manifest.json).
-RULES = {"config": {"personal_data": {"entry_fields": ["codex", "layers", "proposal", "activates_at", "reverted"]}}}
+FIELDS = ["codex", "layers", "proposal", "vote", "activates_at", "reverted", "source", "version", "effective_from"]
+RULES = {"config": {"personal_data": {"entry_fields": FIELDS}}}
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +69,7 @@ def test_a_new_realm_has_a_journal_and_an_issue_for_today_with_no_entries():
     out = ok("journal_issue", fake_chain.ANONYMOUS)  # public: a visitor reads it
     assert out["issued"] is True and out["capital"] == fake_chain.self_id()
     assert out["issue"] == {"realm": "Agora", "day": "2026-11-09", "number": 1, "first_day": "2026-11-09",
-                            "today": "2026-11-09", "timezone": "UTC", "entries": []}
+                            "today": "2026-11-09", "timezone": "UTC", "entries": [], "status": "provisional"}
 
 
 def test_every_day_from_the_first_to_today_has_an_issue_with_or_without_entries():
@@ -243,6 +246,42 @@ def test_publishing_changes_no_activates_at_and_no_install(realm):  # noqa: F811
     assert entry["details"]["proposal"] == p and entry["at"] == due
 
 
+def test_an_install_decided_by_a_vote_names_the_proposal_and_how_the_vote_went(realm):  # noqa: F811
+    rules()
+    action = {"op": "codex_install", "args": change_list(own_layer())}
+    p = ok("proposal_create", "alice", title="Legislation", action=action,
+           effective_at=fake_chain.now() + HOUR)["proposal"]
+    ok("proposal_vote", "elena", proposal=p, choice="no")
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=p, choice="yes")
+    run_job()
+    later(HOUR)
+    fire_timers()
+    fire_due()
+    [entry] = issue()["entries"]
+    assert entry["details"]["proposal"] == p
+    assert entry["details"]["vote"] == {"yes": 4, "no": 1, "abstain": 0, "eligible": 7}
+    assert "carla" not in str(entry["details"])  # the count only, never who voted
+
+
+def test_a_departments_vote_gives_the_entry_its_counts_and_never_its_seats_or_veto_holders():
+    world.build()
+    rules()
+    Proposal(id="P-9", tally={"yes": 2, "no": 0, "abstain": 1, "eligible": 3, "seats": 3, "veto": ["2vxsx-fae"]})
+    journal.codex_installed(LayeredCodex(id="sha256:ab", proposal="P-9"))
+    [entry] = issue()["entries"]
+    assert entry["details"]["proposal"] == "P-9"
+    assert entry["details"]["vote"] == {"yes": 2, "no": 0, "abstain": 1, "eligible": 3}  # no seats, no veto holders
+    assert "2vxsx-fae" not in str(entry)
+
+
+def test_an_install_nobody_proposed_has_no_vote(realm):  # noqa: F811
+    rules()
+    install(change_list(own_layer()))
+    [entry] = issue()["entries"]
+    assert entry["details"]["proposal"] == "" and "vote" not in entry["details"]
+
+
 def test_a_legacy_single_file_install_makes_no_entry(realm):  # noqa: F811
     from test_codex import SOURCE, manifest
 
@@ -250,6 +289,102 @@ def test_a_legacy_single_file_install_makes_no_entry(realm):  # noqa: F811
     Realm["1"].require_marketplace_approval = False
     ok("codex_install", "ctl", manifest=manifest(), source=SOURCE)
     assert issue()["entries"] == []
+
+
+# ---- the releases of the sync sources are entries, and so are the realm's own
+
+
+def release_entries():
+    return [(e["kind"], e["details"], e["at"]) for e in issue()["entries"]]
+
+
+def found(version, effective_from):
+    return ("release_found", {"source": "arcadia", "version": version, "effective_from": effective_from})
+
+
+def test_a_release_the_check_finds_is_an_entry_once_stamped_with_the_time_of_the_check(realm):  # noqa: F811
+    rules()
+    checks.source(checks.entry("1.0.0", 6))
+    checks.link()
+    checks.check_now()
+    first = fake_chain.now()
+    assert release_entries() == [(*found("1.0.0", 6), first)]
+    later(HOUR)
+    checks.source(checks.entry("1.0.0", 6), checks.entry("2.0.0", 100))
+    checks.check_now()
+    checks.check_now()
+    assert release_entries() == [(*found("1.0.0", 6), first), (*found("2.0.0", 100), fake_chain.now())]
+    assert [r.found_at for r in rows(FoundRelease)] == [first, fake_chain.now()]  # the entry is the log's time
+
+
+def test_an_entry_of_a_release_found_belongs_to_the_day_it_was_found_on_the_capitals_clock(realm):  # noqa: F811
+    rules()
+    zone("Asia/Tokyo")
+    at(2026, 11, 9, 20)  # 05:00 on the 10th in Tokyo
+    checks.source(checks.entry("1.0.0", 6))
+    checks.link()
+    checks.check_now()
+    assert [e["kind"] for e in issue("2026-11-10")["entries"]] == ["release_found"]
+    assert issue("2026-11-09")["entries"] == []
+
+
+def test_a_release_the_realm_publishes_is_an_entry_with_the_time_it_was_published(realm):  # noqa: F811
+    rules()
+    later(60)
+    ok("legislation_release_publish", "ctl", **sources.release())
+    published = Release["x/town@1.0.0"].published
+    assert release_entries() == [("release_published", {"source": "x/town", "version": "1.0.0",
+                                                         "effective_from": 1_900_000_000}, published)]
+    assert published == fake_chain.now()
+
+
+def test_a_release_refused_makes_no_entry(realm):  # noqa: F811
+    rules()
+    denied("legislation_release_publish", "ctl", **sources.release(commit=""))
+    assert issue()["entries"] == []
+
+
+def test_releases_found_and_published_change_no_activates_at_and_no_install(realm):  # noqa: F811
+    rules()
+    layer = own_layer()
+    p = schedule(change_list(layer))
+    run_job()
+    staged = LayeredCodex[expected_id(layer)]
+    due = staged.activates_at
+    checks.source(checks.entry("1.0.0", fake_chain.now() - 1))  # in force already: no install follows it
+    checks.link()
+    checks.check_now()
+    ok("legislation_release_publish", "ctl", **sources.release())
+    assert [kind for kind, _, _ in release_entries()] == ["release_found", "release_published"]
+    assert (staged.status, staged.activates_at) == ("pending", due) and status()["codex"] is None
+    assert FoundRelease.count() == 1 and LayeredCodex.count() == 1 and p
+    later(due - fake_chain.now())
+    fire_timers()
+    fire_due()
+    assert LayeredCodex[expected_id(layer)].activates_at == due and status()["codex"]["id"] == expected_id(layer)
+
+
+def test_a_release_whose_entry_fails_stands_and_the_check_goes_on(realm, monkeypatch):  # noqa: F811
+    rules()
+    monkeypatch.setattr(journal, "allowed_fields", broken)
+    checks.source(checks.entry("1.0.0", 6), checks.entry("2.0.0", 100))
+    checks.link()
+    checks.check_now()
+    assert FoundRelease.count() == 2 and checks.checked()["error"] == ""  # both found, and the check did not fail
+    assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [
+        ("not_recorded", {"kind": "release_found", "source": "arcadia", "version": version})
+        for version in ("1.0.0", "2.0.0")]
+    assert failure()["kind"] == "release_found" and failure()["error"] == "ValueError: the journal is broken"
+    ok("legislation_release_publish", "ctl", **sources.release())
+    assert Release["x/town@1.0.0"] is not None
+    assert failure()["version"] == "1.0.0" and failure()["source"] == "x/town"
+
+
+def test_a_realm_without_the_rules_keeps_no_detail_of_a_release_and_still_records_it(realm):  # noqa: F811
+    checks.source(checks.entry("1.0.0", 6))
+    checks.link()
+    checks.check_now()
+    assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [("release_found", {})]
 
 
 # ---- a revert is an entry too, whichever kind of codex it restores
@@ -264,8 +399,23 @@ def test_a_revert_makes_an_entry_with_the_codex_restored_its_layers_and_the_one_
     ok("codex_revert", "ctl")
     entry = issue()["entries"][-1]
     assert entry["kind"] == "codex_reverted" and entry["at"] == fake_chain.now()
-    assert entry["details"] == {"codex": expected_id(first), "reverted": expected_id(second),
+    assert entry["details"] == {"codex": expected_id(first), "reverted": expected_id(second), "proposal": "",
                                 "layers": [{"source": "arcadia", "versions": []}]}
+
+
+def test_a_revert_decided_by_a_vote_names_the_proposal_and_how_the_vote_went(realm):  # noqa: F811
+    rules()
+    first, second = own_layer(), own_layer("2.0.0")
+    install(change_list(first))
+    install(change_list(second, replaces=expected_id(first), url=WEB + "changes/second.json"))
+    action = {"op": "codex_revert", "args": {"codex": expected_id(first)}}
+    p = ok("proposal_create", "alice", title="Back", action=action)["proposal"]
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert LayeredCodex[expected_id(first)].status == "active"
+    entry = issue()["entries"][-1]
+    assert entry["kind"] == "codex_reverted" and entry["details"]["proposal"] == p
+    assert entry["details"]["vote"] == {"yes": 4, "no": 0, "abstain": 0, "eligible": 7}
 
 
 def test_a_revert_to_a_legacy_codex_makes_an_entry_with_no_layers(realm):  # noqa: F811
@@ -277,7 +427,7 @@ def test_a_revert_to_a_legacy_codex_makes_an_entry_with_no_layers(realm):  # noq
         ok("codex_install", "ctl", manifest=manifest(version), source=SOURCE)
     ok("codex_revert", "ctl")
     assert [(e["kind"], e["details"]) for e in issue()["entries"]] == [
-        ("codex_reverted", {"codex": "test@1.0.0", "reverted": "test@1.1.0", "layers": []})]
+        ("codex_reverted", {"codex": "test@1.0.0", "reverted": "test@1.1.0", "layers": [], "proposal": ""})]
 
 
 # ---- the journal only reports: nothing that goes wrong in it stops a revert or an install

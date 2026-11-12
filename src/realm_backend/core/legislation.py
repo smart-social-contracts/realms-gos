@@ -27,20 +27,22 @@ personal data the audit log keeps out still reaches the legislation that decides
 import json
 
 from core import auth, chain
+from core import change_list
 from core import civil
 from core import compliance
 from core import it_team
 from core import localtime
 from core import sandbox
 from core.db import PAGE, Fail, Forbidden, first, next_id, view
-from core.op import FORWARDING, GENERATOR, Call, filing, ops
+from core.op import FORWARDING, GENERATOR, Call, awaitable, filing, ops
 import core.legislation_sandbox  # bundled with the realm for its text (core.sandbox.module_source); the realm runs only its pure ``readable``
 import ggg_facts  # GGG's fact schema: the sandbox imports it from text, and the realm builds the Cedar schema from it
 
 # The operations no chapter may hook, guard or forbid, and those it may only hook, as realms.legislation.chapter lists
 # them; written here too because the realm compiles the library in its own interpreter only when an install checks a
 # change list, and the runtime needs the lists before that (a test keeps them equal).
-RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove")
+RESERVED = ("codex_revert", "codex_revert_fast", "it_team_set", "sync_source_remove", "codex_check_config",
+            "codex_check_now")
 HOOK_ONLY = ("link_notify",)
 # The federation_message topics that carry a codex across a realm's quarters (api.propagation): like the reserved
 # operations, no chapter, hook or forbid runs on a message that carries one, or a codex could refuse its own revert.
@@ -53,6 +55,7 @@ ACTIVATE = "codex_activate"
 # call fails, so a chapter that loops on reads costs the caller this much and never the whole message.
 READS = 2_000_000_000
 REMINDER = 24 * 3600  # seconds a method keeps failing before the IT admin team is told again
+CODEX_PAGE = "/extensions/codex_viewer"  # where an IT admin team notification takes them: the failing chapters, and the revert
 # What a chapter may read of GGG's entities, and nothing else: what legislation needs to decide, never a key, a code,
 # a person's private data, a sealed bid, who voted what, a grant or a payment account, nor what one member was told.
 # A Request leaves out its ``body`` and ``reply`` (personal data) and its ``decision`` (free text until GGG types it as
@@ -237,7 +240,7 @@ def run(op, call, args, department, perform, record, read=False):
     which fails closed when the codex is not loaded: nothing may refuse the notice that a link ended. A generator, as
     the operation and the effects may call other canisters."""
     legislated = not read and call.origin != "codex" and not is_reserved(op, args) and _ensure()
-    if legislated and op not in HOOK_ONLY:
+    if legislated and op not in HOOK_ONLY and not proposes_release(op, args):
         _guard(op, args, call, department)
     out = perform()
     if isinstance(out, GENERATOR):
@@ -275,6 +278,12 @@ def compute(op, decimals=None, **kwargs):
     return outcome["result"]
 
 
+def views():
+    """The flattened view of every domain of the running layered codex (§5.9), ``{domain: {"domain", "path",
+    "members"}}``, as the sandbox keeps it loaded; empty when no layered codex is active. It reads no row of GGG."""
+    return _call("views") if _ensure() else {}
+
+
 def _ensure():
     """Whether a layered codex is active, loading it on first use: a new heap, or a query after one."""
     if _state["codex"] is UNKNOWN:
@@ -290,6 +299,16 @@ def is_reserved(op, args):
         return True
     action = _action_about(op, args)
     return isinstance(action, dict) and action.get("op") in RESERVED
+
+
+def proposes_release(op, args):
+    """Whether ``op`` is the ``proposal_create`` of a "Propose install" (§11.4), whose action installs a release of a
+    layer from above (core.change_list.names_release). No guard or forbid of the codex runs on it: the realm votes
+    only on when to install that legislation, whose date the source's legislation set (§2, rule 3). Its hooks run,
+    and the vote follows the realm's rules like any proposal's."""
+    action = args.get("action") if op == "proposal_create" else None
+    return isinstance(action, dict) and action.get("op") == "codex_install" and change_list.names_release(
+        action.get("args"))
 
 
 def _action_about(op, args):
@@ -374,6 +393,7 @@ def _hooks(op, args, result, call, department):
         _record("codex", method, str(e))
         return
     _clear(["codex"], method)
+    running = _state["codex"]
     for entry in domains:
         files = entry["files"]
         try:
@@ -384,11 +404,42 @@ def _hooks(op, args, result, call, department):
         if "error" in outcome:
             _record(outcome["chapter"] or files[-1], method, outcome["error"])
             continue
-        errors = yield from _effects(outcome["effects"])
+        errors = yield from _in_own_message(outcome["effects"])
+        if _state["codex"] != running:
+            # Another message switched the codex while these effects waited. The domains left, and the failure of this
+            # one, belong to the codex it replaced: the sandbox, and the record of failures, are the new one's now.
+            return
         if errors:
             _record(files[-1], method, "; ".join(errors))
         else:
             _clear(files, method)
+
+
+def _in_own_message(effects):
+    """Apply a domain's effects in a message of their own, by calling the realm's own ``hook_effects``. An operation that
+    raises what it does not expect traps, and a trap undoes the whole message and no handler here sees it: here it
+    undoes only that message, and comes back as a rejected call, which is the chapter's failure, while the operation
+    that ran the hook, and a scheduled codex switch it belongs to, stand (§9.3). A call and not a timer: a trap in a
+    timer would erase the record of its own failure. Where nothing can wait for another canister (``awaitable``: an
+    operation that another one runs through ``core.op.call``, as ``shell.execute``, ``extension.call`` and the
+    controller's ``__shell__`` do) they run where they are, as before (§9.3). Returns the errors. A generator."""
+    if not effects:
+        return []
+    if not awaitable():
+        return (yield from _effects(effects))
+    try:
+        reply = yield from chain.call_text(chain.self_id(), "hook_effects", json.dumps(effects))
+    except Exception as e:  # noqa: BLE001  the call was rejected: the message of the effects trapped
+        return [f"the effects were rejected: {e}"]
+    return json.loads(reply)
+
+
+def hook_effects(effects):
+    """The message in which a hook domain's effects run (main.hook_effects): ``effects`` as JSON, ``[name, args]`` each,
+    applied by ``_effects``; returns its errors as JSON. Only the realm calls it, from ``_in_own_message``. A generator."""
+    if chain.caller() != chain.self_id():
+        chain.trap("only the realm applies the effects of its hooks")
+    return json.dumps((yield from _effects(json.loads(effects))))
 
 
 def _effects(effects):
@@ -404,11 +455,24 @@ def _effects(effects):
     return []
 
 
+def _entity_refs(value):
+    """``value`` with each GGG ``Ref`` in it, ``{kind, id}`` as a chapter's ``Ref("external", "AGE")`` crosses, written
+    the way the realm's operations take an entity: ``"External:AGE"``."""
+    if isinstance(value, dict):
+        if set(value) == {"kind", "id"} and all(isinstance(v, str) for v in value.values()):
+            return f"{value['kind'][:1].upper() + value['kind'][1:]}:{value['id']}"
+        return {k: _entity_refs(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_entity_refs(v) for v in value]
+    return value
+
+
 def _effect(name, args):
     """One effect, as a reply ``{ok, ...}``: a governed operation becomes a proposal the realm files, whatever its
     department's policy, never a direct call; a reserved operation, an operation about a proposal or a vote on one,
     and an effect that would set a time zone (§4.5) are refused; whatever else fails is the chapter's failure,
     never the caller's."""
+    args = _entity_refs(args)
     if name in RESERVED or is_reserved(name, args):
         return {"ok": False, "error": f"{name} is about a reserved operation: no chapter may call it"}
     if "timezone" in args:
@@ -426,16 +490,18 @@ def _effect(name, args):
 
 
 def _call(fn, **kwargs):
-    """Ask the running codex's sandbox. A spent budget reloads the codex and, unless the call had already read past
-    its budget, asks once more, so a long-lived sandbox never fails a call for the calls before it; a sandbox that
-    fails otherwise, or a codex that did not load, raises Fail."""
+    """Ask the running codex's sandbox. A spent budget (``sandbox.Spent``, whatever the meter's text) reloads the codex
+    and, unless the call had already read past its budget, asks once more, so a long-lived sandbox never fails a call
+    for the calls before it; a call that spends a fresh sandbox too, a sandbox that fails otherwise, or a codex that
+    did not load, raises Fail."""
     if _state["box"] is None:
         raise Fail(f"the codex {_state['codex']} is not loaded")
     try:
         return _ask(fn, kwargs)
+    except sandbox.Spent:
+        pass
     except RuntimeError as e:
-        if "BudgetExceeded" not in str(e):
-            raise Fail(f"the codex {_state['codex']} failed: {e}")
+        raise Fail(f"the codex {_state['codex']} failed: {e}")
     stopped = _state["reads"]["stopped"]
     from ggg import LayeredCodex
 
@@ -703,7 +769,8 @@ def _tell_it_team(file, method, error):
     if team is None:
         return False
     Notification(id=next_id(Notification, "N"), recipient=f"Department:{team.id}", topic="codex.failing",
-                 title=f"The codex fails: {method} of {file}", body=error[:500], sender=chain.self_id(), at=chain.now())
+                 title=f"The codex fails: {method} of {file}", body=error[:500], href=CODEX_PAGE, sender=chain.self_id(),
+                 at=chain.now())
     return True
 
 

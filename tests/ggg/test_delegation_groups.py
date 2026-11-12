@@ -330,6 +330,7 @@ def test_I_ID_10_a_delegate_that_files_a_transfer_for_one_member_does_not_vote_o
     depts = finance_for_carla()
     world.policy(depts["Infrastructure"], 2, 3)
     depts["Infrastructure"].head = "bob"
+    world.seat("infrastructure.board", "bob", depts["Infrastructure"])  # a head votes with the seat they hold
     lend(style, "carla", ["transfer.create", "proposal.vote"], ["money", "vote"])
     lend(style, "bob", ["proposal.vote"], ["vote"])
     p = file_transfer()

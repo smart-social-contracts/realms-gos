@@ -35,7 +35,7 @@ PROFILES = {
 }
 INSTALL = ("network", "can_test_mode", "founder")
 FIELDS = {
-    "realm": ("name", "manifesto", "welcome_message", "open_registration", "ai_assistant_enabled",
+    "realm": ("name", "manifesto", "terms", "welcome_message", "open_registration", "ai_assistant_enabled",
               "quarter_join_mode", "auto_scale_enabled", "timezone", "languages", "test_mode", "test_flags"),
     "branding": ("logo_url", "background_image_url", "primary_color"),
     "tokens": ("accounting_currency", "accounting_currency_decimals", "token_canister_id", "nft_canister_id",
@@ -50,6 +50,10 @@ FIELDS = {
 # "data:image/jpeg;base64," prefix; IMAGE_MAX leaves a little room over that.
 IMAGES = ("logo_url", "background_image_url")
 IMAGE_MAX = 960_000
+# The realm's texts a quarter keeps in sync travel whole with every settings push, whose record (a FederationMessage)
+# holds at most 65,536 characters; and the Realm row is read on every message.
+TEXTS = ("manifesto", "terms")
+TEXT_MAX = 20_000
 # Kept in manifest_data["casals"], not on Realm: the stand Casals built the realm on, its baton and its conductor.
 CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
 # Kept in manifest_data too: how far db_convert_indexes has got, {"after": key, "refused": [key, ...]} while it runs and
@@ -102,11 +106,13 @@ def start(installer=""):
     legislation.warm()  # the active layered codex's sandbox is gone after an upgrade, and a query could not keep one
     installs.pause_after_upgrade()
     tasks.rearm()
-    from api import links, proposals, quarters
+    from api import links, proposals, quarters, sync_checks, treasury
 
     links.resume()
     proposals.resume()
     quarters.resume()
+    sync_checks.resume()
+    treasury.resume()
 
 
 @op(None, read=True, public=True)
@@ -126,17 +132,30 @@ def version(c, args):
 
 @op(None, read=True, public=True)
 def realm_info(c, args):
-    """The realm's public profile: name, manifesto, welcome message, status, branding, accounting currency,
-    whether registration is open and whether it is a capital, its network, time zone and languages, and its test mode
-    and test flags, and its ``sync_sources``: the realms it takes legislation from, each with the status of its link."""
-    from api import links
+    """The realm's public profile: name, manifesto, terms, welcome message, status, branding, accounting currency and
+    its decimals, whether registration is open and whether it is a capital, its network, time zone and languages, and
+    its test mode and test flags, and its ``sync_sources``: the realms it takes legislation from, each with the status
+    of its link. ``official_timezone`` is the zone of the realm's official time: its own, or on a quarter its
+    capital's as of the last sync (``timezone`` is the quarter's own)."""
+    from api import links, quarters
 
     realm = Realm["1"]
-    return {"realm": view(realm, "name", "manifesto", "welcome_message", "status", "logo_url",
-                          "background_image_url", "primary_color", "accounting_currency",
-                          "open_registration", "is_capital", "network", "timezone", "languages", "test_mode",
-                          "test_flags") if realm else {},
+    return {"realm": {**view(realm, "name", "manifesto", "terms", "welcome_message", "status", "logo_url",
+                             "background_image_url", "primary_color", "accounting_currency",
+                             "accounting_currency_decimals", "open_registration", "is_capital", "network", "timezone",
+                             "languages", "test_mode", "test_flags"),
+                      "official_timezone": quarters.official_timezone()} if realm else {},
             "sync_sources": [links.source_view(s) for s in links.sources()]}
+
+
+@op(None, read=True, public=True)
+def realm_image(c, args):
+    """One of the realm's branding images, ``image`` (``logo_url`` or ``background_image_url``), as ``value``. A quarter
+    reads its capital's this way when one changes (api.quarters), one image a call: two images and the rest of
+    ``realm_info`` may not fit in the 2 MiB a reply to another canister may be."""
+    if args["image"] not in IMAGES:
+        raise Fail(f"image is one of {', '.join(IMAGES)}")
+    return {"image": args["image"], "value": getattr(Realm["1"], args["image"])}
 
 
 @op(None, read=True, public=True)
@@ -160,10 +179,19 @@ def remember(key, value):
     realm.manifest_data = {**realm.manifest_data, key: value}
 
 
+def configurable(values):
+    """The check of ``realm_configure`` and its branding and tokens variants, so that a call that cannot succeed is
+    refused before a voting policy turns it into a proposal: on a quarter, a setting the capital keeps in sync; and the
+    values ``valid_values`` refuses."""
+    from api import quarters  # it imports this module
+
+    quarters.refuse_synced(values)
+    valid_values(values)
+
+
 def valid_values(values):
-    """Refuse a ``timezone`` this release has no zone file for, ``languages`` that are no BCP 47 tags and a branding
-    image above ``IMAGE_MAX``. The check of ``realm_configure`` and ``realm_configure_branding``, so that a call that
-    cannot succeed is refused before a voting policy turns it into a proposal."""
+    """Refuse a ``timezone`` this release has no zone file for, ``languages`` that are no BCP 47 tags, a branding image
+    above ``IMAGE_MAX`` and a manifesto or terms above ``TEXT_MAX``."""
     if "timezone" in values and not zones.known(values["timezone"]):
         raise Fail(f"timezone must be an IANA name such as Europe/Madrid, or UTC; this release has no zone "
                    f"'{values['timezone']}'")
@@ -173,13 +201,21 @@ def valid_values(values):
         if len(values.get(name) or "") > IMAGE_MAX:
             raise Fail(f"{name} is above {IMAGE_MAX:,} characters (an image of about 700 KiB): the realm sends its "
                        f"images with every page it shows")
+    for name in TEXTS:
+        if len(values.get(name) or "") > TEXT_MAX:
+            raise Fail(f"{name} is above {TEXT_MAX:,} characters")
 
 
 def configure(fields, values):
+    """Set ``values``, any of ``fields``. On a capital, a change of a synced setting is pushed to its quarters; a
+    quarter refuses one (api.quarters.SYNCED)."""
+    from api import quarters  # it imports this module
+
     realm, color = Realm["1"], values.get("primary_color")
     unknown = sorted(set(values) - set(fields))
     if unknown:
         raise Fail(f"cannot configure {', '.join(unknown)} here")
+    quarters.refuse_synced(values)
     valid_values(values)
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in HEX for ch in color[1:].lower())):
         raise Fail(f"primary_color must look like #1E6B52, not {color}")
@@ -194,6 +230,9 @@ def configure(fields, values):
     if "timezone" in values:
         localtime.use(realm.timezone)  # from now on; nothing stored is rewritten
         journal.fix_first_day()  # a zone west of the old one can put today before the journal's first day
+    quarters.forget_digests(values)
+    if set(values) & set(quarters.SYNCED):
+        quarters.push_settings()
     return {"configured": sorted(values)}
 
 
@@ -287,45 +326,66 @@ def host_infrastructure(c, args):
 
 @op("realm.configure", returns="realm")
 def setup_launch(c, args):
-    """Open the realm (status ``alpha``). The founder's setup rights end; configuration is governed from now on.
-    Returns ``realm`` and its ``status``."""
+    """Open the realm (status ``alpha``; a quarter takes its capital's stage). The founder's setup rights end;
+    configuration is governed from now on. Returns ``realm`` and its ``status``."""
+    from api import quarters  # it imports this module
+
     realm, d = Realm["1"], draft()
     if realm.status != "setup":
         raise Conflict("the realm has already launched")
     if not realm.name:
         raise Conflict("name the realm first")
+    stage = launch_stage()
     if d.get("founder"):
         founder = User[d["founder"]]
         founder.profiles = [p for p in founder.profiles if p.id != "founder"]
-    realm.status = "alpha"
+    realm.status = stage
     remember("setup", {**d, "launched_at": chain.now()})
-    yield from codex.hook("on_stage_change", {"stage": "alpha"})
+    quarters.push_settings()
+    yield from codex.hook("on_stage_change", {"stage": stage})
     return {"realm": realm.id, "status": realm.status}
 
 
-@op("realm.configure", governed=launched, check=valid_values)
+def launch_stage():
+    """The stage a launch takes: ``alpha``, or on a quarter its capital's, which the quarter learns when it syncs. A
+    quarter that has not synced yet, or whose capital is still in setup, cannot launch."""
+    from api import quarters  # it imports this module
+
+    if not quarters.federated():
+        return "alpha"
+    stage = (Realm["1"].sync_state or {}).get("stage")
+    if stage is None:
+        raise Conflict("this quarter does not know its capital's stage yet: run quarter_sync first")
+    if stage == "setup":
+        raise Conflict(f"the capital {quarters.capital()} is still in setup: a quarter launches after it")
+    return stage
+
+
+@op("realm.configure", governed=launched, check=configurable)
 def realm_configure(c, args):
-    """Set any of ``name``, ``manifesto``, ``welcome_message``, ``open_registration``, ``ai_assistant_enabled``,
-    ``quarter_join_mode``, ``auto_scale_enabled``, ``timezone``, ``languages`` (BCP 47 tags, the first the default),
-    ``test_mode`` and ``test_flags``. Returns
-    ``configured``. The ``timezone`` is an IANA name such as ``Europe/Madrid`` that this release bundles, or ``UTC``,
+    """Set any of ``name``, ``manifesto`` and ``terms`` (at most 20,000 characters each), ``welcome_message``,
+    ``open_registration``, ``ai_assistant_enabled``, ``quarter_join_mode``, ``auto_scale_enabled``, ``timezone``,
+    ``languages`` (BCP 47 tags, the first the default), ``test_mode`` and ``test_flags``. Returns ``configured``. The
+    ``timezone`` is an IANA name such as ``Europe/Madrid`` that this release bundles, or ``UTC``,
     which a realm has until it sets one; the new zone applies from the moment it is set, and nothing stored changes.
     Test mode and flags need a test build, on a non-production network or with ``can_test_mode`` set at install;
-    a production build refuses them."""
+    a production build refuses them. On a quarter, the settings its capital keeps in sync (api.quarters.SYNCED: the
+    name, the manifesto, the terms and the languages here) are refused with Forbidden."""
     return configure(FIELDS["realm"], args)
 
 
-@op("realm.configure.branding", governed=launched, check=valid_values)
+@op("realm.configure.branding", governed=launched, check=configurable)
 def realm_configure_branding(c, args):
     """Set any of ``logo_url``, ``background_image_url`` and ``primary_color`` (like ``#1E6B52``). An image is a URL or
-    a data URL of at most 960,000 characters, about 700 KiB."""
+    a data URL of at most 960,000 characters, about 700 KiB. A quarter refuses them: its capital keeps them in sync."""
     return configure(FIELDS["branding"], args)
 
 
-@op("realm.configure.tokens", governed=launched)
+@op("realm.configure.tokens", governed=launched, check=configurable)
 def realm_configure_tokens(c, args):
     """Set any of ``accounting_currency``, ``accounting_currency_decimals``, ``token_canister_id``,
-    ``nft_canister_id`` and ``shared_tokens_json``."""
+    ``nft_canister_id`` and ``shared_tokens_json``. A quarter refuses the accounting currency and its decimals: its
+    capital keeps them in sync."""
     return configure(FIELDS["tokens"], args)
 
 

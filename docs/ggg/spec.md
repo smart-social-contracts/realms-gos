@@ -215,8 +215,9 @@ Where the two interfaces cannot say the same thing, the `ggg.did` methods do thi
 Realms GOS also differs from the model in what it keeps:
 
 - `Event` does not yet record whether the caller acted as an agent, nor its supervisor (I-ALL-7);
-- `realm_configure` and its variants also take Realms GOS settings (`ai_assistant_enabled`,
-  `test_mode`, `primary_color`, token and NFT canister ids), which `ggg.did` would carry as
+- `realm_configure` and its variants also take Realms GOS settings (`ai_assistant_enabled`, `terms`,
+  `test_mode`, `primary_color`, token and NFT canister ids), and `quarter_configure` takes `sync_every`, the
+  seconds between a quarter's catch-up syncs (an hour to a week), which `ggg.did` would carry as
   `realms_gos_` fields, and setup has `install` and `infrastructure` steps of its own
   (`realm_configure_infrastructure` is a Realms GOS operation, not GGG). They do what GGG's
   `host_install` and `host_infrastructure` do, which run the same code; the GaaS installer still
@@ -267,6 +268,8 @@ Next to the model's fields, the `Realm` row holds:
 - scaling and sync: `auto_scale_enabled`, `scale_in_flight`, `scale_requested_at`,
   `bootstrap_state`, `sync_state`, `codex_install_state`, `last_activity_at`;
 - `ai_assistant_enabled`;
+- `terms`, the realm's terms text (at most 20,000 characters, as is the `manifesto`), which `realm_configure` sets
+  and `realm_info` shows; a capital keeps it in sync for its quarters with the rest of its identity;
 - test flags: `can_test_mode`, `test_mode` and the `test_mode_*` switches.
 
 ## 3. Entities Realms GOS adds
@@ -280,7 +283,8 @@ Next to the model's fields, the `Realm` row holds:
 | `SyncSource`, `Follower` | `id` (a realm's capital, or a stand-in record's url), `status` (`requested`, `active`, `ended`), `ended_by`, `ended_at`, `unsent`, `checking`; a sync source also `name` and the record's `checksum`, a follower also `layers`, `compliance`, `population`, `reported_at` | The two sides of a link between realms (§8 of the [layered codex](../codices/layered-codex.md)): `Realm.sync_sources` and GGG's `Follower`. | CV's link to València: `active`; València's last report: compliant |
 | `Release` | `id` (`<source>@<version>`), `source`, `version`, `relayed`, `rank`, `published`, `effective_from`, `commit`, `chapters` (domain → sha256), `calendar`, `notes` | One release in the realm's published record: its own, or one it relays from above, as the record that vouches for it lists it. | `eu/es@2.4.0`, relayed, rank 2 |
 | `InstallJob` | `id`, `proposal`, `change_list` (`{url, checksum}`), `step`, `staged`, `status` (`running`, `paused`, `failed`, `done`), `error`, `started_at`, `finished_at` | One install of a layered codex. At most one job is `running` or `paused`. | `J-1`, running, fetching chapters |
-| `JournalEntry` | `id`, `day` (the local day on the capital's clock, `YYYY-MM-DD`), `at` (seconds, UTC), `kind` (`codex_installed`, `codex_reverted`; `not_recorded` when one of them could not be), `details` (Json: only the fields the journal extension's personal-data rules allow; for `not_recorded`, the kind and the codices' ids) | One report of the official journal, appended when the realm learns of it and never changed; an issue is the entries of one day, so a past issue does not change when the realm changes its zone. A quarter records none. | `E-1`, `codex_installed`, on `2026-11-09` |
+| `JournalEntry` | `id`, `day` (the local day on the capital's clock, `YYYY-MM-DD`), `at` (seconds, UTC), `kind` (`codex_installed`, `codex_reverted`; `not_recorded` when one of them could not be), `details` (Json: only the fields the journal extension's personal-data rules allow; for `not_recorded`, the kind and the codices' ids) | One report of the official journal, appended when the realm learns of it and never changed; an issue is the entries of one day, so a past issue does not change when the realm changes its zone, and no entry is stamped into a day already signed. A quarter records none. | `E-1`, `codex_installed`, on `2026-11-09` |
+| `SignedDocument` | `id` (`<kind>:<subject>`), `code` (the verification code, `XXXX-XXXX-XXXX-XXXX`), `canonical` (the document as signed: JSON with its kind, realm canister id, subject, body, the previous document's digest and the key), `digest` (SHA-256 of it), `root` (of the batch's Merkle tree), `path` (from the digest to the root), `signature` (Ed25519, of the root) | A document of any kind signed by the realm's canister with the IC's threshold Schnorr key for the kind (`realms:<kind>`), stored once and never changed (docs/codices/journal-signature.md). The official journal's issues are the first kind. | `journal:2026-11-09` |
 
 Extensions are callers of their own (see the model's "Callers"): an extension calls operations
 only as the user using it (as the delegate for the user, when a delegate calls it), and only those its manifest declares.
@@ -324,10 +328,12 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `extension_call` | `extension.call` + the extension's declared operation | delegable (each operation it calls is held to the grant) | The voting extension casts Alice's vote through `proposal_vote` |
 | `extension_set_access`, `sidebar_configure` | `realm.configure` | governed, delegable | Show `vault` only to Finance |
 | `extension_list` | — (public) | read | Alice's sidebar shows `voting`, not `vault`; a visitor's shows the public dashboard |
-| `journal_issue` (the issue of `day`, default today: the realm's name, its `number`, counted from the journal's first day, and the day's entries; every day from the first to today has one, a future day has none; on a quarter `issued` is false and the capital's id is named) | — (public) | read | Today's issue of the official journal lists the codex installed that morning; the day before it is empty |
+| `journal_issue` (the issue of `day`, default today, or of the verification `code`: the realm's name, its `number`, counted from the journal's first day, the day's entries, its `status`, which is `provisional` today, `signed`, or `unsigned` for a closed day not yet signed, and, when signed, its `proof`; every day from the first to today has one, a future day has none; on a quarter `issued` is false and the capital's id is named) | — (public) | read | Today's issue of the official journal lists the codex installed that morning and is provisional; the day before it is empty and signed |
+| `signature_proof` (the proof that the realm's canister signed a document, by its `kind` and `subject`, or by its verification `code`: the signed `canonical` text, its `digest`, the batch's `root`, its `path` to it, the `signature` and the `code`) | — (public) | read | The proof of `journal` `2026-11-09`, checked by `docs/verify/index.html` |
 | `journal_capital_issue` (on a quarter, the capital's issue of `day`, asked of the capital by an update, because a read cannot call another canister; it changes nothing, so it leaves no audit event and runs no legislation) | `realm.data_view` | delegable | A quarter's journal page shows the capital's issue |
 | `shell` (REPL; calls operations as the caller) | `shell.execute` | delegable | An admin runs `ops.proposal_list({"status": "voting"})` |
 | `status`, `version` | — (public) | read | Thin summaries of `realm_info` |
+| `realm_image` | — (public) | read | One branding image (`logo_url` or `background_image_url`): what a quarter reads of its capital's when it changes, one a call, since two may not fit in one reply |
 | `token_catalog` | — (public) | read | The ICRC-1 ledgers this GOS ships with, not the realm's registered tokens |
 | `scale_status` | — (public) | read | Quarter populations against this GOS's auto-scale capacity |
 | `quarter_add` (on the capital: Casals grows the realm's stand by <stand>-quarter-<n>, then the capital makes that canister a quarter and registers it; filed by the realm itself once a quarter is wanted) | `quarter.register` | governed, delegable | The members vote for a fourth quarter → Casals builds `agora-quarter-4` |
@@ -336,6 +342,9 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `codex_install_resume` (an admin resumes the install of a layered codex that an upgrade paused: the step it stopped in runs again, for the change list the vote approved; nothing else can change) | `codex.install` | delegable | After an upgrade in the middle of an install, the admin resumes `J-3` |
 | `it_team_set` (designate the department that is the IT admin team, or "" for none; reserved: no codex may call it or change the department) | `it_team.set` | governed, delegable | The admins designate `IT`; after launch the realm votes on a change |
 | `codex_revert_fast` (go back to the codex the active one replaced, decided by the IT admin team's department under its own policy; refused when no team is designated; reserved) | `codex.revert_fast` | governed, delegable | `check_proposal_create` of the new legislation refuses every proposal: two of the three `IT` seats approve the revert |
+| `codex_check_config` (check the sync sources every `interval` hours, 1 to 168, 24 until set; reserved), `codex_check_now` (check them at once, in the next message; reserved) | `realm.configure` | delegable | The admins check hourly while a release is due, and force a check the day the source publishes |
+| `codex_views` (the flattened view of every domain of the active layered codex: its layer path and a row for each public member of its resolved chapter, with the layers that define it and the legislation each cites; empty when no layered codex is active) | — (public) | read | The codex page shows how `tax` applies in València: Spain's forbid on the IBI cap, València's own bonus |
+| `codex_releases_found` (the releases the checks of the sync sources found, once each, with the sync source whose record listed it and when: what the official journal reports) | — (public) | read | The journal lists arcadia 2.0.0, found on 3 Nov |
 | `db_convert_indexes` | `db.convert` | | After an upgrade from a release before ic-python-db 0.13: converts the index lists saved as one array each, a batch per call, until `done` (a list too long for one call is skipped and named in `refused`); a new realm, or one already converted, does nothing |
 | `tax_policy_view` | `realm.data_view` | read, delegable | A member reads the tax policy they are taxed under (with its currency), the newest drafts, and their own declarations |
 | `budget_view` | `realm.data_view` | read, delegable | A member sees each fund's balances, allocation rule and, for one fiscal period (default: now), its budgets in force, adopted or extended |

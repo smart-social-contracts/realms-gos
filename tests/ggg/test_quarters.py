@@ -291,7 +291,7 @@ def built(member, cid, status="ready"):
 
 
 def adoptable(cid):
-    for method in ("quarter_join_federation", "setup_step", "quarter_sync"):
+    for method in ("quarter_join_federation", "setup_step", "quarter_sync", "setup_launch"):
         reply(cid, method)
 
 
@@ -314,8 +314,8 @@ def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
     fire_timers()
     to_south = [(m, json.loads(a)) for cid, m, a in fake_chain.state["calls"] if cid == "south-id"]
     assert to_south == [("quarter_join_federation", {"capital": CAPITAL}),
-                        ("setup_step", {"step": "realm", "name": "South", "open_registration": True}),
-                        ("quarter_sync", {})]
+                        ("setup_step", {"step": "realm", "open_registration": True}),  # the realm's name comes by sync
+                        ("quarter_sync", {}), ("setup_launch", {})]
     south = Quarter["south-id"]
     assert (south.name, south.index, south.status) == ("South", 2, "setup")
     s = ok("scale_status", fake_chain.ANONYMOUS)
@@ -338,6 +338,24 @@ def test_quarter_add_refusals_and_a_failed_join_is_retried():
     adoptable("east-id")
     fire_timers()
     assert Quarter["east-id"].index == 1
+
+
+def test_a_quarter_whose_first_sync_fails_stays_pending_and_is_synced_and_launched_at_the_next_look():
+    on_casals()
+    reply(CONDUCTOR, "stand_grow")
+    ok("quarter_add", "ctl", name="East")
+    built("agora-quarter-1", "east-id")
+    adoptable("east-id")
+    fake_chain.state["replies"][("east-id", "quarter_sync")] = json.dumps({"ok": False, "error": "capital busy"})
+    fire_timers()
+    p = ok("scale_status", fake_chain.ANONYMOUS)["pending"]
+    assert p["done"] == ["join", "configure", "register"] and "capital busy" in p["error"]
+    assert Quarter["east-id"].name == "East" and len(fake_chain.state["timers"]) == 1  # looked at again in ADOPT_EVERY
+    reply("east-id", "quarter_sync")
+    fake_chain.state["calls"].clear()
+    fire_timers()
+    assert [m for cid, m, _ in fake_chain.state["calls"] if cid == "east-id"] == ["quarter_sync", "setup_launch"]
+    assert ok("scale_status", fake_chain.ANONYMOUS)["pending"] is None and fake_chain.state["timers"] == []
 
 
 def test_a_quarter_still_being_built_is_looked_for_after_an_upgrade():

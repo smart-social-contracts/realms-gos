@@ -24,6 +24,16 @@ class SyncSource(Row):
     ended_at = Integer(default=0)
     unsent = Boolean(default=False, indexed=True)
     checking = Boolean(default=False)  # this side's vote is still being checked for a cycle: the other side's notice waits
+    # What the last check found (api.sync_checks): the realm's flag against this source's record, when, and the
+    # releases it could install from it.
+    compliance = String(default='"unknown"')  # the flag as JSON text (core.compliance)
+    checked_at = Integer(default=0)
+    check_error = String(default="")  # why the last check found no flag, "" when it found one
+    # [{source, version, effective_from}], and step_back: true for a release older than the one the realm runs
+    installable = Json([])
+    # [{source, kind: unlisted | went_back, runs, lists}]: a layer the realm runs that this record does not list
+    notes = Json([])
+    layer = String(default="")  # the source id of the record's own layer, which "vouched for" in a codex names
 
 
 RECORD_MAX = 1 << 19  # characters of a sync source's record as JSON
@@ -73,3 +83,18 @@ class Release(Row):
     chapters = Json({})  # {domain: sha256:<hex>}
     calendar = String(default="")
     notes = Json({})  # {language: text}
+
+
+class FoundRelease(Row):
+    """A release that a check of the sync sources found in a record for the first time, and when: what the official
+    journal reports (§9.6, §11.1). Kept once per release, whichever sync source listed it first, and never changed."""
+
+    __alias__ = "id"
+    id = String()  # <source>@<version>
+    source = String(default="")
+    version = String(default="")
+    published = Integer(default=0)
+    effective_from = Integer(default=0)
+    notes = Json({})  # {language: text}
+    found_in = String(default="")  # the sync source whose record listed it: its capital, or its url
+    found_at = Integer(default=0)

@@ -251,6 +251,8 @@ def refuse_forbidden(user, name, spec, args, proposal):
 
     if legislation.is_reserved(name, args):  # a reserved operation, and a proposal or a vote about one: no forbid (§10.4)
         return
+    if legislation.proposes_release(name, args):  # the realm votes only on when to install a release (§11.4)
+        return
     if name in live["unloaded"]:  # a read too: the realm refuses what a forbid it cannot load would have judged
         raise Denied(f"{name} is forbidden by the legislation, which does not load: revert the codex to use it")
     if in_force is None:
