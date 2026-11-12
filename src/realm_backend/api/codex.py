@@ -145,18 +145,23 @@ def hooks(codex_id):
         yield from legislation.activate(row)
 
 
-def defined_hooks(source):
-    """The names of the functions ``source`` defines at its top level (``def`` and ``async def``, decorated or not): what
-    a hook of the manifest can be. Read from the syntax tree, so that no code runs and a name that is only used, or
-    bound some other way, does not count. None when the tree cannot be made (code that does not compile, or nested too
-    deep for the parser): that is for the checks of the code itself."""
-    import ast
+CO_OPTIMIZED = 0x1  # the flag of a function's code, and of a lambda's or a comprehension's: not of a class body
 
+
+def defined_hooks(source):
+    """The names of the functions ``source`` defines at the top of its module (``def`` and ``async def``, decorated or
+    not): what a hook of the manifest can be. Read from the compiled code, where each of them is a constant of the
+    module's code with the flag of a function: a method, or a function nested in another, is a constant of its
+    container's code, a lambda and a comprehension carry names with ``<``, a class body lacks the flag, and a name that
+    is only used, assigned or imported is not a constant at all. (The syntax tree would say the same, but ``ast`` is a
+    stub in the canister's Python: it has no ``parse``.) No code runs. None when the source cannot be compiled (a syntax
+    error, a null byte, or nested too deep): that is for the checks of the code itself."""
     try:
-        tree = ast.parse(source, "hooks.py")
+        code = compile(source, "hooks.py", "exec")
     except Exception:  # noqa: BLE001  a SyntaxError, a ValueError, a RecursionError, a MemoryError
         return None
-    return {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    return {const.co_name for const in code.co_consts
+            if hasattr(const, "co_flags") and const.co_flags & CO_OPTIMIZED and not const.co_name.startswith("<")}
 
 
 def check_hooks(manifest, source):

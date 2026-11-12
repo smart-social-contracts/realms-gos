@@ -133,9 +133,10 @@ def test_a_manifest_whose_hooks_are_top_level_functions_installs_as_before():
     "init = lambda args: {}\n",                                      # bound, not defined
     "def helper():\n    def init(args):\n        return {}\n",      # nested in a function
     "class Hooks:\n    def init(self, args):\n        return {}\n",  # a method
-    "if True:\n    def init(args):\n        return {}\n",           # not at the top level
+    "class init:\n    pass\n",                                       # a class of that name
     "from elsewhere import init\n",                                  # imported
-], ids=["assigned", "nested", "method", "inside an if", "imported"])
+    "init = None\n",                                                 # only bound
+], ids=["assigned", "nested", "method", "class", "imported", "none"])
 def test_a_hook_that_is_not_a_top_level_function_is_not_one(source):
     """Only a top-level ``def`` counts: a name that is used or bound some other way is not a hook the realm can call."""
     build()
@@ -146,19 +147,19 @@ def test_a_hook_that_is_not_a_top_level_function_is_not_one(source):
 
 @pytest.mark.parametrize("failure", [SyntaxError("invalid syntax"), ValueError("a null byte"),
                                      RecursionError("maximum recursion depth exceeded"), MemoryError()])
-def test_a_syntax_tree_that_cannot_be_made_is_left_to_the_checks_of_the_code_itself(monkeypatch, failure):
-    """Code that does not compile, or that is nested too deep for the parser (a RecursionError or a MemoryError, which
-    the wasm can catch): there is no tree to read, so the hook check says nothing and raises nothing."""
-    import ast
-
-    def parse(*args, **kwargs):
+def test_code_the_compiler_cannot_take_is_left_to_the_checks_of_the_code_itself(monkeypatch, failure):
+    """A source that does not compile, or is nested too deep for the compiler (a RecursionError or a MemoryError, which
+    the wasm can catch): there is no code to read, so the hook check says nothing and raises nothing."""
+    def refuse(*args, **kwargs):
         raise failure
 
-    monkeypatch.setattr(ast, "parse", parse)
+    monkeypatch.setattr("builtins.compile", refuse, raising=False)
     assert codex.defined_hooks("def init(args):\n    return {}\n") is None
     codex.check_hooks({"hooks": ["init"]}, "def init(args):\n    return {}\n")  # returns: nothing to judge
 
 
-def test_a_source_that_does_not_parse_is_refused_by_the_compile_check_and_not_by_the_hook_check():
+def test_a_source_that_does_not_compile_is_left_to_the_compile_check_and_not_judged_by_the_hook_check():
     assert codex.defined_hooks("def (") is None
     codex.check_hooks({"hooks": ["init"]}, "def (")
+    assert codex.defined_hooks("def init(a):\n    return 1\n\nclass K:\n    def m(self):\n        pass\n"
+                               "x = lambda: 1\nasync def later(a):\n    return 1\n") == {"init", "later"}
