@@ -1,6 +1,6 @@
-from core import auth, chain, language
+from core import auth, chain, ic_keys, language
 from core.db import Conflict, Fail, Forbidden, deref, find, next_id, page_by, view
-from ggg import Department, Dispatch, Document, External, KeyEnvelope, Realm
+from ggg import Department, Dispatch, Document, External, KeyEnvelope
 from core.op import op
 from core.pending import named, principals, quoted
 from api.external import queue
@@ -31,8 +31,7 @@ def blob_hex(decoded):
 
 
 def key_id():
-    name = "dfx_test_key" if Realm["1"].network == "local" else "test_key_1"
-    return f'record {{ curve = variant {{ bls12_381_g2 = null }}; name = "{name}" }}'
+    return f'record {{ curve = variant {{ bls12_381_g2 = null }}; name = "{ic_keys.key_name()}" }}'
 
 
 def managers(scope):
