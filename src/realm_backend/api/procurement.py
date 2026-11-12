@@ -5,6 +5,7 @@ from core.db import Conflict, Fail, Forbidden, find, next_id, page, view
 from ggg import Bid, BidScore, Contract, Department, External, Organization, Tender
 from api.external import REALM_JOURNAL
 from api.justice import people
+from api.treasury import currency
 from core.op import op
 from core.pending import quoted, you_sign
 from core.ratio import ONE, PERCENT
@@ -306,7 +307,8 @@ def awarding(user, args, grant):
     summary=awarding, title="Award a tender")
 def tender_award(c, args):
     """Award ``tender`` to ``bid`` (default the best-scored revealed bid), signing an active contract between the
-    requester and the vendor; a lower-scored bid needs a ``justification``. A tender with lots is awarded one ``lot`` at a
+    requester and the vendor, worth the bid's price in the realm's currency; a lower-scored bid needs a
+    ``justification``. A tender with lots is awarded one ``lot`` at a
     time, to the best-scored bid of that lot (a named ``bid`` must be one of it), so its lots may go to different vendors,
     each with a contract of its own. Returns ``winner``, ``score``, ``contract``."""
     t = find(Tender, args["tender"])
@@ -315,8 +317,8 @@ def tender_award(c, args):
     title = f"{t.title}: {lot['title']}" if lot else t.title
     k = Contract(id=next_id(Contract, "C"), title=title, parties=[f"Department:{t.requester.id}",
                  f"Organization:{b.vendor.id}"], kind=t.kind, procedure=t.procedure, tender=t.id,
-                 terms_ref=b.payload_ref, terms_hash=b.payload_hash, status="active", starts_at=chain.now(),
-                 lot=lot["id"] if lot else "")
+                 value=b.price or 0, symbol=currency(), terms_ref=b.payload_ref,
+                 terms_hash=b.payload_hash, status="active", starts_at=chain.now(), lot=lot["id"] if lot else "")
     if lot:
         decided(t, lot, "awarded", winner=b.id, contract=k.id)
     else:

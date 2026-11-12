@@ -3,7 +3,7 @@ import ggg_methods as g
 import world
 from core import op
 from core.ratio import PERCENT
-from ggg import Bid, Contract, Delegation, Department, Event, Organization, Tender
+from ggg import Bid, Contract, Delegation, Department, Event, Organization, Realm, Tender
 from kit import call, denied, later, ok
 from api.procurement import seal
 
@@ -251,6 +251,15 @@ def test_the_award_makes_a_contract_of_the_kind_and_procedure_of_its_tender():
     ok("bid_score", "carla", bid=b1, scores={"price": 9, "quality": 8})
     k = Contract[ok("tender_award", "carla", tender=t)["contract"]]
     assert (k.kind, k.procedure, k.tender) == ("works", "open", t)
+
+
+def test_the_award_makes_a_contract_worth_the_winning_bid_in_the_realms_currency():
+    t, b1, b2 = evaluation()
+    Realm["1"].accounting_currency = "REALM"
+    ok("bid_score", "carla", bid=b1, scores={"price": 9, "quality": 8})
+    ok("bid_score", "carla", bid=b2, scores={"price": 7, "quality": 7})
+    k = Contract[ok("tender_award", "carla", tender=t, bid=b2, justification="the local firm")["contract"]]
+    assert (k.value, k.symbol) == (52000, "REALM")
 
 
 def test_a_contract_made_from_a_tender_takes_its_kind_and_procedure():
