@@ -112,6 +112,8 @@
     <dl id="facts"></dl>
     <h2>What was checked</h2>
     <ul id="checks" class="checks"></ul>
+    <p id="chain-note" hidden>This signature also covers every earlier document of this realm's kind: each document names the
+      digest of the one before it, signed or not, so none can be changed or dropped without this one no longer fitting.</p>
     <p id="chain-buttons" hidden>
       <button id="walk" type="button" class="secondary">Check the whole chain back to the first document</button>
       <span id="walk-state" class="lede"></span>
@@ -269,6 +271,13 @@ function shapedDocument(doc, proof) {
     typeof key.name === "string" && /^[a-z0-9_]+$/.test(key.name) && key.path === `realms:${doc.kind}` &&
     (doc.prev === null || isHex(doc.prev, 64)) && proof && isHex(proof.digest, 64) && isHex(proof.root, 64) &&
     isHex(proof.signature, 128) && Array.isArray(proof.path) && typeof proof.code === "string");
+}
+
+// When the document says it was made or, in the documents a realm signed as it made them, signed.
+function timeRow(doc) {
+  const iso = (seconds) => new Date(seconds * 1000).toISOString();
+  if (typeof doc.made_at === "number") return ["Made at", iso(doc.made_at)];
+  return ["Signed at", typeof doc.signed_at === "number" ? iso(doc.signed_at) : ""];
 }
 
 // The code of a document as written however a person types it: capitals and digits only.
@@ -460,14 +469,34 @@ async function fetchProof(host, canister, which) {
   return reply.proof;
 }
 
-// The link of a document to the one before it: that one is fetched by its code and must be what this one names.
+// The link of a document to the one before it: that one is fetched by its code and must be what this one names. It need
+// not be signed: a realm signs a day when someone asks, and makes every day's document, each naming the one before it, so
+// the one before is often only made, and its digest is what links it.
 async function checkPrevious(doc, fetcher) {
   if (doc.prev === null) return { status: "note", name: CHAIN_CHECK, detail: "none: this is the first of its chain, or its kind is not chained" };
   const previous = await fetcher({ code: codeOf(doc.prev) });
   const text = toHex(await sha256(textEncoder.encode(previous.canonical)));
   const linked = previous.digest.toLowerCase() === doc.prev.toLowerCase() && text === doc.prev.toLowerCase();
+  const kept = previous.signature ? "" : ", made and not signed: its digest is chained";
   return { status: linked ? "pass" : "fail", name: CHAIN_CHECK,
-    detail: linked ? `the document before it is ${previous.code}` : "the document the realm gives as the previous one is not the one this names", previous };
+    detail: linked ? `the document before it is ${previous.code}${kept}` : "the document the realm gives as the previous one is not the one this names", previous };
+}
+
+// One document back in the chain, as the walk finds it: ``previous`` as the realm serves it, which ``after`` (the document
+// that names it) must name by its digest. A signed one is verified in full. One only made has no signature to check: its
+// text must hash to that digest and be of the same realm and kind, which, with the digests it names in turn, is all that
+// ties it to the document that was signed. Returns {ok, signed, doc}.
+async function checkEarlier(previous, after, options = {}) {
+  const linked = toHex(await sha256(textEncoder.encode(previous.canonical))) === after.prev.toLowerCase();
+  if (!linked) return { ok: false, signed: Boolean(previous.signature), doc: null };
+  if (previous.signature) {
+    const result = await verifyProof(previous, options);
+    return { ok: result.valid, signed: true, doc: result.doc };
+  }
+  let doc = null;
+  try { doc = JSON.parse(previous.canonical); } catch (error) { return { ok: false, signed: false, doc: null }; }
+  const same = doc && doc.kind === after.kind && doc.realm === after.realm && (doc.prev === null || isHex(doc.prev, 64));
+  return { ok: Boolean(same), signed: false, doc };
 }
 
 const DEFAULT_HOST = "https://icp-api.io";
@@ -545,7 +574,7 @@ function snippets(doc, proof) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { toHex, fromHex, codeOf, climb, ed25519, findProof, verifyProof, checkPrevious, principalBytes, principalText,
+  module.exports = { toHex, fromHex, codeOf, climb, ed25519, findProof, verifyProof, checkPrevious, checkEarlier, timeRow, principalBytes, principalText,
     cbor, cborDecode, candidTexts, candidText, readOp, fetchProof, requestFromUrl, hostNote, snippets, shapedDocument, verdictOf };
 }
 
@@ -605,7 +634,7 @@ if (typeof document !== "undefined") {
     const facts = $("facts");
     facts.replaceChildren();
     const rows = doc ? [["Realm canister", doc.realm], ["Kind", doc.kind], ["Subject", doc.subject],
-      ["Signed at", typeof doc.signed_at === "number" ? new Date(doc.signed_at * 1000).toISOString() : ""],
+      timeRow(doc),
       ["Public key", doc.key.public_key], ["Key", `${doc.key.algorithm}, ${doc.key.name}, path ${doc.key.path}`],
       ["Verification code", proof.code], ["Digest", proof.digest], ...(replica ? [["Replica asked", replica]] : [])] : [];
     for (const [name, value] of rows) { facts.append(node("dt", name), node("dd", String(value))); }
@@ -626,6 +655,7 @@ if (typeof document !== "undefined") {
       $("tool-python").textContent = commands.python;
       $("tool-openssl").textContent = commands.openssl;
     }
+    $("chain-note").hidden = !(doc && doc.prev !== null);
     $("chain-buttons").hidden = !(doc && from);
     $("walk-state").textContent = "";
     current = { proof, doc, from };
@@ -654,29 +684,30 @@ if (typeof document !== "undefined") {
       $("verdict").className = "verdict fail";
       $("verdict").textContent = error.message;
       for (const id of ["facts", "checks"]) $(id).replaceChildren();
-      for (const id of ["body-details", "key-details", "tools-details", "chain-buttons"]) $(id).hidden = true;
+      for (const id of ["body-details", "key-details", "tools-details", "chain-note", "chain-buttons"]) $(id).hidden = true;
     } finally {
       button.disabled = false;
     }
   }
 
-  // Every document back to the first is fetched and checked in full, one after the other.
+  // Every document back to the first is fetched and checked, one after the other: a signed one in full, one only made by
+  // its link.
   async function walk() {
     if (!current || !current.from) return;
     const state = $("walk-state"), button = $("walk");
     button.disabled = true;
-    let doc = current.doc, count = 0;
+    let doc = current.doc, count = 0, unsigned = 0;
     try {
       while (doc.prev !== null) {
         state.textContent = `Checking document ${++count} before this one…`;
         const previous = await fetchProof(host(), current.from, { code: codeOf(doc.prev) });
-        const result = await verifyProof(previous, { canister: current.from, requested: { code: codeOf(doc.prev) },
+        const earlier = await checkEarlier(previous, doc, { canister: current.from, requested: { code: codeOf(doc.prev) },
           expectedKey: $("expected").value });
-        const linked = toHex(await sha256(textEncoder.encode(previous.canonical))) === doc.prev.toLowerCase();
-        if (!result.valid || !linked) { state.textContent = `Document ${count} before this one is not valid or is not the one named.`; return; }
-        doc = result.doc;
+        if (!earlier.ok) { state.textContent = `Document ${count} before this one is not valid or is not the one named.`; return; }
+        if (!earlier.signed) unsigned++;
+        doc = earlier.doc;
       }
-      state.textContent = `All ${count} earlier document(s) are valid and linked, back to the first.`;
+      state.textContent = `All ${count} earlier document(s) are linked back to the first: ${count - unsigned} signed and checked in full, ${unsigned} made and not signed, tied by their digests.`;
     } catch (error) {
       state.textContent = error.refused ? `Document ${count} before this one is not served by the realm: ${error.message}` : `Stopped: ${error.message}`;
     } finally {

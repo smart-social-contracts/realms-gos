@@ -6,7 +6,8 @@ kind the canister signs.
 
 Give it the proof in one of three ways: fetch it from a realm by canister id and verification code (or kind and subject),
 paste the proof as JSON, or open a file. It shows valid or invalid with the reason, the canister id, the kind, subject and
-signing time, what was signed, and the link to the previous document. It also prints, for the key in the document, the
+the time the document says (made, or for the documents an earlier release signed as it made them, signed), what was signed,
+and the link to the previous document. It also prints, for the key in the document, the
 snippet that derives the canister's key offline and the commands that check the signature with Python or OpenSSL.
 
 A link can carry the request, and only that: `?canister=<id>&code=<code>` (or `&kind=journal&subject=2026-11-09`). It cannot
@@ -21,8 +22,11 @@ the page names whenever it is not `https://icp-api.io`. A sheet's QR code is suc
    and Safari). The page has no curve code of its own: a browser without it says so and shows the commands for other tools.
 3. The proof is the one asked for (its code, or its kind and subject, is the requested one), and the text names the canister
    it was fetched from.
-4. `prev` is the document before it, fetched by its code; the whole chain back to the first can be walked. A realm that
-   refuses the previous document has dropped it or hides it, and the page says so.
+4. `prev` is the document before it, fetched by its code; the whole chain back to the first can be walked. The document
+   before is often only *made*, not signed (a realm signs a day when someone asks): the realm serves it with an empty
+   signature, and the page checks that its text hashes to `prev` and that it is of the same realm and kind, and says it is not
+   signed. This signature thereby also covers every earlier document. A realm that refuses the previous document has dropped
+   it or hides it, and the page says so.
 5. When an expected key is given, the key in the text is that key. **That is what ties a key to a canister**: derive the key
    yourself, offline, as the page shows, and give it. Without it the page says the key is only the one the document reports.
 
