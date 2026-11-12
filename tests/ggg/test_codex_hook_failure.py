@@ -120,10 +120,34 @@ def test_a_sandbox_that_fails_for_any_reason_is_a_hook_failure_and_never_raises(
     assert state() == ("test@1.0.0", False, "init")
 
 
-def test_a_manifest_whose_hooks_are_all_defined_installs_as_before():
-    """The check judges names on the compiled code: decorated functions, plain ones and names bound otherwise count."""
+def test_a_manifest_whose_hooks_are_top_level_functions_installs_as_before():
+    """The check reads the syntax tree: decorated, plain and async functions defined at the top level are hooks."""
     build()
     source = ("from ggg_sdk import hook\n\n@hook\ndef init(args):\n    return {}\n\n"
-              "def act(args, context=None):\n    return {}\n\nbound = act\n")
-    out = ok("codex_install", "ctl", **install_args(source, hooks=["init", "act", "bound"]))
+              "def act(args, context=None):\n    return {}\n\nasync def later(args):\n    return {}\n")
+    out = ok("codex_install", "ctl", **install_args(source, hooks=["init", "act", "later"]))
     assert out["codex"] == "test@1.0.0" and out["init"]["ok"] is True and state() == ("test@1.0.0", True, None)
+
+
+@pytest.mark.parametrize("source", [
+    "init = lambda args: {}\n",                                      # bound, not defined
+    "def helper():\n    def init(args):\n        return {}\n",      # nested in a function
+    "class Hooks:\n    def init(self, args):\n        return {}\n",  # a method
+    "if True:\n    def init(args):\n        return {}\n",           # not at the top level
+    "from elsewhere import init\n",                                  # imported
+], ids=["assigned", "nested", "method", "inside an if", "imported"])
+def test_a_hook_that_is_not_a_top_level_function_is_not_one(source):
+    """Only a top-level ``def`` counts: a name that is used or bound some other way is not a hook the realm can call."""
+    build()
+    reason = "the manifest lists the hook init, which the code does not define as a top-level function"
+    assert reason in denied("codex_install", "ctl", **install_args(source))
+    assert state() == NO_CODEX
+
+
+def test_code_nested_too_deep_for_the_parser_is_left_to_the_checks_of_the_code_itself():
+    """No syntax tree to read: the hook check does not judge it (and does not raise); the install then fails or not on
+    its own, never a trap."""
+    from api.codex import check_hooks
+
+    deep = "x = " + "-" * 5000 + "1\n"
+    check_hooks({"hooks": ["init"]}, deep)  # returns: nothing to say about a tree that cannot be made

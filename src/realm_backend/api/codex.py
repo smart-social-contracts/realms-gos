@@ -145,27 +145,33 @@ def hooks(codex_id):
         yield from legislation.activate(row)
 
 
-def defined_by(code):
-    """The names a module's ``code`` can bind at its top level: every name it uses (a ``def`` stores its name) and the
-    name of every function it defines."""
-    return set(code.co_names) | {const.co_name for const in code.co_consts if hasattr(const, "co_name")}
+def defined_hooks(source):
+    """The names of the functions ``source`` defines at its top level (``def`` and ``async def``, decorated or not): what
+    a hook of the manifest can be. Read from the syntax tree, so that no code runs and a name that is only used, or
+    bound some other way, does not count. None when the tree cannot be made (code that does not compile, or nested too
+    deep for the parser): that is for the checks of the code itself."""
+    import ast
+
+    try:
+        tree = ast.parse(source, "hooks.py")
+    except Exception:  # noqa: BLE001  a SyntaxError, a ValueError, a RecursionError, a MemoryError
+        return None
+    return {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
 
 
 def check_hooks(manifest, source):
-    """A manifest that lists a hook its ``source`` does not define is refused before anything is installed: the codex
-    would switch in, and its hook could never run (``hook`` would find no function and mark it unhealthy for good). The
-    names are judged on the compiled code, no code runs. A manifest or source of another type, or code that does not
-    compile, is left to the checks of those."""
+    """A manifest that lists a hook its ``source`` does not define as a top-level function is refused before anything is
+    installed: the codex would switch in, and its hook could never run (``hook`` would find no function and mark it
+    unhealthy for good). A manifest or source of another type is left to the checks of those."""
     hooks = manifest.get("hooks") if isinstance(manifest, dict) else None
     if not isinstance(hooks, list) or not isinstance(source, str):
         return
-    try:
-        code = compile(source, "hooks.py", "exec")
-    except (SyntaxError, ValueError):
+    defined = defined_hooks(source)
+    if defined is None:
         return
     for name in hooks:
-        if isinstance(name, str) and name not in defined_by(code):
-            raise Fail(f"the manifest lists the hook {name}, which the code does not define")
+        if isinstance(name, str) and name not in defined:
+            raise Fail(f"the manifest lists the hook {name}, which the code does not define as a top-level function")
 
 
 def filed_install(args, proposal):

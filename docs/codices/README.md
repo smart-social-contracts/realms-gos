@@ -69,9 +69,9 @@ context)`), a spent budget.
 
 The same holds for `init` when a codex is installed: a failing `init` never undoes the install. The switch
 stands, the call (and the proposal that carried it) succeeds with the hook's failure in `init`, and the codex
-is unhealthy with the reason until a hook succeeds. A manifest that lists a hook its code does not define is
-refused before anything is installed, where the install is filed and where `codex_install` is called: such a
-hook could never run.
+is unhealthy with the reason until a hook succeeds. A manifest that lists a hook its code does not
+define as a top-level function (`def` or `async def`, decorated or not) is refused before anything is installed,
+where the install is filed and where `codex_install` is called: such a hook could never run.
 
 ## Capabilities
 
