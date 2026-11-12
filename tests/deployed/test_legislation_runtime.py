@@ -76,6 +76,8 @@ class LocalRegime(above("local_regime")):
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def on_proposal_create(self, event):
         event.order = ["es"]
+        if event.args["title"] == "malformed effect":
+            self.ggg.notification_send(recipient=123, topic="ordinance", title="malformed", body="")
         self.ggg.notification_send(recipient="User:" + event.user, topic="ordinance", title="Comunicació d'acord",
                                    body=event.result["proposal"])
 '''
@@ -466,6 +468,38 @@ def test_d_a_raising_guard_denies_naming_the_chapter_and_a_raising_hook_never_fa
     assert "x/town/water.py" not in recorded  # the guard succeeded this time: its entry cleared
     ok(town, "proposal_create", founder, title="fine")
     assert failures(town, founder) == {} and ok(town, "codex_status", founder, query=True)["healthy"]
+
+
+def test_d1_a_member_s_operation_stands_when_a_chapter_of_another_source_queues_an_effect_that_traps(town, people):
+    """Spain's chapter queues an effect with a number where the recipient is text: it fails as a message fails, by a trap
+    (realms-gos#679). The operation is the member's, through ``run``, the update that the frontend and an extension's
+    ``ctx.run`` call and that awaits: it stands, the chapter's failure is recorded, and the trap ends only the message the
+    effects run in."""
+    founder = people["founder"]
+    pid = ok(town, "proposal_create", founder, title="malformed effect")["proposal"]
+    assert ok(town, "proposal_get", founder, query=True, proposal=pid)["proposal"]["status"] == "voting"
+    error = failures(town, founder)["x/town/local_regime.py"]["on_proposal_create"]["error"]
+    assert error.startswith("the effects were rejected: "), error
+    assert not ok(town, "codex_status", founder, query=True)["healthy"]
+    ok(town, "proposal_create", founder, title="fine")
+    assert failures(town, founder) == {} and ok(town, "codex_status", founder, query=True)["healthy"]
+
+
+def test_d2_hook_effects_refuses_every_caller_but_the_realm_itself(town, people):
+    """``hook_effects`` applies operations as the codex, in a message the realm calls on itself; the update is on the
+    canister's interface for anyone to call. The founder, the controller and the anonymous caller are rejected by the real
+    wasm, and what they carried is never applied (no notification is written)."""
+    from ic.candid import Types, encode
+    from ic.principal import Principal
+
+    founder = people["founder"]
+    before = titles(town, founder)
+    effects = json.dumps([["notification_send", {"recipient": "User:" + founder, "topic": "x", "title": "smuggled", "body": ""}]])
+    for who in (Principal.from_str(founder), Principal.from_str(people["ctl"]), Principal.anonymous()):
+        town.pic.set_sender(who)
+        with pytest.raises(Exception, match="only the realm applies the effects of its hooks"):
+            town.pic.update_call(town.id, "hook_effects", encode([{"type": Types.Text, "value": effects}]))
+    assert titles(town, founder) == before
 
 
 def test_e_a_hook_that_exhausts_the_budget_fails_alone_and_the_codex_reloads(town, people):

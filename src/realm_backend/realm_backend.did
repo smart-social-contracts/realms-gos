@@ -967,6 +967,7 @@ service : (text) -> {
   "ggg_document_delete" : (DocumentDeleteArgs) -> (DocumentDeletedReply);
   "read" : (text, text) -> (text) query;
   "run" : (text, text) -> (text);
+  "hook_effects" : (text) -> (text);
   "http_transform" : (HttpTransformArgs) -> (HttpResponse) query;
   "__shell__" : (text) -> (text);
   "__browse__" : (text) -> (text) query;

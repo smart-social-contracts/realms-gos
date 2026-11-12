@@ -1460,6 +1460,37 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
 - **Failures:**
   - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
     hooks still run;
+  - an effect that fails never fails the caller either, even when it fails as a message does, by a trap (an
+    operation that raises what it does not expect: a number where a recipient is text). Each domain's effects run
+    in a message of their own, which the realm calls on itself (`hook_effects`, an update that refuses every other
+    caller) and awaits: a trap ends only that message and comes back as a rejected call, which is the chapter's
+    failure, recorded on the codex ("the effects were rejected: …"); the operation, and a codex switch it belongs
+    to, stand. This holds wherever the operation can wait for another canister: the `run` update (the frontend,
+    an extension's `ctx.run`, a delegate), a proposal's execution, a task and the hooks of a codex switch. What
+    that means for the operation and the effects:
+    - the operation's own writes are committed before its effects run (a call to another canister ends the
+      message), and the effects finish before the reply;
+    - other calls can run between one domain's effects and the next's, and a codex switch among them ends the
+      pass: the domains left, and a failure of the domain waiting, belong to the codex it replaced and are
+      neither run nor recorded on the new one;
+    - a trap in a domain's message undoes all of that domain's effects, those that had succeeded too; an effect
+      that fails without trapping (it answers `ok: false`) stops that domain at that effect and keeps the ones
+      before it. The other domains' effects stand either way;
+    - each call that has not answered holds about 42 billion cycles of the realm's balance (measured on PocketIC);
+      a realm too low to hold them has the call refused, which reads as the same failure, "the effects were
+      rejected";
+    - a failure is recorded against the last file of the domain (the highest layer's, the town's own), even when
+      the chapter that queued the effect is another source's.
+
+    **Known limit:** an operation that another operation runs through `core.op.call` cannot wait for another
+    canister (`op.run` drives it, as it does a query), so its hooks' effects run in the message that is running, and
+    an effect that traps still takes that message with it. Whoever calls: the controller's `__shell__`; the
+    `shell.execute` operation (an admin's, through `run` or as a task's step) for the operations it runs; and the
+    `extension.call` operation for the operations an extension's own backend calls, which any member who may use the
+    extension reaches through `run`. The hooks of `shell.execute` and `extension.call` themselves run after the
+    operation, outside that call, and are isolated. Collecting the effects the nested operations queue and applying
+    them through the realm's own message once `sandbox.execute` returns would close this (the follow-up to
+    [#679](https://github.com/smart-social-contracts/realms-gos/issues/679));
   - a guard that raises **denies** (fail closed), with "legislation error in <chapter>: <error>"; so does a
     codex that does not load, for every operation its legislation could guard, until a revert;
   - calls between domains stop at depth 8; the install refuses a `uses` chain that could reach it;
