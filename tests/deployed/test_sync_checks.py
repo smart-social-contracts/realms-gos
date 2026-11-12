@@ -312,17 +312,22 @@ def test_a_stored_install_the_check_refuses_concludes_failed_on_the_wasm_where_i
 def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(
         net, source, town):
     """The release is staged when the vote decides it, and switched to at the time: the same check at both, so the job
-    never outlives a refusal. The release is the one the town does not run (1.0.0: the town runs 2.0.0)."""
+    never outlives a refusal. The source relays 1.0.0 again for it (the town runs 2.0.0, which it relays now)."""
+    releases = source.ok("legislation_releases", None, query=True)["releases"]
+    now_relayed = next(r for r in releases if r["source"] == "arcadia")  # 2.0.0, to restore for the tests that follow
+    relay(source, "1.0.0", 6, published=now_relayed["published"] - 1)
     action = {"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0"}}
     pid = town.ok("proposal_create", "alice", title="Stored", action=action,
                   effective_at=town.now() + HOUR)["proposal"]
     store_action(town, pid, {"source": "arcadia", "version": "1.0.0", "url": 5})
     assert vote(town, pid, "yes") == "execution_scheduled"
-    assert settled(net, town)["step"] == "wait" and running(town) == {"2.0.0"}  # staged: the job waits for its time
+    job = settled(net, town)
+    assert (job["status"], job["step"]) == ("running", "wait") and running(town) == {"2.0.0"}  # staged, waiting
     net.wait(HOUR + 5)
     row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
-    assert row["status"] == "executed" and running(town) == {"1.0.0"}
-    assert status(town)["job"]["status"] == "done"  # no job left running
+    assert row["status"] == "executed" and running(town) == {"1.0.0"}  # it ran as the release
+    assert status(town)["job"]["status"] == "done"  # and left no job running
+    relay(source, "2.0.0", now_relayed["effective_from"], published=now_relayed["published"])  # as it was
     # the next install is not refused, and the tests that follow run on 2.0.0 again
     installed(net, town, file_install(town, "2.0.0"))
     assert running(town) == {"2.0.0"}
