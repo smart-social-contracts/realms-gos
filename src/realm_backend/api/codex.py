@@ -6,6 +6,7 @@ from core import it_team
 from core import layered_codex as store
 from core import legislation
 from core import sandbox
+from core import signing
 from core.db import Conflict, Fail, NotFound, find, first, latest, view, window
 from ggg import Codex, InstallJob, LayeredCodex, Realm
 from core.op import op
@@ -378,7 +379,9 @@ def codex_status(c, args):
     route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
     ``job`` the install job running or paused, else the latest, with its step, status and error. ``it_team`` is the
     department the admins designated to revert fast ("" for none). ``journal_failure`` is the last entry the official
-    journal could not record (the change it was for, when, and why), or None. ``sync_sources`` is what the last check
+    journal could not record (the change it was for, when, and why), or None. ``signing_failures`` is, for each kind of
+    document the realm signs (the journal's issues, so far), the last batch it could not sign (the subjects, when, and
+    why), if there is one. ``sync_sources`` is what the last check
     of each active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the realm's
     ``compliance`` against its record, ``checked_at``, the ``error`` that left it ``unknown`` ("" for none) and the
     releases ``installable`` from it; ``check`` the
@@ -398,5 +401,6 @@ def codex_status(c, args):
             "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
             "pending": shown(waiting) if waiting else None,
             "job": view(job, *JOB_SHOWN) if job else None, "it_team": it_team.department_id(),
-            "journal_failure": journal.failure(), "sync_sources": sync_checks.found(),
+            "journal_failure": journal.failure(), "signing_failures": signing.failures(),
+            "sync_sources": sync_checks.found(),
             "check": sync_checks.schedule_view()}

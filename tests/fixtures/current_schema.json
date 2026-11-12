@@ -4266,6 +4266,50 @@
   "relationships": {},
   "version": 1
  },
+ "SignedDocument": {
+  "fields": {
+   "canonical": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "code": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "digest": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "path": {
+    "constraints": {
+     "max_length": 65536
+    },
+    "default": "[]",
+    "kind": "property",
+    "type": "Json"
+   },
+   "root": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "signature": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
+  "version": 1
+ },
  "SourceRecord": {
   "fields": {
    "checked_at": {

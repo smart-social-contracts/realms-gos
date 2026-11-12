@@ -17,6 +17,7 @@ from core import fastjson  # noqa: E402
 fastjson.install()
 
 from api import setup  # noqa: E402
+from core import journal_signing  # noqa: E402
 from core.op import dispatch, run as drive  # noqa: E402
 # basilisk calls a method by looking its name up among main's globals. Reading ``__all__`` loads the module.
 from ggg_methods import *  # noqa: E402, F401, F403
@@ -31,11 +32,13 @@ import core.layered_codex  # noqa: E402, F401
 @init
 def init_(installer: text) -> void:
     setup.start(installer)
+    journal_signing.resume()
 
 
 @post_upgrade
 def post_upgrade_() -> void:
     setup.start()
+    journal_signing.resume()  # timers do not survive an upgrade
 
 
 @query

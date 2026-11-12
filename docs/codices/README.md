@@ -11,6 +11,7 @@ submodule): `agora`, `dominion`, `syntropia`.
 | [SDK](sdk.md) | `ggg_sdk`: `hook`, `realm`, and the helpers |
 | [Build, test, publish](build-test-publish.md) | From an empty folder to a codex running in a realm |
 | [The layered codex](layered-codex.md) | The next design, not built yet: legislation from several sources as chapters, pinned by checksum and installed by vote |
+| [The signed official journal](journal-signature.md) | How each closed issue of a realm's journal is signed by its canister, and how anyone verifies it |
 
 ## The package
 

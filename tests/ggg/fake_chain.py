@@ -20,7 +20,7 @@ class Trap(BaseException):
 def reset():
     state.clear()
     state.update(caller=ANONYMOUS, controllers={"ctl"}, now=1_790_000_000, timers=[], calls=[], replies={}, peers={},
-                 web={})
+                 web={}, attached=[], balance=5_000_000_000_000)
 
 
 def caller():
@@ -62,7 +62,7 @@ def candid_decode(data):
 
 
 def cycles():
-    return 5_000_000_000_000
+    return state["balance"]
 
 
 def memory():
@@ -149,6 +149,7 @@ def send(cid, method, recorded, given, default):
 
 
 def call(cid, method, candid="()", cycles=0):
+    state["attached"].append((cid, method, cycles))
     return send(cid, method, candid, candid, "()")
     yield
 

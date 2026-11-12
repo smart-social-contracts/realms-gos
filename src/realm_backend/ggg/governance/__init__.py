@@ -19,4 +19,5 @@ from .federation import FederationMessage
 from .codex import Codex
 from .layered_codex import ChapterSource, InstallJob, LayeredCodex
 from .journal import JournalEntry
+from .signed_document import SignedDocument
 from .links import Follower, FoundRelease, Release, SourceRecord, SyncSource
