@@ -1,6 +1,6 @@
 from ic_python_db import Boolean, Integer, ManyToOne, OneToMany, String
 
-from core.db import Json, Row, indexed_ids
+from core.db import Json, Row, has_indexed, indexed_ids
 from core.ratio import ONE, PERCENT, upgrade_call
 
 
@@ -45,7 +45,7 @@ class Proposal(Row):
     votes = OneToMany("Vote", "proposal")
 
     # A proposal has several tags, which a field index (one value per row) cannot hold. Each tag has a list of its own in
-    # the same store, ``_fi:Proposal:tags:<tag>``, of the ids of the proposals that carry it, and read a page at a time
+    # the same store, ``_fi:Proposal:tags:<tag_key>``, of the ids of the proposals that carry it, and read a page at a time
     # by ``with_tags``. ``list_tags`` writes them, and keeps beside them what each proposal is listed under, so that it
     # can take a proposal off a list when the tags changed without it (a release that kept no lists). Assign the tags
     # only through ``set_tags``.
@@ -54,15 +54,24 @@ class Proposal(Row):
         if not kw.get("_loaded"):
             self.list_tags()
 
+    @staticmethod
+    def tag_key(tag):
+        """The name of a tag's list. A tag is free text, and the index adds ``|c``, ``|d`` or ``|n`` and twelve digits to a
+        name, for the count of the list, its mark when it is cleared and its entries. A tag that ended like one of them
+        (``parks|n0000000000``) would put keys of its own among the entries of another list, where they hide some of
+        them. So a name never holds ``|``: it is written ``%7C``, and ``%`` is written ``%25`` so that no two tags share
+        a name."""
+        return tag.replace("%", "%25").replace("|", "%7C")
+
     def list_tags(self):
         """Make the lists of the tags say what the tags of this proposal say: take it off the lists it is on and no longer
         belongs to, put it on those it belongs to. Doing it again changes nothing."""
         db, kind = self.db(), self._type
         listed = (db.load(LISTED, self._id) or {}).get("tags", [])
         for tag in set(listed) - set(self.tags):
-            db.field_index_remove(kind, "tags", tag, self._id)
+            db.field_index_remove(kind, "tags", self.tag_key(tag), self._id)
         for tag in self.tags:
-            db.field_index_add(kind, "tags", tag, self._id)
+            db.field_index_add(kind, "tags", self.tag_key(tag), self._id)
         if listed != self.tags:
             if self.tags:
                 db.save(LISTED, self._id, {"tags": self.tags})
@@ -77,15 +86,20 @@ class Proposal(Row):
     @classmethod
     def with_tags(cls, tags, start, count):
         """The ids, ascending, of the first ``count`` proposals from id ``start`` that carry at least one of ``tags``.
-        One range read of each tag's list: every id of the first ``count`` of the union is among the first ``count`` of
-        its own tag's list."""
-        found = {i for tag in tags for i in indexed_ids(cls, "tags", tag, start, count)}
+        A read of each tag's list: every id of the first ``count`` of the union is among the first ``count`` of its own
+        tag's list."""
+        found = {i for tag in tags for i in indexed_ids(cls, "tags", cls.tag_key(tag), start, count)}
         return sorted(found)[:count]
 
     @classmethod
     def count_with_tags(cls, tags):
         """How many ids the lists of ``tags`` hold: the proposals that carry at least one, or more if one carries several."""
-        return sum(cls.db().field_index_count(cls.get_full_type_name(), "tags", tag) for tag in tags)
+        return sum(cls.db().field_index_count(cls.get_full_type_name(), "tags", cls.tag_key(tag)) for tag in tags)
+
+    @classmethod
+    def is_listed_under(cls, tag, proposal_id):
+        """Whether the proposal ``proposal_id`` is on the list of ``tag``, from the list alone."""
+        return has_indexed(cls, "tags", cls.tag_key(tag), proposal_id)
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):

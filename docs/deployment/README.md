@@ -156,8 +156,8 @@ has run it; restore from a backup instead.
 
 #### The tag lists of proposals, after every upgrade
 
-`proposal_list` with `tags` reads one list of proposal ids for each tag (`_fi:Proposal:tags:<tag>`), so a page costs what
-its proposals cost whatever the realm holds. `Proposal.set_tags` keeps the lists, and `_tag_lists@<id>` beside them: the
+`proposal_list` with `tags` reads one list of proposal ids for each tag (`_fi:Proposal:tags:<tag>`, the tag with `%` and `|`
+written `%25` and `%7C`), so a page costs what its proposals cost whatever the realm holds. `Proposal.set_tags` keeps the lists, and `_tag_lists@<id>` beside them: the
 tags each proposal is on the lists of.
 
 After **every** upgrade the realm puts its proposals on the lists of their tags again, by itself: `post_upgrade` does the

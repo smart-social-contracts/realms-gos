@@ -847,7 +847,7 @@ def id_sources(tags, status, count):
     read for each tag it is checked in, an id of the tags a read for the status."""
     if status and Proposal.count_by("status", status) * len(tags) < Proposal.count_with_tags(tags):
         return (lambda cursor: indexed_ids(Proposal, "status", status, cursor, count + 1),
-                lambda i: any(has_indexed(Proposal, "tags", tag, i) for tag in tags))
+                lambda i: any(Proposal.is_listed_under(tag, i) for tag in tags))
     return (lambda cursor: Proposal.with_tags(tags, cursor, count + 1),
             lambda i: not status or has_indexed(Proposal, "status", status, i))
 

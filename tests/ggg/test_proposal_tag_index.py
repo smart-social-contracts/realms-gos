@@ -4,6 +4,7 @@ that kept no such lists answers by reading the proposals until ``relist_tags`` h
 again after every upgrade, so that a rollback to such a release leaves no list wrong."""
 
 import random
+import re
 
 import kit
 import world
@@ -13,6 +14,10 @@ from ic_python_db import Database
 from kit import call, fire_timers, ok
 
 STATUSES = ("voting", "executed", "rejected")
+# Tags that end like what the index adds to the name of a list: its count (``|c``), its mark (``|d``) and its entries
+# (``|n`` and twelve digits). ``a|n0000000000`` is ``a|n`` and ten digits: of the length of an entry of ``a``, and sorted
+# among them from the proposal 100 on.
+LOOK_ALIKES = ["a", "a|c", "a|d", "a|n000000000001", "a|n0000000000", "a|n0000000000|c", "a|n000000000", "a%7Cc", "a%"]
 
 
 def file(title, **extra):
@@ -21,6 +26,12 @@ def file(title, **extra):
 
 def number(proposal):
     return int(proposal.split("-")[1])
+
+
+def pass_id_100():
+    """Untagged proposals up to P-100, so that those filed next have the ids that sort after a key like ``|n0000000000``."""
+    for i in range(100):
+        file(f"before {i}")
 
 
 def fill(count, tagged, every):
@@ -161,12 +172,14 @@ def test_a_status_with_the_tags_is_read_from_the_shorter_list(monkeypatch):
 
 
 def test_pages_with_any_count_and_filters_are_what_the_proposals_say_and_full():
-    """Against the proposals themselves: tags that are alike, one that ends like an index entry, and a long one."""
+    """Against the proposals themselves, with ids above 100: tags that are alike, ones that end like an index entry, and
+    a long one."""
     world.build()
-    vocabulary = ["a", "a|c", "a|d", "a|n000000000001", "a|n000000000001|c", "x" * 64, "😀" * 64, "València"]
+    vocabulary = LOOK_ALIKES + ["x" * 64, "😀" * 64, "València"]
     shuffle = random.Random(7)
+    pass_id_100()
     ids = []
-    for i in range(60):
+    for i in range(40):
         ids.append(file(f"p{i}", tags=shuffle.sample(vocabulary, shuffle.randint(0, 4))))
         Proposal[ids[-1]].status = shuffle.choice(STATUSES)
     everything = [Proposal[i] for i in ids]
@@ -183,20 +196,56 @@ def test_pages_with_any_count_and_filters_are_what_the_proposals_say_and_full():
         assert got[-1][1] is None
 
 
+def test_a_tag_that_ends_like_an_index_entry_hides_no_proposal():
+    """``parks|n0000000000`` is ``parks`` and what the index adds to the name of a list for an entry: its count key sorted
+    among the entries of ``parks`` from the proposal 100 on, and a read that met it came back short and was taken for the
+    end of the list."""
+    world.build()
+    pass_id_100()
+    parks = [file(f"Parks {i}", tags=["parks"]) for i in range(10)]  # P-101 to P-110
+    like = file("Look-alike", tags=["parks|n0000000000"])
+    other = file("Other", tags=["parks|n0000000000|c", "parks%7Cn0000000000"])
+    for count in (1, 2, 3, 20):
+        assert found(tags=["parks"], count=count) == parks, count
+        assert found(tags=["parks", "elsewhere"], count=count) == parks, count  # two tags
+        assert found(tags=["parks|n0000000000"], count=count) == [like], count
+        assert found(tags=["parks", "parks|n0000000000"], count=count) == parks + [like], count
+    assert found(tags=["parks|n0000000000|c"]) == [other] and found(tags=["parks%7Cn0000000000"]) == [other]
+    assert pages(tags=["parks"], count=2)[-1] == ([parks[8], parks[9]], None)
+    # The name of a list holds no ``|``, so that no key of one lies among the entries of another
+    keys = [k for k in Database.get_instance()._db_storage.keys() if k.startswith("_fi:Proposal:tags:")]
+    assert keys and all(re.fullmatch(r"_fi:Proposal:tags:[^|]*\|(c|n\d{12})", k) for k in keys), keys
+    assert len({Proposal.tag_key(t) for t in LOOK_ALIKES}) == len(LOOK_ALIKES)  # and no two tags share a name
+
+
+def test_a_read_of_a_list_that_comes_back_short_is_not_the_end_of_it():
+    """ic-python-db cuts a read at the number of keys asked for and then drops those that are not entries of the list. A
+    key of another list among the entries is not there to be had (a tag's name never holds ``|``), but a read that comes
+    back short is not taken for the end for that."""
+    world.build()
+    pass_id_100()
+    parks = [file(f"Parks {i}", tags=["parks"]) for i in range(10)]
+    stray = "_fi:Proposal:tags:parks|n0000000000|c"  # what the name ``parks|n0000000000`` used to make
+    Database.get_instance()._db_storage.insert(stray, "7")
+    for count in (1, 2, 3, 20):
+        assert found(tags=["parks"], count=count) == parks, count
+    assert Proposal.with_tags(["parks"], 1, 4) == [number(p) for p in parks[:4]]
+
+
 def test_retagging_among_tags_that_look_like_index_entries_leaves_every_list_right():
     """A tag is a key of the store as it is: one that is another's key plus ``|c`` or ``|n`` and an id must not touch
     that other's list, whichever way proposals come and go from them."""
     world.build()
-    vocabulary = ["a", "a|c", "a|d", "a|n000000000001", "a|n000000000001|c", "a|n000000000001|n000000000002"]
+    pass_id_100()
     shuffle = random.Random(11)
-    drafts = [file(f"d{i}", tags=shuffle.sample(vocabulary, shuffle.randint(0, 3))) for i in range(12)]
+    drafts = [file(f"d{i}", tags=shuffle.sample(LOOK_ALIKES, shuffle.randint(0, 3))) for i in range(12)]
     for p in drafts:
         Proposal[p].status = "draft"
     for _ in range(80):
         ok("proposal_set_tags", "alice", proposal=shuffle.choice(drafts),
-           tags=shuffle.sample(vocabulary, shuffle.randint(0, 4)))
-        for tag in vocabulary:
-            assert found(tags=[tag]) == [p for p in drafts if tag in Proposal[p].tags], tag
+           tags=shuffle.sample(LOOK_ALIKES, shuffle.randint(0, 4)))
+        for tag in LOOK_ALIKES:
+            assert found(tags=[tag], count=3) == [p for p in drafts if tag in Proposal[p].tags], tag
 
 
 def test_a_list_of_tags_is_a_list_of_text():
@@ -286,8 +335,9 @@ def test_what_a_release_without_lists_filed_or_retagged_is_put_right_by_the_next
 
 def test_after_any_rollbacks_the_next_upgrade_leaves_every_list_exact(monkeypatch):
     world.build()
-    vocabulary = ["a", "b", "a|c", "a|n000000000001", "c", "x" * 64]
+    vocabulary = LOOK_ALIKES + ["b", "c", "x" * 64]
     shuffle = random.Random(3)
+    pass_id_100()
     drafts = []
 
     def file_draft():
@@ -310,6 +360,19 @@ def test_after_any_rollbacks_the_next_upgrade_leaves_every_list_exact(monkeypatc
             (file_draft if shuffle.random() < 0.3 else retag)()
         for tag in vocabulary:
             assert listed(tag) == [number(p) for p in drafts if tag in Proposal[p].tags], tag
+
+
+def test_the_pass_puts_proposals_back_on_lists_that_are_gone_whatever_the_records_say():
+    """The records say what each proposal is on; the pass adds it to the lists of its tags all the same, so that lists
+    kept under another name (an earlier naming of the keys) are rebuilt by the next upgrade."""
+    world.build()
+    fill(6, "rare", 2)
+    storage = Database.get_instance()._db_storage
+    for key in [k for k in storage.keys() if k.startswith("_fi:Proposal:tags:")]:
+        storage.remove(key)
+    assert listed("rare") == []
+    setup.start()
+    assert listed("rare") == [2, 4, 6] and found(tags=["rare"]) == ["P-2", "P-4", "P-6"]
 
 
 def test_a_new_realm_has_every_proposal_listed_from_the_start():
