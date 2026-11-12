@@ -114,6 +114,36 @@ reply = json.loads(op.run(op.dispatch("proposal_list", %(args)r)))
 print(json.dumps({"ids": [p["id"] for p in reply["proposals"]], "next": reply["next"], "ok": reply["ok"],
                   "instructions": ic.performance_counter(0) - before}))
 '''
+# Proposals that tags and a status hardly share: 1,999 executed ones that carry sixteen tags, and the ones that are
+# voting (P-2000 on, but for the ones that are rejected from ``%(rejected_from)d``) which carry none, but the last, P-4000,
+# which is voting and carries them all: the only match, at the far end of every list.
+CROWDED = '''
+from ggg import Department, Proposal
+
+root = Department["Administration"]
+tags = [f"c{k}" for k in range(16)]
+for i in range(%(first)d, %(last)d + 1):
+    carrier = i < 2000 or i == 4000
+    status = "executed" if i < 2000 else "rejected" if i >= %(rejected_from)d and i != 4000 else "voting"
+    Proposal(id=f"P-{i}", title=f"Item {i}", description="Aprovar l'expedient.", proposer="2vxsx-fae", department=root,
+             status=status, tags=tags if carrier else [])
+'''
+# The same listing with the limit on checks lifted, as the realm did before it: what it costs, whatever it costs
+UNBOUNDED = '''
+import json
+from basilisk import ic
+from api import proposals
+from core import op
+
+kept, proposals.CHECK_LIMIT = proposals.CHECK_LIMIT, 10**9
+try:
+    before = ic.performance_counter(0)
+    reply = json.loads(op.run(op.dispatch("proposal_list", %(args)r)))
+    print(json.dumps({"ids": [p["id"] for p in reply["proposals"]], "next": reply["next"], "ok": reply["ok"],
+                      "instructions": ic.performance_counter(0) - before}))
+finally:
+    proposals.CHECK_LIMIT = kept
+'''
 # The first message of the pass that lists the proposals, with the instructions it used
 PASS = '''
 from basilisk import ic
@@ -159,6 +189,12 @@ def one_page(realm, **args):
     return reply
 
 
+def unbounded_page(realm, **args):
+    reply = json.loads(run(realm, UNBOUNDED % {"args": json.dumps(args)}).strip().splitlines()[-1])
+    assert reply["ok"], reply
+    return reply
+
+
 def every_page(realm, **args):
     """Follow ``next``: the ids found, the instructions of each page and the ids of each."""
     ids, costs, start = [], [], 1
@@ -180,14 +216,8 @@ def pass_is_done(realm):
     return json.loads(run(realm, STATE).strip().splitlines()[-1]) is True
 
 
-@pytest.fixture(scope="module", params=[
-    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
-    "rewritten"])
-def realm(request, wasm_of, people, costs):
-    """A realm of 4,000 proposals, whose lists are those of the previous release (none under any tag), then upgraded."""
-    current = wasm_of("production")
-    variant = request.param
-    realm = Canister(PREVIOUS if variant == "previous" else current, installer=people["installer"])
+def launched(realm, people):
+    """``realm`` set up and launched, with Alice a member."""
     founder = people["founder"]
     for step, who, args in (("install", people["installer"], {"network": "local", "founder": founder}),
                             ("realm", founder, {"name": "València", "open_registration": True}),
@@ -197,6 +227,17 @@ def realm(request, wasm_of, people, costs):
         assert out["ok"], out
     assert realm.call("setup_launch", sender=founder)["ok"]
     assert realm.call("realm_join", sender=people["alice"])["ok"]
+    return realm
+
+
+@pytest.fixture(scope="module", params=[
+    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
+    "rewritten"])
+def realm(request, wasm_of, people, costs):
+    """A realm of 4,000 proposals, whose lists are those of the previous release (none under any tag), then upgraded."""
+    current = wasm_of("production")
+    variant = request.param
+    realm = launched(Canister(PREVIOUS if variant == "previous" else current, installer=people["installer"]), people)
     seed(realm, 1, PROPOSALS)
     realm.variant = variant
     if variant == "previous":
@@ -322,6 +363,41 @@ def test_an_upgrade_after_a_rollback_puts_right_what_the_release_before_filed_an
     wait_for_the_pass(realm)
     assert one_page(realm, tags=[RARE], count=500)["ids"] == expected
     assert "P-100" in one_page(realm, tags=["area-0"], count=500)["ids"]  # what it kept is still listed
+
+
+@pytest.fixture(scope="module", params=[
+    pytest.param(4_000, id="the ids come from the tags"), pytest.param(3_950, id="the ids come from the status")])
+def crowded(request, wasm_of, people):
+    """A realm of 4,000 proposals that tags and a status hardly share. Rejected from P-3950 on, the status is the shorter
+    list and its ids are checked in each tag; with none rejected the tags' lists are, and their ids are checked in the
+    status."""
+    realm = launched(Canister(wasm_of("production"), installer=people["installer"]), people)
+    for first in range(1, PROPOSALS + 1, SEED_BATCH):
+        run(realm, CROWDED % {"first": first, "last": min(first + SEED_BATCH - 1, PROPOSALS),
+                              "rejected_from": request.param})
+    return realm
+
+
+def test_tags_and_a_status_that_few_proposals_share_cost_a_call_under_the_limit_of_a_query(crowded, costs):
+    """The one proposal they share is the last: to find it, the whole of the shorter list has to be checked, in as many
+    calls as it takes. No call spends more than 2.5 billion instructions, half of what a query may, at any page size."""
+    for names in (["c0"], [f"c{k}" for k in range(16)]):
+        for count in (100, 500):
+            found, spent, start = [], [], 1
+            while start is not None:
+                reply = one_page(crowded, tags=names, status="voting", count=count, **{"from": start})
+                found += reply["ids"]
+                spent.append(reply["instructions"])
+                start = reply["next"]
+            assert found == ["P-4000"], (names, found)
+            what = f"{len(names)} tag{'s' * (len(names) > 1)} and status voting, count {count}, {len(spent)} call{'s' * (len(spent) > 1)}"
+            costs.report(f"{what}: the dearest call", max(spent))
+            costs.report(f"{what}: all of them", sum(spent))
+            assert max(spent) < 2_500_000_000, (names, count, spent)
+            assert len(spent) <= 30, (names, count, spent)
+        lifted = unbounded_page(crowded, tags=names, status="voting")
+        assert lifted["ids"] == ["P-4000"] and lifted["next"] is None
+        costs.report(f"{len(names)} tag{'s' * (len(names) > 1)} and status voting, no limit on checks: one call", lifted["instructions"])
 
 
 def test_a_realm_created_by_this_release_needs_no_pass(wasm_of, people):

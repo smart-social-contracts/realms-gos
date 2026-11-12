@@ -141,8 +141,10 @@ def page_by(cls, field, value, args, most=PAGE_MAX):
 def indexed_ids(cls, field, value, start, count):
     """The ids, ascending, of up to ``count`` rows from id ``start`` whose indexed ``field`` is ``value``: a read of the
     index, no row. ic-python-db cuts its read at ``count`` keys and only then drops the keys that are not entries of the
-    list, so a read can come back short with more to follow: it is read again, from after the last id, until ``count``
-    ids are in or a read comes back empty, which is the end."""
+    list, so a read that meets keys of another list among the entries comes back short, with more to follow. What keeps
+    such keys out is the name of the list: a value with no ``|`` (see ``Proposal.tag_key``) cannot make one. This is
+    the defence for when one gets in anyway: it reads again, from after the last id, until ``count`` ids are in or a
+    read comes back empty. A read whose keys are all foreign comes back empty too, and is taken for the end."""
     ids = []
     while len(ids) < count:
         more = cls.db().field_index_page(cls.get_full_type_name(), field, str(value), start, count - len(ids))

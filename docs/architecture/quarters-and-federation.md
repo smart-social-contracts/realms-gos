@@ -99,12 +99,13 @@ of the last change it took and when that one was made. The answer carries what c
 
 A quarter with no cursor, one whose cursor is ahead of the log or names a change that is not the log's (the capital was
 restored from a snapshot), one further behind than the log keeps (256 changes), and one whose cursor was read before the
-capital last **started** is answered with everything, as every quarter always was. The cursor names the epoch of the log, a
-time the capital sets at every install and upgrade: an upgrade may serve what it did not serve, and a capital rolled back to
-a release that has no log changes what it serves without a note, so that its log reads, on the next upgrade, as it did when
-the quarter last synced. Each quarter of a capital that starts again takes everything once, and the changes after. So is every quarter's first sync after it starts, since the cursor is presented only by a heap that
-has already synced: an upgrade is followed by a full sync. A quarter keeps the cursor only when it has taken the whole
-answer; a sync that failed, or could not read an image, is asked for again from the old one.
+capital last **started** is answered with everything, as every quarter always was. The cursor names the epoch of the log,
+a time the capital sets at every install and upgrade: an upgrade may serve what it did not serve, and a capital rolled
+back to a release that has no log changes what it serves without a note, so that its log reads, on the next upgrade, as
+it did when the quarter last synced. Each quarter of a capital that starts again takes everything once, and the changes
+after. So does every quarter in its first sync after it starts: the cursor is presented only by a heap that has already
+synced, so an upgrade is followed by a full sync. A quarter keeps the cursor only when it has taken the whole answer; a
+sync that failed, or could not read an image, is asked for again from the old one.
 
 The quarter's report is cheap too. It carries the population and codex, and the **census** of the zones its members live
 in only when a member moved into or out of one since the capital last took it (and in its first sync). The capital writes
