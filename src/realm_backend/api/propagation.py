@@ -25,7 +25,7 @@ from api import codex as runtime
 from api import installs, links, quarters, tasks
 from core import chain, compliance, legislation
 from core import layered_codex as store
-from core.db import JSON_MAX, Conflict, Fail, each, find, next_id
+from core.db import JSON_MAX, Conflict, Fail, each, find, next_id, put
 from core.op import op
 from ggg import FederationMessage, InstallJob, LayeredCodex, Quarter, Task, TaskSchedule
 
@@ -314,5 +314,5 @@ def judge_quarters():
     then follow the quarters' own reports."""
     target = required()
     for q in each(Quarter, "status", "active"):
-        if q.last_sync:
-            q.compliance = judge(q, q.codex_id, target)
+        if q.last_sync and put(q, compliance=judge(q, q.codex_id, target)):
+            quarters.announce(q)

@@ -4,11 +4,11 @@ import math
 
 from core import chain
 from core import compliance
-from core import sandbox
+from core import sandbox, sync_log
 from api import assets, proposals
-from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, view
+from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, put, view
 from core.ic_keys import TEST_NETWORKS
-from ggg import Forward, GuestUser, LayeredCodex, Member, Quarter, Realm, User, UserProfile
+from ggg import Forward, GuestUser, LayeredCodex, Member, Quarter, Realm, User, UserProfile, Zone
 from api import codex as runtime
 from core.op import filing, op, run
 from core.pending import quoted
@@ -16,7 +16,7 @@ from core.ratio import ONE, PERCENT
 
 CAPACITY, TEST_CAPACITY, SCALE_AT = 2000, 10, 0.9
 GUEST = ["self.data_view", "realm.data_view"]
-# Every sync carries the whole directory, so a federation has a fixed most quarters.
+# A full sync (the first of a quarter after it starts) carries the whole directory, so a federation has a fixed most quarters.
 MAX_QUARTERS = 500
 STATUSES = ("setup", "active", "suspended", "splitting", "merging")
 MOVES = {"setup": {"active"}, "active": {"suspended", "splitting", "merging"}, "suspended": {"active"},
@@ -24,6 +24,12 @@ MOVES = {"setup": {"active"}, "active": {"suspended", "splitting", "merging"}, "
 RULE = {"kind": "majority_of_quarters", "threshold": ONE // 2, "absent": "wait"}
 KINDS, ABSENT = ("majority_of_quarters", "majority_of_members"), ("wait", "no", "ignore")
 FIELDS = ("id", "name", "index", "status", "population", "codex_id", "codex_version", "compliance", "last_sync")
+# What of a directory row the quarters are told of when it changes. ``last_sync`` is left out: it moves at every sync, so a
+# row that carried it would change at every sync, and the capital's own row of the quarter is the one that stays exact.
+# ``population`` is told only once it has moved by POPULATION_STEP (``drifted``): every quarter reports every hour, and no
+# quarter acts on a population to the member.
+NOTABLE = ("name", "index", "status", "codex_id", "codex_version", "compliance")
+POPULATION_STEP = 100  # a quarter's population is told when it has moved by one in this many of the quarter's capacity
 # Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
 ADOPT_EVERY = 60
 # What adopt() does for a quarter Casals has built, in order.
@@ -36,13 +42,20 @@ LOCAL_SETTINGS = "quarter.local_settings"
 DEFAULTS = {"timezone": "UTC", "welcome_message": ""}
 # Seconds between a quarter's catch-up syncs with its capital, which sets them (quarter_configure ``sync_every``). The
 # capital pushes its synced settings when they change and a quarter syncs when it starts after an upgrade, so this only
-# catches up what a quarter missed while it was down; each sync carries the whole directory (up to MAX_QUARTERS rows).
+# catches up what a quarter missed while it was down; each sync carries what changed on the capital since the last one
+# (core.sync_log), which is almost nothing for a federation that was idle.
 SYNC_EVERY, SYNC_MIN, SYNC_MAX = 3600, 3600, 7 * 24 * 3600
 # A quarter that starts after an upgrade syncs within this many seconds, at a moment its canister id sets: the quarters
 # of a federation upgraded together do not all call their capital in the same round.
 RESUME_SPREAD = 120
 # Whether this heap has armed the catch-up timer: one chain of them, armed again after an upgrade (resume).
 _catch_up = {"armed": False}
+# What a heap knows of its own syncs, not stored, so that it is gone with an upgrade: whether this quarter has synced since
+# it started (its first sync is a full one), and when it last did.
+_synced = {"since_start": False, "at": 0}
+# On a capital, whether the next report has it check if a new quarter is wanted, whatever the quarter reports: it starts
+# true, and a change of the capacity or of auto-scaling (``quarter_configure``) sets it again.
+_scale = {"check": True}
 # The settings a capital keeps in sync for its quarters (the last section of this module), sent in messages of
 # SETTINGS_TOPIC, which only the capital sends.
 SYNCED = ("name", "manifesto", "terms", "logo_url", "background_image_url", "primary_color", "accounting_currency",
@@ -120,7 +133,7 @@ def me():
     r, state = realm(), realm().sync_state or {}
     return {"id": chain.self_id(), "name": state.get("label", r.name) if federated() else r.name,
             "index": state.get("index", 0) if federated() else 0,
-            "status": "setup" if r.status == "setup" else "active", "last_sync": state.get("at", 0), **report(),
+            "status": "setup" if r.status == "setup" else "active", "last_sync": _synced["at"], **report(),
             "compliance": own_compliance()}
 
 
@@ -132,12 +145,16 @@ def known():
 def zones_held():
     """The zones of the realm that members live in here, each with how many: what a quarter reports to its capital,
     which places new members by it and tells no one else, since a small count singles out a person."""
-    return {z.id: z.population for z in assets.defined_zones() if z.population}
+    return assets.populated()
+
+
+def zone_definition(z):
+    return {"zone": z.id, "name": z.name, "kind": z.kind}
 
 
 def zone_definitions():
     """The zones of the realm as ``zone_define`` takes them: what the capital sends its quarters, without a population."""
-    return [{"zone": z.id, "name": z.name, "kind": z.kind} for z in assets.defined_zones()]
+    return [zone_definition(z) for z in assets.defined_zones()]
 
 
 def zones_of(cid):
@@ -149,11 +166,14 @@ def zones_of(cid):
     return None if federated() else Quarter[cid].zones
 
 
+def flagged(row):
+    """A directory row with whether it is the capital's and whether its codex drifts from the capital's."""
+    row["capital"], row["drifting"] = row["id"] == capital(), drifting(row["codex_version"])
+    return row
+
+
 def directory():
-    rows = [me()] + [view(q, *FIELDS) for q in known()]
-    for row in rows:
-        row["capital"], row["drifting"] = row["id"] == capital(), drifting(row["codex_version"])
-    return rows
+    return [flagged(row) for row in [me()] + [view(q, *FIELDS) for q in known()]]
 
 
 def published_rule():
@@ -172,7 +192,7 @@ def scale():
     one is proposed or being built, and the ``pending`` one Casals is building."""
     r, n = realm(), capacity()
     pops = {row["id"]: row["population"] for row in directory()}
-    at = math.ceil(SCALE_AT * n)
+    at = scale_at(n)
     return {"populations": pops, "capacity": n, "scale_at": at, "enabled": r.auto_scale_enabled,
             "wanted": r.auto_scale_enabled and max(pops.values()) >= at,
             "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at, "pending": pending()}
@@ -201,7 +221,10 @@ def from_capital(c):
 
 
 def record(c, args):
-    """A quarter's report reaches the capital: population, codex and optionally a federal vote leg."""
+    """A quarter's report reaches the capital: population, codex and optionally a federal vote leg. Returns the quarter's
+    row and whether the report changed anything worth a note: a report that did not leaves no audit event, since every
+    quarter reports every hour (``Call.quiet``). The row's ``last_sync``, a population that moved by less than a step and
+    the census of the zones are written every time, which is no change."""
     if federated():
         raise Conflict("quarters report to their capital")
     q = registered(c.by)
@@ -209,52 +232,105 @@ def record(c, args):
         from api import federation
 
         federation.record_leg(q, args["leg"])
-    q.population = int(args.get("population", q.population))
-    if "zones" in args:  # a report keeps the realm's zones only: it is no way to store other keys
-        defined = {z.id for z in assets.defined_zones()}
-        q.zones = {zone: int(n) for zone, n in args["zones"].items() if zone in defined}
-    q.codex_id, q.codex_version = args.get("codex_id", q.codex_id), args.get("codex_version", q.codex_version)
     from api import propagation  # it imports the install task, which imports this module
 
-    q.compliance = propagation.judge(q, args.get("codex_id"), propagation.required())
+    now = chain.now()
+    changed = put(q, population=int(args.get("population", q.population)),
+                  codex_id=args.get("codex_id", q.codex_id), codex_version=args.get("codex_version", q.codex_version),
+                  compliance=propagation.judge(q, args.get("codex_id"), propagation.required()),
+                  status="active" if q.status == "setup" else q.status)
+    put(q, last_sync=now, last_activity_at=now)
+    if "zones" in args:  # a report keeps the realm's zones only: it is no way to store other keys
+        known = q.zones  # a zone the realm defined stays defined: only the others need a look
+        changed += put(q, zones={zone: int(n) for zone, n in args["zones"].items() if zone in known or held_zone(zone)})
     propagation.correct(q)
-    q.last_sync = q.last_activity_at = chain.now()
-    if q.status == "setup":
-        q.status = "active"
-    want_quarter()
-    return q
+    notable = bool(set(changed) & set(NOTABLE)) or drifted(q)
+    if notable:
+        announce(q)
+    if _scale["check"] or q.population >= scale_at(capacity()):
+        want_quarter()
+    return q, notable or bool(args.get("leg"))
+
+
+def drifted(q):
+    """Whether the population of ``q`` has moved from the one its row last carried to the quarters by a step."""
+    return abs(q.population - q.told_population) >= max(1, capacity() // POPULATION_STEP)
+
+
+def announce(q):
+    """Tell the quarters that ``q``'s row of the directory changed: it carries the population it has now."""
+    put(q, told_population=q.population)
+    sync_log.note("quarter", q.id)
+
+
+def held_zone(zone_id):
+    """Whether the realm defines ``zone_id``: a report keeps no other."""
+    z = Zone[zone_id]
+    return z is not None and z.defined
+
+
+def fullest():
+    """The population of the fullest quarter, this realm's own and each one's last report."""
+    return max([population()] + [q.population for q in known()])
+
+
+def scale_at(n):
+    """The population at which a quarter counts as full, and the realm wants another, for ``n`` members a quarter."""
+    return math.ceil(SCALE_AT * n)
 
 
 def want_quarter():
-    """On the capital, once scale_status wants a quarter: the realm proposes its next quarter itself and the members
-    decide (quarter_add). Checked whenever a population changes: a quarter reports, a member joins."""
+    """On the capital, once its fullest quarter is full: the realm proposes its next quarter itself and the members
+    decide (quarter_add). Checked when a member joins the capital, whenever a quarter reports itself full (a full quarter
+    that is still there once the next is built asks for another at its next report), and when what decides it changes
+    (``_scale``). A report of less than full cannot make another quarter full, so it does not have the capital read every
+    quarter."""
+    _scale["check"] = False
     r = realm()
-    if not federated() and scale()["wanted"] and not r.scale_in_flight:
+    if federated() or r.scale_in_flight or not r.auto_scale_enabled:
+        return
+    if fullest() >= scale_at(capacity()):
         r.scale_in_flight, r.scale_requested_at = True, chain.now()
         proposals.file_replay(filing("quarter_add", {}, proposals.root()), chain.self_id(), chain.self_id())
 
 
-def apply_directory(reply):
-    seen, index, flag, label = set(), 0, None, realm().name
-    for row in reply["directory"]:
-        if row["id"] == chain.self_id():
-            index, flag, label = row["index"], row.get("compliance"), row["name"]
-            continue
-        q = Quarter[row["id"]] or Quarter(id=row["id"])
-        for k in FIELDS[1:]:
-            setattr(q, k, row.get(k, getattr(q, k)))  # a capital on the previous release sends no compliance
-        seen.add(q.id)
-    for q in [q for q in known() if q.id not in seen]:
-        q.delete()
+def apply_reply(reply):
+    """On a quarter, take what the capital's answer carries: its directory, the zones it defines, its sweep rules and what
+    this quarter learns of itself and of the capital. A full answer is the whole of each; one that is ``delta`` holds only
+    what changed since the cursor this quarter presented, and a part it does not carry is as the quarter has it. A
+    capital on the previous release sends every part, and no ``delta``."""
+    delta = bool(reply.get("delta"))
+    state = (realm().sync_state or {}) if delta else {}
+    index, flag, label = apply_directory(reply, state)
     apply_zones(reply.get("zones") or [])
     if "sweep" in reply:  # a capital on the previous release sends none
         from api import sweeps  # it imports this module
 
         sweeps.keep(reply["sweep"])
-    r = realm()
-    r.sync_state = {**(r.sync_state or {}), "at": chain.now(), "codex": reply["codex"], "index": index,
-                    "compliance": flag, "label": label, "sync_every": reply.get("sync_every", SYNC_EVERY),
-                    "official_timezone": reply.get("official_timezone", "")}  # a capital on the previous release sends none
+    remember(codex=reply["codex"], index=index, compliance=flag, label=label,
+             sync_every=reply.get("sync_every", SYNC_EVERY),
+             official_timezone=reply.get("official_timezone", ""))  # a capital on the previous release sends none
+
+
+def apply_directory(reply, state):
+    """The rows of ``reply``'s directory, each written only where it differs, and the quarters it no longer has deleted:
+    all those the answer does not name when it is a full one, those it lists in ``removed`` when it is a delta. Returns
+    what this quarter's own row says of it: its index, the flag its capital gave it and its label, as ``state`` (what a
+    delta that does not carry the row leaves) says otherwise."""
+    seen, index, flag, label = set(), state.get("index", 0), state.get("compliance"), state.get("label", realm().name)
+    for row in reply["directory"]:
+        if row["id"] == chain.self_id():
+            index, flag, label = row["index"], row.get("compliance"), row["name"]
+            continue
+        q = Quarter[row["id"]] or Quarter(id=row["id"])
+        put(q, **{k: row.get(k, getattr(q, k)) for k in FIELDS[1:]})  # a capital on the previous release sends no compliance
+        seen.add(q.id)
+    gone = reply.get("removed", []) if reply.get("delta") else [q.id for q in known() if q.id not in seen]
+    for cid in gone:
+        q = Quarter[cid]
+        if q is not None:
+            q.delete()
+    return index, flag, label
 
 
 def apply_zones(definitions):
@@ -266,6 +342,15 @@ def apply_zones(definitions):
             assets.define_zone(d["zone"], d["name"], d["kind"])
         except Conflict:  # a member's home cell
             pass
+
+
+def remember(**values):
+    """Keep ``values`` in this quarter's ``sync_state``, written only if one differs: it is a save of the realm's whole
+    row, the branding images in it too."""
+    r = realm()
+    state = r.sync_state or {}
+    if any(k not in state or state[k] != v for k, v in values.items()):
+        r.sync_state = {**state, **values}
 
 
 @op("quarter.register", governed=proposals.realm_wide, returns="quarter")
@@ -286,6 +371,7 @@ def register(cid, name=None):
     Quarter(id=cid, name=name or f"Quarter {index}", index=index, last_activity_at=chain.now())
     r = realm()
     r.is_quarter, r.scale_in_flight = True, False
+    sync_log.note("quarter", cid)
     return {"quarter": cid, "index": index}
 
 
@@ -414,8 +500,7 @@ def catch_up():
         error = ""
     except Exception as e:  # noqa: BLE001  a capital that is down or upgrading: the next catch-up tries again
         error = str(e)[:300]
-    r = realm()
-    r.sync_state = {**(r.sync_state or {}), "catch_up_error": error}  # so that a quarter stuck behind shows why
+    remember(catch_up_error=error)  # so that a quarter stuck behind shows why
 
 
 @op("quarter.deregister", governed=proposals.realm_wide)
@@ -424,6 +509,7 @@ def quarter_deregister(c, args):
     if federated():
         raise Forbidden("only the capital deregisters quarters")
     find(Quarter, args["quarter"]).delete()
+    sync_log.note("quarter", args["quarter"])
 
 
 def federal_rule(args):
@@ -489,8 +575,8 @@ def quarter_configure(c, args):
     local = local_settings(args)
     if local:  # first: what this message writes before an await is kept even if the quarter then refuses
         yield from set_for_quarter(q, local)
-    if q is not None:
-        q.name, q.status = args.get("name", q.name), status or q.status
+    if q is not None and set(put(q, name=args.get("name", q.name), status=status or q.status)) & set(NOTABLE):
+        announce(q)
     r = realm()
     for k in ("auto_scale_enabled", "quarter_join_mode", "federation_codex"):
         if k in args:
@@ -498,6 +584,7 @@ def quarter_configure(c, args):
     data = r.manifest_data or {}
     if "capacity" in args:
         data["scaling"] = {**data.get("scaling", {}), "quarter_capacity": int(args["capacity"])}
+    _scale["check"] = _scale["check"] or "capacity" in args or "auto_scale_enabled" in args
     if rule:
         data["federation"] = {**data.get("federation", {}), "rule": {**RULE, **rule}}
     if "sync_every" in args:
@@ -605,7 +692,8 @@ def on_local_settings(c, body):
 @op(None, read=True, public=True)
 def quarter_directory(c, args):
     """The capital and every quarter with its status, population and codex, whether that codex drifts from the
-    capital's, and the ``compliance`` the capital gives it. Returns ``capital`` and ``quarters``."""
+    capital's, and the ``compliance`` the capital gives it. On a quarter, another quarter's ``last_sync`` is as of the last
+    change of its row, not of its last sync: the capital's list keeps it exact. Returns ``capital`` and ``quarters``."""
     return {"capital": capital(), "quarters": directory()}
 
 
@@ -680,33 +768,75 @@ def self_change_quarter(c, args):
 
 @op("quarter.sync")
 def quarter_sync(c, args):
-    """On a quarter: report to the capital and take its directory, the zones the realm defines and the settings it keeps
-    in sync; a quarter may run it at any time, besides its catch-up timer. On the capital: answer that call, which
-    carries ``population``, ``codex_id``, ``codex_version``, optionally the ``zones`` its members live in (zone id to
-    how many) and a federal vote ``leg``; the answer carries the synced ``settings``, ``sync_every`` and the capital's
-    ``official_timezone``."""
+    """On a quarter: report to the capital and take what changed there: its directory, the zones the realm defines and
+    the settings it keeps in sync; a quarter may run it at any time, besides its catch-up timer. On the capital: answer
+    that call, which carries ``population``, ``codex_id``, ``codex_version``, optionally the ``zones`` its members live
+    in (zone id to how many), a federal vote ``leg`` and the ``have`` cursor of what the quarter has taken from the
+    capital (core.sync_log); the answer carries the synced ``settings``, ``sync_every`` and the capital's
+    ``official_timezone``, with everything the quarter has not got: all of it when it presents no cursor."""
     if federated():
-        reply = yield from sync()
-        return {"quarters": len(reply["directory"]), "drifting": drifting(codex()["version"])}
-    q = record(c, args)
+        yield from sync()
+        return {"quarters": Quarter.count() + 1, "drifting": drifting(codex()["version"])}
+    q, changed = record(c, args)
+    c.quiet = not changed
+    return answer(q, args.get("have"))
+
+
+def answer(q, have):
+    """The capital's answer to the sync of quarter ``q``, which has taken what the capital changed up to the cursor
+    ``have``: the changes since, or everything when it has no cursor or the log cannot serve it (``sync_log.since``). The
+    answer always carries the codex in force, the quarter's index, how often to catch up, the capital's time zone and
+    the capital's own row of the directory, which are small and which no change is noted for; ``rev`` is the cursor to
+    present next time."""
     from api import propagation  # it imports the install task, which imports this module
 
     from api import sweeps  # it imports this module
 
-    return {"directory": directory(), "codex": propagation.in_force(), "index": q.index, "zones": zone_definitions(),
-            "settings": synced_values(), "sync_every": sync_every(), "official_timezone": realm().timezone,
-            "sweep": sweeps.rules_for_quarters()}
+    reply = {"rev": sync_log.cursor(), "codex": propagation.in_force(), "index": q.index, "sync_every": sync_every(),
+             "official_timezone": realm().timezone}
+    changes = sync_log.since(have, reply["rev"])
+    if changes is None:
+        return {**reply, "directory": directory(), "zones": zone_definitions(), "settings": synced_values(),
+                "sweep": sweeps.rules_for_quarters()}
+    rows = {cid: Quarter[cid] for cid in changes.get("quarter", [])}
+    zones = [Zone[zone] for zone in changes.get("zone", [])]
+    reply.update(delta=True, directory=[flagged(me())] + [flagged(view(q, *FIELDS)) for q in rows.values() if q],
+                 removed=[cid for cid, q in rows.items() if q is None],
+                 zones=[zone_definition(z) for z in zones if z and z.defined])
+    if "settings" in changes:
+        reply["settings"] = synced_values()
+    if "sweep" in changes:
+        reply["sweep"] = sweeps.rules_for_quarters()
+    return reply
 
 
 def sync():
-    """On a quarter: report to the capital, and take back its directory, the zones the realm defines, the settings it
-    keeps in sync and how often to catch up. A generator; returns the capital's answer."""
-    reply = yield from ask(capital(), "quarter_sync", {**report(), "zones": zones_held()})
-    if not reply.get("ok"):
-        raise Fail(f"the capital refused to sync: {reply.get('error')}")
-    apply_directory(reply)
-    if "settings" in reply:  # a capital on the previous release sends none
-        yield from apply_settings(reply["settings"])
+    """On a quarter: report to the capital, and take back what changed there since it last synced: the directory, the
+    zones the realm defines, the settings it keeps in sync and how often to catch up. It presents the cursor of what it
+    has taken, which the capital answers with the changes since; it presents none, and so takes everything, in the first
+    sync after it started. Its zone census goes with the report only when a population changed, or in that first sync.
+    A generator; returns the capital's answer."""
+    census = None
+    if assets.census["changed"]:
+        census, assets.census["changed"] = zones_held(), False  # a member who moves while the call is out sets it again
+    request = {**report(), **({"zones": census} if census is not None else {})}
+    cursor = (realm().sync_state or {}).get("rev")
+    if cursor and _synced["since_start"]:
+        request["have"] = cursor
+    try:
+        reply = yield from ask(capital(), "quarter_sync", request)
+        if not reply.get("ok"):
+            raise Fail(f"the capital refused to sync: {reply.get('error')}")
+        apply_reply(reply)
+        taken = {}
+        if "settings" in reply:  # a capital on the previous release sends none
+            taken = yield from apply_settings(reply["settings"])
+    except Exception:
+        assets.census["changed"] = assets.census["changed"] or census is not None  # the census did not arrive
+        raise
+    if "rev" in reply and not taken.get("images_error"):  # an image not read is asked for again: from the old cursor
+        remember(rev=reply["rev"])
+    _synced.update(since_start=True, at=chain.now())
     return reply
 
 
@@ -736,7 +866,8 @@ def quarter_report(c, args):
     """On the capital, record a quarter's ``population``, ``codex_id``, ``codex_version``, ``zones`` (zone id to how many
     of its members live there) and optional federal vote ``leg``. Returns the ``quarter`` and ``drifting``: whether its
     codex differs from the capital's."""
-    q = record(c, args)
+    q, changed = record(c, args)
+    c.quiet = not changed
     return {"quarter": q.id, "drifting": drifting(q.codex_version)}
 
 
@@ -786,6 +917,7 @@ def push_settings():
     whole set, so a repeated or late one does no harm."""
     from api import propagation  # it imports the install task, which imports this module
 
+    sync_log.note("settings")
     propagation.tell_all(SETTINGS_TOPIC, synced_values(), recorded=settings_reply)
 
 
@@ -826,12 +958,11 @@ def apply_settings(values):
     are the capital's, else the ``images_error``. A generator."""
     r = realm()
     configured = [k for k in SYNCED if k in values and k != "status"]
-    for k in configured:
-        setattr(r, k, values[k])
+    put(r, **{k: values[k] for k in configured})
     stage = values.get("status")
     if stage:
         configured.append("status")
-        r.sync_state = {**(r.sync_state or {}), "stage": stage}
+        remember(stage=stage)
         if r.status not in ("setup", stage):
             r.status = stage
             yield from runtime.hook("on_stage_change", {"stage": stage})
@@ -856,10 +987,9 @@ def take_images(digests):
             value = (yield from read_image(image)) if digest else ""
         except Fail as e:
             return f"{image}: {e}"
-        setattr(r, image, value)
+        put(r, **{image: value})
         forget_digests((image,))  # a quarter that secedes and becomes a capital takes them again
-        state = r.sync_state or {}
-        r.sync_state = {**state, "images": {**(state.get("images") or {}), image: digest}}
+        remember(images={**((r.sync_state or {}).get("images") or {}), image: digest})
     return ""
 
 
@@ -893,6 +1023,7 @@ def on_arrive(c, body):
 
 def on_secede(c, body):
     find(Quarter, c.by).delete()
+    sync_log.note("quarter", c.by)
     return {"removed": c.by}
 
 

@@ -164,6 +164,15 @@ def deref(text):
     return find(cls, key)
 
 
+def put(row, **values):
+    """Set the fields of ``row`` that differ from ``values``, and return their names. ic-python-db saves the whole row at
+    every assignment, the same value included, so a write that may change nothing goes through here."""
+    changed = [name for name, value in values.items() if getattr(row, name) != value]
+    for name in changed:
+        setattr(row, name, values[name])
+    return changed
+
+
 def view(row, *fields):
     """A row as plain data: the named fields, or every serializable one."""
     data = row.serialize()

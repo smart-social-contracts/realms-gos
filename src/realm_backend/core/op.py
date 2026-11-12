@@ -30,11 +30,13 @@ class Call:
     hook path (core.sandbox.call) sets it, and a call without it holds nothing of the realm's. ``prepared_by`` is the
     delegate that prepared the call, when the member approved it from a pending action: the call is the member's own.
     ``root`` is the origin of the outermost call: what a task's step runs through the shell or an extension is still a
-    task's."""
+    task's. ``quiet`` is set by an operation that found nothing to change, which leaves no audit event: the quarters' hourly
+    reports would otherwise fill the log, which keeps EVENTS_KEPT events, with reports that changed nothing."""
 
     def __init__(self, user, by, origin, proposal="", grant="", legacy=False, prepared_by="", root=""):
         self.user, self.by, self.origin, self.proposal, self.grant = user, by, origin, proposal, grant
         self.legacy, self.prepared_by, self.root = legacy, prepared_by, root or origin
+        self.quiet = False
 
     @property
     def delegated(self):
@@ -159,7 +161,12 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
 
         call = Call(user, by, origin, proposal, grant, legacy, prepared.delegate if prepared else "", root)
         reading = spec["read"] or spec["only_reads"]
-        record = None if reading else (lambda out: acted(name, user, by, origin, args, out, grant, prepared))
+
+        def audited(out):
+            if not call.quiet:
+                acted(name, user, by, origin, args, out, grant, prepared)
+
+        record = None if reading else audited
         # A delegate's governed call is always a proposal: where the department decides directly, the member's own
         # vote is what lets it through. The filing is a proposal_create to the legislation.
         if governing is not None and (grant or not direct(governing)):

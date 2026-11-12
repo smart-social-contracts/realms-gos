@@ -77,6 +77,49 @@ no parent realm. Those links, the releases a sync source publishes, how a follow
 how a new codex reaches a realm's own quarters at one switch time are in
 [The layered codex](../codices/layered-codex.md) (not built yet).
 
+### What a sync carries
+
+A quarter syncs when it starts and then every `sync_every` seconds, an hour at least. Every quarter of a federation
+does, so what a sync costs is paid in each of them every hour, and what it carries must not grow with the size of the
+federation when nothing has changed.
+
+The capital notes each change a quarter takes from it in a log of the last 256 (`SyncChange`, `core/sync_log.py`, a ring
+of rows that are written over, never deleted): a quarter's row of the directory (it joined, left, was configured, reported
+another codex or was judged differently, or its population moved by a hundredth of what a quarter takes, 20 members at the
+default), a zone the realm defines, the synced settings, the sweep rules. What every quarter does every hour is no change:
+its `last_sync` and a population that moved by less. A quarter's report carries the **cursor** it holds, `have`: the number
+of the last change it took and when that one was made. The answer carries what came after it:
+
+| Part of the answer | When it carries something |
+|---|---|
+| `directory` | the capital's own row, always; the rows of the quarters that changed. `removed` names those that left |
+| `zones` | the zones defined or changed |
+| `settings`, `sweep` | only after a change of a synced setting or of the sweep rules |
+| `codex`, `index`, `sync_every`, `official_timezone`, `rev` | always: they are a few bytes, and `rev` is the cursor to present next time |
+
+A quarter with no cursor, one whose cursor is ahead of the log or names a change that is not the log's (the capital was
+restored from a snapshot), and one further behind than the log keeps (256 changes) is answered with everything, as every
+quarter always was. So is every quarter's first sync after it starts, since the cursor is presented only by a heap that
+has already synced: an upgrade is followed by a full sync. A quarter keeps the cursor only when it has taken the whole
+answer; a sync that failed, or could not read an image, is asked for again from the old one.
+
+The quarter's report is cheap too. It carries the population and codex, and the **census** of the zones its members live
+in only when a member moved into or out of one since the capital last took it (and in its first sync). The capital writes
+a row only where a field differs, and a quarter does the same with the directory, the zones and its settings, so a sync
+that changes nothing writes nothing but the quarter's `last_sync` on the capital. A report that changed nothing worth a
+note (the same, or a population that moved by less than a step, or another census) leaves no audit event either: every
+quarter reports every hour, and the audit log keeps only `EVENTS_KEPT` events.
+
+What a quarter shows of another quarter is therefore as of that row's last change: its `last_sync`, not that of its last
+sync (a row that carried it would change at every sync), and its population, within a hundredth of the capacity of what it
+is (a quarter that is full to within 20 members may be offered a member). The capital's own list keeps both exact, and
+nothing reads the other quarters' `last_sync`.
+
+The two ends need not be the same release. A quarter that presents no cursor, which is what the previous release does,
+is answered with everything; a quarter that gets an answer without `rev` or `delta`, from a capital on the previous
+release, takes it as it always did and never presents a cursor. Both stay correct and as slow as before until both
+ends are upgraded, in either order.
+
 ## What the realm sets for its quarters
 
 A realm has one face, so its quarters share some settings and keep others
