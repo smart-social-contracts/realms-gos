@@ -6,7 +6,7 @@ import json
 import fake_chain
 import pytest
 import world
-from api import propagation, quarters
+from api import assets, propagation, quarters, sweeps
 from core import op, sync_log
 from fake_chain import rejects
 from ggg import Codex, Event, LayeredCodex, Quarter, Realm, SyncChange, Zone
@@ -173,14 +173,22 @@ def test_a_log_that_is_not_the_one_a_quarter_read_is_answered_with_everything(ch
 
 def test_a_log_with_no_changes_serves_a_quarter_that_holds_none():
     world.build()
-    assert sync_log.cursor() == {"n": 0, "at": 0} and sync_log.since({"n": 0, "at": 0}, sync_log.cursor()) == {}
+    assert sync_log.cursor() == {"n": 0, "at": 0, "e": 0} and sync_log.since({"n": 0, "at": 0, "e": 0}, sync_log.cursor()) == {}
+
+
+def test_a_quarter_that_holds_no_change_names_no_time():
+    capital("north")
+    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    head = sync_log.cursor()
+    assert sync_log.since({"n": 0, "at": 0, "e": head["e"]}, head) is not None
+    assert sync_log.since({"n": 0, "at": 12345, "e": head["e"]}, head) is None
 
 
 def test_a_slot_that_holds_another_change_than_the_one_asked_for_is_no_log_to_read_from():
     capital("north")
     ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
     head = sync_log.cursor()
-    held = {"n": head["n"] - 2, "at": sync_log.slot(head["n"] - 2).at}
+    held = {"n": head["n"] - 2, "at": sync_log.slot(head["n"] - 2).at, "e": head["e"]}
     assert sync_log.since(held, head) is not None
     sync_log.slot(head["n"] - 1).n += sync_log.KEPT  # a change after the cursor that a later change has replaced
     assert sync_log.since(held, head) is None
@@ -189,11 +197,65 @@ def test_a_slot_that_holds_another_change_than_the_one_asked_for_is_no_log_to_re
 def test_the_log_is_kept_by_a_capital_only():
     world.build()  # an independent realm has no quarters to tell
     sync_log.note("zone", "x")
+    quarters.resume()
     assert SyncChange[sync_log.HEAD] is None
     quarter = Site("north", Site("capital"))
     with quarter.here():  # nor has a quarter
         sync_log.note("zone", "x")
+        quarters.resume()
         assert SyncChange[sync_log.HEAD] is None
+
+
+def test_a_cursor_from_another_epoch_is_answered_with_everything():
+    capital("north")
+    held = first_sync()
+    assert delta("north", held)["delta"]
+    for epoch in (held["rev"]["e"] + 1, None, "0"):
+        assert "delta" not in delta("north", {"rev": {**held["rev"], "e": epoch}})
+    assert "delta" not in delta("north", {"rev": {"n": held["rev"]["n"], "at": held["rev"]["at"]}})  # no epoch at all
+
+
+def test_every_start_of_a_capital_begins_an_epoch_that_no_earlier_one_can_be_taken_for():
+    capital("north")
+    before = sync_log.cursor()["e"]
+    quarters.resume()
+    after = sync_log.cursor()["e"]
+    fake_chain.state["now"] += 1
+    quarters.resume()
+    assert before == 0 < after < sync_log.cursor()["e"] and after >= fake_chain.state["now"] - 1  # a time, and never back
+    SyncChange[sync_log.HEAD].epoch = 5  # a snapshot restored from long ago
+    quarters.resume()
+    assert sync_log.cursor()["e"] > fake_chain.state["now"] - 1
+
+
+def test_a_capital_with_no_log_yet_begins_one_when_it_starts_so_that_a_quarter_that_read_none_is_not_trusted():
+    capital_site, north = pair()
+    with capital_site.here():
+        SyncChange[sync_log.HEAD].delete()  # (a capital that has noted nothing so far)
+    north.catch_up()
+    with north.here():
+        held = Realm["1"].sync_state["rev"]
+    with capital_site.here():
+        quarters.resume()
+        assert sync_log.cursor()["e"] != held["e"]
+
+
+
+def test_what_a_quarter_shows_of_another_quarters_population_is_within_a_step_whatever_happened_to_its_row():
+    """A row carries the population it last told, and tells the one it has when it travels for another reason, so a delta
+    shows what a full sync does and neither is more than a step from the truth."""
+    capital("north", "south")
+    held = first_sync()
+    shows = lambda reply: {row["id"]: row["population"] for row in reply["directory"]}["south"]  # noqa: E731
+    ok("quarter_report", "south", population=100)  # 100 on from the 0 told: told
+    assert shows(delta("north", held)) == 100
+    ok("quarter_report", "south", population=119)  # 19 on from the 100: kept, and not told
+    ok("quarter_configure", "ctl", quarter="south", name="South Bank")  # the row travels, and tells what it has
+    assert shows(delta("north", held)) == 119 == shows(first_sync("north"))
+    ok("quarter_report", "south", population=81)  # 38 under the 119: told
+    assert shows(delta("north", held)) == 81 == shows(first_sync("north"))
+    ok("quarter_report", "south", population=70)  # 11 under the 81: kept
+    assert shows(first_sync("north")) == 81 and abs(81 - Quarter["south"].population) < 20
 
 
 # ---- Whether a quarter is wanted
@@ -223,6 +285,17 @@ def test_a_full_quarter_asks_for_another_at_each_report_once_the_one_before_is_r
     ok("quarter_register", "ctl", quarter="east")
     assert not Realm["1"].scale_in_flight
     ok("quarter_report", "north", population=9)  # nothing changed, and north is still full
+    assert Realm["1"].scale_in_flight
+
+
+def test_a_capital_that_is_full_itself_has_the_next_report_of_a_quarter_check():
+    scaling_capital("north")
+    ok("quarter_configure", "ctl", capacity=5)  # the capital's own members are more than that
+    ok("quarter_report", "north", population=0)
+    assert Realm["1"].scale_in_flight
+    ok("quarter_register", "ctl", quarter="east")
+    assert not Realm["1"].scale_in_flight
+    ok("quarter_report", "north", population=0)  # nothing changed, and the capital is still full
     assert Realm["1"].scale_in_flight
 
 
@@ -321,8 +394,7 @@ def test_a_quarter_that_took_every_change_one_at_a_time_holds_what_one_that_took
             for gone in (fresh.cid, north.cid):  # north learns of the new quarter at its next sync; none is told of itself
                 held["quarters"].pop(gone, None)
                 held["populations"].pop(gone, None)
-        assert mine == {**theirs, "populations": mine["populations"]}, change
-        assert all(abs(n - theirs["populations"][cid]) < 20 for cid, n in mine["populations"].items()), change  # a step
+        assert mine == theirs, change  # the populations too: both take the one the rows last told
         assert (north.own(), fresh.own()) == (north.row(), fresh.row()), change
 
 
@@ -405,9 +477,13 @@ def test_a_census_that_did_not_arrive_is_sent_again():
         ok("user_edit", "ctl", user="alice", home_zone="riverside")
     fake_chain.state["peers"]["capital"].replies["quarter_sync"] = rejects("the capital is down")
     assert "the capital is down" in north.catch_up()
+    with north.here():
+        assert assets.census["taken"] != assets.census["generation"]  # not acknowledged: nothing arrived
     fake_chain.state["peers"]["capital"].replies["quarter_sync"] = north.ask_capital("quarter_sync")
     assert north.catch_up() == ""
     assert sent()[-1]["zones"] == {"riverside": 1}
+    with north.here():
+        assert assets.census["taken"] == assets.census["generation"]
     with capital_site.here():
         assert Quarter["north"].zones == {"riverside": 1}
 
@@ -429,6 +505,36 @@ def test_a_member_who_moves_while_the_call_is_out_is_reported_at_the_next_sync()
     fake_chain.state["peers"]["capital"].replies["quarter_sync"] = answer
     north.catch_up()
     assert sent()[-1]["zones"] == {"riverside": 1}
+
+
+def test_a_capital_that_starts_again_is_taken_in_full_once_and_what_it_changed_meanwhile_is_not_missed():
+    """Rolled back to a release that has no log, it changes what it serves and notes nothing; upgraded again, its log reads
+    as it did when the quarter last synced. The start is what the quarter's cursor cannot survive."""
+    capital_site, north = pair()
+    north.catch_up()
+    north.catch_up()
+    with capital_site.here():
+        before = sync_log.cursor()
+        Zone(id="riverside", name="Riverside", kind="district", defined=True)  # written by a build that notes nothing
+        Quarter["north"].name = "North Bank"
+        assert sync_log.cursor() == before
+        quarters.resume()  # and started again, as an upgrade does
+    assert north.catch_up() == ""
+    with north.here():
+        assert Zone["riverside"].name == "Riverside"
+    assert north.own()["name"] == "North Bank" and north.own() == north.row()
+    for _ in range(2):  # and from then on the changes alone
+        north.catch_up()
+        with north.here():
+            assert sent()[-1]["have"] == Realm["1"].sync_state["rev"]
+    with capital_site.here():
+        ok("zone_define", "ctl", zone="hillside", name="Hillside", kind="district")
+        assert "delta" in ok("quarter_sync", "north", population=0, have=north_cursor(north))
+
+
+def north_cursor(north):
+    with north.here():
+        return Realm["1"].sync_state["rev"]
 
 
 def test_a_sync_that_fails_leaves_the_cursor_where_it_was():
@@ -491,3 +597,47 @@ def test_a_quarter_that_leaves_a_capital_forgets_where_it_was_in_its_log():
         fake_chain.state["peers"]["capital"].replies["federation_message"] = json.dumps({"ok": True})
         ok("quarter_secede", "ctl")
         assert Realm["1"].sync_state == {}
+
+
+def test_a_quarter_whose_treasury_epoch_gets_a_length_arms_its_sweep_timer_then():
+    """It holds the capital's rules, which arm the timer once an epoch has a length: the rules do not come again."""
+    capital_site, north = pair()
+    with capital_site.here():
+        ok("treasury_configure", "ctl", config={"sweep": [RULE]})
+    with north.here():
+        ok("treasury_configure", "ctl", config={"epoch": 0})
+    north.catch_up()
+    armed = lambda: [t for t in fake_chain.state["timers"] if t[1] is sweeps.end_of_epoch]  # noqa: E731
+    assert armed() == []
+    with north.here():
+        ok("treasury_configure", "ctl", config={"epoch": "monthly"})
+    assert len(armed()) == 1
+
+
+def test_a_capital_answers_a_cursor_after_its_start_with_everything_whatever_the_release_in_between_did():
+    """Rolled back to a release that answers every sync in full and notes nothing, the capital changes a zone; upgraded
+    again, its log has not moved since the quarter last read it."""
+    capital_site, north = pair()
+    north.catch_up()
+    north.catch_up()
+    held = north_cursor(north)
+    real = fake_chain.state["peers"]["capital"].replies["quarter_sync"]
+
+    def previous_release(args):
+        out = json.loads(real({**args, "have": None}))  # it knows no cursor
+        for key in ("rev", "delta", "removed"):
+            out.pop(key, None)
+        return json.dumps(out)
+
+    fake_chain.state["peers"]["capital"].replies["quarter_sync"] = previous_release
+    with capital_site.here():
+        Zone(id="riverside", name="Riverside", kind="district", defined=True)  # no note: the old release keeps none
+        assert sync_log.cursor()["n"] == held["n"]
+    north.catch_up()
+    assert north_cursor(north) == held  # nothing to take a cursor from
+    fake_chain.state["peers"]["capital"].replies["quarter_sync"] = real
+    with capital_site.here():
+        quarters.resume()  # upgraded again
+    assert north.catch_up() == ""
+    with north.here():
+        assert Zone["riverside"].name == "Riverside"

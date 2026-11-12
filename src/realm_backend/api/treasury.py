@@ -696,6 +696,10 @@ def treasury_configure(c, args):
     t.config = {**(t.config or {}), **args["config"]}
     if "sweep" in args["config"]:
         sync_log.note("sweep")  # the quarters take the rules at their next sync
+    if "epoch" in args["config"]:
+        from api import sweeps  # it imports this module
+
+        sweeps.resume()  # a quarter that holds rules sweeps at the end of an epoch that has a length now
     return {"config": t.config}
 
 

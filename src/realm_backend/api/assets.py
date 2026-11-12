@@ -17,9 +17,10 @@ CELL = 16  # the side of a spatial index cell, and the most a parcel spans
 VIEW = 32  # the most a map viewport spans
 # The census of the zones members live in: ``held`` is each zone with its population (``populated``), read from the rows
 # once and kept by ``move_home`` and ``leave_home`` after that, so that a quarter does not read every zone to report them;
-# ``changed`` is whether a population changed since a quarter last gave its capital the census (api.quarters.sync). Neither
-# is stored: they start afresh after an upgrade, which is when the next report must carry the whole census.
-census = {"held": None, "changed": True}
+# ``generation`` counts the changes, and ``taken`` is the generation the capital last took (api.quarters.sync): a quarter
+# reports the census while they differ, and the capital's take is acknowledged only when it has been made. None is stored:
+# they start afresh after an upgrade, which is when the next report must carry the whole census.
+census = {"held": None, "generation": 1, "taken": 0}
 
 
 # --- ledger (ICRC-7, smart-social-contracts/ic-tokens), spoken in candid text ---
@@ -348,7 +349,7 @@ def populated():
 
 def counted(zone):
     """The population of ``zone`` changed: the census has it as it is now."""
-    census["changed"] = True
+    census["generation"] += 1
     if census["held"] is not None:
         census["held"].pop(zone.id, None)
         if zone.population and zone.defined:

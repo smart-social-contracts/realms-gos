@@ -26,8 +26,9 @@ KINDS, ABSENT = ("majority_of_quarters", "majority_of_members"), ("wait", "no", 
 FIELDS = ("id", "name", "index", "status", "population", "codex_id", "codex_version", "compliance", "last_sync")
 # What of a directory row the quarters are told of when it changes. ``last_sync`` is left out: it moves at every sync, so a
 # row that carried it would change at every sync, and the capital's own row of the quarter is the one that stays exact.
-# ``population`` is told only once it has moved by POPULATION_STEP (``drifted``): every quarter reports every hour, and no
-# quarter acts on a population to the member.
+# ``population`` is told only once it has moved by POPULATION_STEP from the one the row last carried (``drifted``), and the
+# rows sent to the quarters carry that one (``announced``), so that what a quarter shows is within a step of the truth:
+# every quarter reports every hour, and no quarter acts on a population to the member.
 NOTABLE = ("name", "index", "status", "codex_id", "codex_version", "compliance")
 POPULATION_STEP = 100  # a quarter's population is told when it has moved by one in this many of the quarter's capacity
 # Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
@@ -176,6 +177,14 @@ def directory():
     return [flagged(row) for row in [me()] + [view(q, *FIELDS) for q in known()]]
 
 
+def announced(q):
+    """The row of quarter ``q`` as its capital sends it to the quarters, in a full answer and in a delta alike: with the
+    population it last told them, which is within a step of the quarter's own (a quarter that told none shows its own)."""
+    row = view(q, *FIELDS)
+    row["population"] = q.told_population or q.population
+    return flagged(row)
+
+
 def published_rule():
     return {**RULE, "window": proposals.window(), **(realm().manifest_data or {}).get("federation", {}).get("rule", {})}
 
@@ -247,7 +256,8 @@ def record(c, args):
     notable = bool(set(changed) & set(NOTABLE)) or drifted(q)
     if notable:
         announce(q)
-    if _scale["check"] or q.population >= scale_at(capacity()):
+    full = scale_at(capacity())
+    if _scale["check"] or q.population >= full or population() >= full:  # a quarter, or the capital, is full
         want_quarter()
     return q, notable or bool(args.get("leg"))
 
@@ -281,10 +291,10 @@ def scale_at(n):
 
 def want_quarter():
     """On the capital, once its fullest quarter is full: the realm proposes its next quarter itself and the members
-    decide (quarter_add). Checked when a member joins the capital, whenever a quarter reports itself full (a full quarter
-    that is still there once the next is built asks for another at its next report), and when what decides it changes
-    (``_scale``). A report of less than full cannot make another quarter full, so it does not have the capital read every
-    quarter."""
+    decide (quarter_add). Checked when a member joins the capital, whenever a quarter or the capital reports itself full (a
+    full quarter that is still there once the next is built asks for another at its next report), and when what decides it
+    changes (``_scale``). A report of less than full, with the capital not full, cannot make another quarter full, so it does
+    not have the capital read every quarter."""
     _scale["check"] = False
     r = realm()
     if federated() or r.scale_in_flight or not r.auto_scale_enabled:
@@ -471,9 +481,11 @@ def adoption_step(step, cid, name):
 
 def resume():
     """Timers do not survive an upgrade: keep looking for a quarter Casals is still building, and on a quarter, sync
-    with the capital now and catch up from then on."""
+    with the capital now and catch up from then on. A capital starts a new epoch of its log of changes."""
     if pending():
         chain.set_timer(ADOPT_EVERY, adopt)
+    if is_capital():
+        sync_log.restart()
     if federated():
         catch_up_in(sum(chain.self_id().encode()) % RESUME_SPREAD)
         from api import sweeps  # it imports this module
@@ -796,11 +808,11 @@ def answer(q, have):
              "official_timezone": realm().timezone}
     changes = sync_log.since(have, reply["rev"])
     if changes is None:
-        return {**reply, "directory": directory(), "zones": zone_definitions(), "settings": synced_values(),
-                "sweep": sweeps.rules_for_quarters()}
+        return {**reply, "directory": [flagged(me())] + [announced(q) for q in known()],
+                "zones": zone_definitions(), "settings": synced_values(), "sweep": sweeps.rules_for_quarters()}
     rows = {cid: Quarter[cid] for cid in changes.get("quarter", [])}
     zones = [Zone[zone] for zone in changes.get("zone", [])]
-    reply.update(delta=True, directory=[flagged(me())] + [flagged(view(q, *FIELDS)) for q in rows.values() if q],
+    reply.update(delta=True, directory=[flagged(me())] + [announced(q) for q in rows.values() if q],
                  removed=[cid for cid, q in rows.items() if q is None],
                  zones=[zone_definition(z) for z in zones if z and z.defined])
     if "settings" in changes:
@@ -816,24 +828,22 @@ def sync():
     has taken, which the capital answers with the changes since; it presents none, and so takes everything, in the first
     sync after it started. Its zone census goes with the report only when a population changed, or in that first sync.
     A generator; returns the capital's answer."""
-    census = None
-    if assets.census["changed"]:
-        census, assets.census["changed"] = zones_held(), False  # a member who moves while the call is out sets it again
-    request = {**report(), **({"zones": census} if census is not None else {})}
+    generation = assets.census["generation"]
+    request = report()
+    if generation != assets.census["taken"]:
+        request["zones"] = zones_held()
     cursor = (realm().sync_state or {}).get("rev")
     if cursor and _synced["since_start"]:
         request["have"] = cursor
-    try:
-        reply = yield from ask(capital(), "quarter_sync", request)
-        if not reply.get("ok"):
-            raise Fail(f"the capital refused to sync: {reply.get('error')}")
-        apply_reply(reply)
-        taken = {}
-        if "settings" in reply:  # a capital on the previous release sends none
-            taken = yield from apply_settings(reply["settings"])
-    except Exception:
-        assets.census["changed"] = assets.census["changed"] or census is not None  # the census did not arrive
-        raise
+    reply = yield from ask(capital(), "quarter_sync", request)
+    if not reply.get("ok"):
+        raise Fail(f"the capital refused to sync: {reply.get('error')}")
+    apply_reply(reply)
+    taken = {}
+    if "settings" in reply:  # a capital on the previous release sends none
+        taken = yield from apply_settings(reply["settings"])
+    if "zones" in request:
+        assets.census["taken"] = generation  # a member who moved while the call was out is another generation
     if "rev" in reply and not taken.get("images_error"):  # an image not read is asked for again: from the old cursor
         remember(rev=reply["rev"])
     _synced.update(since_start=True, at=chain.now())

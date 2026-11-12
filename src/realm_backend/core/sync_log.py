@@ -8,8 +8,10 @@ directory, a zone the realm defines, its synced settings, its sweep rules. A qua
 number of the last change it took and when that one was made, and gets only what came after it.
 
 It gets everything when it has no cursor (the first sync after a start, a quarter on the previous release), when its
-cursor is ahead of this log or names a change that is not this log's (the capital was restored from a snapshot), or when
-it is further behind than the log reaches.
+cursor is ahead of this log or names a change that is not this log's (the capital was restored from a snapshot), when it is
+further behind than the log reaches, or when it was read before the capital last started: a capital that starts again, to
+upgrade or to roll back, may serve what it did not serve before, or have changed what it serves without noting it (a release
+that has no log), so no cursor outlives a start.
 """
 
 from core import chain
@@ -44,10 +46,17 @@ def note(part, key=""):
     put(head, n=n, at=now)
 
 
+def restart():
+    """On a capital, at each start (``quarters.resume``: install and upgrade): begin a new epoch. The cursors held so far
+    name the one before, and are answered with everything once. A time, so that no rollback or restore can make one again."""
+    head = SyncChange[HEAD] or SyncChange(id=HEAD)
+    put(head, epoch=max(head.epoch + 1, chain.now()))
+
+
 def cursor():
-    """The position of the last change: its number and when it was made, 0 and 0 for a log with none."""
+    """The position of the last change: its number, when it was made and the epoch it is in, zeros for a log with none."""
     head = SyncChange[HEAD]
-    return {"n": head.n, "at": head.at} if head else {"n": 0, "at": 0}
+    return {"n": head.n, "at": head.at, "e": head.epoch} if head else {"n": 0, "at": 0, "e": 0}
 
 
 def since(have, head):
@@ -56,7 +65,7 @@ def since(have, head):
     if not isinstance(have, dict):
         return None
     n = have.get("n")
-    if type(n) is not int or n < 0 or n > head["n"] or head["n"] - n >= KEPT:
+    if have.get("e") != head["e"] or type(n) is not int or n < 0 or n > head["n"] or head["n"] - n >= KEPT:
         return None
     if n == head["n"]:
         if have.get("at") != head["at"]:
@@ -65,6 +74,8 @@ def since(have, head):
         held = slot(n)
         if held is None or (held.n, held.at) != (n, have.get("at")):
             return None
+    elif have.get("at") != 0:  # a quarter that holds none of them has no time to name
+        return None
     changes = {}
     for m in range(n + 1, head["n"] + 1):
         change = slot(m)

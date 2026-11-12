@@ -65,7 +65,7 @@ def fresh():
     fake_chain.reset()
     quarters._synced.update(since_start=False, at=0)  # what a heap of a canister knows of its syncs, which a test starts without
     quarters._scale["check"] = True
-    assets.census.update(held=None, changed=True)
+    assets.census.update(held=None, generation=1, taken=0)
     fake_chain.state["mirror"] = MIRROR
     yield
 

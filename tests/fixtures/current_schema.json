@@ -4443,6 +4443,11 @@
     "kind": "property",
     "type": "Integer"
    },
+   "epoch": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
    "id": {
     "has_default": false,
     "kind": "property",

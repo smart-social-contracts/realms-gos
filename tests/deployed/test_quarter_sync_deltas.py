@@ -19,8 +19,9 @@ from api import quarters
 if not hasattr(quarters, "asked"):
     quarters.asked, quarters.current = [], quarters.answer
     def answer(q, have):
-        quarters.asked.append([q.id, have is not None])
-        return quarters.current(q, have)
+        reply = quarters.current(q, have)
+        quarters.asked.append([q.id, have is not None, "delta" in reply])
+        return reply
     quarters.answer = answer
 print("{}")
 '''
@@ -61,7 +62,12 @@ def catch_up(net, quarter):
 
 def asked(capital, quarter=None):
     """What the capital was asked, as ``[quarter, whether it presented a cursor]``, those of ``quarter`` only if it is given."""
-    return [call for call in heap(capital, ASKED) if quarter is None or call[0] == quarter.cid]
+    return [call[:2] for call in heap(capital, ASKED) if quarter is None or call[0] == quarter.cid]
+
+
+def deltas(capital, quarter):
+    """For each time ``quarter`` synced, whether the capital answered with the changes alone, not with everything."""
+    return [call[2] for call in heap(capital, ASKED) if call[0] == quarter.cid]
 
 
 def directory(realm):
@@ -130,6 +136,23 @@ def test_the_first_sync_after_an_upgrade_is_a_full_one(net, federation):
     assert asked(capital, south)[-1] == [south.cid, False]
     catch_up(net, south)
     assert asked(capital, south)[-1] == [south.cid, True]
+
+
+def test_the_first_sync_after_the_capitals_own_start_is_a_full_one(net, federation):
+    """Its upgrade, or a rollback to a release that has no log and a new upgrade, may have changed what it serves without a
+    note: the cursors read before are no more than that."""
+    capital, north, south = federation
+    catch_up(net, north)
+    catch_up(net, north)
+    assert deltas(capital, north)[-2:] == [True, True]
+    capital.upgrade()
+    heap(capital, SPY)  # its heap is gone
+    capital.ok("zone_define", "ctl", zone="after-upgrade", name="After", kind="district")
+    catch_up(net, north)
+    assert deltas(capital, north) == [False]  # it presented a cursor and was answered with everything
+    assert heap(north, ZONE % {"zone": "after-upgrade"}) == ["After", "district"]
+    catch_up(net, north)
+    assert deltas(capital, north) == [False, True]
 
 
 def test_a_capital_that_answers_as_the_previous_release_does_is_taken_in_full(net, federation):

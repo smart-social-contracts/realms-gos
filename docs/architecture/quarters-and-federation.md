@@ -98,8 +98,11 @@ of the last change it took and when that one was made. The answer carries what c
 | `codex`, `index`, `sync_every`, `official_timezone`, `rev` | always: they are a few bytes, and `rev` is the cursor to present next time |
 
 A quarter with no cursor, one whose cursor is ahead of the log or names a change that is not the log's (the capital was
-restored from a snapshot), and one further behind than the log keeps (256 changes) is answered with everything, as every
-quarter always was. So is every quarter's first sync after it starts, since the cursor is presented only by a heap that
+restored from a snapshot), one further behind than the log keeps (256 changes), and one whose cursor was read before the
+capital last **started** is answered with everything, as every quarter always was. The cursor names the epoch of the log, a
+time the capital sets at every install and upgrade: an upgrade may serve what it did not serve, and a capital rolled back to
+a release that has no log changes what it serves without a note, so that its log reads, on the next upgrade, as it did when
+the quarter last synced. Each quarter of a capital that starts again takes everything once, and the changes after. So is every quarter's first sync after it starts, since the cursor is presented only by a heap that
 has already synced: an upgrade is followed by a full sync. A quarter keeps the cursor only when it has taken the whole
 answer; a sync that failed, or could not read an image, is asked for again from the old one.
 
@@ -111,9 +114,10 @@ note (the same, or a population that moved by less than a step, or another censu
 quarter reports every hour, and the audit log keeps only `EVENTS_KEPT` events.
 
 What a quarter shows of another quarter is therefore as of that row's last change: its `last_sync`, not that of its last
-sync (a row that carried it would change at every sync), and its population, within a hundredth of the capacity of what it
-is (a quarter that is full to within 20 members may be offered a member). The capital's own list keeps both exact, and
-nothing reads the other quarters' `last_sync`.
+sync (a row that carried it would change at every sync), and its population, the one the row last told the quarters (a
+row that travels for another reason tells the population it has), which is within a hundredth of the capacity of the truth
+(a quarter that is full to within 20 members may be offered a member), in a delta as in a full answer. The capital's own
+list keeps both exact, and nothing reads the other quarters' `last_sync`.
 
 The two ends need not be the same release. A quarter that presents no cursor, which is what the previous release does,
 is answered with everything; a quarter that gets an answer without `rev` or `delta`, from a capital on the previous

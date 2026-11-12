@@ -25,7 +25,7 @@ from kit import ok
 
 # What a realm's heap holds that its database does not: a fresh heap, as after an upgrade.
 FRESH = ((quarters._synced, {"since_start": False, "at": 0}), (quarters._scale, {"check": True}),
-         (quarters._catch_up, {"armed": False}), (assets.census, {"held": None, "changed": True}),
+         (quarters._catch_up, {"armed": False}), (assets.census, {"held": None, "generation": 1, "taken": 0}),
          (sweeps._timer, {"armed": False}))
 
 
