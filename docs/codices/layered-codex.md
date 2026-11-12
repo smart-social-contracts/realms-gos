@@ -1919,11 +1919,12 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    `codex_install` is called with no vote behind it, and a proposal stored with both before that still runs,
    as the release, and is described as one. The arguments of an install are of the types it reads (the
    arguments are a record; a manifest is a record that is not empty whose `hooks` and `capabilities`, when
-   there, are lists of text; the sent code is text that compiles; a source, a version and a codex name are
-   text): one that is not is refused where the install is filed and where `codex_install` is called, and a
+   there, are lists of text; the sent code is UTF-8 text that compiles; a source, a version and a codex name
+   are text): one that is not is refused where the install is filed and where `codex_install` is called, and a
    proposal stored with one fails, with the reason recorded, rather than raising in the message of its vote or
-   its timer. For a release only its `source` and `version` are judged: the change list beside it is never
-   read. The
+   its timer. Sent code the realm would refuse as untrusted (it requires approval and does not pin the code's
+   checksum) is not compiled: it is filed, and refused at the vote by the trust policy. For a release only its
+   `source` and `version` are judged: the change list beside it is never read. The
    follower's own guard or forbid on `codex_install` still runs when the accepted
    proposal executes, and can delay or refuse the install; if it does, the realm reads `non_compliant`
    past the release's effective date, visible to all: that is the realm's own legislation over its own

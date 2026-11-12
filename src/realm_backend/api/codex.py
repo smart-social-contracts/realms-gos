@@ -166,6 +166,16 @@ def compiled(source):
         raise Fail(f"source does not compile: {reason}")
 
 
+def digest_of(manifest, source):
+    """The checksum of the manifest and the code, or a Fail: the canister's JSON accepts a lone surrogate
+    (``"\\ud800"``), which is not UTF-8 text, so the checksum (the hash of the text's bytes) raises a
+    UnicodeEncodeError that dispatch would trap on, with a vote or a timer that never concludes."""
+    try:
+        return checksum(manifest, source)
+    except UnicodeEncodeError as e:
+        raise Fail(f"the manifest and the code are UTF-8 text: {e}")
+
+
 def check_install_args(args):
     """``codex_install``'s ``args`` are of the types the install reads, or a Fail names the one that is not. Without it
     an argument of another type raises inside the install (a manifest that is null, an empty string or a list, sent
@@ -200,7 +210,7 @@ def check_install_args(args):
                 texts_of(manifest[key], f"the manifest's {key}")
         # Code the realm would refuse as untrusted is refused for that, without compiling it (``trust``): the compiler
         # runs here only on code the realm takes, which is all of it when it requires no approval.
-        if extensions.pinned(checksum(manifest, args["source"])):
+        if extensions.pinned(digest_of(manifest, args["source"])):
             compiled(args["source"])
     elif "codex" in args or "version" in args:
         text_arg(args, "codex", "the name of a codex of the file registry: text")
@@ -246,7 +256,7 @@ def codex_install(c, args):
         namespace = f"ext/{args['codex']}/{args['version']}"
         manifest, source = yield from fetch(namespace)
     runnable(manifest)
-    digest = checksum(manifest, source)
+    digest = digest_of(manifest, source)
     yield from trust(digest, namespace)
     compiled(source)
     if len(sandbox.readable(manifest.get("capabilities", []))) > sandbox.MAX_ACTIONS:

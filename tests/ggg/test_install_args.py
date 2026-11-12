@@ -251,3 +251,35 @@ def test_an_exception_whose_text_cannot_be_made_is_still_a_refusal(monkeypatch):
     monkeypatch.setattr("builtins.compile", refuse, raising=False)
     with pytest.raises(codex.Fail, match="source does not compile: Unprintable"):
         codex.compiled("pass")
+
+
+# Text that is not UTF-8: the canister's JSON accepts a lone surrogate, and the hash of the text's bytes raises a
+# UnicodeEncodeError, which dispatch traps on (review of realms-gos#697, with approval required or not). In a manifest
+# value it shows only on the wasm, whose json.dumps ignores ensure_ascii (tests/deployed/test_sync_checks.py): here the
+# dumps escapes it and the text is hashed.
+SURROGATES = {"in the code": {"manifest": MANIFEST, "source": "x = '\ud800'\n"},
+              "alone, with a manifest that cannot run": {"manifest": {"id": "lex", "version": "1.0"},
+                                                         "source": "\ud800"}}
+
+
+@pytest.mark.parametrize("approval", ["off", "on"])
+@pytest.mark.parametrize("name", list(SURROGATES))
+def test_text_that_is_not_utf8_is_a_refusal_never_a_trap(name, approval):
+    args = SURROGATES[name]
+    trust_policy(approval, "pass")
+    reason = "the manifest and the code are UTF-8 text"
+    action = {"op": "codex_install", "args": args}
+    assert reason in denied("codex_install", "ctl", **args)
+    assert reason in denied("proposal_create", "alice", title="Install", action=action)
+    ok("governance_update", "ctl", voting_window=0)
+    for timed in (False, True):  # stored, as it would have been filed before the check
+        extra = {"effective_at": fake_chain.now() + HOUR} if timed else {}
+        pid = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS, **extra)["proposal"]
+        Proposal[pid].action = action
+        vote_yes(pid)  # no trap: the last vote runs the action, or schedules it
+        if timed:
+            later(HOUR)
+            fire_timers()  # no trap in the timer
+            fake_chain.state["timers"].clear()
+        row = Proposal[pid]
+        assert row.status == "failed" and reason in row.result["error"], (timed, row.status, row.result)
