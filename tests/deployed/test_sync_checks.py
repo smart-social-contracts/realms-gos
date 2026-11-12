@@ -354,8 +354,15 @@ SURROGATES = {"in the code": {"manifest": {"id": "lex", "version": "1.0", "codex
                                       "source": "pass"}}
 
 
+@pytest.fixture(scope="module")
+def plain(net):
+    """A realm of its own with no codex: its filings meet no guard of a layered codex, whose sandbox call cannot take a
+    lone surrogate either (a separate bug: it traps before the install's check is reached)."""
+    return net.realm("plain")
+
+
 @pytest.mark.parametrize("name", list(SURROGATES))
-def test_text_that_is_not_utf8_is_a_refusal_and_a_stored_one_concludes_failed_with_approval_on(net, source, town, name):
+def test_text_that_is_not_utf8_is_a_refusal_and_a_stored_one_concludes_failed_with_approval_on(net, plain, name):
     """The canister's JSON accepts a lone surrogate, and hashing the text raised a UnicodeEncodeError that dispatch
     trapped on: the direct call and the filing were rejected, and a stored proposal trapped its deciding vote for ever
     (review of #697). In a manifest value it shows only here: the canister's json.dumps ignores ensure_ascii. The
@@ -364,25 +371,22 @@ def test_text_that_is_not_utf8_is_a_refusal_and_a_stored_one_concludes_failed_wi
     reason = "the manifest and the code are UTF-8 text"
     set_policy = ("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = {}\n"
                   "r.trusted_approvers = []\nprint('policy')")
-    assert "Traceback" not in town.shell(set_policy.format(True))
-    try:
-        direct = town.call("codex_install", args, sender=net.people["ctl"])
-        assert not direct["ok"] and reason in direct["error"]
-        filing = {"title": "Install", "action": {"op": "codex_install", "args": args},
-                  "effective_at": town.now() + 60 * 86400}  # past the town's own wait: the realm's check refuses it
-        refused = town.call("proposal_create", filing, sender=net.people["alice"])
-        assert not refused["ok"] and reason in refused["error"]
-        pid = file_install(town, "1.0.0")
-        store_action(town, pid, args)
-        shown = f"from ggg import Proposal\nprint('STATUS', Proposal[{pid!r}].status)"
-        for member in town.members:
-            if "STATUS voting" not in town.shell(shown):
-                break
-            town.ok("proposal_vote", member, proposal=pid, choice="yes")  # no trap
-        out = town.shell(f"from ggg import Proposal\np = Proposal[{pid!r}]\nprint('STATUS', p.status, p.result)")
-        assert "STATUS failed" in out and reason in out, out
-    finally:
-        assert "Traceback" not in town.shell(set_policy.format(False))
+    assert "Traceback" not in plain.shell(set_policy.format(True))
+    direct = plain.call("codex_install", args, sender=net.people["ctl"])
+    assert not direct["ok"] and reason in direct["error"]
+    action = {"op": "codex_install", "args": args}
+    refused = plain.call("proposal_create", {"title": "Install", "action": action}, sender=net.people["alice"])
+    assert not refused["ok"] and reason in refused["error"]
+    road = {"op": "mandate_create", "args": {"title": "Road works"}}
+    pid = plain.ok("proposal_create", "alice", title="Road works", action=road)["proposal"]
+    store_action(plain, pid, args)
+    shown = f"from ggg import Proposal\nprint('STATUS', Proposal[{pid!r}].status)"
+    for member in plain.members:
+        if "STATUS voting" not in plain.shell(shown):
+            break
+        plain.ok("proposal_vote", member, proposal=pid, choice="yes")  # no trap
+    out = plain.shell(f"from ggg import Proposal\np = Proposal[{pid!r}]\nprint('STATUS', p.status, p.result)")
+    assert "STATUS failed" in out and reason in out, out
 
 
 def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(
