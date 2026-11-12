@@ -138,6 +138,26 @@ def page_by(cls, field, value, args, most=PAGE_MAX):
     return cls.find_by(field, value, from_id=start, count=count)
 
 
+def indexed_ids(cls, field, value, start, count):
+    """The ids, ascending, of up to ``count`` rows from id ``start`` whose indexed ``field`` is ``value``: a read of the
+    index, no row. ic-python-db cuts its read at ``count`` keys and only then drops the keys that are not entries of the
+    list, so a read can come back short with more to follow: it is read again, from after the last id, until ``count``
+    ids are in or a read comes back empty, which is the end."""
+    ids = []
+    while len(ids) < count:
+        more = cls.db().field_index_page(cls.get_full_type_name(), field, str(value), start, count - len(ids))
+        if not more:
+            break
+        ids += [int(i) for i in more]
+        start = ids[-1] + 1
+    return ids
+
+
+def has_indexed(cls, field, value, row_id):
+    """Whether the row ``row_id`` has ``value`` in its indexed ``field``, from the index alone: the row is not read."""
+    return indexed_ids(cls, field, value, row_id, 1) == [row_id]
+
+
 def latest(cls, count=PAGE):
     """The newest ``count`` rows of ``cls``, newest first."""
     last = cls.max_id()

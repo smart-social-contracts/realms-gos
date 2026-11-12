@@ -111,6 +111,7 @@ def start(installer=""):
 
     links.resume()
     proposals.resume()
+    proposals.relist_tags()
     quarters.resume()
     sync_checks.resume()
     treasury.resume()

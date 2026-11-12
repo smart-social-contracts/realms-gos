@@ -154,6 +154,22 @@ index entries.
 release before 0.13 reads them as empty: `count_by` answers 0 and `find_by` answers `[]`. Do not downgrade a realm that
 has run it; restore from a backup instead.
 
+#### The tag lists of proposals, after every upgrade
+
+`proposal_list` with `tags` reads one list of proposal ids for each tag (`_fi:Proposal:tags:<tag>`, the tag with `%` and `|`
+written `%25` and `%7C`), so a page costs what its proposals cost whatever the realm holds. `Proposal.set_tags` keeps the lists, and `_tag_lists@<id>` beside them: the
+tags each proposal is on the lists of.
+
+After **every** upgrade the realm puts its proposals on the lists of their tags again, by itself: `post_upgrade` does the
+first 200 and a timer chain the next 200 a message (about a billion instructions each), then notes `tag_index` in the
+realm's `manifest_data`. There is nothing to call. It does so every time, not once, because a realm rolled back to a release
+that kept no such lists, and upgraded again, would otherwise trust lists that release left wrong: what it filed is on none,
+what it re-tagged is on the old ones. The pass takes a proposal off the lists it is on and no longer belongs to, so
+the lists are exact when it is done. Until it is noted, `proposal_list` with `tags` answers by reading the proposals a page
+at a time, as the release before did: right, but slow, and a page can be short or empty, so a client follows `next`. An
+upgrade in the middle starts the pass again. A realm of 10,000 proposals spends about 50 billion instructions on it per
+upgrade, over 50 messages.
+
 ### The token ledger
 
 The realm's treasury reads only the standard ICRC-1 transfer result, `variant { Ok : nat; Err : TransferError }`.
