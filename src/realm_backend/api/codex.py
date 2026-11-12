@@ -139,12 +139,11 @@ def hooks(codex_id):
 
 
 def text_arg(args, key, what):
-    """``args[key]`` as text, or a Fail that says what ``key`` is: an argument of another type than the one the install
-    reads is refused here, where a call is filed or made, rather than raising inside it (a trap)."""
-    value = args.get(key)
-    if not isinstance(value, str) or not value:
+    """``args[key]`` is text, or a Fail that says what ``key`` is: an argument of another type than the one the install
+    reads is refused here, where a call is filed or made, rather than raising inside it (a trap). What the text must
+    be, a source id or a version of 1 to 64 characters, the install itself judges."""
+    if not isinstance(args.get(key), str):
         raise Fail(f"{key} is {what}")
-    return value
 
 
 def check_install_args(args):
@@ -164,16 +163,16 @@ def check_install_args(args):
         if "url" in args and not isinstance(args["url"], str):
             raise Fail("url is the address of the change list, https")
         if change_list.names_release(args):
-            text_arg(args, "source", "the id of a layer from above: folder names of lowercase letters, digits, -")
-            text_arg(args, "version", "the release's version: 1 to 64 characters")
+            text_arg(args, "source", "the id of a layer from above: text")
+            text_arg(args, "version", "the release's version: text")
     elif "manifest" in args:
         manifest = args["manifest"]
         if not isinstance(manifest, dict) or not manifest:
             raise Fail("manifest is the codex's manifest.json: a record that is not empty")
         text_arg(args, "source", "the codex's code: text")
         for key in ("id", "version"):
-            if not isinstance(manifest.get(key), str) or not manifest[key]:
-                raise Fail(f"the manifest's {key} is text that is not empty")
+            if not isinstance(manifest.get(key), str):
+                raise Fail(f"the manifest's {key} is text")
         if not isinstance(manifest.get("capabilities", []), list):
             raise Fail("the manifest's capabilities is a list")
     elif "codex" in args or "version" in args:

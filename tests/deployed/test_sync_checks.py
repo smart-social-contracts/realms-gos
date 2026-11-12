@@ -263,7 +263,10 @@ def test_an_install_with_ill_typed_arguments_is_refused_and_a_stored_one_fails_a
     reason = "manifest is the codex's manifest.json"
     malformed = {"source": "arcadia", "version": "1.0.0", "manifest": None}
     action = {"op": "codex_install", "args": malformed}
-    refused = town.call("proposal_create", {"title": "Null manifest", "action": action}, sender=net.people["alice"])
+    # the town's own legislation makes a proposal wait 15 working days: this one takes effect after that, so it is the
+    # realm's check, not the town's rule, that refuses it
+    refused = town.call("proposal_create", {"title": "Null manifest", "action": action,
+                                            "effective_at": town.now() + 60 * 86400}, sender=net.people["alice"])
     assert not refused["ok"] and reason in refused["error"]
     direct = town.call("codex_install", malformed, sender=net.people["ctl"])
     assert not direct["ok"] and reason in direct["error"]
