@@ -123,9 +123,10 @@ offline; it is not in this version, since the master keys must be checked agains
 If the browser has no WebCrypto Ed25519 the page says so and prints the commands to check the signature with OpenSSL or
 Python's `cryptography`; it carries no curve code of its own.
 
-**Where to publish.** Not from a realm's own frontend: the signer must not serve its own verifier. A GitHub Pages site of the
-organization, deployed by a workflow that publishes `docs/verify/` alone, plus the same file attached to each release so it
-runs from disk. A sheet's QR code points to it with `?canister=…&code=…`.
+**Where it is published.** Not from a realm's own frontend: the signer must not serve its own verifier. On GitHub Pages of
+the organization, at `https://smart-social-contracts.github.io/realms-gos/verify/`, deployed by
+`.github/workflows/verify-pages.yml` from `main` with the page alone in the site; the same file can be attached to each
+release so it runs from disk. A sheet's QR code points to it with `?canister=…&code=…`, so the address must not change.
 
 ## 8. Costs
 
