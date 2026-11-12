@@ -15,7 +15,8 @@ class LayeredCodex(Row):
     id = String()
     layers = Json([])  # every source with a chapter or a calendar, top to bottom
     layer_paths = Json({})  # {domain: [source, ...]}, top to bottom
-    # {chapter id: {source, version, sha256, vouched_by, route, fetched_at, url, size}}; a calendar is <source>/calendar
+    # {chapter id: {source, version, sha256, vouched_by, route, fetched_at, url, size}}, and published (when a layer
+    # from above's release was published, when known); a calendar is <source>/calendar
     chapters = Json({})
     previous = String(default="")  # the codex this one replaced, of either kind
     status = String(default="pending", indexed=True)  # pending | active | inactive | reverted

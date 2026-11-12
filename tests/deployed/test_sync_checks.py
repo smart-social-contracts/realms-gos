@@ -36,10 +36,11 @@ CALENDAR = json.dumps({"weekend": ["sat", "sun"], "years": {
     "2022": [{"date": "2022-01-01", "name": {"en": "New Year"}}]}})
 
 
-def relay(realm, version, effective_from):
-    """The record of ``realm`` relays release ``version`` of arcadia, in force from ``effective_from``."""
+def relay(realm, version, effective_from, published=5):
+    """The record of ``realm`` relays release ``version`` of arcadia, published at ``published``, in force from
+    ``effective_from``."""
     texts = [chapter_text(d, version).decode() for d in BOTH]
-    release = {**entry(version), "effective_from": effective_from}
+    release = {**entry(version), "effective_from": effective_from, "published": published}
     out = realm.shell(STORE % {"texts": texts} + RELAY % {"release": release, "order": ["arcadia", "x/source"]})
     assert "Traceback" not in out, out
 
@@ -165,7 +166,8 @@ def test_past_its_effective_date_an_older_pin_is_non_compliant_installing_clears
         net, source, town):
     first = active_id(town)
     due = town.now() + HOUR
-    relay(source, "2.0.0", due)
+    # published after 1.0.0 (5): releases are ordered by that, not by when they take effect
+    relay(source, "2.0.0", due, published=6)
     found = check_now(net, town)
     assert found["compliance"] == "compliant"  # published, not in force yet
     assert found["installable"] == installable(("2.0.0", due))
@@ -192,6 +194,34 @@ def test_the_source_receives_the_report(net, source, town):
     assert report["layers"] == [{"version": "2.0.0", "checksum": layer_checksum(published)}]  # found by its checksum
     assert report["compliance"] == "compliant"
     assert report["population"] == len(town.members) and report["reported_at"] > 0
+
+
+def test_a_source_that_goes_back_is_followed_never_behind_and_its_older_release_is_a_step_back(net, source, town):
+    """The town runs 2.0.0, whose publication time it kept with the layer; the source then relays 1.0.0 only, which was
+    published earlier: the flag stays compliant, the note says the source went back, and "Propose install" of 1.0.0 is a
+    step back (§11.6). Released together with 2.0.0 (a tie), 1.0.0 would be a note only."""
+    releases = source.ok("legislation_releases", None, query=True)["releases"]
+    current = next(r for r in releases if r["source"] == "arcadia")
+    assert current["version"] == "2.0.0"
+    chapters = status(town)["codex"]["chapters"]
+    assert {c["published"] for k, c in chapters.items() if k.startswith("arcadia/")} == {current["published"]}
+    assert all("published" not in c for k, c in chapters.items() if k.startswith("town/"))  # the town's own layer
+
+    relay(source, "1.0.0", 6, published=current["published"] - 1)  # the source went back to an earlier release
+    found = check_now(net, town)
+    assert found["compliance"] == "compliant" and found["layer"] == "x/source"
+    assert found["notes"] == [{"source": "arcadia", "kind": "went_back", "runs": "2.0.0", "lists": "1.0.0"}]
+    assert found["installable"] == [{"source": "arcadia", "version": "1.0.0", "effective_from": 6, "step_back": True},
+                                    installable()[-1]]
+
+    relay(source, "1.0.0", 6, published=current["published"])  # published together: a tie, a note only
+    found = check_now(net, town)
+    assert found["compliance"] == "compliant" and found["installable"] == installable()
+    assert found["notes"] == [{"source": "arcadia", "kind": "unlisted", "runs": "2.0.0", "lists": "1.0.0"}]
+
+    relay(source, "2.0.0", current["effective_from"], published=current["published"])  # as it was, for the tests after
+    found = check_now(net, town)
+    assert found["compliance"] == "compliant" and found["notes"] == [] and found["installable"] == installable()
 
 
 def test_an_unreadable_record_reads_unknown(net, source, town):

@@ -661,8 +661,9 @@ def own_layer(current, realm):
 
 def installed_layers(current, realm):
     """The layers from above that the active codex runs, top to bottom, as it runs them: each ``{source, version,
-    chapters, calendar, vouched_by}``, the release it installed and the source whose record vouched for it. None under
-    a legacy codex or none."""
+    published, chapters, calendar, vouched_by}``, the release it installed, when its publisher published it (None for a
+    layer installed before that was kept) and the source whose record vouched for it. None under a legacy codex or
+    none."""
     if not isinstance(current, LayeredCodex):
         return []
     layers = {}
@@ -671,7 +672,8 @@ def installed_layers(current, realm):
         if source == realm:
             continue
         layer = layers.setdefault(source, {"source": source, "version": entry["version"], "chapters": {},
-                                           "calendar": None, "vouched_by": entry["vouched_by"]})
+                                           "calendar": None, "vouched_by": entry["vouched_by"],
+                                           "published": entry.get("published")})
         if domain == change_list.CALENDAR:
             layer["calendar"] = entry["sha256"]
         else:
@@ -689,11 +691,13 @@ def activates_at_of(job):
 
 
 def entries_of(job, planned, vouched_by, listed):
-    """What the codex row keeps per chapter (§8, §9.1): its source, version and checksum, who vouched for it, and
-    how and when its bytes came: fetched by this job, as the active codex already had them, or found stored."""
+    """What the codex row keeps per chapter (§8, §9.1): its source, version and checksum, who vouched for it, when the
+    release it belongs to was published (``published``: compliance orders releases by it, §11.6), and how and when its
+    bytes came: fetched by this job, as the active codex already had them, or found stored."""
     current = codex.active()
     before = current.chapters if isinstance(current, LayeredCodex) else {}
     urls = {entry["chapter"]: entry for entry in listed["set"]}
+    published = published_times(job, before)
     fetched_now = job.staged.get("fetched", {})
     entries = {}
     for chapter, item in change_list.named(planned):
@@ -709,7 +713,23 @@ def entries_of(job, planned, vouched_by, listed):
             came = {"route": "stored", "url": "", "fetched_at": chain.now(), "size": stored_size(sha256)}
         entries[chapter] = {"source": item["source"], "version": item["version"], "sha256": sha256,
                             "vouched_by": vouched_by[chapter], **came}
+        if published.get((item["source"], item["version"])) is not None:
+            entries[chapter]["published"] = published[(item["source"], item["version"])]
     return entries
+
+
+def published_times(job, before):
+    """When the publisher published the release of each layer from above that the new codex runs, ``{(source, version):
+    seconds}``: the release this job installs, as the record that vouches for it lists it (every record entry carries
+    it, and a relay copies it), and the releases the active codex already runs, as it kept them. A layer installed
+    before the time was kept has none: ``sync_checks.running_layers`` looks for it among the releases a check found, and
+    compliance reads a version it cannot place as no reason to be behind (§11.6)."""
+    times = {(entry["source"], entry["version"]): entry.get("published") for entry in before.values()}
+    vouching = job.staged.get("layers", {}).get("vouching")
+    if vouching is not None:
+        release = vouching["release"]
+        times[(release["source"], release["version"])] = release["published"]
+    return times
 
 
 def stored_size(sha256):
