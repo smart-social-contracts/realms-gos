@@ -259,10 +259,11 @@ def only_previous(target):
         raise Conflict(f"codex_revert_fast restores only the previous codex ({previous or 'none'})")
 
 
-def restore(target):
+def restore(target, proposal=""):
     """The revert: ``target``, an earlier codex of either kind, is the active codex again and the one it replaces is
     reverted. No ``on_codex_activate`` hook runs (§10.5), and nothing else about the codex changes: it keeps the voting
-    rule and window it was recorded with. A capital's quarters restore it too (api.propagation). Returns ``codex``."""
+    rule and window it was recorded with. The ``proposal`` that carried the revert, if any, is named in the journal. A
+    capital's quarters restore it too (api.propagation). Returns ``codex``."""
     if isinstance(target, Codex):
         runnable(target.manifest or {})
     current = active()
@@ -270,7 +271,7 @@ def restore(target):
     if isinstance(current, LayeredCodex) or isinstance(target, LayeredCodex):
         legislation.warm(target if isinstance(target, LayeredCodex) else None)
     store.remember_in_force(chain.now())
-    journal.codex_reverted(target, current)
+    journal.codex_reverted(target, current, proposal)
     from api import propagation  # it imports the install task, which imports this module
 
     propagation.reverted(target)  # a capital tells its quarters; a quarter reports to its capital
@@ -332,7 +333,7 @@ def codex_revert(c, args):
     checksum), else the one the active codex replaced. Filed as a proposal, it names the codex it restores, and the vote
     follows the rule recorded with that codex. No legislation runs for it, and no ``on_codex_activate`` hook. Returns
     ``codex``."""
-    return restore(restoring(args))
+    return restore(restoring(args), c.proposal)
 
 
 @op("codex.revert_fast", governed=it_team_governs, names=names_the_codex, fixes=filed_fast_revert)
@@ -340,7 +341,7 @@ def codex_revert_fast(c, args):
     """Go back to the codex the active one replaced, on the approval of the IT admin team (``it_team_set``): its
     department's own policy decides, m of n, quorum and veto. Refused when no team is designated. No legislation runs
     for it, and no ``on_codex_activate`` hook. Returns ``codex``."""
-    return restore(fast_target(args))
+    return restore(fast_target(args), c.proposal)
 
 
 def shown(codex):

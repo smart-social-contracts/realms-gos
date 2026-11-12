@@ -13,7 +13,7 @@ realm's operations run it, never when the journal prints it.
 
 from core import chain, civil, localtime, signing
 from core.db import Fail, NotFound, each, next_id, view
-from ggg import Extension, JournalEntry, LayeredCodex, Realm
+from ggg import Extension, JournalEntry, LayeredCodex, Proposal, Realm
 
 EXTENSION = "journal"
 STATE = "journal"  # in Realm.manifest_data: {"first_day": "YYYY-MM-DD", "failure": the last entry not recorded, why}
@@ -160,17 +160,29 @@ def failure():
     return Realm["1"].manifest_data.get(STATE, {}).get("failure")
 
 
+def decision(proposal):
+    """The decision behind a change: the id of the ``proposal`` that carried it ("" for a change nobody proposed) and,
+    when the realm still has that proposal, the ``vote`` it ended with: the votes for, against and abstaining, and how
+    many could vote. Counts only: who voted is not for the journal."""
+    row = Proposal[proposal] if proposal else None
+    if row is None or not row.tally:
+        return {"proposal": proposal}
+    return {"proposal": proposal, "vote": {name: row.tally.get(name) for name in ("yes", "no", "abstain", "eligible")}}
+
+
 def codex_installed(codex):
     """The layered ``codex`` has just become the realm's legislation (api.codex.switch)."""
     reported("codex_installed", {"codex": codex.id},
-             lambda: {"layers": layers_of(codex), "proposal": codex.proposal, "activates_at": codex.activates_at})
+             lambda: {"layers": layers_of(codex), "activates_at": codex.activates_at, **decision(codex.proposal)})
 
 
-def codex_reverted(restored, reverted):
+def codex_reverted(restored, reverted, proposal=""):
     """A revert has made the earlier codex ``restored`` the realm's legislation again in place of ``reverted``
-    (api.codex.restore). Either may be a legacy codex, which has no layers."""
+    (api.codex.restore), by the accepted ``proposal`` that carried it, if any. Either codex may be a legacy codex, which
+    has no layers."""
     reported("codex_reverted", {"codex": restored.id, "reverted": reverted.id},
-             lambda: {"layers": layers_of(restored) if isinstance(restored, LayeredCodex) else []})
+             lambda: {"layers": layers_of(restored) if isinstance(restored, LayeredCodex) else [],
+                      **decision(proposal)})
 
 
 def release_found(found):

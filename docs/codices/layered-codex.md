@@ -1746,15 +1746,19 @@ other core extensions of [`core-extensions.json`](../../core-extensions.json)
 **How it is built.** An entry (`JournalEntry`) is appended when the realm learns of what it reports, and is never
 changed: the switch of a layered codex, every revert (§10), each release the realm's checks find for the first time
 (`release_found`, stamped with the check's time, §11.2) and, on a sync source, each release it publishes
-(`release_published`). A release's entry names its `source` and `version` and the time it is `effective_from`. It
-holds the instant and the realm's local day on the capital's clock at that moment, so a change of the realm's zone
-moves no past issue. An issue
-is the entries of its day. `journal_issue {day}` returns the entries of a day, numbered from the journal's first day (the
-local day the realm first started with the journal, moved back if the realm then sets a zone west of UTC, until a day is
-signed), for every day from that one to today, with or without entries; a later day, or one before the first, is not
-found. Today's issue is `provisional`. When a day has closed, an hourly sweep has the realm's canister sign it, with the
-issue before it linked by digest; the signed text, the signature and a verification code are stored and served as the
-issue's `proof`, and no entry is ever stamped into a signed day (`journal-signature.md`). A quarter's `journal_issue` returns `issued: false` and names its capital; `journal_capital_issue` asks the
+(`release_published`). A release's entry names its `source` and `version` and the time it is `effective_from`. An
+install's and a revert's entry name the `proposal` that decided it, if any, and the `vote` it ended with (the votes for,
+against and abstaining, and how many could vote: counts, never who voted, nor the seats and veto holders of a
+department's vote). For a change a federal vote decided, the capital replays it under its own ballot of that vote, so
+the entry names that ballot and records the capital's own tally, not the federation's count. It holds the instant and
+the realm's local day on the capital's clock at that moment, so a change of the realm's zone moves no past issue. An
+issue is the entries of its day. `journal_issue {day}` returns the entries of a day, numbered from the journal's first
+day (the local day the realm first started with the journal, moved back if the realm then sets a zone west of UTC,
+until a day is signed), for every day from that one to today, with or without entries; a later day, or one before the
+first, is not found. Today's issue is `provisional`. When a day has closed, an hourly sweep has the realm's canister
+sign it, with the issue before it linked by digest; the signed text, the signature and a verification code are stored
+and served as the issue's `proof`, and no entry is ever stamped into a signed day (`journal-signature.md`). A quarter's
+`journal_issue` returns `issued: false` and names its capital; `journal_capital_issue` asks the
 capital for its issue through the quarter, as an update, because a read cannot call another canister. The extension's
 manifest holds the personal-data rules as an allow-list of the fields an entry may keep, which the realm applies when
 it records the entry; rules that are not a list of names keep nothing. Nothing that goes wrong in the journal stops
