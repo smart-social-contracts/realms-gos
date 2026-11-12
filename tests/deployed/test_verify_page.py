@@ -354,6 +354,21 @@ def test_a_made_document_of_another_canister_or_another_code_than_the_one_asked_
     assert page("verifyProof", made[0], asked)["unsigned"] is True  # the one asked for, of the canister asked: neutral
 
 
+def test_a_made_document_that_names_no_realm_or_an_odd_one_or_is_no_document_is_red_when_asked_of_a_canister():
+    signer = Signer(CANISTER)
+    made = days(signer, 1)[0]
+    document = json.loads(made["canonical"])
+    texts = [canonical_text({k: v for k, v in document.items() if k != "realm"}),  # names no realm
+             canonical_text({**document, "realm": ["lxzze-o7777-77777-aaaaa-cai"]}),  # a list
+             canonical_text({**document, "realm": 7}), "null", "[]", "7"]  # and what is no document at all
+    for text in texts:
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        odd = {**made, "canonical": text, "digest": digest, "code": code(digest)}
+        result = page("verifyProof", odd, {"canister": CANISTER})
+        assert result["unsigned"] is False and page("verdictOf", result)["level"] == "fail", text
+        assert "no canister" in str([c["detail"] for c in result["checks"]]) or not text.startswith("{")
+
+
 def test_a_made_document_whose_text_or_code_was_changed_is_red_and_not_the_neutral_kind():
     signer = Signer(CANISTER)
     made = days(signer, 1)[0]

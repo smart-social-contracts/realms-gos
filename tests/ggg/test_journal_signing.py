@@ -740,6 +740,27 @@ def test_more_than_a_batch_of_days_made_for_another_key_do_not_hold_the_days_aft
     assert failure_of("journal") is None
 
 
+def test_a_sweep_during_a_request_that_then_fails_does_not_pass_over_the_day_the_request_was_signing():
+    peer = started()
+    daily()
+    in_days(2)  # the 9th and 10th are made and signed by the daily sweep
+    good = peer.replies["sign_with_schnorr"]
+    at(2026, 11, 12, 0, 1)  # the 11th closed a minute ago and is not made yet
+
+    def meanwhile(arg):
+        peer.answer("sign_with_schnorr", good)
+        sweep()  # the hourly sweep lands while the request's call is out: the 11th is being signed
+        return fake_chain.rejects("not enough cycles")
+
+    peer.answer("sign_with_schnorr", meanwhile)
+    assert call("journal_sign", ANONYMOUS, day="2026-11-11")["kind"] == "unavailable"  # makes the 11th, and the call fails
+    assert journal_signing.signed_through() == "2026-11-10" and journal_signing.waiting_days() == ["2026-11-11"]
+    peer.answer("sign_with_schnorr", good)
+    at(2026, 11, 12, 1, 5)
+    sweep()  # the next sweep finds the 11th again
+    assert issue("2026-11-11")["status"] == "signed" and journal_signing.signed_through() == "2026-11-11"
+
+
 # ---- Changing the mode
 
 

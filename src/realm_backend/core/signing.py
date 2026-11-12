@@ -303,8 +303,8 @@ def request(kind, subject):
     if stored is None:
         raise NotFound(f"no document {kind}:{subject[:40]} is made")
     if not stored.signature and made_for(stored) != ic_keys.key_name():
-        raise Conflict(f"the document {subject} of {kind} was made for the key {made_for(stored)} and the realm's key is "
-                       f"{ic_keys.key_name()} now: it cannot be signed, and the signature of a later document covers it")
+        raise Conflict(f"the document {subject} of {kind} was made for the key {made_for(stored)}: it cannot be signed "
+                       f"while the realm's key is {ic_keys.key_name()}; ask for a later one, whose signature covers it")
     signed = yield from sign_batch(kind, [subject])
     if signed is None:
         raise Unavailable("the signature could not be made now: ask again later")

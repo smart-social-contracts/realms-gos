@@ -295,8 +295,11 @@ async function checkMade(proof, doc, checks, options) {
   checks.push({ status: hashed ? "pass" : "fail", name: "The text hashes to the digest", detail: hashed ? "" : "the text was changed" });
   const coded = isHex(proof.digest, 64) && codeOf(proof.digest) === proof.code.toUpperCase();
   checks.push({ status: coded ? "pass" : "fail", name: "The verification code is the digest's", detail: coded ? "" : "the code does not belong to this digest" });
-  if (doc && typeof doc.realm === "string") {
+  const document = Boolean(doc) && typeof doc === "object" && !Array.isArray(doc);
+  if (document) {
     checkBinding(doc, proof, options, (status, name, detail = "") => checks.push({ status, name, detail }));
+  } else {
+    checks.push({ status: "fail", name: "The proof is well formed", detail: "the text is not a document" });
   }
   return { checks, doc, valid: false, supported: true, shaped: false, unsigned: checks.every((check) => check.status !== "fail") };
 }
@@ -306,6 +309,10 @@ const normalCode = (code) => String(code).toUpperCase().replace(/[^A-Z0-9]/g, ""
 
 // What a document must be of the request that fetched it: the one asked for (an answer to a query is not certified, and can be
 // another genuine document than the one asked for), and of the canister it came from.
+function claimedRealm(doc) {
+  return typeof doc.realm === "string" ? doc.realm : "no canister";
+}
+
 function checkBinding(doc, proof, options, add) {
   if (options.requested) {
     const asked = options.requested;
@@ -317,9 +324,9 @@ function checkBinding(doc, proof, options, add) {
   if (options.canister) {
     const named = doc.realm === options.canister;
     add(named ? "pass" : "fail", "The text names the canister it came from",
-      named ? doc.realm : `it names ${doc.realm}, not ${options.canister}: it was made for another canister`);
+      named ? doc.realm : `it names ${claimedRealm(doc)}, not ${options.canister}: it was made for another canister`);
   } else {
-    add("note", "The canister", `the text names ${doc.realm}; the proof was not fetched from a canister, so this is a claim`);
+    add("note", "The canister", `the text names ${claimedRealm(doc)}; the proof was not fetched from a canister, so this is a claim`);
   }
 }
 
@@ -535,7 +542,7 @@ const CHAIN_CHECK = "Link to the previous document";
 function verdictOf(result) {
   if (result.unsigned) {
     return { level: "neutral", title: "Made, not signed yet",
-      detail: `This document says it was made by ${result.doc && result.doc.realm}, and it is not signed, so nothing here is verified as that realm's. Ask the realm to sign it (on its journal page, "Request signature"), then check the signed document.` };
+      detail: `This document says it was made by ${typeof (result.doc && result.doc.realm) === "string" ? result.doc.realm : "no canister"}, and it is not signed, so nothing here is verified as that realm's. Ask the realm to sign it (on its journal page, "Request signature"), then check the signed document.` };
   }
   const keyChecked = result.checks.some((c) => c.name === "The key is the expected one" && c.status === "pass");
   const chainBroken = result.checks.some((c) => c.name === CHAIN_CHECK && c.status === "fail");
