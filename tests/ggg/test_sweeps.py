@@ -120,6 +120,14 @@ def test_the_capital_books_a_reported_sweep_into_its_fund_once():
     assert other["kind"] == "conflict" and "booked with other figures" in other["error"]
 
 
+def test_ledger_view_names_the_sweep_an_entry_books():
+    capital_with_a_quarter()
+    ok("quarter_sweep_report", "north", **reported())
+    entries = ok("ledger_view", "bob")["entries"]
+    assert [(e["category"], e["sweep"]) for e in entries if e["sweep"]] == [("cash", "north/SW-1"), ("sweep", "north/SW-1")]
+    assert all(e["sweep"] == "" for e in entries if e["category"] not in ("cash", "sweep"))
+
+
 def test_the_capital_takes_a_report_only_from_a_registered_quarter_for_a_sent_sweep_with_a_block():
     capital_with_a_quarter()
     assert call("quarter_sweep_report", "harbor", **reported())["kind"] == "forbidden"
