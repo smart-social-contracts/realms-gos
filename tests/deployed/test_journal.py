@@ -20,7 +20,8 @@ DAY = 86400
 HOUR = 3600
 # What the journal extension's manifest allows an entry to keep (extensions/journal/manifest.json).
 RULES = ("import ggg\nggg.Extension(id='journal', manifest={'config': {'personal_data': {'entry_fields': "
-         "['codex', 'layers', 'proposal', 'activates_at', 'reverted', 'source', 'version', 'effective_from']}}})")
+         "['codex', 'layers', 'proposal', 'vote', 'activates_at', 'reverted', 'source', 'version', "
+         "'effective_from']}}})")
 MALFORMED = "import ggg\nggg.Extension['journal'].manifest = {'config': 'text'}"
 # The journal breaks inside the canister until MEND: the revert it reports must stand all the same.
 BREAK = ("from core import journal\ndef broken(*args):\n    raise ValueError('the journal is broken')\n"
@@ -134,9 +135,11 @@ def test_e_an_install_is_an_entry_with_what_the_personal_data_rules_allow(net, c
     assert job["status"] == "done"
     net.wait(1)
     [entry] = [e for e in issue(capital)["entries"] if e["kind"] == "codex_installed" and e["details"]]
-    assert entry["details"] == {"codex": expected_id(layer), "layers": [{"source": "arcadia", "versions": []}],
-                                "proposal": entry["details"]["proposal"], "activates_at": 0}
-    assert entry["details"]["proposal"].startswith("P-") and entry["at"] <= capital.now()
+    details = entry["details"]
+    assert details == {"codex": expected_id(layer), "layers": [{"source": "arcadia", "versions": []}],
+                       "proposal": details["proposal"], "vote": details["vote"], "activates_at": 0}
+    assert details["proposal"].startswith("P-") and entry["at"] <= capital.now()
+    assert set(details["vote"]) == {"yes", "no", "abstain", "eligible"} and details["vote"]["yes"] >= 1  # counts only
 
 
 def test_f_publishing_moves_no_activates_at_and_no_install(net, capital, site, people):
@@ -192,8 +195,10 @@ def test_j_a_revert_by_a_vote_is_an_entry_naming_the_codex_restored_and_the_one_
     assert active_id(capital) == reverted["previous"]
     entry = issue(capital)["entries"][-1]
     assert entry["kind"] == "codex_reverted" and entry["at"] <= capital.now()
-    assert entry["details"] == {"codex": reverted["previous"], "reverted": reverted["id"],
-                                "layers": [{"source": "arcadia", "versions": []}]}
+    details = entry["details"]
+    assert details == {"codex": reverted["previous"], "reverted": reverted["id"], "proposal": details["proposal"],
+                       "vote": details["vote"], "layers": [{"source": "arcadia", "versions": []}]}
+    assert details["proposal"].startswith("P-") and details["vote"]["yes"] >= 1
 
 
 def test_k_a_malformed_personal_data_config_stops_no_revert_and_keeps_nothing(capital):
