@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+import fake_chain
 from api import codex as codex_api
 from api import proposals, taxes
 from core import layered_codex as store
@@ -41,6 +42,12 @@ def t_log(c, args):
     """The chapters' effect: records what they wrote and who they were."""
     LOG.append((args["text"], c.origin))
     return {"logged": args["text"]}
+
+
+@op.op("treasury.manage")
+def t_break(c, args):
+    """An operation that fails as a message fails, by an exception it does not handle: a trap."""
+    raise TypeError("recipient is text")
 
 
 @op.op("realm.data_view", read=True)
@@ -388,6 +395,38 @@ class Register(above("register")):
     assert "on_t_act" not in failures().get("x/town/register.py", {})
     # the nested t_act ran as the codex: no guard and no hook ran again for it
     assert LOG[before:] == [("es:unknown op", "codex"), ("town:es:ctl", "codex")]
+
+
+def awaiting(gen):
+    """Drive ``gen`` as the canister's runtime does, which lets it call other canisters: ``op.run`` does not."""
+    try:
+        while True:
+            next(gen)
+    except StopIteration as done:
+        return done.value
+
+
+def test_a_hooks_effect_that_traps_counts_against_its_chapter_and_the_operation_that_ran_the_hook_stands():
+    """An effect that traps ends only the message it runs in: the realm calls its own ``hook_effects`` for each domain
+    (the issue, realms-gos#679, is a chapter whose effect passes a number as the recipient of a notification)."""
+    town({(TOWN, "register"): '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def on_t_act(self, event):
+        if event.args.get("what") == "trap":
+            self.ggg.t_break(recipient=123)
+'''})
+    LOG.clear()
+    fake_chain.state["caller"] = "ctl"
+    out = json.loads(awaiting(op.dispatch("t_act", json.dumps({"what": "trap"}))))
+    assert out["ok"] and out["done"] == "trap"
+    assert LOG == [("es:trap", "codex"), ("town:es:ctl", "codex")]  # the other domains' effects still ran
+    error = failures()["x/town/register.py"]["on_t_act"]["error"]
+    assert error.startswith("the effects were rejected: ") and "t_break: recipient is text" in error
+    assert not ok("codex_status", query=True)["healthy"]
+    ok("t_act", what="fine")
+    assert failures() == {} and ok("codex_status", query=True)["healthy"]
 
 
 def test_a_hooks_effect_names_an_entity_as_a_ref_and_the_realm_takes_it_as_kind_and_id_in_text():

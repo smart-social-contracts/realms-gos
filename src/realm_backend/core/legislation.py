@@ -34,7 +34,7 @@ from core import it_team
 from core import localtime
 from core import sandbox
 from core.db import PAGE, Fail, Forbidden, first, next_id, view
-from core.op import FORWARDING, GENERATOR, Call, filing, ops
+from core.op import FORWARDING, GENERATOR, Call, awaitable, filing, ops
 import core.legislation_sandbox  # bundled with the realm for its text (core.sandbox.module_source); the realm runs only its pure ``readable``
 import ggg_facts  # GGG's fact schema: the sandbox imports it from text, and the realm builds the Cedar schema from it
 
@@ -403,11 +403,37 @@ def _hooks(op, args, result, call, department):
         if "error" in outcome:
             _record(outcome["chapter"] or files[-1], method, outcome["error"])
             continue
-        errors = yield from _effects(outcome["effects"])
+        errors = yield from _in_own_message(outcome["effects"])
         if errors:
             _record(files[-1], method, "; ".join(errors))
         else:
             _clear(files, method)
+
+
+def _in_own_message(effects):
+    """Apply a domain's effects in a message of their own, by calling the realm's own ``hook_effects``. An operation that
+    raises what it does not expect traps, and a trap undoes the whole message and no handler here sees it: here it
+    undoes only that message, and comes back as a rejected call, which is the chapter's failure, while the operation
+    that ran the hook, and a scheduled codex switch it belongs to, stand (§9.3). A call and not a timer: a trap in a
+    timer would erase the record of its own failure. Where nothing can wait for another canister (``awaitable``: the shell,
+    an extension's call) they run where they are, as before. Returns the errors. A generator."""
+    if not effects:
+        return []
+    if not awaitable():
+        return (yield from _effects(effects))
+    try:
+        reply = yield from chain.call_text(chain.self_id(), "hook_effects", json.dumps(effects))
+    except Exception as e:  # noqa: BLE001  the call was rejected: the message of the effects trapped
+        return [f"the effects were rejected: {e}"]
+    return json.loads(reply)
+
+
+def hook_effects(effects):
+    """The message in which a hook domain's effects run (main.hook_effects): ``effects`` as JSON, ``[name, args]`` each,
+    applied by ``_effects``; returns its errors as JSON. Only the realm calls it, from ``_in_own_message``. A generator."""
+    if chain.caller() != chain.self_id():
+        chain.trap("only the realm applies the effects of its hooks")
+    return json.dumps((yield from _effects(json.loads(effects))))
 
 
 def _effects(effects):

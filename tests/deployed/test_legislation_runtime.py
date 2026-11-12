@@ -115,6 +115,8 @@ class Register(above("register")):
     def on_proposal_create(self, event):
         if event.args["title"] == "break the register":
             return 1 // 0
+        if event.args["title"] == "malformed effect":
+            self.ggg.notification_send(recipient=123, topic="register", title="malformed", body="")
         if event.args["title"] == "loop":
             n = 0
             while True:
@@ -464,6 +466,19 @@ def test_d_a_raising_guard_denies_naming_the_chapter_and_a_raising_hook_never_fa
     recorded = failures(town, founder)
     assert recorded["x/town/register.py"]["on_proposal_create"]["error"] == "ZeroDivisionError: integer division or modulo by zero"
     assert "x/town/water.py" not in recorded  # the guard succeeded this time: its entry cleared
+    ok(town, "proposal_create", founder, title="fine")
+    assert failures(town, founder) == {} and ok(town, "codex_status", founder, query=True)["healthy"]
+
+
+def test_d1_an_effect_that_traps_fails_its_chapter_alone_and_the_operation_that_ran_the_hook_succeeds(town, people):
+    """A chapter's effect with a number where the recipient is text fails as a message fails: by a trap (realms-gos#679).
+    It ends only the message the effects run in."""
+    founder = people["founder"]
+    pid = ok(town, "proposal_create", founder, title="malformed effect")["proposal"]
+    assert ok(town, "proposal_get", founder, query=True, proposal=pid)["proposal"]["status"] == "voting"
+    error = failures(town, founder)["x/town/register.py"]["on_proposal_create"]["error"]
+    assert error.startswith("the effects were rejected: "), error
+    assert not ok(town, "codex_status", founder, query=True)["healthy"]
     ok(town, "proposal_create", founder, title="fine")
     assert failures(town, founder) == {} and ok(town, "codex_status", founder, query=True)["healthy"]
 
