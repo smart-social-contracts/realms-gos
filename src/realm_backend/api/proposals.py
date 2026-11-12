@@ -794,12 +794,19 @@ def proposal_run_scheduled(c, args):
 @op("realm.data_view", read=True)
 def proposal_get(c, args):
     """The proposal ``proposal`` with its current tally, the number of eligible voters and its votes, ``count`` at a
-    time (default 100, at most 500) from row ``from`` (default 1); ``next`` continues the votes (null at the end)."""
+    time (default 100, at most 500) from row ``from`` (default 1); ``next`` continues the votes (null at the end). One
+    whose action installs a release of a layer the realm runs also has ``release_change``: how that release stands
+    against the one the realm runs, ``step_back`` true when it was published earlier and installing it takes the realm
+    back (api.sync_checks.release_change, §11.6)."""
+    from api import sync_checks  # it imports the install task, which imports this module
+
     p = find(Proposal, args["proposal"])
     tally, size, _ = count(p)
     votes, nxt = page_by(Vote, "proposal_id", p.id, args)
-    return {"proposal": view(p), "tally": tally, "eligible": size,
-            "votes": [view(v, "voter", "choice", "cast_by") for v in votes], "next": nxt}
+    shown = {"proposal": view(p), "tally": tally, "eligible": size,
+             "votes": [view(v, "voter", "choice", "cast_by") for v in votes], "next": nxt}
+    change = sync_checks.release_change(p.action)
+    return {**shown, "release_change": change} if change else shown
 
 
 @op("realm.data_view", read=True, returns="proposals")

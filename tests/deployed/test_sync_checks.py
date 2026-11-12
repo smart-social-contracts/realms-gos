@@ -224,6 +224,21 @@ def test_a_source_that_goes_back_is_followed_never_behind_and_its_older_release_
     assert found["compliance"] == "compliant" and found["notes"] == [] and found["installable"] == installable()
 
 
+def test_a_release_filed_by_hand_that_is_older_than_what_the_town_runs_is_marked_a_step_back(net, source, town):
+    """The town runs 2.0.0 (published at 6); 1.0.0 (published at 5) is a release a check found, which nothing offers: a
+    member files its install by hand, and ``proposal_get`` says it takes the town back, a newer one that it is newer, and
+    a release no check found that it cannot be placed (§11.6)."""
+    assert running(town) == {"2.0.0"}
+    assert checked(town)["installable"] == installable() and checked(town)["notes"] == []  # nothing offers 1.0.0
+    back = town.ok("proposal_get", "alice", query=True, proposal=file_install(town, "1.0.0"))["release_change"]
+    assert back == {"source": "arcadia", "version": "1.0.0", "runs": "2.0.0", "published": 5, "runs_published": 6,
+                    "order": "older", "step_back": True}
+    unknown = town.ok("proposal_get", "alice", query=True, proposal=file_install(town, "9.9.9"))["release_change"]
+    assert (unknown["order"], unknown["step_back"], unknown["published"]) == ("unknown", False, None)
+    same = town.ok("proposal_get", "alice", query=True, proposal=file_install(town, "2.0.0"))["release_change"]
+    assert (same["order"], same["step_back"]) == ("same", False)
+
+
 def test_an_unreadable_record_reads_unknown(net, source, town):
     source.stop()
     try:
