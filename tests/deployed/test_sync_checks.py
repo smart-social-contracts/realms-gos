@@ -166,7 +166,8 @@ def test_past_its_effective_date_an_older_pin_is_non_compliant_installing_clears
         net, source, town):
     first = active_id(town)
     due = town.now() + HOUR
-    relay(source, "2.0.0", due)
+    # published after 1.0.0 (5): releases are ordered by that, not by when they take effect
+    relay(source, "2.0.0", due, published=6)
     found = check_now(net, town)
     assert found["compliance"] == "compliant"  # published, not in force yet
     assert found["installable"] == installable(("2.0.0", due))
