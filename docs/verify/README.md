@@ -28,9 +28,16 @@ the page names whenever it is not `https://icp-api.io`. A sheet's QR code is suc
 
 ## Where it runs from
 
-Not from a realm's own frontend: the signer must not serve its own verifier. The page is for a GitHub Pages site of the
-organization (a workflow that deploys this folder alone), and the same file can be attached to each release so that it runs
-from disk. It asks a replica only to read a proof (an anonymous query).
+Not from a realm's own frontend: the signer must not serve its own verifier. The page is published on GitHub Pages at
+
+> **https://smart-social-contracts.github.io/realms-gos/verify/**
+
+which is the address on every journal sheet's QR code, so it must not change. `.github/workflows/verify-pages.yml` assembles a
+site with this folder's `index.html` as `verify/index.html` and nothing else, and deploys it. It runs on pushes to `main` that
+touch the page, and by hand (`workflow_dispatch`); a deployment to Pages comes from `main`, so the page goes out with the
+release that merges `feat/layered-codex` into `main`. To turn it on, in the repository's **Settings → Pages → Build and
+deployment → Source**, choose **GitHub Actions**. The same file can also be attached to each release, so that it runs from disk.
+It asks a replica only to read a proof (an anonymous query).
 
 ## Tests
 
