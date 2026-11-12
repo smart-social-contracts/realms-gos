@@ -203,7 +203,8 @@ print(json.dumps({"stable": ic.stable64_size() * 65536}))
 '''
 # The other quarters of the capital, so that its directory is the size of the city's. Nobody runs them: each is
 # registered and then reports as a running quarter does every hour, which the capital records (``quarters.record``):
-# active, on the codex in force, with members in ``zones`` zones and a ``last_sync`` of now.
+# active, on the codex in force, with members in ``zones`` zones, a ``last_sync`` of now and a population that drifts
+# with ``drift``. It prints the oldest ``last_sync`` of its quarters, so that a test can see that time has passed.
 OTHERS = '''
 import json
 from api import propagation, quarters
@@ -216,10 +217,11 @@ for n in range(%(first)d, %(last)d):
     other = f"other-quarter-{n}"
     if Quarter[other] is None:
         quarters.register(other, f"Quarter {n}")
-    zones = {f"zone-{(n + k) %% %(districts)d}": 100 for k in range(%(zones)d)}
-    quarters.record(Caller(other), {"population": 1000 + n, "codex_id": codex["id"], "codex_version": codex["version"],
-                                    "zones": zones})
-print(json.dumps({"quarters": Quarter.count()}))
+    zones = {f"zone-{(n + k) %% %(districts)d}": 100 + %(drift)d for k in range(%(zones)d)}
+    quarters.record(Caller(other), {"population": 1000 + n + %(drift)d, "codex_id": codex["id"],
+                                    "codex_version": codex["version"], "zones": zones})
+oldest = min((Quarter[f"other-quarter-{n}"].last_sync for n in range(%(first)d, %(last)d)), default=0)
+print(json.dumps({"quarters": Quarter.count(), "oldest": oldest}))
 '''
 _STATUS = Types.Record({"canister_id": Types.Principal})
 
@@ -516,12 +518,17 @@ def test_the_quarter_and_the_capital_upgrade_with_a_year_in_them(city):
     assert quarter.ok("scale_status", "ctl", query=True)["populations"]
 
 
-def others_report(capital, federation, zones):
+def others_report(capital, federation, zones, drift=0):
     """Every other quarter of a federation of ``federation`` quarters reports to the capital, with members in ``zones``
-    zones: the ones not yet there are added first. In batches, since a report reads the whole directory."""
+    zones and ``drift`` more of them than before: the ones not yet there are added first. In batches, since a report
+    reads the whole directory. Returns the oldest ``last_sync`` of the others (0 with none)."""
+    oldest = []
     for first in range(1, federation, OTHERS_BATCH):
         last = min(first + OTHERS_BATCH, federation)
-        heap(capital, OTHERS % {"first": first, "last": last, "zones": zones, "districts": DISTRICTS})
+        got = heap(capital, OTHERS % {"first": first, "last": last, "zones": zones, "drift": drift,
+                                      "districts": DISTRICTS})
+        oldest.append(got["oldest"])
+    return min(oldest, default=0)
 
 
 def test_a_quarter_catches_up_with_its_capital_every_hour_and_both_pay_for_it(city):
@@ -529,17 +536,28 @@ def test_a_quarter_catches_up_with_its_capital_every_hour_and_both_pay_for_it(ci
     capital and takes back its directory, its zones and its settings, and the capital answers: a real ``quarter_sync``,
     sampled with the capital's directory at one quarter, at 26 and at 103. The other quarters are rows like a running
     quarter's, in three states: at rest (each reported once, so that nothing changes between two syncs: the least a sync
-    costs), and reporting, as they do every hour in a live federation, with ``FEW_ZONES`` zones each and with all of
-    them. Last, because it adds the quarters."""
+    costs), and reporting, as they do every hour in a live federation: an hour passes (the clock is in seconds and a
+    round adds a nanosecond, so a report is the same one until it does), then each reports again with a new
+    ``last_sync``, a population that drifted, and ``FEW_ZONES`` zones or all of them. Last, because it adds the
+    quarters.
+
+    The others' reports skip the operation layer and write no audit event. A live capital's log is full, so each sync it
+    answers, a real call here, writes one and deletes the oldest: the full module has the log full by now (the Junta's
+    year), a run of ``-k`` parts may not."""
     net, capital, quarter, ctl, size, bench = city
     states = (("others at rest", None), ("others reporting", FEW_ZONES), ("others reporting, all zones", DISTRICTS))
+    hours = 0
     for federation in FEDERATIONS:
-        others_report(capital, federation, FEW_ZONES)  # the rows, as they were
+        reported = others_report(capital, federation, FEW_ZONES)  # the rows, as they were
         for what, zones in states if federation > 1 else states[:1]:
             label = f"quarter_sync with {federation} quarters" + (f", {what}" if federation > 1 else "")
             for _ in range(SYNCS):
                 if zones:
-                    others_report(capital, federation, zones)  # each other quarter has reported since the last sync
+                    net.wait(HOUR, rounds=30)  # as between two syncs of a live federation
+                    hours += 1
+                    now = others_report(capital, federation, zones, drift=hours)
+                    assert now > reported, "the others' last_sync did not move: no time passed between their reports"
+                    reported = now
                 before = balance(capital)
                 _, count = charged(quarter, "quarter_sync", {}, ctl)
                 bench.report(f"{label} (call)", count)
