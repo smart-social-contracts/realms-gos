@@ -41,6 +41,35 @@ class Proposal(Row):
     replaced_by = String(default="")  # the one proposal that replaces this withdrawn one
     votes = OneToMany("Vote", "proposal")
 
+    # A proposal has several tags, which a field index (one value per row) cannot hold. Each tag has a list of its own in
+    # the same store, ``_fi:Proposal:tags:<tag>``, of the ids of the proposals that carry it: written here, whenever the
+    # tags are, and read a page at a time by ``with_tags``. Assign the tags only through ``set_tags``.
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        if not kw.get("_loaded"):
+            self.index_tags()
+
+    def index_tags(self):
+        """List the proposal under each of its tags. Doing it again changes nothing."""
+        for tag in self.tags:
+            self.db().field_index_add(self._type, "tags", tag, self._id)
+
+    def set_tags(self, tags):
+        """Replace the tags, and the lists that find the proposal by them."""
+        for tag in set(self.tags) - set(tags):
+            self.db().field_index_remove(self._type, "tags", tag, self._id)
+        self.tags = tags
+        self.index_tags()
+
+    @classmethod
+    def with_tags(cls, tags, start, count):
+        """The ids, ascending, of the first ``count`` proposals from id ``start`` that carry at least one of ``tags``.
+        One range read of each tag's list: every id of the first ``count`` of the union is among the first ``count`` of
+        its own tag's list."""
+        db, kind = cls.db(), cls.get_full_type_name()
+        found = {int(i) for tag in tags for i in db.field_index_page(kind, "tags", tag, start, count)}
+        return sorted(found)[:count]
+
     @classmethod
     def migrate(cls, obj, from_version, to_version):
         obj.setdefault("tags", [])  # a Json field a stored row lacks reads as the text of its default

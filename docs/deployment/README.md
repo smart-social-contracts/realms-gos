@@ -154,6 +154,19 @@ index entries.
 release before 0.13 reads them as empty: `count_by` answers 0 and `find_by` answers `[]`. Do not downgrade a realm that
 has run it; restore from a backup instead.
 
+#### After an upgrade to the tag lists of proposals
+
+`proposal_list` with `tags` reads one list of proposal ids for each tag (`_fi:Proposal:tags:<tag>`, kept by
+`Proposal.set_tags`), so a page costs what its proposals cost whatever the realm holds. A release before it kept no
+such lists. After an upgrade from one, the realm lists its proposals under their tags by itself: `post_upgrade` lists the
+first 200 and a timer chain the next 200 a message, then notes `tag_index` in the realm's `manifest_data`. There is
+nothing to call. Until it is noted `proposal_list` with `tags` answers as that release did, by reading the proposals a
+page at a time: right, but slow, and a page can be short or empty, so a client follows `next`. An upgrade in the middle
+starts the pass again; a realm created by this release has none.
+
+**Do not roll back to a release before it, then upgrade again.** The older release writes no lists, so a proposal filed
+or re-tagged meanwhile would be missing from them, and the note says they are complete.
+
 ### The token ledger
 
 The realm's treasury reads only the standard ICRC-1 transfer result, `variant { Ok : nat; Err : TransferError }`.
