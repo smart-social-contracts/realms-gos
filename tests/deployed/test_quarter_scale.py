@@ -6,13 +6,15 @@ for large families. The quarter is filled with ``n`` members, each with a home d
 assessed parcel, and its residents stay idle: the city drives the load. It bills two taxes over everyone in pages, takes
 the payments of most bills, sweeps them to the capital, catches up with it every hour and is upgraded; the capital signs
 its journal and carries the Junta de Govern Local, one proposal per item with ten votes each. Its reads are checked as
-queries along the way. A codex's sandbox spends its budget after a few thousand calls and the realm loads the codex again: the operations
-pay for that as a live realm's do, and each reload is counted, with what it cost.
+queries along the way. A codex's sandbox spends its budget after a few thousand calls and the realm loads the codex
+again: the operations pay for that as a live realm's do, and each reload is counted, with what it cost.
 
 Opt-in, since a quarter of 8,000 takes about half an hour: ``REALM_BENCH_MEMBERS=2000,8000`` runs a quarter of
 each size, and the module is skipped without it. ``REALM_BENCH_JGL_ITEMS`` (default 3,600, a year) sets the Junta's
 items, ``REALM_BENCH_TAX_PAGE`` (default 250) a tax run's page, and ``REALM_BENCH_OUT`` names a JSON file for every
-sample.
+sample. A part of the module runs with ``-k``, but the quarter is as full as the tests that ran before make it: ``-k
+"catches_up or day"`` deselects the seeding and measures a bare quarter whatever ``REALM_BENCH_MEMBERS`` says. Add
+``seeding`` (with at least 106 members, one in each zone) to compare it with a full run's table.
 
 Two measures. The bulk runs in the heap, through the controller's ``__shell__`` in batches, and ``performance_counter``
 times each operation: no message overhead, and a row the batch has already read is cheaper. A sample of each operation
@@ -49,8 +51,10 @@ BATCH = 20
 PAY_BATCH = 200  # invoices booked per shell message
 SAMPLES = 8  # points of each scaling curve
 IMPORT = 200  # members registered by one user_import, the bulk way to seed
-SYNCS = 3  # catch-up syncs sampled at each federation size
+SYNCS = 3  # catch-up syncs sampled in each state of a federation
 FEDERATIONS = (1, 26, 103)  # quarters: one, a quarter of the city, all of it
+FEW_ZONES = 3  # zones that the members of another quarter live in, as it reports them
+OTHERS_BATCH = 20  # other quarters that report in one shell message: each report reads the whole directory
 DISTRICTS = 106  # València's 19 districts and 87 barris, as zones
 LARGE_FAMILY_EVERY = 30  # about 3 % of households hold a large-family title, which the city's IBI chapter reads
 UNIT = 10**8  # DOM has 8 decimals
@@ -94,7 +98,7 @@ import json
 from core import chain, legislation
 if not hasattr(legislation, "reloads"):
     legislation.reloads, load = [], legislation.warm
-    def counted(codex):
+    def counted(codex=legislation.UNKNOWN):
         t = chain.instructions()
         load(codex)
         legislation.reloads.append(chain.instructions() - t)
@@ -197,13 +201,25 @@ MEMORY = '''
 import json
 print(json.dumps({"stable": ic.stable64_size() * 65536}))
 '''
-# Quarters of the capital that nobody runs, so that its directory is the size of the city's: they only add rows.
-QUARTERS = '''
+# The other quarters of the capital, so that its directory is the size of the city's. Nobody runs them: each is
+# registered and then reports as a running quarter does every hour, which the capital records (``quarters.record``):
+# active, on the codex in force, with members in ``zones`` zones and a ``last_sync`` of now.
+OTHERS = '''
 import json
-from api import quarters
-for n in range(%(first)d, %(last)d + 1):
-    quarters.register(f"empty-quarter-{n}", f"Quarter {n}")
-print(json.dumps({"quarters": len(list(quarters.known()))}))
+from api import propagation, quarters
+from ggg import Quarter
+class Caller:
+    def __init__(self, by):
+        self.by = by
+codex = propagation.in_force()
+for n in range(%(first)d, %(last)d):
+    other = f"other-quarter-{n}"
+    if Quarter[other] is None:
+        quarters.register(other, f"Quarter {n}")
+    zones = {f"zone-{(n + k) %% %(districts)d}": 100 for k in range(%(zones)d)}
+    quarters.record(Caller(other), {"population": 1000 + n, "codex_id": codex["id"], "codex_version": codex["version"],
+                                    "zones": zones})
+print(json.dumps({"quarters": Quarter.count()}))
 '''
 _STATUS = Types.Record({"canister_id": Types.Principal})
 
@@ -500,18 +516,31 @@ def test_the_quarter_and_the_capital_upgrade_with_a_year_in_them(city):
     assert quarter.ok("scale_status", "ctl", query=True)["populations"]
 
 
+def others_report(capital, federation, zones):
+    """Every other quarter of a federation of ``federation`` quarters reports to the capital, with members in ``zones``
+    zones: the ones not yet there are added first. In batches, since a report reads the whole directory."""
+    for first in range(1, federation, OTHERS_BATCH):
+        last = min(first + OTHERS_BATCH, federation)
+        heap(capital, OTHERS % {"first": first, "last": last, "zones": zones, "districts": DISTRICTS})
+
+
 def test_a_quarter_catches_up_with_its_capital_every_hour_and_both_pay_for_it(city):
     """Every ``sync_every`` seconds, an hour by default and at least (api.quarters.catch_up), a quarter reports to its
     capital and takes back its directory, its zones and its settings, and the capital answers: a real ``quarter_sync``,
-    sampled with the capital's directory at one quarter, at 26 and at 103. Last, because it adds the quarters."""
+    sampled with the capital's directory at one quarter, at 26 and at 103. The other quarters are rows like a running
+    quarter's, in three states: at rest (each reported once, so that nothing changes between two syncs: the least a sync
+    costs), and reporting, as they do every hour in a live federation, with ``FEW_ZONES`` zones each and with all of
+    them. Last, because it adds the quarters."""
     net, capital, quarter, ctl, size, bench = city
-    held = 1
+    states = (("others at rest", None), ("others reporting", FEW_ZONES), ("others reporting, all zones", DISTRICTS))
     for federation in FEDERATIONS:
-        if federation > held:
-            heap(capital, QUARTERS % {"first": held, "last": federation - 1})  # the real quarter is one of them
-            held = federation
-        for _ in range(SYNCS):
-            before = balance(capital)
-            _, count = charged(quarter, "quarter_sync", {}, ctl)
-            bench.report(f"quarter_sync with {federation} quarters (call)", count)
-            bench.report(f"quarter_sync with {federation} quarters: the capital's share (cycles)", before - balance(capital))
+        others_report(capital, federation, FEW_ZONES)  # the rows, as they were
+        for what, zones in states if federation > 1 else states[:1]:
+            label = f"quarter_sync with {federation} quarters" + (f", {what}" if federation > 1 else "")
+            for _ in range(SYNCS):
+                if zones:
+                    others_report(capital, federation, zones)  # each other quarter has reported since the last sync
+                before = balance(capital)
+                _, count = charged(quarter, "quarter_sync", {}, ctl)
+                bench.report(f"{label} (call)", count)
+                bench.report(f"{label}: the capital's share (cycles)", before - balance(capital))
