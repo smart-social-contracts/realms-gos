@@ -144,10 +144,21 @@ def test_a_hook_that_is_not_a_top_level_function_is_not_one(source):
     assert state() == NO_CODEX
 
 
-def test_code_nested_too_deep_for_the_parser_is_left_to_the_checks_of_the_code_itself():
-    """No syntax tree to read: the hook check does not judge it (and does not raise); the install then fails or not on
-    its own, never a trap."""
-    from api.codex import check_hooks
+@pytest.mark.parametrize("failure", [SyntaxError("invalid syntax"), ValueError("a null byte"),
+                                     RecursionError("maximum recursion depth exceeded"), MemoryError()])
+def test_a_syntax_tree_that_cannot_be_made_is_left_to_the_checks_of_the_code_itself(monkeypatch, failure):
+    """Code that does not compile, or that is nested too deep for the parser (a RecursionError or a MemoryError, which
+    the wasm can catch): there is no tree to read, so the hook check says nothing and raises nothing."""
+    import ast
 
-    deep = "x = " + "-" * 5000 + "1\n"
-    check_hooks({"hooks": ["init"]}, deep)  # returns: nothing to say about a tree that cannot be made
+    def parse(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(ast, "parse", parse)
+    assert codex.defined_hooks("def init(args):\n    return {}\n") is None
+    codex.check_hooks({"hooks": ["init"]}, "def init(args):\n    return {}\n")  # returns: nothing to judge
+
+
+def test_a_source_that_does_not_parse_is_refused_by_the_compile_check_and_not_by_the_hook_check():
+    assert codex.defined_hooks("def (") is None
+    codex.check_hooks({"hooks": ["init"]}, "def (")
