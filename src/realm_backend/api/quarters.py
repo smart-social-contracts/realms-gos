@@ -179,7 +179,8 @@ def directory():
 
 def announced(q):
     """The row of quarter ``q`` as its capital sends it to the quarters, in a full answer and in a delta alike: with the
-    population it last told them, which is within a step of the quarter's own (a quarter that told none shows its own)."""
+    population it last told them, which is within a step of the quarter's own. A row that told none shows the quarter's own
+    until the quarter reports (``drifted``): a row from before this release."""
     row = view(q, *FIELDS)
     row["population"] = q.told_population or q.population
     return flagged(row)
@@ -263,7 +264,11 @@ def record(c, args):
 
 
 def drifted(q):
-    """Whether the population of ``q`` has moved from the one its row last carried to the quarters by a step."""
+    """Whether the population of ``q`` has moved from the one its row last carried to the quarters by a step, or is the
+    first it has to tell: a row that told none (a quarter that reports for the first time, an active one before it did, a
+    row from before this was kept) tells the population it has, so that it carries one that stays."""
+    if not q.told_population:
+        return q.population > 0
     return abs(q.population - q.told_population) >= max(1, capacity() // POPULATION_STEP)
 
 

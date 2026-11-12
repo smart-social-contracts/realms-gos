@@ -98,147 +98,49 @@ def test_a_report_that_changes_nothing_notes_nothing_and_still_stamps_the_quarte
 def test_a_population_is_noted_only_once_it_moved_by_a_step_of_the_capacity():
     capital("north", "south")  # a quarter takes 2,000: the step is 20
     held = first_sync()
+    ok("quarter_report", "south", population=10)  # the first it tells
     head = sync_log.cursor()
-    ok("quarter_report", "south", population=19)
-    assert sync_log.cursor() == head and Quarter["south"].population == 19  # kept, and not told to the quarters
-    ok("quarter_report", "south", population=20)
+    ok("quarter_report", "south", population=29)
+    assert sync_log.cursor() == head and Quarter["south"].population == 29  # kept, and not told to the quarters
+    ok("quarter_report", "south", population=30)
     assert sync_log.cursor()["n"] == head["n"] + 1
-    assert {row["id"]: row["population"] for row in delta("north", held)["directory"]}["south"] == 20
-    ok("quarter_report", "south", population=39)  # 19 on from the 20 told
+    assert {row["id"]: row["population"] for row in delta("north", held)["directory"]}["south"] == 30
+    ok("quarter_report", "south", population=49)  # 19 on from the 30 told
     assert sync_log.cursor()["n"] == head["n"] + 1
-    ok("quarter_report", "south", population=0)  # 20 under it
+    ok("quarter_report", "south", population=10)  # 20 under it
     assert sync_log.cursor()["n"] == head["n"] + 2
     ok("quarter_configure", "ctl", capacity=300)  # a smaller quarter: a step of 3
-    ok("quarter_report", "south", population=2)
+    ok("quarter_report", "south", population=12)
     assert sync_log.cursor()["n"] == head["n"] + 2
-    ok("quarter_report", "south", population=3)
+    ok("quarter_report", "south", population=13)
     assert sync_log.cursor()["n"] == head["n"] + 3
 
 
-def test_a_census_that_changed_is_kept_but_not_noted_since_no_directory_row_shows_it():
+def test_the_first_population_a_quarter_reports_is_told_whatever_it_is_and_the_row_keeps_it():
+    """Told, not only the step: a row that told none would show whatever population the quarter has when the row travels,
+    so a quarter that took the row in a delta and one that takes it in a full answer would not show the same."""
     capital("north")
-    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    ok("quarter_register", "ctl", quarter="east", name="East")
+    ok("quarter_configure", "ctl", quarter="east", status="active")  # active before it reported: no change of status to note
+    held = first_sync()
     head = sync_log.cursor()
-    ok("quarter_report", "north", population=0, zones={"riverside": 2, "nowhere": 9})  # only the realm's zones are kept
-    assert Quarter["north"].zones == {"riverside": 2} and sync_log.cursor() == head
+    ok("quarter_report", "east", population=5)  # 5 is under a step
+    assert sync_log.cursor()["n"] == head["n"] + 1 and Quarter["east"].told_population == 5
+    shown = lambda reply: {row["id"]: row["population"] for row in reply["directory"]}["east"]  # noqa: E731
+    assert shown(delta("north", held)) == 5
+    ok("quarter_report", "east", population=9)  # under a step from the 5 told: kept
+    assert shown(first_sync()) == 5  # what a full answer shows is what the delta did
 
 
-def test_the_compliance_a_capital_gives_a_quarter_reaches_the_quarters_as_a_change(monkeypatch):
+def test_a_row_from_before_this_release_tells_its_population_at_the_quarters_next_report():
     capital("north", "south")
+    Quarter["south"].population = 400  # reported before told_population was kept
     held = first_sync()
-    monkeypatch.setattr(propagation, "judge", lambda *a: '"stale"')
-    propagation.judge_quarters()
-    out = delta("north", held)
-    assert {row["id"]: row["compliance"] for row in out["directory"] if row["id"] != CAPITAL} == {
-        "north": '"stale"', "south": '"stale"'}
-
-
-@pytest.mark.parametrize("have", [None, "3", [], {}, {"n": "1", "at": 0}, {"n": -1, "at": 0}, {"n": True, "at": 0},
-                                  {"n": 999, "at": 0}, {"n": 1, "at": 12345}])
-def test_a_cursor_the_log_cannot_serve_is_answered_with_everything(have):
-    capital("north")
-    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
-    out = ok("quarter_sync", "north", population=0, **({"have": have} if have is not None else {}))
-    assert "delta" not in out and [z["zone"] for z in out["zones"]] == ["riverside"]
-
-
-def test_a_quarter_further_behind_than_the_log_reaches_takes_everything(monkeypatch):
-    monkeypatch.setattr(sync_log, "KEPT", 5)
-    capital("north")
-    held = first_sync()
-    for n in range(4):
-        ok("zone_define", "ctl", zone=f"zone-{n}", name="Zone", kind="district")
-    assert delta("north", held)["delta"]  # four changes behind: the log still has them
-    ok("zone_define", "ctl", zone="zone-4", name="Zone", kind="district")
-    out = delta("north", held)
-    assert "delta" not in out and len(out["zones"]) == 5
-    ok("zone_define", "ctl", zone="zone-5", name="Zone", kind="district")
-    head = sync_log.cursor()["n"]
-    assert sorted(SyncChange[sync_log.slot_id(i)].n for i in range(5)) == list(range(head - 4, head + 1))  # its last five
-
-
-@pytest.mark.parametrize("changes_since", [0, 2])
-def test_a_log_that_is_not_the_one_a_quarter_read_is_answered_with_everything(changes_since):
-    """The capital was restored from a snapshot: it numbers its changes again, and the quarter's cursor names one that is
-    not the one it read: the same number, made at another time."""
-    capital("north")
-    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
-    held = first_sync()
-    for n in range(changes_since):
-        ok("zone_define", "ctl", zone=f"zone-{n}", name="Zone", kind="district")
-    assert delta("north", held)["delta"]
-    SyncChange[sync_log.HEAD if not changes_since else sync_log.slot_id(held["rev"]["n"])].at += 1
-    assert "delta" not in delta("north", held)
-
-
-def test_a_log_with_no_changes_serves_a_quarter_that_holds_none():
-    world.build()
-    assert sync_log.cursor() == {"n": 0, "at": 0, "e": 0} and sync_log.since({"n": 0, "at": 0, "e": 0}, sync_log.cursor()) == {}
-
-
-def test_a_quarter_that_holds_no_change_names_no_time():
-    capital("north")
-    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    assert {row["id"]: row["population"] for row in held["directory"]}["south"] == 400  # until it reports, its own
     head = sync_log.cursor()
-    assert sync_log.since({"n": 0, "at": 0, "e": head["e"]}, head) is not None
-    assert sync_log.since({"n": 0, "at": 12345, "e": head["e"]}, head) is None
-
-
-def test_a_slot_that_holds_another_change_than_the_one_asked_for_is_no_log_to_read_from():
-    capital("north")
-    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
-    head = sync_log.cursor()
-    held = {"n": head["n"] - 2, "at": sync_log.slot(head["n"] - 2).at, "e": head["e"]}
-    assert sync_log.since(held, head) is not None
-    sync_log.slot(head["n"] - 1).n += sync_log.KEPT  # a change after the cursor that a later change has replaced
-    assert sync_log.since(held, head) is None
-
-
-def test_the_log_is_kept_by_a_capital_only():
-    world.build()  # an independent realm has no quarters to tell
-    sync_log.note("zone", "x")
-    quarters.resume()
-    assert SyncChange[sync_log.HEAD] is None
-    quarter = Site("north", Site("capital"))
-    with quarter.here():  # nor has a quarter
-        sync_log.note("zone", "x")
-        quarters.resume()
-        assert SyncChange[sync_log.HEAD] is None
-
-
-def test_a_cursor_from_another_epoch_is_answered_with_everything():
-    capital("north")
-    held = first_sync()
-    assert delta("north", held)["delta"]
-    for epoch in (held["rev"]["e"] + 1, None, "0"):
-        assert "delta" not in delta("north", {"rev": {**held["rev"], "e": epoch}})
-    assert "delta" not in delta("north", {"rev": {"n": held["rev"]["n"], "at": held["rev"]["at"]}})  # no epoch at all
-
-
-def test_every_start_of_a_capital_begins_an_epoch_that_no_earlier_one_can_be_taken_for():
-    capital("north")
-    before = sync_log.cursor()["e"]
-    quarters.resume()
-    after = sync_log.cursor()["e"]
-    fake_chain.state["now"] += 1
-    quarters.resume()
-    assert before == 0 < after < sync_log.cursor()["e"] and after >= fake_chain.state["now"] - 1  # a time, and never back
-    SyncChange[sync_log.HEAD].epoch = 5  # a snapshot restored from long ago
-    quarters.resume()
-    assert sync_log.cursor()["e"] > fake_chain.state["now"] - 1
-
-
-def test_a_capital_with_no_log_yet_begins_one_when_it_starts_so_that_a_quarter_that_read_none_is_not_trusted():
-    capital_site, north = pair()
-    with capital_site.here():
-        SyncChange[sync_log.HEAD].delete()  # (a capital that has noted nothing so far)
-    north.catch_up()
-    with north.here():
-        held = Realm["1"].sync_state["rev"]
-    with capital_site.here():
-        quarters.resume()
-        assert sync_log.cursor()["e"] != held["e"]
-
+    ok("quarter_report", "south", population=402)
+    assert sync_log.cursor()["n"] == head["n"] + 1 and Quarter["south"].told_population == 402
+    assert {row["id"]: row["population"] for row in delta("north", held)["directory"]}["south"] == 402
 
 
 def test_what_a_quarter_shows_of_another_quarters_population_is_within_a_step_whatever_happened_to_its_row():
