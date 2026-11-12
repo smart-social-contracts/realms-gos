@@ -198,9 +198,13 @@ def prepare(proposal):
     A job that cannot start (another install is running) is recorded as failed, so the switch says why."""
     action = proposal.action or {}
     args = action.get("args") or {}
-    if action.get("op") != "codex_install" or not ("checksum" in args or change_list.names_release(args)):
+    if (action.get("op") != "codex_install" or not isinstance(args, dict)
+            or not ("checksum" in args or change_list.names_release(args))):
         return
+    from api import codex  # it imports this module
+
     try:
+        codex.check_install_args(args)  # the switch asks it again: what is staged is what it will find
         start(proposal.id, args)
     except Fail as e:
         InstallJob(id=next_id(InstallJob, "J"), proposal=proposal.id, change_list=named_change(args), status="failed",

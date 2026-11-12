@@ -61,9 +61,12 @@ def check_action(action):
     run_action), not as a member picked by whoever filed it."""
     if action.get("op") not in ops():
         raise Fail(f"unknown operation '{action.get('op')}'")
-    if "on_behalf_of" in (action.get("args") or {}):
+    args = action.get("args")
+    if args is not None and not isinstance(args, dict):
+        raise Fail("an action is {op, args}, with args a record")
+    if "on_behalf_of" in (args or {}):
         raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, as its proposer")
-    ranges.check(action["op"], action.get("args") or {})
+    ranges.check(action["op"], args or {})
 
 
 def check_scope(department, action):
@@ -356,7 +359,13 @@ def scheduled_task_name(p):
 
 def run_action(p):
     """Run the accepted action as its proposer: the vote is the authority, and the action cannot name anyone else.
-    The vote's authority stops at the proposal's department, so an action outside it fails without running."""
+    The vote's authority stops at the proposal's department, so an action outside it fails without running. One whose
+    args are not a record (a filing refuses it now) fails with that reason: it never reaches code that reads them."""
+    args = p.action.get("args")
+    if args is not None and not isinstance(args, dict):
+        end(p, "failed")
+        p.result = {"ok": False, "error": "an action is {op, args}, with args a record", "kind": Fail.kind}
+        return
     try:
         check_scope(p.department, p.action)
         if p.on_behalf_of:
@@ -366,7 +375,7 @@ def run_action(p):
         p.result = {"ok": False, "error": str(e), "kind": e.kind}
         return
     p.status = "executed"
-    out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay", signer=p.proposer,
+    out = yield from dispatch(p.action["op"], json.dumps(p.action.get("args")), origin="replay", signer=p.proposer,
                               proposal=p.id)
     p.result = json.loads(out)
     if not p.result.get("ok"):

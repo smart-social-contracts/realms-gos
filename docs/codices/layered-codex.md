@@ -1913,10 +1913,13 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    at once. The realm installs the release and never reads the change list, so a vote would be told one
    install and the realm would run another: such an action is refused where it is filed and where
    `codex_install` is called with no vote behind it, and a proposal stored with both before that still runs,
-   as the release, and is described as one. The arguments of an install are of the types it reads (a
-   manifest is a record that is not empty, a source, a version and a codex name are text): one that is not
-   is refused where the install is filed and where `codex_install` is called, and a proposal stored with one
-   fails, with the reason recorded, rather than raising in the message of its vote or its timer. The
+   as the release, and is described as one. The arguments of an install are of the types it reads (the
+   arguments are a record; a manifest is a record that is not empty whose `hooks` and `capabilities`, when
+   there, are lists of text; the sent code is text that compiles; a source, a version and a codex name are
+   text): one that is not is refused where the install is filed and where `codex_install` is called, and a
+   proposal stored with one fails, with the reason recorded, rather than raising in the message of its vote or
+   its timer. For a release only its `source` and `version` are judged: the change list beside it is never
+   read. The
    follower's own guard or forbid on `codex_install` still runs when the accepted
    proposal executes, and can delay or refuse the install; if it does, the realm reads `non_compliant`
    past the release's effective date, visible to all: that is the realm's own legislation over its own

@@ -597,6 +597,58 @@ def test_a_plain_change_list_is_described_as_it_was_and_a_plain_release_as_the_r
     assert "Call" in ggg_api.action({"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0"}})
 
 
+def jobs_left():
+    """The install jobs that are running or paused: what would refuse the next install."""
+    from core import layered_codex as store
+
+    return store.live_job()
+
+
+@pytest.mark.parametrize("extra", [{"url": 5}, {"checksum": None}], ids=["url a number", "checksum null"])
+def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_and_leaves_no_job(extra):
+    """The change list beside a release is never read, so its types do not matter (#695: such a proposal runs as the
+    release). One stored with an effective time stages the release when the vote decides it and switches at the time:
+    the check of the install's arguments is the same at both, so the staged job never outlives a refusal at the
+    switch."""
+    own_layer()
+    source(entry("1.0.0", 6, published=5))
+    link()
+    check_now()
+    pid = ok("proposal_create", "alice", title="Stored", effective_at=fake_chain.now() + 2 * HOUR,
+             action={"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0"}})["proposal"]
+    Proposal[pid].action = {"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0", **extra}}
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=pid, choice="yes")
+    run_job()
+    staged = jobs_left()
+    assert Proposal[pid].status == "execution_scheduled" and staged is not None and staged.step == "wait"
+    later(2 * HOUR + 1)
+    fire_timers()
+    fire_timers()
+    assert Proposal[pid].status == "executed" and running() == {"1.0.0"}  # it ran as the release
+    assert jobs_left() is None  # and left no job to refuse the next install
+
+
+def test_a_stored_change_list_with_an_ill_typed_checksum_fails_at_acceptance_and_leaves_no_job():
+    """Stored with an effective time and no release: staging it at the deciding vote is refused for the same reason
+    the switch would refuse it, so the job it leaves is a failed one, never one that is running and keeps the next
+    install out."""
+    own_layer()
+    pid = ok("proposal_create", "alice", title="Stored", effective_at=fake_chain.now() + 2 * HOUR,
+             action={"op": "codex_install", "args": CHANGE_LIST_PIN})["proposal"]
+    Proposal[pid].action = {"op": "codex_install", "args": {"url": CHANGE_LIST_PIN["url"], "checksum": None}}
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=pid, choice="yes")
+    assert jobs_left() is None  # the job staged at acceptance failed: nothing is running
+    from ggg import InstallJob
+
+    assert [j.status for j in InstallJob.load_some(1, InstallJob.max_id())] == ["done", "failed"]
+    later(2 * HOUR + 1)
+    fire_timers()
+    assert Proposal[pid].status == "failed" and "checksum is sha256" in Proposal[pid].result["error"]
+    assert jobs_left() is None
+
+
 def test_the_change_list_of_a_release_is_the_whole_release_with_its_calendar_and_without_the_realm_chapter():
     release = {**entry("1.0.0", 6), "chapters": {**entry("1.0.0", 6)["chapters"], "realm": "sha256:" + "c" * 64},
                "calendar": "sha256:" + "d" * 64}

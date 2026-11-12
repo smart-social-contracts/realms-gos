@@ -281,6 +281,53 @@ def test_an_install_with_ill_typed_arguments_is_refused_and_a_stored_one_fails_a
     assert row["status"] == "failed" and reason in row["result"]["error"]
 
 
+def store_action(town, pid, args):
+    """Set the action of ``pid`` as a proposal stored before a filing refused it would have it (the controller's
+    shell)."""
+    action = {"op": "codex_install", "args": args}
+    out = town.shell(f"from ggg import Proposal\nProposal[{pid!r}].action = {action!r}\nprint('stored')")
+    assert "Traceback" not in out, out
+
+
+LEX = {"id": "lex", "version": "1.0"}
+
+
+@pytest.mark.parametrize("args", ["checksum", ["checksum"], {"manifest": {**LEX, "hooks": None}, "source": "pass"},
+                                  {"manifest": {**LEX, "capabilities": [{}]}, "source": "pass"},
+                                  {"manifest": LEX, "source": "def ("}],
+                         ids=["args text", "args list", "hooks null", "capabilities with a record",
+                              "code that does not compile"])
+def test_a_stored_install_the_check_refuses_concludes_failed_on_the_wasm_where_it_used_to_reject_the_last_vote(
+        net, source, town, args):
+    """Args that are not a record, hooks that are null, capabilities that cannot be hashed, code that does not compile:
+    each raised in the message of the last vote, which the replica rolled back, and the proposal stayed ``voting`` for
+    ever (review of #697). The wasm now concludes it ``failed``, with the reason."""
+    pid = file_install(town, "1.0.0")
+    store_action(town, pid, args)
+    assert vote(town, pid, "yes") == "failed"  # the last vote's message completes
+    row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    assert row["status"] == "failed" and row["result"]["ok"] is False and row["result"]["error"]
+
+
+def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(
+        net, source, town):
+    """The release is staged when the vote decides it, and switched to at the time: the same check at both, so the job
+    never outlives a refusal. The release is the one the town does not run (1.0.0: the town runs 2.0.0)."""
+    action = {"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0"}}
+    pid = town.ok("proposal_create", "alice", title="Stored", action=action,
+                  effective_at=town.now() + HOUR)["proposal"]
+    store_action(town, pid, {"source": "arcadia", "version": "1.0.0", "url": 5})
+    assert vote(town, pid, "yes") == "execution_scheduled"
+    assert settled(net, town)["step"] == "wait" and running(town) == {"2.0.0"}  # staged: the job waits for its time
+    net.wait(HOUR + 5)
+    row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    assert row["status"] == "executed" and running(town) == {"1.0.0"}
+    assert status(town)["job"]["status"] == "done"  # no job left running
+    # the next install is not refused, and the tests that follow run on 2.0.0 again
+    installed(net, town, file_install(town, "2.0.0"))
+    assert running(town) == {"2.0.0"}
+
+
 def test_an_unreadable_record_reads_unknown(net, source, town):
     source.stop()
     try:

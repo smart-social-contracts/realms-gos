@@ -146,25 +146,33 @@ def text_arg(args, key, what):
         raise Fail(f"{key} is {what}")
 
 
+def texts_of(value, what):
+    """``value`` is a list of text, or a Fail that says what ``what`` is."""
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise Fail(f"{what} is a list of text")
+
+
 def check_install_args(args):
     """``codex_install``'s ``args`` are of the types the install reads, or a Fail names the one that is not. Without it
     an argument of another type raises inside the install (a manifest that is null, an empty string or a list, sent
-    code that is not text): the operation then traps, and a trap inside a vote's execution or a timer rolls the message
-    back, so a proposal that carries it may never conclude. Asked when the install is filed (``filed_install``) and at
-    the start of the call, whether a member's, a controller's or an accepted vote's: a proposal stored with such
-    arguments before then fails, with the reason recorded. The shape of the arguments is not judged here: a release
-    with a change list beside it is refused when it is filed (core.change_list.names_both) and still runs, as the
-    release, when stored."""
+    code that is not text or does not compile, hooks that are not a list): the operation then traps, and a trap inside
+    a vote's execution or a timer rolls the message back, so a proposal that carries it may never conclude. It is the
+    operation's ``check``, which runs for a member's, a controller's or an accepted vote's call, and ``filed_install``
+    asks it where the install is filed: a proposal stored with such arguments before then fails, with the reason
+    recorded, and ``installs.prepare`` asks it before it stages a release, so that the staging and the switch cannot
+    disagree. A release is judged by its ``source`` and ``version`` alone: a change list beside it is never read, so
+    its types do not matter (a release with one is refused when it is filed, core.change_list.names_both, and still
+    runs, as the release, when stored)."""
     if not isinstance(args, dict):
         raise Fail("an install takes a record of arguments")
-    if "checksum" in args or change_list.names_release(args):
-        if "checksum" in args and not isinstance(args["checksum"], str):
+    if change_list.names_release(args):
+        text_arg(args, "source", "the id of a layer from above: text")
+        text_arg(args, "version", "the release's version: text")
+    elif "checksum" in args:
+        if not isinstance(args["checksum"], str):
             raise Fail("checksum is sha256:<64 hex digits>")
         if "url" in args and not isinstance(args["url"], str):
             raise Fail("url is the address of the change list, https")
-        if change_list.names_release(args):
-            text_arg(args, "source", "the id of a layer from above: text")
-            text_arg(args, "version", "the release's version: text")
     elif "manifest" in args:
         manifest = args["manifest"]
         if not isinstance(manifest, dict) or not manifest:
@@ -173,8 +181,13 @@ def check_install_args(args):
         for key in ("id", "version"):
             if not isinstance(manifest.get(key), str):
                 raise Fail(f"the manifest's {key} is text")
-        if not isinstance(manifest.get("capabilities", []), list):
-            raise Fail("the manifest's capabilities is a list")
+        for key in ("capabilities", "hooks"):
+            if key in manifest:
+                texts_of(manifest[key], f"the manifest's {key}")
+        try:
+            compile(args["source"], "hooks.py", "exec")
+        except (SyntaxError, ValueError) as e:  # a null byte is a ValueError
+            raise Fail(f"source does not compile: {e}")
     elif "codex" in args or "version" in args:
         text_arg(args, "codex", "the name of a codex of the file registry: text")
         text_arg(args, "version", "the version of that codex: text")
@@ -195,7 +208,7 @@ def filed_install(args, proposal):
         installs.release_of(args)
 
 
-@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install)
+@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install, check=check_install_args)
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
     The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``.
@@ -209,7 +222,6 @@ def codex_install(c, args):
     (core.legislation.proposes_release)."""
     from api import installs  # it imports this module
 
-    check_install_args(args)
     if "checksum" in args or change_list.names_release(args):
         return installs.begin(c, args)
     if store.live_job() is not None:
