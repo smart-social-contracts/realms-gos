@@ -158,11 +158,38 @@ def running_layers():
     record can place against the releases it lists (core.compliance, §11.6)."""
     running = {}
     for layer in layers_run():
-        published, found = layer["published"], FoundRelease[f"{layer['source']}@{layer['version']}"]
-        if published is None and found is not None:
-            published = found.published
+        published = layer["published"]
+        if published is None:
+            published = found_published(layer["source"], layer["version"])
         running[layer["source"]] = {**layer, "published": published}
     return running
+
+
+def found_published(source, version):
+    """When the publisher published release ``version`` of layer ``source``, as a check logged it when it read it in a
+    record (``keep_found``), or None for a release no check has read."""
+    found = FoundRelease[f"{source}@{version}"]
+    return found.published if found is not None else None
+
+
+def release_change(action):
+    """How the release a proposal's ``action`` installs stands against the one the realm runs of that layer (§11.6), for
+    the voters of a proposal and every reader of ``proposal_get``: ``{source, version, runs, published, runs_published,
+    order, step_back}``. ``order`` is ``older`` (published strictly earlier than what the realm runs, and ``step_back``
+    is true: installing it takes the realm back, whoever filed it and whatever the source lists), ``newer``, ``tied``
+    or ``unknown`` (published at the same time, or a time that is not known: a note, no mark), or ``same`` (the release
+    the realm runs now). None for an action that installs no release, and for a layer the realm runs none of."""
+    args = action.get("args") if isinstance(action, dict) else None
+    if not isinstance(args, dict) or action.get("op") != "codex_install" or not change_list.names_release(args):
+        return None
+    source, version = args.get("source"), args.get("version")
+    layer = running_layers().get(source) if isinstance(source, str) and isinstance(version, str) else None
+    if layer is None:
+        return None
+    published = found_published(source, version)
+    order = "same" if layer["version"] == version else compliance.order_of(published, layer["published"])
+    return {"source": source, "version": version, "runs": layer["version"], "published": published,
+            "runs_published": layer["published"], "order": order, "step_back": order == "older"}
 
 
 def judge(link, record):
