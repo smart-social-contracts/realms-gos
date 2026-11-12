@@ -21,7 +21,7 @@ import json
 
 from core import chain, ic_keys
 from core.candid import Reader, idl_hash
-from core.db import Fail, NotFound, Unavailable, first
+from core.db import Conflict, Fail, NotFound, Unavailable, first
 from ggg import Realm, SignedDocument
 
 MANAGEMENT = "aaaaa-aa"
@@ -229,16 +229,21 @@ def make(kind, chained, subjects_of, body_of):
 # ---- Signing
 
 
+def made_for(stored):
+    """The name of the key the text of the made document ``stored`` names: the one its signature has to be made with."""
+    return json.loads(stored.canonical)["key"]["name"]
+
+
 def being_signed(kind, subject):
     since = IN_FLIGHT.get((kind, subject))
     return since is not None and chain.now() - since < STALE
 
 
 def sign_batch(kind, subjects):
-    """Sign as one batch the made documents of ``subjects`` of ``kind`` that are not signed and are not being signed, and
-    keep the signature with them; the rest are left out. The subjects signed, [] when there are none (and then nothing is
-    written). A failure (a realm short of cycles, a call refused, a key that is not the document's) is kept for the IT admin
-    team (``failures``: the last, with its time and the subjects it concerned: information, nothing retries from it),
+    """Sign as one batch the made documents of ``subjects`` of ``kind`` that are not signed, are not being signed and were
+    made for the key the realm has now, and keep the signature with them; the rest are left out. The subjects signed, []
+    when there are none (and then nothing is written). A failure (a realm short of cycles, a call refused) is kept for the IT
+    admin team (``failures``: the last, with its time and the subjects it concerned: information, nothing retries from it),
     nothing is kept of the batch, and the result is None: the owner tries again. A generator."""
     try:
         signed = yield from sign(kind, subjects)
@@ -251,22 +256,21 @@ def sign_batch(kind, subjects):
 
 
 def sign(kind, subjects):
-    """What ``sign_batch`` does, raising what goes wrong. The key is named once, and each text must name it too: a text
-    that names another key (the realm's network changed since it was made) would not verify. A document is marked as
-    being signed while the call is out, so that no other call asks for its signature; one signed meanwhile, which a mark
-    lost to a trap allows, keeps its signature. A generator."""
+    """What ``sign_batch`` does, raising what goes wrong. The key is named once, and a text that names another key (the
+    realm's network or key rule changed since it was made) would not verify with it: that document is left out, and a
+    signature of a later one covers it through the chain. A document is marked as being signed while the call is out, so
+    that no other call asks for its signature; one signed meanwhile, which a mark lost to a trap allows, keeps its
+    signature. A generator."""
     path(kind)
     name = ic_keys.key_name()
     waiting = []
     for subject in subjects:
         stored = SignedDocument[document_id(kind, subject)]
-        if stored is not None and not stored.signature and not being_signed(kind, subject):
+        if (stored is not None and not stored.signature and not being_signed(kind, subject)
+                and made_for(stored) == name):
             waiting.append((subject, stored))
     if not waiting:
         return []
-    for subject, stored in waiting:
-        if json.loads(stored.canonical)["key"]["name"] != name:
-            raise Fail(f"the document {subject} of {kind} was made for another key than {name}, the realm's now")
     # The balance, not what is spendable above the freezing reserve: a call that would take the realm below the reserve
     # still traps, and nothing is recorded of it (the realm's balance is topped up, as for any other call it makes).
     if chain.cycles() < attached(name):
@@ -291,11 +295,16 @@ def sign(kind, subjects):
 def request(kind, subject):
     """The proof of the made document ``subject`` of ``kind``, signing it now if it is not signed (what anyone's
     request for a signature does). ``(proof, signed)``: ``signed`` is whether this call made the signature, and the proof is
-    None while another call is signing the document. NotFound when it is not made, Unavailable when the signature could not
+    None while another call is signing the document. NotFound when it is not made, Conflict when it was made for another key
+    than the realm's now (it can never be signed: the error names both), Unavailable when the signature could not
     be made, whose reason is kept (``failures``) for the IT admin team and not told to the caller (it holds the realm's
     balance and what the management canister said): the document is as it was, and may be asked again. A generator."""
-    if SignedDocument[document_id(kind, subject)] is None:
+    stored = SignedDocument[document_id(kind, subject)]
+    if stored is None:
         raise NotFound(f"no document {kind}:{subject[:40]} is made")
+    if not stored.signature and made_for(stored) != ic_keys.key_name():
+        raise Conflict(f"the document {subject} of {kind} was made for the key {made_for(stored)} and the realm's key is "
+                       f"{ic_keys.key_name()} now: it cannot be signed, and the signature of a later document covers it")
     signed = yield from sign_batch(kind, [subject])
     if signed is None:
         raise Unavailable("the signature could not be made now: ask again later")

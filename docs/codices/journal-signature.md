@@ -68,9 +68,10 @@ with `{`, a node's input with `0x01`, so a leaf cannot pass for a node). One sig
 keeps its **path**: the sibling digests from its leaf up, each marked left or right. Checking a document is: hash the
 text, climb the path to the root, check the signature of the root. A batch of one has an empty path and root = digest.
 
-A signature on request is a batch of one. A realm set to sign daily signs the days that are made and not yet signed as one batch of at most 31 days
-(a batch is made in one message), so that 40 days stopped, or a backlog of a year, is two signatures, or twelve. Two requests that land together are not batched, and none waits for another: a request
-signs at once.
+A signature on request is a batch of one. A realm set to sign daily signs the days that are made and come after the last
+day signed as batches of at most 31 days (a batch is made in one message), so that 40 days stopped, or a backlog of a year,
+is two signatures, or twelve. Two requests that land together are not batched, and none waits for another: a request signs
+at once.
 
 ## 5. The journal, the first kind
 
@@ -86,12 +87,14 @@ signs at once.
   quarter: `conflict`). A day **already signed** returns its proof at once and signs nothing; a day **being signed** by
   another call is `pending` (an in-flight mark, in the heap, so no second `sign_with_schnorr` for it; a mark older than ten
   minutes, left by a call that trapped, no longer counts). A day the sweep has not made yet (it closed within the hour) is
-  made first, with the days before it. A signature that fails is kept in `signing_failures`, the caller gets `unavailable`
-  with the reason, and the day stays as it was: it may be asked again. **Cost bound: at most one signature
-  is *stored* per closed day, ever, so the most a realm can spend on signatures is what signing every day would cost.** The
-  fee is paid for a signature the realm asked for, not for one it stored: an upgrade while `sign_with_schnorr` is out traps
-  the callback and stores nothing, and the next request pays the fee again. The caller is told only that the signature could
-  not be made now; the reason, with the realm's balance, is kept in `signing_failures` for the IT admin team.
+  made first, with the days before it. A signature that fails is kept in `signing_failures` (the reason, with the realm's
+  balance, for the IT admin team); the caller gets `unavailable` and only "could not be made now: ask again later", and the
+  day stays as it was: it may be asked again. A day made for **another key** than the realm's now (the network or the key
+  rule changed since) can never be signed: a request for it is a `conflict` that names both keys, and the signature of a
+  later day covers it through the chain. **Cost bound: at most one signature is *stored* per closed day, ever, so the most
+  a realm can spend on signatures is what signing every day would cost.** The fee is paid for a signature the realm asked
+  for, not for one it stored: an upgrade while `sign_with_schnorr` is out traps the callback and stores nothing, and the
+  next request pays the fee again.
 - **No call that changes nothing writes.** An idempotent request, a `pending` one and a refusal save no row, not even the
   realm's: the cursor and the failure record are written only when a signature is made or fails.
 - **Audit and legislation.** `journal_sign` is registered with `only_reads`, which is the flag that makes the operation run no
@@ -106,7 +109,8 @@ signs at once.
   (`signing` state `signed`, moved forward by every signature, a request's too), never from the record of failures, which is
   for the IT admin team to read: a batch that fails (the realm is short of cycles, a call is refused) leaves its days where
   they were, and the next sweep finds them again. A day before the last signed one is covered by it through the chain, is not
-  signed by the sweep, and may still be asked for. **Switching from `on_request` to `daily` therefore signs everything made
+  signed by the sweep, and may still be asked for. A day the sweep cannot sign (made for another key than the realm's now,
+  or its document gone) is left out of its batch and passed over, so it never holds back the days after it. **Switching from `on_request` to `daily` therefore signs everything made
   after the last signed day, once: a year without a signature is about 12 signatures (about 0.3 T cycles), and every day then
   has a proof of its own**; from there it is one signature a day. A realm upgraded from the release that signed every day starts
   from its last signed day (its old head); a new realm starts from none.

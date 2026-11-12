@@ -703,6 +703,43 @@ def test_a_new_realm_has_signed_no_day_and_the_cursor_is_kept_from_the_first_swe
     assert "signed" in signing.state("journal") and journal_signing.signed_through() is None
 
 
+# ---- Documents made for another key
+
+def test_a_daily_realm_signs_on_past_days_made_for_another_key_and_a_request_for_one_of_them_names_the_keys():
+    started()
+    Realm["1"].network = "staging"  # test_key_1
+    in_days(2)  # the 9th and 10th are made for test_key_1, unsigned (on request)
+    Realm["1"].network = "ic"  # the key rule now names key_1
+    in_days(4)  # the 11th to the 14th are made for key_1 (on request: nothing is signed)
+    daily()
+    for night in range(5, 8):
+        at(2026, 11, 9 + night, 0, 5)
+        sweep()
+    days = [f"2026-11-{d:02d}" for d in range(9, 16)]  # the 16th is open
+    assert [issue(day)["status"] for day in days] == ["unsigned"] * 2 + ["signed"] * 5  # not stalled behind the 9th
+    assert failure_of("journal") is None and journal_signing.waiting_days() == []
+    out = call("journal_sign", ANONYMOUS, day="2026-11-09")
+    assert out["kind"] == "conflict" and "test_key_1" in out["error"] and "key_1" in out["error"]  # a clear error, both keys
+    assert made("2026-11-11")["prev"] == signing.proof("journal", "2026-11-10")["digest"]  # the signed days cover them
+
+
+def test_more_than_a_batch_of_days_made_for_another_key_do_not_hold_the_days_after_them_back():
+    peer = started()
+    Realm["1"].network = "staging"
+    at(2026, 12, 14, 0, 5)  # 35 days have closed
+    sweep()
+    assert SignedDocument.count() == 35 and peer.sent("sign_with_schnorr") == []
+    Realm["1"].network = "ic"
+    daily()
+    for night in range(3):
+        at(2026, 12, 15 + night, 0, 5)
+        sweep()
+    assert peer.sent("sign_with_schnorr") != [] and journal_signing.waiting_days() == []
+    days = [(datetime(2026, 11, 9) + timedelta(days=n)).strftime("%Y-%m-%d") for n in range(38)]
+    assert unsigned_among(days) == days[:35]  # the 35 stay unsigned, and the 3 after them are signed
+    assert failure_of("journal") is None
+
+
 # ---- Changing the mode
 
 
