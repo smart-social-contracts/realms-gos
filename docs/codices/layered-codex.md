@@ -1311,12 +1311,15 @@ never needs the record, except to check compliance (§11).
 New entities, beside today's `Codex` ([`api/codex.py`](../../src/realm_backend/api/codex.py)):
 
 ```
-LayeredCodex { id; layers; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, route, fetched_at, url, size}};
+LayeredCodex { id; layers; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, effective_from, route, fetched_at, url, size}};
            previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal;
            voting_rule (the realm's rule and voting window when it became active, §10.1) }
 ChapterSource { sha256 (key); source text }            the downloaded bytes, stored once
 InstallJob { id; proposal; change_list {url, checksum}; step; staged; status: running | paused | failed | done; error; started_at; finished_at }
 ```
+
+`effective_from` is when the release a layer from above came from took effect (§11.6), kept with each of its chapters; the
+realm's own layer, and a layer installed before it was kept, have none.
 
 `pending` is a codex installed but not yet in force (GGG's `Pending` codex status, §13);
 `activates_at` is its switch time, the adopting proposal's `effective_at`.
@@ -1886,6 +1889,25 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
      when CV is late with a release of Spain's; Spain's legislation deals with CV;
    - **`non_compliant` since `<effective_from>`:** otherwise, naming the stale layers;
    - **`unknown`:** a sync source's record couldn't be read at the last check.
+
+   "At least" is told by the record's order where it lists the version the follower runs (the releases it lists
+   after that one are newer), and by **effective date** where it does not: the realm keeps with each layer the date
+   its release took effect (`effective_from` on the codex's chapters, taken from the record that vouched for the
+   release when it was installed), and a listed release is newer than what the realm runs only if it took effect
+   after that date. A version the record does not list is therefore never a reason to be behind: the flag stays
+   `compliant`, and the source's entry in `codex_status` (`sync_sources`, field `notes`) says what is going on, for
+   each such layer `{source, kind, runs, lists}`:
+   - **`unlisted`:** "runs eu/es 2.6.0, which this source does not list": a version the source never listed (it came
+     from elsewhere), or no longer lists, while none of the releases it lists took effect after it;
+   - **`went_back`:** the source vouched for what the realm runs and its record now lists an older release of that
+     layer (it reverted a layer it relays): "the source went back to eu/es 2.4.0". The realm follows its source, so
+     "Propose install" offers that release, marked **`step_back`** in `installable`, and the screen says it takes the
+     realm back to an older release. It is never shown as catching up, and the flag is never `non_compliant` for it.
+
+   `installable` offers only releases that come after what the realm runs (and, for a source that went back, the one
+   step back). A layer installed before the date was kept has none: if the record lists its version, the record's order
+   places it as above; if not, it cannot be placed, and the realm is neither behind nor offered anything for it (only
+   the note), until an install of that layer records its date.
 
    It is also recomputed right after every install and every revert, from the record the last check
    kept (a record that could not be read stays `unknown` until a check reads it). It is worked out

@@ -276,14 +276,88 @@ def test_an_unexpected_error_in_one_sources_check_leaves_the_others_checked(monk
     assert (found["other"]["compliance"], found["other"]["error"]) == (stale_since(6), "")
 
 
+def runs(version, date=None, by="arcadia"):
+    """What the realm runs of arcadia: release ``version``, which took effect at ``date`` (None for a layer installed before
+    the date was kept), as the record of ``by`` vouched for it."""
+    return {"arcadia": {"version": version, "effective_from": date, "vouched_by": by}}
+
+
 def test_the_flag_is_judged_against_each_record():
-    record = {"releases": [entry("1.0.0", 6), entry("2.0.0", 100)]}
-    assert compliance.judged(record, {"arcadia": "2.0.0"}, 50) == "compliant"
-    assert compliance.judged(record, {"arcadia": "1.0.0"}, 50) == "compliant"  # 2.0.0 is not in effect yet
-    assert compliance.judged(record, {"arcadia": "1.0.0"}, 100) == stale_since(100)
+    record = {"source": "arcadia", "releases": [entry("1.0.0", 6), entry("2.0.0", 100)]}
+    assert compliance.judged(record, runs("2.0.0"), 50) == "compliant"
+    assert compliance.judged(record, runs("1.0.0"), 50) == "compliant"  # 2.0.0 is not in effect yet
+    assert compliance.judged(record, runs("1.0.0"), 100) == stale_since(100)
     assert compliance.judged(record, {}, 100) == stale_since(6)  # the earliest release in effect it misses
-    assert compliance.judged(record, {"arcadia": "0.9.0"}, 7) == stale_since(6)  # a version the record does not list
     assert compliance.judged({"releases": []}, {}, 100) == "compliant"
+    # a version the record does not list is placed by its effective date: 1.0.0 took effect after 0.9.0 (at 3)
+    assert compliance.judged(record, runs("0.9.0", 3), 7) == stale_since(6)
+    assert compliance.judged(record, runs("0.9.0", 6), 7) == "compliant"  # at the same time as 1.0.0: not after it
+    # and one the realm kept no date for cannot be placed: never behind
+    assert compliance.judged(record, runs("0.9.0"), 7) == "compliant"
+
+
+def test_a_version_the_record_does_not_list_is_never_a_reason_to_catch_up_to_an_older_release():
+    """The realm runs 2.6.0 or 9.9.9 and the record lists 2.3.0 and 2.4.0: compliant, with a note, and nothing older
+    offered as catching up. Running 2.3.0 is behind 2.4.0, running 2.4.0 is compliant (§11.6)."""
+    record = {"source": "arcadia", "releases": [entry("1.0.0", 100, as_version="2.3.0"), entry("1.0.0", 200, as_version="2.4.0")]}
+    two_four = {"source": "arcadia", "version": "2.4.0", "effective_from": 200}
+
+    def judge(running):
+        return (compliance.judged(record, running, 1000), compliance.installable(record, running),
+                compliance.notes(record, running))
+
+    assert judge(runs("2.3.0", 100)) == (stale_since(200), [two_four], [])
+    assert judge(runs("2.4.0", 200)) == ("compliant", [], [])
+    assert judge(runs("2.3.0")) == (stale_since(200), [two_four], [])  # listed: placed by the record, no date needed
+    note = {"source": "arcadia", "runs": "2.6.0", "lists": "2.4.0"}
+    assert judge(runs("2.6.0")) == ("compliant", [], [{**note, "kind": "unlisted"}])  # no date kept: cannot be placed
+    assert judge(runs("2.6.0", 300, by="elsewhere")) == ("compliant", [], [{**note, "kind": "unlisted"}])  # not this source's
+    assert judge(runs("9.9.9", 300, by="elsewhere")) == (
+        "compliant", [], [{"source": "arcadia", "kind": "unlisted", "runs": "9.9.9", "lists": "2.4.0"}])
+    assert judge(runs("9.9.9")) == ("compliant", [], [{"source": "arcadia", "kind": "unlisted", "runs": "9.9.9", "lists": "2.4.0"}])
+    # a date between the two: 2.4.0 took effect after what the realm runs, so it is behind it
+    assert judge(runs("2.3.5", 150)) == (stale_since(200), [two_four], [])
+
+
+def test_a_source_that_went_back_is_followed_never_behind_and_its_older_release_is_a_step_back():
+    """The record lists only 2.4.0 of a layer the source vouched for as 2.6.0, which took effect later: the source went
+    back. The flag stays compliant; the note says so; "Propose install" offers 2.4.0, marked as a step back (§11.6)."""
+    record = {"source": "arcadia", "releases": [entry("1.0.0", 200, as_version="2.4.0")]}
+    running = runs("2.6.0", 300)
+    assert compliance.judged(record, running, 1000) == "compliant"
+    assert compliance.notes(record, running) == [{"source": "arcadia", "kind": "went_back", "runs": "2.6.0", "lists": "2.4.0"}]
+    assert compliance.installable(record, running) == [
+        {"source": "arcadia", "version": "2.4.0", "effective_from": 200, "step_back": True}]
+    # the same record, when another source vouched for what the realm runs: the version is only one it does not list
+    assert compliance.notes({**record, "source": "elsewhere"}, running) == [
+        {"source": "arcadia", "kind": "unlisted", "runs": "2.6.0", "lists": "2.4.0"}]
+    assert compliance.installable({**record, "source": "elsewhere"}, running) == []
+
+
+def test_an_installed_release_keeps_the_date_it_took_effect_and_a_source_going_back_is_a_note():
+    own_layer()
+    source(entry("1.0.0", 6), entry("2.0.0", 50))
+    link()
+    check_now()
+    assert checked()["compliance"] == stale_since(6)
+    assert propose("2.0.0").status == "executed" and running() == {"2.0.0"}
+    entries = status()["codex"]["chapters"]
+    assert {c["effective_from"] for k, c in entries.items() if k.startswith("arcadia/")} == {50}
+    assert all("effective_from" not in c for k, c in entries.items() if k.startswith("town/"))  # the realm's own layer
+    fire_due()
+    assert checked()["compliance"] == "compliant" and checked()["installable"] == [] and checked()["notes"] == []
+
+    source(entry("1.0.0", 6))  # the source went back: it now relays 1.0.0 only, which took effect before 2.0.0
+    check_now()
+    found = checked()
+    assert found["compliance"] == "compliant"  # followed, never behind
+    assert found["notes"] == [{"source": "arcadia", "kind": "went_back", "runs": "2.0.0", "lists": "1.0.0"}]
+    assert found["installable"] == [{"source": "arcadia", "version": "1.0.0", "effective_from": 6, "step_back": True}]
+
+    # an own-layer install keeps the date of the layer from above it leaves as it is
+    install(listing({"town/water": WATER.encode() + b"\n"}, realm="town", replaces=active_id(),
+                    url=WEB + "changes/water-2.json"))
+    assert {c["effective_from"] for k, c in status()["codex"]["chapters"].items() if k.startswith("arcadia/")} == {50}
 
 
 def test_the_change_list_of_a_release_is_the_whole_release_with_its_calendar_and_without_the_realm_chapter():

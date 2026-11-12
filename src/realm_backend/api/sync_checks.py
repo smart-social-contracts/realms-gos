@@ -153,9 +153,11 @@ def layers_run():
 
 def judge(link, record):
     """The realm's flag against ``record``, the record of ``link``'s sync source, and what it could install from it."""
-    running = {layer["source"]: layer["version"] for layer in layers_run()}
+    running = {layer["source"]: layer for layer in layers_run()}
     link.compliance = compliance.valid(compliance.judged(record, running, chain.now()))
     link.installable = compliance.installable(record, running)
+    link.notes = compliance.notes(record, running)
+    link.layer = record.get("source") or ""
 
 
 def keep_found(record):
@@ -199,7 +201,7 @@ def rejudge():
 def rejudge_source(key):
     link, kept = SyncSource[key], SourceRecord[key]
     if link is not None and kept is not None and compliance.of(link.compliance) != "unknown":
-        judge(link, {"releases": kept.releases})
+        judge(link, {"source": kept.source, "releases": kept.releases})
 
 
 # ---- What the checks found
@@ -208,7 +210,8 @@ def rejudge_source(key):
 def found():
     """What the last check found for each active sync source, as ``codex_status`` shows it."""
     return [{"source": link.id, "name": link.name, "compliance": compliance.of(link.compliance),
-             "checked_at": link.checked_at, "error": link.check_error, "installable": link.installable}
+             "layer": link.layer, "checked_at": link.checked_at, "error": link.check_error,
+             "installable": link.installable, "notes": link.notes}
             for link in each(SyncSource, "status", "active")]
 
 

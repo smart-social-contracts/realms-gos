@@ -194,6 +194,28 @@ def test_the_source_receives_the_report(net, source, town):
     assert report["population"] == len(town.members) and report["reported_at"] > 0
 
 
+def test_a_source_that_goes_back_is_followed_never_behind_and_its_older_release_is_a_step_back(net, source, town):
+    """The town runs 2.0.0, whose effective date it kept with the layer; the source then relays 1.0.0 only, which took effect
+    earlier: the flag stays compliant, the note says the source went back, and "Propose install" of 1.0.0 is a step back
+    (§11.6)."""
+    published = next(r for r in source.ok("legislation_releases", None, query=True)["releases"] if r["source"] == "arcadia")
+    assert published["version"] == "2.0.0"
+    kept = {c["effective_from"] for k, c in status(town)["codex"]["chapters"].items() if k.startswith("arcadia/")}
+    assert kept == {published["effective_from"]}  # the date of the release it installed, kept with the layer
+    assert all("effective_from" not in c for k, c in status(town)["codex"]["chapters"].items() if k.startswith("town/"))
+
+    relay(source, "1.0.0", 6)  # the source went back to the release it relayed first
+    found = check_now(net, town)
+    assert found["compliance"] == "compliant" and found["layer"] == "x/source"
+    assert found["notes"] == [{"source": "arcadia", "kind": "went_back", "runs": "2.0.0", "lists": "1.0.0"}]
+    assert found["installable"] == [{"source": "arcadia", "version": "1.0.0", "effective_from": 6, "step_back": True},
+                                    installable()[-1]]
+
+    relay(source, "2.0.0", published["effective_from"])  # as it was, for the tests that follow
+    found = check_now(net, town)
+    assert found["compliance"] == "compliant" and found["notes"] == [] and found["installable"] == installable()
+
+
 def test_an_unreadable_record_reads_unknown(net, source, town):
     source.stop()
     try:
