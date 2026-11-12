@@ -13,6 +13,7 @@ import fake_chain
 import ggg_api
 import pytest
 import world
+from api import extensions
 from core import legislation, op
 from ggg import Proposal, Realm
 from kit import denied, fire_timers, later, ok
@@ -186,3 +187,67 @@ def test_a_package_of_well_typed_arguments_installs_as_before():
     source = "from ggg_sdk import hook\n\n@hook\ndef init(args):\n    return {}\n"
     reply = ok("codex_install", "ctl", manifest=manifest, source=source)
     assert reply["codex"] == "lex@1.0"
+
+
+# Code the compiler cannot take: nested so deep that it raises a RecursionError, a MemoryError or a SyntaxError of its
+# own. Each is catchable, and each trapped the install, so that the vote or timer that carried it never concluded
+# (review of realms-gos#697, with the approval the realm requires by default).
+DEEP = {"binary operators": "1" + "+1" * 5000, "unary operators": "-" * 5000 + "1", "nots": "not " * 5000 + "x",
+        "lambdas": "lambda: " * 3000 + "1"}
+NOT_TRUSTED = "neither allowlisted nor approved"
+
+
+def trust_policy(approval, source):
+    """The realm's trust policy: no approval required, approval required (this code unpinned), or its digest pinned."""
+    realm = Realm["1"]
+    realm.require_marketplace_approval = approval != "off"
+    if approval == "pinned":
+        realm.trusted_approvers = [f"sha256:{extensions.checksum(MANIFEST, source)}"]
+
+
+@pytest.mark.parametrize("approval", ["off", "on", "pinned"])
+@pytest.mark.parametrize("name", list(DEEP))
+def test_code_the_compiler_cannot_take_is_a_refusal_never_a_trap_whatever_the_trust_policy(name, approval):
+    """Code the realm would refuse as untrusted is refused for that, without compiling it (what it did before the
+    check); code it takes, because it asks no approval or pins the digest, is refused where it is filed and where it is
+    called, with the compiler's reason, and one stored before concludes failed at the vote and at the timer."""
+    source, reason = DEEP[name], "source does not compile"
+    args = {"manifest": MANIFEST, "source": source}
+    trust_policy(approval, source)
+    filed = {"op": "codex_install", "args": args}
+    if approval == "on":
+        assert NOT_TRUSTED in denied("codex_install", "ctl", **args)  # base's order: the trust refusal first
+        # filed all the same: trust is asked when the vote has passed, as before the check
+        assert ok("proposal_create", "alice", title="Install", action=filed)["proposal"]
+        reason = NOT_TRUSTED
+    else:
+        assert reason in denied("codex_install", "ctl", **args)
+        assert reason in denied("proposal_create", "alice", title="Install", action=filed)
+    ok("governance_update", "ctl", voting_window=0)
+    for timed in (False, True):  # a stored one, as it would have been filed before the check
+        extra = {"effective_at": fake_chain.now() + HOUR} if timed else {}
+        pid = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS, **extra)["proposal"]
+        Proposal[pid].action = filed
+        vote_yes(pid)  # no trap: the last vote runs the action, or schedules it
+        if timed:
+            assert Proposal[pid].status == "execution_scheduled"
+            later(HOUR)
+            fire_timers()  # no trap in the timer
+            fake_chain.state["timers"].clear()
+        row = Proposal[pid]
+        assert row.status == "failed" and reason in row.result["error"], (timed, row.status, row.result)
+
+
+def test_an_exception_whose_text_cannot_be_made_is_still_a_refusal(monkeypatch):
+    class Unprintable(Exception):
+        def __str__(self):
+            raise RuntimeError("no text")
+
+    def refuse(*args, **kwargs):
+        raise Unprintable()
+
+    from api import codex
+
+    monkeypatch.setattr("builtins.compile", refuse, raising=False)
+    with pytest.raises(codex.Fail, match="source does not compile: Unprintable"):
+        codex.compiled("pass")

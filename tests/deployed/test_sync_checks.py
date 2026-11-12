@@ -309,6 +309,43 @@ def test_a_stored_install_the_check_refuses_concludes_failed_on_the_wasm_where_i
     assert row["status"] == "failed" and row["result"]["ok"] is False and row["result"]["error"]
 
 
+DEEP = {"binary operators": "1" + "+1" * 5000, "unary operators": "-" * 5000 + "1"}
+
+
+@pytest.mark.parametrize("approval", ["off", "on", "pinned"])
+@pytest.mark.parametrize("name", list(DEEP))
+def test_code_nested_too_deep_to_compile_is_a_refusal_and_a_stored_one_concludes_failed_whatever_the_trust_policy(
+        net, source, town, name, approval):
+    """The compiler raises a RecursionError or a MemoryError on it, which the wasm can catch and which trapped the
+    install: a stored package with it left the proposal ``voting`` for ever, the deciding vote and the next both
+    rejected, with the approval a realm requires by default (review of #697). Code the realm refuses as untrusted is
+    refused for that, without being compiled; code it takes is refused as one that does not compile."""
+    lex = {"id": "lex", "version": "1.0", "codex_api_version": 2}
+    args = {"manifest": lex, "source": DEEP[name]}
+    pin = "[]" if approval != "pinned" else "['sha256:' + checksum(%r, %r)]" % (lex, DEEP[name])
+    out = town.shell("from ggg import Realm\nfrom api.extensions import checksum\nr = Realm['1']\n"
+                     f"r.require_marketplace_approval = {approval != 'off'}\n"
+                     f"r.trusted_approvers = {pin}\nprint('policy')")
+    assert "Traceback" not in out, out
+    try:
+        reason = "neither allowlisted nor approved" if approval == "on" else "source does not compile"
+        direct = town.call("codex_install", args, sender=net.people["ctl"])
+        assert not direct["ok"] and reason in direct["error"]
+        if approval != "on":  # filed all the same when it asks the trust policy at the vote
+            filing = {"title": "Install", "action": {"op": "codex_install", "args": args}}
+            refused = town.call("proposal_create", filing, sender=net.people["alice"])
+            assert not refused["ok"] and reason in refused["error"]
+        pid = file_install(town, "1.0.0")
+        store_action(town, pid, args)
+        assert vote(town, pid, "yes") == "failed"  # the last vote's message completes: it did not trap
+        row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+        assert row["status"] == "failed" and reason in row["result"]["error"]
+    finally:
+        restore = town.shell("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = False\n"
+                             "r.trusted_approvers = []\nprint('restored')")
+        assert "Traceback" not in restore
+
+
 def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(
         net, source, town):
     """The release is staged when the vote decides it, and switched to at the time: the same check at both, so the job

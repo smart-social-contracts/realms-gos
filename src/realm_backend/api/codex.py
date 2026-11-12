@@ -152,6 +152,20 @@ def texts_of(value, what):
         raise Fail(f"{what} is a list of text")
 
 
+def compiled(source):
+    """``source`` compiled, or a Fail: whatever the compiler raises is a refusal, never an exception out of the install: a
+    syntax error, a null byte, and on code nested too deep a RecursionError or a MemoryError (each of which a trap would
+    turn into a vote or a timer that never concludes)."""
+    try:
+        return compile(source, "hooks.py", "exec")
+    except Exception as e:  # noqa: BLE001
+        try:
+            reason = str(e)[:200] or type(e).__name__
+        except Exception:  # noqa: BLE001  an exception whose text cannot be made
+            reason = type(e).__name__
+        raise Fail(f"source does not compile: {reason}")
+
+
 def check_install_args(args):
     """``codex_install``'s ``args`` are of the types the install reads, or a Fail names the one that is not. Without it
     an argument of another type raises inside the install (a manifest that is null, an empty string or a list, sent
@@ -184,10 +198,10 @@ def check_install_args(args):
         for key in ("capabilities", "hooks"):
             if key in manifest:
                 texts_of(manifest[key], f"the manifest's {key}")
-        try:
-            compile(args["source"], "hooks.py", "exec")
-        except (SyntaxError, ValueError) as e:  # a null byte is a ValueError
-            raise Fail(f"source does not compile: {e}")
+        # Code the realm would refuse as untrusted is refused for that, without compiling it (``trust``): the compiler
+        # runs here only on code the realm takes, which is all of it when it requires no approval.
+        if extensions.pinned(checksum(manifest, args["source"])):
+            compiled(args["source"])
     elif "codex" in args or "version" in args:
         text_arg(args, "codex", "the name of a codex of the file registry: text")
         text_arg(args, "version", "the version of that codex: text")
@@ -234,7 +248,7 @@ def codex_install(c, args):
     runnable(manifest)
     digest = checksum(manifest, source)
     yield from trust(digest, namespace)
-    compile(source, "hooks.py", "exec")
+    compiled(source)
     if len(sandbox.readable(manifest.get("capabilities", []))) > sandbox.MAX_ACTIONS:
         raise Fail(f"a codex may declare at most {sandbox.MAX_ACTIONS} read operations")
     key, current = f"{manifest['id']}@{manifest['version']}", active()
