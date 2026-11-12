@@ -429,6 +429,60 @@ class Register(above("register")):
     assert failures() == {} and ok("codex_status", query=True)["healthy"]
 
 
+@pytest.mark.parametrize("who", ["mallory", "ctl", fake_chain.ANONYMOUS])
+def test_hook_effects_applies_for_the_realm_alone(who):
+    """``hook_effects`` is an update anyone can reach, and it applies operations as the codex: only the realm's own call
+    to itself may run it. A member, a controller and the anonymous caller are refused (a trap), and nothing they carried
+    is applied; the realm itself runs the same effects."""
+    town()
+    LOG.clear()
+    effects = json.dumps([["t_log", {"text": "smuggled"}]])
+    fake_chain.state["caller"] = who
+    with pytest.raises(fake_chain.Trap, match="only the realm applies the effects of its hooks"):
+        awaiting(legislation.hook_effects(effects))
+    assert LOG == []
+    fake_chain.state["caller"] = fake_chain.SELF
+    assert json.loads(awaiting(legislation.hook_effects(effects))) == []
+    assert LOG == [("smuggled", "codex")]
+
+
+REGISTER = '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def on_t_act(self, event):
+        self.ggg.t_log(text="register of %s")
+'''
+
+
+def test_a_codex_switch_that_lands_while_a_domains_effects_wait_ends_the_old_codexs_pass(monkeypatch):
+    """A domain's effects are awaited, and another message can switch the codex meanwhile. The old codex's remaining
+    domains would then be asked of the new codex's sandbox, and their failures recorded on the new codex: the pass
+    ends at the first await that returns on another codex."""
+    old = town({(TOWN, "register"): REGISTER % "old"})
+    chapters = {("eu", "data_protection"): EU_DP, ("eu/es", "data_protection"): ES_DP, ("eu/es", "procedure"): ES_PROCEDURE,
+                ("eu/es", "local_regime"): ES_LOCAL_REGIME, (TOWN, "data_protection"): TOWN_DP,
+                (TOWN, "local_regime"): TOWN_LOCAL_REGIME, (TOWN, "realm"): TOWN_REALM,
+                (TOWN, "register"): REGISTER % "new"}
+    new = layered(chapters, ((f"eu/es", CALENDAR),), layers=["eu", "eu/es", TOWN])
+    effects_of_a_domain, switched = fake_chain.own_hook_effects, []
+
+    def interleaved(effects):
+        if not switched:  # while the first domain's effects wait, another message switches the codex
+            switched.append(True)
+            old.status, new.status = "inactive", "active"
+            legislation.load(new)
+        return (yield from effects_of_a_domain(effects))
+
+    monkeypatch.setattr(fake_chain, "own_hook_effects", interleaved)
+    LOG.clear()
+    fake_chain.state["caller"] = "ctl"
+    assert json.loads(awaiting(op.dispatch("t_act", json.dumps({"what": "x"})))) == {"ok": True, "done": "x"}
+    assert switched and legislation._state["codex"] == new.id
+    assert LOG == [("es:x", "codex"), ("town:es:ctl", "codex")]  # the domain in flight finished; no other ran, on either codex
+    assert LayeredCodex[old.id].failures == {} and LayeredCodex[new.id].failures == {}
+
+
 def test_a_hooks_effect_names_an_entity_as_a_ref_and_the_realm_takes_it_as_kind_and_id_in_text():
     """A chapter writes ``Ref("external", "AGE")`` as GGG's Ref; the realm's ``notification_send`` takes ``External:AGE``."""
     town({(TOWN, "register"): '''

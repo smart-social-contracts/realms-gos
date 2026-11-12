@@ -393,6 +393,7 @@ def _hooks(op, args, result, call, department):
         _record("codex", method, str(e))
         return
     _clear(["codex"], method)
+    running = _state["codex"]
     for entry in domains:
         files = entry["files"]
         try:
@@ -404,6 +405,10 @@ def _hooks(op, args, result, call, department):
             _record(outcome["chapter"] or files[-1], method, outcome["error"])
             continue
         errors = yield from _in_own_message(outcome["effects"])
+        if _state["codex"] != running:
+            # Another message switched the codex while these effects waited. The domains left, and the failure of this
+            # one, belong to the codex it replaced: the sandbox, and the record of failures, are the new one's now.
+            return
         if errors:
             _record(files[-1], method, "; ".join(errors))
         else:
@@ -415,8 +420,9 @@ def _in_own_message(effects):
     raises what it does not expect traps, and a trap undoes the whole message and no handler here sees it: here it
     undoes only that message, and comes back as a rejected call, which is the chapter's failure, while the operation
     that ran the hook, and a scheduled codex switch it belongs to, stand (§9.3). A call and not a timer: a trap in a
-    timer would erase the record of its own failure. Where nothing can wait for another canister (``awaitable``: the shell,
-    an extension's call) they run where they are, as before. Returns the errors. A generator."""
+    timer would erase the record of its own failure. Where nothing can wait for another canister (``awaitable``: an
+    operation that another one runs through ``core.op.call``, as ``shell.execute``, ``extension.call`` and the
+    controller's ``__shell__`` do) they run where they are, as before (§9.3). Returns the errors. A generator."""
     if not effects:
         return []
     if not awaitable():
