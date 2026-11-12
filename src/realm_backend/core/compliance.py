@@ -101,13 +101,21 @@ def installable(record, running):
     return offered
 
 
+def order_of(published, running):
+    """How a release published at ``published`` stands against the one the realm runs, published at ``running``
+    (§11.6): ``older`` or ``newer`` when the times differ, ``tied`` when they are the same, ``unknown`` when either is
+    not known. A tie, or a time not known, places nothing: a note, never a step back."""
+    if published is None or running is None:
+        return "unknown"
+    return "older" if published < running else "newer" if published > running else "tied"
+
+
 def notes(record, running):
     """What a flag does not say about the layers the ``record`` lists and the realm runs under a version the record
     does not list (§11.6): ``{source, kind, runs, lists}`` each, ``lists`` the newest release the record has of the
-    layer.
-    ``kind`` is ``went_back`` when the source vouched for what the realm runs and has since gone back to an older
-    release (``went_back``), else ``unlisted``: a version this source never listed, or no longer lists, and no listed
-    release takes effect after it. A realm that is behind a layer has no note for it."""
+    layer. ``kind`` is ``went_back`` when the source vouched for what the realm runs and has since gone back to an
+    older release (``went_back``), else ``unlisted``: a version this source never listed, or no longer lists, and no
+    listed release was published after it. A realm that is behind a layer has no note for it."""
     found = []
     for source, releases in by_layer(record).items():
         layer = running.get(source)

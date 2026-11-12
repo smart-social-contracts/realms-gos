@@ -431,6 +431,92 @@ def test_a_codex_installed_before_the_time_was_kept_finds_it_among_the_releases_
     assert found["notes"] == [{"source": "arcadia", "kind": "unlisted", "runs": "1.0.0", "lists": "2.0.0"}]
 
 
+def filed(version, source="arcadia"):
+    """What ``proposal_get`` says of the release change of a proposal a member files by hand to install release ``version``
+    of ``source``: no vote, and no help from the codex page's button."""
+    action = {"op": "codex_install", "args": {"source": source, "version": version}}
+    pid = ok("proposal_create", "alice", title=f"Install {source} {version}", action=action)["proposal"]
+    return ok("proposal_get", "alice", query=True, proposal=pid).get("release_change")
+
+
+def runs_releases(*releases):
+    """The realm follows a source that lists ``releases``, runs the last of them (installed by a vote), and has checked."""
+    own_layer()
+    source(*releases)
+    link()
+    check_now()
+    assert propose(releases[-1]["version"]).status == "executed" and running() == {releases[-1]["version"]}
+    fire_due()
+
+
+def test_a_release_filed_by_hand_that_is_older_than_what_the_realm_runs_is_marked_a_step_back():
+    """The realm runs arcadia 2.0.0 and the record lists 1.0.0 and 2.0.0: nothing offers 1.0.0 (only newer releases are
+    installable) and no note is made, but a member can file its install by hand, and every reader of ``proposal_get``
+    is told it takes the realm back (§11.6)."""
+    runs_releases(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=20))
+    assert checked()["installable"] == [] and checked()["notes"] == []  # the rule is as it was
+    assert filed("1.0.0") == {"source": "arcadia", "version": "1.0.0", "runs": "2.0.0", "published": 5,
+                              "runs_published": 20, "order": "older", "step_back": True}
+
+
+def test_a_downgrade_along_the_publishers_own_record_is_marked_too():
+    """The realm runs 2.6.0 and the record lists 2.3.0 and 2.6.0: filing 2.3.0 by hand is a step back."""
+    runs_releases(listed("2.3.0", 100), listed("2.6.0", 300))
+    assert checked()["installable"] == [] and checked()["notes"] == []
+    change = filed("2.3.0")
+    assert (change["runs"], change["order"], change["step_back"]) == ("2.6.0", "older", True)
+
+
+def test_a_release_published_together_with_what_the_realm_runs_is_a_tie_and_not_marked():
+    runs_releases(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=5))
+    change = filed("1.0.0")
+    assert (change["order"], change["step_back"], change["published"], change["runs_published"]) == ("tied", False, 5, 5)
+
+
+def test_a_time_that_is_not_known_places_nothing_and_is_not_marked():
+    runs_releases(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=20))
+    # a release no check ever found (the proposed one) cannot be placed
+    change = filed("9.9.9")
+    assert (change["order"], change["step_back"], change["published"], change["runs_published"]) == ("unknown", False, None, 20)
+    # nor can an old install that kept no time and whose release no check found
+    row = LayeredCodex[active_id()]
+    row.chapters = {k: {f: v for f, v in c.items() if f != "published"} for k, c in row.chapters.items()}
+    FoundRelease["arcadia@2.0.0"].delete()
+    change = filed("1.0.0")
+    assert (change["order"], change["step_back"], change["published"], change["runs_published"]) == ("unknown", False, 5, None)
+
+
+def test_an_old_install_that_kept_no_time_is_placed_by_the_release_a_check_found():
+    runs_releases(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=20))
+    row = LayeredCodex[active_id()]
+    row.chapters = {k: {f: v for f, v in c.items() if f != "published"} for k, c in row.chapters.items()}
+    change = filed("1.0.0")
+    assert (change["order"], change["step_back"], change["runs_published"]) == ("older", True, 20)
+
+
+def test_a_forward_install_by_hand_is_not_marked_and_one_the_realm_has_run_is_the_same():
+    runs_releases(entry("1.0.0", 6, published=5))
+    source(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=20))
+    check_now()  # 2.0.0 is found
+    change = filed("2.0.0")
+    assert (change["order"], change["step_back"], change["runs"]) == ("newer", False, "1.0.0")
+    assert (filed("1.0.0")["order"], filed("1.0.0")["step_back"]) == ("same", False)  # the release the realm runs now
+
+
+def test_a_proposal_that_installs_no_release_of_a_layer_the_realm_runs_says_nothing_of_one():
+    runs_releases(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=20))
+    assert filed("1.0.0", source="elsewhere") is None  # a layer the realm runs none of
+    other = ok("proposal_create", "alice", title="Something else", action={"op": "governance_update", "args": {"voting_window": 0}})["proposal"]
+    assert "release_change" not in ok("proposal_get", "alice", query=True, proposal=other)
+    plain = ok("proposal_create", "alice", title="No action")["proposal"]
+    assert "release_change" not in ok("proposal_get", "alice", query=True, proposal=plain)
+
+
+def test_the_order_of_two_release_times():
+    assert [compliance.order_of(*pair) for pair in ((5, 20), (20, 5), (5, 5), (None, 5), (5, None), (None, None))] == [
+        "older", "newer", "tied", "unknown", "unknown", "unknown"]
+
+
 def test_the_change_list_of_a_release_is_the_whole_release_with_its_calendar_and_without_the_realm_chapter():
     release = {**entry("1.0.0", 6), "chapters": {**entry("1.0.0", 6)["chapters"], "realm": "sha256:" + "c" * 64},
                "calendar": "sha256:" + "d" * 64}
