@@ -98,21 +98,66 @@ def test_a_report_that_changes_nothing_notes_nothing_and_still_stamps_the_quarte
 def test_a_population_is_noted_only_once_it_moved_by_a_step_of_the_capacity():
     capital("north", "south")  # a quarter takes 2,000: the step is 20
     held = first_sync()
+    ok("quarter_report", "south", population=10)  # the first it tells
     head = sync_log.cursor()
-    ok("quarter_report", "south", population=19)
-    assert sync_log.cursor() == head and Quarter["south"].population == 19  # kept, and not told to the quarters
-    ok("quarter_report", "south", population=20)
+    ok("quarter_report", "south", population=29)
+    assert sync_log.cursor() == head and Quarter["south"].population == 29  # kept, and not told to the quarters
+    ok("quarter_report", "south", population=30)
     assert sync_log.cursor()["n"] == head["n"] + 1
-    assert {row["id"]: row["population"] for row in delta("north", held)["directory"]}["south"] == 20
-    ok("quarter_report", "south", population=39)  # 19 on from the 20 told
+    assert {row["id"]: row["population"] for row in delta("north", held)["directory"]}["south"] == 30
+    ok("quarter_report", "south", population=49)  # 19 on from the 30 told
     assert sync_log.cursor()["n"] == head["n"] + 1
-    ok("quarter_report", "south", population=0)  # 20 under it
+    ok("quarter_report", "south", population=10)  # 20 under it
     assert sync_log.cursor()["n"] == head["n"] + 2
     ok("quarter_configure", "ctl", capacity=300)  # a smaller quarter: a step of 3
-    ok("quarter_report", "south", population=2)
+    ok("quarter_report", "south", population=12)
     assert sync_log.cursor()["n"] == head["n"] + 2
-    ok("quarter_report", "south", population=3)
+    ok("quarter_report", "south", population=13)
     assert sync_log.cursor()["n"] == head["n"] + 3
+
+
+def test_the_first_population_a_quarter_reports_is_told_whatever_it_is_and_the_row_keeps_it():
+    """Told, not only the step: a row that told none would show whatever population the quarter has when the row travels,
+    so a quarter that took the row in a delta and one that takes it in a full answer would not show the same."""
+    capital("north")
+    ok("quarter_register", "ctl", quarter="east", name="East")
+    ok("quarter_configure", "ctl", quarter="east", status="active")  # active before it reported: no change of status to note
+    held = first_sync()
+    head = sync_log.cursor()
+    ok("quarter_report", "east", population=5)  # 5 is under a step
+    assert sync_log.cursor()["n"] == head["n"] + 1 and Quarter["east"].told_population == 5
+    shown = lambda reply: {row["id"]: row["population"] for row in reply["directory"]}["east"]  # noqa: E731
+    assert shown(delta("north", held)) == 5
+    ok("quarter_report", "east", population=9)  # under a step from the 5 told: kept
+    assert shown(first_sync()) == 5  # what a full answer shows is what the delta did
+
+
+@pytest.mark.parametrize("before", [400, 7])
+def test_a_row_that_told_none_tells_when_its_quarter_has_none_left(before):
+    """It showed the quarter's own population, 400 or 7 (under a step); a report of 0 changes what it shows, so the quarters
+    that took it in a delta are told, as a full answer would show them."""
+    capital("north", "south")
+    Quarter["south"].population = before  # a row that told none: from before told_population was kept, or under a step
+    held = first_sync()
+    shown = lambda reply: {row["id"]: row["population"] for row in reply["directory"]}["south"]  # noqa: E731
+    assert shown(held) == before
+    head = sync_log.cursor()
+    ok("quarter_report", "south", population=0)
+    assert sync_log.cursor()["n"] == head["n"] + 1
+    assert shown(delta("north", held)) == 0 == shown(first_sync("north"))
+    ok("quarter_report", "south", population=0)  # and it has told it: nothing more to tell
+    assert sync_log.cursor()["n"] == head["n"] + 1
+
+
+def test_a_row_from_before_this_release_tells_its_population_at_the_quarters_next_report():
+    capital("north", "south")
+    Quarter["south"].population = 400  # reported before told_population was kept
+    held = first_sync()
+    assert {row["id"]: row["population"] for row in held["directory"]}["south"] == 400  # until it reports, its own
+    head = sync_log.cursor()
+    ok("quarter_report", "south", population=402)
+    assert sync_log.cursor()["n"] == head["n"] + 1 and Quarter["south"].told_population == 402
+    assert {row["id"]: row["population"] for row in delta("north", held)["directory"]}["south"] == 402
 
 
 def test_a_census_that_changed_is_kept_but_not_noted_since_no_directory_row_shows_it():
