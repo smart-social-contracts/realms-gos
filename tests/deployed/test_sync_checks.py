@@ -332,7 +332,9 @@ def test_code_nested_too_deep_to_compile_is_a_refusal_and_a_stored_one_concludes
         direct = town.call("codex_install", args, sender=net.people["ctl"])
         assert not direct["ok"] and reason in direct["error"]
         if approval != "on":  # filed all the same when it asks the trust policy at the vote
-            filing = {"title": "Install", "action": {"op": "codex_install", "args": args}}
+            # past the town's own 15-working-day wait: it is the realm's check that refuses it, not the town's rule
+            filing = {"title": "Install", "action": {"op": "codex_install", "args": args},
+                      "effective_at": town.now() + 60 * 86400}
             refused = town.call("proposal_create", filing, sender=net.people["alice"])
             assert not refused["ok"] and reason in refused["error"]
         pid = file_install(town, "1.0.0")
