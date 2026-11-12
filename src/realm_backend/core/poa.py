@@ -25,6 +25,7 @@ INBOX_GROUPS = {"Department": "office", "Organization": "orgs"}
 # the operations Realms GOS adds to GGG's: the tasks, the shell, extensions and the host's and the operator's own.
 OWN = {
     "budget_view": ("direct", "see", None, None),
+    "contract_list": ("direct", "see", None, None),
     "tax_policy_view": ("direct", "see", None, None),
     "journal_capital_issue": ("direct", "see", None, None),
     "task_create": ("direct", "admin", None, None),
@@ -57,6 +58,7 @@ OWN = {
     # Public reads, and an upgrade step for controllers: no member's act.
     "extension_list": ("none", None, None, None),
     "journal_issue": ("none", None, None, None),
+    "journal_sign": ("none", None, None, None),
     "signature_proof": ("none", None, None, None),
     "realm_image": ("none", None, None, None),
     "ops_list": ("none", None, None, None),

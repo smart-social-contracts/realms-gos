@@ -12,18 +12,22 @@ import pytest
 import world
 from core import op, signing
 from core.candid import Reader
-from core.db import Fail
+from core.db import Fail, NotFound, Unavailable
 from ggg import Realm, SignedDocument
 from kit import call, ok
 from signing_kit import climb, fake_key, fake_signature, management
 
 
+def make(kind, documents, chained=False):
+    """The documents made, unsigned, as their owner does when they are asked for."""
+    bodies = dict(documents)
+    return op.run(signing.make(kind, chained, lambda: [subject for subject, _ in documents], bodies.get))
+
+
 def sign(kind, documents, chained=False):
-    return op.run(signing.sign_batch(kind, documents, chained))
-
-
-def sign_fresh(kind, documents, fresh):
-    return op.run(signing.sign_batch(kind, documents, False, fresh))
+    """The documents made and signed at once, as a kind that signs each as it makes it does. True when they are signed."""
+    made = make(kind, documents, chained)
+    return made is not None and op.run(signing.sign_batch(kind, [subject for subject, _ in documents])) is not None
 
 
 def certificates(count):
@@ -32,6 +36,11 @@ def certificates(count):
 
 def document(kind, subject):
     return json.loads(signing.proof(kind, subject)["canonical"])
+
+
+@pytest.fixture(autouse=True)
+def nothing_in_flight():
+    signing.IN_FLIGHT.clear()
 
 
 # ---- The tree: one root for a batch, a path for each document
@@ -115,7 +124,7 @@ def test_the_text_names_its_kind_subject_and_realm_so_a_document_cannot_be_passe
     doc = document("certificate", "C-1")
     assert (doc["v"], doc["kind"], doc["subject"], doc["realm"]) == (1, "certificate", "C-1", fake_chain.self_id())
     assert doc["body"] == {"holder": "member-1", "course": "first aid"}
-    assert doc["signed_at"] == fake_chain.now()
+    assert doc["made_at"] == fake_chain.now() and "signed_at" not in doc
 
 
 def test_the_key_of_the_network_signs_the_text_and_is_named_in_it():
@@ -129,15 +138,15 @@ def test_the_key_of_the_network_signs_the_text_and_is_named_in_it():
 # ---- What is refused, and what a failure leaves
 
 
-def test_a_subject_is_signed_once_and_a_second_try_is_refused():
+def test_a_document_is_made_once_and_signed_once_and_a_second_try_changes_and_asks_nothing():
     world.build()
     peer = management()
     sign("certificate", certificates(1))
     first = signing.proof("certificate", "C-1")
-    calls = len(peer.calls)
-    assert sign("certificate", [("C-1", {"holder": "someone else"})]) is False
-    assert "signed already" in signing.failures()["certificate"]["error"] and len(peer.calls) == calls
-    assert signing.proof("certificate", "C-1") == first
+    calls = len(peer.sent("sign_with_schnorr"))
+    assert make("certificate", [("C-1", {"holder": "someone else"})]) == []  # made already, as it was
+    assert op.run(signing.sign_batch("certificate", ["C-1"])) == []  # signed already
+    assert len(peer.sent("sign_with_schnorr")) == calls and signing.proof("certificate", "C-1") == first
 
 
 @pytest.mark.parametrize("kind", ["", "Certificate", "a b", "x:y", "x/y", "é"])
@@ -148,17 +157,18 @@ def test_a_kind_is_lower_case_letters_digits_and_dashes(kind):
     assert peer.calls == [] and SignedDocument.count() == 0
 
 
-def test_a_failed_batch_keeps_nothing_and_the_next_try_signs_it_and_clears_the_failure():
+def test_a_failed_signature_keeps_the_documents_unsigned_and_the_next_try_signs_them_and_clears_the_failure():
     world.build()
     peer = management()
     peer.answer("sign_with_schnorr", fake_chain.rejects("no cycles"))
     assert sign("certificate", certificates(3)) is False
     failure = signing.failures()["certificate"]
     assert failure["subjects"] == ["C-1", "C-2", "C-3"] and failure["at"] == fake_chain.now()
-    assert "no cycles" in failure["error"] and SignedDocument.count() == 0
+    assert "no cycles" in failure["error"] and SignedDocument.count() == 3
+    assert [signing.proof("certificate", f"C-{n}")["signature"] for n in (1, 2, 3)] == [""] * 3
     management()
-    assert sign("certificate", certificates(3)) is True
-    assert signing.failures() == {} and SignedDocument.count() == 3
+    assert op.run(signing.sign_batch("certificate", ["C-1", "C-2", "C-3"])) == ["C-1", "C-2", "C-3"]
+    assert signing.failures() == {} and all(signing.proof("certificate", f"C-{n}")["signature"] for n in (1, 2, 3))
 
 
 def test_a_failed_kind_does_not_hold_another_back():
@@ -282,39 +292,188 @@ def test_a_signature_is_sent_with_the_fee_of_its_key_and_half_as_much_again(netw
     assert [cycles for _, method, cycles in fake_chain.state["attached"] if method == "schnorr_public_key"] == [0]
 
 
-def test_a_realm_without_the_cycles_asks_for_nothing_and_says_what_it_lacks():
+def test_a_realm_without_the_cycles_asks_for_no_signature_and_says_what_it_lacks():
     world.build()
     peer = management()
     fake_chain.state["balance"] = 1_000_000_000
     assert sign("certificate", certificates(1)) is False
     error = signing.failures()["certificate"]["error"]
     assert "1000000000 cycles" in error and "key_1" in error and "39230769229" in error
-    assert peer.calls == [] and SignedDocument.count() == 0
+    assert peer.sent("sign_with_schnorr") == [] and signing.proof("certificate", "C-1")["signature"] == ""
 
 
-def test_the_key_is_named_once_so_that_a_change_of_network_in_flight_cannot_split_text_and_signature():
+def test_a_text_made_for_one_key_is_not_signed_with_another_and_is_signed_once_the_key_is_the_same():
+    world.build()
+    peer = management()
+    Realm["1"].network = "ic"
+    make("certificate", certificates(1))
+    Realm["1"].network = "staging"  # the realm's network changed since the text named key_1
+    assert op.run(signing.sign_batch("certificate", ["C-1"])) is None
+    assert "another key than test_key_1" in signing.failures()["certificate"]["error"] and peer.sent("sign_with_schnorr") == []
+    Realm["1"].network = "ic"
+    assert op.run(signing.sign_batch("certificate", ["C-1"])) == ["C-1"]
+    assert Reader(peer.sent("sign_with_schnorr")[0]).args()[0]["key_id"]["name"] == "key_1"
+
+
+def test_a_document_is_made_for_the_key_asked_for_once_even_if_the_network_changes_while_it_is_out():
     world.build()
     peer = management()
     Realm["1"].network = "ic"
     asked = peer.replies["schnorr_public_key"]
 
     def moved(arg):
-        Realm["1"].network = "staging"  # while the calls are out
+        Realm["1"].network = "staging"  # while the call is out
         return asked(arg)
 
     peer.answer("schnorr_public_key", moved)
-    sign("certificate", certificates(1))
-    named = Reader(peer.sent("sign_with_schnorr")[0]).args()[0]["key_id"]["name"]
+    make("certificate", certificates(1))
+    named = Reader(peer.sent("schnorr_public_key")[0]).args()[0]["key_id"]["name"]
     assert named == "key_1" == document("certificate", "C-1")["key"]["name"]
 
 
-def test_a_batch_whose_documents_changed_while_it_was_signed_is_not_kept_and_says_so():
+# ---- Making costs no signature
+
+
+def test_making_documents_asks_for_the_key_and_for_no_signature_and_attaches_no_cycles():
+    world.build()
+    peer = management()
+    assert make("certificate", certificates(3), chained=True) == ["C-1", "C-2", "C-3"]
+    assert peer.sent("sign_with_schnorr") == [] and len(peer.sent("schnorr_public_key")) == 1
+    assert [cycles for _, _, cycles in fake_chain.state["attached"]] == [0]
+    proofs = [signing.proof("certificate", f"C-{n}") for n in (1, 2, 3)]
+    assert all(p["root"] == p["signature"] == "" and p["path"] == [] and p["digest"] for p in proofs)
+    assert [document("certificate", f"C-{n}")["prev"] for n in (1, 2, 3)] == [None, proofs[0]["digest"], proofs[1]["digest"]]
+    assert signing.head("certificate") == {"subject": "C-3", "digest": proofs[2]["digest"]}
+
+
+def test_a_chain_of_documents_made_unsigned_is_signed_later_with_the_digests_it_had():
     world.build()
     management()
-    assert sign_fresh("certificate", certificates(2), lambda: certificates(2)) is True
-    assert sign_fresh("decision", [("D-1", {"n": 1})], lambda: [("D-1", {"n": 2})]) is False
-    assert "changed while they were signed" in signing.failures()["decision"]["error"]
-    assert signing.proof("decision", "D-1") is None and signing.proof("certificate", "C-2") is not None
+    make("certificate", certificates(3), chained=True)
+    before = [signing.proof("certificate", f"C-{n}")["digest"] for n in (1, 2, 3)]
+    assert op.run(signing.sign_batch("certificate", ["C-3"])) == ["C-3"]  # only the last is asked for
+    after = [signing.proof("certificate", f"C-{n}") for n in (1, 2, 3)]
+    assert [p["digest"] for p in after] == before and [bool(p["signature"]) for p in after] == [False, False, True]
+    assert document("certificate", "C-3")["prev"] == before[1]  # which names the unsigned one before it
+
+
+def test_a_key_that_cannot_be_had_makes_nothing_and_is_kept_as_a_failure_for_the_next_try():
+    world.build()
+    peer = management()
+    peer.answer("schnorr_public_key", fake_chain.rejects("management canister busy"))
+    assert make("certificate", certificates(2)) is None
+    assert signing.failures()["certificate"]["subjects"] == ["C-1", "C-2"] and SignedDocument.count() == 0
+    management()
+    assert make("certificate", certificates(2)) == ["C-1", "C-2"]
+
+
+def test_a_document_already_made_in_the_middle_of_a_batch_is_the_link_of_the_one_after_it():
+    world.build()
+    management()
+    made = make("certificate", certificates(1), chained=True)  # C-1
+    other = SignedDocument(id="certificate:C-2", code="X", canonical="{}", digest="ab" * 32)  # made by another call
+    assert made == ["C-1"] and signing.head("certificate")["subject"] == "C-1"
+    assert make("certificate", certificates(3), chained=True) == ["C-3"]  # C-1 and C-2 are there; C-3 follows C-2
+    assert document("certificate", "C-3")["prev"] == other.digest
+    assert signing.head("certificate") == {"subject": "C-3", "digest": signing.proof("certificate", "C-3")["digest"]}
+
+
+def test_a_document_made_by_another_call_while_the_key_was_out_is_left_to_it():
+    world.build()
+    peer = management()
+    asked = peer.replies["schnorr_public_key"]
+
+    def racing(arg):
+        peer.answer("schnorr_public_key", asked)
+        make("certificate", certificates(1), chained=True)  # the other call makes C-1 first
+        return asked(arg)
+
+    peer.answer("schnorr_public_key", racing)
+    assert make("certificate", certificates(2), chained=True) == ["C-2"]
+    first = signing.proof("certificate", "C-1")["digest"]
+    assert document("certificate", "C-2")["prev"] == first and SignedDocument.count() == 2
+
+
+# ---- A signature on request: once, idempotent, and never two calls for one document
+
+
+def test_a_request_signs_a_made_document_returns_its_proof_and_a_second_request_makes_no_call():
+    world.build()
+    peer = management()
+    make("certificate", certificates(1))
+    proof, signed = op.run(signing.request("certificate", "C-1"))
+    assert signed is True and proof["signature"] == fake_signature(bytes.fromhex(proof["root"])).hex()
+    assert proof == signing.proof("certificate", "C-1")
+    calls = len(peer.calls)
+    assert op.run(signing.request("certificate", "C-1")) == (proof, False)
+    assert len(peer.calls) == calls  # no call at all, not even for the key
+
+
+def test_a_request_for_a_document_that_is_not_made_is_not_found():
+    world.build()
+    management()
+    with pytest.raises(NotFound):
+        op.run(signing.request("certificate", "C-1"))
+
+
+def test_a_document_being_signed_is_pending_for_a_second_request_which_asks_for_no_second_signature():
+    world.build()
+    peer = management()
+    make("certificate", certificates(1))
+    plain, seen = peer.replies["sign_with_schnorr"], []
+
+    def meanwhile(arg):
+        peer.answer("sign_with_schnorr", plain)
+        seen.append(op.run(signing.request("certificate", "C-1")))  # another call arrives while the signature is out
+        return plain(arg)
+
+    peer.answer("sign_with_schnorr", meanwhile)
+    proof, signed = op.run(signing.request("certificate", "C-1"))
+    assert seen == [(None, False)] and signed is True and proof["signature"]
+    assert len(peer.sent("sign_with_schnorr")) == 1 and not signing.IN_FLIGHT
+
+
+def test_a_failed_signature_is_an_error_to_the_caller_is_kept_and_leaves_the_document_to_ask_again():
+    world.build()
+    peer = management()
+    make("certificate", certificates(1))
+    peer.answer("sign_with_schnorr", fake_chain.rejects("Rejection code 4, not enough cycles"))
+    with pytest.raises(Unavailable) as refused:
+        op.run(signing.request("certificate", "C-1"))
+    assert "not enough cycles" not in str(refused.value)  # the caller is not told the reason, or the realm's balance
+    assert "not enough cycles" in signing.failures()["certificate"]["error"]  # the admins are
+    assert not signing.IN_FLIGHT and signing.proof("certificate", "C-1")["signature"] == ""
+    management()
+    assert op.run(signing.request("certificate", "C-1"))[1] is True and signing.failures() == {}
+
+
+def test_a_mark_left_by_a_call_that_never_came_back_stops_counting_after_a_while():
+    world.build()
+    management()
+    make("certificate", certificates(1))
+    signing.IN_FLIGHT[("certificate", "C-1")] = fake_chain.now()
+    assert op.run(signing.request("certificate", "C-1")) == (None, False)  # pending
+    fake_chain.state["now"] += signing.STALE
+    proof, signed = op.run(signing.request("certificate", "C-1"))
+    assert signed is True and proof["signature"]
+
+
+def test_a_signature_that_lands_for_a_document_signed_meanwhile_does_not_replace_the_first():
+    world.build()
+    peer = management()
+    make("certificate", certificates(1))
+    plain = peer.replies["sign_with_schnorr"]
+
+    def racing(arg):
+        peer.answer("sign_with_schnorr", plain)
+        signing.IN_FLIGHT.clear()  # a mark lost to a trap: the other call is not held off
+        op.run(signing.sign_batch("certificate", ["C-1"]))
+        return plain(arg)
+
+    peer.answer("sign_with_schnorr", racing)
+    signed = op.run(signing.sign_batch("certificate", ["C-1"]))
+    assert signed == [] and len(peer.sent("sign_with_schnorr")) == 2  # both asked, one signature kept
+    assert signing.proof("certificate", "C-1")["signature"]
 
 
 def test_a_bad_kind_is_refused_before_anything_is_asked_of_anyone():

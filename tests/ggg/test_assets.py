@@ -125,6 +125,14 @@ def test_the_realm_defines_zones_that_members_can_name_as_home():
     assert [z["id"] for z in ok("land_map", "bob")["zones"]] == ["riverside", "871f1d489ffffff"]
 
 
+def test_land_map_says_which_zones_the_realm_defines_and_which_are_home_cells():
+    agora()
+    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    ok("zone_set", "alice", zone="871f1d489ffffff")
+    zones = ok("land_map", "bob")["zones"]
+    assert {z["id"]: z["defined"] for z in zones} == {"riverside": True, "871f1d489ffffff": False}
+
+
 def test_defining_a_zone_is_governed_once_the_realm_has_launched():
     agora()
     world.policy(Department["Administration"], 2, 3)

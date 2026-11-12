@@ -12,7 +12,9 @@ def signature_proof(c, args):
     ``subject`` of the document (a journal issue's subject is its day) or for its verification ``code``. The proof is
     the ``canonical`` text that was signed, its ``digest``, the ``root`` of the batch it was signed in, its ``path`` to
     the root, the ``signature`` of the root and the ``code``; the key, the realm's canister id and the previous
-    document's digest are in the text. Returns ``kind``, ``subject`` and ``proof``. A document not signed is not
+    document's digest are in the text. Returns ``kind``, ``subject`` and ``proof``. A document made and not signed is
+    served too, with an empty ``root``, ``path`` and ``signature``: its text and digest are what the next document's
+    ``prev`` names, so that a chain can be checked back through days nobody asked to sign. A document not made is not
     found."""
     if args.get("code"):
         kind, subject = signing.find(args["code"])
@@ -23,5 +25,5 @@ def signature_proof(c, args):
         signing.path(kind)  # a kind that is no name is refused, and is not echoed
     proof = signing.proof(kind, subject)
     if proof is None:
-        raise NotFound(f"no signed document {kind[:40]}:{subject[:40]}")
+        raise NotFound(f"no document {kind[:40]}:{subject[:40]}")
     return {"kind": kind, "subject": subject, "proof": proof}

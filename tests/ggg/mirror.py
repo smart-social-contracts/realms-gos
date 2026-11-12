@@ -166,8 +166,9 @@ def convert(name, arg_t, args):
     return ggg_api.to_ggg(args.get(key), arg_t)
 
 
-# Arguments a test passes that GGG covers another way.
-UNARGS_OK = {"delegation_list": ("from_grantor", "from_delegate"), "notification_read": ("all",)}
+# Arguments a test passes that GGG covers another way, or that are Realms GOS's own settings, which GGG has no field for.
+UNARGS_OK = {"delegation_list": ("from_grantor", "from_delegate"), "notification_read": ("all",),
+             "setup_step": ("journal_signing",), "realm_configure": ("journal_signing",)}
 
 
 def note(name, problem):

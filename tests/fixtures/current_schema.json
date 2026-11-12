@@ -3933,6 +3933,11 @@
     "kind": "property",
     "type": "String"
    },
+   "journal_signing": {
+    "default": "on_request",
+    "kind": "property",
+    "type": "String"
+   },
    "languages": {
     "constraints": {
      "max_length": 65536

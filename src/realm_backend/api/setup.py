@@ -36,7 +36,8 @@ PROFILES = {
 INSTALL = ("network", "can_test_mode", "founder")
 FIELDS = {
     "realm": ("name", "manifesto", "terms", "welcome_message", "open_registration", "ai_assistant_enabled",
-              "quarter_join_mode", "auto_scale_enabled", "timezone", "languages", "test_mode", "test_flags"),
+              "quarter_join_mode", "auto_scale_enabled", "timezone", "languages", "journal_signing", "test_mode",
+              "test_flags"),
     "branding": ("logo_url", "background_image_url", "primary_color"),
     "tokens": ("accounting_currency", "accounting_currency_decimals", "token_canister_id", "nft_canister_id",
                "shared_tokens_json"),
@@ -144,7 +145,7 @@ def realm_info(c, args):
     return {"realm": {**view(realm, "name", "manifesto", "terms", "welcome_message", "status", "logo_url",
                              "background_image_url", "primary_color", "accounting_currency",
                              "accounting_currency_decimals", "open_registration", "is_capital", "network", "timezone",
-                             "languages", "test_mode", "test_flags"),
+                             "languages", "journal_signing", "test_mode", "test_flags"),
                       "official_timezone": quarters.official_timezone()} if realm else {},
             "sync_sources": [links.source_view(s) for s in links.sources()]}
 
@@ -191,13 +192,15 @@ def configurable(values):
 
 
 def valid_values(values):
-    """Refuse a ``timezone`` this release has no zone file for, ``languages`` that are no BCP 47 tags, a branding image
-    above ``IMAGE_MAX`` and a manifesto or terms above ``TEXT_MAX``."""
+    """Refuse a ``timezone`` this release has no zone file for, ``languages`` that are no BCP 47 tags, a
+    ``journal_signing`` that is no mode, a branding image above ``IMAGE_MAX`` and a manifesto or terms above ``TEXT_MAX``."""
     if "timezone" in values and not zones.known(values["timezone"]):
         raise Fail(f"timezone must be an IANA name such as Europe/Madrid, or UTC; this release has no zone "
                    f"'{values['timezone']}'")
     if "languages" in values:
         language.require_all(values["languages"])
+    if "journal_signing" in values and values["journal_signing"] not in journal.SIGNING_MODES:
+        raise Fail(f"journal_signing is one of {', '.join(journal.SIGNING_MODES)}")
     for name in IMAGES:
         if len(values.get(name) or "") > IMAGE_MAX:
             raise Fail(f"{name} is above {IMAGE_MAX:,} characters (an image of about 700 KiB): the realm sends its "
@@ -366,7 +369,10 @@ def launch_stage():
 def realm_configure(c, args):
     """Set any of ``name``, ``manifesto`` and ``terms`` (at most 20,000 characters each), ``welcome_message``,
     ``open_registration``, ``ai_assistant_enabled``, ``quarter_join_mode``, ``auto_scale_enabled``, ``timezone``,
-    ``languages`` (BCP 47 tags, the first the default), ``test_mode`` and ``test_flags``. Returns ``configured``. The
+    ``languages`` (BCP 47 tags, the first the default), ``journal_signing`` (``on_request``, the default, or ``daily``:
+    whether the official journal's days are signed when someone asks or each as it closes, which costs the realm a
+    threshold signature a day; a change to ``daily`` also signs, once, every day made after the last signed one, a
+    signature for each 31 days), ``test_mode`` and ``test_flags``. Returns ``configured``. The
     ``timezone`` is an IANA name such as ``Europe/Madrid`` that this release bundles, or ``UTC``,
     which a realm has until it sets one; the new zone applies from the moment it is set, and nothing stored changes.
     Test mode and flags need a test build, on a non-production network or with ``can_test_mode`` set at install;

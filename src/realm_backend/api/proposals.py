@@ -4,10 +4,10 @@ from core import auth, chain, ranges
 from core.civil import civil_from_days
 from core.db import (Conflict, Fail, Forbidden, Unavailable, each, find, first, has_indexed, indexed_ids, next_id, page,
                      page_by, view, window as page_window)
-from ggg import (Appointment, Calendar, Contract, ContractAmendment, Delegation, Department, External, Mandate, Member,
-                 Proposal, ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
+from ggg import (Appointment, Budget, Calendar, Contract, ContractAmendment, Delegation, Department, External, Mandate,
+                 Member, Proposal, ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
 from api import tasks
-from core.op import dispatch, op, ops
+from core.op import direct, dispatch, op, ops
 from core.pending import quoted, readable, you_sign
 from core.ratio import ONE, refuse_renamed
 
@@ -25,6 +25,8 @@ MAX_TAGS, MAX_TAG = 16, 64  # a proposal's tags, and the code points of one (ggg
 MAX_PERIODS = 64  # the fiscal periods a contract's value is spread over (ggg I-GOV-16)
 MAX_REFERENCE, MAX_WINNERS = 128, 32  # the code points of a framework's reference, and the winners it lists (I-PRC-6)
 TERMS = ("value", "split", "starts_at", "ends_at")  # what contract_amend may change
+CONTRACT_LISTED = ("id", "title", "parties", "mandate", "kind", "procedure", "tender", "lot", "value", "symbol", "status",
+                   "starts_at", "ends_at", "split", "framework")  # what a list of contracts shows
 # Proposals whose deadline timers are set again after an upgrade, per message.
 RESUME_PAGE = 100
 # Kept in the realm's manifest_data: true once every proposal is on the lists of its tags (``Proposal.with_tags``), which
@@ -1114,13 +1116,34 @@ def contract_amend(c, args):
     return {"contract": k.id}
 
 
+def charged_lines(k):
+    """The budget lines the payments counted on contract ``k`` are charged to, each once: ``id``, ``fund``, ``period``
+    and ``category``."""
+    lines = [Budget[line] for line in dict.fromkeys(t.budget for t in Transfer.counted_on(k.id) if t.budget)]
+    return [{"id": b.id, "fund": b.fund.id, "period": b.period.id, "category": b.category} for b in lines]
+
+
 @op("realm.data_view", read=True, returns="contract")
 def contract_get(c, args):
     """``contract`` and its amendments, oldest first, ``count`` at a time (default 100, at most 500) from row ``from``
-    (default 1); ``next`` continues them (null at the end)."""
+    (default 1); ``next`` continues them (null at the end). It also says what an amendment is held to: ``paid``, the
+    least its value may be amended to (ggg I-FIN-11); ``governed_by``, the department that governs it, and
+    ``needs_vote``, whether that department's policy makes a member's amendment a proposal; and ``budgets``, the budget
+    lines its payments are charged to."""
     k = find(Contract, args["contract"])
+    owner = contract_owner(args)
     amendments, nxt = page_by(ContractAmendment, "contract", k.id, args)
-    return {"contract": view(k), "amendments": [view(a) for a in amendments], "next": nxt}
+    return {"contract": view(k), "amendments": [view(a) for a in amendments], "next": nxt, "paid": Transfer.paid_on(k.id),
+            "governed_by": owner.id, "needs_vote": not direct(owner), "budgets": charged_lines(k)}
+
+
+@op("realm.data_view", read=True, returns="contracts")
+def contract_list(c, args):
+    """List contracts, or only those whose ``status`` is draft, active, fulfilled, terminated or disputed, from row
+    ``from`` (default 1) over ``count`` rows (default 100, at most 500); a filtered page may hold fewer. Returns
+    ``contracts`` and ``next``, the ``from`` of the next page (null at the end)."""
+    rows, nxt = page(Contract, args, keep=lambda k: not args.get("status") or k.status == args["status"])
+    return {"contracts": [view(k, *CONTRACT_LISTED) for k in rows], "next": nxt}
 
 
 def terminating(user, args, grant):
