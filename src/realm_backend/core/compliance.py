@@ -41,6 +41,15 @@ def by_layer(record):
     return layers
 
 
+def order_of(published, running):
+    """How a release published at ``published`` stands against the one the realm runs, published at ``running``
+    (§11.6): ``older`` or ``newer`` when the times differ, ``tied`` when they are the same, ``unknown`` when either is
+    not known. A tie, or a time not known, places nothing: a note, never a step back."""
+    if published is None or running is None:
+        return "unknown"
+    return "older" if published < running else "newer" if published > running else "tied"
+
+
 def after(releases, layer):
     """The releases of one layer, oldest first, that come after what the realm runs of it, ``layer`` (``{version,
     published, vouched_by}``, None when it runs none: all of them). A version the record lists has the releases the
@@ -55,7 +64,7 @@ def after(releases, layer):
     if layer["version"] in versions:
         return releases[versions.index(layer["version"]) + 1:]
     published = layer.get("published")
-    return [release for release in releases if published is not None and release["published"] > published]
+    return [release for release in releases if order_of(release["published"], published) == "newer"]
 
 
 def went_back(releases, layer, by):
@@ -65,9 +74,9 @@ def went_back(releases, layer, by):
     published strictly earlier than that, which the realm kept the time of to say so: a tie, or a time not kept, is no
     step back."""
     published = None if layer is None else layer.get("published")
-    return (bool(by) and published is not None and layer.get("vouched_by") == by and bool(releases)
+    return (bool(by) and layer is not None and layer.get("vouched_by") == by and bool(releases)
             and layer["version"] not in [release["version"] for release in releases]
-            and all(release["published"] < published for release in releases))
+            and all(order_of(release["published"], published) == "older" for release in releases))
 
 
 def judged(record, running, now):
@@ -99,15 +108,6 @@ def installable(record, running):
         elif went_back(releases, layer, record.get("source")):
             offered.append({**{k: releases[-1][k] for k in ("source", "version", "effective_from")}, "step_back": True})
     return offered
-
-
-def order_of(published, running):
-    """How a release published at ``published`` stands against the one the realm runs, published at ``running``
-    (§11.6): ``older`` or ``newer`` when the times differ, ``tied`` when they are the same, ``unknown`` when either is
-    not known. A tie, or a time not known, places nothing: a note, never a step back."""
-    if published is None or running is None:
-        return "unknown"
-    return "older" if published < running else "newer" if published > running else "tied"
 
 
 def notes(record, running):

@@ -13,7 +13,7 @@ from api import quarters, setup, sync_checks
 from core import change_list, compliance, legislation, op
 from fake_chain import peer, rejects
 from fixtures import legislation as arcadia
-from ggg import FoundRelease, LayeredCodex, Notification, Proposal, Quarter, Realm, SyncSource
+from ggg import FoundRelease, InstallJob, LayeredCodex, Notification, Proposal, Quarter, Realm, SyncSource
 from kit import denied, fire_timers, later, ok
 from test_installs import FOUR, WEB, active_id, fire_due, job, run_job, status
 from test_installs import change_list as listing
@@ -415,7 +415,8 @@ def test_a_codex_installed_before_the_time_was_kept_finds_it_among_the_releases_
     assert propose("1.0.0").status == "executed" and running() == {"1.0.0"}
     fire_due()
     row = LayeredCodex[active_id()]
-    row.chapters = {k: {f: v for f, v in c.items() if f != "published"} for k, c in row.chapters.items()}  # an old install
+    # an old install: its chapters kept no time
+    row.chapters = {k: {f: v for f, v in c.items() if f != "published"} for k, c in row.chapters.items()}
     assert all("published" not in c for c in LayeredCodex[active_id()].chapters.values())
 
     source(entry("2.0.0", 50, published=20))  # the relay moved forward: it lists 2.0.0 only, which was published later
@@ -432,15 +433,21 @@ def test_a_codex_installed_before_the_time_was_kept_finds_it_among_the_releases_
 
 
 def filed(version, source="arcadia"):
-    """What ``proposal_get`` says of the release change of a proposal a member files by hand to install release ``version``
-    of ``source``: no vote, and no help from the codex page's button."""
+    """What ``proposal_get`` says of the release change of a proposal a member files by hand to install release
+    ``version`` of ``source``: no vote, and no help from the codex page's button."""
     action = {"op": "codex_install", "args": {"source": source, "version": version}}
     pid = ok("proposal_create", "alice", title=f"Install {source} {version}", action=action)["proposal"]
     return ok("proposal_get", "alice", query=True, proposal=pid).get("release_change")
 
 
+def stands(change):
+    """What a release change says of how the release stands: its order, whether it is a step back, and both times."""
+    return change["order"], change["step_back"], change["published"], change["runs_published"]
+
+
 def runs_releases(*releases):
-    """The realm follows a source that lists ``releases``, runs the last of them (installed by a vote), and has checked."""
+    """The realm follows a source that lists ``releases``, runs the last of them (installed by a vote), and has
+    checked."""
     own_layer()
     source(*releases)
     link()
@@ -470,20 +477,20 @@ def test_a_downgrade_along_the_publishers_own_record_is_marked_too():
 def test_a_release_published_together_with_what_the_realm_runs_is_a_tie_and_not_marked():
     runs_releases(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=5))
     change = filed("1.0.0")
-    assert (change["order"], change["step_back"], change["published"], change["runs_published"]) == ("tied", False, 5, 5)
+    assert stands(change) == ("tied", False, 5, 5)
 
 
 def test_a_time_that_is_not_known_places_nothing_and_is_not_marked():
     runs_releases(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=20))
     # a release no check ever found (the proposed one) cannot be placed
     change = filed("9.9.9")
-    assert (change["order"], change["step_back"], change["published"], change["runs_published"]) == ("unknown", False, None, 20)
+    assert stands(change) == ("unknown", False, None, 20)
     # nor can an old install that kept no time and whose release no check found
     row = LayeredCodex[active_id()]
     row.chapters = {k: {f: v for f, v in c.items() if f != "published"} for k, c in row.chapters.items()}
     FoundRelease["arcadia@2.0.0"].delete()
     change = filed("1.0.0")
-    assert (change["order"], change["step_back"], change["published"], change["runs_published"]) == ("unknown", False, 5, None)
+    assert stands(change) == ("unknown", False, 5, None)
 
 
 def test_an_old_install_that_kept_no_time_is_placed_by_the_release_a_check_found():
@@ -506,7 +513,8 @@ def test_a_forward_install_by_hand_is_not_marked_and_one_the_realm_has_run_is_th
 def test_a_proposal_that_installs_no_release_of_a_layer_the_realm_runs_says_nothing_of_one():
     runs_releases(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=20))
     assert filed("1.0.0", source="elsewhere") is None  # a layer the realm runs none of
-    other = ok("proposal_create", "alice", title="Something else", action={"op": "governance_update", "args": {"voting_window": 0}})["proposal"]
+    action = {"op": "governance_update", "args": {"voting_window": 0}}
+    other = ok("proposal_create", "alice", title="Something else", action=action)["proposal"]
     assert "release_change" not in ok("proposal_get", "alice", query=True, proposal=other)
     plain = ok("proposal_create", "alice", title="No action")["proposal"]
     assert "release_change" not in ok("proposal_get", "alice", query=True, proposal=plain)
@@ -515,6 +523,70 @@ def test_a_proposal_that_installs_no_release_of_a_layer_the_realm_runs_says_noth
 def test_the_order_of_two_release_times():
     assert [compliance.order_of(*pair) for pair in ((5, 20), (20, 5), (5, 5), (None, 5), (5, None), (None, None))] == [
         "older", "newer", "tied", "unknown", "unknown", "unknown"]
+
+
+NOT_BOTH = "an install names a release (source and version) or a change list (url and checksum), not both"
+CHANGE_LIST_PIN = {"url": WEB + "changes/mixed.json", "checksum": "sha256:" + "a" * 64}
+
+
+def mixed(version="1.0.0"):
+    """The arguments of a ``codex_install`` that name a release and a change list at once."""
+    return {"source": "arcadia", "version": version, **CHANGE_LIST_PIN}
+
+
+def test_an_install_that_names_a_release_and_a_change_list_is_refused_when_it_is_filed_and_when_it_is_called():
+    """The realm installs the release and never reads the change list, while a reader that tests the checksum first
+    describes a change list: the voters would be told one install and the realm run another. So the shape is refused
+    where it is filed, and where it is called with no vote behind it."""
+    own_layer()
+    source(entry("1.0.0", 6, published=5))
+    link()
+    check_now()
+    proposals_before, jobs_before = Proposal.count(), InstallJob.count()
+    for args in (mixed(), {"source": "arcadia", "version": "1.0.0", "url": CHANGE_LIST_PIN["url"]},
+                 {"source": "arcadia", "version": "1.0.0", "checksum": CHANGE_LIST_PIN["checksum"]}):
+        action = {"op": "codex_install", "args": args}
+        assert NOT_BOTH in denied("proposal_create", "alice", title="Both", action=action)
+        assert NOT_BOTH in denied("codex_install", "ctl", **args)
+    # nothing was filed, nothing started
+    assert (Proposal.count(), InstallJob.count()) == (proposals_before, jobs_before)
+    assert propose("1.0.0").status == "executed" and running() == {"1.0.0"}  # a plain release is as it was
+
+
+def test_a_mixed_proposal_stored_before_it_was_refused_runs_as_the_release_and_is_described_as_one():
+    """A proposal filed with both before the shape was refused still runs, as the release it always ran as (the vote is
+    not undone), and what it is described as follows what runs: the release, not a change list."""
+    from api import proposals
+    import ggg_api
+
+    own_layer()
+    source(entry("1.0.0", 6, published=5))
+    link()
+    check_now()
+    pid = ok("proposal_create", "alice", title="Stored",
+             action={"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0"}})["proposal"]
+    Proposal[pid].action = {"op": "codex_install", "args": mixed()}  # as it was stored
+    shown = proposals.codex_lines(mixed())
+    assert [label for label, _ in shown] == ["Release to install", "Installed from"]
+    assert shown[0][1] == proposals.quoted("arcadia 1.0.0")
+    assert shown == proposals.codex_lines({"source": "arcadia", "version": "1.0.0"})  # as a plain release reads
+    assert "Call" in ggg_api.action(Proposal[pid].action)  # GGG sees the call, not a Code action with a change list
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=pid, choice="yes")
+    run_job()
+    assert Proposal[pid].status == "executed" and running() == {"1.0.0"}  # it ran as the release
+
+
+def test_a_plain_change_list_and_a_plain_release_are_described_as_they_were():
+    from api import proposals
+    import ggg_api
+
+    lines = dict(proposals.codex_lines(CHANGE_LIST_PIN))
+    assert set(lines) == {"Codex source", "Codex checksum"} and "Release to install" not in lines
+    assert "Code" in ggg_api.action({"op": "codex_install", "args": CHANGE_LIST_PIN})
+    assert "Call" in ggg_api.action({"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0"}})
+    package = dict(proposals.codex_lines({"manifest": {"id": "lex", "version": "1.0"}, "source": "def hook(): pass"}))
+    assert package["Codex to install"] == proposals.quoted("lex@1.0") and "Release to install" not in package
 
 
 def test_the_change_list_of_a_release_is_the_whole_release_with_its_calendar_and_without_the_realm_chapter():

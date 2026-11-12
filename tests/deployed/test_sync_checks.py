@@ -225,9 +225,9 @@ def test_a_source_that_goes_back_is_followed_never_behind_and_its_older_release_
 
 
 def test_a_release_filed_by_hand_that_is_older_than_what_the_town_runs_is_marked_a_step_back(net, source, town):
-    """The town runs 2.0.0 (published at 6); 1.0.0 (published at 5) is a release a check found, which nothing offers: a
-    member files its install by hand, and ``proposal_get`` says it takes the town back, a newer one that it is newer, and
-    a release no check found that it cannot be placed (§11.6)."""
+    """The town runs 2.0.0 (published at 6); 1.0.0 (published at 5) is a release a check found, which nothing offers:
+    a member files its install by hand, and ``proposal_get`` says it takes the town back, a newer one that it is
+    newer, and a release no check found that it cannot be placed (§11.6)."""
     assert running(town) == {"2.0.0"}
     assert checked(town)["installable"] == installable() and checked(town)["notes"] == []  # nothing offers 1.0.0
     back = town.ok("proposal_get", "alice", query=True, proposal=file_install(town, "1.0.0"))["release_change"]
@@ -237,6 +237,22 @@ def test_a_release_filed_by_hand_that_is_older_than_what_the_town_runs_is_marked
     assert (unknown["order"], unknown["step_back"], unknown["published"]) == ("unknown", False, None)
     same = town.ok("proposal_get", "alice", query=True, proposal=file_install(town, "2.0.0"))["release_change"]
     assert (same["order"], same["step_back"]) == ("same", False)
+
+
+def test_an_install_that_names_a_release_and_a_change_list_is_refused_where_it_is_filed(net, source, town):
+    """The realm installs the release and never reads the change list, so a vote would be told one install and the realm
+    would run another: the real wasm refuses the shape when it is filed, and a plain release is filed as it was."""
+    pin = {"url": "https://legislation.example.test/changes/mixed.json", "checksum": "sha256:" + "a" * 64}
+    mixed = {"source": "arcadia", "version": "1.0.0", **pin}
+    action = {"op": "codex_install", "args": mixed}
+    before = len(town.ok("proposal_list", "alice", query=True, count=500)["proposals"])
+    refused = town.call("proposal_create", {"title": "Both", "action": action}, sender=net.people["alice"])
+    assert not refused["ok"]
+    assert "a release (source and version) or a change list (url and checksum), not both" in refused["error"]
+    direct = town.call("codex_install", mixed, sender=net.people["ctl"])
+    assert not direct["ok"] and "not both" in direct["error"]
+    assert len(town.ok("proposal_list", "alice", query=True, count=500)["proposals"]) == before  # nothing was filed
+    assert file_install(town, "1.0.0")  # a plain release is filed
 
 
 def test_an_unreadable_record_reads_unknown(net, source, town):

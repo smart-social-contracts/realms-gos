@@ -1909,7 +1909,11 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    list), a federation with quarters (its quarters stage the change list the capital announces, and a
    release built from a record has none: a federation installs a release with a change list), and a
    release that only a stand-in record vouches for, whose chapters no capital serves (it is installed
-   with a change list that gives their URLs). The follower's own guard or forbid on `codex_install` still runs when the accepted
+   with a change list that gives their URLs), and an action that names a release and a change list (`url` or `checksum`)
+   at once: the realm installs the release and never reads the change list, so a vote would be told one install and the
+   realm would run another. It is refused where it is filed and where `codex_install` is called with no vote behind it;
+   a proposal stored with both before that still runs, as the release, and is described as one. The follower's own guard
+   or forbid on `codex_install` still runs when the accepted
    proposal executes, and can delay or refuse the install; if it does, the realm reads `non_compliant`
    past the release's effective date, visible to all: that is the realm's own legislation over its own
    install, and the check makes the consequence visible.
