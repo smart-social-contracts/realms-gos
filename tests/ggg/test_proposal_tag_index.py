@@ -137,6 +137,27 @@ def test_a_status_with_the_tags_keeps_the_pages_full():
     assert found(status="voting") == ids[20:]  # the status alone is as before
 
 
+def refuse(what):
+    def refused(*args, **kw):
+        raise AssertionError(f"{what} was read")
+
+    return refused
+
+
+def test_a_status_with_the_tags_is_read_from_the_shorter_list(monkeypatch):
+    world.build()
+    ids = fill(60, "common", 1)  # every one carries it
+    for p in ids[3:]:
+        Proposal[p].status = "executed"  # three are still voting
+    with monkeypatch.context() as patched:
+        patched.setattr(Proposal, "with_tags", refuse("the list of the tag"))
+        assert pages(tags=["common"], status="voting", count=2) == [(ids[:2], 3), (ids[2:3], None)]
+        assert found(tags=["common", "other"], status="voting") == ids[:3]
+    fill(2, "rare", 1)  # two more, voting, with another tag
+    monkeypatch.setattr(proposals, "indexed_ids", refuse("the list of the status"))
+    assert found(tags=["rare"], status="voting") == ["P-61", "P-62"]
+
+
 def test_pages_with_any_count_and_filters_are_what_the_proposals_say_and_full():
     """Against the proposals themselves: tags that are alike, one that ends like an index entry, and a long one."""
     world.build()

@@ -189,6 +189,8 @@ def realm(request, wasm_of, people, costs):
         costs.report("by tag, rare (40 of 4,000), count 100, previous release: every page", sum(spent))
         costs.report("by tag, rare (40 of 4,000), count 100, previous release: one page", max(spent))
         assert len(ids) == 40  # a client follows ``next`` through all 4,000 proposals for 40
+        voting = one_page(realm, tags=[RARE, COMMON], status="voting", count=100)
+        costs.report("by tag (rare or common) and status voting, count 100, previous release", voting["instructions"])
         filing_costs(realm, costs, "previous")
     else:
         run(realm, FORGET)
@@ -241,11 +243,12 @@ def test_a_page_of_a_common_tag_and_the_pages_after_it_follow_the_order_of_an_un
     assert max(spent) < 1_500_000_000
 
 
-def test_with_a_status_the_tags_pages_are_still_full_and_read_no_row_they_do_not_return(realm, costs):
+def test_with_a_status_the_tags_pages_are_still_full_and_read_from_the_shorter_list(realm, costs):
     voting = one_page(realm, tags=[RARE, COMMON], status="voting", count=100)
     assert voting["ids"] == [i for i in open_ids() if i in set(rare_ids()) | set(common_ids())]
     assert voting["next"] is None
     costs.report("by tag (rare or common) and status voting, count 100, current release", voting["instructions"])
+    assert voting["instructions"] < 200_000_000  # 20 are voting: its list is the shorter, and 1,373 carry the tags
     executed = every_page(realm, tags=[RARE], status="executed", count=20)[0]
     assert [i for page in executed for i in page] == rare_ids()[:-1] and len(executed[0]) == 20
 

@@ -2,8 +2,8 @@ import json
 
 from core import auth, chain, ranges
 from core.civil import civil_from_days
-from core.db import (Conflict, Fail, Forbidden, Unavailable, each, find, first, has_indexed, next_id, page, page_by, view,
-                     window as page_window)
+from core.db import (Conflict, Fail, Forbidden, Unavailable, each, find, first, has_indexed, indexed_ids, next_id, page,
+                     page_by, view, window as page_window)
 from ggg import (Appointment, Calendar, Contract, ContractAmendment, Delegation, Department, External, Mandate, Member,
                  Proposal, ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
 from api import tasks
@@ -839,15 +839,27 @@ def proposal_get(c, args):
     return {**shown, "release_change": change} if change else shown
 
 
+def id_sources(tags, status, count):
+    """Where the ids of a listing by ``tags`` (and ``status``, if given) come from: the shorter list, as far as reading
+    goes, the tags' or the status's, and how each id is checked in the other, by its index. An id of the status costs a
+    read for each tag it is checked in, an id of the tags a read for the status."""
+    if status and Proposal.count_by("status", status) * len(tags) < Proposal.count_with_tags(tags):
+        return (lambda cursor: indexed_ids(Proposal, "status", status, cursor, count + 1),
+                lambda i: any(has_indexed(Proposal, "tags", tag, i) for tag in tags))
+    return (lambda cursor: Proposal.with_tags(tags, cursor, count + 1),
+            lambda i: not status or has_indexed(Proposal, "status", status, i))
+
+
 def listed_by_tags(tags, status, args):
     """One page of the proposals that carry at least one of ``tags`` and, if given, have ``status``: the rows, and the id
-    the next page starts at (None at the end). The ids come from the lists of the tags and from the index of the status,
-    so a row is read only once it is on the page."""
+    the next page starts at (None at the end). Only the ids are read until they are on the page, so what it costs is
+    the page, and the ids of the shorter list that the other leaves out."""
     start, count = page_window(args)
+    ids_from, matches = id_sources(tags, status, count)
     ids, cursor = [], start
     while len(ids) <= count:  # the one past the page is where the next one starts
-        found = Proposal.with_tags(tags, cursor, count + 1)
-        ids += [i for i in found if not status or has_indexed(Proposal, "status", status, i)]
+        found = ids_from(cursor)
+        ids += [i for i in found if matches(i)]
         if len(found) <= count:
             break
         cursor = found[-1] + 1

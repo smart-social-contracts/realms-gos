@@ -1,6 +1,6 @@
 from ic_python_db import Boolean, Integer, ManyToOne, OneToMany, String
 
-from core.db import Json, Row
+from core.db import Json, Row, indexed_ids
 from core.ratio import ONE, PERCENT, upgrade_call
 
 
@@ -66,9 +66,13 @@ class Proposal(Row):
         """The ids, ascending, of the first ``count`` proposals from id ``start`` that carry at least one of ``tags``.
         One range read of each tag's list: every id of the first ``count`` of the union is among the first ``count`` of
         its own tag's list."""
-        db, kind = cls.db(), cls.get_full_type_name()
-        found = {int(i) for tag in tags for i in db.field_index_page(kind, "tags", tag, start, count)}
+        found = {i for tag in tags for i in indexed_ids(cls, "tags", tag, start, count)}
         return sorted(found)[:count]
+
+    @classmethod
+    def count_with_tags(cls, tags):
+        """How many ids the lists of ``tags`` hold: the proposals that carry at least one, or more if one carries several."""
+        return sum(cls.db().field_index_count(cls.get_full_type_name(), "tags", tag) for tag in tags)
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
