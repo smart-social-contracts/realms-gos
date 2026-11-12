@@ -1464,8 +1464,11 @@ the codex subinterpreter), on the library of §12 ([#488](https://github.com/sma
     operation that raises what it does not expect: a number where a recipient is text). Each domain's effects run
     in a message of their own, which the realm calls on itself and awaits: a trap ends only that message and comes
     back as a rejected call, which is the chapter's failure, recorded on the codex; the operation, and a codex
-    switch it belongs to, stand. Where nothing can wait for another canister (the shell, an extension's call) the
-    effects run where they are;
+    switch it belongs to, stand. This holds wherever the operation can wait for another canister: the `run` update
+    (the frontend, an extension's `ctx.run`, a delegate), a proposal's execution, a task and the hooks of a codex
+    switch. **Known limit:** where nothing can wait for one, the effects run where they are, and an effect that traps
+    still takes that message with it: the controller's shell, and the call an extension's own backend makes to
+    an operation from inside the canister;
   - a guard that raises **denies** (fail closed), with "legislation error in <chapter>: <error>"; so does a
     codex that does not load, for every operation its legislation could guard, until a revert;
   - calls between domains stop at depth 8; the install refuses a `uses` chain that could reach it;

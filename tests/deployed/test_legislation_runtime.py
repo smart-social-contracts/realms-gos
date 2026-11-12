@@ -76,6 +76,8 @@ class LocalRegime(above("local_regime")):
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def on_proposal_create(self, event):
         event.order = ["es"]
+        if event.args["title"] == "malformed effect":
+            self.ggg.notification_send(recipient=123, topic="ordinance", title="malformed", body="")
         self.ggg.notification_send(recipient="User:" + event.user, topic="ordinance", title="Comunicació d'acord",
                                    body=event.result["proposal"])
 '''
@@ -115,8 +117,6 @@ class Register(above("register")):
     def on_proposal_create(self, event):
         if event.args["title"] == "break the register":
             return 1 // 0
-        if event.args["title"] == "malformed effect":
-            self.ggg.notification_send(recipient=123, topic="register", title="malformed", body="")
         if event.args["title"] == "loop":
             n = 0
             while True:
@@ -470,13 +470,15 @@ def test_d_a_raising_guard_denies_naming_the_chapter_and_a_raising_hook_never_fa
     assert failures(town, founder) == {} and ok(town, "codex_status", founder, query=True)["healthy"]
 
 
-def test_d1_an_effect_that_traps_fails_its_chapter_alone_and_the_operation_that_ran_the_hook_succeeds(town, people):
-    """A chapter's effect with a number where the recipient is text fails as a message fails: by a trap (realms-gos#679).
-    It ends only the message the effects run in."""
+def test_d1_a_member_s_operation_stands_when_a_chapter_of_another_source_queues_an_effect_that_traps(town, people):
+    """Spain's chapter queues an effect with a number where the recipient is text: it fails as a message fails, by a trap
+    (realms-gos#679). The operation is the member's, through ``run``, the update that the frontend and an extension's
+    ``ctx.run`` call and that awaits: it stands, the chapter's failure is recorded, and the trap ends only the message the
+    effects run in."""
     founder = people["founder"]
     pid = ok(town, "proposal_create", founder, title="malformed effect")["proposal"]
     assert ok(town, "proposal_get", founder, query=True, proposal=pid)["proposal"]["status"] == "voting"
-    error = failures(town, founder)["x/town/register.py"]["on_proposal_create"]["error"]
+    error = failures(town, founder)["x/town/local_regime.py"]["on_proposal_create"]["error"]
     assert error.startswith("the effects were rejected: "), error
     assert not ok(town, "codex_status", founder, query=True)["healthy"]
     ok(town, "proposal_create", founder, title="fine")
