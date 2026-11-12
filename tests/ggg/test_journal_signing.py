@@ -10,7 +10,7 @@ wasm with the IC's own key, and checks the signatures as Ed25519."""
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import fake_chain
 import pytest
@@ -18,6 +18,7 @@ import world
 from core import journal, journal_signing, legislation, localtime, op, signing
 from core.candid import Reader, idl_hash
 from ggg import Event, Extension, Realm, SignedDocument
+from ic_python_db import Entity
 from kit import call, ok
 from signing_kit import climb, fake_key, fake_signature, management
 
@@ -133,10 +134,11 @@ def test_a_closed_day_is_made_at_the_next_sweep_and_not_before_and_asks_for_no_s
     assert issue("2026-11-10")["status"] == "provisional"
 
 
-def test_the_sweep_with_nothing_to_make_asks_nobody_in_either_mode():
+def test_the_sweep_with_nothing_to_make_or_sign_asks_nobody_in_either_mode():
     peer = started()
     at(2026, 11, 10, 0, 5)
     sweep()
+    ask("2026-11-09")  # the one day there is, signed
     calls = len(peer.calls)
     for mode in ("on_request", "daily"):
         Realm["1"].journal_signing = mode
@@ -267,7 +269,8 @@ def test_a_request_for_a_day_the_realm_could_not_make_is_an_error_and_may_be_ask
     at(2026, 11, 10, 0, 1)
     peer.answer("schnorr_public_key", fake_chain.rejects("management canister busy"))
     out = call("journal_sign", ANONYMOUS, day="2026-11-09")
-    assert out["kind"] == "unavailable" and "busy" in out["error"] and SignedDocument.count() == 0
+    assert out["kind"] == "unavailable" and "busy" not in out["error"] and SignedDocument.count() == 0  # told only: not now
+    assert "busy" in failure_of("journal")["error"]  # the admins read why
     management()
     assert ask("2026-11-09")["status"] == "signed"
 
@@ -278,7 +281,8 @@ def test_a_signature_that_fails_on_request_is_an_error_kept_for_the_admins_and_t
     sweep()
     peer.answer("sign_with_schnorr", fake_chain.rejects("Rejection code 4, 5 cycles attached, 26_153_846_153 required"))
     out = call("journal_sign", ANONYMOUS, day="2026-11-09")
-    assert not out["ok"] and out["kind"] == "unavailable" and "26_153_846_153" in out["error"]
+    assert not out["ok"] and out["kind"] == "unavailable"
+    assert "26_153_846_153" not in out["error"] and "cycles" not in out["error"]  # what the management canister said is not told
     failure = failure_of("journal")
     assert failure["subjects"] == ["2026-11-09"] and failure["at"] == fake_chain.now() and "26_153_846_153" in failure["error"]
     assert issue("2026-11-09")["status"] == "unsigned" and not signing.IN_FLIGHT
@@ -318,7 +322,7 @@ def test_a_signature_made_is_on_the_audit_trail_once_and_calls_that_change_nothi
     at(2026, 11, 10, 0, 5)
     sweep()
     before = Event.count()
-    digest = ask("2026-11-09", ANONYMOUS)["proof"]["digest"]
+    digest = ok("journal_sign", ANONYMOUS, day="2026-11-09", junk="x" * 500)["proof"]["digest"]  # an argument it does not take
     event = Event[str(Event.max_id())]
     assert Event.count() == before + 1
     assert (event.op, event.user, event.args, event.result) == ("journal_sign", ANONYMOUS, {"day": "2026-11-09"},
@@ -485,19 +489,31 @@ def test_a_second_read_and_a_second_sweep_give_the_same_signature_and_sign_nothi
     assert issue("2026-11-09")["proof"] == first and len(peer.calls) == calls and SignedDocument.count() == 1
 
 
-def test_a_realm_that_turns_daily_signs_the_days_made_from_then_on_and_one_that_turns_back_stops():
+def test_a_realm_that_turns_daily_signs_every_day_made_after_the_last_signed_one_and_one_that_turns_back_stops():
     peer = started()
     in_days(2)  # the 9th and 10th are made, on request: unsigned
     daily()
     at(2026, 11, 12, 0, 5)
-    sweep()  # the 11th is made, and signed
-    assert [issue(f"2026-11-{d:02d}")["status"] for d in (9, 10, 11)] == ["unsigned", "unsigned", "signed"]
+    sweep()  # the 11th is made; the 9th, 10th and 11th are made and come after the last signed day (none): one batch
+    assert [issue(f"2026-11-{d:02d}")["status"] for d in (9, 10, 11)] == ["signed"] * 3
     assert len(peer.sent("sign_with_schnorr")) == 1
+    assert len({issue(f"2026-11-{d:02d}")["proof"]["root"] for d in (9, 10, 11)}) == 1
     Realm["1"].journal_signing = "on_request"
     at(2026, 11, 13, 0, 5)
     sweep()
     assert issue("2026-11-12")["status"] == "unsigned" and len(peer.sent("sign_with_schnorr")) == 1
-    assert made("2026-11-11")["prev"] == signing.proof("journal", "2026-11-10")["digest"]  # the signed day covers them
+
+
+def test_a_daily_realm_signs_only_the_days_after_the_last_one_signed_the_days_before_it_are_covered_by_it():
+    peer = started()
+    in_days(4)  # the 9th to the 12th are made, on request
+    ask("2026-11-11")  # the 11th is signed on request: the 9th and 10th are before it
+    daily()
+    at(2026, 11, 14, 0, 5)
+    sweep()  # the 13th is made
+    assert [issue(f"2026-11-{d:02d}")["status"] for d in (9, 10, 11, 12, 13)] == ["unsigned", "unsigned", "signed", "signed", "signed"]
+    assert len(peer.sent("sign_with_schnorr")) == 2  # the request, and one batch for the 12th and 13th
+    assert made("2026-11-11")["prev"] == signing.proof("journal", "2026-11-10")["digest"]  # which it covers by the chain
 
 
 def test_a_daily_realm_whose_signature_fails_keeps_the_days_made_and_signs_them_all_in_one_batch_at_a_later_sweep():
@@ -541,6 +557,150 @@ def test_a_request_made_while_a_daily_sweep_is_signing_the_same_day_is_pending_a
     peer.answer("sign_with_schnorr", meanwhile)
     sweep()
     assert seen == ["pending"] and issue("2026-11-09")["status"] == "signed" and len(peer.sent("sign_with_schnorr")) == 1
+
+
+# ---- A daily realm's sweep works from the documents, so no failure loses a day
+
+def unsigned_among(days):
+    return [day for day in days if not signing.proof("journal", day)["signature"]]
+
+
+def all_days(count):
+    return [f"2026-{d.month:02d}-{d.day:02d}" for d in (datetime(2026, 11, 9) + timedelta(days=n) for n in range(count))]
+
+
+def test_a_backlog_of_forty_one_days_signed_by_a_daily_realm_short_of_cycles_is_signed_whole_when_the_cycles_are_back():
+    peer = started()
+    daily()
+    enough = fake_chain.state["balance"]
+    fake_chain.state["balance"] = 1_000_000_000  # the realm is short of cycles
+    at(2026, 12, 20, 0, 5)  # 41 days have closed
+    sweep()
+    assert SignedDocument.count() == 41 and peer.sent("sign_with_schnorr") == []  # all made, none signed
+    assert len(failure_of("journal")["subjects"]) == 31 and journal_signing.signed_through() is None  # a record of one batch
+    fake_chain.state["balance"] = enough  # the cycles are back
+    for night in range(3):  # and three more nights
+        at(2026, 12, 21 + night, 0, 5)
+        sweep()
+    assert unsigned_among(all_days(44)) == []  # not a day lost: ten of them used to stay unsigned for good
+    assert len(peer.sent("sign_with_schnorr")) == 4  # 31 and 13 at the first sweep, then a day at a time
+    assert failure_of("journal") is None
+
+
+def test_a_request_that_fails_and_a_sweep_that_fails_lose_no_day_when_the_realm_can_sign_again():
+    peer = started()
+    daily()
+    at(2026, 11, 12, 0, 5)  # 9th to 11th closed
+    sweep()
+    assert unsigned_among(all_days(3)) == []
+    peer.answer("sign_with_schnorr", fake_chain.rejects("no cycles"))
+    at(2026, 11, 14, 0, 5)  # the 12th and 13th close
+    sweep()  # a sweep that fails
+    assert unsigned_among(all_days(5)) == ["2026-11-12", "2026-11-13"]
+    assert call("journal_sign", "alice", day="2026-11-12")["kind"] == "unavailable"  # a request that fails too
+    assert failure_of("journal")["subjects"] == ["2026-11-12"]  # the record names only the last failure...
+    management()
+    sweep()  # ...and nothing waits on it
+    assert unsigned_among(all_days(5)) == []
+
+
+def test_days_made_by_a_request_are_signed_by_the_next_sweep_of_a_daily_realm():
+    peer = started()
+    daily()
+    at(2026, 11, 12, 0, 1)  # the 9th to the 11th have closed, and the sweep has not run
+    assert ask("2026-11-09")["status"] == "signed"  # the request makes the three, and signs the first
+    assert unsigned_among(all_days(3)) == ["2026-11-10", "2026-11-11"] and journal_signing.signed_through() == "2026-11-09"
+    sweep()
+    assert unsigned_among(all_days(3)) == [] and len(peer.sent("sign_with_schnorr")) == 2
+
+
+def test_a_request_for_an_old_day_does_not_move_the_last_signed_day_back_and_a_later_one_moves_it_forward():
+    started()
+    in_days(4)
+    ask("2026-11-11")
+    ask("2026-11-09")
+    assert journal_signing.signed_through() == "2026-11-11"
+    ask("2026-11-12")
+    assert journal_signing.signed_through() == "2026-11-12"
+
+
+def test_an_idempotent_request_a_pending_one_and_a_refusal_write_nothing_and_clear_no_failure():
+    peer = started()
+    in_days(3)
+    ask("2026-11-09")
+    peer.answer("sign_with_schnorr", fake_chain.rejects("no cycles"))
+    assert call("journal_sign", "alice", day="2026-11-10")["kind"] == "unavailable"  # a failure is on record
+    kept = failure_of("journal")
+    writes = []
+    real_save = Entity._save
+    monkeypatch_save(real_save, writes)
+    try:
+        assert ask("2026-11-09", ANONYMOUS)["status"] == "signed"  # signed already
+        assert ask("2026-11-09")["status"] == "signed"
+        refused("2026-11-12"), refused("tomorrow"), refused("2026-11-08")  # not closed, no date, before the first day
+        sweep()  # nothing to make, and on request nothing to sign
+    finally:
+        Entity._save = real_save
+    assert writes == [] and failure_of("journal") == kept  # not a save, and the failure is still there
+
+
+def test_the_counter_of_saves_does_see_a_signature_being_stored():
+    started()
+    at(2026, 11, 10, 0, 5)
+    sweep()
+    writes, real_save = [], Entity._save
+    monkeypatch_save(real_save, writes)
+    try:
+        ask("2026-11-09")
+    finally:
+        Entity._save = real_save
+    assert "SignedDocument" in writes and "Realm" in writes  # the signature, and the last signed day
+
+
+def test_a_request_that_is_pending_writes_nothing_either():
+    peer = started()
+    at(2026, 11, 10, 0, 5)
+    sweep()
+    plain, writes = peer.replies["sign_with_schnorr"], []
+
+    def meanwhile(arg):
+        peer.answer("sign_with_schnorr", plain)
+        real_save = Entity._save
+        monkeypatch_save(real_save, writes)
+        try:
+            assert ask("2026-11-09", ANONYMOUS)["status"] == "pending"
+        finally:
+            Entity._save = real_save
+        return plain(arg)
+
+    peer.answer("sign_with_schnorr", meanwhile)
+    ask("2026-11-09")
+    assert writes == []
+
+
+def monkeypatch_save(real_save, writes):
+    """Count the saves of entities from now until ``Entity._save`` is put back."""
+    def counting(self, *args, **kwargs):
+        writes.append(self._type)
+        return real_save(self, *args, **kwargs)
+
+    Entity._save = counting
+
+
+def test_the_last_signed_day_of_a_realm_upgraded_from_the_daily_release_starts_at_its_last_signed_day():
+    started()
+    at(2026, 11, 11, 0, 5)
+    signed_the_old_way(["2026-11-09", "2026-11-10"])
+    assert journal_signing.signed_through() is None  # the earlier release kept no such day: its head was the last signed
+    at(2026, 11, 12, 0, 5)
+    sweep()
+    assert journal_signing.signed_through() == "2026-11-10" and issue("2026-11-11")["status"] == "unsigned"
+
+
+def test_a_new_realm_has_signed_no_day_and_the_cursor_is_kept_from_the_first_sweep():
+    started()
+    sweep()
+    assert "signed" in signing.state("journal") and journal_signing.signed_through() is None
 
 
 # ---- Changing the mode

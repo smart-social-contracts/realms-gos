@@ -26,7 +26,10 @@ the page names whenever it is not `https://icp-api.io`. A sheet's QR code is suc
    before is often only *made*, not signed (a realm signs a day when someone asks): the realm serves it with an empty
    signature, and the page checks that its text hashes to `prev` and that it is of the same realm and kind, and says it is not
    signed. This signature thereby also covers every earlier document. A realm that refuses the previous document has dropped
-   it or hides it, and the page says so.
+   it or hides it, and the page says so. The note that a signature covers every earlier document is shown only for a valid
+   document whose link to the one before it was checked. A document that is only made, fetched by its code or by its kind and
+   subject, is not a proof: the page says "Made, not signed yet" (neutral, never green), checks only that its text hashes to
+   its digest, and says to ask the realm for a signature.
 5. When an expected key is given, the key in the text is that key. **That is what ties a key to a canister**: derive the key
    yourself, offline, as the page shows, and give it. Without it the page says the key is only the one the document reports.
 

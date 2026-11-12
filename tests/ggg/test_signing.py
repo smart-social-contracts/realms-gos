@@ -367,6 +367,17 @@ def test_a_key_that_cannot_be_had_makes_nothing_and_is_kept_as_a_failure_for_the
     assert make("certificate", certificates(2)) == ["C-1", "C-2"]
 
 
+def test_a_document_already_made_in_the_middle_of_a_batch_is_the_link_of_the_one_after_it():
+    world.build()
+    management()
+    made = make("certificate", certificates(1), chained=True)  # C-1
+    other = SignedDocument(id="certificate:C-2", code="X", canonical="{}", digest="ab" * 32)  # made by another call
+    assert made == ["C-1"] and signing.head("certificate")["subject"] == "C-1"
+    assert make("certificate", certificates(3), chained=True) == ["C-3"]  # C-1 and C-2 are there; C-3 follows C-2
+    assert document("certificate", "C-3")["prev"] == other.digest
+    assert signing.head("certificate") == {"subject": "C-3", "digest": signing.proof("certificate", "C-3")["digest"]}
+
+
 def test_a_document_made_by_another_call_while_the_key_was_out_is_left_to_it():
     world.build()
     peer = management()
@@ -429,7 +440,8 @@ def test_a_failed_signature_is_an_error_to_the_caller_is_kept_and_leaves_the_doc
     peer.answer("sign_with_schnorr", fake_chain.rejects("Rejection code 4, not enough cycles"))
     with pytest.raises(Unavailable) as refused:
         op.run(signing.request("certificate", "C-1"))
-    assert "not enough cycles" in str(refused.value) and "not enough cycles" in signing.failures()["certificate"]["error"]
+    assert "not enough cycles" not in str(refused.value)  # the caller is not told the reason, or the realm's balance
+    assert "not enough cycles" in signing.failures()["certificate"]["error"]  # the admins are
     assert not signing.IN_FLIGHT and signing.proof("certificate", "C-1")["signature"] == ""
     management()
     assert op.run(signing.request("certificate", "C-1"))[1] is True and signing.failures() == {}

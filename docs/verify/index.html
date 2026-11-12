@@ -43,6 +43,7 @@
   .pass { background: var(--pass-bg); color: var(--pass); }
   .fail { background: var(--fail-bg); color: var(--fail); }
   .note { background: var(--note-bg); color: var(--note); }
+  .neutral { background: var(--card); color: var(--fg); border: 1px solid var(--line); }
   dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: .5rem 0; }
   dt { color: var(--muted); }
   dd { margin: 0; word-break: break-all; }
@@ -280,6 +281,23 @@ function timeRow(doc) {
   return ["Signed at", typeof doc.signed_at === "number" ? iso(doc.signed_at) : ""];
 }
 
+// A document the realm made and has not signed (a day nobody has asked it to sign): its root, path and signature are empty.
+// It is not a proof, so it is neither valid nor invalid: the page says what it is and that nothing is signed.
+function isMade(proof) {
+  return proof && proof.signature === "" && proof.root === "" && Array.isArray(proof.path) && proof.path.length === 0 &&
+    typeof proof.digest === "string" && typeof proof.code === "string";
+}
+
+// What can be said of a made document: whether its text hashes to its digest and the code is the digest's. ``unsigned`` marks
+// the result, which is never ``valid``.
+async function checkMade(proof, doc, checks) {
+  const hashed = toHex(await sha256(textEncoder.encode(proof.canonical))) === proof.digest.toLowerCase();
+  checks.push({ status: hashed ? "pass" : "fail", name: "The text hashes to the digest", detail: hashed ? "" : "the text was changed" });
+  const coded = isHex(proof.digest, 64) && codeOf(proof.digest) === proof.code.toUpperCase();
+  checks.push({ status: coded ? "pass" : "fail", name: "The verification code is the digest's", detail: coded ? "" : "the code does not belong to this digest" });
+  return { checks, doc, valid: false, supported: true, shaped: false, unsigned: hashed && coded };
+}
+
 // The code of a document as written however a person types it: capitals and digits only.
 const normalCode = (code) => String(code).toUpperCase().replace(/[^A-Z0-9]/g, "");
 
@@ -300,6 +318,7 @@ async function verifyProof(proof, options = {}) {
     add("fail", "The proof is well formed", "the signed text is not JSON"); return stop();
   }
   const key = doc && doc.key;
+  if (isMade(proof)) return checkMade(proof, doc, checks);
   if (!shapedDocument(doc, proof)) {
     add("fail", "The proof is well formed", "a field is missing or not in its form, the key's path is not its kind's, or the text is not version 1");
     return stop();
@@ -507,6 +526,10 @@ const CHAIN_CHECK = "Link to the previous document";
 // could not be confirmed; ``fail`` (red) for one whose own signature or binding fails. A failed link to the previous
 // document alone is amber: the document's own signature verifies, and the realm withholds or changed the one before it.
 function verdictOf(result) {
+  if (result.unsigned) {
+    return { level: "neutral", title: "Made, not signed yet",
+      detail: "The realm made this document but has not signed it, so nothing here is verified as the realm's. Ask the realm to sign it (on its journal page, \"Request signature\"), then check the signed document." };
+  }
   const keyChecked = result.checks.some((c) => c.name === "The key is the expected one" && c.status === "pass");
   const chainBroken = result.checks.some((c) => c.name === CHAIN_CHECK && c.status === "fail");
   if (!result.supported) return { level: "note", title: "This browser cannot check the signature", detail: "" };
@@ -622,6 +645,7 @@ if (typeof document !== "undefined") {
 
   function show(result, proof, from, replica) {
     const doc = result.shaped ? result.doc : null;
+    const made = result.unsigned ? result.doc : null; // a document made and not signed: what it says, and nothing about a key
     $("result").hidden = false;
     $("host-note").textContent = replica ? hostNote(replica) : "";
     $("host-note").hidden = !$("host-note").textContent;
@@ -636,15 +660,18 @@ if (typeof document !== "undefined") {
     const rows = doc ? [["Realm canister", doc.realm], ["Kind", doc.kind], ["Subject", doc.subject],
       timeRow(doc),
       ["Public key", doc.key.public_key], ["Key", `${doc.key.algorithm}, ${doc.key.name}, path ${doc.key.path}`],
-      ["Verification code", proof.code], ["Digest", proof.digest], ...(replica ? [["Replica asked", replica]] : [])] : [];
+      ["Verification code", proof.code], ["Digest", proof.digest], ...(replica ? [["Replica asked", replica]] : [])] :
+      made ? [["Kind", String(made.kind)], ["Subject", String(made.subject)], timeRow(made),
+        ["Verification code", proof.code], ["Digest", proof.digest]] : [];
     for (const [name, value] of rows) { facts.append(node("dt", name), node("dd", String(value))); }
 
     const list = $("checks");
     list.replaceChildren();
     for (const check of result.checks) addCheck(list, check);
 
-    $("body-details").hidden = !doc;
-    $("body").textContent = doc ? JSON.stringify(doc.body, null, 2) : "";
+    $("body-details").hidden = !(doc || made);
+    $("body-details").querySelector("summary").textContent = made ? "What the realm made (it is not signed)" : "What the realm signed";
+    $("body").textContent = doc || made ? JSON.stringify((doc || made).body, null, 2) : "";
     $("key-details").hidden = !doc;
     $("tools-details").hidden = !doc;
     for (const id of ["derive", "tool-python", "tool-openssl"]) $(id).textContent = ""; // nothing of an earlier document stays
@@ -655,7 +682,9 @@ if (typeof document !== "undefined") {
       $("tool-python").textContent = commands.python;
       $("tool-openssl").textContent = commands.openssl;
     }
-    $("chain-note").hidden = !(doc && doc.prev !== null);
+    // Said only of a document that is valid and whose link to the one before it has been checked
+    const linked = result.valid && result.checks.some((check) => check.name === CHAIN_CHECK && check.status === "pass");
+    $("chain-note").hidden = !(doc && doc.prev !== null && linked);
     $("chain-buttons").hidden = !(doc && from);
     $("walk-state").textContent = "";
     current = { proof, doc, from };

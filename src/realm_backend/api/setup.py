@@ -370,7 +370,8 @@ def realm_configure(c, args):
     ``open_registration``, ``ai_assistant_enabled``, ``quarter_join_mode``, ``auto_scale_enabled``, ``timezone``,
     ``languages`` (BCP 47 tags, the first the default), ``journal_signing`` (``on_request``, the default, or ``daily``:
     whether the official journal's days are signed when someone asks or each as it closes, which costs the realm a
-    threshold signature a day), ``test_mode`` and ``test_flags``. Returns ``configured``. The
+    threshold signature a day; a change to ``daily`` also signs, once, every day made after the last signed one, a
+    signature for each 31 days), ``test_mode`` and ``test_flags``. Returns ``configured``. The
     ``timezone`` is an IANA name such as ``Europe/Madrid`` that this release bundles, or ``UTC``,
     which a realm has until it sets one; the new zone applies from the moment it is set, and nothing stored changes.
     Test mode and flags need a test build, on a non-production network or with ``can_test_mode`` set at install;

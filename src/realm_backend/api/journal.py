@@ -30,11 +30,13 @@ def journal_issue(c, args):
 def journal_sign(c, args):
     """Sign the issue of ``day`` (``YYYY-MM-DD``) now, if nobody has, and return it: the ``day``, its ``status`` and, once
     signed, the ``proof`` (as ``signature_proof``). Anyone may ask, anonymous callers too, and the realm pays: at most one
-    signature for a day, ever, so that signing every day is the most it can cost. An issue already signed is returned
+    signature stored for a day, ever, so that signing every day is the most it can cost (an upgrade while the signature is
+    out stores nothing, and the next request pays the fee again). An issue already signed is returned
     as it is, and makes no signature; one being signed by another call is ``pending``: ask again. The day must have
     closed on the realm's clock (Conflict) and not be before the journal's first day (NotFound); a realm that issues no
-    journal refuses (Conflict). A signature that fails is kept for the IT admin team (``codex_status``) and the call is
-    Unavailable: the day stays as it was, and may be asked again.
+    journal refuses (Conflict). A signature that fails is kept for the IT admin team (``codex_status``: the reason, with the
+    realm's balance), and the caller is told only that it could not be made now (Unavailable): the day stays as it was,
+    and may be asked again.
 
     It runs no legislation, a codex can neither refuse nor hook it (``only_reads``, as ``journal_capital_issue``: it
     changes nothing a vote decided, and is not the act of a member), and it leaves an audit event only when it makes a
@@ -42,7 +44,8 @@ def journal_sign(c, args):
     reply, signed = yield from journal_signing.request(args.get("day"))
     if signed:
         # not the verification code: the audit log hides every field named ``code`` (core.op.SECRET)
-        audit("journal_sign", c.user, c.by, c.origin, args, {"day": reply["day"], "digest": reply["proof"]["digest"]})
+        audit("journal_sign", c.user, c.by, c.origin, {"day": reply["day"]},
+              {"day": reply["day"], "digest": reply["proof"]["digest"]})
     return reply
 
 

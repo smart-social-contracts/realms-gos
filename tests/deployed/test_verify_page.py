@@ -327,11 +327,24 @@ def test_the_walk_stops_at_an_earlier_document_that_is_not_the_one_named_another
     assert page("checkEarlier", forged, after, options)["ok"] is False  # signed, and the signature does not verify
 
 
-def test_a_document_that_is_only_made_is_not_valid_as_a_signed_one():
+def test_a_document_that_is_only_made_is_neither_valid_nor_red_and_never_reads_as_signed():
     signer = Signer(CANISTER)
     made = days(signer, 1)[0]
     result = page("verifyProof", made, {"canister": CANISTER})
-    assert result["valid"] is False and result["shaped"] is False
+    assert result["valid"] is False and result["shaped"] is False and result["unsigned"] is True
+    assert all(c["status"] == "pass" for c in result["checks"])  # its text hashes to its digest, and the code is the digest's
+    said = page("verdictOf", result)
+    assert said["level"] == "neutral" and said["title"] == "Made, not signed yet" and "Request signature" in said["detail"]
+    assert "valid" not in said["title"].lower()
+
+
+def test_a_made_document_whose_text_or_code_was_changed_is_red_and_not_the_neutral_kind():
+    signer = Signer(CANISTER)
+    made = days(signer, 1)[0]
+    for changed in ({**made, "canonical": made["canonical"].replace("2026-11-09", "2026-11-12")}, {**made, "code": "AAAA-AAAA-AAAA-AAAA"}):
+        result = page("verifyProof", changed, {"canister": CANISTER})
+        assert result["unsigned"] is False and result["valid"] is False
+        assert page("verdictOf", result)["level"] == "fail"
 
 
 # ---- The query to a realm: what the IC's HTTP interface and Candid expect

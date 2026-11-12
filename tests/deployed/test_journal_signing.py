@@ -328,8 +328,10 @@ def test_i_each_network_names_its_own_key_and_an_ic_realm_signs_with_key_1(capit
 
 def test_j_a_realm_set_to_sign_daily_by_a_vote_signs_each_day_as_it_closes_for_one_signature(net, capital):
     assert capital.ok("realm_info", "alice", query=True)["realm"]["journal_signing"] == "on_request"
-    before, unsigned = closed_days(capital), unsigned_days(capital)
-    capital.govern("realm_configure", {"journal_signing": "daily"})
+    before = closed_days(capital)
+    ask(capital, before[-1])  # the newest day is signed on request: every day before it is covered by it, and unsigned still
+    unsigned = unsigned_days(capital)
+    capital.govern("realm_configure", {"journal_signing": "daily"})  # and a daily realm's sweep goes on from it
     assert capital.ok("realm_info", "alice", query=True)["realm"]["journal_signing"] == "daily"
     cycles = balance(net, capital)
     for _ in range(2):
@@ -345,7 +347,7 @@ def test_j_a_realm_set_to_sign_daily_by_a_vote_signs_each_day_as_it_closes_for_o
     print(f"cycles spent in {len(new)} days, one signature each, daily: {spent:,}")
     MEASURED["a day signed by a daily realm"] = spent // len(new)
     assert abs(spent - len(new) * FEE) < 3 * SLACK, spent  # one threshold signature a day, and nothing else of cost
-    assert unsigned_days(capital) == unsigned  # the days made before the setting stay as they were
+    assert unsigned_days(capital) == unsigned  # the days before the last signed one stay as they were
 
 
 def test_k_days_that_closed_while_a_daily_realm_was_stopped_are_signed_in_batches_of_a_month(net, capital):
@@ -427,6 +429,7 @@ def test_n_a_realm_upgraded_from_the_release_that_signed_every_day_keeps_its_sig
 
 def test_o_what_making_and_signing_cost_in_instructions(capital, costs):
     day = closed_days(capital)[-1]
+    ask(capital, day)  # the newest day is signed, so that a daily sweep has nothing to sign either
     nothing = ("from core import chain, journal_signing, op\nkeep = chain.set_timer\nchain.set_timer = lambda *a, **k: None\n"
                "try:\n    op.run(journal_signing.sweep())\nfinally:\n    chain.set_timer = keep")
     costs.measure(capital, "journal sweep that makes nothing: on request", nothing)

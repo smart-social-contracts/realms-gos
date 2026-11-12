@@ -7,8 +7,10 @@ documents, oldest first, as many as it can in a batch, whether or not the day be
 call that costs no cycles, and the chain of digests it keeps is what lets one signature vouch for every day before it.
 
 A day is signed when someone asks (``request``), at most once, ever: what the realm spends on signatures is never more
-than signing every day would cost. A realm that says so (``Realm.journal_signing`` is ``daily``) signs each day as the
-sweep makes it. A call that fails, a realm short of cycles or an upgrade only delays a document or a signature. Nothing
+than signing every day would cost. A realm that says so (``Realm.journal_signing`` is ``daily``) has its sweep sign the
+days that are made and come after the last day signed (``signed_through``): a signature covers every day before it, through
+the chain. What the sweep does is worked out from that and from the documents, never from a record of what went wrong, so a
+call that fails, a realm short of cycles or an upgrade only delays a signature: the same days wait at the next sweep. Nothing
 else in the realm waits for it.
 """
 
@@ -52,26 +54,52 @@ def body(issue):
     return {"number": issue["number"], "timezone": issue["timezone"], "entries": issue["entries"]}
 
 
+def signed_through():
+    """The last day signed, or None while none is. A day after it that is made is waiting for a daily realm's sweep; a day
+    before it is covered by it, through the chain (and may still be asked for). Moved only forward, by ``note_signed``."""
+    return signing.state(KIND).get("signed")
+
+
+def note_signed(days):
+    """Keep that ``days`` have been signed: the last of them is the last signed, if it is after the one that was."""
+    last, through = max(days, key=journal.day_number), signed_through()
+    if through is None or journal.day_number(last) > journal.day_number(through):
+        signing.keep(KIND, signed=last)
+
+
 def make_closed():
     """Make the days that have closed into documents, a batch at a time, until none is left or a batch fails: the failure
-    is kept (core.signing.failures) and the next sweep tries again. The days made. A generator."""
-    made = []
+    is kept (core.signing.failures) and the next sweep tries again. A generator."""
+    if "signed" not in signing.state(KIND):
+        # The first time this release makes a day. A realm upgraded from the release that signed each day has its last
+        # signed day for the chain's head; one that is new has signed none.
+        head = journal.sealed_head()
+        signing.keep(KIND, signed=head["subject"] if head else None)
     while closed_days():
-        batch = yield from signing.make(KIND, True, closed_days, lambda day: body(journal.issue(day)))
-        if not batch:
+        if not (yield from signing.make(KIND, True, closed_days, lambda day: body(journal.issue(day)))):
             break
-        made += batch
-    return made
 
 
-def sign_made(days):
-    """Sign ``days`` (those the sweep has made now and any whose signature failed before) in batches, until all are or a
-    batch fails. A generator."""
-    failed = (signing.failures().get(KIND) or {}).get("subjects", [])
-    waiting = list(dict.fromkeys([*failed, *days]))
-    for first in range(0, len(waiting), BATCH_DAYS):
-        if (yield from signing.sign_batch(KIND, waiting[first:first + BATCH_DAYS])) is None:
+def waiting_days():
+    """The days made and not signed that come after the last signed one, oldest first, at most ``BATCH_DAYS``."""
+    head, through = journal.sealed_head(), signed_through()
+    day = journal.day_text(journal.day_number(through) + 1) if through else journal.first_day()
+    days = []
+    while head and journal.day_number(day) <= journal.day_number(head["subject"]) and len(days) < BATCH_DAYS:
+        days.append(day)
+        day = journal.day_text(journal.day_number(day) + 1)
+    return days
+
+
+def sign_made():
+    """Sign the days made after the last signed one, a batch at a time, until none is left or a batch fails. A batch that
+    fails (the realm is short of cycles, a call is refused) leaves what it held waiting, and its failure is kept for the IT
+    admin team; the next sweep finds the same days. A generator."""
+    while days := waiting_days():
+        signed = yield from signing.sign_batch(KIND, days)
+        if not signed:  # it failed, or nothing could be signed (being signed by a request, or its document gone)
             return
+        note_signed(signed)
 
 
 def sweep():
@@ -79,9 +107,9 @@ def sweep():
     hour. The next sweep is set first, so that one that fails leaves it set. A generator."""
     chain.set_timer(SWEEP, sweep)
     if journal.publishes():
-        made = yield from make_closed()
+        yield from make_closed()
         if journal.signs_daily():
-            yield from sign_made(made)
+            yield from sign_made()
 
 
 def resume():
@@ -105,9 +133,10 @@ def request(day):
             raise Conflict(f"the issue of {day} is not closed: it is signed once its day is over on the realm's clock")
         yield from make_closed()
         if not sealed(day):
-            raise Unavailable(f"the issue of {day} could not be made: "
-                              f"{(signing.failures().get(KIND) or {}).get('error', 'nothing was made')}")
+            raise Unavailable(f"the issue of {day} could not be made now: ask again later")
     proof, signed = yield from signing.request(KIND, day)
+    if signed:
+        note_signed([day])
     reply = {"day": day, "status": "signed", "proof": proof} if proof else {"day": day, "status": "pending"}
     return reply, signed
 

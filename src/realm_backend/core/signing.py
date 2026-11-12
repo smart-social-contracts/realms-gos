@@ -173,7 +173,8 @@ def head(kind):
 
 
 def failures():
-    """The last batch of each kind that could not be made or signed, ``{kind: {"subjects", "at", "error"}}``."""
+    """The last batch of each kind that could not be made or signed, ``{kind: {"subjects", "at", "error"}}``: for the IT
+    admin team to read. What an owner makes or signs next is worked out from its documents, not from this."""
     return {kind: kept["failure"] for kind, kept in (Realm["1"].manifest_data.get(STATE) or {}).items()
             if kept.get("failure")}
 
@@ -209,7 +210,9 @@ def make(kind, chained, subjects_of, body_of):
     link = previous["digest"] if previous and chained else None
     made = []
     for subject in subjects_of():
-        if SignedDocument[document_id(kind, subject)]:
+        existing = SignedDocument[document_id(kind, subject)]
+        if existing:  # made by another call: the next document follows it
+            link = existing.digest if chained else None
             continue
         text = canonical({"v": VERSION, "kind": kind, "realm": chain.self_id(), "subject": subject,
                           "body": body_of(subject), "prev": link, "made_at": chain.now(),
@@ -233,15 +236,17 @@ def being_signed(kind, subject):
 
 def sign_batch(kind, subjects):
     """Sign as one batch the made documents of ``subjects`` of ``kind`` that are not signed and are not being signed, and
-    keep the signature with them; the rest are left out. The subjects signed, [] when there are none. A failure (a realm
-    short of cycles, a call refused, a key that is not the document's) is kept for the IT admin team (``failures``),
+    keep the signature with them; the rest are left out. The subjects signed, [] when there are none (and then nothing is
+    written). A failure (a realm short of cycles, a call refused, a key that is not the document's) is kept for the IT admin
+    team (``failures``: the last, with its time and the subjects it concerned: information, nothing retries from it),
     nothing is kept of the batch, and the result is None: the owner tries again. A generator."""
     try:
         signed = yield from sign(kind, subjects)
     except Exception as e:  # noqa: BLE001  whatever it is, only the signature waits
         failed(kind, subjects, e)
         return None
-    keep(kind, failure=None)
+    if signed and state(kind).get("failure"):  # a call that signs nothing writes nothing
+        keep(kind, failure=None)
     return signed
 
 
@@ -287,13 +292,13 @@ def request(kind, subject):
     """The proof of the made document ``subject`` of ``kind``, signing it now if it is not signed (what anyone's
     request for a signature does). ``(proof, signed)``: ``signed`` is whether this call made the signature, and the proof is
     None while another call is signing the document. NotFound when it is not made, Unavailable when the signature could not
-    be made, whose error is kept (``failures``) and which leaves the document as it was: it may be asked again. A
-    generator."""
+    be made, whose reason is kept (``failures``) for the IT admin team and not told to the caller (it holds the realm's
+    balance and what the management canister said): the document is as it was, and may be asked again. A generator."""
     if SignedDocument[document_id(kind, subject)] is None:
         raise NotFound(f"no document {kind}:{subject[:40]} is made")
     signed = yield from sign_batch(kind, [subject])
     if signed is None:
-        raise Unavailable(f"the signature could not be made: {failures()[kind]['error']}")
+        raise Unavailable("the signature could not be made now: ask again later")
     found = proof(kind, subject)
     return (found if found["signature"] else None), bool(signed)
 
