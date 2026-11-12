@@ -187,7 +187,8 @@ A page may hold fewer rows than `count` when a filter drops some; keep going unt
 
 Every successful call of a non-read operation is stored as an `Event`: operation, user, signer,
 origin, arguments and the plain fields of the result, with secrets (`code`, `private_data`,
-`payload`, `ciphertext`) removed. The latest 2,000 events are kept. Read them with `events`
+`payload`, `ciphertext`) removed. The latest 2,000 events are kept: each new event drops the one that falls out,
+with `Event.forget`, about 1.7 M instructions (`Entity.delete` would cost 20 M here). Read them with `events`
 (permission `realm.monitor`).
 
 ## Calling operations from Python
