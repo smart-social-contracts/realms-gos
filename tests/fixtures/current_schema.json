@@ -3823,6 +3823,11 @@
     "kind": "property",
     "type": "String"
    },
+   "told_population": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
    "zones": {
     "constraints": {
      "max_length": 65536
@@ -3930,6 +3935,11 @@
    },
    "it_team": {
     "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "journal_signing": {
+    "default": "on_request",
     "kind": "property",
     "type": "String"
    },
@@ -4429,6 +4439,42 @@
     "type": "OneToMany"
    }
   },
+  "version": 1
+ },
+ "SyncChange": {
+  "fields": {
+   "at": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "epoch": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "id": {
+    "has_default": false,
+    "kind": "property",
+    "type": "String"
+   },
+   "key": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   },
+   "n": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "part": {
+    "default": "",
+    "kind": "property",
+    "type": "String"
+   }
+  },
+  "relationships": {},
   "version": 1
  },
  "SyncSource": {

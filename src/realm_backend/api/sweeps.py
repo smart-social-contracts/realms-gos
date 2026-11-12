@@ -64,8 +64,7 @@ def held():
 
 def keep(config):
     """On a quarter, keep the rules the capital sent: the last ones it received stand until it hears again."""
-    r = quarters.realm()
-    r.sync_state = {**(r.sync_state or {}), "sweep": config}
+    quarters.remember(sweep=config)
     resume()
 
 

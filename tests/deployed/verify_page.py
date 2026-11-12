@@ -103,13 +103,34 @@ class Signer:
         return {"canonical": text, "digest": digest.hex(), "root": digest.hex(), "path": [],
                 "signature": self.private.sign(digest).hex(), "code": code(digest.hex())}
 
+    def text_of(self, subject, body, prev, stamp):
+        """The text of a document: ``stamp`` is ``{"signed_at": t}``, as the realm wrote it when it signed each document as
+        it made it, or ``{"made_at": t}``, as it writes it now."""
+        return canonical({"v": 1, "kind": self.kind, "realm": self.realm, "subject": subject, "body": body, "prev": prev,
+                          **stamp, "key": {"algorithm": "ed25519", "name": self.key_name, "path": "realms:" + self.kind,
+                                           "public_key": self.public.hex()}})
+
+    def make(self, batch, made_at=1_790_000_000):
+        """``batch`` made as the realm makes documents now: chained, with ``made_at``, and no signature. The proofs, in
+        order, with an empty root, path and signature."""
+        proofs, prev = [], self.head
+        for subject, body in batch:
+            text = self.text_of(subject, body, prev, {"made_at": made_at})
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            proofs.append({"canonical": text, "digest": digest, "root": "", "path": [], "signature": "", "code": code(digest)})
+            prev = self.head = digest
+        return proofs
+
+    def sign_made(self, proof):
+        """The proof of a document made, signed alone when asked for: its digest is the root, and the text is as it was."""
+        digest = bytes.fromhex(proof["digest"])
+        return {**proof, "root": digest.hex(), "signature": self.private.sign(digest).hex()}
+
     def sign(self, batch, chained=True, signed_at=1_790_000_000):
         """``batch``: ``[(subject, body)]``. The proofs, in order."""
         texts, prev = [], self.head if chained else None
         for subject, body in batch:
-            text = canonical({"v": 1, "kind": self.kind, "realm": self.realm, "subject": subject, "body": body, "prev": prev,
-                              "signed_at": signed_at, "key": {"algorithm": "ed25519", "name": self.key_name,
-                                                              "path": "realms:" + self.kind, "public_key": self.public.hex()}})
+            text = self.text_of(subject, body, prev, {"signed_at": signed_at})
             texts.append(text)
             prev = hashlib.sha256(text.encode()).hexdigest() if chained else None
         digests = [hashlib.sha256(text.encode()).digest() for text in texts]

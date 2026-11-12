@@ -75,5 +75,7 @@ and `query=True` reads. A realm's id is `realm.cid`.
 Most of a flow can be tested without a wasm in `tests/ggg`, where the realm runs in the test's process. There
 `fake_chain.peer(canister_id, method=reply, ...)` plays another canister, for example a sync source or a follower:
 it answers by method name from a fixture or a function, records what it was sent (`peer.sent(method)`), and fails on
-purpose with `rejects(...)` or `traps(...)`. See `tests/ggg/test_scripted_peers.py`. Use PocketIC for what only the
-wasm shows: timers, upgrades, the replica's limits and the instruction cost.
+purpose with `rejects(...)` or `traps(...)`. See `tests/ggg/test_scripted_peers.py`. For a flow that follows a change from
+a capital to its quarters, `tests/ggg/sites.py` runs several realms in one process, each with its own database and heap
+(`tests/ggg/test_quarter_sync_deltas.py`). Use PocketIC for what only the wasm shows: timers, upgrades, the replica's
+limits and the instruction cost.
