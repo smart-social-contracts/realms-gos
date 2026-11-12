@@ -1,15 +1,19 @@
 """Signatures by the realm's canister on its documents (docs/codices/journal-signature.md). The official journal is the
 first kind of document (core.journal_signing).
 
-A document has a ``kind`` and a ``subject`` (a journal's is its day). Its owner builds the ``body`` from stored facts
-and asks for a batch to be signed: the documents of one kind, signed together. Each is written as canonical JSON, and
-its SHA-256 is a leaf of a Merkle tree. The realm has the IC's threshold Schnorr key for this canister and the kind
-(Ed25519, the management canister's ``sign_with_schnorr``) sign the tree's root: only code running as this canister can
-ask for a signature under that key, and the path ``realms:<kind>`` keeps one kind's key from signing another's
-documents. A batch of one has its digest for root. A document keeps its text, its digest, the root, its path in the
-tree, the signature and a short verification code, and a chained kind links each document to the one before it by
-digest, so that one altered or dropped later shows. A document is signed once and never again: a second signature of
-the same root need not be the same.
+A document has a ``kind`` and a ``subject`` (a journal's is its day). Its owner builds the ``body`` from stored facts and
+asks for the document to be made: written as canonical JSON, hashed with SHA-256 and kept, as it is, with a short
+verification code. A chained kind links each document to the one before it by digest, so that one altered or dropped later
+shows; making a document costs SHA-256 and nothing else. A signature is asked for later, for one document or a batch of
+them: their digests are the leaves of a Merkle tree, and the realm has the IC's threshold Schnorr key for this canister
+and the kind (Ed25519, the management canister's ``sign_with_schnorr``) sign the tree's root. Only code running as this
+canister can ask for a signature under that key, and the path ``realms:<kind>`` keeps one kind's key from signing another's
+documents. A batch of one has its digest for root. The signature is added to the document and never replaced: a second
+signature of the same root need not be the same, and a document is signed once.
+
+The text is fixed when the document is made, and what the signature attests is that text as it was made, at ``made_at``,
+whenever the signature is asked for. The documents made before a signature could wait were signed as they were made, and
+their text says ``signed_at`` where a new one says ``made_at``: they are unchanged.
 """
 
 import hashlib
@@ -17,7 +21,7 @@ import json
 
 from core import chain, ic_keys
 from core.candid import Reader, idl_hash
-from core.db import Fail, NotFound, first
+from core.db import Fail, NotFound, Unavailable, first
 from ggg import Realm, SignedDocument
 
 MANAGEMENT = "aaaaa-aa"
@@ -33,6 +37,11 @@ KIND_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789-"  # ASCII only: a kind is a 
 BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"  # RFC 4648: the canister's base64 has no b32encode
 CODE_BYTES = 10  # of the digest that the verification code keeps: 80 bits, 16 digits in base32
 STATE = "signing"  # in Realm.manifest_data: {kind: {"head": {"subject", "digest"}, "failure": {...} or None}}
+# The documents being signed now, ``{(kind, subject): when the call began}``: in the heap, since a call out of the canister
+# does not outlive the heap, and a document being signed is not signed again meanwhile. A trap after the call is back would
+# leave an entry no one removes, so one older than STALE seconds is no longer counted.
+IN_FLIGHT = {}
+STALE = 600
 
 
 # ---- The key
@@ -143,7 +152,7 @@ def merkle(leaves):
     return level[0][0], paths
 
 
-# ---- Signing
+# ---- State
 
 
 def state(kind):
@@ -158,85 +167,145 @@ def keep(kind, **values):
 
 
 def head(kind):
-    """The last document of a chained ``kind`` that was signed, ``{"subject", "digest"}``; None while none is."""
+    """The last document of a chained ``kind`` that was made, ``{"subject", "digest"}``; None while none is. A realm that
+    signed each document as it was made has the last one signed here."""
     return state(kind).get("head")
 
 
 def failures():
-    """The last batch of each kind that could not be signed, ``{kind: {"subjects", "at", "error"}}``."""
+    """The last batch of each kind that could not be made or signed, ``{kind: {"subjects", "at", "error"}}``."""
     return {kind: kept["failure"] for kind, kept in (Realm["1"].manifest_data.get(STATE) or {}).items()
             if kept.get("failure")}
+
+
+def failed(kind, subjects, error):
+    """Keep for the IT admin team that ``subjects`` of ``kind`` could not be made or signed, and why."""
+    keep(kind, failure={"subjects": subjects, "at": chain.now(), "error": f"{type(error).__name__}: {error}"[:500]})
 
 
 def document_id(kind, subject):
     return f"{kind}:{subject}"
 
 
-def sign_batch(kind, documents, chained, fresh=None):
-    """Sign ``documents``, a list of ``(subject, body)`` in order, as one batch of ``kind``, and keep them. A
-    ``chained`` kind links each to the one before it, the first to the last signed (``head``). ``fresh``, if given, is
-    called when the signature is back and returns the documents as they are by then: a batch whose documents have
-    changed meanwhile is not kept. True when the batch is signed or another has signed it meanwhile. A failure (a realm
-    short of cycles, a call refused, documents changed while it was signed) is kept for the IT admin team
-    (``failures``, shown in ``codex_status``), nothing is kept of the batch, and the result is False: the owner tries
-    again at its next sweep. A generator."""
-    subjects = [subject for subject, _ in documents]
+# ---- Making the documents
+
+
+def make(kind, chained, subjects_of, body_of):
+    """Make the documents of ``kind`` that ``subjects_of()`` names, oldest first, with the body ``body_of(subject)`` gives
+    each, and keep them unsigned. A ``chained`` kind links each to the one before it, the first to the last made
+    (``head``). The text names the realm's public key, which is asked for first: the one wait. So the subjects and the
+    bodies are taken once it is back, in one message, and what is made is what is there then; a subject made meanwhile by
+    another call is left to it. A failure (the key could not be had) is kept for the IT admin team (``failures``, shown in
+    ``codex_status``), nothing is made, and the result is None: the owner tries again at its next sweep. The subjects made
+    by this call. A generator."""
     try:
-        yield from sign(kind, documents, chained, fresh)
+        path(kind)  # a kind that is no name is refused before anything else
+        name = ic_keys.key_name()
+        key = yield from public_key(kind, name)
+    except Exception as e:  # noqa: BLE001  whatever it is, only the documents wait
+        failed(kind, subjects_of(), e)
+        return None
+    previous = head(kind)
+    link = previous["digest"] if previous and chained else None
+    made = []
+    for subject in subjects_of():
+        if SignedDocument[document_id(kind, subject)]:
+            continue
+        text = canonical({"v": VERSION, "kind": kind, "realm": chain.self_id(), "subject": subject,
+                          "body": body_of(subject), "prev": link, "made_at": chain.now(),
+                          "key": {"algorithm": ALGORITHM, "name": name, "path": path(kind), "public_key": key.hex()}})
+        digest = digest_of(text)
+        SignedDocument(id=document_id(kind, subject), code=code_of(digest), canonical=text, digest=digest)
+        made.append(subject)
+        link = digest if chained else None
+    if chained and made:
+        keep(kind, head={"subject": made[-1], "digest": link})
+    return made
+
+
+# ---- Signing
+
+
+def being_signed(kind, subject):
+    since = IN_FLIGHT.get((kind, subject))
+    return since is not None and chain.now() - since < STALE
+
+
+def sign_batch(kind, subjects):
+    """Sign as one batch the made documents of ``subjects`` of ``kind`` that are not signed and are not being signed, and
+    keep the signature with them; the rest are left out. The subjects signed, [] when there are none. A failure (a realm
+    short of cycles, a call refused, a key that is not the document's) is kept for the IT admin team (``failures``),
+    nothing is kept of the batch, and the result is None: the owner tries again. A generator."""
+    try:
+        signed = yield from sign(kind, subjects)
     except Exception as e:  # noqa: BLE001  whatever it is, only the signature waits
-        keep(kind, failure={"subjects": subjects, "at": chain.now(), "error": f"{type(e).__name__}: {e}"[:500]})
-        return False
+        failed(kind, subjects, e)
+        return None
     keep(kind, failure=None)
-    return True
+    return signed
 
 
-def sign(kind, documents, chained, fresh):
-    """What ``sign_batch`` does, raising what goes wrong. The key is named once, so that a change of network while the
-    calls are out cannot make the text name one key and the signature another. The texts are made once the public key is
-    known, and the batch is dropped if it was overtaken while the calls were out, so that each document has one
-    signature. A generator."""
-    path(kind)  # a kind that is no name is refused before anything else
-    previous, name = head(kind), ic_keys.key_name()
-    if any(SignedDocument[document_id(kind, subject)] for subject, _ in documents):
-        raise Fail(f"a document of {kind} is signed already")
+def sign(kind, subjects):
+    """What ``sign_batch`` does, raising what goes wrong. The key is named once, and each text must name it too: a text
+    that names another key (the realm's network changed since it was made) would not verify. A document is marked as
+    being signed while the call is out, so that no other call asks for its signature; one signed meanwhile, which a mark
+    lost to a trap allows, keeps its signature. A generator."""
+    path(kind)
+    name = ic_keys.key_name()
+    waiting = []
+    for subject in subjects:
+        stored = SignedDocument[document_id(kind, subject)]
+        if stored is not None and not stored.signature and not being_signed(kind, subject):
+            waiting.append((subject, stored))
+    if not waiting:
+        return []
+    for subject, stored in waiting:
+        if json.loads(stored.canonical)["key"]["name"] != name:
+            raise Fail(f"the document {subject} of {kind} was made for another key than {name}, the realm's now")
     # The balance, not what is spendable above the freezing reserve: a call that would take the realm below the reserve
     # still traps, and nothing is recorded of it (the realm's balance is topped up, as for any other call it makes).
     if chain.cycles() < attached(name):
         raise Fail(f"the realm has {chain.cycles()} cycles and a signature with {name} needs {attached(name)} attached")
-    key = yield from public_key(kind, name)
-    texts, link = [], previous["digest"] if previous and chained else None
-    for subject, body in documents:
-        text = canonical({"v": VERSION, "kind": kind, "realm": chain.self_id(), "subject": subject, "body": body,
-                          "prev": link, "signed_at": chain.now(),
-                          "key": {"algorithm": ALGORITHM, "name": name, "path": path(kind),
-                                  "public_key": key.hex()}})
-        texts.append((subject, text, digest_of(text)))
-        link = texts[-1][2] if chained else None
-    root, paths = merkle([bytes.fromhex(digest) for _, _, digest in texts])
-    signature = yield from sign_root(kind, name, root)
-    if overtaken(kind, previous, chained, texts):
-        return
-    if fresh is not None and fresh() != documents:
-        raise Fail("the documents changed while they were signed")
-    for (subject, text, digest), leaf_path in zip(texts, paths):
-        SignedDocument(id=document_id(kind, subject), code=code_of(digest), canonical=text, digest=digest,
-                       root=root.hex(), path=leaf_path, signature=signature.hex())
-    if chained:
-        keep(kind, head={"subject": texts[-1][0], "digest": texts[-1][2]})
+    root, paths = merkle([bytes.fromhex(stored.digest) for _, stored in waiting])
+    for subject, _ in waiting:
+        IN_FLIGHT[(kind, subject)] = chain.now()
+    try:
+        signature = yield from sign_root(kind, name, root)
+    finally:
+        for subject, _ in waiting:
+            IN_FLIGHT.pop((kind, subject), None)
+    signed = []
+    for (subject, _), leaf_path in zip(waiting, paths):
+        stored = SignedDocument[document_id(kind, subject)]
+        if not stored.signature:
+            stored.root, stored.path, stored.signature = root.hex(), leaf_path, signature.hex()
+            signed.append(subject)
+    return signed
 
 
-def overtaken(kind, previous, chained, texts):
-    """Whether another batch has signed since this one began: the chain has moved, or a subject is signed."""
-    return (chained and head(kind) != previous) or any(SignedDocument[document_id(kind, s)] for s, _, _ in texts)
+def request(kind, subject):
+    """The proof of the made document ``subject`` of ``kind``, signing it now if it is not signed (what anyone's
+    request for a signature does). ``(proof, signed)``: ``signed`` is whether this call made the signature, and the proof is
+    None while another call is signing the document. NotFound when it is not made, Unavailable when the signature could not
+    be made, whose error is kept (``failures``) and which leaves the document as it was: it may be asked again. A
+    generator."""
+    if SignedDocument[document_id(kind, subject)] is None:
+        raise NotFound(f"no document {kind}:{subject[:40]} is made")
+    signed = yield from sign_batch(kind, [subject])
+    if signed is None:
+        raise Unavailable(f"the signature could not be made: {failures()[kind]['error']}")
+    found = proof(kind, subject)
+    return (found if found["signature"] else None), bool(signed)
 
 
 # ---- Reading
 
 
 def proof(kind, subject):
-    """The proof of the signed document ``subject`` of ``kind``, or None if it is not signed: its ``canonical`` text,
-    which names the realm, kind, subject, body, the previous document's digest and the key; its ``digest``; the ``root``
-    of its batch and its ``path`` to it; the ``signature`` of the root; and the verification ``code``. All as stored."""
+    """The proof of the made document ``subject`` of ``kind``, or None if it is not made: its ``canonical`` text, which
+    names the realm, kind, subject, body, the previous document's digest and the key; its ``digest``; the ``root`` of its
+    batch and its ``path`` to it; the ``signature`` of the root; and the verification ``code``. All as stored. Until the
+    document is signed its ``root``, ``path`` and ``signature`` are empty."""
     stored = SignedDocument[document_id(kind, subject)]
     if stored is None:
         return None

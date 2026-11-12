@@ -4,8 +4,9 @@ An entry is appended when the realm learns of what it reports, stamped with the 
 on its own clock (core.localtime), which on a capital is the realm's official time (§4.5). Stamping the day, instead of
 working it out when an issue is read, keeps a past issue as it was when the realm changes its zone. An issue is the
 entries of its day, and it exists for every day from the journal's first day to today, with or without entries.
-Today's is open; a day that has closed is signed by the realm's canister (core.journal_signing), and no entry is ever
-stamped into a signed day. A quarter issues nothing: its capital does.
+Today's is open; a day that has closed is made into a document of the realm's canister, linked to the day before
+(core.journal_signing), and no entry is ever stamped into a day made. The realm signs a day when anyone asks, or each day
+as it closes if the realm says so (``Realm.journal_signing``). A quarter issues nothing: its capital does.
 
 The journal only reports. Nothing here reads or writes a codex's ``activates_at``: legislation applies when the
 realm's operations run it, never when the journal prints it.
@@ -18,12 +19,18 @@ from ggg import Extension, JournalEntry, LayeredCodex, Proposal, Realm
 EXTENSION = "journal"
 STATE = "journal"  # in Realm.manifest_data: {"first_day": "YYYY-MM-DD", "failure": the last entry not recorded, why}
 SHOWN = ("id", "at", "kind", "details")
+SIGNING_MODES = ("on_request", "daily")  # the values of Realm.journal_signing
 
 
 def publishes():
     """Whether this canister issues a journal: a capital or an independent realm, not a quarter (§9.6)."""
     realm = Realm["1"]
     return not (realm.is_quarter and not realm.is_capital)
+
+
+def signs_daily():
+    """Whether the realm signs each day as it closes. Otherwise it signs a day when someone asks."""
+    return Realm["1"].journal_signing == "daily"
 
 
 # ---- Days
@@ -60,8 +67,8 @@ def fix_first_day():
     realm = Realm["1"]
     data, today = realm.manifest_data, local_day(chain.now())
     first = data.get(STATE, {}).get("first_day")
-    # once an issue is signed the numbering is fixed: the issues already signed count from the first day
-    if first is None or (day_number(today) < day_number(first) and signed_head() is None):
+    # once an issue is made the numbering is fixed: the issues already made count from the first day
+    if first is None or (day_number(today) < day_number(first) and sealed_head() is None):
         realm.manifest_data = {**data, STATE: {"first_day": today}}
 
 
@@ -69,16 +76,17 @@ def first_day():
     return Realm["1"].manifest_data[STATE]["first_day"]
 
 
-def signed_head():
-    """The last issue signed, ``{"subject": its day, "digest"}``, or None while none is (core.journal_signing)."""
+def sealed_head():
+    """The last issue made into a document, ``{"subject": its day, "digest"}``, or None while none is
+    (core.journal_signing)."""
     return signing.head("journal")
 
 
 def open_day():
-    """The day of the issue that is open, ``YYYY-MM-DD``: the realm's local day, but never one already signed. A change
-    of zone to the west can take the local day back to a signed one, and an entry stamped there would sit in a closed
-    issue: the day after the last signed one is the open day until the clock has reached it."""
-    today, head = local_day(chain.now()), signed_head()
+    """The day of the issue that is open, ``YYYY-MM-DD``: the realm's local day, but never one already made into a
+    document. A change of zone to the west can take the local day back to one, and an entry stamped there would sit in a
+    closed issue: the day after the last made is the open day until the clock has reached it."""
+    today, head = local_day(chain.now()), sealed_head()
     if head and day_number(today) <= day_number(head["subject"]):
         return day_text(day_number(head["subject"]) + 1)
     return today
