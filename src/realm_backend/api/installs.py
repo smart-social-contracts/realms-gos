@@ -661,8 +661,8 @@ def own_layer(current, realm):
 
 def installed_layers(current, realm):
     """The layers from above that the active codex runs, top to bottom, as it runs them: each ``{source, version,
-    effective_from, chapters, calendar, vouched_by}``, the release it installed, when it took effect (None for a layer
-    installed before the date was kept) and the source whose record vouched for it. None under a legacy codex or none."""
+    published, chapters, calendar, vouched_by}``, the release it installed, when its publisher published it (None for a
+    layer installed before that was kept) and the source whose record vouched for it. None under a legacy codex or none."""
     if not isinstance(current, LayeredCodex):
         return []
     layers = {}
@@ -672,7 +672,7 @@ def installed_layers(current, realm):
             continue
         layer = layers.setdefault(source, {"source": source, "version": entry["version"], "chapters": {},
                                            "calendar": None, "vouched_by": entry["vouched_by"],
-                                           "effective_from": entry.get("effective_from")})
+                                           "published": entry.get("published")})
         if domain == change_list.CALENDAR:
             layer["calendar"] = entry["sha256"]
         else:
@@ -691,12 +691,12 @@ def activates_at_of(job):
 
 def entries_of(job, planned, vouched_by, listed):
     """What the codex row keeps per chapter (§8, §9.1): its source, version and checksum, who vouched for it, when the
-    release it belongs to took effect (``effective_from``: compliance compares by it, §11.6), and how and when its bytes
-    came: fetched by this job, as the active codex already had them, or found stored."""
+    release it belongs to was published (``published``: compliance orders releases by it, §11.6), and how and when its
+    bytes came: fetched by this job, as the active codex already had them, or found stored."""
     current = codex.active()
     before = current.chapters if isinstance(current, LayeredCodex) else {}
     urls = {entry["chapter"]: entry for entry in listed["set"]}
-    dates = effective_dates(job, before)
+    published = published_times(job, before)
     fetched_now = job.staged.get("fetched", {})
     entries = {}
     for chapter, item in change_list.named(planned):
@@ -712,22 +712,22 @@ def entries_of(job, planned, vouched_by, listed):
             came = {"route": "stored", "url": "", "fetched_at": chain.now(), "size": stored_size(sha256)}
         entries[chapter] = {"source": item["source"], "version": item["version"], "sha256": sha256,
                             "vouched_by": vouched_by[chapter], **came}
-        if dates.get((item["source"], item["version"])) is not None:
-            entries[chapter]["effective_from"] = dates[(item["source"], item["version"])]
+        if published.get((item["source"], item["version"])) is not None:
+            entries[chapter]["published"] = published[(item["source"], item["version"])]
     return entries
 
 
-def effective_dates(job, before):
-    """When the release of each layer from above that the new codex runs took effect, ``{(source, version): seconds}``: the
-    release this job installs, as the record that vouches for it lists it, and the releases the active codex already runs,
-    as it kept them. A layer installed before the date was kept has none, which compliance reads as a version it cannot
-    place (§11.6)."""
-    dates = {(entry["source"], entry["version"]): entry.get("effective_from") for entry in before.values()}
+def published_times(job, before):
+    """When the publisher published the release of each layer from above that the new codex runs, ``{(source, version):
+    seconds}``: the release this job installs, as the record that vouches for it lists it (every record entry carries it,
+    and a relay copies it), and the releases the active codex already runs, as it kept them. A layer installed before the
+    time was kept has none, which compliance reads as a version it cannot place (§11.6)."""
+    times = {(entry["source"], entry["version"]): entry.get("published") for entry in before.values()}
     vouching = job.staged.get("layers", {}).get("vouching")
     if vouching is not None:
         release = vouching["release"]
-        dates[(release["source"], release["version"])] = release["effective_from"]
-    return dates
+        times[(release["source"], release["version"])] = release["published"]
+    return times
 
 
 def stored_size(sha256):

@@ -43,30 +43,34 @@ def by_layer(record):
 
 def after(releases, layer):
     """The releases of one layer, oldest first, that come after what the realm runs of it, ``layer`` (``{version,
-    effective_from, vouched_by}``, None when it runs none: all of them). A version the record lists has the releases the
-    record lists after it. One the record does not list is placed by effective date: the releases that take effect after
-    it, and none when the realm did not keep its date (a layer installed before the date was kept, §11.6): a version the
-    record cannot place is never behind it."""
+    published, vouched_by}``, None when it runs none: all of them). A version the record lists has the releases the
+    record lists after it. One the record does not list is placed by ``published``, the publisher's chain time on every
+    entry of a record, relays copy it: the releases published strictly later, and none when the realm did not keep the
+    time (a layer installed before it was kept, §11.6). An effective date does not order releases (the versions of one
+    publication can take effect together, and an urgent one earlier than the release before it), and a tie or a time
+    not known leaves a version the record cannot place: it is never behind it."""
     if layer is None:
         return releases
     versions = [release["version"] for release in releases]
     if layer["version"] in versions:
         return releases[versions.index(layer["version"]) + 1:]
-    date = layer.get("effective_from")
-    return [release for release in releases if date is not None and release["effective_from"] > date]
+    published = layer.get("published")
+    return [release for release in releases if published is not None and release["published"] > published]
 
 
 def went_back(releases, layer, by):
     """Whether the source ``by`` (the layer a record is the publisher's own record of), whose record lists ``releases`` of
-    the layer, vouched for what the realm runs of it and now lists only an older release: the source went back (it
-    reverted a layer it relays, §11.6). The record does not list what the realm runs, nothing it lists takes effect after
-    it, and the realm kept the date to say so."""
-    return (bool(by) and layer is not None and layer.get("vouched_by") == by and layer.get("effective_from") is not None
-            and layer["version"] not in [release["version"] for release in releases] and not after(releases, layer))
+    the layer, vouched for what the realm runs of it and now lists only older ones: the source went back (it reverted a
+    layer it relays, §11.6). The record does not list what the realm runs, and everything it lists was published strictly
+    earlier than that, which the realm kept the time of to say so: a tie, or a time not kept, is no step back."""
+    published = None if layer is None else layer.get("published")
+    return (bool(by) and published is not None and layer.get("vouched_by") == by and bool(releases)
+            and layer["version"] not in [release["version"] for release in releases]
+            and all(release["published"] < published for release in releases))
 
 
 def judged(record, running, now):
-    """The flag of a realm that runs ``running`` (``{source: {version, effective_from, vouched_by}}``, its layers from
+    """The flag of a realm that runs ``running`` (``{source: {version, published, vouched_by}}``, its layers from
     above) against the ``record`` of one of its sync sources, at ``now`` (§11.6): compliant while no layer the record
     lists has a release in effect that comes after what the realm runs of it (``after``); else non-compliant since the
     earliest such release, naming the stale layers. A layer the realm runs and the record does not list is no reason to

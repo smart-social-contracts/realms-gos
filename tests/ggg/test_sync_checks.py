@@ -40,10 +40,10 @@ class Water(above("water")):
 '''
 
 
-def entry(version, effective_from, as_version=None):
-    """Release ``version`` of arcadia as a record lists it, in force from ``effective_from``; ``as_version`` lists the
-    same chapters under another version."""
-    return {**arcadia.layer(version), "version": as_version or version, "published": 5,
+def entry(version, effective_from, as_version=None, published=5):
+    """Release ``version`` of arcadia as a record lists it, published at ``published`` and in force from
+    ``effective_from``; ``as_version`` lists the same chapters under another version."""
+    return {**arcadia.layer(version), "version": as_version or version, "published": published,
             "effective_from": effective_from}
 
 
@@ -276,30 +276,37 @@ def test_an_unexpected_error_in_one_sources_check_leaves_the_others_checked(monk
     assert (found["other"]["compliance"], found["other"]["error"]) == (stale_since(6), "")
 
 
-def runs(version, date=None, by="arcadia"):
-    """What the realm runs of arcadia: release ``version``, which took effect at ``date`` (None for a layer installed before
-    the date was kept), as the record of ``by`` vouched for it."""
-    return {"arcadia": {"version": version, "effective_from": date, "vouched_by": by}}
+def runs(version, published=None, by="arcadia"):
+    """What the realm runs of arcadia: release ``version``, which its publisher published at ``published`` (None for a layer
+    installed before that was kept), as the record of ``by`` vouched for it."""
+    return {"arcadia": {"version": version, "published": published, "vouched_by": by}}
+
+
+def listed(version, published, effective_from=None):
+    """Release ``version`` as a record lists it, published at ``published``, in force from ``effective_from`` (the time it
+    was published, if none): the fixture's chapters under that version."""
+    return entry("1.0.0", published if effective_from is None else effective_from, as_version=version, published=published)
 
 
 def test_the_flag_is_judged_against_each_record():
-    record = {"source": "arcadia", "releases": [entry("1.0.0", 6), entry("2.0.0", 100)]}
+    record = {"source": "arcadia", "releases": [entry("1.0.0", 6), entry("2.0.0", 100)]}  # both published at 5
     assert compliance.judged(record, runs("2.0.0"), 50) == "compliant"
     assert compliance.judged(record, runs("1.0.0"), 50) == "compliant"  # 2.0.0 is not in effect yet
     assert compliance.judged(record, runs("1.0.0"), 100) == stale_since(100)
     assert compliance.judged(record, {}, 100) == stale_since(6)  # the earliest release in effect it misses
     assert compliance.judged({"releases": []}, {}, 100) == "compliant"
-    # a version the record does not list is placed by its effective date: 1.0.0 took effect after 0.9.0 (at 3)
+    # a version the record does not list is placed by the time it was published: 1.0.0 came after 0.9.0 (at 3)
     assert compliance.judged(record, runs("0.9.0", 3), 7) == stale_since(6)
-    assert compliance.judged(record, runs("0.9.0", 6), 7) == "compliant"  # at the same time as 1.0.0: not after it
-    # and one the realm kept no date for cannot be placed: never behind
+    assert compliance.judged(record, runs("0.9.0", 5), 7) == "compliant"  # published together: a tie places nothing
+    assert compliance.judged(record, runs("0.9.0", 6), 7) == "compliant"  # published after both
+    # and one the realm kept no time for cannot be placed: never behind
     assert compliance.judged(record, runs("0.9.0"), 7) == "compliant"
 
 
 def test_a_version_the_record_does_not_list_is_never_a_reason_to_catch_up_to_an_older_release():
     """The realm runs 2.6.0 or 9.9.9 and the record lists 2.3.0 and 2.4.0: compliant, with a note, and nothing older
     offered as catching up. Running 2.3.0 is behind 2.4.0, running 2.4.0 is compliant (§11.6)."""
-    record = {"source": "arcadia", "releases": [entry("1.0.0", 100, as_version="2.3.0"), entry("1.0.0", 200, as_version="2.4.0")]}
+    record = {"source": "arcadia", "releases": [listed("2.3.0", 100), listed("2.4.0", 200)]}
     two_four = {"source": "arcadia", "version": "2.4.0", "effective_from": 200}
 
     def judge(running):
@@ -308,21 +315,47 @@ def test_a_version_the_record_does_not_list_is_never_a_reason_to_catch_up_to_an_
 
     assert judge(runs("2.3.0", 100)) == (stale_since(200), [two_four], [])
     assert judge(runs("2.4.0", 200)) == ("compliant", [], [])
-    assert judge(runs("2.3.0")) == (stale_since(200), [two_four], [])  # listed: placed by the record, no date needed
-    note = {"source": "arcadia", "runs": "2.6.0", "lists": "2.4.0"}
-    assert judge(runs("2.6.0")) == ("compliant", [], [{**note, "kind": "unlisted"}])  # no date kept: cannot be placed
-    assert judge(runs("2.6.0", 300, by="elsewhere")) == ("compliant", [], [{**note, "kind": "unlisted"}])  # not this source's
-    assert judge(runs("9.9.9", 300, by="elsewhere")) == (
-        "compliant", [], [{"source": "arcadia", "kind": "unlisted", "runs": "9.9.9", "lists": "2.4.0"}])
-    assert judge(runs("9.9.9")) == ("compliant", [], [{"source": "arcadia", "kind": "unlisted", "runs": "9.9.9", "lists": "2.4.0"}])
-    # a date between the two: 2.4.0 took effect after what the realm runs, so it is behind it
+    assert judge(runs("2.3.0")) == (stale_since(200), [two_four], [])  # listed: placed by the record, no time needed
+    unlisted = {"source": "arcadia", "kind": "unlisted", "runs": "2.6.0", "lists": "2.4.0"}
+    assert judge(runs("2.6.0")) == ("compliant", [], [unlisted])  # no time kept: cannot be placed
+    assert judge(runs("2.6.0", 300, by="elsewhere")) == ("compliant", [], [unlisted])  # not this source's to go back from
+    assert judge(runs("9.9.9", 300, by="elsewhere")) == ("compliant", [], [{**unlisted, "runs": "9.9.9"}])
+    assert judge(runs("9.9.9")) == ("compliant", [], [{**unlisted, "runs": "9.9.9"}])
+    # published between the two: 2.4.0 came after what the realm runs, so it is behind it
     assert judge(runs("2.3.5", 150)) == (stale_since(200), [two_four], [])
+    # published together with the newest it lists: a tie, which places nothing: a note, never behind, never a step back
+    assert judge(runs("2.6.0", 200)) == ("compliant", [], [unlisted])
+
+
+def test_effective_dates_do_not_order_releases_but_the_times_they_were_published_do():
+    """The reviewer's two cases (§11.6). Releases of one publication take effect together: a relay that moves from 2.5.0
+    to 2.6.0 is the realm catching up, not the source going back. And an urgent 2.5.1, published after 2.6.0, can take
+    effect before it: a relay that goes back to 2.6.0 is a source going back, not the realm being behind."""
+    together = {"source": "arcadia", "releases": [listed("2.6.0", 300, effective_from=1000)]}  # 2.5.0 took effect at 1000 too
+    running = runs("2.5.0", 250)
+    assert compliance.judged(together, running, 500) == "compliant"  # 2.6.0 is not in effect yet
+    assert compliance.installable(together, running) == [{"source": "arcadia", "version": "2.6.0", "effective_from": 1000}]
+    assert compliance.notes(together, running) == []  # no step back, no note: it is newer
+    assert compliance.judged(together, running, 2000) == stale_since(1000)  # in effect: behind, offered as catching up
+    assert compliance.installable(together, running) == [{"source": "arcadia", "version": "2.6.0", "effective_from": 1000}]
+
+    urgent = runs("2.5.1", 400)  # published after 2.6.0 (300), in force at 50, before it (1000)
+    back = {"source": "arcadia", "releases": [listed("2.6.0", 300, effective_from=1000)]}
+    assert compliance.judged(back, urgent, 2000) == "compliant"  # by effective date 2.6.0 would be newer: behind
+    assert compliance.notes(back, urgent) == [{"source": "arcadia", "kind": "went_back", "runs": "2.5.1", "lists": "2.6.0"}]
+    assert compliance.installable(back, urgent) == [
+        {"source": "arcadia", "version": "2.6.0", "effective_from": 1000, "step_back": True}]
+    # published at the same time, in force at different times: a tie, a note only
+    tie = runs("2.5.1", 300)
+    assert compliance.judged(back, tie, 2000) == "compliant"
+    assert compliance.installable(back, tie) == []
+    assert compliance.notes(back, tie) == [{"source": "arcadia", "kind": "unlisted", "runs": "2.5.1", "lists": "2.6.0"}]
 
 
 def test_a_source_that_went_back_is_followed_never_behind_and_its_older_release_is_a_step_back():
-    """The record lists only 2.4.0 of a layer the source vouched for as 2.6.0, which took effect later: the source went
-    back. The flag stays compliant; the note says so; "Propose install" offers 2.4.0, marked as a step back (§11.6)."""
-    record = {"source": "arcadia", "releases": [entry("1.0.0", 200, as_version="2.4.0")]}
+    """The record lists only 2.4.0 of a layer the source vouched for as 2.6.0, published later: the source went back. The
+    flag stays compliant; the note says so; "Propose install" offers 2.4.0, marked as a step back (§11.6)."""
+    record = {"source": "arcadia", "releases": [listed("2.4.0", 200)]}
     running = runs("2.6.0", 300)
     assert compliance.judged(record, running, 1000) == "compliant"
     assert compliance.notes(record, running) == [{"source": "arcadia", "kind": "went_back", "runs": "2.6.0", "lists": "2.4.0"}]
@@ -334,30 +367,36 @@ def test_a_source_that_went_back_is_followed_never_behind_and_its_older_release_
     assert compliance.installable({**record, "source": "elsewhere"}, running) == []
 
 
-def test_an_installed_release_keeps_the_date_it_took_effect_and_a_source_going_back_is_a_note():
+def test_an_installed_release_keeps_the_time_it_was_published_and_a_source_going_back_is_a_note():
     own_layer()
-    source(entry("1.0.0", 6), entry("2.0.0", 50))
+    source(entry("1.0.0", 6, published=5), entry("2.0.0", 50, published=20))
     link()
     check_now()
     assert checked()["compliance"] == stale_since(6)
     assert propose("2.0.0").status == "executed" and running() == {"2.0.0"}
     entries = status()["codex"]["chapters"]
-    assert {c["effective_from"] for k, c in entries.items() if k.startswith("arcadia/")} == {50}
-    assert all("effective_from" not in c for k, c in entries.items() if k.startswith("town/"))  # the realm's own layer
+    assert {c["published"] for k, c in entries.items() if k.startswith("arcadia/")} == {20}
+    assert all("published" not in c and "effective_from" not in c for k, c in entries.items() if k.startswith("town/"))
     fire_due()
     assert checked()["compliance"] == "compliant" and checked()["installable"] == [] and checked()["notes"] == []
 
-    source(entry("1.0.0", 6))  # the source went back: it now relays 1.0.0 only, which took effect before 2.0.0
+    source(entry("1.0.0", 6, published=5))  # the source went back: it now relays 1.0.0 only, published before 2.0.0
     check_now()
     found = checked()
     assert found["compliance"] == "compliant"  # followed, never behind
     assert found["notes"] == [{"source": "arcadia", "kind": "went_back", "runs": "2.0.0", "lists": "1.0.0"}]
     assert found["installable"] == [{"source": "arcadia", "version": "1.0.0", "effective_from": 6, "step_back": True}]
 
-    # an own-layer install keeps the date of the layer from above it leaves as it is
+    source(entry("1.0.0", 6, published=20))  # published together with what the realm runs: a tie, a note only
+    check_now()
+    found = checked()
+    assert found["compliance"] == "compliant" and found["installable"] == []
+    assert found["notes"] == [{"source": "arcadia", "kind": "unlisted", "runs": "2.0.0", "lists": "1.0.0"}]
+
+    # an own-layer install keeps the time of the layer from above it leaves as it is
     install(listing({"town/water": WATER.encode() + b"\n"}, realm="town", replaces=active_id(),
                     url=WEB + "changes/water-2.json"))
-    assert {c["effective_from"] for k, c in status()["codex"]["chapters"].items() if k.startswith("arcadia/")} == {50}
+    assert {c["published"] for k, c in status()["codex"]["chapters"].items() if k.startswith("arcadia/")} == {20}
 
 
 def test_the_change_list_of_a_release_is_the_whole_release_with_its_calendar_and_without_the_realm_chapter():
