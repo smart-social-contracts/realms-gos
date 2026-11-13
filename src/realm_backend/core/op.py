@@ -195,7 +195,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
 
 def refuse_lone_surrogates(args):
     """Refuse a call whose arguments hold a lone surrogate, in any text at any depth, whichever the operation (see
-    core.surrogates): an operation that kept one would make every reply that held it trap."""
+    core.surrogates): it would trap where it first met a write, a reply or a guard of the codex, naming no argument."""
     name = surrogates.culprit(args)
     if name is not None:
         raise Fail(f"argument {name!r} holds a lone surrogate (U+D800 to U+DFFF), which is not text")
