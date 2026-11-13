@@ -1,0 +1,12 @@
+[
+  {"name": "consent is not a basis between public authorities", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "recipient": "External:AGE", "keys": {}, "basis": {"legal_basis": "gdpr-6-1-a", "purpose": "x"}}, "denies": "consent is not a basis between public authorities"},
+  {"name": "a public task is a basis between public authorities", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "recipient": "External:AGE", "keys": {}, "basis": {"legal_basis": "gdpr-6-1-e", "purpose": "x"}}, "denies": null},
+  {"name": "a basis that is a text is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "recipient": "External:AGE", "keys": {}, "basis": "gdpr-6-1-e"}, "denies": null},
+  {"name": "a basis that is a list is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "recipient": "External:AGE", "keys": {}, "basis": ["gdpr-6-1-e"]}, "denies": null},
+  {"name": "a basis that is a number is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "recipient": "External:AGE", "keys": {}, "basis": 5}, "denies": null}
+]
