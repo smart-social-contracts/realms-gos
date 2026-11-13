@@ -173,3 +173,25 @@ def test_what_the_registry_sends_or_fails_to_send_is_a_refusal_by_a_call_a_vote_
     row = realm.ok("proposal_get", "alice", query=True, proposal=timed)["proposal"]
     assert row["status"] == "failed" and named(row["result"]["error"]), row  # the timer completed
     assert status(realm)["codex"] is None  # nothing installed
+
+
+ECHO = "this realm runs codex API 2, not ['x', 'x'"
+
+
+def test_a_registry_manifest_whose_codex_api_version_echoes_past_the_record_concludes_with_the_marker(net, realm):
+    """The refusal names the codex API the manifest asks for, which here is a list of 30,000 texts: larger than a
+    proposal's result holds. The vote and the timer conclude, with the reason cut (core.db.bounded, #716)."""
+    big = json.dumps({**LEX, "codex_api_version": ["x"] * 30000})
+    serve(realm, files(big))
+    direct = realm.call("codex_install", {"codex": "lex", "version": "1.0.0"}, sender=net.people["ctl"])
+    assert direct["ok"] is False and direct["error"].startswith(ECHO), direct
+    for timed in (False, True):
+        pid = installing(realm, **({"effective_at": realm.now() + HOUR} if timed else {}))
+        assert vote(realm, pid) == ("execution_scheduled" if timed else "failed")
+        if timed:
+            net.wait(HOUR + 5)
+        row = realm.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+        error = row["result"]["error"]
+        assert row["status"] == "failed" and error.startswith(ECHO), row["status"]
+        assert "[cut: the reply was" in error and len(error) < 65_536
+    assert status(realm)["codex"] is None

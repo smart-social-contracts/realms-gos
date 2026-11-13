@@ -15,6 +15,7 @@ import json
 import fake_chain
 import pytest
 from core import op
+from core.db import JSON_MAX
 from ggg import Codex, Proposal, Realm
 from fake_chain import rejects, traps
 from kit import call, fire_timers, later, ok
@@ -227,6 +228,37 @@ def test_a_checksum_that_raises_a_recursion_error_is_a_refusal_not_a_trap(monkey
     serve()
     out = install()
     assert out["ok"] is False and "the manifest is nested too deep to be hashed" in out["error"], out
+
+
+# ---- a refusal that echoes what the registry sent
+
+ECHO = "this realm runs codex API 2, not ['x', 'x'"
+
+def test_a_registry_manifest_whose_codex_api_version_echoes_past_the_record_concludes_with_the_marker():
+    """``runnable`` names the codex API a manifest asks for with ``str()``: a registry's manifest may be a megabyte, so
+    the refusal can be larger than ``Proposal.result`` holds, and the write that exceeded it trapped the vote and the
+    timer (#716 bounds what a proposal records; the registry path reaches it with no stored action at all)."""
+    serve(manifest_text=json.dumps({**json.loads(GOOD_MANIFEST), "codex_api_version": ["x"] * 30000}))
+    out = install()
+    assert out["ok"] is False and out["error"].startswith(ECHO), out["error"][:80]
+    assert len(out["error"]) > JSON_MAX  # a call's reply is not recorded: it comes whole
+    ok("governance_update", "ctl", voting_window=0)
+    for timed in (False, True):
+        filing = {"title": "Install test",
+                  "action": {"op": "codex_install", "args": {"codex": "test", "version": "1.0.0"}}}
+        if timed:
+            filing["effective_at"] = fake_chain.now() + HOUR
+        pid = ok("proposal_create", "alice", **filing)["proposal"]
+        for voter in FOUR:
+            ok("proposal_vote", voter, proposal=pid, choice="yes")  # no trap
+        if timed:
+            later(HOUR)
+            fire_timers()  # no trap
+        row = Proposal[pid]
+        assert row.status == "failed", (timed, row.status)
+        assert row.result["error"].startswith(ECHO)
+        assert "[cut: the reply was" in row.result["error"] and len(json.dumps(row.result)) <= JSON_MAX
+    assert Codex["test@1.0.0"] is None
 
 
 # ---- extension_install shares the registry's helpers, and parsed its manifest the same way
