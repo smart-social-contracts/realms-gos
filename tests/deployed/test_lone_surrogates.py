@@ -64,9 +64,18 @@ def run(realm, code):
 
 
 def held(realm):
-    """How many proposals, organizations and audit events the realm holds."""
-    return run(realm, "from ggg import Event, Organization, Proposal\n"
-                      "print(Proposal.count(), Organization.count(), Event.max_id())").split()
+    """How many proposals and organizations the realm holds, and its last audit event."""
+    return [int(n) for n in run(realm, "from ggg import Event, Organization, Proposal\n"
+                                       "print(Proposal.count(), Organization.count(), Event.max_id())").split()]
+
+
+def kept_nothing(realm, before):
+    """Nothing was filed or registered since ``held`` gave ``before``, and no audit event is of a refused call: a realm
+    with an active codex records events of its own as its timers run."""
+    after = held(realm)
+    since = run(realm, "from ggg import Event\n"
+                       f"print([Event[str(i)].op for i in range({before[2]} + 1, Event.max_id() + 1)])")
+    return after[:2] == before[:2] and not any(op in since for op in ("proposal_create", "organization_register"))
 
 
 def culprit(args):
@@ -82,7 +91,7 @@ def test_a_call_with_a_lone_surrogate_is_refused_with_the_argument_named_and_kee
     out = town.call(name, args, sender=founder, query=name == "proposal_get")
     assert out["ok"] is False and out["kind"] == "invalid_argument", out
     assert out["error"] == f"argument {culprit(args)!r} holds a lone surrogate (U+D800 to U+DFFF), which is not text"
-    assert held(town) == before
+    assert kept_nothing(town, before)
 
 
 @pytest.fixture(scope="module")
@@ -104,7 +113,7 @@ def test_a_call_is_refused_before_the_active_codex_is_asked(codex_town, people, 
     out = codex_town.call(name, args, sender=people["founder"])
     assert out["ok"] is False and out["kind"] == "invalid_argument", out
     assert out["error"] == f"argument {culprit(args)!r} holds a lone surrogate (U+D800 to U+DFFF), which is not text"
-    assert held(codex_town) == before
+    assert kept_nothing(codex_town, before)
 
 
 def test_a_pair_is_one_character_and_is_taken(town, people):
