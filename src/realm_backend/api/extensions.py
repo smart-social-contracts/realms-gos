@@ -5,7 +5,7 @@ from core import chain
 from core.candid import quote
 from core import sandbox
 from core import surrogates
-from core.db import Fail, Forbidden, Unavailable, find, page, view
+from core.db import JSON_MAX, Fail, Forbidden, Unavailable, find, page, view
 from ggg import Department, Extension, Realm, User, UserProfile
 from core.op import dispatch, on_behalf, op, run
 from api.proposals import appointed, realm_wide
@@ -13,6 +13,12 @@ from api.proposals import appointed, realm_wide
 SIDEBAR = ("show_in_sidebar", "sidebar_label", "categories", "icon")
 # What the frontend needs from the installed manifest to host an extension.
 HOST = ("description", "runtime", "sdk_version", "capabilities", "entry_access", "backend")
+# Bytes of one frontend file the realm copies. The file goes to the realm's frontend in one ``store`` call, whose argument
+# is the file and about 120 bytes more (the key and the content type add theirs): a call to a canister on another subnet
+# may carry 2 MiB (2,097,152 bytes; one on the same subnet 10 MiB), so the limit stays 200 kB below the smaller. The
+# message that builds the call costs 6.1 billion instructions for 1,056,837 bytes (maplibre-gl.js, the largest file of
+# the extensions' bundles at the pin) and 11.9 billion at the limit, of the 40 billion a message may run.
+FRONTEND_FILE_MAX = 1_900_000
 
 
 def registry():
@@ -123,7 +129,12 @@ def fetch(namespace, path):
 def publish_frontend(namespace, prefix):
     """Copy the registry's ``frontend/**`` files of ``namespace`` into the realm's frontend under ``prefix``, where
     the realm frontend loads extension bundles from. The realm holds ``Commit`` on its frontend for this. Nothing to
-    do when the realm has no frontend of its own. A generator; returns how many files it copied."""
+    do when the realm has no frontend of its own. A generator; returns how many files it copied.
+
+    A file is read in chunks, each its own message, and stored in one call: one of more than ``FRONTEND_FILE_MAX`` bytes
+    is a Fail, as soon as it is over. A registry that never says a file has ended would otherwise be asked for chunks
+    until the realm's heap ran out, a canister that is stopping never stops while it keeps making calls, and the file
+    that finally ended would be too large for the message that builds the store call, which traps."""
     frontend = Realm["1"].frontend_canister_id
     if not frontend:
         return 0
@@ -145,6 +156,8 @@ def publish_frontend(namespace, prefix):
             if "content_b64" not in reply:
                 raise Fail(f"{what}: {reply.get('error')}")
             data += decoded_content(reply["content_b64"], what)
+            if len(data) > FRONTEND_FILE_MAX:
+                raise Fail(f"{what} is larger than the {FRONTEND_FILE_MAX} bytes the realm copies to its frontend")
             length = reply.get("length")
             if not isinstance(length, int) or isinstance(length, bool) or length < 0 or "eof" not in reply:
                 raise Fail(f"{what}: the reply to get_file_chunk has no length (a count) or no eof")
@@ -176,12 +189,19 @@ def available(ext, held):
     return not (wanted or depts) or bool(profiles & wanted or departments & depts)
 
 
+def new_access(manifest):
+    """Who gets an extension that is installed for the first time: the profiles its manifest lists, no department."""
+    return {"profiles": manifest.get("profiles", ["member"]), "departments": []}
+
+
 def extension_manifest(namespace):
     """The manifest of the extension in ``namespace``, a record whose ``operations`` and ``profiles``, when there, are lists
     of text (the install lists them as the extension's), that nests no deeper than a codex's manifest may
-    (``codex.MANIFEST_DEPTH``), or a Fail that names the file: what the registry sends is parsed here, and a manifest
-    that is not JSON, is a list or null, lists a number, or is nested so deep that a dump of it raises a RecursionError
-    (in process, at a depth that depends on the stack) raised in the install, which traps. A generator."""
+    (``codex.MANIFEST_DEPTH``) and that the extension's row can keep (a Json field holds ``JSON_MAX`` characters), or a
+    Fail that names the file: what the registry sends is parsed here, and a manifest that is not JSON, is a list or null,
+    lists a number, or is nested so deep that a dump of it raises a RecursionError (in process, at a depth that depends
+    on the stack) raised in the install, which traps. So did one too large for its row: the write came after the
+    frontend was published, and a vote or a timer that ran it concluded nothing. A generator."""
     text = yield from fetch(namespace, "manifest.json")
     try:
         manifest = json.loads(text)
@@ -196,6 +216,13 @@ def extension_manifest(namespace):
     for key in ("operations", "profiles"):
         if key in manifest and not (isinstance(manifest[key], list) and all(isinstance(i, str) for i in manifest[key])):
             raise Fail(f"{namespace}/manifest.json: {key} is a list of text")
+    # What the install writes of it: the manifest, and the access of a first install, which is its profiles and a little
+    # more. The operations and the sidebar settings are parts of the manifest, so they fit when it does.
+    for field, value in (("manifest", manifest), ("access", new_access(manifest))):
+        size = len(json.dumps(value))  # as the row's field writes it
+        if size > JSON_MAX:
+            raise Fail(f"{namespace}/manifest.json is too large for the realm to keep: its {field} is {size} "
+                       f"characters, at most {JSON_MAX}")
     return manifest
 
 
@@ -212,8 +239,7 @@ def extension_install(c, args):
     approver = yield from trust(checksum(manifest, source), namespace)
     yield from publish_frontend(namespace, f"/{namespace}/")
     ext = Extension[args["extension"]] or Extension(
-        id=args["extension"], access={"profiles": manifest.get("profiles", ["member"]), "departments": []},
-        sidebar={k: manifest[k] for k in SIDEBAR if k in manifest})
+        id=args["extension"], access=new_access(manifest), sidebar={k: manifest[k] for k in SIDEBAR if k in manifest})
     ext.version, ext.status, ext.manifest, ext.source = args["version"], "installed", manifest, source
     ext.operations = list(manifest.get("operations", []))
     return {"extension": ext.id, "version": ext.version, "approved_by": approver}

@@ -15,8 +15,9 @@ import json
 import fake_chain
 import pytest
 from core import op
+from api.extensions import FRONTEND_FILE_MAX
 from core.db import JSON_MAX
-from ggg import Codex, Proposal, Realm
+from ggg import Codex, Extension, Proposal, Realm
 from fake_chain import rejects, traps
 from kit import call, fire_timers, later, ok
 from test_codex import SOURCE, build, manifest
@@ -390,10 +391,11 @@ CHUNK = {"content_b64": b64("x = 1"), "length": 5, "eof": True}
 FRONTEND_PATH = "ext/board/1.0.0/frontend/a.js"
 
 
-def serve_frontend(listing=None, chunk=None, store=None):
+def serve_frontend(listing=None, chunk=None, store=None, manifest=None):
     """The registry holds ``board`` with a frontend of one file; the realm has a frontend canister to store it in."""
     listing = LISTING if listing is None else listing
-    fake_chain.peer("registry", get_file=lambda arg: {"content_b64": b64(json.dumps(EXT_MANIFEST))},
+    manifest = json.dumps(EXT_MANIFEST) if manifest is None else manifest
+    fake_chain.peer("registry", get_file=lambda arg: {"content_b64": b64(manifest)},
                     get_namespace_approval_icc=EXT_APPROVED, list_files=listing,
                     get_file_chunk=CHUNK if chunk is None else chunk)
     stored = fake_chain.peer("frontend", store=store if store is not None else "()")
@@ -459,3 +461,129 @@ def test_a_frontend_the_registry_does_not_serve_as_the_install_reads_it_is_a_ref
             fire_timers()  # no trap
         row = Proposal[pid]
         assert row.status == "failed" and reason in row.result["error"], (timed, row.result)
+
+
+# ---- what the extension's install can keep and copy: a manifest its row holds, a file the frontend takes in one call
+
+ROUTES = ["call", "vote", "timer"]
+
+
+def install_board(route):
+    """``extension_install`` of board 1.0.0 by a call, by the vote that closes a proposal, or by the timer of one that waits:
+    the reply, or the result the proposal concluded with. A trap in any of them would raise here (a vote's and a timer's
+    leave the proposal executed with no result, in the canister)."""
+    args = {"extension": "board", "version": "1.0.0"}
+    if route == "call":
+        return call("extension_install", "ctl", **args)
+    ok("governance_update", "ctl", voting_window=0)
+    filing = {"title": "Install board", "action": {"op": "extension_install", "args": args}}
+    if route == "timer":
+        filing["effective_at"] = fake_chain.now() + HOUR
+    pid = ok("proposal_create", "alice", **filing)["proposal"]
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=pid, choice="yes")
+    if route == "timer":
+        later(HOUR)
+        fire_timers()
+    row = Proposal[pid]
+    assert row.result is not None, row.status
+    return row.result
+
+
+def refused(out, reason):
+    assert out["ok"] is False and reason in out["error"], out
+
+
+def manifest_of_size(chars):
+    """The board's manifest, padded until its dump is ``chars`` characters: as the row's field writes it."""
+    plain = {**EXT_MANIFEST, "pad": ""}
+    return {**plain, "pad": "x" * (chars - len(json.dumps(plain)))}
+
+
+def test_a_manifest_the_row_can_keep_installs_up_to_the_last_character_of_a_json_field():
+    for chars in (60_000, JSON_MAX):
+        manifest = manifest_of_size(chars)
+        stored = serve_frontend(manifest=json.dumps(manifest))
+        assert install_board("call")["ok"] is True
+        assert Extension["board"].manifest == manifest and len(stored.calls) == 1
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("chars", [JSON_MAX + 1, 70_000])
+def test_a_manifest_too_large_for_its_row_is_a_refusal_before_the_frontend_is_published(chars, route):
+    """It used to pass every check, publish the frontend, and trap writing the row: the call raised, the vote's
+    execution did, and the timer's left the proposal executed with no result, and no extension."""
+    stored = serve_frontend(manifest=json.dumps(manifest_of_size(chars)))
+    refused(install_board(route), f"ext/board/1.0.0/manifest.json is too large for the realm to keep: its manifest is "
+                                  f"{chars} characters, at most {JSON_MAX}")
+    assert stored.calls == [] and Extension["board"] is None  # nothing published, nothing installed
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_profiles_the_access_of_a_new_extension_cannot_keep_are_a_refusal_though_the_manifest_fits(route):
+    """A new extension's access is its manifest's profiles and ``"departments": []``, a little more than the profiles
+    take in the manifest: a manifest that fills its field to the last character has an access that does not fit."""
+    manifest = {"profiles": ["x" * (JSON_MAX - len(json.dumps({"profiles": [""]})))]}
+    assert len(json.dumps(manifest)) == JSON_MAX
+    access = len(json.dumps({"profiles": manifest["profiles"], "departments": []}))
+    stored = serve_frontend(manifest=json.dumps(manifest))
+    refused(install_board(route), f"its access is {access} characters, at most {JSON_MAX}")
+    assert stored.calls == [] and Extension["board"] is None
+
+
+CHUNK_SIZE = 128 * 1024  # what the registry hands out per call
+CHUNKS_TO_THE_LIMIT = -(-FRONTEND_FILE_MAX // CHUNK_SIZE)
+TOO_LARGE = f"ext/board/1.0.0/frontend/a.js is larger than the {FRONTEND_FILE_MAX} bytes the realm copies"
+
+
+def chunks_of(total):
+    """``get_file_chunk`` of a file of ``total`` bytes, as the registry answers it: a chunk from the offset asked for, and
+    eof when the file ends."""
+    chunk = b64(b"x" * CHUNK_SIZE)
+
+    def reply(arg):
+        offset = json.loads(arg)["offset"]
+        length = min(CHUNK_SIZE, total - offset)
+        return {"content_b64": chunk if length == CHUNK_SIZE else b64(b"x" * length), "length": length,
+                "eof": offset + length >= total}
+
+    return reply
+
+
+def asked_for_chunks():
+    return len(fake_chain.state["peers"]["registry"].sent("get_file_chunk"))
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_registry_that_never_ends_a_file_is_a_refusal_when_the_file_is_larger_than_the_frontend_takes(route):
+    """Each chunk is its own message, so nothing stopped the loop: it ran until the heap was exhausted, and kept the
+    realm from stopping."""
+    never = {"content_b64": b64(b"x" * CHUNK_SIZE), "length": CHUNK_SIZE, "eof": False}
+    stored = serve_frontend(chunk=never)
+    refused(install_board(route), TOO_LARGE)
+    assert asked_for_chunks() == CHUNKS_TO_THE_LIMIT  # it stopped asking as soon as the file was over the limit
+    assert stored.calls == [] and Extension["board"] is None
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_file_that_ends_but_is_larger_than_the_frontend_takes_is_a_refusal_as_soon_as_it_is_over(route):
+    listing = [{"path": "frontend/a.js", "content_type": "application/javascript", "size": 3_000_000}]
+    stored = serve_frontend(listing=listing, chunk=chunks_of(3_000_000))
+    refused(install_board(route), TOO_LARGE)
+    assert asked_for_chunks() == CHUNKS_TO_THE_LIMIT  # not the 23 chunks of the whole file
+    assert stored.calls == [] and Extension["board"] is None
+
+
+@pytest.mark.parametrize("size", [1_056_837, FRONTEND_FILE_MAX], ids=["the largest bundle file", "the limit"])
+def test_a_file_up_to_the_limit_is_copied_whole(size):
+    """1,056,837 bytes is maplibre-gl.js, the largest file of the extensions' built bundles at the pin bfa69152."""
+    stored = serve_frontend(chunk=chunks_of(size))
+    assert install_board("call")["ok"] is True
+    [(method, candid)] = stored.calls
+    assert method == "store" and candid.count("\\78") == size  # every byte, as Candid text: \78 is "x"
+
+
+def test_a_file_one_byte_over_the_limit_is_a_refusal():
+    stored = serve_frontend(chunk=chunks_of(FRONTEND_FILE_MAX + 1))
+    refused(install_board("call"), TOO_LARGE)
+    assert stored.calls == []
