@@ -41,6 +41,7 @@ from core import change_list
 from core import layered_codex as store
 from core import legislation
 from core import records
+from core import surrogates
 from core.db import JSON_MAX, Conflict, Fail, each, find, first, next_id, view
 from core.op import GENERATOR, audit, op
 from ggg import ChapterSource, InstallJob, LayeredCodex, Proposal, Quarter
@@ -445,6 +446,7 @@ def receive_from_capital(job, entry, capital, text):
     """The capital's answer for one chapter: the size and the checksum the change list gives, or a refusal."""
     if not isinstance(text, str):
         raise Fail(f"{capital}: no text for {entry['sha256']}")
+    refuse_lone_surrogate(entry, text, capital)
     if entry["size"] is not None and len(text.encode()) != entry["size"]:
         raise refused_by_capital(capital, entry, f"{len(text.encode())} bytes, the change list says {entry['size']}")
     try:
@@ -467,6 +469,7 @@ def receive_chapter(job, entry, index, status, body):
     The bytes are stored now, and where and when they came from is noted for the codex row (§8)."""
     url = entry["urls"][index]
     text = store.decoded(url, status, body, MAX_CHAPTER)
+    refuse_lone_surrogate(entry, text, url)
     if len(body) != entry["size"]:
         raise Fail(f"{url}: {len(body)} bytes, the change list says {entry['size']}")
     try:
@@ -474,6 +477,13 @@ def receive_chapter(job, entry, index, status, body):
     except Fail as e:
         raise Fail(f"{url}: {e}")
     stage_fetched(job, entry, {"route": "https", "url": index})
+
+
+def refuse_lone_surrogate(entry, text, source):
+    """A layer's calendar is JSON, which must hold no lone surrogate once parsed (core.surrogates); every other chapter is
+    code, where ``"\\ud800"`` is an escape of Python's. ``source`` is the URL or the capital that served ``text``."""
+    if entry["domain"] == change_list.CALENDAR and surrogates.json_holds(text):
+        raise Fail(f"{source}: {entry['chapter']} holds a lone surrogate (U+D800 to U+DFFF), which is not text")
 
 
 def stage_fetched(job, entry, came):

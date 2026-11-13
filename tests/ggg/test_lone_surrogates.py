@@ -14,13 +14,13 @@ import json
 import fake_chain
 import pytest
 import world
-from api import extensions
+from api import extensions, installs
 from core import layered_codex, op, records, surrogates
 from core.db import Fail
 from fake_chain import peer
 from ggg import Event, Organization, PendingAction, Proposal, Realm, SourceRecord, SyncSource
 from kit import direct, ok
-from test_installs import LIST_URL, job, run_job
+from test_installs import LIST_URL, change_list, job, own_layer, run_job
 from test_records import SRC, URL, capital, entry, failing, stand_in
 
 LONE = "\ud800"
@@ -239,6 +239,42 @@ def test_a_change_list_that_holds_one_fails_the_install_job_naming_the_reason():
     ok("codex_install", "ctl", url=LIST_URL, checksum="sha256:" + hashlib.sha256(text).hexdigest())
     run_job()
     assert job()["status"] == "failed" and f"{LIST_URL}: holds a lone surrogate" in job()["error"], job()
+
+
+def test_a_calendar_that_holds_one_fails_the_install_job_naming_the_chapter():
+    """A layer's calendar is JSON, parsed by the legislation: the one chapter that is not code."""
+    ok("governance_update", "ctl", voting_window=0)
+    calendar = json.dumps({"holidays": [{"day": "01-01", "name": "New Year" + LONE}]}).encode()
+    ok("codex_install", "ctl", **change_list({**own_layer(), "arcadia/calendar": calendar}))
+    run_job()
+    assert job()["status"] == "failed", job()
+    assert "arcadia/calendar holds a lone surrogate" in job()["error"], job()
+
+
+CALENDAR = {"chapter": "arcadia/calendar", "domain": "calendar"}
+CODE = {"chapter": "arcadia/tax", "domain": "tax"}
+
+
+def test_the_calendar_a_capital_serves_is_refused_when_it_holds_one_and_the_audit_log_does_not_blame_the_capital():
+    text = json.dumps({"holidays": ["x" + LONE]})
+    with pytest.raises(Fail, match=f"src: arcadia/calendar {REASON}"):
+        installs.receive_from_capital(None, {**CALENDAR, "sha256": "sha256:" + "a" * 64, "size": None}, "src", text)
+    assert not [e for e in Event.load_some(1, max(Event.max_id(), 1)) if e and e.op == "install_chapter_refused"]
+
+
+@pytest.mark.parametrize("entry, text, refused", [
+    (CALENDAR, json.dumps({"holidays": ["x" + LONE]}), True),
+    (CALENDAR, json.dumps({"holidays": ["x 😀"]}), False),  # a pair is a character
+    (CALENDAR, json.dumps({"holidays": ["x\\ud800"]}), False),  # a backslash and letters
+    (CODE, "x = '\\ud800'\n", False),  # Python's escape, in code
+    (CODE, json.dumps({"a": "x" + LONE}), False),  # not a calendar: it is not parsed as JSON by anything
+])
+def test_only_a_calendar_is_scanned_for_a_lone_surrogate(entry, text, refused):
+    if refused:
+        with pytest.raises(Fail, match=REASON):
+            installs.refuse_lone_surrogate(entry, text, "src")
+    else:
+        installs.refuse_lone_surrogate(entry, text, "src")
 
 
 def test_a_json_file_of_the_registry_that_holds_one_is_refused_inside_its_base64():
