@@ -45,7 +45,7 @@ chain._stub = {}
 
 
 def stubbed(cid, method, candid="()", cycles=0):
-    if cid != "registry-stub":
+    if cid not in ("registry-stub", "frontend-stub"):
         return (yield from chain._real_call(cid, method, candid, cycles))
     what = chain._stub[method]
     if isinstance(what, dict):  # by the path asked for
@@ -57,7 +57,7 @@ def stubbed(cid, method, candid="()", cycles=0):
 
 chain.call = stubbed
 r = Realm["1"]
-r.file_registry_canister_id, r.marketplace_canister_id = "registry-stub", "mkt"
+r.file_registry_canister_id, r.marketplace_canister_id, r.frontend_canister_id = "registry-stub", "mkt", "frontend-stub"
 r.require_marketplace_approval, r.trusted_approvers = True, []
 print("stubbed")
 '''
@@ -195,3 +195,68 @@ def test_a_registry_manifest_whose_codex_api_version_echoes_past_the_record_conc
         assert row["status"] == "failed" and error.startswith(ECHO), row["status"]
         assert "[cut: the reply was" in error and len(error) < 65_536
     assert status(realm)["codex"] is None
+
+
+# ---- extension_install: the same registry, and the frontend it copies
+
+BOARD = {"id": "board", "version": "1.0.0", "operations": ["proposal_list"], "profiles": ["member"]}
+BOARD_APPROVED = {"namespace": "ext/board/1.0.0", "approved": True, "approver": "mkt"}
+LISTING = [{"path": "frontend/a.js", "content_type": "application/javascript"}]
+CHUNK = {"content_b64": b64("x = 1"), "length": 5, "eof": True}
+
+
+def serve_extension(realm, manifest=None, listing=None, chunk=None, store="()", approval=BOARD_APPROVED):
+    """The registry holds ``board`` with a frontend of one file, which the realm's frontend canister (a stub) takes."""
+    text = json.dumps(BOARD) if manifest is None else manifest
+    stub = {"get_file": {"manifest.json": json.dumps({"content_b64": b64(text)})},
+            "get_namespace_approval_icc": json.dumps(approval),
+            "list_files": json.dumps(LISTING) if listing is None else listing,
+            "get_file_chunk": json.dumps(CHUNK) if chunk is None else chunk, "store": store}
+    out = realm.shell(f"from core import chain\nchain._stub = {stub!r}\nprint('served')")
+    assert out.strip() == "served", out
+
+
+EXTENSION_SHAPES = {
+    "a manifest nested past the limit": ({"manifest": json.dumps(BOARD)[:-1] + ', "x": ' + "[" * 120 + "]" * 120 + "}"},
+                                         "manifest.json nests lists or records more than 100 levels deep"),
+    "a manifest that is a list": ({"manifest": "[1]"}, "manifest.json is a record that is not empty"),
+    "operations that are a number": ({"manifest": json.dumps({**BOARD, "operations": 5})},
+                                     "manifest.json: operations is a list of text"),
+    "a listing that is a record": ({"listing": "{}"}, "reply to list_files ext/board/1.0.0 is not a list"),
+    "a listing nested too deep": ({"listing": DEEP}, "reply to list_files ext/board/1.0.0 is not JSON"),
+    "an entry without a path": ({"listing": json.dumps([{"content_type": "text/css"}])},
+                                "lists an entry without a path"),
+    "a listing call that fails": ({"listing": "FAIL"}, "the file registry's list_files for ext/board/1.0.0 failed"),
+    "a chunk call that fails": ({"chunk": "FAIL"},
+                                "get_file_chunk for ext/board/1.0.0/frontend/a.js failed"),
+    "a chunk whose length is text": ({"chunk": json.dumps({**CHUNK, "length": "5"})},
+                                     "has no length (a count) or no eof"),
+    "a chunk nested too deep": ({"chunk": DEEP}, "reply to get_file_chunk ext/board/1.0.0/frontend/a.js is not JSON"),
+    "a frontend that rejects the file": ({"store": "FAIL"}, "the realm's frontend did not store"),
+}
+
+
+def test_an_extension_with_a_frontend_installs_through_the_stubs(net, realm):
+    serve_extension(realm)
+    out = realm.call("extension_install", {"extension": "board", "version": "1.0.0"}, sender=net.people["ctl"])
+    assert out["ok"] and out["extension"] == "board", out
+    realm.ok("extension_uninstall", "ctl", extension="board")
+
+
+@pytest.mark.parametrize("name", list(EXTENSION_SHAPES))
+def test_what_the_registry_sends_or_fails_to_send_for_an_extension_is_a_refusal_by_a_call_a_vote_and_a_timer(
+        net, realm, name):
+    served, reason = EXTENSION_SHAPES[name]
+    serve_extension(realm, **served)
+    args = {"extension": "board", "version": "1.0.0"}
+    direct = realm.call("extension_install", args, sender=net.people["ctl"])
+    assert direct["ok"] is False and reason in direct["error"], direct
+    for timed in (False, True):
+        extra = {"effective_at": realm.now() + HOUR} if timed else {}
+        action = {"op": "extension_install", "args": args}
+        pid = realm.ok("proposal_create", "alice", title="Install board", action=action, **extra)["proposal"]
+        assert vote(realm, pid) == ("execution_scheduled" if timed else "failed")
+        if timed:
+            net.wait(HOUR + 5)
+        row = realm.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+        assert row["status"] == "failed" and reason in row["result"]["error"], (timed, row)

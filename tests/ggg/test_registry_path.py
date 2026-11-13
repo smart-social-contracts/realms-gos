@@ -326,3 +326,130 @@ def test_an_extension_of_the_registry_that_is_not_what_the_install_reads_is_a_re
             fire_timers()
         row = Proposal[pid]
         assert row.status == "failed" and reason in row.result["error"], (timed, row.result)
+
+
+# An extension's manifest is held to the depth a codex's is: in process a manifest nested about 940 deep parses, and
+# the dump of it (the checksum, the row that keeps it) raised a RecursionError at a depth that depends on the stack, a
+# trap by a call, a vote and a timer. (The guard around the checksum that this replaces was never reached by a test.)
+EXT_NESTED = "manifest.json nests lists or records more than 100 levels deep"
+
+
+def deep_extension(depth):
+    return json.dumps(EXT_MANIFEST)[:-1] + ', "x": ' + "[" * depth + "]" * depth + "}"
+
+
+def test_an_extension_manifest_nested_deeper_than_a_codex_needs_is_refused_at_every_depth_of_the_window():
+    """Every depth in which the parse succeeds and a dump, deeper in the stack, gives out: a trap (the Trap of the fake
+    chain) would raise out of the call. Where the parse itself runs out of stack, that is the refusal."""
+    nested = 0
+    for depth in WINDOW:
+        serve_extension(manifest_text=deep_extension(depth))
+        out = call("extension_install", "ctl", extension="board", version="1.0.0")
+        assert out["ok"] is False and (EXT_NESTED in out["error"] or "is not JSON" in out["error"]), (depth, out)
+        nested += EXT_NESTED in out["error"]
+    assert nested  # the limit, not only the parse, refused some of them
+
+
+@pytest.mark.parametrize("timed", [None, False, True], ids=["call", "vote", "timer"])
+def test_an_extension_manifest_942_levels_deep_is_refused_by_a_call_a_vote_and_a_timer(timed):
+    serve_extension(manifest_text=deep_extension(942))
+    if timed is None:
+        out = call("extension_install", "ctl", extension="board", version="1.0.0")
+        assert out["ok"] is False and EXT_NESTED in out["error"], out
+        return
+    ok("governance_update", "ctl", voting_window=0)
+    filing = {"title": "Install board",
+              "action": {"op": "extension_install", "args": {"extension": "board", "version": "1.0.0"}}}
+    if timed:
+        filing["effective_at"] = fake_chain.now() + HOUR
+    pid = ok("proposal_create", "alice", **filing)["proposal"]
+    for voter in FOUR:
+        ok("proposal_vote", voter, proposal=pid, choice="yes")  # no trap
+    if timed:
+        later(HOUR)
+        fire_timers()  # no trap
+    row = Proposal[pid]
+    assert row.status == "failed" and EXT_NESTED in row.result["error"], row.result
+
+
+def test_an_extension_manifest_of_the_depth_the_extensions_have_installs():
+    serve_extension(manifest_text=json.dumps({**EXT_MANIFEST, "x": {"a": [{"b": [{"c": [1]}]}]}}))
+    assert ok("extension_install", "ctl", extension="board", version="1.0.0")["extension"] == "board"
+
+
+# ---- the frontend an extension brings is copied from the registry in chunks: the same replies, the same refusals
+
+LISTING = [{"path": "frontend/a.js", "content_type": "application/javascript"}, {"path": "README.md"}]
+CHUNK = {"content_b64": b64("x = 1"), "length": 5, "eof": True}
+FRONTEND_PATH = "ext/board/1.0.0/frontend/a.js"
+
+
+def serve_frontend(listing=None, chunk=None, store=None):
+    """The registry holds ``board`` with a frontend of one file; the realm has a frontend canister to store it in."""
+    listing = LISTING if listing is None else listing
+    fake_chain.peer("registry", get_file=lambda arg: {"content_b64": b64(json.dumps(EXT_MANIFEST))},
+                    get_namespace_approval_icc=EXT_APPROVED, list_files=listing,
+                    get_file_chunk=CHUNK if chunk is None else chunk)
+    stored = fake_chain.peer("frontend", store=store if store is not None else "()")
+    Realm["1"].file_registry_canister_id, Realm["1"].marketplace_canister_id = "registry", "mkt"
+    Realm["1"].frontend_canister_id = "frontend"
+    return stored
+
+
+BAD_FRONTENDS = {
+    "a listing that is not JSON": ({"listing": "oops"}, "reply to list_files ext/board/1.0.0 is not JSON"),
+    "a listing nested too deep": ({"listing": NESTED}, "reply to list_files ext/board/1.0.0 is not JSON"),
+    "a listing that is a record": ({"listing": "{}"}, "reply to list_files ext/board/1.0.0 is not a list"),
+    "a listing that is null": ({"listing": "null"}, "reply to list_files ext/board/1.0.0 is not a list"),
+    "an entry that is a number": ({"listing": [5]}, "lists an entry without a path"),
+    "an entry without a path": ({"listing": [{"content_type": "text/css"}]}, "lists an entry without a path"),
+    "a path that is a number": ({"listing": [{"path": 5}]}, "lists an entry without a path"),
+    "a content type that is a number": ({"listing": [{"path": "frontend/a.js", "content_type": 5}]},
+                                        "or with a content type that is not text"),
+    "a listing call that fails": ({"listing": rejects("IC0522: out of instructions")},
+                                  "the file registry's list_files for ext/board/1.0.0 failed"),
+    "a chunk that is not JSON": ({"chunk": "oops"}, f"reply to get_file_chunk {FRONTEND_PATH} is not JSON"),
+    "a chunk nested too deep": ({"chunk": NESTED}, f"reply to get_file_chunk {FRONTEND_PATH} is not JSON"),
+    "a chunk that is a list": ({"chunk": [1]}, f"reply to get_file_chunk {FRONTEND_PATH} is not a record"),
+    "a chunk whose content is a number": ({"chunk": {**CHUNK, "content_b64": 5}}, "content_b64 is not text"),
+    "a chunk whose content is not base64": ({"chunk": {**CHUNK, "content_b64": "abc"}}, "is not base64"),
+    "a chunk whose length is text": ({"chunk": {**CHUNK, "length": "5"}}, "has no length (a count) or no eof"),
+    "a chunk whose length is negative": ({"chunk": {**CHUNK, "length": -1}}, "has no length (a count) or no eof"),
+    "a chunk whose length is true": ({"chunk": {**CHUNK, "length": True}}, "has no length (a count) or no eof"),
+    "a chunk without eof": ({"chunk": {"content_b64": CHUNK["content_b64"], "length": 5}},
+                            "has no length (a count) or no eof"),
+    "a chunk call that fails": ({"chunk": rejects("the reply is over the limit")},
+                                f"the file registry's get_file_chunk for {FRONTEND_PATH} failed"),
+    "a chunk that holds a lone surrogate": ({"chunk": r'{"error": "\ud800"}'}, "its reply holds a lone surrogate"),
+    "a frontend that rejects the file": ({"store": rejects("the canister is out of cycles")},
+                                         "the realm's frontend did not store /ext/board/1.0.0/frontend/a.js"),
+}
+
+
+def test_an_extension_with_a_frontend_installs_and_its_file_is_stored():
+    stored = serve_frontend()
+    assert ok("extension_install", "ctl", extension="board", version="1.0.0")["extension"] == "board"
+    [(method, candid)] = stored.calls
+    assert method == "store" and 'key = "/ext/board/1.0.0/frontend/a.js"' in candid
+
+
+@pytest.mark.parametrize("name", list(BAD_FRONTENDS))
+def test_a_frontend_the_registry_does_not_serve_as_the_install_reads_it_is_a_refusal_on_every_route(name):
+    served, reason = BAD_FRONTENDS[name]
+    serve_frontend(**served)
+    out = call("extension_install", "ctl", extension="board", version="1.0.0")
+    assert out["ok"] is False and reason in out["error"], out
+    ok("governance_update", "ctl", voting_window=0)
+    for timed in (False, True):
+        filing = {"title": "Install board",
+                  "action": {"op": "extension_install", "args": {"extension": "board", "version": "1.0.0"}}}
+        if timed:
+            filing["effective_at"] = fake_chain.now() + HOUR
+        pid = ok("proposal_create", "alice", **filing)["proposal"]
+        for voter in FOUR:
+            ok("proposal_vote", voter, proposal=pid, choice="yes")  # no trap
+        if timed:
+            later(HOUR)
+            fire_timers()  # no trap
+        row = Proposal[pid]
+        assert row.status == "failed" and reason in row.result["error"], (timed, row.result)
