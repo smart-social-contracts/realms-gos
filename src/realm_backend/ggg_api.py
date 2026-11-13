@@ -622,7 +622,7 @@ def read(op, arg_t, arg, reply_t):
         args = request(op, arg_t, arg)
     except BadArgument as e:
         return refused(op, e)
-    with db.Showing():
+    with db.Listing():
         return asks_call_for(op, args) or reply(op, args, json.loads(drive(dispatch(op, json.dumps(args), query=True))),
                                                 reply_t)
 
@@ -676,7 +676,7 @@ def load(t, key):
         return None
     if isinstance(key, dict):
         key = key.get("id")
-    return (db.SHOWN or {}).get((cls, str(key))) or cls[str(key)]  # a row the operation just returned is not read again
+    return (db.LISTING or {}).get((cls, str(key))) or cls[str(key)]  # a row the operation just listed is not read again
 
 
 def result(op, out, t):
@@ -717,7 +717,8 @@ KEY = {"crypto_envelope": "scope", "crypto_derive_key": "transport_public_key", 
 KEEP_LIMIT = {"document_delete"}
 # Operations whose GGG method returns at most this many items a page, whatever ``limit`` asks (the reply's ``next`` goes
 # on from the last): each item is a whole GGG record, built from a row, and the page is Candid on top of that. A page of
-# 500 proposals came to about 4.8 billion instructions, a query may spend 5; the operation's own page is up to 500.
+# 500 proposals came to 4.5 billion instructions in the shell and trapped as a query, which may spend 5; the operation's
+# own page is up to 500.
 PAGE_CAP = {"proposal_list": 200}
 
 

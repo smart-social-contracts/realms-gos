@@ -254,7 +254,7 @@ def test_pages_with_any_count_and_filters_are_what_the_proposals_say_and_full():
 
 def test_a_ggg_listing_builds_its_records_from_the_rows_the_operation_listed(monkeypatch):
     """``ggg_proposal_list`` runs the operation and builds a GGG record from each row it returned. Reading the row again
-    costs as much as listing it (3 million instructions, 1.6 billion for 500) and trapped a page of 500 in a query."""
+    costs about as much as listing it did, which with a GGG record of each row trapped a page of 500 in a query."""
     world.build()
     ids = fill(8, "t", 1)
     read = loaded_proposals(monkeypatch)
@@ -264,8 +264,8 @@ def test_a_ggg_listing_builds_its_records_from_the_rows_the_operation_listed(mon
 
 
 def test_a_ggg_listing_returns_at_most_the_pages_its_records_allow(monkeypatch):
-    """A page of whole GGG records, Candid included, is dearer than the operation's rows: 500 came to about 4.8 billion
-    instructions, and the method returns fewer than ``limit`` asks for, with ``next`` to go on from."""
+    """A page of whole GGG records, Candid included, is dearer than the operation's rows: 500 came to 4.5 billion
+    instructions in the shell, and the method returns fewer than ``limit`` asks for, with ``next`` to go on from."""
     world.build()
     ids = fill(8, "t", 1)
     monkeypatch.setitem(ggg_api.PAGE_CAP, "proposal_list", 3)
