@@ -2,8 +2,8 @@ import json
 
 from core import auth, chain, ranges
 from core.civil import civil_from_days
-from core.db import (Conflict, Fail, Forbidden, Unavailable, each, find, first, has_indexed, indexed_ids, next_id, page,
-                     page_by, view, window as page_window)
+from core.db import (Conflict, Fail, Forbidden, Unavailable, bounded, each, find, first, has_indexed, indexed_ids,
+                     next_id, page, page_by, view, window as page_window)
 from ggg import (Appointment, Budget, Calendar, Contract, ContractAmendment, Delegation, Department, External, Mandate,
                  Member, Proposal, ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
 from api import tasks
@@ -389,7 +389,9 @@ def scheduled_task_name(p):
 def run_action(p):
     """Run the accepted action as its proposer: the vote is the authority, and the action cannot name anyone else.
     The vote's authority stops at the proposal's department, so an action outside it fails without running. One whose
-    args are not a record (a filing refuses it now) fails with that reason: it never reaches code that reads them."""
+    args are not a record (a filing refuses it now) fails with that reason: it never reaches code that reads them.
+    What it records is ``bounded``: a refusal can echo what a stored action holds, more than the result's field keeps,
+    and the write that exceeded it would trap the vote or the timer that concludes the proposal."""
     args = p.action.get("args")
     if args is not None and not isinstance(args, dict):
         end(p, "failed")
@@ -401,12 +403,12 @@ def run_action(p):
             check_grant(p.filed_under, p.proposer, p.action, p.opens_at)
     except Fail as e:
         end(p, "failed")
-        p.result = {"ok": False, "error": str(e), "kind": e.kind}
+        p.result = bounded({"ok": False, "error": str(e), "kind": e.kind})
         return
     p.status = "executed"
     out = yield from dispatch(p.action["op"], json.dumps(p.action.get("args")), origin="replay", signer=p.proposer,
                               proposal=p.id)
-    p.result = json.loads(out)
+    p.result = bounded(json.loads(out))
     if not p.result.get("ok"):
         end(p, "failed")
 

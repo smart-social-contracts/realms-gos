@@ -167,13 +167,24 @@ def compiled(source):
 
 
 def digest_of(manifest, source):
-    """The checksum of the manifest and the code, or a Fail: the canister's JSON accepts a lone surrogate
-    (``"\\ud800"``), which is not UTF-8 text, so the checksum (the hash of the text's bytes) raises a
-    UnicodeEncodeError that dispatch would trap on, with a vote or a timer that never concludes."""
+    """The checksum of the manifest and the code, or a Fail that names the part with text that is not UTF-8: the
+    canister's JSON accepts a lone surrogate (``"\\ud800"``), which cannot be encoded, so the checksum (the hash of the
+    text's bytes) raises a UnicodeEncodeError that dispatch would trap on, with a vote or a timer that never concludes.
+    The error's position is in the manifest's JSON followed by the code, which nobody sent as one text: the Fail names
+    the manifest, or the code with its line and column."""
     try:
         return checksum(manifest, source)
-    except UnicodeEncodeError as e:
-        raise Fail(f"the manifest and the code are UTF-8 text: {e}")
+    except UnicodeEncodeError:
+        pass
+    for part, text in (("manifest", json.dumps(manifest, sort_keys=True)), ("code", source)):
+        try:
+            text.encode()
+        except UnicodeEncodeError as e:
+            lone = f"U+{ord(text[e.start]):04X}, a lone surrogate,"
+            line = text.count("\n", 0, e.start) + 1
+            where = f" at line {line}, column {e.start - text.rfind(chr(10), 0, e.start)}" if part == "code" else ""
+            raise Fail(f"the {part} is not UTF-8 text: {lone} cannot be encoded{where}")
+    raise Fail("the manifest and the code are not UTF-8 text")  # the checksum failed and no part says why
 
 
 def check_install_args(args):

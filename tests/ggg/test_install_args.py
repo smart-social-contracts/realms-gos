@@ -257,17 +257,19 @@ def test_an_exception_whose_text_cannot_be_made_is_still_a_refusal(monkeypatch):
 # UnicodeEncodeError, which dispatch traps on (review of realms-gos#697, with approval required or not). In a manifest
 # value it shows only on the wasm, whose json.dumps ignores ensure_ascii (tests/deployed/test_sync_checks.py): here the
 # dumps escapes it and the text is hashed.
-SURROGATES = {"in the code": {"manifest": MANIFEST, "source": "x = '\ud800'\n"},
-              "alone, with a manifest that cannot run": {"manifest": {"id": "lex", "version": "1.0"},
-                                                         "source": "\ud800"}}
+LONE = "U+D800, a lone surrogate, cannot be encoded"
+SURROGATES = {"in the code": ({"manifest": MANIFEST, "source": "x = 1\ny = '\ud800'\n"},
+                              f"the code is not UTF-8 text: {LONE} at line 2, column 6"),
+              "alone, with a manifest that cannot run": ({"manifest": {"id": "lex", "version": "1.0"},
+                                                          "source": "\ud800"},
+                                                         f"the code is not UTF-8 text: {LONE} at line 1, column 1")}
 
 
 @pytest.mark.parametrize("approval", ["off", "on"])
 @pytest.mark.parametrize("name", list(SURROGATES))
 def test_text_that_is_not_utf8_is_a_refusal_never_a_trap(name, approval):
-    args = SURROGATES[name]
+    args, reason = SURROGATES[name]
     trust_policy(approval, "pass")
-    reason = "the manifest and the code are UTF-8 text"
     action = {"op": "codex_install", "args": args}
     assert reason in denied("codex_install", "ctl", **args)
     assert reason in denied("proposal_create", "alice", title="Install", action=action)

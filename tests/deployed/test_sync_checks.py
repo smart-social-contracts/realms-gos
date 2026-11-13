@@ -348,10 +348,13 @@ def test_code_nested_too_deep_to_compile_is_a_refusal_and_a_stored_one_concludes
         assert "Traceback" not in restore
 
 
-SURROGATES = {"in the code": {"manifest": {"id": "lex", "version": "1.0", "codex_api_version": 2},
-                              "source": "x = '\ud800'\n"},
-              "in a manifest value": {"manifest": {"id": "lex\ud800", "version": "1.0", "codex_api_version": 2},
-                                      "source": "pass"}}
+LONE = "U+D800, a lone surrogate, cannot be encoded"
+SURROGATES = {"in the code": ({"manifest": {"id": "lex", "version": "1.0", "codex_api_version": 2},
+                              "source": "x = 1\ny = '\ud800'\n"},
+                              f"the code is not UTF-8 text: {LONE} at line 2, column 6"),
+              "in a manifest value": ({"manifest": {"id": "lex\ud800", "version": "1.0", "codex_api_version": 2},
+                                       "source": "pass"},
+                                      f"the manifest is not UTF-8 text: {LONE}")}
 
 
 @pytest.fixture(scope="module")
@@ -367,8 +370,7 @@ def test_text_that_is_not_utf8_is_refused_where_the_install_is_called_and_filed_
     trapped on: the direct call and the filing were rejected (review of #697). In a manifest value it shows only here:
     the canister's json.dumps ignores ensure_ascii. A stored proposal with one is not a case here: the canister's
     database cannot encode it, so the shell cannot write one (the in-process test runs the stored vote and timer)."""
-    args = SURROGATES[name]
-    reason = "the manifest and the code are UTF-8 text"
+    args, reason = SURROGATES[name]
     set_policy = ("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = {}\n"
                   "r.trusted_approvers = []\nprint('policy')")
     assert "Traceback" not in plain.shell(set_policy.format(True))
@@ -378,6 +380,37 @@ def test_text_that_is_not_utf8_is_refused_where_the_install_is_called_and_filed_
     refused = plain.call("proposal_create", {"title": "Install", "action": action}, sender=net.people["alice"])
     assert not refused["ok"] and reason in refused["error"]
     assert plain.ok("proposal_list", "alice", query=True)["proposals"] == []  # nothing was filed
+
+
+ECHOES = {"a control character": '["\\x7f" * 14000]', "a list of numbers": "[1] * 27000"}
+
+
+@pytest.mark.parametrize("name", list(ECHOES))
+def test_a_stored_install_whose_refusal_echoes_a_large_value_concludes_failed_with_a_cut_reason(net, plain, name):
+    """``codex.runnable`` names the codex API a manifest asks for, so a stored manifest whose ``codex_api_version`` is
+    long gave a refusal larger than ``Proposal.result`` holds while the action itself fits: the write raised, and the
+    deciding vote was rolled back in every message that carried it, so the proposal stayed ``voting`` for ever (review
+    of #697). The reason is recorded cut, with a marker, and the proposal concludes."""
+    set_policy = ("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = True\n"
+                  "r.trusted_approvers = []\nprint('policy')")
+    assert "Traceback" not in plain.shell(set_policy)
+    filed = {"manifest": {**LEX, "codex_api_version": [1]}, "source": "pass"}
+    pid = plain.ok("proposal_create", "alice", title="Install",
+                   action={"op": "codex_install", "args": filed})["proposal"]
+    stored = plain.shell(
+        "import json\nfrom ggg import Proposal\n"
+        f"manifest = {{'id': 'lex', 'version': '1.0', 'codex_api_version': {ECHOES[name]}}}\n"
+        "args = {'manifest': manifest, 'source': 'pass'}\n"
+        f"Proposal[{pid!r}].action = {{'op': 'codex_install', 'args': args}}\n"
+        f"print('stored', len(json.dumps(Proposal[{pid!r}].action)))")
+    assert "Traceback" not in stored, stored
+    assert int(stored.split()[-1]) < 65536  # the action fits the field, as a filing must
+    assert vote(plain, pid, "yes") == "failed"  # the last vote's message completes: it did not trap
+    row = plain.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    result = row["result"]
+    assert row["status"] == "failed" and result["ok"] is False and result["kind"] == "invalid_argument"
+    assert result["error"].startswith("this realm runs codex API 2, not ") and "[cut: the reply was" in result["error"]
+    assert len(json.dumps(result)) <= 65536
 
 
 def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(

@@ -95,6 +95,30 @@ class Json(String):
         super().__set__(obj, json.dumps(value))
 
 
+def bounded(reply, limit=JSON_MAX):
+    """``reply``, an operation's reply (``{ok, error, kind, ...}``), as a Json field of ``limit`` characters can keep
+    it: itself when it fits. A refusal can echo what it refuses (a stored value in its text: the codex API a manifest
+    names, a name that is not known), so a reply may be larger than the field that records it, and the write then
+    raises and traps the call that records it, which rolls the whole message back: a vote that concludes a proposal
+    would never conclude. The ``error`` is cut and says so, and ``ok`` and ``kind`` stay as they were; a reply that is
+    large for another reason (an ``ok`` reply with a long body, an error that is not text) is replaced by a record of
+    ``ok`` and ``kind`` that says how large it was."""
+    size = len(json.dumps(reply))
+    if size <= limit:
+        return reply
+    note = f"[cut: the reply was {size} characters, a record holds {limit}]"
+    error = reply.get("error") if isinstance(reply, dict) else None
+    if isinstance(error, str):
+        keep = limit - len(json.dumps({**reply, "error": note})) - 1  # what the rest leaves for it, and a space
+        while keep > 0:
+            cut = {**reply, "error": f"{error[:keep]} {note}"}
+            if len(json.dumps(cut)) <= limit:
+                return cut
+            keep = keep * 2 // 3  # a character takes up to 6 in JSON: cut again, until it fits
+    small = {k: reply[k] for k in ("ok", "kind") if isinstance(reply, dict) and k in reply}
+    return {**small, "cut": note} if small.get("ok") else {**small, "ok": False, "error": note}
+
+
 def find(cls, key):
     row = cls[str(key)] if key not in (None, "") else None
     if row is None:
