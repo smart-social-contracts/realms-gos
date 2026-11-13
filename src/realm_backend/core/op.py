@@ -134,6 +134,9 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
                            "kind": Fail.kind})
     try:
         args = json.loads(arg or "{}") if isinstance(arg, str) else dict(arg)
+        args = {} if args is None else args
+        if not isinstance(args, dict):  # a vote can carry what a filing now refuses: it fails, it does not trap
+            raise Fail(f"the arguments of {name} are a record, not {type(args).__name__}")
         refuse_lone_surrogates(args)
         by = signer or chain.caller()
         claimed = args.pop("on_behalf_of", None)

@@ -138,11 +138,92 @@ def hooks(codex_id):
         yield from legislation.activate(row)
 
 
+def text_arg(args, key, what):
+    """``args[key]`` is text, or a Fail that says what ``key`` is: an argument of another type than the one the install
+    reads is refused here, where a call is filed or made, rather than raising inside it (a trap). What the text must
+    be, a source id or a version of 1 to 64 characters, the install itself judges."""
+    if not isinstance(args.get(key), str):
+        raise Fail(f"{key} is {what}")
+
+
+def texts_of(value, what):
+    """``value`` is a list of text, or a Fail that says what ``what`` is."""
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise Fail(f"{what} is a list of text")
+
+
+def compiled(source):
+    """``source`` compiled, or a Fail: whatever the compiler raises is a refusal, never an exception out of the install: a
+    syntax error, a null byte, and on code nested too deep a RecursionError or a MemoryError (each of which a trap would
+    turn into a vote or a timer that never concludes)."""
+    try:
+        return compile(source, "hooks.py", "exec")
+    except Exception as e:  # noqa: BLE001
+        try:
+            reason = str(e)[:200] or type(e).__name__
+        except Exception:  # noqa: BLE001  an exception whose text cannot be made
+            reason = type(e).__name__
+        raise Fail(f"source does not compile: {reason}")
+
+
+def digest_of(manifest, source):
+    """The checksum of the manifest and the code, or a Fail: the canister's JSON accepts a lone surrogate
+    (``"\\ud800"``), which is not UTF-8 text, so the checksum (the hash of the text's bytes) raises a
+    UnicodeEncodeError that dispatch would trap on, with a vote or a timer that never concludes."""
+    try:
+        return checksum(manifest, source)
+    except UnicodeEncodeError as e:
+        raise Fail(f"the manifest and the code are UTF-8 text: {e}")
+
+
+def check_install_args(args):
+    """``codex_install``'s ``args`` are of the types the install reads, or a Fail names the one that is not. Without it
+    an argument of another type raises inside the install (a manifest that is null, an empty string or a list, sent
+    code that is not text or does not compile, hooks that are not a list): the operation then traps, and a trap inside
+    a vote's execution or a timer rolls the message back, so a proposal that carries it may never conclude. It is the
+    operation's ``check``, which runs for a member's, a controller's or an accepted vote's call, and ``filed_install``
+    asks it where the install is filed: a proposal stored with such arguments before then fails, with the reason
+    recorded, and ``installs.prepare`` asks it before it stages a release, so that the staging and the switch cannot
+    disagree. A release is judged by its ``source`` and ``version`` alone: a change list beside it is never read, so
+    its types do not matter (a release with one is refused when it is filed, core.change_list.names_both, and still
+    runs, as the release, when stored)."""
+    if not isinstance(args, dict):
+        raise Fail("an install takes a record of arguments")
+    if change_list.names_release(args):
+        text_arg(args, "source", "the id of a layer from above: text")
+        text_arg(args, "version", "the release's version: text")
+    elif "checksum" in args:
+        if not isinstance(args["checksum"], str):
+            raise Fail("checksum is sha256:<64 hex digits>")
+        if "url" in args and not isinstance(args["url"], str):
+            raise Fail("url is the address of the change list, https")
+    elif "manifest" in args:
+        manifest = args["manifest"]
+        if not isinstance(manifest, dict) or not manifest:
+            raise Fail("manifest is the codex's manifest.json: a record that is not empty")
+        text_arg(args, "source", "the codex's code: text")
+        for key in ("id", "version"):
+            if not isinstance(manifest.get(key), str):
+                raise Fail(f"the manifest's {key} is text")
+        for key in ("capabilities", "hooks"):
+            if key in manifest:
+                texts_of(manifest[key], f"the manifest's {key}")
+        # Code the realm would refuse as untrusted is refused for that, without compiling it (``trust``): the compiler
+        # runs here only on code the realm takes, which is all of it when it requires no approval.
+        if extensions.pinned(digest_of(manifest, args["source"])):
+            compiled(args["source"])
+    elif "codex" in args or "version" in args:
+        text_arg(args, "codex", "the name of a codex of the file registry: text")
+        text_arg(args, "version", "the version of that codex: text")
+
+
 def filed_install(args, proposal):
     """A "Propose install" (§11.4) that this realm could not build is refused when it is filed
-    (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a change
-    list at once (core.change_list.names_both): the realm would install the release, and a reader that tests the checksum
-    first would describe the change list."""
+    (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a
+    change list at once (core.change_list.names_both): the realm would install the release, and a reader that tests
+    the checksum first would describe the change list. So is one whose arguments are not of the types the install
+    reads (``check_install_args``)."""
+    check_install_args(args)
     if change_list.names_release(args):
         from api import installs  # it imports this module
 
@@ -151,7 +232,7 @@ def filed_install(args, proposal):
         installs.release_of(args)
 
 
-@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install)
+@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install, check=check_install_args)
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
     The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``.
@@ -175,9 +256,9 @@ def codex_install(c, args):
         namespace = f"ext/{args['codex']}/{args['version']}"
         manifest, source = yield from fetch(namespace)
     runnable(manifest)
-    digest = checksum(manifest, source)
+    digest = digest_of(manifest, source)
     yield from trust(digest, namespace)
-    compile(source, "hooks.py", "exec")
+    compiled(source)
     if len(sandbox.readable(manifest.get("capabilities", []))) > sandbox.MAX_ACTIONS:
         raise Fail(f"a codex may declare at most {sandbox.MAX_ACTIONS} read operations")
     key, current = f"{manifest['id']}@{manifest['version']}", active()

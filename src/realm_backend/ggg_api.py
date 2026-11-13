@@ -299,6 +299,8 @@ def action(a):
     if not a.get("op"):
         return {"Motion": None}
     op, args = a["op"], a.get("args") or {}
+    if not isinstance(args, dict):  # stored before a filing refused it: kept as the operation's name with its JSON
+        return {"Call": {"method": str(op), "arg": json.dumps(args, sort_keys=True).encode()}}
     # An install that names a release runs as one, whatever change list it carries beside it (core.change_list).
     if op == "codex_install" and args.get("checksum") and not change_list.names_release(args):
         return {"Code": {"url": args.get("url", ""), "checksum": args["checksum"]}}
