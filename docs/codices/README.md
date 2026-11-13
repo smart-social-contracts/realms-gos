@@ -71,8 +71,11 @@ The same holds for `init` when a codex is installed: a failing `init` never undo
 stands, the call (and the proposal that carried it) succeeds with the hook's failure in `init`, and the codex
 is unhealthy with the reason until a hook succeeds. A manifest that lists a hook its code does not
 define as a function of its own (`def` or `async def`, decorated or not, at the top of the module: not a method, not
-nested in another function, not assigned or imported) is refused before anything is installed, where the install is
-filed and where `codex_install` is called: such a hook could never run.
+nested in another function, not assigned or imported) is refused before anything is installed: such a hook could
+never run. It is read from the compiled code, so it comes after the trust policy: `codex_install` checks it once the
+code is trusted, and the filing of an install (and a call's own check) only for code the realm takes without asking
+anyone (no approval required, or the code's checksum pinned), as it compiles no other. A codex of the file registry
+(`codex` and `version`) is fetched by the call, so it is checked there only.
 
 ## Capabilities
 

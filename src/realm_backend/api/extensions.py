@@ -30,6 +30,13 @@ def ask(method, namespace, path):
     return json.loads((yield from chain.call_text(registry(), method, arg)))
 
 
+def pinned(digest):
+    """Whether the realm takes sent code of ``digest`` without asking anyone: it requires no approval, or pins the digest
+    in its ``trusted_approvers``. Code that no namespace names (sent with the call) has no other way in (``trust``)."""
+    realm = Realm["1"]
+    return not realm.require_marketplace_approval or f"sha256:{digest}" in (realm.trusted_approvers or [])
+
+
 def trust(digest, namespace=None, path=None):
     """I-EXT-3, I-ADM-3: code is accepted when ``sha256:<digest>`` is pinned in the realm's ``trusted_approvers``,
     or when the file registry reports ``namespace`` approved by a trusted approver (the other entries, by default

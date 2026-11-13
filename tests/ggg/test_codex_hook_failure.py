@@ -10,12 +10,11 @@ concludes.
 
 import fake_chain
 import pytest
-import world
 from api import codex
 from core import op, sandbox
 from ggg import Codex, Proposal, Realm
-from kit import call, denied, fire_timers, later, ok
-from test_codex import SOURCE, build, manifest, vote_through
+from kit import denied, fire_timers, later, ok
+from test_codex import SOURCE, build, manifest
 
 HOUR = 3600
 # `init` takes ctx where the realm calls init(args=..., context=...): the call itself raises a TypeError, in the sandbox
@@ -99,7 +98,7 @@ def test_a_hook_the_active_codex_lost_its_function_for_is_a_failure_of_the_hook_
     assert state() == ("test@1.0.0", True, None)
     Codex["test@1.0.0"].source = "from ggg_sdk import hook\n\n@hook\ndef act(args):\n    return {}\n"  # lost `init`
     out = op.run(codex.hook("init"))
-    assert out["ok"] is False and out["error"] == "KeyError: the code does not define the hook init"
+    assert out["ok"] is False and "init" in out["error"]  # the sandbox's own words: they differ on the wasm
     assert state() == ("test@1.0.0", False, "init")
     assert op.run(codex.hook("act"))["ok"] is True and state() == ("test@1.0.0", True, None)
 
@@ -121,7 +120,7 @@ def test_a_sandbox_that_fails_for_any_reason_is_a_hook_failure_and_never_raises(
 
 
 def test_a_manifest_whose_hooks_are_top_level_functions_installs_as_before():
-    """The check reads the syntax tree: decorated, plain and async functions defined at the top level are hooks."""
+    """The check reads the compiled code: decorated, plain and async functions defined at the top level are hooks."""
     build()
     source = ("from ggg_sdk import hook\n\n@hook\ndef init(args):\n    return {}\n\n"
               "def act(args, context=None):\n    return {}\n\nasync def later(args):\n    return {}\n")
@@ -145,21 +144,72 @@ def test_a_hook_that_is_not_a_top_level_function_is_not_one(source):
     assert state() == NO_CODEX
 
 
-@pytest.mark.parametrize("failure", [SyntaxError("invalid syntax"), ValueError("a null byte"),
-                                     RecursionError("maximum recursion depth exceeded"), MemoryError()])
-def test_code_the_compiler_cannot_take_is_left_to_the_checks_of_the_code_itself(monkeypatch, failure):
-    """A source that does not compile, or is nested too deep for the compiler (a RecursionError or a MemoryError, which
-    the wasm can catch): there is no code to read, so the hook check says nothing and raises nothing."""
-    def refuse(*args, **kwargs):
-        raise failure
-
-    monkeypatch.setattr("builtins.compile", refuse, raising=False)
-    assert codex.defined_hooks("def init(args):\n    return {}\n") is None
-    codex.check_hooks({"hooks": ["init"]}, "def init(args):\n    return {}\n")  # returns: nothing to judge
+def test_the_hooks_a_code_defines_are_read_from_its_compiled_form():
+    code = compile("def init(a):\n    return 1\n\nclass K:\n    def m(self):\n        pass\n"
+                   "x = lambda: 1\nasync def later(a):\n    return 1\n", "hooks.py", "exec")
+    assert codex.defined_hooks(code) == {"init", "later"}
+    assert codex.defined_hooks(compile("", "hooks.py", "exec")) == set()
+    codex.check_hooks({"hooks": ["init"]}, compile("def init(a):\n    return 1\n", "hooks.py", "exec"))
+    codex.check_hooks({"hooks": None}, compile("", "hooks.py", "exec"))  # a manifest of another type: not this check's
 
 
-def test_a_source_that_does_not_compile_is_left_to_the_compile_check_and_not_judged_by_the_hook_check():
-    assert codex.defined_hooks("def (") is None
-    codex.check_hooks({"hooks": ["init"]}, "def (")
-    assert codex.defined_hooks("def init(a):\n    return 1\n\nclass K:\n    def m(self):\n        pass\n"
-                               "x = lambda: 1\nasync def later(a):\n    return 1\n") == {"init", "later"}
+@pytest.mark.parametrize("source", ["def (", "def init(args):\n    return {}\n\x00"], ids=["syntax", "null byte"])
+def test_code_that_does_not_compile_is_refused_for_that_whatever_the_manifest_lists(source):
+    """The hook check reads compiled code: a source that does not compile is the compile check's, with its reason."""
+    build()
+    args = install_args(source)
+    assert "source does not compile" in denied("codex_install", "ctl", **args)
+    action = {"op": "codex_install", "args": args}
+    assert "source does not compile" in denied("proposal_create", "alice", title="Install", action=action)
+    assert state() == NO_CODEX
+
+
+@pytest.fixture
+def compiles(monkeypatch):
+    """The sources the realm compiled as a codex's code, by the filename the install gives it."""
+    import builtins
+
+    seen, real = [], builtins.compile
+
+    def spy(source, filename, *args, **kwargs):
+        if filename == "hooks.py":
+            seen.append(source)
+        return real(source, filename, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "compile", spy)
+    return seen
+
+
+def test_code_the_realm_would_refuse_as_untrusted_is_not_compiled_by_the_hook_check(compiles):
+    """Review of #711: the hook check compiled the code before the trust policy, and on the canister code nested too
+    deep for the compiler ("x = " + "1 if 1 else " * 3000 + "1") crashes it past any ``except``: with approval
+    required and the code not pinned, a stored proposal trapped its deciding vote for ever, where the base refused the
+    code at trust. The check runs after it now, and filing compiles only what the realm takes without asking anyone."""
+    build(approval=True)
+    args = install_args(UNDEFINED)  # lists a hook it does not define: the hook check would refuse it, if it ran
+    untrusted = "neither allowlisted nor approved by the marketplace"
+    assert untrusted in denied("codex_install", "ctl", **args)  # the trust policy refuses it first
+    action = {"op": "codex_install", "args": args}
+    ok("proposal_create", "alice", title="Install", action=action)  # filed: the trust policy judges it at the vote
+    ok("governance_update", "ctl", voting_window=0)
+    pid = ok("proposal_create", "alice", title="Install again", action=action)["proposal"]
+    for voter in ("alice", "bob", "dana", "carla"):
+        ok("proposal_vote", voter, proposal=pid, choice="yes")
+    row = Proposal[pid]
+    assert row.status == "failed" and untrusted in row.result["error"]
+    assert compiles == []  # no filing, call or vote compiled it
+    assert state() == NO_CODEX
+
+
+def test_code_the_realm_trusts_is_hook_checked_where_it_is_filed_and_where_it_is_called(compiles):
+    """With the code's checksum pinned the realm takes it without asking: that code is read, filed and called alike."""
+    from api import extensions
+
+    build(approval=True)
+    args = install_args(UNDEFINED)
+    Realm["1"].trusted_approvers = [f"sha256:{extensions.checksum(args['manifest'], args['source'])}"]
+    reason = "the manifest lists the hook init, which the code does not define"
+    assert reason in denied("codex_install", "ctl", **args)
+    action = {"op": "codex_install", "args": args}
+    assert reason in denied("proposal_create", "alice", title="Install", action=action)
+    assert compiles and state() == NO_CODEX and Proposal.count() == 0

@@ -81,9 +81,7 @@ def hook(name, context=None):
     try:
         out = yield from sandbox.call(codex.source, name, context or {}, facts, codex.capabilities or [])
     except Exception as e:  # noqa: BLE001  the hook's own failure, whatever it is, is the codex's: never the caller's
-        undefined = isinstance(e, KeyError) and e.args == (name,)  # the code has no function of that name
-        detail = f"the code does not define the hook {name}" if undefined else str(e)
-        out = {"ok": False, "error": f"{type(e).__name__}: {detail}"}
+        out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     failed = [e for e in out.get("effects", []) if not e.get("ok")]
     error = out.get("error") or "; ".join(f"{e['op']}: {e.get('error')}" for e in failed)
     problem = {"codex": codex.id, "hook": name, "error": error, "at": chain.now()} if error else {}
@@ -145,57 +143,132 @@ def hooks(codex_id):
         yield from legislation.activate(row)
 
 
+def text_arg(args, key, what):
+    """``args[key]`` is text, or a Fail that says what ``key`` is: an argument of another type than the one the install
+    reads is refused here, where a call is filed or made, rather than raising inside it (a trap). What the text must
+    be, a source id or a version of 1 to 64 characters, the install itself judges."""
+    if not isinstance(args.get(key), str):
+        raise Fail(f"{key} is {what}")
+
+
+def texts_of(value, what):
+    """``value`` is a list of text, or a Fail that says what ``what`` is."""
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise Fail(f"{what} is a list of text")
+
+
+def compiled(source):
+    """``source`` compiled, or a Fail: whatever the compiler raises is a refusal, never an exception out of the install: a
+    syntax error, a null byte, and on code nested too deep a RecursionError or a MemoryError (each of which a trap would
+    turn into a vote or a timer that never concludes)."""
+    try:
+        return compile(source, "hooks.py", "exec")
+    except Exception as e:  # noqa: BLE001
+        try:
+            reason = str(e)[:200] or type(e).__name__
+        except Exception:  # noqa: BLE001  an exception whose text cannot be made
+            reason = type(e).__name__
+        raise Fail(f"source does not compile: {reason}")
+
+
+def digest_of(manifest, source):
+    """The checksum of the manifest and the code, or a Fail: the canister's JSON accepts a lone surrogate
+    (``"\\ud800"``), which is not UTF-8 text, so the checksum (the hash of the text's bytes) raises a
+    UnicodeEncodeError that dispatch would trap on, with a vote or a timer that never concludes."""
+    try:
+        return checksum(manifest, source)
+    except UnicodeEncodeError as e:
+        raise Fail(f"the manifest and the code are UTF-8 text: {e}")
+
+
 CO_OPTIMIZED = 0x1  # the flag of a function's code, and of a lambda's or a comprehension's: not of a class body
 
 
-def defined_hooks(source):
-    """The names of the functions ``source`` defines at the top of its module (``def`` and ``async def``, decorated or
-    not): what a hook of the manifest can be. Read from the compiled code, where each of them is a constant of the
-    module's code with the flag of a function: a method, or a function nested in another, is a constant of its
-    container's code, a lambda and a comprehension carry names with ``<``, a class body lacks the flag, and a name that
-    is only used, assigned or imported is not a constant at all. (The syntax tree would say the same, but ``ast`` is a
-    stub in the canister's Python: it has no ``parse``.) No code runs. None when the source cannot be compiled (a syntax
-    error, a null byte, or nested too deep): that is for the checks of the code itself."""
-    try:
-        code = compile(source, "hooks.py", "exec")
-    except Exception:  # noqa: BLE001  a SyntaxError, a ValueError, a RecursionError, a MemoryError
-        return None
+def defined_hooks(code):
+    """The names of the functions the compiled module ``code`` defines at its top (``def`` and ``async def``, decorated
+    or not): what a hook of the manifest can be. Read from the code, where each of them is a constant of the module's
+    code with the flag of a function: a method, or a function nested in another, is a constant of its container's code,
+    a lambda and a comprehension carry names with ``<``, a class body lacks the flag, and a name that is only used,
+    assigned or imported is not a constant at all. (The syntax tree would say the same, but ``ast`` is a stub in the
+    canister's Python: it has no ``parse``.) No code runs."""
     return {const.co_name for const in code.co_consts
             if hasattr(const, "co_flags") and const.co_flags & CO_OPTIMIZED and not const.co_name.startswith("<")}
 
 
-def check_hooks(manifest, source):
-    """A manifest that lists a hook its ``source`` does not define as a top-level function is refused before anything is
-    installed: the codex would switch in, and its hook could never run (``hook`` would find no function and mark it
-    unhealthy for good). A manifest or source of another type is left to the checks of those."""
+def check_hooks(manifest, code):
+    """A manifest that lists a hook the compiled ``code`` does not define as a top-level function is refused before
+    anything is installed: the codex would switch in, and its hook could never run (``hook`` would find no function and
+    mark it unhealthy for good). The caller compiles the code (``compiled``) once the trust policy has accepted it:
+    code the realm would refuse is never compiled, which on code nested too deep can crash the canister's compiler past
+    any ``except``. A manifest of another type is left to the checks of it."""
     hooks = manifest.get("hooks") if isinstance(manifest, dict) else None
-    if not isinstance(hooks, list) or not isinstance(source, str):
+    if not isinstance(hooks, list):
         return
-    defined = defined_hooks(source)
-    if defined is None:
-        return
+    defined = defined_hooks(code)
     for name in hooks:
         if isinstance(name, str) and name not in defined:
             raise Fail(f"the manifest lists the hook {name}, which the code does not define as a top-level function")
 
 
+def check_install_args(args):
+    """``codex_install``'s ``args`` are of the types the install reads, or a Fail names the one that is not. Without it
+    an argument of another type raises inside the install (a manifest that is null, an empty string or a list, sent
+    code that is not text or does not compile, hooks that are not a list): the operation then traps, and a trap inside
+    a vote's execution or a timer rolls the message back, so a proposal that carries it may never conclude. It is the
+    operation's ``check``, which runs for a member's, a controller's or an accepted vote's call, and ``filed_install``
+    asks it where the install is filed: a proposal stored with such arguments before then fails, with the reason
+    recorded, and ``installs.prepare`` asks it before it stages a release, so that the staging and the switch cannot
+    disagree. A release is judged by its ``source`` and ``version`` alone: a change list beside it is never read, so
+    its types do not matter (a release with one is refused when it is filed, core.change_list.names_both, and still
+    runs, as the release, when stored). Of code the realm takes without asking anyone it also asks that the manifest's
+    hooks are functions the code defines (``check_hooks``); code it would refuse as untrusted is not compiled."""
+    if not isinstance(args, dict):
+        raise Fail("an install takes a record of arguments")
+    if change_list.names_release(args):
+        text_arg(args, "source", "the id of a layer from above: text")
+        text_arg(args, "version", "the release's version: text")
+    elif "checksum" in args:
+        if not isinstance(args["checksum"], str):
+            raise Fail("checksum is sha256:<64 hex digits>")
+        if "url" in args and not isinstance(args["url"], str):
+            raise Fail("url is the address of the change list, https")
+    elif "manifest" in args:
+        manifest = args["manifest"]
+        if not isinstance(manifest, dict) or not manifest:
+            raise Fail("manifest is the codex's manifest.json: a record that is not empty")
+        text_arg(args, "source", "the codex's code: text")
+        for key in ("id", "version"):
+            if not isinstance(manifest.get(key), str):
+                raise Fail(f"the manifest's {key} is text")
+        for key in ("capabilities", "hooks"):
+            if key in manifest:
+                texts_of(manifest[key], f"the manifest's {key}")
+        # Code the realm would refuse as untrusted is refused for that, without compiling it (``trust``): the compiler
+        # runs here only on code the realm takes, which is all of it when it requires no approval.
+        if extensions.pinned(digest_of(manifest, args["source"])):
+            check_hooks(manifest, compiled(args["source"]))
+    elif "codex" in args or "version" in args:
+        text_arg(args, "codex", "the name of a codex of the file registry: text")
+        text_arg(args, "version", "the version of that codex: text")
+
+
 def filed_install(args, proposal):
     """A "Propose install" (§11.4) that this realm could not build is refused when it is filed
-    (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a change
-    list at once (core.change_list.names_both): the realm would install the release, and a reader that tests the checksum
-    first would describe the change list. So is code whose manifest lists a hook it does not define
-    (``check_hooks``)."""
+    (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a
+    change list at once (core.change_list.names_both): the realm would install the release, and a reader that tests
+    the checksum first would describe the change list. So is one whose arguments are not of the types the install
+    reads, or whose code (one the realm takes without asking) lacks a hook its manifest lists
+    (``check_install_args``)."""
+    check_install_args(args)
     if change_list.names_release(args):
         from api import installs  # it imports this module
 
         if change_list.names_both(args):
             raise Fail(installs.MIXED)
         installs.release_of(args)
-    elif "manifest" in args:
-        check_hooks(args["manifest"], args.get("source"))
 
 
-@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install)
+@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install, check=check_install_args)
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
     The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``.
@@ -219,10 +292,9 @@ def codex_install(c, args):
         namespace = f"ext/{args['codex']}/{args['version']}"
         manifest, source = yield from fetch(namespace)
     runnable(manifest)
-    check_hooks(manifest, source)
-    digest = checksum(manifest, source)
+    digest = digest_of(manifest, source)
     yield from trust(digest, namespace)
-    compile(source, "hooks.py", "exec")
+    check_hooks(manifest, compiled(source))  # after the trust policy: it does not compile what it would refuse
     if len(sandbox.readable(manifest.get("capabilities", []))) > sandbox.MAX_ACTIONS:
         raise Fail(f"a codex may declare at most {sandbox.MAX_ACTIONS} read operations")
     key, current = f"{manifest['id']}@{manifest['version']}", active()

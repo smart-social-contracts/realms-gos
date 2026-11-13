@@ -171,6 +171,59 @@ def test_a_status_with_the_tags_is_read_from_the_shorter_list(monkeypatch):
     assert found(tags=["rare"], status="voting") == ["P-61", "P-62"]
 
 
+def test_a_tag_with_a_status_stops_after_the_checks_it_may_spend_and_goes_on_from_there(monkeypatch):
+    """Tags and a status that few proposals share would read the whole of the shorter list in one query. A call spends
+    ``CHECK_LIMIT`` reads at most, then returns what it has, short and even empty, with ``next`` where it stopped."""
+    monkeypatch.setattr(proposals, "CHECK_LIMIT", 10)
+    world.build()
+    for i in range(1, 21):  # P-1 to P-20: executed, on both tags
+        Proposal[file(f"carrier {i}", tags=["t", "u"])].status = "executed"
+    for i in range(21, 35):  # P-21 to P-34: voting, on none
+        file(f"voter {i}")
+    match = file("match", tags=["t", "u"])  # P-35: voting, on both
+    assert match == "P-35"
+    # One tag: its list holds 21 ids and the status's 15, and an id of either is one read, so the ids come from the
+    # status: a window of 6 and one of the 4 reads that are left of the 10, and the first call stops at P-31.
+    assert pages(tags=["t"], status="voting", count=5) == [([], 32), (["P-35"], None)]
+    # Two tags: an id of the status is checked in each, two reads, so a window of 6 is past the limit and a call ends there.
+    assert pages(tags=["t", "u"], status="voting", count=5) == [([], 27), ([], 33), (["P-35"], None)]
+    # A page of 500 reads no more than the limit allows: 5 ids of 2 reads, and 1 more.
+    assert pages(tags=["t", "u"], status="voting", count=500) == [([], 27), ([], 33), (["P-35"], None)]
+    # Every id that is read carries the tag, so each window fills a page and the limit is never reached.
+    assert pages(tags=["t"], status="executed", count=5) == [
+        (["P-1", "P-2", "P-3", "P-4", "P-5"], 6), (["P-6", "P-7", "P-8", "P-9", "P-10"], 11),
+        (["P-11", "P-12", "P-13", "P-14", "P-15"], 16), (["P-16", "P-17", "P-18", "P-19", "P-20"], None)]
+
+
+def test_the_limit_on_checks_leaves_a_listing_by_tags_alone_complete_and_full(monkeypatch):
+    monkeypatch.setattr(proposals, "CHECK_LIMIT", 1)
+    world.build()
+    ids = fill(30, "t", 2)
+    assert pages(tags=["t"], count=4)[:2] == [([ids[i] for i in (1, 3, 5, 7)], 10), ([ids[i] for i in (9, 11, 13, 15)], 18)]
+    assert found(tags=["t"], count=4) == ids[1::2]
+
+
+def test_with_the_limit_on_checks_a_listing_is_what_the_proposals_say_in_pages_that_go_on(monkeypatch):
+    monkeypatch.setattr(proposals, "CHECK_LIMIT", 7)
+    world.build()
+    shuffle = random.Random(5)
+    vocabulary = ["a", "b", "c", "d"]
+    ids = []
+    for i in range(70):
+        ids.append(file(f"p{i}", tags=shuffle.sample(vocabulary, shuffle.randint(0, 3))))
+        Proposal[ids[-1]].status = shuffle.choice(STATUSES)
+    everything = [Proposal[i] for i in ids]
+    for _ in range(40):
+        tags, status = shuffle.sample(vocabulary, shuffle.randint(1, 4)), shuffle.choice(STATUSES)
+        count = shuffle.randint(1, 30)  # a window is cut to what the limit allows, however large the page
+        expected = [p.id for p in everything if set(tags) & set(p.tags) and p.status == status]
+        got = pages(tags=tags, status=status, count=count)
+        assert [i for page, _ in got for i in page] == expected, (tags, status, count)
+        assert all(len(page) <= count for page, _ in got), (tags, status, count)
+        assert [after for _, after in got[:-1]] == sorted({after for _, after in got[:-1]}), (tags, status, count)  # it goes on
+        assert got[-1][1] is None
+
+
 def test_pages_with_any_count_and_filters_are_what_the_proposals_say_and_full():
     """Against the proposals themselves, with ids above 100: tags that are alike, ones that end like an index entry, and
     a long one."""
@@ -246,6 +299,12 @@ def test_retagging_among_tags_that_look_like_index_entries_leaves_every_list_rig
            tags=shuffle.sample(LOOK_ALIKES, shuffle.randint(0, 4)))
         for tag in LOOK_ALIKES:
             assert found(tags=[tag], count=3) == [p for p in drafts if tag in Proposal[p].tags], tag
+
+
+def test_the_tags_of_a_proposal_are_not_an_indexed_field():
+    """``indexed=True`` would put ``_fi:Proposal:tags:<the tags as json>`` among the lists of the tags, under the same
+    prefix: the lists are kept by ``Proposal.list_tags``, and only by it."""
+    assert "tags" not in Proposal._indexed_properties()
 
 
 def test_a_list_of_tags_is_a_list_of_text():

@@ -94,6 +94,32 @@ def test_an_install_whose_hook_cannot_run_concludes_executed_by_vote_and_by_time
     assert s["codex"]["id"] == "lex@1.3" and s["healthy"] is False and s["problem"]["hook"] == "init"
 
 
+DEEP = "x = " + "1 if 1 else " * 3000 + "1"  # the canister's compiler crashes on it, past any `except`
+
+
+def approval(realm, required):
+    out = realm.shell(f"from ggg import Realm\nRealm['1'].require_marketplace_approval = {required}\nprint('set')")
+    assert "Traceback" not in out, out
+
+
+def test_code_the_compiler_cannot_survive_is_refused_at_the_trust_policy_before_it_is_compiled(net, realm):
+    """Review of #711: the hook check compiled the code before the trust policy. With approval required and the code not
+    pinned, the vote that carried this code trapped for ever, where the base refused it at trust."""
+    approval(realm, True)
+    try:
+        args = package(DEEP, "6.0")
+        untrusted = "neither allowlisted nor approved by the marketplace"
+        direct = realm.call("codex_install", args, sender=net.people["ctl"])
+        assert not direct["ok"] and untrusted in direct["error"]
+        pid = realm.ok("proposal_create", "alice", title="Install lex 6.0",
+                       action={"op": "codex_install", "args": args})["proposal"]  # filed: nothing compiles it
+        assert vote(realm, pid) == "failed"  # the last vote's message completes: it did not trap
+        row = realm.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+        assert row["status"] == "failed" and untrusted in row["result"]["error"]
+    finally:
+        approval(realm, False)
+
+
 # The canister has 8 subinterpreter handles, shared by every hook, extension call, the layered codex's sandbox and the
 # controller's shell. This spawns until the table says it is full and gives them back: how many were free.
 FREE = """

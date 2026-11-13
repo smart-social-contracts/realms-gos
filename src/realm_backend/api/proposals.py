@@ -33,6 +33,10 @@ RESUME_PAGE = 100
 # ``relist_tags`` brings about after every upgrade. The proposals it reads per message.
 TAG_INDEX = "tag_index"
 TAG_INDEX_PAGE = 200
+# What one listing by tags and a status spends on the ids it reads and checks, in reads of an index at most, an id counting
+# once for each tag it is read from or checked in (about 0.3 million instructions each, measured at most 1 billion a
+# call): a query may spend 5 billion, and the lists it reads may be as long as the realm is old.
+CHECK_LIMIT = 2_000
 
 
 def root():
@@ -68,9 +72,12 @@ def check_action(action):
     run_action), not as a member picked by whoever filed it."""
     if action.get("op") not in ops():
         raise Fail(f"unknown operation '{action.get('op')}'")
-    if "on_behalf_of" in (action.get("args") or {}):
+    args = action.get("args")
+    if args is not None and not isinstance(args, dict):
+        raise Fail("an action is {op, args}, with args a record")
+    if "on_behalf_of" in (args or {}):
         raise Fail("an action cannot act on_behalf_of a member: it runs once accepted, as its proposer")
-    ranges.check(action["op"], action.get("args") or {})
+    ranges.check(action["op"], args or {})
 
 
 def check_scope(department, action):
@@ -381,7 +388,13 @@ def scheduled_task_name(p):
 
 def run_action(p):
     """Run the accepted action as its proposer: the vote is the authority, and the action cannot name anyone else.
-    The vote's authority stops at the proposal's department, so an action outside it fails without running."""
+    The vote's authority stops at the proposal's department, so an action outside it fails without running. One whose
+    args are not a record (a filing refuses it now) fails with that reason: it never reaches code that reads them."""
+    args = p.action.get("args")
+    if args is not None and not isinstance(args, dict):
+        end(p, "failed")
+        p.result = {"ok": False, "error": "an action is {op, args}, with args a record", "kind": Fail.kind}
+        return
     try:
         check_scope(p.department, p.action)
         if p.on_behalf_of:
@@ -391,7 +404,7 @@ def run_action(p):
         p.result = {"ok": False, "error": str(e), "kind": e.kind}
         return
     p.status = "executed"
-    out = yield from dispatch(p.action["op"], json.dumps(p.action["args"]), origin="replay", signer=p.proposer,
+    out = yield from dispatch(p.action["op"], json.dumps(p.action.get("args")), origin="replay", signer=p.proposer,
                               proposal=p.id)
     p.result = json.loads(out)
     if not p.result.get("ok"):
@@ -841,41 +854,48 @@ def proposal_get(c, args):
     return {**shown, "release_change": change} if change else shown
 
 
-def id_sources(tags, status, count):
+def id_sources(tags, status):
     """Where the ids of a listing by ``tags`` (and ``status``, if given) come from: the shorter list, as far as reading
-    goes, the tags' or the status's, and how each id is checked in the other, by its index. An id of the status costs a
-    read for each tag it is checked in, an id of the tags a read for the status."""
+    goes, the tags' or the status's, and how each id is checked in the other, by its index. An id of the status is checked
+    in each tag, an id of the tags in the status."""
     if status and Proposal.count_by("status", status) * len(tags) < Proposal.count_with_tags(tags):
-        return (lambda cursor: indexed_ids(Proposal, "status", status, cursor, count + 1),
+        return (lambda cursor, n: indexed_ids(Proposal, "status", status, cursor, n),
                 lambda i: any(Proposal.is_listed_under(tag, i) for tag in tags))
-    return (lambda cursor: Proposal.with_tags(tags, cursor, count + 1),
+    return (lambda cursor, n: Proposal.with_tags(tags, cursor, n),
             lambda i: not status or has_indexed(Proposal, "status", status, i))
 
 
 def listed_by_tags(tags, status, args):
     """One page of the proposals that carry at least one of ``tags`` and, if given, have ``status``: the rows, and the id
     the next page starts at (None at the end). Only the ids are read until they are on the page, so what it costs is
-    the page, and the ids of the shorter list that the other leaves out."""
+    the page, and the ids of the shorter list that the other leaves out. With a status that can be more than
+    ``CHECK_LIMIT`` reads: the call then stops, and the page is short, empty even: ``next`` goes on from the last id it
+    checked. Without one nothing is left out, and the page is full."""
     start, count = page_window(args)
-    ids_from, matches = id_sources(tags, status, count)
-    ids, cursor = [], start
-    while len(ids) <= count:  # the one past the page is where the next one starts
-        found = ids_from(cursor)
+    ids_from, matches = id_sources(tags, status)
+    reads = len(tags) if status else 0  # what an id costs, in reads: it is read from every tag's list or checked in each
+    ids, cursor, spent = [], start, 0
+    while len(ids) <= count and spent < CHECK_LIMIT:  # the one past the page is where the next one starts
+        n = min(count + 1, (CHECK_LIMIT - spent) // reads + 1) if reads else count + 1
+        found = ids_from(cursor, n)
         ids += [i for i in found if matches(i)]
-        if len(found) <= count:
+        spent += len(found) * reads
+        if len(found) < n:
+            cursor = None  # the list is at its end
             break
         cursor = found[-1] + 1
-    return [Proposal.load(str(i)) for i in ids[:count]], ids[count] if len(ids) > count else None
+    return [Proposal.load(str(i)) for i in ids[:count]], ids[count] if len(ids) > count else cursor
 
 
 @op("realm.data_view", read=True, returns="proposals")
 def proposal_list(c, args):
     """Proposals (id, title, status, deadline, effective_at, proposer, tags), or only those with ``status`` (e.g.
     voting) and carrying at least one of ``tags`` (at most 16, compared exactly), ``count`` at a time (default 100, at
-    most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the end). A page is full
-    unless it is the last, however few proposals carry the tags, and ``next`` is the id of the next proposal that
-    matches. Only in the minutes after an upgrade, while the realm puts its proposals on the lists of their tags again,
-    can a page with ``tags`` be short or empty: follow ``next``."""
+    most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the end). A page by ``tags``
+    is full unless it is the last, however few proposals carry them, and ``next`` is the id of the next proposal that
+    matches; but with a ``status`` too, a call that has checked about 2,000 ids stops, and its page is short, even
+    empty, and ``next`` goes on from where it stopped. So is a page with ``tags`` in the minutes after an upgrade, while
+    the realm puts its proposals on the lists of their tags again: follow ``next``."""
     tags, status = args.get("tags") or [], args.get("status")
     if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
         raise Fail("tags is a list of text")
