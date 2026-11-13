@@ -433,6 +433,21 @@ def test_an_install_whose_hook_succeeds_with_a_large_result_concludes_executed_w
         assert "Traceback" not in plain.shell(set_policy.replace("= False", "= True"))
 
 
+def test_an_extension_call_that_returns_text_over_the_record_concludes_executed_with_the_result_cut(net, plain):
+    """The audit log keeps the top-level text of a reply (``Event.result``), in ``dispatch``, before the proposal's
+    result: an extension's function that returns 70,000 characters raised in the log and trapped the deciding vote,
+    which the bound of the proposal's result, after it, never reached (review-716)."""
+    made = plain.shell("from ggg import Extension\n"
+                       "Extension(id='longtext', version='1.0.0', operations=[], "
+                       "source='def text():\\n    return \"x\" * 70000\\n')\nprint('made')")
+    assert made.strip() == "made", made
+    action = {"op": "extension_call", "args": {"extension": "longtext", "function": "text"}}
+    pid = plain.ok("proposal_create", "alice", title="Call longtext", action=action)["proposal"]
+    assert vote(plain, pid, "yes") == "executed"  # the last vote's message completes: it did not trap
+    row = plain.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    assert row["result"]["ok"] is True and row["result"]["result"] == "[cut: 70002 characters]"
+
+
 def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(
         net, source, town):
     """The release is staged when the vote decides it, and switched to at the time: the same check at both, so the job

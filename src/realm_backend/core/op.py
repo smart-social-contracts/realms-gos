@@ -7,7 +7,7 @@ from core import it_team
 from core import pending
 from core import poa
 from core import ranges
-from core.db import Fail, Forbidden
+from core.db import Fail, Forbidden, bounded
 
 OPS = {}
 MODULES = ("actions", "assets", "codex", "crypto", "delegation", "extensions", "external", "federation", "installs",
@@ -239,8 +239,8 @@ def audit(name, user, by, origin, args, out, grant="", prepared_by=""):
         kept = {"keys": sorted(kept)}
     shown = {k: v for k, v in redacted(name, out, args).items() if isinstance(v, (str, int, bool))}
     newest = Event.max_id() + 1
-    Event(id=str(newest), op=name, user=user, by=by, origin=origin, args=kept, result=shown, at=chain.now(),
-          grant=grant or None, prepared_by=prepared_by)
+    Event(id=str(newest), op=name, user=user, by=by, origin=origin, args=kept, result=bounded(shown),
+          at=chain.now(), grant=grant or None, prepared_by=prepared_by)
     Event.forget(str(newest - EVENTS_KEPT))
 
 

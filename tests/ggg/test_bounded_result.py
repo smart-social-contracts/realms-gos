@@ -9,14 +9,15 @@ the proposal, for ever. ``core.db.bounded`` cuts the recorded error, with a mark
 """
 
 import json
+import random
 
 import fake_chain
 import pytest
 import world
 from core import legislation, op
 from core.db import JSON_MAX, bounded
-from ggg import PendingAction, Proposal, Realm
-from kit import fire_timers, later, ok
+from ggg import Event, PendingAction, Proposal, Realm
+from kit import fire_timers, later, ok, rows
 
 HOUR = 3600
 FOUR = ("alice", "bob", "dana", "carla")  # more than half of the seven members: enough to carry a vote
@@ -96,8 +97,42 @@ def test_a_reply_too_large_in_many_fields_or_not_a_record_is_replaced_by_a_recor
     assert many["ok"] is True and NOTE in many["cut"] and set(many) == {"ok", "cut"}
     refused = bounded({"ok": False, "kind": "conflict", **fields})
     assert set(refused) == {"ok", "kind", "error"} and refused["ok"] is False and NOTE in refused["error"]
-    listed = bounded(["x" * 1000] * 100)
-    assert listed["ok"] is False and NOTE in listed["error"]
+    listed = bounded(["x" * 1000] * 100)  # not a reply: nothing to say whether it refused
+    assert listed == {"cut": listed["cut"]} and NOTE in listed["cut"]
+    no_ok = bounded(fields)  # what the audit log keeps of a reply: no ok in it
+    assert set(no_ok) == {"cut"} and NOTE in no_ok["cut"]
+
+
+def test_the_other_large_fields_are_cut_before_the_error_and_the_record_never_outgrows_a_field():
+    padded = bounded({"ok": False, "kind": "invalid_argument", "error": "e" * 7000, "pad": "p" * 70000})
+    assert padded == {"ok": False, "kind": "invalid_argument", "error": "e" * 7000,
+                      "pad": f"[cut: {len(json.dumps('p' * 70000))} characters]"}  # the reason stays whole
+    fields = {f"k{i}": "z" * 900 for i in range(100)}
+    huge_kind = bounded({"ok": False, "kind": "k" * 70000, **fields})  # ok and kind come from what is kept
+    assert huge_kind["ok"] is False and huge_kind["kind"].startswith("[cut: ") and NOTE in huge_kind["error"]
+    assert len(json.dumps(huge_kind)) <= JSON_MAX
+
+
+def test_whatever_the_shape_of_a_reply_what_is_recorded_fits_and_keeps_its_ok():
+    rng = random.Random(716)
+    chars = ["x", "\x7f", "\x01", "é", "\\", '"', "\t"]
+    for _ in range(300):
+        reply = {}
+        for i in range(rng.randrange(1, 12)):
+            kind = rng.randrange(5)
+            key = rng.choice(["ok", "kind", "error", "result", "pad", f"f{i}"])
+            if kind < 3:
+                reply[key] = rng.choice(chars) * rng.choice([3, 900, 1200, 9000, 40000, 90000])
+            elif kind == 3:
+                reply[key] = [rng.choice(chars) * 500] * rng.choice([1, 20, 200])
+            else:
+                reply[key] = rng.choice([True, False, 7, None])
+        out = bounded(reply)
+        assert len(json.dumps(out)) <= JSON_MAX and len(json.dumps(out, ensure_ascii=False)) <= JSON_MAX, reply
+        if len(json.dumps(reply)) <= JSON_MAX:
+            assert out is reply
+        elif isinstance(reply.get("ok"), bool) and len(json.dumps(reply["ok"])) <= JSON_MAX:
+            assert out.get("ok") is reply["ok"] or "ok" not in out, (reply, out)
 
 
 # ---- A stored proposal
@@ -151,20 +186,23 @@ def test_what_the_operation_returns_is_recorded_whole_when_it_fits():
 
 
 def test_an_ok_reply_too_large_for_the_field_does_not_trap_the_vote_that_ran_it(monkeypatch):
-    """A refusal is not the only reply that can be large: the action ran, and its record keeps what is small of it."""
-    real = op.dispatch
+    """A refusal is not the only reply that can be large: the action ran, and its record keeps what is small of it. The
+    operation itself returns the text (as an extension's function can), so the audit log meets it first, in
+    ``dispatch``, and the proposal's result after it (review-716: the audit's ``Event.result`` raised first)."""
+    real = op.OPS["mandate_create"]["fn"]
 
-    def large(name, arg, **kw):
-        out = json.loads((yield from real(name, arg, **kw)))
-        return json.dumps({**out, "document": "z" * 80000})
+    def large(call, args):
+        return {**real(call, args), "document": "z" * 80000}
 
-    monkeypatch.setattr("api.proposals.dispatch", large)
+    monkeypatch.setitem(op.OPS["mandate_create"], "fn", large)
     ok("governance_update", "ctl", voting_window=0)
     p = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS)["proposal"]
-    vote_yes(p)
+    vote_yes(p)  # no trap, in the audit or in the result
     row = Proposal[p]
     assert row.status == "executed" and row.result["ok"] is True and "mandate" in row.result
     assert row.result["document"] == "[cut: 80002 characters]"
+    logged = [e for e in rows(Event) if e.op == "mandate_create"][-1]
+    assert logged.result["document"] == "[cut: 80002 characters]" and "mandate" in logged.result
 
 
 RETURNS_A_LOT = ("from ggg_sdk import hook\n\n@hook\ndef init(args):\n    return {'big': 'x' * 70000}\n")
