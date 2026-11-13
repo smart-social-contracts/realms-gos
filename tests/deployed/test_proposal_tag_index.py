@@ -18,6 +18,8 @@ import json
 import os
 
 import pytest
+from ic.candid import Types, decode, encode
+from ic.principal import Principal
 from pic import Canister
 
 PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
@@ -114,20 +116,43 @@ reply = json.loads(op.run(op.dispatch("proposal_list", %(args)r)))
 print(json.dumps({"ids": [p["id"] for p in reply["proposals"]], "next": reply["next"], "ok": reply["ok"],
                   "instructions": ic.performance_counter(0) - before}))
 '''
-# Proposals that tags and a status hardly share: 1,999 executed ones that carry sixteen tags, and the ones that are
-# voting (P-2000 on, but for the ones that are rejected from ``%(rejected_from)d``) which carry none, but those from
-# ``%(matches_from)d`` on, which are voting and carry them all: the matches, at the far end of every list.
+# Proposals that tags and a status hardly share: the first ``%(executed_to)d`` are executed and carry sixteen tags; of
+# the ones after them, those from ``%(rejected_from)d`` on are rejected and those from ``%(matches_from)d`` on are voting
+# and carry the tags (the matches, at the far end of every list); the others are voting and carry none.
 CROWDED = '''
 from ggg import Department, Proposal
 
 root = Department["Administration"]
 tags = [f"c{k}" for k in range(16)]
 for i in range(%(first)d, %(last)d + 1):
-    carrier = i < 2000 or i >= %(matches_from)d
-    status = "executed" if i < 2000 else "rejected" if %(rejected_from)d <= i < %(matches_from)d else "voting"
+    carrier = i <= %(executed_to)d or i >= %(matches_from)d
+    status = "executed" if i <= %(executed_to)d else "rejected" if %(rejected_from)d <= i < %(matches_from)d else "voting"
     Proposal(id=f"P-{i}", title=f"Item {i}", description="Aprovar l'expedient.", proposer="2vxsx-fae", department=root,
              status=status, tags=tags if carrier else [])
 '''
+# The same page as a GGG query builds it: ggg_proposal_list takes the rows the operation lists and makes a GGG record of
+# each, which the caller gets as Candid. In the shell, to count the instructions up to the Candid.
+GGG_LIST = '''
+import json
+from basilisk import ic
+import ggg_api
+
+before = ic.performance_counter(0)
+out = ggg_api.read("proposal_list", "ProposalListArgs", %(arg)r, "ProposalPageReply")
+spent = ic.performance_counter(0) - before
+ok = out.get("Ok") or {}
+print(json.dumps({"ok": "Ok" in out, "items": len(ok.get("items") or []), "next": ok.get("next"), "instructions": spent}))
+'''
+# What the realm's limit on checks is, as the realm has it
+LIMIT = '''
+from api import proposals
+
+print(proposals.CHECK_LIMIT)
+'''
+GGG_LIST_ARGS = Types.Record({
+    "cursor": Types.Opt(Types.Text), "limit": Types.Opt(Types.Nat32), "tags": Types.Opt(Types.Vec(Types.Text)),
+    "status": Types.Opt(Types.Variant({name: Types.Null for name in (
+        "Draft", "Voting", "Accepted", "ExecutionScheduled", "Rejected", "Expired", "Executed", "Failed", "Withdrawn")}))})
 # The same listing with the limit on checks lifted, as the realm did before it: what it costs, whatever it costs
 UNBOUNDED = '''
 import json
@@ -187,6 +212,16 @@ def one_page(realm, **args):
     reply = json.loads(run(realm, LIST % {"args": json.dumps(args)}).strip().splitlines()[-1])
     assert reply["ok"], reply
     return reply
+
+
+def ggg_query(realm, sender, **args):
+    """``ggg_proposal_list`` as a GGG caller asks it, a real query with its limit of 5 billion instructions: it replies, or
+    it traps and this raises. Returns the Candid reply, decoded without names."""
+    value = {"cursor": [args["cursor"]], "limit": [args["limit"]], "tags": [args["tags"]],
+             "status": [{args["status"]: None}] if args.get("status") else []}
+    realm.pic.set_sender(Principal.from_str(sender))
+    reply = realm.pic.query_call(realm.id, "ggg_proposal_list", encode([{"type": GGG_LIST_ARGS, "value": value}]))
+    return decode(bytes(reply))[0]["value"]
 
 
 def unbounded_page(realm, **args):
@@ -371,20 +406,21 @@ def crowded(request, wasm_of, people):
     """A realm of 4,000 proposals that tags and a status hardly share. Rejected from P-3950 on, the status is the shorter
     list and its ids are checked in each tag; with none rejected the tags' lists are, and their ids are checked in the
     status."""
-    return crowd(wasm_of, people, rejected_from=request.param, matches_from=4_000)
+    return crowd(wasm_of, people, total=4_000, executed_to=1_999, rejected_from=request.param, matches_from=4_000)
 
 
 @pytest.fixture(scope="module")
 def filled(wasm_of, people):
-    """A realm of 4,000 proposals in which the 501 that tags and a status share, P-3500 on, come after 1,500 voting ones
-    that carry no tag: a page of 500 matches that costs about 2,000 checks as well as its rows."""
-    return crowd(wasm_of, people, rejected_from=4_001, matches_from=3_500)
+    """A realm in which a call can spend a long limit on checks and then fill a page. The status's ids drive the listing
+    (5,001 of them, against 5,003 that carry the tag), 4,500 of them carry no tag, and then come the 501 that do: a limit
+    up to 4,500 reads would be spent on the misses and no more, and a larger one would go on to fill the page."""
+    return crowd(wasm_of, people, total=9_503, executed_to=4_502, rejected_from=10**9, matches_from=9_003)
 
 
-def crowd(wasm_of, people, rejected_from, matches_from):
+def crowd(wasm_of, people, total, executed_to, rejected_from, matches_from):
     realm = launched(Canister(wasm_of("production"), installer=people["installer"]), people)
-    for first in range(1, PROPOSALS + 1, SEED_BATCH):
-        run(realm, CROWDED % {"first": first, "last": min(first + SEED_BATCH - 1, PROPOSALS),
+    for first in range(1, total + 1, SEED_BATCH):
+        run(realm, CROWDED % {"first": first, "last": min(first + SEED_BATCH - 1, total), "executed_to": executed_to,
                               "rejected_from": rejected_from, "matches_from": matches_from})
     return realm
 
@@ -412,13 +448,38 @@ def test_tags_and_a_status_that_few_proposals_share_cost_a_call_under_the_limit_
         costs.report(f"{len(names)} tag{'s' * (len(names) > 1)} and status voting, no limit on checks: one call", lifted["instructions"])
 
 
-def test_a_filled_page_by_tags_and_a_status_costs_its_checks_and_its_rows_under_what_a_query_may_spend(filled, costs):
-    """The bound is on checks: the rows of the page come on top, about 6 million each. Here a call spends the whole limit
-    on ids that tags and status do not share, and then fills a page of 500."""
-    reply = one_page(filled, tags=["c0"], status="voting", count=500)
-    assert reply["ids"] == [f"P-{i}" for i in range(3_500, 4_000)] and reply["next"] == 4_000
-    costs.report("1 tag and status voting, a page of 500 after 2,000 checks: one call", reply["instructions"])
-    assert reply["instructions"] < 5_000_000_000
+def test_a_filled_page_by_tags_and_a_status_costs_its_checks_and_its_rows_under_what_a_query_may_spend(filled, people, costs):
+    """The bound on checks (``CHECK_LIMIT`` reads of an index, about 0.4 million instructions each) is not on the rows of
+    the page, about 6 million each: 3 billion for 500. A call that reaches the matches has spent the limit less what the
+    page took. With a limit of 2,000 reads that is 1,500 misses and 3.75 billion; with 5,000 it would be 4,500 misses
+    and 4.8 billion, and with 10,000 more than a query may spend. So the realm's limit is held to 2,000 here, which this
+    realm is built for, and no call of the operation may cost 4.5 billion, a tenth under what a query may spend.
+
+    Two paths are bounded. The operation, ``proposal_list``: its calls are measured in the shell (an update, so that what
+    is over 5 billion is measured too). And ``ggg_proposal_list``, the GGG method over it, as a real query, which makes a
+    GGG record of each row and encodes the page as Candid on top of the operation: it must not trap."""
+    assert int(run(filled, LIMIT).strip().splitlines()[-1]) == 2_000, "this realm is built for a limit of 2,000 reads"
+    matches = [f"P-{i}" for i in range(9_003, 9_504)]
+    found, spent, start = [], [], 1
+    while start is not None:  # as a client does, from the first id
+        reply = one_page(filled, tags=["c0"], status="voting", count=500, **{"from": start})
+        found += reply["ids"]
+        spent.append(reply["instructions"])
+        start = reply["next"]
+    assert found == matches and max(spent) < 4_500_000_000, (len(spent), spent)
+    costs.report(f"1 tag and status voting, a page of 500 after the misses, {len(spent)} calls: the dearest", max(spent))
+    # From where exactly the limit's worth of misses less the page come before the matches: the dearest a call can be
+    after_misses = {"tags": ["c0"], "status": "voting", "count": 500, "from": 9_003 - 1_500}
+    reply = one_page(filled, **after_misses)
+    assert reply["ids"] == matches[:500] and reply["next"] == 9_503
+    costs.report("1 tag and status voting, a page of 500 after 1,500 misses: one call", reply["instructions"])
+    assert reply["instructions"] < 4_500_000_000
+    # The same page through the GGG method
+    arg = {"cursor": "7503", "limit": 500, "status": {"Voting": None}, "tags": ["c0"]}
+    ggg = json.loads(run(filled, GGG_LIST % {"arg": arg}).strip().splitlines()[-1])
+    assert ggg["ok"] and ggg["items"] == 500 and ggg["next"] == "9503", ggg
+    costs.report("1 tag and status voting, a page of 500 after 1,500 misses, ggg_proposal_list: to the Candid", ggg["instructions"])
+    assert ggg_query(filled, people["alice"], cursor="7503", tags=["c0"], status="Voting", limit=500)
 
 
 def test_a_realm_created_by_this_release_needs_no_pass(wasm_of, people):

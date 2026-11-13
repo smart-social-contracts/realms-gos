@@ -17,7 +17,7 @@ from api import crypto, links, tasks
 from api.treasury import EPOCHS
 from api.proposals import settings
 from api.setup import VERSION
-from core import chain, change_list, compliance, pending
+from core import chain, change_list, compliance, db, pending
 from core.candid import Principal as ParsedPrincipal, Reader, idl_hash, quote
 from core.op import dispatch, ops, run as drive
 from core.ratio import ONE
@@ -618,8 +618,9 @@ def read(op, arg_t, arg, reply_t):
         args = request(op, arg_t, arg)
     except BadArgument as e:
         return refused(op, e)
-    return asks_call_for(op, args) or reply(op, args, json.loads(drive(dispatch(op, json.dumps(args), query=True))),
-                                            reply_t)
+    with db.Showing():
+        return asks_call_for(op, args) or reply(op, args, json.loads(drive(dispatch(op, json.dumps(args), query=True))),
+                                                reply_t)
 
 
 def run(op, arg_t, arg, reply_t):
@@ -671,7 +672,7 @@ def load(t, key):
         return None
     if isinstance(key, dict):
         key = key.get("id")
-    return cls[str(key)]
+    return (db.SHOWN or {}).get((cls, str(key))) or cls[str(key)]  # a row the operation just returned is not read again
 
 
 def result(op, out, t):

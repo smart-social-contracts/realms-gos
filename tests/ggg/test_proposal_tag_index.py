@@ -7,9 +7,11 @@ import random
 import re
 
 import kit
+import mirror
 import world
 from api import proposals, setup
 from ggg import Proposal, Realm
+from core.db import PAGE_MAX
 from ic_python_db import Database
 from kit import call, fire_timers, ok
 
@@ -249,6 +251,17 @@ def test_pages_with_any_count_and_filters_are_what_the_proposals_say_and_full():
         assert got[-1][1] is None
 
 
+def test_a_ggg_listing_builds_its_records_from_the_rows_the_operation_listed(monkeypatch):
+    """``ggg_proposal_list`` runs the operation and builds a GGG record from each row it returned. Reading the row again
+    costs as much as listing it (3 million instructions, 1.6 billion for 500) and trapped a page of 500 in a query."""
+    world.build()
+    ids = fill(8, "t", 1)
+    read = loaded_proposals(monkeypatch)
+    out = mirror.call("proposal_list", "bob", {"tags": ["t"], "count": 5}, kit.direct)
+    assert [p["id"] for p in out["proposals"]] == ids[:5]
+    assert len(read) == 5 and all(key.isdigit() for key in read), read  # by id, once each, and none by name (``P-1``)
+
+
 def test_a_tag_that_ends_like_an_index_entry_hides_no_proposal():
     """``parks|n0000000000`` is ``parks`` and what the index adds to the name of a list for an entry: its count key sorted
     among the entries of ``parks`` from the proposal 100 on, and a read that met it came back short and was taken for the
@@ -305,6 +318,17 @@ def test_the_tags_of_a_proposal_are_not_an_indexed_field():
     """``indexed=True`` would put ``_fi:Proposal:tags:<the tags as json>`` among the lists of the tags, under the same
     prefix: the lists are kept by ``Proposal.list_tags``, and only by it."""
     assert "tags" not in Proposal._indexed_properties()
+
+
+# What a read of an index and a row cost, in instructions, as tests/deployed/test_proposal_tag_index.py measures them: a
+# call of 2,000 reads 0.84 to 0.91 billion, a page of 500 rows 3 billion.
+READ, ROW = 450_000, 6_200_000
+
+
+def test_the_limit_on_checks_and_a_page_of_rows_together_stay_under_what_a_query_may_spend():
+    """A call spends its limit on checks and then fills a page. The limit is in reads, not in instructions: raise it
+    and the deployed cost test will tell too, but this is the sum that must stay under a query's 5 billion."""
+    assert proposals.CHECK_LIMIT * READ + PAGE_MAX * ROW < 5_000_000_000
 
 
 def test_a_tag_to_find_by_is_at_most_as_long_as_a_tag_can_be():
