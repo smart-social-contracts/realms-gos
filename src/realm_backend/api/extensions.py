@@ -16,8 +16,9 @@ HOST = ("description", "runtime", "sdk_version", "capabilities", "entry_access",
 # Bytes of one frontend file the realm copies. The file goes to the realm's frontend in one ``store`` call, whose argument
 # is the file and about 120 bytes more (the key and the content type add theirs): a call to a canister on another subnet
 # may carry 2 MiB (2,097,152 bytes; one on the same subnet 10 MiB), so the limit stays 200 kB below the smaller. The
-# message that builds the call costs 6.1 billion instructions for 1,056,837 bytes (maplibre-gl.js, the largest file of
-# the extensions' bundles at the pin) and 11.9 billion at the limit, of the 40 billion a message may run.
+# message that builds the call costs 5.9 billion instructions for 1,056,837 bytes (maplibre-gl.js, the largest file of
+# the extensions' bundles at the pin) and 11.2 billion at the limit, of the 40 billion a message may run (it traps
+# between 5 and 7 MB).
 FRONTEND_FILE_MAX = 1_900_000
 
 
