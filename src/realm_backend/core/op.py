@@ -137,7 +137,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         args = {} if args is None else args
         if not isinstance(args, dict):  # a vote can carry what a filing now refuses: it fails, it does not trap
             raise Fail(f"the arguments of {name} are a record, not {type(args).__name__}")
-        refuse_lone_surrogates(args)
+        if not isinstance(arg, str) or surrogates.may_hold(arg):  # a text that says no escape has none to look for
+            refuse_lone_surrogates(args)
         by = signer or chain.caller()
         claimed = args.pop("on_behalf_of", None)
         if claimed == by and spec["tier"] == "member":  # not even for oneself: a member's own act takes no claim

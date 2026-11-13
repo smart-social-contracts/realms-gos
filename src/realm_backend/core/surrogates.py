@@ -49,11 +49,23 @@ def culprit(record):
     return next((key for key, value in record.items() if holds(key) or holds(value)), None)
 
 
+def starts_an_escape(text):
+    """Whether the JSON ``text`` has the start of the escape of a surrogate: ``\\ud`` and a hex digit, from ``\\ud800`` to
+    ``\\udfff``. A pass in C, and a text that has none has no lone surrogate once parsed, unless it holds one itself."""
+    return "\\ud" in text or "\\uD" in text
+
+
+def may_hold(text):
+    """Whether data parsed from the JSON ``text`` may hold a lone surrogate: the text has the start of an escape for
+    one, or holds one itself (a text made in the canister, not one that came in as Candid). Most do neither."""
+    return starts_an_escape(text) or not encodable(text)
+
+
 def json_holds(text):
     """Whether the JSON ``text``, parsed, holds a lone surrogate. Only a text with the start of such an escape (``\\ud``
     and a hex digit, from ``\\ud800`` to ``\\udfff``) can, so that is looked for first, in one pass in C, and only a text
     that has one is parsed. A text that is not JSON holds none."""
-    if "\\ud" not in text and "\\uD" not in text:
+    if not starts_an_escape(text):
         return False
     try:
         return holds(json.loads(text))

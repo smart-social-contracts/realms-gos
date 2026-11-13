@@ -199,9 +199,13 @@ try:
                 print(cid, how, "failed:", e)
 finally:
     chain.call = was
-for what, body in (("holds", rb'{"id":"lex\ud800"}'), ("code", rb"x = '\ud800'")):
+# A body is scanned only when it is JSON. The canister's json.loads reads the first value and ignores the rest, so code
+# that begins with a docstring would, scanned, be taken for JSON that holds one.
+for what, body, is_json in (("holds", rb'{"id":"lex\ud800"}', True), ("code", rb"x = '\ud800'", False),
+                            ("docstring", rb'"\ud800 a docstring"' + b"\nx = 1\n", False),
+                            ("docstring, scanned", rb'"\ud800 a docstring"' + b"\nx = 1\n", True)):
     try:
-        layered_codex.decoded("https://x.test/r.json", 200, body, 1024)
+        layered_codex.decoded("https://x.test/r.json", 200, body, 1024, is_json=is_json)
         print("decoded", what, "read")
     except Fail as e:
         print("decoded", what, "refused:", e)
@@ -216,7 +220,8 @@ def test_a_reply_or_an_https_body_whose_json_holds_a_lone_surrogate_is_refused(t
         "pair call_text read", "pair call_op read",
         "escaped backslash call_text read", "escaped backslash call_op read",
         f"decoded holds refused: https://x.test/r.json: {REASON}",
-        "decoded code read"]
+        "decoded code read", "decoded docstring read",
+        f"decoded docstring, scanned refused: https://x.test/r.json: {REASON}"]
 
 
 # What the checks cost, in instructions on the wasm.
