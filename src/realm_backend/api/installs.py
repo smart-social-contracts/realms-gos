@@ -103,7 +103,7 @@ def start(proposal, args):
     """A new job for ``args``: a change list at ``url`` with its ``checksum`` (``sha256:<hex>``), or a release's
     ``source`` and ``version``; its first step and its 24-hour limit armed. Refused while another job runs or is
     paused."""
-    if not proposal and change_list.names_both(args):  # a vote already carried one stored before it was refused: it runs
+    if not proposal and change_list.names_both(args):  # a vote that carried one stored before it was refused still runs
         raise Fail(MIXED)
     if change_list.names_release(args):
         release_of(args)
@@ -198,9 +198,13 @@ def prepare(proposal):
     A job that cannot start (another install is running) is recorded as failed, so the switch says why."""
     action = proposal.action or {}
     args = action.get("args") or {}
-    if action.get("op") != "codex_install" or not ("checksum" in args or change_list.names_release(args)):
+    if (action.get("op") != "codex_install" or not isinstance(args, dict)
+            or not ("checksum" in args or change_list.names_release(args))):
         return
+    from api import codex  # it imports this module
+
     try:
+        codex.check_install_args(args)  # the switch asks it again: what is staged is what it will find
         start(proposal.id, args)
     except Fail as e:
         InstallJob(id=next_id(InstallJob, "J"), proposal=proposal.id, change_list=named_change(args), status="failed",

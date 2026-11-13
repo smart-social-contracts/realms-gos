@@ -255,6 +255,155 @@ def test_an_install_that_names_a_release_and_a_change_list_is_refused_where_it_i
     assert file_install(town, "1.0.0")  # a plain release is filed
 
 
+def test_an_install_with_ill_typed_arguments_is_refused_and_a_stored_one_fails_and_concludes_instead_of_trapping(
+        net, source, town):
+    """A manifest that is null made the install raise, so the call trapped: in a vote's execution the trap rolled the
+    vote back and the proposal never concluded (review of #695). The real wasm refuses it where it is filed; one stored
+    before that (set through the controller's shell) fails, with the reason recorded, when its vote closes."""
+    reason = "manifest is the codex's manifest.json"
+    malformed = {"source": "arcadia", "version": "1.0.0", "manifest": None}
+    action = {"op": "codex_install", "args": malformed}
+    # the town's own legislation makes a proposal wait 15 working days: this one takes effect after that, so it is the
+    # realm's check, not the town's rule, that refuses it
+    refused = town.call("proposal_create", {"title": "Null manifest", "action": action,
+                                            "effective_at": town.now() + 60 * 86400}, sender=net.people["alice"])
+    assert not refused["ok"] and reason in refused["error"]
+    direct = town.call("codex_install", malformed, sender=net.people["ctl"])
+    assert not direct["ok"] and reason in direct["error"]
+
+    pid = file_install(town, "1.0.0")  # a plain release, then stored as it would have been before the refusal
+    stored = town.shell("from ggg import Proposal\n"
+                        f"Proposal[{pid!r}].action = {action!r}\n"
+                        "print('stored')")
+    assert "Traceback" not in stored
+    assert vote(town, pid, "yes") == "failed"  # the last vote's message completes: it did not trap
+    row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    assert row["status"] == "failed" and reason in row["result"]["error"]
+
+
+def store_action(town, pid, args):
+    """Set the action of ``pid`` as a proposal stored before a filing refused it would have it (the controller's
+    shell)."""
+    action = {"op": "codex_install", "args": args}
+    out = town.shell(f"from ggg import Proposal\nProposal[{pid!r}].action = {action!r}\nprint('stored')")
+    assert "Traceback" not in out, out
+
+
+LEX = {"id": "lex", "version": "1.0"}
+
+
+@pytest.mark.parametrize("args", ["checksum", ["checksum"], {"manifest": {**LEX, "hooks": None}, "source": "pass"},
+                                  {"manifest": {**LEX, "capabilities": [{}]}, "source": "pass"},
+                                  {"manifest": LEX, "source": "def ("}],
+                         ids=["args text", "args list", "hooks null", "capabilities with a record",
+                              "code that does not compile"])
+def test_a_stored_install_the_check_refuses_concludes_failed_on_the_wasm_where_it_used_to_reject_the_last_vote(
+        net, source, town, args):
+    """Args that are not a record, hooks that are null, capabilities that cannot be hashed, code that does not compile:
+    each raised in the message of the last vote, which the replica rolled back, and the proposal stayed ``voting`` for
+    ever (review of #697). The wasm now concludes it ``failed``, with the reason."""
+    pid = file_install(town, "1.0.0")
+    store_action(town, pid, args)
+    assert vote(town, pid, "yes") == "failed"  # the last vote's message completes
+    row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    assert row["status"] == "failed" and row["result"]["ok"] is False and row["result"]["error"]
+
+
+DEEP = {"binary operators": "1" + "+1" * 5000, "unary operators": "-" * 5000 + "1"}
+
+
+@pytest.mark.parametrize("approval", ["off", "on", "pinned"])
+@pytest.mark.parametrize("name", list(DEEP))
+def test_code_nested_too_deep_to_compile_is_a_refusal_and_a_stored_one_concludes_failed_whatever_the_trust_policy(
+        net, source, town, name, approval):
+    """The compiler raises a RecursionError or a MemoryError on it, which the wasm can catch and which trapped the
+    install: a stored package with it left the proposal ``voting`` for ever, the deciding vote and the next both
+    rejected, with the approval a realm requires by default (review of #697). Code the realm refuses as untrusted is
+    refused for that, without being compiled; code it takes is refused as one that does not compile."""
+    lex = {"id": "lex", "version": "1.0", "codex_api_version": 2}
+    args = {"manifest": lex, "source": DEEP[name]}
+    pin = "[]" if approval != "pinned" else "['sha256:' + checksum(%r, %r)]" % (lex, DEEP[name])
+    out = town.shell("from ggg import Realm\nfrom api.extensions import checksum\nr = Realm['1']\n"
+                     f"r.require_marketplace_approval = {approval != 'off'}\n"
+                     f"r.trusted_approvers = {pin}\nprint('policy')")
+    assert "Traceback" not in out, out
+    try:
+        reason = "neither allowlisted nor approved" if approval == "on" else "source does not compile"
+        direct = town.call("codex_install", args, sender=net.people["ctl"])
+        assert not direct["ok"] and reason in direct["error"]
+        if approval != "on":  # filed all the same when it asks the trust policy at the vote
+            # past the town's own 15-working-day wait: it is the realm's check that refuses it, not the town's rule
+            filing = {"title": "Install", "action": {"op": "codex_install", "args": args},
+                      "effective_at": town.now() + 60 * 86400}
+            refused = town.call("proposal_create", filing, sender=net.people["alice"])
+            assert not refused["ok"] and reason in refused["error"]
+        pid = file_install(town, "1.0.0")
+        store_action(town, pid, args)
+        assert vote(town, pid, "yes") == "failed"  # the last vote's message completes: it did not trap
+        row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+        assert row["status"] == "failed" and reason in row["result"]["error"]
+    finally:
+        restore = town.shell("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = False\n"
+                             "r.trusted_approvers = []\nprint('restored')")
+        assert "Traceback" not in restore
+
+
+SURROGATES = {"in the code": {"manifest": {"id": "lex", "version": "1.0", "codex_api_version": 2},
+                              "source": "x = '\ud800'\n"},
+              "in a manifest value": {"manifest": {"id": "lex\ud800", "version": "1.0", "codex_api_version": 2},
+                                      "source": "pass"}}
+
+
+@pytest.fixture(scope="module")
+def plain(net):
+    """A realm of its own with no codex: its filings meet no guard of a layered codex, whose sandbox call cannot take a
+    lone surrogate either (a separate bug: it traps before the install's check is reached)."""
+    return net.realm("plain")
+
+
+@pytest.mark.parametrize("name", list(SURROGATES))
+def test_text_that_is_not_utf8_is_refused_where_the_install_is_called_and_filed_with_approval_on(net, plain, name):
+    """The canister's JSON accepts a lone surrogate, and hashing the text raised a UnicodeEncodeError that dispatch
+    trapped on: the direct call and the filing were rejected (review of #697). In a manifest value it shows only here:
+    the canister's json.dumps ignores ensure_ascii. A stored proposal with one is not a case here: the canister's
+    database cannot encode it, so the shell cannot write one (the in-process test runs the stored vote and timer)."""
+    args = SURROGATES[name]
+    reason = "the manifest and the code are UTF-8 text"
+    set_policy = ("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = {}\n"
+                  "r.trusted_approvers = []\nprint('policy')")
+    assert "Traceback" not in plain.shell(set_policy.format(True))
+    direct = plain.call("codex_install", args, sender=net.people["ctl"])
+    assert not direct["ok"] and reason in direct["error"]
+    action = {"op": "codex_install", "args": args}
+    refused = plain.call("proposal_create", {"title": "Install", "action": action}, sender=net.people["alice"])
+    assert not refused["ok"] and reason in refused["error"]
+    assert plain.ok("proposal_list", "alice", query=True)["proposals"] == []  # nothing was filed
+
+
+def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(
+        net, source, town):
+    """The release is staged when the vote decides it, and switched to at the time: the same check at both, so the job
+    never outlives a refusal. The source relays 1.0.0 again for it (the town runs 2.0.0, which it relays now)."""
+    releases = source.ok("legislation_releases", None, query=True)["releases"]
+    now_relayed = next(r for r in releases if r["source"] == "arcadia")  # 2.0.0, to restore for the tests that follow
+    relay(source, "1.0.0", 6, published=now_relayed["published"] - 1)
+    action = {"op": "codex_install", "args": {"source": "arcadia", "version": "1.0.0"}}
+    pid = town.ok("proposal_create", "alice", title="Stored", action=action,
+                  effective_at=town.now() + HOUR)["proposal"]
+    store_action(town, pid, {"source": "arcadia", "version": "1.0.0", "url": 5})
+    assert vote(town, pid, "yes") == "execution_scheduled"
+    job = settled(net, town)
+    assert (job["status"], job["step"]) == ("running", "wait") and running(town) == {"2.0.0"}  # staged, waiting
+    net.wait(HOUR + 5)
+    row = town.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    assert row["status"] == "executed" and running(town) == {"1.0.0"}  # it ran as the release
+    assert status(town)["job"]["status"] == "done"  # and left no job running
+    relay(source, "2.0.0", now_relayed["effective_from"], published=now_relayed["published"])  # as it was
+    # the next install is not refused, and the tests that follow run on 2.0.0 again
+    installed(net, town, file_install(town, "2.0.0"))
+    assert running(town) == {"2.0.0"}
+
+
 def test_an_unreadable_record_reads_unknown(net, source, town):
     source.stop()
     try:

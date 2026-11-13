@@ -77,10 +77,10 @@ def names_release(args):
 
 def names_both(args):
     """Whether ``codex_install``'s ``args`` name a release (``source`` and ``version``) and a change list (``url`` or
-    ``checksum``) at once. The realm installs the release then (``names_release``) and never reads the change list, while a
-    reader that tests the checksum first describes a change list: the voters would be told one install and the realm run
-    another. Refused when the install is filed (api.codex.filed_install) and when it is called with no vote behind it
-    (api.installs.start); a proposal stored before that runs as the release, as it always did."""
+    ``checksum``) at once. The realm installs the release then (``names_release``) and never reads the change list,
+    while a reader that tests the checksum first describes a change list: the voters would be told one install and the
+    realm run another. Refused when the install is filed (api.codex.filed_install) and when it is called with no vote
+    behind it (api.installs.start); a proposal stored before that runs as the release, as it always did."""
     return names_release(args) and ("checksum" in args or "url" in args)
 
 
