@@ -138,7 +138,7 @@ def calendar(name):
 
 def test_a_layers_calendar_that_holds_a_lone_surrogate_fails_the_install_by_name_and_a_pair_installs(calendars, people):
     """The calendar is the one chapter that is JSON: it is read where the legislation parses it, after its checksum has
-    been checked (tests/ggg/test_lone_surrogates.py runs the routes). The job names it once, the codex stays as it was."""
+    been checked (tests/ggg/test_lone_surrogates.py runs the routes). The job names it once; the codex stays."""
     net, realm = calendars
     site, layer = Site(net.web), own_layer(people["founder"])
     job = failing(net, realm, site.change_list({**layer, "arcadia/calendar": calendar("New Year " + LONE)}),
