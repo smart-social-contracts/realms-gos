@@ -326,7 +326,7 @@ def fetch_change_list(job):
 def receive_change_list(job, status, body):
     """The reply to step 1's outcall: the bytes the proposal's checksum names, stored under it."""
     url = job.change_list["url"]
-    text = store.decoded(url, status, body, MAX_CHANGE_LIST)
+    text = store.decoded(url, status, body, MAX_CHANGE_LIST, is_json=True)
     try:
         store.store_chapter(job.change_list["checksum"], text)
     except Fail as e:

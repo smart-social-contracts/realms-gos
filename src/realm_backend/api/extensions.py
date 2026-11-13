@@ -4,6 +4,7 @@ import json
 from core import chain
 from core.candid import quote
 from core import sandbox
+from core import surrogates
 from core.db import Fail, Forbidden, Unavailable, find, page, view
 from ggg import Department, Extension, Realm, User, UserProfile
 from core.op import dispatch, on_behalf, op, run
@@ -69,7 +70,10 @@ def fetch(namespace, path):
     reply = yield from ask("get_file", namespace, path)
     if "content_b64" not in reply:
         raise Fail(f"{namespace}/{path}: {reply.get('error')}")
-    return base64.b64decode(reply["content_b64"]).decode()
+    text = base64.b64decode(reply["content_b64"]).decode()
+    if path.endswith(".json") and surrogates.json_holds(text):  # a file comes inside the reply, base64, unseen by its scan
+        raise Fail(f"{namespace}/{path}: holds a lone surrogate (U+D800 to U+DFFF), which is not text")
+    return text
 
 
 def publish_frontend(namespace, prefix):

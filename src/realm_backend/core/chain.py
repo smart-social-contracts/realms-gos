@@ -4,6 +4,7 @@ from basilisk import Duration, Principal, ic
 
 from core.candid import quote, unquote
 from core import principal
+from core.surrogates import refuse_reply
 
 ANONYMOUS = "2vxsx-fae"
 # An HTTPS outcall is paid for by every node of the subnet; this is the largest subnet, and what a smaller one does
@@ -77,13 +78,13 @@ def call(cid, method, candid="()", cycles=0):
 
 def call_text(cid, method, arg=None):
     reply = yield from call(cid, method, "()" if arg is None else f"({quote(arg)})")
-    return unquote(reply)
+    return refuse_reply(unquote(reply), cid, method)
 
 
 def call_op(cid, name, args):
     """Run operation ``name`` on another realm canister; returns its JSON reply as text."""
     reply = yield from call(cid, "run", f"({quote(name)}, {quote(json.dumps(args))})")
-    return unquote(reply)
+    return refuse_reply(unquote(reply), cid, name)
 
 
 def http_cycles(request_bytes, max_response_bytes):

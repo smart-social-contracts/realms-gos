@@ -6,6 +6,7 @@ import json
 
 from core import chain
 from core import sandbox
+from core import surrogates
 from core.db import Conflict, Fail, first, next_id
 from ggg import ChapterSource, InstallJob, Realm
 
@@ -94,13 +95,17 @@ def fetched(url, most):
         raise Fail(f"{url}: {e}")
 
 
-def decoded(url, status, body, most):
-    """The text of a reply: a 200 of at most ``most`` bytes of UTF-8."""
+def decoded(url, status, body, most, is_json=False):
+    """The text of a reply: a 200 of at most ``most`` bytes of UTF-8. A body that is JSON (``is_json``) must hold no lone
+    surrogate once parsed; code (a chapter) is no JSON, and a ``"\\ud800"`` in it is an escape of Python's."""
     if status != 200:
         raise Fail(f"{url}: HTTP {status}")
     if len(body) > most:
         raise Fail(f"{url}: {len(body)} bytes is above {most // 1024} KB")
     try:
-        return body.decode("utf-8")
+        text = body.decode("utf-8")
     except UnicodeDecodeError:
         raise Fail(f"{url}: not UTF-8")
+    if is_json and surrogates.json_holds(text):
+        raise Fail(f"{url}: holds a lone surrogate (U+D800 to U+DFFF), which is not text")
+    return text

@@ -7,6 +7,7 @@ from core import it_team
 from core import pending
 from core import poa
 from core import ranges
+from core import surrogates
 from core.db import Fail, Forbidden
 
 OPS = {}
@@ -136,6 +137,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         args = {} if args is None else args
         if not isinstance(args, dict):  # a vote can carry what a filing now refuses: it fails, it does not trap
             raise Fail(f"the arguments of {name} are a record, not {type(args).__name__}")
+        if not isinstance(arg, str) or surrogates.may_hold(arg):  # a text that says no escape has none to look for
+            refuse_lone_surrogates(args)
         by = signer or chain.caller()
         claimed = args.pop("on_behalf_of", None)
         if claimed == by and spec["tier"] == "member":  # not even for oneself: a member's own act takes no claim
@@ -192,6 +195,14 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         return json.dumps({"ok": False, "error": f"missing {e}", "kind": Fail.kind})
     except Exception as e:
         chain.trap(f"{name}: {e}")
+
+
+def refuse_lone_surrogates(args):
+    """Refuse a call whose arguments hold a lone surrogate, in any text at any depth, whichever the operation (see
+    core.surrogates): it would trap where it first met a write, a reply or a guard of the codex, naming no argument."""
+    name = surrogates.culprit(args)
+    if name is not None:
+        raise Fail(f"argument {name!r} holds a lone surrogate (U+D800 to U+DFFF), which is not text")
 
 
 def filing(name, args, department):
