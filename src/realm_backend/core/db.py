@@ -238,30 +238,29 @@ def put(row, **values):
     return changed
 
 
-# While ggg_api answers a GGG query: the rows that its operation returned, by class and id. The GGG record of a row is
-# built from the row itself, and loading it again costs as much as listing it did: about 3 million instructions a
-# proposal, 1.6 billion for a page of 500.
-SHOWN = None
+# While ggg_api answers a GGG query: the rows that its operation listed, by class and id. The GGG record of a row is
+# built from the row itself, and loading it again costs about as much as listing it did.
+LISTING = None
 
 
-class Showing:
-    """``with Showing():`` for the length of a GGG query: keep the rows that ``shown`` is given. (Not a contextlib manager:
-    the canister's Python has no contextlib.)"""
+class Listing:
+    """``with Listing():`` for the length of a GGG query: keep the rows that ``listed`` is given. (Not a contextlib
+    manager: the canister's Python has no contextlib.)"""
 
     def __enter__(self):
-        global SHOWN
-        SHOWN = {}
+        global LISTING
+        LISTING = {}
 
     def __exit__(self, *failure):
-        global SHOWN
-        SHOWN = None
+        global LISTING
+        LISTING = None
 
 
-def shown(row):
-    """``row``, which an operation returns: kept for ggg_api to build the GGG record from while a GGG query is answered;
+def listed(row):
+    """``row``, which an operation lists: kept for ggg_api to build the GGG record from while a GGG query is answered;
     otherwise nothing happens."""
-    if SHOWN is not None:
-        SHOWN[type(row), row.id] = row
+    if LISTING is not None:
+        LISTING[type(row), row.id] = row
     return row
 
 

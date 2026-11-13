@@ -15,7 +15,7 @@ import fake_chain
 import pytest
 import world
 from core import legislation, op
-from core.db import JSON_MAX, bounded
+from core.db import JSON_MAX, KEPT_FIELD, bounded
 from ggg import Event, PendingAction, Proposal, Realm
 from kit import fire_timers, later, ok, rows
 
@@ -127,12 +127,16 @@ def test_whatever_the_shape_of_a_reply_what_is_recorded_fits_and_keeps_its_ok():
                 reply[key] = [rng.choice(chars) * 500] * rng.choice([1, 20, 200])
             else:
                 reply[key] = rng.choice([True, False, 7, None])
+        if rng.random() < 0.3:  # many fields that are each kept, which together are not: the last resort
+            reply.update({f"m{j}": "z" * rng.choice([700, 900, 1000]) for j in range(rng.randrange(80, 160))})
+            reply["ok"] = rng.choice([True, False, None, 7])
+            reply.pop("error", None)  # a refusal's text is cut before the last resort: this one has none
         out = bounded(reply)
         assert len(json.dumps(out)) <= JSON_MAX and len(json.dumps(out, ensure_ascii=False)) <= JSON_MAX, reply
         if len(json.dumps(reply)) <= JSON_MAX:
             assert out is reply
-        elif isinstance(reply.get("ok"), bool) and len(json.dumps(reply["ok"])) <= JSON_MAX:
-            assert out.get("ok") is reply["ok"] or "ok" not in out, (reply, out)
+        elif "ok" in reply and len(json.dumps(reply["ok"])) <= KEPT_FIELD:
+            assert out["ok"] is reply["ok"], (reply, out)  # a small ok is never dropped or changed
 
 
 # ---- A stored proposal
