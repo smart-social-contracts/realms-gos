@@ -350,12 +350,18 @@ def test_an_extension_manifest_nested_deeper_than_a_codex_needs_is_refused_at_ev
     assert nested  # the limit, not only the parse, refused some of them
 
 
+def refused_as_too_deep(error):
+    """Where the parse gives out depends on the stack under the call (the mirror's frames among them): the depth limit
+    refuses what parses, and the parse refuses the rest."""
+    return EXT_NESTED in error or "manifest.json is not JSON" in error
+
+
 @pytest.mark.parametrize("timed", [None, False, True], ids=["call", "vote", "timer"])
 def test_an_extension_manifest_942_levels_deep_is_refused_by_a_call_a_vote_and_a_timer(timed):
     serve_extension(manifest_text=deep_extension(942))
     if timed is None:
         out = call("extension_install", "ctl", extension="board", version="1.0.0")
-        assert out["ok"] is False and EXT_NESTED in out["error"], out
+        assert out["ok"] is False and refused_as_too_deep(out["error"]), out
         return
     ok("governance_update", "ctl", voting_window=0)
     filing = {"title": "Install board",
@@ -369,7 +375,7 @@ def test_an_extension_manifest_942_levels_deep_is_refused_by_a_call_a_vote_and_a
         later(HOUR)
         fire_timers()  # no trap
     row = Proposal[pid]
-    assert row.status == "failed" and EXT_NESTED in row.result["error"], row.result
+    assert row.status == "failed" and refused_as_too_deep(row.result["error"]), row.result
 
 
 def test_an_extension_manifest_of_the_depth_the_extensions_have_installs():
