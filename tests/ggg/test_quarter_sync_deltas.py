@@ -151,13 +151,13 @@ def test_a_row_that_told_none_tells_when_its_quarter_has_none_left(before):
 
 def test_a_row_from_before_this_release_tells_its_population_at_the_quarters_next_report():
     capital("north", "south")
-    Quarter["south"].population = 400  # reported before told_population was kept
+    Quarter["south"].population = 7  # reported before told_population was kept, and under a step
     held = first_sync()
-    assert {row["id"]: row["population"] for row in held["directory"]}["south"] == 400  # until it reports, its own
+    assert {row["id"]: row["population"] for row in held["directory"]}["south"] == 7  # until it reports, its own
     head = sync_log.cursor()
-    ok("quarter_report", "south", population=402)
-    assert sync_log.cursor()["n"] == head["n"] + 1 and Quarter["south"].told_population == 402
-    assert {row["id"]: row["population"] for row in delta("north", held)["directory"]}["south"] == 402
+    ok("quarter_report", "south", population=9)  # a step has not passed: it is told because it told none
+    assert sync_log.cursor()["n"] == head["n"] + 1 and Quarter["south"].told_population == 9
+    assert {row["id"]: row["population"] for row in delta("north", held)["directory"]}["south"] == 9
 
 
 def test_a_census_that_changed_is_kept_but_not_noted_since_no_directory_row_shows_it():
