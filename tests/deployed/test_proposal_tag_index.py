@@ -115,16 +115,16 @@ print(json.dumps({"ids": [p["id"] for p in reply["proposals"]], "next": reply["n
                   "instructions": ic.performance_counter(0) - before}))
 '''
 # Proposals that tags and a status hardly share: 1,999 executed ones that carry sixteen tags, and the ones that are
-# voting (P-2000 on, but for the ones that are rejected from ``%(rejected_from)d``) which carry none, but the last, P-4000,
-# which is voting and carries them all: the only match, at the far end of every list.
+# voting (P-2000 on, but for the ones that are rejected from ``%(rejected_from)d``) which carry none, but those from
+# ``%(matches_from)d`` on, which are voting and carry them all: the matches, at the far end of every list.
 CROWDED = '''
 from ggg import Department, Proposal
 
 root = Department["Administration"]
 tags = [f"c{k}" for k in range(16)]
 for i in range(%(first)d, %(last)d + 1):
-    carrier = i < 2000 or i == 4000
-    status = "executed" if i < 2000 else "rejected" if i >= %(rejected_from)d and i != 4000 else "voting"
+    carrier = i < 2000 or i >= %(matches_from)d
+    status = "executed" if i < 2000 else "rejected" if %(rejected_from)d <= i < %(matches_from)d else "voting"
     Proposal(id=f"P-{i}", title=f"Item {i}", description="Aprovar l'expedient.", proposer="2vxsx-fae", department=root,
              status=status, tags=tags if carrier else [])
 '''
@@ -371,16 +371,28 @@ def crowded(request, wasm_of, people):
     """A realm of 4,000 proposals that tags and a status hardly share. Rejected from P-3950 on, the status is the shorter
     list and its ids are checked in each tag; with none rejected the tags' lists are, and their ids are checked in the
     status."""
+    return crowd(wasm_of, people, rejected_from=request.param, matches_from=4_000)
+
+
+@pytest.fixture(scope="module")
+def filled(wasm_of, people):
+    """A realm of 4,000 proposals in which the 501 that tags and a status share, P-3500 on, come after 1,500 voting ones
+    that carry no tag: a page of 500 matches that costs about 2,000 checks as well as its rows."""
+    return crowd(wasm_of, people, rejected_from=4_001, matches_from=3_500)
+
+
+def crowd(wasm_of, people, rejected_from, matches_from):
     realm = launched(Canister(wasm_of("production"), installer=people["installer"]), people)
     for first in range(1, PROPOSALS + 1, SEED_BATCH):
         run(realm, CROWDED % {"first": first, "last": min(first + SEED_BATCH - 1, PROPOSALS),
-                              "rejected_from": request.param})
+                              "rejected_from": rejected_from, "matches_from": matches_from})
     return realm
 
 
 def test_tags_and_a_status_that_few_proposals_share_cost_a_call_under_the_limit_of_a_query(crowded, costs):
     """The one proposal they share is the last: to find it, the whole of the shorter list has to be checked, in as many
-    calls as it takes. No call spends more than 2.5 billion instructions, half of what a query may, at any page size."""
+    calls as it takes. The checks of a call come to about 1 billion instructions at most; the page has no rows but the
+    one. No call spends more than 2.5 billion, half of what a query may, at any page size."""
     for names in (["c0"], [f"c{k}" for k in range(16)]):
         for count in (100, 500):
             found, spent, start = [], [], 1
@@ -398,6 +410,15 @@ def test_tags_and_a_status_that_few_proposals_share_cost_a_call_under_the_limit_
         lifted = unbounded_page(crowded, tags=names, status="voting")
         assert lifted["ids"] == ["P-4000"] and lifted["next"] is None
         costs.report(f"{len(names)} tag{'s' * (len(names) > 1)} and status voting, no limit on checks: one call", lifted["instructions"])
+
+
+def test_a_filled_page_by_tags_and_a_status_costs_its_checks_and_its_rows_under_what_a_query_may_spend(filled, costs):
+    """The bound is on checks: the rows of the page come on top, about 6 million each. Here a call spends the whole limit
+    on ids that tags and status do not share, and then fills a page of 500."""
+    reply = one_page(filled, tags=["c0"], status="voting", count=500)
+    assert reply["ids"] == [f"P-{i}" for i in range(3_500, 4_000)] and reply["next"] == 4_000
+    costs.report("1 tag and status voting, a page of 500 after 2,000 checks: one call", reply["instructions"])
+    assert reply["instructions"] < 5_000_000_000
 
 
 def test_a_realm_created_by_this_release_needs_no_pass(wasm_of, people):

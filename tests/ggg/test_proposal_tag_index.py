@@ -307,6 +307,17 @@ def test_the_tags_of_a_proposal_are_not_an_indexed_field():
     assert "tags" not in Proposal._indexed_properties()
 
 
+def test_a_tag_to_find_by_is_at_most_as_long_as_a_tag_can_be():
+    """None longer can have been filed, so none can match; and on the status path each makes a check dearer."""
+    world.build()
+    long, longest = file("Long", tags=["x" * 64]), "x" * 64
+    assert found(tags=[longest]) == [long]
+    out = call("proposal_list", "bob", tags=[longest + "x"])
+    assert not out["ok"] and "at most 64 code points" in out["error"], out
+    assert not call("proposal_list", "bob", tags=["a", longest + "x"], status="voting")["ok"]
+    assert found(tags=["é" * 64]) == []  # 64 code points of two bytes each is not too long
+
+
 def test_a_list_of_tags_is_a_list_of_text():
     world.build()
     for tags in ("parks", [7], [["parks"]]):
