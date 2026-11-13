@@ -19,7 +19,7 @@ import json
 import pytest
 from network import Network
 from pic import Canister
-from test_installs import Site, install, own_layer
+from test_installs import Site, active_id, failing, install, own_layer
 
 LONE = "\ud800"
 
@@ -121,6 +121,33 @@ def test_a_pair_is_one_character_and_is_taken(town, people):
     assert out["ok"], out
     shown = town.call("proposal_get", {"proposal": out["proposal"]}, sender=people["founder"], query=True)
     assert shown["proposal"]["title"] == "Party \U0001F600"
+
+
+@pytest.fixture(scope="module")
+def calendars(wasm_of, people):
+    """A realm with no codex yet, and the harness's web that serves the change lists."""
+    net = Network(wasm_of("production"), people)
+    return net, net.realm("calendars")
+
+
+def calendar(name):
+    """A layer's calendar, written with the escapes of ``json.dumps``: ``\\ud800`` for a lone surrogate, a pair of them
+    for ``\U0001F600``."""
+    return json.dumps({"holidays": [{"day": "01-01", "name": name}]}).encode()
+
+
+def test_a_layers_calendar_that_holds_a_lone_surrogate_fails_the_install_by_name_and_a_pair_installs(calendars, people):
+    """The calendar is the one chapter that is JSON: it is read where the legislation parses it, after its checksum has
+    been checked (tests/ggg/test_lone_surrogates.py runs the routes). The job names it once; the codex stays."""
+    net, realm = calendars
+    site, layer = Site(net.web), own_layer(people["founder"])
+    job = failing(net, realm, site.change_list({**layer, "arcadia/calendar": calendar("New Year " + LONE)}),
+                  "arcadia/calendar.json holds a lone surrogate (U+D800 to U+DFFF), which is not text")
+    assert job["error"].count("arcadia/calendar") == 1, job
+    assert active_id(realm) is None
+    done = install(net, realm, site.change_list({**layer, "arcadia/calendar": calendar("New Year \U0001F600")}))
+    assert done["status"] == "done" and done["error"] == "", done
+    assert active_id(realm)
 
 
 # The shell is the one place a lone surrogate is made in the canister, on purpose: it runs Python.

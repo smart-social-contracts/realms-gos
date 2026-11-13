@@ -33,6 +33,7 @@ from core import compliance
 from core import it_team
 from core import localtime
 from core import sandbox
+from core import surrogates
 from core.db import PAGE, Fail, Forbidden, first, next_id, view
 from core.op import FORWARDING, GENERATOR, Call, awaitable, filing, ops
 import core.legislation_sandbox  # bundled with the realm for its text (core.sandbox.module_source); the realm runs only its pure ``readable``
@@ -627,10 +628,19 @@ def _text(sources, entry):
 
 
 def _calendar(sources, entry):
+    """The layer's calendar, parsed. It is the one chapter that is JSON, so it is the one that can hold a lone
+    surrogate once parsed (``"\\ud800"``, which no row or reply can keep: core.surrogates); every other chapter is code,
+    where that is an escape of Python's. It is read here, after every route that brought the text (HTTPS, a capital, the
+    quarter's announced one) has verified its checksum, so that a refusal by name is for the calendar the change list
+    names, and the install job records it as the build's."""
+    text = _text(sources, entry)
     try:
-        return json.loads(_text(sources, entry))
+        calendar = json.loads(text)
     except ValueError as e:
         raise Fail(f"{entry['source']}/calendar.json is not JSON: {e}")
+    if surrogates.starts_an_escape(text) and surrogates.holds(calendar):
+        raise Fail(f"{entry['source']}/calendar.json holds a lone surrogate (U+D800 to U+DFFF), which is not text")
+    return calendar
 
 
 def _public(value, secret):
