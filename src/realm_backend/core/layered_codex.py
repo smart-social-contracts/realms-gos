@@ -6,6 +6,7 @@ import json
 
 from core import chain
 from core import sandbox
+from core import surrogates
 from core.db import Conflict, Fail, first, next_id
 from ggg import ChapterSource, InstallJob, Realm
 
@@ -101,6 +102,9 @@ def decoded(url, status, body, most):
     if len(body) > most:
         raise Fail(f"{url}: {len(body)} bytes is above {most // 1024} KB")
     try:
-        return body.decode("utf-8")
+        text = body.decode("utf-8")
     except UnicodeDecodeError:
         raise Fail(f"{url}: not UTF-8")
+    if surrogates.json_holds(text):
+        raise Fail(f"{url}: holds a lone surrogate (U+D800 to U+DFFF), which is not text")
+    return text

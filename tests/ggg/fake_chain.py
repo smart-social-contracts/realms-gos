@@ -8,6 +8,8 @@ Calls to other canisters are answered by a scripted peer (``peer``), or, for a c
 import json
 from collections import namedtuple
 
+from core import surrogates
+
 ANONYMOUS = "2vxsx-fae"
 SELF = "realm"
 state = {}
@@ -157,8 +159,13 @@ def call(cid, method, candid="()", cycles=0):
 def call_text(cid, method, arg=None):
     if cid == SELF and method == "hook_effects":
         return (yield from own_hook_effects(arg))
-    return send(cid, method, arg, arg, "")
+    return replied(send(cid, method, arg, arg, ""), cid, method)
     yield
+
+
+def replied(reply, cid, method):
+    """What ``chain`` makes of a reply in text: one whose JSON holds a lone surrogate fails the call."""
+    return surrogates.refuse_reply(reply, cid, method) if isinstance(reply, str) else reply
 
 
 def own_hook_effects(effects):
@@ -180,7 +187,7 @@ def call_op(cid, name, args):
     """Run operation ``name`` on another realm. ``state["calls"]`` records ``(cid, name, json)``, like call_text. A peer
     is handed ``args`` itself; a canister that is no peer answers with ``state["replies"][(cid, name)]``, or with the
     empty text if there is none."""
-    return send(cid, name, json.dumps(args), args, "")
+    return replied(send(cid, name, json.dumps(args), args, ""), cid, name)
     yield
 
 
