@@ -8,13 +8,15 @@ signature that does not fit), and a trap in the message of a vote or a timer rol
 concludes.
 """
 
+import json
+
 import fake_chain
 import pytest
 from api import codex
 from core import op, sandbox
 from ggg import Codex, Proposal, Realm
-from kit import denied, fire_timers, later, ok
-from test_codex import SOURCE, build, manifest
+from kit import call, denied, fire_timers, later, ok
+from test_codex import SOURCE, build, manifest, registry
 
 HOUR = 3600
 # `init` takes ctx where the realm calls init(args=..., context=...): the call itself raises a TypeError, in the sandbox
@@ -88,6 +90,50 @@ def test_an_install_whose_hook_cannot_run_concludes_executed_with_the_codex_inst
     row = Proposal[pid]
     assert row.status == "executed" and row.result["ok"] is True and row.result["init"]["ok"] is False
     assert state() == ("test@1.0.0", False, "init")  # installed, and its hook failing is on record
+
+
+LONG_MESSAGE = "from ggg_sdk import hook\n\n@hook\ndef init(args):\n    raise ValueError('x' * 70000)\n"
+JOIN_LONG_MESSAGE = LONG_MESSAGE.replace("def init", "def on_user_register")
+
+
+def assert_cut(error):
+    assert error.startswith("ValueError: xxxx") and "[cut" in error and len(error) <= codex.ERROR_MAX + 100, len(error)
+
+
+def test_a_hook_that_fails_with_a_long_message_is_recorded_cut_and_nothing_traps():
+    """Review of #711: the SDK's reply carries the whole text of the error, and the problem recorded in
+    ``Realm.codex_install_state`` (a Json field of 65,536 characters) raised on it: the install, the vote and the timer
+    that carried it trapped, and with ``on_user_register`` failing so every ``realm_join``. The error is cut."""
+    build()
+    Realm["1"].open_registration = True
+    out = ok("codex_install", "ctl", **install_args(LONG_MESSAGE))  # no trap
+    assert out["codex"] == "test@1.0.0" and out["init"]["ok"] is False
+    assert_cut(out["init"]["error"])
+    assert state() == ("test@1.0.0", False, "init")
+    assert_cut(ok("codex_status", "alice")["problem"]["error"])
+    ok("codex_install", "ctl", **install_args(JOIN_LONG_MESSAGE, version="1.1.0", hooks=["on_user_register"]))
+    ok("realm_join", "newbie")  # a join whose hook fails this way still joins
+    assert state() == ("test@1.1.0", False, "on_user_register")
+    assert_cut(ok("codex_status", "alice")["problem"]["error"])
+
+
+@pytest.mark.parametrize("timed", [False, True], ids=["vote", "timer"])
+def test_an_install_whose_hook_fails_with_a_long_message_concludes_executed_with_the_error_cut(timed):
+    build()
+    ok("governance_update", "ctl", voting_window=0)
+    filing = {"title": "Install", "action": {"op": "codex_install", "args": install_args(LONG_MESSAGE)}}
+    if timed:
+        filing["effective_at"] = fake_chain.now() + HOUR
+    pid = ok("proposal_create", "alice", **filing)["proposal"]
+    for voter in ("alice", "bob", "dana", "carla"):
+        ok("proposal_vote", voter, proposal=pid, choice="yes")  # no trap
+    if timed:
+        later(HOUR)
+        fire_timers()  # no trap
+    row = Proposal[pid]
+    assert row.status == "executed" and row.result["init"]["ok"] is False
+    assert_cut(row.result["init"]["error"])
+    assert state() == ("test@1.0.0", False, "init")
 
 
 def test_a_hook_the_active_codex_lost_its_function_for_is_a_failure_of_the_hook_and_not_of_the_call():
@@ -213,3 +259,29 @@ def test_code_the_realm_trusts_is_hook_checked_where_it_is_filed_and_where_it_is
     action = {"op": "codex_install", "args": args}
     assert reason in denied("proposal_create", "alice", title="Install", action=action)
     assert compiles and state() == NO_CODEX and Proposal.count() == 0
+
+
+def registry_files(source):
+    return {"manifest.json": json.dumps(manifest(**INIT_ONLY)), "backend/hooks.py": source}
+
+
+def test_a_codex_of_the_registry_whose_manifest_lists_a_hook_its_code_lacks_is_refused_and_nothing_installs():
+    """The registry path (``codex`` and ``version``) is fetched by the call, so the hook check is made there only: after
+    the trust policy has accepted the namespace, on the code it fetched."""
+    build(approval=True)
+    registry({"namespace": "ext/test/1.0.0", "approved": True, "approver": "mkt"}, registry_files(UNDEFINED))
+    out = call("codex_install", "ctl", codex="test", version="1.0.0")
+    assert not out["ok"] and "the manifest lists the hook init, which the code does not define" in out["error"]
+    assert Codex["test@1.0.0"] is None and state() == NO_CODEX
+    registry({"namespace": "ext/test/1.0.0", "approved": True, "approver": "mkt"}, registry_files(SOURCE))
+    assert ok("codex_install", "ctl", codex="test", version="1.0.0")["codex"] == "test@1.0.0"  # the same, with the hook
+
+
+@pytest.mark.parametrize("approval", [{"approved": False, "status": "pending"}, {"approved": True, "approver": "evil"}],
+                         ids=["unapproved", "approved by another"])
+def test_a_codex_of_the_registry_the_realm_does_not_trust_is_refused_for_that_and_never_compiled(compiles, approval):
+    build(approval=True)
+    registry({"namespace": "ext/test/1.0.0", **approval}, registry_files(UNDEFINED))
+    out = call("codex_install", "ctl", codex="test", version="1.0.0")
+    assert not out["ok"] and "which the code does not define" not in out["error"]  # the trust policy's reason
+    assert compiles == [] and Codex["test@1.0.0"] is None and state() == NO_CODEX

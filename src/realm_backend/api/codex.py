@@ -64,6 +64,16 @@ def fetch(namespace):
     return manifest, (yield from extensions.fetch(namespace, "backend/hooks.py"))
 
 
+ERROR_MAX = 1000  # characters of a hook's error the realm keeps, in its record and in the reply it gives
+
+
+def cut_error(text):
+    """``text``, an error a hook failed with, as the realm keeps it: the SDK's reply carries the whole text of what the
+    hook raised, and a Json field of 65,536 characters (``Realm.codex_install_state``) raises on more, which trapped
+    the install, the vote or timer that ran it and, for ``on_user_register``, every join."""
+    return text if len(text) <= ERROR_MAX else f"{text[:ERROR_MAX]}… [cut, {len(text)} characters in all]"
+
+
 def hook(name, context=None):
     """Run hook ``name`` of the active codex with ``context`` and apply its effects.
 
@@ -84,6 +94,10 @@ def hook(name, context=None):
         out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     failed = [e for e in out.get("effects", []) if not e.get("ok")]
     error = out.get("error") or "; ".join(f"{e['op']}: {e.get('error')}" for e in failed)
+    if error:
+        error = cut_error(str(error))
+        if out.get("error"):  # the caller's reply (an install's ``init``, then a proposal's result) is cut as well
+            out = {**out, "error": error}
     problem = {"codex": codex.id, "hook": name, "error": error, "at": chain.now()} if error else {}
     if realm.codex_install_state != problem:
         realm.codex_install_state = problem

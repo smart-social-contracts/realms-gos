@@ -162,5 +162,36 @@ def test_hooks_that_fail_leave_no_sandbox_handle_open_and_the_realm_keeps_workin
     assert free_handles(realm) == before  # none was kept
     good = realm.ok("codex_install", "ctl", **package(GOOD, "5.0"))
     assert good["init"]["ok"] is True  # a hook still runs
-    assert realm.shell("print('alive')").strip() == "alive"  # and so does the shell
+    assert realm.ok("shell", "ctl", expr="1 + 1")["result"] == 2  # and so does the shell op, which needs a handle
     assert status(realm)["healthy"] is True
+
+
+LONG_MESSAGE = RAISES.replace("ValueError('boom')", "ValueError('x' * 70000)")
+LONG_JOIN = LONG_MESSAGE.replace("def init", "def on_user_register")
+
+
+def is_cut(error):
+    return error.startswith("ValueError: xxxx") and "[cut" in error and len(error) <= 1100
+
+
+def test_a_hook_that_fails_with_a_long_message_is_recorded_cut_and_traps_nothing(net, realm):
+    """Review of #711: the SDK's reply carries the whole text of what the hook raised, and the problem the realm records
+    (a Json field of 65,536 characters) raised on it: the install, the vote and the timer that carried it trapped, and
+    with ``on_user_register`` failing this way so did every ``realm_join``. The error is cut."""
+    out = realm.ok("codex_install", "ctl", **package(LONG_MESSAGE, "7.0"))  # no trap
+    assert out["init"]["ok"] is False and is_cut(out["init"]["error"])
+    voted = file_install(realm, LONG_MESSAGE, "7.1")
+    assert vote(realm, voted) == "executed"  # the last vote's message completes
+    row = realm.ok("proposal_get", "alice", query=True, proposal=voted)["proposal"]
+    assert row["result"]["ok"] is True and is_cut(row["result"]["init"]["error"])
+    timed = file_install(realm, LONG_MESSAGE, "7.2", effective_at=realm.now() + HOUR)
+    assert vote(realm, timed) == "execution_scheduled"
+    net.wait(HOUR + 5)
+    row = realm.ok("proposal_get", "alice", query=True, proposal=timed)["proposal"]
+    assert row["status"] == "executed" and is_cut(row["result"]["init"]["error"])  # the timer completed
+    joining = {**package(LONG_JOIN, "7.3"), "manifest": {**manifest("7.3"), "hooks": ["on_user_register"]}}
+    realm.ok("codex_install", "ctl", **joining)
+    realm.ok("realm_join", "mallory")  # a join whose hook fails this way still joins
+    s = status(realm)
+    assert s["codex"]["id"] == "lex@7.3" and s["healthy"] is False
+    assert s["problem"]["hook"] == "on_user_register" and is_cut(s["problem"]["error"])
