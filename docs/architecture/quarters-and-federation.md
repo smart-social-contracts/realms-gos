@@ -99,12 +99,13 @@ of the last change it took and when that one was made. The answer carries what c
 
 A quarter with no cursor, one whose cursor is ahead of the log or names a change that is not the log's (the capital was
 restored from a snapshot), one further behind than the log keeps (256 changes), and one whose cursor was read before the
-capital last **started** is answered with everything, as every quarter always was. The cursor names the epoch of the log, a
-time the capital sets at every install and upgrade: an upgrade may serve what it did not serve, and a capital rolled back to
-a release that has no log changes what it serves without a note, so that its log reads, on the next upgrade, as it did when
-the quarter last synced. Each quarter of a capital that starts again takes everything once, and the changes after. So is every quarter's first sync after it starts, since the cursor is presented only by a heap that
-has already synced: an upgrade is followed by a full sync. A quarter keeps the cursor only when it has taken the whole
-answer; a sync that failed, or could not read an image, is asked for again from the old one.
+capital last **started** is answered with everything, as every quarter always was. The cursor names the epoch of the log,
+a time the capital sets at every install and upgrade: an upgrade may serve what it did not serve, and a capital rolled
+back to a release that has no log changes what it serves without a note, so that its log reads, on the next upgrade, as
+it did when the quarter last synced. Each quarter of a capital that starts again takes everything once, and the changes
+after. So does every quarter in its first sync after it starts: the cursor is presented only by a heap that has already
+synced, so an upgrade is followed by a full sync. A quarter keeps the cursor only when it has taken the whole answer; a
+sync that failed, or could not read an image, is asked for again from the old one.
 
 The quarter's report is cheap too. It carries the population and codex, and the **census** of the zones its members live
 in only when a member moved into or out of one since the capital last took it (and in its first sync). The capital writes
@@ -116,8 +117,10 @@ quarter reports every hour, and the audit log keeps only `EVENTS_KEPT` events.
 What a quarter shows of another quarter is therefore as of that row's last change: its `last_sync`, not that of its last
 sync (a row that carried it would change at every sync), and its population, the one the row last told the quarters (a
 row that travels for another reason tells the population it has), which is within a hundredth of the capacity of the truth
-(a quarter that is full to within 20 members may be offered a member), in a delta as in a full answer. The capital's own
-list keeps both exact, and nothing reads the other quarters' `last_sync`.
+(a quarter that is full to within 20 members may be offered a member), in a delta as in a full answer. A quarter's first
+report tells whatever population it reports, under a step or not, so that its row carries one that stays; a row that told
+none (from before the population was kept) shows the quarter's own until the quarter reports, and tells a fall to 0 as
+well as a first population. The capital's own list keeps both exact, and nothing reads the other quarters' `last_sync`.
 
 The two ends need not be the same release. A quarter that presents no cursor, which is what the previous release does,
 is answered with everything; a quarter that gets an answer without `rev` or `delta`, from a capital on the previous

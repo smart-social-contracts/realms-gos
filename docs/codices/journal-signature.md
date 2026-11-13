@@ -68,9 +68,10 @@ with `{`, a node's input with `0x01`, so a leaf cannot pass for a node). One sig
 keeps its **path**: the sibling digests from its leaf up, each marked left or right. Checking a document is: hash the
 text, climb the path to the root, check the signature of the root. A batch of one has an empty path and root = digest.
 
-A signature on request is a batch of one. A realm set to sign daily signs the days that are made and not yet signed as one batch of at most 31 days
-(a batch is made in one message), so that 40 days stopped, or a backlog of a year, is two signatures, or twelve. Two requests that land together are not batched, and none waits for another: a request
-signs at once.
+A signature on request is a batch of one. A realm set to sign daily signs the days that are made and come after the last
+day signed as batches of at most 31 days (a batch is made in one message), so that 40 days stopped, or a backlog of a year,
+is two signatures, or twelve. Two requests that land together are not batched, and none waits for another: a request signs
+at once.
 
 ## 5. The journal, the first kind
 
@@ -84,16 +85,19 @@ signs at once.
   returns its proof (`day`, `status` `signed`, `proof`). It refuses a day not closed yet (`conflict`), one before the
   journal's first day (`not_found`), a date that is no date (`invalid_argument`) and a realm that issues no journal (a
   quarter: `conflict`). A day **already signed** returns its proof at once and signs nothing; a day **being signed** by
-  another call is `pending` (an in-flight mark, in the heap, so no second `sign_with_schnorr` for it; a mark older than ten
-  minutes, left by a call that trapped, no longer counts). A day the sweep has not made yet (it closed within the hour) is
-  made first, with the days before it. A signature that fails is kept in `signing_failures`, the caller gets `unavailable`
-  with the reason, and the day stays as it was: it may be asked again. **Cost bound: at most one signature
-  is *stored* per closed day, ever, so the most a realm can spend on signatures is what signing every day would cost.** The
-  fee is paid for a signature the realm asked for, not for one it stored: an upgrade while `sign_with_schnorr` is out traps
-  the callback and stores nothing, and the next request pays the fee again. The caller is told only that the signature could
-  not be made now; the reason, with the realm's balance, is kept in `signing_failures` for the IT admin team.
+  another call is `pending` (an in-flight mark, in the heap, so no second `sign_with_schnorr` for it; a mark older than
+  ten minutes, left by a call that trapped, no longer counts). A day the sweep has not made yet (it closed within the
+  hour) is made first, with the days before it. A signature that fails is kept in `signing_failures` (the reason, with the
+  realm's balance, for the IT admin team); the caller gets `unavailable` and only "could not be made now: ask again
+  later", and the day stays as it was: it may be asked again. A day made for **another key** than the realm's now (the
+  network or the key rule changed since) cannot be signed while the realm's key is another: a request for it is a
+  `conflict` that names both keys, and one asks for a later day instead, whose signature covers it through the chain.
+  **Cost bound: at most one signature is *stored* per closed day, ever, so the most a realm can spend on signatures is
+  what signing every day would cost.** The fee is paid for a signature the realm asked for, not for one it stored: an
+  upgrade while `sign_with_schnorr` is out traps the callback and stores nothing, and the next request pays the fee again.
 - **No call that changes nothing writes.** An idempotent request, a `pending` one and a refusal save no row, not even the
-  realm's: the cursor and the failure record are written only when a signature is made or fails.
+  realm's: the cursor and the failure record are written only when a signature is made or fails, or a daily sweep passes over
+  days it cannot sign.
 - **Audit and legislation.** `journal_sign` is registered with `only_reads`, which is the flag that makes the operation run no
   legislation: no chapter's guard, forbid or hook runs for it, so a codex can neither refuse nor hook it (it is protocol, not
   policy). It would also leave no audit event, so the operation writes one itself, only when it makes a signature (at most
@@ -106,9 +110,12 @@ signs at once.
   (`signing` state `signed`, moved forward by every signature, a request's too), never from the record of failures, which is
   for the IT admin team to read: a batch that fails (the realm is short of cycles, a call is refused) leaves its days where
   they were, and the next sweep finds them again. A day before the last signed one is covered by it through the chain, is not
-  signed by the sweep, and may still be asked for. **Switching from `on_request` to `daily` therefore signs everything made
-  after the last signed day, once: a year without a signature is about 12 signatures (about 0.3 T cycles), and every day then
-  has a proof of its own**; from there it is one signature a day. A realm upgraded from the release that signed every day starts
+  signed by the sweep, and may still be asked for. A day the sweep cannot sign (made for another key than the realm's now, or
+  its document gone) is left out of its batch and passed over, so it never holds back the days after it; a batch left empty
+  only because a request is signing one of its days is not passed over, so that the next sweep finds that day again if the
+  request fails. **Switching from `on_request` to `daily` therefore signs everything made after the last signed day, once: a
+  year without a signature is about 12 signatures (about 0.3 T cycles), and every day then has a proof of its own**; from
+  there it is one signature a day. A realm upgraded from the release that signed every day starts
   from its last signed day (its old head); a new realm starts from none.
 - `journal_issue {day}` (public read, as now) gives `status`: `provisional` (the open day), `signed` or `unsigned` (closed, with
   no signature), and, when signed, `proof`. `journal_issue {code}` finds an issue by its code, signed or not.
