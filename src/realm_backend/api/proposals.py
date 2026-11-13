@@ -3,7 +3,7 @@ import json
 from core import auth, chain, ranges
 from core.civil import civil_from_days
 from core.db import (Conflict, Fail, Forbidden, Unavailable, each, find, first, has_indexed, indexed_ids, next_id, page,
-                     page_by, view, window as page_window)
+                     page_by, shown, view, window as page_window)
 from ggg import (Appointment, Budget, Calendar, Contract, ContractAmendment, Delegation, Department, External, Mandate,
                  Member, Proposal, ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
 from api import tasks
@@ -33,9 +33,11 @@ RESUME_PAGE = 100
 # ``relist_tags`` brings about after every upgrade. The proposals it reads per message.
 TAG_INDEX = "tag_index"
 TAG_INDEX_PAGE = 200
-# What one listing by tags and a status spends on the ids it reads and checks, in reads of an index at most, an id counting
-# once for each tag it is read from or checked in (about 0.3 million instructions each, measured at most 1 billion a
-# call): a query may spend 5 billion, and the lists it reads may be as long as the realm is old.
+# What one listing by tags and a status spends on reading and checking ids, in reads of an index at most, an id counting
+# once for each tag it is read from or checked in. A read costs about 0.4 million instructions: the checks of a call come
+# to 1 billion at most, and the rows of the page come on top, about 6 million each (a page of 500: 3 billion). A call
+# that fills a page after spending the limit costs the two: 3.75 billion with 2,000, over 4.8 with 5,000. A query may
+# spend 5 billion, and the lists it reads may be as long as the realm is old.
 CHECK_LIMIT = 2_000
 
 
@@ -876,6 +878,8 @@ def listed_by_tags(tags, status, args):
     reads = len(tags) if status else 0  # what an id costs, in reads: it is read from every tag's list or checked in each
     ids, cursor, spent = [], start, 0
     while len(ids) <= count and spent < CHECK_LIMIT:  # the one past the page is where the next one starts
+        # With a status: the ids that the reads left of the limit pay for, and one more, so that a window is never empty,
+        # even with less of the limit left than an id costs (a call would then not advance).
         n = min(count + 1, (CHECK_LIMIT - spent) // reads + 1) if reads else count + 1
         found = ids_from(cursor, n)
         ids += [i for i in found if matches(i)]
@@ -893,20 +897,23 @@ def proposal_list(c, args):
     voting) and carrying at least one of ``tags`` (at most 16, compared exactly), ``count`` at a time (default 100, at
     most 500) from row ``from`` (default 1). Returns ``proposals`` and ``next`` (null at the end). A page by ``tags``
     is full unless it is the last, however few proposals carry them, and ``next`` is the id of the next proposal that
-    matches; but with a ``status`` too, a call that has checked about 2,000 ids stops, and its page is short, even
-    empty, and ``next`` goes on from where it stopped. So is a page with ``tags`` in the minutes after an upgrade, while
-    the realm puts its proposals on the lists of their tags again: follow ``next``."""
+    matches; but with a ``status`` too, a call that has spent about 2,000 index reads (an id counts once for each tag
+    it is read from or checked in) stops: its page is short, even empty, and ``next`` is the id after the last it
+    checked. So is a page with ``tags`` in the minutes after an upgrade, while the realm puts its proposals on the lists
+    of their tags again: follow ``next``."""
     tags, status = args.get("tags") or [], args.get("status")
     if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
         raise Fail("tags is a list of text")
     if len(tags) > MAX_TAGS:
         raise Fail(f"a list filters by at most {MAX_TAGS} tags")
+    if any(len(tag) > MAX_TAG for tag in tags):  # none can match, and on the status path each makes a check dearer
+        raise Fail(f"a tag is at most {MAX_TAG} code points")
     if tags and Realm["1"].manifest_data.get(TAG_INDEX):
         rows, nxt = listed_by_tags(tags, status, args)
     else:
         rows, nxt = page_by(Proposal, "status", status, args) if status else page(Proposal, args)
         rows = [p for p in rows if not tags or set(tags) & set(p.tags or [])]
-    return {"proposals": [view(p, "id", "title", "status", "deadline", "effective_at", "proposer", "tags")
+    return {"proposals": [view(shown(p), "id", "title", "status", "deadline", "effective_at", "proposer", "tags")
                           for p in rows], "next": nxt}
 
 

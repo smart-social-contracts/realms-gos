@@ -6,10 +6,13 @@ again after every upgrade, so that a rollback to such a release leaves no list w
 import random
 import re
 
+import ggg_api
 import kit
+import mirror
 import world
 from api import proposals, setup
 from ggg import Proposal, Realm
+from core.db import PAGE_MAX
 from ic_python_db import Database
 from kit import call, fire_timers, ok
 
@@ -249,6 +252,29 @@ def test_pages_with_any_count_and_filters_are_what_the_proposals_say_and_full():
         assert got[-1][1] is None
 
 
+def test_a_ggg_listing_builds_its_records_from_the_rows_the_operation_listed(monkeypatch):
+    """``ggg_proposal_list`` runs the operation and builds a GGG record from each row it returned. Reading the row again
+    costs as much as listing it (3 million instructions, 1.6 billion for 500) and trapped a page of 500 in a query."""
+    world.build()
+    ids = fill(8, "t", 1)
+    read = loaded_proposals(monkeypatch)
+    out = mirror.call("proposal_list", "bob", {"tags": ["t"], "count": 5}, kit.direct)
+    assert [p["id"] for p in out["proposals"]] == ids[:5]
+    assert len(read) == 5 and all(key.isdigit() for key in read), read  # by id, once each, and none by name (``P-1``)
+
+
+def test_a_ggg_listing_returns_at_most_the_pages_its_records_allow(monkeypatch):
+    """A page of whole GGG records, Candid included, is dearer than the operation's rows: 500 came to about 4.8 billion
+    instructions, and the method returns fewer than ``limit`` asks for, with ``next`` to go on from."""
+    world.build()
+    ids = fill(8, "t", 1)
+    monkeypatch.setitem(ggg_api.PAGE_CAP, "proposal_list", 3)
+    first = mirror.call("proposal_list", "bob", {"tags": ["t"], "count": 10}, kit.direct)
+    assert [p["id"] for p in first["proposals"]] == ids[:3] and first["next"] == 4
+    assert len(mirror.call("proposal_list", "bob", {"count": 2}, kit.direct)["proposals"]) == 2  # a smaller page stays
+    assert found(tags=["t"], count=10) == ids  # a client that follows next gets them all
+
+
 def test_a_tag_that_ends_like_an_index_entry_hides_no_proposal():
     """``parks|n0000000000`` is ``parks`` and what the index adds to the name of a list for an entry: its count key sorted
     among the entries of ``parks`` from the proposal 100 on, and a read that met it came back short and was taken for the
@@ -305,6 +331,28 @@ def test_the_tags_of_a_proposal_are_not_an_indexed_field():
     """``indexed=True`` would put ``_fi:Proposal:tags:<the tags as json>`` among the lists of the tags, under the same
     prefix: the lists are kept by ``Proposal.list_tags``, and only by it."""
     assert "tags" not in Proposal._indexed_properties()
+
+
+# What a read of an index and a row cost, in instructions, as tests/deployed/test_proposal_tag_index.py measures them: a
+# call of 2,000 reads 0.84 to 0.91 billion, a page of 500 rows 3 billion.
+READ, ROW = 450_000, 6_200_000
+
+
+def test_the_limit_on_checks_and_a_page_of_rows_together_stay_under_what_a_query_may_spend():
+    """A call spends its limit on checks and then fills a page. The limit is in reads, not in instructions: raise it
+    and the deployed cost test will tell too, but this is the sum that must stay under a query's 5 billion."""
+    assert proposals.CHECK_LIMIT * READ + PAGE_MAX * ROW < 5_000_000_000
+
+
+def test_a_tag_to_find_by_is_at_most_as_long_as_a_tag_can_be():
+    """None longer can have been filed, so none can match; and on the status path each makes a check dearer."""
+    world.build()
+    long, longest = file("Long", tags=["x" * 64]), "x" * 64
+    assert found(tags=[longest]) == [long]
+    out = call("proposal_list", "bob", tags=[longest + "x"])
+    assert not out["ok"] and "at most 64 code points" in out["error"], out
+    assert not call("proposal_list", "bob", tags=["a", longest + "x"], status="voting")["ok"]
+    assert found(tags=["é" * 64]) == []  # 64 code points of two bytes each is not too long
 
 
 def test_a_list_of_tags_is_a_list_of_text():
