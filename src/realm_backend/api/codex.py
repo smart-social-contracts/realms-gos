@@ -59,8 +59,19 @@ def config(codex):
 
 
 def fetch(namespace):
-    """Manifest and hook source of a published codex, from the file registry."""
-    manifest = json.loads((yield from extensions.fetch(namespace, "manifest.json")))
+    """Manifest and hook source of a published codex, from the file registry. What the registry sends is checked as what
+    a sent package is (``check_manifest``), and every way it can be wrong is a Fail that names the file: a manifest that
+    is not JSON, is a list or null, or is empty, code that is not UTF-8. Parsed unchecked, they raised in the install (a
+    ``.get`` of a list, a parse error), which is a trap: the vote or the timer that ran the install never concluded."""
+    text = yield from extensions.fetch(namespace, "manifest.json")
+    try:
+        manifest = json.loads(text)
+    except Exception as e:  # noqa: BLE001  a ValueError, or a RecursionError on a manifest nested too deep
+        raise Fail(f"{namespace}/manifest.json is not JSON: {str(e)[:200]}")
+    try:
+        check_manifest(manifest)
+    except Fail as e:
+        raise Fail(f"{namespace}/manifest.json: {e}")
     return manifest, (yield from extensions.fetch(namespace, "backend/hooks.py"))
 
 
@@ -171,6 +182,20 @@ def texts_of(value, what):
         raise Fail(f"{what} is a list of text")
 
 
+def check_manifest(manifest):
+    """``manifest`` is of the types the install reads, or a Fail names the one that is not: a record that is not empty
+    whose ``id`` and ``version`` are text and whose ``hooks`` and ``capabilities``, when there, are lists of text. A
+    sent package is judged by it (``check_install_args``) and so is the manifest the file registry sends (``fetch``)."""
+    if not isinstance(manifest, dict) or not manifest:
+        raise Fail("manifest is the codex's manifest.json: a record that is not empty")
+    for key in ("id", "version"):
+        if not isinstance(manifest.get(key), str):
+            raise Fail(f"the manifest's {key} is text")
+    for key in ("capabilities", "hooks"):
+        if key in manifest:
+            texts_of(manifest[key], f"the manifest's {key}")
+
+
 def compiled(source):
     """``source`` compiled, or a Fail: whatever the compiler raises is a refusal, never an exception out of the install: a
     syntax error, a null byte, and on code nested too deep a RecursionError or a MemoryError (each of which a trap would
@@ -248,15 +273,8 @@ def check_install_args(args):
             raise Fail("url is the address of the change list, https")
     elif "manifest" in args:
         manifest = args["manifest"]
-        if not isinstance(manifest, dict) or not manifest:
-            raise Fail("manifest is the codex's manifest.json: a record that is not empty")
+        check_manifest(manifest)
         text_arg(args, "source", "the codex's code: text")
-        for key in ("id", "version"):
-            if not isinstance(manifest.get(key), str):
-                raise Fail(f"the manifest's {key} is text")
-        for key in ("capabilities", "hooks"):
-            if key in manifest:
-                texts_of(manifest[key], f"the manifest's {key}")
         # Code the realm would refuse as untrusted is refused for that, without compiling it (``trust``): the compiler
         # runs here only on code the realm takes, which is all of it when it requires no approval.
         if extensions.pinned(digest_of(manifest, args["source"])):

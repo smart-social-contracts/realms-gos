@@ -26,9 +26,22 @@ def checksum(manifest, source):
     return sandbox.sha256(json.dumps(manifest, sort_keys=True) + "\n" + source)
 
 
+def registry_record(text, what):
+    """The record the file registry's reply ``text`` to ``what`` holds, or a Fail: a reply that is not JSON (or is
+    nested too deep to parse) or is not a record raised in the parse or in the ``.get`` that read it, which is a trap:
+    the vote or the timer that ran the install never concluded."""
+    try:
+        reply = json.loads(text)
+    except Exception as e:  # noqa: BLE001  a ValueError, or a RecursionError on a reply nested too deep
+        raise Fail(f"the file registry's reply to {what} is not JSON: {str(e)[:200]}")
+    if not isinstance(reply, dict):
+        raise Fail(f"the file registry's reply to {what} is not a record")
+    return reply
+
+
 def ask(method, namespace, path):
     arg = json.dumps({"namespace": namespace, "path": path})
-    return json.loads((yield from chain.call_text(registry(), method, arg)))
+    return registry_record((yield from chain.call_text(registry(), method, arg)), f"{method} {namespace}/{path}")
 
 
 def pinned(digest):
@@ -57,7 +70,8 @@ def trust(digest, namespace=None, path=None):
         found = (yield from ask("get_file_size", namespace, path)).get("sha256")
         if not found or found != digest:
             raise Fail(f"{namespace}/{path} is sha256:{found or 'missing'}, not sha256:{digest}")
-    approval = json.loads((yield from chain.call_text(registry(), "get_namespace_approval_icc", namespace)))
+    approval = registry_record((yield from chain.call_text(registry(), "get_namespace_approval_icc", namespace)),
+                               f"get_namespace_approval_icc {namespace}")
     if not approval.get("approved"):
         raise Forbidden(f"{namespace} is not approved by the marketplace "
                    f"({approval.get('status') or approval.get('error') or 'unapproved'})")
@@ -70,7 +84,10 @@ def fetch(namespace, path):
     reply = yield from ask("get_file", namespace, path)
     if "content_b64" not in reply:
         raise Fail(f"{namespace}/{path}: {reply.get('error')}")
-    text = base64.b64decode(reply["content_b64"]).decode()
+    try:
+        text = base64.b64decode(reply["content_b64"]).decode()
+    except Exception as e:  # noqa: BLE001  not base64, not text, or not UTF-8
+        raise Fail(f"{namespace}/{path} is not UTF-8 text: {str(e)[:200]}")
     if path.endswith(".json") and surrogates.json_holds(text):  # a file comes inside the reply, base64, unseen by its scan
         raise Fail(f"{namespace}/{path}: holds a lone surrogate (U+D800 to U+DFFF), which is not text")
     return text
