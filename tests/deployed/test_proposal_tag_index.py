@@ -153,6 +153,10 @@ GGG_LIST_ARGS = Types.Record({
     "cursor": Types.Opt(Types.Text), "limit": Types.Opt(Types.Nat32), "tags": Types.Opt(Types.Vec(Types.Text)),
     "status": Types.Opt(Types.Variant({name: Types.Null for name in (
         "Draft", "Voting", "Accepted", "ExecutionScheduled", "Rejected", "Expired", "Executed", "Failed", "Withdrawn")}))})
+# What of the reply of ggg_proposal_list the test reads: Candid skips the fields of a record that a type leaves out
+GGG_LIST_REPLY = Types.Variant({
+    "Ok": Types.Record({"items": Types.Vec(Types.Record({"id": Types.Text})), "next": Types.Opt(Types.Text)}),
+    "Err": Types.Reserved})
 # The same listing with the limit on checks lifted, as the realm did before it: what it costs, whatever it costs
 UNBOUNDED = '''
 import json
@@ -216,12 +220,13 @@ def one_page(realm, **args):
 
 def ggg_query(realm, sender, **args):
     """``ggg_proposal_list`` as a GGG caller asks it, a real query with its limit of 5 billion instructions: it replies, or
-    it traps and this raises. Returns the Candid reply, decoded without names."""
+    it traps and this raises. Returns the reply decoded as far as the test reads it: ``{"Ok": {"items": [{"id"}], "next"}}``
+    or ``{"Err": ...}``."""
     value = {"cursor": [args["cursor"]], "limit": [args["limit"]], "tags": [args["tags"]],
              "status": [{args["status"]: None}] if args.get("status") else []}
     realm.pic.set_sender(Principal.from_str(sender))
     reply = realm.pic.query_call(realm.id, "ggg_proposal_list", encode([{"type": GGG_LIST_ARGS, "value": value}]))
-    return decode(bytes(reply))[0]["value"]
+    return decode(bytes(reply), [GGG_LIST_REPLY])[0]["value"]
 
 
 def unbounded_page(realm, **args):
@@ -451,8 +456,8 @@ def test_tags_and_a_status_that_few_proposals_share_cost_a_call_under_the_limit_
 def test_a_filled_page_by_tags_and_a_status_costs_its_checks_and_its_rows_under_what_a_query_may_spend(filled, people, costs):
     """The bound on checks (``CHECK_LIMIT`` reads of an index, about 0.4 million instructions each) is not on the rows of
     the page, about 6 million each: 3 billion for 500. A call that reaches the matches has spent the limit less what the
-    page took. With a limit of 2,000 reads that is 1,500 misses and 3.75 billion; with 5,000 it would be 4,500 misses
-    and 4.8 billion, and with 10,000 more than a query may spend. So the realm's limit is held to 2,000 here, which this
+    page took. With a limit of 2,000 reads that is 1,500 misses and 3.83 billion; with 5,000 it would be 4,500 misses
+    and 5.2 billion, and with 10,000 more still. So the realm's limit is held to 2,000 here, which this
     realm is built for, and no call of the operation may cost 4.5 billion, a tenth under what a query may spend.
 
     Two paths are bounded. The operation, ``proposal_list``: its calls are measured in the shell (an update, so that what
@@ -482,7 +487,9 @@ def test_a_filled_page_by_tags_and_a_status_costs_its_checks_and_its_rows_under_
     assert ggg["ok"] and ggg["items"] == 200 and ggg["next"] == "9203", ggg
     costs.report("1 tag and status voting, 500 asked after 1,500 misses, ggg_proposal_list (200): to the Candid", ggg["instructions"])
     assert ggg["instructions"] < 4_000_000_000
-    assert ggg_query(filled, people["alice"], cursor="7503", tags=["c0"], status="Voting", limit=500)
+    queried = ggg_query(filled, people["alice"], cursor="7503", tags=["c0"], status="Voting", limit=500)
+    assert "Ok" in queried, queried
+    assert [p["id"] for p in queried["Ok"]["items"]] == matches[:200] and queried["Ok"]["next"] == ["9203"], queried
 
 
 def test_a_realm_created_by_this_release_needs_no_pass(wasm_of, people):
