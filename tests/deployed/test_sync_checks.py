@@ -348,37 +348,36 @@ def test_code_nested_too_deep_to_compile_is_a_refusal_and_a_stored_one_concludes
         assert "Traceback" not in restore
 
 
-LONE = "U+D800, a lone surrogate, cannot be encoded"
-SURROGATES = {"in the code": ({"manifest": {"id": "lex", "version": "1.0", "codex_api_version": 2},
-                              "source": "x = 1\ny = '\ud800'\n"},
-                              f"the code is not UTF-8 text: {LONE} at line 2, column 6"),
-              "in a manifest value": ({"manifest": {"id": "lex\ud800", "version": "1.0", "codex_api_version": 2},
-                                       "source": "pass"},
-                                      f"the manifest is not UTF-8 text: {LONE}")}
+# The argument that holds the lone surrogate, which dispatch names in its refusal
+SURROGATES = {"in the code": ("source", {"manifest": {"id": "lex", "version": "1.0", "codex_api_version": 2},
+                                         "source": "x = '\ud800'\n"}),
+              "in a manifest value": ("manifest", {"manifest": {"id": "lex\ud800", "version": "1.0",
+                                                                "codex_api_version": 2}, "source": "pass"})}
 
 
 @pytest.fixture(scope="module")
 def plain(net):
-    """A realm of its own with no codex: its filings meet no guard of a layered codex, whose sandbox call cannot take a
-    lone surrogate either (a separate bug: it traps before the install's check is reached)."""
+    """A realm of its own with no codex, so that the filings meet no guard of a layered codex: what dispatch refuses
+    before them (tests/deployed/test_lone_surrogates.py runs a realm with a codex)."""
     return net.realm("plain")
 
 
 @pytest.mark.parametrize("name", list(SURROGATES))
 def test_text_that_is_not_utf8_is_refused_where_the_install_is_called_and_filed_with_approval_on(net, plain, name):
     """The canister's JSON accepts a lone surrogate, and hashing the text raised a UnicodeEncodeError that dispatch
-    trapped on: the direct call and the filing were rejected (review of #697). In a manifest value it shows only here:
-    the canister's json.dumps ignores ensure_ascii. A stored proposal with one is not a case here: the canister's
-    database cannot encode it, so the shell cannot write one (the in-process test runs the stored vote and timer)."""
-    args, reason = SURROGATES[name]
+    trapped on: the direct call and the filing were rejected (review of #697). Dispatch now refuses it first, naming the
+    argument (core.surrogates). A stored proposal with one is not a case here: the canister's database cannot encode it,
+    so the shell cannot write one (the in-process test runs the stored vote and timer)."""
+    culprit, args = SURROGATES[name]
+    refusal = "argument '%s' holds a lone surrogate (U+D800 to U+DFFF), which is not text"
     set_policy = ("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = {}\n"
                   "r.trusted_approvers = []\nprint('policy')")
     assert "Traceback" not in plain.shell(set_policy.format(True))
     direct = plain.call("codex_install", args, sender=net.people["ctl"])
-    assert not direct["ok"] and reason in direct["error"]
+    assert not direct["ok"] and direct["error"] == refusal % culprit
     action = {"op": "codex_install", "args": args}
     refused = plain.call("proposal_create", {"title": "Install", "action": action}, sender=net.people["alice"])
-    assert not refused["ok"] and reason in refused["error"]
+    assert not refused["ok"] and refused["error"] == refusal % "action"
     assert plain.ok("proposal_list", "alice", query=True)["proposals"] == []  # nothing was filed
 
 

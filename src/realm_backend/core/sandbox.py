@@ -150,10 +150,16 @@ def execute(source, fn, kwargs, rpc, allowed=()):
     def handler(_, action, kw):
         return plain(rpc(action, plain(kw)))
 
-    handle = _basilisk_sandbox.spawn_subinterpreter(text, digest, "", tuple(allowed), handler, BUDGET)
-    out = _basilisk_sandbox.call_in_subinterpreter(handle, fn, plain(kwargs))
-    _basilisk_sandbox.close_subinterpreter(handle)
-    _basilisk_sandbox.revoke_hash(digest)
+    handle = None
+    try:
+        handle = _basilisk_sandbox.spawn_subinterpreter(text, digest, "", tuple(allowed), handler, BUDGET)
+        out = _basilisk_sandbox.call_in_subinterpreter(handle, fn, plain(kwargs))
+    finally:  # a call that fails is often caught (a hook's failure is recorded, it does not trap): the table of 8
+        try:  # subinterpreter handles is the canister's, so one left open for each is a denial of service for the rest
+            if handle is not None:
+                _basilisk_sandbox.close_subinterpreter(handle)
+        finally:
+            _basilisk_sandbox.revoke_hash(digest)
     return plain(out)
 
 

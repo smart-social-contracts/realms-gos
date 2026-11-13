@@ -108,7 +108,7 @@ def releases_from_capital(key):
 def releases_from_stand_in(url, pin):
     """``(source, releases)`` of the stand-in record at ``url``, whose bytes must be the ``pin``. A generator."""
     status, body = yield from store.fetched(url, RECORD_MAX)
-    text = store.decoded(url, status, body, RECORD_MAX)
+    text = store.decoded(url, status, body, RECORD_MAX, is_json=True)
     found = store.checksum(text)
     if found != pin:
         raise Fail(f"{url}: the record is {found}, the pin is {pin}")
