@@ -10,7 +10,7 @@ action is read, listed or approved (``settled``); nothing sweeps.
 import json
 
 from core import auth, chain, poa, ranges
-from core.db import Conflict, Fail, Forbidden, JSON_MAX, NotFound, Unavailable, each, find, next_id, view
+from core.db import Conflict, Fail, Forbidden, JSON_MAX, NotFound, Unavailable, bounded, each, find, next_id, view
 
 TTL = 86400  # a pending action lasts a day
 APPROVING_TTL = 600  # an approval still running after this long ended in a trap
@@ -436,7 +436,7 @@ def approve(c, aid, sent):
     # Before anything awaits: a second approval that arrives while the call waits on another canister meets this.
     a.status, a.open_link = "approving", None
     out = json.loads((yield from dispatch(a.method, json.dumps(a.args), origin="confirmed", signer=a.grantor, prepared=a)))
-    a.result, a.status = blank(a.method, out), "done" if out["ok"] else "failed"
+    a.result, a.status = bounded(blank(a.method, out)), "done" if out["ok"] else "failed"
     return a, out
 
 

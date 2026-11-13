@@ -1922,7 +1922,14 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    there, are lists of text; the sent code is UTF-8 text that compiles; a source, a version and a codex name
    are text): one that is not is refused where the install is filed and where `codex_install` is called, and a
    proposal stored with one fails, with the reason recorded, rather than raising in the message of its vote or
-   its timer. Sent code the realm would refuse as untrusted (it requires approval and does not pin the code's
+   its timer. What a proposal records of its action's reply fits the 65,536 characters of its result, so
+   that nothing can keep a vote or a timer from concluding it: a refusal's reason too long for the record (a
+   refusal can echo what the stored action holds, such as the codex API a manifest names) is recorded cut, with a
+   marker that says how long the reply was; of a reply that succeeds (an `init` that returns a lot, an
+   extension's function that returns text), the fields over 1,000 characters read `[cut: N characters]` and the
+   others stay. The same holds for the audit log's record of the reply and for the reply of an approved pending
+   action, and GGG's `Reply` blob of a proposal's result carries the result as it is recorded, notes included.
+   Sent code the realm would refuse as untrusted (it requires approval and does not pin the code's
    checksum) is not compiled: it is filed, and refused at the vote by the trust policy. For a release only its
    `source` and `version` are judged: the change list beside it is never read. The
    follower's own guard or forbid on `codex_install` still runs when the accepted

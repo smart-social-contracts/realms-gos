@@ -381,6 +381,72 @@ def test_text_that_is_not_utf8_is_refused_where_the_install_is_called_and_filed_
     assert plain.ok("proposal_list", "alice", query=True)["proposals"] == []  # nothing was filed
 
 
+ECHOES = {"a control character": '["\\x7f" * 14000]', "a list of numbers": "[1] * 27000"}
+
+
+@pytest.mark.parametrize("name", list(ECHOES))
+def test_a_stored_install_whose_refusal_echoes_a_large_value_concludes_failed_with_a_cut_reason(net, plain, name):
+    """``codex.runnable`` names the codex API a manifest asks for, so a stored manifest whose ``codex_api_version`` is
+    long gave a refusal larger than ``Proposal.result`` holds while the action itself fits: the write raised, and the
+    deciding vote was rolled back in every message that carried it, so the proposal stayed ``voting`` for ever (review
+    of #697). The reason is recorded cut, with a marker, and the proposal concludes."""
+    set_policy = ("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = True\n"
+                  "r.trusted_approvers = []\nprint('policy')")
+    assert "Traceback" not in plain.shell(set_policy)
+    filed = {"manifest": {**LEX, "codex_api_version": [1]}, "source": "pass"}
+    pid = plain.ok("proposal_create", "alice", title="Install",
+                   action={"op": "codex_install", "args": filed})["proposal"]
+    stored = plain.shell(
+        "import json\nfrom ggg import Proposal\n"
+        f"manifest = {{'id': 'lex', 'version': '1.0', 'codex_api_version': {ECHOES[name]}}}\n"
+        "args = {'manifest': manifest, 'source': 'pass'}\n"
+        f"Proposal[{pid!r}].action = {{'op': 'codex_install', 'args': args}}\n"
+        f"print('stored', len(json.dumps(Proposal[{pid!r}].action)))")
+    assert "Traceback" not in stored, stored
+    assert int(stored.split()[-1]) < 65536  # the action fits the field, as a filing must
+    assert vote(plain, pid, "yes") == "failed"  # the last vote's message completes: it did not trap
+    row = plain.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    result = row["result"]
+    assert row["status"] == "failed" and result["ok"] is False and result["kind"] == "invalid_argument"
+    assert result["error"].startswith("this realm runs codex API 2, not ") and "[cut: the reply was" in result["error"]
+    size = plain.shell(f"import json\nfrom ggg import Proposal\nprint(len(json.dumps(Proposal[{pid!r}].result)))")
+    assert 0 < int(size) <= 65536  # as the canister's own json.dumps measures it, which the field does too
+
+
+def test_an_install_whose_hook_succeeds_with_a_large_result_concludes_executed_with_the_result_cut(net, plain):
+    """A reply that succeeds can be larger than ``Proposal.result`` holds too: ``init`` returns 70,000 characters, the
+    install replies with them, and the write of the proposal's result raised in the last vote's message."""
+    set_policy = ("from ggg import Realm\nr = Realm['1']\nr.require_marketplace_approval = False\n"
+                  "r.trusted_approvers = []\nprint('policy')")
+    assert "Traceback" not in plain.shell(set_policy)
+    try:
+        source = "from ggg_sdk import hook\n\n@hook\ndef init(args):\n    return {'big': 'x' * 70000}\n"
+        manifest = {**LEX, "version": "3.0", "codex_api_version": 2, "hooks": ["init"], "capabilities": []}
+        pid = plain.ok("proposal_create", "alice", title="Install lex 3.0",
+                       action={"op": "codex_install", "args": {"manifest": manifest, "source": source}})["proposal"]
+        assert vote(plain, pid, "yes") == "executed"  # the last vote's message completes: it did not trap
+        row = plain.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+        assert row["result"]["ok"] is True and row["result"]["codex"] == "lex@3.0"
+        assert row["result"]["init"].startswith("[cut: ")
+    finally:
+        assert "Traceback" not in plain.shell(set_policy.replace("= False", "= True"))
+
+
+def test_an_extension_call_that_returns_text_over_the_record_concludes_executed_with_the_result_cut(net, plain):
+    """The audit log keeps the top-level text of a reply (``Event.result``), in ``dispatch``, before the proposal's
+    result: an extension's function that returns 70,000 characters raised in the log and trapped the deciding vote,
+    which the bound of the proposal's result, after it, never reached (review-716)."""
+    made = plain.shell("from ggg import Extension\n"
+                       "Extension(id='longtext', version='1.0.0', operations=[], "
+                       "source='def text():\\n    return \"x\" * 70000\\n')\nprint('made')")
+    assert made.strip() == "made", made
+    action = {"op": "extension_call", "args": {"extension": "longtext", "function": "text"}}
+    pid = plain.ok("proposal_create", "alice", title="Call longtext", action=action)["proposal"]
+    assert vote(plain, pid, "yes") == "executed"  # the last vote's message completes: it did not trap
+    row = plain.ok("proposal_get", "alice", query=True, proposal=pid)["proposal"]
+    assert row["result"]["ok"] is True and row["result"]["result"] == "[cut: 70002 characters]"
+
+
 def test_a_stored_release_with_an_ill_typed_change_list_beside_it_runs_as_the_release_at_its_time_on_the_wasm(
         net, source, town):
     """The release is staged when the vote decides it, and switched to at the time: the same check at both, so the job

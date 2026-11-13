@@ -95,6 +95,49 @@ class Json(String):
         super().__set__(obj, json.dumps(value))
 
 
+KEPT_FIELD = 1000  # characters: what of a reply too large for its record is kept field by field
+
+
+def bounded(reply, limit=JSON_MAX):
+    """``reply``, an operation's reply (``{ok, error, kind, ...}``), as a Json field of ``limit`` characters can keep
+    it: itself when it fits. A reply can be larger than the field that records it: a refusal echoes what it refuses (a
+    stored value in its text: the codex API a manifest names), and a reply that succeeds can carry a long result (an
+    ``init`` that returns a lot, an extension's function that returns text). The write then raises and traps the call
+    that records it, which rolls the whole message back: a vote that concludes a proposal would never conclude. What is
+    cut, in this order, until it fits: the fields larger than ``KEPT_FIELD`` characters, other than a refusal's
+    ``error``, are replaced by a note of their size (``"[cut: N characters]"``), and the rest stay, ``ok`` with them; a
+    refusal's ``error`` is then cut, with a marker that says how large the reply was; and one still too large (many
+    fields, or not a record) is replaced by a record of its ``ok`` and ``kind`` (never larger than a field) that says
+    so, under ``error`` for a refusal and ``cut`` for any other."""
+    size = len(json.dumps(reply))
+    if size <= limit:
+        return reply
+    note = f"[cut: the reply was {size} characters, a record holds {limit}]"
+    kept = {}
+    if isinstance(reply, dict):
+        sizes = {k: len(json.dumps(v)) for k, v in reply.items()}
+
+        def noted(k, v, whole=()):
+            return v if sizes[k] <= KEPT_FIELD or k in whole else f"[cut: {sizes[k]} characters]"
+
+        text = isinstance(reply.get("error"), str)
+        kept = {k: noted(k, v, ("error",) if text else ()) for k, v in reply.items()}  # a refusal's text is cut last
+        if len(json.dumps(kept)) <= limit:
+            return kept
+        if text:
+            keep = limit - len(json.dumps({**kept, "error": note})) - 1  # what the rest leaves for it, and a space
+            while keep > 0:
+                cut = {**kept, "error": f"{reply['error'][:keep]} {note}"}
+                if len(json.dumps(cut)) <= limit:
+                    return cut
+                keep = keep * 2 // 3  # a character takes up to 6 in JSON: cut again, until it fits
+            kept = {k: noted(k, v) for k, v in reply.items()}
+            if len(json.dumps(kept)) <= limit:
+                return kept
+    small = {k: kept[k] for k in ("ok", "kind") if k in kept}
+    return {**small, "error": note} if small.get("ok") is False else {**small, "cut": note}
+
+
 def find(cls, key):
     row = cls[str(key)] if key not in (None, "") else None
     if row is None:
