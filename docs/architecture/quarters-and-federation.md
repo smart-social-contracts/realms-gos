@@ -117,8 +117,10 @@ quarter reports every hour, and the audit log keeps only `EVENTS_KEPT` events.
 What a quarter shows of another quarter is therefore as of that row's last change: its `last_sync`, not that of its last
 sync (a row that carried it would change at every sync), and its population, the one the row last told the quarters (a
 row that travels for another reason tells the population it has), which is within a hundredth of the capacity of the truth
-(a quarter that is full to within 20 members may be offered a member), in a delta as in a full answer. The capital's own
-list keeps both exact, and nothing reads the other quarters' `last_sync`.
+(a quarter that is full to within 20 members may be offered a member), in a delta as in a full answer. A quarter's first
+report tells whatever population it reports, under a step or not, so that its row carries one that stays; a row that told
+none (from before the population was kept) shows the quarter's own until the quarter reports, and tells a fall to 0 as
+well as a first population. The capital's own list keeps both exact, and nothing reads the other quarters' `last_sync`.
 
 The two ends need not be the same release. A quarter that presents no cursor, which is what the previous release does,
 is answered with everything; a quarter that gets an answer without `rev` or `delta`, from a capital on the previous
