@@ -15,12 +15,15 @@ import fake_chain
 import pytest
 import world
 from api import extensions, installs
-from core import layered_codex, op, records, surrogates
+from core import layered_codex, legislation, op, records, surrogates
 from core.db import Fail
 from fake_chain import peer
 from ggg import Event, Organization, PendingAction, Proposal, Realm, SourceRecord, SyncSource
 from kit import direct, ok
-from test_installs import LIST_URL, change_list, job, own_layer, run_job
+from test_installs import LIST_URL, change_list, chapter_text, job, own_layer, run_job
+from test_release_installs import TEXTS as release_texts
+from test_release_installs import capital as release_capital
+from test_release_installs import entry as release_entry
 from test_records import SRC, URL, capital, entry, failing, stand_in
 
 LONE = "\ud800"
@@ -241,40 +244,93 @@ def test_a_change_list_that_holds_one_fails_the_install_job_naming_the_reason():
     assert job()["status"] == "failed" and f"{LIST_URL}: holds a lone surrogate" in job()["error"], job()
 
 
-def test_a_calendar_that_holds_one_fails_the_install_job_naming_the_chapter():
+# A layer's calendar is the one chapter that is JSON, so the one that can hold a lone surrogate once parsed; the others
+# are code, where ``"\\ud800"`` is an escape of Python's. It is read where the legislation parses it (``_calendar``),
+# after every route that brought the text has checked its size and its checksum, and the install job records the
+# refusal as the build's: so a capital that serves other bytes than its record names is still blamed for that,
+# surrogate or not.
+CALENDAR = {"chapter": "arcadia/calendar", "domain": "calendar", "source": "arcadia"}
+CALENDAR_REASON = "arcadia/calendar.json holds a lone surrogate (U+D800 to U+DFFF), which is not text"
+
+
+def calendar_with(name):
+    """A calendar's JSON, as ``json.dumps`` writes it: a lone surrogate is the escape ``\\ud800``."""
+    return json.dumps({"holidays": [{"day": "01-01", "name": name}]})
+
+
+def blamed():
+    """The audit log's ``install_chapter_refused`` events: a sync source's capital served other bytes than it names."""
+    return [e for e in Event.load_some(1, max(Event.max_id(), 1)) if e and e.op == "install_chapter_refused"]
+
+
+def test_a_calendar_that_holds_one_fails_the_install_job_naming_the_calendar_once():
     """A layer's calendar is JSON, parsed by the legislation: the one chapter that is not code."""
     ok("governance_update", "ctl", voting_window=0)
-    calendar = json.dumps({"holidays": [{"day": "01-01", "name": "New Year" + LONE}]}).encode()
-    ok("codex_install", "ctl", **change_list({**own_layer(), "arcadia/calendar": calendar}))
+    layer = {**own_layer(), "arcadia/calendar": calendar_with("New Year" + LONE).encode()}
+    ok("codex_install", "ctl", **change_list(layer))
     run_job()
     assert job()["status"] == "failed", job()
-    assert "arcadia/calendar holds a lone surrogate" in job()["error"], job()
+    assert CALENDAR_REASON in job()["error"] and job()["error"].count("arcadia/calendar") == 1, job()
+    assert not blamed()
 
 
-CALENDAR = {"chapter": "arcadia/calendar", "domain": "calendar"}
-CODE = {"chapter": "arcadia/tax", "domain": "tax"}
+@pytest.mark.parametrize("name", ["New Year \U0001F600", "New Year\\ud800"], ids=["a pair", "a backslash and letters"])
+def test_a_calendar_that_holds_what_is_no_lone_surrogate_installs(name):
+    ok("codex_install", "ctl", **change_list({**own_layer(), "arcadia/calendar": calendar_with(name).encode()}))
+    run_job()
+    assert job()["status"] == "done", job()
 
 
-def test_the_calendar_a_capital_serves_is_refused_when_it_holds_one_and_the_audit_log_does_not_blame_the_capital():
-    text = json.dumps({"holidays": ["x" + LONE]})
-    with pytest.raises(Fail, match=f"src: arcadia/calendar {REASON}"):
-        installs.receive_from_capital(None, {**CALENDAR, "sha256": "sha256:" + "a" * 64, "size": None}, "src", text)
-    assert not [e for e in Event.load_some(1, max(Event.max_id(), 1)) if e and e.op == "install_chapter_refused"]
+def sources_of(text):
+    return {"sha256:" + hashlib.sha256(text.encode()).hexdigest(): text}
 
 
-@pytest.mark.parametrize("entry, text, refused", [
-    (CALENDAR, json.dumps({"holidays": ["x" + LONE]}), True),
-    (CALENDAR, json.dumps({"holidays": ["x 😀"]}), False),  # a pair is a character
-    (CALENDAR, json.dumps({"holidays": ["x\\ud800"]}), False),  # a backslash and letters
-    (CODE, "x = '\\ud800'\n", False),  # Python's escape, in code
-    (CODE, json.dumps({"a": "x" + LONE}), False),  # not a calendar: it is not parsed as JSON by anything
-])
-def test_only_a_calendar_is_scanned_for_a_lone_surrogate(entry, text, refused):
-    if refused:
-        with pytest.raises(Fail, match=REASON):
-            installs.refuse_lone_surrogate(entry, text, "src")
+@pytest.mark.parametrize("name, holds", [("x" + LONE, True), ("x \U0001F600", False), ("x\\ud800", False)],
+                         ids=["a lone surrogate", "a pair", "a backslash and letters"])
+def test_the_legislation_refuses_a_calendar_that_holds_a_lone_surrogate_once_parsed(name, holds):
+    text = calendar_with(name)
+    entry_ = {**CALENDAR, "sha256": next(iter(sources_of(text)))}
+    if holds:
+        with pytest.raises(Fail) as refused:
+            legislation._calendar(sources_of(text), entry_)
+        assert str(refused.value) == CALENDAR_REASON
     else:
-        installs.refuse_lone_surrogate(entry, text, "src")
+        assert legislation._calendar(sources_of(text), entry_) == json.loads(text)
+    with pytest.raises(Fail, match="arcadia/calendar.json is not JSON"):
+        legislation._calendar(sources_of("not json"), {**CALENDAR, "sha256": next(iter(sources_of("not json")))})
+
+
+def release_with(calendar):
+    """The sync source's record of arcadia 1.0.0 with a calendar of its own, and the change list that installs it."""
+    text = calendar.encode()
+    record = {**release_entry("1.0.0"), "calendar": "sha256:" + hashlib.sha256(text).hexdigest()}
+    chapters = {f"arcadia/{d}": chapter_text(d, "1.0.0") for d in ("tax", "procedure")} | {"arcadia/calendar": text}
+    return record, change_list(chapters, realm="town", release={"source": "arcadia", "version": "1.0.0"})
+
+
+def test_a_capitals_calendar_with_its_real_checksum_is_refused_by_name_and_the_capital_is_not_blamed(monkeypatch):
+    calendar = calendar_with("New Year" + LONE)
+    record, args = release_with(calendar)
+    monkeypatch.setitem(release_texts, record["calendar"], calendar)
+    release_capital(record)
+    ok("codex_install", "ctl", **args)
+    run_job()
+    assert job()["status"] == "failed" and CALENDAR_REASON in job()["error"], job()
+    assert not blamed()
+    assert [c for c in fake_chain.state["calls"] if c[:2] == (SRC, "legislation_chapter")]  # it came from the capital
+
+
+@pytest.mark.parametrize("how", ["by size", "by checksum"])
+def test_bytes_a_capital_serves_that_do_not_match_its_record_are_blamed_whether_or_not_they_hold_a_lone_surrogate(how):
+    """The size and the checksum are checked before the text is read as JSON: the audit log names the capital for it."""
+    text = calendar_with("x" + LONE)
+    named = text if how == "by size" else text.replace("x", "y")  # the checksum is of other text of the same size
+    entry_ = {**CALENDAR, "sha256": "sha256:" + hashlib.sha256(named.encode()).hexdigest(),
+              "size": len(text) + 1 if how == "by size" else len(text.encode())}
+    with pytest.raises(Fail, match="^src: "):
+        installs.receive_from_capital(None, entry_, "src", text)
+    events = blamed()
+    assert len(events) == 1 and events[0].by == "src" and events[0].args["chapter"] == "arcadia/calendar", events
 
 
 def test_a_json_file_of_the_registry_that_holds_one_is_refused_inside_its_base64():
