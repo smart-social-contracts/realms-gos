@@ -92,3 +92,49 @@ def test_an_install_whose_hook_cannot_run_concludes_executed_by_vote_and_by_time
     assert row["status"] == "executed" and row["result"]["init"]["ok"] is False
     s = status(realm)
     assert s["codex"]["id"] == "lex@1.3" and s["healthy"] is False and s["problem"]["hook"] == "init"
+
+
+# The canister has 8 subinterpreter handles, shared by every hook, extension call, the layered codex's sandbox and the
+# controller's shell. This spawns until the table says it is full and gives them back: how many were free.
+FREE = """
+import _basilisk_sandbox as s
+handles, err = [], ''
+program = 'def f():\\n    return 1\\n'
+digest = s.sha256(program)
+s.approve_hash(digest)
+try:
+    while len(handles) < 12:
+        handles.append(s.spawn_subinterpreter(program, digest, '', (), lambda *a: None, 1000000))
+except Exception as e:
+    err = str(e)[:200]
+finally:
+    for h in handles:
+        s.close_subinterpreter(h)
+    s.revoke_hash(digest)
+print(len(handles), err)
+"""
+RAISES = "from ggg_sdk import hook\n\n@hook\ndef init(args):\n    raise ValueError('boom')\n"
+GOOD = "from ggg_sdk import hook\n\n@hook\ndef init(args):\n    return {'fine': True}\n"
+
+
+def free_handles(realm):
+    out = realm.shell(FREE).strip()
+    assert "Traceback" not in out, out
+    return int(out.split()[0])
+
+
+def test_hooks_that_fail_leave_no_sandbox_handle_open_and_the_realm_keeps_working(net, realm):
+    """A failing hook no longer traps, so the call that made it commits: ``sandbox.execute`` has to close its
+    subinterpreter itself. It did not, and each failed install (or join, with a buggy ``on_user_register``) kept one of
+    the 8 handles for good: after them every hook failed with "sandbox handle table exhausted" and the shell trapped."""
+    before = free_handles(realm)
+    assert before >= 2
+    for i in range(before + 4):  # more failures than there are handles
+        source = WRONG_SIGNATURE if i % 2 else RAISES
+        out = realm.ok("codex_install", "ctl", **package(source, f"4.{i}"))
+        assert out["init"]["ok"] is False
+    assert free_handles(realm) == before  # none was kept
+    good = realm.ok("codex_install", "ctl", **package(GOOD, "5.0"))
+    assert good["init"]["ok"] is True  # a hook still runs
+    assert realm.shell("print('alive')").strip() == "alive"  # and so does the shell
+    assert status(realm)["healthy"] is True
