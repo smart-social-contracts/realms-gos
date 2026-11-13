@@ -3,7 +3,7 @@ import json
 from core import auth, chain, ranges
 from core.civil import civil_from_days
 from core.db import (Conflict, Fail, Forbidden, Unavailable, each, find, first, has_indexed, indexed_ids, next_id, page,
-                     page_by, shown, view, window as page_window)
+                     page_by, listed, view, window as page_window)
 from ggg import (Appointment, Budget, Calendar, Contract, ContractAmendment, Delegation, Department, External, Mandate,
                  Member, Proposal, ProposalEdge, Realm, Task, TaskSchedule, Tender, Transfer, Vote)
 from api import tasks
@@ -36,7 +36,7 @@ TAG_INDEX_PAGE = 200
 # What one listing by tags and a status spends on reading and checking ids, in reads of an index at most, an id counting
 # once for each tag it is read from or checked in. A read costs about 0.4 million instructions: the checks of a call come
 # to 1 billion at most, and the rows of the page come on top, about 6 million each (a page of 500: 3 billion). A call
-# that fills a page after spending the limit costs the two: 3.75 billion with 2,000, over 4.8 with 5,000. A query may
+# that fills a page after spending the limit costs the two: 3.83 billion with 2,000, over 5 with 5,000. A query may
 # spend 5 billion, and the lists it reads may be as long as the realm is old.
 CHECK_LIMIT = 2_000
 
@@ -913,7 +913,7 @@ def proposal_list(c, args):
     else:
         rows, nxt = page_by(Proposal, "status", status, args) if status else page(Proposal, args)
         rows = [p for p in rows if not tags or set(tags) & set(p.tags or [])]
-    return {"proposals": [view(shown(p), "id", "title", "status", "deadline", "effective_at", "proposer", "tags")
+    return {"proposals": [view(listed(p), "id", "title", "status", "deadline", "effective_at", "proposer", "tags")
                           for p in rows], "next": nxt}
 
 

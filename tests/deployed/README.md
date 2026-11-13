@@ -70,6 +70,15 @@ and `query=True` reads. A realm's id is `realm.cid`.
   spent and returns them. `costs.report("what it was", n)` records a count measured some other way. The table is
   printed once, at the end of the session.
 
+## A quarter at full size
+
+`test_quarter_scale.py` measures what one quarter of a city's federation costs over a year of the city's activity:
+seeding its members, its reads, a tax run in pages, the payments and their sweep, the quarter's hourly catch-up with its
+capital, the capital's journal signatures, its Junta de Govern Local and an upgrade (realms-gos#564). It counts the times a
+realm loads its codex's sandbox again, with what each costs. It is skipped unless `REALM_BENCH_MEMBERS` names the sizes,
+such as `2000,8000`; a quarter of 8,000 takes about half an hour. Its docstring lists the other settings, and
+`REALM_BENCH_OUT` writes every sample to a JSON file.
+
 ## The same thing in-process
 
 Most of a flow can be tested without a wasm in `tests/ggg`, where the realm runs in the test's process. There
