@@ -494,10 +494,17 @@ def refused(out, reason):
     assert out["ok"] is False and reason in out["error"], out
 
 
-def manifest_of_size(chars):
-    """The board's manifest, padded until its dump is ``chars`` characters: as the row's field writes it."""
+def manifest_of_size(chars, unit="x"):
+    """The board's manifest, padded with ``unit`` (and ASCII for what is left) until its dump is ``chars`` characters,
+    as the row's field writes it. In process that dump escapes non-ASCII text (é takes 6 characters, an emoji 12); the
+    canister's keeps it (tests/deployed)."""
     plain = {**EXT_MANIFEST, "pad": ""}
-    return {**plain, "pad": "x" * (chars - len(json.dumps(plain)))}
+    room, width = chars - len(json.dumps(plain)), len(json.dumps(unit)) - 2
+    return {**plain, "pad": unit * (room // width) + "x" * (room % width)}
+
+
+def served(manifest):
+    return json.dumps(manifest, ensure_ascii=False)  # the registry's file: UTF-8 text, not escapes
 
 
 def test_a_manifest_the_row_can_keep_installs_up_to_the_last_character_of_a_json_field():
@@ -519,20 +526,56 @@ def test_a_manifest_too_large_for_its_row_is_a_refusal_before_the_frontend_is_pu
     assert stored.calls == [] and Extension["board"] is None  # nothing published, nothing installed
 
 
+@pytest.mark.parametrize("unit", ["é", "😀"])
+def test_the_limit_counts_the_characters_the_field_writes_whatever_the_text(unit):
+    """The check dumps the manifest as the field does, so it is exact where a character takes more than one."""
+    stored = serve_frontend(manifest=served(manifest_of_size(JSON_MAX, unit)))
+    assert install_board("call")["ok"] is True and len(stored.calls) == 1
+    stored = serve_frontend(manifest=served(manifest_of_size(JSON_MAX + 1, unit)))
+    refused(install_board("call"), f"its manifest is {JSON_MAX + 1} characters, at most {JSON_MAX}")
+    assert stored.calls == []
+
+
+def with_access_of(chars):
+    """A manifest of profiles alone whose access, as a first install keeps it, is ``chars`` characters."""
+    room = chars - len(json.dumps({"profiles": [""], "departments": []}))
+    return {"profiles": ["x" * room]}
+
+
+def test_an_access_that_fills_its_field_exactly_installs():
+    manifest = with_access_of(JSON_MAX)
+    serve_frontend(manifest=json.dumps(manifest))
+    assert install_board("call")["ok"] is True
+    assert len(json.dumps(Extension["board"].access)) == JSON_MAX
+
+
 @pytest.mark.parametrize("route", ROUTES)
-def test_profiles_the_access_of_a_new_extension_cannot_keep_are_a_refusal_though_the_manifest_fits(route):
-    """A new extension's access is its manifest's profiles and ``"departments": []``, a little more than the profiles
-    take in the manifest: a manifest that fills its field to the last character has an access that does not fit."""
-    manifest = {"profiles": ["x" * (JSON_MAX - len(json.dumps({"profiles": [""]})))]}
-    assert len(json.dumps(manifest)) == JSON_MAX
-    access = len(json.dumps({"profiles": manifest["profiles"], "departments": []}))
+@pytest.mark.parametrize("chars", [JSON_MAX + 1, JSON_MAX + 19], ids=["one over", "a manifest that fills its field"])
+def test_profiles_the_access_of_a_new_extension_cannot_keep_are_a_refusal_though_the_manifest_fits(chars, route):
+    """A new extension's access is its manifest's profiles and ``"departments": []``, 19 characters more than the
+    profiles take in the manifest: a manifest that fills its field to the last character (the second case) has an
+    access that does not fit, and one whose access is a character over has a manifest that does."""
+    manifest = with_access_of(chars)
     stored = serve_frontend(manifest=json.dumps(manifest))
-    refused(install_board(route), f"its access is {access} characters, at most {JSON_MAX}")
+    refused(install_board(route), f"its access is {chars} characters, at most {JSON_MAX}")
     assert stored.calls == [] and Extension["board"] is None
 
 
+@pytest.mark.parametrize("route", ROUTES)
+def test_an_upgrade_whose_profiles_fill_the_field_installs_and_keeps_the_access_its_row_has(route):
+    """The access is set by the first install only: an upgrade keeps the row's, so the profiles of its manifest, which
+    only its manifest holds, need not fit an access."""
+    serve_frontend()
+    assert install_board("call")["ok"] is True
+    kept = Extension["board"].access
+    big = with_access_of(JSON_MAX + 1)
+    stored = serve_frontend(manifest=json.dumps(big))
+    assert install_board(route)["ok"] is True
+    assert Extension["board"].access == kept and Extension["board"].manifest == big and len(stored.calls) == 1
+
+
 CHUNK_SIZE = 128 * 1024  # what the registry hands out per call
-CHUNKS_TO_THE_LIMIT = -(-FRONTEND_FILE_MAX // CHUNK_SIZE)
+CHUNKS_TO_THE_LIMIT = FRONTEND_FILE_MAX // CHUNK_SIZE + 1  # a file of the limit takes the last one, partly
 TOO_LARGE = f"ext/board/1.0.0/frontend/a.js is larger than the {FRONTEND_FILE_MAX} bytes the realm copies"
 
 
@@ -587,3 +630,48 @@ def test_a_file_one_byte_over_the_limit_is_a_refusal():
     stored = serve_frontend(chunk=chunks_of(FRONTEND_FILE_MAX + 1))
     refused(install_board("call"), TOO_LARGE)
     assert stored.calls == []
+
+
+# What the registry says a chunk is must be what it sends: a chunk of no bytes that says it has some, or a byte at a
+# time, keeps the loop going where the bytes alone never reach the limit.
+FILE = "ext/board/1.0.0/frontend/a.js"
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_registry_that_never_ends_a_file_and_sends_chunks_of_no_bytes_is_a_refusal_at_the_first(route):
+    stored = serve_frontend(chunk={"content_b64": "", "length": CHUNK_SIZE, "eof": False})
+    refused(install_board(route), f"{FILE}: the reply to get_file_chunk says {CHUNK_SIZE} bytes and carries 0")
+    assert asked_for_chunks() == 1
+    assert stored.calls == [] and Extension["board"] is None
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_registry_that_never_ends_a_file_and_sends_a_byte_a_chunk_is_a_refusal_after_the_chunks_a_file_takes(route):
+    stored = serve_frontend(chunk={"content_b64": b64("x"), "length": 1, "eof": False})
+    refused(install_board(route), f"{FILE} comes in more than {CHUNKS_TO_THE_LIMIT} chunks")
+    assert asked_for_chunks() == CHUNKS_TO_THE_LIMIT  # not the 1.9 million that the bytes alone would take
+    assert stored.calls == [] and Extension["board"] is None
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("says", [0, 4, 6])
+def test_a_chunk_that_says_it_has_other_bytes_than_it_carries_is_a_refusal(says, route):
+    """Five bytes, and a length of 0 (which ended the file with them), 4 (a byte short) or 6 (a byte over)."""
+    stored = serve_frontend(chunk={"content_b64": b64("x = 1"), "length": says, "eof": True})
+    refused(install_board(route), f"{FILE}: the reply to get_file_chunk says {says} bytes and carries 5")
+    assert stored.calls == [] and Extension["board"] is None
+
+
+def test_a_file_ended_by_an_empty_chunk_after_the_most_chunks_is_copied():
+    """The most chunks are the full ones a file of the limit's size takes, and the one that ends it, empty or not."""
+    size = (CHUNKS_TO_THE_LIMIT - 1) * CHUNK_SIZE
+
+    def reply(arg):
+        offset = json.loads(arg)["offset"]
+        length = min(CHUNK_SIZE, size - offset)
+        return {"content_b64": b64(b"x" * length), "length": length, "eof": False}  # eof is left to the empty chunk
+
+    stored = serve_frontend(chunk=reply)
+    assert install_board("call")["ok"] is True and asked_for_chunks() == CHUNKS_TO_THE_LIMIT
+    [(method, candid)] = stored.calls
+    assert candid.count("\\78") == size

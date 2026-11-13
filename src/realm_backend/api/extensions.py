@@ -13,13 +13,15 @@ from api.proposals import appointed, realm_wide
 SIDEBAR = ("show_in_sidebar", "sidebar_label", "categories", "icon")
 # What the frontend needs from the installed manifest to host an extension.
 HOST = ("description", "runtime", "sdk_version", "capabilities", "entry_access", "backend")
-# Bytes of one frontend file the realm copies. The file goes to the realm's frontend in one ``store`` call, whose argument
-# is the file and about 120 bytes more (the key and the content type add theirs): a call to a canister on another subnet
-# may carry 2 MiB (2,097,152 bytes; one on the same subnet 10 MiB), so the limit stays 200 kB below the smaller. The
-# message that builds the call costs 5.9 billion instructions for 1,056,837 bytes (maplibre-gl.js, the largest file of
-# the extensions' bundles at the pin) and 11.2 billion at the limit, of the 40 billion a message may run (it traps
-# between 5 and 7 MB).
+# Bytes of one frontend file the realm copies. The file goes to the realm's frontend in one ``store`` call, whose
+# argument is the file and about 120 bytes more (the key and the content type add theirs): a call to a canister on
+# another subnet may carry 2 MiB (2,097,152 bytes; one on the same subnet 10 MiB), so the limit stays 200 kB below the
+# smaller. The message that builds the call costs 5.9 billion instructions for 1,056,837 bytes (maplibre-gl.js, the
+# largest file of the extensions' bundles at the pin) and 11.2 billion at the limit, of the 40 billion a message may
+# run (it traps between 5 and 7 MB).
 FRONTEND_FILE_MAX = 1_900_000
+CHUNK_MAX = 128 * 1024  # bytes the registry hands out per get_file_chunk
+CHUNKS_MAX = FRONTEND_FILE_MAX // CHUNK_MAX + 1  # what a file of the most the realm copies takes
 
 
 def registry():
@@ -132,10 +134,13 @@ def publish_frontend(namespace, prefix):
     the realm frontend loads extension bundles from. The realm holds ``Commit`` on its frontend for this. Nothing to
     do when the realm has no frontend of its own. A generator; returns how many files it copied.
 
-    A file is read in chunks, each its own message, and stored in one call: one of more than ``FRONTEND_FILE_MAX`` bytes
-    is a Fail, as soon as it is over. A registry that never says a file has ended would otherwise be asked for chunks
-    until the realm's heap ran out, a canister that is stopping never stops while it keeps making calls, and the file
-    that finally ended would be too large for the message that builds the store call, which traps."""
+    A file is read in chunks, each its own message, and stored in one call. A registry that never says a file has ended
+    would otherwise be asked for chunks until the realm's heap ran out, a canister that is stopping never stops while it
+    keeps making calls, and the file that finally ended would be too large for the message that builds the store call,
+    which traps. So a file is a Fail as soon as it is over ``FRONTEND_FILE_MAX`` bytes, and when it is not over after
+    ``CHUNKS_MAX`` chunks (a registry that sends a byte a chunk would take 1.9 million calls to pass the first bound).
+    A chunk whose ``length`` is not the bytes it carries is a Fail too: one that says 128 KB and sends none would go on
+    for ever."""
     frontend = Realm["1"].frontend_canister_id
     if not frontend:
         return 0
@@ -150,19 +155,24 @@ def publish_frontend(namespace, prefix):
         if not entry["path"].startswith("frontend/"):
             continue
         what = f"{namespace}/{entry['path']}"
-        data, offset, eof = b"", 0, False
-        while not eof:  # the registry hands out at most 128 KB per call
-            arg = json.dumps({"namespace": namespace, "path": entry["path"], "offset": offset})
+        data, chunks, eof = b"", 0, False
+        while not eof:
+            arg = json.dumps({"namespace": namespace, "path": entry["path"], "offset": len(data)})
             reply = registry_record((yield from registry_call("get_file_chunk", arg, what)), f"get_file_chunk {what}")
             if "content_b64" not in reply:
                 raise Fail(f"{what}: {reply.get('error')}")
-            data += decoded_content(reply["content_b64"], what)
-            if len(data) > FRONTEND_FILE_MAX:
-                raise Fail(f"{what} is larger than the {FRONTEND_FILE_MAX} bytes the realm copies to its frontend")
+            chunk = decoded_content(reply["content_b64"], what)
             length = reply.get("length")
             if not isinstance(length, int) or isinstance(length, bool) or length < 0 or "eof" not in reply:
                 raise Fail(f"{what}: the reply to get_file_chunk has no length (a count) or no eof")
-            offset, eof = offset + length, bool(reply["eof"]) or length == 0
+            if length != len(chunk):
+                raise Fail(f"{what}: the reply to get_file_chunk says {length} bytes and carries {len(chunk)}")
+            data, chunks, eof = data + chunk, chunks + 1, bool(reply["eof"]) or length == 0
+            if len(data) > FRONTEND_FILE_MAX:
+                raise Fail(f"{what} is larger than the {FRONTEND_FILE_MAX} bytes the realm copies to its frontend")
+            if not eof and chunks == CHUNKS_MAX:
+                raise Fail(f"{what} comes in more than {CHUNKS_MAX} chunks, the most a file of {FRONTEND_FILE_MAX} "
+                           f"bytes takes at {CHUNK_MAX} bytes a chunk")
         content = data.hex()
         content = "".join("\\" + content[i:i + 2] for i in range(0, len(content), 2))
         try:
@@ -195,14 +205,23 @@ def new_access(manifest):
     return {"profiles": manifest.get("profiles", ["member"]), "departments": []}
 
 
+def fits_a_row(namespace, field, value):
+    """``value`` is what the extension's row can keep in its Json ``field`` (``JSON_MAX`` characters), or a Fail that
+    names the manifest it comes from: the write that traps comes after the frontend is published."""
+    size = len(json.dumps(value))  # as the field writes it
+    if size > JSON_MAX:
+        raise Fail(f"{namespace}/manifest.json is too large for the realm to keep: its {field} is {size} characters, "
+                   f"at most {JSON_MAX}")
+
+
 def extension_manifest(namespace):
     """The manifest of the extension in ``namespace``, a record whose ``operations`` and ``profiles``, when there, are lists
     of text (the install lists them as the extension's), that nests no deeper than a codex's manifest may
     (``codex.MANIFEST_DEPTH``) and that the extension's row can keep (a Json field holds ``JSON_MAX`` characters), or a
-    Fail that names the file: what the registry sends is parsed here, and a manifest that is not JSON, is a list or null,
-    lists a number, or is nested so deep that a dump of it raises a RecursionError (in process, at a depth that depends
-    on the stack) raised in the install, which traps. So did one too large for its row: the write came after the
-    frontend was published, and a vote or a timer that ran it concluded nothing. A generator."""
+    Fail that names the file: what the registry sends is parsed here, and a manifest that is not JSON, is a list or
+    null, lists a number, or is nested so deep that a dump of it raises a RecursionError (in process, at a depth that
+    depends on the stack) raised in the install, which traps. So did one too large for its row: the write came after
+    the frontend was published, and a vote or a timer that ran it concluded nothing. A generator."""
     text = yield from fetch(namespace, "manifest.json")
     try:
         manifest = json.loads(text)
@@ -217,13 +236,7 @@ def extension_manifest(namespace):
     for key in ("operations", "profiles"):
         if key in manifest and not (isinstance(manifest[key], list) and all(isinstance(i, str) for i in manifest[key])):
             raise Fail(f"{namespace}/manifest.json: {key} is a list of text")
-    # What the install writes of it: the manifest, and the access of a first install, which is its profiles and a little
-    # more. The operations and the sidebar settings are parts of the manifest, so they fit when it does.
-    for field, value in (("manifest", manifest), ("access", new_access(manifest))):
-        size = len(json.dumps(value))  # as the row's field writes it
-        if size > JSON_MAX:
-            raise Fail(f"{namespace}/manifest.json is too large for the realm to keep: its {field} is {size} "
-                       f"characters, at most {JSON_MAX}")
+    fits_a_row(namespace, "manifest", manifest)  # its operations and sidebar settings are parts of it: they fit too
     return manifest
 
 
@@ -236,6 +249,8 @@ def extension_install(c, args):
     requires marketplace approval, its checksum must be pinned or an approver it trusts must have approved it."""
     namespace = f"ext/{args['extension']}/{args['version']}"
     manifest = yield from extension_manifest(namespace)
+    if Extension[args["extension"]] is None:  # an upgrade keeps the access its row has
+        fits_a_row(namespace, "access", new_access(manifest))
     source = (yield from fetch(namespace, "backend/entry.py")) if manifest.get("backend") else ""
     approver = yield from trust(checksum(manifest, source), namespace)
     yield from publish_frontend(namespace, f"/{namespace}/")

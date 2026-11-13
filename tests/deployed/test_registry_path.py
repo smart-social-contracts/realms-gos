@@ -49,7 +49,7 @@ chain._chunk_b64 = base64.b64encode(b"x" * CHUNK).decode()  # encoded once: the 
 
 
 def sized_chunk(what, offset):
-    """The chunk at ``offset`` of a file of "FILE <bytes>" as the registry serves it, or of "NEVER", one it never ends."""
+    """The chunk at ``offset`` of "FILE <bytes>" (a file) or "NEVER" (one with no end), as the registry serves it."""
     total = None if what == "NEVER" else int(what.split()[1])
     length = CHUNK if total is None else min(CHUNK, total - offset)
     content = chain._chunk_b64 if length == CHUNK else base64.b64encode(b"x" * length).decode()
@@ -303,7 +303,7 @@ def install_board(net, realm, route):
     vote(realm, pid)
     if route == "timer":
         net.wait(HOUR + 5)
-        net.wait_until(lambda: realm.proposal(pid).get("result") is not None)  # an install in flight shows no result yet
+        net.wait_until(lambda: realm.proposal(pid).get("result") is not None)  # in flight, it shows no result yet
     row = realm.proposal(pid)
     assert row["status"] in ("executed", "failed"), row
     return row["result"]
@@ -321,13 +321,26 @@ def left(realm):
 
 
 def compact(value):
-    """A dump as the canister writes it, and the Json fields store it."""
-    return json.dumps(value, separators=(",", ":"))
+    """A dump as the canister writes it, and the Json fields store it: compact, and non-ASCII text as it is."""
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
-def manifest_of_size(chars):
+def manifest_of_size(chars, unit="x"):
+    """The board's manifest, padded with ``unit`` until the canister's dump of it is ``chars`` characters."""
     plain = {**BOARD, "pad": ""}
-    return {**plain, "pad": "x" * (chars - len(compact(plain)))}
+    room = chars - len(compact(plain))
+    return {**plain, "pad": unit * room}
+
+
+def row_of(realm):
+    """The board's access and manifest, as its row keeps them."""
+    return json.loads(realm.shell("import json\nfrom ggg import Extension\ne = Extension['board']\n"
+                                  "print(json.dumps({'access': e.access, 'manifest': e.manifest}))"))
+
+
+def with_access_of(chars):
+    """A manifest of profiles alone whose access, as a first install keeps it, is ``chars`` characters."""
+    return {"profiles": ["x" * (chars - len(compact({"profiles": [""], "departments": []})))]}
 
 
 @pytest.fixture
@@ -356,14 +369,47 @@ def test_a_manifest_too_large_for_its_row_is_a_refusal_before_the_frontend_is_pu
     assert left(realm) == (0, [], [])  # no chunk asked for, nothing stored, nothing installed
 
 
+@pytest.mark.parametrize("unit", ["é", "😀"])
+def test_the_limit_counts_the_characters_the_canisters_dump_writes_whatever_the_text(net, realm, no_board, unit):
+    """The canister's dump keeps non-ASCII text, a character each (in process it escapes it): the check dumps the
+    manifest as the field does, so it is exact in both."""
+    serve_extension(realm, manifest=compact(manifest_of_size(JSON_MAX, unit)))
+    assert install_board(net, realm, "call")["ok"]
+    serve_extension(realm, manifest=compact(manifest_of_size(JSON_MAX + 1, unit)))
+    refused(install_board(net, realm, "call"), f"its manifest is {JSON_MAX + 1} characters, at most {JSON_MAX}")
+    assert left(realm)[1] == []
+
+
+def test_an_access_that_fills_its_field_exactly_installs(net, realm, no_board):
+    serve_extension(realm, manifest=compact(with_access_of(JSON_MAX)))
+    assert install_board(net, realm, "call")["ok"]
+
+
 @pytest.mark.parametrize("route", ROUTES)
-def test_profiles_the_access_of_a_new_extension_cannot_keep_are_a_refusal_though_the_manifest_fits(net, realm, route):
-    manifest = {"profiles": ["x" * (JSON_MAX - len(compact({"profiles": [""]})))]}
-    assert len(compact(manifest)) == JSON_MAX
-    access = len(compact({"profiles": manifest["profiles"], "departments": []}))
-    serve_extension(realm, manifest=compact(manifest))
-    refused(install_board(net, realm, route), f"its access is {access} characters, at most {JSON_MAX}")
+@pytest.mark.parametrize("chars", [JSON_MAX + 1, JSON_MAX + 17], ids=["one over", "a manifest that fills its field"])
+def test_profiles_the_access_of_a_new_extension_cannot_keep_are_a_refusal_though_the_manifest_fits(net, realm, chars,
+                                                                                                    route):
+    """The access is the profiles and ``"departments": []``: 17 characters more than the profiles take in the manifest
+    (19 in process, where the dump has spaces)."""
+    serve_extension(realm, manifest=compact(with_access_of(chars)))
+    refused(install_board(net, realm, route), f"its access is {chars} characters, at most {JSON_MAX}")
     assert left(realm) == (0, [], [])
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_an_upgrade_whose_profiles_fill_the_field_installs_and_keeps_the_access_its_row_has(net, realm, no_board,
+                                                                                            route):
+    """The first install sets the access, an upgrade keeps it: the profiles of the new manifest need not fit one."""
+    serve_extension(realm)
+    assert install_board(net, realm, "call")["ok"]
+    kept = row_of(realm)["access"]
+    big = with_access_of(JSON_MAX + 1)
+    serve_extension(realm, manifest=compact(big))
+    out = install_board(net, realm, route)
+    assert out["ok"], out
+    row = row_of(realm)
+    assert row["access"] == kept and row["manifest"] == big  # the new manifest, the old access
+    assert len(left(realm)[1]) == 1
 
 
 def frontend_file_max(realm):
@@ -398,4 +444,51 @@ def test_a_file_larger_than_the_frontend_takes_is_a_refusal_as_soon_as_it_is_ove
     serve_extension(realm, chunk="NEVER" if never else "FILE 3000000", listing=json.dumps(listing))
     refused(install_board(net, realm, route), f"ext/board/1.0.0/frontend/a.js is larger than the {limit} bytes the "
                                               "realm copies to its frontend")
-    assert left(realm) == (-(-limit // CHUNK_BYTES), [], [])  # it stopped asking, stored nothing, installed nothing
+    assert left(realm) == (limit // CHUNK_BYTES + 1, [], [])  # it stopped asking, stored nothing, installed nothing
+
+
+# What the registry says a chunk is must be what it sends: a chunk of no bytes that says it has some, or a byte at a
+# time, keeps the loop going where the bytes alone never reach the limit.
+EMPTY_CHUNKS = json.dumps({"content_b64": "", "length": CHUNK_BYTES, "eof": False})
+BYTE_CHUNKS = json.dumps({"content_b64": b64("x"), "length": 1, "eof": False})
+A_JS = "ext/board/1.0.0/frontend/a.js"
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_registry_that_never_ends_a_file_and_sends_chunks_of_no_bytes_is_a_refusal_at_the_first(net, realm, route):
+    serve_extension(realm, chunk=EMPTY_CHUNKS)
+    refused(install_board(net, realm, route), f"{A_JS}: the reply to get_file_chunk says {CHUNK_BYTES} bytes and "
+                                              "carries 0")
+    assert left(realm) == (1, [], [])
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_registry_that_never_ends_a_file_and_sends_a_byte_a_chunk_is_a_refusal_after_the_chunks_a_file_takes(
+        net, realm, route):
+    chunks = frontend_file_max(realm) // CHUNK_BYTES + 1
+    serve_extension(realm, chunk=BYTE_CHUNKS)
+    refused(install_board(net, realm, route), f"{A_JS} comes in more than {chunks} chunks")
+    assert left(realm) == (chunks, [], [])  # not the 1.9 million that the bytes alone would take
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("says", [0, 6])
+def test_a_chunk_that_says_it_has_other_bytes_than_it_carries_is_a_refusal(net, realm, says, route):
+    serve_extension(realm, chunk=json.dumps({"content_b64": b64("x = 1"), "length": says, "eof": True}))
+    refused(install_board(net, realm, route), f"{A_JS}: the reply to get_file_chunk says {says} bytes and carries 5")
+    assert left(realm) == (1, [], [])
+
+
+@pytest.mark.parametrize("chunk", ["NEVER", BYTE_CHUNKS], ids=["128 KB chunks", "a byte a chunk"])
+def test_the_realm_stops_while_a_registry_that_never_ends_a_file_is_read(net, realm, chunk):
+    """A canister that is stopping does not stop while it keeps making calls: a loop that never ended kept the realm
+    from stopping. The install now ends in its refusal, and the stop completes."""
+    serve_extension(realm, chunk=chunk)
+    msg = realm.submit("extension_install", {"extension": "board", "version": "1.0.0"}, sender=net.people["ctl"])
+    for _ in range(4):
+        net.pic.tick()
+    realm.stop()  # raises when it has not completed within 100 rounds
+    realm.start()
+    [out] = realm.finish(msg)
+    assert out["ok"] is False and A_JS in out["error"], out
+    assert left(realm)[2] == []
