@@ -12,7 +12,7 @@ import pytest
 import world
 from core import op, signing
 from core.candid import Reader
-from core.db import Fail, NotFound, Unavailable
+from core.db import Conflict, Fail, NotFound, Unavailable
 from ggg import Realm, SignedDocument
 from kit import call, ok
 from signing_kit import climb, fake_key, fake_signature, management
@@ -302,17 +302,24 @@ def test_a_realm_without_the_cycles_asks_for_no_signature_and_says_what_it_lacks
     assert peer.sent("sign_with_schnorr") == [] and signing.proof("certificate", "C-1")["signature"] == ""
 
 
-def test_a_text_made_for_one_key_is_not_signed_with_another_and_is_signed_once_the_key_is_the_same():
+def test_a_document_made_for_another_key_is_left_out_of_a_batch_and_a_request_for_it_names_both_keys():
     world.build()
     peer = management()
-    Realm["1"].network = "ic"
-    make("certificate", certificates(1))
-    Realm["1"].network = "staging"  # the realm's network changed since the text named key_1
-    assert op.run(signing.sign_batch("certificate", ["C-1"])) is None
-    assert "another key than test_key_1" in signing.failures()["certificate"]["error"] and peer.sent("sign_with_schnorr") == []
-    Realm["1"].network = "ic"
-    assert op.run(signing.sign_batch("certificate", ["C-1"])) == ["C-1"]
-    assert Reader(peer.sent("sign_with_schnorr")[0]).args()[0]["key_id"]["name"] == "key_1"
+    Realm["1"].network = "staging"
+    make("certificate", certificates(2))  # C-1 and C-2 name test_key_1
+    Realm["1"].network = "ic"  # the key rule now names key_1
+    assert make("certificate", [("C-3", {"holder": "member-3"})]) == ["C-3"]
+    assert op.run(signing.sign_batch("certificate", ["C-1", "C-2", "C-3"])) == ["C-3"]  # the others are left out, not refused
+    assert signing.failures() == {} and Reader(peer.sent("sign_with_schnorr")[0]).args()[0]["key_id"]["name"] == "key_1"
+    assert [bool(signing.proof("certificate", f"C-{n}")["signature"]) for n in (1, 2, 3)] == [False, False, True]
+    calls = len(peer.calls)
+    with pytest.raises(Conflict) as refused:
+        op.run(signing.request("certificate", "C-1"))
+    assert "test_key_1" in str(refused.value) and "key_1" in str(refused.value) and len(peer.calls) == calls
+    assert op.run(signing.sign_batch("certificate", ["C-1", "C-2"])) == [] and signing.failures() == {}  # nothing, and nothing written
+    assert op.run(signing.request("certificate", "C-3"))[1] is False  # signed already: its proof, whatever the key is now
+    Realm["1"].network = "staging"
+    assert op.run(signing.request("certificate", "C-1"))[1] is True  # and signed again once the key is the one it names
 
 
 def test_a_document_is_made_for_the_key_asked_for_once_even_if_the_network_changes_while_it_is_out():
