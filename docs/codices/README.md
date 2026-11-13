@@ -76,10 +76,14 @@ never run. It is read from the compiled code, so it comes after the trust policy
 code is trusted, and the filing of an install (and a call's own check) only for code the realm takes without asking
 anyone (no approval required, or the code's checksum pinned), as it compiles no other. A codex of the file registry
 (`codex` and `version`) is fetched by the call, so it is checked there only. What it fetches is held to what a sent
-package is: a manifest that is not JSON, is not a record that is not empty, or whose `id` and `version` are not text
-or whose `hooks` and `capabilities` are not lists of text, and code that is not UTF-8, are refused with the file
-named, and so is a reply of the registry that is not a record: the install fails, with the reason recorded, and the
-vote or the timer that ran it concludes.
+package is: a manifest that is not JSON, is not a record that is not empty, nests lists or records more than 100
+levels deep, or whose `id` and `version` are not text or whose `hooks` and `capabilities` are not lists of text, and
+code that is not UTF-8 or a file that is not base64, are refused with the file named. So is a reply of the registry
+that is not a record, a call to it that fails (it ran out of instructions on a large file, or its reply is over the
+limit), and a reply that holds a lone surrogate: the install fails, with the reason recorded, and the vote or the
+timer that ran it concludes. An extension's install (`extension_install`) reads its manifest the same way. The checks
+are the same on the canister, whose JSON and base64 are its own and stop at limits of their own: whatever they raise
+is caught, and the shapes are tested there (`tests/deployed/test_registry_path.py`).
 
 ## Capabilities
 

@@ -182,18 +182,49 @@ def texts_of(value, what):
         raise Fail(f"{what} is a list of text")
 
 
-def check_manifest(manifest):
-    """``manifest`` is of the types the install reads, or a Fail names the one that is not: a record that is not empty
-    whose ``id`` and ``version`` are text and whose ``hooks`` and ``capabilities``, when there, are lists of text. A
-    sent package is judged by it (``check_install_args``) and so is the manifest the file registry sends (``fetch``)."""
+def manifest_is_record(manifest):
+    """``manifest`` is a record that is not empty, or a Fail: the first thing an install asks of it."""
     if not isinstance(manifest, dict) or not manifest:
         raise Fail("manifest is the codex's manifest.json: a record that is not empty")
+
+
+MANIFEST_DEPTH = 100  # levels of lists and records a manifest may nest: the codices' have a handful
+
+
+def nests_deeper_than(value, limit):
+    """Whether the JSON ``value`` nests lists and records more than ``limit`` levels deep. Read without recursion: that
+    is the point."""
+    todo = [(value, 0)]
+    while todo:
+        item, level = todo.pop()
+        if isinstance(item, (dict, list)):
+            if level >= limit:
+                return True
+            todo.extend((child, level + 1) for child in (item.values() if isinstance(item, dict) else item))
+    return False
+
+
+def check_manifest_fields(manifest):
+    """The fields of a manifest that is a record: ``id`` and ``version`` text, ``hooks`` and ``capabilities``, when
+    there, lists of text, and no more than ``MANIFEST_DEPTH`` levels of nesting. A manifest nested deeper parses and then
+    raises a RecursionError wherever it is dumped (the checksum, the row that keeps it), at a depth that depends on the
+    stack the dump is made in, so a vote or a timer that runs it traps, in process, at one depth and not another."""
+    if nests_deeper_than(manifest, MANIFEST_DEPTH):
+        raise Fail(f"the manifest nests lists or records more than {MANIFEST_DEPTH} levels deep")
     for key in ("id", "version"):
         if not isinstance(manifest.get(key), str):
             raise Fail(f"the manifest's {key} is text")
     for key in ("capabilities", "hooks"):
         if key in manifest:
             texts_of(manifest[key], f"the manifest's {key}")
+
+
+def check_manifest(manifest):
+    """``manifest`` is of the types the install reads, or a Fail names the one that is not. The manifest the file registry
+    sends is judged by it (``fetch``); a sent package by the same two parts with its code between them
+    (``check_install_args``: record, code, fields), as the checks were before the registry's were added."""
+    manifest_is_record(manifest)
+    check_manifest_fields(manifest)
 
 
 def compiled(source):
@@ -213,11 +244,14 @@ def compiled(source):
 def digest_of(manifest, source):
     """The checksum of the manifest and the code, or a Fail: the canister's JSON accepts a lone surrogate
     (``"\\ud800"``), which is not UTF-8 text, so the checksum (the hash of the text's bytes) raises a
-    UnicodeEncodeError that dispatch would trap on, with a vote or a timer that never concludes."""
+    UnicodeEncodeError that dispatch would trap on, with a vote or a timer that never concludes; so does a manifest
+    that parses and is nested too deep to dump, which a registry's can be (a RecursionError)."""
     try:
         return checksum(manifest, source)
     except UnicodeEncodeError as e:
         raise Fail(f"the manifest and the code are UTF-8 text: {e}")
+    except RecursionError:  # a manifest nested so deep that it parses and cannot be dumped (the interpreter's limit)
+        raise Fail("the manifest is nested too deep to be hashed")
 
 
 CO_OPTIMIZED = 0x1  # the flag of a function's code, and of a lambda's or a comprehension's: not of a class body
@@ -273,8 +307,9 @@ def check_install_args(args):
             raise Fail("url is the address of the change list, https")
     elif "manifest" in args:
         manifest = args["manifest"]
-        check_manifest(manifest)
+        manifest_is_record(manifest)
         text_arg(args, "source", "the codex's code: text")
+        check_manifest_fields(manifest)
         # Code the realm would refuse as untrusted is refused for that, without compiling it (``trust``): the compiler
         # runs here only on code the realm takes, which is all of it when it requires no approval.
         if extensions.pinned(digest_of(manifest, args["source"])):

@@ -92,6 +92,31 @@ def test_arguments_of_the_wrong_types_are_refused_when_the_install_is_filed_and_
     assert Proposal.count() == 0
 
 
+# What a package that is wrong in two ways is refused for: the checks run in an order, record, then the code, then the
+# fields of the manifest (the order they had before the file registry's manifest was held to the same checks).
+TWICE_WRONG = {
+    "an id that is a number and no code": ({"manifest": {"id": 5, "version": "1"}}, "source is the codex's code: text"),
+    "an id that is a number and code that is a number": ({"manifest": {"id": 5, "version": "1"}, "source": 5},
+                                                         "source is the codex's code: text"),
+    "an id that is a number and code that is null": ({"manifest": {"id": 5, "version": "1"}, "source": None},
+                                                     "source is the codex's code: text"),
+    "hooks that are null and code that is a list": ({"manifest": {"id": "a", "version": "1", "hooks": None},
+                                                     "source": []}, "source is the codex's code: text"),
+    "a manifest that is not a record and no code": ({"manifest": [1]}, "manifest is the codex's manifest.json"),
+    "an id that is a number and good code": ({"manifest": {"id": 5, "version": "1"}, "source": "pass"},
+                                             "the manifest's id is text"),
+}
+
+
+@pytest.mark.parametrize("name", list(TWICE_WRONG))
+def test_a_package_wrong_in_two_ways_is_refused_for_the_first_in_the_order_of_the_checks(name):
+    if ("no code" in name and "good" not in name or "code that is null" in name) and os.environ.get("GGG_MIRROR"):
+        pytest.skip("GGG's Candid types carry no null or missing text: the mirror changes the argument")
+    args, reason = TWICE_WRONG[name]
+    assert reason in denied("codex_install", "ctl", **args)
+    assert reason in denied("proposal_create", "alice", title="Install", action={"op": "codex_install", "args": args})
+
+
 STORED = ["a release with a null manifest", "a manifest that is text", "code that is a number",
           "a release whose version is a number", "hooks that are null", "capabilities with a record in them",
           "code that does not compile", "code with a null byte"]

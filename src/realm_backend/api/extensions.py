@@ -39,9 +39,23 @@ def registry_record(text, what):
     return reply
 
 
+def registry_call(method, arg, what):
+    """The text the file registry answers ``method`` with, or a Fail naming ``what`` it was asked for. A call that fails
+    is a plain Exception, as ``chain.call`` raises it (the registry ran out of instructions on a large file, or went
+    over the reply limit), and one whose reply holds a lone surrogate is refused as a failed call is
+    (``core.surrogates.refuse_reply``). Left alone either traps, after the await that made it: a proposal that carried
+    the install ended ``executed`` with no result, and nothing installed. A generator."""
+    cid = registry()  # Unavailable when the realm has none
+    try:
+        return (yield from chain.call_text(cid, method, arg))
+    except Exception as e:  # noqa: BLE001  the call failed: reject, trap or out of instructions at the registry
+        raise Fail(f"the file registry's {method} for {what} failed: {str(e)[:200]}")
+
+
 def ask(method, namespace, path):
     arg = json.dumps({"namespace": namespace, "path": path})
-    return registry_record((yield from chain.call_text(registry(), method, arg)), f"{method} {namespace}/{path}")
+    what = f"{namespace}/{path}"
+    return registry_record((yield from registry_call(method, arg, what)), f"{method} {what}")
 
 
 def pinned(digest):
@@ -70,7 +84,7 @@ def trust(digest, namespace=None, path=None):
         found = (yield from ask("get_file_size", namespace, path)).get("sha256")
         if not found or found != digest:
             raise Fail(f"{namespace}/{path} is sha256:{found or 'missing'}, not sha256:{digest}")
-    approval = registry_record((yield from chain.call_text(registry(), "get_namespace_approval_icc", namespace)),
+    approval = registry_record((yield from registry_call("get_namespace_approval_icc", namespace, namespace)),
                                f"get_namespace_approval_icc {namespace}")
     if not approval.get("approved"):
         raise Forbidden(f"{namespace} is not approved by the marketplace "
@@ -84,9 +98,16 @@ def fetch(namespace, path):
     reply = yield from ask("get_file", namespace, path)
     if "content_b64" not in reply:
         raise Fail(f"{namespace}/{path}: {reply.get('error')}")
+    content = reply["content_b64"]
+    if not isinstance(content, str):
+        raise Fail(f"{namespace}/{path}: content_b64 is not text")
     try:
-        text = base64.b64decode(reply["content_b64"]).decode()
-    except Exception as e:  # noqa: BLE001  not base64, not text, or not UTF-8
+        raw = base64.b64decode(content)
+    except Exception as e:  # noqa: BLE001  binascii.Error here, whatever the canister's own base64 raises
+        raise Fail(f"{namespace}/{path} is not base64: {str(e)[:200]}")
+    try:
+        text = raw.decode()
+    except UnicodeDecodeError as e:
         raise Fail(f"{namespace}/{path} is not UTF-8 text: {str(e)[:200]}")
     if path.endswith(".json") and surrogates.json_holds(text):  # a file comes inside the reply, base64, unseen by its scan
         raise Fail(f"{namespace}/{path}: holds a lone surrogate (U+D800 to U+DFFF), which is not text")
@@ -137,6 +158,24 @@ def available(ext, held):
     return not (wanted or depts) or bool(profiles & wanted or departments & depts)
 
 
+def extension_manifest(namespace):
+    """The manifest of the extension in ``namespace``, a record whose ``operations`` and ``profiles``, when there, are lists
+    of text (the install lists them as the extension's), or a Fail that names the file: what the registry sends is parsed
+    here, and a manifest that is not JSON, is a list or null, or lists a number raised in the install, which traps. A
+    generator."""
+    text = yield from fetch(namespace, "manifest.json")
+    try:
+        manifest = json.loads(text)
+    except Exception as e:  # noqa: BLE001  a ValueError, or a RecursionError on a manifest nested too deep
+        raise Fail(f"{namespace}/manifest.json is not JSON: {str(e)[:200]}")
+    if not isinstance(manifest, dict) or not manifest:
+        raise Fail(f"{namespace}/manifest.json is a record that is not empty")
+    for key in ("operations", "profiles"):
+        if key in manifest and not (isinstance(manifest[key], list) and all(isinstance(i, str) for i in manifest[key])):
+            raise Fail(f"{namespace}/manifest.json: {key} is a list of text")
+    return manifest
+
+
 @op("extension.install", governed=realm_wide)
 def extension_install(c, args):
     """Install or upgrade ``extension`` at ``version`` from the file registry (``ext/<extension>/<version>``).
@@ -145,9 +184,13 @@ def extension_install(c, args):
     to the realm's frontend under ``/ext/<extension>/<version>/``. Returns ``approved_by``: if the realm
     requires marketplace approval, its checksum must be pinned or an approver it trusts must have approved it."""
     namespace = f"ext/{args['extension']}/{args['version']}"
-    manifest = json.loads((yield from fetch(namespace, "manifest.json")))
+    manifest = yield from extension_manifest(namespace)
     source = (yield from fetch(namespace, "backend/entry.py")) if manifest.get("backend") else ""
-    approver = yield from trust(checksum(manifest, source), namespace)
+    try:
+        digest = checksum(manifest, source)
+    except (RecursionError, UnicodeEncodeError) as e:  # a manifest nested too deep to dump, or text that cannot be hashed
+        raise Fail(f"{namespace}/manifest.json cannot be hashed: {type(e).__name__}")
+    approver = yield from trust(digest, namespace)
     yield from publish_frontend(namespace, f"/{namespace}/")
     ext = Extension[args["extension"]] or Extension(
         id=args["extension"], access={"profiles": manifest.get("profiles", ["member"]), "departments": []},
