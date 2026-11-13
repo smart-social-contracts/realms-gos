@@ -95,14 +95,19 @@ class Json(String):
         super().__set__(obj, json.dumps(value))
 
 
+KEPT_FIELD = 1000  # characters: what of a reply too large for its record is kept field by field
+
+
 def bounded(reply, limit=JSON_MAX):
     """``reply``, an operation's reply (``{ok, error, kind, ...}``), as a Json field of ``limit`` characters can keep
-    it: itself when it fits. A refusal can echo what it refuses (a stored value in its text: the codex API a manifest
-    names, a name that is not known), so a reply may be larger than the field that records it, and the write then
-    raises and traps the call that records it, which rolls the whole message back: a vote that concludes a proposal
-    would never conclude. The ``error`` is cut and says so, and ``ok`` and ``kind`` stay as they were; a reply that is
-    large for another reason (an ``ok`` reply with a long body, an error that is not text) is replaced by a record of
-    ``ok`` and ``kind`` that says how large it was."""
+    it: itself when it fits. A reply can be larger than the field that records it: a refusal echoes what it refuses (a
+    stored value in its text: the codex API a manifest names), and a reply that succeeds can carry a long result (an
+    ``init`` that returns a lot). The write then raises and traps the call that records it, which rolls the whole
+    message back: a vote that concludes a proposal would never conclude. Of a refusal the ``error`` is cut, with a
+    marker that says how large the reply was; ``ok``, ``kind`` and the other fields stay. Of any other reply the fields
+    larger than ``KEPT_FIELD`` characters are replaced by a note of their size and the rest stay (``ok`` with them), and
+    one still too large (many fields, or not a record) is replaced by a record of its ``ok`` and ``kind`` that says how
+    large the reply was."""
     size = len(json.dumps(reply))
     if size <= limit:
         return reply
@@ -115,6 +120,11 @@ def bounded(reply, limit=JSON_MAX):
             if len(json.dumps(cut)) <= limit:
                 return cut
             keep = keep * 2 // 3  # a character takes up to 6 in JSON: cut again, until it fits
+    if isinstance(reply, dict):
+        sizes = {k: len(json.dumps(v)) for k, v in reply.items()}
+        kept = {k: v if sizes[k] <= KEPT_FIELD else f"[cut: {sizes[k]} characters]" for k, v in reply.items()}
+        if len(json.dumps(kept)) <= limit:
+            return kept
     small = {k: reply[k] for k in ("ok", "kind") if isinstance(reply, dict) and k in reply}
     return {**small, "cut": note} if small.get("ok") else {**small, "ok": False, "error": note}
 

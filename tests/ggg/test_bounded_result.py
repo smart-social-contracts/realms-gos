@@ -79,13 +79,25 @@ def test_an_error_that_is_too_long_is_cut_with_a_marker_whatever_its_characters_
     assert str(len(json.dumps(reply))) in out["error"]  # it says how large the reply was
 
 
-def test_a_reply_too_large_for_another_reason_keeps_its_ok_and_kind_and_says_how_large_it_was():
-    big = bounded({"ok": True, "document": "y" * 80000})
-    assert big["ok"] is True and "document" not in big and NOTE in big["cut"]
+def test_a_reply_that_succeeds_with_a_large_field_keeps_ok_and_the_small_fields_and_notes_the_size_of_the_large_one():
+    init = {"ok": True, "result": "y" * 80000}
+    out = bounded({"ok": True, "codex": "lex@1.0", "init": init})
+    assert out == {"ok": True, "codex": "lex@1.0", "init": f"[cut: {len(json.dumps(init))} characters]"}
     refused = bounded({"ok": False, "kind": "forbidden", "error": "no", "permission": "p" * 70000})
-    assert refused["ok"] is False and refused["kind"] == "forbidden" and NOTE in refused["error"]
+    assert refused == {"ok": False, "kind": "forbidden", "error": "no",
+                       "permission": f"[cut: {len(json.dumps('p' * 70000))} characters]"}
     not_text = bounded({"ok": False, "kind": "conflict", "error": ["a"] * 70000})
-    assert not_text["ok"] is False and not_text["kind"] == "conflict" and NOTE in not_text["error"]
+    assert not_text["ok"] is False and not_text["kind"] == "conflict" and not_text["error"].startswith("[cut: ")
+
+
+def test_a_reply_too_large_in_many_fields_or_not_a_record_is_replaced_by_a_record_of_its_ok_and_kind():
+    fields = {f"k{i}": "z" * 900 for i in range(100)}  # each is kept, together they are not
+    many = bounded({"ok": True, **fields})
+    assert many["ok"] is True and NOTE in many["cut"] and set(many) == {"ok", "cut"}
+    refused = bounded({"ok": False, "kind": "conflict", **fields})
+    assert set(refused) == {"ok", "kind", "error"} and refused["ok"] is False and NOTE in refused["error"]
+    listed = bounded(["x" * 1000] * 100)
+    assert listed["ok"] is False and NOTE in listed["error"]
 
 
 # ---- A stored proposal
@@ -139,7 +151,7 @@ def test_what_the_operation_returns_is_recorded_whole_when_it_fits():
 
 
 def test_an_ok_reply_too_large_for_the_field_does_not_trap_the_vote_that_ran_it(monkeypatch):
-    """A refusal is not the only reply that can be large: the action ran, and its record says how large it was."""
+    """A refusal is not the only reply that can be large: the action ran, and its record keeps what is small of it."""
     real = op.dispatch
 
     def large(name, arg, **kw):
@@ -151,7 +163,31 @@ def test_an_ok_reply_too_large_for_the_field_does_not_trap_the_vote_that_ran_it(
     p = ok("proposal_create", "alice", title="Road works", action=ROAD_WORKS)["proposal"]
     vote_yes(p)
     row = Proposal[p]
-    assert row.status == "executed" and row.result["ok"] is True and NOTE in row.result["cut"]
+    assert row.status == "executed" and row.result["ok"] is True and "mandate" in row.result
+    assert row.result["document"] == "[cut: 80002 characters]"
+
+
+RETURNS_A_LOT = ("from ggg_sdk import hook\n\n@hook\ndef init(args):\n    return {'big': 'x' * 70000}\n")
+
+
+@pytest.mark.parametrize("timed", [False, True], ids=["vote", "timer"])
+def test_an_install_whose_hook_succeeds_with_a_large_result_concludes_executed_with_the_result_cut(timed):
+    """Review of #711: an ``init`` that succeeds and returns more than the record holds trapped the vote that ran the
+    install: ``codex_install`` replies with it, and the write of the proposal's result raised."""
+    ok("governance_update", "ctl", voting_window=0)
+    manifest = {"id": "lex", "version": "1.0", "codex_api_version": 2, "hooks": ["init"], "capabilities": []}
+    action = {"op": "codex_install", "args": {"manifest": manifest, "source": RETURNS_A_LOT}}
+    filing = {"title": "Install", "action": action}
+    if timed:
+        filing["effective_at"] = fake_chain.now() + HOUR
+    p = ok("proposal_create", "alice", **filing)["proposal"]
+    vote_yes(p)  # no trap
+    if timed:
+        later(HOUR)
+        fire_timers()  # no trap
+    row = Proposal[p]
+    assert row.status == "executed" and row.result["ok"] is True and row.result["codex"] == "lex@1.0"
+    assert row.result["init"].startswith("[cut: ") and len(json.dumps(row.result)) <= JSON_MAX
 
 
 # ---- A pending action
