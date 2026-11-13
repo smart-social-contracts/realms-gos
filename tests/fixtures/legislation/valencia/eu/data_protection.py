@@ -8,5 +8,6 @@ class DataProtection(above("data_protection")):
 
     @extension(legislation="GDPR Art. 5-6")
     def check_document_share(self, args):
-        if args.basis is not None and args.basis.legal_basis == "gdpr-6-1-a":
+        basis = args.basis
+        if isinstance(basis, type(args)) and basis.legal_basis == "gdpr-6-1-a":     # a basis that is no record is for the realm to refuse
             return self.deny("consent is not a basis between public authorities")
