@@ -65,7 +65,7 @@ same rows.
   and an amount of a token with many decimals is limited to 2^53 − 1 of its smallest unit. Not bounded here: the maps
   that stand for lists of pairs (a tender's rubric weights, bid scores), `expires_in`, which only Realms GOS has, a
   number inside a variant (except the tokens step of `setup_step`), a derived fact, and `limit`, which is `count` and
-  is capped by the page size;
+  is capped by the page size (500; `ggg_proposal_list` returns at most 200, each item a whole GGG record: follow `next`);
 - a proposal stores the rule that decides it (I-GOV-3): `kind`, `matter`, `threshold`, `quorum` and `threshold_of`
   (`cast` or `eligible`, lower case) are arguments of `proposal_create`, a stricter rule than the scope's default is
   stored and a weaker one refused. The default is the realm's `voting_threshold` and `voting_quorum` over the votes

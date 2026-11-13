@@ -586,6 +586,8 @@ def request(op, arg_t, arg):
         args["from"] = int(cursor)
     if "limit" in args and op not in KEEP_LIMIT:
         args["count"] = args.pop("limit")
+    if op in PAGE_CAP and (args.get("count") or 0) > PAGE_CAP[op]:
+        args["count"] = PAGE_CAP[op]
     return ARGS[op](args, arg) if op in ARGS else args
 
 
@@ -711,6 +713,10 @@ KEY = {"crypto_envelope": "scope", "crypto_derive_key": "transport_public_key", 
        "dispute_get": "dispute", "report_view": "report", "legislation_chapter": "chapter"}
 # Operations that take ``limit`` as such, not as a page size.
 KEEP_LIMIT = {"document_delete"}
+# Operations whose GGG method returns at most this many items a page, whatever ``limit`` asks (the reply's ``next`` goes
+# on from the last): each item is a whole GGG record, built from a row, and the page is Candid on top of that. A page of
+# 500 proposals came to about 4.8 billion instructions, a query may spend 5; the operation's own page is up to 500.
+PAGE_CAP = {"proposal_list": 200}
 
 
 def seat_owner(args):

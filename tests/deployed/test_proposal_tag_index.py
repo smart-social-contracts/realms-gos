@@ -456,8 +456,9 @@ def test_a_filled_page_by_tags_and_a_status_costs_its_checks_and_its_rows_under_
     realm is built for, and no call of the operation may cost 4.5 billion, a tenth under what a query may spend.
 
     Two paths are bounded. The operation, ``proposal_list``: its calls are measured in the shell (an update, so that what
-    is over 5 billion is measured too). And ``ggg_proposal_list``, the GGG method over it, as a real query, which makes a
-    GGG record of each row and encodes the page as Candid on top of the operation: it must not trap."""
+    is over 5 billion is measured too). And ``ggg_proposal_list``, the GGG method over it, which makes a GGG record of
+    each row and encodes the page as Candid on top of the operation: it returns at most 200 items, is held to 4 billion
+    in the shell, and as a real query, with its limit of 5 billion, it must not trap."""
     assert int(run(filled, LIMIT).strip().splitlines()[-1]) == 2_000, "this realm is built for a limit of 2,000 reads"
     matches = [f"P-{i}" for i in range(9_003, 9_504)]
     found, spent, start = [], [], 1
@@ -474,11 +475,13 @@ def test_a_filled_page_by_tags_and_a_status_costs_its_checks_and_its_rows_under_
     assert reply["ids"] == matches[:500] and reply["next"] == 9_503
     costs.report("1 tag and status voting, a page of 500 after 1,500 misses: one call", reply["instructions"])
     assert reply["instructions"] < 4_500_000_000
-    # The same page through the GGG method
+    # The same page through the GGG method, which returns at most 200 (ggg_api.PAGE_CAP) when 500 are asked for. Uncapped it
+    # came to 4.5 billion in the shell and trapped as a query: a GGG record and its Candid on top of each row.
     arg = {"cursor": "7503", "limit": 500, "status": {"Voting": None}, "tags": ["c0"]}
     ggg = json.loads(run(filled, GGG_LIST % {"arg": arg}).strip().splitlines()[-1])
-    assert ggg["ok"] and ggg["items"] == 500 and ggg["next"] == "9503", ggg
-    costs.report("1 tag and status voting, a page of 500 after 1,500 misses, ggg_proposal_list: to the Candid", ggg["instructions"])
+    assert ggg["ok"] and ggg["items"] == 200 and ggg["next"] == "9203", ggg
+    costs.report("1 tag and status voting, 500 asked after 1,500 misses, ggg_proposal_list (200): to the Candid", ggg["instructions"])
+    assert ggg["instructions"] < 4_000_000_000
     assert ggg_query(filled, people["alice"], cursor="7503", tags=["c0"], status="Voting", limit=500)
 
 

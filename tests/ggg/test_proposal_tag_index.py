@@ -6,6 +6,7 @@ again after every upgrade, so that a rollback to such a release leaves no list w
 import random
 import re
 
+import ggg_api
 import kit
 import mirror
 import world
@@ -260,6 +261,18 @@ def test_a_ggg_listing_builds_its_records_from_the_rows_the_operation_listed(mon
     out = mirror.call("proposal_list", "bob", {"tags": ["t"], "count": 5}, kit.direct)
     assert [p["id"] for p in out["proposals"]] == ids[:5]
     assert len(read) == 5 and all(key.isdigit() for key in read), read  # by id, once each, and none by name (``P-1``)
+
+
+def test_a_ggg_listing_returns_at_most_the_pages_its_records_allow(monkeypatch):
+    """A page of whole GGG records, Candid included, is dearer than the operation's rows: 500 came to about 4.8 billion
+    instructions, and the method returns fewer than ``limit`` asks for, with ``next`` to go on from."""
+    world.build()
+    ids = fill(8, "t", 1)
+    monkeypatch.setitem(ggg_api.PAGE_CAP, "proposal_list", 3)
+    first = mirror.call("proposal_list", "bob", {"tags": ["t"], "count": 10}, kit.direct)
+    assert [p["id"] for p in first["proposals"]] == ids[:3] and first["next"] == 4
+    assert len(mirror.call("proposal_list", "bob", {"count": 2}, kit.direct)["proposals"]) == 2  # a smaller page stays
+    assert found(tags=["t"], count=10) == ids  # a client that follows next gets them all
 
 
 def test_a_tag_that_ends_like_an_index_entry_hides_no_proposal():
