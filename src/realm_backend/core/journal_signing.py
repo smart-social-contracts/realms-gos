@@ -55,13 +55,16 @@ def body(issue):
 
 
 def signed_through():
-    """The last day signed, or None while none is. A day after it that is made is waiting for a daily realm's sweep; a day
-    before it is covered by it, through the chain (and may still be asked for). Moved only forward, by ``note_signed``."""
+    """The last day signed, or passed over by a daily sweep because it cannot sign it (it was made for another key than the
+    realm's now, or its document is gone), or None while there is none. A day after it that is made is waiting for a daily
+    realm's sweep; a day before it is covered by a signature after it, through the chain (and may still be asked for, if it
+    can be signed). Moved only forward, by ``note_signed``."""
     return signing.state(KIND).get("signed")
 
 
 def note_signed(days):
-    """Keep that ``days`` have been signed: the last of them is the last signed, if it is after the one that was."""
+    """Keep that ``days`` have been signed, or passed over by the sweep because it cannot sign them: the last of them is
+    the last signed day, if it is after the one that was."""
     last, through = max(days, key=journal.day_number), signed_through()
     if through is None or journal.day_number(last) > journal.day_number(through):
         signing.keep(KIND, signed=last)
@@ -94,12 +97,17 @@ def waiting_days():
 def sign_made():
     """Sign the days made after the last signed one, a batch at a time, until none is left or a batch fails. A batch that
     fails (the realm is short of cycles, a call is refused) leaves what it held waiting, and its failure is kept for the IT
-    admin team; the next sweep finds the same days. A generator."""
+    admin team; the next sweep finds the same days. A day that cannot be signed (made for another key than the realm's now,
+    or gone) is left out of its batch and passed over, so that it never holds the days after it back: a batch with nothing in
+    it to sign moves the last signed day to its end, unless a request is signing one of its days (which, if it fails, the
+    next sweep must find again). A generator."""
     while days := waiting_days():
         signed = yield from signing.sign_batch(KIND, days)
-        if not signed:  # it failed, or nothing could be signed (being signed by a request, or its document gone)
+        if signed is None:  # it failed: the same days wait for the next sweep
             return
-        note_signed(signed)
+        if not signed and any(signing.being_signed(KIND, day) for day in days):
+            return  # a request is signing a day of it: if the request fails, the next sweep finds the day again
+        note_signed(signed or days)
 
 
 def sweep():
