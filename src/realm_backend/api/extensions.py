@@ -26,16 +26,17 @@ def checksum(manifest, source):
     return sandbox.sha256(json.dumps(manifest, sort_keys=True) + "\n" + source)
 
 
-def registry_record(text, what):
-    """The record the file registry's reply ``text`` to ``what`` holds, or a Fail: a reply that is not JSON (or is
-    nested too deep to parse) or is not a record raised in the parse or in the ``.get`` that read it, which is a trap:
-    the vote or the timer that ran the install never concluded."""
+def registry_record(text, what, kind=dict):
+    """The record the file registry's reply ``text`` to ``what`` holds (a list when ``kind`` is ``list``: ``list_files``
+    answers one), or a Fail: a reply that is not JSON (or is nested too deep to parse) or is not a record raised in the
+    parse or in the ``.get`` that read it, which is a trap: the vote or the timer that ran the install never
+    concluded."""
     try:
         reply = json.loads(text)
     except Exception as e:  # noqa: BLE001  a ValueError, or a RecursionError on a reply nested too deep
         raise Fail(f"the file registry's reply to {what} is not JSON: {str(e)[:200]}")
-    if not isinstance(reply, dict):
-        raise Fail(f"the file registry's reply to {what} is not a record")
+    if not isinstance(reply, kind):
+        raise Fail(f"the file registry's reply to {what} is not a {'record' if kind is dict else 'list'}")
     return reply
 
 
@@ -94,17 +95,22 @@ def trust(digest, namespace=None, path=None):
     return approval["approver"]
 
 
+def decoded_content(content, what):
+    """The bytes of ``content``, the ``content_b64`` of a registry's reply, or a Fail naming ``what`` (not text, not
+    base64)."""
+    if not isinstance(content, str):
+        raise Fail(f"{what}: content_b64 is not text")
+    try:
+        return base64.b64decode(content)
+    except Exception as e:  # noqa: BLE001  binascii.Error here, whatever the canister's own base64 raises
+        raise Fail(f"{what} is not base64: {str(e)[:200]}")
+
+
 def fetch(namespace, path):
     reply = yield from ask("get_file", namespace, path)
     if "content_b64" not in reply:
         raise Fail(f"{namespace}/{path}: {reply.get('error')}")
-    content = reply["content_b64"]
-    if not isinstance(content, str):
-        raise Fail(f"{namespace}/{path}: content_b64 is not text")
-    try:
-        raw = base64.b64decode(content)
-    except Exception as e:  # noqa: BLE001  binascii.Error here, whatever the canister's own base64 raises
-        raise Fail(f"{namespace}/{path} is not base64: {str(e)[:200]}")
+    raw = decoded_content(reply["content_b64"], f"{namespace}/{path}")
     try:
         text = raw.decode()
     except UnicodeDecodeError as e:
@@ -121,24 +127,36 @@ def publish_frontend(namespace, prefix):
     frontend = Realm["1"].frontend_canister_id
     if not frontend:
         return 0
-    files = json.loads((yield from chain.call_text(registry(), "list_files", json.dumps({"namespace": namespace}))))
+    files = registry_record((yield from registry_call("list_files", json.dumps({"namespace": namespace}), namespace)),
+                            f"list_files {namespace}", list)
     copied = 0
     for entry in files:
+        listed = isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        if not listed or not isinstance(entry.get("content_type") or "", str):
+            raise Fail(f"the file registry's list_files for {namespace} lists an entry without a path, or with a "
+                       "content type that is not text")
         if not entry["path"].startswith("frontend/"):
             continue
+        what = f"{namespace}/{entry['path']}"
         data, offset, eof = b"", 0, False
         while not eof:  # the registry hands out at most 128 KB per call
             arg = json.dumps({"namespace": namespace, "path": entry["path"], "offset": offset})
-            reply = json.loads((yield from chain.call_text(registry(), "get_file_chunk", arg)))
+            reply = registry_record((yield from registry_call("get_file_chunk", arg, what)), f"get_file_chunk {what}")
             if "content_b64" not in reply:
-                raise Fail(f"{namespace}/{entry['path']}: {reply.get('error')}")
-            data += base64.b64decode(reply["content_b64"])
-            offset, eof = offset + reply["length"], reply["eof"] or reply["length"] == 0
+                raise Fail(f"{what}: {reply.get('error')}")
+            data += decoded_content(reply["content_b64"], what)
+            length = reply.get("length")
+            if not isinstance(length, int) or isinstance(length, bool) or length < 0 or "eof" not in reply:
+                raise Fail(f"{what}: the reply to get_file_chunk has no length (a count) or no eof")
+            offset, eof = offset + length, bool(reply["eof"]) or length == 0
         content = data.hex()
         content = "".join("\\" + content[i:i + 2] for i in range(0, len(content), 2))
-        yield from chain.call(frontend, "store", f"(record {{ key = {quote(prefix + entry['path'])}; "
-                              f"content_type = {quote(entry.get('content_type') or 'application/octet-stream')}; "
-                              f'content_encoding = "identity"; content = blob "{content}"; sha256 = null }})')
+        try:
+            yield from chain.call(frontend, "store", f"(record {{ key = {quote(prefix + entry['path'])}; "
+                                  f"content_type = {quote(entry.get('content_type') or 'application/octet-stream')}; "
+                                  f'content_encoding = "identity"; content = blob "{content}"; sha256 = null }})')
+        except Exception as e:  # noqa: BLE001  the realm's frontend rejected it, or ran out of cycles
+            raise Fail(f"the realm's frontend did not store {prefix + entry['path']}: {str(e)[:200]}")
         copied += 1
     return copied
 
@@ -160,9 +178,10 @@ def available(ext, held):
 
 def extension_manifest(namespace):
     """The manifest of the extension in ``namespace``, a record whose ``operations`` and ``profiles``, when there, are lists
-    of text (the install lists them as the extension's), or a Fail that names the file: what the registry sends is parsed
-    here, and a manifest that is not JSON, is a list or null, or lists a number raised in the install, which traps. A
-    generator."""
+    of text (the install lists them as the extension's), that nests no deeper than a codex's manifest may
+    (``codex.MANIFEST_DEPTH``), or a Fail that names the file: what the registry sends is parsed here, and a manifest
+    that is not JSON, is a list or null, lists a number, or is nested so deep that a dump of it raises a RecursionError
+    (in process, at a depth that depends on the stack) raised in the install, which traps. A generator."""
     text = yield from fetch(namespace, "manifest.json")
     try:
         manifest = json.loads(text)
@@ -170,6 +189,10 @@ def extension_manifest(namespace):
         raise Fail(f"{namespace}/manifest.json is not JSON: {str(e)[:200]}")
     if not isinstance(manifest, dict) or not manifest:
         raise Fail(f"{namespace}/manifest.json is a record that is not empty")
+    from api import codex  # it imports this module
+
+    if codex.nests_deeper_than(manifest, codex.MANIFEST_DEPTH):
+        raise Fail(f"{namespace}/manifest.json nests lists or records more than {codex.MANIFEST_DEPTH} levels deep")
     for key in ("operations", "profiles"):
         if key in manifest and not (isinstance(manifest[key], list) and all(isinstance(i, str) for i in manifest[key])):
             raise Fail(f"{namespace}/manifest.json: {key} is a list of text")
@@ -186,11 +209,7 @@ def extension_install(c, args):
     namespace = f"ext/{args['extension']}/{args['version']}"
     manifest = yield from extension_manifest(namespace)
     source = (yield from fetch(namespace, "backend/entry.py")) if manifest.get("backend") else ""
-    try:
-        digest = checksum(manifest, source)
-    except (RecursionError, UnicodeEncodeError) as e:  # a manifest nested too deep to dump, or text that cannot be hashed
-        raise Fail(f"{namespace}/manifest.json cannot be hashed: {type(e).__name__}")
-    approver = yield from trust(digest, namespace)
+    approver = yield from trust(checksum(manifest, source), namespace)
     yield from publish_frontend(namespace, f"/{namespace}/")
     ext = Extension[args["extension"]] or Extension(
         id=args["extension"], access={"profiles": manifest.get("profiles", ["member"]), "departments": []},
