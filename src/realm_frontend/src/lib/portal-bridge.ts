@@ -3,6 +3,14 @@
  */
 import { DelegationIdentity, DelegationChain, Ed25519KeyIdentity } from '@dfinity/identity';
 import { portalLoginHref, markPortalSigningIn } from '$lib/portal-redirect-path.ts';
+import type { AssistantPromptContext } from '$lib/host-bridge';
+
+/** A question for the portal's assistant, with the text it is about. */
+export interface PortalAssistantPrompt {
+  message: string;
+  autoSend: boolean;
+  context?: AssistantPromptContext | null;
+}
 
 const BRIDGE_VERSION = '1';
 const PORTAL_SESSION_KEY = 'realms:portal-embed';
@@ -21,6 +29,7 @@ let pendingDelegationRequest = false;
 let pendingNavPush: { path: string; replace: boolean } | null = null;
 let pendingFocusPush: { source: string; uri: string; label?: string } | null | undefined = undefined;
 let pendingAssistantOpen: boolean = false;
+let queuedAssistantPrompt: PortalAssistantPrompt | null = null;
 let pendingUiReady: boolean = false;
 let pendingPortalLogin: { returnPath: string } | null = null;
 let pendingPortalLogout = false;
@@ -278,6 +287,11 @@ export function initPortalBridge() {
       pendingFocusPush = undefined;
       post({ type: 'focus:push', payload: queuedFocus });
     }
+    if (queuedAssistantPrompt) {
+      const queuedPrompt = queuedAssistantPrompt;
+      queuedAssistantPrompt = null;
+      post({ type: 'assistant:prompt', payload: queuedPrompt });
+    }
     if (pendingAssistantOpen) {
       pendingAssistantOpen = false;
       post({ type: 'assistant:open' });
@@ -355,14 +369,39 @@ export function portalNavPush(path: string, { replace = false }: { replace?: boo
  * Mirror document focus onto the portal host so RegistryAssistant can include it.
  * @param {{ source: string, uri: string, label?: string } | null} focus
  */
-export function portalFocusPush(focus: { source: string; uri: string; label?: string } | null) {
+export function portalFocusPush(
+  focus: { source: string; uri: string; label?: string; snapshot?: unknown } | null
+) {
   if (!isPortalEmbedded()) return false;
+  // Only what the message declares: the document's text crosses on an explicit
+  // request (`assistant:prompt`), never with every selection change.
+  const payload = focus
+    ? { source: focus.source, uri: focus.uri, label: focus.label }
+    : null;
   if (!port) {
-    pendingFocusPush = focus;
+    pendingFocusPush = payload;
     return false;
   }
   pendingFocusPush = undefined;
-  post({ type: 'focus:push', payload: focus });
+  post({ type: 'focus:push', payload });
+  return true;
+}
+
+/**
+ * Give the portal host a question for the mundus-level RegistryAssistant, with
+ * the text it is about. A portal that predates this message ignores it and
+ * still opens its panel on `assistant:open`, which the caller sends after.
+ * Fire-and-forget; queues briefly if the MessagePort is not ready yet.
+ */
+export function portalAssistantPrompt(prompt: PortalAssistantPrompt) {
+  if (!isPortalEmbedded()) return false;
+  if (!prompt?.message) return false;
+  if (!port) {
+    queuedAssistantPrompt = prompt;
+    return false;
+  }
+  queuedAssistantPrompt = null;
+  post({ type: 'assistant:prompt', payload: prompt });
   return true;
 }
 

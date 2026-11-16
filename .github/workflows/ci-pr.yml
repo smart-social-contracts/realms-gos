@@ -100,7 +100,9 @@ jobs:
           npx vitest run src/lib/i18n/localeParity.test.ts \
             src/lib/stores/sidebar.test.ts \
             src/lib/i18n/resolveLocale.test.ts \
-            src/lib/utils/backendError.test.ts
+            src/lib/utils/backendError.test.ts \
+            src/lib/host-bridge.test.ts \
+            src/lib/portal-bridge.assistant-prompt.test.ts
 
   # The packed realm wasms on PocketIC: basilisk stubs typing and struct inside a
   # canister, so only the built artifact shows how the production and the test

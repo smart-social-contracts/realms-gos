@@ -17,7 +17,12 @@
 	import { hostActionEvents, documentFocus } from '$lib/host-bridge';
 	import { sidebarConfig } from '$lib/stores/sidebar';
 	import { resolveHomePath } from '$lib/utils/home-path';
-	import { portalFocusPush, portalAssistantOpen, isEmbeddedInPortal } from '$lib/portal-bridge.ts';
+	import {
+		portalFocusPush,
+		portalAssistantOpen,
+		portalAssistantPrompt,
+		isEmbeddedInPortal
+	} from '$lib/portal-bridge.ts';
 	import { realmInfo } from '$lib/stores/realmInfo';
 	import {
 		initialHideOnScrollState,
@@ -144,6 +149,21 @@
 				if (!event) return;
 				if (event.action.type === 'assistant.open') {
 					if (embeddedInPortal) {
+						portalAssistantOpen();
+					}
+					return;
+				}
+				if (event.action.type === 'assistant.prompt') {
+					if (embeddedInPortal) {
+						// The question first, then the open the older portal knows:
+						// a portal without `assistant:prompt` drops it and still opens.
+						if (event.action.message) {
+							portalAssistantPrompt({
+								message: event.action.message,
+								autoSend: event.action.autoSend === true,
+								context: event.action.context ?? null
+							});
+						}
 						portalAssistantOpen();
 					}
 					return;
