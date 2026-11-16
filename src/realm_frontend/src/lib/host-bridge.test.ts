@@ -162,7 +162,17 @@ describe('buildAssistantContext', () => {
 		expect(context).toMatchObject({ text: 'the whole chapter', label: 'eu/data_protection.py' });
 	});
 
-	it('is null when neither the action nor the focus holds text', () => {
+	it('keeps a reference with no text: it says where the whole text is read', () => {
+		const context = buildAssistantContext(
+			{ checksum: 'sha256:abc', held: 'realm', label: 'eu/es/tax.py' },
+			null,
+		);
+
+		expect(context).toMatchObject({ checksum: 'sha256:abc', held: 'realm', truncated: false });
+		expect(context?.text).toBeUndefined();
+	});
+
+	it('is null when neither the action nor the focus holds text or a reference', () => {
 		expect(buildAssistantContext(undefined, null)).toBeNull();
 		expect(buildAssistantContext({ text: '   ' }, null)).toBeNull();
 		expect(
@@ -174,11 +184,14 @@ describe('buildAssistantContext', () => {
 		).toBeNull();
 	});
 
-	it('caps the text it was handed', () => {
+	it('caps the text it was handed, and keeps the reference beside it', () => {
 		const context = buildAssistantContext(
-			{ text: 'z'.repeat(ASSISTANT_CONTEXT_MAX_CHARS + 1) },
+			{ text: 'z'.repeat(ASSISTANT_CONTEXT_MAX_CHARS + 1), checksum: 'sha256:abc', url: 'https://x/y.py' },
 			null,
 		);
+
+		expect(context?.checksum).toBe('sha256:abc');
+		expect(context?.url).toBe('https://x/y.py');
 
 		expect(context?.truncated).toBe(true);
 		expect(context?.text.length).toBe(ASSISTANT_CONTEXT_MAX_CHARS);

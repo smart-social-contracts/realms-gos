@@ -29,7 +29,11 @@ export interface DocumentFocus {
  * whoever renders it says so (see the portal's `assistant:prompt` handling).
  */
 export interface AssistantPromptContext {
-	text: string;
+	/**
+	 * The text itself, cut to the cap. It is a head start, not the whole truth: a long chapter does not fit, so the
+	 * reference below says where the whole of it can be read.
+	 */
+	text?: string;
 	languageId?: string;
 	/** Human-readable name of what the text is, e.g. "eu/data_protection.py". */
 	label?: string;
@@ -40,6 +44,15 @@ export interface AssistantPromptContext {
 	totalLines?: number;
 	/** Set by the host when the text did not fit the cap. */
 	truncated?: boolean;
+	/**
+	 * `sha256:<hex>` of the whole document. It is how the realm pins a chapter, so it both names the text to read
+	 * and proves the text read is the right one.
+	 */
+	checksum?: string;
+	/** Whether the realm holds this text itself, or it is published by a layer the realm does not run. */
+	held?: 'realm' | 'published';
+	/** An immutable public URL of the same text, such as a layer's release commit. */
+	url?: string;
 }
 
 /**
@@ -150,6 +163,7 @@ function copyTextWithFallback(text: string): void {
  * boundary so the model never reads half a statement.
  */
 export function capAssistantText(text: string): { text: string; truncated: boolean } {
+	if (!text) return { text: '', truncated: false };
 	if (text.length <= ASSISTANT_CONTEXT_MAX_CHARS) return { text, truncated: false };
 	const cut = text.slice(0, ASSISTANT_CONTEXT_MAX_CHARS);
 	const lastLineEnd = cut.lastIndexOf('\n');
@@ -177,11 +191,12 @@ export function buildAssistantContext(
 				range: focus.snapshot.range,
 			}
 		: null;
-	const source = context?.text?.trim() ? context : fromFocus;
+	// A context the extension passed is used even with no text in it: its reference says where the text is read.
+	const source = context?.text?.trim() || context?.checksum || context?.url ? context : fromFocus;
 	if (!source) return null;
 
-	const { text, truncated } = capAssistantText(source.text);
-	return { ...source, text, truncated };
+	const { text, truncated } = capAssistantText(source.text ?? '');
+	return text ? { ...source, text, truncated } : { ...source, text: undefined, truncated: false };
 }
 
 export function dispatchHostAction(action: HostAction): void {
