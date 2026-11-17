@@ -10,10 +10,11 @@ on:
     paths:
       - "src/marketplace_frontend/**"
       - "src/declarations/marketplace_backend/**"
-      - "packages/extension-bridge/**"
-      # The postbuild step and the unit tests both use these.
+      # Files outside the frontend that its postbuild step or unit tests read.
       - "scripts/build-info.js"
       - "scripts/build-info.test.js"
+      - ".github/workflows/release.yml"
+      - "website/src/locales/en.json"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/marketplace-frontend.yml"
@@ -22,9 +23,10 @@ on:
     paths:
       - "src/marketplace_frontend/**"
       - "src/declarations/marketplace_backend/**"
-      - "packages/extension-bridge/**"
       - "scripts/build-info.js"
       - "scripts/build-info.test.js"
+      - ".github/workflows/release.yml"
+      - "website/src/locales/en.json"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/marketplace-frontend.yml"
@@ -34,10 +36,12 @@ permissions:
 
 concurrency:
   group: marketplace-frontend-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push to a pull request makes the older run pointless; every push to main is checked.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  unit:
+  # Not named `unit`: ci-pr.yml has a job of that name, and a required check is matched by name.
+  marketplace-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -69,13 +73,9 @@ jobs:
 
       # The build recipe of release.yml. Install from the repo root: installing
       # inside src/marketplace_frontend hoists @sveltejs/kit to the root while
-      # vite stays nested, and kit then cannot resolve vite. The frontend imports
-      # @realmsgos/extension-bridge from its dist/, so build that package first.
+      # vite stays nested, and kit then cannot resolve vite.
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
-
-      - name: Build extension-bridge
-        run: npm run build --workspace packages/extension-bridge
 
       # VITE_ACCOUNT_ALPHA=true is what release.yml ships: the account pages are
       # not open yet.
@@ -90,8 +90,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # The spec asserts layout and sign-in gates only, so it needs no backend and
-      # no /canister_ids.js. `vite preview` serves dist/ and falls back to the SPA
-      # shell for client routes such as /about.
+      # no /canister_ids.js. `vite preview` serves the JS, CSS and other files of
+      # dist/ but renders each page's HTML shell itself, so dist/index.html is not
+      # loaded here; the build step only checks that it exists.
       - name: Smoke spec against the build
         working-directory: src/marketplace_frontend
         run: |

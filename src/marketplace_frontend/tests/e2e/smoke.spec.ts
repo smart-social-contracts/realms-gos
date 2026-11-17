@@ -60,7 +60,8 @@ test.describe('marketplace_frontend smoke', () => {
     await expect(page.getByRole('heading', { name: 'For People' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'For Institutions' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Get Started' })).toBeVisible();
-    // The demo link moved from the hero to Get Started (4f603e71).
+    // The hero lost its CTA in 108c8a6d and its last demo link (AboutExplainer) in
+    // 4f603e71; the demo link now sits under Get Started.
     await expect(page.getByRole('link', { name: /Try the Demo/i })).toBeVisible();
     await expect(page.locator('.about-hero .cta.secondary, .about-hero .mark')).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Request Invitation Code' })).toBeVisible();
