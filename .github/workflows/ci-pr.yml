@@ -38,13 +38,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install -e cli/ ruff black
-      - name: Ruff
-        run: ruff check src/ scripts/ cli/
-        continue-on-error: true
-      - name: Black --check
-        run: black --check src/ scripts/ cli/
-        continue-on-error: true
+      - run: pip install -e cli/ ruff
+      # Syntax errors and undefined names only (E9, F63, F7, F82). The full rule set finds 2615 things on this tree and
+      # black wants 1114 of 1307 files reformatted (2026-11-17): the two steps that ran them were continue-on-error, so
+      # the job was green over all of it. This one is clean today and goes red on a real error.
+      - name: Ruff (syntax errors and undefined names)
+        run: ruff check --select E9,F63,F7,F82 src/ scripts/ cli/
       - name: actionlint
         uses: raven-actions/actionlint@v2
       - name: No principal / canister-id tables in canister code, scripts or workflows
