@@ -5,7 +5,7 @@ place the built code is known to behave as shipped. See realms-gos#395.
 """
 
 import pytest
-from pack_realm_backend import pack
+from pack_realm_backend import pack, snapshot_version
 from pic import Canister
 
 # Every switch a test or demo realm sets through ``test_flags``.
@@ -61,3 +61,14 @@ def test_a_release_build_reports_its_version(people):
     """The release workflow stamps the tag through the packer; a placeholder left in would ship as the version."""
     realm = Canister(pack(version="v9.9.9"), installer=people["installer"])
     assert realm.call("status", query=True)["version"] == "v9.9.9"
+
+
+@pytest.mark.parametrize("variant", ["production", "test"])
+def test_a_build_without_a_release_tag_reports_the_commit_it_was_packed_from(wasm_of, people, variant):
+    """realms-gos#551: the wasm holds its sources as text, so a placeholder left in setup.py would show in it."""
+    wasm = wasm_of(variant)
+    code = open(wasm, "rb").read()
+    assert b"VERSION_PLACEHOLDER" not in code
+    assert f'VERSION = "{snapshot_version()}"'.encode() in code
+    realm = Canister(wasm, installer=people["installer"])
+    assert realm.call("status", query=True)["version"] == snapshot_version()
