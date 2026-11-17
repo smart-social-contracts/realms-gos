@@ -1,0 +1,14 @@
+[
+  {"name": "a recipient that is a number is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "keys": {}, "recipient": 5, "basis": {"legal_basis": "gdpr-6-1-e", "purpose": "x", "legislation": "Ley 7/1985 Art. 25"}}, "denies": null},
+  {"name": "a recipient that is a list is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "keys": {}, "recipient": ["External:AGE"], "basis": {"legal_basis": "gdpr-6-1-e", "purpose": "x", "legislation": "Ley 7/1985 Art. 25"}}, "denies": null},
+  {"name": "a recipient that is a record is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "keys": {}, "recipient": {}, "basis": {"legal_basis": "gdpr-6-1-e", "purpose": "x", "legislation": "Ley 7/1985 Art. 25"}}, "denies": null},
+  {"name": "a recipient that is null is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "keys": {}, "recipient": null, "basis": {"legal_basis": "gdpr-6-1-e", "purpose": "x", "legislation": "Ley 7/1985 Art. 25"}}, "denies": null},
+  {"name": "a share with no recipient is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "keys": {}, "basis": {"legal_basis": "gdpr-6-1-e", "purpose": "x", "legislation": "Ley 7/1985 Art. 25"}}, "denies": null},
+  {"name": "a basis that is a text is left to the realm, which refuses it", "guard": "document_share", "now": 1800000000,
+   "args": {"document": "D-1", "recipient": "User:alice", "keys": {}, "basis": "gdpr-6-1-e"}, "denies": null}
+]

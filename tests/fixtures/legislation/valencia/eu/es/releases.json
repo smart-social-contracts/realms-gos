@@ -46,5 +46,21 @@
     },
     "calendar": "sha256:b8935ae502bdc311dc336f8850613e47e30e7712042d435810641a1db67ba0f9",
     "notes": {"en": "The guard on an ordinance reads the form of an action a realm gives it", "es": "La salvaguarda de una ordenanza lee la forma de una acción que le da el realm"}
+  },
+  {
+    "version": "2.6.1",
+    "published": "2026-11-13",
+    "effective_from": "2027-01-01",
+    "commit": "b47a994d5d347e3205709fd2e8d442629a9a5b3a",
+    "chapters": {
+      "data_protection": "sha256:c9d6a06b82cfb39c56491095caa8c23aeb0455f0e520e3f23edb92c5052244e0",
+      "language": "sha256:0f13de1ea79d9c311bdd2adeb33204e214ed01eb1ed65f98896c22bc7197c8d4",
+      "local_regime": "sha256:63fb7191486c652c75dd88f2156a31a908a5ae612aaa60295c059a10473ad591",
+      "procedure": "sha256:7792a2b0756ca8d6dbc3e4e6f030d7f6ab4114f1a8763bfc198ad793f252fe3a",
+      "register": "sha256:fb56a3e6460e72ea8849d8d343aa2816933053ddbf9d8c91e8d9274e53e56fc6",
+      "tax": "sha256:a41bba00bc798b73e85d30d8b04f993536f1d4530d20047a9b98c51b7dd0350b"
+    },
+    "calendar": "sha256:b8935ae502bdc311dc336f8850613e47e30e7712042d435810641a1db67ba0f9",
+    "notes": {"en": "The notice of an ordinance waits for the codex an install names; the guards on an ordinance and on sharing a document leave what they cannot read to the realm", "es": "El aviso de una ordenanza espera al codex que nombra una instalación; las salvaguardas de una ordenanza y de compartir un documento dejan al realm lo que no saben leer"}
   }
 ]

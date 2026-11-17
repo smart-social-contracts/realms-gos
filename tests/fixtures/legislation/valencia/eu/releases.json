@@ -9,5 +9,16 @@
     },
     "calendar": null,
     "notes": {"en": "First release: data protection (GDPR)", "es": "Primera versión: protección de datos (RGPD)"}
+  },
+  {
+    "version": "1.0.1",
+    "published": "2026-11-13",
+    "effective_from": "2027-01-01",
+    "commit": "b47a994d5d347e3205709fd2e8d442629a9a5b3a",
+    "chapters": {
+      "data_protection": "sha256:b5442c45b09f2b6bda094ee0d8f0c1afeddcf6082f887289f79c33555b590d76"
+    },
+    "calendar": null,
+    "notes": {"en": "The guard on the basis of sharing a document leaves a basis that is no record to the realm", "es": "La salvaguarda de la base para compartir un documento deja al realm la base que no es un registro"}
   }
 ]
