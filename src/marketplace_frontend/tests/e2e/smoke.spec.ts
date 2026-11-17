@@ -99,7 +99,7 @@ test.describe('marketplace_frontend smoke', () => {
 
   test('extensions page renders search input, sort dropdown, and verified-only filter', async ({ page }) => {
     await page.goto('/extensions');
-    await expect(page.getByRole('heading', { name: 'RED-PROOF planted defect' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Extensions' })).toBeVisible();
     await expect(page.getByPlaceholder('Search extensions…')).toBeVisible();
     await expect(page.getByText(/Verified only/i)).toBeVisible();
     await expect(page.locator('.verified-toggle input[type="checkbox"]')).toBeChecked();
