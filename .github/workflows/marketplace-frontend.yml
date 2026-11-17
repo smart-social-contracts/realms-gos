@@ -1,0 +1,111 @@
+name: Marketplace frontend
+
+# PR-time check for src/marketplace_frontend: its unit tests, the build exactly as
+# release.yml makes it, and the Playwright smoke spec run against that build.
+# Before this, the build ran only at release time and the tests ran nowhere.
+
+# The two path lists must stay identical.
+on:
+  pull_request:
+    paths:
+      - "src/marketplace_frontend/**"
+      - "src/declarations/marketplace_backend/**"
+      # Files outside the frontend that its postbuild step or unit tests read.
+      - "scripts/build-info.js"
+      - "scripts/build-info.test.js"
+      - ".github/workflows/release.yml"
+      - "website/src/locales/en.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/marketplace-frontend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/marketplace_frontend/**"
+      - "src/declarations/marketplace_backend/**"
+      - "scripts/build-info.js"
+      - "scripts/build-info.test.js"
+      - ".github/workflows/release.yml"
+      - "website/src/locales/en.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/marketplace-frontend.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-frontend-${{ github.ref }}
+  # A newer push to a pull request makes the older run pointless; every push to main is checked.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Not named `unit`: ci-pr.yml has a job of that name, and a required check is matched by name.
+  marketplace-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tests are .ts files run by node itself (--experimental-strip-types),
+      # which needs node 22.6 or later. They import nothing, so no npm install.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Unit tests
+        working-directory: src/marketplace_frontend
+        run: npm run test:unit
+
+  build-and-smoke:
+    # Playwright 1.55 has no chromium for ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same node as the build in release.yml.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # The build recipe of release.yml. Install from the repo root: installing
+      # inside src/marketplace_frontend hoists @sveltejs/kit to the root while
+      # vite stays nested, and kit then cannot resolve vite.
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      # VITE_ACCOUNT_ALPHA=true is what release.yml ships: the account pages are
+      # not open yet.
+      - name: Build marketplace frontend (release flavour)
+        working-directory: src/marketplace_frontend
+        run: |
+          VITE_ACCOUNT_ALPHA=true npm run build
+          test -f dist/index.html
+
+      - name: Install Playwright chromium
+        working-directory: src/marketplace_frontend
+        run: npx playwright install --with-deps chromium
+
+      # The spec asserts layout and sign-in gates only, so it needs no backend and
+      # no /canister_ids.js. `vite preview` serves the JS, CSS and other files of
+      # dist/ but renders each page's HTML shell itself, so dist/index.html is not
+      # loaded here; the build step only checks that it exists.
+      - name: Smoke spec against the build
+        working-directory: src/marketplace_frontend
+        run: |
+          npx vite preview --port 4173 &
+          curl --fail --silent --retry 30 --retry-delay 1 --retry-all-errors \
+            --output /dev/null http://localhost:4173/
+          PLAYWRIGHT_BASE_URL=http://localhost:4173 npm run test:e2e
+
+      - name: Upload Playwright traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-frontend-test-results
+          path: src/marketplace_frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7

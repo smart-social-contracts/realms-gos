@@ -60,7 +60,9 @@ test.describe('marketplace_frontend smoke', () => {
     await expect(page.getByRole('heading', { name: 'For People' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'For Institutions' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Get Started' })).toBeVisible();
-    await expect(page.locator('.about-hero .cta')).toHaveText(/Try Demo/i);
+    // The hero lost its CTA in 108c8a6d and its last demo link (AboutExplainer) in
+    // 4f603e71; the demo link now sits under Get Started.
+    await expect(page.getByRole('link', { name: /Try the Demo/i })).toBeVisible();
     await expect(page.locator('.about-hero .cta.secondary, .about-hero .mark')).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Request Invitation Code' })).toBeVisible();
     await expect(page.getByText(/test environment/i)).toHaveCount(0);
@@ -88,9 +90,10 @@ test.describe('marketplace_frontend smoke', () => {
     await page.getByRole('button', { name: /Most Liked/i }).click();
     await page.getByRole('tab', { name: /Codices/i }).click();
 
-    await expect(page.getByText(/built on the/i)).toBeVisible();
     const footerCard = page.locator('.footer-card');
     await expect(footerCard).toBeVisible();
+    // Scoped to the footer: the home page has its own "Built on the Internet Computer" credit.
+    await expect(footerCard.getByText(/built on the/i)).toBeVisible();
     await expect(footerCard).toHaveCSS('border-top-width', '0px');
     await expect(footerCard).toHaveCSS('border-left-width', '0px');
   });
@@ -141,9 +144,7 @@ test.describe('marketplace_frontend smoke', () => {
     await page.goto('/upload');
     await expect(page.getByRole('heading', { name: 'Upload' })).toBeVisible();
     await expect(page.getByText(/Sign in required/i)).toBeVisible();
-    await expect(
-      page.getByText(/Anyone can upload — a developer license is only required to request an audit/i),
-    ).toBeVisible();
+    await expect(page.getByText(/Publishing needs an active developer license/i)).toBeVisible();
   });
 
   test('my-purchases page gates on sign-in', async ({ page }) => {
