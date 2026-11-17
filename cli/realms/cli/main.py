@@ -17,6 +17,7 @@ from .commands.export_data import export_data_command
 from .commands.extension import extension_command, codex_command
 from .commands.wasm_registry import wasm_command
 from .commands.installer import installer_health_command
+from .commands.legislation import legislation_app
 from .commands.marketplace import (
     marketplace_call_command,
     marketplace_deploy_command,
@@ -374,9 +375,9 @@ def new(
     codex_version: Optional[str] = typer.Option(
         None, "--codex-version", help="Codex version (omit for registry latest)"
     ),
-    logo: Optional[str] = typer.Option(None, "--logo", help="Logo image path (≤ 1.5 MiB)"),
+    logo: Optional[str] = typer.Option(None, "--logo", help="Logo image path (≤ 700 KiB)"),
     background: Optional[str] = typer.Option(
-        None, "--background", help="Background image path (≤ 1.5 MiB)"
+        None, "--background", help="Background image path (≤ 700 KiB)"
     ),
     primary: Optional[str] = typer.Option(None, "--primary", help="Primary color #RRGGBB"),
     manifesto: Optional[str] = typer.Option(
@@ -2365,6 +2366,7 @@ local_app = typer.Typer(
     help="A realm on this machine (icp-cli + PocketIC, release canisters, no Casals/dfx)",
 )
 app.add_typer(local_app, name="local", rich_help_panel="Development")
+app.add_typer(legislation_app, name="legislation", rich_help_panel="Development")
 
 
 @local_app.command("start")

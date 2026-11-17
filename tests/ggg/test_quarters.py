@@ -3,8 +3,9 @@ import json
 from core import auth, op
 import fake_chain
 from api import quarters
+from core.ratio import ONE
 import world
-from ggg import Codex, Department, Forward, GuestUser, Member, Proposal, Quarter, Realm, User
+from ggg import Codex, Department, Forward, GuestUser, Member, Proposal, Quarter, Realm, User, Zone
 from kit import call, denied, ok, rows
 
 CAPITAL = fake_chain.SELF
@@ -61,7 +62,7 @@ def test_configure_follows_the_quarter_lifecycle():
     ok("quarter_configure", "ctl", quarter="north", status="suspended", name="North")
     assert "cannot become splitting" in call("quarter_configure", "ctl", quarter="north", status="splitting")["error"]
     ok("quarter_configure", "ctl", quarter="north", status="active")
-    assert "threshold" in call("quarter_configure", "ctl", rule={"threshold": 100})["error"]
+    assert "threshold" in call("quarter_configure", "ctl", rule={"threshold": ONE})["error"]
     rule = ok("quarter_configure", "ctl", rule={"absent": "no"}, capacity=500)["rule"]
     assert rule["absent"] == "no" and quarters.scale()["capacity"] == 500
     ok("quarter_deregister", "ctl", quarter="north")
@@ -109,6 +110,18 @@ def test_I_FED_1_bob_moves_to_south(monkeypatch):
     assert Member["bob"] is None and GuestUser["bob"].home_quarter == "south" and User["bob"].home_quarter == "south"
     assert "proposal.vote" not in auth.permissions("bob")
     assert "needs self.change_quarter" in denied("self_change_quarter", "bob", quarter="south")
+
+
+def test_a_member_who_moves_away_leaves_the_population_of_their_home_zone(monkeypatch):
+    quarter(monkeypatch, "north", "south")
+    reply("south", "federation_message")
+    ok("zone_define", "ctl", zone="riverside", name="Riverside", kind="district")
+    ok("user_edit", "ctl", user="bob", home_zone="riverside")
+    ok("user_edit", "ctl", user="alice", home_zone="riverside")
+    assert Zone["riverside"].population == 2
+    ok("self_change_quarter", "bob", quarter="south")
+    assert (User["bob"].home_zone, Zone["riverside"].population) == ("", 1)
+    assert User["alice"].home_zone == "riverside"
 
 
 def test_bob_arrives_in_south(monkeypatch):
@@ -169,11 +182,81 @@ def test_capital_forgets_a_seceded_quarter():
 
 def test_harbor_joins_agora():
     world.build()
+    reply("agora", "realm_info", realm={"timezone": "UTC"})
     assert "needs quarter.join_federation" in denied("quarter_join_federation", "alice", capital="agora")
     ok("quarter_join_federation", "ctl", capital="agora")
     r = Realm["1"]
     assert r.is_quarter and not r.is_capital and Quarter["agora"].index == 0 and quarters.capital() == "agora"
     assert "already belongs" in call("quarter_join_federation", "ctl", capital="other")["error"]
+
+
+def test_a_new_quarter_starts_on_its_capitals_zone():
+    world.build()
+    reply("agora", "realm_info", realm={"timezone": "Europe/Madrid"})
+    ok("quarter_join_federation", "ctl", capital="agora")
+    assert Realm["1"].timezone == "Europe/Madrid"
+    assert fake_chain.state["calls"][-1][:2] == ("agora", "realm_info")
+
+
+def test_a_realm_that_chose_its_zone_keeps_it_when_it_joins():
+    world.build()
+    reply("agora", "realm_info", realm={"timezone": "Europe/Madrid"})
+    ok("realm_configure", "ctl", timezone="America/Mexico_City")
+    ok("quarter_join_federation", "ctl", capital="agora")
+    assert Realm["1"].timezone == "America/Mexico_City"
+
+
+def test_a_capital_that_cannot_be_reached_or_is_no_realm_is_not_joined():
+    world.build()
+    fake_chain.state["replies"][("agora", "realm_info")] = Exception("agora is stopped")
+    out = call("quarter_join_federation", "ctl", capital="agora")
+    assert out["kind"] == "unavailable" and "agora is stopped" in out["error"]
+    assert "not a realm" in call("quarter_join_federation", "ctl", capital="nobody")["error"]  # it does not answer
+    r = Realm["1"]
+    assert not r.is_quarter and r.timezone == "UTC" and Quarter.count() == 0
+
+
+def test_the_realm_sets_a_quarters_zone_which_the_quarter_applies_first():
+    capital("north")
+    assert "name it with quarter" in call("quarter_configure", "ctl", timezone="Asia/Tokyo")["error"]
+    out = call("quarter_configure", "ctl", quarter="north", timezone="Mars/Olympus")
+    assert out["kind"] == "invalid_argument" and "no zone 'Mars/Olympus'" in out["error"]
+    world.policy(Department["Administration"], 2, 3)
+    filed = Proposal.count()
+    assert "name it with quarter" in call("quarter_configure", "ctl", timezone="Asia/Tokyo")["error"]
+    assert Proposal.count() == filed  # refused before it became a proposal
+    assert ok("quarter_configure", "ctl", quarter="north", timezone="Asia/Tokyo")["requires_vote"]
+    world.policy(Department["Administration"], 1, 1)
+
+    reply("north", "federation_message", message="FM-1", configured=["timezone"])
+    ok("quarter_configure", "ctl", quarter="north", timezone="Asia/Tokyo", name="North")
+    sent = json.loads(fake_chain.state["calls"][-1][2])
+    assert sent["topic"] == quarters.LOCAL_SETTINGS and sent["body"] == {"timezone": "Asia/Tokyo"}
+    assert Realm["1"].timezone == "UTC"  # the capital's own zone is set with realm_configure
+
+    reply("north", "federation_message", message="FM-2")  # an older quarter: ok to a topic it does not know
+    out = call("quarter_configure", "ctl", quarter="north", timezone="UTC", name="N")
+    assert out["kind"] == "conflict" and "did not apply timezone: upgrade it" in out["error"]
+    fake_chain.state["replies"][("north", "federation_message")] = json.dumps({"ok": False, "error": "no"})
+    assert "refused timezone: no" in call("quarter_configure", "ctl", quarter="north", timezone="UTC", name="N")["error"]
+    fake_chain.state["replies"][("north", "federation_message")] = Exception("north is stopped")
+    out = call("quarter_configure", "ctl", quarter="north", timezone="UTC", name="N")
+    assert out["kind"] == "unavailable" and "cannot be reached" in out["error"]
+    assert Quarter["north"].name == "North"  # nothing changed
+
+
+def test_a_quarter_applies_its_zone_from_its_capital_only_and_no_member_relays_one(monkeypatch):
+    quarter(monkeypatch, "south", "north")
+    body = {"timezone": "Asia/Tokyo"}
+    ok("federation_message", CAPITAL, topic=quarters.LOCAL_SETTINGS, body=body)
+    assert Realm["1"].timezone == "Asia/Tokyo"
+    assert "only this quarter's capital" in denied("federation_message", "north", topic=quarters.LOCAL_SETTINGS,
+                                                   body={"timezone": "UTC"})
+    assert "cannot configure name" in denied("federation_message", CAPITAL, topic=quarters.LOCAL_SETTINGS,
+                                             body={"name": "Mine"})
+    refused = call("federation_message", "ctl", topic=quarters.LOCAL_SETTINGS, body=body, to="north")
+    assert refused["kind"] == "forbidden" and "never relayed" in refused["error"]
+    assert Realm["1"].timezone == "Asia/Tokyo"
 
 
 def test_population_counts_active_members_only():
@@ -208,7 +291,7 @@ def built(member, cid, status="ready"):
 
 
 def adoptable(cid):
-    for method in ("quarter_join_federation", "setup_step", "quarter_sync"):
+    for method in ("quarter_join_federation", "setup_step", "quarter_sync", "setup_launch"):
         reply(cid, method)
 
 
@@ -231,8 +314,8 @@ def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
     fire_timers()
     to_south = [(m, json.loads(a)) for cid, m, a in fake_chain.state["calls"] if cid == "south-id"]
     assert to_south == [("quarter_join_federation", {"capital": CAPITAL}),
-                        ("setup_step", {"step": "realm", "name": "South", "open_registration": True}),
-                        ("quarter_sync", {})]
+                        ("setup_step", {"step": "realm", "open_registration": True}),  # the realm's name comes by sync
+                        ("quarter_sync", {}), ("setup_launch", {})]
     south = Quarter["south-id"]
     assert (south.name, south.index, south.status) == ("South", 2, "setup")
     s = ok("scale_status", fake_chain.ANONYMOUS)
@@ -255,6 +338,24 @@ def test_quarter_add_refusals_and_a_failed_join_is_retried():
     adoptable("east-id")
     fire_timers()
     assert Quarter["east-id"].index == 1
+
+
+def test_a_quarter_whose_first_sync_fails_stays_pending_and_is_synced_and_launched_at_the_next_look():
+    on_casals()
+    reply(CONDUCTOR, "stand_grow")
+    ok("quarter_add", "ctl", name="East")
+    built("agora-quarter-1", "east-id")
+    adoptable("east-id")
+    fake_chain.state["replies"][("east-id", "quarter_sync")] = json.dumps({"ok": False, "error": "capital busy"})
+    fire_timers()
+    p = ok("scale_status", fake_chain.ANONYMOUS)["pending"]
+    assert p["done"] == ["join", "configure", "register"] and "capital busy" in p["error"]
+    assert Quarter["east-id"].name == "East" and len(fake_chain.state["timers"]) == 1  # looked at again in ADOPT_EVERY
+    reply("east-id", "quarter_sync")
+    fake_chain.state["calls"].clear()
+    fire_timers()
+    assert [m for cid, m, _ in fake_chain.state["calls"] if cid == "east-id"] == ["quarter_sync", "setup_launch"]
+    assert ok("scale_status", fake_chain.ANONYMOUS)["pending"] is None and fake_chain.state["timers"] == []
 
 
 def test_a_quarter_still_being_built_is_looked_for_after_an_upgrade():

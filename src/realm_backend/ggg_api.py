@@ -3,8 +3,8 @@
 Each call converts the GGG arguments to the operation's JSON, runs the operation (so permissions, governance
 and the audit log apply as for ``read`` and ``run``), and builds the GGG reply, mostly from the rows the
 operation touched. The conversion follows the types of ggg_did: GGG has nanoseconds, principals, variants,
-references as records and ratios in basis points, where Realms GOS has seconds, text, lower-case text,
-``Kind:id`` and percentages. Types are ggg_did.SCHEMA's type expressions (``"opt vec Ref"``): the canister's
+references as records, where Realms GOS has seconds, text, lower-case text and ``Kind:id``. Ratios are
+in hundred-millionths on both sides. Types are ggg_did.SCHEMA's type expressions (``"opt vec Ref"``): the canister's
 Python keeps no types at run time. tests/ggg/test_candid.py checks the methods against ggg.did.
 """
 import json
@@ -13,33 +13,36 @@ from basilisk import Principal  # tests replace it, to accept their names for pr
 
 import ggg
 import ggg_did
+from api import crypto, links, tasks
+from api.treasury import EPOCHS
 from api.proposals import settings
 from api.setup import VERSION
-from core import chain
+from core import chain, change_list, compliance, db, pending
 from core.candid import Principal as ParsedPrincipal, Reader, idl_hash, quote
 from core.op import dispatch, ops, run as drive
+from core.ratio import ONE
 from ggg_did import METHODS, SCHEMA
 
 NS = 1_000_000_000
 STANDARDS = (("ICRC-10", "https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md"),
              ("GGG", f"https://github.com/smart-social-contracts/ggg/blob/v{ggg_did.VERSION}/ggg.did"))
-# GGG fields in basis points, and the Realms GOS field holding the same ratio in percent.
-PERCENT = {("Policy", "quorum"): "quorum_percent", ("Allocation", "share"): "share", ("Criterion", "weight"): "weight",
-           ("Proposal", "threshold"): "threshold", ("Proposal", "quorum"): "quorum_percent",
-           ("GovernanceUpdateArgs", "voting_threshold"): "threshold",
-           ("GovernanceUpdateArgs", "voting_quorum"): "quorum_percent"}
 # GGG fields Realms GOS names otherwise.
 RENAME = {("DelegationGrantArgs", "scope"): "operations", ("DelegationRequestArgs", "scope"): "operations",
           ("DelegationDecideArgs", "scope"): "operations", ("QuarterRegisterArgs", "canister"): "quarter",
-          ("ResolutionQueryArgs", "search"): "text"}
+          ("ResolutionQueryArgs", "search"): "text", ("Land", "zones"): "lies_in",
+          # The member a delegate calls for is not who the call_for operation acts as: the delegate acts as itself.
+          ("CallForArgs", "on_behalf_of"): "grantor", ("ReadForArgs", "on_behalf_of"): "grantor"}
+# GGG times that Realms GOS rounds up to the second, where it rounds every other time down: a time something must not
+# precede (a proposal's effective_at), not one it must not outlast (an expiry, a deadline).
+CEIL = {("ProposalCreateArgs", "effective_at")}
 # GGG lists of pairs that Realms GOS keeps as a map, with the fields holding the key and the value.
 MAPS = {("TenderCreateArgs", "rubric"): ("criterion", "weight"), ("Tender", "rubric"): ("criterion", "weight"),
-        ("AllocationRuleDraftArgs", "rules"): ("fund", "share"), ("AllocationRule", "rules"): ("fund", "share"),
         ("CredentialIssueArgs", "fields"): (0, 1), ("CredentialIssued", "header"): (0, 1),
         ("CredentialVerifyArgs", "header"): (0, 1), ("KeyGrantArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentStoreArgs", "keys"): ("principal", "wrapped_dek"),
         ("DocumentShareArgs", "keys"): ("principal", "wrapped_dek"), ("BidScoreArgs", "scores"): ("criterion", "score"),
-        ("Fund", "balances"): ("symbol", "amount")}
+        ("Fund", "balances"): ("symbol", "amount"), ("Release", "chapters"): ("domain", "checksum"),
+        ("QuarterReportArgs", "zones"): (0, 1)}
 # GGG lists of records that Realms GOS keeps as a map from one field to the rest.
 KEYED = {("BidsRevealArgs", "openings"): "bid"}
 # Set to a list by the tests: every required field a reply had no value for is added to it.
@@ -211,9 +214,6 @@ def record(x, name):
     for w, ft in fields(name).items():
         if w in fixed:
             raw = fixed[w]
-        elif (name, w) in PERCENT:
-            raw = get(x, PERCENT[name, w])
-            raw = None if raw is None else int(raw) * 100
         else:
             raw = get(x, RENAME.get((name, w), w))
         if (name, w) in KEYED and isinstance(raw, dict):
@@ -249,10 +249,45 @@ def realm_fix(r):
     rules = settings()
     # A quarter counts its own members; a capital adds what its quarters last reported.
     members = quarters.population() + (0 if quarters.federated() else sum(q.population for q in quarters.known()))
-    return {"member_count": members, "voting_threshold": int(rules.get("threshold", 50)) * 100,
-            "voting_quorum": int(rules.get("quorum_percent", 0)) * 100,
+    return {"member_count": members, "voting_threshold": int(rules.get("voting_threshold", ONE // 2)),
+            "voting_quorum": int(rules.get("voting_quorum", 0)), "casting_vote": rules.get("casting_vote"),
+            "sync_sources": list(links.sources()),
             "installed_version": get(r, "installed_version") or VERSION,
             "accounting_currency_decimals": get(r, "accounting_currency_decimals") if get(r, "accounting_currency") else None}
+
+
+# Whether the caller is on a department's staff, (department, caller) -> bool, for the length of one reply: a page of
+# documents asks it of each, and building a reply writes nothing, so the answer cannot change under it. reply() empties it.
+STAFF = {}
+
+
+def reads_document(d):
+    """crypto.reads_ciphertext for the caller, asking after the staff of the document's department once per reply."""
+    caller, department = chain.caller(), get(d, "department")
+    if crypto.holds_key(d, caller):
+        return True
+    if (department, caller) not in STAFF:
+        STAFF[department, caller] = crypto.on_staff(department, caller)
+    return STAFF[department, caller]
+
+
+def scheduled_task(t):
+    """A task of the realm's scheduler as GGG's Task, which is one operation at a time: the task's first step and
+    first schedule. The tasks the realm itself schedules, such as a proposal's run, are the realm's."""
+    t = t if isinstance(t, dict) else tasks.summary(t)
+    step, when = (t["steps"] or [{}])[0], (t["schedules"] or [{}])[0]
+    by = "Realm:1" if t["creator"] == chain.self_id() else f"User:{t['creator']}"
+    return {"id": t["name"], "op": step.get("op", ""), "args": step.get("args"), "at": when.get("run_at", 0),
+            "reason": step.get("reason"), "status": tasks.STATUS[t["status"]], "scheduled_by": by,
+            "event": t["event"]}
+
+
+def dispatch_status(d):
+    """A dispatch's status as GGG's variant: confirmed with when and the receipt, or failed with the reason."""
+    status = get(d, "status")
+    if status == "confirmed":
+        return {"Confirmed": {"at": get(d, "outcome_at"), "receipt": get(d, "receipt")}}
+    return {"Failed": get(d, "failure")} if status == "failed" else {"Queued": None}
 
 
 def action(a):
@@ -264,13 +299,22 @@ def action(a):
     if not a.get("op"):
         return {"Motion": None}
     op, args = a["op"], a.get("args") or {}
-    if op == "codex_install" and args.get("checksum"):
+    if not isinstance(args, dict):  # stored before a filing refused it: kept as the operation's name with its JSON
+        return {"Call": {"method": str(op), "arg": json.dumps(args, sort_keys=True).encode()}}
+    # An install that names a release runs as one, whatever change list it carries beside it (core.change_list).
+    if op == "codex_install" and args.get("checksum") and not change_list.names_release(args):
         return {"Code": {"url": args.get("url", ""), "checksum": args["checksum"]}}
+    return {"Call": call_record(op, args)}
+
+
+def call_record(op, args):
+    """An operation's call as GGG's ``Call``: its ggg_ method with its arguments in Candid. An operation GGG lacks keeps
+    its name, with its JSON arguments."""
     if op not in METHODS:
-        return {"Call": {"method": op, "arg": json.dumps(args, sort_keys=True).encode()}}
+        return {"method": op, "arg": json.dumps(args, sort_keys=True).encode()}
     arg_t = METHODS[op][0]
     text = f"({to_candid(ggg_args(op, args), arg_t)})" if arg_t else "()"
-    return {"Call": {"method": f"ggg_{op}", "arg": chain.candid_encode(text)}}
+    return {"method": f"ggg_{op}", "arg": chain.candid_encode(text)}
 
 
 def scope(row, key):
@@ -278,8 +322,46 @@ def scope(row, key):
     return s.get(key) if isinstance(s, dict) else None
 
 
+GROUP = "group:"
+
+
+def pending_action(a):
+    """A pending action's call, in Candid, and, once the call ran, its reply, Candid-encoded with the method's own type."""
+    method, args, result = get(a, "method"), get(a, "args"), get(a, "result")
+    ran = get(a, "status") == "done" and result and result.get("ok")
+    return {"call": call_record(method, args),
+            "result": encoded(method, args, {k: v for k, v in result.items() if k != "ok"}) if ran else None}
+
+
+def encoded(op, args, out):
+    """The reply ``out`` of operation ``op`` called with ``args`` as GGG's ``Ok`` value, Candid-encoded with the method's own
+    type. An operation GGG lacks replies in JSON, as its arguments are."""
+    if op not in METHODS:
+        return json.dumps(out, sort_keys=True).encode()
+    ok_t = fields(METHODS[op][1])["Ok"]
+    return chain.candid_encode(f"({to_candid(ok_value(op, args, out, ok_t), ok_t)})")
+
+
+class Shown:
+    """A record built from what a reply holds, not from the row: the approval of a pending action shows the reply with its
+    secrets, which the row never keeps."""
+
+    def __init__(self, fields):
+        self.__dict__.update(fields)
+
+
+def named(row):
+    """A grant's or request's ``scope`` in GGG: its groups as ``group:<id>``, or the permissions it names."""
+    groups = scope(row, "groups")
+    return [GROUP + g for g in groups] if groups else scope(row, "operations") or []
+
+
 FIX = {
     "Realm": realm_fix,
+    "SyncSource": lambda s: {"source": links.source_ref(s), "status": links.link_status(s)},
+    "Follower": lambda f: {"capital": get(f, "id"), "status": links.link_status(f),
+                           "compliance": compliance.of(get(f, "compliance"))},
+    "Quarter": lambda q: {"compliance": compliance.of(get(q, "compliance"))},
     "Member": lambda m: {"user": get(m, "user") or ident(m)},
     "User": lambda u: {"private_data": get(u, "private_data") if ident(u) == chain.caller() else None},
     "ProposalAction": action,
@@ -287,28 +369,29 @@ FIX = {
                           "symbol": get(m, "symbol") or scope(m, "symbol")},
     "FederalVote": lambda v: {"title": get(v, "title") or (get(v, "action") or {}).get("title", "")},
     "Event": lambda e: {"agent": bool(get(e, "agent"))},
+    # The ciphertext of a document stays with its staff and key holders (I-PRV-4), as in crypto.document_get.
+    "Document": lambda d: {} if reads_document(d) else crypto.CONCEALED,
+    "Task": scheduled_task,
+    "Dispatch": lambda d: {"status": dispatch_status(d)},
     "Proposal": lambda p: {"action": action(get(p, "action")),  # a realm-wide proposal names no department
                            "department": None if getattr(get(p, "department"), "is_root", False) else get(p, "department")},
     # The replayed operation's JSON reply stands in for a Candid one.
     "ProposalResult": lambda r: r if "Reply" in r or "Error" in r else {"Error": r.get("error", "")}
     if not r.get("ok", True) else {"Reply": json.dumps(r, sort_keys=True).encode()},
     "DelegableOperation": lambda d: {"operation": get(d, "operation") or get(d, "op")},
-    "Delegation": lambda d: {"scope": scope(d, "operations") or []},
-    "DelegationRequest": lambda d: {"scope": scope(d, "operations") or []},
+    "Delegation": lambda d: {"scope": named(d)},
+    "DelegationRequest": lambda d: {"scope": named(d)},
+    "PendingAction": lambda a: pending_action(a),
     "Policy": lambda p: {"m": get(p, "m") or 1, "n": get(p, "n") or 1, "veto": get(p, "veto") or [],
-                         "quorum": int(get(p, "quorum_percent") or 0) * 100},
+                         "quorum": int(get(p, "quorum") or 0)},
     "UserEntry": lambda e: entry(get(e, "user") or e),
     "Verdict": lambda v: {"issued_by": get(v, "issued_by") or ""},
     "License": lambda lic: {"issued_by": get(lic, "issued_by") or ""},
-    "CodexSource": lambda c: c if "Package" in c or "Registry" in c else
-    {"Package": c} if "manifest" in c else {"Registry": c},
+    "CodexSource": lambda c: c if "Package" in c or "Registry" in c or "Release" in c else
+    {"Package": c} if "manifest" in c else {"Registry": c} if "codex" in c else {"Release": c},
     "SetupStep": lambda s: s if len(s) == 1 else {camel(s.get("step")): {k: v for k, v in s.items() if k != "step"}},
     "DepartmentEditArgsHead": lambda h: h if isinstance(h, dict) else {"Set": h} if h else {"Clear": None},
 }
-
-
-# Realms GOS names its treasury epochs; GGG has their length.
-EPOCHS = {"monthly": 30 * 86400, "quarterly": 91 * 86400, "yearly": 365 * 86400}
 
 
 def entry(user):
@@ -344,6 +427,8 @@ UNFIX = {
     "ProposalAction": unaction,
     "CodexSource": lambda case, payload: payload,
     "SetupStep": lambda case, payload: {"step": snake(case), **payload},
+    # Named for the first inline `variant { Set : principal; Clear }` in ggg.did (department_edit's head): every copy of
+    # the shape is this class, so governance_update's casting_vote is a principal, or "", as well.
     "DepartmentEditArgsHead": lambda case, payload: payload or "",
 }
 
@@ -374,7 +459,7 @@ def to_candid(v, t):
     """A GGG value of type ``t`` as candid text, with every field named by its number."""
     k, detail = kind(t)
     if k == "time":
-        return f"{v} : nat64"
+        return f"({v} : nat64)"  # parenthesised, so that `opt` takes the number and not the annotation
     if k == "opt":
         return "null" if v is None else f"opt {to_candid(v, detail)}"
     if k == "vec":
@@ -394,7 +479,7 @@ def to_candid(v, t):
         return f"principal {quote(v.to_str() if hasattr(v, 'to_str') else str(v))}"
     if t == "blob":
         return 'blob "' + "".join(f"\\{b:02x}" for b in v) + '"'
-    return "null" if t == "null" else f"{v} : {t}"
+    return "null" if t == "null" else f"({v} : {t})"
 
 
 def from_candid(v, t):
@@ -461,8 +546,8 @@ def to_realms(x, t):
             v = x.get(w)
             if v is None:
                 continue
-            if (t, w) in PERCENT:
-                out[PERCENT[t, w]] = int(v) // 100
+            if (t, w) in CEIL:
+                out[w] = -(-int(v) // NS)
             elif (t, w) in KEYED:
                 key = KEYED[t, w]
                 out[w] = {item[key]: {f: v2 for f, v2 in item.items() if f != key} for item in to_realms(v, ft)}
@@ -487,10 +572,11 @@ def to_realms(x, t):
 
 def request(op, arg_t, arg):
     """The JSON arguments of ``op`` for a GGG argument of type ``arg_t``."""
+    arg_t = unwrap(arg_t) if arg_t else None  # an optional record is asked as the record; none given, as no arguments
     if arg_t is None:
         args = {}
     elif is_record(arg_t) or is_variant(arg_t):
-        args = to_realms(arg, arg_t)
+        args = to_realms(arg, arg_t) or {}
         if "id" in args:  # GetArgs and the like: the operation names the id after what it finds
             args[KEY.get(op, op.split("_")[0])] = args.pop("id")
     else:
@@ -502,6 +588,8 @@ def request(op, arg_t, arg):
         args["from"] = int(cursor)
     if "limit" in args and op not in KEEP_LIMIT:
         args["count"] = args.pop("limit")
+    if op in PAGE_CAP and (args.get("count") or 0) > PAGE_CAP[op]:
+        args["count"] = PAGE_CAP[op]
     return ARGS[op](args, arg) if op in ARGS else args
 
 
@@ -515,6 +603,16 @@ def refused(op, e):
     return {"Err": {"InvalidArgument": str(e)}}
 
 
+def asks_call_for(op, args):
+    """GGG D28: a call in its confirm form that a delegate makes through its own method is refused, for the method's reply
+    has no place for a pending action: it is filed with ``call_for``. None if the call is not one."""
+    behalf = args.get("on_behalf_of")
+    if behalf and pending.asked_under(behalf, chain.caller(), ops()[op], args):
+        return {"Err": {"Forbidden": {"permission": None,
+                                      "message": f"{op} needs the member's approval: file it with ggg_call_for"}}}
+    return None
+
+
 def read(op, arg_t, arg, reply_t):
     if op in LOCAL:
         return LOCAL[op](arg)
@@ -524,7 +622,9 @@ def read(op, arg_t, arg, reply_t):
         args = request(op, arg_t, arg)
     except BadArgument as e:
         return refused(op, e)
-    return reply(op, args, json.loads(drive(dispatch(op, json.dumps(args), query=True))), reply_t)
+    with db.Listing():
+        return asks_call_for(op, args) or reply(op, args, json.loads(drive(dispatch(op, json.dumps(args), query=True))),
+                                                reply_t)
 
 
 def run(op, arg_t, arg, reply_t):
@@ -534,6 +634,9 @@ def run(op, arg_t, arg, reply_t):
         args = request(op, arg_t, arg)
     except BadArgument as e:
         return refused(op, e)
+    filed = asks_call_for(op, args)
+    if filed:
+        return filed
     out = yield from dispatch(op, json.dumps(args))
     return reply(op, args, json.loads(out), reply_t)
 
@@ -555,8 +658,16 @@ def reply(op, args, out, reply_t):
         if "NotFound" in err and ok_t.startswith("opt "):
             return {"Ok": None}
         return {"Err": err}
+    try:
+        return {"Ok": ok_value(op, args, out, ok_t)}
+    finally:
+        STAFF.clear()
+
+
+def ok_value(op, args, out, ok_t):
+    """The ``Ok`` value of type ``ok_t`` that GGG replies for the reply ``out`` of operation ``op``."""
     raw = BUILD[op](out, args) if op in BUILD else result(op, out, ok_t)
-    return {"Ok": to_ggg(raw, ok_t)}
+    return to_ggg(raw, ok_t)
 
 
 def load(t, key):
@@ -565,7 +676,7 @@ def load(t, key):
         return None
     if isinstance(key, dict):
         key = key.get("id")
-    return cls[str(key)]
+    return (db.LISTING or {}).get((cls, str(key))) or cls[str(key)]  # a row the operation just listed is not read again
 
 
 def result(op, out, t):
@@ -599,10 +710,16 @@ LOCAL = {
 # operation's first word.
 KEY = {"crypto_envelope": "scope", "crypto_derive_key": "transport_public_key", "private_data_update": "private_data",
        "federal_vote_finalize": "vote", "federal_vote_cancel": "vote", "tax_policy_propose": "policy",
+       "budget_extend": "period",
        "allocation_rule_propose": "rule", "representative_remove": "appointment", "document_get": "document",
-       "dispute_get": "dispute", "report_view": "report"}
+       "dispute_get": "dispute", "report_view": "report", "legislation_chapter": "chapter"}
 # Operations that take ``limit`` as such, not as a page size.
 KEEP_LIMIT = {"document_delete"}
+# Operations whose GGG method returns at most this many items a page, whatever ``limit`` asks (the reply's ``next`` goes
+# on from the last): each item is a whole GGG record, built from a row, and the page is Candid on top of that. A page of
+# 500 proposals came to 4.5 billion instructions in the shell and trapped as a query, which may spend 5; the operation's
+# own page is up to 500.
+PAGE_CAP = {"proposal_list": 200}
 
 
 def seat_owner(args):
@@ -648,14 +765,35 @@ def page_of(key, item=None):
     return build
 
 
+def grouped(args, g):
+    """A grant's scope as Realms GOS takes it: ``group:<id>`` entries are ``groups``, anything else permissions."""
+    names = args.get("operations")
+    if names is None or not any(n.startswith(GROUP) for n in names):
+        return args
+    if not all(n.startswith(GROUP) for n in names):
+        raise BadArgument("a grant names groups or permissions, not both")
+    return {**{k: v for k, v in args.items() if k != "operations"}, "groups": [n.removeprefix(GROUP) for n in names]}
+
+
 # Argument and reply adapters, for operations whose shapes differ beyond names and units.
 ARGS = {
+    "delegation_grant": grouped, "delegation_request": grouped, "delegation_request_decide": grouped,
     "department_set_policy": lambda a, g: {**{k: v for k, v in a.items() if k != "policy"}, **a.get("policy", {})},
     "treasury_configure": lambda a, g: {"config": a},
     "representative_remove": lambda a, g: seat_owner(a),
     "delegation_list": lambda a, g: {"from_" + a.get("role", "delegate"): a.get("from"), "count": a.get("count")},
     "notification_read": lambda a, g: {**a, "all": True} if "notification" not in a else a,
+    "call_for": lambda a, g: called_for(a), "read_for": lambda a, g: called_for(a),
 }
+
+
+def called_for(args):
+    """call_for's and read_for's arguments as the operations take them: the operation a ggg_ method stands for and its
+    arguments, decoded with the method's own type."""
+    if not args["method"].startswith("ggg_") or args["method"].removeprefix("ggg_") not in METHODS:
+        raise BadArgument(f"this realm has no method {args['method']}")
+    call = unaction("Call", {"method": args["method"], "arg": args["arg"]})
+    return {**{k: v for k, v in args.items() if k not in ("method", "arg")}, "method": call["op"], "args": call["args"]}
 
 
 def chart(out, args):
@@ -667,7 +805,14 @@ def chart(out, args):
 def proposal_detail(out, args):
     pid = out["proposal"]["id"]
     return {"proposal": pid, "votes": [ggg.Vote[f"{pid}:{v['voter']}"] for v in out.get("votes", [])],
-            "next": None if out.get("next") is None else str(out["next"])}
+            "next": None if out.get("next") is None else str(out["next"]),
+            "replaced_by": out["proposal"].get("replaced_by") or None}
+
+
+def voted(out, args):
+    """proposal_vote's reply: the ballot cast, which the reply holds, since the vote that completed a tied first vote
+    opened a second one that has none."""
+    return Shown({**out, "id": out["vote"], "proposal": args["proposal"]})
 
 
 def nxt(out):
@@ -685,6 +830,17 @@ def directory(out):
     return {"capital": out.get("capital"), "items": out.get("quarters", []), "next": None}
 
 
+def synced(out, args):
+    """quarter_sync's reply. The capital answers with the directory it sends its quarters and the zones the realm
+    defines, and the reply is those. The counts it keeps of a quarter's zones are for placing members and go in no
+    reply, since a small count singles out a person. A quarter's own call returns a summary, so its reply is its view
+    of the directory, which defines nothing."""
+    if "directory" not in out:
+        return directory(local("quarter_directory"))
+    return {**directory({"capital": chain.self_id(), "quarters": out["directory"]}), "zones": out["zones"],
+            "sweep": out.get("sweep")}
+
+
 def local(name, **args):
     """Another operation's reply, as the caller."""
     from core.op import call
@@ -692,7 +848,20 @@ def local(name, **args):
     return call(name, args, user=chain.caller())
 
 
+def called(out, args):
+    """call_for's reply as GGG's: the pending action the call became, the proposal it filed, or the method's own reply."""
+    if "approve_link" in out:
+        return {"Pending": ggg.PendingAction[out["pending"]]}
+    if out.get("requires_vote"):
+        return {"Proposed": out["proposal"]}
+    return {"Done": encoded(args["method"], args["args"], out)}
+
+
 BUILD = {
+    "call_for": called,
+    "read_for": lambda o, a: encoded(a["method"], a["args"], o),
+    "action_approve": lambda o, a: Shown(o["action"]),
+    "action_collect": lambda o, a: encoded(o["method"], o["args"], {k: v for k, v in o["result"].items() if k != "ok"}),
     "invite_create": lambda o, a: {"invite": o["invite"]["id"], "code": o["invite"]["code"]},
     "me": me,
     "delegation_list": delegations,
@@ -701,15 +870,22 @@ BUILD = {
     "treasury_view": treasury,
     "department_get": lambda o, a: detail("department", o),
     "organization_get": lambda o, a: detail("organization", o),
+    "contract_get": lambda o, a: {"contract": ggg.Contract[o["contract"]["id"]],
+                                  "amendments": [ggg.ContractAmendment[x["id"]] for x in o["amendments"]],
+                                  "next": nxt(o)},
     "tender_get": lambda o, a: {"tender": o["tender"], "bids": o["tender"].get("bids", []), "next": None},
     "invoice_refresh": lambda o, a: {"items": list(o.get("invoices") or {}), "next": nxt(o)},
     "quarter_directory": lambda o, a: directory(o),
-    "quarter_sync": lambda o, a: directory(local("quarter_directory")),
+    "quarter_sync": synced,
     "federal_vote_propose": federal_vote,
     "department_chart": chart,
     "proposal_get": proposal_detail,
+    "proposal_vote": voted,
     "enforcement_record": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
+    "external_report": lambda o, a: ggg.Event[str(ggg.Event.max_id())],
+    "notification_send": lambda o, a: {"Dispatch": o["dispatch"]} if "dispatch" in o else {"Notification": o["notification"]},
     "credential_verify": lambda o, a: {"valid": o.get("valid"), **(o.get("checks") or {})},
+    "legislation_chapter": lambda o, a: o["text"].encode(),
     "codex_status": lambda o, a: {**o, "checksum": (o.get("codex") or {}).get("id"),
                                   "history": [h["id"] for h in o.get("history", [])], "signing": signing()},
 }

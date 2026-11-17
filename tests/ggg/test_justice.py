@@ -91,6 +91,7 @@ def test_story_mallorys_fine():
     inv = ok("penalty_execute", "dana", penalty=pen)["invoice"]
     i = Invoice[inv]
     assert (i.payer, i.amount, i.symbol, i.reason) == ("User:mallory", 500, "REALM", f"Penalty:{pen}")
+    assert i.items == [{"concept": "fine", "amount": 500}]
     assert i.due_at == fake_chain.now() + 30 * DAY and Penalty[pen].status == "executed"
     assert "executed" in denied("penalty_execute", "dana", penalty=pen)
 

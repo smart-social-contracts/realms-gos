@@ -265,7 +265,12 @@ test('a treasury transaction is voted and executed', async ({ page }) => {
 	await run('token_register', { symbol, ledger: realm.token_ledger, decimals: 8, fee: 10_000 });
 	await run('fund_create', { fund: 'TREASURY' });
 	await run('treasury_configure', { config: { source_fund: 'TREASURY' } });
-	const billed = await run('invoice_create', { payer: realm.founder, amount: 2_000_000, symbol });
+	const billed = await run('invoice_create', {
+		payer: realm.founder,
+		amount: 2_000_000,
+		items: [{ concept: 'treasury', amount: 2_000_000 }],
+		symbol
+	});
 	const payTo = billed.pay_to as { owner: string; subaccount: string };
 	await mint(realm, payTo, 2_000_000n);
 	// WORKAROUND for realms-gos #450: a fund pays out of the realm's own (default) account, and what an invoice

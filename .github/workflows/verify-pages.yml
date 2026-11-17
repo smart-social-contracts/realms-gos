@@ -1,0 +1,45 @@
+name: verify-pages
+
+# Publishes the page that verifies a signed document (docs/verify/index.html) at
+#   https://smart-social-contracts.github.io/realms-gos/verify/
+# That address is printed as a QR code on every sheet of a realm's official journal (realms-extensions, journal), so it must
+# not change: the site is assembled with the page in a verify/ folder of its own, and nothing else of the repository is
+# published. Deployments to Pages come from `main` (the github-pages environment allows no other branch until it is told
+# to): the page goes out with the release that merges feat/layered-codex into main, and whenever main changes it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/verify/index.html
+      - .github/workflows/verify-pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time; one that has started is let finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}verify/
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the site, the page alone under verify/
+        run: |
+          mkdir -p _site/verify
+          cp docs/verify/index.html _site/verify/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

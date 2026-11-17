@@ -1,17 +1,26 @@
 
 from core import candid
-from core import chain
-from core.db import Conflict, Fail, Forbidden, deref, each, find, next_id, page, view
+from core import chain, sync_log
+from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, put, view
 from ggg import Appointment, Dispute, Land, License, NFTToken, Organization, Realm, User, Verdict, Zone
 from api import codex
 from api.licenses import active, principals
 from core.op import op
-from api.proposals import realm_wide
+from core.pending import quoted, readable, you_sign
+from api.proposals import day_of, launched, realm_wide, whole
 
 LAND = "LAND"
-PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id")
+PARCEL = ("id", "x", "y", "width", "height", "kind", "owner", "status", "token_id", "assessed_value", "area",
+          "assessed_at", "assessment_ref", "lies_in")
+ZONES_MAX = 8  # the zones a parcel lies in (ggg I-AST-6)
 CELL = 16  # the side of a spatial index cell, and the most a parcel spans
 VIEW = 32  # the most a map viewport spans
+# The census of the zones members live in: ``held`` is each zone with its population (``populated``), read from the rows
+# once and kept by ``move_home`` and ``leave_home`` after that, so that a quarter does not read every zone to report them;
+# ``generation`` counts the changes, and ``taken`` is the generation the capital last took (api.quarters.sync): a quarter
+# reports the census while they differ, and the capital's take is acknowledged only when it has been made. None is stored:
+# they start afresh after an upgrade, which is when the next report must carry the whole census.
+census = {"held": None, "generation": 1, "taken": 0}
 
 
 # --- ledger (ICRC-7, smart-social-contracts/ic-tokens), spoken in candid text ---
@@ -138,7 +147,35 @@ def land_register(c, args):
     return {"land": land.id}
 
 
-@op("nft.force_transfer", signing=True, governed=realm_wide, parties=transfer_parties)
+@op("realm.configure", governed=launched, returns="land")
+def land_zone_set(c, args):
+    """Replace the zones parcel ``land`` lies in, such as a planning area, by ``zones``: at most 8, each a zone the realm
+    defines (``zone_define``) and named once. Returns ``land``."""
+    land, zones = find(Land, args["land"]), args["zones"]
+    if len(zones) > ZONES_MAX or len(set(zones)) != len(zones):
+        raise Fail(f"a parcel lies in at most {ZONES_MAX} zones, each named once")
+    for zone in zones:
+        if not (Zone[zone] and Zone[zone].defined):
+            raise NotFound(f"{zone} is not a zone of the realm")
+    land.lies_in = zones
+    return {"land": land.id}
+
+
+def of_the_parcel(land):
+    return f"parcel {land.id} ({quoted(land.kind)}, {land.width} by {land.height} cells at {land.x}, {land.y})"
+
+
+def moving_land(user, args, grant):
+    land, to, order = find(Land, args["land"]), owner_ref(args["to"]), deref(args["order"])
+    if not isinstance(order, Verdict):
+        raise Fail("moving a parcel needs an issued court verdict")
+    return you_sign(f"Moves {of_the_parcel(land)}{' and its NFT' if land.token_id else ''} from {quoted(land.owner)} "
+                    f"to {quoted(to)} under verdict {order.id} of case {order.case.id}",
+                    ("Court order", quoted(order.decision)))
+
+
+@op("nft.force_transfer", signing=True, governed=realm_wide, parties=transfer_parties, summary=moving_land,
+    title="Move a parcel by court order")
 def land_transfer(c, args):
     """Move parcel ``land`` to ``to`` (user or organization) under court ``order`` (``Verdict:id``, issued or final,
     in a case whose dispute is about ``Land:<id>`` and in which ``to`` is a party), and its NFT with it if minted."""
@@ -170,14 +207,15 @@ def land_list(c, args):
 @op("realm.data_view", read=True)
 def land_map(c, args):
     """The ``parcels`` overlapping the viewport of ``w`` × ``h`` cells (default and at most 32) from ``x``, ``y``
-    (default 0), and one page (``from``, ``count``) of the ``zones`` not tied to a parcel; ``next`` continues the
-    zones. A page can hold fewer zones than ``count``: follow ``next``."""
+    (default 0), and one page (``from``, ``count``) of the ``zones`` not tied to a parcel, each with whether the realm
+    ``defined`` it (zone_define) or it is a member's home cell; ``next`` continues the zones. A page can hold fewer zones
+    than ``count``: follow ``next``."""
     x, y, w, h = (int(args.get(k, d)) for k, d in (("x", 0), ("y", 0), ("w", VIEW), ("h", VIEW)))
     if not (1 <= w <= VIEW and 1 <= h <= VIEW):
         raise Fail(f"a map viewport is 1 to {VIEW} cells wide and high")
     zones, more = page(Zone, args, lambda z: z.land is None)
     return {"parcels": [view(p, *PARCEL) for p in parcels_in(x, y, w, h)],
-            "zones": [view(z, "id", "name", "kind") for z in zones], "next": more}
+            "zones": [view(z, "id", "name", "kind", "population", "defined") for z in zones], "next": more}
 
 
 @op("nft.mint", returns="token_id")
@@ -195,6 +233,35 @@ def land_mint_nft(c, args):
     return {"land": land.id, "token_id": token_id}
 
 
+def assessing_land(user, args, grant):
+    land = find(Land, args["land"])
+    changes = [f"{name} {whole(name, args[name]) if name != 'reference' else quoted(args[name])}"
+               for name in ("value", "area", "reference") if args.get(name) is not None]
+    lines = [("Legislation followed", quoted(args["legislation"]))] if args.get("legislation") else []
+    return you_sign(f"Sets the assessment of {of_the_parcel(land)}: {', '.join(changes) or 'nothing'}", *lines)
+
+
+@op("land.assess", signing=True, returns="land", summary=assessing_land, title="Assess a parcel")
+def land_assess(c, args):
+    """Set what the assessor decided for the parcel ``land``, signing for it: its ``value`` in the accounting
+    currency, its ``area`` in square metres, and the ``reference`` of the entry in the assessor's register. A field
+    left out keeps its value; ``legislation`` (the provision followed) is kept in the audit event. Returns ``land``."""
+    land = find(Land, args["land"])
+    changes = {k: args[k] for k in ("value", "area", "reference") if args.get(k) is not None}
+    if not changes:
+        raise Fail("an assessment sets a value, an area or a reference")
+    if land.status == "revoked":
+        raise Conflict(f"{land.id} is {land.status}")
+    if "value" in changes:
+        land.assessed_value = int(changes["value"])
+    if "area" in changes:
+        land.area = int(changes["area"])
+    if "reference" in changes:
+        land.assessment_ref = changes["reference"]
+    land.assessed_at = chain.now()
+    return {"land": land.id}
+
+
 def freeze(args, on):
     land = find(Land, args["land"])
     if land.status != ("active" if on else "disputed"):
@@ -207,22 +274,38 @@ def freeze(args, on):
     return {"land": land.id, "status": land.status}
 
 
-@op("nft.freeze", signing=True, parties=owners, returns="land")
+def freezing_land(user, args, grant):
+    land = find(Land, args["land"])
+    return you_sign(f"Marks {of_the_parcel(land)} of {quoted(land.owner)} disputed"
+                    f"{' and freezes its NFT' if land.token_id else ''}",
+                    ("Freeze reason", quoted(args.get("reason", ""))))
+
+
+@op("nft.freeze", signing=True, parties=owners, returns="land", summary=freezing_land, title="Freeze a parcel")
 def land_freeze(c, args):
     """Mark the active parcel ``land`` disputed and freeze its NFT, with optional ``reason``."""
     return (yield from freeze(args, True))
 
 
-@op("nft.freeze", signing=True, parties=owners, returns="land")
+def unfreezing_land(user, args, grant):
+    land = find(Land, args["land"])
+    return you_sign(f"Ends the dispute on {of_the_parcel(land)} of {quoted(land.owner)}: it becomes active again"
+                    f"{' and its NFT is unfrozen' if land.token_id else ''}")
+
+
+@op("nft.freeze", signing=True, parties=owners, returns="land", summary=unfreezing_land, title="Unfreeze a parcel")
 def land_unfreeze(c, args):
     """End the dispute on parcel ``land``: it becomes active again and its NFT is unfrozen."""
     return (yield from freeze(args, False))
 
 
-@op("self.data_manage", delegable=True, returns="zone")
+@op("self.data_manage", returns="zone", secret=("zone",))
 def zone_set(c, args):
-    """Make ``zone`` (an h3 cell) your home, with optional ``name`` and ``kind``; it replaces your previous home."""
+    """Make ``zone`` (an h3 cell) your home, with optional ``name`` and ``kind``; it replaces your previous home. The
+    cell is personal data: it reaches neither the legislation nor the audit log (``secret``)."""
     zone = Zone[args["zone"]]
+    if zone and zone.defined:
+        raise Fail(f"zone {zone.id} is a zone of the realm, not a cell to make your home")
     if zone and zone.user not in ("", c.user):
         raise Forbidden(f"zone {zone.id} is someone else's home")
     for old in [z for z in each(Zone, "user", c.user) if z.id != args["zone"]]:
@@ -232,9 +315,79 @@ def zone_set(c, args):
     return {"zone": zone.id}
 
 
-@op("self.data_manage", delegable=True, returns="zone")
+@op("realm.configure", governed=launched, returns="zone")
+def zone_define(c, args):
+    """Define ``zone``, such as a district, that members name as their home zone: its ``name`` and ``kind``. The
+    same id again redefines it. Returns ``zone``."""
+    return {"zone": define_zone(args["zone"], args["name"], args["kind"]).id}
+
+
+def define_zone(zone_id, name, kind):
+    """The zone of the realm ``zone_id``, created or redefined in place (its population stays). A member's home cell
+    is no zone of the realm."""
+    zone = Zone[zone_id]
+    if zone and not zone.defined:
+        raise Conflict(f"zone {zone.id} is a member's home cell")
+    created = zone is None
+    zone = zone or Zone(id=zone_id, defined=True)
+    if put(zone, name=name, kind=kind) or created:
+        sync_log.note("zone", zone_id)  # the capital's quarters take it at their next sync
+    return zone
+
+
+def defined_zones():
+    """The zones of the realm. A member's home cell has a user and a zone of the realm has none, so the index on
+    ``user`` finds them without reading every cell."""
+    return [z for z in each(Zone, "user", "") if z.defined]
+
+
+def populated():
+    """The zones of the realm that members live in, each with how many."""
+    if census["held"] is None:
+        census["held"] = {z.id: z.population for z in defined_zones() if z.population}
+    return dict(census["held"])
+
+
+def counted(zone):
+    """The population of ``zone`` changed: the census has it as it is now."""
+    census["generation"] += 1
+    if census["held"] is not None:
+        census["held"].pop(zone.id, None)
+        if zone.population and zone.defined:
+            census["held"][zone.id] = zone.population
+
+
+def defined_zone(zone_id):
+    """The zone of the realm called ``zone_id``; a member's home cell, or no zone at all, is a bad argument."""
+    zone = Zone[zone_id]
+    if zone is None or not zone.defined:
+        raise Fail(f"'{zone_id}' is no zone of the realm: define it with zone_define")
+    return zone
+
+
+def move_home(user, zone_id):
+    """Make the zone of the realm ``zone_id`` the home zone of ``user``, counting them there and no longer where
+    they were."""
+    zone = defined_zone(zone_id)
+    if user.home_zone != zone.id:
+        leave_home(user)
+        zone.population += 1
+        counted(zone)
+        user.home_zone = zone.id
+
+
+def leave_home(user):
+    """Take ``user`` out of the population of their home zone, if they have one."""
+    home = Zone[user.home_zone] if user.home_zone else None
+    if home:
+        home.population -= 1
+        counted(home)
+        user.home_zone = ""
+
+
+@op("self.data_manage", returns="zone", secret=("zone",))
 def zone_clear(c, args):
-    """Stop having ``zone`` as your home."""
+    """Stop having ``zone`` (your home cell) as your home."""
     zone = find(Zone, args["zone"])
     if zone.user != c.user:
         raise Forbidden(f"zone {zone.id} is not your home")
@@ -246,7 +399,7 @@ def zone_clear(c, args):
 
 def schema_of(name):
     """A codex manifest's `credentials` block: {schema: {license, positions, collection, public, after_license}}."""
-    current = codex.active()
+    current = codex.active_legacy()
     rule = current and (current.manifest or {}).get("credentials", {}).get(name)
     if not rule:
         raise Fail(f"no active codex declares the schema '{name}'")
@@ -269,7 +422,32 @@ def signer(c, args):
     return rule, org, find(NFTToken, rule["collection"])
 
 
-@op("credential.sign", signing=True)
+def licences_held(issuer, kinds):
+    """The active licences of ``issuer`` of the ``kinds`` that issuing a credential needs, as the card names them: a
+    renewal replaces the licence by another, and the card changes with it."""
+    held = [(kind, active(issuer, kind)) for kind in dict.fromkeys(filter(None, kinds))]
+    return ", ".join(f"{lic.id if lic else 'none'} ({quoted(kind)})" for kind, lic in held) or "none needed"
+
+
+def issuing_credential(user, args, grant):
+    expires = whole("expires_at", args.get("expires_at") or 0)
+    rule = schema_of(args["schema"])
+    collection = find(NFTToken, rule["collection"])
+    issuer = f"Organization:{find(Organization, args['organization']).id}"
+    needed = (rule["license"], collection.required_license)
+    return you_sign(f"Issues a {quoted(args['schema'])} credential from organization {quoted(args['organization'])} "
+                    f"to {quoted(args['holder'])}",
+                    ("Credential claims", readable(args.get("fields", {}))),
+                    ("Credential issuer licence", licences_held(issuer, needed)),
+                    ("Credential collection", quoted(collection.id)),
+                    ("Credential subject", quoted(args.get("subject", "")) if args.get("subject") else "none"),
+                    ("Credential payload", f"hash {quoted(args.get('payload_hash', ''))}, "
+                                           f"kept at {quoted(args.get('payload_ref', ''))}"),
+                    ("Credential expiry", f"expires {day_of(expires)}" if expires else "never expires"),
+                    ("Credential prepared by", quoted(args["prepared_by"]) if args.get("prepared_by") else "nobody"))
+
+
+@op("credential.sign", signing=True, summary=issuing_credential, title="Issue a credential")
 def credential_issue(c, args):
     """Mint a ``schema`` credential to principal ``holder`` for ``organization`` (you need a seat there that signs it),
     with optional ``subject``, public ``fields``, ``payload_hash`` (sha256:…), ``payload_ref``, ``prepared_by`` and
@@ -294,7 +472,13 @@ def credential_issue(c, args):
     return {"collection": collection.id, "token_id": token_id, "header": meta}
 
 
-@op("credential.sign", signing=True, returns="token_id")
+def revoking_credential(user, args, grant):
+    return you_sign(f"Revokes the {quoted(args['schema'])} credential, token {whole('token_id', args['token_id'])}, "
+                    f"issued by organization {quoted(args['organization'])}: the token is frozen for good",
+                    ("Revocation reason", quoted(args.get("reason", ""))))
+
+
+@op("credential.sign", signing=True, returns="token_id", summary=revoking_credential, title="Revoke a credential")
 def credential_revoke(c, args):
     """Revoke the ``schema`` credential ``token_id`` that ``organization`` issued (you need a seat there that signs
     it; the ledger's token header must name both): the token is frozen for good, with ``reason``."""

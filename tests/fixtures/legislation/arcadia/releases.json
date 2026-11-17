@@ -1,0 +1,26 @@
+[
+  {
+    "version": "1.0.0",
+    "published": "2026-01-15",
+    "effective_from": "2026-03-01",
+    "commit": "0000000000000000000000000000000000000001",
+    "chapters": {
+      "procedure": "sha256:e2ad1a357875e8c72b026334e5d555d721b202d40b4d1a3e5aaeb423375b029c",
+      "tax": "sha256:65d67026a24155a980334d3c89317b6ef8b3ed2fa87c359ec03aef4e5270a93e"
+    },
+    "calendar": null,
+    "notes": {"en": "First release."}
+  },
+  {
+    "version": "2.0.0",
+    "published": "2026-09-01",
+    "effective_from": "2027-01-01",
+    "commit": "0000000000000000000000000000000000000002",
+    "chapters": {
+      "procedure": "sha256:e2ad1a357875e8c72b026334e5d555d721b202d40b4d1a3e5aaeb423375b029c",
+      "tax": "sha256:4798643a9a4e070c5655226b21414e484ea8e5c92294caa1e0dae9ea58e4d304"
+    },
+    "calendar": null,
+    "notes": {"en": "The property tax rate rises."}
+  }
+]

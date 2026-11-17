@@ -12,3 +12,4 @@ class Permission(Row):
     users = ManyToMany(["User"], "permissions")
     profiles = ManyToMany(["UserProfile"], "permissions")
     departments = ManyToMany(["Department"], "permissions")
+    unlisted = ("users",)  # every member may hold it: a User lists its permissions

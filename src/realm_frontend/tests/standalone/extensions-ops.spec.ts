@@ -94,7 +94,9 @@ const ROWS: Row[] = [
 			};
 			await expect(app.getByRole('heading', { name: info.name, level: 1 })).toBeVisible();
 			await expect(app.getByText(info.welcome_message).first()).toBeVisible();
-			await expect(app.getByText(/Members\s*2/)).toBeVisible();
+			// The metric itself: its text also matches the card of the latest members, whose principals may begin with a 2.
+			const members = app.locator('.realm-status-metric').filter({ hasText: 'Members' });
+			await expect(members.locator('.realm-status-metric-value')).toHaveText('2');
 		}
 	},
 	{
@@ -195,7 +197,7 @@ const ROWS: Row[] = [
 			await app.locator('select').selectOption('User');
 			await app.getByRole('button', { name: 'Export User' }).click();
 			await closeDialog(frame);
-			await expect(app.getByText(/2\s*entities/)).toBeVisible();
+			await expect(app.getByText(/\b2\s*entities/)).toBeVisible();
 			const download = page.waitForEvent('download', { timeout: 30_000 });
 			await app.getByRole('button', { name: 'Download JSON' }).click();
 			await closeDialog(frame);
@@ -367,7 +369,7 @@ const ROWS: Row[] = [
 			await app.getByRole('button', { name: 'Refresh' }).click();
 			await expect(app.getByText(`${realm.name} (alpha)`)).toBeVisible();
 			await expect(app.getByText(/Codex\s+syntropia/)).toBeVisible();
-			await expect(app.getByText(new RegExp(`${count}\\s*installed`, 'i')).first()).toBeVisible();
+			await expect(app.getByText(new RegExp(`\\b${count}\\s*installed`, 'i')).first()).toBeVisible();
 		}
 	},
 	{

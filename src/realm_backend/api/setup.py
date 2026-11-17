@@ -1,16 +1,17 @@
 import json
 
-from core import build_variant, chain
+from core import auth, build_variant, chain, journal, language, legislation, localtime, zones
 import constants
 import ggg
 from core import sandbox
 from api import tasks
-from core.db import Conflict, Fail, Forbidden, Unavailable, page, view
+from core.db import CONVERT_IDS, PAGE_MAX, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
 from api.extensions import trust
 from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
-from api import codex
+from api import codex, installs
 from core.op import call, op, ops
+from core.pending import quoted, without_secrets
 from api.proposals import root
 
 VERSION = "VERSION_PLACEHOLDER"
@@ -22,18 +23,21 @@ PROFILES = {
         "self.join", "self.update_public_profile", "self.update_private_data", "self.change_quarter",
         "self.invoice_refresh", "self.data_view", "self.data_manage", "self.delegate", "realm.data_view",
         "proposal.create", "proposal.vote", "federal_vote.propose", "dispute.create", "dispute.view",
-        "identity.submit", "license.apply", "tax.declare", "bid.submit", "extension.call",
+        "identity.submit", "attribute.submit", "license.apply", "request.file", "tax.declare", "bid.submit",
+        "extension.call",
     ],
     # Held by the founder only while the realm is in setup (I-ADM-2).
     "founder": [
         "realm.configure", "realm.configure.branding", "realm.configure.tokens", "realm.configure.infrastructure",
         "realm.configure.trust_policy", "realm.register", "codex.install", "extension.install", "governance.update",
+        "it_team.set",
     ],
 }
 INSTALL = ("network", "can_test_mode", "founder")
 FIELDS = {
-    "realm": ("name", "manifesto", "welcome_message", "open_registration", "ai_assistant_enabled",
-              "quarter_join_mode", "auto_scale_enabled", "test_mode", "test_flags"),
+    "realm": ("name", "manifesto", "terms", "welcome_message", "open_registration", "ai_assistant_enabled",
+              "quarter_join_mode", "auto_scale_enabled", "timezone", "languages", "journal_signing", "test_mode",
+              "test_flags"),
     "branding": ("logo_url", "background_image_url", "primary_color"),
     "tokens": ("accounting_currency", "accounting_currency_decimals", "token_canister_id", "nft_canister_id",
                "shared_tokens_json"),
@@ -41,8 +45,23 @@ FIELDS = {
                        "installer_canister_id", "baton_canister_id", "conductor_canister_id", "casals_stand"),
     "trust_policy": ("require_marketplace_approval", "trusted_approvers", "trusted_principals"),
 }
+# The branding images are kept in the Realm row as data URLs, and setup_step answers with the whole setup state, both
+# images included: an update's reply may not pass 2 MiB, so two images and the rest of the state must fit in it. The
+# frontend compresses an image to 700 KiB (imageDataUrl.ts), which is 955,759 characters in base64 with the
+# "data:image/jpeg;base64," prefix; IMAGE_MAX leaves a little room over that.
+IMAGES = ("logo_url", "background_image_url")
+IMAGE_MAX = 960_000
+# The realm's texts a quarter keeps in sync travel whole with every settings push, whose record (a FederationMessage)
+# holds at most 65,536 characters; and the Realm row is read on every message.
+TEXTS = ("manifesto", "terms")
+TEXT_MAX = 20_000
 # Kept in manifest_data["casals"], not on Realm: the stand Casals built the realm on, its baton and its conductor.
 CASALS = ("baton_canister_id", "conductor_canister_id", "casals_stand")
+# Kept in manifest_data too: how far db_convert_indexes has got, {"after": key, "refused": [key, ...]} while it runs and
+# {"done": True, "refused": [...]} at the end (a new realm: {"done": True}). "refused" names the lists it skipped as
+# too long to convert.
+INDEX_CONVERSION = "index_conversion"
+LEG_INDEX = "leg_index"  # FederalVoteLeg.proposal_id indexed for the legs that predate the index (#488)
 HEX = "0123456789abcdef"
 COUNTED = ("User", "Member", "Department", "Organization", "Proposal", "Extension", "Task", "Notification")
 SHELL = """class _Ops:
@@ -66,6 +85,8 @@ def start(installer=""):
     if Realm["1"] is None:
         realm = Realm(id="1", principal_id=chain.self_id())
         realm.calendar, realm.treasury = Calendar(id="1"), Treasury(id="1")
+        # a new database holds no list saved the old way, and no leg that predates its index
+        realm.manifest_data = {INDEX_CONVERSION: {"done": True}, LEG_INDEX: True}
         Department(id="Administration", is_root=True, description="The realm's root department")
     installer = (installer or "").strip()
     if installer and not Realm["1"].installer_canister_id:
@@ -73,11 +94,27 @@ def start(installer=""):
     for name, allowed in PROFILES.items():
         if UserProfile[name] is None:
             UserProfile(id=name, allowed_to=allowed)
-    tasks.rearm()
-    from api import proposals, quarters
+    # The parsed zone is gone after an upgrade, and a query could not keep one it parsed: read it here. A zone the
+    # release lacks traps the upgrade on purpose: tz names only grow, and the realm must not turn UTC without a word.
+    if Realm["1"].timezone != "UTC":  # a UTC realm needs no zone file, nor the reader
+        localtime.use(Realm["1"].timezone)
+    journal.fix_first_day()  # on the realm's clock
+    if not Realm["1"].manifest_data.get(LEG_INDEX):
+        from api import federation
 
+        federation.index_legs()
+        remember(LEG_INDEX, True)
+    legislation.warm()  # the active layered codex's sandbox is gone after an upgrade, and a query could not keep one
+    installs.pause_after_upgrade()
+    tasks.rearm()
+    from api import links, proposals, quarters, sync_checks, treasury
+
+    links.resume()
     proposals.resume()
+    proposals.relist_tags()
     quarters.resume()
+    sync_checks.resume()
+    treasury.resume()
 
 
 @op(None, read=True, public=True)
@@ -97,12 +134,30 @@ def version(c, args):
 
 @op(None, read=True, public=True)
 def realm_info(c, args):
-    """The realm's public profile: name, manifesto, welcome message, status, branding, accounting currency,
-    whether registration is open and whether it is a capital, its network, and its test mode and test flags."""
+    """The realm's public profile: name, manifesto, terms, welcome message, status, branding, accounting currency and
+    its decimals, whether registration is open and whether it is a capital, its network, time zone and languages, and
+    its test mode and test flags, and its ``sync_sources``: the realms it takes legislation from, each with the status
+    of its link. ``official_timezone`` is the zone of the realm's official time: its own, or on a quarter its
+    capital's as of the last sync (``timezone`` is the quarter's own)."""
+    from api import links, quarters
+
     realm = Realm["1"]
-    return {"realm": view(realm, "name", "manifesto", "welcome_message", "status", "logo_url",
-                          "background_image_url", "primary_color", "accounting_currency",
-                          "open_registration", "is_capital", "network", "test_mode", "test_flags") if realm else {}}
+    return {"realm": {**view(realm, "name", "manifesto", "terms", "welcome_message", "status", "logo_url",
+                             "background_image_url", "primary_color", "accounting_currency",
+                             "accounting_currency_decimals", "open_registration", "is_capital", "network", "timezone",
+                             "languages", "journal_signing", "test_mode", "test_flags"),
+                      "official_timezone": quarters.official_timezone()} if realm else {},
+            "sync_sources": [links.source_view(s) for s in links.sources()]}
+
+
+@op(None, read=True, public=True)
+def realm_image(c, args):
+    """One of the realm's branding images, ``image`` (``logo_url`` or ``background_image_url``), as ``value``. A quarter
+    reads its capital's this way when one changes (api.quarters), one image a call: two images and the rest of
+    ``realm_info`` may not fit in the 2 MiB a reply to another canister may be."""
+    if args["image"] not in IMAGES:
+        raise Fail(f"image is one of {', '.join(IMAGES)}")
+    return {"image": args["image"], "value": getattr(Realm["1"], args["image"])}
 
 
 @op(None, read=True, public=True)
@@ -126,11 +181,46 @@ def remember(key, value):
     realm.manifest_data = {**realm.manifest_data, key: value}
 
 
+def configurable(values):
+    """The check of ``realm_configure`` and its branding and tokens variants, so that a call that cannot succeed is
+    refused before a voting policy turns it into a proposal: on a quarter, a setting the capital keeps in sync; and the
+    values ``valid_values`` refuses."""
+    from api import quarters  # it imports this module
+
+    quarters.refuse_synced(values)
+    valid_values(values)
+
+
+def valid_values(values):
+    """Refuse a ``timezone`` this release has no zone file for, ``languages`` that are no BCP 47 tags, a
+    ``journal_signing`` that is no mode, a branding image above ``IMAGE_MAX`` and a manifesto or terms above ``TEXT_MAX``."""
+    if "timezone" in values and not zones.known(values["timezone"]):
+        raise Fail(f"timezone must be an IANA name such as Europe/Madrid, or UTC; this release has no zone "
+                   f"'{values['timezone']}'")
+    if "languages" in values:
+        language.require_all(values["languages"])
+    if "journal_signing" in values and values["journal_signing"] not in journal.SIGNING_MODES:
+        raise Fail(f"journal_signing is one of {', '.join(journal.SIGNING_MODES)}")
+    for name in IMAGES:
+        if len(values.get(name) or "") > IMAGE_MAX:
+            raise Fail(f"{name} is above {IMAGE_MAX:,} characters (an image of about 700 KiB): the realm sends its "
+                       f"images with every page it shows")
+    for name in TEXTS:
+        if len(values.get(name) or "") > TEXT_MAX:
+            raise Fail(f"{name} is above {TEXT_MAX:,} characters")
+
+
 def configure(fields, values):
+    """Set ``values``, any of ``fields``. On a capital, a change of a synced setting is pushed to its quarters; a
+    quarter refuses one (api.quarters.SYNCED)."""
+    from api import quarters  # it imports this module
+
     realm, color = Realm["1"], values.get("primary_color")
     unknown = sorted(set(values) - set(fields))
     if unknown:
         raise Fail(f"cannot configure {', '.join(unknown)} here")
+    quarters.refuse_synced(values)
+    valid_values(values)
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in HEX for ch in color[1:].lower())):
         raise Fail(f"primary_color must look like #1E6B52, not {color}")
     if (values.get("test_mode") or any((values.get("test_flags") or {}).values())) \
@@ -141,6 +231,12 @@ def configure(fields, values):
             remember("casals", {**realm.manifest_data.get("casals", {}), k: v})
         else:
             setattr(realm, k, v)
+    if "timezone" in values:
+        localtime.use(realm.timezone)  # from now on; nothing stored is rewritten
+        journal.fix_first_day()  # a zone west of the old one can put today before the journal's first day
+    quarters.forget_digests(values)
+    if set(values) & set(quarters.SYNCED):
+        quarters.push_settings()
     return {"configured": sorted(values)}
 
 
@@ -234,41 +330,69 @@ def host_infrastructure(c, args):
 
 @op("realm.configure", returns="realm")
 def setup_launch(c, args):
-    """Open the realm (status ``alpha``). The founder's setup rights end; configuration is governed from now on.
-    Returns ``realm`` and its ``status``."""
+    """Open the realm (status ``alpha``; a quarter takes its capital's stage). The founder's setup rights end;
+    configuration is governed from now on. Returns ``realm`` and its ``status``."""
+    from api import quarters  # it imports this module
+
     realm, d = Realm["1"], draft()
     if realm.status != "setup":
         raise Conflict("the realm has already launched")
     if not realm.name:
         raise Conflict("name the realm first")
+    stage = launch_stage()
     if d.get("founder"):
         founder = User[d["founder"]]
         founder.profiles = [p for p in founder.profiles if p.id != "founder"]
-    realm.status = "alpha"
+    realm.status = stage
     remember("setup", {**d, "launched_at": chain.now()})
-    yield from codex.hook("on_stage_change", {"stage": "alpha"})
+    quarters.push_settings()
+    yield from codex.hook("on_stage_change", {"stage": stage})
     return {"realm": realm.id, "status": realm.status}
 
 
-@op("realm.configure", governed=launched)
+def launch_stage():
+    """The stage a launch takes: ``alpha``, or on a quarter its capital's, which the quarter learns when it syncs. A
+    quarter that has not synced yet, or whose capital is still in setup, cannot launch."""
+    from api import quarters  # it imports this module
+
+    if not quarters.federated():
+        return "alpha"
+    stage = (Realm["1"].sync_state or {}).get("stage")
+    if stage is None:
+        raise Conflict("this quarter does not know its capital's stage yet: run quarter_sync first")
+    if stage == "setup":
+        raise Conflict(f"the capital {quarters.capital()} is still in setup: a quarter launches after it")
+    return stage
+
+
+@op("realm.configure", governed=launched, check=configurable)
 def realm_configure(c, args):
-    """Set any of ``name``, ``manifesto``, ``welcome_message``, ``open_registration``, ``ai_assistant_enabled``,
-    ``quarter_join_mode``, ``auto_scale_enabled``, ``test_mode`` and ``test_flags``. Returns ``configured``.
+    """Set any of ``name``, ``manifesto`` and ``terms`` (at most 20,000 characters each), ``welcome_message``,
+    ``open_registration``, ``ai_assistant_enabled``, ``quarter_join_mode``, ``auto_scale_enabled``, ``timezone``,
+    ``languages`` (BCP 47 tags, the first the default), ``journal_signing`` (``on_request``, the default, or ``daily``:
+    whether the official journal's days are signed when someone asks or each as it closes, which costs the realm a
+    threshold signature a day; a change to ``daily`` also signs, once, every day made after the last signed one, a
+    signature for each 31 days), ``test_mode`` and ``test_flags``. Returns ``configured``. The
+    ``timezone`` is an IANA name such as ``Europe/Madrid`` that this release bundles, or ``UTC``,
+    which a realm has until it sets one; the new zone applies from the moment it is set, and nothing stored changes.
     Test mode and flags need a test build, on a non-production network or with ``can_test_mode`` set at install;
-    a production build refuses them."""
+    a production build refuses them. On a quarter, the settings its capital keeps in sync (api.quarters.SYNCED: the
+    name, the manifesto, the terms and the languages here) are refused with Forbidden."""
     return configure(FIELDS["realm"], args)
 
 
-@op("realm.configure.branding", governed=launched)
+@op("realm.configure.branding", governed=launched, check=configurable)
 def realm_configure_branding(c, args):
-    """Set any of ``logo_url``, ``background_image_url`` and ``primary_color`` (like ``#1E6B52``)."""
+    """Set any of ``logo_url``, ``background_image_url`` and ``primary_color`` (like ``#1E6B52``). An image is a URL or
+    a data URL of at most 960,000 characters, about 700 KiB. A quarter refuses them: its capital keeps them in sync."""
     return configure(FIELDS["branding"], args)
 
 
-@op("realm.configure.tokens", governed=launched)
+@op("realm.configure.tokens", governed=launched, check=configurable)
 def realm_configure_tokens(c, args):
     """Set any of ``accounting_currency``, ``accounting_currency_decimals``, ``token_canister_id``,
-    ``nft_canister_id`` and ``shared_tokens_json``."""
+    ``nft_canister_id`` and ``shared_tokens_json``. A quarter refuses the accounting currency and its decimals: its
+    capital keeps them in sync."""
     return configure(FIELDS["tokens"], args)
 
 
@@ -317,10 +441,26 @@ def realm_upgrade(c, args):
     return release
 
 
-@op("orchestration.approve")
+DECISIONS = {"approve": "submit_approval", "reject": "reject_action"}
+
+
+def deciding(user, args, grant):
+    """What deciding a Casals action does. The realm holds the action's id and no more of it: the upgrade it carries is
+    in the baton, so the member is told to read it there."""
+    if args["decision"] not in DECISIONS:
+        raise Fail("decision is approve or reject")
+    action = quoted(args["action_id"])
+    if args["decision"] == "reject":
+        return [{"label": "What changes", "value": f"Rejects Casals action {action}, which then does not run"}]
+    return [{"label": "What changes",
+             "value": f"Approves Casals action {action}. Once it has the approvals it needs, the upgrade it carries "
+                      "takes effect at once. The realm cannot show you the upgrade here: read it in Casals before you approve"}]
+
+
+@op("orchestration.approve", summary=deciding, title="Decide a Casals action")
 def orchestration_decide(c, args):
     """Approve or reject (``decision``) the Casals baton action ``action_id`` for this realm."""
-    method = {"approve": "submit_approval", "reject": "reject_action"}.get(args["decision"])
+    method = DECISIONS.get(args["decision"])
     baton = Realm["1"].manifest_data.get("casals", {}).get("baton_canister_id")
     if method is None:
         raise Fail("decision is approve or reject")
@@ -342,21 +482,53 @@ def realm_monitor(c, args):
             "rows": {n: getattr(ggg, n).count() for n in COUNTED}, "upgrade": realm.manifest_data.get("upgrade", {})}
 
 
+# Entities whose rows hold personal data in clear: exporting them takes their readers' permission too (I-PRV-1).
+READERS = {"Attribute": "attribute.review"}
+
+
 @op("db.export", read=True, returns="rows")
 def realm_export(c, args):
-    """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it."""
+    """One page of an entity's rows (``entity``, ``from``, ``count``); ``next`` continues it. An entity whose rows are
+    large returns fewer rows than ``count`` asks for: follow ``next``, never compute ``from``. Exporting ``Attribute``
+    takes attribute.review as well, since its rows hold personal data in clear."""
     cls = getattr(ggg, args["entity"], None)
     if not (isinstance(cls, type) and issubclass(cls, Entity)):
         raise Fail(f"unknown entity '{args['entity']}'")
-    rows, nxt = page(cls, args)
-    return {"entity": args["entity"], "rows": [view(r) for r in rows], "next": nxt}
+    reader = READERS.get(args["entity"])
+    if reader and not {"all", reader} & auth.permissions(c.user):
+        raise Forbidden(f"exporting {args['entity']} needs {reader}")
+    rows, nxt = page(cls, args, most=getattr(cls, "export_most", PAGE_MAX))
+    out = [view(r) for r in rows]
+    if args["entity"] == "PendingAction":  # whoever exports, the secrets of the calls the actions hold stay out
+        out = [without_secrets(r["method"], r) for r in out]
+    return {"entity": args["entity"], "rows": out, "next": nxt}
+
+
+@op("db.convert")
+def db_convert_indexes(c, args):
+    """After an upgrade from a release before ic-python-db 0.13: convert the index lists saved as one array each, at
+    most ``ids`` (default 10,000, at most 140,000) of their ids per call. Call it until ``done``. A realm created by
+    this release, or one that is done, answers at once and reads no index entry. Returns the ``lists`` and ``ids``
+    converted, whether it is ``done`` and the lists ``refused`` so far: one longer than a call can convert is left as
+    it was."""
+    progress = Realm["1"].manifest_data.get(INDEX_CONVERSION) or {}
+    refused = progress.get("refused", [])
+    if progress.get("done"):
+        return {"lists": 0, "ids": 0, "done": True, "refused": refused}
+    out = convert_legacy_indexes(progress.get("after", ""), max(1, int(args.get("ids") or CONVERT_IDS)))
+    refused = refused + out["refused"]
+    done = out["next"] is None
+    progress = {"done": True} if done else {"after": out["next"]}
+    remember(INDEX_CONVERSION, {**progress, "refused": refused})
+    return {"lists": out["lists"], "ids": out["ids"], "done": done, "refused": refused}
 
 
 @op("shell.execute")
 def shell(c, args):
     """Evaluate one expression ``expr`` in the sandbox; ``ops.<name>(args)`` calls an operation as you, through Cedar.
+    Called by your delegate, it calls them as the delegate for you, so under the grant.
     Example: ``{"expr": "ops.proposal_list({'status': 'voting'})"}``."""
     def as_caller(_, kw):
-        return call(kw["name"], kw["args"], user=c.user, origin="shell")
+        return call(kw["name"], kw["args"], user=c.user, origin="shell", by=c.by, root=c.root)
 
     return {"result": sandbox.execute(SHELL % args["expr"], "main", {}, as_caller, ("op",))}

@@ -1,4 +1,4 @@
-"""Users and profiles, invites, departments and positions, extensions, notifications, the event log and encrypted documents."""
+"""Users and profiles, invites, departments and positions, extensions, notifications, outside bodies and what is sent to them, the event log and encrypted documents."""
 
 from .user import User
 from .user_profile import UserProfile
@@ -9,6 +9,8 @@ from .position import Position, Appointment
 from .department_authority import Authority
 from .extension import Extension
 from .notification import Notification
+from .external import External
+from .dispatch import Dispatch
 from .event import Event
 from .key_envelope import KeyEnvelope
 from .document import Document

@@ -16,6 +16,11 @@ The canister has two endpoints, both `(text, text) -> text`:
 `args` and the reply are JSON text. Calling a changing operation with `read` returns
 `"<name> changes the realm: call it with run, not read"`.
 
+The text in `args` is Unicode: a call whose arguments hold a lone surrogate (the escape `"\ud800"` alone, at any depth, in
+a key or a value) is refused with the argument named, whichever operation it is. No stored row or Candid reply can hold
+one, so the call would otherwise trap where it first writes or replies with it (`core/surrogates.py`). A pair
+(`"\ud83d\ude00"`) is one character and is fine.
+
 From the CLI:
 
 ```bash
@@ -51,13 +56,15 @@ of running.
 | Unknown operation | `{"ok": false, "error": "unknown operation 'x'"}` |
 | Not allowed (Cedar) | `{"ok": false, "error": "<op> needs <permission>"}` and similar |
 | Invalid input (`Fail`) | `{"ok": false, "error": "<message>"}` |
+| An argument holds a lone surrogate | `{"ok": false, "error": "argument 'title' holds a lone surrogate (U+D800 to U+DFFF), which is not text", "kind": "invalid_argument"}` |
 | A required argument is missing | `{"ok": false, "error": "missing 'proposal'"}` |
 | Any other exception | the call **traps**: every change it made is rolled back |
 
 ## Discovering operations
 
 `ops_list` is public and returns every operation with its permission, flags and docstring. The
-CLI uses it to choose `read` or `run`; AI tools (MCP) are generated from it.
+CLI uses it to choose `read` or `run`; AI tools (MCP) are generated from it. `delegable` says a power of attorney can
+reach the operation in this release; `delegable_operations` gives the groups it can be granted in.
 
 ```bash
 realms local call ops_list
@@ -186,7 +193,8 @@ A page may hold fewer rows than `count` when a filter drops some; keep going unt
 
 Every successful call of a non-read operation is stored as an `Event`: operation, user, signer,
 origin, arguments and the plain fields of the result, with secrets (`code`, `private_data`,
-`payload`, `ciphertext`) removed. The latest 2,000 events are kept. Read them with `events`
+`payload`, `ciphertext`) removed. The latest 2,000 events are kept: each new event drops the one that falls out,
+with `Event.forget`, about 1.7 M instructions (`Entity.delete` would cost 20 M here). Read them with `events`
 (permission `realm.monitor`).
 
 ## Calling operations from Python

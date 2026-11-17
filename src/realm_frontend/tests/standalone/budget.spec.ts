@@ -66,7 +66,7 @@ interface Period {
 interface Rule {
 	id: string;
 	source_fund: string;
-	rules: Record<string, number>;
+	rules: { fund: string; share: number }[];
 	status: string;
 }
 interface Budget {
@@ -219,19 +219,21 @@ test('the realm opens a fiscal period, and only the finance role can', async () 
 });
 
 test('the allocation rule is adopted by the finance role only', async () => {
-	const shares = { [ROADS]: 60, [WELFARE]: 30 };
+	// A share is in hundred-millionths: 1 % is 1_000_000.
+	const share = (fund: string, percent: number) => ({ fund, share: percent * 1_000_000 });
+	const shares = [share(ROADS, 60), share(WELFARE, 30)];
 	await leavesUnchanged(['AllocationRule', 'Fund'], async () => {
 		const draft = { source_fund: SOURCE, rules: shares };
 		await refused('allocation_rule_draft', draft, member, /needs org\.manage_budget/);
 		await refused(
 			'allocation_rule_draft',
-			{ source_fund: SOURCE, rules: { [ROADS]: 80, [WELFARE]: 30 } },
+			{ source_fund: SOURCE, rules: [share(ROADS, 80), share(WELFARE, 30)] },
 			founder(),
-			/at most 100/
+			/at most 100000000/
 		);
 		await refused(
 			'allocation_rule_draft',
-			{ source_fund: SOURCE, rules: { [`NOPE-${RUN}`]: 10 } },
+			{ source_fund: SOURCE, rules: [share(`NOPE-${RUN}`, 10)] },
 			founder(),
 			/unknown Fund/
 		);
@@ -275,7 +277,13 @@ test('a payment into the treasury is split between the department funds', async 
 
 	const billed = await done(
 		'invoice_create',
-		{ payer: realm.founder, amount, symbol: SYMBOL, reason: `Tax: budget ${RUN}` },
+		{
+			payer: realm.founder,
+			amount,
+			items: [{ concept: 'tax', amount }],
+			symbol: SYMBOL,
+			reason: `Tax: budget ${RUN}`
+		},
 		founder()
 	);
 	const payTo = billed.pay_to as { owner: string; subaccount: string };
@@ -296,7 +304,7 @@ test('a payment into the treasury is split between the department funds', async 
 });
 
 test('the finance role adopts a budget for the roads, and only it can', async () => {
-	const draft = { fund: ROADS, period, category: CATEGORY, planned: 300_000 };
+	const draft = { fund: ROADS, period, category: CATEGORY, kind: 'expense', planned: 300_000 };
 	// What the period's earlier budget for this category has spent carries over to its successor.
 	const carried = (await adoptedBudget())?.actual ?? 0;
 	await leavesUnchanged(['Budget'], async () => {
@@ -317,13 +325,13 @@ test('the finance role adopts a budget for the roads, and only it can', async ()
 	});
 
 	await leavesUnchanged(['Budget'], async () => {
-		await refused('budget_propose', { budget }, member, /needs org\.manage_budget/);
+		await refused('budget_propose', { period }, member, /needs org\.manage_budget/);
 	});
-	await done('budget_propose', { budget }, founder());
+	await done('budget_propose', { period }, founder());
 	expect(await row<Budget>('Budget', budget)).toMatchObject({ status: 'adopted', actual: carried });
 
 	await leavesUnchanged(['Budget'], async () => {
-		await refused('budget_propose', { budget }, founder(), /only a draft for an open period/);
+		await refused('budget_propose', { period }, founder(), /no draft budget lines/);
 	});
 });
 
@@ -370,19 +378,20 @@ test('the founder spends from the roads fund on the vault page, within the budge
 });
 
 test('a payment the fund cannot cover is refused and moves nothing', async ({ page }) => {
-	const tooMuch = (await held(ROADS)) + 1;
+	// From a fund no budget governs: the budget line's own refusal comes first, and the next test has it.
+	const tooMuch = (await held(SOURCE)) + 1;
 	const outsider = Ed25519KeyIdentity.generate(new Uint8Array(32).fill(52));
-	const pay = { fund: ROADS, to: principal(payee), amount: tooMuch, symbol: SYMBOL };
+	const pay = { fund: SOURCE, to: principal(payee), amount: tooMuch, symbol: SYMBOL };
 
 	await leavesUnchanged(['Fund', 'Budget', 'Transfer', 'LedgerEntry'], async () => {
 		await refused('transfer_create', pay, member, /needs transfer\.create/);
 		await refused('transfer_create', pay, outsider, /needs transfer\.create/);
-		await refused('transfer_create', pay, founder(), /fund DEPT-INFRA holds \d+ E2E, less than/);
+		await refused('transfer_create', pay, founder(), /fund TREASURY holds \d+ E2E, less than/);
 
 		const { app, frame, close } = await openExtension(page, realm, founder(), 'vault');
 		try {
 			await app.getByRole('button', { name: 'Send', exact: true }).first().click();
-			await app.locator('#v-fund').selectOption(ROADS);
+			await app.locator('#v-fund').selectOption(SOURCE);
 			await app.locator('#v-to').fill(principal(payee));
 			await app.locator('#v-amount').fill((tooMuch / 1e8).toFixed(8));
 			await app.getByRole('button', { name: 'Send', exact: true }).last().click();
@@ -392,6 +401,20 @@ test('a payment the fund cannot cover is refused and moves nothing', async ({ pa
 		} finally {
 			await close();
 		}
+	});
+});
+
+test('a payment the budget line cannot meet is refused first, naming the line and the shortfall', async () => {
+	// The roads fund holds more than its line has available: the line refuses before the fund is asked.
+	const { id, planned, actual } = (await adoptedBudget())!;
+	const over = planned - actual + 1;
+	const pay = { fund: ROADS, to: principal(payee), amount: over, symbol: SYMBOL };
+	const why = new RegExp(
+		`line ${id} \\(${ROADS}, ${period}, ${CATEGORY}\\) has ${planned - actual} available; the transfer of ${over} is 1 short`
+	);
+
+	await leavesUnchanged(['Fund', 'Budget', 'Transfer', 'LedgerEntry'], async () => {
+		await refused('transfer_create', pay, founder(), why);
 	});
 });
 
@@ -471,7 +494,9 @@ test('a payment past the budget of its category is refused and moves nothing', a
 		amount: planned - actual + 1,
 		symbol: SYMBOL
 	};
-	const why = new RegExp(`plans ${planned} .* ${actual} is spent and ${pay.amount} was asked`);
+	const why = new RegExp(
+		`has ${planned - actual} available; the transfer of ${pay.amount} is 1 short`
+	);
 	await leavesUnchanged(['Fund', 'Budget', 'Transfer', 'LedgerEntry'], async () => {
 		await refused('transfer_create', pay, founder(), why);
 
@@ -496,7 +521,13 @@ test.fixme('a budget with a negative amount is refused', async () => {
 	await leavesUnchanged(['Budget'], async () => {
 		await refused(
 			'budget_draft',
-			{ fund: ROADS, period: (await openPeriod())!.id, category: `negative-${RUN}`, planned: -5 },
+			{
+				fund: ROADS,
+				period: (await openPeriod())!.id,
+				category: `negative-${RUN}`,
+				kind: 'expense',
+				planned: -5
+			},
 			founder(),
 			/positive|negative/
 		);

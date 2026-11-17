@@ -34,6 +34,15 @@ def later(seconds):
     fake_chain.state["now"] += seconds
 
 
+def fire_timers():
+    """Run the timers set so far, as the replica would once their delay had passed."""
+    timers, fake_chain.state["timers"] = fake_chain.state["timers"], []
+    for _, cb in timers:
+        out = cb()
+        if out is not None:
+            op.run(out)
+
+
 def rows(cls):
     """Every row of ``cls``: for checking results in tests, never in canister code."""
     return cls.load_some(1, max(cls.max_id(), 1))

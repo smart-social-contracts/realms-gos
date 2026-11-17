@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sys
+import re
 from collections import OrderedDict
 from pathlib import Path
 
@@ -13,9 +13,17 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent.parent
 EXTENSIONS_ROOT = REPO_ROOT / "extensions" / "extensions"
 SCRIPT_PATH = REPO_ROOT / "scripts" / "add_sidebar_labels.py"
+CATALOG_PATH = REPO_ROOT / "src" / "realm_frontend" / "src" / "lib" / "i18n" / "realmLocales.ts"
 
-sys.path.insert(0, str(REPO_ROOT / "src" / "realm_backend"))
-from core.realm_locales import CATALOG_IDS  # noqa: E402
+
+def _catalog_ids():
+    """The realm's language catalog lives in the frontend (the backend keeps no copy of it)."""
+    return re.findall(r"\{ id: '([^']+)', name:", CATALOG_PATH.read_text(encoding="utf-8"))
+
+
+CATALOG_IDS = _catalog_ids()
+# A catalog that did not parse would make every label "complete".
+assert "en" in CATALOG_IDS, f"no locale ids found in {CATALOG_PATH}"
 
 
 def _load_sidebar_script():
@@ -53,8 +61,18 @@ ALL = _manifests()
 SIDEBAR_CONTRACT = _sidebar_contract_manifests()
 
 
+# Extensions known to miss locales, with the issue that fixes each. Remove the entry when it is fixed.
+KNOWN_GAPS = {"realm_settings": "realms-extensions#65"}
+
+
+def _expect_complete(ext_id, manifest):
+    gap = KNOWN_GAPS.get(ext_id)
+    marks = [pytest.mark.xfail(reason=gap, strict=True)] if gap else []
+    return pytest.param(ext_id, manifest, id=ext_id, marks=marks)
+
+
 @pytest.mark.skipif(not SIDEBAR_CONTRACT, reason="extensions submodule not checked out")
-@pytest.mark.parametrize("ext_id,manifest", SIDEBAR_CONTRACT, ids=[e for e, _ in SIDEBAR_CONTRACT])
+@pytest.mark.parametrize("ext_id,manifest", [_expect_complete(e, m) for e, m in SIDEBAR_CONTRACT])
 def test_sidebar_label_includes_all_catalog_locales(ext_id, manifest):
     sidebar_label = manifest.get("sidebar_label")
     if manifest.get("show_in_sidebar"):

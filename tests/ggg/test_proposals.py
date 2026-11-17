@@ -5,7 +5,9 @@ import world
 from api import members, proposals
 from core import auth, op
 from core.db import Forbidden
-from ggg import Delegation, Department, Mandate, Position, Proposal, Realm, User, UserProfile, Vote
+from core.ratio import PERCENT
+from ggg import Appointment, Delegation, Department, Mandate, Position, Proposal, Realm, User, UserProfile, Vote
+from ic_python_db.constants import MAX_UNPAGED
 from kit import call, denied, later, ok
 
 
@@ -61,7 +63,7 @@ def test_I_GOV_2_only_eligible_voters_count():
 
 def test_I_GOV_3_quorum_and_threshold():
     world.build()
-    ok("governance_update", "ctl", quorum_percent=50)
+    ok("governance_update", "ctl", voting_quorum=50 * PERCENT)
     p = ok("proposal_create", "alice", title="x")["proposal"]
     vote_all(p, "yes", "alice", "bob")
     later(8 * 86400)
@@ -73,7 +75,134 @@ def test_veto():
     world.policy(depts["Civil Registry"], 1, 3, veto=["dana"])
     p = ok("proposal_create", "bob", title="x", department="Civil Registry")["proposal"]
     ok("proposal_vote", "dana", proposal=p, choice="no")
+    assert Proposal[p].status == "voting"  # a veto holder's no can be replaced too: it rejects when the vote ends
+    ok("proposal_vote", "bob", proposal=p, choice="yes")  # the approval m asks for, and everyone has voted
     assert Proposal[p].status == "rejected"
+
+
+def civil_registry(m, quorum=0, veto=()):
+    """Civil Registry deciding m of 3, with four voters: dana, bob, and alice and carla in seats of their own."""
+    depts = world.build()
+    for voter in ("alice", "carla"):
+        world.seat(f"civil-registry.{voter}", voter, depts["Civil Registry"])
+    world.policy(depts["Civil Registry"], m, 3, quorum, veto)
+
+
+def department_proposal():
+    return ok("proposal_create", "bob", title="x", department="Civil Registry")["proposal"]
+
+
+def finalized_at_its_deadline(p):
+    later(8 * 86400)
+    return ok("proposal_finalize", "ctl", proposal=p)["status"]
+
+
+def test_I_GOV_7_a_veto_holder_who_has_not_voted_keeps_a_department_vote_open():
+    civil_registry(2, veto=["dana"])
+    p = department_proposal()
+    vote_all(p, "yes", "bob", "alice")
+    assert Proposal[p].status == "voting"  # two approvals, but dana has not voted
+    ok("proposal_vote", "dana", proposal=p, choice="abstain")
+    assert Proposal[p].status == "accepted" and Proposal[p].tally["eligible"] == 4  # carla never voted
+    assert "not open" in call("proposal_vote", "carla", proposal=p, choice="no")["error"]
+
+
+def test_I_GOV_7_a_vetoing_no_keeps_the_vote_open_until_it_ends_and_rejects_it_then():
+    civil_registry(2, veto=["dana"])
+    p = department_proposal()
+    ok("proposal_vote", "dana", proposal=p, choice="no")
+    vote_all(p, "yes", "bob", "alice")
+    assert Proposal[p].status == "voting"  # every veto holder has voted, but against
+    ok("proposal_vote", "dana", proposal=p, choice="yes")  # she changes her mind
+    assert Proposal[p].status == "accepted"
+
+    q = department_proposal()
+    ok("proposal_vote", "dana", proposal=q, choice="no")
+    vote_all(q, "yes", "bob", "alice")
+    assert finalized_at_its_deadline(q) == "rejected"
+
+
+def test_I_GOV_7_a_veto_holder_who_never_votes_does_not_block_acceptance_at_the_deadline():
+    civil_registry(2, veto=["dana"])
+    p = department_proposal()
+    vote_all(p, "yes", "bob", "alice")
+    assert Proposal[p].status == "voting"
+    assert finalized_at_its_deadline(p) == "accepted"
+
+
+def test_I_GOV_7_a_veto_holder_who_left_the_department_does_not_hold_the_vote_open():
+    civil_registry(2, veto=["dana"])
+    # The rows are set as expelling her leaves them: org.expel (department_expel) is governed by the department, so
+    # under this 2-of-3 policy it would file a proposal; it ends her seat and clears the head, and the policy keeps
+    # its veto list.
+    Appointment["civil-registry.head:dana"].status = "ended"
+    Department["Civil Registry"].head = ""
+    p = department_proposal()
+    assert "not eligible" in call("proposal_vote", "dana", proposal=p, choice="no")["error"]
+    vote_all(p, "yes", "bob", "alice")
+    assert Proposal[p].status == "accepted"  # she cannot vote, and would not be waited for
+
+
+def test_I_GOV_7_a_department_vote_without_veto_holders_ends_at_its_approvals():
+    civil_registry(2)
+    p = department_proposal()
+    ok("proposal_vote", "bob", proposal=p, choice="yes")
+    assert Proposal[p].status == "voting"
+    ok("proposal_vote", "alice", proposal=p, choice="yes")
+    assert Proposal[p].status == "accepted"
+
+
+def test_I_GOV_7_a_no_can_be_replaced_after_approvals_become_impossible():
+    civil_registry(3)
+    p = department_proposal()
+    vote_all(p, "no", "bob", "alice")  # two of the four are left: three approvals are out of reach
+    assert Proposal[p].status == "voting"
+    ok("proposal_vote", "bob", proposal=p, choice="yes")
+    vote_all(p, "yes", "dana", "carla")
+    assert Proposal[p].status == "accepted"
+
+    q = department_proposal()
+    vote_all(q, "no", "bob", "alice")
+    assert finalized_at_its_deadline(q) == "rejected"
+
+
+def test_I_GOV_7_with_no_voting_window_a_department_vote_that_cannot_pass_stays_open():
+    civil_registry(3)
+    ok("governance_update", "ctl", voting_window=0)
+    p = department_proposal()
+    assert Proposal[p].deadline == 0
+    vote_all(p, "no", "bob", "alice")  # three approvals are out of reach
+    later(30 * 86400)
+    assert Proposal[p].status == "voting"
+    ok("proposal_vote", "bob", proposal=p, choice="yes")  # a no is still replaced
+    vote_all(p, "yes", "dana", "carla")
+    assert Proposal[p].status == "accepted"
+
+    withdrawn = department_proposal()
+    vote_all(withdrawn, "no", "bob", "alice")
+    ok("proposal_withdraw", "bob", proposal=withdrawn)  # its proposer ends it
+    assert Proposal[withdrawn].status == "withdrawn"
+
+    everyone = department_proposal()
+    vote_all(everyone, "no", "bob", "alice", "dana")
+    assert Proposal[everyone].status == "voting"
+    ok("proposal_vote", "carla", proposal=everyone, choice="no")  # the last of the four
+    assert Proposal[everyone].status == "rejected"
+
+
+def test_I_GOV_3_a_departments_quorum_is_enforced():
+    civil_registry(1, quorum=75 * PERCENT)
+    p = department_proposal()
+    ok("proposal_vote", "bob", proposal=p, choice="yes")
+    assert Proposal[p].status == "voting"  # one approval is enough, a quarter of the voters is not
+    ok("proposal_vote", "alice", proposal=p, choice="abstain")
+    assert Proposal[p].status == "voting"
+    ok("proposal_vote", "dana", proposal=p, choice="abstain")  # three of the four
+    assert Proposal[p].status == "accepted"
+
+    q = department_proposal()
+    ok("proposal_vote", "bob", proposal=q, choice="yes")
+    assert finalized_at_its_deadline(q) == "rejected"
 
 
 def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
@@ -82,19 +211,33 @@ def test_I_GOV_1_governed_call_becomes_a_proposal_and_replays_once():
     out = ok("mandate_create", "ctl", title="Road works", scope={"max_value": 200000}, executor="Infrastructure")
     assert out["requires_vote"] and Mandate.count() == 0
     p = out["proposal"]
-    vote_all(p, "yes", *world.PEOPLE)
+    vote_all(p, "yes", *world.PEOPLE[:4])  # more than half: the week-long vote stays open for the rest
+    assert Proposal[p].status == "voting" and Mandate.count() == 0
     later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
-    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed"
+    # The vote has ended: finalize closes it, and an accepted action runs at once (there is nothing to wait for).
+    assert ok("proposal_finalize", "ctl", proposal=p)["status"] == "executed"
     assert Mandate.count() == 1 and Mandate["M-1"].executor.id == "Infrastructure"
     assert "no accepted action" in call("proposal_execute", "ctl", proposal=p)["error"]
     assert Proposal[p].status == "executed"
 
 
+def test_a_proposal_the_previous_release_left_accepted_runs_once_through_proposal_execute():
+    """The release before this one recorded an accepted vote at ``proposal_finalize`` and ran its action at
+    ``proposal_execute``: such a proposal is still in storage."""
+    world.build()
+    action = {"op": "mandate_create", "args": {"title": "Road works"}}
+    p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
+    Proposal[p].status = "accepted"
+    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+    again = call("proposal_execute", "ctl", proposal=p)
+    assert not again["ok"] and again["kind"] == "conflict" and "no accepted action" in again["error"]
+    assert Mandate.count() == 1
+
+
 def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
     world.build()
     realm_wide = [("mandate_create", {"title": "Road works", "executor": "Infrastructure"}),
-                  ("governance_update", {"threshold": 0, "voting_window": 1})]
+                  ("governance_update", {"voting_threshold": 0, "voting_window": 1})]
     for name, args in realm_wide:
         out = call("proposal_create", "carla", title=name, department="Infrastructure", action={"op": name, "args": args})
         assert not out["ok"] and out["kind"] == "forbidden" and "only a realm-wide proposal" in out["error"]
@@ -105,7 +248,7 @@ def test_a_department_proposal_cannot_carry_an_action_outside_the_department():
 
 def test_a_stored_department_action_outside_the_department_fails_without_running():
     world.build()
-    for name, args in (("mandate_create", {"title": "Road works"}), ("governance_update", {"threshold": 0})):
+    for name, args in (("mandate_create", {"title": "Road works"}), ("governance_update", {"voting_threshold": 0})):
         p = ok("proposal_create", "carla", title=name, department="Infrastructure")["proposal"]
         Proposal[p].action = {"op": name, "args": args}
         out = ok("proposal_vote", "carla", proposal=p, choice="yes")
@@ -129,6 +272,50 @@ def test_a_department_proposal_carries_actions_its_department_governs():
         p = ok("proposal_create", "carla", title="crew", department="Infrastructure", action=action)["proposal"]
         assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "executed"
         assert Department[f"{parent} crew"].parent.id == parent
+
+
+def set_policy_of_roads(department):
+    """A proposal of ``department`` to set the policy of Roads, a department under Infrastructure."""
+    return call("proposal_create", "carla", title="Roads policy", department=department,
+                action={"op": "department_set_policy", "args": {"department": "Roads", "m": 1, "n": 2}})
+
+
+def test_a_parent_department_carries_a_governed_call_on_a_department_below_it_but_a_sibling_does_not():
+    world.build()
+    Department(id="Roads", parent=Department["Infrastructure"])
+    assert set_policy_of_roads("Infrastructure")["ok"]
+    sibling = set_policy_of_roads("Health")
+    assert sibling["kind"] == "forbidden" and "not governed by Health" in sibling["error"]
+    assert Proposal.count() == 1
+
+
+def test_a_department_moved_after_the_vote_was_filed_is_no_longer_governed_by_its_proposal():
+    world.build()
+    Department(id="Roads", parent=Department["Infrastructure"])
+    p = set_policy_of_roads("Infrastructure")["proposal"]
+    ok("department_edit", "ctl", department="Roads", parent="Health")
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert Proposal[p].result["kind"] == "forbidden" and Department["Roads"].policy["n"] == 1
+
+
+def test_a_department_deleted_after_the_vote_was_filed_leaves_nothing_to_run():
+    world.build()
+    Department(id="Roads", parent=Department["Infrastructure"])
+    p = set_policy_of_roads("Infrastructure")["proposal"]
+    ok("department_delete", "ctl", department="Roads")
+    assert ok("proposal_vote", "carla", proposal=p, choice="yes")["status"] == "failed"
+    assert Proposal[p].result["kind"] == "not_found"
+
+
+def test_a_call_on_a_record_that_does_not_exist_is_carried_only_by_a_realm_wide_proposal():
+    """It has no governing department: a department's proposal is refused, the realm's runs and fails (I-GOV-13)."""
+    world.build()
+    action = {"op": "department_set_policy", "args": {"department": "Nowhere", "m": 1, "n": 2}}
+    refused = call("proposal_create", "carla", title="x", department="Infrastructure", action=action)
+    assert refused["kind"] == "not_found" and Proposal.count() == 0
+    p = ok("proposal_create", "alice", title="x", action=action)["proposal"]
+    vote_all(p, "yes", *world.PEOPLE)
+    assert Proposal[p].status == "failed" and Proposal[p].result["kind"] == "not_found"
 
 
 def pass_department_proposal(op_name, args, department="Infrastructure"):
@@ -195,7 +382,7 @@ def test_a_deleted_departments_proposal_does_not_turn_realm_wide_to_make_every_m
 def test_a_replay_of_a_proposal_whose_department_is_gone_holds_no_permission():
     p = pending_in_deleted_department(
         "role.assign", {"op": "role_assign", "args": {"department": "Sub", "user": "carla", "profile": "admin"}})
-    replay = SimpleNamespace(origin="replay", proposal=p, user="carla")
+    replay = SimpleNamespace(origin="replay", proposal=p, user="carla", legacy=False)
     try:
         members.within(replay, {"role.assign"})
     except Forbidden as e:
@@ -217,20 +404,33 @@ def test_a_department_with_a_proposal_to_vote_on_or_run_cannot_be_deleted():
     assert Department["Sub"] is None
 
 
+def test_a_department_with_more_proposals_than_a_call_can_load_is_still_deleted_and_still_guarded():
+    """Its ``proposals`` relation holds them all (ic-python-db refuses to load more than MAX_UNPAGED of a relation), but
+    only the pending ones matter."""
+    world.build()
+    sub = Department(id="Sub", parent=Department["Infrastructure"])
+    for n in range(MAX_UNPAGED + 1):
+        Proposal(id=f"H-{n}", title="x", department=sub, status="executed")
+    Proposal["H-7"].status = "voting"
+    assert call("department_delete", "ctl", department="Sub")["kind"] == "conflict"
+    Proposal["H-7"].status = "rejected"
+    ok("department_delete", "ctl", department="Sub")
+    assert Department["Sub"] is None
+
+
 def test_a_realm_wide_proposal_carries_any_action():
     world.build()
     action = {"op": "mandate_create", "args": {"title": "Road works"}}
     p = ok("proposal_create", "alice", title="Road works", action=action)["proposal"]
     vote_all(p, "yes", *world.PEOPLE)
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
-    assert ok("proposal_execute", "ctl", proposal=p)["status"] == "executed" and Mandate.count() == 1
+    assert Proposal[p].status == "executed" and Mandate.count() == 1  # the last vote ended the vote
 
 
 def test_a_governed_call_under_power_of_attorney_replays_as_the_grantor():
     world.build()
     world.policy(Department["Infrastructure"], 2, 3)
     Department["Infrastructure"].head = "bob"
+    world.seat("infrastructure.board", "bob", Department["Infrastructure"])  # a head votes with the seat they hold
     Delegation(id="d1", grantor="carla", delegate="claude-conn", status="active",
                scope={"operations": ["proposal.vote"]}, expires_at=fake_chain.now() + 86400)
     p = ok("t_governed_whoami", "claude-conn", on_behalf_of="carla")["proposal"]
@@ -255,13 +455,10 @@ def test_a_stored_action_naming_another_member_runs_as_its_proposer_not_that_mem
     p = ok("proposal_create", "mallory", title="Vote no", action=vote)["proposal"]
     # A proposal filed before the rule, with the impersonation already in its stored action, both ways.
     Proposal[p].action = {**vote, "args": {**vote["args"], "on_behalf_of": "alice"}, "initiator": "alice"}
-    vote_all(p, "yes", *world.PEOPLE)
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=p)
     target = ok("proposal_create", "alice", title="Bike lane on Main St")["proposal"]
     assert target == "P-2"
-    out = ok("proposal_execute", "ctl", proposal=p)
-    assert out["status"] == "executed", out
+    vote_all(p, "yes", *world.PEOPLE)  # the last vote ends the vote and runs the action
+    assert Proposal[p].status == "executed", Proposal[p].result
     assert Vote[f"{target}:alice"] is None
     assert Vote[f"{target}:mallory"].choice == "no"
 
@@ -303,7 +500,9 @@ def test_tally_is_kept_as_votes_are_cast_and_replaced():
     assert out["tally"] == {"yes": 1, "no": 1, "abstain": 0} and out["eligible"] == len(world.PEOPLE)
     ok("user_set_status", "ctl", user="mallory", status="suspended")
     assert "not eligible" in call("proposal_vote", "mallory", proposal=p, choice="yes")["error"]
-    assert ok("proposal_get", "alice", proposal=p)["eligible"] == len(world.PEOPLE) - 1
+    assert ok("proposal_get", "alice", proposal=p)["eligible"] == len(world.PEOPLE)  # counted when the vote opened
+    after = ok("proposal_create", "alice", title="z")["proposal"]
+    assert ok("proposal_get", "alice", proposal=after)["eligible"] == len(world.PEOPLE) - 1
     world.policy(depts["Civil Registry"], 1, 2)
     d = ok("proposal_create", "dana", title="y", department="Civil Registry")["proposal"]
     assert ok("proposal_get", "dana", proposal=d)["eligible"] == 2
@@ -343,7 +542,7 @@ def fire_timers():
 def test_a_zero_window_closes_a_vote_once_its_outcome_is_certain_and_runs_its_action():
     world.build()
     ok("governance_update", "ctl", voting_window=0)
-    action = {"op": "governance_update", "args": {"threshold": 60}}
+    action = {"op": "governance_update", "args": {"voting_threshold": 60 * PERCENT}}
     p = ok("proposal_create", "alice", title="Raise the threshold", action=action)["proposal"]
     assert Proposal[p].deadline == 0 and fake_chain.state["timers"] == []
     vote_all(p, "yes", "alice", "bob", "dana")
@@ -368,7 +567,7 @@ def test_everyone_voting_decides_an_open_vote():
 
 def test_a_timed_vote_settles_itself_at_its_deadline():
     world.build()
-    action = {"op": "governance_update", "args": {"threshold": 60}}
+    action = {"op": "governance_update", "args": {"voting_threshold": 60 * PERCENT}}
     p = ok("proposal_create", "alice", title="Raise the threshold", action=action)["proposal"]
     vote_all(p, "yes", "alice", "bob")
     assert fake_chain.state["timers"][-1][0] == 7 * 86400 + 1

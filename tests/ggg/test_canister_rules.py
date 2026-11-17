@@ -2,6 +2,7 @@
 
 import ast
 import pathlib
+import re
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "realm_backend"
 
@@ -25,7 +26,8 @@ def test_every_op_module_is_loaded_by_ops():
 def test_only_op_reads_the_raw_registry():
     for path in SRC.rglob("*.py"):
         if path.name not in ("op.py", "main.py"):
-            assert "OPS" not in path.read_text(), f"{path.name}: use op.ops(), OPS may be partly loaded"
+            # The name OPS itself, not a longer one such as MODULE_OPS (realms/legislation/subset.py).
+            assert not re.search(r"\bOPS\b", path.read_text()), f"{path.name}: use op.ops(), OPS may be partly loaded"
 
 
 def test_every_op_says_what_it_does_and_names_its_arguments():

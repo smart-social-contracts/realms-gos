@@ -1,0 +1,183 @@
+"""The chapters of València (tests/fixtures/legislation/valencia, a copy of realms-codices ``legislation/``) in the
+realm's runtime (docs/codices/layered-codex.md §5, realms-gos#488): the codex of the layers EU, Spain, the Comunitat
+Valenciana, EMSHI and València, installed in a realm, and each example's guard or hook answering on GGG's data.
+
+The sandbox's guards and hooks are called with the plain arguments GGG would hand them: the operations they run
+around (``document_share``, ``codex_install``, ...) need arguments and rows of their own that say nothing about the
+chapter."""
+
+from pathlib import Path
+
+import pytest
+
+from core import legislation, op
+from core.db import each
+from ggg import Department, External, Invoice, Land, Member, TaxPolicy
+from kit import call, ok
+import world
+from test_legislation_runtime import activate, fresh_realm, layered  # noqa: F401  the autouse fixture
+from test_taxes import adopt_policy, setup_taxes
+
+TREE = Path(__file__).resolve().parents[1] / "fixtures/legislation/valencia"
+VALENCIA = "eu/es/vc/46250-valencia"
+LAYERS = ["eu", "eu/es", "eu/es/vc", "eu/es/vc/emshi", VALENCIA]
+NOW = 1_800_000_000  # seconds, as the realm counts time
+DAY = 86_400
+
+# A chapter of a domain of its own, in València's layer: a guard that reports what a helper of Spain's tax chapter says.
+PROBE = """
+from realms.legislation import above
+
+class Probe(above("probe")):
+    uses = ["tax"]
+
+    def check_t_probe(self, args):
+        return self.deny(str(self.legislation.tax.ibi_bonus(args.owner)))
+"""
+
+
+@op.op("treasury.manage")
+def t_probe(c, args):
+    """The operation the probe chapter guards: it always refuses, and says what it found."""
+    return {}
+
+
+def valencia():
+    chapters = {(s, f.stem): f.read_text() for s in LAYERS for f in sorted((TREE / s).glob("*.py"))}
+    chapters[(VALENCIA, "probe")] = PROBE
+    calendars = [(s, (TREE / s / "calendar.json").read_text()) for s in LAYERS if (TREE / s / "calendar.json").exists()]
+    return activate(layered(chapters, calendars, layers=LAYERS))
+
+
+def guard(operation, args, approvals=()):
+    """The outcome of every domain's ``check_<operation>``: the reason it denied, or None."""
+    outcomes = legislation._call("guard", op=operation, args=args, now=NOW, approvals=list(approvals))
+    assert all("error" not in o for o in outcomes), outcomes
+    return next((o["denied"] for o in outcomes if "denied" in o), None)
+
+
+def hook(operation, domain, args, result=None):
+    """The effects one domain's ``on_<operation>`` queues, as (operation, arguments)."""
+    event = {"user": "alice", "args": args, "result": result or {}, "at": NOW}
+    outcome = legislation._call("hook", op=operation, domain=domain, event=event, now=NOW, approvals=[])
+    assert "error" not in outcome, outcome
+    return [tuple(effect) for effect in outcome["effects"]]
+
+
+def bonus(owner):
+    return call("t_probe", owner=owner)["error"]
+
+
+def submit_title(user, value, verify=True):
+    attribute = ok("attribute_submit", user, kind="large_family", value=value, ref=f"vault:{user}")["attribute"]
+    if verify:
+        ok("attribute_review", "hector", attribute=attribute, status="verified")
+
+
+def reviewer():
+    """Hector, who verifies attributes."""
+    world.seat("civil-registry.reviewer", "hector", Department["Civil Registry"], "attribute.review")
+    world.person("hector")
+
+
+@pytest.fixture
+def codex():
+    reviewer()
+    return valencia()
+
+
+# ── Taxes (§5.6): the bonus is read from GGG's attributes ────────────────────────────────────────────────────────
+
+
+def test_a_verified_large_family_title_forgives_its_share_of_the_quota(codex):
+    submit_title("alice", "general")
+    submit_title("bob", "special")
+    assert bonus("User:alice") == "60000000"  # 60 %, in hundred-millionths
+    assert bonus("User:bob") == "90000000"
+
+
+def test_no_bonus_without_a_verified_title_of_a_known_kind_held_by_a_person(codex):
+    submit_title("alice", "general", verify=False)  # still pending
+    submit_title("bob", "unheard-of")
+    ok("attribute_submit", "dana", kind="student", value="general", ref="vault:dana")
+    assert [bonus(f"User:{who}") for who in ("alice", "bob", "dana", "carla")] == ["0", "0", "0", "0"]
+    assert bonus("Organization:buildco") == "0"
+
+
+def items_of(payer):
+    return [(i["concept"], i["amount"]) for invoice in each(Invoice, "payer", payer) for i in invoice.items]
+
+
+def test_the_ibi_is_assessed_on_the_parcels_value_less_the_verified_large_family_bonus():
+    setup_taxes()  # the invoice token has two decimals: a cent is a unit
+    reviewer()
+    Land(id="L-1", owner="User:alice", width=10, height=12, assessed_value=20_000_000, area=120)  # 200 000.00
+    Land(id="L-2", owner="User:bob", width=10, height=12, assessed_value=20_000_000, area=120)
+    Land(id="L-3", owner="User:carla", width=1, height=1)  # never assessed: no IBI yet
+    submit_title("alice", "general")
+    valencia()
+    adopt_policy([{"code": "ibi_urban", "kind": "tax", "subject": "Land", "rate": 1_240_000, "facts": {}}])  # 1.24 %
+    assert ok("tax_assess", "bob", period="2026")["count"] == 2
+    assert items_of("User:alice") == [("ibi_urban", 248_000), ("ibi_urban_bonus", -148_800)]  # 2 480.00 less 60 %
+    assert items_of("User:bob") == [("ibi_urban", 248_000)]
+    assert items_of("User:carla") == []
+
+
+# ── Local regime (§5.2): the guard on a change of legislation and the hooks that run when it is installed ────────
+
+
+def test_an_ordinance_must_take_effect_15_working_days_after_the_vote_can_close(codex):
+    code = {"op": "codex_install", "args": {"url": "https://example.org/change.json", "checksum": "sha256:x"}}  # as a realm files it
+    assert "15 working days" in guard("proposal_create", {"action": code, "effective_at": None})
+    assert "15 working days" in guard("proposal_create", {"action": code, "effective_at": NOW + 7 * DAY})
+    assert guard("proposal_create", {"action": code, "effective_at": NOW + 40 * DAY}) is None
+    assert guard("proposal_create", {"action": {"op": "transfer_create", "args": {}}, "effective_at": None}) is None  # not an ordinance
+
+
+def test_an_ordinance_installed_tells_the_authorities_then_every_member_in_the_co_official_languages(codex):
+    Member(id="zoe", joined_at=1)
+    effects = hook("codex_install", "local_regime", {"url": "https://example.org/change.json", "checksum": "sha256:x"},
+                   {"codex": "sha256:abc", "job": "J-1"})
+    sent = [(args["recipient"]["id"], args["title"]) for _, args in effects]
+    assert sent[:2] == [("AGE", "Comunicació d'acord"), ("GVA", "Comunicació d'acord")]
+    assert ("zoe", "Nova ordenança") in sent
+    notice = next(args for _, args in effects if args["recipient"]["id"] == "zoe")["translations"]
+    assert [(t["language"], t["title"]) for t in notice] == [("es", "Nueva ordenanza"), ("ca-valencia", "Nova ordenança")]
+    assert {t["body"] for t in notice} == {"sha256:abc"}  # Spain's language first, then the Comunitat's
+
+
+# ── Data protection (§5.4): the guards stack down the layers ─────────────────────────────────────────────────────
+
+
+def share(basis, recipient, approvals=()):
+    return guard("document_share", {"basis": basis, "recipient": recipient}, approvals)
+
+
+def test_the_guards_of_the_eu_spain_and_valencia_run_in_that_order(codex):
+    External(id="AGE", name="Administración General del Estado", kind="authority")
+    External(id="BUILDCO", name="BuildCo", kind="company")
+    authority, company = "External:AGE", "External:BUILDCO"  # as the realm takes a recipient
+    assert "consent is not a basis" in share({"legal_basis": "gdpr-6-1-a"}, authority)
+    assert "name the legislation" in share({"legal_basis": "gdpr-6-1-c"}, authority)
+    task = {"legal_basis": "gdpr-6-1-c", "legislation": "Ley 7/1985"}
+    assert share(task, authority) is None
+    assert "Junta de Govern Local" in share(task, company)
+    assert share(task, company, approvals=["Junta de Govern Local"]) is None
+
+
+# ── The register and the body beside the line (§5.5, §5.7) ───────────────────────────────────────────────────────
+
+
+def test_a_new_resident_is_reported_to_the_national_register(codex):
+    [(operation, args)] = hook("user_add", "register", {"user": "zoe"})
+    assert (operation, args["recipient"], args["topic"], args["body"]) == (
+        "notification_send", {"kind": "external", "id": "INE"}, "padron", "zoe")
+
+
+def test_emshi_is_told_when_a_water_tariff_is_proposed(codex):
+    TaxPolicy(id="P1", taxes=[{"code": "water_supply"}, {"code": "ibi_urban"}])
+    [(_, args)] = hook("tax_policy_propose", "water", {"policy": "P1"})
+    assert (args["recipient"], args["topic"]) == ({"kind": "external", "id": "EMSHI"}, "tariff")
+    TaxPolicy(id="P2", taxes=[{"code": "ibi_urban"}])
+    assert hook("tax_policy_propose", "water", {"policy": "P2"}) == []
+

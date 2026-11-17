@@ -11,7 +11,9 @@ class License(Row):
     issued_by = ManyToOne("Department", "licenses_issued")
     status = String(default="applied")  # applied | active | rejected | suspended | revoked | expired
     applied_at = Integer(default=0)
+    decision_due = Integer(default=0)  # from the Procedure of its kind, when one is defined
     issued_at = Integer(default=0)
     expires_at = Integer(default=0)
     evidence_ref = String(default="")
     conditions = Json({})
+    land = String(default="")  # the parcel it is for, when it is for one

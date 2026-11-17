@@ -9,7 +9,9 @@ from .budget import Budget
 from .allocation_rule import AllocationRule
 from .ledger_entry import LedgerEntry
 from .invoice import Invoice
+from .loan import Loan
 from .transfer import Transfer
+from .sweep import Sweep
 from .trade import Trade
 from .payment_account import PaymentAccount
 from .financial_report import FinancialReport

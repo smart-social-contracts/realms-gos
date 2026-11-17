@@ -36,8 +36,8 @@
   },
   "governance": {
     "voting_window_days": 7,
-    "quorum_percent": 20,
-    "approval_threshold": 0.5,
+    "quorum": 20000000,
+    "threshold": 50000000,
     "proposal_types": [
       "codex_change"
     ]

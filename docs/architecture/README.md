@@ -95,6 +95,7 @@ back every change of the call. Details: [operations](operations.md).
 | Passed proposal | replay of its action, as the proposer (the grantor, under power of attorney) | `replay` | Nothing more: the vote was the authorization, within the proposal's department. A proposal from a delegate's governed call also needs its grant not to have been revoked or replaced, and to still cover the call |
 | REPL | `shell` op → sandbox → `ops.<name>()` | `shell` | The caller's permissions |
 | Another quarter | `run` from a registered quarter | `user` | `quarter.sync` |
+| The capital of a linked realm | `run` from the capital at the other side of a link | `user` | `link.sync` |
 
 ## Where to go next
 

@@ -1,22 +1,46 @@
 import json
 
-from core import chain
+from core import chain, journal
+from core import change_list
+from core import it_team
+from core import layered_codex as store
+from core import legislation
 from core import sandbox
-from core.db import Conflict, Fail, find, first, page, view
-from ggg import Codex, Realm
+from core import signing
+from core.db import Conflict, Fail, NotFound, find, first, latest, view, window
+from ggg import Codex, InstallJob, LayeredCodex, Realm
 from core.op import op
 from api import extensions
 from api.extensions import checksum, trust
-from api.proposals import realm_wide
+from api.proposals import realm_wide, rule_to_record
 
 API = 2  # the hook contract codices declare as `codex_api_version`
 SHOWN = ("id", "version", "status", "checksum", "capabilities", "installed_at", "previous")
+LAYERED_SHOWN = ("id", "status", "layers", "layer_paths", "chapters", "previous", "installed_at", "activates_at",
+                 "proposal")
+JOB_SHOWN = ("id", "proposal", "step", "status", "error", "started_at", "finished_at")
 REALM_FIELDS = ("name", "status", "accounting_currency", "accounting_currency_decimals", "is_capital", "is_quarter",
                 "open_registration")
 
 
-def active():
+def active_legacy():
+    """The active codex when it is a legacy one: the kind with a manifest and hooks."""
     return first(Codex, "status", "active")
+
+
+def active():
+    """The codex the realm runs, of either kind: a legacy ``Codex`` or a ``LayeredCodex``. At most one is active."""
+    return active_legacy() or first(LayeredCodex, "status", "active")
+
+
+def pending():
+    """The layered codex installed and waiting for ``codex_activate`` or its time, if any; at most one waits at a time."""
+    return first(LayeredCodex, "status", "pending")
+
+
+def find_codex(codex_id):
+    """A codex of either kind by its id: ``name@version`` for a legacy one, ``sha256:…`` for a layered one."""
+    return find(Codex if "@" in codex_id else LayeredCodex, codex_id)
 
 
 def runnable(manifest):
@@ -35,9 +59,30 @@ def config(codex):
 
 
 def fetch(namespace):
-    """Manifest and hook source of a published codex, from the file registry."""
-    manifest = json.loads((yield from extensions.fetch(namespace, "manifest.json")))
+    """Manifest and hook source of a published codex, from the file registry. What the registry sends is checked as what
+    a sent package is (``check_manifest``), and every way it can be wrong is a Fail that names the file: a manifest that
+    is not JSON, is a list or null, or is empty, code that is not UTF-8. Parsed unchecked, they raised in the install (a
+    ``.get`` of a list, a parse error), which is a trap: the vote or the timer that ran the install never concluded."""
+    text = yield from extensions.fetch(namespace, "manifest.json")
+    try:
+        manifest = json.loads(text)
+    except Exception as e:  # noqa: BLE001  a ValueError, or a RecursionError on a manifest nested too deep
+        raise Fail(f"{namespace}/manifest.json is not JSON: {str(e)[:200]}")
+    try:
+        check_manifest(manifest)
+    except Fail as e:
+        raise Fail(f"{namespace}/manifest.json: {e}")
     return manifest, (yield from extensions.fetch(namespace, "backend/hooks.py"))
+
+
+ERROR_MAX = 1000  # characters of a hook's error the realm keeps, in its record and in the reply it gives
+
+
+def cut_error(text):
+    """``text``, an error a hook failed with, as the realm keeps it: the SDK's reply carries the whole text of what the
+    hook raised, and a Json field of 65,536 characters (``Realm.codex_install_state``) raises on more, which trapped
+    the install, the vote or timer that ran it and, for ``on_user_register``, every join."""
+    return text if len(text) <= ERROR_MAX else f"{text[:ERROR_MAX]}… [cut, {len(text)} characters in all]"
 
 
 def hook(name, context=None):
@@ -45,35 +90,278 @@ def hook(name, context=None):
 
     A generator (``out = yield from codex.hook(...)``). Returns None when no codex is active or it has no such
     hook, else ``{ok, result, effects}`` or ``{ok: false, error}``. A failing hook never fails the caller; it
-    marks the codex unhealthy until a hook succeeds again.
+    marks the codex unhealthy until a hook succeeds again. It fails however it does: an error inside it, a function
+    the code does not define, a signature that does not take what the realm gives it, a spent budget. None of them
+    reaches the caller as an exception, and so none traps the message of a vote, a timer or an install it runs in.
     """
-    codex = active()
+    codex = active_legacy()
     if codex is None or name not in (codex.manifest or {}).get("hooks", []):
         return None
     realm = Realm["1"]
     facts = {"codex": codex.id, "config": config(codex), "now": chain.now(), "realm": view(realm, *REALM_FIELDS)}
-    out = yield from sandbox.call(codex.source, name, context or {}, facts, codex.capabilities or [])
+    try:
+        out = yield from sandbox.call(codex.source, name, context or {}, facts, codex.capabilities or [])
+    except Exception as e:  # noqa: BLE001  the hook's own failure, whatever it is, is the codex's: never the caller's
+        out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     failed = [e for e in out.get("effects", []) if not e.get("ok")]
     error = out.get("error") or "; ".join(f"{e['op']}: {e.get('error')}" for e in failed)
+    if error:
+        error = cut_error(str(error))
+        if out.get("error"):  # the caller's reply (an install's ``init``, then a proposal's result) is cut as well
+            out = {**out, "error": error}
     problem = {"codex": codex.id, "hook": name, "error": error, "at": chain.now()} if error else {}
     if realm.codex_install_state != problem:
         realm.codex_install_state = problem
     return out
 
 
-@op("codex.install", governed=realm_wide, returns="codex")
+def compute(name, context, decimals=None):
+    """The active codex's answer to GGG's ``compute_<name>`` for ``context`` (its keyword arguments), None when no
+    chapter defines it. ``decimals`` is the token the answer is in (core.legislation.compute). A generator, for the
+    operations that drive it with ``yield from``."""
+    return legislation.compute(name, decimals=decimals, **context)
+    yield  # noqa: unreachable, on purpose
+
+
+def switch_to(row, replaced):
+    """Make ``row`` the active codex in place of ``replaced``, which is kept to revert to, and record the realm's voting
+    rule and window with it: what will decide a vote to revert to this codex (§10.1)."""
+    record = rule_to_record()
+    row.previous, row.status, row.voting_rule = replaced.id if replaced else "", "active", record
+    if replaced:
+        replaced.status = "inactive"
+        if not replaced.voting_rule:  # it became active before the realm recorded rules: the rule in force until now
+            replaced.voting_rule = record
+
+
+def switch(waiting):
+    """The switch of an install (docs/codices/layered-codex.md §9.2 step 6): the pending ``waiting`` becomes the
+    active codex in place of the current one, kept to revert to, with its ``installed_at`` and, the first time, the
+    realm's own source id (its own layer). A release its install brings is checked first, and then the runtime loads
+    it: a codex that is refused or does not load raises before anything changes. The ``on_codex_activate`` hooks run
+    in the next message (``hooks``): a hook never fails the switch (§9.3), nor the proposal execution or install step
+    that made it."""
+    from api import installs  # it imports this module
+
+    installs.check_relayed(waiting)
+    legislation.load(waiting)
+    installs.keep_relayed(waiting)
+    switch_to(waiting, active())
+    waiting.installed_at = chain.now()
+    store.remember_source(waiting.layers[-1])
+    store.remember_in_force(waiting.activates_at if 0 < waiting.activates_at <= chain.now() else chain.now())
+    journal.codex_installed(waiting)
+    chain.set_timer(0, lambda codex_id=waiting.id: hooks(codex_id))
+    from api import propagation  # it imports the install task, which imports this module
+
+    chain.set_timer(0, propagation.after_switch)  # a quarter reports to its capital; a capital judges its quarters
+    from api import sync_checks  # it imports the install task, which imports this module
+
+    sync_checks.rejudge()
+
+
+def hooks(codex_id):
+    """The ``on_codex_activate`` hooks of the codex just switched to, once per realm, unless it was switched away
+    from again before this message ran. A generator: a hook's effects may call other canisters."""
+    row = LayeredCodex[codex_id]
+    if row is not None and row.status == "active":
+        yield from legislation.activate(row)
+
+
+def text_arg(args, key, what):
+    """``args[key]`` is text, or a Fail that says what ``key`` is: an argument of another type than the one the install
+    reads is refused here, where a call is filed or made, rather than raising inside it (a trap). What the text must
+    be, a source id or a version of 1 to 64 characters, the install itself judges."""
+    if not isinstance(args.get(key), str):
+        raise Fail(f"{key} is {what}")
+
+
+def texts_of(value, what):
+    """``value`` is a list of text, or a Fail that says what ``what`` is."""
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise Fail(f"{what} is a list of text")
+
+
+def manifest_is_record(manifest):
+    """``manifest`` is a record that is not empty, or a Fail: the first thing an install asks of it."""
+    if not isinstance(manifest, dict) or not manifest:
+        raise Fail("manifest is the codex's manifest.json: a record that is not empty")
+
+
+MANIFEST_DEPTH = 100  # levels of lists and records a manifest may nest: the codices' have a handful
+
+
+def nests_deeper_than(value, limit):
+    """Whether the JSON ``value`` nests lists and records more than ``limit`` levels deep. Read without recursion: that
+    is the point."""
+    todo = [(value, 0)]
+    while todo:
+        item, level = todo.pop()
+        if isinstance(item, (dict, list)):
+            if level >= limit:
+                return True
+            todo.extend((child, level + 1) for child in (item.values() if isinstance(item, dict) else item))
+    return False
+
+
+def check_manifest_fields(manifest):
+    """The fields of a manifest that is a record: ``id`` and ``version`` text, ``hooks`` and ``capabilities``, when
+    there, lists of text, and no more than ``MANIFEST_DEPTH`` levels of nesting. A manifest nested deeper parses and then
+    raises a RecursionError wherever it is dumped (the checksum, the row that keeps it), at a depth that depends on the
+    stack the dump is made in, so a vote or a timer that runs it traps, in process, at one depth and not another."""
+    if nests_deeper_than(manifest, MANIFEST_DEPTH):
+        raise Fail(f"the manifest nests lists or records more than {MANIFEST_DEPTH} levels deep")
+    for key in ("id", "version"):
+        if not isinstance(manifest.get(key), str):
+            raise Fail(f"the manifest's {key} is text")
+    for key in ("capabilities", "hooks"):
+        if key in manifest:
+            texts_of(manifest[key], f"the manifest's {key}")
+
+
+def check_manifest(manifest):
+    """``manifest`` is of the types the install reads, or a Fail names the one that is not. The manifest the file registry
+    sends is judged by it (``fetch``); a sent package by the same two parts with its code between them
+    (``check_install_args``: record, code, fields), as the checks were before the registry's were added."""
+    manifest_is_record(manifest)
+    check_manifest_fields(manifest)
+
+
+def compiled(source):
+    """``source`` compiled, or a Fail: whatever the compiler raises is a refusal, never an exception out of the install: a
+    syntax error, a null byte, and on code nested too deep a RecursionError or a MemoryError (each of which a trap would
+    turn into a vote or a timer that never concludes)."""
+    try:
+        return compile(source, "hooks.py", "exec")
+    except Exception as e:  # noqa: BLE001
+        try:
+            reason = str(e)[:200] or type(e).__name__
+        except Exception:  # noqa: BLE001  an exception whose text cannot be made
+            reason = type(e).__name__
+        raise Fail(f"source does not compile: {reason}")
+
+
+def digest_of(manifest, source):
+    """The checksum of the manifest and the code, or a Fail: the canister's JSON accepts a lone surrogate
+    (``"\\ud800"``), which is not UTF-8 text, so the checksum (the hash of the text's bytes) raises a
+    UnicodeEncodeError that dispatch would trap on, with a vote or a timer that never concludes; so does a manifest
+    that parses and is nested too deep to dump, which a registry's can be (a RecursionError)."""
+    try:
+        return checksum(manifest, source)
+    except UnicodeEncodeError as e:
+        raise Fail(f"the manifest and the code are UTF-8 text: {e}")
+    except RecursionError:  # a manifest nested so deep that it parses and cannot be dumped (the interpreter's limit)
+        raise Fail("the manifest is nested too deep to be hashed")
+
+
+CO_OPTIMIZED = 0x1  # the flag of a function's code, and of a lambda's or a comprehension's: not of a class body
+
+
+def defined_hooks(code):
+    """The names of the functions the compiled module ``code`` defines at its top (``def`` and ``async def``, decorated
+    or not): what a hook of the manifest can be. Read from the code, where each of them is a constant of the module's
+    code with the flag of a function: a method, or a function nested in another, is a constant of its container's code,
+    a lambda and a comprehension carry names with ``<``, a class body lacks the flag, and a name that is only used,
+    assigned or imported is not a constant at all. (The syntax tree would say the same, but ``ast`` is a stub in the
+    canister's Python: it has no ``parse``.) No code runs."""
+    return {const.co_name for const in code.co_consts
+            if hasattr(const, "co_flags") and const.co_flags & CO_OPTIMIZED and not const.co_name.startswith("<")}
+
+
+def check_hooks(manifest, code):
+    """A manifest that lists a hook the compiled ``code`` does not define as a top-level function is refused before
+    anything is installed: the codex would switch in, and its hook could never run (``hook`` would find no function and
+    mark it unhealthy for good). The caller compiles the code (``compiled``) once the trust policy has accepted it:
+    code the realm would refuse is never compiled, which on code nested too deep can crash the canister's compiler past
+    any ``except``. A manifest of another type is left to the checks of it."""
+    hooks = manifest.get("hooks") if isinstance(manifest, dict) else None
+    if not isinstance(hooks, list):
+        return
+    defined = defined_hooks(code)
+    for name in hooks:
+        if isinstance(name, str) and name not in defined:
+            raise Fail(f"the manifest lists the hook {name}, which the code does not define as a top-level function")
+
+
+def check_install_args(args):
+    """``codex_install``'s ``args`` are of the types the install reads, or a Fail names the one that is not. Without it
+    an argument of another type raises inside the install (a manifest that is null, an empty string or a list, sent
+    code that is not text or does not compile, hooks that are not a list): the operation then traps, and a trap inside
+    a vote's execution or a timer rolls the message back, so a proposal that carries it may never conclude. It is the
+    operation's ``check``, which runs for a member's, a controller's or an accepted vote's call, and ``filed_install``
+    asks it where the install is filed: a proposal stored with such arguments before then fails, with the reason
+    recorded, and ``installs.prepare`` asks it before it stages a release, so that the staging and the switch cannot
+    disagree. A release is judged by its ``source`` and ``version`` alone: a change list beside it is never read, so
+    its types do not matter (a release with one is refused when it is filed, core.change_list.names_both, and still
+    runs, as the release, when stored). Of code the realm takes without asking anyone it also asks that the manifest's
+    hooks are functions the code defines (``check_hooks``); code it would refuse as untrusted is not compiled."""
+    if not isinstance(args, dict):
+        raise Fail("an install takes a record of arguments")
+    if change_list.names_release(args):
+        text_arg(args, "source", "the id of a layer from above: text")
+        text_arg(args, "version", "the release's version: text")
+    elif "checksum" in args:
+        if not isinstance(args["checksum"], str):
+            raise Fail("checksum is sha256:<64 hex digits>")
+        if "url" in args and not isinstance(args["url"], str):
+            raise Fail("url is the address of the change list, https")
+    elif "manifest" in args:
+        manifest = args["manifest"]
+        manifest_is_record(manifest)
+        text_arg(args, "source", "the codex's code: text")
+        check_manifest_fields(manifest)
+        # Code the realm would refuse as untrusted is refused for that, without compiling it (``trust``): the compiler
+        # runs here only on code the realm takes, which is all of it when it requires no approval.
+        if extensions.pinned(digest_of(manifest, args["source"])):
+            check_hooks(manifest, compiled(args["source"]))
+    elif "codex" in args or "version" in args:
+        text_arg(args, "codex", "the name of a codex of the file registry: text")
+        text_arg(args, "version", "the version of that codex: text")
+
+
+def filed_install(args, proposal):
+    """A "Propose install" (§11.4) that this realm could not build is refused when it is filed
+    (api.installs.release_of), rather than when the vote has passed. So is an install that names a release and a
+    change list at once (core.change_list.names_both): the realm would install the release, and a reader that tests
+    the checksum first would describe the change list. So is one whose arguments are not of the types the install
+    reads, or whose code (one the realm takes without asking) lacks a hook its manifest lists
+    (``check_install_args``)."""
+    check_install_args(args)
+    if change_list.names_release(args):
+        from api import installs  # it imports this module
+
+        if change_list.names_both(args):
+            raise Fail(installs.MIXED)
+        installs.release_of(args)
+
+
+@op("codex.install", governed=realm_wide, returns="codex", fixes=filed_install, check=check_install_args)
 def codex_install(c, args):
     """Install and activate a codex: ``manifest`` and ``source``, or ``codex`` and ``version`` from the file registry.
-    The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``."""
-    if "source" in args:
+    The code must pass the trust policy; the replaced codex is kept to revert to. Returns ``codex`` and ``init``.
+    A change list's ``url`` and ``checksum`` (``sha256:<hex>``, GGG's Code action) install a layered codex instead:
+    the install task fetches, checks and builds it step by step (api.installs), and the call returns its ``job``; a
+    proposal with an ``effective_at`` stages it at acceptance and switches at that time. One install at a time.
+    A release's ``source`` and ``version`` (GGG's ``CodexSource.Release``, the "Propose install" of §11.4) install
+    that release of a layer from above whole, from the record of the sync source that vouches for it, the realm's own
+    layer unchanged; refused in a realm that has no layer of its own yet, and in a federation. Anyone with
+    ``proposal.create`` may file it, and no guard or forbid of the codex runs on that ``proposal_create``
+    (core.legislation.proposes_release)."""
+    from api import installs  # it imports this module
+
+    if "checksum" in args or change_list.names_release(args):
+        return installs.begin(c, args)
+    if store.live_job() is not None:
+        raise Conflict("an install is running")
+    if "manifest" in args:
         manifest, source, namespace = args["manifest"], args["source"], None
     else:
         namespace = f"ext/{args['codex']}/{args['version']}"
         manifest, source = yield from fetch(namespace)
     runnable(manifest)
-    digest = checksum(manifest, source)
+    digest = digest_of(manifest, source)
     yield from trust(digest, namespace)
-    compile(source, "hooks.py", "exec")
+    check_hooks(manifest, compiled(source))  # after the trust policy: it does not compile what it would refuse
     if len(sandbox.readable(manifest.get("capabilities", []))) > sandbox.MAX_ACTIONS:
         raise Fail(f"a codex may declare at most {sandbox.MAX_ACTIONS} read operations")
     key, current = f"{manifest['id']}@{manifest['version']}", active()
@@ -82,11 +370,28 @@ def codex_install(c, args):
     row = Codex[key] or Codex(id=key)
     row.version, row.checksum, row.manifest, row.source = manifest["version"], digest, manifest, source
     row.capabilities, row.installed_at = manifest.get("capabilities", []), chain.now()
-    row.previous, row.status = current.id if current else "", "active"
-    if current:
-        current.status = "inactive"
+    switch_to(row, current)
+    if isinstance(current, LayeredCodex):
+        legislation.load(None)
     init = yield from hook("init")
     return {"codex": key, "init": init}
+
+
+@op("codex.install", governed=realm_wide, returns="codex")
+def codex_activate(c, args):
+    """Make the pending codex, named by its ``codex`` checksum (``sha256:<hex>``), the active one now; the codex it
+    replaces is kept to revert to, and its ``on_codex_activate`` hooks run in the next message. Conflict when no codex
+    is pending or it is another one. ``at``, when given, is not in the future: a pending codex is activated at once.
+    Returns ``codex``."""
+    waiting = pending()
+    if waiting is None:
+        raise Conflict("no codex is pending")
+    if args["codex"] != waiting.id:
+        raise Conflict(f"{args['codex']} is not the pending codex")
+    if args.get("at") and int(args["at"]) > chain.now():
+        raise Fail("this realm activates a pending codex at once: at is not in the future")
+    switch(waiting)
+    return {"codex": waiting.id}
 
 
 @op("codex.uninstall", governed=realm_wide)
@@ -96,30 +401,197 @@ def codex_uninstall(c, args):
     if codex is None:
         raise Conflict("no codex is installed")
     codex.status = "inactive"
+    if isinstance(codex, LayeredCodex):
+        legislation.load(None)
     return {"codex": codex.id}
 
 
-@op("codex.revert", governed=realm_wide)
-def codex_revert(c, args):
-    """Go back to the version the active codex replaced, if this realm still runs its codex API."""
-    codex = active()
-    if codex is None or not codex.previous:
+def legacy_with_checksum(digest):
+    """The legacy codex whose ``checksum`` is ``digest``. It is not indexed: a realm has few legacy codices."""
+    return next((row for row in Codex.load_some(1, max(Codex.max_id(), 1)) if row.checksum == digest), None)
+
+
+def named(value):
+    """The codex of either kind that ``value`` names: a layered codex by its id, which is its checksum; a legacy codex by
+    its ``checksum`` (with or without the ``sha256:`` GGG writes) or by the ``name@version`` the history lists it by."""
+    if not isinstance(value, str) or not value:
+        raise Fail("codex is the checksum of the codex to restore")
+    found = Codex[value] if "@" in value else LayeredCodex[value] or legacy_with_checksum(value.removeprefix("sha256:"))
+    if found is None:
+        raise NotFound(f"{value} is not in the history of this realm's codices")
+    return found
+
+
+def restoring(args):
+    """The earlier codex a revert restores: the one ``args["codex"]`` names, else the one the active codex replaced. The
+    active codex is not an earlier one, nor is a pending one: only ``codex_activate`` activates that."""
+    current = active()
+    if current is None:
+        raise Conflict("no codex is active")
+    if args.get("codex"):
+        target = named(args["codex"])
+    elif current.previous:
+        target = find_codex(current.previous)
+    else:
         raise Conflict("there is no previous codex to revert to")
-    prior = find(Codex, codex.previous)
-    runnable(prior.manifest or {})
-    codex.status, prior.status = "reverted", "active"
-    return {"codex": prior.id}
+    if target.id == current.id:
+        raise Conflict(f"{target.id} is the active codex already")
+    if target.status == "pending":
+        raise Conflict(f"{target.id} is pending: codex_activate activates it")
+    return target
+
+
+def only_previous(target):
+    previous = active().previous
+    if target.id != previous:
+        raise Conflict(f"codex_revert_fast restores only the previous codex ({previous or 'none'})")
+
+
+def restore(target, proposal=""):
+    """The revert: ``target``, an earlier codex of either kind, is the active codex again and the one it replaces is
+    reverted. No ``on_codex_activate`` hook runs (§10.5), and nothing else about the codex changes: it keeps the voting
+    rule and window it was recorded with. The ``proposal`` that carried the revert, if any, is named in the journal. A
+    capital's quarters restore it too (api.propagation). Returns ``codex``."""
+    if isinstance(target, Codex):
+        runnable(target.manifest or {})
+    current = active()
+    current.status, target.status = "reverted", "active"
+    if isinstance(current, LayeredCodex) or isinstance(target, LayeredCodex):
+        legislation.warm(target if isinstance(target, LayeredCodex) else None)
+    store.remember_in_force(chain.now())
+    journal.codex_reverted(target, current, proposal)
+    from api import propagation  # it imports the install task, which imports this module
+
+    propagation.reverted(target)  # a capital tells its quarters; a quarter reports to its capital
+    from api import sync_checks  # it imports the install task, which imports this module
+
+    sync_checks.rejudge()
+    return {"codex": target.id}
+
+
+def recorded_rule(action):
+    """The rule and window recorded with the codex that ``action`` restores, when it is a revert (``codex_revert``, or
+    ``codex_revert_fast``, which keeps its department's rule but runs under the window) and that codex has them: what
+    decides its vote (§10.1). None for any other action, and for a codex with no record: its vote follows the rule and
+    window in force."""
+    if not (isinstance(action, dict) and action.get("op") in ("codex_revert", "codex_revert_fast")
+            and (action.get("args") or {}).get("codex")):
+        return None
+    return named(action["args"]["codex"]).voting_rule or None
+
+
+def names_the_codex(args):
+    """A revert that becomes a proposal names the codex it restores, found when it is filed, so that what the vote
+    approves is what runs."""
+    return {**args, "codex": restoring(args).id}
+
+
+def filed_revert(args, proposal):
+    """A revert filed as a proposal names a codex that can be restored now."""
+    if not args.get("codex"):
+        raise Fail("a revert filed as a proposal names the codex it restores")
+    restoring(args)
+
+
+def fast_target(args):
+    """The codex a fast revert restores: the previous one, and only while a team is designated, whatever files or
+    replays the revert."""
+    it_team_governs(args)
+    target = restoring(args)
+    only_previous(target)
+    return target
+
+
+def filed_fast_revert(args, proposal):
+    filed_revert(args, proposal)
+    fast_target(args)
+
+
+def it_team_governs(args):
+    """The IT admin team's department governs a fast revert, under its own policy; no team, no fast revert."""
+    team = it_team.department()
+    if team is None:
+        raise Conflict("this realm has designated no IT admin team: codex_revert_fast is refused")
+    return team
+
+
+@op("codex.revert", governed=realm_wide, names=names_the_codex, fixes=filed_revert)
+def codex_revert(c, args):
+    """Go back to an earlier codex of either kind, if this realm still runs its codex API: the one named by ``codex`` (its
+    checksum), else the one the active codex replaced. Filed as a proposal, it names the codex it restores, and the vote
+    follows the rule recorded with that codex. No legislation runs for it, and no ``on_codex_activate`` hook. Returns
+    ``codex``."""
+    return restore(restoring(args), c.proposal)
+
+
+@op("codex.revert_fast", governed=it_team_governs, names=names_the_codex, fixes=filed_fast_revert)
+def codex_revert_fast(c, args):
+    """Go back to the codex the active one replaced, on the approval of the IT admin team (``it_team_set``): its
+    department's own policy decides, m of n, quorum and veto. Refused when no team is designated. No legislation runs
+    for it, and no ``on_codex_activate`` hook. Returns ``codex``."""
+    return restore(fast_target(args), c.proposal)
+
+
+def shown(codex):
+    return view(codex, *(SHOWN if isinstance(codex, Codex) else LAYERED_SHOWN))
+
+
+def history(args):
+    """One page of every codex the realm has had: the legacy ones, then the layered ones, each in install order.
+    ``next`` is the ``from`` of the next page, None at the end."""
+    start, count = window(args)
+    legacy_count = Codex.max_id()
+    rows = Codex.load_some(start, count) if start <= legacy_count else []
+    if len(rows) < count:
+        rows += LayeredCodex.load_some(max(start - legacy_count, 1), count - len(rows))
+    return rows, (start + count if start + count <= legacy_count + LayeredCodex.max_id() else None)
+
+
+@op(None, read=True, public=True)
+def codex_views(c, args):
+    """The flattened view (§5.9) of every domain of the active layered codex, as it applies in this realm: the domain's
+    layer ``path`` and a row for each public member of its resolved chapter, with its ``name``, ``kind`` (hook, guard,
+    compute, helper, setting or forbid), ``mark`` and the ``layers`` that define it, each with the ``legislation`` it
+    cites and, for a setting, its ``value``. The chapters are as public as the legislation they hold. Returns ``views``,
+    empty when no layered codex is active."""
+    return {"views": legislation.views()}
 
 
 @op("realm.data_view", read=True)
 def codex_status(c, args):
-    """The active codex, whether it is healthy (its last hook succeeded), its hooks and configuration, and one page
-    of the install ``history``: ``count`` installs (default 100, at most 500) from row ``from`` (default 1), with
-    ``next``, the ``from`` of the next page (null at the end)."""
+    """The active codex, whether it is healthy (a legacy codex: its last hook succeeded; a layered codex: no chapter's
+    method is failing, see ``failures``: per chapter and method, the count, the last error and when), its hooks and
+    configuration, and one page of the install ``history``: ``count`` installs (default 100, at most 500) from row ``from`` (default 1), with
+    ``next``, the ``from`` of the next page (null at the end). The history lists the legacy codices, then the layered
+    ones. A layered codex shows its layers, layer paths and chapters (source, version, checksum, who vouched for it,
+    route, fetch time), its status and ``activates_at``. ``pending`` is the layered codex waiting for its time, and
+    ``job`` the install job running or paused, else the latest, with its step, status and error. ``it_team`` is the
+    department the admins designated to revert fast ("" for none). ``journal_failure`` is the last entry the official
+    journal could not record (the change it was for, when, and why), or None. ``signing_failures`` is, for each kind of
+    document the realm signs (the journal's issues, so far), the last batch it could not sign (the subjects, when, and
+    why), if there is one. ``sync_sources`` is what the last check
+    of each active sync source found (api.sync_checks): its ``source`` (capital or url) and ``name``, the ``layer``
+    its record is the own record of (what a codex's ``vouched_by`` names; "" before a check has read it), the realm's
+    ``compliance`` against its record, ``checked_at``, the ``error`` that left it ``unknown`` ("" for none), the
+    releases ``installable`` from it (``step_back`` marks one older than the release the realm runs: the source went
+    back to it) and the ``notes`` on the layers the realm runs and the record does not list (``{source, kind, runs,
+    lists}``, ``kind`` ``unlisted`` or ``went_back``, §11.6); ``check`` the
+    ``interval`` of the checks, in hours, and when the next is ``due`` (0 before the realm's first sync source)."""
+    from api import sync_checks  # it imports the install task, which imports this module
+
     codex, problem = active(), Realm["1"].codex_install_state or {}
     problem = problem if codex and problem.get("codex") == codex.id else {}
-    rows, nxt = page(Codex, args)
-    return {"codex": view(codex, *SHOWN) if codex else None, "healthy": codex is not None and not problem,
-            "problem": problem, "hooks": (codex.manifest or {}).get("hooks", []) if codex else [],
-            "config": config(codex) if codex else {},
-            "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt}
+    legacy_codex = codex if isinstance(codex, Codex) else None
+    failures = codex.failures if isinstance(codex, LayeredCodex) else {}
+    rows, nxt = history(args)
+    waiting, newest = pending(), latest(InstallJob, 1)
+    job = store.live_job() or (newest[0] if newest else None)
+    return {"codex": shown(codex) if codex else None, "healthy": codex is not None and not problem and not failures,
+            "problem": problem, "failures": failures, "hooks": (legacy_codex.manifest or {}).get("hooks", []) if legacy_codex else [],
+            "config": config(legacy_codex) if legacy_codex else {},
+            "history": [view(x, "id", "version", "status", "installed_at") for x in rows], "next": nxt,
+            "pending": shown(waiting) if waiting else None,
+            "job": view(job, *JOB_SHOWN) if job else None, "it_team": it_team.department_id(),
+            "journal_failure": journal.failure(), "signing_failures": signing.failures(),
+            "sync_sources": sync_checks.found(),
+            "check": sync_checks.schedule_view()}

@@ -50,7 +50,9 @@ docs/
 ├── codices/
 │   ├── README.md                 what a codex is
 │   ├── sdk.md                    ggg_sdk reference
-│   └── build-test-publish.md
+│   ├── build-test-publish.md
+│   └── journal-signature.md      signed documents and the signed official journal
+├── verify/index.html             the page that verifies a signed document (standalone)
 ├── deployment/README.md          Casals, environments, domains, publishing
 ├── development/
 │   ├── contributing.md           style rules and conventions

@@ -12,10 +12,111 @@ try:
 except ImportError:  # unit tests: no subinterpreters, hooks run in a fresh namespace instead
     _basilisk_sandbox = None
 
+NATIVE = _basilisk_sandbox is not None  # whether subinterpreters exist here (the canister), or the fallbacks run
 BUDGET = 10_000_000  # bytecode instructions per call, metered by the sandbox (deterministic)
 MAX_ACTIONS = 32  # _basilisk_sandbox traps on a longer allow-list
 LOADER = ("import sys\n_sdk = type(sys)('ggg_sdk')\nexec(compile(%r, 'ggg_sdk.py', 'exec'), _sdk.__dict__)\n"
           "sys.modules['ggg_sdk'] = _sdk\n" % sdk.SOURCE)
+
+
+class Spent(RuntimeError):
+    """A call into a ``Resident`` failed because its budget is spent: every later call fails too, until it is
+    replaced."""
+
+
+def is_spent(error):
+    """Whether ``error``, the text of a failed sandbox call, is the meter ending it. basilisk's meter ends a call in
+    one of two ways, and only their text crosses the boundary: ``BudgetExceeded: instruction budget (N) exhausted``,
+    or, when the budget runs out while an ``except`` body runs, 100,000 instructions later, ``RuntimeError:
+    instruction budget (N) exhausted; sandbox terminated after grace period``, which names no BudgetExceeded
+    (realms-gos#670). Either leaves the meter past the budget for good. A chapter that raises the same text only costs
+    its own call a reload."""
+    return "instruction budget (" in error and ") exhausted" in error
+
+
+def module_source(name):
+    """The source text of the bundled module ``name``, and whether it is a package. Neither runs the module.
+
+    The canister keeps every bundled module's source on its lazy module object (never read an attribute of one: that
+    would compile and run it); on a laptop the source is read from the file."""
+    module = sys.modules.get(name)
+    if module is None:  # a laptop, before the module was imported
+        __import__(name)
+        module = sys.modules[name]
+    source = vars(module).get("_bsrc")
+    if source is None:
+        with open(module.__file__) as f:
+            source = f.read()
+    return source, "__path__" in vars(module)
+
+
+def module_sources(package):
+    """``{name: (source, is_package)}`` of ``package``, its parents and everything bundled under it: what a
+    subinterpreter needs to import the package from text, as it has no path to import from."""
+    names = {n for n in sys.modules if n == package or n.startswith(package + ".")}
+    if len(names) <= 1:  # a laptop, before the submodules were imported: they are files
+        import pkgutil
+
+        __import__(package)
+        names = {package} | {m.name for m in pkgutil.walk_packages(sys.modules[package].__path__, package + ".")}
+    parents = {n.rpartition(".")[0] for n in names} - {""}
+    return {name: module_source(name) for name in sorted(names | parents)}
+
+
+class Resident:
+    """A subinterpreter kept open across calls: ``program`` runs once at spawn, then ``call(fn, **kwargs)`` runs
+    its top-level functions with plain data in and out, until ``close``. Inside, ``rpc(action, **kw)`` reaches
+    ``rpc(action, kw)`` here for the actions in ``allowed``. The budget is per spawn, cumulative over the calls:
+    a call that exhausts it raises ``Spent``, and so does every later call.
+
+    Without ``_basilisk_sandbox`` (unit tests), the same program runs in a fresh namespace, unmetered."""
+
+    def __init__(self, program, rpc, allowed=(), budget=BUDGET):
+        self.handle = self.space = None
+
+        def handler(_, action, kw):
+            return plain(rpc(action, plain(kw)))
+
+        if _basilisk_sandbox is None:
+
+            def ask(action, **kw):  # as the native boundary does: the host's error crosses as text, in a RuntimeError
+                try:
+                    return handler(None, action, kw)
+                except Exception as e:
+                    raise RuntimeError(f"rpc failed: {e}")
+
+            self.space = {"__name__": "__sandbox__", "__builtins__": dict(vars(builtins), rpc=ask)}
+            exec(compile(program, "sandbox.py", "exec"), self.space)
+            return
+        digest = _basilisk_sandbox.sha256(program)
+        _basilisk_sandbox.approve_hash(digest)
+        try:
+            self.handle = _basilisk_sandbox.spawn_subinterpreter(program, digest, "", tuple(allowed), handler, budget)
+        finally:
+            _basilisk_sandbox.revoke_hash(digest)
+
+    def call(self, fn, **kwargs):
+        """``fn(**kwargs)`` inside; raises RuntimeError with the error's text when the call itself fails, ``Spent``
+        when it failed on the spent budget."""
+        try:
+            return self._call(fn, kwargs)
+        except RuntimeError as e:
+            if is_spent(str(e)):
+                raise Spent(str(e)) from None
+            raise
+
+    def _call(self, fn, kwargs):
+        if self.space is not None:
+            try:
+                return plain(self.space[fn](**plain(kwargs)))
+            except Exception as e:
+                raise RuntimeError(f"sandboxed call raised: {type(e).__name__}: {e}")
+        return plain(_basilisk_sandbox.call_in_subinterpreter(self.handle, fn, plain(kwargs)))
+
+    def close(self):
+        if self.handle is not None:
+            _basilisk_sandbox.close_subinterpreter(self.handle)
+        self.handle = self.space = None
 
 
 def sha256(text):
@@ -28,6 +129,11 @@ def sha256(text):
 
 def plain(value):
     return json.loads(json.dumps(value))
+
+
+# What a legacy codex's effect, which acts as the realm, never does: link the realm to another or publish its record
+# (api.links), which only the realm's own vote may do.
+VOTED = ("sync_source_add", "sync_source_remove", "follower_accept", "follower_remove", "legislation_release_publish")
 
 
 def execute(source, fn, kwargs, rpc, allowed=()):
@@ -44,10 +150,16 @@ def execute(source, fn, kwargs, rpc, allowed=()):
     def handler(_, action, kw):
         return plain(rpc(action, plain(kw)))
 
-    handle = _basilisk_sandbox.spawn_subinterpreter(text, digest, "", tuple(allowed), handler, BUDGET)
-    out = _basilisk_sandbox.call_in_subinterpreter(handle, fn, plain(kwargs))
-    _basilisk_sandbox.close_subinterpreter(handle)
-    _basilisk_sandbox.revoke_hash(digest)
+    handle = None
+    try:
+        handle = _basilisk_sandbox.spawn_subinterpreter(text, digest, "", tuple(allowed), handler, BUDGET)
+        out = _basilisk_sandbox.call_in_subinterpreter(handle, fn, plain(kwargs))
+    finally:  # a call that fails is often caught (a hook's failure is recorded, it does not trap): the table of 8
+        try:  # subinterpreter handles is the canister's, so one left open for each is a denial of service for the rest
+            if handle is not None:
+                _basilisk_sandbox.close_subinterpreter(handle)
+        finally:
+            _basilisk_sandbox.revoke_hash(digest)
     return plain(out)
 
 
@@ -76,7 +188,7 @@ def call(source, fn, args, context, declared):
         return envelope
     results = []
     for name, kwargs in envelope["effects"]:
-        results.append((yield from apply(name, resolve(kwargs, results), declared)))
+        results.append((yield from apply(name, resolve(kwargs, results), declared, legacy=True)))
     return {"ok": True, "result": resolve(envelope["result"], results),
             "effects": [{"op": e[0], **r} for e, r in zip(envelope["effects"], results)]}
 
@@ -93,10 +205,18 @@ def read(action, args, declared):
                                    declared=declared)))
 
 
-def apply(name, args, declared):
+def apply(name, args, declared, legacy=False):
+    """Run ``name`` as the codex (origin ``codex``, the realm as signer); ``legacy`` marks a legacy codex's effect,
+    which acts for the realm where a layered codex's holds nothing (core.op.Call), except in what takes the realm's
+    vote (``VOTED``) and its time zone, which no codex sets (GGG I-ADM-4; the layered runtime refuses it too)."""
     if name not in ops():
         return {"ok": False, "error": f"unknown operation '{name}'"}
-    reply = yield from dispatch(name, json.dumps(args), origin="codex", signer=chain.self_id(), declared=declared)
+    if legacy and name in VOTED:
+        return {"ok": False, "error": f"{name} takes the realm's vote, which a legacy codex does not hold"}
+    if legacy and "timezone" in args:
+        return {"ok": False, "error": "a codex never sets a time zone"}
+    reply = yield from dispatch(name, json.dumps(args), origin="codex", signer=chain.self_id(), declared=declared,
+                                legacy=legacy)
     return json.loads(reply)
 
 

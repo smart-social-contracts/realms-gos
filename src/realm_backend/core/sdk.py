@@ -104,7 +104,9 @@ class Realm:
         return [u for u in self.every("user_list", "users") if u.get("status") == "active"]
 
     def invoice(self, user, amount, reason, days=30):
-        return self.effect("invoice_create", payer="User:" + user, amount=self.units(amount),
+        units = self.units(amount)
+        return self.effect("invoice_create", payer="User:" + user, amount=units,
+                           items=[{"concept": reason or "invoice", "amount": units}],
                            symbol=self.currency, due_at=self.now + int(days * 86400), reason=reason)
 
     def notify(self, user, title, body, topic="", href=""):

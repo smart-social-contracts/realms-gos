@@ -8,6 +8,7 @@ import fake_chain
 import ggg_methods
 import world
 from api import setup
+from core.ratio import PERCENT
 from basilisk.wasm_manipulator import extract_methods_from_python, generate_candid_from_methods
 from ggg import Realm
 from kit import ok
@@ -81,16 +82,26 @@ def test_realm_info_converts_to_ggg():
     ok("setup_step", "frank", step="realm", name="Agora", open_registration=True)
     ok("setup_step", "frank", step="tokens", accounting_currency="ckUSDC")
     Realm["1"].trusted_principals = [fake_chain.ANONYMOUS]
-    Realm["1"].manifest_data = {**Realm["1"].manifest_data, "governance": {"threshold": 60, "quorum_percent": 25}}
+    Realm["1"].manifest_data = {**Realm["1"].manifest_data, "governance": {"voting_threshold": 60 * PERCENT, "voting_quorum": 25 * PERCENT}}
     r = ggg_methods.ggg_realm_info()
     assert r["name"] == "Agora" and r["status"] == {"Setup": None} and r["open_registration"]
     assert r["accounting_currency"] == "ckUSDC" and r["accounting_currency_decimals"] == 8
     assert r["calendar"] == "1" and r["federation_realm_id"] is None and r["logo_url"] is None
     assert r["trusted_principals"] == [fake_chain.ANONYMOUS]
-    assert (r["voting_threshold"], r["voting_quorum"]) == (6000, 2500)
+    assert (r["voting_threshold"], r["voting_quorum"]) == (60_000_000, 25_000_000)
     assert r["installed_version"] == setup.VERSION and r["network"] == "ic"
     ok("setup_launch", "frank")
     assert ggg_methods.ggg_realm_info()["status"] == {"Alpha": None}
+
+
+def test_a_period_crosses_as_a_count_and_a_unit_in_both_directions():
+    """A Period is ``{count, unit}`` with the unit in lower-case text in the operations' JSON, as every unit-only variant."""
+    import ggg_api
+
+    for unit, case in (("day", "Day"), ("working_day", "WorkingDay"), ("month", "Month"), ("year", "Year")):
+        period = {"count": 3, "unit": unit}
+        assert ggg_api.to_ggg(period, "Period") == {"count": 3, "unit": {case: None}}
+        assert ggg_api.to_realms({"count": 3, "unit": {case: None}}, "Period") == period
 
 
 def test_every_operation_names_where_its_result_is():
@@ -101,7 +112,8 @@ def test_every_operation_names_where_its_result_is():
 
     unnamed = []
     for name, (_, reply_t) in ggg_api.METHODS.items():
-        if name in ggg_api.LOCAL or name in ggg_api.BUILD:
+        # test_spec reports a method whose operation is not registered.
+        if name in ggg_api.LOCAL or name in ggg_api.BUILD or name not in ops():
             continue
         t = ggg_api.unwrap(ggg_api.fields(reply_t)["Ok"]) if ggg_api.is_variant(reply_t) else reply_t
         page = ggg_api.is_record(t) and {"items", "next"} <= set(ggg_api.fields(t))

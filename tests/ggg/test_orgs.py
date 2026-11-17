@@ -1,21 +1,21 @@
 from core import auth
+from core.ratio import PERCENT
 import fake_chain
 import world
 from ggg import Appointment, Authority, Department, Organization, Position, Proposal
-from kit import denied, later, ok
+from kit import call, denied, later, ok
 
 DAY = 86400
 
 
 def pass_proposal(p, *voters):
     """The deciding vote settles a department's proposal and runs its action; a timed realm-wide one waits for its
-    deadline."""
+    deadline, and then ``proposal_finalize`` closes it and runs it."""
     for v in voters:
         ok("proposal_vote", v, proposal=p, choice="yes")
     if Proposal[p].status == "voting":
         later(8 * DAY)
         ok("proposal_finalize", "ctl", proposal=p)
-        ok("proposal_execute", "ctl", proposal=p)
     assert Proposal[p].status == "executed", Proposal[p].result
 
 
@@ -36,7 +36,7 @@ def test_story_agora_departments_and_clinics():
     ok("position_create", "ctl", department="Infrastructure", position="infrastructure.inspector", title="Inspector",
        headcount=2, salary=2400)
     ok("appoint", "ctl", position="infrastructure.inspector", user="alice")
-    ok("department_set_policy", "ctl", department="Infrastructure", m=2, n=3, quorum_percent=50)
+    ok("department_set_policy", "ctl", department="Infrastructure", m=2, n=3, quorum=50 * PERCENT)
     p = ok("appoint", "ctl", position="infrastructure.inspector", user="bob")["proposal"]
     pass_proposal(p, "carla", "alice")
     assert len([a for a in Position["infrastructure.inspector"].appointments if a.status == "active"]) == 2
@@ -187,3 +187,33 @@ def test_auth():
     for name in ("department_get", "department_list", "department_chart", "organization_get", "organization_list"):
         assert "sign in" in denied(name, fake_chain.ANONYMOUS, department="Health", organization="clinic-b")
         ok(name, "mallory", department="Health", organization="clinic-b")
+
+
+def test_a_department_has_a_kind_that_legislation_can_address():
+    depts = world.build()
+    ok("department_create", "ctl", department="Council", kind="plenary")
+    assert Department["Council"].kind == "plenary" and depts["Finance"].kind == ""
+    ok("department_edit", "ctl", department="Finance", kind="committee")
+    ok("department_edit", "ctl", department="Finance", description="Money")
+    assert Department["Finance"].kind == "committee" and Department["Finance"].description == "Money"
+    assert ok("department_get", "ctl", department="Council")["department"]["kind"] == "plenary"
+    assert {d["id"]: d["kind"] for d in ok("department_list", "ctl")["departments"]}["Finance"] == "committee"
+
+
+def test_an_organization_has_a_kind_that_tells_a_party_from_a_company():
+    world.build()
+    org_admin("dr-ana")
+    assert Organization["clinic-b"].kind == "other"  # registered without one
+    ok("organization_register", "dr-ana", organization="harbour-party", kind="party")
+    ok("organization_register", "dr-ana", organization="harbour-union", kind="union")
+    assert Organization["harbour-party"].kind == "party"
+    assert "kind is one of" in call("organization_register", "dr-ana", organization="x", kind="club")["error"]
+    ok("organization_edit", "dr-ana", organization="harbour-party", kind="association")
+    ok("organization_edit", "dr-ana", organization="harbour-party", description="Harbour")  # a field left out stays
+    assert Organization["harbour-party"].kind == "association"
+    assert "kind is one of" in call("organization_edit", "dr-ana", organization="harbour-party", kind="club")["error"]
+    org_admin("bob")
+    assert "admins" in denied("organization_edit", "bob", organization="harbour-party", kind="party")
+    assert ok("organization_get", "bob", organization="harbour-party")["organization"]["kind"] == "association"
+    listed = ok("organization_list", "bob", kind="union")["organizations"]
+    assert [(o["id"], o["kind"]) for o in listed] == [("harbour-union", "union")]

@@ -24,6 +24,8 @@
 	import { isPrivilegedExtension } from '$lib/extension-privileged';
 	import { loadExtensionTranslation } from '$lib/i18n';
 	import { createMarketplaceExtensionBackend } from '$lib/marketplace-extension-backend';
+	import { assistantAvailable } from '$lib/host-bridge';
+	import { isEmbeddedInPortal } from '$lib/portal-bridge.ts';
 	import {
 		callRealmExtension,
 		extensionResult,
@@ -191,7 +193,10 @@
 			config: {
 				...CONFIG,
 				canisterId: backendCanisterId?.toString?.() ?? '',
-				aiAssistantEnabled: get(realmInfo).aiAssistantEnabled !== false,
+				aiAssistantEnabled: assistantAvailable({
+					realmEnabled: get(realmInfo).aiAssistantEnabled !== false,
+					embeddedInPortal: isEmbeddedInPortal()
+				}),
 				...infraConfig
 			},
 			navigate: goto,

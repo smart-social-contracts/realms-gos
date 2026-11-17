@@ -8,7 +8,7 @@ from core import op
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPECS = (ROOT / "ggg" / "model" / "README.md", ROOT / "docs" / "ggg" / "spec.md")
-FLAGS = ("read", "delegable", "governed", "signing")
+FLAGS = ("read", "delegable", "confirm", "governed", "signing")
 
 
 def spec_ops():
@@ -17,7 +17,8 @@ def spec_ops():
             if line.startswith("| `") and line.count("|") == 5]
     for row in rows:
         names_cell, perm_cell, flag_cell = [c.strip() for c in row.split("|")[1:4]]
-        names = re.findall(r"`([a-z_*]+)`", names_cell)
+        # A parenthesis explains the row; the arguments it names in backticks are not operations.
+        names = re.findall(r"`([a-z_*]+)`", re.sub(r"\([^)]*\)", "", names_cell))
         if not names or ":" in names_cell.split("`")[1]:
             continue
         perms = re.findall(r"`([a-z_]+(?:\.[a-z_*]+)+)`", perm_cell)
@@ -40,8 +41,9 @@ def registered():
 
 
 def flags_of(s):
-    return {"read": s["read"], "delegable": s["delegable"], "governed": s["governed"] is not None,
-            "signing": s["signing"], "public": s["public"]}
+    """``delegable`` and ``confirm`` are the model's tiers, direct and ask-each-time: never a decorator's flag."""
+    return {"read": s["read"], "delegable": s["tier"] == "direct", "confirm": s["tier"] == "confirm",
+            "governed": s["governed"] is not None, "signing": s["signing"], "public": s["public"]}
 
 
 def test_every_spec_operation_is_registered_as_specified():

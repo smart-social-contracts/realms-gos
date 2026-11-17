@@ -71,6 +71,9 @@ jobs:
             echo "::error::canister/principal ids belong in casals.json (read them with 'casals export')"; exit 1
           fi
 
+  # The Python unit suites (tests/ggg, tests/backend, the layered codex library, the ratchet and the GGG
+  # checks) run in tests.yml and nowhere else. This job keeps the CLI tests, without the library's, and
+  # the frontend tests.
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -80,64 +83,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: |
-          pip install -e "cli/[listings]"
-          pip install -r requirements.txt
-          pip install pytest pytest-cov cedarpy==4.12.2
+      # The CLI's own `listings` extra brings h3, so test_listings_command runs.
+      - run: pip install -e "cli/[listings]" pytest
       - name: CLI unit tests
-        run: pytest -v cli/tests/
-      - name: Extension privilege ratchet
-        # Blocking on purpose: these are pure source scans and in-memory unit
-        # tests with no canister or DB, so a failure here is a real
-        # regression. The exemption list may only shrink, and no extension may
-        # take the caller's identity from its own call args.
-        #
-        # tests/backend/ is the suite of the previous backend (legacy/); most of
-        # its files no longer load and are out of CI until each is ported to
-        # tests/ggg or deleted (realms-gos#554). Those still listed here pass;
-        # the two deselected ones read the old backend's core.privileged_extensions.
-        run: |
-          python3 scripts/declare_extension_runtime.py --check
-          pytest -q tests/backend/test_extension_caller_identity.py \
-                    tests/backend/test_stamp_build.py \
-                    tests/backend/test_sandbox_exemption_ratchet.py \
-                    --deselect tests/backend/test_sandbox_exemption_ratchet.py::test_backend_grant_list_matches_the_baseline \
-                    --deselect tests/backend/test_sandbox_exemption_ratchet.py::test_manifest_cannot_grant_itself_host_access
-      - name: Build variants
-        # Blocking on purpose: the checked-in variant is production, the test
-        # gate fails closed, and the packer's wasm scan works in both
-        # directions. See realms-gos#395. The same packer stamps the version
-        # status() reports (realms-gos#551).
-        run: |
-          pytest -q tests/backend/test_build_variant.py \
-                    tests/backend/test_publish_build_variant.py \
-                    tests/backend/test_realm_version_stamp.py
-      - name: GGG interface
-        # The generated GGG methods must match ggg/ggg.did, and every operation must pass
-        # tests/ggg. Its own process: its fake chain replaces the ggg entities loaded above.
-        run: |
-          python3 scripts/ggg_candid.py --check
-          pytest -q tests/ggg --cov=src/realm_backend --cov-report=
-          # Again, each operation through its ggg_ method, every reply checked against ggg.did.
-          GGG_MIRROR=strict pytest -q tests/ggg
-      - name: GGG coverage floors
-        # A ratchet, not a target: each floor is the level reached when it was set, so coverage can
-        # only go up. Raise a floor when the number above it grows; ggg_api.py is lowest while the
-        # mirror harness (tests/ggg/mirror.py) still reports mismatches. Generated files are left out.
-        run: |
-          coverage report --include='src/realm_backend/api/*' --fail-under=95
-          coverage report --include='src/realm_backend/ggg_api.py' --fail-under=60
-          coverage report --omit='src/realm_backend/ggg_did.py,src/realm_backend/ggg_methods.py' --skip-covered
-          coverage xml -o coverage-ggg.xml --omit='src/realm_backend/ggg_did.py,src/realm_backend/ggg_methods.py'
-      - name: Upload the GGG coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-ggg
-          path: coverage-ggg.xml
-      - name: Extension locale packs
-        # test_sidebar_labels.py and test_api_errors.py are out of CI with the
-        # rest of the previous backend's tests (realms-gos#554).
-        run: pytest -q tests/backend/test_extension_i18n_packs.py
+        run: pytest -v cli/tests/ --ignore-glob='cli/tests/test_legislation*'
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -151,7 +100,9 @@ jobs:
           npx vitest run src/lib/i18n/localeParity.test.ts \
             src/lib/stores/sidebar.test.ts \
             src/lib/i18n/resolveLocale.test.ts \
-            src/lib/utils/backendError.test.ts
+            src/lib/utils/backendError.test.ts \
+            src/lib/host-bridge.test.ts \
+            src/lib/portal-bridge.assistant-prompt.test.ts
 
   # The packed realm wasms on PocketIC: basilisk stubs typing and struct inside a
   # canister, so only the built artifact shows how the production and the test
@@ -167,7 +118,12 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           pip install -r requirements.txt
-          pip install pytest pocket-ic==3.1.2
+          pip install pytest pocket-ic==3.1.2 cryptography cbor2
+      # The verify page's tests (tests/deployed/test_verify_page.py) run its script under Node: 22 or later, for WebCrypto's
+      # Ed25519.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       # The dfx cache carries the pocket-ic server the tests drive.
       - name: Install dfx
         run: |
@@ -178,8 +134,10 @@ jobs:
       - name: Realm wasms on PocketIC
         run: pytest -q tests/deployed
 
-  # casals up from an empty replica + the cross-quarter live suite; the job
-  # body is realms-e2e.yml (also runnable by hand via workflow_dispatch).
+  # casals up from an empty replica, one extension put on the marketplace and verified, then the
+  # standalone realm UI suite in a browser. The job body is realms-e2e.yml (also runnable by hand via
+  # workflow_dispatch); its cross-quarter and GGG conformance steps skip themselves while
+  # casals.local.json has no demo-backend.
   e2e:
     needs: [lint, unit]
     uses: ./.github/workflows/realms-e2e.yml

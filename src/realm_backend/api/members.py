@@ -2,23 +2,29 @@ import hashlib
 
 from core import auth
 from core import chain
+from core import it_team
 from api import delegation
-from api import orgs
-from core.db import Conflict, Fail, Forbidden, each, find, next_id, page, view
-from ggg import Appointment, Department, Human, Identity, Invite, Member, Position, Proposal, Realm, User, UserProfile
+from api import assets, orgs
+from core import language
+from core.db import Conflict, Fail, Forbidden, each, find, next_id, page, page_by, view
+from ggg import (Appointment, Attribute, Department, Human, Identity, Invite, Member, Position, Proposal, Realm, User,
+                 UserProfile)
 from api import codex
 from core.op import op
-from api.proposals import root
+from core.pending import moment, quoted, you_sign
+from api.proposals import day_of, root
 
 MOVES = {"active": {"inactive", "suspended", "banned"}, "inactive": {"active", "banned"},
          "suspended": {"active", "banned"}, "banned": set()}
 
 
 def within(c, perms):
-    """I-ID-3: nobody hands out a permission they do not hold. A codex or a realm-wide vote acts for the realm; a
-    department's vote holds only what that department does, like org.grant_authority. A proposal whose department
-    was deleted holds nothing: it is refused, never treated as realm-wide."""
-    if c.origin == "codex":
+    """I-ID-3: nobody hands out a permission they do not hold. A realm-wide vote acts for the realm, and so does a
+    legacy codex's effect (``Call.legacy``, the mark only the legacy hook path sets); a department's vote holds only
+    what that department does, like org.grant_authority; a layered codex holds nothing, so handing out a permission
+    takes a vote, which its effects file as proposals. A proposal whose department was deleted holds nothing: it is
+    refused, never treated as realm-wide."""
+    if c.legacy:
         return
     if c.origin == "replay":
         proposal = Proposal[c.proposal]
@@ -59,7 +65,7 @@ def subject(args):
 
 def card(user):
     m = Member[user.id]
-    return {**view(user, "id", "nickname", "avatar", "home_quarter"), "status": m.status if m else "",
+    return {**view(user, "id", "nickname", "avatar", "home_quarter", "language", "home_zone"), "status": m.status if m else "",
             "profiles": [p.id for p in user.profiles]}
 
 
@@ -79,6 +85,26 @@ def enroll(principal, nickname=""):
     return user
 
 
+def check_language(args):
+    """Refuse a ``language`` that is no BCP 47 tag, before anything is written."""
+    if "language" in args:
+        language.require(args["language"])
+
+
+def check_choices(args):
+    """Refuse a ``language`` that is no BCP 47 tag and a ``home_zone`` the realm has not defined."""
+    check_language(args)
+    if "home_zone" in args:
+        assets.defined_zone(args["home_zone"])
+
+
+def apply_choices(user, args):
+    """Set the ``language`` and ``home_zone`` a call states; ``check_choices`` has accepted them."""
+    user.language = args.get("language", user.language)
+    if "home_zone" in args:
+        assets.move_home(user, args["home_zone"])
+
+
 def digest(code):
     return hashlib.sha256(code.strip().upper().encode()).hexdigest()
 
@@ -92,10 +118,24 @@ def redeemable(code, principal):
     return inv
 
 
-@op("self.join")
+def seat_line(label, position):
+    return {"label": label, "value": f"{quoted(position.title or position.id)} of {quoted(orgs.body(position).id)}"}
+
+
+def joining(user, args, grant):
+    """What the invite code carries, which joining takes, and that joining is the member's consent to the realm's terms."""
+    inv = redeemable(args["code"], user) if args.get("code") else None
+    lines = [{"label": "Profile you take", "value": quoted(inv.profile)}] if inv else []
+    if inv and inv.position:
+        lines.append(seat_line("Seat you take", find(Position, inv.position)))
+    taken = " with the profile and seat of the code" if inv else ""
+    return lines + [{"label": "What changes", "value": f"You join the realm{taken}, which is your consent to its terms"}]
+
+
+@op("self.join", check=check_choices, secret=("code",), summary=joining, title="Join the realm with an invite code")
 def realm_join(c, args):
-    """Join with an invite ``code`` (needed unless registration is open) and an optional ``nickname``.
-    A member can join again with a code to gain its profile and seat. Returns ``user``, ``status`` and ``profiles``.
+    """Join with an invite ``code`` (needed unless registration is open) and an optional ``nickname``,
+    ``language`` (a BCP 47 tag) and ``home_zone`` (a zone of the realm). A member can join again with a code to gain its profile and seat. Returns ``user``, ``status`` and ``profiles``.
     Example: ``{"code": "X7K-29Q"}`` → ``{"user": "bob", "status": "active", "profiles": ["member"]}``."""
     member, realm = Member[c.user], Realm["1"]
     inv = redeemable(args["code"], c.user) if args.get("code") else None
@@ -108,6 +148,7 @@ def realm_join(c, args):
     if inv and inv.position:
         orgs.fill(find(Position, inv.position), c.user)
     user = enroll(c.user, args.get("nickname", ""))
+    apply_choices(user, args)
     if inv:
         give(user, find(UserProfile, inv.profile))
         inv.uses, inv.redeemed_by = inv.uses + 1, inv.redeemed_by + [c.user]
@@ -132,7 +173,7 @@ def user_list(c, args):
     return {"users": [card(u) for u in rows], "next": nxt}
 
 
-@op("self.data_view", read=True, delegable=True)
+@op("self.data_view", read=True)
 def me(c, args):
     """Your card, permissions and the first page of your delegations each way (``next`` in it continues them with
     delegation_list), plus your private data when you call it yourself (not as a delegate)."""
@@ -144,15 +185,23 @@ def me(c, args):
     return out
 
 
-@op("self.update_public_profile", delegable=True, returns="user")
+@op("self.update_public_profile", check=check_language, returns="user")
 def profile_update(c, args):
-    """Change your public ``nickname`` and ``avatar``; a field you leave out stays as it is. Returns ``user``."""
+    """Change your public ``nickname`` and ``avatar`` and your ``language`` (a BCP 47 tag); a field you leave out
+    stays as it is. Returns ``user``."""
     user = find(User, c.user)
     user.nickname, user.avatar = args.get("nickname", user.nickname), args.get("avatar", user.avatar)
+    user.language = args.get("language", user.language)
     return {"user": user.id}
 
 
-@op("self.update_private_data", returns="user")
+def replacing_private_data(user, args, grant):
+    effect = "Your private data is replaced by the text shown here; what is stored now is lost"
+    return [{"label": "What changes", "value": effect}]
+
+
+@op("self.update_private_data", returns="user", secret=("private_data",), summary=replacing_private_data,
+    title="Replace your private data")
 def private_data_update(c, args):
     """Replace your ``private_data``; it is stored as given, so encrypt it first (vetKeys ciphertext). Returns
     ``user``."""
@@ -184,13 +233,15 @@ def user_import(c, args):
     return {"added": len(ids)}
 
 
-@op("user.edit", returns="user")
+@op("user.edit", check=check_choices, returns="user")
 def user_edit(c, args):
-    """Edit ``user``'s ``nickname``, ``avatar`` or ``home_quarter``; only the fields given change."""
+    """Edit ``user``'s ``nickname``, ``avatar``, ``home_quarter``, ``language`` (a BCP 47 tag) or ``home_zone`` (a
+    zone of the realm); only the fields given change."""
     user = find(User, args["user"])
     for field in ("nickname", "avatar", "home_quarter"):
         if field in args:
             setattr(user, field, args[field])
+    apply_choices(user, args)
     return {"user": user.id}
 
 
@@ -215,16 +266,23 @@ def user_remove(c, args):
         raise Conflict(f"{user.id} still holds appointments; end them first")
     if Member[user.id]:
         Member[user.id].delete()
+    assets.leave_home(user)
     user.delete()
 
 
-@op("identity.submit", returns="identity")
+def person(user):
+    """The Human behind ``user``, made on the first identity or attribute they submit."""
+    return next(each(Human, "user", user), None) or Human(id=next_id(Human, "H"), user=user)
+
+
+@op("identity.submit", returns="identity", title="Submit an identity proof")
 def identity_submit(c, args):
-    """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``issuer``
-    and ``ref`` (where the proof is kept). Returns ``identity``, pending until reviewed."""
-    human = next(each(Human, "user", c.user), None) or Human(id=next_id(Human, "H"), user=c.user)
-    i = Identity(id=next_id(Identity, "ID"), human=human, kind=args["kind"], issuer=args.get("issuer", ""),
-                 ref=args.get("ref", ""))
+    """Submit a proof of who you are for review: ``kind`` (e.g. passport, email, registry), optional ``category`` (a
+    subdivision of the kind), ``issuer``, ``expires_at`` and ``ref`` (where the proof is kept). Returns ``identity``,
+    pending until reviewed."""
+    i = Identity(id=next_id(Identity, "ID"), human=person(c.user), kind=args["kind"],
+                 category=args.get("category", ""), issuer=args.get("issuer", ""), ref=args.get("ref", ""),
+                 expires_at=int(args.get("expires_at") or 0))
     return {"identity": i.id}
 
 
@@ -232,7 +290,16 @@ def identity_owner(args):
     return {find(Identity, args["identity"]).human.user}
 
 
-@op("identity.review", signing=True, parties=identity_owner, returns="identity")
+def reviewing_identity(user, args, grant):
+    i = find(Identity, args["identity"])
+    proof = quoted(i.kind) + (f" ({quoted(i.category)})" if i.category else "")
+    return you_sign(f"Marks identity proof {i.id} of {quoted(i.human.user)} as {quoted(args['status'])}",
+                    ("Identity proof", f"{proof}, issued by {quoted(i.issuer)}, kept at {quoted(i.ref)}, "
+                     + (f"expires {day_of(i.expires_at)}" if i.expires_at else "never expires")))
+
+
+@op("identity.review", signing=True, parties=identity_owner, returns="identity", summary=reviewing_identity,
+    title="Verify or reject an identity proof")
 def identity_review(c, args):
     """Decide a pending ``identity``: ``status`` verified or rejected. Returns ``status``."""
     i = find(Identity, args["identity"])
@@ -242,12 +309,90 @@ def identity_review(c, args):
     return {"identity": i.id, "status": i.status}
 
 
+@op("attribute.submit", private=("kind", "value"), returns="attribute")
+def attribute_submit(c, args):
+    """Submit a certified attribute of your own person for review: ``kind`` (such as large_family), ``value`` (such
+    as general), ``ref`` (where the proof is kept) and optional ``issuer`` and ``expires_at``. Returns ``attribute``,
+    pending until reviewed. Its kind and value are personal data (I-PRV-1): only you, whoever holds
+    attribute.review and the codex read them, and the audit log does not keep them."""
+    a = Attribute(id=next_id(Attribute, "ATTR"), human=person(c.user).id, kind=args["kind"], value=args["value"],
+                  issuer=args.get("issuer", ""), ref=args["ref"], expires_at=int(args.get("expires_at") or 0))
+    return {"attribute": a.id}
+
+
+def attribute_owner(args):
+    return {Human[find(Attribute, args["attribute"]).human].user}
+
+
+def reviewing_attribute(user, args, grant):
+    a = find(Attribute, args["attribute"])
+    # Its kind and value are personal data (I-PRV-1), and the delegate reads this card: they stay out of it.
+    return you_sign(f"Marks attribute {a.id} of {quoted(Human[a.human].user)} as {quoted(args['status'])}",
+                    ("Attribute details", "Its kind and value are personal data, so they are not shown here: "
+                                          "read them where you review attributes before you approve"))
+
+
+@op("attribute.review", signing=True, parties=attribute_owner, returns="attribute", summary=reviewing_attribute,
+    title="Verify or reject an attribute")
+def attribute_review(c, args):
+    """Decide a pending ``attribute``: ``status`` verified or rejected. Returns ``attribute`` and ``status``."""
+    a = find(Attribute, args["attribute"])
+    if args["status"] not in ("verified", "rejected") or a.status != "pending":
+        raise Conflict(f"{a.id} is {a.status}; it can only go from pending to verified or rejected")
+    a.status, a.verified_at = args["status"], chain.now() if args["status"] == "verified" else 0
+    return {"attribute": a.id, "status": a.status}
+
+
+@op("attribute.review", read=True, returns="attributes")
+def attribute_pending_list(c, args):
+    """The attributes awaiting review, with their ``kind`` and ``value`` in clear (I-PRV-1), ``count`` rows at a time
+    (default 100, at most 500) from row ``from`` (default 1). Returns ``attributes`` and ``next`` (null at the end); a
+    page can hold fewer than ``count``: follow ``next``, which goes by row, so that deciding a page skips none."""
+    rows, nxt = page(Attribute, args, keep=lambda a: a.status == "pending")
+    return {"attributes": [view(a) for a in rows], "next": nxt}
+
+
+@op("self.data_view", read=True, returns="attributes")
+def attribute_list(c, args):
+    """Your own attributes, all or only those of ``kind``, ``count`` rows at a time (default 100, at most 500) from
+    row ``from`` (default 1). Returns ``attributes`` and ``next`` (null at the end); a page can hold fewer than
+    ``count`` when ``kind`` is given: follow ``next``."""
+    human = next(each(Human, "user", c.user), None)
+    if human is None:
+        return {"attributes": [], "next": None}
+    rows, nxt = page_by(Attribute, "human", human.id, args)
+    return {"attributes": [view(a) for a in rows if args.get("kind") in (None, a.kind)], "next": nxt}
+
+
 def fresh_code(c):
     h = hashlib.sha256(f"{chain.self_id()}:{chain.now()}:{Invite.max_id()}:{c.by}".encode()).hexdigest().upper()
     return f"{h[:4]}-{h[4:8]}-{h[8:12]}"
 
 
-@op("invite.manage")
+def inviting(user, args, grant):
+    """What an invite that carries a profile or a seat lets whoever holds its code take."""
+    profile = find(UserProfile, args.get("profile") or "member")
+    pos = find(Position, args["position"]) if args.get("position") else None
+    if pos and pos.department is None:
+        raise Fail(f"{pos.id} is not a seat of a department")
+    expires = invite_expiry(args)
+    lines = [{"label": "Profile it carries", "value": quoted(profile.id)}]
+    if pos:
+        lines.append(seat_line("Seat it carries", pos))
+    uses, lapse = int(args.get("max_uses", 1)), f"until {moment(expires)}" if expires else "with no end date"
+    effect = (f"Whoever holds the code can use it {uses} time{'' if uses == 1 else 's'} to take the profile"
+              f"{' and seat' if pos else ''} above, {lapse}")
+    return lines + [{"label": "What changes",
+                     "value": effect + ("" if args.get("code") else ". You are shown the code once, when you approve")}]
+
+
+def invite_expiry(args):
+    """When the invite lapses, from ``expires_at`` or ``expires_in`` seconds from now: 0 for never."""
+    lasts = int(args.get("expires_in") or 0)
+    return int(args.get("expires_at") or 0) or (chain.now() + lasts if lasts else 0)
+
+
+@op("invite.manage", secret=("code",), summary=inviting, title="Create an invite that carries a profile or a seat")
 def invite_create(c, args):
     """Create an invite to ``profile`` (default member) and optionally seat ``position`` of ``department``, only with
     permissions you hold: ``code`` (default generated), ``max_uses`` (default 1), ``expires_at`` or ``expires_in``
@@ -261,10 +406,8 @@ def invite_create(c, args):
     code = (args.get("code") or fresh_code(c)).strip().upper()
     if Invite[digest(code)]:
         raise Conflict("this code is taken")
-    lasts = int(args.get("expires_in") or 0)
-    expires = int(args.get("expires_at") or 0) or (chain.now() + lasts if lasts else 0)
     Invite(id=digest(code), profile=profile.id, department=department, position=pos.id if pos else "",
-           max_uses=int(args.get("max_uses", 1)), expires_at=expires, created_by=c.user)
+           max_uses=int(args.get("max_uses", 1)), expires_at=invite_expiry(args), created_by=c.user)
     # Shown once, nested so the audit log never keeps it.
     return {"invite": {"id": digest(code), "code": code}}
 
@@ -296,6 +439,7 @@ def profile_create(c, args):
     if UserProfile[args["profile"]]:
         raise Conflict(f"profile {args['profile']} exists")
     within(c, args.get("allowed_to", []))
+    it_team.refuse_grant(args.get("allowed_to"))
     UserProfile(id=args["profile"], description=args.get("description", ""), allowed_to=args.get("allowed_to", []))
     return {"profile": args["profile"]}
 
@@ -306,6 +450,7 @@ def profile_edit(c, args):
     leave out stays. An optional ``department`` decides as in user_add."""
     p = find(UserProfile, args["profile"])
     within(c, args.get("allowed_to", []))
+    it_team.refuse_grant(args.get("allowed_to"))
     p.description, p.allowed_to = args.get("description", p.description), args.get("allowed_to", p.allowed_to)
 
 

@@ -1,0 +1,405 @@
+"""A change list (docs/codices/layered-codex.md §7) and the records that vouch for it (§8): the rules of
+core.change_list on plain data, as the install task's steps 2 and 4 apply them."""
+
+import json
+import pathlib
+
+import pytest
+from core import change_list
+from core.db import Fail
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+SHA = {name: "sha256:" + hex(10 + n)[2:].rjust(64, "0") for n, name in enumerate(
+    ("tax", "procedure", "local_regime", "water", "realm", "calendar", "other", "codex"))}
+URL = "https://legislation.example.test/"
+
+
+def entry(chapter, sha256=None, size=100, mirrors=()):
+    return {"chapter": chapter, "url": URL + chapter + ".py", "mirrors": list(mirrors),
+            "sha256": (sha256 or SHA.get(chapter.rpartition("/")[2], SHA["other"]))[7:], "size": size}
+
+
+def text(realm="town", replaces=None, set=(), remove=(), release=None, **more):
+    return json.dumps({"kind": change_list.KIND, "format": change_list.FORMAT, "realm": realm, "replaces": replaces,
+                       "set": list(set), "remove": list(remove), "release": release, **more})
+
+
+def refused(fn, *args, match, **kw):
+    with pytest.raises(Fail, match=match):
+        fn(*args, **kw)
+
+
+# ---- parse
+
+
+def test_four_mirrors_are_the_most_a_chapter_may_have():
+    parsed = change_list.parse(text(set=[entry("town/tax", mirrors=[URL + f"m{n}/tax.py" for n in range(4)])]))
+    assert len(parsed["set"][0]["urls"]) == 5
+
+
+def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and_checksum():
+    parsed = change_list.parse(text(set=[entry("town/tax", mirrors=[URL + "mirror/tax.py"])], summary={"en": "x"}))
+    assert parsed["realm"] == "town" and parsed["replaces"] is None and parsed["summary"] == {"en": "x"}
+    assert parsed["set"] == [{"chapter": "town/tax", "source": "town", "domain": "tax", "sha256": SHA["tax"],
+                              "urls": [URL + "town/tax.py", URL + "mirror/tax.py"], "size": 100}]
+    calendar = change_list.parse(text(set=[entry("eu/es/calendar")], release={"source": "eu/es", "version": "1"}))
+    assert calendar["set"][0]["domain"] == "calendar" and calendar["release"] == {"source": "eu/es", "version": "1"}
+
+
+@pytest.mark.parametrize("bad, match", [
+    ("not json", "not JSON"),
+    (json.dumps({"kind": "other", "format": 1}), "not {\"kind\""),
+    (json.dumps({"kind": change_list.KIND, "format": 2, "realm": "t"}), "not {\"kind\""),
+    (text(realm=""), "realm names"),
+    (text(replaces=5), "replaces is"),
+    (text(set=[entry("town/tax") for _ in range(51)]), "at most 50 chapters"),
+    (text(set=[entry("town/tax"), entry("town/tax")]), "twice"),
+    (text(set=[{**entry("town/tax"), "url": "http://x"}]), "over https"),
+    (text(set=[{**entry("town/tax"), "mirrors": ["ftp://x"]}]), "over https"),
+    (text(set=[{**entry("town/tax"), "mirrors": "https://x"}]), "mirrors is a list"),
+    (text(set=[{**entry("town/tax"), "mirrors": {"a": 1}}]), "mirrors is a list"),
+    (text(set=[entry("town/tax", mirrors=[URL + f"m{n}/tax.py" for n in range(5)])]), "at most 4 mirrors, not 5"),
+    ("[" * 100_000 + "]" * 100_000, "nested too deep"),
+    (text(set=[{**entry("town/tax"), "sha256": "sha256:" + "0" * 64}]), "64 hex digits"),
+    (text(set=[{**entry("town/tax"), "sha256": "0" * 63}]), "64 hex digits"),
+    (text(set=[entry("town/tax", size=0)]), "size is between"),
+    (text(set=[entry("town/tax", size=256 * 1024 + 1)]), "size is between"),
+    (text(set=[entry("town/parking")]), "not a GGG domain"),
+    (text(set=[entry("Town/tax")]), "not a chapter id"),
+    (text(set=[entry("tax")]), "not a chapter id"),
+    (text().replace('"remove": []', '"remove": "town/tax"'), "remove is a list"),
+    (text(release={"source": "eu/es"}), "release is"),
+    (text(), "changes nothing"),
+    # a repeated key reads as its last value here and as its first elsewhere: what voters see could differ
+    (text(set=[entry("town/tax")]).replace('"realm": "town"', '"realm": "town", "realm": "other"'), "repeats the key 'realm'"),
+    (text(set=[entry("town/tax")]).replace('"size": 100', '"size": 100, "size": 200'), "repeats the key 'size'"),
+    (text(set=[entry("town/tax")], summary={"en": "x"}).replace('"en": "x"', '"en": "x", "en": "y"'), "repeats the key 'en'"),
+    (text(set=[entry("town/tax")], remove=["town/tax"]), "town/tax is both set and removed"),
+    (text(set=[entry("town/tax")], summary="a summary"), "summary is"),
+    (text(set=[entry("town/tax")], summary=["a summary"]), "summary is"),
+    (text(set=[entry("town/tax")], summary={"en": 5}), "summary is"),
+    (text(set=[entry("town/tax")], summary=0), "summary is"),
+    (text(set=[entry("town/tax")], summary=False), "summary is"),
+])
+def test_what_parse_refuses(bad, match):
+    refused(change_list.parse, bad, match=match)
+
+
+ES = {"source": "eu/es", "version": "1"}
+
+
+def served(chapter, **more):
+    """A chapter of a release as a realm serves it: its checksum, no URL and no size."""
+    return {"chapter": chapter, "sha256": SHA["tax"][7:], **more}
+
+
+def test_a_chapter_of_the_release_may_give_no_url_and_no_size_for_a_realm_serves_it():
+    parsed = change_list.parse(text(set=[served("eu/es/tax")], release=ES))
+    assert parsed["set"] == [{"chapter": "eu/es/tax", "source": "eu/es", "domain": "tax", "sha256": SHA["tax"],
+                              "urls": [], "size": None}]
+
+
+@pytest.mark.parametrize("bad", [
+    text(set=[served("town/tax")]),  # the realm's own chapter is fetched by its URL
+    text(set=[served("town/tax")], release=ES),
+    text(set=[served("eu/fr/tax")], release=ES),  # not the release's layer
+    text(set=[served("eu/es/tax", size=100)], release=ES),  # a size but no URL
+    text(set=[served("eu/es/tax", mirrors=[URL + "m/tax.py"])], release=ES),
+])
+def test_any_other_chapter_gives_its_url(bad):
+    refused(change_list.parse, bad, match="fetched over https")
+
+
+def test_a_summary_is_a_text_per_language_and_may_be_left_out():
+    chapter = [entry("town/tax")]
+    assert change_list.parse(text(set=chapter))["summary"] == {}
+    assert change_list.parse(text(set=chapter, summary=None))["summary"] == {}
+    assert change_list.parse(text(set=chapter, summary={}))["summary"] == {}
+    assert change_list.parse(text(set=chapter, summary={"en": "x", "es": "y"}))["summary"] == {"en": "x", "es": "y"}
+
+
+def test_the_same_key_in_different_objects_is_no_repeat():
+    same = text(set=[entry("town/tax"), entry("town/water")], remove=["town/procedure"])
+    assert [c["chapter"] for c in change_list.parse(same)["set"]] == ["town/tax", "town/water"]
+
+
+def test_the_change_list_of_the_bonus_change_is_one_the_realm_accepts():
+    """The file ``realms legislation propose`` writes for València's tax chapter (cli/tests checks it byte for byte)."""
+    golden = (ROOT / "tests/fixtures/legislation/bonus-change.json").read_text().replace("<commit>", "0" * 40)
+    parsed = change_list.parse(golden)
+    chapter = parsed["set"][0]
+    assert (parsed["realm"], chapter["chapter"], chapter["source"], chapter["domain"]) == (
+        "eu/es/vc/46250-valencia", "eu/es/vc/46250-valencia/tax", "eu/es/vc/46250-valencia", "tax")
+    assert chapter["urls"][0].endswith("/legislation/eu/es/vc/46250-valencia/tax.py") and chapter["size"] == 853
+    realm, own = change_list.apply(parsed, parsed["realm"], parsed["replaces"], {"chapters": {}, "calendar": None})
+    assert own == {"chapters": {"tax": chapter["sha256"]}, "calendar": None}
+    assert parsed["summary"]["es"] == "IBI 2027: bonificación por familia numerosa"
+
+
+def test_the_domain_list_is_gggs():
+    listed = json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
+    assert tuple(d["id"] for d in listed) == change_list.DOMAINS
+
+
+# ---- apply (step 2)
+
+OWN = {"chapters": {"tax": SHA["tax"], "procedure": SHA["procedure"]}, "calendar": SHA["calendar"]}
+
+
+def applied(**kw):
+    kw.setdefault("realm", "town")
+    return change_list.apply(change_list.parse(text(**kw)), "town", SHA["codex"], OWN)
+
+
+def test_the_first_install_sets_the_realms_source_id_and_every_later_one_must_name_it():
+    first = change_list.parse(text(realm="eu/es/vc/46250-valencia", set=[entry("eu/es/vc/46250-valencia/tax")]))
+    realm, own = change_list.apply(first, None, None, {"chapters": {}, "calendar": None})
+    assert realm == "eu/es/vc/46250-valencia" and own == {"chapters": {"tax": SHA["tax"]}, "calendar": None}
+    refused(change_list.apply, first, "town", None, {"chapters": {}, "calendar": None},
+            match="for eu/es/vc/46250-valencia; this realm is town")
+
+
+def test_replaces_must_name_the_active_codex_or_none():
+    refused(applied, replaces=None, set=[entry("town/tax")], match="stale change list: it replaces no codex, the active codex is sha256")
+    refused(change_list.apply, change_list.parse(text(replaces=SHA["codex"], set=[entry("town/tax")])), "town", None,
+            {"chapters": {}, "calendar": None}, match="the active codex is none")
+
+
+def test_set_and_remove_give_the_realms_own_layer_after_the_change():
+    _, own = applied(replaces=SHA["codex"], set=[entry("town/water"), entry("town/tax", SHA["other"]),
+                                                 entry("town/calendar", SHA["other"])],
+                     remove=["town/procedure"])
+    assert own == {"chapters": {"tax": SHA["other"], "water": SHA["water"]}, "calendar": SHA["other"]}
+    _, own = applied(replaces=SHA["codex"], remove=["town/calendar"])
+    assert own == {"chapters": OWN["chapters"], "calendar": None}
+
+
+@pytest.mark.parametrize("kw, match", [
+    ({"remove": ["eu/es/tax"]}, "only the realm's own layer, town, may be emptied"),
+    ({"remove": ["town/water"]}, "no such chapter"),
+    ({"set": [entry("eu/es/tax")]}, "layer from above: it is installed whole, as a release"),
+    ({"set": [entry("eu/es/tax")], "release": {"source": "town", "version": "1"}}, "own layer has no releases"),
+    ({"set": [entry("eu/es/tax")], "remove": ["town/tax"], "release": {"source": "eu/es", "version": "1"}},
+     "remove is empty"),
+    ({"set": [entry("eu/es/tax"), entry("eu/tax")], "release": {"source": "eu/es", "version": "1"}},
+     "eu/tax is not part of the release of eu/es"),
+])
+def test_what_apply_refuses(kw, match):
+    refused(applied, replaces=SHA["codex"], match=match, **kw)
+
+
+def test_a_release_may_set_the_realms_own_chapters_too_and_only_those_of_its_source():
+    # The realm's own layer changes with every change list; a release brings one layer from above with it.
+    _, own = applied(replaces=SHA["codex"], set=[entry("eu/es/tax"), entry("town/water")],
+                     release={"source": "eu/es", "version": "1"})
+    assert own["chapters"]["water"] == SHA["water"]
+
+
+# ---- vouch (step 4)
+
+
+def release(source, version, chapters, calendar=None):
+    return {"source": source, "version": version, "chapters": {d: SHA[d] for d in chapters}, "calendar": calendar}
+
+
+ES = release("eu/es", "1.0.0", ["tax", "procedure"], SHA["calendar"])
+CV = release("eu/es/vc", "2.0.0", ["local_regime"])
+TOWN_OWN = {"chapters": {"tax": SHA["other"], "water": SHA["water"]}, "calendar": None}
+THROUGH_CV = [{"source": "eu/es/vc", "layers": [ES, CV]}]
+
+
+def vouched(set=(), release=None, relays=THROUGH_CV, own=TOWN_OWN):
+    listed = change_list.parse(text(realm="town", set=set or [entry("town/tax", SHA["other"])], release=release))
+    vouchers = {layer["source"]: relay["source"] for relay in relays for layer in relay["layers"]}  # the record that lists it
+    return change_list.vouch(listed, "town", relays, own, vouchers)
+
+
+def test_the_relaying_sync_source_vouches_for_the_layers_it_relays_and_the_realm_for_its_own():
+    planned, vouched_by = vouched()
+    assert planned.layers == ["eu/es", "eu/es/vc", "town"]
+    assert planned.paths == {"local_regime": ["eu/es/vc"], "procedure": ["eu/es"], "tax": ["eu/es", "town"],
+                             "water": ["town"]}
+    assert vouched_by == {"eu/es/tax": "eu/es/vc", "eu/es/procedure": "eu/es/vc", "eu/es/vc/local_regime": "eu/es/vc",
+                          "town/tax": "town", "town/water": "town", "eu/es/calendar": "eu/es/vc"}
+
+
+def test_a_release_is_installed_whole_as_its_record_lists_it():
+    whole = [entry("eu/es/tax"), entry("eu/es/procedure"), entry("eu/es/calendar")]
+    planned, vouched_by = vouched(set=whole, release={"source": "eu/es", "version": "1.0.0"})
+    assert [c["sha256"] for c in planned.calendars] == [SHA["calendar"]] and vouched_by["eu/es/calendar"] == "eu/es/vc"
+    refused(vouched, whole[:2], {"source": "eu/es", "version": "1.0.0"},
+            match="installed whole: eu/es 1.0.0 is eu/es/calendar, eu/es/procedure, eu/es/tax; the change list sets eu/es/procedure, eu/es/tax")
+    refused(vouched, whole[:2] + [entry("eu/es/calendar", SHA["other"])], {"source": "eu/es", "version": "1.0.0"},
+            match="eu/es/calendar: the record says sha256:.*, the change list sha256:")
+    refused(vouched, whole, {"source": "eu/es", "version": "1.1.0"}, match="relays eu/es 1.0.0, not 1.1.0")
+    refused(vouched, [entry("eu/tax")], {"source": "eu", "version": "1"}, match="no sync source relays eu")
+
+
+def test_a_realm_chapter_a_release_lists_is_skipped():
+    with_realm = release("eu/es/vc", "2.0.0", ["local_regime", "realm"])
+    relays = [{"source": "eu/es/vc", "layers": [ES, with_realm]}]
+    for listed in ([entry("eu/es/vc/local_regime")], [entry("eu/es/vc/local_regime"), entry("eu/es/vc/realm")]):
+        planned, _ = vouched(set=listed, release={"source": "eu/es/vc", "version": "2.0.0"}, relays=relays)
+        assert planned.skipped == [{"source": "eu/es/vc", "domain": "realm", "sha256": SHA["realm"]}]
+        assert "eu/es/vc/realm" not in dict(change_list.named(planned))
+
+
+def test_two_sync_sources_relaying_different_releases_of_one_layer_are_refused():
+    newer = release("eu/es", "1.1.0", ["tax", "procedure"], SHA["calendar"])
+    relays = THROUGH_CV + [{"source": "eu/es/vc/emshi", "layers": [newer, release("eu/es/vc/emshi", "1", ["water"])]}]
+    refused(vouched, (), None, relays, match="relay different releases \\(1.0.0 and 1.1.0\\)")
+
+
+def test_paths_that_are_not_one_chain_are_refused():
+    emshi = release("eu/es/vc/emshi", "1", ["tax"])  # EMSHI writes tax beside CV, not below it
+    cv_tax = release("eu/es/vc", "2.0.0", ["local_regime", "tax"])
+    beside = [{"source": "eu/es/vc", "layers": [ES, cv_tax]}, {"source": "eu/es/vc/emshi", "layers": [ES, emshi]}]
+    refused(vouched, (), None, beside, match="Paths that differ are refused unless one extends the other")
+    untied = THROUGH_CV + [{"source": "eu/es/vc/emshi", "layers": [ES, emshi]}]  # no domain puts CV and EMSHI in order
+    refused(vouched, (), None, untied, match="neither above the other")
+    below = THROUGH_CV + [{"source": "eu/es/vc/emshi", "layers": [ES, CV, release("eu/es/vc/emshi", "1", ["water"])]}]
+    planned, vouched_by = vouched(relays=below)
+    assert planned.paths["water"] == ["eu/es/vc/emshi", "town"] and vouched_by["eu/es/vc/emshi/water"] == "eu/es/vc/emshi"
+
+
+def test_the_realm_cannot_be_a_layer_of_its_sync_sources():
+    refused(vouched, (), None, [{"source": "eu/es/vc", "layers": [ES, release("town", "1", ["tax"])]}],
+            match="relays town, this realm's own layer")
+
+
+def test_a_realm_with_no_sync_sources_runs_its_own_layer_alone():
+    planned, vouched_by = vouched(relays=[])
+    assert planned.layers == ["town"] and planned.paths == {"tax": ["town"], "water": ["town"]}
+    assert vouched_by == {"town/tax": "town", "town/water": "town"}
+
+
+# ---- the layers of an install that leaves the layers from above as they are, and brings a release
+
+
+def record(key, source, *releases):
+    return {"key": key, "source": source, "releases": list(releases)}
+
+
+def runs(*releases, voucher="eu/es/vc"):
+    return [{**r, "vouched_by": voucher} for r in releases]
+
+
+EU = release("eu", "1.0.0", ["tax"])
+ASK_ES = {"source": "eu/es", "version": "1.0.0"}
+CV_RECORD = record("cv", "eu/es/vc", EU, ES, CV)
+
+
+def order_of(found):
+    return [layer["source"] for relay in found["relays"] for layer in relay["layers"]]
+
+
+def test_without_a_release_the_layers_from_above_stay_as_installed_and_no_record_is_needed():
+    found = change_list.layers_for(runs(EU, ES), [], None)
+    assert found["relays"] == [{"source": "eu/es", "layers": [EU, ES]}]  # one record, named by its last layer
+    assert found["vouchers"] == {"eu": "eu/es/vc", "eu/es": "eu/es/vc"} and found["vouching"] is None
+    assert change_list.layers_for([], [], None) == {"relays": [], "vouchers": {}, "vouching": None}
+
+
+def test_the_layers_the_realm_runs_keep_their_order_and_a_new_one_goes_where_the_vouching_record_puts_it():
+    only_eu_and_cv = change_list.layers_for(runs(EU, CV), [CV_RECORD], ASK_ES)
+    assert order_of(only_eu_and_cv) == ["eu", "eu/es", "eu/es/vc"]  # between the two the record lists it between
+    assert only_eu_and_cv["vouchers"]["eu/es"] == "eu/es/vc" and only_eu_and_cv["vouching"]["by"] == "eu/es/vc"
+    assert order_of(change_list.layers_for(runs(CV), [CV_RECORD], ASK_ES)) == ["eu/es", "eu/es/vc"]  # before the one below
+    assert order_of(change_list.layers_for(runs(EU), [CV_RECORD], ASK_ES)) == ["eu", "eu/es"]  # after the one above
+    assert order_of(change_list.layers_for([], [CV_RECORD], ASK_ES)) == ["eu/es"]
+
+
+def test_a_layer_the_realm_already_runs_takes_the_place_of_its_earlier_release_and_has_a_new_voucher():
+    newer = release("eu/es", "1.1.0", ["tax", "procedure"], SHA["calendar"])
+    found = change_list.layers_for(runs(EU, ES, CV), [record("es", "eu/es", ES, newer)], {"source": "eu/es", "version": "1.1.0"})
+    assert order_of(found) == ["eu", "eu/es", "eu/es/vc"]
+    assert found["relays"][0]["layers"][1]["version"] == "1.1.0" and found["relays"][0]["layers"][2] == CV
+    assert found["vouchers"] == {"eu": "eu/es/vc", "eu/es": "eu/es", "eu/es/vc": "eu/es/vc"}  # Spain's own record now
+
+
+def test_a_record_that_puts_the_layers_the_realm_runs_the_other_way_round_is_refused_naming_both():
+    flipped = record("cv", "eu/es/vc", ES, EU, CV)
+    refused(change_list.layers_for, runs(EU, ES), [flipped], ASK_ES,
+            match="the record of eu/es/vc puts eu/es above eu, and this realm runs eu above eu/es")
+    flipped = record("cv", "eu/es/vc", CV, EU)  # the release is for a layer the realm does not run: CV and EU swap
+    refused(change_list.layers_for, runs(EU, CV), [flipped], {"source": "eu", "version": "1.0.0"},
+            match="puts eu/es/vc above eu, and this realm runs eu above eu/es/vc")
+
+
+def test_a_record_that_does_not_vouch_is_held_to_the_order_too():
+    other = record("other", "elsewhere", CV, EU)
+    refused(change_list.layers_for, runs(EU, CV), [CV_RECORD, other], {"source": "eu/es/vc", "version": "2.0.0"},
+            match="the record of elsewhere puts eu/es/vc above eu, and this realm runs eu above eu/es/vc")
+
+
+def test_a_new_layer_between_kept_layers_the_record_orders_the_other_way_is_refused():
+    reverse = record("cv", "eu/es/vc", CV, ES, EU)  # CV above Spain above EU, but the realm runs EU above CV
+    refused(change_list.layers_for, runs(EU, CV), [reverse], ASK_ES, match="puts eu/es/vc above eu, and this realm runs eu")
+
+
+def test_a_layer_whose_link_ended_keeps_its_place_when_a_layer_the_realm_runs_is_released_from_another_record():
+    spain = record("es", "eu/es", EU, ES)  # the publisher's record lists EU and Spain; CV's link has ended
+    found = change_list.layers_for(runs(EU, ES, CV), [spain], ASK_ES)
+    assert order_of(found) == ["eu", "eu/es", "eu/es/vc"]
+    assert found["vouchers"] == {"eu": "eu/es/vc", "eu/es": "eu/es", "eu/es/vc": "eu/es/vc"}
+    planned, _ = vouched(release=ASK_ES, set=[entry("eu/es/tax"), entry("eu/es/procedure"), entry("eu/es/calendar")],
+                         relays=found["relays"])
+    assert planned.layers == ["eu", "eu/es", "eu/es/vc", "town"]
+
+
+def test_a_new_layer_beside_a_kept_layer_that_no_record_puts_in_order_with_it_is_refused():
+    spain = record("es", "eu/es", EU, ES)  # CV's link has ended: nothing orders Spain against CV
+    refused(change_list.layers_for, runs(EU, CV), [spain], ASK_ES,
+            match="the record of eu/es does not put eu/es in order against eu/es/vc: layers that no record puts in order")
+    refused(change_list.layers_for, runs(CV, EU), [record("n", "n", ES, EU)], ASK_ES, match="against eu/es/vc")
+    # the layers between the slot's two ends are named in the order the realm runs them
+    refused(change_list.layers_for, runs(EU, CV, release("w", "1", ["tax"])), [record("n", "n", EU, ES)], ASK_ES,
+            match="against eu/es/vc, w")
+
+
+def test_a_new_layer_that_the_record_orders_against_none_of_the_layers_the_realm_runs_is_refused():
+    refused(change_list.layers_for, runs(EU), [record("es", "eu/es", ES)], ASK_ES,
+            match="the record of eu/es does not put eu/es in order against eu: layers that no record puts in order")
+
+
+def test_a_record_that_has_moved_on_from_a_layer_the_realm_keeps_is_no_conflict():
+    newer = release("eu/es", "1.1.0", ["tax", "procedure"], SHA["calendar"])
+    behind = record("cv", "eu/es/vc", EU, newer, CV)
+    found = change_list.layers_for(runs(EU, ES), [behind], {"source": "eu/es/vc", "version": "2.0.0"})
+    assert found["relays"] == [{"source": "eu/es/vc", "layers": [EU, ES, CV]}]  # Spain stays at 1.0.0
+
+
+def test_the_publishers_record_vouches_when_the_realm_syncs_from_it_and_the_first_record_else():
+    es = record("es", "eu/es", ES)
+    through_cv = record("cv", "eu/es/vc", EU, ES, CV)
+    for records in ([es, through_cv], [through_cv, es]):
+        found = change_list.vouching(records, ASK_ES)
+        assert (found["key"], found["by"], found["order"]) == ("es", "eu/es", ["eu/es"])
+    found = change_list.vouching([through_cv], ASK_ES)
+    assert (found["key"], found["by"], found["release"], found["order"]) == ("cv", "eu/es/vc", ES, ["eu", "eu/es", "eu/es/vc"])
+    assert change_list.vouching([record("other", "eu/es/x", ES), through_cv], ASK_ES)["key"] == "other"
+
+
+def test_a_publishers_record_lists_the_version_asked_for_among_its_own():
+    old, new = release("eu/es", "1.0.0", ["tax"]), release("eu/es", "1.1.0", ["tax"])
+    publisher = record("es", "eu/es", old, new)
+    for version, expected in (("1.0.0", old), ("1.1.0", new)):
+        found = change_list.layers_for([], [publisher], {"source": "eu/es", "version": version})
+        assert found["relays"] == [{"source": "eu/es", "layers": [expected]}] and found["vouching"]["release"] == expected
+
+
+def test_what_no_record_vouches_for_is_refused():
+    refused(change_list.vouching, [CV_RECORD], {"source": "eu/es", "version": "1.1.0"}, match="relays eu/es 1.0.0, not 1.1.0")
+    refused(change_list.vouching, [CV_RECORD], {"source": "eu/es/x", "version": "1"}, match="no sync source relays eu/es/x")
+    refused(change_list.vouching, [], ASK_ES, match="no sync source relays eu/es")
+
+
+def test_two_records_that_list_different_releases_of_the_layer_are_refused_and_so_is_a_publisher_ahead_of_its_relays():
+    newer = release("eu/es", "1.1.0", ["tax", "procedure"], SHA["calendar"])
+    refused(change_list.vouching, [CV_RECORD, record("es", "eu/es", newer)], ASK_ES,
+            match="sync sources eu/es/vc and eu/es relay different releases \\(1.0.0 and 1.1.0\\)")
+    other_sums = {**ES, "chapters": {**ES["chapters"], "tax": SHA["other"]}}
+    refused(change_list.vouching, [CV_RECORD, record("x", "x", other_sums)], ASK_ES, match="1.0.0 with different checksums")
+    ahead = record("es", "eu/es", ES, newer)  # the publisher also lists 1.0.0: relays that lag are not in conflict with it
+    assert change_list.vouching([CV_RECORD, ahead], ASK_ES)["key"] == "es"
+    refused(change_list.vouching, [CV_RECORD, ahead], {"source": "eu/es", "version": "1.1.0"}, match="relay different releases")

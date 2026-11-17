@@ -3,16 +3,31 @@ import json
 
 from core import candid
 from core import chain
+from core import compliance, sync_log
 from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page, page_by, view, window
-from ggg import (AllocationRule, Budget, Contract, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
-                 LedgerEntry, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
+from ggg import (AllocationRule, Budget, Contract, Department, External, FinancialReport, FiscalPeriod, Fund, Invoice,
+                 LedgerEntry, Loan, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
+from ggg.finance.budget import KINDS
 from core.op import op
+from core.pending import money, quoted, readable, you_sign
+from core.ratio import ONE, PERCENT
 from api.proposals import realm_wide, root
 
-CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate")
+CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate", "sweep")
+# Realms GOS names its treasury epochs; GGG has their length.
+EPOCHS = {"monthly": 30 * 86400, "quarterly": 91 * 86400, "yearly": 365 * 86400}
 REGISTRY = 100  # tokens, and NFT collections, a realm can register: treasury_view lists them all
 REFRESH = 20  # invoices one invoice_refresh checks, one ledger call each
+MIGRATE_PAGE = 500  # transfers one message of the pass after an upgrade reads
+MONEY_MAX = 2**53 - 1  # GGG's Money
+FEE = "ledger_fee"  # the category of the ledger's fee on a payment: a cost of paying, not a budgeted one
+IN_FORCE = ("adopted", "extended")  # the statuses of a budget line that caps spending
+ITEM_FIELDS = ("concept", "amount", "quantity", "unit", "legislation")
+TRANSFER = ("id", "sender", "to", "symbol", "amount", "ledger_tx", "status", "at", "payroll", "due_at", "budget", "committed",
+            "contract")  # what a list of transfers shows
+LINE = ("id", "category", "kind", "planned", "reserved", "committed", "actual", "status", "proposal")  # what a line shows
+PERIOD_UNITS = ("day", "working_day", "month", "year")
 
 
 # --- ledger calls ---------------------------------------------------------------------------------
@@ -27,6 +42,15 @@ def account(owner, sub=None):
 
 def text(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def icrc1_arg(to, amount, memo, fee=None, created_at=None):
+    """The argument of an ICRC-1 transfer of ``amount`` to the account ``to`` (as ``account`` writes it), with ``memo``
+    and, when given, the ``fee`` and the ``created_at`` time in seconds that make it recognisable as a repeat."""
+    fee_text = f"opt ({fee} : nat)" if fee is not None else "null"
+    time_text = f"opt ({created_at * 1_000_000_000} : nat64)" if created_at is not None else "null"
+    return (f"(record {{ to = {to}; amount = {amount} : nat; fee = {fee_text}; memo = opt {blob(memo)}; "
+            f"from_subaccount = null; created_at_time = {time_text} }})")
 
 
 def subaccount(invoice_id):
@@ -127,19 +151,52 @@ def tally(p, e):
     p.source_hash = hashlib.sha256((p.source_hash + line).encode()).hexdigest()
 
 
-def refuse_overspend(p, lines):
-    """An adopted budget's planned amount is a ceiling: refuse lines that would take its actual past it (members
-    amend the budget to spend more). Only spending counts: a reversal frees budget and is never refused."""
+def caps_spending(b):
+    """A line caps spending when it is in force and plans an expense: a revenue line caps nothing."""
+    return b.status in IN_FORCE and b.kind == "expense"
+
+
+def has_adopted_budget(fund, p):
+    """The fund has an adopted line in the period, of either kind: its budget is adopted."""
+    return any(b.status == "adopted" and b.fund.id == fund.id for b in p.budgets)
+
+
+def available(b):
+    """What a line can still pay from: its plan less what it has reserved, committed and spent (ggg I-FIN-9)."""
+    return b.planned - b.reserved - b.committed - b.actual
+
+
+def describe(b):
+    return f"line {b.id} ({b.fund.id}, {b.period.id}, {b.category})"
+
+
+def refuse_short(b, asked, committed):
+    """Refuse a payment of ``asked`` that line ``b`` cannot meet from the money it draws on: its committed money when
+    ``committed``, else its available credit. The message says by how much the line is short."""
+    has, what = (b.committed, "committed") if committed else (available(b), "available")
+    if asked > has:
+        raise Conflict(f"{describe(b)} has {has} {what}; the transfer of {asked} is {asked - has} short")
+
+
+def refuse_overspend(p, lines, committed=False):
+    """A budget line's plan is a ceiling: refuse lines that would take its actual past the credit it has available, or,
+    for a ``committed`` payment, past its committed money (members amend the budget to spend more). An adopted budget is
+    exhaustive: once a fund has one for the period, spending in a category it has no line for is refused too (not the
+    ledger's fee). Only spending counts: a reversal frees budget and is never refused."""
     spent = {}
     for kind, category, debit, credit, fund in lines:
         if kind == "expense" and fund is not None and p is not None:
             key = slot(fund, p, category)
-            spent[key] = spent.get(key, 0) + debit - credit
-    for key, asked in spent.items():
-        for b in each(Budget, "slot", key):
-            if b.status == "adopted" and asked > 0 and b.actual + asked > b.planned:
-                raise Conflict(f"budget {b.id} plans {b.planned} for {b.category} of fund {b.fund.id}, "
-                               f"{b.actual} is spent and {asked} was asked: amend the budget to spend more")
+            spent[key] = (fund, category, spent.get(key, (None, None, 0))[2] + debit - credit)
+    for key, (fund, category, asked) in spent.items():
+        if asked <= 0:
+            continue
+        in_force = [b for b in each(Budget, "slot", key) if caps_spending(b)]
+        for b in in_force:
+            refuse_short(b, asked, committed)
+        if not in_force and category != FEE and has_adopted_budget(fund, p):
+            raise Conflict(f"the adopted budget of fund {fund.id} for {p.id} has no expense line for {category}: amend "
+                           f"the budget to spend on it")
 
 
 def post(p, lines, symbol, description="", **refs):
@@ -160,7 +217,7 @@ def post(p, lines, symbol, description="", **refs):
         tally(p, e)
         if kind == "expense" and fund is not None:
             for b in each(Budget, "slot", slot(fund, p, category)):
-                if b.status == "adopted":
+                if caps_spending(b):
                     b.actual += debit - credit
     return tx
 
@@ -180,33 +237,94 @@ def address(to, symbol):
         for a in each(PaymentAccount, "owner", owner):
             if a.symbol == symbol:
                 return a.address
-    return to.removeprefix("User:")  # a user without an account is paid at their principal
+    return to.removeprefix("User:").removeprefix("Follower:")  # a user, or a follower realm, is paid at its principal
+
+
+def not_the_fee(args):
+    """The ledger's fee is booked by the realm under its own category, which budgets do not cap: a caller cannot name
+    it for a payment or a budget line, or the payment would spend past an adopted budget."""
+    if args.get("category") == FEE:
+        raise Fail(f"{FEE} is the category of the ledger's fee, which the realm books itself")
 
 
 def spending(fund, category, amount, fee):
-    return [("expense", category, amount, 0, fund), ("expense", "ledger_fee", fee, 0, fund)]
+    return [("expense", category, amount, 0, fund), ("expense", FEE, fee, 0, fund)]
 
 
-def reserve(p, fund, to, symbol, amount, category, description="", payroll=None, **refs):
+def charged_line(p, fund, category):
+    """The budget line a payment of ``category`` from ``fund`` is charged to: the one in force in period ``p``, if any."""
+    if p is None:
+        return None
+    return next((b for b in each(Budget, "slot", slot(fund, p, category)) if caps_spending(b)), None)
+
+
+def standing_line(t):
+    """The line that stands now for the one ``t`` was charged to: it, or the line that replaced it and carried its money;
+    none once its period has closed."""
+    return next((b for b in each(Budget, "slot", Budget[t.budget].slot) if caps_spending(b)), None)
+
+
+def reserve(p, fund, to, symbol, amount, category, description="", payroll=None, committed=False, due_at=0, **refs):
+    """Book a payment of ``amount`` from ``fund`` and record its transfer: ``scheduled`` when it falls due at ``due_at``,
+    else about to be sent. The line it is charged to pays it from its committed money when ``committed``, else from its
+    available credit (ggg I-FIN-9). A fund with no line in force charges none."""
     fee = find(Token, symbol).fee
     lines = spending(fund, category, amount, fee) + [("asset", "cash", 0, amount + fee, fund)]
-    refuse_overspend(p, lines)  # post refuses too, but only after the transfer row below is written
+    refuse_overspend(p, lines, committed)  # post refuses too, but only after the transfer row below is written
+    line = charged_line(p, fund, category)
+    drawn = committed and line is not None
+    paid_for = refs["contract"].id if "contract" in refs else ""
     t = Transfer(id=next_id(Transfer, "TR"), sender=f"Fund:{fund.id}", to=to, symbol=symbol, amount=amount,
-                 status="sending", at=chain.now(), payroll=payroll)
+                 status="scheduled" if due_at else "sending", at=chain.now(), payroll=payroll, contract=paid_for,
+                 due_at=due_at, budget=line.id if line else "", committed=drawn)
+    if drawn:
+        line.committed -= amount  # it becomes the available credit that post spends, so post's own check passes
     post(p, lines, symbol, description or f"{t.id} to {to}", transfer=t, **refs)
     return t
 
 
-def reverse(t, p, why):
+def resume(start=1):
+    """A transfer of an earlier release is migrated, and indexed, when it is first read, so what the indexes find (the
+    payments on a contract, the transfers still owed) is complete only once every one is. After an upgrade, read them all,
+    a page a message: the rebuild of the status index loads each page, which migrates it."""
+    cursor = Transfer.rebuild_field_index("status", from_id=start, batch=MIGRATE_PAGE)
+    if cursor is not None:
+        chain.set_timer(0, lambda: resume(cursor))
+
+
+def open_or_none(p):
+    """``p`` when it is an open fiscal period. A period that has closed takes no entry (I-FIN-5): what is booked in none
+    refunds a fund or moves money the books must show, and leaves the closed period's statements as they were (a restating
+    report corrects them)."""
+    return p if p is not None and p.status == "open" else None
+
+
+def booking_period():
+    """The period an entry that cannot be refused is booked in: the one covering now, if it is open."""
+    return open_or_none(period_at(chain.now()))
+
+
+def booked_period(t):
+    """The fiscal period ``t`` was booked in, which takes its reversal while it is open: a transfer scheduled in one
+    period can be cancelled in a later one. A period does not close while it holds a transfer that is scheduled, sending
+    or pending (``period_close``), so a closed one is the exception, and the reversal is booked in none."""
+    return open_or_none(next(iter(t.ledger_entries)).period)
+
+
+def reverse(t, why, status="failed"):
+    """Undo the books of ``t`` and give back what it charged, to the stage it came from (ggg I-FIN-9). It refuses nothing:
+    a transfer whose call has been made must end in a final state."""
     lines = [(e.kind, e.category, e.credit, e.debit, e.fund) for e in t.ledger_entries]
-    post(p, lines, t.symbol, f"reversal of {t.id}: {why}", transfer=t)
-    t.status = "failed"
+    post(booked_period(t), lines, t.symbol, f"reversal of {t.id}: {why}", transfer=t)
+    line = standing_line(t) if t.committed else None
+    if line is not None:
+        line.committed += t.amount
+    t.status = status
 
 
 def send(t):
     token = find(Token, t.symbol)
-    arg = (f"(record {{ to = {account(address(t.to, t.symbol))}; amount = {t.amount} : nat; fee = null; "
-           f"memo = opt {blob(t.id.encode())}; from_subaccount = null; created_at_time = null }})")
+    arg = icrc1_arg(account(address(t.to, t.symbol)), t.amount, t.id.encode())
     try:
         reply = yield from chain.call(token.ledger, "icrc1_transfer", arg)
     except Exception as e:
@@ -215,7 +333,7 @@ def send(t):
         status, tx = outcome(reply)
     if t.status == "sending":
         if status == "failed":
-            reverse(t, period(), reply[:200])
+            reverse(t, reply[:200])
         else:
             t.status, t.ledger_tx, t.reply = status, tx or "", reply[:200]
     return {"transfer": t.id, "status": t.status, **({"ledger_tx": tx} if tx else {"error": reply[:200]})}
@@ -239,13 +357,57 @@ def positive(args, key="amount"):
     return amount
 
 
-@op("transfer.create", delegable=True, governed=fund_department, parties=lambda a: {a.get("to", "")},
-    returns="transfer")
+def paying_a_follower(args, proposal=""):
+    """The fact of a transfer_create call that is not one of its arguments (GGG's derived facts): the compliance its
+    recipient, if a follower, last reported, for the legislation of a source that pays only compliant followers."""
+    return {"follower_compliance": compliance.of_follower(args.get("to"))}
+
+
+def due_date(args):
+    """The ``due_at`` of a transfer_create call, in seconds: it lies after the call, or the transfer is paid at once and
+    this is 0 (ggg I-FIN-10)."""
+    due = int(args.get("due_at") or 0)
+    if due and due <= chain.now():
+        raise Fail("due_at must lie after the call")
+    return due
+
+
+def refuse_over_contract(args):
+    """A payment on a contract is in its symbol and leaves the payments on it within its value (ggg I-FIN-11)."""
+    contract, amount = find(Contract, args["contract"]), positive(args)
+    symbol = args.get("symbol") or currency()
+    if symbol != contract.symbol:
+        raise Fail(f"a transfer for contract {contract.id} is in {contract.symbol}, not {symbol}")
+    left = contract.value - Transfer.paid_on(contract.id)
+    if amount > left:
+        raise Conflict(f"contract {contract.id} has {left} left of its value; the transfer of {amount} is "
+                       f"{amount - left} over")
+
+
+def refuse_unpayable(args):
+    """What a transfer_create call meets whatever its fund holds: it does not name the ledger's fee, it falls due after
+    the call, it keeps a contract's payments within its value and its budget line can pay it. It runs when the call is
+    filed and again when the proposal that carries it applies, so that two proposals that together overpay cannot both
+    execute (ggg I-FIN-9, I-FIN-11)."""
+    not_the_fee(args)
+    due_date(args)
+    if args.get("contract"):
+        refuse_over_contract(args)
+    symbol = args.get("symbol") or currency()
+    lines = spending(find(Fund, args["fund"]), args.get("category", "transfer"), positive(args),
+                     find(Token, symbol).fee)
+    refuse_overspend(period(), lines, bool(args.get("committed")))
+
+
+@op("transfer.create", governed=fund_department, parties=lambda a: {a.get("to", "")},
+    returns="transfer", check=refuse_unpayable, derived=paying_a_follower)
 def transfer_create(c, args):
     """Pay ``amount`` of ``symbol`` (default the realm currency) from ``fund`` to ``to`` (principal, user or org); the
-    fund must also cover the ledger fee. Optional ``category`` (default transfer), ``description``, ``contract``.
-    A payment that takes the adopted budget of its fund and category past its plan is refused: amend the budget to
-    spend more. Returns ``transfer``, ``status``. Example: ``{"fund": "ROADS", "to": "buildco", "amount": 50000}``."""
+    fund must also cover the ledger fee. Optional ``category`` (default transfer), ``description``, ``contract``, ``due_at``
+    (seconds: the transfer is scheduled, owed by then, and moves no money until ``transfer_pay``) and ``committed`` (it
+    draws on the committed money of its budget line, not its available credit). A payment that its adopted budget line
+    cannot meet, or that takes a contract past its value, is refused. Returns ``transfer``, ``status``. Example:
+    ``{"fund": "ROADS", "to": "buildco", "amount": 50000}``."""
     fund, amount = find(Fund, args["fund"]), positive(args)
     symbol = args.get("symbol") or currency()
     need = amount + find(Token, symbol).fee
@@ -254,20 +416,44 @@ def transfer_create(c, args):
     p = period()
     refs = {"contract": find(Contract, args["contract"])} if args.get("contract") else {}
     t = reserve(p, fund, args["to"], symbol, amount, args.get("category", "transfer"), args.get("description", ""),
-                **refs)
+                committed=bool(args.get("committed")), due_at=due_date(args), **refs)
+    if t.status == "scheduled":
+        return {"transfer": t.id, "status": t.status}
+    return (yield from send(t))
+
+
+@op("transfer.create", returns="transfer")
+def transfer_pay(c, args):
+    """Pay the scheduled ``transfer`` now, early or late. It is not governed: transfer_create decided the payment.
+    Returns ``transfer``, ``status``."""
+    t = find(Transfer, args["transfer"])
+    if t.status != "scheduled":
+        raise Conflict(f"{t.id} is {t.status}; only a scheduled transfer is paid")
+    t.status = "sending"
     return (yield from send(t))
 
 
 @op("transfer.delete", governed=lambda a: owner_of(transfer_fund(find(Transfer, a["transfer"]))))
 def transfer_revert(c, args):
-    """Revert a pending ``transfer`` (the ledger rejected its call), refunding its fund; optional ``reason``.
-    A transfer still ``sending`` (its ledger call in flight) or ``unconfirmed`` (the ledger's answer was unclear, the
-    tokens may have left) cannot be reverted."""
+    """Revert a pending ``transfer`` (the ledger rejected its call), refunding its fund; optional ``reason``. Or cancel a
+    scheduled one, unpaid, which gives back what it charged to its budget line. A transfer still ``sending`` (its ledger
+    call in flight) or ``unconfirmed`` (the ledger's answer was unclear, the tokens may have left) cannot be reverted."""
     t = find(Transfer, args["transfer"])
-    if t.status != "pending":
-        raise Conflict(f"{t.id} is {t.status}; only a pending transfer can be reverted")
-    reverse(t, period(), args.get("reason", "reverted"))
+    if t.status not in ("pending", "scheduled"):
+        raise Conflict(f"{t.id} is {t.status}; only a pending or scheduled transfer can be reverted")
+    reverse(t, args.get("reason", "reverted"), "cancelled" if t.status == "scheduled" else "failed")
     return {"transfer": t.id, "status": t.status}
+
+
+@op("treasury.view", read=True, returns="transfers")
+def transfer_list(c, args):
+    """One page of the realm's transfers (``from``, ``count``), optionally only those of ``fund`` or with ``status``:
+    the ``scheduled`` ones are what the realm owes, and when (``due_at``); ``next`` continues it. A page can hold fewer
+    matches than ``count``: follow ``next``."""
+    def wanted(t):
+        return args.get("fund") in (None, t.sender.removeprefix("Fund:")) and args.get("status") in (None, t.status)
+    rows, nxt = page(Transfer, args, wanted)
+    return {"transfers": [view(t, *TRANSFER) for t in rows], "next": nxt}
 
 
 # --- invoices -------------------------------------------------------------------------------------
@@ -276,10 +462,50 @@ def payer_ref(payer):
     return payer if ":" in payer else f"User:{payer}"
 
 
-def new_invoice(payer, amount, symbol, due_at, reason=""):
+def invoice_item(item):
+    """One line of an invoice as it is stored: a ``concept`` and an ``amount`` (negative for a discount), and optionally
+    a ``quantity``, a ``unit`` and the ``legislation`` that charges it."""
+    if not isinstance(item, dict) or set(item) - set(ITEM_FIELDS):
+        raise Fail(f"an invoice item has {', '.join(ITEM_FIELDS)}")
+    if not isinstance(item.get("concept"), str) or not item["concept"]:
+        raise Fail("an invoice item names its concept")
+    if type(item.get("amount")) is not int or abs(item["amount"]) > MONEY_MAX:
+        raise Fail(f"item '{item['concept']}': amount is a whole number of the token's smallest unit, at most "
+                   f"{MONEY_MAX} either way")
+    quantity = item.get("quantity")
+    if quantity is not None and (type(quantity) is not int or quantity < 0):
+        raise Fail(f"item '{item['concept']}': quantity is a whole number, not negative")
+    for key in ("unit", "legislation"):
+        if item.get(key) is not None and type(item[key]) is not str:
+            raise Fail(f"item '{item['concept']}': {key} is text")
+    return {k: v for k, v in item.items() if v is not None}
+
+
+def invoice_items(items):
+    """The lines of an invoice, each checked: there is at least one (I-FIN-7)."""
+    if not isinstance(items, list) or not items:
+        raise Fail("an invoice has at least one item")
+    return [invoice_item(item) for item in items]
+
+
+def total(items):
+    return sum(item["amount"] for item in items)
+
+
+def checked_total(items):
+    """The sum of the ``items`` of an invoice, which is never negative (I-FIN-7) and is an amount of money."""
+    amount = total(items)
+    if not 0 <= amount <= MONEY_MAX:
+        raise Fail(f"the items of an invoice sum to {amount}, which is not an amount of money")
+    return amount
+
+
+def new_invoice(payer, items, symbol, due_at, reason="", facts=None):
+    """A pending invoice for the sum of its ``items``."""
     find(Token, symbol)
-    return Invoice(id=next_id(Invoice, "INV"), payer=payer_ref(payer), amount=amount, symbol=symbol,
-                   due_at=int(due_at), reason=reason, status="pending")
+    amount = checked_total(items)
+    return Invoice(id=next_id(Invoice, "INV"), payer=payer_ref(payer), amount=amount, items=items, facts=facts or {},
+                   symbol=symbol, due_at=int(due_at), reason=reason, status="pending")
 
 
 def pay_to(inv):
@@ -287,7 +513,7 @@ def pay_to(inv):
 
 
 def show(inv):
-    return {**view(inv, "id", "payer", "amount", "symbol", "due_at", "status", "reason", "paid_at"),
+    return {**view(inv, "id", "payer", "amount", "items", "symbol", "due_at", "status", "reason", "paid_at"),
             "pay_to": pay_to(inv)}
 
 
@@ -307,8 +533,8 @@ def receive(inv, received):
     category = inv.reason.partition(":")[0].lower() or "invoice"
     lines = [("asset", "cash", inv.amount, 0, source), ("revenue", category, 0, inv.amount, source)]
     rule = adopted_rule(source) if config.get("auto_allocate") else None
-    for code, percent in ((rule.rules or {}).items() if rule else ()):
-        share = inv.amount * int(percent) // 100
+    for allocation in (rule.rules if rule else []):
+        code, share = allocation["fund"], inv.amount * allocation["share"] // ONE
         if share and code != source.id:
             lines += [("asset", "cash", 0, share, source), ("asset", "cash", share, 0, find(Fund, code))]
     kind, _, key = inv.payer.partition(":")
@@ -332,14 +558,34 @@ def refresh(inv):
 
 @op("treasury.manage")
 def invoice_create(c, args):
-    """Bill ``payer`` (user id or ``Entity:id``) ``amount`` of ``symbol`` (default the realm currency), optionally
-    due at ``due_at`` and for ``reason``. Returns ``invoice`` and ``pay_to``, the ledger account to pay it into."""
-    inv = new_invoice(args["payer"], positive(args), args.get("symbol") or currency(), args.get("due_at", 0),
-                      args.get("reason", ""))
+    """Bill ``payer`` (user id or ``Entity:id``) ``amount`` of ``symbol`` (default the realm currency) in ``items``,
+    which sum to ``amount``: each has a ``concept`` and an ``amount`` (negative for a discount), optionally a
+    ``quantity``, ``unit`` and ``legislation``. Optionally due at ``due_at``, for ``reason``, with ``facts`` for
+    legislation. Returns ``invoice`` and ``pay_to``, the ledger account to pay it into."""
+    items, amount = invoice_items(args["items"]), positive(args)
+    if total(items) != amount:
+        raise Fail(f"the items sum to {total(items)}, not to the amount {amount}")
+    inv = new_invoice(args["payer"], items, args.get("symbol") or currency(), args.get("due_at", 0),
+                      args.get("reason", ""), args.get("facts"))
     return {"invoice": inv.id, "pay_to": pay_to(inv)}
 
 
-@op("self.invoice_refresh", delegable=True, returns="invoice")
+@op("treasury.manage", returns="invoice")
+def invoice_item_add(c, args):
+    """Add the line ``item`` (as in ``invoice_create``) to the pending ``invoice``; its amount rises by the line's, or
+    falls for a discount, and stays within zero and the largest amount of money. Returns ``invoice``."""
+    inv = find(Invoice, args["invoice"])
+    if inv.status != "pending":
+        raise Conflict(f"{inv.id} is {inv.status}; a line joins only a pending invoice")
+    item = invoice_item(args["item"])
+    amount = inv.amount + item["amount"]
+    if not 0 <= amount <= MONEY_MAX:
+        raise Fail(f"{inv.id} would be {amount}, which is not an amount of money")
+    inv.items, inv.amount = [*inv.items, item], amount
+    return {"invoice": inv.id}
+
+
+@op("self.invoice_refresh", returns="invoice")
 def invoice_check(c, args):
     """Check the ledger for a payment of ``invoice`` (yours or your organization's). Returns its ``status``."""
     inv = find(Invoice, args["invoice"])
@@ -376,7 +622,7 @@ def invoice_refresh(c, args):
             "next": nxt}
 
 
-@op("self.data_view", read=True, delegable=True)
+@op("self.data_view", read=True)
 def my_invoices(c, args):
     """One page of your ``invoices`` (``from``, ``count``), each with its status and ``pay_to``, the ledger account to
     pay it into; ``next`` continues it."""
@@ -400,7 +646,8 @@ def treasury_view(c, args):
 @op("treasury.view", read=True, returns="entries")
 def ledger_view(c, args):
     """One page of ledger entries (``from``, ``count``), optionally filtered by ``transaction``, ``symbol``, ``kind``,
-    ``fund`` and ``period``; ``next`` continues it. A page can hold fewer matches than ``count``: follow ``next``."""
+    ``fund`` and ``period``; ``next`` continues it. An entry that books a sweep names it (``sweep``). A page can hold
+    fewer matches than ``count``: follow ``next``."""
     keys = {k: args[k] for k in ("transaction", "symbol", "kind") if k in args}
 
     def keep(e):
@@ -410,7 +657,8 @@ def ledger_view(c, args):
     rows, nxt = page(LedgerEntry, args, keep)
     return {"entries": [{**view(e, "id", "transaction", "kind", "category", "debit", "credit", "symbol", "at",
                                 "description", "user"),
-                         "fund": e.fund.id if e.fund else "", "period": e.period.id if e.period else ""}
+                         "fund": e.fund.id if e.fund else "", "period": e.period.id if e.period else "",
+                         "sweep": e.sweep.id if e.sweep else ""}
                         for e in rows], "next": nxt}
 
 
@@ -425,17 +673,35 @@ def report_view(c, args):
     return {"reports": [view(r, "id", "kind", "as_of", "issued_by", "supersedes") for r in rows], "next": nxt}
 
 
-@op("treasury.manage", governed=realm_wide)
-def treasury_configure(c, args):
-    """Update the treasury settings in ``config``: ``epoch``, ``anchor_month``, ``source_fund`` (receives invoice
-    payments) and ``auto_allocate`` (split them by its adopted allocation rule). Returns the merged ``config``."""
-    t = Treasury["1"] or Treasury(id="1")
+def configuring(args):
+    """What a treasury_configure call meets whatever the vote decides: the settings it knows, and sweep rules only on a
+    capital, for its own funds and tokens (the sweep module)."""
     unknown = set(args["config"]) - set(CONFIG)
     if unknown:
         raise Fail(f"unknown treasury settings: {', '.join(sorted(unknown))}")
     if "source_fund" in args["config"]:
         find(Fund, args["config"]["source_fund"])
+    if "sweep" in args["config"]:
+        from api import sweeps  # it imports this module
+
+        sweeps.refuse_bad_rules(args["config"]["sweep"])
+
+
+@op("treasury.manage", governed=realm_wide, check=configuring)
+def treasury_configure(c, args):
+    """Update the treasury settings in ``config``: ``epoch``, ``anchor_month``, ``source_fund`` (receives invoice
+    payments), ``auto_allocate`` (split them by its adopted allocation rule) and, on a capital, ``sweep``: the rules by
+    which its quarters move what is paid in them into its funds, each a quarter ``fund`` and ``symbol``, the capital fund
+    ``into``, and what the quarter ``keep``s; the rules given replace the earlier ones and reach the quarters with
+    quarter_sync. Returns the merged ``config``."""
+    t = Treasury["1"] or Treasury(id="1")
     t.config = {**(t.config or {}), **args["config"]}
+    if "sweep" in args["config"]:
+        sync_log.note("sweep")  # the quarters take the rules at their next sync
+    if "epoch" in args["config"]:
+        from api import sweeps  # it imports this module
+
+        sweeps.resume()  # a quarter that holds rules sweeps at the end of an epoch that has a length now
     return {"config": t.config}
 
 
@@ -502,15 +768,27 @@ def period_open(c, args):
     return {"period": p.id}
 
 
+def unsettled_in(p):
+    """The ids of the transfers booked in period ``p`` that are still owed (scheduled), in flight (sending) or waiting to
+    be reverted (pending): each ends with a reversal or a cancellation, which books in the period."""
+    return [t.id for status in ("scheduled", "sending", "pending") for t in each(Transfer, "status", status)
+            if next(iter(t.ledger_entries)).period == p]
+
+
 @op("org.manage_budget", governed=realm_wide)
 def period_close(c, args):
-    """Close the fiscal ``period`` and its adopted budgets. Nothing can be booked while a closed period covers now."""
+    """Close the fiscal ``period`` and its adopted budgets. Nothing can be booked while a closed period covers now. A
+    period that holds a scheduled, sending or pending transfer does not close: cancel, pay or revert it first."""
     p = find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Conflict(f"{p.id} is {p.status}")
+    unsettled = unsettled_in(p)
+    if unsettled:
+        raise Conflict(f"{p.id} holds {len(unsettled)} transfers still scheduled, sending or pending, among "
+                       f"them {', '.join(unsettled[:10])}: cancel, pay or revert them first")
     p.status = "closed"
     for b in p.budgets:
-        if b.status == "adopted":
+        if b.status in IN_FORCE:
             b.status = "closed"
     return {"period": p.id, "status": p.status}
 
@@ -519,48 +797,260 @@ def budget_department(args):
     return owner_of(find(Budget, args["budget"]).fund)
 
 
-def supersede(b, status):
+def held(b):
+    """What a line holds besides its available credit: its reserved, committed and spent money (ggg I-FIN-9)."""
+    return b.reserved + b.committed + b.actual
+
+
+def refuse_underfunded(key, planned, name):
+    """A line ``name`` that would replace the one in force in slot ``key`` carries what that holds, and plans at least
+    that much."""
+    for old in each(Budget, "slot", key):
+        if old.status in IN_FORCE and held(old) > planned:
+            raise Conflict(f"{name} plans {planned}, less than the {held(old)} that {old.id} holds")
+
+
+def supersede(b):
+    """Replace the line of the same slot that is in force, adopted or extended: it becomes ``amended``, and the money
+    reserved, committed and spent against it carries over."""
     for old in each(Budget, "slot", b.slot):
-        if old.id != b.id and old.status == "adopted":
-            old.status = status
+        if old.id != b.id and old.status in IN_FORCE:
+            old.status = "amended"
+            b.reserved += old.reserved
+            b.committed += old.committed
             b.actual += old.actual
 
 
-@op("org.manage_budget", governed=fund_department, returns="budget")
+def other_kind_in_slot(fund, p, category, kind):
+    """A line of the other kind in the slot of ``fund``, ``p`` and ``category``, whatever its status, if any."""
+    return next((b for b in each(Budget, "slot", slot(fund, p, category)) if b.kind != kind), None)
+
+
+@op("org.manage_budget", governed=fund_department, returns="budget", check=not_the_fee)
 def budget_draft(c, args):
-    """Draft a budget for ``fund`` in the open ``period``: ``planned`` amount for ``category``, ``kind`` (default
-    expense). Returns ``budget``."""
+    """Draft a budget line for ``fund`` in the open ``period``: ``planned`` amount for ``category``, of ``kind``
+    ``revenue`` or ``expense``; a category is one kind in a fund and period. Returns ``budget``."""
     fund, p = find(Fund, args["fund"]), find(FiscalPeriod, args["period"])
     if p.status != "open":
         raise Conflict(f"{p.id} is {p.status}")
+    if args["kind"] not in KINDS:
+        raise Fail(f"kind is one of {', '.join(KINDS)}")
+    other = other_kind_in_slot(fund, p, args["category"], args["kind"])
+    if other:  # a line's slot has no kind: a category is revenue or expense, not both
+        raise Fail(f"{args['category']} is a {other.kind} category of fund {fund.id} in {p.id}, not {args['kind']}")
     b = Budget(id=next_id(Budget, "B"), fund=fund, period=p, category=args["category"],
-               slot=slot(fund, p, args["category"]), kind=args.get("kind", "expense"), planned=int(args["planned"]))
+               slot=slot(fund, p, args["category"]), kind=args["kind"], planned=int(args["planned"]))
     return {"budget": b.id}
 
 
-@op("org.manage_budget", governed=budget_department)
+def lines_of(p):
+    """The budget lines of fiscal period ``p``, in the order they were drafted."""
+    return sorted(p.budgets, key=lambda b: int(b._id))
+
+
+def draft_lines(args):
+    """The draft lines a budget_propose call proposes: those of the ``fund`` it names, or of every fund when it names
+    none."""
+    fund = args.get("fund")
+    if fund:
+        find(Fund, fund)  # NotFound for a fund the realm does not have, not an empty proposal
+    lines = lines_of(find(FiscalPeriod, args["period"]))
+    return [b for b in lines if b.status == "draft" and (not fund or b.fund.id == fund)]
+
+
+def propose_department(args):
+    """The department that governs a budget_propose call (GGG D19): the owner of the fund it names, the root when it
+    names none, as the budget of the whole realm is the realm's."""
+    return fund_department(args) if args.get("fund") else root()
+
+
+def totals_of(lines):
+    totals = {"revenue": 0, "expense": 0}
+    for b in lines:
+        totals[b.kind] += b.planned
+    return totals
+
+
+def budget_totals(args, proposal=""):
+    """The facts of a budget_propose call that are not its arguments (GGG's derived facts): ``revenue`` and ``expense``,
+    the sums of ``planned`` over the lines it proposes of each kind: those ``proposal`` fixed when it was filed, if the
+    call is its replay, and otherwise the draft lines it would propose."""
+    return totals_of(fixed_lines(args, proposal) if proposal else draft_lines(args))
+
+
+def check_years(args):
+    """``years`` says how many periods a budget covers: at least one."""
+    if args.get("years") is not None and int(args["years"]) < 1:
+        raise Fail("a budget covers at least one year")
+
+
+def refuse_unproposable(args, lines):
+    """A budget with no line to propose, or with a total out of range, is refused before it is filed or adopted."""
+    p, fund = find(FiscalPeriod, args["period"]), args.get("fund")
+    if not lines:
+        raise Conflict(f"{p.id} has no draft budget lines" + (f" of fund {fund}" if fund else "") + " to propose")
+    for name, amount in totals_of(lines).items():
+        if amount > MONEY_MAX:
+            raise Fail(f"the planned {name} of {p.id} is {amount}, above the largest amount of money {MONEY_MAX}")
+
+
+def fix_lines(args, proposal):
+    """Tie the draft lines of a budget_propose call to ``proposal``, the one that carries it, when it is filed: they are
+    ``proposed``, the vote decides exactly these, and no other proposal takes them (``Conflict`` when no draft line is
+    left)."""
+    check_years(args)
+    lines = draft_lines(args)
+    refuse_unproposable(args, lines)
+    for b in lines:
+        b.status, b.proposal = "proposed", proposal
+
+
+def release_lines(args, proposal):
+    """A proposal that ended without adopting its lines gives them back: ``draft`` with no proposal, to be proposed
+    again."""
+    period = FiscalPeriod[args["period"]] if args.get("period") else None  # a stored action may name no period
+    if period is None:
+        return
+    for b in lines_of(period):
+        if b.status == "proposed" and b.proposal == proposal:
+            b.status, b.proposal = "draft", ""
+
+
+def fixed_lines(args, proposal):
+    """The lines ``proposal`` fixed when it was filed, and that it has not adopted yet."""
+    lines = lines_of(find(FiscalPeriod, args["period"]))
+    return [b for b in lines if b.status == "proposed" and b.proposal == proposal]
+
+
+def carried_lines(c, args):
+    """The lines a budget_propose call adopts: those its proposal fixed when it was filed; a department that decides
+    alone files no proposal, and adopts the draft lines the call names."""
+    return fixed_lines(args, c.proposal) if c.proposal else draft_lines(args)
+
+
+@op("org.manage_budget", governed=propose_department, check=check_years, derived=budget_totals, fixes=fix_lines,
+    releases=release_lines)
 def budget_propose(c, args):
-    """Adopt the draft ``budget``, replacing the adopted one for the same fund, period and category.
-    Spending booked against the replaced budget carries over."""
-    b = find(Budget, args["budget"])
-    if b.status != "draft" or b.period.status != "open":
-        raise Conflict(f"{b.id} is {b.status}; only a draft for an open period can be adopted")
-    supersede(b, "amended")
-    b.status, b.proposal = "adopted", c.proposal
-    return {"budget": b.id, "status": b.status}
+    """Adopt the draft lines of the open fiscal ``period`` together: those of the ``fund`` it names, whose owner governs
+    the call, or every fund's, which the realm governs. When a vote decides it, the lines are fixed as ``proposed`` when
+    it is filed, and a proposal that ends without adopting them (rejected, expired, withdrawn, stopped or failed) gives
+    them back as drafts. ``years`` says how many periods the plan covers, when more than one (a fact for legislation).
+    The lines are adopted in the order they were drafted, each replacing the adopted or extended line of its fund and
+    category (a later draft replaces an earlier one), and the spending booked against that carries over; every extended
+    line of a fund whose lines it adopts is replaced (``amended``), whether the new budget names its category or not,
+    and the extensions of the other funds stand. Returns ``period``, ``budgets`` and the planned ``revenue`` and
+    ``expense``."""
+    p, lines = find(FiscalPeriod, args["period"]), carried_lines(c, args)
+    if p.status != "open":
+        raise Conflict(f"{p.id} is {p.status}; only the lines of an open period can be adopted")
+    if c.proposal and not lines:  # filed before the lines of a budget were fixed to the proposal that carries them
+        raise Conflict(f"{c.proposal} fixed no budget line when it was filed: propose the budget again")
+    refuse_unproposable(args, lines)
+    for b in lines:
+        refuse_underfunded(b.slot, b.planned, f"line {b.id}")
+    for b in lines:
+        supersede(b)
+        b.status, b.proposal = "adopted", c.proposal
+    adopted_funds = {b.fund.id for b in lines}
+    for b in p.budgets:  # a fund's adopted budget stands alone: no extended line of the fund stands beside it
+        if b.status == "extended" and b.fund.id in adopted_funds:
+            b.status = "amended"
+    return {"period": p.id, "budgets": [b.id for b in lines], **totals_of(lines)}
+
+
+def previous_period(p):
+    """The fiscal period opened just before ``p``, if any. Periods open in order, so their rows do."""
+    n = int(p._id) - 1
+    return FiscalPeriod.load_some(n, 1)[0] if n >= 1 else None
+
+
+def standing_at_end(p):
+    """The budget of period ``p`` as it stood when it ended: of each fund and category, the newest line that was adopted
+    or extended (``closed`` once the period is), never one a newer line replaced."""
+    newest = {}
+    for b in lines_of(p):
+        if b.status in (*IN_FORCE, "closed"):
+            newest[b.slot] = b
+    return list(newest.values())
+
+
+@op("org.manage_budget", returns="extended")
+def budget_extend(c, args):
+    """Carry the budget of the period before the open fiscal ``period`` over into it, as ``extended`` lines, without a
+    vote, fund by fund: for each fund that has no extended, proposed or adopted line in the period yet (draft lines do
+    not count). They hold, and cap spending, until an adopted budget of the fund replaces them. Refused with Conflict
+    when no fund is left to carry. The lines carried are those of the earlier period as they stood at its end,
+    adopted, extended or closed with it, except a line whose category the period already holds as the other kind,
+    even in a draft. Returns ``extended``, how many lines."""
+    p = find(FiscalPeriod, args["period"])
+    if p.status != "open":
+        raise Conflict(f"{p.id} is {p.status}")
+    held = {b.fund.id for b in p.budgets if b.status in ("extended", "proposed", "adopted")}
+    before = previous_period(p)
+    lines = [b for b in standing_at_end(before)
+             if b.fund.id not in held and not other_kind_in_slot(b.fund, p, b.category, b.kind)] if before else []
+    if not lines:
+        raise Conflict(f"no fund is left to carry into {p.id}: the period before has no budget for a fund without a line "
+                       f"in it")
+    for b in lines:
+        Budget(id=next_id(Budget, "B"), fund=b.fund, period=p, category=b.category, slot=slot(b.fund, p, b.category),
+               kind=b.kind, planned=b.planned, status="extended")
+    return {"period": p.id, "extended": len(lines)}
 
 
 @op("org.manage_budget", governed=budget_department, returns="budget")
 def budget_amend(c, args):
-    """Replace the adopted ``budget`` with a new adopted version planning ``planned``. Returns the new ``budget``."""
+    """Replace the adopted ``budget`` with a new adopted version planning ``planned``, which is at least what the line
+    holds: its reserved, committed and spent money. Returns the new ``budget``."""
     old = find(Budget, args["budget"])
     if old.status != "adopted":
         raise Conflict(f"{old.id} is {old.status}; only an adopted budget can be amended")
+    refuse_underfunded(old.slot, int(args["planned"]), f"the amendment of {old.id}")
     b = Budget(id=next_id(Budget, "B"), fund=old.fund, period=old.period, category=old.category, slot=old.slot,
                kind=old.kind, planned=int(args["planned"]), proposal=c.proposal)
-    supersede(b, "amended")
+    supersede(b)
     b.status = "adopted"
     return {"budget": b.id, "amends": old.id}
+
+
+def staged(args):
+    """The line ``budget_stage`` moves money on, with the reserved and committed money it would hold, or why it cannot
+    (ggg I-FIN-9)."""
+    b = find(Budget, args["budget"])
+    reserve, commit = int(args.get("reserve", 0)), int(args.get("commit", 0))
+    if b.status != "adopted" or b.kind != "expense":
+        raise Fail(f"{describe(b)} is not an adopted expense line")
+    if reserve == 0 and commit == 0:
+        raise Fail("the stage moves no money")
+    reserved, committed = b.reserved + reserve, b.committed + commit
+    if reserved < 0 or committed < 0:
+        raise Conflict(f"{describe(b)} would hold less than nothing reserved or committed")
+    over = reserved + committed + b.actual - b.planned
+    if over > 0:
+        raise Conflict(f"{describe(b)} plans {b.planned}; this stage would take it {over} above")
+    return b, reserved, committed
+
+
+@op("org.manage_budget", governed=budget_department, check=staged)
+def budget_stage(c, args):
+    """Move money between the stages of the adopted expense ``budget`` line: ``reserve`` and ``commit`` are added to what
+    it has reserved and committed (each 0 when left out), a negative one releasing it (committing what was reserved is
+    ``reserve`` -x and ``commit`` x). Refused with Conflict when either would fall below zero or the line's available credit would, and
+    when both are zero or the line is not an adopted expense line, as a bad argument."""
+    b, reserved, committed = staged(args)
+    b.reserved, b.committed = reserved, committed
+    return {"budget": b.id, "reserved": reserved, "committed": committed}
+
+
+@op("treasury.view", read=True, returns="budgets")
+def budget_list(c, args):
+    """One page of budget lines (``from``, ``count``), optionally only those of ``fund`` or ``period``, each with its
+    planned, reserved, committed and actual money; ``next`` continues it. A page can hold fewer matches than ``count``:
+    follow ``next``."""
+    def wanted(b):
+        return args.get("fund") in (None, b.fund.id) and args.get("period") in (None, b.period.id)
+    rows, nxt = page(Budget, args, wanted)
+    return {"budgets": [{**view(b, *LINE), "fund": b.fund.id, "period": b.period.id} for b in rows], "next": nxt}
 
 
 def rule_department(args):
@@ -568,16 +1058,32 @@ def rule_department(args):
     return owner_of(find(Fund, rule.source_fund if rule else args["source_fund"]))
 
 
-@op("org.manage_budget", governed=rule_department, returns="rule")
+def shares_of(args):
+    """The ``rules`` of an ``allocation_rule_draft`` call, a list of ``{fund, share}`` as GGG has it, refused if it is
+    not one or its shares are not whole numbers of hundred-millionths adding up to at most 100 %."""
+    rules = args.get("rules")
+    if not isinstance(rules, list):
+        raise Fail("rules is a list of {fund, share}, each share in hundred-millionths: 30 % of WELFARE is "
+                   f'[{{"fund": "WELFARE", "share": {30 * PERCENT}}}]')
+    shares = []
+    for rule in rules:
+        if not isinstance(rule, dict) or not isinstance(rule.get("fund"), str) or type(rule.get("share")) is not int:
+            raise Fail("each rule is a {fund, share}: a fund code and a whole number of hundred-millionths")
+        shares.append({"fund": rule["fund"], "share": rule["share"]})
+    if len({s["fund"] for s in shares}) < len(shares) or any(s["share"] < 0 for s in shares) \
+            or sum(s["share"] for s in shares) > ONE:
+        raise Fail(f"each fund is named once, and the shares are not negative and add up to at most {ONE} (100 %)")
+    return shares
+
+
+@op("org.manage_budget", governed=rule_department, returns="rule", check=shares_of)
 def allocation_rule_draft(c, args):
-    """Draft how payments into ``source_fund`` are split: ``rules`` maps fund codes to whole percentages adding up to at
-    most 100. Returns ``rule``."""
-    source, rules = find(Fund, args["source_fund"]), {k: int(v) for k, v in args["rules"].items()}
-    for code in rules:
-        find(Fund, code)
-    if any(v < 0 for v in rules.values()) or sum(rules.values()) > 100:
-        raise Fail("shares must be non-negative percentages adding up to at most 100")
-    r = AllocationRule(id=next_id(AllocationRule, "AR"), source_fund=source.id, rules=rules)
+    """Draft how payments into ``source_fund`` are split: ``rules`` is a list of ``{fund, share}``, each share in
+    hundred-millionths (30 % is 30000000), adding up to at most 100000000. Returns ``rule``."""
+    source, shares = find(Fund, args["source_fund"]), shares_of(args)
+    for share in shares:
+        find(Fund, share["fund"])
+    r = AllocationRule(id=next_id(AllocationRule, "AR"), source_fund=source.id, rules=shares)
     return {"rule": r.id}
 
 
@@ -599,16 +1105,15 @@ def allocation_rule_propose(c, args):
 @op("realm.data_view", read=True)
 def budget_view(c, args):
     """How the realm budgets its money, for any member: one page of ``funds`` (``from``, ``count``; ``next`` continues
-    it), each with its ``balances``, its adopted allocation ``rule`` and its adopted ``budgets`` in one fiscal
-    ``period`` (an id; default the one covering now, null if none does); the latest fiscal ``periods`` to choose from;
-    the treasury ``config``; the accounting ``currency`` with its ``decimals``; and up to ten newest ``rule_drafts``.
-    Single ledger entries stay with ``ledger_view``."""
+    it), each with its ``balances``, its adopted allocation ``rule`` and its ``budgets`` in force (adopted or extended)
+    in one fiscal ``period`` (an id; default the one covering now, null if none does); the latest fiscal ``periods`` to
+    choose from; the treasury ``config``; the accounting ``currency`` with its ``decimals``; and up to ten newest
+    ``rule_drafts``. Single ledger entries stay with ``ledger_view``."""
     chosen = find(FiscalPeriod, args["period"]) if args.get("period") else period_at(chain.now())
-    lines = {}  # fund id -> the adopted budgets of the chosen period: one period's lines, however old the funds
+    lines = {}  # fund id -> the budgets in force in the chosen period: one period's lines, however old the funds
     for b in chosen.budgets if chosen else []:
-        if b.status == "adopted":
-            lines.setdefault(b.fund.id, []).append({**view(b, "id", "category", "kind", "planned", "actual"),
-                                                     "period": chosen.id})
+        if b.status in IN_FORCE:
+            lines.setdefault(b.fund.id, []).append({**view(b, *LINE), "period": chosen.id})
     rows, nxt = page(Fund, args)
     funds = []
     for f in rows:
@@ -654,15 +1159,40 @@ def payroll_run(c, args):
     return {"transfers": results, "seats": len(batch), "total": total}
 
 
-@op("treasury.manage", signing=True, returns="report")
-def report_issue(c, args):
-    """Freeze the statements of fiscal ``period`` as a report of ``kind`` (default period_close), with a hash chained
-    over its ledger entries in id order, superseding the previous one of that kind. Returns ``report``,
-    ``source_hash``, ``supersedes``."""
-    p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
-    s = p.statements
+def statements_of(period, args):
+    """The statements a report of ``period`` freezes now: the ledger's running ones, and the issuer's ``adjustments``
+    beside them."""
+    s = period.statements
     statements = {"accounts": dict(sorted(s["accounts"].items())),
                   "fund_balances": dict(sorted(s["fund_balances"].items())), "debit": s["debit"], "credit": s["credit"]}
+    if args.get("adjustments") is not None:
+        if not isinstance(args["adjustments"], dict):
+            raise Fail("adjustments is a map of the figures the issuer adds")
+        statements["adjustments"] = args["adjustments"]
+    return statements
+
+
+def reporting(user, args, grant):
+    p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
+    s = statements_of(p, args)
+    previous = [r for r in p.reports if r.kind == kind]
+    return you_sign(f"Issues a {quoted(kind)} report of fiscal period {quoted(p.id)}, "
+                    + (f"which replaces report {previous[-1].id}" if previous else "the first of its kind"),
+                    ("Report totals", f"debit {s['debit']}, credit {s['credit']}"),
+                    ("Report fund balances", readable(s["fund_balances"])),
+                    ("Report accounts", readable(s["accounts"])),
+                    ("Report adjustments", readable(s["adjustments"]) if "adjustments" in s else "none"),
+                    ("Report source hash", "sha256:" + p.source_hash))
+
+
+@op("treasury.manage", signing=True, returns="report", summary=reporting, title="Issue a financial report")
+def report_issue(c, args):
+    """Freeze the statements of fiscal ``period`` as a report of ``kind`` (default period_close), with a hash chained
+    over its ledger entries in id order, superseding the previous one of that kind. The issuer may add figures the
+    ledger does not keep, as a map of ``adjustments``; they stand beside the ledger's in the statements and outside
+    the hash. Returns ``report``, ``source_hash``, ``supersedes``."""
+    p, kind = find(FiscalPeriod, args["period"]), args.get("kind", "period_close")
+    statements = statements_of(p, args)
     previous = [r for r in p.reports if r.kind == kind]
     r = FinancialReport(id=next_id(FinancialReport, "FR"), kind=kind, period=p, as_of=chain.now(),
                         statements=statements, source_hash="sha256:" + p.source_hash,
@@ -670,32 +1200,115 @@ def report_issue(c, args):
     return {"report": r.id, "source_hash": r.source_hash, "supersedes": r.supersedes}
 
 
+# --- loans ----------------------------------------------------------------------------------------
+
+def period_of(term):
+    """A loan's ``term`` as the Period it is: a ``count`` of ``unit``, one of day, working_day, month or year."""
+    if not isinstance(term, dict) or type(term.get("count")) is not int or term.get("unit") not in PERIOD_UNITS:
+        raise Fail(f"a term is a count of {', '.join(PERIOD_UNITS)}")
+    return {"count": term["count"], "unit": term["unit"]}
+
+
+def treasury_row():
+    return Treasury["1"] or Treasury(id="1")
+
+
+@op("org.manage_budget", governed=realm_wide, returns="loan")
+def loan_create(c, args):
+    """Record that the realm borrowed ``amount`` from the outside body ``lender`` for ``term`` at ``rate``,
+    for the fund ``fund``, in the accounting currency, with optional ``facts`` for legislation. The money moves
+    outside the realm; this records the debt. Returns ``loan``."""
+    amount, symbol = positive(args), currency()
+    if not symbol:
+        raise Conflict("the realm has no accounting currency")
+    find(Fund, args["fund"])
+    find(External, args["lender"])
+    if treasury_row().debt_outstanding + amount > MONEY_MAX:
+        raise Fail(f"the debt of the realm would pass the largest amount of money, {MONEY_MAX}")
+    loan = Loan(id=next_id(Loan, "LOAN"), lender=args["lender"], amount=amount, symbol=symbol,
+                term=period_of(args["term"]), rate=int(args["rate"]), fund=args["fund"], outstanding=amount,
+                facts=args.get("facts") or {})
+    treasury_row().debt_outstanding += amount
+    return {"loan": loan.id}
+
+
+@op("org.manage_budget", returns="loan")
+def loan_repay(c, args):
+    """Record that ``amount`` of the ``loan`` was repaid, with optional ``reason``. A repayment never exceeds what is
+    outstanding; the loan that reaches zero is repaid. Returns ``loan``."""
+    loan, amount = find(Loan, args["loan"]), positive(args)
+    if amount > loan.outstanding:
+        raise Conflict(f"{loan.id} has {loan.outstanding} outstanding, less than {amount}")
+    loan.outstanding -= amount
+    if loan.outstanding == 0:
+        loan.status = "repaid"
+    treasury_row().debt_outstanding -= amount
+    return {"loan": loan.id}
+
+
+@op("treasury.view", read=True, returns="loans")
+def loan_list(c, args):
+    """One page of the realm's loans (``from``, ``count``), optionally only those with ``status`` active or repaid;
+    ``next`` continues it. A page can hold fewer matches than ``count``: follow ``next``."""
+    rows, nxt = page(Loan, args, lambda loan: args.get("status") in (None, loan.status))
+    return {"loans": [view(loan) for loan in rows], "next": nxt}
+
+
 # --- payment accounts -----------------------------------------------------------------------------
 
-def account_owner(c, args):
+def account_owner(user, args):
     org = args.get("organization")
     if not org:
-        return f"User:{c.user}"
-    if c.user not in (find(Organization, org).admins or []):
+        return f"User:{user}"
+    if user not in (find(Organization, org).admins or []):
         raise Forbidden(f"you do not administer {org}")
     return f"Organization:{org}"
 
 
-@op("self.data_manage", returns="account")
+def adding_account(user, args, grant):
+    """What a payout account added for ``user`` changes: the realm pays an owner at the first account that names the token."""
+    owner, symbol = account_owner(user, args), args.get("symbol", "")
+    who = "you" if owner == f"User:{user}" else owner
+    if not symbol:
+        return [{"label": "What changes", "value": "It names no token, so no payment is sent to it"}]
+    now = address(owner, symbol)
+    paid = f"Realm payments to {who} in {quoted(symbol)}"
+    if any(a.symbol == symbol for a in each(PaymentAccount, "owner", owner)):
+        effect = f"{paid} keep going to {quoted(now)}; this account comes after it"
+    else:
+        effect = f"{paid} will go to {quoted(args['address'])} instead of {quoted(now)}"
+    return [{"label": "What changes", "value": effect}]
+
+
+def removing_account(user, args, grant):
+    """What removing a payout account of ``user`` changes: where the realm pays the owner in that token afterwards."""
+    a = find(PaymentAccount, args["account"])
+    if a.owner != account_owner(user, args):
+        raise Forbidden(f"{a.id} is not yours")
+    who = "you" if a.owner == f"User:{user}" else a.owner
+    after = next((b.address for b in each(PaymentAccount, "owner", a.owner) if b.symbol == a.symbol and b.id != a.id),
+                 a.owner.removeprefix("User:"))
+    account = f"{quoted(a.address)} on {quoted(a.network)}" + (f" ({quoted(a.label)})" if a.label else "")
+    paid = f"Realm payments to {who} in {quoted(a.symbol) if a.symbol else 'any token'}"
+    return [{"label": "Payout account", "value": account},
+            {"label": "What changes", "value": f"{paid} will go to {quoted(after)} instead of {quoted(a.address)}"}]
+
+
+@op("self.data_manage", returns="account", summary=adding_account, title="Add a payout account")
 def payment_account_add(c, args):
     """Add a payout account (``network``, ``address``, optional ``symbol`` and ``label``) for you, or for
     ``organization`` if you administer it. Transfers in ``symbol`` are paid to it. Returns ``account``."""
-    a = PaymentAccount(id=next_id(PaymentAccount, "PA"), owner=account_owner(c, args), network=args["network"],
+    a = PaymentAccount(id=next_id(PaymentAccount, "PA"), owner=account_owner(c.user, args), network=args["network"],
                        address=args["address"], symbol=args.get("symbol", ""), label=args.get("label", ""))
     return {"account": a.id}
 
 
-@op("self.data_manage", returns="account")
+@op("self.data_manage", returns="account", summary=removing_account, title="Remove a payout account")
 def payment_account_remove(c, args):
     """Remove your payout ``account``, or with ``organization`` one of an organization you administer. Returns the
     ``account`` as it was."""
     a = find(PaymentAccount, args["account"])
-    if a.owner != account_owner(c, args):
+    if a.owner != account_owner(c.user, args):
         raise Forbidden(f"{a.id} is not yours")
     gone = view(a)
     a.delete()
@@ -704,8 +1317,19 @@ def payment_account_remove(c, args):
 
 # --- court-ordered token actions ------------------------------------------------------------------
 
+def ledger_memo(args):
+    """The memo a court-ordered call leaves on the ledger: the first 64 characters of its ``reason``."""
+    return str(args.get("reason", ""))[:64]
+
+
+def forcing_transfer(user, args, grant):
+    token = find(Token, args["symbol"])
+    return you_sign(f"By court order, moves {money(positive(args), token.id)} from {quoted(args['from'])} to "
+                    f"{quoted(args['to'])} on the ledger of {token.id}", ("Ledger memo", quoted(ledger_memo(args))))
+
+
 @op("token.force_transfer", signing=True, governed=realm_wide, parties=lambda a: {a.get("from", ""), a.get("to", "")},
-    returns="transfer")
+    returns="transfer", summary=forcing_transfer, title="Move tokens by court order")
 def token_force_transfer(c, args):
     """By court order, move ``amount`` of ``symbol`` from principal ``from`` to principal ``to`` on the token's ledger,
     with optional ``reason`` as memo. Returns ``transfer``, ``status`` and ``ledger_tx``."""
@@ -714,7 +1338,7 @@ def token_force_transfer(c, args):
     t = Transfer(id=next_id(Transfer, "TR"), sender=args["from"], to=args["to"], symbol=token.id, amount=amount,
                  status="sending", at=chain.now())
     arg = (f'(record {{ from = {account(args["from"])}; to = {account(args["to"])}; amount = {amount} : nat; '
-           f'memo = opt {text(args.get("reason", "")[:64])} }})')
+           f'memo = opt {text(ledger_memo(args))} }})')
     reply = yield from chain.call(token.ledger, "force_transfer", arg)
     status, tx = outcome(reply)
     if status != "completed":
@@ -726,14 +1350,21 @@ def token_force_transfer(c, args):
     return {"transfer": t.id, "status": t.status, "ledger_tx": tx}
 
 
-@op("token.freeze", signing=True, governed=realm_wide, parties=lambda a: {a.get("account", "")})
+def freezing_account(user, args, grant):
+    token = find(Token, args["symbol"])
+    return you_sign(f"{'Freezes' if args.get('frozen', True) else 'Unfreezes'} {quoted(args['account'])} "
+                    f"on the ledger of {token.id}", ("Ledger memo", quoted(ledger_memo(args))))
+
+
+@op("token.freeze", signing=True, governed=realm_wide, parties=lambda a: {a.get("account", "")},
+    summary=freezing_account, title="Freeze or unfreeze a token account")
 def token_freeze(c, args):
     """Freeze principal ``account`` on the ``symbol`` ledger with optional ``reason``; ``frozen`` false unfreezes it."""
     token = find(Token, args["symbol"])
     method = "freeze_account" if args.get("frozen", True) else "unfreeze_account"
     reply = yield from chain.call(token.ledger, method,
                                   f'(record {{ account = {account(args["account"])}; '
-                                  f'reason = opt {text(args.get("reason", "")[:64])} }})')
+                                  f'reason = opt {text(ledger_memo(args))} }})')
     if outcome(reply)[0] != "completed":
         raise Fail(f"{method} not confirmed: {reply[:200]}")
     return {"account": args["account"], "frozen": method == "freeze_account"}

@@ -3,6 +3,7 @@
 | Suite | Where | Runs | Needs |
 |---|---|---|---|
 | Backend | [`tests/ggg/`](../../tests/ggg) | Every operation, Cedar, the sandbox, codices, against an in-memory realm | Python 3.10, `cedarpy` |
+| Source scans and contracts | [`tests/backend/`](../../tests/backend) | Build variants, the codex package contract, extension manifests and sidebar labels, local-time arithmetic, the marketplace canister | Python 3.10 |
 | Codex hooks | `codices/tests/` | Each first-party codex's hooks against canned reads | Python |
 | Frontend | [`src/realm_frontend/`](../../src/realm_frontend) | Unit tests (Vitest), browser tests (Playwright) | Node |
 | CLI | [`cli/tests/`](../../cli/tests) | The `realms` CLI | Python |
@@ -125,12 +126,21 @@ demand, and uploads both folders.
 
 ## In CI
 
-[`ci-pr.yml`](../../.github/workflows/ci-pr.yml) runs on every pull request to `main` or a `feat/**`
-branch (and by hand): the lint checks, `tests/ggg` (the job installs `cedarpy` itself), the CLI
-tests, the host's locale parity tests, the packed realm wasms on PocketIC (`tests/deployed`) and the
-Casals end-to-end run.
+[`tests.yml`](../../.github/workflows/tests.yml) is the unit gate. It runs on every pull request to `main` or a
+`feat/**` branch and every push to `main` and `feat/layered-codex`, needs no secrets and no replica, and is the one place these suites run: `tests/ggg`
+(with `cedarpy`, once through each operation's `ggg_` method, with coverage floors), `tests/backend`, the layered
+codex library (`cli/tests/test_legislation*.py`, with the pinned Cedar tools), the extension sandbox ratchet and the
+generated GGG methods and zone data. The realm backend and the marketplace both pin `ic-python-db` 0.14.0, so
+`tests/backend/marketplace` runs in the same environment. [`ci-pr.yml`](../../.github/workflows/ci-pr.yml) runs on every
+pull request to `main` or a `feat/**` branch (and by hand) and keeps what the full bring-up of a mundus on a local
+replica needs: lint, the packed wasms on PocketIC, e2e, the frontend tests and the CLI tests (the layered codex
+library's are in `tests.yml`). `ci-main.yml` runs by hand only. `scripts/loc_budget.py` is not in CI yet. Run the unit
+gate before a pull request:
 
-`tests/backend/` is the suite of the previous backend, which does not load on this branch, and
-only a handful of its files still run in CI. The rest are out until each is ported to `tests/ggg`
-or deleted ([#554](https://github.com/smart-social-contracts/realms-gos/issues/554)).
-`scripts/loc_budget.py` is not in CI yet. Run it locally before a pull request.
+```bash
+pip install -r requirements.txt -e cli/ cedarpy==4.12.2 pytest
+pytest tests/ggg -q && pytest tests/backend -q
+```
+
+`tests/backend` held the suite of the previous backend until realms-gos#513 removed it; that code is in
+`legacy/realm_backend`, and the tests that checked it are in the history before that change.

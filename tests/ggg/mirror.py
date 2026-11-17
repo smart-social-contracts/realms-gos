@@ -77,10 +77,18 @@ def signature(fn):
     return SIGNATURES[fn.__name__]
 
 
+def scoped(a):
+    """A test's ``groups`` as the scope entries GGG takes."""
+    if "groups" not in a:
+        return a
+    return {**{k: v for k, v in a.items() if k != "groups"}, "operations": ["group:" + g for g in a["groups"]]}
+
+
 # The test's JSON arguments, reshaped where ggg_api.ARGS reshapes GGG arguments for the operation.
 UNARGS = {
+    "delegation_grant": scoped, "delegation_request": scoped, "delegation_request_decide": scoped,
     "department_set_policy": lambda a: {"department": a.get("department"),
-                                        "policy": {k: a[k] for k in ("m", "n", "quorum_percent", "veto") if k in a}},
+                                        "policy": {k: a[k] for k in ("m", "n", "quorum", "veto") if k in a}},
     "treasury_configure": lambda a: a.get("config", {}),
     "delegation_list": lambda a: {"role": "grantor" if "from_grantor" in a else "delegate", **a},
     "notification_read": lambda a: {k: v for k, v in a.items() if k != "all"},
@@ -92,8 +100,7 @@ class Unrepresentable(Exception):
 
 
 def representable(args, arg_t, key):
-    known = {ggg_api.PERCENT.get((arg_t, f), ggg_api.RENAME.get((arg_t, f), f))
-             for f in ggg_api.fields(arg_t)} | {key, "on_behalf_of"}
+    known = {ggg_api.RENAME.get((arg_t, f), f) for f in ggg_api.fields(arg_t)} | {key, "on_behalf_of"}
     if set(args) - known:
         return False
     for f, ft in ggg_api.fields(arg_t).items():
@@ -151,7 +158,7 @@ def convert(name, arg_t, args):
             args["id"] = args.pop(key)
         garg = ggg_api.to_ggg(args, arg_t)
         for f in ggg_api.fields(arg_t):  # what the test left out stays out, not "" or 0
-            if ggg_api.PERCENT.get((arg_t, f), ggg_api.RENAME.get((arg_t, f), f)) not in args:
+            if ggg_api.RENAME.get((arg_t, f), f) not in args:
                 garg[f] = None
         return garg
     if ggg_api.is_variant(arg_t):
@@ -159,8 +166,9 @@ def convert(name, arg_t, args):
     return ggg_api.to_ggg(args.get(key), arg_t)
 
 
-# Arguments a test passes that GGG covers another way.
-UNARGS_OK = {"delegation_list": ("from_grantor", "from_delegate"), "notification_read": ("all",)}
+# Arguments a test passes that GGG covers another way, or that are Realms GOS's own settings, which GGG has no field for.
+UNARGS_OK = {"delegation_list": ("from_grantor", "from_delegate"), "notification_read": ("all",),
+             "setup_step": ("journal_signing",), "realm_configure": ("journal_signing",)}
 
 
 def note(name, problem):

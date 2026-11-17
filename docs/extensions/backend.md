@@ -14,7 +14,7 @@ def cast_vote(proposal, choice):
 
 
 def quorum(percent):
-    return rpc("governance_update", quorum_percent=percent)
+    return rpc("governance_update", voting_quorum=percent * 1_000_000)  # ratios are in hundred-millionths
 ```
 
 ```json

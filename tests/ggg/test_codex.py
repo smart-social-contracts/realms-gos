@@ -6,11 +6,12 @@ import pytest
 
 import ggg_api
 from api import codex
+from core import layered_codex as store
 import fake_chain
 from core import op
 import world
-from ggg import Codex, Department, Event, Invoice, Realm, Token
-from kit import call, denied, later, ok, rows
+from ggg import Codex, Department, Event, Invoice, LayeredCodex, Proposal, Realm, Token
+from kit import call, denied, fire_timers, ok, rows
 from test_spec import spec_ops
 
 CODICES = pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices"
@@ -49,6 +50,12 @@ def broken(args):
 
 
 @op.op("treasury.manage")
+def t_codex_poke(c, args):
+    """A write the layered codices below guard, to tell which codex the runtime runs."""
+    return {"done": args.get("what", "")}
+
+
+@op.op("treasury.manage")
 def t_note(c, args):
     return {"note": "N-" + args["text"], "user": c.user, "origin": c.origin}
 
@@ -79,11 +86,10 @@ def hook(name, context=None):
 
 
 def vote_through(proposal):
+    """Every member votes yes: the last vote ends the vote and runs the action."""
     for v in world.PEOPLE:
         ok("proposal_vote", v, proposal=proposal, choice="yes")
-    later(8 * 86400)
-    ok("proposal_finalize", "ctl", proposal=proposal)
-    return ok("proposal_execute", "ctl", proposal=proposal)
+    assert Proposal[proposal].status == "executed", Proposal[proposal].result
 
 
 def test_install_status_uninstall():
@@ -192,15 +198,11 @@ def test_failing_hook_marks_the_codex_unhealthy_until_one_succeeds():
     assert ok("codex_status", "alice")["healthy"]
 
 
-def registry(monkeypatch, approval, files):
-    def call_text(cid, method, arg=None):
-        fake_chain.state["calls"].append((cid, method, arg))
-        if method == "get_file":
-            return json.dumps({"content_b64": base64.b64encode(files[json.loads(arg)["path"]].encode()).decode()})
-        return json.dumps(approval)
-        yield
+def registry(approval, files):
+    def get_file(arg):
+        return {"content_b64": base64.b64encode(files[json.loads(arg)["path"]].encode()).decode()}
 
-    monkeypatch.setattr(fake_chain, "call_text", call_text)
+    fake_chain.peer("registry", get_file=get_file, get_namespace_approval_icc=approval)
     Realm["1"].file_registry_canister_id, Realm["1"].marketplace_canister_id = "registry", "mkt"
 
 
@@ -220,10 +222,10 @@ def test_I_EXT_3_code_from_args_needs_an_allowlisted_checksum():
     ({"approved": True, "approver": "evil"}, ["evil"], None),
     ({"approved": False, "status": "pending"}, [], "not approved"),
 ])
-def test_I_EXT_3_registry_code_needs_a_trusted_approval(monkeypatch, approval, trusted, error):
+def test_I_EXT_3_registry_code_needs_a_trusted_approval(approval, trusted, error):
     build(approval=True)
     files = {"manifest.json": json.dumps(manifest()), "backend/hooks.py": SOURCE}
-    registry(monkeypatch, {"namespace": "ext/test/1.0.0", **approval}, files)
+    registry({"namespace": "ext/test/1.0.0", **approval}, files)
     Realm["1"].trusted_approvers = trusted
     out = call("codex_install", "ctl", codex="test", version="1.0.0")
     assert (out.get("error") is None if error is None else error in out["error"]), out
@@ -301,3 +303,147 @@ def test_hooks_fire_from_their_operations():
     ok("realm_join", "newbie")
     notes = [e.result.get("note") for e in rows(Event) if e.op == "t_note"]
     assert "N-welcome newbie" in notes
+
+
+ZONING = '''
+from ggg_sdk import hook, realm
+
+
+@hook
+def zone(args):
+    realm.effect("realm_configure", timezone="Asia/Tokyo")
+    realm.effect("setup_step", step="realm", timezone="Asia/Tokyo")
+    return {}
+'''
+
+
+def test_a_legacy_codex_never_sets_a_time_zone():
+    build()
+    m = manifest(capabilities=["realm_configure", "setup_step"], hooks=["zone"])
+    ok("codex_install", "ctl", manifest=m, source=ZONING)
+    effects = hook("zone")["effects"]
+    assert [(e["op"], e["ok"], e["error"]) for e in effects] == [
+        ("realm_configure", False, "a codex never sets a time zone"), ("setup_step", False, "a codex never sets a time zone")]
+    assert Realm["1"].timezone == "UTC"
+
+
+TOWN_TAX = "from realms.legislation import above\n\nclass Tax(above('tax')):\n    pass\n"
+
+
+def waiting_codex():
+    """A layered codex installed and checked but not yet in force, as an install leaves it: one chapter, stored, so
+    that the runtime can load it at the switch."""
+    from core import layered_codex as store
+
+    sha256 = store.store_chapter(store.checksum(TOWN_TAX), TOWN_TAX).sha256
+    chapters = {"town/tax": {"source": "town", "version": None, "sha256": sha256, "vouched_by": "town",
+                             "route": "https", "fetched_at": fake_chain.now(), "url": "https://example.test/tax.py",
+                             "size": len(TOWN_TAX)}}
+    return LayeredCodex(id=store.codex_id(["town"], {"tax": ["town"]}, chapters), layers=["town"],
+                        layer_paths={"tax": ["town"]}, chapters=chapters, status="pending", installed_at=fake_chain.now())
+
+
+def test_codex_activate_is_a_conflict_while_no_codex_is_pending():
+    build()
+    ok("codex_install", "ctl", manifest=manifest(), source=SOURCE)
+    assert codex.pending() is None and ok("codex_status", "alice")["pending"] is None
+    out = call("codex_activate", "ctl", codex="sha256:" + "0" * 64)
+    assert out["kind"] == "conflict" and "no codex is pending" in out["error"]
+    assert ok("codex_status", "alice")["codex"]["version"] == "1.0.0"
+
+
+def test_codex_activate_makes_the_pending_codex_active_and_keeps_the_one_it_replaces():
+    build()
+    ok("codex_install", "ctl", manifest=manifest(), source=SOURCE)
+    waiting = waiting_codex()
+    seen = ok("codex_status", "alice")
+    assert (seen["pending"]["id"], seen["codex"]["version"]) == (waiting.id, "1.0.0")
+    other = call("codex_activate", "ctl", codex="sha256:" + "0" * 64)
+    assert other["kind"] == "conflict" and "not the pending codex" in other["error"]
+    assert waiting.status == "pending"
+    out = ok("codex_activate", "ctl", codex=waiting.id, at=fake_chain.now())
+    assert out["codex"] == waiting.id
+    seen = ok("codex_status", "alice")
+    assert (seen["codex"]["id"], seen["codex"]["previous"], seen["pending"]) == (waiting.id, "test@1.0.0", None)
+    assert seen["codex"]["installed_at"] == fake_chain.now() and store.own_source() == "town"  # with no job behind it
+    assert Codex["test@1.0.0"].status == "inactive"
+    assert ok("codex_revert", "ctl")["codex"] == "test@1.0.0" and Codex["test@1.0.0"].status == "active"
+    assert call("codex_activate", "ctl", codex=waiting.id)["kind"] == "conflict"  # it is not pending any more
+
+
+def test_codex_activate_in_a_realm_without_a_codex():
+    build()
+    waiting = waiting_codex()
+    ok("codex_activate", "ctl", codex=waiting.id)
+    assert (waiting.status, waiting.previous) == ("active", "") and codex.active().id == waiting.id
+
+
+def test_a_pending_codex_is_not_activated_ahead_of_its_time():
+    build()
+    waiting = waiting_codex()
+    out = call("codex_activate", "ctl", codex=waiting.id, at=fake_chain.now() + 3600)
+    assert not out["ok"] and "at once" in out["error"] and waiting.status == "pending"
+
+
+def test_activating_a_codex_is_the_realms_to_decide():
+    build()
+    waiting = waiting_codex()
+    world.policy(Department["Administration"], 2, 3)
+    p = ok("codex_activate", "ctl", codex=waiting.id)["proposal"]
+    assert waiting.status == "pending"
+    vote_through(p)
+    assert waiting.status == "active"
+
+
+REGISTER = '''
+from realms.legislation import above
+
+class Register(above("register")):
+    def check_t_codex_poke(self, args):
+        if args.what == "who":
+            return self.deny("%s")
+
+    def on_codex_activate(self, event):
+        self.ggg.t_log(text="activated by %s")
+'''
+
+
+def test_codex_activate_switches_the_runtime_and_runs_the_new_codexs_hook_once_in_the_next_message():
+    from core import legislation
+    from test_legislation_runtime import LOG, TOWN, activate as running, layered
+
+    build()
+    a = running(layered({(TOWN, "register"): REGISTER % ("A", "A")}, layers=[TOWN]))
+    b = layered({(TOWN, "register"): REGISTER % ("B", "B")}, layers=[TOWN], status="pending")
+    LOG.clear()
+    assert call("t_codex_poke", "ctl", what="who")["error"] == "A"
+    assert ok("codex_activate", "ctl", codex=b.id)["codex"] == b.id
+    assert (a.status, b.status, b.previous) == ("inactive", "active", a.id)
+    assert legislation._state["codex"] == b.id and call("t_codex_poke", "ctl", what="who")["error"] == "B"
+    assert LOG == []  # the switch's own message runs no hook: not A's for the operation, not B's yet
+    fire_timers()
+    assert LOG == [("activated by B", "codex")]
+    fire_timers()
+    assert LOG == [("activated by B", "codex")]  # once
+
+
+def test_codex_activate_refuses_a_codex_that_does_not_load_and_switches_nothing():
+    from core import legislation
+    from test_legislation_runtime import LOG, TOWN, activate as running, layered
+
+    build()
+    a = running(layered({(TOWN, "register"): REGISTER % ("A", "A")}, layers=[TOWN]))
+    b = layered({(TOWN, "register"): "class Register:\n    pass\n"}, layers=[TOWN], status="pending")
+    LOG.clear()
+    out = call("codex_activate", "ctl", codex=b.id)
+    assert not out["ok"] and "x/town/register.py" in out["error"], out  # the load refused the chapter
+    assert (a.status, b.status) == ("active", "pending") and codex.active().id == a.id
+    assert legislation._state["codex"] == a.id and call("t_codex_poke", "ctl", what="who")["error"] == "A"
+    fire_timers()
+    assert LOG == []
+
+
+def test_codex_compute_gives_no_answer_until_the_layered_runtime_gives_one():
+    build()
+    ok("codex_install", "ctl", manifest=manifest(), source=SOURCE)
+    assert op.run(codex.compute("tax_assess", {"entry": {}, "subject": "User:alice"})) is None

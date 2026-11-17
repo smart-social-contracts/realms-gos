@@ -1,9 +1,14 @@
-from core import chain
-from core.db import Conflict, Forbidden, deref, each, find, next_id, page, page_by, view
-from ggg import Calendar, Department, License, Organization
+from core import chain, localtime
+from core.db import Conflict, Fail, Forbidden, Unavailable, deref, each, find, next_id, page, page_by, view
+from core.pending import quoted, readable, you_sign
+from ggg import Calendar, Department, Land, License, Organization, Procedure
 from core.op import op
+from api.proposals import day_of, realm_wide, whole
 
-SHOWN = ("id", "kind", "holder", "status", "issued_at", "expires_at")
+SHOWN = ("id", "kind", "holder", "status", "decision_due", "issued_at", "expires_at", "land")
+NS = 10**9  # the chain counts seconds, localtime nanoseconds
+# The operations' text for GGG's PeriodUnit, as the legislation library tags it.
+PERIOD_UNITS = {"day": "Day", "working_day": "WorkingDay", "month": "Month", "year": "Year"}
 
 
 def valid(lic):
@@ -32,32 +37,60 @@ def holders(args):
     return principals(find(License, args["license"]).holder)
 
 
+def administers(org, user):
+    return org.status == "active" and user in (org.admins or [])
+
+
 def applicant(ref, user):
     entity = deref(ref)
-    org = isinstance(entity, Organization)
-    if not (ref == f"User:{user}" or org and entity.status == "active" and user in (entity.admins or [])):
+    if not (ref == f"User:{user}" or isinstance(entity, Organization) and administers(entity, user)):
         raise Forbidden(f"you cannot apply for {ref}")
 
 
-def application(c, kind, holder, department, evidence_ref, conditions):
+def decision_due(kind, applied_at):
+    """When a decision on an application for a licence of ``kind``, made at ``applied_at``, is due by its Procedure:
+    the end of the last day of the deadline on the realm's clock, because that day counts in full and positive silence
+    applies only after it. 0 when the kind has no procedure, or none with a deadline.
+
+    Working days need the calendar of the layers the realm runs (realms-gos#505); a realm with none cannot date such an
+    application, and refuses it."""
+    procedure = Procedure[kind]
+    deadline = procedure.decision_deadline if procedure else None
+    if not deadline:
+        return 0
+    from realms.legislation.calendar import Calendar as Layers
+    from realms.legislation.errors import LegislationError
+    from realms.legislation.periods import Period
+
+    try:
+        _, _, end = localtime.add_period(applied_at * NS, Period(deadline["count"], PERIOD_UNITS[deadline["unit"]]), Layers())
+    except LegislationError as e:
+        raise Unavailable(f"an application for a {kind} licence cannot be dated: {e}")
+    return end // NS
+
+
+def application(c, kind, holder, department, evidence_ref, conditions, land):
     applicant(holder, c.user)
     issuer = find(Department, department) if department else None
-    lic = License(id=next_id(License, "LIC"), kind=kind, holder=holder, status="applied", applied_at=chain.now(),
-                  evidence_ref=evidence_ref, conditions=conditions)
+    parcel = find(Land, land).id if land else ""
+    now = chain.now()
+    lic = License(id=next_id(License, "LIC"), kind=kind, holder=holder, status="applied", applied_at=now,
+                  decision_due=decision_due(kind, now), evidence_ref=evidence_ref, conditions=conditions, land=parcel)
     if issuer:
         lic.issued_by = issuer
     return {"license": lic.id}
 
 
-@op("license.apply", delegable=True, returns="license")
+@op("license.apply", returns="license")
 def license_apply(c, args):
     """Apply for a licence of ``kind`` for ``holder`` (default you, or ``Organization:id`` of one you administer), to
-    issuing ``department`` (optional), with optional ``evidence_ref`` and ``conditions``. Returns ``license``."""
+    issuing ``department`` (optional), with optional ``evidence_ref``, ``conditions`` and the parcel ``land`` it is for,
+    which must exist. Returns ``license``."""
     return application(c, args["kind"], args.get("holder") or f"User:{c.user}", args.get("department"),
-                       args.get("evidence_ref", ""), args.get("conditions", {}))
+                       args.get("evidence_ref", ""), args.get("conditions", {}), args.get("land", ""))
 
 
-@op("license.apply", delegable=True, returns="license")
+@op("license.apply", returns="license")
 def license_renew(c, args):
     """Apply to renew the active or expired ``license``, optionally with new ``evidence_ref``. Approving the renewal
     expires the old licence. Returns the new application's ``license``."""
@@ -65,10 +98,39 @@ def license_renew(c, args):
     if old.status not in ("active", "expired"):
         raise Conflict(f"{old.id} is {old.status}")
     return application(c, old.kind, old.holder, old.issued_by.id if old.issued_by else None,
-                       args.get("evidence_ref", old.evidence_ref), {**(old.conditions or {}), "renews": old.id})
+                       args.get("evidence_ref", old.evidence_ref), {**(old.conditions or {}), "renews": old.id}, old.land)
 
 
-@op("license.issue", signing=True, parties=holders, returns="license")
+def of_the_licence(lic):
+    return f"licence {lic.id} ({quoted(lic.kind)}) of {quoted(lic.holder)}"
+
+
+def deciding_licence(user, args, grant):
+    lic = find(License, args["license"])
+    if not args.get("approve"):
+        return you_sign(f"Rejects the application for {of_the_licence(lic)}")
+    if args.get("expires_at"):
+        expires = f"on {day_of(whole('expires_at', args['expires_at']))}"
+    else:  # the default term runs from the day it is signed: a date would differ between the filing and the approval
+        cycle = Calendar["1"].license_review_cycle if Calendar["1"] else 2 * 365 * 86400
+        expires = f"{cycle // 86400} days after you sign it"
+    issuer = find(Department, args.get("department") or (lic.issued_by.id if lic.issued_by else ""))
+    conditions = {**(lic.conditions or {}), **args.get("conditions", {})}
+    renewed = License[conditions.get("renews") or "-"]
+    ends = f"; it ends licence {renewed.id}, which is active" if renewed and renewed.status == "active" else ""
+    return you_sign(f"Issues {of_the_licence(lic)}, which expires {expires}{ends}",
+                    ("Licence conditions", readable(conditions)), ("Issuing department", quoted(issuer.id)))
+
+
+def in_zones(args, proposal=""):
+    """The fact of a license_decide call that is not one of its arguments (GGG's derived facts): the zones of the parcel
+    the licence is for, for the legislation of a plan that holds back the decisions on its parcels."""
+    land = find(License, args["license"]).land
+    return {"zones": Land[land].lies_in if land else []}
+
+
+@op("license.issue", signing=True, parties=holders, returns="license", summary=deciding_licence,
+    title="Issue or reject a licence", derived=in_zones)
 def license_decide(c, args):
     """Issue the applied-for ``license`` if ``approve`` is true, else reject it; issuing ``department`` defaults to
     the one applied to. On approval: ``expires_at`` (default now plus the licence review cycle, 2 years) and extra
@@ -90,7 +152,15 @@ def license_decide(c, args):
     return {"license": lic.id, "status": lic.status, "expires_at": lic.expires_at}
 
 
-@op("license.revoke", signing=True, parties=holders, returns="license")
+def suspending_licence(user, args, grant):
+    lic = find(License, args["license"])
+    if args.get("resume"):
+        return you_sign(f"Reinstates the suspended {of_the_licence(lic)}")
+    return you_sign(f"Suspends the {lic.status} {of_the_licence(lic)}")
+
+
+@op("license.revoke", signing=True, parties=holders, returns="license", summary=suspending_licence,
+    title="Suspend or reinstate a licence")
 def license_suspend(c, args):
     """Suspend the active ``license``, or with ``resume`` true reinstate a suspended one."""
     lic = find(License, args["license"])
@@ -101,7 +171,13 @@ def license_suspend(c, args):
     return {"license": lic.id, "status": after}
 
 
-@op("license.revoke", signing=True, parties=holders, returns="license")
+def revoking_licence(user, args, grant):
+    lic = find(License, args["license"])
+    return you_sign(f"Revokes for good the {lic.status} {of_the_licence(lic)}")
+
+
+@op("license.revoke", signing=True, parties=holders, returns="license", summary=revoking_licence,
+    title="Revoke a licence")
 def license_revoke(c, args):
     """Revoke the active or suspended ``license`` for good."""
     lic = find(License, args["license"])
@@ -130,3 +206,39 @@ def license_verify(c, args):
     Returns ``valid`` and the ``license``."""
     lic = find(License, args["license"]) if args.get("license") else active(args["holder"], args["kind"])
     return {"valid": bool(lic and valid(lic)), "license": shown(lic) if lic else None}
+
+
+SILENCES = ("positive", "negative")
+
+
+def valid_procedure(args):
+    """Refuse a deadline that is no Period, or a silence that is neither positive nor negative."""
+    deadline = args.get("decision_deadline")
+    if deadline is not None and not (
+            isinstance(deadline, dict) and type(deadline.get("count")) is int and deadline["count"] >= 0
+            and isinstance(deadline.get("unit"), str) and deadline["unit"] in PERIOD_UNITS):
+        raise Fail(f"a decision_deadline is a count of {', '.join(PERIOD_UNITS)}, such as 3 months")
+    if args.get("silence") not in (None, *SILENCES):
+        raise Fail(f"silence is {' or '.join(SILENCES)}")
+
+
+@op("procedure.define", governed=realm_wide, check=valid_procedure, returns="procedure")
+def procedure_define(c, args):
+    """Define, or redefine, how applications for licences of ``kind`` are decided: who starts it (``initiated_by``),
+    optionally the ``matter``, a ``decision_deadline`` (a Period ``{"count": 3, "unit": "month"}``, the unit day,
+    working_day, month or year), what ``silence`` means (positive grants, negative refuses), the ``legislation`` that says so and
+    ``facts``. The licence applications that follow take their ``decision_due`` from it. Returns ``procedure``, the
+    kind."""
+    p = Procedure[args["kind"]] or Procedure(id=args["kind"])
+    p.initiated_by, p.matter = args["initiated_by"], args.get("matter", "")
+    p.decision_deadline, p.silence = args.get("decision_deadline"), args.get("silence", "")
+    p.legislation, p.facts = args.get("legislation", ""), args.get("facts") or {}
+    return {"procedure": p.id}
+
+
+@op("realm.data_view", read=True, returns="procedures")
+def procedure_list(c, args):
+    """The realm's procedures, ``count`` at a time (default 100, at most 500) from row ``from`` (default 1). Returns
+    ``procedures`` and ``next`` (null at the end)."""
+    rows, nxt = page(Procedure, args)
+    return {"procedures": [view(p) for p in rows], "next": nxt}

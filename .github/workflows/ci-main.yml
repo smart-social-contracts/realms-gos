@@ -1,5 +1,5 @@
-# ci-main.yml — main pipeline: casals up on a local replica + the cross-quarter
-# live suite (realms-e2e.yml). Live environments are built by hand with
+# ci-main.yml — main pipeline: casals up on a local replica + the standalone realm UI
+# suite (realms-e2e.yml). Live environments are built by hand with
 # `casals up -e production` and released with `casals upgrade`
 # (docs/deployment/README.md); nothing here deploys.
 
@@ -19,6 +19,6 @@ env:
   NODE_VERSION: "20"
 
 jobs:
-  # ── E2E on a local replica: casals up + cross-quarter live suite ───────────
+  # ── E2E on a local replica: casals up + the standalone realm UI suite ──────────
   e2e:
     uses: ./.github/workflows/realms-e2e.yml

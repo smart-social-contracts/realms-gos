@@ -7,11 +7,12 @@ import ggg_methods as g
 import world
 from core import op
 from core.candid import Reader
-from ggg import Department, KeyEnvelope, Mandate, Proposal, Quarter, Realm, User, UserProfile
-from kit import ok
+from ggg import Budget, Department, KeyEnvelope, Mandate, Procedure, Proposal, Quarter, Realm, User, UserProfile
+from kit import ok, rows
 from mirror import FakePrincipal as P
 from test_assets import RX, agora, license_clinic, prescribe
 from test_crypto import REPORT, health
+from test_treasury import draft, setup_finance
 
 
 def caller(principal):
@@ -21,6 +22,18 @@ def caller(principal):
 def do(update):
     """Run an update method to its reply, as the canister drives its generator."""
     return op.run(update)
+
+
+def test_budget_propose_by_fund_reaches_the_operation_through_candid():
+    """GGG D19: the fund in ``BudgetProposeArgs`` proposes that fund's draft lines, and without one every fund's."""
+    setup_finance()
+    draft("ROOT", "salaries", 500)
+    draft("ROADS", "capital", 300)
+    caller("bob")
+    assert do(g.ggg_budget_propose({"period": "FY2026", "years": None, "fund": "ROOT"})) == {"Ok": {"Done": None}}
+    assert {b.fund.id: b.status for b in rows(Budget)} == {"ROOT": "adopted", "ROADS": "draft"}
+    assert do(g.ggg_budget_propose({"period": "FY2026", "years": None, "fund": None})) == {"Ok": {"Done": None}}
+    assert {b.fund.id: b.status for b in rows(Budget)} == {"ROOT": "adopted", "ROADS": "adopted"}
 
 
 def test_private_data_and_wrapped_keys_are_blobs():
@@ -40,13 +53,60 @@ def test_private_data_and_wrapped_keys_are_blobs():
     stored = do(g.ggg_document_store({"document": None, "department": "Health", "keys": [], **REPORT}))["Ok"]
     doc = stored["document"]["id"]
     assert stored["scope"] == f"dept:Health:doc:{doc}"
-    shared = do(g.ggg_document_share({"document": doc, "keys": [{"principal": P("dr-ana"), "wrapped_dek": b"\x0a"}]}))
+    shared = do(g.ggg_document_share({"document": doc, "recipient": {"kind": "User", "id": "dr-ana"},
+                                      "keys": [{"principal": P("dr-ana"), "wrapped_dek": b"\x0a"}]}))
     assert shared == {"Ok": 1}
     caller("dr-ana")
     got = g.ggg_document_get(doc)["Ok"]
     assert got["document"]["hash"] == "sha256:ab12" and got["envelope"]["wrapped_dek"] == b"\x0a"
     caller("bob")
     assert g.ggg_document_get(doc) == {"Ok": None} or "Err" in g.ggg_document_get(doc)
+
+
+def test_I_PRV_4_a_document_record_never_carries_the_ciphertext_to_a_reader_without_the_key_published_or_not():
+    health()
+    caller("carla")
+    doc = do(g.ggg_document_store({"document": None, "department": "Health", "keys": [], **REPORT}))["Ok"]["document"]["id"]
+    for reader in (fake_chain.ANONYMOUS, "alice"):
+        caller(reader)
+        shown = ggg_api.to_ggg(doc, "Document")
+        assert (shown["ref"], shown["hash"], shown["facts"]) == ("", "", {"Map": []}), reader
+    caller("carla")
+    assert ggg_api.to_ggg(doc, "Document")["ref"] == REPORT["ref"]
+
+
+def test_I_PRV_4_the_ggg_method_gives_a_stranger_only_the_public_copy_of_a_published_document():
+    health()
+    caller("carla")
+    stored = do(g.ggg_document_store({"document": None, "department": "Health", "facts": {"Map": [("source", {"Text": "x"})]},
+                                      "keys": [{"principal": P("dr-ana"), "wrapped_dek": b"\x0a"}], **REPORT}))["Ok"]
+    doc = stored["document"]["id"]
+    do(g.ggg_document_publish({"document": doc, "to": None, "ref": "pub/report.pdf", "hash": "sha256:cd34"}))
+    public = {"ref": "pub/report.pdf", "hash": "sha256:cd34"}
+    for reader in (fake_chain.ANONYMOUS, "alice"):
+        caller(reader)
+        got = g.ggg_document_get(doc)["Ok"]["document"]
+        assert got["public"] == public and got["title"] == REPORT["title"]
+        assert (got["ref"], got["hash"], got["facts"]) == ("", "", {"Map": []}), reader
+    for reader in ("carla", "dr-ana"):  # the department's staff, and a holder of the key
+        caller(reader)
+        got = g.ggg_document_get(doc)["Ok"]["document"]
+        assert (got["ref"], got["hash"]) == (REPORT["ref"], REPORT["hash"]), reader
+    assert g.ggg_document_get(doc)["Ok"]["document"]["facts"] == {"Map": [("source", {"Text": "x"})]}
+    caller("carla")
+    assert do(g.ggg_document_publish({"document": doc, "to": None, **public}))["Ok"]["ref"] == REPORT["ref"]
+
+
+def test_a_procedure_crosses_with_ggg_s_period_unit_tags():
+    health()
+    caller("ctl")
+    args = {"kind": "business", "initiated_by": "the applicant", "matter": None, "silence": {"Negative": None},
+            "decision_deadline": {"count": 30, "unit": {"WorkingDay": None}}, "legislation": None, "facts": None}
+    assert do(g.ggg_procedure_define(args)) == {"Ok": {"Done": "business"}}
+    assert Procedure["business"].decision_deadline == {"count": 30, "unit": "working_day"}
+    listed = g.ggg_procedure_list({"cursor": None, "limit": None})["Ok"]["items"]
+    assert listed[0]["decision_deadline"] == {"count": 30, "unit": {"WorkingDay": None}}
+    assert listed[0]["silence"] == {"Negative": None}
 
 
 def test_a_credential_header_is_a_list_of_text_pairs():
@@ -175,3 +235,10 @@ def test_a_capital_counts_its_quarters_members():
     Quarter(id="harbor", population=40, status="active")
     Quarter(id="hills", population=2, status="active")
     assert g.ggg_realm_info()["member_count"] == members + 42
+
+
+def test_an_optional_record_argument_is_asked_as_the_record():
+    for operation, arg_t, arg in (("join_targets", "opt JoinTargetsArgs", {"home_zone": "riverside"}),
+                                  ("codex_revert", "opt CodexRevertArgs", {"codex": "sha256:x"})):
+        assert ggg_api.request(operation, arg_t, arg) == arg
+        assert ggg_api.request(operation, arg_t, None) == {}

@@ -13,7 +13,9 @@ All three install **release artifacts**, not the checkout.
 ## Releases
 
 The *Create Release* workflow ([`.github/workflows/release.yml`](../../.github/workflows/release.yml),
-run by hand: patch, minor or major) builds and attaches to a GitHub release:
+run by hand: patch, minor or major) builds and attaches to a GitHub release. **First, when IANA has published a new
+tz database** (the workflow fails if it has), run `python3 scripts/build_zones.py --release <version>` and commit the
+result: every release bundles the time zones of the realm (`src/realm_backend/zonedata`).
 
 | Asset | Built by |
 |---|---|
@@ -132,6 +134,46 @@ Once built, the orchestra changes by operations, not by re-applying the sheet:
 casals -e production --identity <id> upgrade casals.json --wasm <family>          # a backend
 casals -e production --identity <id> upgrade casals.json --content <namespace>    # a frontend bundle
 ```
+
+#### After an upgrade from ic-python-db 0.12
+
+A realm backend built with ic-python-db 0.12 or earlier saved each index list (the members with a status, the votes of
+a proposal, a department's proposals) as one JSON array, which every change reads and rewrites whole: about 51 thousand
+instructions per id already in the list, so 6.5 billion for each vote on a proposal that has 127,000. 0.13 and later keep
+one entry per id, at about 0.6 million per change however long the list is, and convert an array the first time its
+index is read. In an update that conversion is kept. In a query it is discarded and paid again by the next query, and
+a list of 20,000 ids is past a query's 5 billion instructions.
+
+So the controller of an upgraded realm converts its lists once, before members read them, by calling the operation
+`db_convert_indexes` (`run`, no arguments) again and again until its reply says `"done": true`. A call converts at most
+10,000 ids (`ids` changes that, up to 140,000), about 2.5 billion instructions, and looks at no more than 20,000 index
+entries, about 0.8 billion. A list is converted whole, and a list longer than `ids` uses its call up: measured on 127,000
+ids it took 31.1 and 32.5 billion instructions (245 to 256 thousand per id), so an update, which has 40 billion,
+converts a list of up to about 155,000 ids. A list over 140,000 ids is skipped and named in the reply's `refused`
+(and in every later reply): nothing in this release converts it, and reading it in an update would run out of
+instructions too, but the other lists are converted and the walk still ends. The realm remembers how far it got and when
+it is done: a call after that, and every call on a realm created by this release, answers at once without reading the
+index entries.
+
+**This is one way.** Once a release with ic-python-db 0.13 or later has run on a realm, it has converted lists, and a
+release before 0.13 reads them as empty: `count_by` answers 0 and `find_by` answers `[]`. Do not downgrade a realm that
+has run it; restore from a backup instead.
+
+#### The tag lists of proposals, after every upgrade
+
+`proposal_list` with `tags` reads one list of proposal ids for each tag (`_fi:Proposal:tags:<tag>`, the tag with `%` and `|`
+written `%25` and `%7C`), so a page costs what its proposals cost whatever the realm holds. `Proposal.set_tags` keeps the lists, and `_tag_lists@<id>` beside them: the
+tags each proposal is on the lists of.
+
+After **every** upgrade the realm puts its proposals on the lists of their tags again, by itself: `post_upgrade` does the
+first 200 and a timer chain the next 200 a message (about a billion instructions each), then notes `tag_index` in the
+realm's `manifest_data`. There is nothing to call. It does so every time, not once, because a realm rolled back to a release
+that kept no such lists, and upgraded again, would otherwise trust lists that release left wrong: what it filed is on none,
+what it re-tagged is on the old ones. The pass takes a proposal off the lists it is on and no longer belongs to, so
+the lists are exact when it is done. Until it is noted, `proposal_list` with `tags` answers by reading the proposals a page
+at a time, as the release before did: right, but slow, and a page can be short or empty, so a client follows `next`. An
+upgrade in the middle starts the pass again. A realm of 10,000 proposals spends about 50 billion instructions on it per
+upgrade, over 50 messages.
 
 ### The token ledger
 

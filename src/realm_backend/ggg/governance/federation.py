@@ -10,3 +10,5 @@ class FederationMessage(Row):
     source = String(default="")
     body = Json({})
     response = Json({})
+    codex = String(default="")  # the codex checksum the sender ran when it sent this (api.quarters.ask)
+    compliance = String(default='"unknown"')  # the sender's flag as the receiver knew it, as JSON text (core.compliance)

@@ -113,12 +113,16 @@ These are settled. Each later section applies them.
 18. **No rule** on hook order between domains, and none on lower layers filling settings that forbids
     above read.
 19. **The realm domain's entry points are GGG hooks:** `on_codex_activate` and `compute_realm_join`. A
-    follower leaving is a GGG event of the links. `sync_source_remove` is reserved: no chapter can
-    forbid, guard or hook it.
+    follower leaving is a GGG event of the links, `link_notify`, which a chapter may hook and never guard
+    or forbid. `sync_source_remove` is reserved: no chapter can forbid, guard or hook it.
 20. **`each="taxes"`** ranges over the saved TaxPolicy's `taxes`, and the same check runs when the
     draft is saved.
-21. **Each realm sets its own `Realm.timezone`** (an IANA name) and never inherits it; timestamps stay
-    UTC. Realm-local time is computed in Realms GOS, with no change to the Python runtime
+21. **Each realm sets its own `Realm.timezone`** (an IANA name) and never takes it from another realm,
+    from legislation or from a sync source; timestamps stay UTC. A quarter has a zone of its own: a new
+    one starts on its capital's (a realm that joins keeps a zone it already chose), it may change it,
+    and the realm may set it by a realm-wide vote. The
+    capital's zone is the realm's official time, a quarter's its local time (§4.5). Realm-local time
+    is computed in Realms GOS, with no change to the Python runtime
     ([#503](https://github.com/smart-social-contracts/realms-gos/issues/503)).
 22. **One official journal per realm,** the core extension `journal`. Publication never decides when
     legislation applies.
@@ -136,7 +140,8 @@ These are settled. Each later section applies them.
     new proposal sets the right date, so proposers leave a margin.
 27. **Working days are a GGG Period unit,** `WorkingDay`, defined on
     [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7)
-    against the realm's `calendar.json` and time zone. GGG names the unit and realms count it
+    against the realm's `calendar.json` and the time zone of the clock that counts (§4.5). GGG names
+    the unit and realms count it
     ([#505](https://github.com/smart-social-contracts/realms-gos/issues/505)); the library gains
     `working_days(n)`. If the calendar has no entries for a year the count reaches, the
     count fails closed. The platform supports working days, and each realm's legislation decides
@@ -189,6 +194,7 @@ The rules:
   is an empty chapter. No other `.py` files are allowed in a source folder.
 - **Calendar file** = `calendar.json`, one per source at most, beside its chapters (§3.4). A source
   that sets no holidays, such as EMSHI, has none.
+- **Test cases** = `<domain>.cases.json`, beside the chapter they test (§12.1).
 - **The `realm` domain** (the realm's own hooks, such as `on_realm_join`; its entry point
   `on_codex_activate`, the hook on GGG's `codex_activate`; and `compute_realm_join`, which GGG asks for
   the quarter of a new member) may only be filled in the realm's own layer.
@@ -211,11 +217,11 @@ The rules:
 | Field | Rule |
 |---|---|
 | `name` | official names, by language |
-| `created_by` | the act that created the source |
+| `created_by` | the act that created the source; left out when none did, such as a municipality older than any statute |
 | `publisher.realm` | the canister id of the source's own realm, if it has one, else `null` (§8) |
 
 A source carries no time zone and no zone file: a realm's time zone is its own `Realm.timezone`
-(§4.5), never a layer's, and the realm stores only its own zone file.
+(§4.5), never a layer's, and the realm reads only its own zone from the release's tz data.
 
 ### 3.2 `releases.json`
 
@@ -240,9 +246,10 @@ One entry per release, newest last:
 ```
 
 - **A release lists all of the source's chapters,** changed or not, and its calendar if it has one.
-  The source adopts it by its own vote. A follower installs a release whole, never only some of its
-  chapters, but downloads only the chapters on its own layer paths: EMSHI's water chapter reaches only
-  the realms that sync from EMSHI.
+  It never lists the `realm` domain, which only the realm's own layer fills (§3). A follower that finds
+  one in a release skips it and reports it. The source adopts the release by its own vote. A follower
+  installs a release whole, never only some of its chapters, but downloads only the chapters on its own
+  layer paths: EMSHI's water chapter reaches only the realms that sync from EMSHI.
 - **The repository file is a convenience copy.** The authority is the source's published record (§8).
 - **The realm's own layer needs no releases:** its proposals are its record.
 - **`calendar.json` is released and pinned like a chapter:** the release's own `calendar` field holds
@@ -263,10 +270,15 @@ own layer. Each sync source relays its own paths, so a path grows by one layer a
 | València | CV and EMSHI | EU → Spain → CV → EMSHI → València |
 
 - EMSHI writes water chapters only, so in every other domain its path equals CV's. Empty chapters are
-  skipped, so València's tax path is Spain → València.
+  skipped, so València's tax path is Spain → València. A layer is on a domain's path only if its
+  release has a chapter in that domain; the table above shows a domain every layer writes in.
 - **One chain:** when a realm has several sync sources, their paths in one domain must form one
   chain, each the start of the longest, which the realm uses. Paths that differ are refused unless one
   extends the other, and the install fails. València passes, because EMSHI's water path extends CV's.
+  Across domains, too, the records of the sync sources must, taken together, put every layer with a
+  chapter or a calendar above or below every other: one order, no ties. Two layers that no record
+  puts in order, such as CV and a metropolitan area that both sync from Spain, are refused, so
+  `self.layer` has one order to count by.
 - A CV town that does not sync from EMSHI gets a water path without EMSHI.
 
 ### 3.4 `calendar.json`
@@ -299,8 +311,8 @@ change to its layer; the change list names it `<source>/calendar` (§7), and a r
 `calendar` field (§3.2).
 
 `self.calendar.add(day, period)` adds a GGG Period to a realm-local day (§4.5). For `working_days(n)` it
-steps over the weekend days and the holidays of the realm's calendar, in the realm's time zone: a
-**working day** is a day that is neither, as
+steps over the weekend days and the holidays of the realm's calendar, in the time zone of the clock
+that counts (§4.5): a **working day** is a day that is neither, as
 [GGG defines it](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7).
 GGG names the unit `WorkingDay` ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)) and
 the realm counts it ([#505](https://github.com/smart-social-contracts/realms-gos/issues/505)). If the
@@ -325,8 +337,8 @@ class Procedure(above("procedure")):
     default_decision_deadline = overridable(months(3), legislation="Ley 39/2015 Art. 21.3")   # a GGG Period
 
     over_six_months = forbid("procedure_define",
-        F.decision_deadline.is_some() & (F.decision_deadline > 6)             # GGG's fact, a Period compared in months
-        & F.longer_deadline_legislation.is_none(),
+        F.decision_deadline.is_some() & (F.decision_deadline > months(6))     # GGG's fact, a Period: another unit fails closed (§6)
+        & F.legislation.is_none(),
         legislation="Ley 39/2015 Art. 21.2")
 
     @fixed(legislation="Ley 39/2015 Art. 30")
@@ -345,20 +357,34 @@ Methods are named after GGG operations. `<op>` is the name of a GGG operation, s
 Any domain's chapter may define a method for any GGG operation (water and waste both hook
 `tax_policy_propose`). This design sets no order between domains.
 
+A guard and a hook read the operation's arguments as the realm takes them: an action is `{op, args}` (a change of
+legislation is `action.op == "codex_install"` with a `checksum` in `action.args`, never GGG's `Code` variant) and
+an entity is the text `"External:<id>"`. An effect names an entity the way GGG does, `Ref("external", "AGE")`, and
+the realm hands the operation `"External:AGE"`.
+
 The realm domain's two entry points are methods of these kinds, so they follow the same naming rule:
 
 - `on_codex_activate(self, event)`: the hook on GGG's `codex_activate`. It runs once per realm when a
   codex becomes active, not once per quarter, and not on a revert. It replaces today's `init` hook. A
   zone set-up in it needs no check against creating a zone twice: zones are keyed by their primary ids.
-- `compute_realm_join(self, ...)`: GGG asks it, during `realm_join`, which quarter a new member goes to.
-  It may prefer the quarter that holds the member's zone; capacity decides first. It replaces today's
-  `assign_quarter` hook.
+- `compute_realm_join(self, user, home_zone, quarters)`: GGG asks it, when a new member is placed
+  (`join_targets`, which takes the optional `home_zone` the joiner states, else that of a member the realm
+  already knows), which quarter they go to. `quarters` are the quarters below capacity, each with its
+  `population` and its `zones`: what the quarter last reported of the zones its members live in, zone id to
+  how many (empty for none, None where the realm does not know; the counts serve this placement and no
+  reply carries them). It may prefer the quarter that holds the
+  member's zone; capacity decides first, because the realm offers only quarters with room and ignores an
+  answer that is not among them, and asks nothing when none has room. One zone may span several quarters,
+  each counting its own members of it. The home zone is a private choice of the joiner: the realm uses it for
+  this placement only and no reply carries it. It replaces today's `assign_quarter` hook.
 
 The rules (the checker enforces them, §12):
 
 1. **One class per file,** named after the domain in CamelCase (`tax` → `Tax`, `data_protection` →
    `DataProtection`), with the base `above("<its own domain>")`. Nothing else at module level except
-   imports from the SDK and constants.
+   imports from the SDK and constants. The constants are frozen once the file has loaded (a list is a tuple, a
+   dict read-only: write `list(CODES) + [...]` to build a longer list), so a method cannot leave a change in one
+   for the next call. An imported name is bound by its import and never assigned to.
 2. **Imports only from the SDK** (`realms.legislation`) and from `ggg`, for read-only access to GGG's
    entities (`from ggg import Land, Member`). No other import, anywhere in the file. A chapter cannot
    write an entity; it queues operations.
@@ -370,7 +396,22 @@ The rules (the checker enforces them, §12):
 5. **Single inheritance only.** No metaclasses, no class decorators, no nested classes, no `exec`,
    `eval`, `compile`, `globals`, `locals`, `setattr`, `__import__`, `open`, no dunder attribute access
    (`__class__`, `__dict__`, `__bases__`, `__subclasses__`, ...). These are the same restrictions as
-   codex code today ([Design choices](../architecture/design-choices.md)).
+   codex code today ([Design choices](../architecture/design-choices.md)). No default arguments either,
+   on a method, a nested function or a lambda. An attribute is set only on the event a hook was given, by plain
+   assignment (`event.order = [...]`, never `+=`), and never on `self` or on anything else: one instance runs every
+   layer's code of a domain in a call, so what one layer stored on `self` would change what another reads, a
+   `fixed` method of a layer above included. `self` and that event are bound once, as the method's parameters, and
+   never rebound, deleted or reused as a nested function's parameter. A chapter's class lives as long as the codex
+   runs, so a default or an attribute on an SDK object, a parameter or a view would be state shared by every call.
+   A method is defined under its own name (`charge = on_user_add` is refused), and a hook runs with the
+   operation's own event, and with nothing a chapter makes up.
+6. **No floats.** Money is whole units of the token and a rate is `pct("1.10")`, so a chapter holds no float
+   literal, calls no `float()` or `complex()`, and writes no `/` or `/=`, which make a float of two integers
+   (`//` divides whole numbers). It writes no `**`, `**=` or `pow()` either: a negative power is a float and a
+   negative base to a fractional power a complex number, and the power can come at run time, where no check of a
+   constant would hold; a chapter needs no power. The names `float`, `complex` and `pow` are neither read nor bound
+   anywhere in a chapter, and `type(x)` of a float or a complex number is refused, so the data a chapter reads
+   cannot hand it the class either. A share of money is `amount.times(rate)`, rounded by GGG's one rule (§4.5).
 
 ### 4.1 Marks
 
@@ -386,7 +427,7 @@ The rules (the checker enforces them, §12):
 - **Hooks:** every layer's definition runs, top to bottom. Each queues GGG operations with
   `self.ggg.<op>(...)`. The event object is shared down the chain: a layer may add attributes to it,
   and lower layers can read but not change attributes set above. Example: CV sets
-  `event.languages_missing`, and València reads it.
+  `event.languages`, and València reads it.
 - **Guards:** every layer's definition runs, top to bottom. Returning `None` continues; returning
   `self.deny(reason)` stops and refuses the operation. If all return `None`, the guard allows.
 - **Helpers and settings returning values:** results merge in layer order.
@@ -409,7 +450,7 @@ whatever version of the CV chapter is pinned.
 
 ```python
 default_decision_deadline = overridable(months(3), legislation="Ley 39/2015 Art. 21.3")   # in eu/es
-default_decision_deadline = days(60)                                                      # in València
+default_decision_deadline = months(2)                                                     # in València
 co_official = fixed(["ca-valencia", "es"], legislation="Estatut d'Autonomia Art. 6")      # in eu/es/vc
 ```
 
@@ -447,9 +488,9 @@ through the calendar, so a lower layer that sets `comment_period = days(45)` is 
 
 **Working days:** GGG's `Period` has a `WorkingDay` unit, defined on
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7);
-the realm's calendar (§3.4) and time zone (§4.5) decide which days count. GGG names the unit; the realm
-counts it, and `working_days(n)` writes it. Each realm's legislation decides whether to use working days
-at all.
+the realm's calendar (§3.4) and the time zone of the clock that counts (§4.5) decide which days count.
+GGG names the unit; the realm counts it, and `working_days(n)` writes it. Each realm's legislation
+decides whether to use working days at all.
 
 **Plenary meetings are out of date in a GOS:** the plenary is the online vote, and a notice period is
 only the gap before the vote opens (`Proposal.opens_at`). The example above is the public comment
@@ -489,8 +530,11 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 
 - **Only declared domains.** A chapter may only reach domains listed in `uses`. Anything else is an
   error at load time.
-- **No cycles.** If tax uses procedure and procedure uses tax, the checker refuses the cycle. The
-  runtime also stops calls between domains at depth 8.
+- **No cycles.** If tax uses procedure and procedure uses tax, the checker refuses the cycle, and so
+  does the install. The install also refuses a `uses` of the chapter's own domain, or of a domain the
+  realm has no chapter in.
+- **Depth 8.** Calls between domains stop at depth 8 (`MAX_DEPTH` in `realms.legislation.context`):
+  the runtime refuses a ninth nested call, and the install refuses a `uses` chain that could reach it.
 - **What's protected.** `fixed` members of the called domain can't be changed by lower layers, so a
   source that needs a guaranteed answer marks it `fixed`, as `working_days_after` is in §4.
 
@@ -500,14 +544,16 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 |---|---|
 | `self.ggg.<op>(**args)` | queues GGG operation `<op>` as an effect, as codex effects work today |
 | `self.deny(reason)` | a guard's refusal |
-| `from ggg import ...` | read-only access to GGG's entities (`Member.each`, `Land.get`, ...) |
+| `from ggg import ...` | read-only access to the fields of GGG's entities that legislation may read: `get(id)`, `each()` and `find(field, value)` on an indexed field. A list reads as a tuple and a mapping as `row["code"]`; values are as the realm stores them (an attribute's status is `verified`, a parcel's owner `User:<id>`) |
 | `Ref(kind, id)` | GGG's `Ref`, e.g. `Ref("external", "INE")` |
 | `self.now()` | the current time, a UTC timestamp, as today |
 | `self.approved_by(department)` | whether the current operation carries that department's approval |
 | `self.legislation.<d>`, `self.layer.<d>` | §4.4 |
 | `self.calendar` | the realm's calendar: the union of the `calendar.json` of the layers it runs (§3.4); `self.calendar.add(day, period)` adds a Period to a realm-local day, counting working days on it |
+| `self.local_day(at)` | the realm's local day of UTC timestamp `at`, `YYYY-MM-DD`, computed by the realm from its own time zone (below): the day a working-day count starts from (§5.2) |
 | `pct("1.10")` | a rate literal, stored as the integer in hundred-millionths (§4.3) |
 | `days(n)`, `working_days(n)`, `months(n)`, `years(n)` | a Period, as GGG writes it: the unit constructors GGG defines, for settings (§4.3); the SDK adds none |
+| `Money(units, decimals)` | an amount in the token's smallest unit: it adds, compares and `times(rate)`; an amount GGG hands a chapter (a parcel's `assessed_value`, below) is one |
 | `amount.times(rate)` | money times a rate, rounded as GGG says |
 
 **Rounding is one rule, set by GGG:** nearest cent, an exact half away from zero, stated with the money
@@ -515,15 +561,107 @@ kind of GGG's fact schema so that every implementation rounds the same way. The 
 [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
 `times()` takes no rounding argument and a chapter names no rule.
 
+**Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row, the
+object `Land.get(id)` gives, and not as the reference `"Land:L-1"`. A parcel's `assessed_value` is in the accounting
+currency (GGG's model), and it reaches the chapter as a `Money` of that currency's decimals, so that
+`subject.assessed_value.times(entry.rate)` rounds to its cent. Every amount a chapter reads is in it, so a codex
+computes a tax only when it is billed in the accounting currency, whatever the tax's subject: `tax_assess` refuses a
+codex's answer for one billed in another token, and such a tax has its own rate, amount or brackets. Only a `compute_`
+method knows the token: anywhere else an amount read is a `Money` without decimals, and `times()` says so instead of
+guessing. A chapter's own amounts are `Money(units, decimals)`, the decimals those of the amounts it read
+(`subject.assessed_value.decimals`). `sum()` of amounts needs a start of the same kind:
+`sum(amounts, Money(0, decimals))`. The realm's own tax code rounds with the same function
+(`realms.legislation.rates.times`): there is one implementation.
+
+**Round once.** GGG rounds an amount where it is complete (D23), not at each step: a tax by brackets adds the exact
+products of each bracket, whole numbers in hundred-millionths of a unit, and rounds the total once. Rounding each
+bracket and adding the cents gives another total. A tax of 0.1 % on the first 25.00 and 0.3 % above, on 40.00, is
+2.5 cents and 4.5 cents: 7 cents rounded once, and 8 when each is rounded first. A chapter writes it the same way:
+
+```python
+def brackets_tax(self, value, brackets):       # value: a Money; brackets: up_to and rate, the last up_to None
+    exact, lower = 0, 0                        # whole numbers, in hundred-millionths of a unit: nothing rounded yet
+    for bracket in brackets:
+        upper = value.units if bracket["up_to"] is None else min(value.units, bracket["up_to"])
+        exact += max(upper - lower, 0) * bracket["rate"]
+        lower = max(lower, upper)
+    return Money(exact, value.decimals).times(1)    # the one rounding, of the total
+```
+
 **Time zones.** GGG's `Realm.timezone` is an IANA name such as `Europe/Madrid`
-([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)). Each realm sets its own and never
-inherits it from a layer or a sync source. Timestamps stay UTC nanoseconds, and the UI shows the
-realm's official time. Realm-local time is computed in Realms GOS
+([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)). Timestamps stay UTC nanoseconds,
+and an effective time is an exact UTC instant (§9.5). Realm-local time is computed in Realms GOS
 ([#503](https://github.com/smart-social-contracts/realms-gos/issues/503)): a pure-Python zone-file
-reader plus date arithmetic, with no change to the Python runtime. The realm stores only its own zone
-file, as raw bytes (never base64), parsed once and kept in memory. The day of a timestamp, for the
-working-day count of §5.2 or the official journal's daily issue (§9.6), is the realm's local day
-computed this way.
+reader plus date arithmetic, with no change to the Python runtime. Every release bundles the IANA tz data
+for every zone, one module per zone file, as hex text that `bytes.fromhex` decodes (never base64, which costs 17M
+instructions for a few KB), so the rules are refreshed whenever a realm is upgraded: there is no upload and no
+checksum. A quarter is a full realm canister, so it has every zone too. A canister reads only its own zone, once,
+when it is set and again when it starts after an upgrade, never in a query, and keeps the parsed zone in memory.
+A change of `Realm.timezone` applies from that moment: stored times are UTC, so nothing is rewritten, and a
+deadline or an `effective_at` already set does not move; only what is computed in local time from then on uses
+the new zone. It is a governed realm setting. The day of a timestamp, for the working-day count of §5.2 or the
+official journal's daily issue (§9.6), is the local day computed this way, on the clock that counts (below).
+
+**Where a zone comes from.** Always from the realm itself, never from outside it:
+
+- **A realm sets its own** with `realm_configure`. It never takes a zone from another realm, from
+  legislation or from a sync source ([GGG I-ADM-4](https://github.com/smart-social-contracts/ggg/blob/main/model/README.md)).
+  **The codex never sets a zone:** the runtime refuses any effect a hook queues that carries
+  `timezone`. Its guards (`check_realm_configure`, `check_quarter_configure`) may constrain who may
+  change a zone, like those of any governed operation.
+- **A new quarter starts on its capital's zone.** `quarter_join_federation` copies it once, when the
+  joining realm is still on `UTC` (GGG I-ADM-4: `UTC` means not yet chosen), as a freshly built quarter
+  is. A realm that already chose a zone keeps it when it joins as a quarter. After that the zone is
+  the quarter's own, and a later change of the capital's does not follow.
+- **A quarter may change its own zone** with `realm_configure` on the quarter, governed there as today.
+- **The realm may set a quarter's zone** by a realm-wide vote: `quarter_configure` on the capital takes
+  a `timezone` for the `quarter` it names; the capital's own zone is set with `realm_configure`. A
+  `timezone` with no `quarter` is refused. So is a malformed name, or one the release has no data for:
+  `quarter_configure`'s `check=` also runs `realm_configure`'s zone test (`known_timezone`). Both are
+  refused before the call becomes a proposal, so before any vote. When the proposal executes, the
+  capital sends the setting to the quarter over the trusted capital-to-quarter channel, the
+  `quarter.sync` permission the federation already uses
+  ([Quarters and federation](../architecture/quarters-and-federation.md)), and the quarter applies it
+  as its own zone. Only the name travels: the quarter's release already holds the data of every zone.
+  If the quarter refuses it or cannot be reached, the operation fails and nothing changes.
+
+**Settings the realm sets for its quarters.** A realm has one face, so its quarters share some settings
+and keep others. The table and the mechanism are in
+[Quarters and federation](../architecture/quarters-and-federation.md#what-the-realm-sets-for-its-quarters).
+
+| Group | Settings | Rule |
+|---|---|---|
+| Identity | the realm's name (each quarter keeps its own quarter label), logo, background image and colours (branding), manifesto, the realm's terms text, lifecycle stage | kept in sync from the capital: the capital owns them, a quarter cannot change them, and a realm-wide vote changes them on the capital, which pushes them to every quarter |
+| Shared foundations | accounting currency, the languages offered | kept in sync from the capital, as above |
+| Local, with a default | time zone (above), welcome message | copied once when a quarter joins, then the quarter's own: the quarter changes it through its own governance, and the realm may set it by a realm-wide vote through `quarter_configure`; a joining realm that already chose a value keeps it |
+| Not pushed as settings | voting rules (window, threshold, quorum) | they belong in the codex, which reaches every quarter at one switch time (§9.5); a pushed setting would bypass the legislation |
+| Not pushed | registration (`quarter_join_mode` is the capital's already, through `quarter_configure`; `open_registration` is each quarter's own), capacity (the capital's already), notification settings, departments, members, treasury | local, or the capital's already |
+
+The capital pushes a changed synced setting to its quarters over `quarter.sync`, and the answer to
+`quarter_sync` carries the current values, so a quarter that missed a push catches up. On a quarter,
+`realm_configure` (and its branding and token variants) and `setup_step` refuse a synced field with `Forbidden`,
+naming the capital.
+
+**Two clocks, with clear jobs.**
+
+| Clock | Zone | Used for |
+|---|---|---|
+| the realm's official time | the capital's | realm-wide votes: their deadlines and working-day counts; a realm-wide `effective_at` as people see it; the realm's single official journal (§9.6) |
+| a quarter's local time | the quarter's | its own departments' deadlines and working days; the local time its members see |
+
+Realm-wide counts are made on the capital. A federal vote's deadline is set there once, as an instant,
+and every quarter's leg keeps it. A quarter never counts on the capital's clock, and its own votes, its
+root department's included, use its own zone. The calendar's holidays are the realm's, the same in
+every quarter (§3.4): a quarter's zone decides only where its days begin and end.
+
+The UI shows a realm-wide time in the official time (the capital's), with the quarter's local time
+beside it when they differ. `realm_info` gives both zones: `timezone` is the realm's own and
+`official_timezone` the capital's, which a quarter keeps from the answer to its last `quarter_sync`
+(its own until the first), so a change of the capital's zone reaches it at its next sync.
+
+For example, a codex switch set for 1 December 2026, 00:00 in Europe/Madrid is the instant 23:00 UTC
+on 30 November. It is 08:00 on 1 December in a quarter on Asia/Tokyo and 17:00 on 30 November in one
+on America/Mexico_City, and every quarter switches at that one instant (§9.5).
 
 The SDK also provides general helpers that are the same for every source: dates, adding a Period to a
 day (working days included), money, rates. Legislation-specific helpers, such as the day a procedure's
@@ -548,10 +686,12 @@ legislation in force.
 ```python
 # legislation/eu/es/vc/46250-valencia/procedure.py
 class Procedure(above("procedure")):
-    default_decision_deadline = days(60)
+    default_decision_deadline = months(2)
 ```
 
-- **València:** 60 days. Spain's six-month forbid on `procedure_define` still applies.
+- **València:** two months. It is written in months because Spain's Art. 21.2 forbid compares a
+  deadline in months and refuses any other unit (§6). The six-month forbid on `procedure_define` still
+  applies.
 - **A town with no `procedure.py`:** three months, Spain's default (Ley 39/2015 Art. 21.3).
 
 ### 5.2 A chain down the layers
@@ -565,11 +705,12 @@ class LocalRegime(above("local_regime")):
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
     def check_proposal_create(self, args):
-        if "Code" not in args.action:                        # only this realm's own change of legislation (see below)
+        action = args.action                                 # as the realm files it: {op, args}, never GGG's variant
+        if action is None or action.op != "codex_install" or "checksum" not in action.args:   # only this realm's own change of legislation (see below)
             return None
-        # ... elided: the realm's local day (§4.5) of the earliest close of the vote and of args.effective_at
+        earliest_close_day = self.local_day(self.now())      # a vote may close as soon as its outcome is certain
         if args.effective_at is None \
-                or effective_day < self.legislation.procedure.working_days_after(earliest_close_day, 15):
+                or self.local_day(args.effective_at) < self.legislation.procedure.working_days_after(earliest_close_day, 15):
             return self.deny("an ordinance takes effect at the earliest 15 working days after the vote closes (Art. 65.2)")
 
     @extension(legislation="Ley 7/1985 Art. 65.2")
@@ -581,47 +722,53 @@ class LocalRegime(above("local_regime")):
 
 ```python
 # legislation/eu/es/vc/local_regime.py
-from ggg import Document
-
 class LocalRegime(above("local_regime")):
     uses = ["language"]
 
     @extension(legislation="Llei 4/1983; Llei 8/2010")
     def on_codex_install(self, event):
-        languages = Document.get(event.args["document"]).languages
-        event.languages_missing = [l for l in self.legislation.language.co_official
-                                   if l not in languages]
+        # the notice of an ordinance goes out in every co-official language: the layers below read it from the event
+        event.languages = list(self.legislation.language.co_official)
 ```
 
 ```python
 # legislation/eu/es/vc/46250-valencia/local_regime.py
 from ggg import Member
 
+TITLES = {"ca-valencia": "Nova ordenança", "es": "Nueva ordenanza"}
+
 class LocalRegime(above("local_regime")):
 
     def on_codex_install(self, event):
-        title = "Nova ordenança" + (" (traducció pendent)" if event.languages_missing else "")
-        for m in Member.each():
-            self.ggg.notification_send(recipient=Ref("user", m.user), topic="ordinance",
-                title=title, body=event.result["codex"])
+        notice = [{"language": l, "title": TITLES[l], "body": event.result["codex"]}
+                  for l in event.languages if l in TITLES]
+        for m in Member.each():                              # a member's id is its user's id
+            self.ggg.notification_send(recipient=Ref("user", m.id), topic="ordinance",
+                title=TITLES["ca-valencia"], body=event.result["codex"], translations=notice)
 ```
 
-The runtime runs Spain's, then CV's, then València's `on_codex_install` when the proposal is accepted,
-and the communications of Art. 65.2 go out then. The codex waits `pending` and switches at the
-proposal's `effective_at` (§9.2 step 6). Spain's guard on `proposal_create` makes the proposer set it
-at least 15 working days after the vote can close (`working_days(15)`, counted on the realm's calendar
-by Spain's procedure chapter, §4), so the Art. 65.2 period is expressed by the proposal, not by a
-chapter calling `codex_activate` after a wait. The period really runs from the authorities' receipt of
-the communication, which the guard cannot know at creation, so the proposer leaves a margin:
-`effective_at` never moves after acceptance. If it proves too early, another proposal stops the
-scheduled one, and a new proposal sets the right date. The realm domain's `on_codex_activate` hook runs
-once per realm when the codex becomes active. The install appears in the realm's official journal
-(§9.6), which reports it and plays no role in when it applies. The event's arguments and result are
-GGG's.
+The runtime runs Spain's, then CV's, then València's `on_codex_install` when the install proposal executes. An
+ordinance with an `effective_at` waits `pending` from its acceptance and executes at that time, which is the switch
+(§9.2 step 6): the hooks do not run in between, so the communications of Art. 65.2 go out on the day the ordinance takes
+effect. **The period of Art. 65.2 is not modelled yet**, and [#680](https://github.com/smart-social-contracts/realms-gos/issues/680) will: the period really runs from the
+authorities' receipt of the communication, which no chapter sends before the switch. What the realm enforces today is
+Spain's guard on `proposal_create`, which makes the proposer set `effective_at` at least 15 working days after the
+vote can close (`working_days(15)`, counted on the realm's calendar by Spain's procedure chapter, §4), so the proposer
+leaves a margin, and `effective_at` never moves after acceptance. If it proves too early, another proposal stops the
+scheduled one, and a new proposal sets the right date. No chapter calls `codex_activate` after a wait.
+The realm domain's `on_codex_activate` hook runs once per realm when the codex becomes active. The install appears in the realm's official journal
+(§9.6), which reports it and plays no role in when it applies. The event's arguments and result are the
+operation's, as the realm gives them.
+
+A realm installs the layers it takes legislation from first and its own layer last. Its chapters read what the
+layers above set (València's hook reads `event.languages`, which CV's sets), and would run without it in a codex that has
+its own layer alone. The realm's first layered install names its own source id (§9.2 step 2), so it is a release by a
+change list; the other releases come by "Propose install" (§11.4), and the realm's own layer by an ordinance.
 
 The guard applies to the realm's own ordinances only. A proposal that installs a release from a sync
-source (§11.4) runs no guard of the codex on `proposal_create`: the follower votes only on when to
-install (§2, rule 3), and the source's own legislation set the release's date. A proposal whose action
+source (§11.4) runs no guard and no forbid of the codex on `proposal_create` (its hooks still run): the
+follower votes only on when to install (§2, rule 3), and the source's own legislation set the release's
+date. A proposal whose action
 is a reserved operation, such as `codex.revert`, runs no legislation at all (§10.4), so this guard can
 neither refuse nor delay a revert.
 
@@ -671,8 +818,9 @@ from ggg import External
 
 class DataProtection(above("data_protection")):
     def check_document_share(self, args):
-        # the recipient's kind is read from GGG's entity, never from the args
-        recipient = External.get(args.recipient.id) if args.recipient.kind == "external" else None
+        # the recipient is "External:<id>" as the realm takes it; its kind is read from GGG's entity, never from the args
+        kind, _, who = args.recipient.partition(":")
+        recipient = External.get(who) if kind == "External" else None
         if recipient is not None and recipient.kind != "authority" \
                 and not self.approved_by("Junta de Govern Local"):
             return self.deny("a recipient that is not an authority needs the Junta de Govern Local")
@@ -680,7 +828,7 @@ class DataProtection(above("data_protection")):
 
 The guards run EU, then Spain, then València, and the first deny stops the operation. The arguments
 are those GGG defines for sharing a document (§13): `basis {legal_basis, purpose, legislation,
-special_category}`, `recipient` (a `Ref`) and `facts`.
+special_category}`, `recipient` (`"External:<id>"`, as the realm takes an entity) and `facts`.
 
 ### 5.5 Refused: overriding fixed legislation
 
@@ -721,6 +869,10 @@ class Tax(above("tax")):
     services_beyond_art26 = overridable(False, legislation="TRLRHL Art. 72.3")
     rustic_over_80pct = overridable(False, legislation="TRLRHL Art. 72.3")
 
+    ibi_rate_required = forbid("tax_policy_propose",
+        F.code.in_(["ibi_urban", "ibi_rustic"]) & F.rate.is_none(),
+        each="taxes", legislation="TRLRHL Art. 72")
+
     ibi_urban_range = forbid("tax_policy_propose",
         (F.code == "ibi_urban") & F.rate.is_some() & ~F.rate.between(pct("0.40"), pct("1.30")),
         each="taxes", legislation="TRLRHL Art. 72.1, 72.3")
@@ -740,10 +892,11 @@ class Tax(above("tax")):
     @fixed(legislation="TRLRHL Arts. 61, 65, 71 and 74")
     def compute_tax_assess(self, entry, subject):
         """GGG asks for the invoice items of each subject of each entry."""
-        if entry.code != "ibi_urban":
+        if entry.code != "ibi_urban" or subject.assessed_value is None:     # a parcel never assessed owes no IBI yet
             return []
+        # Each invoice line is rounded once: the quota, then the bonus on the rounded quota.
         gross = subject.assessed_value.times(entry.rate)            # nearest cent, half away from zero
-        net = gross - gross.times(self.ibi_bonus(subject))
+        net = gross - gross.times(self.ibi_bonus(subject.owner))
         items = [{"concept": entry.code, "amount": gross, "legislation": "TRLRHL Art. 71.1"}]
         if net < gross:
             items.append({"concept": entry.code + "_bonus", "amount": net - gross,
@@ -751,8 +904,8 @@ class Tax(above("tax")):
         return items
 
     @overridable(legislation="TRLRHL Art. 74")
-    def ibi_bonus(self, land):
-        return 0
+    def ibi_bonus(self, owner):
+        return 0                                        # owner: "User:<id>", as a parcel's owner is written
 
 # legislation/eu/es/vc/46250-valencia/tax.py
 from ggg import Attribute, Human
@@ -762,21 +915,32 @@ class Tax(above("tax")):
     surface_public_transport = True
     large_family_bonus = {"general": pct("60"), "special": pct("90")}      # 60 % and 90 % of the quota
 
-    def ibi_bonus(self, land):
-        owner = Human.for_user(land.owner.id)
-        verified = [a.value for a in Attribute.of(owner, kind="large_family") if a.status == "Verified"]
-        return self.large_family_bonus.get(verified[0], 0) if verified else 0
+    def ibi_bonus(self, owner):
+        kind, _, user = owner.partition(":")
+        if kind != "User":
+            return 0
+        for human in Human.find("user", user):                          # find: an indexed field and the value it has
+            for attribute in Attribute.find("human", human.id):
+                if attribute.kind == "large_family" and attribute.status == "verified":
+                    return self.large_family_bonus.get(attribute.value, 0)
+        return 0
 ```
 
 - **The rate lives in one place:** the entry of the adopted policy, proposed with
   `tax_policy_propose`. The forbids check it. València's chapter holds no rate.
+- **An IBI entry must state its rate:** `ibi_rate_required` forbids an `ibi_urban` or `ibi_rustic` entry
+  with no `rate`. The rate is an optional fact, so the other three forbids test `F.rate.is_some()` (§6,
+  rule 3), and an entry with no rate would pass all of them. The requirement is Spain's legislation,
+  not GGG's: GGG stays generic.
 - **The same forbids run when the draft is saved** (`tax_policy_draft`), so an entry they refuse never
   reaches a proposal.
 - **The settings** `capital`, `surface_public_transport` and the rest are world facts of the realm's
   own layer (§4.3), read by Spain's forbids through `S.` and fixed per realm at build. They never come
   from whoever proposes the rate.
 - **The amount** is computed by `compute_tax_assess`, which GGG calls for each entry and subject, page
-  by page. GGG's rounding rule applies to `times()`.
+  by page. The subject is the view of the parcel (`Land.get`'s, with its `assessed_value` and `area`), whose
+  `assessed_value` is a `Money` in the accounting currency's decimals, the currency a tax computed by a codex is
+  billed in (§4.5), and GGG's rounding rule applies to `times()`.
 
 ### 5.7 A body beside the line
 
@@ -790,9 +954,9 @@ class Water(above("water")):
     @fixed(legislation="EMSHI statutes (illustrative)")
     def on_tax_policy_propose(self, event):
         for entry in TaxPolicy.get(event.args["policy"]).taxes:     # the saved policy's entries
-            if entry.code == "water_supply":
+            if entry["code"] == "water_supply":
                 self.ggg.notification_send(recipient=self.bulk_supplier, topic="tariff",
-                                           title="Water tariff proposed", body=entry.code)
+                                           title="Water tariff proposed", body=entry["code"])
 ```
 
 València's water layer path goes through EMSHI, because València syncs from EMSHI and EMSHI from CV
@@ -801,14 +965,19 @@ València's water layer path goes through EMSHI, because València syncs from EM
 ### 5.8 The generated Cedar
 
 From 5.6, inside València. `S.capital` and the other settings are folded to their values in the
-realm's layer path, and the action is GGG's operation. With `each`, Cedar sees one request per list
-element, with the element's fields as facts. The numbers are `rate`'s integers in hundred-millionths:
-`pct("1.10")` is 1100000.
+realm's layer path. A forbid without `each` names GGG's operation. With `each`, it names the per-list
+actions `<operation>.<list>`, here `tax_policy_propose.taxes` and, since the same forbids run at draft,
+`tax_policy_draft.taxes` (§9.4). Cedar sees one request per list element on that action, with the
+element's fields as facts. The numbers are `rate`'s integers in hundred-millionths: `pct("1.10")` is
+1100000.
 
 ```
 @id("eu/es/tax/ibi_urban_cap")
 @legislation("TRLRHL Art. 72.3")
-forbid (principal, action == Realm::Action::"tax_policy_propose", resource)
+forbid (principal,
+        action in [Realm::Action::"tax_policy_propose.taxes",
+                   Realm::Action::"tax_policy_draft.taxes"],
+        resource)
   when { context.facts.code == "ibi_urban"
          && context.facts has rate
          && context.facts.rate > 1100000
@@ -819,9 +988,13 @@ forbid (principal, action == Realm::Action::"tax_policy_propose", resource)
 
 ### 5.9 What a member sees: the flattened view
 
+The realm serves it as the public read `codex_views` (the domain's layer path and a row for each member, with the
+layers that define it and the legislation each cites); the codex page shows it.
+
 ```
 tax, as it applies in València (codex sha256:3f1c…), path Spain → València:
   capital, surface_public_transport = true          València   (Spain asks, València fills)
+  ibi_rate_required     forbid                      Spain      TRLRHL Art. 72
   ibi_urban_range       forbid                      Spain      TRLRHL Art. 72.1, 72.3
   ibi_urban_cap         forbid                      Spain      TRLRHL Art. 72.3
                         for València: capital + transport → maximum 1.24 % (1240000)
@@ -844,6 +1017,12 @@ tax, as it applies in València (codex sha256:3f1c…), path Spain → València
   `each`, a forbid sees the whole args. For `tax_policy_propose`, whose args hold only a policy id,
   `each="taxes"` is the `taxes` list of the saved TaxPolicy that the id names, and the same forbids run
   when the draft is saved with `tax_policy_draft`.
+  - **The Cedar action.** A forbid with `each` names the action `<operation>.<list>`, e.g.
+    `tax_policy_propose.taxes`, and also `tax_policy_draft.taxes`, since the same forbids run at draft.
+    That action's `facts` are the element's type. A forbid without `each` names the operation, whose
+    `facts` are its args. A Cedar action has one context type, and the operation's own args (for
+    `tax_policy_propose`, only the policy id) are not the element's fields, so the per-element requests
+    need actions of their own.
 - **`expression`** is built from `F` and `S`, and is true when the operation is forbidden.
 
 | Write | Means | Cedar |
@@ -859,6 +1038,30 @@ tax, as it applies in València (codex sha256:3f1c…), path Spain → València
 | `F.s.contains("a")` | set fact contains | `s.contains("a")` |
 | `F.x.is_none()`, `F.x.is_some()` | optional fact absent or present | `!(context.facts has x)`, `context.facts has x` |
 | `when(c, a, b=0)` | if c then a else b | `if c then a else b` |
+| `F.p > months(6)` | a Period fact against a Period of the unit the rule names; another unit makes the comparison true (polarity below) | `context.facts.p.unit != "Month" \|\| context.facts.p.count > 6` |
+
+**Periods compare only within one unit** (§4.3), and a forbid fails closed: a Period comparison is true,
+in the forbid's sense (it counts towards the forbid firing), for a deadline in any other unit. A
+deadline must therefore be written in the unit the rule uses, because days and months don't convert
+cleanly: a month is not a fixed number of days, and a count of days in legislation is often a count of
+working days. Art. 21.2 (§4) is in months, so `days(60)` is refused unless the call names the
+legislation that allows a longer deadline, and València's default is `months(2)` (§5.1).
+
+The generator writes a Period comparison by its polarity, the number of `~` above it. Under an even
+number, it is the row above. Under an odd number, it writes `p.unit == "Month" && p.count > 6` and
+keeps the `!` above it, so `~(F.p > months(6))` is `!(p.unit == "Month" && p.count > 6)`, that is,
+`p.unit != "Month" || p.count <= 6`. The same holds under other facts:
+
+```
+~(F.d.is_some() & (F.d >= months(1)))
+!(context.facts has d && (context.facts.d.unit == "Month" && context.facts.d.count >= 1))
+```
+
+A Period comparison is therefore true, in the forbid's sense, for every other unit, negated or not. The
+Python evaluation follows the same rule (rule 7).
+
+A Period comparison can't be the condition of `when()`: inside arithmetic it has no polarity, so another
+unit could raise a cap.
 
 The rules:
 
@@ -878,9 +1081,13 @@ The rules:
 6. **A forbid does not round.** It compares integers. Rounding happens only where money is computed
    from a rate (§4.5), by GGG's one rule.
 7. **The same tree evaluates in plain Python** (`expr.evaluate(facts)`) for tests. CI checks that
-   Python and Cedar give the same answer on generated facts.
+   Python and Cedar give the same answer on generated facts, among them each literal ±1, 0 and the
+   64-bit extremes: Python integers never overflow, so only such facts show where the two differ.
 8. **Ids and annotations:** each forbid's Cedar `@id` is `"<source>/<domain>/<attribute>"`, plus a
    `@legislation("<citation>")` annotation.
+9. **A forbid never errors.** Cedar skips a policy whose evaluation errors, so an overflowing forbid
+   would allow. `check` proves it for every forbid (`never-errors`, §12.1), and the generator bounds
+   arithmetic on facts by the fact schema's ranges (a value out of range makes the forbid fire).
 
 **When a forbid, when a guard:** use a `forbid` whenever the rule fits the expression language, so
 that it's analysed. Guards (Python methods) are for rules that need loops, other domains, or the
@@ -935,17 +1142,21 @@ The change list:
 | `realm` | must equal the realm's own source id |
 | `replaces` | must equal the current codex's checksum; otherwise the install is refused as stale |
 | `set[].chapter` | `<source id>/<domain>`. The source must be in one of the realm's layer paths (§3.3); the domain must be in the GGG list. A calendar is set the same way, under the id `<source id>/calendar`, e.g. `eu/es/calendar` |
-| `set[].url`, `mirrors` | https only. The first URL whose bytes match `sha256` and `size` wins. For a layer from above, the bytes may instead come from the sync source's capital (§9.2) |
-| `remove` | chapters to empty. Allowed only for the realm's own layer |
+| `set[].url`, `mirrors` | https only. The first URL whose bytes match `sha256` and `size` wins. For a layer from above, the bytes may instead come from the sync source's capital (§9.2). A chapter of the `release` may give no `url`, `mirrors` or `size`: a realm then serves its bytes by checksum, the sync source's capital, or a quarter's capital (§9.5) |
+| `remove` | chapters to empty. Allowed only for the realm's own layer. A chapter is not both in `set` and in `remove` |
 | `release` | for legislation from above: `{"source": "eu/es", "version": "2.4.0"}`. `set` must then contain exactly that release's chapters on the realm's layer paths, and its calendar (§3.2) |
 | `report` | optional analysis report (§12.3). The UI shows it, labelled as not checked by the realm |
-| `summary` | shown in the proposal |
+| `summary` | shown in the proposal: the text of the summary per language, `{"es": "..."}`, or left out |
+
+The realm reads the list strictly: a JSON object that repeats a key is refused (a tool that kept the first value
+would show voters something other than what the realm installs, which keeps the last).
 
 Limits:
 
 - change list ≤ 64 KB;
 - each chapter ≤ 256 KB;
-- ≤ 50 chapters per change list.
+- ≤ 50 chapters per change list;
+- ≤ 4 mirrors per chapter: every URL the realm tries is an outcall it pays for.
 
 These all fit within one HTTPS outcall each (2 MB maximum). A canister-to-canister fetch from a sync
 source has no 2 MB limit; the 256 KB chapter limit stays.
@@ -975,7 +1186,7 @@ The realm needs, from outside its own state:
 | the realm's links | layer paths | the realm's own GGG state: its sync sources, each active after both votes |
 | published releases of each sync source, and of the layers it relays | checking layers from above; compliance | the sync source's published record (below) |
 | world facts (`capital`, `population`, ...) | `S.` in forbids, and chapters | the realm's own layer: settings (§4.3). No record is read |
-| the realm's time zone | showing the realm's official time in the UI; the realm's local day for the official journal's issues and for working-day counts | its own `Realm.timezone`, set by the realm, never taken from a layer; the realm's own zone file, stored as raw bytes and read by Realms GOS's pure-Python reader |
+| the time zones | showing the realm's official time (the capital's zone), with a quarter's local time beside it when they differ, in the UI; the local day for the official journal's issues (the capital's) and for working-day counts (the zone of the matter's clock, §4.5) | the canister's own `Realm.timezone`: the realm's, set by the realm; a quarter's, copied from its capital when it joins while still on `UTC`, then changed by the quarter or by a realm-wide vote. Never taken from a layer, another realm or a sync source. The tz data ships with the realm release, as hex text that `bytes.fromhex` decodes, and a canister reads only its own zone with Realms GOS's pure-Python reader |
 
 GGG and the registry hold no national codes (INE, BFS, ISO). A gateway that needs them reads a Realms
 GOS extension.
@@ -985,6 +1196,60 @@ GOS extension.
 becomes official only when the source publishes it by its own vote. A sync source's record also lists
 the releases of every layer it relays, as it installed them. The record is what followers check
 against; the official journal (§9.6) is where people read the same releases.
+
+**Reading a record** ([`core/records.py`](../../src/realm_backend/core/records.py)). A realm's record is read from
+its capital, 100 releases at a time. The reply also names `source`, the id of the realm's own layer (null while it
+has none), which tells a record that is a layer's publisher's from one that only relays it. A stand-in record is a
+JSON file at its URL, `{"source": "<its source id>", "releases": [...]}`, with the same releases (times in seconds,
+`chapters` a domain to its checksum), the layers it relays first and its own layer last, oldest first. A realm's
+link pins its content, so the file must be exactly the bytes whose checksum the link names. Either record is
+refused if it lists more than 1000 releases or more than 512 KB, if a release has other fields than
+`legislation_releases` gives, a checksum that is not `sha256:` and 64 hex digits, a domain GGG does not have,
+`calendar` among its chapters, or a time GGG's typed methods cannot encode (in seconds, from 0 to 18446744073), if it lists a relayed layer twice or a version of its own layer twice, its own
+layer before a relayed one, or more than 16 layers (a chain is at most 8 deep, §4.4). What was read is kept with the time (`SourceRecord`), for the compliance check (§11).
+
+**What the resolver takes.** The library function `realms.legislation.plan(realm, relays, own)` (the
+install task's step 5, `realms legislation resolve`) computes the layer paths from plain data. Each
+chosen sync source, one with an active link, is its record as the releases it runs, in layer order:
+
+```json
+{"source": "eu/es/vc",
+ "layers": [
+   {"source": "eu",       "version": "1.0.0", "chapters": {"data_protection": "sha256:<hex>"}, "calendar": null},
+   {"source": "eu/es",    "version": "2.4.0", "chapters": {"tax": "sha256:<hex>", "procedure": "sha256:<hex>"}, "calendar": "sha256:<hex>"},
+   {"source": "eu/es/vc", "version": "1.1.0", "chapters": {"local_regime": "sha256:<hex>"}, "calendar": "sha256:<hex>"}
+ ]}
+```
+
+- `layers` runs **top to bottom**: the layers the sync source relays, its own layer last. An entry is a
+  release as in `releases.json` (§3.2) with its `source` added. The order is the source's own layer
+  path; a source id does not place it (§3).
+- A layer is on a domain's path only if its entry has a chapter in that domain.
+- Taken together, the records must put every layer with a chapter or a calendar above or below every
+  other: one order, no ties. A record may order two layers through a third (`[a, b]` and `[b, c]` give
+  `a, b, c`), but records that contradict each other, or leave two layers with neither above the
+  other, are refused.
+- A relay's `source` is not the realm itself, and a record that lists its own layer lists it last.
+- The realm's own layer is passed beside them, without a version (§3.2):
+  `{"chapters": {domain: sha256}, "calendar": sha256}`.
+- Two sync sources that relay one layer must relay the same release, with the same version and
+  checksums. Otherwise `plan` refuses (§9.2 step 4).
+- `plan` returns the layer paths, the chapters to fetch (`source`, `domain`, `version`, `sha256`, in the
+  order they load), the calendars and the realm chapters it skipped (§3.2). `resolve` loads them into a
+  codex and gives the flattened view of §5.9 as plain data.
+
+A follower installs a layer from above as a release, one layer at a time (§7, §9.2). The install reads the
+records of its active sync sources only when it brings a release. **The layers the realm runs keep the order the
+active codex runs them in**, whatever a record says, each as the realm runs it (the release, checksums and voucher
+it was installed with); a record that has moved on to a newer release of one of them is no conflict, since the
+install does not touch it. The release's layer takes the place of its earlier release when the realm runs it
+already. A new layer goes right after the last layer the vouching record lists above it and right before the first it
+lists below it, and only there: a layer the realm runs that the record puts in neither relation would have no order
+against the new one, which §3.3 refuses, and so is a record that lists none of the layers the realm runs.
+Every active record must agree with the order that results: one that puts two of the layers the other way round than
+the realm runs them is refused, naming both. `plan` gets the result as one record, named by its last layer. So a
+record that relays several layers is installed in any order, a change to the realm's own layer needs no call to a sync
+source, and a layer whose link has ended stays where it is.
 
 A follower checks each layer from above against one record:
 
@@ -1001,6 +1266,42 @@ Layer paths are computed at install time and **stored in the codex**, with each 
 version, checksum, the record that vouched for it, the route and the fetch time. At run time the realm
 never needs the record, except to check compliance (§11).
 
+**How the realm keeps its links and its record** ([`api/links.py`](../../src/realm_backend/api/links.py)):
+
+- A link is a row on each side, made by that side's vote: `SyncSource` on the follower (a realm by its
+  capital, a stand-in record by its url), `Follower` on the source. Both are `requested` until the
+  other side's vote is in, then `active`; a stand-in record is `active` on the follower's vote alone.
+  Either side ends it (`ended`, with who and when), and an ended link is replaced by a new pair of votes.
+  The follower keeps the layers it installed.
+- The side whose vote changes a link tells the other side's capital with `link_notify` and reads the
+  answer, `active` meaning that their vote is in. A notice nobody answered (the call is rejected) is kept
+  as `unsent` and sent again every minute, also after an upgrade; a refusal is an answer. A vote still
+  `checking` when the realm starts has no walk left (none outlives an upgrade): it ends, by this realm, and
+  the other side is told, so that its key is not locked for good. Only the
+  capital at the other side of a link this realm has voted on may send `link_notify` and
+  `follower_report` (permission `link.sync`); a quarter links to no realm and makes no call to one.
+- A vote refuses a cycle: it reads the `sync_sources` of `realm_info` along the sources of the other
+  realm, at most 32 realms, and a realm it cannot read fails the vote with `Unavailable`. The link is
+  recorded before the walk, marked `checking` while the walk is out (the other side's notice is refused
+  then, as for a vote not cast), and undone if the walk refuses it. A realm that is already a follower
+  counts as taking legislation from this one. The walk runs when the vote applies, not when a proposal that
+  carries it is filed: filing makes no call to another realm.
+- Calls between realms are **not bounded-wait**, which the model asks for: basilisk 0.15 has no call with
+  a timeout, so a canister that never answers holds the vote's message open and blocks stopping the realm
+  for an upgrade. A rejected call (a stopped realm) is handled, and a vote should name only realms its
+  members trust.
+- A follower's report is kept on its `Follower` row as the follower's own claim, with its time. The
+  `follower_compliance` fact of a transfer to `Follower:<capital>` and of a quarter's report is the
+  compliance last reported, `Unknown` for any other recipient or a link that is not active.
+- The record is `Release` rows: the realm's own, published by `legislation_release_publish` (every
+  checksum already in `ChapterSource`, one source id, a version once, never edited), and the releases of
+  the layers it runs from above, which the install task keeps with `links.relay_release` as the record that
+  vouches for them lists them. `legislation_releases` answers the relayed ones top to bottom, then its own,
+  oldest first, and the id of the realm's own layer; `legislation_chapter` answers the text stored under a
+  checksum. A release is kept under `<source>@<version>`, so neither holds an `@`.
+- `Quarter.compliance` is stored and read like a follower's. The capital writes it from what a quarter reports it
+  runs, when a codex is switched across the quarters (§9.5); the scheduled checks (D7) write a follower's.
+
 ---
 
 ## 9. The realm canister
@@ -1010,17 +1311,38 @@ never needs the record, except to check compliance (§11).
 New entities, beside today's `Codex` ([`api/codex.py`](../../src/realm_backend/api/codex.py)):
 
 ```
-LayeredCodex { id = sha256 of its canonical JSON; layer_paths; chapters: {chapter id → {source, version, sha256, vouched_by, route, fetched_at, url, size}};
-           previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal }
+LayeredCodex { id; layers; layer_paths;
+           chapters: {chapter id → {source, version, sha256, vouched_by, published, route, fetched_at, url, size}};
+           previous (codex id); status: pending | active | inactive | reverted; activates_at; installed_at; proposal;
+           voting_rule (the realm's rule and voting window when it became active, §10.1) }
 ChapterSource { sha256 (key); source text }            the downloaded bytes, stored once
-InstallJob { id; proposal; change_list {url, checksum}; step; staged; error; started_at }
+InstallJob { id; proposal; change_list {url, checksum}; step; staged; status: running | paused | failed | done; error; started_at; finished_at }
 ```
+
+`published` is when its publisher published the release a layer from above came from (§11.6), kept with each of its
+chapters; the realm's own layer, and a layer installed before it was kept, have none.
 
 `pending` is a codex installed but not yet in force (GGG's `Pending` codex status, §13);
 `activates_at` is its switch time, the adopting proposal's `effective_at`.
 
-Canonical JSON means sorted keys, no spaces and UTF-8. The codex checksum is what `replaces` refers
-to.
+`layers` is every source with a chapter or a calendar, top to bottom (`plan`'s `layers`, §8), and
+`layer_paths` each domain's path (`plan`'s `paths`). Both are stored: the paths alone do not place a
+layer that has only a calendar, or two layers that share no domain, and `resolve` needs the one order
+(§3.3) to load the codex again after an upgrade.
+
+**The id** is `sha256:` and the hex sha256 of the canonical JSON of
+`{"layers": ..., "layer_paths": ..., "chapters": {chapter id → sha256}}`. Canonical JSON means sorted
+keys, no spaces and UTF-8. The id names the legislation and nothing else: a chapter's version, who
+vouched for it, the route, the fetch time and the URL, and `previous`, `status`, `activates_at`,
+`installed_at` and `proposal`, are this realm's own history and stay out of it. So a capital and each of
+its quarters, which fetch the texts themselves, at their own time and by their own route (§9.5), have
+the same id; it does not change when the codex goes from `pending` to `active`; and it is what `replaces`
+refers to and what calls between quarters carry.
+
+A `ChapterSource` is keyed by `sha256:` and the hex sha256 of its text's UTF-8 bytes, the form the
+records of §8 use for a chapter. A text above 256 KB, or one whose checksum is not its key, is refused.
+`previous` is a codex id of either kind (`name@version` for a legacy codex, `sha256:…` for a layered
+one), so the history of §10.5 runs through both.
 
 **The legacy path stays:** `codex_install` with `manifest` and `source`, or with `codex` and `version`
 from the file registry, keeps working for agora, dominion and syntropia. A change-list URL selects the
@@ -1031,36 +1353,62 @@ new path. A realm runs either a legacy codex or a layered codex, never both.
 `codex_install` with a change-list URL starts an `InstallJob` and returns. A timer then runs one step
 per message:
 
-1. **Fetch the change list** by HTTPS outcall (`basilisk.io.wget`), from the first URL whose sha256
-   matches the proposal's checksum.
-2. **Check the change list:** `realm`, `replaces`, chapter ids, the release rule, and limits.
-3. **Fetch each chapter,** one or a few per message, by the route available: a canister call to the
-   sync source's capital, or an HTTPS outcall to a URL. Check size and sha256, then store it in
-   `ChapterSource`. The realm skips the download if `ChapterSource` already has that sha256.
+1. **Fetch the change list** by HTTPS outcall (at most 64 KB, https only), from the first URL whose sha256
+   matches the proposal's checksum. The realm exports the `http_transform` query the outcall names, which
+   drops the reply's headers so that every node sees the same reply.
+2. **Check the change list:** `realm`, `replaces`, chapter ids, the release rule, and limits. `realm` is the
+   realm's own source id: the first layered install sets it from the change list (the vote approved it), every
+   later one must name the same, and an id that is a layer of one of its sync sources is refused. `replaces`
+   is the active codex's id as `codex_status` shows it (a layered codex's checksum, a legacy codex's
+   `name@version`), or null when none is active. A chapter from a layer above comes only as a release of
+   that layer, whole.
+3. **Read the records, then fetch each chapter.** For a release install the first message reads the
+   records of the active sync sources (§8) and checks the change list against them at once, so that a
+   release no record vouches for fails before anything is fetched. Then each chapter, one or a few per
+   message, by the route available: a canister call to the capital of the sync source that vouches for
+   the layer (`legislation_chapter`), then the change list's URLs and mirrors, each an HTTPS outcall;
+   the first route whose bytes match the size and sha256 wins. Store it in `ChapterSource`. The realm
+   skips the download if `ChapterSource` already has that sha256. A capital that serves other bytes than
+   its record names is noted in the audit log (`install_chapter_refused`: the capital, the chapter, the
+   checksum asked for) before the URLs are tried, so that a realm can see it. The codex row keeps the
+   route, `capital` or `https`.
 4. **Check sources:**
    - each layer from above must match the record that vouches for it: its publisher's, when the realm
-     syncs from the publisher directly, otherwise the relaying sync source's, whichever route the bytes
-     came by; a copy that does not match is refused;
+     syncs from the publisher directly, otherwise the relaying sync source's (the first of them, in the
+     order of the links), whichever route the bytes came by; a copy that does not match is refused. A
+     layer the realm already runs keeps the voucher it was installed with, and the order it runs in: a
+     record that lists the layers in another order is refused (§8);
    - a release install must match one release exactly and be whole;
    - if two sync sources relay different releases of the same layer, the follower's own legislation
      decides which one it installs. **If its legislation does not choose, the install is refused and
      the old codex keeps running.**
 5. **Build:**
-   - compute the new layer paths from the paths the sync sources relay, then the realm's own layer;
+   - compute the new layer paths from the layers the realm runs from above, in the order it runs them,
+     with the release's layer placed by the record that vouches for it, then the realm's own layer
+     (`plan`, shape in §8);
    - refuse paths that do not form one chain (§3.3);
-   - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`;
+   - load every chapter of the new codex into a fresh sandbox, top to bottom, binding `above()`
+     (`resolve`), and refuse `uses` cycles and chains deeper than 8 (§4.4);
    - run the in-canister checks (§12.2), including every setting's `check=`;
    - generate the Cedar, folding the `S.` settings;
    - parse and validate it against the schema in strict mode (the canister's Cedar engine has the
      validator).
 6. **Switch:** the switch time is the adopting proposal's `effective_at`; without one, the switch
    happens on acceptance. Until then the new codex is `pending`, with steps 1 to 5 done ahead of the
-   time, as a quarter stages ahead of T (§9.5). At the switch, in one message, set the new codex
+   time, as a quarter stages ahead of T (§9.5): acceptance starts the job, which runs steps 1 to 5 and
+   leaves the codex `pending` with `activates_at` = `effective_at`; the proposal's scheduled execution
+   at that time is the switch. If the job is not done by then, the switch fails, the proposal ends
+   `failed` and the old codex keeps running (proposers leave a margin, rule 26). A proposal stopped with
+   `proposal_stop` discards its pending codex and its staging. Without `effective_at` the job runs on
+   acceptance and switches as soon as step 5 is done. At the switch, in one message, set the new codex
    active and keep the previous one; the realm loads the parsed policy set and the realm domain's
-   `on_codex_activate` hook runs once per realm, not in each quarter and not on a revert.
+   `on_codex_activate` hook runs once per realm, not in each quarter and not on a revert. The hook runs in
+   the message after the switch, so a hook that fails, or traps after a call it made, never fails the
+   switch, the proposal's execution or the install step that made it.
    **Legislation applies when the proposal passes and its changes are executed,** which is at that
    time. No chapter calls `codex_activate`, and no publication, in the official journal (§9.6) or in an
-   outside gazette, plays a role in when the legislation applies.
+   outside gazette, plays a role in when the legislation applies. A release install also puts the release in
+   the realm's own record, where the record that vouches for it lists it (§8).
 
 The job's other rules:
 
@@ -1068,62 +1416,263 @@ The job's other rules:
   unchanged. Executing the same proposal again is safe.
 - **Safe to run twice:** every step can run again after a canister upgrade. Staging is keyed by
   checksum, and the switch checks the active codex first. A job caught mid-way by an upgrade stays
-  paused until an admin of the realm resumes it by hand; the step it stopped in then runs again.
+  paused until an admin of the realm resumes it by hand with `codex_install_resume { job }` (permission
+  `codex.install`, not governed: it only re-runs the step the job stopped in and cannot change what the
+  vote approved); the step it stopped in then runs again.
 - **One job at a time:** a second install while one runs is refused with `Conflict("an install is
-  running")`.
+  running")`, the legacy path included. A staged install holds that place until its switch time; stopping its
+  proposal frees it. A revert is not an install and stays allowed.
 - **Timeout:** a job not finished within 24 hours fails.
 - **Status:** `ggg_codex_status` shows the job, its step and its error.
 
 ### 9.3 The runtime
 
-- **Loading:** after every canister upgrade, or on first use, the realm loads the active codex's
-  chapters from `ChapterSource` into the sandbox and parses the Cedar once. That matches today's
-  lazy-load pattern in [`core/auth.py`](../../src/realm_backend/core/auth.py).
-- **Methods:** around a GGG operation `op`, the realm runs the guards `check_<op>` before it, the
-  `compute_<op>` methods during it when GGG asks, and the hooks `on_<op>` after it. Each is answered by
-  the resolved class of its domain, applying the marks (§4.1).
-- **Failures:**
-  - a hook that raises never fails the caller; it marks the codex unhealthy, as today;
-  - a guard that raises **denies** (fail closed), with "legislation error in <chapter>";
-  - calls between domains stop at depth 8.
-- **Making "unhealthy" visible.** Today it is only the `healthy` flag of `ggg_codex_status`, with no
-  UI and no notice. Add:
-  - **a notification** to the IT admin team (§10) on the first failure, and again after 24 hours if it
-    still fails;
-  - **a per-chapter, per-method failure count** and the last error in `ggg_codex_status` and on the
-    public record;
-  - **on the codex page,** the failing chapters and methods, and for IT team members a "revert"
-    button that starts `codex.revert_fast`.
+Built: `core/legislation.py` (the realm's side) and `core/legislation_sandbox.py` (the program that runs inside
+the codex subinterpreter), on the library of §12 ([#488](https://github.com/smart-social-contracts/realms-gos/issues/488)).
 
-  No banner for members. The flag clears when that method next succeeds. There is no automatic
-  revert.
+- **Loading:** after every canister upgrade (`post_upgrade`, where the realm starts), or on first use, the realm
+  loads the active codex's chapters from `ChapterSource` into **one codex subinterpreter kept across calls**
+  (`core/sandbox.py`'s `Resident`), never into its own interpreter: the subinterpreter imports the library from
+  the sources the realm bundles, builds the `Codex`, loads the chapters top to bottom and runs the checks of
+  §12.2, then answers each call. A query cannot keep what it loads, so the load happens where the realm starts.
+  Cedar is parsed once per activation (§9.4). That matches today's lazy-load pattern in
+  [`core/auth.py`](../../src/realm_backend/core/auth.py).
+- **Methods:** around a GGG operation `op`, the realm runs the guards `check_<op>` before it, the
+  `compute_<op>` methods during it when GGG asks, and the hooks `on_<op>` after it succeeds. Each is answered by
+  the resolved class of its domain, applying the marks (§4.1). Every domain whose chapter defines the guard or
+  the hook runs, by domain name (the design orders domains no other way); a `compute_` is answered by one
+  domain, and two domains defining it is an error. Guards get the operation's arguments as `args` (attribute
+  access, `args.basis.legal_basis`; an argument the call did not give reads None); a guard returns None or
+  `self.deny(reason)` and queues no effect. Hooks get GGG's `Event`, one per domain, shared down the layers of
+  that domain. Read operations run no legislation, and nor do the effects a chapter queues (origin `codex`):
+  a hook's effect never runs another guard or hook, so chapters cannot cascade. A governed call that becomes a
+  proposal is a `proposal_create` to the legislation: its guards and hooks run on the filing. What a chapter
+  reads of GGG's entities is an allowlist of entities and fields (`VIEWS` in `core/legislation.py`): what
+  legislation needs to decide, never a key, a code, a person's private data, a sealed bid, who voted what, a
+  grant, a payment account or what one member was told. So a notification shows its recipient, topic, sender and
+  time and not its title; a request shows when it was filed, is due and was decided, and not its body, reply or
+  decision (free text); a dispatch shows its recipient, topic and status and not its body; a procedure and a loan
+  show no `facts`; a document shows its title only when it is public, and a dispatch only when it carries a
+  document (only the publication of a document does); and a chapter sees the zones the realm defined and never a member's home cell, which is as
+  private as `Human.h3_index` (a chapter reads a member's district as `User.home_zone`, the id of a zone the realm
+  defined). The arguments and results it gets carry no key material or credential (`secret=` on the operation: a
+  code, keys, private data, a request's body and reply, the home cell `zone_set` and `zone_clear` take), and neither
+  do the replies of its effects or the call a proposal carries and the result of running it, nor any call that an
+  operation carries into a guard or a hook (the steps of a task, what `call_for` forwards, a pending action's card),
+  while the personal data the audit log keeps out (`private=`) still reaches the legislation that decides on it
+  (I-PRV-1); and no read is answered while the codex loads.
+- **Failures:**
+  - a hook that raises never fails the caller; it marks the codex unhealthy, as today, and the other domains'
+    hooks still run;
+  - an effect that fails never fails the caller either, even when it fails as a message does, by a trap (an
+    operation that raises what it does not expect: a number where a recipient is text). Each domain's effects run
+    in a message of their own, which the realm calls on itself (`hook_effects`, an update that refuses every other
+    caller) and awaits: a trap ends only that message and comes back as a rejected call, which is the chapter's
+    failure, recorded on the codex ("the effects were rejected: …"); the operation, and a codex switch it belongs
+    to, stand. This holds wherever the operation can wait for another canister: the `run` update (the frontend,
+    an extension's `ctx.run`, a delegate), a proposal's execution, a task and the hooks of a codex switch. What
+    that means for the operation and the effects:
+    - the operation's own writes are committed before its effects run (a call to another canister ends the
+      message), and the effects finish before the reply;
+    - other calls can run between one domain's effects and the next's, and a codex switch among them ends the
+      pass: the domains left, and a failure of the domain waiting, belong to the codex it replaced and are
+      neither run nor recorded on the new one;
+    - a trap in a domain's message undoes all of that domain's effects, those that had succeeded too; an effect
+      that fails without trapping (it answers `ok: false`) stops that domain at that effect and keeps the ones
+      before it. The other domains' effects stand either way;
+    - each call that has not answered holds about 42 billion cycles of the realm's balance (measured on PocketIC);
+      a realm too low to hold them has the call refused, which reads as the same failure, "the effects were
+      rejected";
+    - a failure is recorded against the last file of the domain (the highest layer's, the town's own), even when
+      the chapter that queued the effect is another source's.
+
+    **Known limit:** an operation that another operation runs through `core.op.call` cannot wait for another
+    canister (`op.run` drives it, as it does a query), so its hooks' effects run in the message that is running, and
+    an effect that traps still takes that message with it. Whoever calls: the controller's `__shell__`; the
+    `shell.execute` operation (an admin's, through `run` or as a task's step) for the operations it runs; and the
+    `extension.call` operation for the operations an extension's own backend calls, which any member who may use the
+    extension reaches through `run`. The hooks of `shell.execute` and `extension.call` themselves run after the
+    operation, outside that call, and are isolated. Collecting the effects the nested operations queue and applying
+    them through the realm's own message once `sandbox.execute` returns would close this (the follow-up to
+    [#679](https://github.com/smart-social-contracts/realms-gos/issues/679));
+  - a guard that raises **denies** (fail closed), with "legislation error in <chapter>: <error>"; so does a
+    codex that does not load, for every operation its legislation could guard, until a revert;
+  - calls between domains stop at depth 8; the install refuses a `uses` chain that could reach it;
+  - a chapter that exhausts the sandbox's instruction budget fails that call; the realm closes the spent
+    interpreter, loads the codex again and asks once more, so the calls before it never cost a later one its
+    answer. The reads of one call are metered on the realm's side too: past 2 B instructions they are refused
+    and the call fails, so a chapter that loops on reads costs the caller that much and never the whole message.
+    The hooks of an operation run one domain per call, so a domain that loops costs no other domain its
+    effects;
+  - a failure on a query path (`compute_realm_join`, asked by `join_targets`) is not kept: a query keeps no
+    writes.
+- **Making "unhealthy" visible.** `LayeredCodex.failures` holds, per chapter file and method, the failure
+  count, the last error and when; `ggg_codex_status` shows it as `failures`, and `healthy` is false while it is
+  not empty. The flag clears when that method next succeeds. There is no automatic revert.
+  - **The IT admin team (§10) is notified** (topic `codex.failing`, to the team's department) on the first
+    failure of a method, and again when it fails once more at least 24 hours after the last notice: the
+    entry's `notified` is the time of that notice. A realm with no team designated notifies no one, and the
+    next failure notifies the team once there is one.
+  - **On the codex page** (the `codex_viewer` extension, [#493](https://github.com/smart-social-contracts/realms-gos/issues/493)):
+    the failing chapters and methods, and for IT team members a "revert" button that starts `codex.revert_fast`.
+    The team's notification links to that page.
+
+  No banner for members.
+- **Across domains:** what crosses a domain boundary is plain data, frozen on the way (a list is a tuple, a
+  dict read-only), or the called chapter seen through its public view (its public members only, never the `self`
+  API): a method that returns `self` hands back the view, a bound method or a view of other domains is refused
+  ([#543](https://github.com/smart-social-contracts/realms-gos/issues/543),
+  [#621](https://github.com/smart-social-contracts/realms-gos/issues/621)).
+- **Effects** go through the codex caller as a legacy codex's do: origin `codex`, the realm as signer, Cedar's
+  guardrails. A layered codex declares no capability list: the GGG page (§1, "Effects are operations") has a
+  hook queue GGG operations "which the GOS runs as the realm, under the same permissions as any caller", and
+  rule 9 of §2 and the `self` API of §4.5 put no catalogue between a chapter and GGG, so the operation an effect
+  names is the one declared for it. Plainly: **a chapter can do, as the realm, anything the realm itself may do
+  directly** through a GGG operation, and nothing that takes a permission it does not hold: a layered codex holds
+  none, so an effect hands out no permission (I-ID-3) and no invite to a profile that carries one (a legacy
+  codex's effects keep acting for the realm as before, marked as such by the legacy hook path alone). **A governed
+  operation it queues is never run, whatever the department's policy: it becomes a proposal the realm files**,
+  decided by the vote that operation needs. Effects apply in order and stop at the first that fails, and
+  whatever one fails with is the chapter's failure, never the caller's; the operation's own audit event precedes
+  theirs. Refused before they run and counted against the chapter: an effect that names a reserved operation
+  (§10.4), one about a proposal or a federal vote whose action is reserved (a stop, a withdrawal, a vote, a
+  quarter's report of its leg), and one that carries a `timezone` (§4.5). The security review of #512 and #544
+  decides whether chapters get capabilities of their own, and reviews the allowlist of what they read.
 - **Facts:** the facts of a forbid are the operation's args, as GGG supplies them. The settings it
   reads with `S.` were folded in at build.
+- **Costs**, measured on PocketIC (basilisk 0.15.1, the realm's production wasm, 8 November 2026):
+
+  | What | Instructions |
+  |---|---|
+  | load: spawn the subinterpreter with the program and the library's sources | 379 M |
+  | load: import the library from text inside it | 556 M |
+  | load: 9 chapters loaded (the readable-subset check, the marks) and the checks of §12.2 | 64 M |
+  | one `activate`: the `on_codex_activate` hook and its one effect, a notification | 50 M |
+  | one guard call, 3 domains (the round trip, before the realm acts on the answer) | 2.5 M |
+  | the hooks of one operation, 2 domains, one call each, 2 effects queued (before the realm applies them) | 7.2 M |
+  | one `build` of the example: 7 chapters, a calendar, the flattened views | 1,045 M |
+
+  A load, about 1 B in all, is paid once per activation and once per upgrade (in `post_upgrade`, where the
+  realm starts), never in a query; the library's import from text is most of it. A codex that holds forbids adds
+  about 0.5 B: the Cedar generated in the sandbox and parsed by the realm's engine (§9.4). A guard or a hook costs
+  about as much as a small database read.
 
 ### 9.4 Cedar changes
 
-In [`core/auth.py`](../../src/realm_backend/core/auth.py) (see [Authorization](../architecture/authorization.md)):
+In [`core/auth.py`](../../src/realm_backend/core/auth.py) and [`core/forbids.py`](../../src/realm_backend/core/forbids.py)
+(see [Authorization](../architecture/authorization.md)):
 
 1. **One Cedar action per GGG operation,** named as the operation, e.g.
    `Realm::Action::"tax_policy_propose"`, each `in [Realm::Action::"call"]`. Each action's Cedar
-   context includes `facts`, typed from the operation's args. For a forbid with `each`, one request is
-   made per element.
+   context includes `facts`, typed from the operation's args. A forbid with `each` names the action
+   `<operation>.<list>`, e.g. `tax_policy_propose.taxes`, and also `tax_policy_draft.taxes`, since the
+   same forbids run at draft. Like the others, those actions are `in [Realm::Action::"call"]`; their
+   `facts` are the element's type, and one request is made per element. A forbid without `each` names
+   the operation, whose `facts` are its args (§6).
+   - **The fact schema** is GGG's `facts.json`, which the realm bundles as
+     [`ggg_facts.py`](../../src/realm_backend/ggg_facts.py), generated by `scripts/ggg_candid.py` (CI checks it is
+     current). It keeps the facts Cedar can compare: text (a principal, a variant's tag, with the words GGG allows
+     as `values`, which the realm does not use and `realms legislation diff` assumes, §12.3), whole numbers with
+     their ranges, Booleans, Periods, sets of text, and records, which a forbid can only test for (`F.basis.is_none()`,
+     §5.4). A `Value`, a blob or a list of records is not a fact, so a rule on one is a guard. What an operation
+     keeps from the legislation (`secret=`: an invite code, a request's reply, keys) is no fact either, and no list of
+     it is one: a forbid that names it is refused when the codex is built.
+   - **The schema the realm loads declares `call` and the actions its forbids name,** not the 254 of every operation:
+     that schema is 101 KB, which costs 5.4 B instructions for the engine to parse, against 94 M for the one that is
+     loaded (measured below). `realms legislation check` (§12.1) will import the same fact schema and validate against
+     all of them.
 2. **Today's `POLICIES`** use `action == Realm::Action::"call"`; they become
    `action in Realm::Action::"call"`. `GUARDRAILS` (`principal, action, resource`) are unchanged.
    `context.op` stays for compatibility.
 3. **Load order:** `GUARDRAILS + POLICIES + generated forbids of every chapter`, parsed once per codex
-   activation. The generated rules name their operation in the head, so a decision only evaluates
-   rules for that operation.
+   activation. The generated rules name their action in the head (the operation, or
+   `<operation>.<list>`), so a decision only evaluates rules for that action.
+   - The Cedar is generated in the codex sandbox, which hands over the policy text and nothing else. The realm builds
+     the schema and the fact types itself, from its own copy of GGG's fact schema (`ggg_facts`, less what operations
+     keep secret) and the context of `core.auth`, for the actions the policies name, with the library's schema writer;
+     a sandbox that said otherwise would change nothing. The realm's engine then parses and validates the policies
+     strictly against that schema (`core.auth.use_forbids`), and every decision after that evaluates what it holds,
+     with no parse. `load` does it at the switch, so a codex
+     whose Cedar does not validate raises before the switch; `warm` does it at the realm's start, and the same
+     forbids again (a reload after the sandbox spent its budget) are not parsed again. Step 5 of the install (`build`)
+     validates the same Cedar and puts the running policies back, so an install that would not validate fails there.
+     A codex that forbids nothing leaves the realm's own policies in force, and a legacy codex or none loads what it
+     loads today.
+   - **The realm loads forbids from the sandbox and nothing else.** It accepts the text only as the grammar the
+     generator writes (`core.forbids.only_forbids` and `targets`), and no more: outside strings only words, spaces,
+     line breaks and Cedar's punctuation, so no comment of either kind (a `//` comment ends at `\r` as at `\n`, and a
+     scan that missed that let a `permit` through), no non-ASCII; inside strings no control character; no `permit`
+     word; each policy a forbid whose scope is exactly what the generator writes for the actions it names, with the
+     principal and the resource unconstrained, so no forbid of one person, and a condition that never uses either
+     word (the generator cannot write them); and the operation of each action one of the
+     realm's own (`ops()`), never `call` (a forbid of which would refuse every permission decision) and never a
+     reserved one, whatever the sandbox says. A smuggled `permit` fails the switch, the realm's start and install
+     step 5. The engine's API does not yet list the effect and scope of a policy; when it does, the engine will check
+     the same (realms-gos#611, smart-social-contracts/basilisk#64).
+   - **No generated forbid may target a reserved operation (§10.4).** The library refuses it when the chapter loads;
+     the realm checks the policies it is about to load as well (`core.forbids.targets`), and refuses a policy that
+     names an action without facts or no action at all (that would forbid every operation). And no forbid is asked of
+     a reserved operation, nor of the `proposal_create`, the vote or the execution of a proposal about one.
+   - **A codex that does not load still refuses.** Its forbids cannot be read then, but each successful load keeps the
+     operations they name on the codex row (`LayeredCodex.forbids`). Until the codex is reverted, a call of one of
+     them is refused, a read as well as a write: what the forbids would have judged is not let through unjudged. The
+     operations no forbid names are read as before, and a revert is a reserved operation.
+4. **The requests of a call.** The permission decision is what it was: one request on `call`, before anything else. A
+   call whose operation a generated forbid names then makes, under the context `origin: "forbids"` (nothing in it but
+   the operation and its facts; one `permit` for that origin is loaded with the forbids, so that only a forbid can
+   refuse it, and never for `call` itself, the permission decision): one request on the operation's own action, if a forbid names it, with its args in GGG's form
+   (`ggg_api.ggg_args`: renamed arguments, nanoseconds, variants), the principal the call acts for (`on_behalf_of`,
+   when the call names someone other than its signer, so that a rule can refuse a delegate's vote) and the facts the
+   operation derives (`derived=` on
+   `@op`), and one request per element for each list a forbid ranges over: the element of the argument, or, where the
+   list is not an argument, what `lists=` on `@op` gives (`tax_policy_propose`: the saved policy's entries). A list of
+   more than 500 elements is refused with `invalid_argument` where it is given, at draft and at propose, so that no
+   replay is asked for more. Any refusal is a `Denied` that names the list and the position of the element, and the
+   forbids that fired: `taxes[1]: refused by eu/es/tax/ibi_urban_cap (TRLRHL Art. 72.3)`. The engine says only allow
+   or deny, so the names are found after the refusal, by asking the sandbox, whose bound forbids evaluate the same
+   facts in plain Python as Cedar does (§6, rule 7); an allowed call never pays for it, and a sandbox that cannot
+   answer, or answers anything but a short list of ids and citations, leaves the plain reason. An operation no forbid
+   names is decided once, on `call`, as before.
+5. **A proposal is asked when it is filed.** A governed call that becomes a proposal is asked as `proposal_create`
+   before it is filed, as well as under its own operation; `proposal_create` and `federal_vote_propose` ask the
+   forbids of the action they carry. A proposal that could only fail is never put to the vote, and the records its
+   action would fix (a budget's draft lines) stay as they were. A call a delegate prepares for the member's approval
+   (a pending action) is asked when it is prepared, and so is the action a prepared `proposal_create` or
+   `federal_vote_propose` carries, so a forbidden action is never prepared; it is asked again when the member approves
+   it. Both name the member as `on_behalf_of`.
+6. **The replay of an accepted proposal** meets the same forbids, with no permit or guardrail in the way: the vote
+   was the permission, but the forbids of the legislation in force when it executes still hold. The facts it
+   derives are computed for that proposal (`derived(args, proposal)`: a budget's totals are those of the lines
+   the proposal fixed). A replay a forbid refuses ends the proposal `failed` with the forbid's reason, and
+   `proposals.end` releases what it fixed. An operation no forbid names asks Cedar nothing at replay.
 
-Costs, by the Cedar engine's own notes
-([`cedar_api.rs`](https://github.com/smart-social-contracts/basilisk/blob/main/basilisk/compiler/cpython_canister_template/src/cedar_api.rs)
-in basilisk):
+Costs, measured on PocketIC (basilisk 0.15.1, the realm's production wasm, 9 November 2026), with the forbids of §5.6
+(three policies on two actions, 1.2 KB of Cedar and 1.3 KB of schema); the design had estimated parsing at about 20 M
+instructions and a decision at about 0.7 M:
 
-- parsing is about 20 M instructions, once per activation;
-- a decision is about 0.7 M instructions, about 0.3 M cycles.
+| What | Instructions |
+|---|---|
+| engine: parse and validate the realm's policies, the schema and the forbids, once per activation | 94 M |
+| the same with the schema of every operation (101 KB), which the realm does not load | 5,435 M |
+| the sandbox generates the Cedar and hands over the policy text: mostly reading GGG's fact schema (compile and its actions, about 175 M) and importing the generator (about 230 M) | 437 M |
+| the realm builds the schema and the fact types of the actions the forbids name, in its own interpreter | 2.5 M |
+| the same the first time since the realm last started or was upgraded: it compiles the library's Cedar module (497 M) and reads GGG's fact schema (194 M) and the schema writer's other modules (239 M) | 930 M, once |
+| the same for a codex that holds no forbid | 1 M |
+| `cedar()` in the sandbox, of its 10 M bytecode budget per spawn (shared with every guard and hook after it): the example above / the whole València corpus (14 chapters, 6 forbids) | 0.27 M / 0.85 M |
+| a permission decision, one request on `call`: no layered codex / forbids in force | 3.5 M / 3.8 M |
+| the forbids of one call: one request on the operation's action, or per list element | 4.1 M each |
+| the forbids of a draft of 1 / 2 / 5 / 20 entries | 4.4 / 8.4 / 20.5 / 81.2 M |
+| the forbids of a proposal of a saved policy of 2 entries (it reads the policy too) | 9.7 M |
+| the forbids of a realm with no layered codex | 9 k |
+| naming the forbids behind a refusal (one call to the sandbox), only when a request is refused | 0.9 M |
+| install step 5 (`build`) of a codex with these forbids, in all: the first in a heap / after that (its 930 M is once) | 2,669 M / about 1,740 M |
+| a codex with these forbids, loaded and activated: the sandbox 1,116 M, the Cedar and the realm's schema 442 M, the engine 95 M, in all (the sandbox of a codex without forbids: 1,103 M). The first load since the realm last started or was upgraded also pays the 930 M above: about 2.6 B | 1,658 M |
 
-Building the `F` trees and Cedar text is an estimated 10–30 M instructions, once. All of it is
-negligible next to an update call's base fee of about 5 M cycles.
+The engine does not parse again: the forbids of a draft of 5 entries cost 20.5 M each time, against 94 M for one
+parse. A request costs about 4 M, not 0.7 M: that is the whole crossing into the engine, with the request and its
+entities validated against the schema. The cost of a call's forbids grows with the elements it carries (4.1 M each),
+so the most a call can ask, 500 elements, is about 2 B; an update call has 40 B. All of it is small next to an update
+call's base fee of about 5 M cycles.
 
 ### 9.5 Updating a realm's own quarters
 
@@ -1147,6 +1696,64 @@ codex, and a new codex reaches them in four steps:
 The switch cannot be atomic across canisters. During it, calls between quarters carry the sender's
 codex checksum, so a receiver can tell which legislation the sender ran.
 
+**How the realm does it** ([`api/propagation.py`](../../src/realm_backend/api/propagation.py)):
+
+- **Announcing.** When the capital's install job has staged the codex (step 5), it tells each active
+  quarter, in a message of its own per quarter, `codex.stage`: the codex's checksum, the change list's
+  checksum, T (the proposal's `effective_at`, or the moment the job started when there is none) and the layers
+  from above it staged from its sync sources' records (step 3). A quarter
+  it cannot reach is recorded in the `FederationMessage` of the call and holds up no other. A staged codex the
+  capital drops (its proposal is stopped, its job fails) is withdrawn the same way, `codex.unstage`; the same
+  codex announced for another time replaces the staging. These messages are the realm's own: `federation_message`
+  does not relay them for a member, whatever they hold, and no chapter, hook or forbid runs on them (they are reserved like
+  the revert they carry: a codex cannot refuse its own revert). The job a quarter runs names no proposal, so the
+  capital's proposal id is never one of the quarter's, and a job that ends without the switch cancels its task.
+- **Staging in a quarter.** A quarter runs the same install job, in staging mode: the change list and every chapter
+  it lacks are read from the capital by checksum (`legislation_chapter`; the capital keeps the change list's
+  bytes in `ChapterSource` like a chapter's), and nothing changes while it stages. A quarter has no sync source:
+  it reads no record and takes the layers from above that its capital announced, its authority for them (so a
+  capital is upgraded before its quarters); the codex it builds must still be the one announced. One install at a
+  time still holds: a quarter refuses the announcement while an install of its own runs, and a newer announcement
+  replaces a staging in progress. An upgrade pauses the job like any other, and `codex_install_resume` resumes it.
+- **The switch.** The quarter schedules `codex_switch_staged` at T as a task of the realm's own, which
+  `tasks.rearm()` arms again after an upgrade. At T, once the capital confirms, a staged quarter switches: it
+  asks its capital which codex it requires (the answer of `quarter_sync`: the one in force, or the pending one once
+  its time has come) and switches, with no `on_codex_activate`, only if that is the one it staged, so the switch
+  is T plus one round trip. It then reports to its capital. A codex the capital has left (withdrawn, reverted, or
+  replaced by a newer one) is never activated, even by a quarter that missed the message and keeps its codex: its
+  job fails and says so. A capital that does not answer leaves the quarter on its codex and the job paused, for an
+  admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile. The 24 hours of the job
+  cover its work, not the wait for T, however far away T is.
+- **A quarter ready after T** goes through the same confirmation before it switches.
+- **Upgrading.** Upgrade a federation's capital before its quarters: a quarter confirms its switch against the
+  codex the capital's `quarter_sync` names, and an older capital names its active codex only.
+- **A revert.** When the capital restores an earlier codex (`codex_revert`, `codex_revert_fast`), it tells each
+  active quarter `codex.revert`, and each restores that codex from its own history at once: nothing is downloaded
+  and no `on_codex_activate` runs. The quarter reports what it runs; a quarter that never ran that codex refuses,
+  and the capital's record of the message says so. A quarter that missed the message and next reports a codex the
+  realm voted out is told again, so a quarter that was down catches up at its next report, and a bad codex does not
+  keep running in the quarters once the realm has voted it out.
+- **Compliance.** The capital sets `Quarter.compliance` when a quarter reports the codex it runs (`quarter_sync`,
+  `quarter_report`, a leg): compliant when it is the codex in force, or the pending one once its time has come;
+  otherwise non-compliant since that codex took effect (the switch, or the revert that restored it), naming
+  the layers that differ. A minute after the capital's codex changes it judges the quarters that reported
+  before and have not said they changed, so that one that was not ready reads non-compliant since T without
+  waiting for its next report. `quarter_directory` shows the flag, and a quarter's own row the flag its capital gave
+  it at its last sync.
+- **What calls carry and what is recorded.** A call to a canister of the federation carries the checksum of the
+  codex its sender runs. The receiver keeps it, with the sender's flag, on the `FederationMessage` (a move is
+  the `user.arrive` message), on the `FederalVoteLeg`, and the origin quarter on the `Forward`. Legislation
+  decides on them as the call arrives: a guard on `federation_message` reads its `codex` argument, and a chapter
+  reads the quarters' `codex_id` and `compliance` and the legs' `codex` and `compliance` (`VIEWS` in
+  `core/legislation.py`). The message and move records themselves stay outside that view: they say who moved and
+  what was said.
+
+**Quarters in different time zones.** T is an exact UTC instant, so every quarter switches at the same
+moment, whatever its zone (§4.5). The vote's deadline, and any working days counted up to T, belong to
+a realm-wide vote and are counted on the capital's clock. The UI shows T in the realm's official time,
+with the quarter's local time beside it when they differ. A quarter that changes its zone, or has it
+changed, moves no T.
+
 ### 9.6 The official journal (extension `journal`)
 
 Every realm has one official journal, a new core extension `journal`, installed by default like the
@@ -1155,17 +1762,48 @@ other core extensions of [`core-extensions.json`](../../core-extensions.json)
 
 - **One official journal per realm.** It is a report of the latest news and changes, nothing else.
   Its entries include every release of the realm's sync sources, as the scheduled check finds them
-  (§11.2), and the realm's own releases when it is a sync source itself.
-- **One issue every day,** even on a day with no entries. The day is the realm's local day, computed
-  in Realms GOS from the realm's own zone file (§4.5).
-- **The canister serves the JSON, which is the authority.** The PDF is a browser print route with the
-  realm's logo; it is never checksummed.
+  (§11.2), and the realm's own releases when it is a sync source itself. A federation has one journal,
+  the capital's. The journal on a quarter issues nothing and shows the capital's.
+- **One issue every day,** even on a day with no entries. The day is the realm's local day on the
+  capital's clock (the realm's official time), computed in Realms GOS from the capital's own zone
+  (§4.5). A quarter's zone plays no part in it.
+- **The canister serves the JSON, which is the authority, and signs it when asked.** A day that has closed is made
+  into a document of the realm's canister, linked by digest to the day before it, and anyone may ask the realm to
+  sign it (`journal_sign`): the signature is made once, kept, and anyone can verify it, and it also covers every
+  earlier day through the chain ([the signed official journal](journal-signature.md)). A realm can be set to sign each
+  day as it closes (`journal_signing`: `on_request`, the default, or `daily`). The PDF is a browser print route with the
+  realm's logo; the verification code printed on a signed issue finds it.
 - **Personal-data rules live in the extension's config,** not in a chapter.
 - **The official journal plays no role in when legislation applies.** Legislation applies when the
   proposal passes and its changes are executed (§9.2 step 6). No publication gates, in the official
   journal or in an outside gazette such as a provincial bulletin: a dispatch to such a gazette is a
   plain notice to an `External` body, and a statute's condition that the text be published there
   before it enters into force is not represented.
+
+**How it is built.** An entry (`JournalEntry`) is appended when the realm learns of what it reports, and is never
+changed: the switch of a layered codex, every revert (§10), each release the realm's checks find for the first time
+(`release_found`, stamped with the check's time, §11.2) and, on a sync source, each release it publishes
+(`release_published`). A release's entry names its `source` and `version` and the time it is `effective_from`. An
+install's and a revert's entry name the `proposal` that decided it, if any, and the `vote` it ended with (the votes for,
+against and abstaining, and how many could vote: counts, never who voted, nor the seats and veto holders of a
+department's vote). For a change a federal vote decided, the capital replays it under its own ballot of that vote, so
+the entry names that ballot and records the capital's own tally, not the federation's count. It holds the instant and
+the realm's local day on the capital's clock at that moment, so a change of the realm's zone moves no past issue. An
+issue is the entries of its day. `journal_issue {day}` returns the entries of a day, numbered from the journal's first
+day (the local day the realm first started with the journal, moved back if the realm then sets a zone west of UTC,
+until a day is made), for every day from that one to today, with or without entries; a later day, or one before the
+first, is not found. Today's issue is `provisional`. When a day has closed, an hourly sweep has the realm's canister
+make it into a document, with the issue before it linked by digest; its text, digest and a verification code are stored.
+Its signature is made when anyone asks (`journal_sign`), or by the sweep in a realm set to `daily`, and is served with the
+text as the issue's `proof`, which a signed issue has and an `unsigned` one does not. No entry is ever stamped into a day
+that is made (`journal-signature.md`). A quarter's
+`journal_issue` returns `issued: false` and names its capital; `journal_capital_issue` asks the
+capital for its issue through the quarter, as an update, because a read cannot call another canister. The extension's
+manifest holds the personal-data rules as an allow-list of the fields an entry may keep, which the realm applies when
+it records the entry; rules that are not a list of names keep nothing. Nothing that goes wrong in the journal stops
+the switch or the revert it reports. The issue of that day then holds an entry `not_recorded` instead, which names
+the change it misses by its codices, and the page shows it as a notice; the error itself is for the IT admin team,
+in `codex_status` (`journal_failure`).
 
 No chapter publishes to the journal or waits for a publication: a codex install appears in the realm's
 journal by the extension's own rule, and the statutory waits a chapter needs are expressed through the
@@ -1176,31 +1814,61 @@ proposal's `effective_at` (§5.2).
 ## 10. Revert floor and the IT admin team
 
 1. **Member revert:** `codex.revert` (it exists, `governed=realm_wide`) can restore **any** earlier
-   codex in the history. The proposal's voting rules are the governance settings of **the codex being
-   restored**, so a bad codex can't change the rules for undoing itself.
-2. **IT admin team:** the realm admins define who it is and how many of them must approve. This is
-   **left open on purpose:** no structure (department, positions, list), no size and no m-of-n is
-   hardcoded. [#490](https://github.com/smart-social-contracts/realms-gos/issues/490) proposes the
-   form of the team before any code is written. IT team members can run `codex.revert_fast`, which can
-   only restore the **previous** codex. Each use is recorded on the public record.
+   codex in the history, named by its checksum (`codex_revert { codex }`; none names the codex the active one
+   replaced). It needs no download: every codex's chapters are in `ChapterSource`. Filed as a proposal, it
+   names the codex it restores, found when it is filed, so that what is voted on is what runs; a
+   `proposal_create` that carries a revert naming none is refused. The proposal's voting rules are those of
+   **the codex being restored**: the realm records its rule (threshold, quorum and casting vote) and its
+   voting window with each codex when it becomes active, and a revert vote follows the rule and runs under the
+   window recorded with the codex it restores, so a bad codex can't change the rules for undoing itself, nor
+   lengthen the window to stall it. A revert does not record them again. A codex that became active before
+   they were recorded gets them when the codex after it is switched in (the rule and window in force until
+   then); one replaced before that has none, and its revert is decided by the realm's current rule and
+   window.
+2. **IT admin team:** a **department the realm admins designate** (`it_team_set { department }`), so that the
+   realm hardcodes no structure, no size and no m-of-n: its seats and its policy (m of n, quorum, veto) are
+   whatever the admins set, and the votes, vetoes, audit and power-of-attorney rules that already exist apply.
+   The seat holders of that department hold `codex.revert_fast`: only its seats give it, and no profile may list
+   it. Whoever holds `all` (the admins and the controllers) passes the permission check too, and a team whose policy
+   is direct (one of one) lets them revert fast without a seat. `codex_revert_fast` is governed by the department under its own policy, and runs under the voting window
+   recorded with the codex it restores, as a member revert does, so that a codex cannot shorten the window to
+   expire the team's vote. It can only restore the **previous** codex, named when it is filed like any revert, and
+   is refused while no team is designated, whatever files or replays it. Each use is recorded on the audit log with an Event: who
+   asked, and the codex restored.
 3. **Changing the IT team** is done by the realm admins through the realm's admin operations, never by
-   a chapter. That operation (called `it_team.set` below; #490 proposes its form) is reserved like the
-   others.
-4. **Reserved operations:** `codex.revert`, `codex.revert_fast`, `it_team.set` and
-   `sync_source_remove` (no chapter can forbid a follower's leaving).
+   a chapter. That operation, `it_team_set` (`""` designates none), is governed like the realm's other admin
+   settings: direct during setup, a realm-wide vote after launch. It is reserved like the others, and no
+   call of a codex (an effect of a chapter, or of a legacy codex), nor a proposal that one files, however deep
+   it is nested, may change the team's department (its policy, its positions, who holds them, an invite to a
+   seat of it, an expulsion, its place in the realm or its deletion) or take something from a member who holds a
+   seat in it: a status other than active, a role, a permission from a profile they have, the authority the team
+   was given. A department, a seat or a member is named as the operations find it, by its name or by its
+   internal id, each operation in its own class (`user_set_status` finds a member, `user_remove` and
+   `role_revoke` a user). A department that is the team cannot be deleted until another is designated. A
+   realm still in setup when it was upgraded to the release that has `it_team_set` has a founder profile
+   without `it_team.set` (existing profiles are not rewritten): its admins designate the team.
+4. **Reserved operations:** `codex.revert`, `codex.revert_fast`, `it_team.set`,
+   `sync_source_remove` (no chapter can forbid a follower's leaving), and `codex_check_config` and
+   `codex_check_now`, when the realm checks its sync sources (§11.2).
    - No chapter may forbid them, guard them or hook them. The checker refuses it, and the runtime
      never calls chapters for them.
    - A proposal whose action is a reserved operation runs no legislation at all: no chapter's guard,
      forbid or hook runs on its `proposal_create`, its vote or its execution. A guard on
-     `proposal_create`, such as §5.2's, can neither refuse nor delay a revert.
+     `proposal_create`, such as §5.2's, can neither refuse nor delay a revert. The same holds for a
+     federal vote whose action is reserved, its legs in the quarters and the messages that carry it.
    - No chapter may change the IT team or who defines it.
    - The Cedar `GUARDRAILS` keep them permitted for their holders: no generated forbid targets their
      actions, and the checker guarantees that.
    - A sync source's legislation hooks a follower's leaving on its own side, as a GGG event of the
      links, named in [ggg#3](https://github.com/smart-social-contracts/ggg/issues/3) (§13). That
-     operation runs on the sync source and is not reserved.
+     operation, `link_notify`, runs on the sync source and is not reserved: a chapter may hook it
+     (`on_link_notify`, reading the new `status`, such as `Ended`) and may never guard or forbid it, so a
+     side always learns that a link ended. The checker refuses a guard or a forbid on it.
 5. **History:** every codex ever active is kept, with its chapters in `ChapterSource`, so a revert
-   needs no download. A revert does not clear a non-compliant flag: a follower that reverts below a
+   needs no download. A checksum names a layered codex by its id, and a legacy codex by its `checksum` or by
+   the `name@version` the history lists it by; one that is not in the history is not found, and neither
+   the active codex nor a pending one is an earlier codex (a pending codex is activated by `codex_activate`
+   alone). A revert does not clear a non-compliant flag: a follower that reverts below a
    release already in effect is non-compliant again. A revert does not run `on_codex_activate`.
 
 ---
@@ -1216,10 +1884,19 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
 2. **The realm checks on a schedule.** A timer reads each sync source's record, one query per source,
    and stores what it finds with `checked_at`.
    - **The interval is set by the realm admins:** default every 24 hours, allowed from 1 hour to 7
-     days. Operation `codex.check_config { interval }`; the unit, hours, is in the operation's schema,
-     not in the name.
-   - **Admins can force a check now** with `codex.check_now`, which runs the same check at once.
-   - Both are admin operations, outside legislation. Chapters can't change them.
+     days. Operation `codex_check_config { interval }`; the unit, hours, is in the operation's schema,
+     not in the name. The next check is that many hours from the change (before the realm's first sync
+     source, the interval is kept for when it has one).
+   - **Admins can force a check now** with `codex_check_now`, which runs the same check at once (in
+     the next message), and the interval counts from it.
+   - Both are admin operations (permission `realm.configure`, not governed), outside legislation: they
+     are reserved (§10.4), so chapters can't change them.
+   - The realm checks from its first sync source on, and only its capital checks (a quarter calls no
+     other realm). The check is built in
+     [`api/sync_checks.py`](../../src/realm_backend/api/sync_checks.py).
+   - **What the check found is a public read,** `codex_releases_found` (paged): every release a check
+     found in a record for the first time, once, with the sync source whose record listed it and when.
+     It is what the official journal reports (§9.6).
 3. **The codex page shows the result,** for example: "Spain published 2.4.0, effective 1 Jan 2027.
    Last checked 3 Nov 2026 14:00. [Propose install]".
 4. **Proposing the install:** anyone with `proposal.create` can press the button. The realm builds
@@ -1227,7 +1904,38 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    install proposal. The release is installed whole (§3.2). It is voted under the realm's normal rules
    and installed by the normal install task (§9.2). No guard of the codex runs on that
    `proposal_create`: a statutory wait in the realm's own legislation, such as §5.2's, does not apply to
-   a release whose date the source's legislation set.
+   a release whose date the source's legislation set. No forbid of the codex runs on it either; its
+   hooks do. The action is `codex_install(Release { source; version })` (GGG's `CodexSource.Release`):
+   the install reads the records of the active sync sources and builds the change list from the one that
+   vouches for the release (§9.2 step 4), the whole release, with the realm's own layer unchanged. The
+   chapters come from that record's capital by checksum (§9.2 step 3), or are stored already. Refused,
+   with the reason: a realm with no layer of its own yet (its first layered codex names it, with a change
+   list); a federation with quarters (its quarters stage the change list the capital announces, and a
+   release built from a record has none: a federation installs a release with a change list); a release
+   that only a stand-in record vouches for, whose chapters no capital serves (it is installed with a change
+   list that gives their URLs); and an action that names a release and a change list (`url` or `checksum`)
+   at once. The realm installs the release and never reads the change list, so a vote would be told one
+   install and the realm would run another: such an action is refused where it is filed and where
+   `codex_install` is called with no vote behind it, and a proposal stored with both before that still runs,
+   as the release, and is described as one. The arguments of an install are of the types it reads (the
+   arguments are a record; a manifest is a record that is not empty whose `hooks` and `capabilities`, when
+   there, are lists of text; the sent code is UTF-8 text that compiles; a source, a version and a codex name
+   are text): one that is not is refused where the install is filed and where `codex_install` is called, and a
+   proposal stored with one fails, with the reason recorded, rather than raising in the message of its vote or
+   its timer. What a proposal records of its action's reply fits the 65,536 characters of its result, so
+   that nothing can keep a vote or a timer from concluding it: a refusal's reason too long for the record (a
+   refusal can echo what the stored action holds, such as the codex API a manifest names) is recorded cut, with a
+   marker that says how long the reply was; of a reply that succeeds (an `init` that returns a lot, an
+   extension's function that returns text), the fields over 1,000 characters read `[cut: N characters]` and the
+   others stay. The same holds for the audit log's record of the reply and for the reply of an approved pending
+   action, and GGG's `Reply` blob of a proposal's result carries the result as it is recorded, notes included.
+   Sent code the realm would refuse as untrusted (it requires approval and does not pin the code's
+   checksum) is not compiled: it is filed, and refused at the vote by the trust policy. For a release only its
+   `source` and `version` are judged: the change list beside it is never read. The
+   follower's own guard or forbid on `codex_install` still runs when the accepted
+   proposal executes, and can delay or refuse the install; if it does, the realm reads `non_compliant`
+   past the release's effective date, visible to all: that is the realm's own legislation over its own
+   install, and the check makes the consequence visible.
 5. **A follower votes when, never whether** (§2, rule 3). Only an install clears the non-compliant
    flag, and it clears it at once.
 6. **Compliance is measured against each sync source's record** and worked out at each check:
@@ -1237,16 +1945,57 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    - **`non_compliant` since `<effective_from>`:** otherwise, naming the stale layers;
    - **`unknown`:** a sync source's record couldn't be read at the last check.
 
-   It is also recomputed right after every install. The status and `checked_at` are shown in
-   `ggg_codex_status`. The cost is one query per sync source per check: negligible even hourly.
+   "At least" is told by the record's order where it lists the version the follower runs (the releases it lists
+   after that one are newer), and by **the time it was published** where it does not: every entry of a record carries
+   `published`, the publisher's chain time, and a relay copies it. The realm keeps it with each layer (`published` on
+   the codex's chapters, taken from the record that vouched for the release when it was installed). A listed release is
+   newer than what the realm runs only if it was published strictly later, and older only if strictly earlier; **a
+   tie, or a time the realm did not keep, places nothing**. An effective date orders nothing: the releases of one
+   publication can take effect together (eu/es 2.4.0, 2.5.0 and 2.6.0 all on 1 Jan 2027), and an urgent 2.5.1,
+   published after 2.6.0, can take effect before it. `effective_from` only tells whether a release is in effect. A
+   version the record does not list is never a reason to be behind: the flag stays `compliant` unless a release the
+   record lists, in effect, was published later, and the source's entry in `codex_status` (`sync_sources`, field
+   `notes`) says what is going on, for each such layer `{source, kind, runs, lists}`:
+   - **`unlisted`:** "runs eu/es 2.6.0, which this source does not list": a version the source never listed (it came
+     from elsewhere), or no longer lists, whose place against what it lists cannot be told (none of it was published
+     later, and not all of it earlier);
+   - **`went_back`:** the source vouched for what the realm runs and its record now lists only releases of that layer
+     published earlier (it reverted a layer it relays): "the source went back to eu/es 2.4.0". The realm follows its
+     source, so "Propose install" offers that release, marked **`step_back`** in `installable`, and the screen says it
+     takes the realm back to an older release. It is never shown as catching up, and the flag is never
+     `non_compliant` for it.
+
+   `installable` offers only releases that come after what the realm runs (and, for a source that went back, the one
+   step back). A layer installed before the time was kept has none on its chapters: the realm takes it from the
+   releases its checks found (`codex_releases_found` logs every release a check reads in a record, with its `published`
+   and `effective_from`), so a relay that moves forward is still behind on an old install; if the record lists its
+   version, the record's order places it as above; if no check ever found it either, it cannot be placed, and the realm
+   is neither behind nor offered anything for it (only the note), until an install of that layer records its time.
+
+   It is also recomputed right after every install and every revert, from the record the last check
+   kept (a record that could not be read stays `unknown` until a check reads it). It is worked out
+   afresh each time. The releases of a source's own layer are never edited or removed, so for them only
+   a change of what the realm runs, an install or a revert, turns a non-compliant flag compliant. A
+   relayed layer is listed once, as the source runs it: when the source installs another release of it,
+   or reverts, its entry changes, and a check judges against that entry. Each sync source is checked
+   on its own: one whose record cannot be read, or is refused, is `unknown` with the reason, and the
+   others are checked all the same. The status, `checked_at` and that reason are shown for each sync
+   source in `codex_status` (`sync_sources`, with the releases the realm could install from it). The
+   cost is one query per sync source per check: negligible even hourly.
 7. **What follows is the sync source's own legislation,** never the follower's votes. For example, a
    `forbid` in Spain's treasury chapter can test GGG's `follower_compliance` fact of the recipient of a
    transfer. Voting against the install doesn't avoid the flag. Challenging a release is a justice case
    (`ggg_dispute_file`).
 8. **Followers report.** At each sync, the follower's capital reports to each sync source's capital a
-   `ReportedLayer {version, checksum}` for every layer it runs, its compliance against that source and
-   its population. It does not send a layer's source: the sync source finds the layer by its checksum
-   in its own record. The source keeps the last report on the follower's entry, with its time, and may
+   `ReportedLayer {version, checksum}` for every layer from above it runs, its compliance against that
+   source and its population (its capital's members and those its quarters reported). It does not send
+   a layer's source: the sync source finds the layer by its checksum in its own record. A layer's
+   checksum is `sha256:` and the hex sha256 of `{"source", "version", "chapters", "calendar"}` as
+   canonical JSON (§9.1), where `chapters` maps each domain to its checksum without the `realm` chapter,
+   which no follower takes, and `calendar` is the calendar's checksum, or `""` when the release has
+   none, as `legislation_releases` publishes it. The release a follower runs and the entry of the
+   record that lists it give the same checksum. A report the source refuses or does not answer is sent
+   again at the next check. The source keeps the last report on the follower's entry, with its time, and may
    query the follower at any moment. The follower's own `ggg_codex_status` is the authority. Which
    followers a sync source counts, for its population or a vote, is its own legislation's choice, so
    nobody is counted twice.
@@ -1279,15 +2028,56 @@ CI) and [realms-codices#12](https://github.com/smart-social-contracts/realms-cod
 
 It uses Python's parser (`ast`), so it runs only off-chain:
 
-- every rule in §4: file and class names, base, imports, banned constructs, citations, marks, `uses`,
-  and that every `on_`, `check_` and `compute_` method names a GGG operation;
-- the `F` expression rules (§6): the operation named, `each` naming the list it ranges over (for
-  `tax_policy_propose`, the saved policy's `taxes`), `S.` naming a setting of the chapter's own domain,
-  `pct()` literals that fit the scale, and each setting's `check=`;
+- the layout of §3, which it checks first and stops at if the tree breaks it: folder names, a `source.json`
+  whose `id` is the folder's path, only `<domain>.py` files with a GGG domain, the shapes of `source.json`,
+  `releases.json` and `calendar.json`, and each release against the source's files **at the release's own
+  commit**, which must be in the history of `HEAD` (read with git, so the check needs the full history): all its
+  chapters and its calendar listed, never the `realm` domain, every checksum the sha256 of the bytes. A realm loads
+  only its own `realm.py`: one beside a source's releases is that source's own. realms-codices CI runs this command and
+  has no checker of its own;
+- every rule in §4: file and class names, base, imports, banned constructs (`exec`, `eval`, `compile`,
+  `globals`, `locals`, `setattr`, `open`, dunder names, defaults, attribute stores), citations, marks (an
+  extension that calls `super()`), `uses`, and that every `on_`, `check_` and `compute_` method names a GGG
+  operation;
+- the `F` expression rules (§6), by binding every forbid to GGG's fact schema: the operation named, `each` naming
+  the list it ranges over (for `tax_policy_propose`, the saved policy's `taxes`), `S.` naming a setting of the
+  chapter's own domain, `pct()` literals that fit the scale, optional facts compared after `is_some()`, arithmetic
+  that cannot overflow, and each setting's `check=`;
 - reserved operations (§10.4);
-- cycles across `uses`, for every realm that a change affects;
-- every chapter's own `cases.json`, if present, run on the resolved domains;
-- **Python versus Cedar agreement:** generated facts are evaluated both ways and must agree.
+- cycles across `uses`, an undeclared or missing domain, and a chain deeper than the limit, for every realm of the
+  tree: each source is checked as a realm with the sources above it as its layers;
+- the test cases of each chapter, `<domain>.cases.json` (below);
+- **Python versus Cedar agreement:** generated facts, drawn around every literal and endpoint the forbids name,
+  the 64-bit extremes and the edges of each fact's range, are decided in plain Python and by Cedar (`cedarpy`, the
+  canister's Cedar line), with the realm's settings folded in and left open, and must agree;
+- **Never errors:** the generated Cedar of every forbid is proved never to error (§6, rule 9) for each action it
+  names, by the Cedar CLI's `symcc` with cvc5 (§12.3), pinned by version and checksum (`scripts/cedar_tools.sh`). A
+  query the solver does not decide is a problem, never a pass. Without cedarpy, the Cedar CLI and cvc5 a tree
+  with a forbid is not checked: the command exits with code 2 and says what to install, and `--no-analysis` goes
+  without them.
+
+A refusal of a layer is printed once, though every realm below it runs the layer.
+
+**Test cases.** A chapter's cases are `<domain>.cases.json`, beside it. Each is run on the codex of one realm:
+the one named by its optional `realm` (a source id), else the chapter's own source with the sources above it, in
+UTC. A case has a `name` and one kind of test, evaluated in-process with the library, and says what it expects:
+
+| Kind | Fields | Runs |
+|---|---|---|
+| `call` | `call`, `args` (plain data), `returns` | a public member of the resolved domain: a helper called with the arguments, or a setting read |
+| `guard` | `guard` (an operation), `args`, `approvals`, `now` (seconds), `denies` (a reason, or null) | the domain's `check_<operation>` on the operation's arguments, with those departments' approvals and that time |
+| `forbid` | `forbid` (an operation), `each`, `facts`, `fires` (forbid ids) | the realm's forbids on that operation (and list) in plain Python, with its settings folded: those that fire must be exactly `fires` |
+| `compute` | `compute` (an operation), `args` (the arguments of `compute_<operation>`), `decimals` (the token's), `records`, `returns` | the domain's `compute_<operation>`, run by the realm's own sandbox program (`core.legislation_sandbox`), which reads GGG's entities from `records` (`{"Land": [{"id": "L-1", "owner": "User:alice", "assessed_value": 20000000}], "Human": [...]}`) and hands the chapter the subject as the view `Land.get` gives, with money in `decimals`; `returns` is the invoice items |
+
+```json
+[
+  {"name": "València may charge 1.24 %", "realm": "eu/es/vc/46250-valencia", "forbid": "tax_policy_propose",
+   "each": "taxes", "facts": {"code": "ibi_urban", "rate": 1240001}, "fires": ["eu/es/tax/ibi_urban_cap"]}
+]
+```
+
+A case that does not come out as written is a problem, `<source>/<domain>.cases.json: case "<name>": <what>`.
+Hooks are not run by `check`.
 
 ### 12.2 In-canister checks (install step 5, no parser)
 
@@ -1314,28 +2104,126 @@ For a change list, it compares the old and new codices:
 
 1. **The generated Cedar** of both, and the diff.
 2. **Newly forbidden and newly allowed, per operation:** for example, "urban IBI between 1.10 % and
-   1.24 % for capitals: newly allowed". This is proven by Cedar analysis, not sampled.
+   1.24 % for capitals: newly allowed". This is proven by Cedar analysis, not sampled. The analysis
+   proves whether anything is newly forbidden or allowed and gives an example request; the range shown
+   is computed from the `F` trees and proved equal to the difference by an equivalence check.
 3. **"Nothing permitted"** for an operation: no request of that operation can be allowed.
 4. **"Never fires"** (a forbid that is always false) and **"overlap"** (a forbid implied by another).
 5. **The flattened view per changed domain** (§5.9), before and after.
 6. **Dependencies:** every realm and domain affected, through `above()` and `uses`.
 7. **Test cases:** run and results.
+8. **Settings folded and open:** for a source's change, the analysis runs for each affected realm, with
+   its settings folded, and once with the settings left open, which gives statements such as "for
+   capitals".
 
-The tool for points 2–4 is the research issue
-[#481](https://github.com/smart-social-contracts/realms-gos/issues/481) (candidates: Cedar's symbolic
-analysis via an SMT solver). If it isn't usable, the fallback is bounded exhaustive testing over the
-facts' value ranges, labelled as such in the report.
+The tool for points 2–4 is Cedar's symbolic compiler, SymCC (`cedar symcc` of the Cedar CLI,
+experimental flavour), with the cvc5 solver, both pinned by version and checksum
+([R1, #481](https://github.com/smart-social-contracts/realms-gos/issues/481)). Answers hold for every
+request GGG's fact schema allows: its ranges and enumerations, which a Cedar schema can't state, are
+added to the analysis as assumption forbids. A query the solver doesn't finish is reported as
+undecided, never as a pass.
+
+The analysis uses the Cedar semantics of the CLI's version (4.14.1), while the canister links
+`cedar-policy` 4.12.0 (basilisk's canister template). The forbids use only core operators, so the
+difference is not expected to matter; the two versions are aligned at basilisk's next bump.
+
+Built ([realms-codices#13](https://github.com/smart-social-contracts/realms-codices/issues/13)):
+`realms legislation diff [TREE] --base REV [--head REV] [--realm ID]... [--change-list FILE] [--out FILE] [--budget SECONDS]`.
+
+- **What is compared.** The tree at two commits, read with git (never the working copy), as `check` reads it: every
+  source is a realm whose layers are its ancestors. The realms analysed are those with a source on their layer path
+  whose chapter or calendar changed between `--base` and `--head` (default `HEAD`), or `--realm`. A change list
+  (`--change-list`) names the one realm, and the commit its chapters' URLs name is the head; its `replaces` is not
+  read, since a live realm's codex is not (reading it comes with the published record, D6).
+- **Per realm and Cedar action** (the primary action of a forbid; the actions it also applies to run the same
+  forbids), with the settings folded, and, for a realm that is itself a changed source, once more with them left
+  open (`context.settings`), the report gives:
+  - the **newly forbidden** and **newly allowed**, each proved (`implies` of the old set in the new, and of the new in
+    the old) or given with the request that breaks it. Where the difference is a range of one number, the report
+    says it: the trees compare a fact only with constants, so they are evaluated at each constant and beside it, and
+    the runs where the old and new sets differ are written as forbids and proved to be exactly the difference: each
+    claim lies inside what the changed set forbids (`implies(new, permit-all + the newly forbidden claim)`, and
+    `implies(old, permit-all + the newly allowed claim)`), misses what the other set forbids (a permit of the claim's
+    requests is allowed by it), and `equivalent(new + newly allowed, old + newly forbidden)` leaves nothing out; with
+    the settings open, one statement for each combination of the Boolean settings the change reads. A range that is
+    not proved, or whose other facts cannot be stated (a Period, a set, a record), is not printed: the request that
+    breaks the property stands;
+  - **nothing permitted** (`always-denies`), **never fires** and **overlap** (`equivalent` with and without the
+    forbid), whether a forbid **can error** (`never-errors`), and each query the solver **did not decide**;
+  - the **flattened view** of the domains the change reaches (those that changed, and those that call one, through
+    `uses`, however far) before and after, with the folded line of each cap (`for València: capital + transport →
+    maximum 1.24 % (1240000)`), proved equal to its forbid like the ranges;
+  - the **generated Cedar** diff, the **dependencies** (changed sources and domains, and for each realm the domains
+    reached) and the realm's **test cases** (§12.1).
+- **Assumptions.** Every set under analysis is the permit-all set plus one forbid that fires on the requests GGG's fact
+  schema rules out (a number outside its range, a Period of a count or a unit GGG does not have, a word outside the
+  enumeration of a fact), so that every answer holds for the requests the schema allows. The enumerations are
+  `facts.json`'s `values`, which `scripts/ggg_candid.py` carries into `ggg_facts.py` as `values` of a `String` fact;
+  the realm's generator ignores them (Cedar's schema cannot state them), and only this analysis assumes them. The
+  assumption is analysis input and is never installed.
+- **Failures and warnings.** The report lists a failure, and the command exits 1, for a forbid that can error, an
+  operation nothing is permitted on, a forbid that never fires, a query the solver did not decide (also one of the
+  flattened view's maxima), a codex that does not load (a chapter the checker refuses, or a forbid that does not bind
+  to GGG's facts: that realm fails, the others are still analysed) and a test case that fails. A forbid that reads a
+  setting and never fires with the realm's settings is information (`off in this realm`: another realm that runs
+  the source may switch it on); it fails when it reads no setting, or never fires with the settings left open. An
+  overlap is a warning, asked of the realm as it is. Newly forbidden and newly allowed are information: they are what
+  a change of legislation is for. A `--realm`, or the realm of a change list, that is no source of the tree at the
+  head commit exits 2, as `check` does. A change to only the test cases of a chapter (`<domain>.cases.json`) reaches
+  the realms that run the chapter, so that their cases run.
+- **Tools.** The pinned Cedar CLI and cvc5 (`CEDAR_CLI`, `CVC5`; `scripts/cedar_tools.sh`); without them it exits 2 and
+  says so. Up to four SymCC queries run at once.
+- **Time budget.** With `--budget SECONDS` no query starts after that time and a running one is stopped. A realm the
+  budget did not reach is listed as `not analysed (time budget)`, and one it stopped part-way as `not analysed (time
+  budget): stopped part-way` (its partial answers are dropped); both are failures, so a pull request cannot pass on
+  what was not analysed. The report is written whatever the budget does.
+- **Limits.** With the settings open, the schema is the new codex's, so an old forbid that reads a setting the new
+  codex no longer has is not analysed (SymCC refuses it, and it is reported as undecided). The links between realms
+  are not read, as with `check`.
 
 ### 12.4 `realms legislation resolve`: resolver and flattened view
 
 Given a realm's links and a commit, it prints the layer paths, the flattened view and the generated
 Cedar, with the same `realms.legislation` code the canister runs.
 
+Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
+`realms legislation resolve [TREE] --realm <source id> [--commit REV] [--sync-source ID]... [--record FILE]... [--own FILE] [--facts FILE]`.
+
+- **Records.** A sync source's record (§8) is the tree's own `releases.json` (`--sync-source`: the newest release of
+  the source and of each source above it) or a file in the shape of §8 (`--record`). Reading them from the sync
+  sources' realms comes with the published record (D6, [#491](https://github.com/smart-social-contracts/realms-gos/issues/491)).
+- **Files.** The tree is read with git, never from the working copy: a relayed layer at the commit its release
+  names, the realm's own layer (its folder, or the layer in `--own`) at `--commit`, and every file against the
+  checksum its record lists.
+- **Output.** The codex id (§9.1), the layers, each domain's layer path and flattened view, and the Cedar of every
+  forbid when `--facts` gives a fact schema in the shape the generator reads (`cedar.FactSchema`). It calls no network.
+
 ### 12.5 `realms legislation propose`
 
 Given the realm, the chapters to set or remove, and a commit, it writes the change list (with
 `replaces` read from the realm's `ggg_codex_status`) and the report. It prints the `Code { url;
 checksum }` to submit.
+
+Built ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)):
+`realms legislation propose [TREE] --realm <source id> --commit REV --set <chapter>... --remove <chapter>... --url URL --out FILE`,
+with `--replaces <codex id | none>` or `--network`, `--canister` and `--identity`, and optionally
+`--summary LANG=TEXT`, `--report FILE --report-url URL` and `--repo OWNER/NAME`.
+
+- **The file.** The change list as canonical JSON (§9.1: sorted keys, no spaces, UTF-8, no newline at the end),
+  so the checksum a proposal pins is the checksum of the file. Each chapter's URL names the commit in full, and its
+  sha256 and size are those of the bytes at that commit. `--url` is where the change list will be served.
+- **`replaces`** is given, or read from the realm's `codex_status` when `--network`, `--canister` and `--identity`
+  are all given; the command says which it reads before it does. No network is reached otherwise, there is no
+  default network, and no identity is chosen for the caller.
+- **Refused.** What the realm would refuse (§7): a chapter outside the realm's own layer (a layer from above comes
+  as a release), a name that is not a GGG domain or `calendar`, a chapter of 0 bytes, above 256 KB or not UTF-8, more
+  than 50 chapters, a change list above 64 KB, an address that is not https. A `release` is always `null`:
+  installing a release is the realm's own "Propose install" (§11).
+- **Stricter and looser than the realm.** The same chapter in `--set` and `--remove` is refused by the command; the
+  realm accepts it, if the codex has the chapter, and applies the removal first. A `--remove` of a chapter the codex does not have passes the
+  command, which does not know the codex, and can only fail at the realm (§9.2 step 2).
+- **The report** (§12.3, C4) is attached, not written: `--report` is the file and `--report-url` where it is served.
+- **Output.** The `Code { url; checksum }` to submit.
 
 ---
 
@@ -1349,12 +2237,14 @@ codex needs from GGG beyond that is specified in the GGG repository,
 - the **entities, fields and operations real legislation needs**
   ([ggg#2](https://github.com/smart-social-contracts/ggg/issues/2)), among them the `compute_` hook
   kind, forbids that range over a list (`each`), the `Pending` codex status with `codex_activate`, the
-  fact schema's rate scale (hundred-millionths) and rounding rule, and `Period` as a count and a unit;
+  fact schema's rate scale (hundred-millionths), rounding rule, and ranges and allowed values, and `Period` as a count and a unit;
 - the **links between realms** ([ggg#3](https://github.com/smart-social-contracts/ggg/issues/3)):
   sync sources, followers, `ReportedLayer`, the published record, the `follower_compliance` fact and
   the link event a sync source hooks;
 - **proposal links** ([ggg#4](https://github.com/smart-social-contracts/ggg/issues/4));
-- **`Realm.timezone`** ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5));
+- **`Realm.timezone`** ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)), and a
+  `timezone` on `quarter_configure` for a quarter of a federation
+  ([ggg#21](https://github.com/smart-social-contracts/ggg/issues/21));
 - **`effective_at`** on proposals ([ggg#6](https://github.com/smart-social-contracts/ggg/issues/6));
 - the **`WorkingDay`** Period unit ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7));
 - **one scale for every ratio**, hundred-millionths
@@ -1375,32 +2265,33 @@ is no G6.
 
 | Id | Repo | Title | Depends on | Done when |
 |---|---|---|---|---|
-| R1 ([#481](https://github.com/smart-social-contracts/realms-gos/issues/481)) | realms-gos (research) | Cedar analysis tooling for "newly forbidden", "nothing permitted", "never fires" and "overlap" | – | a report with a recommendation and a working sample on the three forbids of §5.6 and the Art. 21.2 forbid of §4 |
+| R1 ([#481](https://github.com/smart-social-contracts/realms-gos/issues/481)) | realms-gos (research) | Cedar analysis tooling for "newly forbidden", "nothing permitted", "never fires" and "overlap" | – | **Done:** a report with a recommendation (SymCC with cvc5, §12.3) and a working sample on the three IBI range and cap forbids of §5.6 and the Art. 21.2 forbid of §4. Its findings are in §5.6, §6, §9.4 and §12.3, and in S2, C2, C4 and D4 below |
 | R2 ([#482](https://github.com/smart-social-contracts/realms-gos/issues/482)) | realms-gos (research) | Which §4 restrictions the codex sandbox enforces at run time today | – | table of rule → enforced or not, with the code path |
 | G1 ([ggg#1](https://github.com/smart-social-contracts/ggg/issues/1)) | ggg | Domain list | – | versioned list merged |
-| G2 ([ggg#2](https://github.com/smart-social-contracts/ggg/issues/2)) | ggg | The entities, fields and operations that real legislation needs (§13), each added or narrowed; the share arguments name `legislation`; the fact schema's rate scale (hundred-millionths) and unit rule; `each="taxes"` over the saved policy, also at `tax_policy_draft` | G1 | `.did` merged; conformance notes updated |
+| G2 ([ggg#2](https://github.com/smart-social-contracts/ggg/issues/2)) | ggg | The entities, fields and operations that real legislation needs (§13), each added or narrowed; the share arguments name `legislation`; the fact schema's rate scale (hundred-millionths), unit rule, and ranges and allowed values; `each="taxes"` over the saved policy, also at `tax_policy_draft` | G1 | `.did` merged; conformance notes updated |
 | G3 ([ggg#3](https://github.com/smart-social-contracts/ggg/issues/3)) | ggg | Links between realms, with `follower_compliance`, `ReportedLayer {version, checksum}` and the link event a sync source hooks | – | types, operations and the link invariants merged; the install rules (vouching record, whole releases, one chain) are Realms GOS's (D2) |
 | G4 ([ggg#4](https://github.com/smart-social-contracts/ggg/issues/4)) | ggg | Proposal links: "replaces" and "relates to" (§7) | – | `.did` merged; a withdrawn proposal can be replaced by a new one that links to it |
-| G5 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)) | ggg | `Realm.timezone`, an IANA name, set by each realm and never inherited (§4.5) | – | `.did` merged; the UI shows the realm's official time; local time is computed by Realms GOS (#503), not by GGG |
+| G5 ([ggg#5](https://github.com/smart-social-contracts/ggg/issues/5)) | ggg | `Realm.timezone`, an IANA name, set by each realm and never taken from another realm, legislation or a sync source (§4.5) | – | `.did` merged; the UI shows the realm's official time; local time is computed by Realms GOS (#503), not by GGG |
 | G7 ([ggg#6](https://github.com/smart-social-contracts/ggg/issues/6)) | ggg | Proposal `effective_at`, UTC ns, optional: once accepted, the action executes at that time, for every kind of proposal (§7) | – | `.did` merged; `ProposalCreateArgs` and `Proposal` carry the field; conformance notes say when an accepted proposal executes |
-| G8 ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)) | ggg | `PeriodUnit` gains `WorkingDay` (§4.3): a day that is neither a weekend day nor a holiday in the realm's calendar, in the realm's time zone; GGG names the unit, realms count it | G2 | `.did` and the schema docs have the unit, defined as above |
+| G8 ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)) | ggg | `PeriodUnit` gains `WorkingDay` (§4.3): a day that is neither a weekend day nor a holiday in the realm's calendar, in the time zone of the clock that counts (§4.5); GGG names the unit, realms count it | G2 | `.did` and the schema docs have the unit, defined as above |
 | [ggg#9](https://github.com/smart-social-contracts/ggg/issues/9) | ggg | One scale for every ratio, hundred-millionths (§4.3): the model's basis-point fields (quorum, thresholds, shares, weights) move to it; a breaking change | – | `.did`, the conventions and the conformance suite use the one scale |
-| [#503](https://github.com/smart-social-contracts/realms-gos/issues/503) | realms-gos | Realm-local time in Realms GOS (§4.5): a pure-Python zone-file reader plus date arithmetic; the realm stores only its own zone file as raw bytes (never base64), parsed once and kept in memory; no change to the Python runtime | G5 | a realm with `timezone = "Europe/Madrid"` reports the right local date and offset on both sides of a DST switch, on PocketIC, including in a year after 2037 (the POSIX footer rule); no base64 and no new runtime modules are used |
+| [ggg#21](https://github.com/smart-social-contracts/ggg/issues/21) | ggg | Quarters in different time zones (§4.5): I-ADM-4 clarified (a quarter starts from its capital's zone, the realm may set it by vote), and `timezone` on `quarter_configure` | G5 | model, layered-codex page and `.did` say it; the fixture and the conformance suite agree |
+| [#503](https://github.com/smart-social-contracts/realms-gos/issues/503) | realms-gos | Realm-local time in Realms GOS (§4.5): a pure-Python zone-file reader plus date arithmetic; the release ships the tz data for every zone as hex text that `bytes.fromhex` decodes (never base64) and the realm reads only its own zone, parsed once and kept in memory; no change to the Python runtime | G5 | a realm with `timezone = "Europe/Madrid"` reports the right local date and offset on both sides of a DST switch, on PocketIC, including in a year after 2037 (the POSIX footer rule); no base64 and no new runtime modules are used |
 | [#504](https://github.com/smart-social-contracts/realms-gos/issues/504) | realms-gos | Proposals execute at `effective_at` (§7, §9.2 step 6, §9.5): every accepted proposal's action runs at that time, or on acceptance without one; a layered-codex install switches then, and quarters switch at that T | G7 | PocketIC: a transfer, a codex install and a settings call each execute at `effective_at` and not before; without it, on acceptance; the install's `on_codex_activate` runs at the switch |
 | [#505](https://github.com/smart-social-contracts/realms-gos/issues/505) | realms-gos | Count working days in the realm (§3.4, §4.3): start + n working days on the realm's calendar in its time zone, one function in the date module of #503; the library gains `working_days(n)`; a count that reaches a year with no calendar entries fails closed | #503, G8 | PocketIC: a 2-working-day count over a holiday and a weekend, and one across a summer-time change, pass; a count into a year with no entries fails with a clear error |
 | [#499](https://github.com/smart-social-contracts/realms-gos/issues/499) | realms-gos | Test harness for linked realms: scripted peers in `fake_chain`, multi-canister PocketIC, outcall mocking, public fixtures | – | the workflow tests of the change list run on it |
 | S1 ([#483](https://github.com/smart-social-contracts/realms-gos/issues/483)) | realms-gos | `realms.legislation`: `Chapter`, `above`, marks, settings with `check=`, `pct()`, the `self` API, hooks, guards and `compute_` methods by GGG operation name, `on_codex_activate` and `compute_realm_join`, read-only `ggg` entities, `times()`, `self.calendar`; self-contained, no CLI dependency | G2 | unit tests for every line of the §4.1 table, including the §5.5 refusal; the module imports nothing from typer, rich or requests |
-| S2 ([#484](https://github.com/smart-social-contracts/realms-gos/issues/484)) | realms-gos | `realms.legislation`: `F` expressions with `each` and `S.`, `pct()` literals, canonical Cedar output, Python evaluation | S1 | the forbids of §5.6 and §4 produce the Cedar of §5.8; Python and Cedar agree on 10 000 generated fact sets |
+| S2 ([#484](https://github.com/smart-social-contracts/realms-gos/issues/484)) | realms-gos | `realms.legislation`: `F` expressions with `each` (one Cedar action per list, §6) and `S.`, `pct()` literals, Period comparisons, canonical Cedar output, a generic output mode for analysis (settings left open, §12.3), Python evaluation | S1 | the forbids of §5.6 and §4 produce the Cedar of §5.8; Python and Cedar agree on 10 000 generated fact sets, among them the literals ±1, 0 and the 64-bit extremes; every forbid passes `never-errors`; a Period comparison is true for another unit, alone or under `~` with other facts, and one in `when()` is refused |
 | S3 ([#485](https://github.com/smart-social-contracts/realms-gos/issues/485)) | realms-gos | Resolver: layer paths from the links with the one-chain rule, extension merge, `uses`, depth limit | S1 | examples 5.1–5.7 resolve as described |
 | C1 ([realms-codices#10](https://github.com/smart-social-contracts/realms-codices/issues/10)) | realms-codices | `legislation/` tree, `source.json`, `releases.json` with the `calendar` field, `calendar.json`, README for authors | S3 | the València example chapters present; schema checked in CI |
-| C2 ([realms-codices#11](https://github.com/smart-social-contracts/realms-codices/issues/11)) | realms-codices | `realms legislation check` in realms-codices CI (the command lives in realms-gos `cli/`) | S1, S2, C1 | every rule of §12.1 has a failing and a passing test |
+| C2 ([realms-codices#11](https://github.com/smart-social-contracts/realms-codices/issues/11)) | realms-codices | `realms legislation check` in realms-codices CI (the command lives in realms-gos `cli/`), including `never-errors` for every forbid (§6, rule 9) | S1, S2, C1 | every rule of §12.1 has a failing and a passing test, among them a forbid that can overflow |
 | C3 ([realms-codices#12](https://github.com/smart-social-contracts/realms-codices/issues/12)) | realms-codices | `realms legislation resolve` and `propose` (the commands live in realms-gos `cli/`) | S3, C1 | change list of §7 produced for the §5.6 bonus change |
-| C4 ([realms-codices#13](https://github.com/smart-social-contracts/realms-codices/issues/13)) | realms-codices | `realms legislation diff`: the analysis report on PRs | R1, C3 | report of §12.3 posted on a sample PR |
+| C4 ([realms-codices#13](https://github.com/smart-social-contracts/realms-codices/issues/13)) | realms-codices | `realms legislation diff`: the analysis report on PRs, by SymCC (the Cedar CLI 4.14.1, experimental flavour) with cvc5 1.3.1, both downloaded by version and checksum | R1, C3 | report of §12.3 posted on a sample PR |
 | C5 ([realms-codices#14](https://github.com/smart-social-contracts/realms-codices/issues/14)) | realms-codices | Review agora, dominion and syntropia as realistic templates (outside this design) | – | review written; follow-up issues opened if any |
 | D1 ([#486](https://github.com/smart-social-contracts/realms-gos/issues/486)) | realms-gos | LayeredCodex, ChapterSource and InstallJob entities; `pending` status and `activates_at`; legacy path kept | S3 | legacy installs still pass their tests |
 | D2 ([#487](https://github.com/smart-social-contracts/realms-gos/issues/487)) | realms-gos | Install task (§9.2): routes, vouching, whole releases, one-chain rule, disagreeing relays refused, steps safe to run twice, failure, one job at a time, timeout, paused job resumed by an admin, switch at the proposal's `effective_at` | D1, #504 | PocketIC test: install, failure at each step leaves the codex unchanged, retry works, a paused job resumes by an admin only |
 | D3 ([#488](https://github.com/smart-social-contracts/realms-gos/issues/488)) | realms-gos | Runtime (§9.3): loading, methods by GGG operation, marks, fail closed guards, `compute_`, `on_codex_activate` at activation | D1, S3, #503 | PocketIC: examples 5.2–5.4 behave as described; §5.2's working-day date is counted from the realm's local day |
-| D4 ([#489](https://github.com/smart-social-contracts/realms-gos/issues/489)) | realms-gos | Cedar per-operation actions and generated forbids with `each` (§9.4), also run at `tax_policy_draft` | S2, D3 | existing auth tests pass; §5.6 forbids enforced at propose and at draft; decision cost measured and recorded |
+| D4 ([#489](https://github.com/smart-social-contracts/realms-gos/issues/489)) | realms-gos | Cedar per-operation actions, per-list actions `<operation>.<list>` and generated forbids with `each` (§9.4), also run at `tax_policy_draft` | S2, D3 | existing auth tests pass; §5.6 forbids enforced at propose and at draft, on `tax_policy_propose.taxes` and `tax_policy_draft.taxes`; decision cost measured and recorded |
 | D5 ([#490](https://github.com/smart-social-contracts/realms-gos/issues/490)) | realms-gos | Revert floor and IT admin team (§10): the form of the admin-defined team is proposed first; `sync_source_remove` reserved. Note: `ggg_codex_revert` takes no argument today and cannot name the codex to restore; §10.1's "any earlier codex" needs one, and a revert does not run `on_codex_activate` | D2 | PocketIC: a codex that forbids everything is still reverted, both ways, under the restored codex's voting rules; no chapter blocks `sync_source_remove` |
 | D6 ([#491](https://github.com/smart-social-contracts/realms-gos/issues/491)) | realms-gos | Public record reads at install and read time: sync sources' published releases (§8) | G3 | install refuses a layer not in the record that vouches for it |
 | D7 ([#492](https://github.com/smart-social-contracts/realms-gos/issues/492)) | realms-gos | Scheduled sync-source checks (admin-set interval, `codex.check_now`), "Propose install", compliance at each check, follower reports as `ReportedLayer` (§11) | D2, D6 | PocketIC: interval change and forced check work; the button's proposal installs the release; past its effective date an older pin reads non-compliant; installing clears it |
@@ -1409,8 +2300,9 @@ is no G6.
 | [#500](https://github.com/smart-social-contracts/realms-gos/issues/500) | realms-gos | Linked realms: `sync_source_add`, `follower_accept`, records, serving chapter bytes, follower reports, leaving through the link event (§11) | G3, D1 | PocketIC: two realms link by both votes, the follower installs a relayed release from the source's capital, reports its layers, and leaves through the link event |
 | [#501](https://github.com/smart-social-contracts/realms-gos/issues/501) | realms-gos | Propagation across a realm's own quarters (§9.5): staging mode, the switch at T (the proposal's `effective_at`), quarter compliance, paused tasks resumed by an admin | D2, #504 | PocketIC: every quarter switches at T; a quarter not ready reads non-compliant; a task interrupted by an upgrade resumes only by an admin |
 | [#502](https://github.com/smart-social-contracts/realms-gos/issues/502) | realms-gos | Districts as zones: `User.home_zone`, `Zone.population`, `compute_realm_join` preferring a zone | G2 | PocketIC: a member with a home zone joins the quarter that holds it while capacity allows; capacity decides otherwise |
-| J1 ([realms-extensions#54](https://github.com/smart-social-contracts/realms-extensions/issues/54)) | realms-extensions | Core extension `journal`, the official journal (§9.6): one per realm, daily issues, sync-source releases as entries and, on a sync source, its own releases, JSON served by the canister as the authority, PDF print route with the logo, personal-data rules in config; added to `core-extensions.json` | D7, #503 | a new realm has the journal; an issue opens at local midnight, also across a DST change; a release found by the check appears as an entry; the print route renders; publication changes no `activates_at` |
+| [#528](https://github.com/smart-social-contracts/realms-gos/issues/528) | realms-gos | Quarters in different time zones, and the settings the realm sets for its quarters (§4.5, §9.5, §9.6): a quarter starts on its capital's zone, copied at `quarter_join_federation` unless the joining realm already chose one; `quarter_configure` gains `timezone` with a `check=`, and the capital pushes it to the quarter over `quarter.sync`; realm-wide counts use the capital's zone, local ones the quarter's; J1 uses the capital's, and a quarter's journal shows it; the identity and the shared foundations are kept in sync from the capital (pushed on change over `quarter.sync`, carried by `quarter_sync` so a quarter catches up, refused by a quarter's `realm_configure` with `Forbidden` naming the capital); the welcome message is copied at join like the zone and set through `quarter_configure`; a realm with another accounting currency code or decimals cannot join as a quarter; `adopt()` stops copying the name; a quarter in `setup` keeps `setup`, and `adopt()` launches a quarter it builds right after its first sync, and keeps it pending, looking again every `ADOPT_EVERY`, until the sync and the launch have both succeeded, so it takes the capital's stage (a quarter's `setup_launch` is refused with `Conflict` while its capital is in `setup`, and until the quarter's first sync) | [#511](https://github.com/smart-social-contracts/realms-gos/issues/511), #501, #499, ggg#21, ggg#24 (`welcome_message` on `QuarterConfigureArgs`) | multi-canister PocketIC: a quarter joins on its capital's zone and keeps it when the capital's changes, and a realm that already chose a zone keeps it on joining; the quarter and a realm-wide vote can each change it, and a malformed name, or a `timezone` with no `quarter`, is refused before any vote; a quarter that refuses or can't be reached leaves everything unchanged; a working-day count over a Madrid/Tokyo date difference uses the capital's zone for a realm-wide vote and the quarter's for its department; a switch at T is the same UTC instant in both; a hook cannot set a zone; with a capital and two quarters, a realm-wide change of the name, branding, manifesto and accounting currency reaches both, each keeps its own label, a quarter that can't be reached does not undo it and catches up at its next `quarter_sync`, and a quarter's `realm_configure` of a synced field is refused with `Forbidden` before any vote; the welcome message is copied once at join, kept by a realm that had one, and set by `quarter_configure`; a realm with another accounting currency code or decimals is refused at join; a federal vote on a synced field takes effect on the capital and reaches both quarters by the push, with no replay in them; a pushed stage change runs `on_stage_change` in the quarters; a failed first sync of a capital-built quarter is retried and the quarter launches |
+| J1 ([realms-extensions#54](https://github.com/smart-social-contracts/realms-extensions/issues/54)) | realms-extensions | Core extension `journal`, the official journal (§9.6): one per realm, daily issues, sync-source releases as entries and, on a sync source, its own releases, JSON served by the canister as the authority, PDF print route with the logo, personal-data rules in config; added to `core-extensions.json` | D7, #503 | a new realm has the journal; an issue opens at midnight on the capital's clock, also across a DST change; a quarter's journal issues nothing and shows the capital's; a release found by the check appears as an entry; the print route renders; publication changes no `activates_at` |
 
 Suggested order: R1 and R2 in parallel with G1, G4, G5, G7, ggg#9, #499, #503 and #504 → G2 and G3 → G8 →
-#505 → S1 → S2 and S3 → C1–C3 → D1 → D2 to D4 and #500 → D5 to D7, #501 and J1 → D8 and D9, #502 →
-C4 and C5.
+#505 → S1 → S2 and S3 → C1–C3 → D1 → D2 to D4 and #500 → D5 to D7, #501 and J1 → D8 and D9, #502,
+#528 (after #511, #501 and ggg#21) → C4 and C5.

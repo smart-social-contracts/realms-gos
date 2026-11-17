@@ -1,11 +1,11 @@
 import json
 
-from core import chain
-from api import proposals
-from api import quarters
-from core.db import Conflict, Fail, Forbidden, each, find, next_id
+from core import auth, chain
+from api import propagation, proposals, quarters
+from core.db import PAGE_MAX, Conflict, Fail, Forbidden, each, find, next_id, page
 from ggg import FederalVote, FederalVoteLeg, FederationMessage, Proposal, Quarter
 from core.op import GENERATOR, dispatch, op
+from core.ratio import ONE
 
 PASSED = ("accepted", "executed")
 
@@ -14,25 +14,36 @@ def leg_id(vote, quarter):
     return f"{vote}:{quarter}"
 
 
+def index_legs():
+    """Index every leg by its proposal: ``FederalVoteLeg.proposal_id`` gained its index with the layered codex
+    runtime, and the legs written before that release need their entries, once, where the realm starts."""
+    start = 1
+    while start is not None:
+        rows, start = page(FederalVoteLeg, {"from": start, "count": PAGE_MAX})
+        for leg in rows:
+            leg.db().field_index_add(leg._type, "proposal_id", leg.proposal_id, leg._id)  # the row id, as Row indexes it
+
+
 def freeze(action, rule, deadline):
     return quarters.digest({"action": action, "rule": rule, "deadline": deadline})
 
 
-def ballot(vote, action, deadline, proposer, by):
-    """The local leg of a federal vote: a realm-wide proposal with no action of its own."""
+def ballot(vote, action, deadline, proposer, by, prepared_by=""):
+    """The local leg of a federal vote: a realm-wide proposal with no action of its own. ``prepared_by`` is the delegate
+    whose pending action the proposer approved: it does not vote on the leg, nor do the proposer's other delegates."""
     p = proposals.new_proposal(f"{vote}: {action.get('title') or action['op']}", proposer, by, proposals.root(),
-                               None, f"Local leg of federal vote {vote}")
+                               None, f"Local leg of federal vote {vote}", prepared_by=prepared_by)
     p.deadline = deadline
     return p
 
 
-def open_vote(action, proposer, by, origin):
+def open_vote(action, proposer, by, origin, prepared_by=""):
     proposals.check_action(action)
     rule = quarters.published_rule()
     deadline = chain.now() + rule["window"]
     vid, h = next_id(FederalVote, "FV"), freeze(action, rule, deadline)
     body = {"vote": vid, "action": action, "rule": rule, "deadline": deadline, "hash": h, "proposer": proposer,
-            "origin": origin}
+            "origin": origin, "prepared_by": prepared_by}
     legs = {}
     for cid in [q.id for q in each(Quarter, "status", "active")]:
         reply = yield from quarters.ask(cid, "federation_message", {"topic": "federal_vote.open", "body": body})
@@ -40,7 +51,7 @@ def open_vote(action, proposer, by, origin):
             raise Fail(f"{cid} refused {vid}: {reply.get('error')}")
         legs[cid] = reply["proposal"]
     v = FederalVote(id=vid, origin_quarter=origin, action=action, rule=rule, hash=h, deadline=deadline)
-    legs[chain.self_id()] = ballot(vid, action, deadline, proposer, by).id
+    legs[chain.self_id()] = ballot(vid, action, deadline, proposer, by, prepared_by).id
     for cid, pid in legs.items():
         FederalVoteLeg(id=leg_id(vid, cid), vote=v, quarter=cid, proposal_id=pid, hash=h)
     return {"vote": vid, "hash": h, "deadline": deadline, "quarters": len(legs)}
@@ -53,15 +64,17 @@ def settle(leg):
         if result is None:
             raise Conflict(f"{p.id} is still open until {p.deadline}")
         tally, size, _ = proposals.count(p)
-        p.status, p.tally = result, {**(p.tally or {}), **tally, "eligible": size}
+        proposals.end(p, result)
+        p.tally = {**(p.tally or {}), **tally, "eligible": size}
     tally, size, _ = proposals.count(p)
     leg.outcome, leg.status = "passed" if p.status in PASSED else "failed", "reported"
     leg.yes, leg.no, leg.abstain, leg.eligible = tally["yes"], tally["no"], tally["abstain"], size
+    leg.codex, leg.compliance = quarters.codex()["id"], quarters.own_compliance()
 
 
 def leg_data(leg):
     return {"vote": leg.vote.id, "outcome": leg.outcome, "yes": leg.yes, "no": leg.no, "abstain": leg.abstain,
-            "eligible": leg.eligible, "hash": leg.hash}
+            "eligible": leg.eligible, "hash": leg.hash, "codex": leg.codex}
 
 
 def record_leg(q, data):
@@ -72,6 +85,8 @@ def record_leg(q, data):
         raise Fail(f"the leg does not match {leg.vote.id}'s published action and rule")
     leg.outcome, leg.status = "passed" if data["outcome"] == "passed" else "failed", "reported"
     leg.yes, leg.no, leg.abstain, leg.eligible = (int(data.get(k, 0)) for k in ("yes", "no", "abstain", "eligible"))
+    leg.codex = data.get("codex", "")
+    leg.compliance = propagation.judge(q, data.get("codex"), propagation.required())
 
 
 def rule_of(v):
@@ -88,14 +103,14 @@ def count(v):
     else:
         yes = sum(leg.outcome == "passed" for leg in reported)
         no = len(reported) - yes + (absent if rule["absent"] == "no" else 0)
-    status = "passed" if yes * 100 > int(rule["threshold"]) * (yes + no) else "failed"
+    status = "passed" if yes * ONE > int(rule["threshold"]) * (yes + no) else "failed"
     return status, {"yes": yes, "no": no, "absent": absent, "quarters": len(legs)}
 
 
 def withdraw(leg):
     p = Proposal[leg.proposal_id]
     if p is not None and p.status in proposals.OPEN:
-        p.status = "withdrawn"
+        proposals.end(p, "withdrawn")
     leg.status = "cancelled"
 
 
@@ -108,15 +123,25 @@ def execute(v):
     return json.loads(out)
 
 
-@op("federal_vote.propose")
+def proposing(user, args, grant):
+    """What a federal vote does: its action runs in every quarter, as the realm itself, if it passes."""
+    effect = ("The vote opens in every quarter of the federation. If it passes, its action runs in each of them as the "
+              "realm itself, not as you")
+    return [{"label": "What changes", "value": effect}]
+
+
+@op("federal_vote.propose", summary=proposing, title="Propose a federal vote")
 def federal_vote_propose(c, args):
     """Propose a federal vote titled ``title`` on ``action`` (``{"op": …, "args": …}``), held in every active quarter
     under the published rule; a quarter passes it to the capital. Returns ``vote``."""
     action = {**args["action"], "title": args["title"]}
+    proposals.check_action(action)
+    auth.refuse_forbidden_action(c.user, action)
     if not quarters.federated():
-        return (yield from open_vote(action, c.user, c.by, chain.self_id()))
+        return (yield from open_vote(action, c.user, c.by, chain.self_id(), c.prepared_by))
     reply = yield from quarters.ask(quarters.capital(), "federation_message",
-                                    {"topic": "federal_vote.propose", "body": {"action": action, "proposer": c.user}})
+                                    {"topic": "federal_vote.propose",
+                                     "body": {"action": action, "proposer": c.user, "prepared_by": c.prepared_by}})
     if not reply.get("ok"):
         raise Fail(f"the capital refused the vote: {reply.get('error')}")
     return {"vote": reply["vote"]}
@@ -170,7 +195,7 @@ def federal_vote_finalize(c, args):
 def on_propose(c, body):
     if quarters.federated():
         raise Forbidden("federal votes are opened by the capital")
-    return (yield from open_vote(body["action"], body["proposer"], c.by, c.by))
+    return (yield from open_vote(body["action"], body["proposer"], c.by, c.by, body.get("prepared_by", "")))
 
 
 def on_open(c, body):
@@ -181,7 +206,7 @@ def on_open(c, body):
         raise Conflict(f"{body['vote']} is already open here")
     v = FederalVote(id=body["vote"], origin_quarter=body["origin"], action=body["action"], rule=body["rule"],
                     hash=body["hash"], deadline=body["deadline"])
-    p = ballot(v.id, v.action, v.deadline, body["proposer"], c.by)
+    p = ballot(v.id, v.action, v.deadline, body["proposer"], c.by, body.get("prepared_by", ""))
     FederalVoteLeg(id=leg_id(v.id, chain.self_id()), vote=v, quarter=chain.self_id(), proposal_id=p.id, hash=v.hash)
     return {"proposal": p.id}
 
@@ -195,8 +220,12 @@ def mirrored(c, body):
 
 
 def on_result(c, body):
+    """A quarter runs a passed vote's action too, except one that changes a setting the capital keeps in sync: the
+    capital ran it, and its push brings the change here (a quarter would refuse it)."""
     v = mirrored(c, body)
     v.status = body["status"]
+    if v.status == "passed" and quarters.changes_synced(v.action):
+        return {"status": v.status, "result": {"ok": True, "skipped": "the capital's settings push carries it"}}
     if v.status == "passed":
         return {"status": v.status, "result": (yield from execute(v))}
     return {"status": v.status}
@@ -210,27 +239,37 @@ def on_cancel(c, body):
 
 
 TOPICS = {"user.arrive": quarters.on_arrive, "quarter.secede": quarters.on_secede, "codex": quarters.on_codex,
+          quarters.LOCAL_SETTINGS: quarters.on_local_settings, quarters.SETTINGS_TOPIC: quarters.on_settings,
+          propagation.STAGE: propagation.on_stage, propagation.UNSTAGE: propagation.on_unstage,
+          propagation.REVERT: propagation.on_revert,
           "federal_vote.propose": on_propose, "federal_vote.open": on_open, "federal_vote.result": on_result,
           "federal_vote.cancel": on_cancel}
+# The realm's own messages: only its own operations send them (an install, a revert, a realm-wide vote's
+# quarter_configure, a change of a synced setting), so federation_message never relays one for a member, or a chapter.
+OWN = propagation.OWN + (quarters.LOCAL_SETTINGS, quarters.SETTINGS_TOPIC)
 
 
 @op("quarter.sync")
 def federation_message(c, args):
-    """From a registered quarter: handle ``topic`` with ``body``. From a local holder of quarter.sync: send it out, to
-    quarter ``to`` or by default to every active quarter."""
+    """From a registered quarter: handle ``topic`` with ``body``, and record the checksum of the codex the sender ran,
+    the ``codex`` it carries, and its flag. From a local holder of quarter.sync: send it out, to quarter ``to`` or by
+    default to every active quarter."""
     topic, body = args["topic"], args.get("body", {})
     if Quarter[c.by] is None:
+        if topic in OWN:
+            raise Forbidden(f"{topic} is the realm's own: only its own operations send it, it is never relayed")
         targets = [find(Quarter, args["to"]).id] if args.get("to") else [
             q.id for q in each(Quarter, "status", "active")]
         replies = {}
         for cid in targets:
             replies[cid] = yield from quarters.ask(cid, "federation_message", {"topic": topic, "body": body})
         m = FederationMessage(id=next_id(FederationMessage, "FM"), topic=topic, source=chain.self_id(), body=body,
-                              response=replies)
+                              response=replies, codex=quarters.codex()["id"], compliance=quarters.own_compliance())
         return {"message": m.id, "replies": replies}
-    handler = TOPICS.get(topic)
+    flag, handler = Quarter[c.by].compliance, TOPICS.get(topic)  # read first: a quarter that secedes is forgotten
     out = handler(c, body) if handler else {}
     if isinstance(out, GENERATOR):
         out = yield from out
-    m = FederationMessage(id=next_id(FederationMessage, "FM"), topic=topic, source=c.by, body=body, response=out)
+    m = FederationMessage(id=next_id(FederationMessage, "FM"), topic=topic, source=c.by, body=body, response=out,
+                          codex=args.get("codex", ""), compliance=flag)
     return {"message": m.id, **out}

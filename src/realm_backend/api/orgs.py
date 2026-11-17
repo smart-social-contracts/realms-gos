@@ -1,9 +1,13 @@
 from core import chain
+from core import it_team
 from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
-from ggg import Appointment, Authority, Department, Organization, Position, User, UserProfile
+from ggg import Appointment, Authority, Department, Organization, Position, Proposal, Realm, User, UserProfile
+from ggg.identity.organization import KINDS
 from core.op import op
-from api.proposals import PENDING, holders, realm_wide, root
+from core.pending import held, principal, principals, quoted
+from core.ratio import ONE, refuse_renamed
+from api.proposals import BASES, PENDING, holders, launched, realm_wide, root
 
 ORG_MOVES = {"active": {"suspended", "dissolved"}, "suspended": {"active", "dissolved"}, "dissolved": set()}
 SEAT_FIELDS = ("title", "salary", "salary_period")
@@ -88,18 +92,19 @@ def profile_of(c, args):
 
 @op("org.create", governed=parent_of, returns="department")
 def department_create(c, args):
-    """Create ``department`` (a new name) under ``parent`` (default the root), with an optional ``description``.
-    Returns ``department``."""
+    """Create ``department`` (a new name) under ``parent`` (default the root), with an optional ``description`` and
+    ``kind`` (what the body is, such as plenary). Returns ``department``."""
     if Department[args["department"]]:
         raise Conflict(f"department {args['department']} exists")
-    d = Department(id=args["department"], description=args.get("description", ""), parent=parent_of(args))
+    d = Department(id=args["department"], description=args.get("description", ""), kind=args.get("kind", ""),
+                   parent=parent_of(args))
     return {"department": d.id}
 
 
 @op("org.set_policy", governed=dept)
 def department_edit(c, args):
-    """Edit ``department``: ``description``, ``parent`` (never itself or one of its sub-departments; the root has none)
-    and ``head`` (someone holding a seat in it, or "" for nobody); a field you leave out stays."""
+    """Edit ``department``: ``description``, ``kind``, ``parent`` (never itself or one of its sub-departments; the
+    root has none) and ``head`` (someone holding a seat in it, or "" for nobody); a field you leave out stays."""
     d = dept(args)
     parent = find(Department, args["parent"]) if args.get("parent") else None
     up = parent
@@ -111,7 +116,8 @@ def department_edit(c, args):
         raise Fail("the root department has no parent")
     if args.get("head") and args["head"] not in holders(d):
         raise Fail(f"{args['head']} holds no seat in {d.id}")
-    d.description, d.head = args.get("description", d.description), args.get("head", d.head)
+    d.description, d.kind = args.get("description", d.description), args.get("kind", d.kind)
+    d.head = args.get("head", d.head)
     if parent:
         d.parent = parent
 
@@ -123,25 +129,53 @@ def department_delete(c, args):
     d = dept(args)
     if d.is_root:
         raise Fail("the root department cannot be deleted")
+    if d.id == it_team.department_id():
+        raise Conflict(f"{d.id} is the IT admin team: designate another with it_team_set first")
     if list(d.children) or any(p.status != "closed" for p in d.positions):
         raise Conflict(f"{d.id} still has sub-departments or open positions")
-    if any(p.status in PENDING for p in d.proposals):
+    # d.proposals holds every proposal the department ever had, more than a call may load: look at the pending ones.
+    if any(p.department and p.department.id == d.id for status in PENDING for p in each(Proposal, "status", status)):
         raise Conflict(f"{d.id} still has proposals to vote on or run")
     d.delete()
 
 
-@op("org.set_policy", governed=dept)
+def policy_args(args):
+    """``(m, n, quorum, veto, threshold_of)`` of a ``department_set_policy`` call, refused if they make no policy."""
+    refuse_renamed(args, {"quorum_percent": "quorum"})
+    m, n, quorum, veto = int(args["m"]), int(args["n"]), int(args.get("quorum", 0)), args.get("veto", [])
+    if not 1 <= m <= n or not 0 <= quorum <= ONE:
+        raise Fail(f"a policy needs 1 <= m <= n and a quorum between 0 and {ONE} (100 %)")
+    basis = args.get("threshold_of")
+    if basis not in (None, *BASES):
+        raise Fail(f"threshold_of is one of {', '.join(BASES)}")
+    return m, n, quorum, veto, basis
+
+
+@op("org.set_policy", governed=dept, check=policy_args)
 def department_set_policy(c, args):
-    """Set how ``department`` approves: ``m`` of ``n`` approvals (1 ≤ m ≤ n), ``quorum_percent`` (0 to 100, default 0)
-    and ``veto``, principals holding a seat in it who can block (default none)."""
+    """Set how ``department`` approves: ``m`` of ``n`` approvals (1 ≤ m ≤ n), ``quorum`` (the share of its members who
+    must vote, 0 to 100000000 hundred-millionths, so 50 % is 50000000; default 0) and ``veto``, principals holding a
+    seat in it who can block (default none). ``threshold_of`` ``cast`` makes it decide by a majority of the votes cast
+    instead, as a council does: the yes votes must exceed the no votes, with ``quorum`` of ``n`` voting, a tie goes to a
+    second vote, and a tie in that one to its head's casting vote; ``m`` is not used then. Absent or ``eligible``, it
+    decides ``m`` of ``n``."""
     d = dept(args)
-    m, n, quorum, veto = int(args["m"]), int(args["n"]), int(args.get("quorum_percent", 0)), args.get("veto", [])
-    if not 1 <= m <= n or not 0 <= quorum <= 100:
-        raise Fail("a policy needs 1 <= m <= n and a quorum between 0 and 100")
+    m, n, quorum, veto, basis = policy_args(args)
     outsiders = sorted(set(veto) - holders(d))
     if outsiders:
         raise Fail(f"veto holders must hold a seat in {d.id}: {', '.join(outsiders)}")
-    d.policy = {"m": m, "n": n, "quorum_percent": quorum, "veto": list(veto)}
+    d.policy = {"m": m, "n": n, "quorum": quorum, "veto": list(veto), **({"threshold_of": basis} if basis else {})}
+
+
+@op("it_team.set", governed=launched)
+def it_team_set(c, args):
+    """Designate ``department`` as the IT admin team (docs/codices/layered-codex.md §10), or "" for none: its seat holders
+    start ``codex_revert_fast`` and are told when a codex method fails, and its own policy (m of n, quorum, veto) decides
+    a fast revert. Direct during setup, a realm-wide vote after launch. No codex can make this call or change the
+    department. Returns ``department``."""
+    team = find(Department, args["department"]).id if args["department"] else ""  # its alias, however it was named
+    Realm["1"].it_team = team
+    return {"department": team}
 
 
 def seat_view(pos):
@@ -162,7 +196,7 @@ def chart(d):
 def department_get(c, args):
     """``department`` with its parent, head and policy, and its ``positions`` with their holders."""
     d = dept(args)
-    return {"department": {**view(d, "id", "description", "is_root", "head", "policy"),
+    return {"department": {**view(d, "id", "description", "kind", "is_root", "head", "policy"),
                            "parent": d.parent.id if d.parent else ""},
             "positions": [seat_view(p) for p in d.positions]}
 
@@ -172,7 +206,7 @@ def department_list(c, args):
     """Departments, ``count`` rows at a time (default 100, at most 500) from row ``from`` (default 1).
     Returns ``departments`` and ``next``, the ``from`` of the next page (null at the end)."""
     rows, nxt = page(Department, args)
-    return {"departments": [{**view(d, "id", "description", "is_root", "head"),
+    return {"departments": [{**view(d, "id", "description", "kind", "is_root", "head"),
                              "parent": d.parent.id if d.parent else ""} for d in rows], "next": nxt}
 
 
@@ -283,37 +317,72 @@ def authority_revoke(c, args):
     find(Authority, args["authority"]).delete()
 
 
-def admin_of(c, args):
+def administered(user, args):
+    """The active organization named in ``args``, which ``user`` administers."""
     org = find(Organization, args["organization"])
-    if c.user not in org.admins:
+    if user not in org.admins:
         raise Forbidden(f"only {org.id}'s admins can do this")
     if org.status != "active":
         raise Conflict(f"{org.id} is {org.status}")
     return org
 
 
+def admin_of(c, args):
+    return administered(c.user, args)
+
+
+def kind_of(args, default):
+    """The ``kind`` an organization call names, or ``default`` when it names none."""
+    kind = args.get("kind", default)
+    if kind not in KINDS:
+        raise Fail(f"kind is one of {', '.join(KINDS)}")
+    return kind
+
+
 @op("organization.add", returns="organization")
 def organization_register(c, args):
-    """Register ``organization`` (a new name) with an optional ``description``; you become its only admin.
-    Returns ``organization``."""
+    """Register ``organization`` (a new name) with an optional ``description`` and ``kind`` (company, party, union,
+    association, or other, the default); you become its only admin. Returns ``organization``."""
     if Organization[args["organization"]]:
         raise Conflict(f"organization {args['organization']} exists")
-    Organization(id=args["organization"], description=args.get("description", ""), admins=[c.user])
+    Organization(id=args["organization"], description=args.get("description", ""), admins=[c.user],
+                 kind=kind_of(args, "other"))
     return {"organization": args["organization"]}
 
 
-@op("organization.edit", returns="organization")
+def changing_admins(user, args, grant):
+    """The admins of the organisation before and after: whoever is listed acts for it."""
+    org = administered(user, args)
+    return [{"label": "Admins now", "value": ", ".join(held(a) for a in org.admins or [])},
+            {"label": "Admins after", "value": principals(args.get("admins", org.admins or []), "admins")},
+            {"label": "What changes",
+             "value": f"Whoever is listed after this can edit {quoted(org.id)} and seat people to act for it; "
+                      "those left out lose that power"}]
+
+
+@op("organization.edit", returns="organization", summary=changing_admins, title="Change an organisation's admins")
 def organization_edit(c, args):
-    """As an admin of active ``organization``, change its ``description`` or replace its ``admins`` (at least one);
-    a field you leave out stays."""
+    """As an admin of active ``organization``, change its ``description``, its ``kind`` or replace its ``admins`` (at
+    least one); a field you leave out stays."""
     org = admin_of(c, args)
     if "admins" in args and not args["admins"]:
         raise Conflict("an organization keeps at least one admin")
+    org.kind = kind_of(args, org.kind)
     org.description, org.admins = args.get("description", org.description), args.get("admins", org.admins)
     return {"organization": org.id}
 
 
-@op("organization.edit", returns="appointment")
+def seating(user, args, grant):
+    """Who will act for the organisation, and in which seat."""
+    org, pos = administered(user, args), Position[args["position"]]
+    seat = quoted(pos.title or pos.id) if pos else f"a new seat {quoted(args.get('title') or args['position'])}"
+    person = principal(args["user"])
+    agent = f", as an agent supervised by {principal(args.get('supervisor'))}" if args.get("agent") else ""
+    return [{"label": "Person seated", "value": person}, {"label": "Seat to fill", "value": seat},
+            {"label": "What changes", "value": f"{person} will act for {quoted(org.id)} in {seat}{agent}"}]
+
+
+@op("organization.edit", returns="appointment", summary=seating, title="Seat someone to act for an organisation")
 def representative_add(c, args):
     """As an admin of ``organization``, seat ``user`` in its seat ``position``, created if new with ``title``,
     ``profile`` and ``headcount`` (default 1); ``agent`` true needs a ``supervisor`` holding a non-agent seat there.
@@ -356,13 +425,15 @@ def organization_set_status(c, args):
 def organization_get(c, args):
     """``organization`` with its status and admins, and its ``positions`` with their holders."""
     org = find(Organization, args["organization"])
-    return {"organization": view(org, "id", "description", "status", "admins"),
+    return {"organization": view(org, "id", "description", "status", "admins", "kind"),
             "positions": [seat_view(p) for p in org.positions]}
 
 
 @op("realm.data_view", read=True, returns="organizations")
 def organization_list(c, args):
     """Organizations, ``count`` rows at a time (default 100, at most 500) from row ``from``, optionally only those with
-    ``status``. Returns ``organizations`` and ``next``; a filtered page can be short or empty, so follow ``next``."""
-    rows, nxt = page(Organization, args, lambda o: not args.get("status") or o.status == args["status"])
-    return {"organizations": [view(o, "id", "description", "status") for o in rows], "next": nxt}
+    ``status`` or ``kind``. Returns ``organizations`` and ``next``; a filtered page can be short or empty, so follow
+    ``next``."""
+    wanted = {f: args[f] for f in ("status", "kind") if args.get(f)}
+    rows, nxt = page(Organization, args, lambda o: all(getattr(o, f) == v for f, v in wanted.items()))
+    return {"organizations": [view(o, "id", "description", "status", "kind") for o in rows], "next": nxt}

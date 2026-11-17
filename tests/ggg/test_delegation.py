@@ -174,6 +174,7 @@ def infrastructure():
     world.build()
     world.policy(Department["Infrastructure"], 2, 3)
     Department["Infrastructure"].head = "bob"
+    world.seat("infrastructure.board", "bob", Department["Infrastructure"])  # a head votes with the seat they hold
 
 
 def rename_for_carla(nickname="Cara"):

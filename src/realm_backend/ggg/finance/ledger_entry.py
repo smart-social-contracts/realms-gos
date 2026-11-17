@@ -22,5 +22,6 @@ class LedgerEntry(Row):
     case = ManyToOne("Case", "ledger_entries")
     penalty = ManyToOne("Penalty", "ledger_entries")
     appeal = ManyToOne("Appeal", "ledger_entries")
+    sweep = ManyToOne("Sweep", "ledger_entries")
     at = Integer(default=0)
     description = String(default="")
