@@ -3,8 +3,8 @@ one drops the oldest, and that must cost an update next to nothing. It cost abou
 cheapest updates (Entity.delete looks through the relations of all 93 entity classes, and the row is loaded first):
 profile_update was 26 M at 1,990 events and 47 M at 2,030.
 
-The upgrade runs from the previous release's own wasm, named by ``REALM_PREVIOUS_WASM``, or from this release's when it
-is unset, which CI can always build: the rows of the log are the same in both.
+The upgrade runs from the previous release's own wasm, named by ``REALM_PREVIOUS_WASM`` (skipped when unset), and from
+this release's, which CI can always build.
 """
 
 import json
@@ -131,11 +131,14 @@ def test_dropping_an_event_from_a_full_log_costs_a_fraction_of_an_update(realm, 
     assert spent < MARGIN
 
 
-@pytest.fixture(scope="module")
-def upgraded(wasm_of, people):
-    """A realm of the previous release whose log is full, the oldest rows of it three events of a grant, and the cost of an
-    update before it was; then upgraded to this release, which drops those rows as the log moves on."""
-    realm = Canister(PREVIOUS or wasm_of("production"), installer=people["installer"])
+@pytest.fixture(scope="module", params=[
+    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
+    "current"])
+def upgraded(request, wasm_of, people):
+    """A realm of the previous release, or of this one, whose log is full, the oldest rows of it three events of a grant,
+    and the cost of an update before it was; then upgraded to this release, which drops those rows as the log moves on."""
+    current = wasm_of("production")
+    realm = Canister(PREVIOUS if request.param == "previous" else current, installer=people["installer"])
     launch(realm, people)
     alice = people["alice"]
     shell(realm, FILL, count=3, user=alice, grant="D-1")
@@ -145,7 +148,7 @@ def upgraded(wasm_of, people):
     record_until(realm, oldest + KEPT - 1, alice)
     realm.state = held(realm)
     realm.wait(600)  # PocketIC refuses an upgrade right after the install of a wasm this big
-    realm.upgrade(wasm_of("production"))
+    realm.upgrade(current)
     return realm
 
 
