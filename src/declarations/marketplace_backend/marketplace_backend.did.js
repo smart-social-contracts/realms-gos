@@ -4,6 +4,38 @@ export const idlFactory = ({ IDL }) => {
     'file_registry' : IDL.Opt(IDL.Text),
   });
   const GenericResult = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
+  const AdminListing = IDL.Record({
+    'updated_at' : IDL.Float64,
+    'name' : IDL.Text,
+    'developer_name' : IDL.Text,
+    'verification_notes' : IDL.Text,
+    'installs' : IDL.Nat64,
+    'item_kind' : IDL.Text,
+    'created_at' : IDL.Float64,
+    'verification_status' : IDL.Text,
+    'likes' : IDL.Nat64,
+    'version' : IDL.Text,
+    'is_active' : IDL.Bool,
+    'item_id' : IDL.Text,
+    'file_registry_namespace' : IDL.Text,
+    'developer' : IDL.Text,
+  });
+  const AdminUser = IDL.Record({
+    'is_suspended' : IDL.Bool,
+    'principal' : IDL.Text,
+    'extensions_count' : IDL.Nat64,
+    'is_admin' : IDL.Bool,
+    'is_reviewer' : IDL.Bool,
+    'display_name' : IDL.Text,
+    'license_active' : IDL.Bool,
+    'assistants_count' : IDL.Nat64,
+    'codices_count' : IDL.Nat64,
+    'license_note' : IDL.Text,
+    'license_payment_method' : IDL.Text,
+    'license_expires_at' : IDL.Float64,
+    'suspended_reason' : IDL.Text,
+    'has_license' : IDL.Bool,
+  });
   const DeveloperLicense = IDL.Record({
     'last_payment_amount_usd_cents' : IDL.Nat64,
     'principal' : IDL.Text,
@@ -72,6 +104,7 @@ export const idlFactory = ({ IDL }) => {
     'updated_at' : IDL.Float64,
     'icon' : IDL.Text,
     'name' : IDL.Text,
+    'developer_name' : IDL.Text,
     'verification_notes' : IDL.Text,
     'requested_permissions' : IDL.Text,
     'languages' : IDL.Text,
@@ -92,7 +125,6 @@ export const idlFactory = ({ IDL }) => {
     'runtime' : IDL.Text,
     'file_registry_namespace' : IDL.Text,
     'developer' : IDL.Text,
-    'developer_name' : IDL.Text,
     'pricing_summary' : IDL.Text,
   });
   const AssistantResult = IDL.Variant({
@@ -104,6 +136,7 @@ export const idlFactory = ({ IDL }) => {
     'updated_at' : IDL.Float64,
     'icon' : IDL.Text,
     'name' : IDL.Text,
+    'developer_name' : IDL.Text,
     'verification_notes' : IDL.Text,
     'installs' : IDL.Nat64,
     'description' : IDL.Text,
@@ -119,7 +152,6 @@ export const idlFactory = ({ IDL }) => {
     'price_e8s' : IDL.Nat64,
     'file_registry_namespace' : IDL.Text,
     'developer' : IDL.Text,
-    'developer_name' : IDL.Text,
   });
   const CodexResult = IDL.Variant({ 'Ok' : CodexListing, 'Err' : IDL.Text });
   const ExtensionListing = IDL.Record({
@@ -128,6 +160,7 @@ export const idlFactory = ({ IDL }) => {
     'extension_id' : IDL.Text,
     'icon' : IDL.Text,
     'name' : IDL.Text,
+    'developer_name' : IDL.Text,
     'verification_notes' : IDL.Text,
     'installs' : IDL.Nat64,
     'download_url' : IDL.Text,
@@ -142,7 +175,6 @@ export const idlFactory = ({ IDL }) => {
     'price_e8s' : IDL.Nat64,
     'file_registry_namespace' : IDL.Text,
     'developer' : IDL.Text,
-    'developer_name' : IDL.Text,
   });
   const ExtensionResult = IDL.Variant({
     'Ok' : ExtensionListing,
@@ -167,6 +199,11 @@ export const idlFactory = ({ IDL }) => {
     'price_paid_e8s' : IDL.Nat64,
     'item_id' : IDL.Text,
     'developer' : IDL.Text,
+  });
+  const MyRolesRecord = IDL.Record({
+    'is_admin' : IDL.Bool,
+    'is_reviewer' : IDL.Bool,
+    'is_controller' : IDL.Bool,
   });
   const Header = IDL.Tuple(IDL.Text, IDL.Text);
   const HttpRequest = IDL.Record({
@@ -211,43 +248,6 @@ export const idlFactory = ({ IDL }) => {
   const ExtensionPage = IDL.Record({
     'listings' : IDL.Vec(ExtensionListing),
     'next_cursor' : IDL.Nat64,
-  });
-  const AdminListing = IDL.Record({
-    'updated_at' : IDL.Float64,
-    'name' : IDL.Text,
-    'item_kind' : IDL.Text,
-    'verification_status' : IDL.Text,
-    'installs' : IDL.Nat64,
-    'developer_name' : IDL.Text,
-    'is_active' : IDL.Bool,
-    'created_at' : IDL.Float64,
-    'version' : IDL.Text,
-    'likes' : IDL.Nat64,
-    'verification_notes' : IDL.Text,
-    'item_id' : IDL.Text,
-    'file_registry_namespace' : IDL.Text,
-    'developer' : IDL.Text,
-  });
-  const AdminUser = IDL.Record({
-    'principal' : IDL.Text,
-    'display_name' : IDL.Text,
-    'is_admin' : IDL.Bool,
-    'is_reviewer' : IDL.Bool,
-    'is_suspended' : IDL.Bool,
-    'suspended_reason' : IDL.Text,
-    'has_license' : IDL.Bool,
-    'license_active' : IDL.Bool,
-    'license_expires_at' : IDL.Float64,
-    'license_payment_method' : IDL.Text,
-    'license_note' : IDL.Text,
-    'extensions_count' : IDL.Nat64,
-    'codices_count' : IDL.Nat64,
-    'assistants_count' : IDL.Nat64,
-  });
-  const MyRolesRecord = IDL.Record({
-    'is_controller' : IDL.Bool,
-    'is_admin' : IDL.Bool,
-    'is_reviewer' : IDL.Bool,
   });
   const PendingAudit = IDL.Record({
     'updated_at' : IDL.Float64,
@@ -295,6 +295,7 @@ export const idlFactory = ({ IDL }) => {
     'add_admin' : IDL.Func([IDL.Text], [GenericResult], []),
     'add_reviewer' : IDL.Func([IDL.Text], [GenericResult], []),
     'admin_approve_namespace' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+    'admin_grant_publisher' : IDL.Func([IDL.Text], [IDL.Text], []),
     'admin_list_listings' : IDL.Func([], [IDL.Vec(AdminListing)], ['query']),
     'admin_list_users' : IDL.Func([], [IDL.Vec(AdminUser)], ['query']),
     'admin_set_developer_name' : IDL.Func([IDL.Text], [IDL.Text], []),
@@ -308,22 +309,20 @@ export const idlFactory = ({ IDL }) => {
         [GenericResult],
         [],
       ),
-    'get_my_roles' : IDL.Func([], [MyRolesRecord], ['query']),
-    'list_admins' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
-    'remove_admin' : IDL.Func([IDL.Text], [GenericResult], []),
+    'admin_status' : IDL.Func([], [IDL.Text], ['query']),
     'buy_assistant' : IDL.Func([IDL.Text], [GenericResult], []),
     'buy_codex' : IDL.Func([IDL.Text], [GenericResult], []),
     'buy_extension' : IDL.Func([IDL.Text], [GenericResult], []),
     'check_license' : IDL.Func([IDL.Text], [LicenseResult], ['query']),
+    'check_upload' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text],
+        [IDL.Text],
+        ['query'],
+      ),
     'create_assistant' : IDL.Func([AssistantInput], [GenericResult], []),
     'create_codex' : IDL.Func([CodexInput], [GenericResult], []),
     'create_extension' : IDL.Func([ExtensionInput], [GenericResult], []),
     'delist_assistant' : IDL.Func([IDL.Text], [GenericResult], []),
-    'transfer_listing' : IDL.Func(
-        [IDL.Text, IDL.Text, IDL.Text],
-        [GenericResult],
-        [],
-      ),
     'delist_codex' : IDL.Func([IDL.Text], [GenericResult], []),
     'delist_extension' : IDL.Func([IDL.Text], [GenericResult], []),
     'get_assistant_details' : IDL.Func(
@@ -347,6 +346,8 @@ export const idlFactory = ({ IDL }) => {
     'get_my_codices' : IDL.Func([], [IDL.Vec(CodexListing)], ['query']),
     'get_my_extensions' : IDL.Func([], [IDL.Vec(ExtensionListing)], ['query']),
     'get_my_purchases' : IDL.Func([], [IDL.Vec(PurchaseRecord)], ['query']),
+    'get_my_roles' : IDL.Func([], [MyRolesRecord], ['query']),
+    'get_purchases_enabled' : IDL.Func([], [IDL.Bool], ['query']),
     'grant_manual_license' : IDL.Func(
         [IDL.Text, IDL.Nat64, IDL.Text],
         [GenericResult],
@@ -376,6 +377,7 @@ export const idlFactory = ({ IDL }) => {
     'http_request' : IDL.Func([HttpRequest], [HttpResponseIncoming], ['query']),
     'http_request_update' : IDL.Func([HttpRequest], [HttpResponseIncoming], []),
     'like_item' : IDL.Func([IDL.Text, IDL.Text], [GenericResult], []),
+    'list_admins' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
     'list_marketplace_assistants' : IDL.Func(
         [IDL.Nat64, IDL.Nat64, IDL.Bool],
         [AssistantListResult],
@@ -409,16 +411,16 @@ export const idlFactory = ({ IDL }) => {
     'list_pending_audits' : IDL.Func([], [IDL.Vec(PendingAudit)], ['query']),
     'list_reviewers' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
     'my_likes' : IDL.Func([], [IDL.Vec(LikeRecord)], ['query']),
+    'prepare_upload' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
     'record_license_payment' : IDL.Func(
         [LicensePaymentInput],
         [GenericResult],
         [],
       ),
     'recount_listing_likes' : IDL.Func([], [GenericResult], []),
+    'remove_admin' : IDL.Func([IDL.Text], [GenericResult], []),
     'remove_reviewer' : IDL.Func([IDL.Text], [GenericResult], []),
     'request_audit' : IDL.Func([IDL.Text, IDL.Text], [GenericResult], []),
-    'check_upload' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], ['query']),
-    'prepare_upload' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
     'review_listing' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Bool, IDL.Text],
         [IDL.Text],
@@ -467,6 +469,7 @@ export const idlFactory = ({ IDL }) => {
         [GenericResult],
         [],
       ),
+    'set_purchases_enabled' : IDL.Func([IDL.Bool], [GenericResult], []),
     'set_verification_status' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Text, IDL.Text],
         [GenericResult],
@@ -502,6 +505,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Nat64, IDL.Bool],
         [IDL.Vec(ExtensionListing)],
         ['query'],
+      ),
+    'transfer_listing' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text],
+        [GenericResult],
+        [],
       ),
     'unlike_item' : IDL.Func([IDL.Text, IDL.Text], [GenericResult], []),
     'update_assistant' : IDL.Func([AssistantInput], [GenericResult], []),
