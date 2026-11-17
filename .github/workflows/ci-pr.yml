@@ -15,6 +15,11 @@ on:
   pull_request:
     branches: [main, "feat/**"]
   workflow_dispatch:
+    inputs:
+      previous_release:
+        description: "Release tag whose realm wasm the realm-wasm upgrade tests start from (empty: REALM_PREVIOUS_RELEASE)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -27,6 +32,9 @@ env:
   PYTHON_VERSION: "3.10"
   NODE_VERSION: "20"
   DFX_VERSION: "0.32.0"
+  # The release the realm-wasm job upgrades from: the latest stable one, which the realms in the field run. Pinned, so
+  # that publishing a release cannot turn an unrelated PR red. Bump it when a release ships.
+  REALM_PREVIOUS_RELEASE: "v0.7.0"
 
 jobs:
   lint:
@@ -130,6 +138,23 @@ jobs:
           sudo tar -xzf /tmp/dfx.tar.gz -C /usr/local/bin
           dfx cache install
           echo "POCKET_IC_BIN=$(dfx cache show)/pocket-ic" >> "$GITHUB_ENV"
+      # The upgrade tests that start from the previous release's own wasm (test_upgrade_chain, and the "previous" case
+      # of the others) read it from REALM_PREVIOUS_WASM and skip without it, which they did on every run until this
+      # step. A release without the asset fails here rather than letting them skip again. A dispatch may name another
+      # release, such as the one a given canister runs.
+      - name: The previous release's realm wasm
+        env:
+          TAG: ${{ inputs.previous_release || env.REALM_PREVIOUS_RELEASE }}
+        run: |
+          dir="$RUNNER_TEMP/previous-release"
+          mkdir -p "$dir" && cd "$dir"
+          for asset in "realm-backend-$TAG.wasm.gz" "checksums-$TAG.txt"; do
+            curl -fsSL -o "$asset" "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$asset" \
+              || { echo "::error::release $TAG has no $asset, which the upgrade tests install"; exit 1; }
+          done
+          sha256sum --check --ignore-missing "checksums-$TAG.txt"
+          gunzip "realm-backend-$TAG.wasm.gz"
+          echo "REALM_PREVIOUS_WASM=$dir/realm-backend-$TAG.wasm" >> "$GITHUB_ENV"
       - name: Realm wasms on PocketIC
         run: pytest -q tests/deployed
 

@@ -7,6 +7,11 @@ the dfx cache. Create instances with `pic.new_pocket_ic()` (the classes below do
 answers 409 "busy" to anything sent during a slow round, such as the install of an 11 MB wasm, and it waits instead
 of failing.
 
+The upgrade tests that start from the previous release's own wasm (`test_upgrade_chain.py`, and the `previous` case
+of others) read its path from `REALM_PREVIOUS_WASM` and skip without it. CI sets it to the `realm-backend-<tag>.wasm.gz`
+asset of `REALM_PREVIOUS_RELEASE` in `.github/workflows/ci-pr.yml`, unpacked; set it the same way to run them
+locally, or to a canister's own release to rehearse that canister's upgrade.
+
 | File | What it gives a test |
 |---|---|
 | `pic.py` | `Canister`: one canister on its own PocketIC instance. `call` runs an operation, `shell` runs Python in its heap, `wait` moves the clock, `upgrade` upgrades it in place, `stop` and `start` make it reject calls for a while. `Wasm`: a wasm uploaded once, for canisters of one instance to install from |
