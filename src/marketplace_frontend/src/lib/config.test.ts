@@ -13,7 +13,7 @@ describe('runtimeCanisterId', () => {
   });
 
   it('is empty when the key, the object or the value is missing', () => {
-    assert.equal(runtimeCanisterId('marketplace_backend', {}), 'RED-PROOF planted defect');
+    assert.equal(runtimeCanisterId('marketplace_backend', {}), '');
     assert.equal(runtimeCanisterId('marketplace_backend', undefined), '');
     assert.equal(runtimeCanisterId('marketplace_backend', { marketplace_backend: '  ' }), '');
     assert.equal(runtimeCanisterId('marketplace_backend', { marketplace_backend: 42 }), '');
