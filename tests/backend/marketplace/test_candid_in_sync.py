@@ -73,7 +73,6 @@ def test_did_service_is_what_the_source_exports():
 @pytest.mark.parametrize(
     "filename, methods_in",
     [
-        ("marketplace_backend.did", methods_in_did),
         ("marketplace_backend.did.js", methods_in_idl_factory),
         ("marketplace_backend.did.d.ts", methods_in_typescript),
     ],
@@ -84,12 +83,12 @@ def test_declarations_have_the_did_service(filename, methods_in):
     assert_same_methods(declared, expected, f"declarations/{filename}")
 
 
-def test_declarations_did_has_the_signatures_of_the_did():
-    service_of = marketplace_candid.service_of
-    declared = service_of((DECLARATIONS / "marketplace_backend.did").read_text())
-    assert declared == service_of(
-        DID.read_text()
-    ), f"declarations/marketplace_backend.did has other signatures. {REGENERATE}"
+def test_declarations_did_is_a_copy_of_the_did():
+    # dfx generate copies the file as it is, so the types and the header match too
+    copy = (DECLARATIONS / "marketplace_backend.did").read_text()
+    assert (
+        copy == DID.read_text()
+    ), f"declarations/marketplace_backend.did differs from the .did. {REGENERATE}"
 
 
 def test_did_declares_only_types_its_service_reaches():
