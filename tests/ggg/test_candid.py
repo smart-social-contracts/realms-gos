@@ -73,7 +73,7 @@ def test_main_loads_every_method():
 
 def test_icrc10_lists_icrc10_and_the_ggg_did_implemented():
     names = {s["name"]: s["url"] for s in ggg_methods.icrc10_supported_standards()}
-    assert set(names) == {"ICRC-10", "GGG"} and names["GGG"].endswith("/blob/v0.1.0/ggg.did")
+    assert set(names) == {"ICRC-10", "GGG"} and names["GGG"].endswith(f"/blob/v{gen.ggg_version()}/ggg.did")
 
 
 def test_realm_info_converts_to_ggg():

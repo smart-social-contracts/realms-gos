@@ -141,4 +141,6 @@ A new version is a new namespace (`ext/hello/1.0.1`) and needs its own approval.
 - [ ] Backend functions take keyword arguments and return plain data.
 - [ ] `entry_access.functions` lists every function the UI calls.
 - [ ] `frontend/dist/index.html` is built, with relative asset paths.
+- [ ] `manifest.json` is at most 65,536 characters (as the realm stores it) and no file of `frontend/` over 1.9 MB:
+  the install refuses a larger package, naming the file.
 - [ ] `version` is bumped for every publish.

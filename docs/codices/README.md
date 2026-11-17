@@ -81,7 +81,7 @@ levels deep, or whose `id` and `version` are not text or whose `hooks` and `capa
 code that is not UTF-8 or a file that is not base64, are refused with the file named. So is a reply of the registry
 that is not a record, a call to it that fails (it ran out of instructions on a large file, or its reply is over the
 limit), and a reply that holds a lone surrogate: the install fails, with the reason recorded, and the vote or the
-timer that ran it concludes. An extension's install (`extension_install`) reads its manifest the same way. The checks
+timer that ran it concludes. An extension's install (`extension_install`) reads its manifest the same way (it nests no deeper than a codex's may), and the frontend it copies from the registry: the listing, each chunk and the store call to the realm's frontend are held to a record or a list, a count and base64, or refused with the file named. The checks
 are the same on the canister, whose JSON and base64 are its own and stop at limits of their own: whatever they raise
 is caught, and the shapes are tested there (`tests/deployed/test_registry_path.py`).
 

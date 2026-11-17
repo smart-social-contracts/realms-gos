@@ -5,7 +5,7 @@ from core import chain
 from core.candid import quote
 from core import sandbox
 from core import surrogates
-from core.db import Fail, Forbidden, Unavailable, find, page, view
+from core.db import JSON_MAX, Fail, Forbidden, Unavailable, find, page, view
 from ggg import Department, Extension, Realm, User, UserProfile
 from core.op import dispatch, on_behalf, op, run
 from api.proposals import appointed, realm_wide
@@ -13,6 +13,15 @@ from api.proposals import appointed, realm_wide
 SIDEBAR = ("show_in_sidebar", "sidebar_label", "categories", "icon")
 # What the frontend needs from the installed manifest to host an extension.
 HOST = ("description", "runtime", "sdk_version", "capabilities", "entry_access", "backend")
+# Bytes of one frontend file the realm copies. The file goes to the realm's frontend in one ``store`` call, whose
+# argument is the file and about 120 bytes more (the key and the content type add theirs): a call to a canister on
+# another subnet may carry 2 MiB (2,097,152 bytes; one on the same subnet 10 MiB), so the limit stays 200 kB below the
+# smaller. The message that builds the call costs 5.9 billion instructions for 1,056,837 bytes (maplibre-gl.js, the
+# largest file of the extensions' bundles at the pin) and 11.2 billion at the limit, of the 40 billion a message may
+# run (it traps between 5 and 7 MB).
+FRONTEND_FILE_MAX = 1_900_000
+CHUNK_MAX = 128 * 1024  # bytes the registry hands out per get_file_chunk
+CHUNKS_MAX = FRONTEND_FILE_MAX // CHUNK_MAX + 1  # what a file of the most the realm copies takes
 
 
 def registry():
@@ -26,16 +35,17 @@ def checksum(manifest, source):
     return sandbox.sha256(json.dumps(manifest, sort_keys=True) + "\n" + source)
 
 
-def registry_record(text, what):
-    """The record the file registry's reply ``text`` to ``what`` holds, or a Fail: a reply that is not JSON (or is
-    nested too deep to parse) or is not a record raised in the parse or in the ``.get`` that read it, which is a trap:
-    the vote or the timer that ran the install never concluded."""
+def registry_record(text, what, kind=dict):
+    """The record the file registry's reply ``text`` to ``what`` holds (a list when ``kind`` is ``list``: ``list_files``
+    answers one), or a Fail: a reply that is not JSON (or is nested too deep to parse) or is not a record raised in the
+    parse or in the ``.get`` that read it, which is a trap: the vote or the timer that ran the install never
+    concluded."""
     try:
         reply = json.loads(text)
     except Exception as e:  # noqa: BLE001  a ValueError, or a RecursionError on a reply nested too deep
         raise Fail(f"the file registry's reply to {what} is not JSON: {str(e)[:200]}")
-    if not isinstance(reply, dict):
-        raise Fail(f"the file registry's reply to {what} is not a record")
+    if not isinstance(reply, kind):
+        raise Fail(f"the file registry's reply to {what} is not a {'record' if kind is dict else 'list'}")
     return reply
 
 
@@ -94,17 +104,22 @@ def trust(digest, namespace=None, path=None):
     return approval["approver"]
 
 
+def decoded_content(content, what):
+    """The bytes of ``content``, the ``content_b64`` of a registry's reply, or a Fail naming ``what`` (not text, not
+    base64)."""
+    if not isinstance(content, str):
+        raise Fail(f"{what}: content_b64 is not text")
+    try:
+        return base64.b64decode(content)
+    except Exception as e:  # noqa: BLE001  binascii.Error here, whatever the canister's own base64 raises
+        raise Fail(f"{what} is not base64: {str(e)[:200]}")
+
+
 def fetch(namespace, path):
     reply = yield from ask("get_file", namespace, path)
     if "content_b64" not in reply:
         raise Fail(f"{namespace}/{path}: {reply.get('error')}")
-    content = reply["content_b64"]
-    if not isinstance(content, str):
-        raise Fail(f"{namespace}/{path}: content_b64 is not text")
-    try:
-        raw = base64.b64decode(content)
-    except Exception as e:  # noqa: BLE001  binascii.Error here, whatever the canister's own base64 raises
-        raise Fail(f"{namespace}/{path} is not base64: {str(e)[:200]}")
+    raw = decoded_content(reply["content_b64"], f"{namespace}/{path}")
     try:
         text = raw.decode()
     except UnicodeDecodeError as e:
@@ -117,28 +132,55 @@ def fetch(namespace, path):
 def publish_frontend(namespace, prefix):
     """Copy the registry's ``frontend/**`` files of ``namespace`` into the realm's frontend under ``prefix``, where
     the realm frontend loads extension bundles from. The realm holds ``Commit`` on its frontend for this. Nothing to
-    do when the realm has no frontend of its own. A generator; returns how many files it copied."""
+    do when the realm has no frontend of its own. A generator; returns how many files it copied.
+
+    A file is read in chunks, each its own message, and stored in one call. A registry that never says a file has ended
+    would otherwise be asked for chunks until the realm's heap ran out, a canister that is stopping never stops while it
+    keeps making calls, and the file that finally ended would be too large for the message that builds the store call,
+    which traps. So a file is a Fail as soon as it is over ``FRONTEND_FILE_MAX`` bytes, and when it is not over after
+    ``CHUNKS_MAX`` chunks (a registry that sends a byte a chunk would take 1.9 million calls to pass the first bound).
+    A chunk whose ``length`` is not the bytes it carries is a Fail too: one that says 128 KB and sends none would go on
+    for ever."""
     frontend = Realm["1"].frontend_canister_id
     if not frontend:
         return 0
-    files = json.loads((yield from chain.call_text(registry(), "list_files", json.dumps({"namespace": namespace}))))
+    files = registry_record((yield from registry_call("list_files", json.dumps({"namespace": namespace}), namespace)),
+                            f"list_files {namespace}", list)
     copied = 0
     for entry in files:
+        listed = isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        if not listed or not isinstance(entry.get("content_type") or "", str):
+            raise Fail(f"the file registry's list_files for {namespace} lists an entry without a path, or with a "
+                       "content type that is not text")
         if not entry["path"].startswith("frontend/"):
             continue
-        data, offset, eof = b"", 0, False
-        while not eof:  # the registry hands out at most 128 KB per call
-            arg = json.dumps({"namespace": namespace, "path": entry["path"], "offset": offset})
-            reply = json.loads((yield from chain.call_text(registry(), "get_file_chunk", arg)))
+        what = f"{namespace}/{entry['path']}"
+        data, chunks, eof = b"", 0, False
+        while not eof:
+            arg = json.dumps({"namespace": namespace, "path": entry["path"], "offset": len(data)})
+            reply = registry_record((yield from registry_call("get_file_chunk", arg, what)), f"get_file_chunk {what}")
             if "content_b64" not in reply:
-                raise Fail(f"{namespace}/{entry['path']}: {reply.get('error')}")
-            data += base64.b64decode(reply["content_b64"])
-            offset, eof = offset + reply["length"], reply["eof"] or reply["length"] == 0
+                raise Fail(f"{what}: {reply.get('error')}")
+            chunk = decoded_content(reply["content_b64"], what)
+            length = reply.get("length")
+            if not isinstance(length, int) or isinstance(length, bool) or length < 0 or "eof" not in reply:
+                raise Fail(f"{what}: the reply to get_file_chunk has no length (a count) or no eof")
+            if length != len(chunk):
+                raise Fail(f"{what}: the reply to get_file_chunk says {length} bytes and carries {len(chunk)}")
+            data, chunks, eof = data + chunk, chunks + 1, bool(reply["eof"]) or length == 0
+            if len(data) > FRONTEND_FILE_MAX:
+                raise Fail(f"{what} is larger than the {FRONTEND_FILE_MAX} bytes the realm copies to its frontend")
+            if not eof and chunks == CHUNKS_MAX:
+                raise Fail(f"{what} comes in more than {CHUNKS_MAX} chunks, the most a file of {FRONTEND_FILE_MAX} "
+                           f"bytes takes at {CHUNK_MAX} bytes a chunk")
         content = data.hex()
         content = "".join("\\" + content[i:i + 2] for i in range(0, len(content), 2))
-        yield from chain.call(frontend, "store", f"(record {{ key = {quote(prefix + entry['path'])}; "
-                              f"content_type = {quote(entry.get('content_type') or 'application/octet-stream')}; "
-                              f'content_encoding = "identity"; content = blob "{content}"; sha256 = null }})')
+        try:
+            yield from chain.call(frontend, "store", f"(record {{ key = {quote(prefix + entry['path'])}; "
+                                  f"content_type = {quote(entry.get('content_type') or 'application/octet-stream')}; "
+                                  f'content_encoding = "identity"; content = blob "{content}"; sha256 = null }})')
+        except Exception as e:  # noqa: BLE001  the realm's frontend rejected it, or ran out of cycles
+            raise Fail(f"the realm's frontend did not store {prefix + entry['path']}: {str(e)[:200]}")
         copied += 1
     return copied
 
@@ -158,11 +200,28 @@ def available(ext, held):
     return not (wanted or depts) or bool(profiles & wanted or departments & depts)
 
 
+def new_access(manifest):
+    """Who gets an extension that is installed for the first time: the profiles its manifest lists, no department."""
+    return {"profiles": manifest.get("profiles", ["member"]), "departments": []}
+
+
+def fits_a_row(namespace, field, value):
+    """``value`` is what the extension's row can keep in its Json ``field`` (``JSON_MAX`` characters), or a Fail that
+    names the manifest it comes from: the write that traps comes after the frontend is published."""
+    size = len(json.dumps(value))  # as the field writes it
+    if size > JSON_MAX:
+        raise Fail(f"{namespace}/manifest.json is too large for the realm to keep: its {field} is {size} characters, "
+                   f"at most {JSON_MAX}")
+
+
 def extension_manifest(namespace):
     """The manifest of the extension in ``namespace``, a record whose ``operations`` and ``profiles``, when there, are lists
-    of text (the install lists them as the extension's), or a Fail that names the file: what the registry sends is parsed
-    here, and a manifest that is not JSON, is a list or null, or lists a number raised in the install, which traps. A
-    generator."""
+    of text (the install lists them as the extension's), that nests no deeper than a codex's manifest may
+    (``codex.MANIFEST_DEPTH``) and that the extension's row can keep (a Json field holds ``JSON_MAX`` characters), or a
+    Fail that names the file: what the registry sends is parsed here, and a manifest that is not JSON, is a list or
+    null, lists a number, or is nested so deep that a dump of it raises a RecursionError (in process, at a depth that
+    depends on the stack) raised in the install, which traps. So did one too large for its row: the write came after
+    the frontend was published, and a vote or a timer that ran it concluded nothing. A generator."""
     text = yield from fetch(namespace, "manifest.json")
     try:
         manifest = json.loads(text)
@@ -170,9 +229,14 @@ def extension_manifest(namespace):
         raise Fail(f"{namespace}/manifest.json is not JSON: {str(e)[:200]}")
     if not isinstance(manifest, dict) or not manifest:
         raise Fail(f"{namespace}/manifest.json is a record that is not empty")
+    from api import codex  # it imports this module
+
+    if codex.nests_deeper_than(manifest, codex.MANIFEST_DEPTH):
+        raise Fail(f"{namespace}/manifest.json nests lists or records more than {codex.MANIFEST_DEPTH} levels deep")
     for key in ("operations", "profiles"):
         if key in manifest and not (isinstance(manifest[key], list) and all(isinstance(i, str) for i in manifest[key])):
             raise Fail(f"{namespace}/manifest.json: {key} is a list of text")
+    fits_a_row(namespace, "manifest", manifest)  # its operations and sidebar settings are parts of it: they fit too
     return manifest
 
 
@@ -185,16 +249,13 @@ def extension_install(c, args):
     requires marketplace approval, its checksum must be pinned or an approver it trusts must have approved it."""
     namespace = f"ext/{args['extension']}/{args['version']}"
     manifest = yield from extension_manifest(namespace)
+    if Extension[args["extension"]] is None:  # an upgrade keeps the access its row has
+        fits_a_row(namespace, "access", new_access(manifest))
     source = (yield from fetch(namespace, "backend/entry.py")) if manifest.get("backend") else ""
-    try:
-        digest = checksum(manifest, source)
-    except (RecursionError, UnicodeEncodeError) as e:  # a manifest nested too deep to dump, or text that cannot be hashed
-        raise Fail(f"{namespace}/manifest.json cannot be hashed: {type(e).__name__}")
-    approver = yield from trust(digest, namespace)
+    approver = yield from trust(checksum(manifest, source), namespace)
     yield from publish_frontend(namespace, f"/{namespace}/")
     ext = Extension[args["extension"]] or Extension(
-        id=args["extension"], access={"profiles": manifest.get("profiles", ["member"]), "departments": []},
-        sidebar={k: manifest[k] for k in SIDEBAR if k in manifest})
+        id=args["extension"], access=new_access(manifest), sidebar={k: manifest[k] for k in SIDEBAR if k in manifest})
     ext.version, ext.status, ext.manifest, ext.source = args["version"], "installed", manifest, source
     ext.operations = list(manifest.get("operations", []))
     return {"extension": ext.id, "version": ext.version, "approved_by": approver}
