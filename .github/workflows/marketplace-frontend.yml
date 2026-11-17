@@ -1,0 +1,110 @@
+name: Marketplace frontend
+
+# PR-time check for src/marketplace_frontend: its unit tests, the build exactly as
+# release.yml makes it, and the Playwright smoke spec run against that build.
+# Before this, the build ran only at release time and the tests ran nowhere.
+
+# The two path lists must stay identical.
+on:
+  pull_request:
+    paths:
+      - "src/marketplace_frontend/**"
+      - "src/declarations/marketplace_backend/**"
+      - "packages/extension-bridge/**"
+      # The postbuild step and the unit tests both use these.
+      - "scripts/build-info.js"
+      - "scripts/build-info.test.js"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/marketplace-frontend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/marketplace_frontend/**"
+      - "src/declarations/marketplace_backend/**"
+      - "packages/extension-bridge/**"
+      - "scripts/build-info.js"
+      - "scripts/build-info.test.js"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/marketplace-frontend.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tests are .ts files run by node itself (--experimental-strip-types),
+      # which needs node 22.6 or later. They import nothing, so no npm install.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Unit tests
+        working-directory: src/marketplace_frontend
+        run: npm run test:unit
+
+  build-and-smoke:
+    # Playwright 1.55 has no chromium for ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same node as the build in release.yml.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # The build recipe of release.yml. Install from the repo root: installing
+      # inside src/marketplace_frontend hoists @sveltejs/kit to the root while
+      # vite stays nested, and kit then cannot resolve vite. The frontend imports
+      # @realmsgos/extension-bridge from its dist/, so build that package first.
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build extension-bridge
+        run: npm run build --workspace packages/extension-bridge
+
+      # VITE_ACCOUNT_ALPHA=true is what release.yml ships: the account pages are
+      # not open yet.
+      - name: Build marketplace frontend (release flavour)
+        working-directory: src/marketplace_frontend
+        run: |
+          VITE_ACCOUNT_ALPHA=true npm run build
+          test -f dist/index.html
+
+      - name: Install Playwright chromium
+        working-directory: src/marketplace_frontend
+        run: npx playwright install --with-deps chromium
+
+      # The spec asserts layout and sign-in gates only, so it needs no backend and
+      # no /canister_ids.js. `vite preview` serves dist/ and falls back to the SPA
+      # shell for client routes such as /about.
+      - name: Smoke spec against the build
+        working-directory: src/marketplace_frontend
+        run: |
+          npx vite preview --port 4173 &
+          curl --fail --silent --retry 30 --retry-delay 1 --retry-all-errors \
+            --output /dev/null http://localhost:4173/
+          PLAYWRIGHT_BASE_URL=http://localhost:4173 npm run test:e2e
+
+      - name: Upload Playwright traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-frontend-test-results
+          path: src/marketplace_frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
