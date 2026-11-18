@@ -707,6 +707,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>{$_('join.join_title', { values: { name: realmName } })}</title>
+</svelte:head>
+
 <div class="min-h-viewport md:h-viewport grid grid-cols-1 md:grid-cols-2" style="transform: none !important;">
   <!-- Left Brand Panel with Background Image -->
   <div class="hidden md:flex md:col-start-1 text-white flex-col justify-between relative">
