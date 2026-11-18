@@ -58,10 +58,6 @@ describe('live realm chrome', () => {
 		expect(existsSync(resolve(here, '../../../static' + REALM_DEFAULT_MARK))).toBe(true);
 	});
 
-	it('ships the default cover as a moving picture and as a still', () => {
-		expect(existsSync(resolve(here, '../../../static/images/background.svg'))).toBe(true);
-	});
-
 	it('does not ship default /custom brand files in the frontend asset tree', () => {
 		const customDir = resolve(here, '../../../static/custom');
 		expect(existsSync(resolve(customDir, 'logo.png'))).toBe(false);

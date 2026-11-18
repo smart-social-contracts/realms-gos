@@ -6,6 +6,8 @@ export const REALM_CUSTOM_LOGO = '/custom/logo.png';
  * never while that one is still loading: a realm with a logo must not flash this one first.
  */
 export const REALM_DEFAULT_MARK = '/images/logo_sphere_only.svg';
+/** The same mark for a dark background. */
+export const REALM_DEFAULT_MARK_ON_DARK = '/images/logo_sphere_only_white.svg';
 
 /** Platform marks that must never appear in live-realm chrome. */
 export const PLATFORM_PLACEHOLDER_LOGOS = [

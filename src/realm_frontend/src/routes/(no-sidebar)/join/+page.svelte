@@ -19,6 +19,7 @@
   import JoinTerms from '$lib/components/JoinTerms.svelte';
   import { shouldShowJoinNotice, shouldShowJoinTerms } from '$lib/config/hostTestFlags';
   import { cn } from '$lib/theme/utilities';
+  import { REALM_DEFAULT_MARK_ON_DARK, resolveRealmMarkSrc } from '$lib/branding/realmMark';
   import { formatQuarterLabel } from '$lib/utils/quarterLabels';
   import { probeFederatedMembership, activateMembership } from '$lib/utils/federatedMembership';
   import {
@@ -139,10 +140,15 @@
   );
   $: showTestModeQuarterPicker = $testMode && quarterDirectory.length > 0;
 
-  // The realm's own cover, or the default one shipped with the shell when it has none (or it fails to load).
-  const DEFAULT_COVER = '/images/background.svg';
+  // The realm's own cover. A realm that has none (or whose cover fails to load) gets no picture: a plain panel in
+  // its colour, darkened enough for white text whatever the colour, with its mark.
   let coverFailed = false;
-  $: welcomeImageUrl = coverFailed ? DEFAULT_COVER : ($realmInfo.backgroundImageUrl || '/custom/background.png');
+  $: welcomeImageUrl = $realmInfo.backgroundImageUrl || '/custom/background.png';
+  $: panelStyle = coverFailed
+    ? `background: #1e293b; background: linear-gradient(160deg, color-mix(in srgb, ${$realmInfo.primaryColor} 55%, #0f172a), color-mix(in srgb, ${$realmInfo.primaryColor} 25%, #0f172a));`
+    : '';
+  let panelMarkFailed = false;
+  $: panelMark = panelMarkFailed ? REALM_DEFAULT_MARK_ON_DARK : resolveRealmMarkSrc($realmInfo.logoUrl);
 
   const internetIdentityUrl =
     (typeof globalThis !== 'undefined' && globalThis.__CANISTER_IDS?.internet_identity) ||
@@ -713,21 +719,31 @@
 
 <div class="min-h-viewport md:h-viewport grid grid-cols-1 md:grid-cols-2" style="transform: none !important;">
   <!-- Left Brand Panel with Background Image -->
-  <div class="hidden md:flex md:col-start-1 text-white flex-col justify-between relative">
+  <div class="hidden md:flex md:col-start-1 text-white flex-col justify-between relative" style={panelStyle}>
     <!-- Background Image - no overlay, full opacity -->
-    <div class="absolute inset-0 z-0">
-      <img 
-        src={welcomeImageUrl} 
-        alt={coverFailed ? '' : t('join.background_alt', { values: { name: realmName } })}
-        on:error={() => { coverFailed = true; }}
-        class="w-full h-full object-cover"
-      />
-    </div>
+    {#if !coverFailed}
+      <div class="absolute inset-0 z-0">
+        <img 
+          src={welcomeImageUrl} 
+          alt={t('join.background_alt', { values: { name: realmName } })}
+          on:error={() => { coverFailed = true; }}
+          class="w-full h-full object-cover"
+        />
+      </div>
+    {/if}
     
     <!-- Content overlay - centered vertically -->
-    <div class={cn('relative z-10 p-6 flex flex-col h-full items-center', coverFailed ? 'justify-end pb-24' : 'justify-center')}>
-      <!-- Text container with dark background for readability -->
-      <div class="bg-black/60 backdrop-blur-sm rounded-2xl p-6 max-w-md mx-6">
+    <div class="relative z-10 p-6 flex flex-col h-full justify-center items-center">
+      <!-- Text container: on a photo, a dark box for readability; on the plain panel, the text stands by itself -->
+      <div class={cn('rounded-2xl p-6 max-w-md mx-6', coverFailed ? '' : 'bg-black/60 backdrop-blur-sm')}>
+        {#if coverFailed}
+          <img
+            src={panelMark}
+            alt=""
+            class="mb-6 h-14 w-14 object-contain"
+            on:error={() => { panelMarkFailed = true; }}
+          />
+        {/if}
         <!-- Welcome Message -->
         <h1 class="text-4xl font-bold mb-4 leading-tight">
           {$_('join.welcome_to', { values: { name: realmName } })}
@@ -751,14 +767,16 @@
   <!-- Right Form Panel -->
   <div class="flex items-start md:items-center justify-center p-4 pb-16 md:p-12 relative bg-gradient-to-br from-gray-50 to-gray-100 md:col-start-2 overflow-y-auto">
     <!-- Mobile background image -->
-    <div class="md:hidden absolute inset-0 z-0">
-      <img 
-        src={welcomeImageUrl} 
-        alt={coverFailed ? '' : t('join.background_alt', { values: { name: realmName } })}
-        on:error={() => { coverFailed = true; }}
-        class="w-full h-full object-cover"
-      />
-    </div>
+    {#if !coverFailed}
+      <div class="md:hidden absolute inset-0 z-0">
+        <img 
+          src={welcomeImageUrl} 
+          alt={t('join.background_alt', { values: { name: realmName } })}
+          on:error={() => { coverFailed = true; }}
+          class="w-full h-full object-cover"
+        />
+      </div>
+    {/if}
     
     <div class="w-full max-w-md relative z-10 md:bg-transparent md:backdrop-blur-none md:rounded-none md:p-0 bg-white/80 backdrop-blur-sm rounded-2xl p-3 my-auto">
 
