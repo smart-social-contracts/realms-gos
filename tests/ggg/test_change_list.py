@@ -64,7 +64,7 @@ def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and
     (text(set=[{**entry("town/tax"), "sha256": "0" * 63}]), "64 hex digits"),
     (text(set=[entry("town/tax", size=0)]), "size is between"),
     (text(set=[entry("town/tax", size=256 * 1024 + 1)]), "size is between"),
-    (text(set=[entry("town/parking")]), "not a GGG domain"),
+    (text(set=[entry("town/Parking")]), "not a domain id"),
     (text(set=[entry("Town/tax")]), "not a chapter id"),
     (text(set=[entry("tax")]), "not a chapter id"),
     (text().replace('"remove": []', '"remove": "town/tax"'), "remove is a list"),
