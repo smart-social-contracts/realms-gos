@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
 	PLATFORM_PLACEHOLDER_LOGOS,
 	REALM_CUSTOM_LOGO,
+	REALM_DEFAULT_MARK,
 	isPlatformPlaceholderLogo,
 	resolveRealmMarkSrc
 } from './realmMark';
@@ -44,6 +45,21 @@ describe('live realm chrome', () => {
 		expect(appHtml).toContain('href="/custom/logo.png"');
 		expect(appHtml).not.toContain('href="/images/logo.png"');
 		expect(appHtml).not.toContain('logo_sphere_only');
+	});
+
+	it('shows the default mark only after the realm\'s own has failed to load', () => {
+		// Never up front: the resolver does not hand it out, so a realm with a logo cannot flash it.
+		expect(isPlatformPlaceholderLogo(REALM_DEFAULT_MARK)).toBe(true);
+		expect(resolveRealmMarkSrc(REALM_DEFAULT_MARK)).toBe(REALM_CUSTOM_LOGO);
+		// The header and the tab icon reach for it in their error paths.
+		expect(navbar).toMatch(/markFailed \? REALM_DEFAULT_MARK : markSrc/);
+		const favicon = readFileSync(resolve(here, './favicon.ts'), 'utf8');
+		expect(favicon).toMatch(/onerror = \(\) => set\(REALM_DEFAULT_MARK\)/);
+		expect(existsSync(resolve(here, '../../../static' + REALM_DEFAULT_MARK))).toBe(true);
+	});
+
+	it('ships the default cover as a moving picture and as a still', () => {
+		expect(existsSync(resolve(here, '../../../static/images/background.svg'))).toBe(true);
 	});
 
 	it('does not ship default /custom brand files in the frontend asset tree', () => {

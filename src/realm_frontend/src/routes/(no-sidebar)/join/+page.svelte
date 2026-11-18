@@ -140,7 +140,7 @@
   $: showTestModeQuarterPicker = $testMode && quarterDirectory.length > 0;
 
   // The realm's own cover, or the default one shipped with the shell when it has none (or it fails to load).
-  const DEFAULT_COVER = '/images/background.png';
+  const DEFAULT_COVER = '/images/background.svg';
   let coverFailed = false;
   $: welcomeImageUrl = coverFailed ? DEFAULT_COVER : ($realmInfo.backgroundImageUrl || '/custom/background.png');
 
