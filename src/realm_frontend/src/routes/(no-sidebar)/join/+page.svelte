@@ -801,7 +801,7 @@
             >
               <div class={cn(
                 "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-medium transition-all",
-                isCurrent ? "bg-gray-900 text-white"
+                isCurrent ? "bg-primary-600 text-white"
                   : isDone ? "bg-gray-700 text-white group-hover:bg-gray-900"
                   : "bg-gray-200 text-gray-500"
               )}>
@@ -874,7 +874,7 @@
                   class={cn(
                     'w-full text-left p-4 rounded-xl border-2 transition-all',
                     selectedTestIdentityIndex === persona.index
-                      ? 'border-gray-900 bg-gray-50'
+                      ? 'border-primary-600 bg-gray-50'
                       : 'border-gray-200 hover:border-gray-300 bg-white'
                   )}
                   disabled={loading}
@@ -899,7 +899,7 @@
                 class={cn(
                   'w-full p-4 rounded-xl border-2 transition-all',
                   customIdentityIndex != null && selectedTestIdentityIndex === customIdentityIndex
-                    ? 'border-gray-900 bg-gray-50'
+                    ? 'border-primary-600 bg-gray-50'
                     : 'border-gray-200 bg-white'
                 )}
               >
@@ -923,7 +923,7 @@
                   />
                   <button
                     type="button"
-                    class="px-3 py-2 text-sm font-medium border border-gray-900 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    class="px-3 py-2 text-sm font-medium border border-primary-600 rounded-lg hover:bg-gray-50 disabled:opacity-50"
                     disabled={loading || customIdentityIndex == null}
                     on:click={() => {
                       if (customIdentityIndex != null) persistSelectedTestIdentity(customIdentityIndex);
@@ -945,7 +945,7 @@
                 type="button"
                 on:click={continueAsSelectedTestIdentity}
                 disabled={loading}
-                class="w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                class="w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
               >
                 {#if loading}
                   <Spinner size="5" color="white" />
@@ -962,7 +962,7 @@
             <button
               on:click={() => handleLogin()}
               disabled={loading}
-              class="w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {#if loading}
                 <Spinner size="5" color="white" />
@@ -1040,7 +1040,7 @@
                   class={cn(
                     "w-full p-4 rounded-xl border-2 text-left transition-all",
                     selectedActivationId === hit.canisterId
-                      ? "border-gray-900 bg-gray-50"
+                      ? "border-primary-600 bg-gray-50"
                       : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
                   )}
                 >
@@ -1055,7 +1055,7 @@
               type="button"
               on:click={continueWithMembership}
               disabled={!selectedActivationId || loading}
-              class="w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {#if loading}
                 <Spinner size="5" color="white" />
@@ -1075,7 +1075,7 @@
             {/if}
             <a
               href={resolve('/extensions/member_dashboard')}
-              class="w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3"
+              class="w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3"
             >
               <span>{$_('join.go_dashboard')}</span>
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1094,7 +1094,7 @@
               {#if showTestModeQuarterPicker}
                 <select
                   id="test-mode-quarter"
-                  class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 focus:border-gray-900 focus:ring-gray-900"
+                  class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 focus:border-primary-600 focus:ring-primary-600"
                   value={targetQuarterId}
                   on:change={handleTestModeQuarterChange}
                 >
@@ -1137,7 +1137,7 @@
             <button
               on:click={handleTermsAccept}
               disabled={!agreement}
-              class="flex-1 py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              class="flex-1 py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {$_('setup.wizard.continue')}
             </button>
@@ -1179,7 +1179,7 @@
               {#if showTestModeQuarterPicker}
                 <select
                   id="test-mode-quarter"
-                  class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 focus:border-gray-900 focus:ring-gray-900"
+                  class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 focus:border-primary-600 focus:ring-primary-600"
                   value={targetQuarterId}
                   on:change={handleTestModeQuarterChange}
                 >
@@ -1205,7 +1205,7 @@
           {#if inviteProfile || $realmOpenRegistration}
           <div class="mb-6 p-4 rounded-xl border-2 border-gray-200 bg-gray-50">
             <div class="flex items-center gap-4">
-              <div class="w-12 h-12 rounded-full flex items-center justify-center bg-gray-900 text-white">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center bg-primary-600 text-white">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
@@ -1243,7 +1243,7 @@
                 placeholder={$_('join.paste_invite')}
                 disabled={inviteValid}
                 class={cn(
-                  "min-w-0 flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-gray-900 focus:border-gray-900",
+                  "min-w-0 flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-primary-600 focus:border-primary-600",
                   inviteValid ? "border-green-300 bg-green-50 text-green-800" : "border-gray-300"
                 )}
               />
@@ -1258,7 +1258,7 @@
                 <button
                   on:click={validateInvite}
                   disabled={!inviteCode || inviteChecking}
-                  class="shrink-0 px-3 md:px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  class="shrink-0 px-3 md:px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {#if inviteChecking}
                     <Spinner size="4" color="white" />
@@ -1302,7 +1302,7 @@
               maxlength="40"
               autocomplete="nickname"
               placeholder={$_('join.display_name_placeholder')}
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-gray-900 focus:border-gray-900"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-primary-600 focus:border-primary-600"
             />
             <p class="mt-2 text-xs text-gray-500">{$_('join.display_name_hint')}</p>
           </div>
@@ -1319,7 +1319,7 @@
             <button
               on:click={handleJoin}
               disabled={loading || inviteRequired}
-              class="flex-1 py-3 md:py-4 px-4 md:px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              class="flex-1 py-3 md:py-4 px-4 md:px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {#if loading}
                 <Spinner size="5" color="white" />
@@ -1347,7 +1347,7 @@
           
           <a
             href={resolve('/extensions/member_dashboard')}
-            class="inline-flex items-center justify-center w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all gap-2"
+            class="inline-flex items-center justify-center w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all gap-2"
           >
             <span>{$_('join.go_member_dashboard')}</span>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

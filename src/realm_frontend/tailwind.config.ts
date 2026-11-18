@@ -7,6 +7,16 @@ import type { Config } from 'tailwindcss';
 // location instead of assuming ./node_modules.
 const flowbiteDir = path.dirname(createRequire(import.meta.url).resolve('flowbite-svelte/package.json'));
 
+// The realm's colour (brandingPrimary.ts writes the variables). "r g b" variables keep the see-through variants
+// working (`bg-primary-600/40`).
+const realmColour: Record<number, string> = Object.fromEntries(
+	[50, 100, 200, 300, 400, 500, 600, 700, 800, 900].map((shade) => [
+		shade,
+		`rgb(var(--color-primary-${shade}-rgb) / <alpha-value>)`
+	])
+);
+realmColour[950] = realmColour[900];
+
 export default {
 	content: [
 		'./src/**/*.{html,js,svelte,ts,md}',
@@ -21,18 +31,12 @@ export default {
     extend: {
       colors: {
         // Theme-based colors using CSS custom properties
-        primary: {
-          50: 'var(--color-primary-50)',
-          100: 'var(--color-primary-100)',
-          200: 'var(--color-primary-200)',
-          300: 'var(--color-primary-300)',
-          400: 'var(--color-primary-400)',
-          500: 'var(--color-primary-500)',
-          600: 'var(--color-primary-600)',
-          700: 'var(--color-primary-700)',
-          800: 'var(--color-primary-800)',
-          900: 'var(--color-primary-900)'
-        },
+        primary: realmColour,
+        // One accent, the realm's. Screens were written with three: `primary`, `blue` and `indigo` (and black). Blue and
+        // indigo are the realm's colour too, so a button, a link or a focus ring written `blue-600` follows the realm
+        // like one written `primary-600`, in the shell and in every extension that draws with its styles.
+        blue: realmColour,
+        indigo: realmColour,
         success: {
           50: 'var(--color-success-50)',
           100: 'var(--color-success-100)',

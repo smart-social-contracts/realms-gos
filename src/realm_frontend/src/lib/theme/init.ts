@@ -7,6 +7,7 @@
 
 import { browser } from '$app/environment';
 import { currentTheme, setTheme, type ThemeConfig } from './theme';
+import { reapplyBrandingPrimary } from './brandingPrimary';
 
 // Initialize theme on client-side
 export function initializeTheme(): void {
@@ -93,6 +94,9 @@ function updateCSSVariables(): void {
   Object.entries(currentTheme.transitions).forEach(([key, value]) => {
     root.style.setProperty(`--transition-${key}`, value);
   });
+
+  // The primary scale is the realm's colour, not the theme's neutral one written above.
+  reapplyBrandingPrimary();
 }
 
 // Handle system theme changes (optional feature)

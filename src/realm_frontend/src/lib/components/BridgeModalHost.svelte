@@ -27,7 +27,7 @@
 			case 'secondary':
 				return 'bg-white text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600 dark:hover:bg-gray-700';
 			default:
-				return 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100';
+				return 'bg-primary-600 text-white hover:bg-primary-700';
 		}
 	}
 
