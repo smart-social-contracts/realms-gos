@@ -6,7 +6,7 @@ the chapter format, the `F` language for forbids, the change list, the install t
 revert floor, compliance, the official journal and the `realms legislation` tools. What GGG provides
 for it (the operation names, the links between realms, `effective_at`, the realm's time zone, the
 Period units) is in the GGG repository:
-[What GGG provides for a layered codex](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md).
+[What GGG provides for a layered codex](https://github.com/smart-social-contracts/ggg/blob/main/model/codex.md).
 
 Status: approved design, November 2026. Nothing here is built yet;
 [#480](https://github.com/smart-social-contracts/realms-gos/issues/480) tracks each part (§14). Today's
@@ -139,7 +139,7 @@ These are settled. Each later section applies them.
     moves after acceptance.** If it proves too early, another proposal stops the scheduled one, and a
     new proposal sets the right date, so proposers leave a margin.
 27. **Working days are a GGG Period unit,** `WorkingDay`, defined on
-    [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7)
+    [the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/model/codex.md#7-the-workingday-unit-ggg7)
     against the realm's `calendar.json` and the time zone of the clock that counts (§4.5). GGG names
     the unit and realms count it
     ([#505](https://github.com/smart-social-contracts/realms-gos/issues/505)); the library gains
@@ -313,7 +313,7 @@ change to its layer; the change list names it `<source>/calendar` (§7), and a r
 `self.calendar.add(day, period)` adds a GGG Period to a realm-local day (§4.5). For `working_days(n)` it
 steps over the weekend days and the holidays of the realm's calendar, in the time zone of the clock
 that counts (§4.5): a **working day** is a day that is neither, as
-[GGG defines it](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7).
+[GGG defines it](https://github.com/smart-social-contracts/ggg/blob/main/model/codex.md#7-the-workingday-unit-ggg7).
 GGG names the unit `WorkingDay` ([ggg#7](https://github.com/smart-social-contracts/ggg/issues/7)) and
 the realm counts it ([#505](https://github.com/smart-social-contracts/realms-gos/issues/505)). If the
 calendar has no entries
@@ -467,7 +467,7 @@ with a GGG fact:** the setting is `default_decision_deadline`; `decision_deadlin
 
 **Rates**, like every GGG ratio, are integers in hundred-millionths (0.123456 % is 123 456); the
 rule's text is on
-[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
+[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/model/codex.md#33-the-fact-schema-units-rates-money-and-periods).
 Integers inside, decimals for people: a chapter writes a rate as the legislation writes it,
 `pct("0.1")`, and the SDK stores the integer:
 
@@ -487,7 +487,7 @@ Periods compare only within one unit. `days(45) >= working_days(30)` fails close
 through the calendar, so a lower layer that sets `comment_period = days(45)` is refused.
 
 **Working days:** GGG's `Period` has a `WorkingDay` unit, defined on
-[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#7-the-workingday-unit-ggg7);
+[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/model/codex.md#7-the-workingday-unit-ggg7);
 the realm's calendar (§3.4) and the time zone of the clock that counts (§4.5) decide which days count.
 GGG names the unit; the realm counts it, and `working_days(n)` writes it. Each realm's legislation
 decides whether to use working days at all.
@@ -558,7 +558,7 @@ forms: Spain's `local_regime` declares `uses = ["procedure"]` and calls
 
 **Rounding is one rule, set by GGG:** nearest cent, an exact half away from zero, stated with the money
 kind of GGG's fact schema so that every implementation rounds the same way. The rule's text is on
-[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md#33-the-fact-schema-units-rates-money-and-periods).
+[the GGG page](https://github.com/smart-social-contracts/ggg/blob/main/model/codex.md#33-the-fact-schema-units-rates-money-and-periods).
 `times()` takes no rounding argument and a chapter names no rule.
 
 **Money in a compute.** The subject `tax_assess` asks about reaches `compute_tax_assess` as the view of its row, the
@@ -2231,7 +2231,7 @@ with `--replaces <codex id | none>` or `--network`, `--canister` and `--identity
 
 GGG already has operations, events and arguments, and chapters use them directly. What the layered
 codex needs from GGG beyond that is specified in the GGG repository,
-[What GGG provides for a layered codex](https://github.com/smart-social-contracts/ggg/blob/main/docs/layered-codex.md):
+[What GGG provides for a layered codex](https://github.com/smart-social-contracts/ggg/blob/main/model/codex.md):
 
 - the **domain list** ([ggg#1](https://github.com/smart-social-contracts/ggg/issues/1));
 - the **entities, fields and operations real legislation needs**

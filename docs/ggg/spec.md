@@ -1,6 +1,6 @@
 # Realms GOS and the GGG model
 
-Realms GOS implements every domain of the [GGG model](../../ggg/model/README.md): its entities,
+Realms GOS implements every domain of the [GGG model](../../ggg/README.md#the-model): its entities,
 operations, lifecycles, invariants and permissions. The model lives in the
 [`ggg`](https://github.com/smart-social-contracts/ggg) repository, checked out here as the `ggg`
 submodule, and is the same for every GOS.
@@ -57,7 +57,7 @@ same rows.
   and `voting_threshold` and `voting_quorum`, kept outside the `Realm` row; a `voting_window` of
   0 leaves a realm-wide proposal open until its outcome is certain. An argument still sent under its
   old name (`threshold`, `quorum_percent`, `rate_bp`) is refused, naming the new one;
-- every number an operation takes is in the range `ggg/facts.json` gives it (`Ratio` 0 to 100 000 000, `Rate` 0 to
+- every number an operation takes is in the range `ggg/generated/facts.json` gives it (`Ratio` 0 to 100 000 000, `Rate` 0 to
   10 000 000 000, `Money` 0 to 2^53 − 1, `SignedMoney` ± that, `Period.count` 0 to 1 000 000, a plain number to the
   Cedar Long maximum), or the call is refused with `InvalidArgument` before anything is written. The bounds are
   `src/realm_backend/ggg_ranges.py`, generated with the other `ggg.did` files, and a time is bounded in seconds.
@@ -315,7 +315,7 @@ and `after_license` (`keep` or `void`) whether credentials stand once their lice
 
 ## 5. Operations Realms GOS adds
 
-Flags are the model's (`ggg/model/README.md`, §1): `delegable` is the direct tier of power of attorney and `confirm` asks
+Flags are the model's (`ggg/model/conventions.md`, §1): `delegable` is the direct tier of power of attorney and `confirm` asks
 each time. These operations get their tier and group in `core/poa.py` (`OWN`), as the model's get theirs in
 `ggg/delegation.json`. An operation with no flag is the member's own, the founder's or needs no power of attorney.
 
