@@ -30,15 +30,9 @@ from realms.legislation.codex import source_id
 from realms.legislation.errors import LegislationError
 from realms.legislation.paths import REALM
 
-# GGG's common domain list: the ggg submodule's domains.json, which the canister carries in
-# core/change_list.py (tests/ggg keeps those two equal, and cli/tests keeps this one equal to the
-# canister's). It is a shared vocabulary, not a gate -- a codex files chapters under the ids it
-# chooses, and `is_domain` is what a chapter name has to satisfy (ggg model/codex.md §2).
+# A codex files chapters under the domain ids it chooses, so no copy of GGG's list is kept here:
+# `is_domain` is the whole rule (ggg model/codex.md §2).
 MAX_DOMAIN = 64  # characters, as core/change_list.py
-GGG_DOMAINS = (
-    "realm", "tax", "procedure", "register", "local_regime", "water", "data_protection", "language",
-    "treasury", "federation", "planning", "justice", "procurement",
-)  # fmt: skip
 SOURCE_FILES = ("source.json", "releases.json", "calendar.json")
 CASES_SUFFIX = ".cases.json"
 CASE_KINDS = ("call", "guard", "forbid", "compute")

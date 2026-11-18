@@ -17,11 +17,6 @@ MAX_MIRRORS = 4  # every URL tried is an outcall the realm pays for
 CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar (§7)
 REALM = "realm"  # the domain only the realm's own layer fills (§3)
 MAX_DOMAIN = 64  # characters; a domain id is a file name and a key in a published record
-# GGG's common domain list, the ggg submodule's domains.json (tests/ggg keeps the two equal). It is a
-# shared vocabulary, not a gate: a codex files chapters under the ids it chooses, and GGG's list is
-# what most realms share so that one id means one subject across realms (ggg model/codex.md §2).
-DOMAINS = ("realm", "tax", "procedure", "register", "local_regime", "water", "data_protection", "language",
-           "treasury", "federation", "planning", "justice", "procurement")
 HEX = "0123456789abcdef"
 
 
@@ -156,7 +151,7 @@ def source_name(source):
 def is_domain(name):
     """Whether ``name`` is a domain id: lowercase letters and underscores, starting with a letter, at most
     ``MAX_DOMAIN`` characters (ggg model/codex.md §2). A codex chooses its own domains, so the id is checked
-    and not its membership of ``DOMAINS``; what the check protects is that an id reaching a published record
+    and not its membership of any list; what the check protects is that an id reaching a published record
     is a plain name, never empty, path-like or unbounded."""
     if not isinstance(name, str) or not 0 < len(name) <= MAX_DOMAIN:
         return False

@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 
 from realms.cli.commands import legislation
 from realms.cli.commands.legislation import legislation_app
-from realms.cli.commands.legislation_layout import GGG_DOMAINS, layout_problems
+from realms.cli.commands.legislation_layout import layout_problems
 
 ROOT = Path(__file__).resolve().parents[2]
 VALENCIA = "eu/es/vc/46250-valencia"
@@ -186,8 +186,14 @@ def test_a_chapter_cannot_be_called_calendar(tree):
     breaks(tree, "eu/es/calendar.py: calendar is a layer's calendar.json, not a chapter")
 
 
-@pytest.mark.parametrize("domain", GGG_DOMAINS)
-def test_a_py_file_named_after_a_ggg_domain_is_kept(tree, domain):
+# Read from ggg rather than copied: the common list is GGG's, and nothing here keeps a second copy.
+COMMON_DOMAINS = tuple(
+    d["id"] for d in json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
+)
+
+
+@pytest.mark.parametrize("domain", COMMON_DOMAINS)
+def test_a_py_file_named_after_a_common_ggg_domain_is_kept(tree, domain):
     write(tree, f"{VALENCIA}/{domain}.py", chapter(domain))
     assert problems(tree) == []
 
@@ -582,14 +588,3 @@ def test_check_loads_the_chapters_once_the_layout_holds(tree, check):
     out = check(tree)
     assert out.exit_code == 0, out.output
     assert "ok: 4 realm(s) checked" in out.output
-
-
-def test_the_domain_list_is_the_canisters():
-    source = (ROOT / "src/realm_backend/core/change_list.py").read_text()
-    listed = next(
-        ast.literal_eval(node.value)
-        for node in ast.parse(source).body
-        if isinstance(node, ast.Assign)
-        and getattr(node.targets[0], "id", None) == "DOMAINS"
-    )
-    assert GGG_DOMAINS == listed

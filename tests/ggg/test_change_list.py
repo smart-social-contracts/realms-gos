@@ -136,11 +136,6 @@ def test_the_change_list_of_the_bonus_change_is_one_the_realm_accepts():
     assert parsed["summary"]["es"] == "IBI 2027: bonificación por familia numerosa"
 
 
-def test_the_domain_list_is_gggs():
-    listed = json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
-    assert tuple(d["id"] for d in listed) == change_list.DOMAINS
-
-
 # ---- apply (step 2)
 
 OWN = {"chapters": {"tax": SHA["tax"], "procedure": SHA["procedure"]}, "calendar": SHA["calendar"]}
