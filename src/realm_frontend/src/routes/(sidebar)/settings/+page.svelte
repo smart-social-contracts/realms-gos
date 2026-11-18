@@ -2,7 +2,6 @@
 	console.log("Settings Svelte script loaded (top of file)");
 
 	import { Heading } from 'flowbite-svelte';
-	import { SITE_NAME } from '$lib/globals';
 	import MetaTag from '../../utils/MetaTag.svelte';
 	import { _ } from 'svelte-i18n';
 	import { get } from 'svelte/store';
@@ -28,7 +27,7 @@
 
 	const path: string = '/settings';
 	const description: string = 'Settings example - Smart Social Contracts';
-	const title: string = SITE_NAME + ' - Settings';
+	const title = $derived($_('settings.title'));
 	const subtitle: string = 'Settings';
 
 	let principal = $state('');

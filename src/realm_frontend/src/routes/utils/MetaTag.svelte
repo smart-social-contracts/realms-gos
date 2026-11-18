@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { MetaTags } from 'svelte-meta-tags';
 	import { SITE_NAME } from '$lib/globals';
+	import { realmName } from '$lib/stores/realmInfo';
+	import { pageTitle } from '$lib/utils/page-title';
 	export let path: string = '';
 	export let description: string = '';
 	export let title: string = '';
@@ -12,7 +14,7 @@
 </script>
 
 <MetaTags
-	{title}
+	title={pageTitle(title, $realmName)}
 	{description}
 	openGraph={{
 		type: 'website',

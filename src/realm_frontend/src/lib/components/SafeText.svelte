@@ -10,7 +10,7 @@
 </script>
 
 {#if showingRawKey}
-  <span class="text-gray-400 text-sm">•••</span>
+  <span class="text-gray-500 text-sm">•••</span>
 {:else}
   {translatedText}
 {/if}

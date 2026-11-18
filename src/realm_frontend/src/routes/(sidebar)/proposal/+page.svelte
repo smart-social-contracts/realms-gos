@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { realmName } from '$lib/stores/realmInfo';
+  import { pageTitle } from '$lib/utils/page-title';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import {
@@ -68,7 +70,7 @@
 </script>
 
 <svelte:head>
-  <title>Proposal Details | Dashboard</title>
+  <title>{pageTitle('Proposal', $realmName)}</title>
 </svelte:head>
 
 <div class="mt-px space-y-4">

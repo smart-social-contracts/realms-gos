@@ -3,6 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { Heading, Spinner } from 'flowbite-svelte';
 	import { _ } from 'svelte-i18n';
+	import { realmName } from '$lib/stores/realmInfo';
+	import { pageTitle } from '$lib/utils/page-title';
 	import {
 		notifications,
 		unreadCount,
@@ -62,13 +64,13 @@
 </script>
 
 <svelte:head>
-	<title>{$_('messages.page_title')}</title>
+	<title>{pageTitle($_('messages.page_title'), $realmName)}</title>
 </svelte:head>
 
 <div class="mt-4 px-4 md:px-6">
 	<div class="mb-6 flex flex-wrap items-start justify-between gap-3">
 		<div>
-			<Heading tag="h2" class="text-2xl font-bold text-gray-900">{$_('messages.page_title')}</Heading>
+			<Heading tag="h1" class="text-2xl font-bold text-gray-900">{$_('messages.page_title')}</Heading>
 			<p class="mt-1 text-sm text-gray-500">
 				{$_('messages.subtitle')}
 			</p>
@@ -111,14 +113,14 @@
 			<Spinner size="6" />
 		</div>
 	{:else if displayedMessages.length === 0}
-		<div class="flex flex-col items-center justify-center py-16 text-gray-400">
+		<div class="flex flex-col items-center justify-center py-16 text-gray-500">
 			<IconInbox size={48} class="mb-4" />
 			<p class="text-lg font-medium text-gray-500">
 				{activeTab === 'unread'
 					? $_('messages.empty_unread_title')
 					: $_('messages.empty_all_title')}
 			</p>
-			<p class="mt-1 text-sm text-gray-400">
+			<p class="mt-1 text-sm text-gray-500">
 				{activeTab === 'unread'
 					? $_('messages.empty_unread_body')
 					: $_('messages.empty_all_body')}
@@ -142,7 +144,7 @@
 						<div class="flex items-start gap-3">
 							<div class="mt-0.5 flex-shrink-0">
 								{#if message.read}
-									<IconMailOpened size={20} class="text-gray-400" />
+									<IconMailOpened size={20} class="text-gray-500" />
 								{:else}
 									<IconMail size={20} class="text-gray-700" />
 								{/if}
@@ -158,20 +160,20 @@
 									</h4>
 									{#if message.timestamp_ms}
 										<span
-											class="flex-shrink-0 text-xs text-gray-400"
+											class="flex-shrink-0 text-xs text-gray-500"
 											title={formatFullDate(message.timestamp_ms)}
 										>
 											{formatRelativeTime(message.timestamp_ms)}
 										</span>
 									{/if}
 								</div>
-								<p class="mt-0.5 text-xs text-gray-400">{formatNoticeMeta(message)}</p>
+								<p class="mt-0.5 text-xs text-gray-500">{formatNoticeMeta(message)}</p>
 								{#if !open}
 									<p class="mt-1 line-clamp-2 text-sm text-gray-500">{message.message}</p>
 								{/if}
 							</div>
 							<svg
-								class="h-5 w-5 flex-shrink-0 text-gray-400 transition-transform {open
+								class="h-5 w-5 flex-shrink-0 text-gray-500 transition-transform {open
 									? 'rotate-180'
 									: ''}"
 								fill="none"
@@ -195,7 +197,7 @@
 								<p class="whitespace-pre-wrap text-sm text-gray-700">{message.message}</p>
 							{/if}
 							{#if message.timestamp_ms}
-								<p class="mt-2 text-xs text-gray-400">{formatFullDate(message.timestamp_ms)}</p>
+								<p class="mt-2 text-xs text-gray-500">{formatFullDate(message.timestamp_ms)}</p>
 							{/if}
 							<div class="mt-3 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-3 {isActionHref(message.href) ? 'justify-between' : 'justify-end'}">
 								{#if isActionHref(message.href)}

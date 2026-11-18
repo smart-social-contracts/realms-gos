@@ -38,7 +38,10 @@
     "ai_resize": "调整 AI 助手面板大小",
     "ai_resize_hint": "拖动以调整大小。双击可重置。",
     "ai_open_settings": "打开 AI 助手设置",
-    "ai_close": "关闭 AI 助手"
+    "ai_close": "关闭 AI 助手",
+    "account_menu": "账户菜单",
+    "skip_to_content": "跳到正文",
+    "test_identity": "身份 {n}"
   },
   "navigation": {
     "dashboard": "仪表板",
@@ -362,7 +365,8 @@
     "quarter_setting_up": "（设置中）",
     "quarter_coordinator_only": "（仅协调员）",
     "capital": "首都",
-    "background_alt": "{name} 背景"
+    "background_alt": "{name} 背景",
+    "ii_explained": "Internet Identity 是保存在你设备上的通行密钥：无需密码，也无需邮箱。"
   },
   "identities": {
     "page_title": "我的身份",

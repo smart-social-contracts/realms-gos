@@ -257,7 +257,7 @@
   {#if pagination}
     <div class="flex justify-center items-center mt-4 space-x-2">
       <button 
-        class="px-3 py-1 rounded border {hasPrevPage ? 'bg-blue-100 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}" 
+        class="px-3 py-1 rounded border {hasPrevPage ? 'bg-blue-100 hover:bg-blue-200' : 'bg-gray-100 text-gray-500 cursor-not-allowed'}" 
         disabled={!hasPrevPage}
         on:click={() => onPageChange(currentPage - 2)}
       >
@@ -306,7 +306,7 @@
         {/if}
       </div>
       <button 
-        class="px-3 py-1 rounded border {hasNextPage ? 'bg-blue-100 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}" 
+        class="px-3 py-1 rounded border {hasNextPage ? 'bg-blue-100 hover:bg-blue-200' : 'bg-gray-100 text-gray-500 cursor-not-allowed'}" 
         disabled={!hasNextPage}
         on:click={() => onPageChange(currentPage)}
       >

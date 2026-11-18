@@ -38,7 +38,10 @@
     "ai_resize": "Ridimensiona il pannello dell'assistente IA",
     "ai_resize_hint": "Trascina per ridimensionare. Doppio clic per reimpostare.",
     "ai_open_settings": "Apri le impostazioni dell'assistente IA",
-    "ai_close": "Chiudi l'assistente IA"
+    "ai_close": "Chiudi l'assistente IA",
+    "account_menu": "Menu dell'account",
+    "skip_to_content": "Vai al contenuto",
+    "test_identity": "Identità {n}"
   },
   "navigation": {
     "dashboard": "Dashboard",
@@ -362,7 +365,8 @@
     "quarter_setting_up": " (in configurazione)",
     "quarter_coordinator_only": " (solo coordinatore)",
     "capital": "Capitale",
-    "background_alt": "Sfondo di {name}"
+    "background_alt": "Sfondo di {name}",
+    "ii_explained": "Internet Identity è una passkey conservata sul tuo dispositivo: niente password e niente email."
   },
   "identities": {
     "page_title": "Le mie identità",

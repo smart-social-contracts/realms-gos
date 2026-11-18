@@ -38,7 +38,10 @@
     "ai_resize": "KI-Assistenten-Panel skalieren",
     "ai_resize_hint": "Ziehen zum Skalieren. Doppelklick zum Zurücksetzen.",
     "ai_open_settings": "Einstellungen des KI-Assistenten öffnen",
-    "ai_close": "KI-Assistent schließen"
+    "ai_close": "KI-Assistent schließen",
+    "account_menu": "Kontomenü",
+    "skip_to_content": "Zum Inhalt springen",
+    "test_identity": "Identität {n}"
   },
   "navigation": {
     "dashboard": "Dashboard",
@@ -362,7 +365,8 @@
     "quarter_setting_up": " (wird eingerichtet)",
     "quarter_coordinator_only": " (nur Koordinator)",
     "capital": "Hauptstadt",
-    "background_alt": "Hintergrund von {name}"
+    "background_alt": "Hintergrund von {name}",
+    "ii_explained": "Internet Identity ist ein Passkey auf deinem Gerät: kein Passwort und keine E-Mail."
   },
   "identities": {
     "page_title": "Meine Identitäten",

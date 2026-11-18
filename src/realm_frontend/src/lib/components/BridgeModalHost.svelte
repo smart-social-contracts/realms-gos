@@ -68,7 +68,7 @@
 					<button
 						type="button"
 						aria-label="Close"
-						class="-mr-1 -mt-1 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+						class="-mr-1 -mt-1 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 						onclick={dismissBridgeModal}
 					>
 						<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">

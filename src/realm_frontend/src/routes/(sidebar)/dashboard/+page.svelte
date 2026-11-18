@@ -2,7 +2,6 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { SITE_NAME } from '$lib/globals';
 	import MetaTag from '../../utils/MetaTag.svelte';
 	import { _ } from 'svelte-i18n';
 	import { isAuthenticated } from '$lib/stores/auth';
@@ -12,7 +11,7 @@
 
 	const path: string = '/dashboard';
 	const description: string = 'Public Dashboard - redirecting to extension';
-	const title: string = SITE_NAME + ' - ' + $_('extensions.public_dashboard.title');
+	const title: string = $_('extensions.public_dashboard.title');
 	const subtitle: string = $_('extensions.public_dashboard.title');
 
 	onMount(() => {

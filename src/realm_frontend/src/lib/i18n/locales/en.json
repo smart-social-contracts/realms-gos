@@ -38,7 +38,10 @@
     "ai_resize": "Resize AI Assistant panel",
     "ai_resize_hint": "Drag to resize. Double-click to reset.",
     "ai_open_settings": "Open AI Assistant settings",
-    "ai_close": "Close AI Assistant"
+    "ai_close": "Close AI Assistant",
+    "account_menu": "Account menu",
+    "skip_to_content": "Skip to content",
+    "test_identity": "Identity {n}"
   },
   "navigation": {
     "dashboard": "Dashboard",
@@ -362,7 +365,8 @@
     "quarter_setting_up": " (setting up)",
     "quarter_coordinator_only": " (coordinator-only)",
     "capital": "Capital",
-    "background_alt": "{name} background"
+    "background_alt": "{name} background",
+    "ii_explained": "Internet Identity is a passkey kept on your device: no password and no email."
   },
   "identities": {
     "page_title": "My Identities",

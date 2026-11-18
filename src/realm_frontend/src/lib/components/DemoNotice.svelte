@@ -22,12 +22,12 @@
 <div class="demo-notice">
 	{#if view.showPrimary}
 		<h2 class="text-2xl font-bold text-gray-900 mb-2">Aviso</h2>
-		<p class="text-xs uppercase tracking-wide text-gray-400 mb-3">
+		<p class="text-xs uppercase tracking-wide text-gray-500 mb-3">
 			{localeLabel(view.primaryLanguage)}
 		</p>
 		<div class="demo-notice__body" lang={view.primaryLanguage}>{view.primary}</div>
 		<h3 class="text-lg font-semibold text-gray-900 mt-6 mb-2">Notice</h3>
-		<p class="text-xs uppercase tracking-wide text-gray-400 mb-3">English</p>
+		<p class="text-xs uppercase tracking-wide text-gray-500 mb-3">English</p>
 	{:else}
 		<h2 class="text-2xl font-bold text-gray-900 mb-2">Notice</h2>
 	{/if}

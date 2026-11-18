@@ -38,7 +38,10 @@
     "ai_resize": "Redimensionner le panneau de l'assistant IA",
     "ai_resize_hint": "Faites glisser pour redimensionner. Double-cliquez pour réinitialiser.",
     "ai_open_settings": "Ouvrir les paramètres de l'assistant IA",
-    "ai_close": "Fermer l'assistant IA"
+    "ai_close": "Fermer l'assistant IA",
+    "account_menu": "Menu du compte",
+    "skip_to_content": "Aller au contenu",
+    "test_identity": "Identité {n}"
   },
   "navigation": {
     "dashboard": "Tableau de bord",
@@ -362,7 +365,8 @@
     "quarter_setting_up": " (en configuration)",
     "quarter_coordinator_only": " (coordinateur uniquement)",
     "capital": "Capitale",
-    "background_alt": "Arrière-plan de {name}"
+    "background_alt": "Arrière-plan de {name}",
+    "ii_explained": "Internet Identity est une clé d'accès conservée sur votre appareil : ni mot de passe ni e-mail."
   },
   "identities": {
     "page_title": "Mes identités",

@@ -6,7 +6,7 @@ import { read } from '$lib/realm';
 import { quarterFederation } from '$lib/stores/quarters';
 import { applyBrandingPrimary, DEFAULT_PRIMARY_COLOR, parsePrimaryColor } from '$lib/theme/brandingPrimary';
 import { applyResolvedLocale } from '$lib/i18n';
-import { defaultRealmLanguages } from '$lib/i18n/realmLocales';
+import { publicRealmLanguages } from '$lib/i18n/realmLocales';
 import { userLocale } from '$lib/stores/userLocale';
 import { singleFlight } from '$lib/utils/singleFlight';
 import { resolveDemoNoticeBodies, resolveDemoNoticeEnabled, resolveDisableMonetaryTokens } from '$lib/config/hostTestFlags';
@@ -132,8 +132,7 @@ const createRealmInfoStore = () => {
 			// awaiting backendReady would deadlock the boot (circular await).
 			await backendActorReady;
 
-				// Languages and the AI assistant switch are not public on this realm version: they keep
-				// their defaults.
+				// The AI assistant switch is not public on this realm version: it keeps its default.
 				const [info, directory] = await Promise.all([
 					withQueryTimeout(read('realm_info'), STATUS_QUERY_TIMEOUT_MS, 'realm_info'),
 					withQueryTimeout(read('quarter_directory'), STATUS_QUERY_TIMEOUT_MS, 'quarter_directory')
@@ -145,7 +144,7 @@ const createRealmInfoStore = () => {
 				const flags = realm.test_flags || {};
 				const network = realm.network || '';
 				const primaryColor = parsePrimaryColor(realm.primary_color) ?? DEFAULT_PRIMARY_COLOR;
-				const languageConfig = defaultRealmLanguages();
+				const languageConfig = publicRealmLanguages(realm.languages);
 				const federation = directory?.ok
 					? quarterFederation(directory)
 					: { quarters: [], isQuarter: false, parentRealmCanisterId: '' };

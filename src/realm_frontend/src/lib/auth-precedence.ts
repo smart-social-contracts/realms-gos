@@ -69,6 +69,23 @@ export function shouldLoginWithTestIdentity(options: {
 	return shouldUseTestModeAuth(!!embeddedInPortal, !!testModeIIBypass);
 }
 
+/**
+ * Which test identity a sign-in uses: the one asked for (the picker, or `?ti=` in the address), else the one this tab
+ * is already signed in as, else the first. A page load signs in by itself before the session is restored, so without
+ * the tab's own identity a reload turned every test member into Identity 1. `random` asks for a fresh identity.
+ */
+export function resolveTestIdentityIndex(
+	requested: number | null | undefined,
+	persisted: number | null | undefined,
+	random = false
+): number | null {
+	const index = (value: number | null | undefined) =>
+		value != null && Number.isFinite(Number(value)) ? Number(value) : null;
+	if (index(requested) != null) return index(requested);
+	if (random) return null;
+	return index(persisted) ?? 0;
+}
+
 /** Test sessions may be restored after iframe reloads when II bypass is on. */
 export function shouldRestoreTestModeSession(testModeIIBypass: boolean): boolean {
 	return __REALMS_TEST_BUILD__ && testModeIIBypass;

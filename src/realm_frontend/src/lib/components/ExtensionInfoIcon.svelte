@@ -62,7 +62,7 @@
 <div class="extension-info-popover relative inline-flex items-center">
 	<button
 		type="button"
-		class="inline-flex items-center justify-center rounded-full p-0.5 text-gray-400 transition-colors hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+		class="inline-flex items-center justify-center rounded-full p-0.5 text-gray-500 transition-colors hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
 		aria-label="Extension information"
 		aria-expanded={open}
 		on:click={toggle}

@@ -138,7 +138,10 @@
   );
   $: showTestModeQuarterPicker = $testMode && quarterDirectory.length > 0;
 
-  $: welcomeImageUrl = $realmInfo.backgroundImageUrl || '/custom/background.png';
+  // The realm's own cover, or the default one shipped with the shell when it has none (or it fails to load).
+  const DEFAULT_COVER = '/images/background.png';
+  let coverFailed = false;
+  $: welcomeImageUrl = coverFailed ? DEFAULT_COVER : ($realmInfo.backgroundImageUrl || '/custom/background.png');
 
   const internetIdentityUrl =
     (typeof globalThis !== 'undefined' && globalThis.__CANISTER_IDS?.internet_identity) ||
@@ -706,13 +709,14 @@
     <div class="absolute inset-0 z-0">
       <img 
         src={welcomeImageUrl} 
-        alt={t('join.background_alt', { values: { name: realmName } })}
+        alt={coverFailed ? '' : t('join.background_alt', { values: { name: realmName } })}
+        on:error={() => { coverFailed = true; }}
         class="w-full h-full object-cover"
       />
     </div>
     
     <!-- Content overlay - centered vertically -->
-    <div class="relative z-10 p-6 flex flex-col h-full justify-center items-center">
+    <div class={cn('relative z-10 p-6 flex flex-col h-full items-center', coverFailed ? 'justify-end pb-24' : 'justify-center')}>
       <!-- Text container with dark background for readability -->
       <div class="bg-black/60 backdrop-blur-sm rounded-2xl p-6 max-w-md mx-6">
         <!-- Welcome Message -->
@@ -741,7 +745,8 @@
     <div class="md:hidden absolute inset-0 z-0">
       <img 
         src={welcomeImageUrl} 
-        alt={t('join.background_alt', { values: { name: realmName } })}
+        alt={coverFailed ? '' : t('join.background_alt', { values: { name: realmName } })}
+        on:error={() => { coverFailed = true; }}
         class="w-full h-full object-cover"
       />
     </div>
@@ -859,7 +864,7 @@
                       {$_('join.registered_founder', { values: { principal: shortPrincipal(persona.registeredFounder) } })}
                     </p>
                   {/if}
-                  <p class="text-xs text-gray-400 mt-1">{persona.description}</p>
+                  <p class="text-xs text-gray-500 mt-1">{persona.description}</p>
                 </button>
               {/each}
 
@@ -902,9 +907,9 @@
                 </div>
                 {#if customPersona}
                   <p class="text-xs font-mono text-gray-500 mt-2 break-all">{customPersona.principal}</p>
-                  <p class="text-xs text-gray-400 mt-1">{customPersona.description}</p>
+                  <p class="text-xs text-gray-500 mt-1">{customPersona.description}</p>
                 {:else}
-                  <p class="text-xs text-gray-400 mt-2">
+                  <p class="text-xs text-gray-500 mt-2">
                     {$_('join.identity_numbers', { values: { max: maxCustomIdentityNumber.toLocaleString() } })}
                   </p>
                 {/if}
@@ -943,6 +948,8 @@
               {/if}
             </button>
 
+            <p class="mt-3 text-center text-sm text-gray-500">{$_('join.ii_explained')}</p>
+
             <p class="mt-6 text-center text-sm text-gray-500">
               {$_('join.no_ii')}
               <button
@@ -955,7 +962,8 @@
             </p>
           {/if}
 
-          <!-- Returning member who forgot their quarter -->
+          <!-- Returning member who forgot their quarter: only a realm with several quarters has the question -->
+          {#if quarterDirectory.length > 1}
           <div class="mt-6 pt-5 border-t border-gray-100 text-center">
             <p class="text-sm text-gray-500 mb-2">{$_('join.already_member_quarter')}</p>
             <button
@@ -975,6 +983,7 @@
               <p class="mt-2 text-sm text-red-600">{forgotError}</p>
             {/if}
           </div>
+          {/if}
         </div>
 
       <!-- Step: Already Joined (Welcome Back / multi-membership activation) -->
@@ -1054,7 +1063,7 @@
         <div class="bg-white rounded-2xl shadow-xl p-5 md:p-8 border border-gray-100">
           {#if showQuarterBanner}
             <div class="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-xl">
-              <div class="text-xs uppercase tracking-wide text-gray-400">{$_('join.joining_quarter')}</div>
+              <div class="text-xs uppercase tracking-wide text-gray-500">{$_('join.joining_quarter')}</div>
               {#if showTestModeQuarterPicker}
                 <select
                   id="test-mode-quarter"
@@ -1068,7 +1077,7 @@
                     </option>
                   {/each}
                 </select>
-                <p class="mt-2 text-xs text-gray-400">
+                <p class="mt-2 text-xs text-gray-500">
                   {$_('join.test_mode_quarter')}
                 </p>
               {:else}
@@ -1139,7 +1148,7 @@
 
           {#if showQuarterBanner}
             <div class="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-xl">
-              <div class="text-xs uppercase tracking-wide text-gray-400">{$_('join.joining_quarter')}</div>
+              <div class="text-xs uppercase tracking-wide text-gray-500">{$_('join.joining_quarter')}</div>
               {#if showTestModeQuarterPicker}
                 <select
                   id="test-mode-quarter"
@@ -1153,7 +1162,7 @@
                     </option>
                   {/each}
                 </select>
-                <p class="mt-2 text-xs text-gray-400">
+                <p class="mt-2 text-xs text-gray-500">
                   {$_('join.test_mode_quarter')}
                 </p>
               {:else}
@@ -1244,7 +1253,7 @@
               <p class="mt-2 text-sm text-red-600">{inviteError}</p>
             {/if}
             {#if $testModeUserSelfRegistration && !inviteValid}
-              <p class="mt-2 text-xs text-gray-400 flex items-start gap-1.5">
+              <p class="mt-2 text-xs text-gray-500 flex items-start gap-1.5">
                 <svg class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
