@@ -7,7 +7,10 @@ import re
 from core import op
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SPECS = (ROOT / "ggg" / "model" / "README.md", ROOT / "docs" / "ggg" / "spec.md")
+# The GGG model is split by subject; ontology.md and codex.md carry no operation tables.
+MODEL = sorted(p for p in (ROOT / "ggg" / "model").glob("*.md")
+               if p.name not in ("ontology.md", "codex.md"))
+SPECS = (*MODEL, ROOT / "docs" / "ggg" / "spec.md")
 FLAGS = ("read", "delegable", "confirm", "governed", "signing")
 
 

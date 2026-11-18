@@ -110,7 +110,7 @@ def test_everything_covers_exactly_the_enabled_operations(name, monkeypatch):
 
 
 def test_the_legacy_operations_are_those_the_model_lists_as_delegable_before_groups():
-    file = (ROOT / "ggg" / "model" / "README.md").read_text()
+    file = "\n".join(p.read_text() for p in sorted((ROOT / "ggg" / "model").glob("*.md")))
     listed = file.split("A grant whose `scope` names permissions covers only these operations")[1].split(". Not")[0]
     names = {n for n in re.findall(r"`([a-z_]+)`", listed) if n in ggg_delegation.OPERATIONS}
     assert len(poa.LEGACY) == 24 and poa.LEGACY == names and poa.LEGACY <= poa.ENABLED <= set(op.OPS)
