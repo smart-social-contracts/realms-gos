@@ -81,6 +81,9 @@ const principalOf = (seed: number) =>
 // The department the founder sits in, for the department_docs row.
 let library = '';
 
+/** The title of the notice the notifications row sends in its setup and looks for when the page is open. */
+let noticeTitle = '';
+
 const ROWS: Row[] = [
 	{
 		id: 'public_dashboard',
@@ -323,19 +326,23 @@ const ROWS: Row[] = [
 		as: 'member',
 		action: "open the second member's messages (notifications sends its visitors there)",
 		expected: 'the notification the founder sent',
-		run: async ({ app }) => {
-			const title = `Meeting on Friday ${Date.now()}`;
+		// The notice is sent before the page is opened. Sent after, it showed only when it landed before the page
+		// first read its list (the page reads it once, on opening): a race the test lost whenever the realm started fast.
+		setup: async () => {
+			noticeTitle = `Meeting on Friday ${Date.now()}`;
 			await runOp(
 				realm,
 				'notification_send',
 				{
 					recipient: `User:${memberIdentity().getPrincipal().toText()}`,
-					title,
+					title: noticeTitle,
 					body: 'In the square.'
 				},
 				founderIdentity(realm)
 			);
-			await expect(app.getByText(title)).toBeVisible({ timeout: 60_000 });
+		},
+		run: async ({ app }) => {
+			await expect(app.getByText(noticeTitle)).toBeVisible({ timeout: 60_000 });
 		}
 	},
 	{
