@@ -116,6 +116,9 @@ export function primaryCssVariables(hex: string): Record<string, string> {
 	return vars;
 }
 
+/** Where the realm's colour is remembered between visits (app.html reads it). */
+export const PRIMARY_VARS_KEY = 'realm_primary_vars';
+
 // The realm's colour once it is known; the default until then.
 let applied = DEFAULT_PRIMARY_COLOR;
 
@@ -126,6 +129,13 @@ export function applyBrandingPrimary(hex: string): Record<string, string> {
 	const root = document.documentElement;
 	for (const [key, value] of Object.entries(vars)) {
 		root.style.setProperty(key, value);
+	}
+	// Remembered for the next visit: app.html sets these before the first paint, so the loading mark is in the
+	// realm's colour and the page does not start in the default one.
+	try {
+		localStorage.setItem(PRIMARY_VARS_KEY, JSON.stringify(vars));
+	} catch {
+		// storage unavailable: the next visit starts in the default colour
 	}
 	return vars;
 }

@@ -19,7 +19,7 @@
   import JoinTerms from '$lib/components/JoinTerms.svelte';
   import { shouldShowJoinNotice, shouldShowJoinTerms } from '$lib/config/hostTestFlags';
   import { cn } from '$lib/theme/utilities';
-  import { REALM_DEFAULT_MARK_ON_DARK, resolveRealmMarkSrc } from '$lib/branding/realmMark';
+  import { REALM_DEFAULT_MARK, resolveRealmMarkSrc } from '$lib/branding/realmMark';
   import { formatQuarterLabel } from '$lib/utils/quarterLabels';
   import { probeFederatedMembership, activateMembership } from '$lib/utils/federatedMembership';
   import {
@@ -141,14 +141,14 @@
   $: showTestModeQuarterPicker = $testMode && quarterDirectory.length > 0;
 
   // The realm's own cover. A realm that has none (or whose cover fails to load) gets no picture: a plain panel in
-  // its colour, darkened enough for white text whatever the colour, with its mark.
+  // a light tint of its colour, with dark text and its mark.
   let coverFailed = false;
   $: welcomeImageUrl = $realmInfo.backgroundImageUrl || '/custom/background.png';
   $: panelStyle = coverFailed
-    ? `background: #1e293b; background: linear-gradient(160deg, color-mix(in srgb, ${$realmInfo.primaryColor} 55%, #0f172a), color-mix(in srgb, ${$realmInfo.primaryColor} 25%, #0f172a));`
+    ? `background: #f3f4f6; background: linear-gradient(160deg, color-mix(in srgb, ${$realmInfo.primaryColor} 18%, #fff), color-mix(in srgb, ${$realmInfo.primaryColor} 5%, #fff));`
     : '';
   let panelMarkFailed = false;
-  $: panelMark = panelMarkFailed ? REALM_DEFAULT_MARK_ON_DARK : resolveRealmMarkSrc($realmInfo.logoUrl);
+  $: panelMark = panelMarkFailed ? REALM_DEFAULT_MARK : resolveRealmMarkSrc($realmInfo.logoUrl);
 
   const internetIdentityUrl =
     (typeof globalThis !== 'undefined' && globalThis.__CANISTER_IDS?.internet_identity) ||
@@ -719,7 +719,7 @@
 
 <div class="min-h-viewport md:h-viewport grid grid-cols-1 md:grid-cols-2" style="transform: none !important;">
   <!-- Left Brand Panel with Background Image -->
-  <div class="hidden md:flex md:col-start-1 text-white flex-col justify-between relative" style={panelStyle}>
+  <div class={cn('hidden md:flex md:col-start-1 flex-col justify-between relative', coverFailed ? 'text-gray-900' : 'text-white')} style={panelStyle}>
     <!-- Background Image - no overlay, full opacity -->
     {#if !coverFailed}
       <div class="absolute inset-0 z-0">
@@ -750,13 +750,13 @@
         </h1>
         
         {#if $realmWelcomeMessage}
-          <p class="text-lg text-white/90 mb-4">
+          <p class={cn('text-lg mb-4', coverFailed ? 'text-gray-700' : 'text-white/90')}>
             {$realmWelcomeMessage}
           </p>
         {/if}
         
         {#if $realmManifesto}
-          <p class="text-lg text-white/90">
+          <p class={cn('text-lg', coverFailed ? 'text-gray-700' : 'text-white/90')}>
             {$realmManifesto}
           </p>
         {/if}
