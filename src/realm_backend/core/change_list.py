@@ -16,9 +16,7 @@ MAX_CHAPTERS = 50
 MAX_MIRRORS = 4  # every URL tried is an outcall the realm pays for
 CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar (§7)
 REALM = "realm"  # the domain only the realm's own layer fills (§3)
-# GGG's domain list, the ggg submodule's domains.json (tests/ggg keeps the two equal).
-DOMAINS = ("realm", "tax", "procedure", "register", "local_regime", "water", "data_protection", "language",
-           "treasury", "federation", "planning", "justice", "procurement")
+MAX_DOMAIN = 64  # characters; a domain id is a file name and a key in a published record
 HEX = "0123456789abcdef"
 
 
@@ -150,15 +148,29 @@ def source_name(source):
         raise Fail(str(e))
 
 
+def is_domain(name):
+    """Whether ``name`` is a domain id: lowercase letters and underscores, starting with a letter, at most
+    ``MAX_DOMAIN`` characters (ggg model/codex.md §2). A codex chooses its own domains, so the id is checked
+    and not its membership of any list; what the check protects is that an id reaching a published record
+    is a plain name, never empty, path-like or unbounded."""
+    if not isinstance(name, str) or not 0 < len(name) <= MAX_DOMAIN:
+        return False
+    if not "a" <= name[0] <= "z":
+        return False
+    return all("a" <= c <= "z" or c == "_" for c in name)
+
+
 def chapter_id(chapter):
-    """``(source, domain)`` of the chapter id ``<source id>/<domain>``, the domain one of GGG's or ``calendar``."""
+    """``(source, domain)`` of the chapter id ``<source id>/<domain>``: the domain is any id ``is_domain``
+    accepts, which includes ``calendar``, the name a layer's calendar is set under."""
     source, _, domain = (chapter if isinstance(chapter, str) else "").rpartition("/")
     try:
         source_name(source)
     except Fail as e:
         raise Fail(f"{chapter!r} is not a chapter id: {e}")
-    if domain != CALENDAR and domain not in DOMAINS:
-        raise Fail(f"{chapter!r} is not a chapter id: {domain!r} is not a GGG domain, nor calendar")
+    if not is_domain(domain):
+        raise Fail(f"{chapter!r} is not a chapter id: {domain!r} is not a domain id (lowercase letters and "
+                   f"underscores, starting with a letter, at most {MAX_DOMAIN} characters)")
     return source, domain
 
 

@@ -164,8 +164,8 @@ def checked_release(entry, key):
     for domain, checksum in chapters.items():
         if domain == change_list.CALENDAR:
             raise Fail(f"{key}: {source} lists its calendar as calendar, not among its chapters")
-        if domain not in change_list.DOMAINS:
-            raise Fail(f"{key}: {source}/{domain}: {domain!r} is not a GGG domain")
+        if not change_list.is_domain(domain):
+            raise Fail(f"{key}: {source}/{domain}: {domain!r} is not a domain id")
         if not pinned(checksum):
             raise Fail(f"{key}: {source}/{domain} is sha256:<64 hex digits>")
     calendar = entry["calendar"] or None

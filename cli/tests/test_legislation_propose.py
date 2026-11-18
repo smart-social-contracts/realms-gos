@@ -298,7 +298,9 @@ def test_no_realm_is_called_unless_it_is_named_with_a_network(
     [
         (["--set", "eu/es/tax"], "only the realm's own layer"),
         (["--remove", "eu/es/tax"], "only the realm's own layer"),
-        (["--set", f"{VALENCIA}/parking"], "parking is not a GGG domain"),
+        (["--set", f"{VALENCIA}/Parking"], "Parking is not a domain id"),
+        # a domain of the codex's own is accepted, so this reaches the missing-file check
+        (["--set", f"{VALENCIA}/drought_measures"], "drought_measures.py"),
         (["--set", "tax"], "is not a source id"),
         (["--set", f"{VALENCIA}/water"], "water.py"),
         (["--set", TAX, "--set", TAX], "named twice"),

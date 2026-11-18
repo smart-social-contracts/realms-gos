@@ -99,7 +99,7 @@ def worst_layers():
         return f"eu/{n:04d}-" + "x" * 56
 
     def release(n):
-        return {"source": source(n), "version": "9" * 64, "chapters": {d: OTHER for d in change_list_rules.DOMAINS},
+        return {"source": source(n), "version": "9" * 64, "chapters": {d: OTHER for d in ("tax", "procedure", "register")},
                 "calendar": OTHER}
 
     running = [release(n) for n in range(16)]

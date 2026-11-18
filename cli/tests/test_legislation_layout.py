@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 
 from realms.cli.commands import legislation
 from realms.cli.commands.legislation import legislation_app
-from realms.cli.commands.legislation_layout import GGG_DOMAINS, layout_problems
+from realms.cli.commands.legislation_layout import layout_problems
 
 ROOT = Path(__file__).resolve().parents[2]
 VALENCIA = "eu/es/vc/46250-valencia"
@@ -168,14 +168,32 @@ def test_a_folder_name_of_lowercase_letters_digits_and_hyphens_is_kept(tree):
 # ── The .py files of a source ─────────────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("name", ["foo.py", "Tax.py", "__init__.py", "local-regime.py"])
-def test_a_py_file_that_is_not_a_ggg_domain_is_refused(tree, name):
+@pytest.mark.parametrize("name", ["Tax.py", "__init__.py", "local-regime.py", "tax2.py"])
+def test_a_py_file_that_is_not_a_domain_id_is_refused(tree, name):
     write(tree, f"eu/es/{name}", "")
-    breaks(tree, f"eu/es/{name}: {name[:-3]} is not a GGG domain")
+    breaks(tree, f"eu/es/{name}: {name[:-3]} is not a domain id")
 
 
-@pytest.mark.parametrize("domain", GGG_DOMAINS)
-def test_a_py_file_named_after_a_ggg_domain_is_kept(tree, domain):
+def test_a_py_file_named_after_a_domain_the_codex_chose_is_kept(tree):
+    """GGG's list is a shared vocabulary, not a gate: a codex files chapters under the ids it chooses."""
+    write(tree, f"{VALENCIA}/drought_measures.py", chapter("drought_measures"))
+    assert problems(tree) == []
+
+
+def test_a_chapter_cannot_be_called_calendar(tree):
+    """`calendar` is a layer's calendar, set under <source>/calendar, so it is not a chapter."""
+    write(tree, "eu/es/calendar.py", "")
+    breaks(tree, "eu/es/calendar.py: calendar is a layer's calendar.json, not a chapter")
+
+
+# Read from ggg rather than copied: the common list is GGG's, and nothing here keeps a second copy.
+COMMON_DOMAINS = tuple(
+    d["id"] for d in json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
+)
+
+
+@pytest.mark.parametrize("domain", COMMON_DOMAINS)
+def test_a_py_file_named_after_a_common_ggg_domain_is_kept(tree, domain):
     write(tree, f"{VALENCIA}/{domain}.py", chapter(domain))
     assert problems(tree) == []
 
@@ -338,8 +356,8 @@ def one_release(tree, **changes):
             "chapters.data_protection is sha256:<64 hex digits>",
         ),
         (
-            {"chapters": {"mining": "sha256:" + "0" * 64}},
-            "chapters lists mining, which is not a GGG domain",
+            {"chapters": {"Mining": "sha256:" + "0" * 64}},
+            "chapters lists Mining, which is not a domain id",
         ),
         ({"calendar": "sha256:short"}, "calendar is sha256:<64 hex digits>, or null"),
         ({"notes": "a release"}, "notes are text by language"),
@@ -557,27 +575,16 @@ def check(monkeypatch):
 
 
 def test_check_stops_at_the_layout_before_it_loads_a_chapter(tree, check):
-    write(tree, "eu/es/foo.py", "this is not python (")
+    write(tree, "eu/es/Foo.py", "this is not python (")
     out = check(tree)
     assert out.exit_code == 1
-    assert "eu/es/foo.py: foo is not a GGG domain" in out.output
+    assert "eu/es/Foo.py: Foo is not a domain id" in out.output
     assert (
         "1 refused" in out.output
-    )  # the syntax error of foo.py is not loaded, so it is not counted
+    )  # the syntax error of Foo.py is not loaded, so it is not counted
 
 
 def test_check_loads_the_chapters_once_the_layout_holds(tree, check):
     out = check(tree)
     assert out.exit_code == 0, out.output
     assert "ok: 4 realm(s) checked" in out.output
-
-
-def test_the_domain_list_is_the_canisters():
-    source = (ROOT / "src/realm_backend/core/change_list.py").read_text()
-    listed = next(
-        ast.literal_eval(node.value)
-        for node in ast.parse(source).body
-        if isinstance(node, ast.Assign)
-        and getattr(node.targets[0], "id", None) == "DOMAINS"
-    )
-    assert GGG_DOMAINS == listed

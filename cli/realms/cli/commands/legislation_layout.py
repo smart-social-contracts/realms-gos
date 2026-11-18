@@ -7,7 +7,7 @@ The rules:
 
 - a folder name is lowercase letters, digits and ``-``;
 - a source is a folder with a ``source.json`` (§3.1), whose ``id`` is the folder's path under the tree;
-- the only ``.py`` files in a source are ``<domain>.py``, ``<domain>`` a GGG domain;
+- the only ``.py`` files in a source are ``<domain>.py``, ``<domain>`` a domain id the codex chose;
 - ``calendar.json`` (§3.4) and ``releases.json`` (§3.2) have the shapes the design shows;
 - ``<domain>.cases.json`` (§12.1) tests the chapter ``<domain>.py`` beside it, and has the shape of
   ``legislation_cases``;
@@ -30,16 +30,21 @@ from realms.legislation.codex import source_id
 from realms.legislation.errors import LegislationError
 from realms.legislation.paths import REALM
 
-# GGG's domain list: the ggg submodule's domains.json, which the canister carries in core/change_list.py
-# (tests/ggg keeps those two equal, and cli/tests keeps this one equal to the canister's).
-GGG_DOMAINS = (
-    "realm", "tax", "procedure", "register", "local_regime", "water", "data_protection", "language",
-    "treasury", "federation", "planning", "justice", "procurement",
-)  # fmt: skip
+# A codex files chapters under the domain ids it chooses, so no copy of GGG's list is kept here:
+# `is_domain` is the whole rule (ggg model/codex.md §2).
+MAX_DOMAIN = 64  # characters, as core/change_list.py
 SOURCE_FILES = ("source.json", "releases.json", "calendar.json")
 CASES_SUFFIX = ".cases.json"
 CASE_KINDS = ("call", "guard", "forbid", "compute")
 HEX = frozenset("0123456789abcdef")
+
+
+def is_domain(name: str) -> bool:
+    """Whether ``name`` is a domain id: lowercase letters and underscores, starting with a letter, at
+    most MAX_DOMAIN characters (ggg model/codex.md §2). Mirrors core/change_list.is_domain."""
+    if not name or len(name) > MAX_DOMAIN or not "a" <= name[0] <= "z":
+        return False
+    return all("a" <= c <= "z" or c == "_" for c in name)
 
 
 def layout_problems(tree: Path) -> List[str]:
@@ -95,9 +100,16 @@ def folder_problems(tree: Path, folder: Path, sources: set) -> List[str]:
 
 def chapter_problems(tree: Path, files: dict) -> List[str]:
     problems = [
-        f"{shown(tree, files[name])}: {name[:-3]} is not a GGG domain ({', '.join(GGG_DOMAINS)})"
+        f"{shown(tree, files[name])}: {name[:-3]} is not a domain id (lowercase letters and underscores,"
+        f" starting with a letter, at most {MAX_DOMAIN} characters)"
         for name in sorted(files)
-        if name.endswith(".py") and name[:-3] not in GGG_DOMAINS
+        if name.endswith(".py") and not is_domain(name[:-3])
+    ]
+    # `calendar` is a layer's calendar, set under <source>/calendar, so it cannot also be a chapter.
+    problems += [
+        f"{shown(tree, files[name])}: calendar is a layer's calendar.json, not a chapter"
+        for name in sorted(files)
+        if name == "calendar.py"
     ]
     return problems + [
         f"{shown(tree, files[name])}: cases for {name[: -len(CASES_SUFFIX)]}, but there is no {name[: -len(CASES_SUFFIX)]}.py beside them"
@@ -287,8 +299,8 @@ def release_reasons(release) -> List[str]:
                 reasons.append(
                     "chapters lists the realm domain, which only the realm's own layer fills"
                 )
-            elif domain not in GGG_DOMAINS:
-                reasons.append(f"chapters lists {domain}, which is not a GGG domain")
+            elif not is_domain(domain):
+                reasons.append(f"chapters lists {domain}, which is not a domain id")
             if not is_checksum(checksum):
                 reasons.append(f"chapters.{domain} is sha256:<64 hex digits>")
     if release.get("calendar") is not None and not is_checksum(release["calendar"]):

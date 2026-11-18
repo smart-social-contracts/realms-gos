@@ -64,7 +64,7 @@ def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and
     (text(set=[{**entry("town/tax"), "sha256": "0" * 63}]), "64 hex digits"),
     (text(set=[entry("town/tax", size=0)]), "size is between"),
     (text(set=[entry("town/tax", size=256 * 1024 + 1)]), "size is between"),
-    (text(set=[entry("town/parking")]), "not a GGG domain"),
+    (text(set=[entry("town/Parking")]), "not a domain id"),
     (text(set=[entry("Town/tax")]), "not a chapter id"),
     (text(set=[entry("tax")]), "not a chapter id"),
     (text().replace('"remove": []', '"remove": "town/tax"'), "remove is a list"),
@@ -134,11 +134,6 @@ def test_the_change_list_of_the_bonus_change_is_one_the_realm_accepts():
     realm, own = change_list.apply(parsed, parsed["realm"], parsed["replaces"], {"chapters": {}, "calendar": None})
     assert own == {"chapters": {"tax": chapter["sha256"]}, "calendar": None}
     assert parsed["summary"]["es"] == "IBI 2027: bonificación por familia numerosa"
-
-
-def test_the_domain_list_is_gggs():
-    listed = json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
-    assert tuple(d["id"] for d in listed) == change_list.DOMAINS
 
 
 # ---- apply (step 2)
