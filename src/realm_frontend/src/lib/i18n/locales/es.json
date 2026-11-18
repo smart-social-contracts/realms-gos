@@ -366,6 +366,9 @@
     "quarter_coordinator_only": " (solo coordinador)",
     "capital": "Capital",
     "background_alt": "Fondo de {name}",
+    "display_name_label": "Tu nombre (opcional)",
+    "display_name_placeholder": "Cómo te verán los demás miembros",
+    "display_name_hint": "Se muestra junto a lo que propones y votas. Puedes cambiarlo más tarde.",
     "ii_explained": "Internet Identity es una llave de acceso guardada en tu dispositivo: sin contraseña y sin correo."
   },
   "identities": {

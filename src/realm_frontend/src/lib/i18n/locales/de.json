@@ -366,6 +366,9 @@
     "quarter_coordinator_only": " (nur Koordinator)",
     "capital": "Hauptstadt",
     "background_alt": "Hintergrund von {name}",
+    "display_name_label": "Dein Name (optional)",
+    "display_name_placeholder": "So sehen dich die anderen Mitglieder",
+    "display_name_hint": "Steht neben deinen Vorschlägen und Stimmen. Du kannst ihn später ändern.",
     "ii_explained": "Internet Identity ist ein Passkey auf deinem Gerät: kein Passwort und keine E-Mail."
   },
   "identities": {

@@ -366,6 +366,9 @@
     "quarter_coordinator_only": " (només coordinador)",
     "capital": "Capital",
     "background_alt": "Fons de {name}",
+    "display_name_label": "El teu nom (opcional)",
+    "display_name_placeholder": "Com et veuran els altres membres",
+    "display_name_hint": "Es mostra al costat del que proposes i votes. El pots canviar més tard.",
     "ii_explained": "Internet Identity és una clau d'accés guardada al teu dispositiu: sense contrasenya i sense correu."
   },
   "identities": {

@@ -366,6 +366,9 @@
     "quarter_coordinator_only": " (solo coordinatore)",
     "capital": "Capitale",
     "background_alt": "Sfondo di {name}",
+    "display_name_label": "Il tuo nome (facoltativo)",
+    "display_name_placeholder": "Come ti vedranno gli altri membri",
+    "display_name_hint": "Mostrato accanto a ciò che proponi e voti. Puoi cambiarlo più tardi.",
     "ii_explained": "Internet Identity è una passkey conservata sul tuo dispositivo: niente password e niente email."
   },
   "identities": {

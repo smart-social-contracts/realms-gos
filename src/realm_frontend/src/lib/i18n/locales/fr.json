@@ -366,6 +366,9 @@
     "quarter_coordinator_only": " (coordinateur uniquement)",
     "capital": "Capitale",
     "background_alt": "Arrière-plan de {name}",
+    "display_name_label": "Votre nom (facultatif)",
+    "display_name_placeholder": "Comment les autres membres vous verront",
+    "display_name_hint": "Affiché à côté de vos propositions et de vos votes. Vous pourrez le changer plus tard.",
     "ii_explained": "Internet Identity est une clé d'accès conservée sur votre appareil : ni mot de passe ni e-mail."
   },
   "identities": {

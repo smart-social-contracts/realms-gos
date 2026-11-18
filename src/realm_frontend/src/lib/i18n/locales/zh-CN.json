@@ -366,6 +366,9 @@
     "quarter_coordinator_only": "（仅协调员）",
     "capital": "首都",
     "background_alt": "{name} 背景",
+    "display_name_label": "你的名字（可选）",
+    "display_name_placeholder": "其他成员将如何看到你",
+    "display_name_hint": "显示在你的提案和投票旁边。之后可以修改。",
     "ii_explained": "Internet Identity 是保存在你设备上的通行密钥：无需密码，也无需邮箱。"
   },
   "identities": {

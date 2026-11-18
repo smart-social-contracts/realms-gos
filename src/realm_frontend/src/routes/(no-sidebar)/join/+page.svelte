@@ -43,6 +43,7 @@
   
   // Step management: 'auth' | 'already_joined' | 'terms' | 'profile' | 'success'
   let currentStep = 'auth';
+  let displayName = '';
   let userHasJoined = false;
   let membershipProbed = false;
   /** @type {Promise<void> | null} */
@@ -654,7 +655,11 @@
       // invite code is consumed on that quarter, where it lives. The profile
       // is resolved server-side (invite code profile or codex default).
       // A known profile means a client-side test code, which is not a realm invite.
-      const response = await onTarget('run', 'realm_join', { code: inviteProfile ? '' : inviteCode });
+      const nickname = displayName.trim();
+      const response = await onTarget('run', 'realm_join', {
+        code: inviteProfile ? '' : inviteCode,
+        ...(nickname ? { nickname } : {}),
+      });
       if (response.ok) {
         // Point the app at the quarter we just joined and remember it.
         if (targetQuarterId && targetQuarterId !== capitalId) {
@@ -1262,6 +1267,22 @@
                 </span>
               </p>
             {/if}
+          </div>
+
+          <div class="mb-6">
+            <label for="display-name" class="block text-sm font-medium text-gray-700 mb-2">
+              {$_('join.display_name_label')}
+            </label>
+            <input
+              id="display-name"
+              type="text"
+              bind:value={displayName}
+              maxlength="40"
+              autocomplete="nickname"
+              placeholder={$_('join.display_name_placeholder')}
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-gray-900 focus:border-gray-900"
+            />
+            <p class="mt-2 text-xs text-gray-500">{$_('join.display_name_hint')}</p>
           </div>
           
           <div class="flex gap-3">
