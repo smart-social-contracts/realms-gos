@@ -17,7 +17,7 @@ from ggg import Fund, Invoice, Proposal, Realm
 from ggg_ranges import RANGES
 from kit import call, ok
 
-FACTS = pathlib.Path(__file__).resolve().parents[2] / "ggg" / "facts.json"
+FACTS = pathlib.Path(__file__).resolve().parents[2] / "ggg" / "generated" / "facts.json"
 LONG = 2**63 - 1
 MONEY = 2**53 - 1
 

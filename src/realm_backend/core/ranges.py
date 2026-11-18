@@ -1,5 +1,5 @@
 """Range enforcement: a number outside the bounds GGG gives it is refused with InvalidArgument, before anything is
-written. The bounds are ggg_ranges.RANGES, generated from the ggg submodule's facts.json by scripts/ggg_candid.py."""
+written. The bounds are ggg_ranges.RANGES, generated from the ggg submodule's generated/facts.json by scripts/ggg_candid.py."""
 from core.db import Fail
 from ggg_ranges import RANGES
 

@@ -7,7 +7,7 @@ which is checked out here as the `ggg/` submodule:
 
 | Part | What | Where |
 |---|---|---|
-| **The model** | Entities, operations, lifecycles, invariants and permissions | [`ggg/model/README.md`](https://github.com/smart-social-contracts/ggg/blob/main/model/README.md) |
+| **The model** | Entities, operations, lifecycles, invariants and permissions | [`ggg/model/`](https://github.com/smart-social-contracts/ggg/tree/main/model) |
 | **The interface** | The model in Candid: a record for every entity and a method for every operation | [`ggg/ggg.did`](https://github.com/smart-social-contracts/ggg/blob/main/ggg.did) |
 | **The conformance suite** | Checks a canister against `ggg.did` | [`ggg/conformance/`](https://github.com/smart-social-contracts/ggg/tree/main/conformance) |
 
