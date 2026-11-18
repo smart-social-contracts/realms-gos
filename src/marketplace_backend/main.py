@@ -364,7 +364,8 @@ from ic_python_logging import get_logger
 # ===========================================================================
 
 storage = StableBTreeMap[str, str](memory_id=1, max_key_size=400, max_value_size=8000)
-Database.init(db_storage=storage, audit_enabled=True)
+# No heap audit log: it makes every save slower, grows without bound and is lost on upgrade
+Database.init(db_storage=storage, audit_enabled=False)
 
 logger = get_logger("marketplace_backend.main")
 
