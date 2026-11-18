@@ -369,7 +369,9 @@
     "display_name_label": "Your name (optional)",
     "display_name_placeholder": "How other members will see you",
     "display_name_hint": "Shown beside what you propose and vote. You can change it later.",
-    "ii_explained": "Internet Identity is a passkey kept on your device: no password and no email."
+    "ii_explained": "Internet Identity is a passkey kept on your device: no password and no email.",
+    "next_voting": "See what is being decided",
+    "next_home": "What this realm is"
   },
   "identities": {
     "page_title": "My Identities",

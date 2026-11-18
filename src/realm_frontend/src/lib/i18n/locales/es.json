@@ -369,7 +369,9 @@
     "display_name_label": "Tu nombre (opcional)",
     "display_name_placeholder": "Cómo te verán los demás miembros",
     "display_name_hint": "Se muestra junto a lo que propones y votas. Puedes cambiarlo más tarde.",
-    "ii_explained": "Internet Identity es una llave de acceso guardada en tu dispositivo: sin contraseña y sin correo."
+    "ii_explained": "Internet Identity es una llave de acceso guardada en tu dispositivo: sin contraseña y sin correo.",
+    "next_voting": "Ver qué se está decidiendo",
+    "next_home": "Qué es este reino"
   },
   "identities": {
     "page_title": "Mis identidades",

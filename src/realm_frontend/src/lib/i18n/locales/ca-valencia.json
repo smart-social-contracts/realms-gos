@@ -369,7 +369,9 @@
     "display_name_label": "El teu nom (opcional)",
     "display_name_placeholder": "Com et veuran els altres membres",
     "display_name_hint": "Es mostra al costat del que proposes i votes. El pots canviar més tard.",
-    "ii_explained": "Internet Identity és una clau d'accés guardada al teu dispositiu: sense contrasenya i sense correu."
+    "ii_explained": "Internet Identity és una clau d'accés guardada al teu dispositiu: sense contrasenya i sense correu.",
+    "next_voting": "Veure què s'està decidint",
+    "next_home": "Què és este regne"
   },
   "identities": {
     "page_title": "Les meues identitats",

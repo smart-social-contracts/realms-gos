@@ -1332,6 +1332,22 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
             </svg>
           </a>
+
+          <!-- A new member's two other first steps: what is being decided, and what the realm is. -->
+          <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <a
+              href={resolve('/extensions/voting')}
+              class="inline-flex items-center justify-center py-3 px-4 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-all text-sm"
+            >
+              {$_('join.next_voting')}
+            </a>
+            <a
+              href={resolve('/extensions/public_dashboard')}
+              class="inline-flex items-center justify-center py-3 px-4 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-all text-sm"
+            >
+              {$_('join.next_home')}
+            </a>
+          </div>
         </div>
       {/if}
     </div>

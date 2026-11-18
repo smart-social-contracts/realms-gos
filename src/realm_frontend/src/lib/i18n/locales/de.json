@@ -369,7 +369,9 @@
     "display_name_label": "Dein Name (optional)",
     "display_name_placeholder": "So sehen dich die anderen Mitglieder",
     "display_name_hint": "Steht neben deinen Vorschlägen und Stimmen. Du kannst ihn später ändern.",
-    "ii_explained": "Internet Identity ist ein Passkey auf deinem Gerät: kein Passwort und keine E-Mail."
+    "ii_explained": "Internet Identity ist ein Passkey auf deinem Gerät: kein Passwort und keine E-Mail.",
+    "next_voting": "Sehen, was gerade entschieden wird",
+    "next_home": "Was dieses Realm ist"
   },
   "identities": {
     "page_title": "Meine Identitäten",

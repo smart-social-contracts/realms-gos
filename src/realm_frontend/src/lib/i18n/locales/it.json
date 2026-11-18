@@ -369,7 +369,9 @@
     "display_name_label": "Il tuo nome (facoltativo)",
     "display_name_placeholder": "Come ti vedranno gli altri membri",
     "display_name_hint": "Mostrato accanto a ciò che proponi e voti. Puoi cambiarlo più tardi.",
-    "ii_explained": "Internet Identity è una passkey conservata sul tuo dispositivo: niente password e niente email."
+    "ii_explained": "Internet Identity è una passkey conservata sul tuo dispositivo: niente password e niente email.",
+    "next_voting": "Vedi cosa si sta decidendo",
+    "next_home": "Che cos'è questo regno"
   },
   "identities": {
     "page_title": "Le mie identità",

@@ -369,7 +369,9 @@
     "display_name_label": "Votre nom (facultatif)",
     "display_name_placeholder": "Comment les autres membres vous verront",
     "display_name_hint": "Affiché à côté de vos propositions et de vos votes. Vous pourrez le changer plus tard.",
-    "ii_explained": "Internet Identity est une clé d'accès conservée sur votre appareil : ni mot de passe ni e-mail."
+    "ii_explained": "Internet Identity est une clé d'accès conservée sur votre appareil : ni mot de passe ni e-mail.",
+    "next_voting": "Voir ce qui se décide",
+    "next_home": "Ce qu'est ce royaume"
   },
   "identities": {
     "page_title": "Mes identités",
