@@ -58,7 +58,7 @@ def test_a_release_build_has_no_placeholders_left(stamp_build, canister):
     }
     assert not left
     assert '"ic-python-db==0.14.0"' in status
-    assert '"ic-basilisk-toolkit==0.5.0"' in status
+    assert '"ic-basilisk==0.15.1"' in status
     assert '_stamped("v0.8.0")' in status
     version_http = _read(stamp_build, canister, "api/version_http.py")
     assert not stamp_build.TOKEN.findall(version_http)
