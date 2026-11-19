@@ -1,0 +1,18 @@
+{
+  "$comment": "Four realms on three codices, each with its swarm: the mundus first built in the some-repos-4 workspace on 18 Nov 2026 (.cto/gaas-local-sim/mundus.json). `realms mundus up proof`. See docs/development/mundus.md for every field.",
+  "name": "proof",
+  "sources": {"gos-as-a-service": "main", "Casals": "main", "file-registry": "main", "geister": "main"},
+  "voting_window": 180,
+  "test_sign_in": false,
+  "day_seconds": 60,
+  "realms": [
+    {"name": "ardenia", "codex": "dominion", "seed": 11, "demo": "examples/demo/realm1",
+     "population": {"compliant": 7, "watchful": 3, "exploiter": 3, "apathetic": 1}},
+    {"name": "borealis", "codex": "agora", "seed": 22, "demo": "examples/demo/realm2",
+     "population": {"compliant": 6, "watchful": 3, "exploiter": 2, "apathetic": 1}},
+    {"name": "cyrene", "codex": "syntropia", "seed": 33, "demo": "examples/demo/realm3",
+     "population": {"compliant": 6, "watchful": 3, "exploiter": 2, "apathetic": 1}},
+    {"name": "delos", "codex": "dominion", "seed": 44, "demo": "examples/demo/realm1",
+     "population": {"compliant": 4, "watchful": 2}}
+  ]
+}

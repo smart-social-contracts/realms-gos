@@ -1,0 +1,27 @@
+{
+  "$comment": "València and the bodies whose legislation it follows, each a realm: the layered codex of docs/codices/layered-codex.md §3.3 (EU > Spain > Comunitat Valenciana > EMSHI > València), with València a capital of three quarters. The EU starts at its release 1.0.0, so that 1.0.1 can come down the chain later. `realms mundus up valencia`. See docs/development/mundus.md for every field.",
+  "name": "valencia",
+  "sources": {"gos-as-a-service": "main", "Casals": "main", "file-registry": "main", "geister": "main"},
+  "voting_window": 180,
+  "test_sign_in": false,
+  "day_seconds": 60,
+  "realms": [
+    {"name": "eu", "display_name": "European Union", "layer": "eu", "release": "1.0.0", "seed": 101,
+     "manifesto": "The European Union's legislation that applies to the realms below it: data protection (GDPR).",
+     "population": {"compliant": 3, "watchful": 1}},
+    {"name": "espana", "display_name": "España", "layer": "eu/es", "follows": ["eu"], "seed": 102,
+     "manifesto": "Spain's legislation for local government: tax, administrative procedure, the municipal register, local regime, data protection and languages.",
+     "population": {"compliant": 3, "watchful": 1}},
+    {"name": "comunitat-valenciana", "display_name": "Comunitat Valenciana", "layer": "eu/es/vc", "follows": ["espana"],
+     "seed": 103,
+     "manifesto": "La Generalitat: the Comunitat Valenciana's own local regime and languages, on top of Spain's.",
+     "population": {"compliant": 3, "watchful": 1}},
+    {"name": "emshi", "display_name": "EMSHI", "layer": "eu/es/vc/emshi", "follows": ["comunitat-valenciana"], "seed": 104,
+     "manifesto": "Entitat Metropolitana de Serveis Hidràulics: the metropolitan water authority, created by Llei 2/2001.",
+     "population": {"compliant": 2, "watchful": 1}},
+    {"name": "valencia", "display_name": "València", "layer": "eu/es/vc/46250-valencia",
+     "follows": ["comunitat-valenciana", "emshi"], "seed": 105, "quarters": 3,
+     "manifesto": "The city of València. Its ordinances sit on the legislation of the EU, Spain, the Comunitat Valenciana and EMSHI, and its members live in three quarters.",
+     "population": {"compliant": 12, "watchful": 4, "exploiter": 3, "apathetic": 3}}
+  ]
+}

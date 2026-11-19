@@ -701,7 +701,7 @@ def status(
 
 
 # Create mundus subcommand group
-mundus_app = typer.Typer(name="mundus", help="Mundus deployment operations")
+mundus_app = typer.Typer(name="mundus", help="A mundus: several realms, deployed (deploy) or on this machine (up)")
 app.add_typer(mundus_app, name="mundus", rich_help_panel="Lifecycle")
 
 
@@ -786,6 +786,113 @@ def mundus_deploy(
         extension_names=ext_names, codex_names=codex_names,
         build_variant=build_variant,
     )
+
+
+# A local mundus: the commands below build and run one on this machine (commands/mundus_local.py). Each runs in the
+# mundus' own Python environment, which `up` makes.
+_MUNDUS_OPTION = typer.Option("", "--mundus", help="The mundus to act on (default: the current one)")
+
+
+def _local_mundus():
+    import sys
+
+    from .commands import mundus_local
+
+    if not mundus_local.in_venv():
+        if not (mundus_local.venv() / "bin" / "realms").exists():
+            mundus_local.fail("no mundus yet: realms mundus up <name>")
+        mundus_local.enter_venv(sys.argv[1:])
+    return mundus_local
+
+
+@mundus_app.command("up")
+def mundus_up(
+    name: str = typer.Argument(..., help="A mundus file, or the name of one in examples/mundi (proof, valencia)"),
+    rebuild: bool = typer.Option(False, "--rebuild", help="Build every canister and frontend again"),
+    swarm: bool = typer.Option(True, "--swarm/--no-swarm", help="Start the geister swarm at the end"),
+) -> None:
+    """Build and start a whole mundus on this machine, from nothing.
+
+    \b
+    The GaaS portal and the Realms product infra on a local network of its own, with a local Internet Identity;
+    the realms of the mundus file, minted through the portal and launched; their links, legislation layers and
+    quarters; a browser check; and the geister swarm living in them. A second run only adds what is missing.
+
+    \b
+    Examples:
+      realms mundus up valencia
+      realms mundus up examples/mundi/proof.json --no-swarm
+    """
+    from .commands import mundus_local
+
+    mundus_local.up(name, rebuild, swarm)
+
+
+@mundus_app.command("urls")
+def mundus_urls(mundus: str = _MUNDUS_OPTION) -> None:
+    """The portal, the realms and their quarters, the invite codes, how to sign in."""
+    _local_mundus().urls(mundus)
+
+
+@mundus_app.command("status")
+def mundus_status(mundus: str = _MUNDUS_OPTION) -> None:
+    """Whether the mundus' network is up, its memory, and its realms."""
+    _local_mundus().status(mundus)
+
+
+@mundus_app.command("check")
+def mundus_check(mundus: str = _MUNDUS_OPTION) -> None:
+    """Open the portal and every realm in headless Chromium; screenshots in the mundus' shots/ folder."""
+    m = _local_mundus()
+    m.check(m.open_mundus(mundus))
+
+
+@mundus_app.command("sign-in")
+def mundus_sign_in(
+    mode: str = typer.Argument(..., help="test (a picker of test identities) or internet-identity (the local one)"),
+    mundus: str = _MUNDUS_OPTION,
+) -> None:
+    """How people sign in, on the portal and on every realm."""
+    if mode not in ("test", "internet-identity"):
+        raise typer.BadParameter("test or internet-identity")
+    _local_mundus().sign_in(mode, mundus)
+
+
+@mundus_app.command("clock")
+def mundus_clock(mundus: str = _MUNDUS_OPTION) -> None:
+    """The network's time beside the wall clock."""
+    _local_mundus().clock(mundus)
+
+
+@mundus_app.command("publish")
+def mundus_publish(
+    realm: str = typer.Argument(..., help="A realm of the mundus whose layer has releases (eu, espana, ...)"),
+    version: str = typer.Argument("", help="Which of its releases.json (default: the newest)"),
+    mundus: str = _MUNDUS_OPTION,
+) -> None:
+    """A source realm adopts another release of its own layer and publishes it, for its followers to take.
+
+    
+    Its followers find it at their next check of their sync sources. A follower that is no federation installs it
+    by "Propose install", which its members file (geister's swarm does); a federation by `realms mundus install`.
+    """
+    _local_mundus().publish(realm, version, mundus)
+
+
+@mundus_app.command("install")
+def mundus_install(
+    realm: str = typer.Argument(..., help="A realm of the mundus that follows others"),
+    mundus: str = _MUNDUS_OPTION,
+) -> None:
+    """A realm installs the releases its sync sources relay and it does not run yet: by a change list in a
+    federation, whose founder files it and votes with the network held; by "Propose install" in any other realm."""
+    _local_mundus().install(realm, mundus)
+
+
+@mundus_app.command("down")
+def mundus_down(mundus: str = _MUNDUS_OPTION) -> None:
+    """Stop the mundus' swarm and network and forget its realms; its builds and sources are kept."""
+    _local_mundus().down(mundus)
 
 
 # Create files subcommand group
