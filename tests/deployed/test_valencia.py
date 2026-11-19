@@ -81,8 +81,8 @@ def layer_files(release):
     """``{chapter id: bytes}`` of a release: its chapters and its calendar, read from the tree and held to the checksums
     the release lists."""
     source = release["source"]
-    files = {f"{source}/{domain}": (TREE / source / f"{domain}.py").read_bytes() for domain in release["chapters"]}
-    listed = {f"{source}/{domain}": checksum for domain, checksum in release["chapters"].items()}
+    files = {f"{source}/{subject_matter}": (TREE / source / f"{subject_matter}.py").read_bytes() for subject_matter in release["chapters"]}
+    listed = {f"{source}/{subject_matter}": checksum for subject_matter, checksum in release["chapters"].items()}
     if release["calendar"]:
         files[f"{source}/calendar"] = (TREE / source / "calendar.json").read_bytes()
         listed[f"{source}/calendar"] = release["calendar"]
@@ -90,11 +90,11 @@ def layer_files(release):
     return files
 
 
-def own_layer_files(source, domains):
-    """``{chapter id: bytes}`` of the realm's own layer as the tree has it: the chapters ``domains`` and the calendar, if
+def own_layer_files(source, subject_matters):
+    """``{chapter id: bytes}`` of the realm's own layer as the tree has it: the chapters ``subject_matters`` and the calendar, if
     the source has one."""
     folder = TREE / source
-    files = {f"{source}/{domain}": (folder / f"{domain}.py").read_bytes() for domain in domains}
+    files = {f"{source}/{subject_matter}": (folder / f"{subject_matter}.py").read_bytes() for subject_matter in subject_matters}
     if (folder / "calendar.json").exists():
         files[f"{source}/calendar"] = (folder / "calendar.json").read_bytes()
     return files
@@ -183,12 +183,12 @@ def spent(realm):
 
 
 def views_of(realm):
-    """The flattened view of every domain as the realm's codex computes it (§5.9), by domain."""
+    """The flattened view of every subject matter as the realm's codex computes it (§5.9), by subject matter."""
     return json.loads(last_line(realm.shell(VIEWS)))
 
 
-def member(views, domain, name):
-    return next(m for m in views[domain]["members"] if m["name"] == name)
+def member(views, subject_matter, name):
+    return next(m for m in views[subject_matter]["members"] if m["name"] == name)
 
 
 def guard_outcome(realm, now, effective_at):
@@ -534,7 +534,7 @@ def test_m_valencias_flattened_view_is_what_the_resolve_tool_computes_for_the_sa
            "calendar": codex["chapters"][f"{VALENCIA}/calendar"]["sha256"]}
     planned = plan(VALENCIA, [listed(cv), listed(emshi)], own)
     assert (planned.layers, planned.paths) == (codex["layers"], codex["layer_paths"])
-    planned_sums = {f"{c['source']}/{c['domain']}": c["sha256"] for c in planned.chapters}
+    planned_sums = {f"{c['source']}/{c['subject_matter']}": c["sha256"] for c in planned.chapters}
     planned_sums |= {f"{c['source']}/calendar": c["sha256"] for c in planned.calendars}
     assert planned_sums == {chapter: v["sha256"] for chapter, v in codex["chapters"].items()}  # the codex id's content
 
@@ -545,7 +545,7 @@ def test_m_valencias_flattened_view_is_what_the_resolve_tool_computes_for_the_sa
                          modules={"ggg": ggg_placeholders()})
     in_the_realm = views_of(valencia)
     assert in_the_realm == json.loads(json.dumps(resolution.views()))
-    assert sorted(in_the_realm) == sorted(planned.paths)  # a view for every domain València has a chapter in
+    assert sorted(in_the_realm) == sorted(planned.paths)  # a view for every subject matter València has a chapter in
     cap, bonus = member(in_the_realm, "tax", "ibi_urban_cap"), member(in_the_realm, "tax", "ibi_bonus")  # §5.9's rows
     assert (cap["kind"], [layer["source"] for layer in cap["layers"]]) == ("forbid", [SPAIN])
     assert (bonus["kind"], [layer["source"] for layer in bonus["layers"]]) == ("helper", [SPAIN, VALENCIA])
@@ -563,7 +563,7 @@ except auth.Denied:
 HOOK = '''
 from core import chain, legislation
 event = {"user": "alice", "args": {"url": "https://example.org/c.json", "checksum": "sha256:x"}, "result": {"codex": "sha256:x"}, "at": chain.now()}
-legislation._call("hook", op="codex_install", domain="local_regime", event=event, now=chain.now(), approvals=[])
+legislation._call("hook", op="codex_install", subject_matter="local_regime", event=event, now=chain.now(), approvals=[])
 '''
 
 
@@ -574,7 +574,7 @@ def test_n_no_chapter_of_any_realm_failed_and_the_flow_cost(cv, emshi, valencia,
         for tag, step, counts in spent(realm):
             for instructions in counts:  # one install each
                 costs.report(f"install task, {tag}: {step}", instructions)
-    costs.measure(valencia, "València: the flattened view of every domain, the sandbox's answer",
+    costs.measure(valencia, "València: the flattened view of every subject matter, the sandbox's answer",
                   "from core import legislation\nlegislation._call('views')")
     costs.measure(valencia, "València: the guards of proposal_create, three layers' check_ methods (sandbox call)",
                   GUARD % {"now": TODAY, "at": TODAY + 30 * DAY})

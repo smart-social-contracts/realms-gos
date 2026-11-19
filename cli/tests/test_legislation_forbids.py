@@ -210,11 +210,11 @@ def forbid_chapter(body, imports="F, S, above, forbid, months, pct, when"):
     return f"from realms.legislation import {imports}\nclass Tax(above('tax')):\n    rule = {body}\n"
 
 
-def refused(text, source="eu/es", domain="tax", c=None):
+def refused(text, source="eu/es", subject_matter="tax", c=None):
     """Load ``text`` into a fresh codex (or ``c``) and bind its forbids; the refusal, as printed."""
     c = c if c is not None else codex()
     with pytest.raises(Refused) as e:
-        c.load(source, domain, text)
+        c.load(source, subject_matter, text)
         c.forbids()
     return str(e.value)
 
@@ -265,7 +265,7 @@ def test_the_forbids_of_5_6_and_4_produce_the_cedar_of_5_8():
 def test_the_output_is_canonical_and_in_a_fixed_order():
     assert valencia().cedar() == valencia().cedar()
     ids = [f.id for f in valencia().forbids()]
-    # Layers top to bottom, domains by name, a chapter's forbids as written.
+    # Layers top to bottom, subject matters by name, a chapter's forbids as written.
     assert ids == [
         "eu/es/procedure/over_six_months",
         "eu/es/tax/ibi_rate_required",
@@ -567,7 +567,7 @@ def test_a_period_comparison_cannot_be_the_condition_of_when():
         "class DataProtection(above('data_protection')):\n"
         "    minimum_retention = overridable(months(6), legislation='x')\n"
         "    rule = forbid('document_share', F.retention.is_some() & (F.pages > when(F.retention > S.minimum_retention, 1, 0)), legislation='x')\n",
-        domain="data_protection",
+        subject_matter="data_protection",
     )
     assert "can't be the condition of when()" in out
 
@@ -578,7 +578,7 @@ def test_a_period_compares_only_with_the_period_the_rule_names():
     assert "compares with the Period the rule names" in refused(
         "from realms.legislation import F, above, forbid, months\nclass Procedure(above('procedure')):\n"
         "    rule = forbid('procedure_define', F.decision_deadline.is_some() & (F.decision_deadline > 6), legislation='x')\n",
-        domain="procedure",
+        subject_matter="procedure",
     )
     assert "compares with the Period the rule names" in refused(
         "from realms.legislation import F, above, forbid, months\nclass Tax(above('tax')):\n"
@@ -828,20 +828,20 @@ def test_rule_3_an_optional_fact_is_compared_after_is_some_in_the_same_chain():
     )
 
 
-def test_rule_4_s_reads_a_setting_of_the_chapters_own_domain():
+def test_rule_4_s_reads_a_setting_of_the_chapters_own_subject_matter():
     c = codex()
     c.load("eu/es", "procedure", ES_PROCEDURE)
     assert "rule: S.capital: procedure has no setting capital" in refused(
         "from realms.legislation import F, S, above, forbid\nclass Procedure(above('procedure')):\n"
         "    uses = ['tax']\n    rule = forbid('procedure_define', S.capital & F.longer_deadline_legislation.is_none(), legislation='x')\n",
-        domain="procedure",
+        subject_matter="procedure",
         c=codex(),
     )
     assert "S.working_days_after: procedure has no setting working_days_after" in refused(
         "from realms.legislation import F, S, above, forbid\nclass Procedure(above('procedure')):\n"
         "    rule = forbid('procedure_define', S.working_days_after & F.longer_deadline_legislation.is_none(), legislation='x')\n",
         source=VALENCIA,
-        domain="procedure",
+        subject_matter="procedure",
         c=c,
     )
     # The setting resolves through the realm's layers: a lower layer may fill it (§4.3).
@@ -1156,7 +1156,7 @@ def test_a_condition_is_never_an_operand_so_it_keeps_its_polarity(expression, re
         "from realms.legislation import F, S, above, forbid, months, when\nclass Procedure(above('procedure')):\n"
         f"    rule = forbid('procedure_define', {expression}, legislation='x')\n"
     )
-    assert reason in refused(text, domain="procedure")
+    assert reason in refused(text, subject_matter="procedure")
 
 
 @pytest.mark.parametrize(
@@ -1391,7 +1391,7 @@ def test_a_node_built_any_other_way_refuses_what_its_method_refuses(expression, 
         "    strict = overridable(True, legislation='x')\n"
         f"    rule = forbid('document_share', {expression}, legislation='x')\n"
     )
-    assert reason in refused(text, domain="data_protection")
+    assert reason in refused(text, subject_matter="data_protection")
 
 
 def test_list_literals_and_folded_list_settings_are_tuples():

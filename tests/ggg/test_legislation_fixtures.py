@@ -25,12 +25,12 @@ def test_two_releases_with_effective_dates_name_chapters_that_exist():
 def test_every_chapter_loads_and_the_record_is_what_the_resolver_takes():
     for release in legislation.releases():
         codex = Codex([legislation.SOURCE])
-        for domain, checksum in release["chapters"].items():
-            codex.load(legislation.SOURCE, domain, legislation.chapter(checksum).decode())
+        for subject_matter, checksum in release["chapters"].items():
+            codex.load(legislation.SOURCE, subject_matter, legislation.chapter(checksum).decode())
         codex.check()
     follower = plan("follower", [{"source": legislation.SOURCE, "layers": [legislation.layer("2.0.0")]}])
     assert follower.layers == [legislation.SOURCE, "follower"]
-    assert {c["domain"]: c["sha256"] for c in follower.chapters} == legislation.releases()[1]["chapters"]
+    assert {c["subject_matter"]: c["sha256"] for c in follower.chapters} == legislation.releases()[1]["chapters"]
 
 
 def test_a_scripted_sync_source_answers_its_record_and_the_bytes_of_a_chapter():

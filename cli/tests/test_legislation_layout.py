@@ -18,9 +18,8 @@ from realms.cli.commands import legislation
 from realms.cli.commands.legislation import legislation_app
 from realms.cli.commands.legislation_layout import layout_problems
 
-ROOT = Path(__file__).resolve().parents[2]
 VALENCIA = "eu/es/vc/46250-valencia"
-CHAPTER = "from realms.legislation import above\n\nclass {name}(above('{domain}')):\n    pass\n"
+CHAPTER = "from realms.legislation import above\n\nclass {name}(above('{subject_matter}')):\n    pass\n"
 CALENDAR = {
     "weekend": ["sat", "sun"],
     "years": {"2027": [{"date": "2027-01-01", "name": {"es": "Año Nuevo"}}]},
@@ -68,9 +67,9 @@ def source_json(source: str, **changes) -> dict:
     }
 
 
-def chapter(domain: str) -> str:
+def chapter(subject_matter: str) -> str:
     return CHAPTER.format(
-        name="".join(w.capitalize() for w in domain.split("_")), domain=domain
+        name="".join(w.capitalize() for w in subject_matter.split("_")), subject_matter=subject_matter
     )
 
 
@@ -96,7 +95,6 @@ def release(tree: Path, source: str, at: str, **changes) -> dict:
         "chapters": {
             f.stem: checksum(f)
             for f in sorted(folder.glob("*.py"))
-            if f.stem != "realm"
         },
         "calendar": (
             checksum(folder / "calendar.json")
@@ -168,15 +166,16 @@ def test_a_folder_name_of_lowercase_letters_digits_and_hyphens_is_kept(tree):
 # ── The .py files of a source ─────────────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("name", ["Tax.py", "__init__.py", "local-regime.py", "tax2.py"])
-def test_a_py_file_that_is_not_a_domain_id_is_refused(tree, name):
+@pytest.mark.parametrize("name", ["Tax.py", "__init__.py", "local-regime.py", "2027_tax.py", "a" * 65 + ".py"])
+def test_a_py_file_that_is_not_a_subject_matter_id_is_refused(tree, name):
     write(tree, f"eu/es/{name}", "")
-    breaks(tree, f"eu/es/{name}: {name[:-3]} is not a domain id")
+    breaks(tree, f"eu/es/{name}: {name[:-3]} is not a subject matter id")
 
 
-def test_a_py_file_named_after_a_domain_the_codex_chose_is_kept(tree):
-    """GGG's list is a shared vocabulary, not a gate: a codex files chapters under the ids it chooses."""
-    write(tree, f"{VALENCIA}/drought_measures.py", chapter("drought_measures"))
+@pytest.mark.parametrize("subject_matter", ["drought_measures", "tax2", "a" * 64])
+def test_a_py_file_named_after_a_subject_matter_the_codex_chose_is_kept(tree, subject_matter):
+    """A codex files chapters under the ids it chooses: only the shape of the id is checked, never a list."""
+    write(tree, f"{VALENCIA}/{subject_matter}.py", chapter(subject_matter))
     assert problems(tree) == []
 
 
@@ -184,18 +183,6 @@ def test_a_chapter_cannot_be_called_calendar(tree):
     """`calendar` is a layer's calendar, set under <source>/calendar, so it is not a chapter."""
     write(tree, "eu/es/calendar.py", "")
     breaks(tree, "eu/es/calendar.py: calendar is a layer's calendar.json, not a chapter")
-
-
-# Read from ggg rather than copied: the common list is GGG's, and nothing here keeps a second copy.
-COMMON_DOMAINS = tuple(
-    d["id"] for d in json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
-)
-
-
-@pytest.mark.parametrize("domain", COMMON_DOMAINS)
-def test_a_py_file_named_after_a_common_ggg_domain_is_kept(tree, domain):
-    write(tree, f"{VALENCIA}/{domain}.py", chapter(domain))
-    assert problems(tree) == []
 
 
 def test_a_py_file_outside_a_source_is_refused(tree):
@@ -350,14 +337,14 @@ def one_release(tree, **changes):
         ({"effective_from": "soon"}, "effective_from is a day"),
         ({"commit": "abc123"}, "commit is the 40 hex digits"),
         ({"commit": "A" * 40}, "commit is the 40 hex digits"),
-        ({"chapters": {}}, "chapters is {domain: sha256:<hex>}"),
+        ({"chapters": {}}, "chapters is {subject_matter: sha256:<hex>}"),
         (
             {"chapters": {"data_protection": "sha256:xyz"}},
             "chapters.data_protection is sha256:<64 hex digits>",
         ),
         (
             {"chapters": {"Mining": "sha256:" + "0" * 64}},
-            "chapters lists Mining, which is not a domain id",
+            "chapters lists Mining, which is not a subject matter id",
         ),
         ({"calendar": "sha256:short"}, "calendar is sha256:<64 hex digits>, or null"),
         ({"notes": "a release"}, "notes are text by language"),
@@ -465,28 +452,16 @@ def test_a_release_lists_no_calendar_the_source_does_not_have(tree):
     )
 
 
-def test_a_release_never_lists_the_realm_domain(tree):
-    one_release(tree)
-    release_ = json.loads((tree / "eu/releases.json").read_text())
-    release_[0]["chapters"]["realm"] = release_[0]["chapters"]["data_protection"]
-    write(tree, "eu/releases.json", release_)
-    breaks(
-        tree, "chapters lists the realm domain, which only the realm's own layer fills"
-    )
-
-
-def test_a_realm_chapter_beside_releases_is_the_sources_own_and_no_release_carries_it(
-    tree,
-):
-    # Spain publishes releases and is a realm too: its realm.py is not a missing chapter, and it is not listed
+def test_a_realm_chapter_beside_releases_is_released_like_any_other(tree):
+    # Which subject matters exist, and who may fill them, is the codices' business: realm.py is a chapter like tax.py
     write(tree, "eu/es/realm.py", chapter("realm"))
     at = commit(tree.parent)
     write(tree, "eu/es/releases.json", [release(tree, "eu/es", at)])
-    assert (
-        "realm"
-        not in json.loads((tree / "eu/es/releases.json").read_text())[0]["chapters"]
-    )
     assert problems(tree) == []
+    release_ = json.loads((tree / "eu/es/releases.json").read_text())
+    del release_[0]["chapters"]["realm"]
+    write(tree, "eu/es/releases.json", release_)
+    breaks(tree, "does not list realm, but eu/es/realm.py is in commit")
 
 
 def test_every_checksum_is_the_sha256_of_the_file_at_the_releases_commit(tree):
@@ -578,7 +553,7 @@ def test_check_stops_at_the_layout_before_it_loads_a_chapter(tree, check):
     write(tree, "eu/es/Foo.py", "this is not python (")
     out = check(tree)
     assert out.exit_code == 1
-    assert "eu/es/Foo.py: Foo is not a domain id" in out.output
+    assert "eu/es/Foo.py: Foo is not a subject matter id" in out.output
     assert (
         "1 refused" in out.output
     )  # the syntax error of Foo.py is not loaded, so it is not counted

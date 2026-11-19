@@ -12,7 +12,6 @@ from typing import List
 
 from realms.cli.commands.legislation_layout import bytes_at, names_at, run_git
 from realms.legislation import Codex, LegislationError, Refused, subset_ast
-from realms.legislation.paths import REALM
 
 
 class WorkingFiles:
@@ -93,21 +92,19 @@ def load_realm(files, realm: str, operations, facts: dict, ggg):
             codex.calendar_layer(
                 source, json.loads(files.text(source, "calendar.json"))
             )
-    domains = []
+    subject_matters = []
     for source in layers:
         for name in files.names(source):
-            if name.endswith(".py") and name[:-3] not in domains:
-                domains.append(name[:-3])
-    for domain in sorted(domains):
+            if name.endswith(".py") and name[:-3] not in subject_matters:
+                subject_matters.append(name[:-3])
+    for subject_matter in sorted(subject_matters):
         for source in layers:
-            if domain + ".py" not in files.names(source) or (
-                domain == REALM and source != realm
-            ):
-                continue  # a realm chapter is the realm's own; the layers above hold theirs for themselves (§3)
-            text = files.text(source, domain + ".py")
+            if subject_matter + ".py" not in files.names(source):
+                continue
+            text = files.text(source, subject_matter + ".py")
             try:
-                subset_ast.check(text, f"{source}/{domain}.py")
-                codex.load(source, domain, text)
+                subset_ast.check(text, f"{source}/{subject_matter}.py")
+                codex.load(source, subject_matter, text)
             except Refused as e:
                 problems.append(str(e))
                 break  # the layers below build on this one

@@ -2,7 +2,7 @@
 
 ``check`` first holds the tree to the layout of §3 (``legislation_layout``, the one place those rules live) and
 stops there if it breaks any. It then loads the tree the way the realm does, with the same ``realms.legislation``
-library, and prints every refusal as ``<source>/<domain>.py:<line>: <reason>``. Each chapter first
+library, and prints every refusal as ``<source>/<subject_matter>.py:<line>: <reason>``. Each chapter first
 passes the readable subset on its syntax tree (``subset_ast``, the clear errors for authors), then
 loads, which runs the realm's own bytecode check and the marks. ``from ggg import ...`` resolves to
 inert placeholders named after GGG's entities: the check loads chapters, it never runs their hooks.
@@ -139,7 +139,7 @@ def check_realm(
         codex.check()
         if (
             not problems
-        ):  # read from a codex that loaded whole: a chapter that did not load would be a false "no such domain"
+        ):  # read from a codex that loaded whole: a chapter that did not load would be a false "no such subject matter"
             check_uses(codex)
             problems += analysis.problems(codex) or case_problems(
                 files, codex, realm, reload
@@ -162,7 +162,7 @@ def refuse(problems: List[str]) -> None:
 def check_command(
     tree: Path = typer.Argument(
         Path("legislation"),
-        help="The legislation/ folder: <source>/<domain>.py chapters",
+        help="The legislation/ folder: <source>/<subject_matter>.py chapters",
     ),
     realm: Optional[str] = typer.Option(
         None,
@@ -241,7 +241,8 @@ def resolve_command(
         "--own",
         exists=True,
         dir_okay=False,
-        help="The realm's own layer, {chapters: {domain: sha256}, calendar: sha256}; its folder at --commit by default",
+        help="The realm's own layer, {chapters: {subject_matter: sha256}, calendar: sha256}; "
+        "its folder at --commit by default",
     ),
     facts: Optional[Path] = typer.Option(
         None,
@@ -297,7 +298,7 @@ def propose_command(
     set_chapters: List[str] = typer.Option(
         [],
         "--set",
-        help="A chapter of the realm's own layer to set, <realm>/<domain> or <realm>/calendar; repeat for more",
+        help="A chapter of the realm's own layer to set, <realm>/<subject_matter> or <realm>/calendar; repeat for more",
     ),
     remove: List[str] = typer.Option(
         [],

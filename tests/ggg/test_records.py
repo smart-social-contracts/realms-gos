@@ -94,7 +94,8 @@ def test_a_realm_without_a_layer_of_its_own_has_an_empty_record():
 @pytest.mark.parametrize("releases, source, reason", [
     ([entry(chapters={"tax": "sha256:short"})], "eu/es", "eu/tax is sha256:<64 hex digits>"),
     ([entry(chapters={"calendar": SUM})], "eu/es", "lists its calendar as calendar"),
-    ([entry(chapters={"Nonsense": SUM})], "eu/es", "is not a domain id"),
+    ([entry(chapters={"Nonsense": SUM})], "eu/es", "is not a subject matter id"),
+    ([entry(chapters={"a" * 65: SUM})], "eu/es", "at most 64 characters"),
     ([entry(calendar="sha256:short")], "eu/es", "calendar is sha256"),
     ([entry(version="")], "eu/es", "version is 1 to 64 characters"),
     ([entry(commit=7)], "eu/es", "commit is 1 to 64 characters"),

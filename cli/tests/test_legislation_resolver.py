@@ -367,9 +367,9 @@ def resolved(realm=VALENCIA, relays=(FROM_CV, FROM_EMSHI), mine=VALENCIA_OWN):
     )
 
 
-def chapter(resolution, domain, **context):
+def chapter(resolution, subject_matter, **context):
     codex = resolution.codex
-    return codex.instance(domain, codex.context(**context)), codex
+    return codex.instance(subject_matter, codex.context(**context)), codex
 
 
 # ── Layer paths from the links (§3.3) ─────────────────────────────────────────
@@ -399,7 +399,7 @@ def test_empty_chapters_are_skipped_so_valencias_tax_path_is_spain_then_valencia
 def test_a_town_that_does_not_sync_from_emshi_has_no_water_path_and_never_fetches_it():
     p = plan(TOWN, [FROM_CV])
     assert "water" not in p.paths
-    assert {c["domain"] for c in p.chapters} == {
+    assert {c["subject_matter"] for c in p.chapters} == {
         "data_protection",
         "language",
         "local_regime",
@@ -412,14 +412,14 @@ def test_a_town_that_does_not_sync_from_emshi_has_no_water_path_and_never_fetche
 
 def test_the_plan_names_the_chapters_to_fetch_in_the_order_they_load():
     p = plan(VALENCIA, [FROM_CV, FROM_EMSHI], VALENCIA_OWN)
-    tax = [c for c in p.chapters if c["domain"] == "tax"]
+    tax = [c for c in p.chapters if c["subject_matter"] == "tax"]
     assert [(c["source"], c["version"]) for c in tax] == [
         ("eu/es", "2.4.0"),
         (VALENCIA, None),
     ]
     assert tax[0]["sha256"] == ES["chapters"]["tax"]
     assert tax[1]["sha256"] == VALENCIA_OWN["chapters"]["tax"]
-    assert [c["domain"] for c in p.chapters] == sorted(c["domain"] for c in p.chapters)
+    assert [c["subject_matter"] for c in p.chapters] == sorted(c["subject_matter"] for c in p.chapters)
     assert [(c["source"], c["version"]) for c in p.calendars] == [
         ("eu/es", "2.4.0"),
         ("eu/es/vc", "1.1.0"),
@@ -474,7 +474,7 @@ def test_paths_that_differ_are_refused_unless_one_extends_the_other():
     )
 
 
-def test_one_domain_in_conflict_refuses_the_whole_install():
+def test_one_subject_matter_in_conflict_refuses_the_whole_install():
     top = mini("a", "1", ["calm", "wrong"])
     relays = [
         {"source": "s1", "layers": [top, mini("a/b", "1", ["calm", "wrong"])]},
@@ -484,7 +484,7 @@ def test_one_domain_in_conflict_refuses_the_whole_install():
         plan("town", relays)
 
 
-def test_layers_that_no_relay_orders_against_each_other_are_refused_even_in_different_domains():
+def test_layers_that_no_relay_orders_against_each_other_are_refused_even_in_different_subject_matters():
     spain = mini("eu/es", "1", ["tax"])
     relays = [
         {"source": "cv", "layers": [spain, mini("eu/es/vc", "1", ["local_regime"])]},
@@ -613,7 +613,7 @@ def test_a_sync_sources_own_layer_comes_last():
             {"source": "cv", "layers": [{"source": "eu", "chapters": {}}]},
             "eu has no version",
         ),
-        ({"source": "cv", "layers": [mini("eu", "1", ["Tax"])]}, "not a domain id"),
+        ({"source": "cv", "layers": [mini("eu", "1", ["Tax"])]}, "not a subject matter id"),
         (
             {"source": "cv", "layers": [dict(mini("eu", "1", ["tax"]), calendar="")]},
             "eu/calendar: a checksum",
@@ -644,29 +644,14 @@ def test_the_realms_own_layer_is_chapters_and_a_calendar_and_nothing_else(mine):
         plan("town", [], mine)
 
 
-def test_a_relayed_realm_chapter_is_skipped_and_reported():
-    """A release never lists the realm domain; a source that does must not break its followers."""
-    mistaken = mini("eu/es", "1", ["tax", "realm"])
-    p = plan("town", [{"source": "eu/es", "layers": [mistaken]}])
-    assert p.paths == {"tax": ["eu/es"]}
-    assert [c["domain"] for c in p.chapters] == ["tax"]
-    assert p.skipped == [
-        {"source": "eu/es", "domain": "realm", "sha256": "sha256:eu/es:realm"}
-    ]
-    two = plan(
-        "town",
-        [{"source": "a", "layers": [mistaken]}, {"source": "b", "layers": [mistaken]}],
-    )
-    assert len(two.skipped) == 1  # one layer, reported once
+def test_a_relayed_realm_chapter_is_on_its_path_like_any_other():
+    """Which subject matters exist, and who may fill them, is the codices' business: ``realm`` is not special here."""
+    p = plan("town", [{"source": "eu/es", "layers": [mini("eu/es", "1", ["tax", "realm"])]}])
+    assert p.paths == {"realm": ["eu/es"], "tax": ["eu/es"]}
+    assert [c["subject_matter"] for c in p.chapters] == ["realm", "tax"]
 
 
-def test_a_layer_whose_only_chapter_was_a_realm_chapter_runs_nothing():
-    only = mini("eu/es", "1", ["realm"])
-    p = plan("town", [{"source": "eu/es", "layers": [only]}])
-    assert p.paths == {} and p.layers == ["town"] and len(p.skipped) == 1
-
-
-def test_the_realm_domain_is_the_realms_own_and_still_loads():
+def test_a_realm_chapter_in_the_realms_own_layer_loads():
     r = resolved(
         mine=dict(
             VALENCIA_OWN,
@@ -679,7 +664,7 @@ def test_the_realm_domain_is_the_realms_own_and_still_loads():
             },
         )
     )
-    assert r.plan.paths["realm"] == [VALENCIA] and r.plan.skipped == []
+    assert r.plan.paths["realm"] == [VALENCIA]
 
 
 def test_a_realm_with_no_sync_source_has_its_own_layer_only():
@@ -909,9 +894,9 @@ class Procedure(above("procedure")):
         resolved("town", [{"source": "eu/es", "layers": [spain]}], mine)
 
 
-def test_the_view_of_a_domain_is_its_path_and_a_row_per_public_member():
+def test_the_view_of_a_subject_matter_is_its_path_and_a_row_per_public_member():
     view = resolved().view("tax")
-    assert view["domain"] == "tax" and view["path"] == ["eu/es", VALENCIA]
+    assert view["subject_matter"] == "tax" and view["path"] == ["eu/es", VALENCIA]
     rows = {m["name"]: m for m in view["members"]}
     assert [m["name"] for m in view["members"]][:5] == [
         "capital",
@@ -955,7 +940,7 @@ def test_chapters_whose_bytes_are_missing_are_refused_by_file():
         resolve(p, without, CALENDARS, operations=OPERATIONS, modules={"ggg": ggg})
 
 
-# ── `uses` between domains, and the depth limit (§4.4) ───────────────────────
+# ── `uses` between subject matters, and the depth limit (§4.4) ───────────────────────
 
 
 def own_chapters(texts):
@@ -963,10 +948,10 @@ def own_chapters(texts):
     return p, CHAPTERS
 
 
-def chapter_using(domain, uses, body="return 0"):
+def chapter_using(subject_matter, uses, body="return 0"):
     return (
         "from realms.legislation import above, overridable\n"
-        f"class {domain.capitalize()}(above('{domain}')):\n"
+        f"class {subject_matter.capitalize()}(above('{subject_matter}')):\n"
         f"    uses = {uses!r}\n    @overridable(legislation='x')\n    def call(self):\n        {body}\n"
     )
 
@@ -986,7 +971,7 @@ def test_uses_cycles_are_refused_and_name_the_files():
     )
 
 
-def test_a_cycle_through_several_domains_and_layers_is_refused():
+def test_a_cycle_through_several_subject_matters_and_layers_is_refused():
     p, found = own_chapters(
         {
             "water": chapter_using("water", ["tax"]),
@@ -1000,9 +985,9 @@ def test_a_cycle_through_several_domains_and_layers_is_refused():
         resolve(p, found)
 
 
-def test_a_chapter_that_uses_its_own_domain_or_a_domain_the_realm_lacks_is_refused():
+def test_a_chapter_that_uses_its_own_subject_matter_or_a_subject_matter_the_realm_lacks_is_refused():
     p, found = own_chapters({"tax": chapter_using("tax", ["tax"])})
-    with pytest.raises(Refused, match="^town/tax.py: uses its own domain, tax"):
+    with pytest.raises(Refused, match="^town/tax.py: uses its own subject matter, tax"):
         resolve(p, found)
     p, found = own_chapters({"tax": chapter_using("tax", ["language"])})
     with pytest.raises(
@@ -1020,7 +1005,7 @@ def test_a_uses_that_a_lower_layer_declares_counts_too():
 
 
 def step_chapters(n):
-    """step0 uses step1, which uses step2, ...: ``n`` domains, ``n - 1`` calls deep."""
+    """step0 uses step1, which uses step2, ...: ``n`` subject matters, ``n - 1`` calls deep."""
     return {
         f"step{i}": chapter_using(
             f"step{i}",
@@ -1035,7 +1020,7 @@ def step_chapters(n):
     }
 
 
-def test_the_depth_limit_is_eight_calls_between_domains():
+def test_the_depth_limit_is_eight_calls_between_subject_matters():
     assert MAX_DEPTH == 8
     p, found = own_chapters(step_chapters(MAX_DEPTH + 1))  # 8 calls deep: allowed
     r = resolve(p, found)
@@ -1049,7 +1034,7 @@ def test_a_uses_chain_deeper_than_eight_is_refused_naming_the_chain():
     message = str(e.value)
     assert message.startswith(
         "uses chain step0 → step1 → step2 → step3 → step4 → step5 → step6 → step7 → step8 → step9 "
-        "is 9 calls deep: calls between domains stop at depth 8"
+        "is 9 calls deep: calls between subject matters stop at depth 8"
     )
     assert "town/step8.py uses step9" in message
 
@@ -1078,8 +1063,8 @@ class Beta(above("beta")):
 """
 
 
-def test_a_method_handed_across_domains_is_refused_at_the_boundary():
-    """Alpha asks beta for a bound method, to call it directly afterwards: what crosses a domain boundary is
+def test_a_method_handed_across_subject_matters_is_refused_at_the_boundary():
+    """Alpha asks beta for a bound method, to call it directly afterwards: what crosses a subject matter boundary is
     plain data, so the hand-over itself is refused (realms-gos#543) and the depth counter unwinds."""
     codex = Codex(["town"], realm="town")
     codex.load("town", "alpha", PING)
@@ -1090,7 +1075,7 @@ def test_a_method_handed_across_domains_is_refused_at_the_boundary():
     assert context.depth == 0 and context.running == []  # undone as the calls unwind
 
 
-def test_calls_inside_one_domain_are_not_calls_between_domains():
+def test_calls_inside_one_subject_matter_are_not_calls_between_subject_matters():
     own_text = (
         "from realms.legislation import above\nclass Tax(above('tax')):\n"
         "    def deep(self, n):\n        return n if n >= 30 else self.deep(n + 1)\n"
@@ -1100,7 +1085,7 @@ def test_calls_inside_one_domain_are_not_calls_between_domains():
     assert codex.instance("tax", codex.context()).deep(0) == 30
 
 
-def test_a_guard_that_calls_another_domain_leaves_the_count_as_it_found_it():
+def test_a_guard_that_calls_another_subject_matter_leaves_the_count_as_it_found_it():
     r = resolved()
     context = r.codex.context()
     local_regime = r.codex.instance("local_regime", context)
@@ -1116,12 +1101,12 @@ def test_a_guard_that_calls_another_domain_leaves_the_count_as_it_found_it():
 
 def test_the_runtime_stops_a_call_that_would_be_deeper_than_eight():
     codex = Codex(["town"], realm="town")
-    for domain, text in step_chapters(
+    for subject_matter, text in step_chapters(
         MAX_DEPTH + 2
     ).items():  # 9 calls deep: the resolver would refuse
-        codex.load("town", domain, text)
+        codex.load("town", subject_matter, text)
     context = codex.context()
-    with pytest.raises(LegislationError, match="calls between domains stop at depth 8"):
+    with pytest.raises(LegislationError, match="calls between subject matters stop at depth 8"):
         codex.instance("step0", context).call()
     assert context.depth == 0 and context.running == []  # undone as the calls unwind
     assert (

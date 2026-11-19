@@ -160,14 +160,16 @@ def checked_release(entry, key):
             raise Fail(f"{key}: {source} {field} is a time in seconds, from 0 to {TIME_MAX}")
     chapters = entry["chapters"]
     if not isinstance(chapters, dict) or len(chapters) > MOST_CHAPTERS:
-        raise Fail(f"{key}: {source} lists at most {MOST_CHAPTERS} chapters, as {{domain: sha256:<hex>}}")
-    for domain, checksum in chapters.items():
-        if domain == change_list.CALENDAR:
+        raise Fail(f"{key}: {source} lists at most {MOST_CHAPTERS} chapters, as {{subject_matter: sha256:<hex>}}")
+    for subject_matter, checksum in chapters.items():
+        if subject_matter == change_list.CALENDAR:
             raise Fail(f"{key}: {source} lists its calendar as calendar, not among its chapters")
-        if not change_list.is_domain(domain):
-            raise Fail(f"{key}: {source}/{domain}: {domain!r} is not a domain id")
+        try:
+            change_list.subject_matter_name(subject_matter)
+        except Fail as e:
+            raise Fail(f"{key}: {source}/{subject_matter}: {e}")
         if not pinned(checksum):
-            raise Fail(f"{key}: {source}/{domain} is sha256:<64 hex digits>")
+            raise Fail(f"{key}: {source}/{subject_matter} is sha256:<64 hex digits>")
     calendar = entry["calendar"] or None
     if calendar is not None and not pinned(calendar):
         raise Fail(f"{key}: {source} calendar is sha256:<64 hex digits>")

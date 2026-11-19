@@ -7,16 +7,16 @@ The rules:
 
 - a folder name is lowercase letters, digits and ``-``;
 - a source is a folder with a ``source.json`` (§3.1), whose ``id`` is the folder's path under the tree;
-- the only ``.py`` files in a source are ``<domain>.py``, ``<domain>`` a domain id the codex chose;
+- the only ``.py`` files in a source are ``<subject_matter>.py``, ``<subject_matter>`` a subject matter id the codex
+  chose;
 - ``calendar.json`` (§3.4) and ``releases.json`` (§3.2) have the shapes the design shows;
-- ``<domain>.cases.json`` (§12.1) tests the chapter ``<domain>.py`` beside it, and has the shape of
+- ``<subject_matter>.cases.json`` (§12.1) tests the chapter ``<subject_matter>.py`` beside it, and has the shape of
   ``legislation_cases``;
-- a release lists all of its source's chapters and its calendar, never the ``realm`` domain (which only a realm's own
-  layer fills, §3: a ``realm.py`` beside a ``releases.json`` is the realm's own and no release carries it), and every
-  checksum is the sha256 of the file's bytes **at the release's own commit**, which is where a follower fetches them
-  from (§7). The commit must be in the history of ``HEAD``: a commit on a side branch or a fork is not what the
-  tree's history vouches for. The tree holds only the current files, so history is read with git; a chapter edited
-  after its release is a proposal in progress, not a broken release.
+- a release lists all of its source's chapters and its calendar, and every checksum is the sha256 of the file's
+  bytes **at the release's own commit**, which is where a follower fetches them from (§7). The commit must be in the
+  history of ``HEAD``: a commit on a side branch or a fork is not what the tree's history vouches for. The tree holds
+  only the current files, so history is read with git; a chapter edited after its release is a proposal in progress,
+  not a broken release.
 """
 
 import json
@@ -26,25 +26,23 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from realms.legislation.calendar import Calendar, parse_day
-from realms.legislation.codex import source_id
+from realms.legislation.codex import SUBJECT_MATTER_RULE, subject_matter_id, source_id
 from realms.legislation.errors import LegislationError
-from realms.legislation.paths import REALM
 
-# A codex files chapters under the domain ids it chooses, so no copy of GGG's list is kept here:
-# `is_domain` is the whole rule (ggg model/codex.md §2).
-MAX_DOMAIN = 64  # characters, as core/change_list.py
 SOURCE_FILES = ("source.json", "releases.json", "calendar.json")
 CASES_SUFFIX = ".cases.json"
 CASE_KINDS = ("call", "guard", "forbid", "compute")
 HEX = frozenset("0123456789abcdef")
 
 
-def is_domain(name: str) -> bool:
-    """Whether ``name`` is a domain id: lowercase letters and underscores, starting with a letter, at
-    most MAX_DOMAIN characters (ggg model/codex.md §2). Mirrors core/change_list.is_domain."""
-    if not name or len(name) > MAX_DOMAIN or not "a" <= name[0] <= "z":
+def is_subject_matter(name: str) -> bool:
+    """Whether ``name`` is a subject matter id, by the library's one rule (``subject_matter_id``): a codex files
+    chapters under the ids it chooses, so no list of them is kept here."""
+    try:
+        subject_matter_id(name)
+    except LegislationError:
         return False
-    return all("a" <= c <= "z" or c == "_" for c in name)
+    return True
 
 
 def layout_problems(tree: Path) -> List[str]:
@@ -100,10 +98,9 @@ def folder_problems(tree: Path, folder: Path, sources: set) -> List[str]:
 
 def chapter_problems(tree: Path, files: dict) -> List[str]:
     problems = [
-        f"{shown(tree, files[name])}: {name[:-3]} is not a domain id (lowercase letters and underscores,"
-        f" starting with a letter, at most {MAX_DOMAIN} characters)"
+        f"{shown(tree, files[name])}: {name[:-3]} is not a subject matter id ({SUBJECT_MATTER_RULE})"
         for name in sorted(files)
-        if name.endswith(".py") and not is_domain(name[:-3])
+        if name.endswith(".py") and not is_subject_matter(name[:-3])
     ]
     # `calendar` is a layer's calendar, set under <source>/calendar, so it cannot also be a chapter.
     problems += [
@@ -176,7 +173,8 @@ def calendar_reasons(data) -> List[str]:
 
 
 def cases_reasons(data) -> List[str]:
-    """§12.1, ``<domain>.cases.json``: a list of cases, each with a name, one kind of test and what it expects."""
+    """§12.1, ``<subject_matter>.cases.json``: a list of cases, each with a name, one kind of test and what it
+    expects."""
     if not isinstance(data, list):
         return ["a list of cases"]
     reasons = []
@@ -292,17 +290,13 @@ def release_reasons(release) -> List[str]:
         reasons.append("commit is the 40 hex digits of a git commit")
     chapters = release.get("chapters")
     if not isinstance(chapters, dict) or not chapters:
-        reasons.append("chapters is {domain: sha256:<hex>}")
+        reasons.append("chapters is {subject_matter: sha256:<hex>}")
     else:
-        for domain, checksum in chapters.items():
-            if domain == REALM:
-                reasons.append(
-                    "chapters lists the realm domain, which only the realm's own layer fills"
-                )
-            elif not is_domain(domain):
-                reasons.append(f"chapters lists {domain}, which is not a domain id")
+        for subject_matter, checksum in chapters.items():
+            if not is_subject_matter(subject_matter):
+                reasons.append(f"chapters lists {subject_matter}, which is not a subject matter id")
             if not is_checksum(checksum):
-                reasons.append(f"chapters.{domain} is sha256:<64 hex digits>")
+                reasons.append(f"chapters.{subject_matter} is sha256:<64 hex digits>")
     if release.get("calendar") is not None and not is_checksum(release["calendar"]):
         reasons.append("calendar is sha256:<64 hex digits>, or null")
     if "notes" in release and not by_language(release["notes"]):
@@ -390,7 +384,7 @@ def release_history_reasons(tree: Path, source: str, release: dict) -> List[str]
         names = names_at(tree, commit, source)
     except LegislationError as e:
         return [f"commit {short} cannot be read ({e}); check out the full history"]
-    held = {n[:-3] for n in names if n.endswith(".py")} - {REALM}
+    held = {n[:-3] for n in names if n.endswith(".py")}
     listed, calendar = release["chapters"], release.get("calendar")
     reasons = [
         f"does not list {d}, but {source}/{d}.py is in commit {short}: a release lists all of the source's chapters"

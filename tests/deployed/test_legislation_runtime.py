@@ -161,9 +161,9 @@ from core.op import run
 from ggg import LayeredCodex
 chapters, calendars, layers, previous = %(chapters)r, %(calendars)r, %(layers)r, %(previous)r
 entries, paths = {}, {}
-for source, domain, text in chapters:
-    entries[f"{source}/{domain}"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
-    paths.setdefault(domain, []).append(source)
+for source, subject_matter, text in chapters:
+    entries[f"{source}/{subject_matter}"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
+    paths.setdefault(subject_matter, []).append(source)
 for source, text in calendars:
     entries[f"{source}/calendar"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
 cid = store.codex_id(layers, paths, entries)
@@ -186,8 +186,8 @@ t0 = ic.performance_counter(0)
 guards = legislation._call("guard", op="proposal_create", args={"title": "measure", "action": None}, now=chain.now(), approvals=[])
 t1 = ic.performance_counter(0)
 event = {"user": %(founder)r, "args": {"title": "measure"}, "result": {"proposal": "P-0"}, "at": chain.now()}
-hooks = [legislation._call("hook", op="proposal_create", domain=d["domain"], event=event, now=chain.now(), approvals=[])
-         for d in legislation._call("hook_domains", op="proposal_create")]
+hooks = [legislation._call("hook", op="proposal_create", subject_matter=d["subject_matter"], event=event, now=chain.now(), approvals=[])
+         for d in legislation._call("hook_subject_matters", op="proposal_create")]
 t2 = ic.performance_counter(0)
 print(json.dumps({"guard": t1 - t0, "hook": t2 - t1, "guards": len(guards), "hooks": len(hooks),
                   "effects": sum(len(h.get("effects", [])) for h in hooks)}))
@@ -198,11 +198,11 @@ from core import layered_codex as store, legislation
 chapters, calendars = %(chapters)r, %(calendars)r
 sources = {store.checksum(t): t for *_, t in chapters} | {store.checksum(t): t for _, t in calendars}
 plan = {"realm": %(realm)r, "layers": %(layers)r,
-        "chapters": [{"source": s, "domain": d, "sha256": store.checksum(t)} for s, d, t in chapters],
+        "chapters": [{"source": s, "subject_matter": d, "sha256": store.checksum(t)} for s, d, t in chapters],
         "calendars": [{"source": s, "sha256": store.checksum(t)} for s, t in calendars]}
 before = ic.performance_counter(0)
 out = legislation.build(plan, sources)
-print(json.dumps({"cost": ic.performance_counter(0) - before, "errors": out["errors"], "domains": sorted(out["views"])}))
+print(json.dumps({"cost": ic.performance_counter(0) - before, "errors": out["errors"], "subject_matters": sorted(out["views"])}))
 '''
 LOAD = '''
 import json
@@ -221,7 +221,7 @@ box.call("setup", operations=sorted(ops()), layers=plan["layers"], realm=plan["r
          calendars=[[c["source"], legislation._calendar(texts, c)] for c in plan["calendars"]], entities=sorted(legislation.VIEWS), money=legislation.MONEY)
 t2 = ic.performance_counter(0)
 for c in plan["chapters"]:
-    box.call("load", source=c["source"], domain=c["domain"], text=texts[c["sha256"]])
+    box.call("load", source=c["source"], subject_matter=c["subject_matter"], text=texts[c["sha256"]])
 t3 = ic.performance_counter(0)
 box.call("finish")
 t4 = ic.performance_counter(0)
@@ -425,8 +425,8 @@ def test_b_guards_deny_down_the_layers_and_hooks_notify_as_the_codex(town, peopl
     notice = ok(town, "notification_list", founder, query=True)["notifications"][-1]
     assert notice["body"] == pid
     measured = run(town, MEASURE % {"founder": founder})
-    print(f"one guard call ({measured['guards']} domains): {measured['guard']:,} instructions; "
-          f"the hooks of one operation ({measured['hooks']} domains, one call each, {measured['effects']} effects queued): "
+    print(f"one guard call ({measured['guards']} subject matters): {measured['guard']:,} instructions; "
+          f"the hooks of one operation ({measured['hooks']} subject matters, one call each, {measured['effects']} effects queued): "
           f"{measured['hook']:,}")
     assert measured["guard"] < 100_000_000 and measured["hook"] < 100_000_000, measured
 
@@ -505,7 +505,7 @@ def test_d2_hook_effects_refuses_every_caller_but_the_realm_itself(town, people)
 def test_e_a_hook_that_exhausts_the_budget_fails_alone_and_the_codex_reloads(town, people):
     founder = people["founder"]
     assert ok(town, "proposal_create", founder, title="loop")["proposal"]
-    # A spent budget poisons the interpreter; the hook ran one domain per call, so the failure is that chapter's.
+    # A spent budget poisons the interpreter; the hook ran one subject matter per call, so the failure is that chapter's.
     error = failures(town, founder)["x/town/register.py"]["on_proposal_create"]["error"]
     assert "BudgetExceeded" in error, error
     assert run(town, STATE)["loaded"]  # the spent interpreter was replaced
@@ -568,7 +568,7 @@ def test_e4_a_sandbox_the_meter_killed_is_replaced_by_the_next_guarded_operation
     assert failures(town, founder) == {}
 
 
-def test_f_what_crosses_a_domain_boundary_is_plain_data_or_the_public_view(town, people):
+def test_f_what_crosses_a_subject_matter_boundary_is_plain_data_or_the_public_view(town, people):
     founder = people["founder"]
     install(town, chapters_of(founder, [(TOWN, "alpha", ALPHA), (TOWN, "beta", BETA), (TOWN, "gamma", GAMMA)]))
     assert proposal(town, founder, "probe self")["error"] == (
@@ -584,10 +584,10 @@ def test_g_build_refuses_a_chain_deeper_than_eight_and_reports_the_valencia_exam
         uses = f'    uses = ["step{i + 1}"]\n' if i < 9 else ""
         steps.append((TOWN, f"step{i}", f"from realms.legislation import above\nclass Step{i}(above('step{i}')):\n{uses}    pass\n"))
     got = run(town, BUILD % {"chapters": steps, "calendars": [], "realm": TOWN, "layers": [TOWN]})
-    assert got["errors"][0].startswith("uses chain step0 → step1") and "calls between domains stop at depth 8" in got["errors"][0]
+    assert got["errors"][0].startswith("uses chain step0 → step1") and "calls between subject matters stop at depth 8" in got["errors"][0]
     got = run(town, BUILD % {"chapters": chapters_of(founder), "calendars": [("eu/es", json.dumps(CALENDAR))],
                              "realm": TOWN, "layers": ["eu", "eu/es", TOWN]})
-    assert got["errors"] == [] and got["domains"] == ["data_protection", "local_regime", "procedure", "realm"]
+    assert got["errors"] == [] and got["subject_matters"] == ["data_protection", "local_regime", "procedure", "realm"]
     print(f"one build of the example (7 chapters, a calendar, the views): {got['cost']:,} instructions")
     assert got["cost"] < 2_000_000_000, got
 

@@ -14,7 +14,7 @@ from realms.legislation.periods import Period
 from realms.legislation.rates import Money
 from realms.legislation.sealed import MappingProxyType, Sealed, freeze
 
-# Nested calls from one domain's chapter into another's (layered-codex.md §4.4, §9.3). The resolver
+# Nested calls from one subject matter's chapter into another's (layered-codex.md §4.4, §9.3). The resolver
 # refuses a codex whose ``uses`` chain is deeper, and ``as_layer`` stops a call that would be.
 MAX_DEPTH = 8
 
@@ -195,8 +195,8 @@ class Event(metaclass=Sealed):
 class Context(metaclass=Sealed):
     """What one call of the legislation runs with: the codex, the time, the approvals the operation
     carries, the effects queue every chapter of the call shares, the realm's local-day function, and which
-    domains' methods are running (``running``, outermost first) and how many calls between domains are in
-    progress (``depth``, at most ``MAX_DEPTH``)."""
+    subject matters' methods are running (``running``, outermost first) and how many calls between subject matters are
+    in progress (``depth``, at most ``MAX_DEPTH``)."""
 
     def __init__(self, codex, now=0, approvals=(), operations=None, local_day=None):
         self.codex, self.now, self.approvals = codex, now, frozenset(approvals)
@@ -206,7 +206,7 @@ class Context(metaclass=Sealed):
 
 
 def is_result(value):
-    """What a method may hand to another domain: a setting's kind of data (chapter.is_data), a Money, or
+    """What a method may hand to another subject matter: a setting's kind of data (chapter.is_data), a Money, or
     lists and dicts of those."""
     from realms.legislation.chapter import is_data
 
@@ -221,23 +221,23 @@ def is_result(value):
 
 
 def crossing(value, file, way="returned"):
-    """``value``, as it crosses between the chapter of ``file`` and another domain, ``returned`` by its method or
-    ``handed`` to it: plain data passes frozen (a list is a tuple, a dict read-only), so neither side changes
-    what the other holds; a chapter instance is seen through ``Public``, and anything else (a method, a view of
-    other domains, an object a chapter made) is refused (realms-gos#543, #621)."""
+    """``value``, as it crosses between the chapter of ``file`` and another subject matter, ``returned`` by its method
+    or ``handed`` to it: plain data passes frozen (a list is a tuple, a dict read-only), so neither side changes what
+    the other holds; a chapter instance is seen through ``Public``, and anything else (a method, a view of other subject
+    matters, an object a chapter made) is refused (realms-gos#543, #621)."""
     from realms.legislation.chapter import Chapter
 
     if isinstance(value, Chapter):
         return Public(value)
     if isinstance(value, Public) or not is_result(value):
         raise LegislationError(
-            f"{file} {way} {type(value).__name__}: only plain data crosses a domain boundary"
+            f"{file} {way} {type(value).__name__}: only plain data crosses a subject matter boundary"
         )
     return freeze(value)
 
 
 class Public(metaclass=Sealed):
-    """Another domain's chapter as a caller sees it: its public members only, never the ``self`` API; what
+    """Another subject matter's chapter as a caller sees it: its public members only, never the ``self`` API; what
     its methods are handed and what they return goes through ``crossing``."""
 
     __slots__ = ("__chapter__",)
@@ -268,8 +268,8 @@ class Public(metaclass=Sealed):
         return call
 
 
-class Domains(metaclass=Sealed):
-    """``self.legislation`` and ``self.layer``: the declared domains, resolved through the realm's
+class SubjectMatters(metaclass=Sealed):
+    """``self.legislation`` and ``self.layer``: the declared subject matters, resolved through the realm's
     layers (``legislation``) or only down to this chapter's own layer (``layer``) (layered-codex.md §4.4).
     """
 
@@ -278,19 +278,20 @@ class Domains(metaclass=Sealed):
     def __init__(self, chapter, scope):
         self.__chapter__, self.__scope__ = chapter, scope
 
-    def __getattr__(self, domain):
-        if domain.startswith("_"):
-            raise AttributeError(domain)
+    def __getattr__(self, subject_matter):
+        if subject_matter.startswith("_"):
+            raise AttributeError(subject_matter)
         chapter = self.__chapter__
         codex, source = chapter.__context__.codex, chapter.running_layer()
-        caller = codex.chapter_at(type(chapter).__domain__, source)
-        if domain not in caller.__uses__:
+        caller = codex.chapter_at(type(chapter).__subject_matter__, source)
+        if subject_matter not in caller.__uses__:
             raise LegislationError(
-                f"{caller.__file__} does not declare {domain!r} in uses: only declared domains can be reached"
+                f"{caller.__file__} does not declare {subject_matter!r} in uses: only declared subject matters can "
+                "be reached"
             )
         cls = (
-            codex.resolved_at(domain, source)
+            codex.resolved_at(subject_matter, source)
             if self.__scope__ == "layer"
-            else codex.resolved(domain)
+            else codex.resolved(subject_matter)
         )
         return Public(cls(chapter.__context__))

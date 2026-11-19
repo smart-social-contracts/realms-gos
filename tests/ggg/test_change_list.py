@@ -37,13 +37,24 @@ def test_four_mirrors_are_the_most_a_chapter_may_have():
     assert len(parsed["set"][0]["urls"]) == 5
 
 
-def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and_checksum():
+def test_a_change_list_is_parsed_into_chapters_with_their_source_urls_and_checksum():
+    """An entry names no subject matter of its own: install jobs keep entries across upgrades, and every version's
+    entries have the chapter id it is the end of."""
     parsed = change_list.parse(text(set=[entry("town/tax", mirrors=[URL + "mirror/tax.py"])], summary={"en": "x"}))
     assert parsed["realm"] == "town" and parsed["replaces"] is None and parsed["summary"] == {"en": "x"}
-    assert parsed["set"] == [{"chapter": "town/tax", "source": "town", "domain": "tax", "sha256": SHA["tax"],
+    assert parsed["set"] == [{"chapter": "town/tax", "source": "town", "sha256": SHA["tax"],
                               "urls": [URL + "town/tax.py", URL + "mirror/tax.py"], "size": 100}]
     calendar = change_list.parse(text(set=[entry("eu/es/calendar")], release={"source": "eu/es", "version": "1"}))
-    assert calendar["set"][0]["domain"] == "calendar" and calendar["release"] == {"source": "eu/es", "version": "1"}
+    assert calendar["set"][0]["chapter"] == "eu/es/calendar" and calendar["release"] == {"source": "eu/es", "version": "1"}
+
+
+def test_an_entry_stored_before_the_rename_still_applies():
+    """A job an upgrade paused keeps the change list it staged, whose entries had a ``domain`` key then."""
+    old = {"chapter": "town/tax", "source": "town", "domain": "tax", "urls": [URL + "town/tax.py"], "sha256": SHA["tax"],
+           "size": 100}
+    listed = {**change_list.parse(text(set=[entry("town/water")])), "set": [old]}
+    assert change_list.apply(listed, "town", None, {"chapters": {}, "calendar": None})[1] == {
+        "chapters": {"tax": SHA["tax"]}, "calendar": None}
 
 
 @pytest.mark.parametrize("bad, match", [
@@ -64,7 +75,9 @@ def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and
     (text(set=[{**entry("town/tax"), "sha256": "0" * 63}]), "64 hex digits"),
     (text(set=[entry("town/tax", size=0)]), "size is between"),
     (text(set=[entry("town/tax", size=256 * 1024 + 1)]), "size is between"),
-    (text(set=[entry("town/Parking")]), "not a domain id"),
+    (text(set=[entry("town/Parking")]), "not a subject matter id"),
+    (text(set=[entry("town/2027_tax")]), "not a subject matter id"),
+    (text(set=[entry("town/" + "a" * 65)]), "at most 64 characters"),
     (text(set=[entry("Town/tax")]), "not a chapter id"),
     (text(set=[entry("tax")]), "not a chapter id"),
     (text().replace('"remove": []', '"remove": "town/tax"'), "remove is a list"),
@@ -95,8 +108,7 @@ def served(chapter, **more):
 
 def test_a_chapter_of_the_release_may_give_no_url_and_no_size_for_a_realm_serves_it():
     parsed = change_list.parse(text(set=[served("eu/es/tax")], release=ES))
-    assert parsed["set"] == [{"chapter": "eu/es/tax", "source": "eu/es", "domain": "tax", "sha256": SHA["tax"],
-                              "urls": [], "size": None}]
+    assert parsed["set"] == [{"chapter": "eu/es/tax", "source": "eu/es", "sha256": SHA["tax"], "urls": [], "size": None}]
 
 
 @pytest.mark.parametrize("bad", [
@@ -118,6 +130,12 @@ def test_a_summary_is_a_text_per_language_and_may_be_left_out():
     assert change_list.parse(text(set=chapter, summary={"en": "x", "es": "y"}))["summary"] == {"en": "x", "es": "y"}
 
 
+def test_a_subject_matter_id_is_checked_for_its_shape_only():
+    """A codex chooses its own subject matters: any id of lowercase letters, digits and _, starting with a letter, up to 64."""
+    ids = ["town/tax2", "town/drought_measures", "town/" + "a" * 64]
+    assert [c["chapter"] for c in change_list.parse(text(set=[entry(i) for i in ids]))["set"]] == ids
+
+
 def test_the_same_key_in_different_objects_is_no_repeat():
     same = text(set=[entry("town/tax"), entry("town/water")], remove=["town/procedure"])
     assert [c["chapter"] for c in change_list.parse(same)["set"]] == ["town/tax", "town/water"]
@@ -128,8 +146,8 @@ def test_the_change_list_of_the_bonus_change_is_one_the_realm_accepts():
     golden = (ROOT / "tests/fixtures/legislation/bonus-change.json").read_text().replace("<commit>", "0" * 40)
     parsed = change_list.parse(golden)
     chapter = parsed["set"][0]
-    assert (parsed["realm"], chapter["chapter"], chapter["source"], chapter["domain"]) == (
-        "eu/es/vc/46250-valencia", "eu/es/vc/46250-valencia/tax", "eu/es/vc/46250-valencia", "tax")
+    assert (parsed["realm"], chapter["chapter"], chapter["source"]) == (
+        "eu/es/vc/46250-valencia", "eu/es/vc/46250-valencia/tax", "eu/es/vc/46250-valencia")
     assert chapter["urls"][0].endswith("/legislation/eu/es/vc/46250-valencia/tax.py") and chapter["size"] == 853
     realm, own = change_list.apply(parsed, parsed["realm"], parsed["replaces"], {"chapters": {}, "calendar": None})
     assert own == {"chapters": {"tax": chapter["sha256"]}, "calendar": None}
@@ -230,13 +248,15 @@ def test_a_release_is_installed_whole_as_its_record_lists_it():
     refused(vouched, [entry("eu/tax")], {"source": "eu", "version": "1"}, match="no sync source relays eu")
 
 
-def test_a_realm_chapter_a_release_lists_is_skipped():
+def test_a_realm_chapter_a_release_lists_is_installed_like_any_other():
+    """Which subject matters exist, and who may fill them, is the codices' business: ``realm`` is not special here."""
     with_realm = release("eu/es/vc", "2.0.0", ["local_regime", "realm"])
     relays = [{"source": "eu/es/vc", "layers": [ES, with_realm]}]
-    for listed in ([entry("eu/es/vc/local_regime")], [entry("eu/es/vc/local_regime"), entry("eu/es/vc/realm")]):
-        planned, _ = vouched(set=listed, release={"source": "eu/es/vc", "version": "2.0.0"}, relays=relays)
-        assert planned.skipped == [{"source": "eu/es/vc", "domain": "realm", "sha256": SHA["realm"]}]
-        assert "eu/es/vc/realm" not in dict(change_list.named(planned))
+    whole = [entry("eu/es/vc/local_regime"), entry("eu/es/vc/realm")]
+    planned, _ = vouched(set=whole, release={"source": "eu/es/vc", "version": "2.0.0"}, relays=relays)
+    assert "eu/es/vc/realm" in dict(change_list.named(planned))
+    refused(vouched, whole[:1], {"source": "eu/es/vc", "version": "2.0.0"}, relays,
+            match="installed whole: eu/es/vc 2.0.0 is eu/es/vc/local_regime, eu/es/vc/realm")
 
 
 def test_two_sync_sources_relaying_different_releases_of_one_layer_are_refused():
@@ -250,7 +270,7 @@ def test_paths_that_are_not_one_chain_are_refused():
     cv_tax = release("eu/es/vc", "2.0.0", ["local_regime", "tax"])
     beside = [{"source": "eu/es/vc", "layers": [ES, cv_tax]}, {"source": "eu/es/vc/emshi", "layers": [ES, emshi]}]
     refused(vouched, (), None, beside, match="Paths that differ are refused unless one extends the other")
-    untied = THROUGH_CV + [{"source": "eu/es/vc/emshi", "layers": [ES, emshi]}]  # no domain puts CV and EMSHI in order
+    untied = THROUGH_CV + [{"source": "eu/es/vc/emshi", "layers": [ES, emshi]}]  # no subject matter puts CV and EMSHI in order
     refused(vouched, (), None, untied, match="neither above the other")
     below = THROUGH_CV + [{"source": "eu/es/vc/emshi", "layers": [ES, CV, release("eu/es/vc/emshi", "1", ["water"])]}]
     planned, vouched_by = vouched(relays=below)

@@ -291,7 +291,7 @@ def test_no_cedar_is_injected_through_a_setting_or_a_literal(name):
     )
 
 
-# The security review before wave 3 (realms-gos#512). One instance runs every layer's code of a domain in a call, so a
+# The security review before wave 3 (realms-gos#512). One instance runs every layer's code of a subject matter in a call, so a
 # chapter stores nothing on ``self``: a name stored by one layer would change what another reads, the code of a layer
 # above that is ``fixed`` included.
 ES_SELF = """

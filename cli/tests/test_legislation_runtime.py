@@ -1,5 +1,5 @@
 """What the runtime (realms-gos#488) adds to the library: ``Args``, the operation's arguments as a guard reads them;
-``self.local_day``, the realm's local day of a timestamp; and the domain boundary (realms-gos#543): other domains
+``self.local_day``, the realm's local day of a timestamp; and the subject matter boundary (realms-gos#543): other subject matters
 reach a chapter's public members only, and what a method hands back is plain data or the chapter seen through
 ``Public``."""
 
@@ -14,8 +14,8 @@ TOWN = "x/town"
 
 def codex(**chapters):
     c = Codex([TOWN], realm=TOWN, operations=["l_act"])
-    for domain, text in chapters.items():
-        c.load(TOWN, domain, text)
+    for subject_matter, text in chapters.items():
+        c.load(TOWN, subject_matter, text)
     return c
 
 
@@ -54,7 +54,7 @@ def test_local_day_is_the_realms_and_a_context_without_one_refuses():
         c.instance("procedure", c.context()).day(7)
 
 
-# ── The domain boundary (#543) ───────────────────────────────────────────────
+# ── The subject matter boundary (#543) ───────────────────────────────────────────────
 
 ALPHA = """
 from realms.legislation import above
@@ -133,7 +133,7 @@ def test_a_method_returning_self_hands_back_the_public_view_only():
         alpha().probe_self()
 
 
-def test_another_domains_self_api_is_out_of_reach():
+def test_another_subject_matters_self_api_is_out_of_reach():
     with pytest.raises(LegislationError, match="legislation is not a public member of x/town/beta.py"):
         alpha().probe_undeclared()
     with pytest.raises(LegislationError, match="ggg is not a public member of x/town/beta.py"):
@@ -168,12 +168,12 @@ def test_crossing_hands_over_frozen_values():
         value[1]["k"] = 1
 
 
-def test_a_value_returned_to_another_domain_cannot_be_mutated_by_it():
+def test_a_value_returned_to_another_subject_matter_cannot_be_mutated_by_it():
     with pytest.raises(AttributeError, match="append"):
         alpha().probe_returned_list()
 
 
-def test_a_value_handed_to_another_domain_cannot_be_mutated_by_it():
+def test_a_value_handed_to_another_subject_matter_cannot_be_mutated_by_it():
     with pytest.raises(AttributeError, match="append"):
         alpha().probe_handed_list()
 

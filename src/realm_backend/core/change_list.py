@@ -15,16 +15,15 @@ KIND, FORMAT = "realms-gos/legislation-change", 1
 MAX_CHAPTERS = 50
 MAX_MIRRORS = 4  # every URL tried is an outcall the realm pays for
 CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar (§7)
-REALM = "realm"  # the domain only the realm's own layer fills (§3)
-MAX_DOMAIN = 64  # characters; a domain id is a file name and a key in a published record
 HEX = "0123456789abcdef"
 
 
 def parse(text):
     """The change list in ``text``, checked for shape and limits: its ``realm``, ``replaces``, ``set`` (each entry
-    with its ``chapter`` id, the ``source`` and ``domain`` in it, its ``urls``, the URL then its mirrors, its
-    ``sha256`` as ``sha256:<hex>`` and its ``size``), ``remove``, ``release`` and ``summary``. A chapter of the release
-    may give no URL and no size (``urls`` empty, ``size`` None): a realm serves its bytes, by checksum."""
+    with its ``chapter`` id, the ``source`` in it, its ``urls``, the URL then its mirrors, its ``sha256`` as
+    ``sha256:<hex>`` and its ``size``), ``remove``, ``release`` and ``summary``. A chapter of the release may give no
+    URL and no size (``urls`` empty, ``size`` None): a realm serves its bytes, by checksum. An entry names no subject
+    matter of its own: an install job stores entries across an upgrade, and the chapter id is in every version's."""
     try:
         data = json.loads(text, object_pairs_hook=no_repeats)
     except ValueError as e:
@@ -96,14 +95,13 @@ def no_repeats(pairs, what="the change list"):
 
 def _entry(entry, release):
     chapter = entry.get("chapter")
-    source, domain = chapter_id(chapter)
+    source, _ = chapter_id(chapter)
     sha256 = entry.get("sha256")
     if not isinstance(sha256, str) or len(sha256) != 64 or any(ch not in HEX for ch in sha256):
         raise Fail(f"{chapter}: sha256 is 64 hex digits")
     served_by_a_realm = release is not None and source == release["source"] and not {"url", "mirrors", "size"} & set(entry)
     urls, size = ([], None) if served_by_a_realm else (_urls(chapter, entry), _size(chapter, entry))
-    return {"chapter": chapter, "source": source, "domain": domain, "urls": urls, "sha256": "sha256:" + sha256,
-            "size": size}
+    return {"chapter": chapter, "source": source, "urls": urls, "sha256": "sha256:" + sha256, "size": size}
 
 
 def _urls(chapter, entry):
@@ -148,37 +146,37 @@ def source_name(source):
         raise Fail(str(e))
 
 
-def is_domain(name):
-    """Whether ``name`` is a domain id: lowercase letters and underscores, starting with a letter, at most
-    ``MAX_DOMAIN`` characters (ggg model/codex.md §2). A codex chooses its own domains, so the id is checked
-    and not its membership of any list; what the check protects is that an id reaching a published record
-    is a plain name, never empty, path-like or unbounded."""
-    if not isinstance(name, str) or not 0 < len(name) <= MAX_DOMAIN:
-        return False
-    if not "a" <= name[0] <= "z":
-        return False
-    return all("a" <= c <= "z" or c == "_" for c in name)
+def subject_matter_name(subject_matter):
+    """``subject_matter``, a subject matter id; a Fail if it is not one. The library's ``subject_matter_id`` has the
+    rule: the shape of the id, never a list, so that an id reaching a file name or a published record is a plain,
+    bounded name."""
+    errors = library().LegislationError
+    from realms.legislation.codex import subject_matter_id
+
+    try:
+        return subject_matter_id(subject_matter)
+    except errors as e:
+        raise Fail(str(e))
 
 
 def chapter_id(chapter):
-    """``(source, domain)`` of the chapter id ``<source id>/<domain>``: the domain is any id ``is_domain``
-    accepts, which includes ``calendar``, the name a layer's calendar is set under."""
-    source, _, domain = (chapter if isinstance(chapter, str) else "").rpartition("/")
+    """``(source, subject_matter)`` of the chapter id ``<source id>/<subject_matter>``: the subject matter is any id
+    ``subject_matter_name`` accepts, which includes ``calendar``, the name a layer's calendar is set under."""
+    source, _, subject_matter = (chapter if isinstance(chapter, str) else "").rpartition("/")
     try:
         source_name(source)
+        subject_matter_name(subject_matter)
     except Fail as e:
         raise Fail(f"{chapter!r} is not a chapter id: {e}")
-    if not is_domain(domain):
-        raise Fail(f"{chapter!r} is not a chapter id: {domain!r} is not a domain id (lowercase letters and "
-                   f"underscores, starting with a letter, at most {MAX_DOMAIN} characters)")
-    return source, domain
+    return source, subject_matter
 
 
 def apply(change_list, realm, active_id, own):
     """Step 2 (§9.2): the change list against this realm. ``realm`` is the realm's own source id, or None before its
     first layered install, which sets it (the vote approved it); ``active_id`` the active codex's id, or None;
-    ``own`` the realm's own layer in the active codex, ``{"chapters": {domain: sha256}, "calendar": sha256 or None}``.
-    Returns the realm's source id and its own layer after the change, in the same shape."""
+    ``own`` the realm's own layer in the active codex,
+    ``{"chapters": {subject_matter: sha256}, "calendar": sha256 or None}``. Returns the realm's source id and its own
+    layer after the change, in the same shape."""
     if realm is None:
         realm = change_list["realm"]
     elif change_list["realm"] != realm:
@@ -200,21 +198,22 @@ def apply(change_list, realm, active_id, own):
             raise Fail(f"{entry['chapter']} is not part of the release of {release['source']}")
     chapters, calendar = dict(own.get("chapters") or {}), own.get("calendar")
     for chapter in change_list["remove"]:
-        source, domain = chapter_id(chapter)
+        source, subject_matter = chapter_id(chapter)
         if source != realm:
             raise Fail(f"remove {chapter}: only the realm's own layer, {realm}, may be emptied")
-        if domain == CALENDAR and calendar:
+        if subject_matter == CALENDAR and calendar:
             calendar = None
-        elif domain in chapters:
-            del chapters[domain]
+        elif subject_matter in chapters:
+            del chapters[subject_matter]
         else:
             raise Fail(f"remove {chapter}: the codex has no such chapter")
     for entry in change_list["set"]:
         if entry["source"] == realm:
-            if entry["domain"] == CALENDAR:
+            subject_matter = entry["chapter"].rpartition("/")[2]
+            if subject_matter == CALENDAR:
                 calendar = entry["sha256"]
             else:
-                chapters[entry["domain"]] = entry["sha256"]
+                chapters[subject_matter] = entry["sha256"]
     return realm, {"chapters": chapters, "calendar": calendar}
 
 
@@ -223,8 +222,8 @@ def vouch(change_list, realm, relays, own, vouchers):
     takes, with ``realm`` and ``own`` as ``apply`` returned them. ``vouchers`` says, for each layer from above, the
     source whose record vouches for it (``layers_for``).
 
-    A release install must be whole: ``set`` holds exactly the release's chapters as the record lists it (a ``realm``
-    chapter it lists is skipped, §3.2), with the record's checksums. Returns the ``Plan`` and, for every chapter and
+    A release install must be whole: ``set`` holds exactly the release's chapters as the record lists it, with the
+    record's checksums. Returns the ``Plan`` and, for every chapter and
     calendar of the new codex, the source that vouches for it; the realm's own are the realm's."""
     legislation = library()
     try:
@@ -328,7 +327,7 @@ def vouching(records, release):
         raise Fail(f"the record of {record['source']} relays {source} {entry['version']}, not {version}")
     record, entry = next((held for held in exact if held[0]["source"] == source), exact[0])
     for other, theirs in holders:
-        if compared(theirs) != compared(entry):
+        if _plain(theirs) != _plain(entry):
             differ = (f"{entry['version']} and {theirs['version']}" if entry["version"] != theirs["version"]
                       else f"{version} with different checksums")
             raise Fail(f"{source}: sync sources {record['source']} and {other['source']} relay different releases "
@@ -337,18 +336,12 @@ def vouching(records, release):
     return {"key": record["key"], "by": record["source"], "release": entry, "order": sources_of(record)}
 
 
-def compared(release):
-    """What two records must agree on for a layer: ``_plain`` without the ``realm`` chapter, which no follower takes."""
-    plain = _plain(release)
-    return {**plain, "chapters": {d: sha for d, sha in plain["chapters"].items() if d != REALM}}
-
-
 def layer_checksum(release):
-    """The checksum of a layer as a follower reports it (GGG's ``ReportedLayer``, §11.8): of ``compared`` as canonical
+    """The checksum of a layer as a follower reports it (GGG's ``ReportedLayer``, §11.8): of ``_plain`` as canonical
     JSON, with no calendar written ``""`` as ``legislation_releases`` publishes it (the follower reads it as None). The
     release a follower runs and the entry of a record that lists it have the same, so a sync source finds the layer by
     it in its own record."""
-    return checksum(canonical({**compared(release), "calendar": release.get("calendar") or ""}))
+    return checksum(canonical({**_plain(release), "calendar": release.get("calendar") or ""}))
 
 
 def of_release(realm, replaces, release):
@@ -357,18 +350,18 @@ def of_release(realm, replaces, release):
     codex's id. Its chapters have no URLs and no size: their bytes come from the capital that vouches for them, by
     checksum, or are stored already (§9.2 step 3)."""
     source = release["source"]
-    chapters = {f"{source}/{domain}": sha for domain, sha in release["chapters"].items() if domain != REALM}
+    chapters = {f"{source}/{subject_matter}": sha for subject_matter, sha in release["chapters"].items()}
     if release.get("calendar"):
         chapters[f"{source}/{CALENDAR}"] = release["calendar"]
-    entries = [{"chapter": chapter, "source": source, "domain": chapter.rpartition("/")[2], "urls": [], "sha256": sha,
-                "size": None} for chapter, sha in sorted(chapters.items())]
+    entries = [{"chapter": chapter, "source": source, "urls": [], "sha256": sha, "size": None}
+               for chapter, sha in sorted(chapters.items())]
     return {"realm": realm, "replaces": replaces, "set": entries, "remove": [],
             "release": {"source": source, "version": release["version"]}, "summary": {}}
 
 
 def named(planned):
     """``(chapter id, plan entry)`` of every chapter and calendar of ``planned``, chapters first."""
-    return [(f"{c['source']}/{c['domain']}", c) for c in planned.chapters] + [
+    return [(f"{c['source']}/{c['subject_matter']}", c) for c in planned.chapters] + [
         (f"{c['source']}/{CALENDAR}", c) for c in planned.calendars]
 
 
@@ -386,10 +379,10 @@ def _record(relays, release):
 
 def _whole(change_list, realm, listed):
     source = listed["source"]
-    expected = {f"{source}/{d}": sha for d, sha in listed["chapters"].items() if d != REALM}
+    expected = {f"{source}/{d}": sha for d, sha in listed["chapters"].items()}
     if listed.get("calendar"):
         expected[f"{source}/{CALENDAR}"] = listed["calendar"]
-    given = {e["chapter"]: e["sha256"] for e in change_list["set"] if e["source"] != realm and e["domain"] != REALM}
+    given = {e["chapter"]: e["sha256"] for e in change_list["set"] if e["source"] != realm}
     if set(given) != set(expected):
         raise Fail(f"a release is installed whole: {source} {listed['version']} is "
                    f"{', '.join(sorted(expected)) or 'no chapters'}; the change list sets "

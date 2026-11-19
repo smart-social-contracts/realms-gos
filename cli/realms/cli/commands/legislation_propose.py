@@ -13,10 +13,10 @@ from typing import Dict, List, Optional
 import typer
 
 from realms.cli.commands.legislation_canonical import canonical
-from realms.cli.commands.legislation_layout import MAX_DOMAIN, bytes_at, git, is_domain
+from realms.cli.commands.legislation_layout import bytes_at, git, is_subject_matter
 from realms.cli.realm_api import call_op
 from realms.legislation import LegislationError
-from realms.legislation.codex import source_id
+from realms.legislation.codex import SUBJECT_MATTER_RULE, source_id
 
 KIND, FORMAT = "realms-gos/legislation-change", 1
 CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar
@@ -73,21 +73,20 @@ def active_codex_id(canister: str, network: str, identity: str) -> Optional[str]
 
 
 def own_chapter_file(chapter: str, realm: str) -> str:
-    """The file name of chapter ``<source>/<domain>`` of the realm's own layer. A layer from above is installed whole,
-    as a release, never chapter by chapter (§7)."""
-    source, _, domain = chapter.rpartition("/")
+    """The file name of chapter ``<source>/<subject_matter>`` of the realm's own layer. A layer from above is installed
+    whole, as a release, never chapter by chapter (§7)."""
+    source, _, subject_matter = chapter.rpartition("/")
     source_id(source)
-    if not is_domain(domain):
+    if not is_subject_matter(subject_matter):
         raise LegislationError(
-            f"{chapter}: {domain} is not a domain id (lowercase letters and underscores, starting with a"
-            f" letter, at most {MAX_DOMAIN} characters)"
+            f"{chapter}: {subject_matter} is not a subject matter id ({SUBJECT_MATTER_RULE})"
         )
     if source != realm:
         raise LegislationError(
             f"{chapter}: only the realm's own layer, {realm}, is set or removed chapter by chapter; "
             "a layer from above is installed whole, as a release"
         )
-    return "calendar.json" if domain == CALENDAR else domain + ".py"
+    return "calendar.json" if subject_matter == CALENDAR else subject_matter + ".py"
 
 
 def chapter_entry(tree: Path, commit: str, repo: str, realm: str, chapter: str) -> dict:

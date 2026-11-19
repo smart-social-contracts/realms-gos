@@ -191,10 +191,10 @@ def agree(c, generic, per_action, seed=2026):
             context = {"op": name, "facts": facts}
             settings = (
                 {}
-            )  # one open value per domain and setting, shared by every forbid that reads it
+            )  # one open value per subject matter and setting, shared by every forbid that reads it
             if generic:
                 for f in on_action:
-                    settings.setdefault(f.domain, {}).update(draw.settings(f))
+                    settings.setdefault(f.subject_matter, {}).update(draw.settings(f))
                 settings = {d: s for d, s in settings.items() if s}
             if (
                 settings
@@ -215,7 +215,7 @@ def agree(c, generic, per_action, seed=2026):
                     f.id
                     for f in on_action
                     if f.evaluate(
-                        facts, settings.get(f.domain, {}) if generic else None
+                        facts, settings.get(f.subject_matter, {}) if generic else None
                     )
                 }
             )

@@ -324,7 +324,9 @@ def cedars(forbids: list, generic: bool) -> set:
 def forbidden_by(forbids: list, facts: dict, settings: Optional[dict]) -> bool:
     """Whether any of ``forbids`` fires on ``facts`` (plain Python), with the example's settings when they are open."""
     return any(
-        f.evaluate(facts, None if settings is None else settings.get(f.domain, {}))
+        f.evaluate(
+            facts, None if settings is None else settings.get(f.subject_matter, {})
+        )
         for f in forbids
     )
 
@@ -376,26 +378,28 @@ def combinations(settings: Optional[dict], differing: list) -> List[Optional[dic
     if settings is None:
         return [None]
     slots = [
-        (f.domain, n)
+        (f.subject_matter, n)
         for f in differing
         for n in settings_read(f.expression)
-        if isinstance(settings.get(f.domain, {}).get(n), bool)
+        if isinstance(settings.get(f.subject_matter, {}).get(n), bool)
     ]
     slots = list(dict.fromkeys(slots))
     out = []
     for values in itertools.product((False, True), repeat=len(slots)):
         combination = {d: dict(v) for d, v in settings.items()}
-        for (domain, name), value in zip(slots, values):
-            combination[domain][name] = value
+        for (subject_matter, name), value in zip(slots, values):
+            combination[subject_matter][name] = value
         out.append(combination)
     return out
 
 
 def read_settings(settings: Optional[dict], differing: list) -> Optional[dict]:
-    """``settings`` (by domain) restricted to the settings the differing forbids read."""
+    """``settings`` (by subject matter) restricted to the settings the differing forbids read."""
     if settings is None:
         return None
-    read = {(f.domain, n) for f in differing for n in settings_read(f.expression)}
+    read = {
+        (f.subject_matter, n) for f in differing for n in settings_read(f.expression)
+    }
     return {
         d: {n: v for n, v in values.items() if (d, n) in read}
         for d, values in settings.items()

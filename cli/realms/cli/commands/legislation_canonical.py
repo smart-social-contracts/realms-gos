@@ -20,7 +20,9 @@ def codex_id(plan) -> str:
     """The id of the codex ``plan`` describes: ``sha256:`` and the hex sha256 of the canonical JSON of its layers,
     layer paths and chapters (a calendar is the chapter ``<source>/calendar``). It is what a change list's
     ``replaces`` names."""
-    chapters = {f"{c['source']}/{c['domain']}": c["sha256"] for c in plan.chapters}
+    chapters = {
+        f"{c['source']}/{c['subject_matter']}": c["sha256"] for c in plan.chapters
+    }
     chapters.update({f"{c['source']}/calendar": c["sha256"] for c in plan.calendars})
     legislation = {
         "layers": plan.layers,

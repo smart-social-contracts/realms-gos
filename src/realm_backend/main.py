@@ -53,8 +53,8 @@ def run(name: text, args: text) -> Async[text]:
 
 @update
 def hook_effects(effects: text) -> Async[text]:
-    """One hook domain's effects, in a message of their own so that a trap in one ends only that message. Only the
-    realm itself calls it (core.legislation)."""
+    """One hook subject matter's effects, in a message of their own so that a trap in one ends only that message. Only
+    the realm itself calls it (core.legislation)."""
     from core import legislation
 
     return (yield from legislation.hook_effects(effects))

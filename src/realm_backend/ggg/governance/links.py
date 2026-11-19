@@ -80,7 +80,7 @@ class Release(Row):
     published = Integer(default=0)
     effective_from = Integer(default=0)
     commit = String(default="")
-    chapters = Json({})  # {domain: sha256:<hex>}
+    chapters = Json({})  # {subject_matter: sha256:<hex>}
     calendar = String(default="")
     notes = Json({})  # {language: text}
 

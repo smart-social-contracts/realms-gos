@@ -92,7 +92,7 @@ def test_a_realm_without_quarters_announces_to_no_one(monkeypatch):
 
 
 def worst_layers():
-    """The layers a capital stages at the worst it expects: 16 layers of every domain and a calendar, source ids of 64
+    """The layers a capital stages at the worst it expects: 16 layers of every subject matter and a calendar, source ids of 64
     characters, a release with the most notes a record allows, and a record that vouches for it listing a thousand
     layers, which alone would take the body past what a message's record holds."""
     def source(n):

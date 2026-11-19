@@ -191,8 +191,8 @@ def refusal(texts):
 
 
 deep = Codex(["x/town"], realm="x/town")
-for domain, text in steps(10).items():
-    deep.load("x/town", domain, text)
+for subject_matter, text in steps(10).items():
+    deep.load("x/town", subject_matter, text)
 try:
     deep.instance("step0", deep.context()).call()
     stopped = None
@@ -234,8 +234,8 @@ def test_the_resolver_runs_in_the_canister(realm):
         "(x/town/step0.py uses step1; x/town/step1.py uses step0)"
     )
     assert got["too_deep"].startswith("uses chain step0 → step1 → ")
-    assert "is 9 calls deep: calls between domains stop at depth 8" in got["too_deep"]
-    assert got["stopped"] == "calls between domains stop at depth 8"
+    assert "is 9 calls deep: calls between subject matters stop at depth 8" in got["too_deep"]
+    assert got["stopped"] == "calls between subject matters stop at depth 8"
     cost = got["cost"]
     print(
         f"first use: import {cost['import']:,} instructions, plan {cost['plan']:,}, resolve {cost['resolve']:,}"

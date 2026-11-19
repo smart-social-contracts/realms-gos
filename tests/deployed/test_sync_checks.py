@@ -96,7 +96,7 @@ def installable(*arcadia_releases):
 def layer_checksum(release):
     """§11.8's checksum of a layer, written out: what a source computes for an entry of its record."""
     layer = {"source": release["source"], "version": release["version"], "calendar": release["calendar"] or "",
-             "chapters": {domain: sha for domain, sha in release["chapters"].items() if domain != "realm"}}
+             "chapters": release["chapters"]}
     text = json.dumps(layer, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return "sha256:" + hashlib.sha256(text.encode()).hexdigest()
 

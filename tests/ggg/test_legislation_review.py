@@ -1,7 +1,7 @@
 """What the review of the runtime (realms-gos#579) found and the runtime now refuses, each probe kept as a test: the
 entities and fields a chapter may read, the secrets kept out of what crosses, a governed effect filed as a proposal,
 effects on proposals and federal votes about a reserved operation, a codex that does not load for any reason, reads
-metered per call, the guards on a governed call's filing, default arguments, chapter instances handed across domains,
+metered per call, the guards on a governed call's filing, default arguments, chapter instances handed across subject matters,
 effects stopping at the first failure, and the audit order."""
 
 import pytest
@@ -83,7 +83,7 @@ def test_the_view_shows_the_allowed_fields_of_the_allowed_entities_and_nothing_e
 def test_an_entity_outside_the_view_cannot_be_imported(entity):
     text = f"from ggg import {entity}\nfrom realms.legislation import above\nclass Register(above('register')):\n    pass\n"
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
-                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
+                             "chapters": [{"source": TOWN, "subject_matter": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
     assert out["errors"] == [f"x/town/register.py:1: ImportError: cannot import name '{entity}' from 'ggg' (unknown location)"]
 
 
@@ -225,7 +225,7 @@ def test_whatever_the_sandbox_raises_at_load_is_a_fail_and_warm_records_it():
 
 def test_the_view_answers_no_read_while_the_codex_loads():
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
-                             "chapters": [{"source": TOWN, "domain": "procedure", "sha256": "sha256:x"}]}, {"sha256:x": LOAD_READS})
+                             "chapters": [{"source": TOWN, "subject_matter": "procedure", "sha256": "sha256:x"}]}, {"sha256:x": LOAD_READS})
     assert out["errors"] == ["x/town/procedure.py:4: GGG's entities are read when a method runs, not while the codex loads"]
 
 
@@ -294,11 +294,11 @@ LAMBDA_DEFAULT = register('''    def check_t_poke(self, args):
                                         (register("    def check_t_poke(self, args, n=15):\n        pass\n"), 4)])
 def test_default_arguments_are_refused_at_load(text, line):
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
-                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
+                             "chapters": [{"source": TOWN, "subject_matter": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
     assert out["errors"] == [f"x/town/register.py:{line}: a default argument is state shared by every call: pass the value instead"]
 
 
-# ── 9. What a chapter hands to another domain crosses the same boundary ─────────────────────────────────────────
+# ── 9. What a chapter hands to another subject matter crosses the same boundary ─────────────────────────────────────────
 
 ALPHA = '''
 from realms.legislation import above
@@ -324,15 +324,15 @@ class Beta(above("beta")):
 '''
 
 
-def test_a_chapter_handed_across_domains_is_the_public_view_and_a_method_is_refused():
+def test_a_chapter_handed_across_subject_matters_is_the_public_view_and_a_method_is_refused():
     activate(layered({(TOWN, "alpha"): ALPHA, (TOWN, "beta"): BETA}, layers=[TOWN]))
     assert call("t_poke", what="hand self")["error"] == (
         "legislation error in x/town/beta.py: _secret is private to its chapter: other chapters cannot call it")
     assert call("t_poke", what="hand method")["error"] == (
-        "legislation error in x/town/alpha.py: x/town/beta.py was handed method: only plain data crosses a domain boundary")
+        "legislation error in x/town/alpha.py: x/town/beta.py was handed method: only plain data crosses a subject matter boundary")
 
 
-# ── The re-review: what crosses, what an effect may do, the revert floor, state, reads per domain ───────────────
+# ── The re-review: what crosses, what an effect may do, the revert floor, state, reads per subject matter ───────────────
 
 TAX = '''
 from realms.legislation import above
@@ -441,11 +441,11 @@ EVENT_OK = register('''    def on_t_poke(self, event):
 @pytest.mark.parametrize("text, line", [(STATEFUL, 6), (CALENDAR_STATE, 6), (SELF_STATE, 5)])
 def test_an_attribute_is_set_on_the_event_a_hook_was_given_never_on_self_or_a_local(text, line):
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
-                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
+                             "chapters": [{"source": TOWN, "subject_matter": "register", "sha256": "sha256:x"}]}, {"sha256:x": text})
     assert out["errors"] == [f"x/town/register.py:{line}: .memo = ...: a chapter sets attributes on the event a hook was "
                              "given, by plain assignment, never on self or anything else"]
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
-                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:y"}]}, {"sha256:y": EVENT_OK})
+                             "chapters": [{"source": TOWN, "subject_matter": "register", "sha256": "sha256:y"}]}, {"sha256:y": EVENT_OK})
     assert out["errors"] == []  # the event a hook was given takes attributes, as §4.1 says
 
 
@@ -461,10 +461,10 @@ class Water(above("water")):
 }
 
 
-def test_the_reads_budget_is_one_domains_so_a_looping_domain_costs_no_other_its_effects():
+def test_the_reads_budget_is_one_subject_matters_so_a_looping_subject_matter_costs_no_other_its_effects():
     activate(layered(TWO_HOOKS, layers=[TOWN]))
     ok("t_poke", what="read loop")
-    assert notices("water") == ["read loop"]  # the water domain's hook ran and its effect applied
+    assert notices("water") == ["read loop"]  # the water subject matter's hook ran and its effect applied
     recorded = failures()
     assert "x/town/register.py" in recorded and "x/town/water.py" not in recorded
 
@@ -548,7 +548,7 @@ FRESH = register('''    def on_t_poke(self, event):
 
 def test_a_store_through_a_parameter_is_refused_and_the_event_outlives_no_call():
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
-                             "chapters": [{"source": TOWN, "domain": "register", "sha256": "sha256:x"}]}, {"sha256:x": KEEP})
+                             "chapters": [{"source": TOWN, "subject_matter": "register", "sha256": "sha256:x"}]}, {"sha256:x": KEEP})
     assert out["errors"] == ["x/town/register.py:8: .memo = ...: a chapter sets attributes on the event a hook was "
                              "given, by plain assignment, never on self or anything else"]
     activate(layered({(TOWN, "register"): FRESH}, layers=[TOWN]))

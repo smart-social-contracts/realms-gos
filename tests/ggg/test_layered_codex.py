@@ -57,7 +57,7 @@ def test_the_id_is_stable_for_equal_content_and_changes_with_any_of_it():
     changed = [
         store.codex_id(LAYERS[::-1], PATHS, two_chapters()),  # the layers in another order
         store.codex_id(LAYERS, {"tax": ["eu/es"]}, two_chapters()),  # another path
-        store.codex_id(LAYERS, {"water": PATHS["tax"]}, two_chapters()),  # another domain
+        store.codex_id(LAYERS, {"water": PATHS["tax"]}, two_chapters()),  # another subject matter
         store.codex_id(LAYERS, PATHS, edited),  # another text
         store.codex_id(LAYERS, PATHS, {**two_chapters(), "eu/es/calendar": entry("eu/es", "{}")}),  # one more chapter
     ]

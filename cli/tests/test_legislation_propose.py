@@ -298,8 +298,8 @@ def test_no_realm_is_called_unless_it_is_named_with_a_network(
     [
         (["--set", "eu/es/tax"], "only the realm's own layer"),
         (["--remove", "eu/es/tax"], "only the realm's own layer"),
-        (["--set", f"{VALENCIA}/Parking"], "Parking is not a domain id"),
-        # a domain of the codex's own is accepted, so this reaches the missing-file check
+        (["--set", f"{VALENCIA}/Parking"], "Parking is not a subject matter id"),
+        # a subject matter of the codex's own is accepted, so this reaches the missing-file check
         (["--set", f"{VALENCIA}/drought_measures"], "drought_measures.py"),
         (["--set", "tax"], "is not a source id"),
         (["--set", f"{VALENCIA}/water"], "water.py"),
@@ -390,7 +390,7 @@ def test_a_chapter_that_is_not_utf8_is_refused_as_the_realm_refuses_it(
 
 
 def test_more_chapters_than_a_change_list_may_set_are_refused():
-    entries = [{"chapter": f"{VALENCIA}/domain{n}"} for n in range(51)]
+    entries = [{"chapter": f"{VALENCIA}/subject_matter{n}"} for n in range(51)]
     with pytest.raises(LegislationError, match="at most 50 chapters, not 51"):
         legislation_propose.change_list(VALENCIA, None, entries, [], None, {})
 

@@ -638,11 +638,11 @@ def test_the_folded_line_names_the_settings_that_raise_the_cap(world):
     ]
 
 
-def test_a_domain_that_calls_a_changed_one_is_reached_through_uses(world):
+def test_a_subject_matter_that_calls_a_changed_one_is_reached_through_uses(world):
     first = world.change({"eu/es/local_regime.py": CALLS_TAX})
     head = world.change({"eu/es/tax.py": tax("1.00", rustic("0.90"))})
     spain = world.realm(first, head, "eu/es")
-    assert spain.domains == ["local_regime", "tax"]
+    assert spain.subject_matters == ["local_regime", "tax"]
     report = world.diff(first, head).output
     assert (
         "Changed: `eu/es/tax`" in report
@@ -699,7 +699,7 @@ def test_a_change_to_only_the_cases_of_a_chapter_reaches_the_realms_that_run_the
     first = world.change({"eu/es/tax.cases.json": CASES})
     head = world.change({"eu/es/tax.cases.json": [{**CASES[0], "returns": True}]})
     spain = world.realm(first, head, "eu/es")
-    assert spain.domains == ["tax"] and [why for _, why in spain.cases] == [
+    assert spain.subject_matters == ["tax"] and [why for _, why in spain.cases] == [
         "returns False, written True"
     ]
     out = world.diff(first, head)
@@ -926,7 +926,7 @@ def test_the_report_has_each_section_with_its_heading_and_a_key_line(world):
         "**No failure**, 2 realm(s) reached.",
         "### Dependencies",
         "Changed: `eu/es/tax`",
-        "| realm | domains reached (changed, or calling one that changed) |",
+        "| realm | subject matters reached (changed, or calling one that changed) |",
         "### `eu/es`",
         "#### settings folded in as this realm has them",
         "**tax_policy_propose.taxes**",
@@ -936,7 +936,7 @@ def test_the_report_has_each_section_with_its_heading_and_a_key_line(world):
         'code = "ibi_urban", not capital: rate more than 1.00 % (1000000) and at most 1.10 % (1100000) newly forbidden (proved)',
         "#### Test cases",
         "1 of 1 pass.",
-        "<summary>Flattened view of the changed domains, before and after</summary>",
+        "<summary>Flattened view of the changed subject matters, before and after</summary>",
         "for eu/es: maximum 1.00 % (1000000)",
         "<summary>Generated Cedar, diff</summary>",
         "+         && context.facts.rate > 1000000",

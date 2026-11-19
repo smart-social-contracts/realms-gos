@@ -15,7 +15,7 @@ step per message:
 5. ``build``: the layer paths (``plan``), every chapter loaded and checked in a fresh sandbox, the Cedar its forbids
    become validated by the realm's engine (core.legislation.build), then the codex row, ``pending``;
 6. ``switch``: the new codex active, the previous one kept, the runtime loaded (api.codex.switch); the realm
-   domain's ``on_codex_activate`` hooks run in the message after it.
+   subject matter's ``on_codex_activate`` hooks run in the message after it.
 
 A proposal with an ``effective_at`` stages at acceptance (steps 1 to 5, ``prepare``) and its scheduled execution at
 that time is the switch: a job not done by then fails it, and the old codex keeps running. Without one, the job
@@ -658,13 +658,13 @@ def own_layer(current, realm):
     chapters, calendar = {}, None
     if isinstance(current, LayeredCodex) and current.layers[-1] == realm:
         for chapter, entry in current.chapters.items():
-            domain = chapter.rpartition("/")[2]
+            subject_matter = chapter.rpartition("/")[2]
             if entry["source"] != realm:
                 continue
-            if domain == change_list.CALENDAR:
+            if subject_matter == change_list.CALENDAR:
                 calendar = entry["sha256"]
             else:
-                chapters[domain] = entry["sha256"]
+                chapters[subject_matter] = entry["sha256"]
     return {"chapters": chapters, "calendar": calendar}
 
 
@@ -677,16 +677,16 @@ def installed_layers(current, realm):
         return []
     layers = {}
     for chapter, entry in current.chapters.items():
-        source, _, domain = chapter.rpartition("/")
+        source, _, subject_matter = chapter.rpartition("/")
         if source == realm:
             continue
         layer = layers.setdefault(source, {"source": source, "version": entry["version"], "chapters": {},
                                            "calendar": None, "vouched_by": entry["vouched_by"],
                                            "published": entry.get("published")})
-        if domain == change_list.CALENDAR:
+        if subject_matter == change_list.CALENDAR:
             layer["calendar"] = entry["sha256"]
         else:
-            layer["chapters"][domain] = entry["sha256"]
+            layer["chapters"][subject_matter] = entry["sha256"]
     return [layers[source] for source in current.layers if source in layers]
 
 

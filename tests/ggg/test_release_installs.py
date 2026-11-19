@@ -52,9 +52,9 @@ def capital(*releases, source="src/town", cid=SRC, chapter=None):
                 legislation_chapter=chapter or (lambda a: {"ok": True, "text": text_of(a["chapter"])}))
 
 
-def release_list(version="1.0.0", source="arcadia", domains=BOTH, **kw):
+def release_list(version="1.0.0", source="arcadia", subject_matters=BOTH, **kw):
     """The change list that installs ``source``'s release ``version`` whole, with the chapters served by URL as well."""
-    chapters = {f"{source}/{d}": chapter_text(d, version) for d in domains}
+    chapters = {f"{source}/{d}": chapter_text(d, version) for d in subject_matters}
     kw.setdefault("url", WEB + f"changes/{source}-{version}.json")
     return listing(chapters, realm="town", release={"source": source, "version": version}, **kw)
 
@@ -314,7 +314,7 @@ def test_a_change_list_whose_chapters_are_not_the_ones_the_record_names_is_refus
 
 def test_a_partial_release_is_refused():
     capital(entry("1.0.0"))
-    failing(release_list(domains=("tax",)), "a release is installed whole: arcadia 1.0.0 is arcadia/procedure, arcadia/tax")
+    failing(release_list(subject_matters=("tax",)), "a release is installed whole: arcadia 1.0.0 is arcadia/procedure, arcadia/tax")
     assert asked(SRC, "legislation_chapter") == []
 
 
