@@ -1,6 +1,6 @@
 ic-basilisk==0.15.1
     # via -r src/marketplace_backend/requirements.in
-ic-python-db==0.14.0
+ic-python-db==0.16.0
     # via -r src/marketplace_backend/requirements.in
 ic-python-logging==0.3.4
     # via -r src/marketplace_backend/requirements.in
