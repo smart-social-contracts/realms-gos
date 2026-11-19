@@ -190,8 +190,9 @@ The rules:
   letters, digits and `-` are allowed in each folder name. The id names the source; it does not say
   which realms run it. The links do (§3.3). The INE code in a folder name is only a name: GGG and the
   registry carry no national codes.
-- **Chapter file** = `<domain>.py`, where `<domain>` is a domain id from the GGG list. A missing file
-  is an empty chapter. No other `.py` files are allowed in a source folder.
+- **Chapter file** = `<domain>.py`, where `<domain>` is a domain id the codex chooses: lowercase letters,
+  digits and `_`, starting with a letter, at most 64 characters. Realms GOS checks that shape and keeps no
+  list of domains. A missing file is an empty chapter. No other `.py` files are allowed in a source folder.
 - **Calendar file** = `calendar.json`, one per source at most, beside its chapters (§3.4). A source
   that sets no holidays, such as EMSHI, has none.
 - **Test cases** = `<domain>.cases.json`, beside the chapter they test (§12.1).
@@ -1141,7 +1142,7 @@ The change list:
 |---|---|
 | `realm` | must equal the realm's own source id |
 | `replaces` | must equal the current codex's checksum; otherwise the install is refused as stale |
-| `set[].chapter` | `<source id>/<domain>`. The source must be in one of the realm's layer paths (§3.3); the domain must be in the GGG list. A calendar is set the same way, under the id `<source id>/calendar`, e.g. `eu/es/calendar` |
+| `set[].chapter` | `<source id>/<domain>`. The source must be in one of the realm's layer paths (§3.3); the domain is a domain id (§3). A calendar is set the same way, under the id `<source id>/calendar`, e.g. `eu/es/calendar` |
 | `set[].url`, `mirrors` | https only. The first URL whose bytes match `sha256` and `size` wins. For a layer from above, the bytes may instead come from the sync source's capital (§9.2). A chapter of the `release` may give no `url`, `mirrors` or `size`: a realm then serves its bytes by checksum, the sync source's capital, or a quarter's capital (§9.5) |
 | `remove` | chapters to empty. Allowed only for the realm's own layer. A chapter is not both in `set` and in `remove` |
 | `release` | for legislation from above: `{"source": "eu/es", "version": "2.4.0"}`. `set` must then contain exactly that release's chapters on the realm's layer paths, and its calendar (§3.2) |
@@ -2028,7 +2029,7 @@ CI) and [realms-codices#12](https://github.com/smart-social-contracts/realms-cod
 It uses Python's parser (`ast`), so it runs only off-chain:
 
 - the layout of §3, which it checks first and stops at if the tree breaks it: folder names, a `source.json`
-  whose `id` is the folder's path, only `<domain>.py` files with a GGG domain, the shapes of `source.json`,
+  whose `id` is the folder's path, only `<domain>.py` files whose name is a domain id, the shapes of `source.json`,
   `releases.json` and `calendar.json`, and each release against the source's files **at the release's own
   commit**, which must be in the history of `HEAD` (read with git, so the check needs the full history): all its
   chapters and its calendar listed, every checksum the sha256 of the bytes. realms-codices CI runs this command and
@@ -2214,7 +2215,7 @@ with `--replaces <codex id | none>` or `--network`, `--canister` and `--identity
   are all given; the command says which it reads before it does. No network is reached otherwise, there is no
   default network, and no identity is chosen for the caller.
 - **Refused.** What the realm would refuse (§7): a chapter outside the realm's own layer (a layer from above comes
-  as a release), a name that is not a GGG domain or `calendar`, a chapter of 0 bytes, above 256 KB or not UTF-8, more
+  as a release), a name that is not a domain id, or is `calendar`, a chapter of 0 bytes, above 256 KB or not UTF-8, more
   than 50 chapters, a change list above 64 KB, an address that is not https. A `release` is always `null`:
   installing a release is the realm's own "Propose install" (§11).
 - **Stricter and looser than the realm.** The same chapter in `--set` and `--remove` is refused by the command; the

@@ -15,7 +15,6 @@ KIND, FORMAT = "realms-gos/legislation-change", 1
 MAX_CHAPTERS = 50
 MAX_MIRRORS = 4  # every URL tried is an outcall the realm pays for
 CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar (§7)
-MAX_DOMAIN = 64  # characters; a domain id is a file name and a key in a published record
 HEX = "0123456789abcdef"
 
 
@@ -147,29 +146,27 @@ def source_name(source):
         raise Fail(str(e))
 
 
-def is_domain(name):
-    """Whether ``name`` is a domain id: lowercase letters and underscores, starting with a letter, at most
-    ``MAX_DOMAIN`` characters (ggg model/codex.md §2). A codex chooses its own domains, so the id is checked
-    and not its membership of any list; what the check protects is that an id reaching a published record
-    is a plain name, never empty, path-like or unbounded."""
-    if not isinstance(name, str) or not 0 < len(name) <= MAX_DOMAIN:
-        return False
-    if not "a" <= name[0] <= "z":
-        return False
-    return all("a" <= c <= "z" or c == "_" for c in name)
+def domain_name(domain):
+    """``domain``, a domain id; a Fail if it is not one. The library's ``domain_id`` has the rule: the shape of the
+    id, never a list, so that an id reaching a file name or a published record is a plain, bounded name."""
+    errors = library().LegislationError
+    from realms.legislation.codex import domain_id
+
+    try:
+        return domain_id(domain)
+    except errors as e:
+        raise Fail(str(e))
 
 
 def chapter_id(chapter):
-    """``(source, domain)`` of the chapter id ``<source id>/<domain>``: the domain is any id ``is_domain``
+    """``(source, domain)`` of the chapter id ``<source id>/<domain>``: the domain is any id ``domain_name``
     accepts, which includes ``calendar``, the name a layer's calendar is set under."""
     source, _, domain = (chapter if isinstance(chapter, str) else "").rpartition("/")
     try:
         source_name(source)
+        domain_name(domain)
     except Fail as e:
         raise Fail(f"{chapter!r} is not a chapter id: {e}")
-    if not is_domain(domain):
-        raise Fail(f"{chapter!r} is not a chapter id: {domain!r} is not a domain id (lowercase letters and "
-                   f"underscores, starting with a letter, at most {MAX_DOMAIN} characters)")
     return source, domain
 
 

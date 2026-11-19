@@ -18,7 +18,6 @@ from realms.cli.commands import legislation
 from realms.cli.commands.legislation import legislation_app
 from realms.cli.commands.legislation_layout import layout_problems
 
-ROOT = Path(__file__).resolve().parents[2]
 VALENCIA = "eu/es/vc/46250-valencia"
 CHAPTER = "from realms.legislation import above\n\nclass {name}(above('{domain}')):\n    pass\n"
 CALENDAR = {
@@ -167,15 +166,16 @@ def test_a_folder_name_of_lowercase_letters_digits_and_hyphens_is_kept(tree):
 # ── The .py files of a source ─────────────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("name", ["Tax.py", "__init__.py", "local-regime.py", "tax2.py"])
+@pytest.mark.parametrize("name", ["Tax.py", "__init__.py", "local-regime.py", "2027_tax.py", "a" * 65 + ".py"])
 def test_a_py_file_that_is_not_a_domain_id_is_refused(tree, name):
     write(tree, f"eu/es/{name}", "")
     breaks(tree, f"eu/es/{name}: {name[:-3]} is not a domain id")
 
 
-def test_a_py_file_named_after_a_domain_the_codex_chose_is_kept(tree):
-    """GGG's list is a shared vocabulary, not a gate: a codex files chapters under the ids it chooses."""
-    write(tree, f"{VALENCIA}/drought_measures.py", chapter("drought_measures"))
+@pytest.mark.parametrize("domain", ["drought_measures", "tax2", "a" * 64])
+def test_a_py_file_named_after_a_domain_the_codex_chose_is_kept(tree, domain):
+    """A codex files chapters under the ids it chooses: only the shape of the id is checked, never a list."""
+    write(tree, f"{VALENCIA}/{domain}.py", chapter(domain))
     assert problems(tree) == []
 
 
@@ -183,18 +183,6 @@ def test_a_chapter_cannot_be_called_calendar(tree):
     """`calendar` is a layer's calendar, set under <source>/calendar, so it is not a chapter."""
     write(tree, "eu/es/calendar.py", "")
     breaks(tree, "eu/es/calendar.py: calendar is a layer's calendar.json, not a chapter")
-
-
-# Read from ggg rather than copied: the common list is GGG's, and nothing here keeps a second copy.
-COMMON_DOMAINS = tuple(
-    d["id"] for d in json.loads((ROOT / "ggg" / "domains.json").read_text())["domains"]
-)
-
-
-@pytest.mark.parametrize("domain", COMMON_DOMAINS)
-def test_a_py_file_named_after_a_common_ggg_domain_is_kept(tree, domain):
-    write(tree, f"{VALENCIA}/{domain}.py", chapter(domain))
-    assert problems(tree) == []
 
 
 def test_a_py_file_outside_a_source_is_refused(tree):

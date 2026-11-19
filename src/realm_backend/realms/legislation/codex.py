@@ -41,6 +41,8 @@ SAFE_BUILTINS = (
 )  # fmt: skip
 _SOURCE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 _DOMAIN_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+MAX_DOMAIN = 64  # characters: a domain id is a file name and a key in a published record
+DOMAIN_RULE = f"lowercase letters, digits and _, starting with a letter, at most {MAX_DOMAIN} characters"
 
 
 def source_id(source):
@@ -54,14 +56,16 @@ def source_id(source):
 
 
 def domain_id(domain):
-    """``data_protection``: lowercase letters, digits and ``_``, starting with a letter."""
+    """``data_protection``: ``DOMAIN_RULE``. That is the whole rule, here and wherever Realms GOS reads a
+    domain id: a codex chooses its own domains, so an id is checked for its shape and never against a list.
+    """
     if (
         not isinstance(domain, str)
-        or not domain
+        or not 0 < len(domain) <= MAX_DOMAIN
         or not domain[0].isalpha()
         or not set(domain) <= _DOMAIN_CHARS
     ):
-        raise LegislationError(f"{domain!r} is not a domain id")
+        raise LegislationError(f"{domain!r} is not a domain id ({DOMAIN_RULE})")
     return domain
 
 

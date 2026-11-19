@@ -65,6 +65,8 @@ def test_a_change_list_is_parsed_into_chapters_with_their_source_domain_urls_and
     (text(set=[entry("town/tax", size=0)]), "size is between"),
     (text(set=[entry("town/tax", size=256 * 1024 + 1)]), "size is between"),
     (text(set=[entry("town/Parking")]), "not a domain id"),
+    (text(set=[entry("town/2027_tax")]), "not a domain id"),
+    (text(set=[entry("town/" + "a" * 65)]), "at most 64 characters"),
     (text(set=[entry("Town/tax")]), "not a chapter id"),
     (text(set=[entry("tax")]), "not a chapter id"),
     (text().replace('"remove": []', '"remove": "town/tax"'), "remove is a list"),
@@ -116,6 +118,13 @@ def test_a_summary_is_a_text_per_language_and_may_be_left_out():
     assert change_list.parse(text(set=chapter, summary=None))["summary"] == {}
     assert change_list.parse(text(set=chapter, summary={}))["summary"] == {}
     assert change_list.parse(text(set=chapter, summary={"en": "x", "es": "y"}))["summary"] == {"en": "x", "es": "y"}
+
+
+def test_a_domain_id_is_checked_for_its_shape_only():
+    """A codex chooses its own domains: any id of lowercase letters, digits and _, starting with a letter, up to 64."""
+    ids = ["town/tax2", "town/drought_measures", "town/" + "a" * 64]
+    assert [c["domain"] for c in change_list.parse(text(set=[entry(i) for i in ids]))["set"]] == [
+        "tax2", "drought_measures", "a" * 64]
 
 
 def test_the_same_key_in_different_objects_is_no_repeat():

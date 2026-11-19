@@ -13,10 +13,10 @@ from typing import Dict, List, Optional
 import typer
 
 from realms.cli.commands.legislation_canonical import canonical
-from realms.cli.commands.legislation_layout import MAX_DOMAIN, bytes_at, git, is_domain
+from realms.cli.commands.legislation_layout import bytes_at, git, is_domain
 from realms.cli.realm_api import call_op
 from realms.legislation import LegislationError
-from realms.legislation.codex import source_id
+from realms.legislation.codex import DOMAIN_RULE, source_id
 
 KIND, FORMAT = "realms-gos/legislation-change", 1
 CALENDAR = "calendar"  # a layer's calendar.json is set under <source>/calendar
@@ -79,8 +79,7 @@ def own_chapter_file(chapter: str, realm: str) -> str:
     source_id(source)
     if not is_domain(domain):
         raise LegislationError(
-            f"{chapter}: {domain} is not a domain id (lowercase letters and underscores, starting with a"
-            f" letter, at most {MAX_DOMAIN} characters)"
+            f"{chapter}: {domain} is not a domain id ({DOMAIN_RULE})"
         )
     if source != realm:
         raise LegislationError(

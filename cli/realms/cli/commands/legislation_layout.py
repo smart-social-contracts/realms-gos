@@ -25,12 +25,9 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from realms.legislation.calendar import Calendar, parse_day
-from realms.legislation.codex import source_id
+from realms.legislation.codex import DOMAIN_RULE, domain_id, source_id
 from realms.legislation.errors import LegislationError
 
-# A codex files chapters under the domain ids it chooses, so no copy of GGG's list is kept here:
-# `is_domain` is the whole rule (ggg model/codex.md §2).
-MAX_DOMAIN = 64  # characters, as core/change_list.py
 SOURCE_FILES = ("source.json", "releases.json", "calendar.json")
 CASES_SUFFIX = ".cases.json"
 CASE_KINDS = ("call", "guard", "forbid", "compute")
@@ -38,11 +35,13 @@ HEX = frozenset("0123456789abcdef")
 
 
 def is_domain(name: str) -> bool:
-    """Whether ``name`` is a domain id: lowercase letters and underscores, starting with a letter, at
-    most MAX_DOMAIN characters (ggg model/codex.md §2). Mirrors core/change_list.is_domain."""
-    if not name or len(name) > MAX_DOMAIN or not "a" <= name[0] <= "z":
+    """Whether ``name`` is a domain id, by the library's one rule (``domain_id``): a codex files chapters
+    under the ids it chooses, so no list of them is kept here."""
+    try:
+        domain_id(name)
+    except LegislationError:
         return False
-    return all("a" <= c <= "z" or c == "_" for c in name)
+    return True
 
 
 def layout_problems(tree: Path) -> List[str]:
@@ -98,8 +97,7 @@ def folder_problems(tree: Path, folder: Path, sources: set) -> List[str]:
 
 def chapter_problems(tree: Path, files: dict) -> List[str]:
     problems = [
-        f"{shown(tree, files[name])}: {name[:-3]} is not a domain id (lowercase letters and underscores,"
-        f" starting with a letter, at most {MAX_DOMAIN} characters)"
+        f"{shown(tree, files[name])}: {name[:-3]} is not a domain id ({DOMAIN_RULE})"
         for name in sorted(files)
         if name.endswith(".py") and not is_domain(name[:-3])
     ]
