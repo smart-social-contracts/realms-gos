@@ -649,18 +649,20 @@ def test_a_stored_change_list_with_an_ill_typed_checksum_fails_at_acceptance_and
     assert jobs_left() is None
 
 
-def test_the_change_list_of_a_release_is_the_whole_release_with_its_calendar_and_without_the_realm_chapter():
+def test_the_change_list_of_a_release_is_the_whole_release_with_its_calendar():
+    """A ``realm`` chapter is a chapter like any other: the codices decide who fills it."""
     release = {**entry("1.0.0", 6), "chapters": {**entry("1.0.0", 6)["chapters"], "realm": "sha256:" + "c" * 64},
                "calendar": "sha256:" + "d" * 64}
     built = change_list.of_release("town", "sha256:" + "e" * 64, release)
     assert [(e["chapter"], e["sha256"], e["urls"], e["size"]) for e in built["set"]] == [
         ("arcadia/calendar", "sha256:" + "d" * 64, [], None),
         ("arcadia/procedure", release["chapters"]["procedure"], [], None),
+        ("arcadia/realm", "sha256:" + "c" * 64, [], None),
         ("arcadia/tax", release["chapters"]["tax"], [], None)]
     assert (built["realm"], built["replaces"], built["remove"], built["release"]) == (
         "town", "sha256:" + "e" * 64, [], {"source": "arcadia", "version": "1.0.0"})
-    # a follower's layer and the record's entry for it have one checksum, whatever the realm chapter
-    assert change_list.layer_checksum(release) == change_list.layer_checksum({**release, "chapters": {
+    # the layer's checksum covers every chapter it lists, the realm chapter included
+    assert change_list.layer_checksum(release) != change_list.layer_checksum({**release, "chapters": {
         d: sha for d, sha in release["chapters"].items() if d != "realm"}})
 
 
