@@ -11,12 +11,11 @@ The rules:
 - ``calendar.json`` (§3.4) and ``releases.json`` (§3.2) have the shapes the design shows;
 - ``<domain>.cases.json`` (§12.1) tests the chapter ``<domain>.py`` beside it, and has the shape of
   ``legislation_cases``;
-- a release lists all of its source's chapters and its calendar, never the ``realm`` domain (which only a realm's own
-  layer fills, §3: a ``realm.py`` beside a ``releases.json`` is the realm's own and no release carries it), and every
-  checksum is the sha256 of the file's bytes **at the release's own commit**, which is where a follower fetches them
-  from (§7). The commit must be in the history of ``HEAD``: a commit on a side branch or a fork is not what the
-  tree's history vouches for. The tree holds only the current files, so history is read with git; a chapter edited
-  after its release is a proposal in progress, not a broken release.
+- a release lists all of its source's chapters and its calendar, and every checksum is the sha256 of the file's
+  bytes **at the release's own commit**, which is where a follower fetches them from (§7). The commit must be in the
+  history of ``HEAD``: a commit on a side branch or a fork is not what the tree's history vouches for. The tree holds
+  only the current files, so history is read with git; a chapter edited after its release is a proposal in progress,
+  not a broken release.
 """
 
 import json
@@ -28,7 +27,6 @@ from typing import Callable, List, Optional
 from realms.legislation.calendar import Calendar, parse_day
 from realms.legislation.codex import source_id
 from realms.legislation.errors import LegislationError
-from realms.legislation.paths import REALM
 
 # A codex files chapters under the domain ids it chooses, so no copy of GGG's list is kept here:
 # `is_domain` is the whole rule (ggg model/codex.md §2).
@@ -295,11 +293,7 @@ def release_reasons(release) -> List[str]:
         reasons.append("chapters is {domain: sha256:<hex>}")
     else:
         for domain, checksum in chapters.items():
-            if domain == REALM:
-                reasons.append(
-                    "chapters lists the realm domain, which only the realm's own layer fills"
-                )
-            elif not is_domain(domain):
+            if not is_domain(domain):
                 reasons.append(f"chapters lists {domain}, which is not a domain id")
             if not is_checksum(checksum):
                 reasons.append(f"chapters.{domain} is sha256:<64 hex digits>")
@@ -390,7 +384,7 @@ def release_history_reasons(tree: Path, source: str, release: dict) -> List[str]
         names = names_at(tree, commit, source)
     except LegislationError as e:
         return [f"commit {short} cannot be read ({e}); check out the full history"]
-    held = {n[:-3] for n in names if n.endswith(".py")} - {REALM}
+    held = {n[:-3] for n in names if n.endswith(".py")}
     listed, calendar = release["chapters"], release.get("calendar")
     reasons = [
         f"does not list {d}, but {source}/{d}.py is in commit {short}: a release lists all of the source's chapters"

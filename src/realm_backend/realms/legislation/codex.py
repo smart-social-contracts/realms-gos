@@ -186,12 +186,6 @@ class Codex(metaclass=Sealed):
         """Run chapter ``<source>/<domain>.py`` and add its class below the chapters of ``domain``."""
         file = f"{source_id(source)}/{domain_id(domain)}.py"
         at = self.index(source)
-        if domain == "realm" and source != self.realm:
-            raise Refused(
-                "the realm domain may only be filled in the realm's own layer",
-                None,
-                file,
-            )
         chain = self.chapters.get(domain, [])
         if chain and self.index(chain[-1].__source__) >= at:
             raise Refused(

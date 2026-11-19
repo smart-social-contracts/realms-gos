@@ -164,17 +164,17 @@ def test_the_realm_s_own_chapter_may_hook_codex_activate(tree):
     assert out.exit_code == 0, out.output
 
 
-def test_a_realm_loads_its_own_realm_chapter_and_not_the_one_a_source_above_keeps(tree):
-    """Spain is a realm too, so it keeps a realm.py beside its releases; València, which runs Spain's chapters, does not
-    load it (as the resolver skips a relayed realm chapter, §3)."""
+def test_a_realm_chapter_of_a_source_above_is_loaded_below_it_like_any_other(tree):
+    """Which subject matters exist, and who may fill them, is the codices' business: València runs Spain's realm.py as
+    it runs Spain's tax.py, so a refused one breaks both."""
     write(
         tree,
         "eu/es/realm.py",
         "from realms.legislation import above\nclass Realm(above('realm')):\n    x = 1.5\n",  # a floating point number: refused
     )
-    assert run(str(tree), "--realm", "eu/es/vc/46250-valencia").exit_code == 0
-    out = run(str(tree), "--realm", "eu/es")
-    assert out.exit_code == 1 and "eu/es/realm.py" in out.output
+    for realm in ("eu/es", "eu/es/vc/46250-valencia"):
+        out = run(str(tree), "--realm", realm)
+        assert out.exit_code == 1 and "eu/es/realm.py" in out.output
 
 
 def test_the_ggg_operation_list_comes_from_the_canisters_interface_plus_the_interim_list():

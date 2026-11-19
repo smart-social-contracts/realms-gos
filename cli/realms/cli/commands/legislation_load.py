@@ -12,7 +12,6 @@ from typing import List
 
 from realms.cli.commands.legislation_layout import bytes_at, names_at, run_git
 from realms.legislation import Codex, LegislationError, Refused, subset_ast
-from realms.legislation.paths import REALM
 
 
 class WorkingFiles:
@@ -100,10 +99,8 @@ def load_realm(files, realm: str, operations, facts: dict, ggg):
                 domains.append(name[:-3])
     for domain in sorted(domains):
         for source in layers:
-            if domain + ".py" not in files.names(source) or (
-                domain == REALM and source != realm
-            ):
-                continue  # a realm chapter is the realm's own; the layers above hold theirs for themselves (§3)
+            if domain + ".py" not in files.names(source):
+                continue
             text = files.text(source, domain + ".py")
             try:
                 subset_ast.check(text, f"{source}/{domain}.py")

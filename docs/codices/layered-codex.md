@@ -195,9 +195,10 @@ The rules:
 - **Calendar file** = `calendar.json`, one per source at most, beside its chapters (§3.4). A source
   that sets no holidays, such as EMSHI, has none.
 - **Test cases** = `<domain>.cases.json`, beside the chapter they test (§12.1).
-- **The `realm` domain** (the realm's own hooks, such as `on_realm_join`; its entry point
+- **The `realm` domain** (by convention the realm's own hooks, such as `on_realm_join`; its entry point
   `on_codex_activate`, the hook on GGG's `codex_activate`; and `compute_realm_join`, which GGG asks for
-  the quarter of a new member) may only be filled in the realm's own layer.
+  the quarter of a new member) is a domain like any other: which layers fill it is the codices' choice,
+  and Realms GOS gives no domain id a meaning of its own.
 - **Districts are zones.** A district is not a quarter and not a source. The realm's codex maps its
   own subdivisions, under their local name (*distritos*, *Kreise*, districts), to GGG zones in its
   `realm` domain. `compute_realm_join` may keep neighbours together, but capacity decides first.
@@ -246,10 +247,9 @@ One entry per release, newest last:
 ```
 
 - **A release lists all of the source's chapters,** changed or not, and its calendar if it has one.
-  It never lists the `realm` domain, which only the realm's own layer fills (§3). A follower that finds
-  one in a release skips it and reports it. The source adopts the release by its own vote. A follower
-  installs a release whole, never only some of its chapters, but downloads only the chapters on its own
-  layer paths: EMSHI's water chapter reaches only the realms that sync from EMSHI.
+  The source adopts the release by its own vote. A follower installs a release whole, never only some
+  of its chapters, but downloads only the chapters on its own layer paths: EMSHI's water chapter reaches
+  only the realms that sync from EMSHI.
 - **The repository file is a convenience copy.** The authority is the source's published record (§8).
 - **The realm's own layer needs no releases:** its proposals are its record.
 - **`calendar.json` is released and pinned like a chapter:** the release's own `calendar` field holds
@@ -1235,7 +1235,7 @@ chosen sync source, one with an active link, is its record as the releases it ru
 - Two sync sources that relay one layer must relay the same release, with the same version and
   checksums. Otherwise `plan` refuses (§9.2 step 4).
 - `plan` returns the layer paths, the chapters to fetch (`source`, `domain`, `version`, `sha256`, in the
-  order they load), the calendars and the realm chapters it skipped (§3.2). `resolve` loads them into a
+  order they load) and the calendars. `resolve` loads them into a
   codex and gives the flattened view of §5.9 as plain data.
 
 A follower installs a layer from above as a release, one layer at a time (§7, §9.2). The install reads the
@@ -1991,10 +1991,9 @@ Kept deliberately simple: no automatic proposals. Realms exchange only what the 
    source and its population (its capital's members and those its quarters reported). It does not send
    a layer's source: the sync source finds the layer by its checksum in its own record. A layer's
    checksum is `sha256:` and the hex sha256 of `{"source", "version", "chapters", "calendar"}` as
-   canonical JSON (§9.1), where `chapters` maps each domain to its checksum without the `realm` chapter,
-   which no follower takes, and `calendar` is the calendar's checksum, or `""` when the release has
-   none, as `legislation_releases` publishes it. The release a follower runs and the entry of the
-   record that lists it give the same checksum. A report the source refuses or does not answer is sent
+   canonical JSON (§9.1), where `chapters` maps each domain to its checksum, and `calendar` is the
+   calendar's checksum, or `""` when the release has none, as `legislation_releases` publishes it. The
+   release a follower runs and the entry of the record that lists it give the same checksum. A report the source refuses or does not answer is sent
    again at the next check. The source keeps the last report on the follower's entry, with its time, and may
    query the follower at any moment. The follower's own `ggg_codex_status` is the authority. Which
    followers a sync source counts, for its population or a vote, is its own legislation's choice, so
@@ -2032,8 +2031,7 @@ It uses Python's parser (`ast`), so it runs only off-chain:
   whose `id` is the folder's path, only `<domain>.py` files with a GGG domain, the shapes of `source.json`,
   `releases.json` and `calendar.json`, and each release against the source's files **at the release's own
   commit**, which must be in the history of `HEAD` (read with git, so the check needs the full history): all its
-  chapters and its calendar listed, never the `realm` domain, every checksum the sha256 of the bytes. A realm loads
-  only its own `realm.py`: one beside a source's releases is that source's own. realms-codices CI runs this command and
+  chapters and its calendar listed, every checksum the sha256 of the bytes. realms-codices CI runs this command and
   has no checker of its own;
 - every rule in §4: file and class names, base, imports, banned constructs (`exec`, `eval`, `compile`,
   `globals`, `locals`, `setattr`, `open`, dunder names, defaults, attribute stores), citations, marks (an

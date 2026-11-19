@@ -644,29 +644,14 @@ def test_the_realms_own_layer_is_chapters_and_a_calendar_and_nothing_else(mine):
         plan("town", [], mine)
 
 
-def test_a_relayed_realm_chapter_is_skipped_and_reported():
-    """A release never lists the realm domain; a source that does must not break its followers."""
-    mistaken = mini("eu/es", "1", ["tax", "realm"])
-    p = plan("town", [{"source": "eu/es", "layers": [mistaken]}])
-    assert p.paths == {"tax": ["eu/es"]}
-    assert [c["domain"] for c in p.chapters] == ["tax"]
-    assert p.skipped == [
-        {"source": "eu/es", "domain": "realm", "sha256": "sha256:eu/es:realm"}
-    ]
-    two = plan(
-        "town",
-        [{"source": "a", "layers": [mistaken]}, {"source": "b", "layers": [mistaken]}],
-    )
-    assert len(two.skipped) == 1  # one layer, reported once
+def test_a_relayed_realm_chapter_is_on_its_path_like_any_other():
+    """Which subject matters exist, and who may fill them, is the codices' business: ``realm`` is not special here."""
+    p = plan("town", [{"source": "eu/es", "layers": [mini("eu/es", "1", ["tax", "realm"])]}])
+    assert p.paths == {"realm": ["eu/es"], "tax": ["eu/es"]}
+    assert [c["domain"] for c in p.chapters] == ["realm", "tax"]
 
 
-def test_a_layer_whose_only_chapter_was_a_realm_chapter_runs_nothing():
-    only = mini("eu/es", "1", ["realm"])
-    p = plan("town", [{"source": "eu/es", "layers": [only]}])
-    assert p.paths == {} and p.layers == ["town"] and len(p.skipped) == 1
-
-
-def test_the_realm_domain_is_the_realms_own_and_still_loads():
+def test_a_realm_chapter_in_the_realms_own_layer_loads():
     r = resolved(
         mine=dict(
             VALENCIA_OWN,
@@ -679,7 +664,7 @@ def test_the_realm_domain_is_the_realms_own_and_still_loads():
             },
         )
     )
-    assert r.plan.paths["realm"] == [VALENCIA] and r.plan.skipped == []
+    assert r.plan.paths["realm"] == [VALENCIA]
 
 
 def test_a_realm_with_no_sync_source_has_its_own_layer_only():

@@ -108,7 +108,6 @@ def test_valencias_layer_paths_are_what_its_sync_sources_relay_then_its_own_laye
         "eu/es/vc/emshi",
         VALENCIA,
     ]
-    assert valencia.plan.skipped == []
 
 
 def test_the_layers_calendars_are_the_union_of_spains_the_regions_and_valencias(

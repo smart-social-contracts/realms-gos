@@ -759,10 +759,9 @@ def test_a_chapter_is_defined_only_by_loading_it():
         type("Tax", (Chapter,), {})
 
 
-def test_the_realm_domain_is_filled_only_in_the_realms_own_layer():
+def test_a_realm_chapter_loads_in_any_layer_and_runs_its_hooks():
     c = codex()
-    assert "realm domain may only be filled in the realm's own layer" in refused(
-        c,
+    c.load(
         "eu/es",
         "realm",
         "from realms.legislation import above\nclass Realm(above('realm')): pass\n",

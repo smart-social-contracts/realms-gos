@@ -96,7 +96,6 @@ def release(tree: Path, source: str, at: str, **changes) -> dict:
         "chapters": {
             f.stem: checksum(f)
             for f in sorted(folder.glob("*.py"))
-            if f.stem != "realm"
         },
         "calendar": (
             checksum(folder / "calendar.json")
@@ -465,28 +464,16 @@ def test_a_release_lists_no_calendar_the_source_does_not_have(tree):
     )
 
 
-def test_a_release_never_lists_the_realm_domain(tree):
-    one_release(tree)
-    release_ = json.loads((tree / "eu/releases.json").read_text())
-    release_[0]["chapters"]["realm"] = release_[0]["chapters"]["data_protection"]
-    write(tree, "eu/releases.json", release_)
-    breaks(
-        tree, "chapters lists the realm domain, which only the realm's own layer fills"
-    )
-
-
-def test_a_realm_chapter_beside_releases_is_the_sources_own_and_no_release_carries_it(
-    tree,
-):
-    # Spain publishes releases and is a realm too: its realm.py is not a missing chapter, and it is not listed
+def test_a_realm_chapter_beside_releases_is_released_like_any_other(tree):
+    # Which subject matters exist, and who may fill them, is the codices' business: realm.py is a chapter like tax.py
     write(tree, "eu/es/realm.py", chapter("realm"))
     at = commit(tree.parent)
     write(tree, "eu/es/releases.json", [release(tree, "eu/es", at)])
-    assert (
-        "realm"
-        not in json.loads((tree / "eu/es/releases.json").read_text())[0]["chapters"]
-    )
     assert problems(tree) == []
+    release_ = json.loads((tree / "eu/es/releases.json").read_text())
+    del release_[0]["chapters"]["realm"]
+    write(tree, "eu/es/releases.json", release_)
+    breaks(tree, "does not list realm, but eu/es/realm.py is in commit")
 
 
 def test_every_checksum_is_the_sha256_of_the_file_at_the_releases_commit(tree):

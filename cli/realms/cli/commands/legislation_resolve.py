@@ -173,10 +173,6 @@ def report_lines(resolution, with_cedar: bool) -> List[str]:
     lines += [
         f"  {domain}: {ARROW.join(path)}" for domain, path in planned.paths.items()
     ]
-    lines += [
-        f"skipped {s['source']}/{s['domain']}: only a realm's own layer fills the realm domain"
-        for s in planned.skipped
-    ]
     for domain, view in resolution.views().items():
         lines += [
             "",

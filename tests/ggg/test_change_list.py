@@ -230,13 +230,15 @@ def test_a_release_is_installed_whole_as_its_record_lists_it():
     refused(vouched, [entry("eu/tax")], {"source": "eu", "version": "1"}, match="no sync source relays eu")
 
 
-def test_a_realm_chapter_a_release_lists_is_skipped():
+def test_a_realm_chapter_a_release_lists_is_installed_like_any_other():
+    """Which subject matters exist, and who may fill them, is the codices' business: ``realm`` is not special here."""
     with_realm = release("eu/es/vc", "2.0.0", ["local_regime", "realm"])
     relays = [{"source": "eu/es/vc", "layers": [ES, with_realm]}]
-    for listed in ([entry("eu/es/vc/local_regime")], [entry("eu/es/vc/local_regime"), entry("eu/es/vc/realm")]):
-        planned, _ = vouched(set=listed, release={"source": "eu/es/vc", "version": "2.0.0"}, relays=relays)
-        assert planned.skipped == [{"source": "eu/es/vc", "domain": "realm", "sha256": SHA["realm"]}]
-        assert "eu/es/vc/realm" not in dict(change_list.named(planned))
+    whole = [entry("eu/es/vc/local_regime"), entry("eu/es/vc/realm")]
+    planned, _ = vouched(set=whole, release={"source": "eu/es/vc", "version": "2.0.0"}, relays=relays)
+    assert "eu/es/vc/realm" in dict(change_list.named(planned))
+    refused(vouched, whole[:1], {"source": "eu/es/vc", "version": "2.0.0"}, relays,
+            match="installed whole: eu/es/vc 2.0.0 is eu/es/vc/local_regime, eu/es/vc/realm")
 
 
 def test_two_sync_sources_relaying_different_releases_of_one_layer_are_refused():

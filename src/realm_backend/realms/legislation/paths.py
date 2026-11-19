@@ -12,8 +12,6 @@ as the releases it runs, top to bottom: the layers it relays and its own layer l
         {"source": "eu/es/vc", "version": "1.1.0", "chapters": {"procedure": "sha256:..."}, "calendar": None}]}
 
 and the realm's own layer, which needs no release (§3.2): ``{"chapters": {domain: sha256}, "calendar": sha256}``.
-A release never lists the ``realm`` domain, which only the realm's own layer fills (§3); a relayed one is
-skipped and reported in ``Plan.skipped``.
 
 A layer is on a domain's path only if its release has a chapter in that domain: empty chapters are
 skipped, so València's tax path is Spain → València (§3.3). The paths the sync sources relay in one
@@ -27,7 +25,6 @@ from realms.legislation.codex import domain_id, source_id
 from realms.legislation.errors import LegislationError
 
 ARROW = " → "
-REALM = "realm"  # the domain only the realm's own layer fills (§3)
 
 
 class Plan:
@@ -37,22 +34,18 @@ class Plan:
     sources that have a chapter in it, top to bottom. ``chapters``: the chapters on those paths to
     fetch, ``{source, domain, version, sha256}`` for each, a domain at a time, top to bottom (the order
     ``Codex.load`` needs). ``calendars``: ``{source, version, sha256}`` for each layer that has one. The
-    realm's own layer has the version ``None``. ``skipped``: the ``realm`` chapters that relayed releases
-    listed and ``plan`` left out, ``{source, domain, sha256}`` each.
+    realm's own layer has the version ``None``.
     """
 
-    def __init__(self, realm, layers, paths, chapters, calendars, skipped):
+    def __init__(self, realm, layers, paths, chapters, calendars):
         self.realm, self.layers, self.paths = realm, layers, paths
-        self.chapters, self.calendars, self.skipped = chapters, calendars, skipped
+        self.chapters, self.calendars = chapters, calendars
 
 
 def plan(realm, relays, own=None):
     """The ``Plan`` of the realm ``realm`` (its source id) that syncs from ``relays`` and has ``own``."""
     realm = source_id(realm)
     relays = [_relay(relay, realm) for relay in relays]
-    skipped = []
-    for relay in relays:
-        skipped += [s for s in relay["skipped"] if s not in skipped]
     releases = _agreed(relays)
     releases[realm] = _own(realm, own)
     paths = {}
@@ -87,12 +80,12 @@ def plan(realm, relays, own=None):
         for source in layers
         if releases[source]["calendar"]
     ]
-    return Plan(realm, layers, paths, chapters, calendars, skipped)
+    return Plan(realm, layers, paths, chapters, calendars)
 
 
 def _relay(relay, realm):
     """A sync source's record, checked: its releases, each layer once, never this realm's own layer, and
-    the source's own layer, if it lists one, last. The ``realm`` chapters it lists are set aside.
+    the source's own layer, if it lists one, last.
     """
     if not isinstance(relay, dict) or not isinstance(relay.get("layers"), list):
         raise LegislationError(
@@ -104,7 +97,7 @@ def _relay(relay, realm):
             f"sync source {name} is this realm itself: a realm cannot sync from itself, directly or "
             "through other realms"
         )
-    layers, skipped = [], []
+    layers = []
     for entry in relay["layers"]:
         release = _release(entry, f"sync source {name}", versioned=True)
         if release["source"] == realm:
@@ -116,11 +109,6 @@ def _relay(relay, realm):
             raise LegislationError(
                 f"sync source {name} relays {release['source']} twice"
             )
-        if REALM in release["chapters"]:
-            sha256 = release["chapters"].pop(REALM)
-            skipped.append(
-                {"source": release["source"], "domain": REALM, "sha256": sha256}
-            )
         layers.append(release)
     sources = [r["source"] for r in layers]
     if name in sources and sources[-1] != name:
@@ -128,7 +116,7 @@ def _relay(relay, realm):
             f"sync source {name} lists its own layer before the end: it comes last, below the "
             "layers it relays"
         )
-    return {"source": name, "layers": layers, "skipped": skipped}
+    return {"source": name, "layers": layers}
 
 
 def _own(realm, own):
