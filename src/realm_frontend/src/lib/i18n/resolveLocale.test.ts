@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	coerceRealmLanguages,
+	publicRealmLanguages,
 	normalizeLanguages,
 	resolveUiLocale
 } from './realmLocales';
@@ -52,5 +53,26 @@ describe('coerceRealmLanguages', () => {
 			languages: ['en'],
 			primary: 'en'
 		});
+	});
+});
+
+describe('publicRealmLanguages', () => {
+	it('offers the languages the realm lists, the first being its own', () => {
+		expect(publicRealmLanguages(['es', 'en', 'ca-valencia'])).toEqual({
+			languages: ['es', 'en', 'ca-valencia'],
+			primary: 'es'
+		});
+	});
+
+	it('leaves out a language the shell cannot show, and reads a regional tag as its language', () => {
+		expect(publicRealmLanguages(['pt', 'es-ES', 'ZH-cn', 'es'])).toEqual({
+			languages: ['es', 'zh-CN'],
+			primary: 'es'
+		});
+	});
+
+	it('falls back to the default when the realm lists nothing it can show', () => {
+		expect(publicRealmLanguages(undefined)).toEqual({ languages: ['en'], primary: 'en' });
+		expect(publicRealmLanguages(['pt'])).toEqual({ languages: ['en'], primary: 'en' });
 	});
 });

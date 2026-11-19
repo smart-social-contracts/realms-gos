@@ -19,6 +19,7 @@
   import JoinTerms from '$lib/components/JoinTerms.svelte';
   import { shouldShowJoinNotice, shouldShowJoinTerms } from '$lib/config/hostTestFlags';
   import { cn } from '$lib/theme/utilities';
+  import { REALM_DEFAULT_MARK, resolveRealmMarkSrc } from '$lib/branding/realmMark';
   import { formatQuarterLabel } from '$lib/utils/quarterLabels';
   import { probeFederatedMembership, activateMembership } from '$lib/utils/federatedMembership';
   import {
@@ -43,6 +44,7 @@
   
   // Step management: 'auth' | 'already_joined' | 'terms' | 'profile' | 'success'
   let currentStep = 'auth';
+  let displayName = '';
   let userHasJoined = false;
   let membershipProbed = false;
   /** @type {Promise<void> | null} */
@@ -138,7 +140,15 @@
   );
   $: showTestModeQuarterPicker = $testMode && quarterDirectory.length > 0;
 
+  // The realm's own cover. A realm that has none (or whose cover fails to load) gets no picture: a plain panel in
+  // a light tint of its colour, with dark text and its mark.
+  let coverFailed = false;
   $: welcomeImageUrl = $realmInfo.backgroundImageUrl || '/custom/background.png';
+  $: panelStyle = coverFailed
+    ? `background: #f3f4f6; background: linear-gradient(160deg, color-mix(in srgb, ${$realmInfo.primaryColor} 18%, #fff), color-mix(in srgb, ${$realmInfo.primaryColor} 5%, #fff));`
+    : '';
+  let panelMarkFailed = false;
+  $: panelMark = panelMarkFailed ? REALM_DEFAULT_MARK : resolveRealmMarkSrc($realmInfo.logoUrl);
 
   const internetIdentityUrl =
     (typeof globalThis !== 'undefined' && globalThis.__CANISTER_IDS?.internet_identity) ||
@@ -651,7 +661,11 @@
       // invite code is consumed on that quarter, where it lives. The profile
       // is resolved server-side (invite code profile or codex default).
       // A known profile means a client-side test code, which is not a realm invite.
-      const response = await onTarget('run', 'realm_join', { code: inviteProfile ? '' : inviteCode });
+      const nickname = displayName.trim();
+      const response = await onTarget('run', 'realm_join', {
+        code: inviteProfile ? '' : inviteCode,
+        ...(nickname ? { nickname } : {}),
+      });
       if (response.ok) {
         // Point the app at the quarter we just joined and remember it.
         if (targetQuarterId && targetQuarterId !== capitalId) {
@@ -699,35 +713,50 @@
   }
 </script>
 
+<svelte:head>
+  <title>{$_('join.join_title', { values: { name: realmName } })}</title>
+</svelte:head>
+
 <div class="min-h-viewport md:h-viewport grid grid-cols-1 md:grid-cols-2" style="transform: none !important;">
   <!-- Left Brand Panel with Background Image -->
-  <div class="hidden md:flex md:col-start-1 text-white flex-col justify-between relative">
+  <div class={cn('hidden md:flex md:col-start-1 flex-col justify-between relative', coverFailed ? 'text-gray-900' : 'text-white')} style={panelStyle}>
     <!-- Background Image - no overlay, full opacity -->
-    <div class="absolute inset-0 z-0">
-      <img 
-        src={welcomeImageUrl} 
-        alt={t('join.background_alt', { values: { name: realmName } })}
-        class="w-full h-full object-cover"
-      />
-    </div>
+    {#if !coverFailed}
+      <div class="absolute inset-0 z-0">
+        <img 
+          src={welcomeImageUrl} 
+          alt={t('join.background_alt', { values: { name: realmName } })}
+          on:error={() => { coverFailed = true; }}
+          class="w-full h-full object-cover"
+        />
+      </div>
+    {/if}
     
     <!-- Content overlay - centered vertically -->
     <div class="relative z-10 p-6 flex flex-col h-full justify-center items-center">
-      <!-- Text container with dark background for readability -->
-      <div class="bg-black/60 backdrop-blur-sm rounded-2xl p-6 max-w-md mx-6">
+      <!-- Text container: on a photo, a dark box for readability; on the plain panel, the text stands by itself -->
+      <div class={cn('rounded-2xl p-6 max-w-md mx-6', coverFailed ? '' : 'bg-black/60 backdrop-blur-sm')}>
+        {#if coverFailed}
+          <img
+            src={panelMark}
+            alt=""
+            class="mb-6 h-14 w-14 object-contain"
+            on:error={() => { panelMarkFailed = true; }}
+          />
+        {/if}
         <!-- Welcome Message -->
         <h1 class="text-4xl font-bold mb-4 leading-tight">
           {$_('join.welcome_to', { values: { name: realmName } })}
         </h1>
         
         {#if $realmWelcomeMessage}
-          <p class="text-lg text-white/90 mb-4">
+          <p class={cn('text-lg mb-4', coverFailed ? 'text-gray-700' : 'text-white/90')}>
             {$realmWelcomeMessage}
           </p>
         {/if}
         
         {#if $realmManifesto}
-          <p class="text-lg text-white/90">
+          <p class={cn('text-lg', coverFailed ? 'text-gray-700' : 'text-white/90')}>
             {$realmManifesto}
           </p>
         {/if}
@@ -738,13 +767,16 @@
   <!-- Right Form Panel -->
   <div class="flex items-start md:items-center justify-center p-4 pb-16 md:p-12 relative bg-gradient-to-br from-gray-50 to-gray-100 md:col-start-2 overflow-y-auto">
     <!-- Mobile background image -->
-    <div class="md:hidden absolute inset-0 z-0">
-      <img 
-        src={welcomeImageUrl} 
-        alt={t('join.background_alt', { values: { name: realmName } })}
-        class="w-full h-full object-cover"
-      />
-    </div>
+    {#if !coverFailed}
+      <div class="md:hidden absolute inset-0 z-0">
+        <img 
+          src={welcomeImageUrl} 
+          alt={t('join.background_alt', { values: { name: realmName } })}
+          on:error={() => { coverFailed = true; }}
+          class="w-full h-full object-cover"
+        />
+      </div>
+    {/if}
     
     <div class="w-full max-w-md relative z-10 md:bg-transparent md:backdrop-blur-none md:rounded-none md:p-0 bg-white/80 backdrop-blur-sm rounded-2xl p-3 my-auto">
 
@@ -769,7 +801,7 @@
             >
               <div class={cn(
                 "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-medium transition-all",
-                isCurrent ? "bg-gray-900 text-white"
+                isCurrent ? "bg-primary-600 text-white"
                   : isDone ? "bg-gray-700 text-white group-hover:bg-gray-900"
                   : "bg-gray-200 text-gray-500"
               )}>
@@ -842,7 +874,7 @@
                   class={cn(
                     'w-full text-left p-4 rounded-xl border-2 transition-all',
                     selectedTestIdentityIndex === persona.index
-                      ? 'border-gray-900 bg-gray-50'
+                      ? 'border-primary-600 bg-gray-50'
                       : 'border-gray-200 hover:border-gray-300 bg-white'
                   )}
                   disabled={loading}
@@ -859,7 +891,7 @@
                       {$_('join.registered_founder', { values: { principal: shortPrincipal(persona.registeredFounder) } })}
                     </p>
                   {/if}
-                  <p class="text-xs text-gray-400 mt-1">{persona.description}</p>
+                  <p class="text-xs text-gray-500 mt-1">{persona.description}</p>
                 </button>
               {/each}
 
@@ -867,7 +899,7 @@
                 class={cn(
                   'w-full p-4 rounded-xl border-2 transition-all',
                   customIdentityIndex != null && selectedTestIdentityIndex === customIdentityIndex
-                    ? 'border-gray-900 bg-gray-50'
+                    ? 'border-primary-600 bg-gray-50'
                     : 'border-gray-200 bg-white'
                 )}
               >
@@ -891,7 +923,7 @@
                   />
                   <button
                     type="button"
-                    class="px-3 py-2 text-sm font-medium border border-gray-900 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    class="px-3 py-2 text-sm font-medium border border-primary-600 rounded-lg hover:bg-gray-50 disabled:opacity-50"
                     disabled={loading || customIdentityIndex == null}
                     on:click={() => {
                       if (customIdentityIndex != null) persistSelectedTestIdentity(customIdentityIndex);
@@ -902,9 +934,9 @@
                 </div>
                 {#if customPersona}
                   <p class="text-xs font-mono text-gray-500 mt-2 break-all">{customPersona.principal}</p>
-                  <p class="text-xs text-gray-400 mt-1">{customPersona.description}</p>
+                  <p class="text-xs text-gray-500 mt-1">{customPersona.description}</p>
                 {:else}
-                  <p class="text-xs text-gray-400 mt-2">
+                  <p class="text-xs text-gray-500 mt-2">
                     {$_('join.identity_numbers', { values: { max: maxCustomIdentityNumber.toLocaleString() } })}
                   </p>
                 {/if}
@@ -913,7 +945,7 @@
                 type="button"
                 on:click={continueAsSelectedTestIdentity}
                 disabled={loading}
-                class="w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                class="w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
               >
                 {#if loading}
                   <Spinner size="5" color="white" />
@@ -930,7 +962,7 @@
             <button
               on:click={() => handleLogin()}
               disabled={loading}
-              class="w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {#if loading}
                 <Spinner size="5" color="white" />
@@ -942,6 +974,8 @@
                 <span>{$_('join.sign_in_ii_button')}</span>
               {/if}
             </button>
+
+            <p class="mt-3 text-center text-sm text-gray-500">{$_('join.ii_explained')}</p>
 
             <p class="mt-6 text-center text-sm text-gray-500">
               {$_('join.no_ii')}
@@ -955,7 +989,8 @@
             </p>
           {/if}
 
-          <!-- Returning member who forgot their quarter -->
+          <!-- Returning member who forgot their quarter: only a realm with several quarters has the question -->
+          {#if quarterDirectory.length > 1}
           <div class="mt-6 pt-5 border-t border-gray-100 text-center">
             <p class="text-sm text-gray-500 mb-2">{$_('join.already_member_quarter')}</p>
             <button
@@ -975,6 +1010,7 @@
               <p class="mt-2 text-sm text-red-600">{forgotError}</p>
             {/if}
           </div>
+          {/if}
         </div>
 
       <!-- Step: Already Joined (Welcome Back / multi-membership activation) -->
@@ -1004,7 +1040,7 @@
                   class={cn(
                     "w-full p-4 rounded-xl border-2 text-left transition-all",
                     selectedActivationId === hit.canisterId
-                      ? "border-gray-900 bg-gray-50"
+                      ? "border-primary-600 bg-gray-50"
                       : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
                   )}
                 >
@@ -1019,7 +1055,7 @@
               type="button"
               on:click={continueWithMembership}
               disabled={!selectedActivationId || loading}
-              class="w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {#if loading}
                 <Spinner size="5" color="white" />
@@ -1039,7 +1075,7 @@
             {/if}
             <a
               href={resolve('/extensions/member_dashboard')}
-              class="w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3"
+              class="w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-3"
             >
               <span>{$_('join.go_dashboard')}</span>
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1054,11 +1090,11 @@
         <div class="bg-white rounded-2xl shadow-xl p-5 md:p-8 border border-gray-100">
           {#if showQuarterBanner}
             <div class="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-xl">
-              <div class="text-xs uppercase tracking-wide text-gray-400">{$_('join.joining_quarter')}</div>
+              <div class="text-xs uppercase tracking-wide text-gray-500">{$_('join.joining_quarter')}</div>
               {#if showTestModeQuarterPicker}
                 <select
                   id="test-mode-quarter"
-                  class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 focus:border-gray-900 focus:ring-gray-900"
+                  class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 focus:border-primary-600 focus:ring-primary-600"
                   value={targetQuarterId}
                   on:change={handleTestModeQuarterChange}
                 >
@@ -1068,7 +1104,7 @@
                     </option>
                   {/each}
                 </select>
-                <p class="mt-2 text-xs text-gray-400">
+                <p class="mt-2 text-xs text-gray-500">
                   {$_('join.test_mode_quarter')}
                 </p>
               {:else}
@@ -1101,7 +1137,7 @@
             <button
               on:click={handleTermsAccept}
               disabled={!agreement}
-              class="flex-1 py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              class="flex-1 py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {$_('setup.wizard.continue')}
             </button>
@@ -1139,11 +1175,11 @@
 
           {#if showQuarterBanner}
             <div class="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-xl">
-              <div class="text-xs uppercase tracking-wide text-gray-400">{$_('join.joining_quarter')}</div>
+              <div class="text-xs uppercase tracking-wide text-gray-500">{$_('join.joining_quarter')}</div>
               {#if showTestModeQuarterPicker}
                 <select
                   id="test-mode-quarter"
-                  class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 focus:border-gray-900 focus:ring-gray-900"
+                  class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 focus:border-primary-600 focus:ring-primary-600"
                   value={targetQuarterId}
                   on:change={handleTestModeQuarterChange}
                 >
@@ -1153,7 +1189,7 @@
                     </option>
                   {/each}
                 </select>
-                <p class="mt-2 text-xs text-gray-400">
+                <p class="mt-2 text-xs text-gray-500">
                   {$_('join.test_mode_quarter')}
                 </p>
               {:else}
@@ -1169,7 +1205,7 @@
           {#if inviteProfile || $realmOpenRegistration}
           <div class="mb-6 p-4 rounded-xl border-2 border-gray-200 bg-gray-50">
             <div class="flex items-center gap-4">
-              <div class="w-12 h-12 rounded-full flex items-center justify-center bg-gray-900 text-white">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center bg-primary-600 text-white">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
@@ -1207,7 +1243,7 @@
                 placeholder={$_('join.paste_invite')}
                 disabled={inviteValid}
                 class={cn(
-                  "min-w-0 flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-gray-900 focus:border-gray-900",
+                  "min-w-0 flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-primary-600 focus:border-primary-600",
                   inviteValid ? "border-green-300 bg-green-50 text-green-800" : "border-gray-300"
                 )}
               />
@@ -1222,7 +1258,7 @@
                 <button
                   on:click={validateInvite}
                   disabled={!inviteCode || inviteChecking}
-                  class="shrink-0 px-3 md:px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  class="shrink-0 px-3 md:px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {#if inviteChecking}
                     <Spinner size="4" color="white" />
@@ -1244,7 +1280,7 @@
               <p class="mt-2 text-sm text-red-600">{inviteError}</p>
             {/if}
             {#if $testModeUserSelfRegistration && !inviteValid}
-              <p class="mt-2 text-xs text-gray-400 flex items-start gap-1.5">
+              <p class="mt-2 text-xs text-gray-500 flex items-start gap-1.5">
                 <svg class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -1253,6 +1289,22 @@
                 </span>
               </p>
             {/if}
+          </div>
+
+          <div class="mb-6">
+            <label for="display-name" class="block text-sm font-medium text-gray-700 mb-2">
+              {$_('join.display_name_label')}
+            </label>
+            <input
+              id="display-name"
+              type="text"
+              bind:value={displayName}
+              maxlength="40"
+              autocomplete="nickname"
+              placeholder={$_('join.display_name_placeholder')}
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-primary-600 focus:border-primary-600"
+            />
+            <p class="mt-2 text-xs text-gray-500">{$_('join.display_name_hint')}</p>
           </div>
           
           <div class="flex gap-3">
@@ -1267,7 +1319,7 @@
             <button
               on:click={handleJoin}
               disabled={loading || inviteRequired}
-              class="flex-1 py-3 md:py-4 px-4 md:px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              class="flex-1 py-3 md:py-4 px-4 md:px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {#if loading}
                 <Spinner size="5" color="white" />
@@ -1295,13 +1347,29 @@
           
           <a
             href={resolve('/extensions/member_dashboard')}
-            class="inline-flex items-center justify-center w-full py-4 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-all gap-2"
+            class="inline-flex items-center justify-center w-full py-4 px-6 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-xl transition-all gap-2"
           >
             <span>{$_('join.go_member_dashboard')}</span>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
             </svg>
           </a>
+
+          <!-- A new member's two other first steps: what is being decided, and what the realm is. -->
+          <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <a
+              href={resolve('/extensions/voting')}
+              class="inline-flex items-center justify-center py-3 px-4 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-all text-sm"
+            >
+              {$_('join.next_voting')}
+            </a>
+            <a
+              href={resolve('/extensions/public_dashboard')}
+              class="inline-flex items-center justify-center py-3 px-4 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-all text-sm"
+            >
+              {$_('join.next_home')}
+            </a>
+          </div>
         </div>
       {/if}
     </div>

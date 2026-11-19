@@ -38,7 +38,10 @@
     "ai_resize": "Redimensionner le panneau de l'assistant IA",
     "ai_resize_hint": "Faites glisser pour redimensionner. Double-cliquez pour réinitialiser.",
     "ai_open_settings": "Ouvrir les paramètres de l'assistant IA",
-    "ai_close": "Fermer l'assistant IA"
+    "ai_close": "Fermer l'assistant IA",
+    "account_menu": "Menu du compte",
+    "skip_to_content": "Aller au contenu",
+    "test_identity": "Identité {n}"
   },
   "navigation": {
     "dashboard": "Tableau de bord",
@@ -362,7 +365,13 @@
     "quarter_setting_up": " (en configuration)",
     "quarter_coordinator_only": " (coordinateur uniquement)",
     "capital": "Capitale",
-    "background_alt": "Arrière-plan de {name}"
+    "background_alt": "Arrière-plan de {name}",
+    "display_name_label": "Votre nom (facultatif)",
+    "display_name_placeholder": "Comment les autres membres vous verront",
+    "display_name_hint": "Affiché à côté de vos propositions et de vos votes. Vous pourrez le changer plus tard.",
+    "ii_explained": "Internet Identity est une clé d'accès conservée sur votre appareil : ni mot de passe ni e-mail.",
+    "next_voting": "Voir ce qui se décide",
+    "next_home": "Ce qu'est ce royaume"
   },
   "identities": {
     "page_title": "Mes identités",

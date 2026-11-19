@@ -257,7 +257,7 @@
   {#if pagination}
     <div class="flex justify-center items-center mt-4 space-x-2">
       <button 
-        class="px-3 py-1 rounded border {hasPrevPage ? 'bg-blue-100 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}" 
+        class="px-3 py-1 rounded border {hasPrevPage ? 'bg-blue-100 hover:bg-blue-200' : 'bg-gray-100 text-gray-500 cursor-not-allowed'}" 
         disabled={!hasPrevPage}
         on:click={() => onPageChange(currentPage - 2)}
       >
@@ -267,7 +267,7 @@
         {#if totalPages <= 7}
           {#each Array(totalPages) as _, i}
             <button 
-              class="w-8 h-8 rounded-full {currentPage === i+1 ? 'bg-blue-500 text-white' : 'bg-gray-100 hover:bg-gray-200'}"
+              class="w-8 h-8 rounded-full {currentPage === i+1 ? 'bg-primary-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}"
               on:click={() => onPageChange(i)}
             >
               {i+1}
@@ -275,7 +275,7 @@
           {/each}
         {:else}
           <button 
-            class="w-8 h-8 rounded-full {currentPage === 1 ? 'bg-blue-500 text-white' : 'bg-gray-100 hover:bg-gray-200'}"
+            class="w-8 h-8 rounded-full {currentPage === 1 ? 'bg-primary-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}"
             on:click={() => onPageChange(0)}
           >
             1
@@ -287,7 +287,7 @@
             {@const pageNum = Math.max(2, Math.min(currentPage - 1 + i, totalPages - 1))}
             {#if pageNum > 1 && pageNum < totalPages}
               <button 
-                class="w-8 h-8 rounded-full {currentPage === pageNum ? 'bg-blue-500 text-white' : 'bg-gray-100 hover:bg-gray-200'}"
+                class="w-8 h-8 rounded-full {currentPage === pageNum ? 'bg-primary-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}"
                 on:click={() => onPageChange(pageNum - 1)}
               >
                 {pageNum}
@@ -298,7 +298,7 @@
             <span class="px-1">...</span>
           {/if}
           <button 
-            class="w-8 h-8 rounded-full {currentPage === totalPages ? 'bg-blue-500 text-white' : 'bg-gray-100 hover:bg-gray-200'}"
+            class="w-8 h-8 rounded-full {currentPage === totalPages ? 'bg-primary-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}"
             on:click={() => onPageChange(totalPages - 1)}
           >
             {totalPages}
@@ -306,7 +306,7 @@
         {/if}
       </div>
       <button 
-        class="px-3 py-1 rounded border {hasNextPage ? 'bg-blue-100 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}" 
+        class="px-3 py-1 rounded border {hasNextPage ? 'bg-blue-100 hover:bg-blue-200' : 'bg-gray-100 text-gray-500 cursor-not-allowed'}" 
         disabled={!hasNextPage}
         on:click={() => onPageChange(currentPage)}
       >

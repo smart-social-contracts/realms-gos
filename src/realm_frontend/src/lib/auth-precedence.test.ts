@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	resolveAuthChannel,
 	resolveEffectiveAuthChannel,
+	resolveTestIdentityIndex,
 	shouldAttemptPortalAuth,
 	shouldLoginWithTestIdentity,
 	shouldPreferTestModeLogin,
@@ -91,4 +92,17 @@ describe('auth-precedence', () => {
 			})
 		).toBe(false);
 	});
+
+	it('a reload keeps the test identity the tab signed in as', () => {
+		// Asked for: the picker or ?ti= in the address.
+		expect(resolveTestIdentityIndex(2, 1)).toBe(2);
+		expect(resolveTestIdentityIndex(0, 1)).toBe(0);
+		// Nothing asked: the tab's own identity, not Identity 1.
+		expect(resolveTestIdentityIndex(null, 1)).toBe(1);
+		expect(resolveTestIdentityIndex(undefined, null)).toBe(0);
+		// A random identity is fresh unless one was asked for.
+		expect(resolveTestIdentityIndex(null, 1, true)).toBeNull();
+		expect(resolveTestIdentityIndex(3, 1, true)).toBe(3);
+	});
 });
+

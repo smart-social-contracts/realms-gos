@@ -12,6 +12,7 @@
 	import { get } from 'svelte/store';
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
+	import { _ } from 'svelte-i18n';
 	import { isAuthenticated } from '$lib/stores/auth';
 	import { loadNotifications } from '$lib/stores/notifications';
 	import { hostActionEvents, documentFocus } from '$lib/host-bridge';
@@ -247,6 +248,14 @@
 	class="relative flex h-viewport flex-col overflow-hidden"
 	style="--realm-banner-h: {bannerHeight}px"
 >
+	<!-- First stop of the keyboard: jump over the header and the menu. Visible only while it has the focus. -->
+	<a
+		href="#main-content"
+		class="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[100] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-gray-900 focus:shadow-lg focus:ring-2 focus:ring-gray-900"
+		on:click|preventDefault={() => mainContentEl?.focus()}
+	>
+		{$_('chrome.skip_to_content')}
+	</a>
 	<div bind:this={bannerEl} class="shrink-0">
 		<DemoBanner />
 	</div>
@@ -272,7 +281,9 @@
 		     reveals content instead of collapsing the flex row (which jumps). -->
 		<div
 			bind:this={mainContentEl}
-			class="main-content-area relative min-w-0 flex-1 overflow-x-hidden bg-white max-lg:pb-[env(safe-area-inset-bottom,0px)] {isFullBleedExtension ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-y-auto'}"
+			id="main-content"
+			tabindex="-1"
+			class="main-content-area relative outline-none min-w-0 flex-1 overflow-x-hidden bg-white max-lg:pb-[env(safe-area-inset-bottom,0px)] {isFullBleedExtension ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-y-auto'}"
 			inert={mobileDrawerOpen ? true : undefined}
 		>
 			{#if !isFullBleedExtension}

@@ -3,7 +3,7 @@
 	import { login, logout, restoreAuthSession, resetAuthSessionRestore } from '$lib/auth';
 	import { isEmbeddedInPortal, redirectToPortalLogin } from '$lib/portal-bridge.ts';
 	import { markPortalSigningOut } from '$lib/portal-redirect-path.ts';
-	import { isAuthenticated, userIdentity, principal } from '$lib/stores/auth';
+	import { isAuthenticated, userIdentity, principal, testIdentityIndex } from '$lib/stores/auth';
 	import { loadUserProfiles, resetProfileState, applyUserGetRecord, userProfiles, userDepartments, hasJoined } from '$lib/stores/profiles';
 	import { formatProfileValues, formatDepartmentValues } from '$lib/utils/membershipLabels';
 	import { activeQuarterId } from '$lib/stores/quarters';
@@ -27,6 +27,7 @@
 	let principalText = '';
 	let showDropdown = false;
 	let copiedPrincipal = false;
+
 
 	// Using the centralized profile loading function from the store
 
@@ -192,11 +193,21 @@
 
 <div class="flex items-center">
 {#if $isAuthenticated}
+	<!-- Test builds say which test identity the tab is signed in as: a wrong one looks exactly like the right one. -->
+	{#if __REALMS_TEST_BUILD__ && $testIdentityIndex != null}
+		<span
+			class="mr-2 whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+			title={$principal}
+		>
+			{$_('chrome.test_identity', { values: { n: $testIdentityIndex + 1 } })}
+		</span>
+	{/if}
 	<div class="avatar-dropdown relative">
 		<!-- Avatar Image -->
 		<div 
 			class="cursor-pointer" 
 			role="button"
+			aria-label={$_('chrome.account_menu')}
 			aria-haspopup="true"
 			aria-expanded={showDropdown}
 			tabindex="0"
@@ -209,9 +220,9 @@
 		>
 		<Avatar 
 			src={generateAvatarUrl($principal, userProfilePictureUrl)} 
-			tabindex={0} 
+			tabindex={-1} 
 			title={`Principal: ${$principal}`} 
-			alt="User avatar"
+			alt=""
 		/>
 		</div>
 		
@@ -231,7 +242,7 @@
 							type="button"
 							class="shrink-0 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {copiedPrincipal
 								? 'text-green-600 dark:text-green-400'
-								: 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}"
+								: 'text-gray-500 hover:text-gray-600 dark:hover:text-gray-200'}"
 							title={copiedPrincipal ? 'Copied!' : 'Copy principal'}
 							aria-label={copiedPrincipal ? 'Copied' : 'Copy principal'}
 							on:click={copyPrincipal}

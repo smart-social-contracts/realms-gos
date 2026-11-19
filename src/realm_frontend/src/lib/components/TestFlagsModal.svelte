@@ -194,7 +194,7 @@
 			     CSS vars that are unset on realms without branding. -->
 			<Button
 				color="none"
-				class="bg-gray-900 text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900"
+				class="bg-primary-600 text-white hover:bg-primary-700"
 				on:click={save}
 				disabled={saving}
 			>

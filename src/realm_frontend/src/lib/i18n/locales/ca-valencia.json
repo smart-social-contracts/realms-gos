@@ -38,7 +38,10 @@
     "ai_resize": "Redimensionar el panell de l'Assistent d'IA",
     "ai_resize_hint": "Arrossega per a redimensionar. Doble clic per a restablir.",
     "ai_open_settings": "Obrir els ajustos de l'Assistent d'IA",
-    "ai_close": "Tancar l'Assistent d'IA"
+    "ai_close": "Tancar l'Assistent d'IA",
+    "account_menu": "Menú del compte",
+    "skip_to_content": "Salta al contingut",
+    "test_identity": "Identitat {n}"
   },
   "navigation": {
     "dashboard": "Tauler",
@@ -362,7 +365,13 @@
     "quarter_setting_up": " (en configuració)",
     "quarter_coordinator_only": " (només coordinador)",
     "capital": "Capital",
-    "background_alt": "Fons de {name}"
+    "background_alt": "Fons de {name}",
+    "display_name_label": "El teu nom (opcional)",
+    "display_name_placeholder": "Com et veuran els altres membres",
+    "display_name_hint": "Es mostra al costat del que proposes i votes. El pots canviar més tard.",
+    "ii_explained": "Internet Identity és una clau d'accés guardada al teu dispositiu: sense contrasenya i sense correu.",
+    "next_voting": "Veure què s'està decidint",
+    "next_home": "Què és este regne"
   },
   "identities": {
     "page_title": "Les meues identitats",

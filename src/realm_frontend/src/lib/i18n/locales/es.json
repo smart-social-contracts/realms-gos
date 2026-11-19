@@ -38,7 +38,10 @@
     "ai_resize": "Redimensionar el panel del Asistente de IA",
     "ai_resize_hint": "Arrastra para redimensionar. Doble clic para restablecer.",
     "ai_open_settings": "Abrir ajustes del Asistente de IA",
-    "ai_close": "Cerrar el Asistente de IA"
+    "ai_close": "Cerrar el Asistente de IA",
+    "account_menu": "Menú de la cuenta",
+    "skip_to_content": "Saltar al contenido",
+    "test_identity": "Identidad {n}"
   },
   "navigation": {
     "dashboard": "Panel",
@@ -362,7 +365,13 @@
     "quarter_setting_up": " (en configuración)",
     "quarter_coordinator_only": " (solo coordinador)",
     "capital": "Capital",
-    "background_alt": "Fondo de {name}"
+    "background_alt": "Fondo de {name}",
+    "display_name_label": "Tu nombre (opcional)",
+    "display_name_placeholder": "Cómo te verán los demás miembros",
+    "display_name_hint": "Se muestra junto a lo que propones y votas. Puedes cambiarlo más tarde.",
+    "ii_explained": "Internet Identity es una llave de acceso guardada en tu dispositivo: sin contraseña y sin correo.",
+    "next_voting": "Ver qué se está decidiendo",
+    "next_home": "Qué es este reino"
   },
   "identities": {
     "page_title": "Mis identidades",

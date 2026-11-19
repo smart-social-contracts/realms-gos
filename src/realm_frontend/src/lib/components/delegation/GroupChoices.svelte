@@ -50,12 +50,12 @@
 				onchange={(e) => tick(choice.id, e.currentTarget.checked)}
 				disabled={!choice.held || everything}
 			/>
-			<span class={choice.held ? 'text-gray-900' : 'text-gray-400'}>
+			<span class={choice.held ? 'text-gray-900' : 'text-gray-500'}>
 				<span class="text-sm font-medium">{choice.label}</span>
 				{#if choice.confirms}
 					<Badge color="yellow" class="ms-2">{$_('delegation.groups.asks_each_time')}</Badge>
 				{/if}
-				<span class="block text-xs {choice.held ? 'text-gray-500' : 'text-gray-400'}">
+				<span class="block text-xs {choice.held ? 'text-gray-500' : 'text-gray-500'}">
 					{choice.held ? choice.summary : $_('delegation.groups.not_held')}
 				</span>
 				{#if choice.held && choice.risk}

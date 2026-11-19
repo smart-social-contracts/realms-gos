@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Frame, type LinkType } from 'flowbite-svelte';
 	import { GithubSolid } from 'flowbite-svelte-icons';
 	import { _ } from 'svelte-i18n';
 	import { testMode } from '$lib/stores/realmInfo';
@@ -66,44 +65,18 @@
 		commitDatetime = datetime;
 		version = ver;
 	}
-
-	const links: LinkType[] = [
-		{ name: 'Terms and conditions', href: '#' },
-		{ name: 'Privacy Policy', href: '#' },
-		{ name: 'Licensing', href: '#' },
-		{ name: 'Cookie Policy', href: '#' },
-		{ name: 'Contact', href: '#' }
-	];
 </script>
 
-<Frame
-	tag="footer"
-	rounded
-	shadow
-	class="mx-auto mt-6 w-full max-w-screen-xl rounded-lg bg-white p-6 shadow dark:bg-gray-800 pl-2"
->
-	<!-- <ul class="flex flex-wrap items-center justify-center space-x-4 space-y-1 md:space-x-6 xl:space-x-8">
-		{#each links as { name, href }}
-			<li>
-				<a
-					{href}
-					class="text-sm font-normal text-gray-500 hover:underline dark:text-gray-400"
-				>
-					{name}
-				</a>
-			</li>
-		{/each}
-	</ul> -->
-	
-	<!-- App name, version and commit hash display -->
-	<div class="mt-3 flex items-center justify-center gap-1 text-xs font-normal text-gray-400 dark:text-gray-500">
+<!-- One quiet line: a page's footer is not content. -->
+<footer class="mx-auto mt-10 w-full max-w-screen-xl px-4 pb-6">
+	<div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-normal text-gray-500 dark:text-gray-400">
 		<span>Realms GOS {version}</span>
 		<a
 			href="https://github.com/smart-social-contracts/realms-gos"
 			target="_blank"
 			rel="noopener noreferrer"
 			aria-label="Realms on GitHub"
-			class="inline-flex items-center text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400"
+			class="inline-flex items-center hover:text-gray-700 dark:hover:text-gray-300"
 		>
 			<GithubSolid class="block h-3 w-3" size="xs" />
 		</a>
@@ -111,31 +84,28 @@
 			href="https://github.com/smart-social-contracts/realms-gos/commit/{fullCommitHash}"
 			target="_blank"
 			rel="noopener noreferrer"
-			class="text-gray-400 hover:underline dark:text-gray-500"
+			class="hover:underline"
 		>
 			{commitHash}
 		</a>
 		<span>{commitDatetime}{typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname.endsWith('.localhost')) ? ' - Local deployment' : ''}</span>
-	</div>
-
-	{#if $testMode}
-		<div class="mt-2 text-center">
+		<span aria-hidden="true">·</span>
+		<a href="https://internetcomputer.org" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 hover:text-gray-700 dark:hover:text-gray-300">
+			<img src="/images/internet-computer-icp-logo.svg" alt="" width="12" height="12" class="block h-3 w-3 grayscale" />
+			<span>{$_('footer.built_on_ic')}</span>
+		</a>
+		{#if $testMode}
+			<span aria-hidden="true">·</span>
 			<button
 				type="button"
-				class="rounded border border-amber-400 px-2 py-0.5 text-xs font-medium text-amber-600 hover:bg-amber-50 dark:border-amber-500 dark:text-amber-400 dark:hover:bg-gray-700"
+				class="rounded border border-amber-500 px-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-500 dark:text-amber-400 dark:hover:bg-gray-700"
 				onclick={() => (testFlagsOpen = true)}
 			>
 				{$_('footer.test_flags')}
 			</button>
-		</div>
+		{/if}
+	</div>
+	{#if $testMode}
 		<TestFlagsModal bind:open={testFlagsOpen} />
 	{/if}
-	
-	<!-- Built on Internet Computer section -->
-	<div class="mt-3 flex justify-center">
-		<a href="https://internetcomputer.org" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-normal text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400">
-			<img src="/images/internet-computer-icp-logo.svg" alt="Internet Computer Logo" width="12" height="12" class="block h-3 w-3 grayscale" />
-			<span>{$_('footer.built_on_ic')}</span>
-		</a>
-	</div>
-</Frame>
+</footer>

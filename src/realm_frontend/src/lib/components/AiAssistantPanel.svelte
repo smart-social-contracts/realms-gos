@@ -299,10 +299,10 @@
 	<!-- Panel header -->
 	<div class="panel-header flex items-center gap-2 px-4 py-3 border-b border-gray-200">
 		<h3 class="text-sm font-semibold text-gray-700 flex-1 min-w-0 truncate">{$_('common.assistant')}</h3>
-		<span class="text-[11px] text-gray-400 font-medium shrink-0">{modelLabel}</span>
+		<span class="text-[11px] text-gray-500 font-medium shrink-0">{modelLabel}</span>
 		<button
 			on:click={openSettings}
-			class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors shrink-0"
+			class="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-600 transition-colors shrink-0"
 			title={$_('chrome.ai_open_settings')}
 			aria-label={$_('chrome.ai_open_settings')}
 		>

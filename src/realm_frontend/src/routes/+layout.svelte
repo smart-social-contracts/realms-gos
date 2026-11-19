@@ -11,10 +11,15 @@
 	import { isEmbeddedInPortal, portalNavPush, getPortalHostEmbeddedPath } from '$lib/portal-bridge.ts';
 	import { portalSharePathFromUrl, resolvePortalNavSyncHref, shouldPortalEnterPush } from '$lib/portal-redirect-path.ts';
 	import { dismissAppSplash } from '$lib/app-splash';
+	import { applyFavicon } from '$lib/branding/favicon';
+	import { realmInfo } from '$lib/stores/realmInfo';
 	import SetupStageGate from '$lib/components/SetupStageGate.svelte';
 	import BridgeModalHost from '$lib/components/BridgeModalHost.svelte';
 
 	export const SITE_NAME = "Realms GOS";
+
+	// The tab's icon is the realm's mark, or the default one when the realm has none.
+	$: if (browser) applyFavicon($realmInfo.logoUrl);
 
 	// Drop the globe as soon as this module evaluates. If a child throw
 	// aborts hydration, onMount never runs — leaving splash up forever.

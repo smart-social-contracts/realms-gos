@@ -27,7 +27,7 @@
 			case 'secondary':
 				return 'bg-white text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600 dark:hover:bg-gray-700';
 			default:
-				return 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100';
+				return 'bg-primary-600 text-white hover:bg-primary-700';
 		}
 	}
 
@@ -68,7 +68,7 @@
 					<button
 						type="button"
 						aria-label="Close"
-						class="-mr-1 -mt-1 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+						class="-mr-1 -mt-1 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 						onclick={dismissBridgeModal}
 					>
 						<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">

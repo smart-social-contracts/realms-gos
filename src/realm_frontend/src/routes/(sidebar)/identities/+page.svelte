@@ -398,6 +398,7 @@
 />
 
 <div class="mt-4 space-y-6 px-4 md:px-6">
+	<h1 class="text-2xl font-bold text-gray-900 dark:text-white">{$_('chrome.account')}</h1>
 	<!-- Public Data -->
 	<Card size="xl">
 		<Heading tag="h3" class="mb-2 text-xl font-bold dark:text-white">{$_('identities.public_data')}</Heading>
@@ -533,7 +534,7 @@
 		{:else}
 			<div class="text-center py-6">
 				<div class="w-12 h-12 mx-auto mb-3 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
-					<FingerprintOutline class="w-6 h-6 text-gray-400 dark:text-gray-500" />
+					<FingerprintOutline class="w-6 h-6 text-gray-500 dark:text-gray-500" />
 				</div>
 				<p class="text-gray-500 dark:text-gray-400">
 					{$_('identities.no_providers')}
@@ -576,7 +577,7 @@
 							<p class="text-sm font-medium text-gray-900 dark:text-white">
 								{audience.label}
 								{#if audience.type === 'department'}
-									<span class="ml-1 text-xs font-normal text-gray-400">{$_('identities.department')}</span>
+									<span class="ml-1 text-xs font-normal text-gray-500">{$_('identities.department')}</span>
 								{/if}
 							</p>
 							<p class="text-xs text-gray-500 dark:text-gray-400">

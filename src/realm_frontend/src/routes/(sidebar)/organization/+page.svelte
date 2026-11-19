@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { realmName } from '$lib/stores/realmInfo';
+	import { pageTitle } from '$lib/utils/page-title';
 	import { onMount } from 'svelte';
 	import {
 		Table,
@@ -206,7 +208,7 @@
 </script>
 
 <svelte:head>
-	<title>Organization | Dashboard</title>
+	<title>{pageTitle('Organization', $realmName)}</title>
 </svelte:head>
 
 <!-- <p>Parameter id: {id}</p> -->

@@ -5,6 +5,9 @@
 	import ExtensionRuntimeHost from '$lib/components/ExtensionRuntimeHost.svelte';
 	import { sidebarConfig } from '$lib/stores/sidebar';
 	import { isMemberInboxExtension, MEMBER_INBOX_HREF } from '$lib/utils/messages';
+	import { resolveExtensionLabel } from '$lib/utils/breadcrumb';
+	import { pageTitle } from '$lib/utils/page-title';
+	import { realmName } from '$lib/stores/realmInfo';
 
 	const id = $derived($page.params.id);
 	const subpath = $derived($page.params.subpath ?? '');
@@ -25,6 +28,10 @@
 		}
 	});
 </script>
+
+<svelte:head>
+	<title>{pageTitle(id ? resolveExtensionLabel(id, $sidebarConfig) : '', $realmName)}</title>
+</svelte:head>
 
 {#if id && !isMemberInboxExtension(id)}
 	{#key id}

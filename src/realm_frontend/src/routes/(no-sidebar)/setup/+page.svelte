@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { DEFAULT_PRIMARY_COLOR } from '$lib/theme/brandingPrimary';
 	import { onMount } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
 	import { hrefWithPreservedTestIdentityParams } from '$lib/test-identity-query.ts';
@@ -83,7 +84,7 @@
 	const toolbarNativeClass =
 		'text-center font-medium inline-flex items-center justify-center px-5 py-2.5 text-sm rounded-lg disabled:cursor-not-allowed disabled:opacity-50';
 	const primaryButtonClass =
-		'bg-gray-900 text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900';
+		'bg-primary-600 text-white hover:bg-primary-700';
 	const secondaryButtonClass =
 		'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 
@@ -104,7 +105,7 @@
 	let tokenChoice = $state('');
 	let symbolLookupTimer: ReturnType<typeof setTimeout> | null = null;
 	let symbolReading = $state(false);
-	let primaryColor = $state('#3b82f6');
+	let primaryColor = $state(DEFAULT_PRIMARY_COLOR);
 	let logoPreview = $state('');
 	let backgroundPreview = $state('');
 	let logoDataUrl = $state('');

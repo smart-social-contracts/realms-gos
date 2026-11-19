@@ -48,7 +48,7 @@
 			<Button
 				href="/join"
 				color="none"
-				class="setup-gate__button bg-gray-900 text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900"
+				class="setup-gate__button bg-primary-600 text-white hover:bg-primary-700"
 			>
 				{$_('setup.gate.log_in')}
 			</Button>

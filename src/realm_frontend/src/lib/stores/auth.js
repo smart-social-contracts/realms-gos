@@ -70,3 +70,6 @@ export const principal = createPersistentStore('auth_principal', '');
 
 export const universe = writable('');
 export const snapshots = writable('');
+
+// Test builds: the index of the test identity this tab is signed in as (0 is Identity 1), or null.
+export const testIdentityIndex = writable(null);

@@ -1,7 +1,7 @@
 <script>
 	import AuthButton from '$lib/components/AuthButton.svelte';
 	import DelegationSwitcher from '$lib/components/DelegationSwitcher.svelte';
-	import { resolveRealmMarkSrc } from '$lib/branding/realmMark';
+	import { REALM_DEFAULT_MARK, resolveRealmMarkSrc } from '$lib/branding/realmMark';
 	import { realmInfo, realmName } from '$lib/stores/realmInfo';
 	import { unreadCount } from '$lib/stores/notifications';
 	import { isEmbeddedInPortal } from '$lib/portal-bridge.ts';
@@ -17,14 +17,19 @@
 
 	const hideRealmName = isEmbeddedInPortal();
 
+	// The realm's own mark first. Only when it fails to load does the default one take its place (never before:
+	// a realm with a logo must not flash the default). If that fails too, no mark is drawn.
 	let markFailed = false;
+	let defaultFailed = false;
 	let lastMarkSrc = '';
 
 	$: markSrc = resolveRealmMarkSrc($realmInfo.logoUrl);
 	$: if (markSrc !== lastMarkSrc) {
 		lastMarkSrc = markSrc;
 		markFailed = false;
+		defaultFailed = false;
 	}
+	$: shownMark = !markSrc || defaultFailed ? '' : markFailed ? REALM_DEFAULT_MARK : markSrc;
 
 	onMount(() => {
 		realmInfo.fetch();
@@ -55,12 +60,12 @@
 
 		<div class="flex min-w-0 items-center justify-center">
 			<a href="/" class="flex min-w-0 max-w-full items-center">
-				{#if markSrc && !markFailed}
+				{#if shownMark}
 					<img
-						src={markSrc}
+						src={shownMark}
 						class="h-8 shrink-0 sm:h-10 pointer-events-none"
-						alt={$realmName || 'Realm logo'}
-						on:error={() => (markFailed = true)}
+						alt={hideRealmName ? $realmName || 'Realm' : ''}
+						on:error={() => (markFailed ? (defaultFailed = true) : (markFailed = true))}
 					/>
 				{/if}
 				{#if !hideRealmName}

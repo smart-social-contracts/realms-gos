@@ -7,7 +7,8 @@ import { normalizePortalRedirectPath } from '$lib/portal-redirect-path.ts';
 import {
   resolveEffectiveAuthChannel,
   shouldRestoreTestModeSession,
-  shouldLoginWithTestIdentity
+  shouldLoginWithTestIdentity,
+  resolveTestIdentityIndex,
 } from '$lib/auth-precedence.ts';
 
 const II_URL = globalThis.__CANISTER_IDS?.internet_identity || 'https://identity.ic0.app';
@@ -208,6 +209,7 @@ async function restoreTestAuthSession() {
     console.log(`[TEST MODE] Restored session from storage: index ${persistedIndex}`);
   }
 
+  void publishTestIdentity();
   return hydrateTestAuthStores(_testIdentity);
 }
 
@@ -259,6 +261,7 @@ function _createTestAuthClientMock() {
       _testLoggedIn = false;
       _testIdentity = null;
       _testIdentityIndex = null;
+      void publishTestIdentity();
     },
   };
 }
@@ -330,7 +333,7 @@ export async function login({ random = false, identityIndex = null, preferTestMo
       }
       identity = await _createTestIdentity({
         random,
-        identityIndex: resolvedIndex ?? (random ? null : 0),
+        identityIndex: resolveTestIdentityIndex(resolvedIndex, readPersistedTestAuthIndex(), random),
       });
     }
     _testLoggedIn = true;
@@ -340,6 +343,7 @@ export async function login({ random = false, identityIndex = null, preferTestMo
     if (_testIdentityIndex != null) {
       persistTestAuthIndex(_testIdentityIndex);
     }
+    void publishTestIdentity();
     const principal = identity.getPrincipal();
     console.log(`[TEST MODE] Logged in with principal: ${principal.toText()}`);
     return { identity, principal };
@@ -432,6 +436,7 @@ export async function logout() {
     _testIdentity = null;
     _testIdentityIndex = null;
     clearPersistedTestAuthIndex();
+    void publishTestIdentity();
     console.log('[TEST MODE] Logged out');
     return;
   }
@@ -444,6 +449,12 @@ export async function logout() {
   }
   const client = await initializeAuthClient();
   await client.logout();
+}
+
+/** Tell the UI which test identity this tab is signed in as (0 is Identity 1), or null. Test builds only. */
+async function publishTestIdentity() {
+  const { testIdentityIndex } = await import('$lib/stores/auth.js');
+  testIdentityIndex.set(__REALMS_TEST_BUILD__ && _testLoggedIn ? _testIdentityIndex : null);
 }
 
 export async function isAuthenticated() {

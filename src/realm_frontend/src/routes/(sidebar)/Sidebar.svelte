@@ -325,7 +325,7 @@
 							<SidebarFold bind:open={foldOpen['__section_me__']} setOpen={(nextOpen) => setFoldOpen('__section_me__', nextOpen)}>
 								<div slot="header" class="flex w-full min-w-0 items-center justify-between">
 									<h3 class={styles.sidebar.sectionHeader()}>{$_('chrome.me')}</h3>
-									<svg class="fold-chevron w-3.5 h-3.5 text-gray-400 " fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+									<svg class="fold-chevron w-3.5 h-3.5 text-gray-500 " fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
 								</div>
 							<ul class="pb-1 space-y-1">
 								{#each topUtilityItems as item}
@@ -356,7 +356,7 @@
 							<SidebarFold bind:open={foldOpen['__section_realm__']} setOpen={(nextOpen) => setFoldOpen('__section_realm__', nextOpen)}>
 								<div slot="header" class="flex w-full min-w-0 items-center justify-between">
 									<h3 class={styles.sidebar.sectionHeader()}>{$_('chrome.my_realm')}</h3>
-									<svg class="fold-chevron w-3.5 h-3.5 text-gray-400 " fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+									<svg class="fold-chevron w-3.5 h-3.5 text-gray-500 " fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
 								</div>
 								<ul class="pb-1 space-y-1">
 									{#each $sidebarConfig.welcomeItems as item (item.href)}
@@ -378,7 +378,7 @@
 									>
 										<div slot="header" class="flex w-full min-w-0 items-center justify-between">
 											<h3 class={styles.sidebar.categoryHeader()}>{categoryLabel(category)}</h3>
-											<svg class="fold-chevron w-3.5 h-3.5 text-gray-400 " fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+											<svg class="fold-chevron w-3.5 h-3.5 text-gray-500 " fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
 										</div>
 										<ul class="pb-1 space-y-1">
 											{#each category.items as item (item.href)}
@@ -404,7 +404,7 @@
 								>
 									<div slot="header" class="flex w-full min-w-0 items-center justify-between">
 										<h3 class={styles.sidebar.sectionHeader()}>{$_('chrome.my_mundus')}</h3>
-										<svg class="fold-chevron w-3.5 h-3.5 text-gray-400 " fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+										<svg class="fold-chevron w-3.5 h-3.5 text-gray-500 " fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
 									</div>
 									<ul class="pb-1 space-y-1">
 										{#each $sidebarConfig.mundusItems as item (item.href)}
@@ -477,7 +477,7 @@
 						{$_('chrome.me')}
 					</h3>
 					<svg
-						class="fold-chevron w-3.5 h-3.5 text-gray-400 "
+						class="fold-chevron w-3.5 h-3.5 text-gray-500 "
 						fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
 					>
 						<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -528,7 +528,7 @@
 							{$_('chrome.my_realm')}
 						</h3>
 						<svg
-							class="fold-chevron w-3.5 h-3.5 text-gray-400 "
+							class="fold-chevron w-3.5 h-3.5 text-gray-500 "
 							fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
 						>
 							<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -566,7 +566,7 @@
 									{categoryLabel(category)}
 								</h3>
 								<svg
-									class="fold-chevron w-3.5 h-3.5 text-gray-400 "
+									class="fold-chevron w-3.5 h-3.5 text-gray-500 "
 									fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
 								>
 									<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -607,7 +607,7 @@
 								{$_('chrome.my_mundus')}
 							</h3>
 							<svg
-								class="fold-chevron w-3.5 h-3.5 text-gray-400 "
+								class="fold-chevron w-3.5 h-3.5 text-gray-500 "
 								fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
 							>
 								<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -641,7 +641,7 @@
 	<!-- Fixed scroll indicator at bottom of sidebar -->
 	{#if showScrollIndicator}
 		<div class="absolute bottom-0 left-0 right-0 h-12 pointer-events-none bg-gradient-to-t from-white to-transparent flex items-end justify-center pb-2">
-			<span class="text-gray-400 text-lg animate-bounce">&#8964;</span>
+			<span class="text-gray-500 text-lg animate-bounce">&#8964;</span>
 		</div>
 	{/if}
 </aside>

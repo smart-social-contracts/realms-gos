@@ -77,6 +77,24 @@ export function coerceRealmLanguages(
 }
 
 /**
+ * The languages a realm offers, from the ``languages`` of its public profile (``realm_info``): BCP 47 tags, the first
+ * being the realm's own. Tags the shell has no translation for are left out ("es-ES" counts as "es"); a realm that
+ * names none it can show gets the default.
+ */
+export function publicRealmLanguages(languages: unknown): { languages: string[]; primary: string } {
+	const shown: string[] = [];
+	for (const raw of Array.isArray(languages) ? languages : []) {
+		if (typeof raw !== 'string') continue;
+		const tag = raw.trim();
+		const id =
+			CATALOG_IDS.find((known) => known.toLowerCase() === tag.toLowerCase()) ??
+			CATALOG_IDS.find((known) => known.toLowerCase() === tag.split('-')[0].toLowerCase());
+		if (id && !shown.includes(id)) shown.push(id);
+	}
+	return shown.length ? { languages: shown, primary: shown[0] } : defaultRealmLanguages();
+}
+
+/**
  * Resolve the UI locale: user override → realm primary → en.
  * User override must be in the realm list; empty means use primary.
  */
