@@ -10,7 +10,7 @@ class UnitMismatch(LegislationError):
 
 
 class Refused(LegislationError):
-    """A chapter the loader refuses, reported as ``<source>/<domain>.py:<line>: <reason>``, the form the
+    """A chapter the loader refuses, reported as ``<source>/<subject_matter>.py:<line>: <reason>``, the form the
     checker prints in CI and the realm shows again at install (layered-codex.md §5.5).
     """
 

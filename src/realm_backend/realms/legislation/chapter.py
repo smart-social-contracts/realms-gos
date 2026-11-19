@@ -1,11 +1,11 @@
 """A chapter's class: ``above()``, the metaclass that applies the marks, and the ``self`` API
 (layered-codex.md §4, §4.1, §4.5).
 
-A chapter is one class, named after its domain, extending ``above("<domain>")``: the class of the
-nearest layer above with a chapter in that domain, or ``Chapter`` at the top. Its members are hooks
+A chapter is one class, named after its subject matter, extending ``above("<subject_matter>")``: the class of the
+nearest layer above with a chapter in that subject matter, or ``Chapter`` at the top. Its members are hooks
 ``on_<op>``, guards ``check_<op>`` and ``compute_<op>`` named after GGG operations, helpers, settings
 and forbids. The metaclass reads each member's mark and refuses what the layer above does not allow,
-in the form the checker prints: ``<source>/<domain>.py:<line>: <reason>``. Once loaded, a chapter's
+in the form the checker prints: ``<source>/<subject_matter>.py:<line>: <reason>``. Once loaded, a chapter's
 class never changes: its settings are frozen values, attribute assignment is refused, and the SDK's
 own classes are sealed the same way.
 """
@@ -14,7 +14,7 @@ from realms.legislation.context import (
     GGG,
     MAX_DEPTH,
     Denial,
-    Domains,
+    SubjectMatters,
     Event,
     Ref,
 )
@@ -39,13 +39,13 @@ _LOADING = []  # the chapter being loaded, set by Codex.load while it runs the f
 class Load(metaclass=Sealed):
     """One chapter being loaded: what ``above()`` and the metaclass need to know about it."""
 
-    __slots__ = ("codex", "source", "domain", "own", "text", "base")
+    __slots__ = ("codex", "source", "subject_matter", "own", "text", "base")
 
-    def __init__(self, codex, source, domain, own, text):
-        self.codex, self.source, self.domain, self.own, self.text = (
+    def __init__(self, codex, source, subject_matter, own, text):
+        self.codex, self.source, self.subject_matter, self.own, self.text = (
             codex,
             source,
-            domain,
+            subject_matter,
             own,
             text,
         )
@@ -53,20 +53,20 @@ class Load(metaclass=Sealed):
 
     @property
     def file(self):
-        return f"{self.source}/{self.domain}.py"
+        return f"{self.source}/{self.subject_matter}.py"
 
 
 def loading():
     if not _LOADING:
         raise LegislationError(
-            "a chapter is defined by loading it into a codex: Codex.load(source, domain, text)"
+            "a chapter is defined by loading it into a codex: Codex.load(source, subject_matter, text)"
         )
     return _LOADING[-1]
 
 
-def camel(domain):
+def camel(subject_matter):
     """``tax`` is ``Tax``, ``data_protection`` is ``DataProtection``."""
-    return "".join(part.capitalize() for part in domain.split("_"))
+    return "".join(part.capitalize() for part in subject_matter.split("_"))
 
 
 def line_of(text, *starts):
@@ -127,18 +127,19 @@ def kind(value):
     return type(value).__name__
 
 
-def above(domain):
-    """The class of the nearest layer above with a chapter in ``domain``, in this realm's layer path: the
+def above(subject_matter):
+    """The class of the nearest layer above with a chapter in ``subject_matter``, in this realm's layer path: the
     base of every chapter class. The top layer gets ``Chapter``. The file never names a version: the codex
     being built decides which class this is."""
     load = loading()
-    if domain != load.domain:
+    if subject_matter != load.subject_matter:
         raise Refused(
-            f'above({domain!r}) in the {load.domain} chapter: a chapter extends above("{load.domain}")',
+            f"above({subject_matter!r}) in the {load.subject_matter} chapter: "
+            f'a chapter extends above("{load.subject_matter}")',
             line_of(load.text, "class "),
             load.file,
         )
-    load.base = load.codex.top(domain)
+    load.base = load.codex.top(subject_matter)
     return load.base
 
 
@@ -153,7 +154,7 @@ class Member(metaclass=Sealed):
         "legislation",
         "check",
         "source",
-        "domain",
+        "subject_matter",
         "line",
         "value",
     )
@@ -161,11 +162,11 @@ class Member(metaclass=Sealed):
     def __init__(self, name, kind, value, mark, legislation, check, load, line):
         self.name, self.kind, self.value, self.mark = name, kind, value, mark
         self.legislation, self.check, self.line = legislation, check, line
-        self.source, self.domain = load.source, load.domain
+        self.source, self.subject_matter = load.source, load.subject_matter
 
     @property
     def file(self):
-        return f"{self.source}/{self.domain}.py"
+        return f"{self.source}/{self.subject_matter}.py"
 
     @property
     def cited(self):
@@ -188,16 +189,16 @@ def as_layer(chapter, source, fn, args, kwargs):
     """Run ``fn`` on ``chapter`` as the layer ``source`` that defined it, so ``self.layer`` and ``uses``
     are those of the layer whose code runs, whatever lower class the instance has.
 
-    Every method of every chapter runs through here, so this is where calls between domains are
-    counted: a method of a domain other than the one running is one more nested call, however the
+    Every method of every chapter runs through here, so this is where calls between subject matters are
+    counted: a method of a subject matter other than the one running is one more nested call, however the
     caller got hold of it, and the one that would pass ``MAX_DEPTH`` is refused."""
-    context, domain = chapter.__context__, type(chapter).__domain__
-    crossing = bool(context.running) and context.running[-1] != domain
+    context, subject_matter = chapter.__context__, type(chapter).__subject_matter__
+    crossing = bool(context.running) and context.running[-1] != subject_matter
     if crossing:
         if context.depth >= MAX_DEPTH:
-            raise LegislationError(f"calls between domains stop at depth {MAX_DEPTH}")
+            raise LegislationError(f"calls between subject matters stop at depth {MAX_DEPTH}")
         context.depth += 1
-    context.running.append(domain)
+    context.running.append(subject_matter)
     layers = chapter.__dict__.setdefault("__layers__", [])
     layers.append(source)
     try:
@@ -283,7 +284,7 @@ class ChapterMeta(type, metaclass=Sealed):
     def __new__(meta, name, bases, namespace):
         if not bases:  # Chapter itself
             cls = super().__new__(meta, name, bases, namespace)
-            _keep(cls, members={}, own={}, uses=(), source=None, domain=None, file=None)
+            _keep(cls, members={}, own={}, uses=(), source=None, subject_matter=None, file=None)
             return cls
         load = loading()
 
@@ -297,11 +298,11 @@ class ChapterMeta(type, metaclass=Sealed):
             )
         if len(bases) != 1 or bases[0] is not load.base:
             refuse(
-                f'{name} extends above("{load.domain}") and nothing else', class_line
+                f'{name} extends above("{load.subject_matter}") and nothing else', class_line
             )
-        if name != camel(load.domain):
+        if name != camel(load.subject_matter):
             refuse(
-                f"the class of {load.file} is named {camel(load.domain)}", class_line
+                f"the class of {load.file} is named {camel(load.subject_matter)}", class_line
             )
         base = bases[0]
         uses = namespace.get("uses", ())
@@ -311,7 +312,7 @@ class ChapterMeta(type, metaclass=Sealed):
             or len(set(uses)) != len(uses)
         ):
             refuse(
-                "uses lists the domains this chapter calls, each once, as strings",
+                "uses lists the subject matters this chapter calls, each once, as strings",
                 line_of(load.text, "uses"),
             )
         own, attrs = {}, {}
@@ -333,7 +334,7 @@ class ChapterMeta(type, metaclass=Sealed):
             own=own,
             uses=tuple(uses),
             source=load.source,
-            domain=load.domain,
+            subject_matter=load.subject_matter,
             file=load.file,
         )
         return cls
@@ -498,11 +499,11 @@ def _install(member):
 
 
 class Chapter(metaclass=ChapterMeta):
-    """The base of the top layer's chapter in every domain, and the ``self`` API every chapter has.
+    """The base of the top layer's chapter in every subject matter, and the ``self`` API every chapter has.
 
     A chapter changes nothing itself: ``self.ggg.<op>(**args)`` queues GGG operation ``<op>`` as an
     effect. ``self.deny(reason)`` is a guard's refusal. ``self.legislation.<d>`` and ``self.layer.<d>``
-    reach a declared domain (layered-codex.md §4.4). ``self.calendar`` is the realm's calendar, and
+    reach a declared subject matter (layered-codex.md §4.4). ``self.calendar`` is the realm's calendar, and
     ``self.local_day(at)`` the realm's local day of a timestamp.
     """
 
@@ -512,8 +513,8 @@ class Chapter(metaclass=ChapterMeta):
         object.__setattr__(self, "__context__", context)
 
     def __setattr__(self, name, value):
-        """A chapter writes nothing on self. One instance runs every layer's code of a domain in a call, so a value
-        stored by one layer would change what another reads, the code of a layer above that is ``fixed`` included.
+        """A chapter writes nothing on self. One instance runs every layer's code of a subject matter in a call, so a
+        value stored by one layer would change what another reads, the code of a layer above that is ``fixed`` included.
         """
         raise LegislationError(
             f"self.{name}: a chapter stores nothing on self, the instance is shared by the layers of a call"
@@ -550,14 +551,14 @@ class Chapter(metaclass=ChapterMeta):
 
     @property
     def legislation(self):
-        return Domains(self, "legislation")
+        return SubjectMatters(self, "legislation")
 
     @property
     def layer(self):
-        return Domains(self, "layer")
+        return SubjectMatters(self, "layer")
 
     def running_layer(self):
-        """The source whose method is running: its ``uses`` and its view of other domains apply."""
+        """The source whose method is running: its ``uses`` and its view of other subject matters apply."""
         layers = self.__dict__.get("__layers__")
         return layers[-1] if layers else type(self).__source__
 

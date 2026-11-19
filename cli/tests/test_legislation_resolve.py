@@ -109,7 +109,7 @@ def test_it_prints_the_flattened_view_of_tax_as_valencia_runs_it(tree):
     assert section(out.output, "tax, as it applies") == TAX_VIEW
 
 
-def test_a_domain_only_a_sync_source_fills_still_shows_in_the_view(tree):
+def test_a_subject_matter_only_a_sync_source_fills_still_shows_in_the_view(tree):
     out = resolve(tree, *SYNC_SOURCES)
     assert (
         section(out.output, "water, as it applies")

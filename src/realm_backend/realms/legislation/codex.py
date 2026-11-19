@@ -40,9 +40,11 @@ SAFE_BUILTINS = (
     "zip", "Ellipsis", "NotImplemented", "__build_class__",
 )  # fmt: skip
 _SOURCE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
-_DOMAIN_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
-MAX_DOMAIN = 64  # characters: a domain id is a file name and a key in a published record
-DOMAIN_RULE = f"lowercase letters, digits and _, starting with a letter, at most {MAX_DOMAIN} characters"
+_SUBJECT_MATTER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+MAX_SUBJECT_MATTER = 64  # characters: a subject matter id is a file name and a key in a published record
+SUBJECT_MATTER_RULE = (
+    f"lowercase letters, digits and _, starting with a letter, at most {MAX_SUBJECT_MATTER} characters"
+)
 
 
 def source_id(source):
@@ -55,18 +57,19 @@ def source_id(source):
     return source
 
 
-def domain_id(domain):
-    """``data_protection``: ``DOMAIN_RULE``. That is the whole rule, here and wherever Realms GOS reads a
-    domain id: a codex chooses its own domains, so an id is checked for its shape and never against a list.
+def subject_matter_id(subject_matter):
+    """``data_protection``: ``SUBJECT_MATTER_RULE``. That is the whole rule, here and wherever Realms GOS reads a
+    subject matter id: a codex chooses its own subject matters, so an id is checked for its shape and never against a
+    list.
     """
     if (
-        not isinstance(domain, str)
-        or not 0 < len(domain) <= MAX_DOMAIN
-        or not domain[0].isalpha()
-        or not set(domain) <= _DOMAIN_CHARS
+        not isinstance(subject_matter, str)
+        or not 0 < len(subject_matter) <= MAX_SUBJECT_MATTER
+        or not subject_matter[0].isalpha()
+        or not set(subject_matter) <= _SUBJECT_MATTER_CHARS
     ):
-        raise LegislationError(f"{domain!r} is not a domain id ({DOMAIN_RULE})")
-    return domain
+        raise LegislationError(f"{subject_matter!r} is not a subject matter id ({SUBJECT_MATTER_RULE})")
+    return subject_matter
 
 
 def one_argument_type(obj, *rest):
@@ -146,7 +149,7 @@ class Codex(metaclass=Sealed):
         self.operations = None if operations is None else frozenset(operations)
         self.facts = None if facts is None else _cedar().FactSchema(facts)
         self.modules = dict(modules or {})
-        self.chapters = {}  # domain -> classes, top to bottom
+        self.chapters = {}  # subject matter -> classes, top to bottom
         self.calendars = {}  # source -> its calendar.json
         self._calendar = None
 
@@ -157,40 +160,41 @@ class Codex(metaclass=Sealed):
             )
         return self.layers.index(source)
 
-    def top(self, domain):
-        """What ``above(domain)`` returns for the next chapter loaded in ``domain``."""
-        chain = self.chapters.get(domain)
+    def top(self, subject_matter):
+        """What ``above(subject_matter)`` returns for the next chapter loaded in ``subject_matter``."""
+        chain = self.chapters.get(subject_matter)
         return chain[-1] if chain else Chapter
 
-    def resolved(self, domain):
-        """The class of ``domain`` as it applies in this realm: the lowest layer's."""
-        chain = self.chapters.get(domain)
+    def resolved(self, subject_matter):
+        """The class of ``subject_matter`` as it applies in this realm: the lowest layer's."""
+        chain = self.chapters.get(subject_matter)
         if not chain:
-            raise LegislationError(f"this realm has no {domain} chapter")
+            raise LegislationError(f"this realm has no {subject_matter} chapter")
         return chain[-1]
 
-    def resolved_at(self, domain, source):
-        """The class of ``domain`` down to layer ``source`` only: the source's own view, ignoring lower layers."""
+    def resolved_at(self, subject_matter, source):
+        """The class of ``subject_matter`` down to layer ``source`` only: the source's own view, ignoring lower
+        layers."""
         at = self.index(source)
         chain = [
-            c for c in self.chapters.get(domain, ()) if self.index(c.__source__) <= at
+            c for c in self.chapters.get(subject_matter, ()) if self.index(c.__source__) <= at
         ]
         if not chain:
-            raise LegislationError(f"no {domain} chapter at or above {source}")
+            raise LegislationError(f"no {subject_matter} chapter at or above {source}")
         return chain[-1]
 
-    def chapter_at(self, domain, source):
-        """The class loaded for exactly ``<source>/<domain>.py``."""
-        for cls in self.chapters.get(domain, ()):
+    def chapter_at(self, subject_matter, source):
+        """The class loaded for exactly ``<source>/<subject_matter>.py``."""
+        for cls in self.chapters.get(subject_matter, ()):
             if cls.__source__ == source:
                 return cls
-        raise LegislationError(f"no {source}/{domain}.py is loaded")
+        raise LegislationError(f"no {source}/{subject_matter}.py is loaded")
 
-    def load(self, source, domain, text):
-        """Run chapter ``<source>/<domain>.py`` and add its class below the chapters of ``domain``."""
-        file = f"{source_id(source)}/{domain_id(domain)}.py"
+    def load(self, source, subject_matter, text):
+        """Run chapter ``<source>/<subject_matter>.py`` and add its class below the chapters of ``subject_matter``."""
+        file = f"{source_id(source)}/{subject_matter_id(subject_matter)}.py"
         at = self.index(source)
-        chain = self.chapters.get(domain, [])
+        chain = self.chapters.get(subject_matter, [])
         if chain and self.index(chain[-1].__source__) >= at:
             raise Refused(
                 f"chapters load top to bottom: {chain[-1].__file__} is already loaded",
@@ -202,7 +206,7 @@ class Codex(metaclass=Sealed):
         except SyntaxError as e:
             raise Refused(e.msg, e.lineno, file)
         imported = subset.check(code, text, file)
-        load = Load(self, source, domain, source == self.realm, text)
+        load = Load(self, source, subject_matter, source == self.realm, text)
         space = {"__name__": file, "__builtins__": self._builtins(file)}
         _LOADING.append(load)
         try:
@@ -216,7 +220,7 @@ class Codex(metaclass=Sealed):
         finally:
             _LOADING.pop()
         cls = self._the_chapter(space, load, imported)
-        self.chapters.setdefault(domain, []).append(cls)
+        self.chapters.setdefault(subject_matter, []).append(cls)
         return cls
 
     def _builtins(self, file):
@@ -289,7 +293,7 @@ class Codex(metaclass=Sealed):
                 space[key] = freeze(value)
         if len(found) != 1:
             raise Refused(
-                f"one class per file, {camel(load.domain)}, extending above({load.domain!r})",
+                f"one class per file, {camel(load.subject_matter)}, extending above({load.subject_matter!r})",
                 None,
                 load.file,
             )
@@ -318,7 +322,7 @@ class Codex(metaclass=Sealed):
         """Every setting's ``check=``, run on the value that wins in this realm's layer path. A codex
         whose value fails, or whose check raises, is refused, naming the chapter that set the value
         and the check it fails."""
-        for domain, chain in self.chapters.items():
+        for subject_matter, chain in self.chapters.items():
             lowest = chain[-1]
             for name, member in lowest.__members__.items():
                 if member.kind != "setting":
@@ -358,8 +362,8 @@ class Codex(metaclass=Sealed):
 
     def forbids(self):
         """Every forbid of every chapter, bound to this realm (layered-codex.md §6, §9.4): its ``S.``
-        settings read from the domain as it resolves here, and its tree checked against the fact
-        schema. In a fixed order, so the Cedar is canonical: layers top to bottom, domains by name,
+        settings read from the subject matter as it resolves here, and its tree checked against the fact
+        schema. In a fixed order, so the Cedar is canonical: layers top to bottom, subject matters by name,
         and each chapter's forbids as written. A forbid the checks refuse raises ``Refused``.
         """
         if self.facts is None:
@@ -368,11 +372,11 @@ class Codex(metaclass=Sealed):
             )
         bound = []
         for source in self.layers:
-            for domain in sorted(self.chapters):
-                for cls in self.chapters[domain]:
+            for subject_matter in sorted(self.chapters):
+                for cls in self.chapters[subject_matter]:
                     if cls.__source__ != source:
                         continue
-                    resolved = self.resolved(domain)
+                    resolved = self.resolved(subject_matter)
                     for member in cls.__own__.values():
                         if member.kind == "forbid":
                             bound.append(_cedar().bind(member, resolved, self.facts))
@@ -395,6 +399,6 @@ class Codex(metaclass=Sealed):
         """A call's context: the time, the approvals the operation carries and the realm's local-day function."""
         return Context(self, now, approvals, self.operations, local_day)
 
-    def instance(self, domain, context):
-        """The resolved chapter of ``domain``, ready to run for ``context``."""
-        return self.resolved(domain)(context)
+    def instance(self, subject_matter, context):
+        """The resolved chapter of ``subject_matter``, ready to run for ``context``."""
+        return self.resolved(subject_matter)(context)

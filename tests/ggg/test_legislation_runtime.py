@@ -2,7 +2,7 @@
 in the sandbox's fallback namespace (core.sandbox.Resident without ``_basilisk_sandbox``) through the same program the
 canister runs. Guards before an operation, hooks after it, ``compute_`` answers during it; a raising guard denies,
 a raising hook never fails the caller, both count; reserved operations run no chapter; a revert reloads without
-``on_codex_activate``; what crosses a domain boundary is plain data (#543). tests/deployed/test_legislation_runtime.py
+``on_codex_activate``; what crosses a subject matter boundary is plain data (#543). tests/deployed/test_legislation_runtime.py
 runs the same on the real wasm."""
 
 import json
@@ -206,7 +206,7 @@ TOWN = "x/town"
 
 
 def step_chapters(count):
-    """``count`` domains in a chain, each calling the next: ``step0`` reaches ``step<count-1>``."""
+    """``count`` subject matters in a chain, each calling the next: ``step0`` reaches ``step<count-1>``."""
     chapters = {}
     for i in range(count):
         uses = f'    uses = ["step{i + 1}"]\n' if i + 1 < count else ""
@@ -217,15 +217,15 @@ def step_chapters(count):
 
 
 def layered(chapters, calendars=(), layers=None, **fields):
-    """A layered codex written through the entities, its texts stored, from ``{(source, domain): text}`` in layer order
+    """A layered codex written through the entities, its texts stored, from ``{(source, subject_matter): text}`` in layer order
     and ``[(source, calendar json)]``; the realm's own layer is the last."""
     layers = layers or list(dict.fromkeys(source for source, _ in chapters))
     paths = {}
-    for source, domain in chapters:
-        paths.setdefault(domain, []).append(source)
+    for source, subject_matter in chapters:
+        paths.setdefault(subject_matter, []).append(source)
     entries = {}
-    for (source, domain), text in chapters.items():
-        entries[f"{source}/{domain}"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
+    for (source, subject_matter), text in chapters.items():
+        entries[f"{source}/{subject_matter}"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
     for source, text in calendars:
         entries[f"{source}/calendar"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
     return LayeredCodex(id=store.codex_id(layers, paths, entries), layers=layers, layer_paths=paths, chapters=entries,
@@ -356,7 +356,7 @@ def test_a_raising_guard_denies_naming_the_chapter_and_counts_until_it_next_succ
     call("t_act", what="break the water")
     assert failures()["x/town/water.py"]["check_t_act"]["count"] == 2
     error = call("t_act", what="a view")["error"]  # a guard returns None or self.deny(reason), nothing else
-    assert error.startswith("legislation error in x/town/water.py: check_t_act returned Domains")
+    assert error.startswith("legislation error in x/town/water.py: check_t_act returned SubjectMatters")
     ok("t_act", what="fine")
     assert failures() == {} and ok("codex_status", query=True)["healthy"]
 
@@ -365,7 +365,7 @@ def test_a_raising_hook_never_fails_the_caller_and_counts_against_its_chapter():
     town({(TOWN, "register"): BROKEN_HOOK})
     LOG.clear()
     assert ok("t_act", what="break the register")["done"] == "break the register"
-    assert LOG == [("es:break the register", "codex"), ("town:es:ctl", "codex")]  # the other domains' hooks still ran
+    assert LOG == [("es:break the register", "codex"), ("town:es:ctl", "codex")]  # the other subject matters' hooks still ran
     recorded = failures()
     assert recorded == {"x/town/register.py": {"on_t_act": {"count": 1, "error": "ZeroDivisionError: integer division or modulo by zero", "at": 1790000000}}}
     ok("t_act", what="fine")
@@ -407,7 +407,7 @@ def awaiting(gen):
 
 
 def test_a_hooks_effect_that_traps_counts_against_its_chapter_and_the_operation_that_ran_the_hook_stands():
-    """An effect that traps ends only the message it runs in: the realm calls its own ``hook_effects`` for each domain
+    """An effect that traps ends only the message it runs in: the realm calls its own ``hook_effects`` for each subject matter
     (the issue, realms-gos#679, is a chapter whose effect passes a number as the recipient of a notification)."""
     town({(TOWN, "register"): '''
 from realms.legislation import above
@@ -421,7 +421,7 @@ class Register(above("register")):
     fake_chain.state["caller"] = "ctl"
     out = json.loads(awaiting(op.dispatch("t_act", json.dumps({"what": "trap"}))))
     assert out["ok"] and out["done"] == "trap"
-    assert LOG == [("es:trap", "codex"), ("town:es:ctl", "codex")]  # the other domains' effects still ran
+    assert LOG == [("es:trap", "codex"), ("town:es:ctl", "codex")]  # the other subject matters' effects still ran
     error = failures()["x/town/register.py"]["on_t_act"]["error"]
     assert error.startswith("the effects were rejected: ") and "t_break: recipient is text" in error
     assert not ok("codex_status", query=True)["healthy"]
@@ -455,9 +455,9 @@ class Register(above("register")):
 '''
 
 
-def test_a_codex_switch_that_lands_while_a_domains_effects_wait_ends_the_old_codexs_pass(monkeypatch):
-    """A domain's effects are awaited, and another message can switch the codex meanwhile. The old codex's remaining
-    domains would then be asked of the new codex's sandbox, and their failures recorded on the new codex: the pass
+def test_a_codex_switch_that_lands_while_a_subject_matters_effects_wait_ends_the_old_codexs_pass(monkeypatch):
+    """A subject matter's effects are awaited, and another message can switch the codex meanwhile. The old codex's remaining
+    subject matters would then be asked of the new codex's sandbox, and their failures recorded on the new codex: the pass
     ends at the first await that returns on another codex."""
     old = town({(TOWN, "register"): REGISTER % "old"})
     chapters = {("eu", "data_protection"): EU_DP, ("eu/es", "data_protection"): ES_DP, ("eu/es", "procedure"): ES_PROCEDURE,
@@ -465,21 +465,21 @@ def test_a_codex_switch_that_lands_while_a_domains_effects_wait_ends_the_old_cod
                 (TOWN, "local_regime"): TOWN_LOCAL_REGIME, (TOWN, "realm"): TOWN_REALM,
                 (TOWN, "register"): REGISTER % "new"}
     new = layered(chapters, ((f"eu/es", CALENDAR),), layers=["eu", "eu/es", TOWN])
-    effects_of_a_domain, switched = fake_chain.own_hook_effects, []
+    effects_of_a_subject_matter, switched = fake_chain.own_hook_effects, []
 
     def interleaved(effects):
-        if not switched:  # while the first domain's effects wait, another message switches the codex
+        if not switched:  # while the first subject matter's effects wait, another message switches the codex
             switched.append(True)
             old.status, new.status = "inactive", "active"
             legislation.load(new)
-        return (yield from effects_of_a_domain(effects))
+        return (yield from effects_of_a_subject_matter(effects))
 
     monkeypatch.setattr(fake_chain, "own_hook_effects", interleaved)
     LOG.clear()
     fake_chain.state["caller"] = "ctl"
     assert json.loads(awaiting(op.dispatch("t_act", json.dumps({"what": "x"})))) == {"ok": True, "done": "x"}
     assert switched and legislation._state["codex"] == new.id
-    assert LOG == [("es:x", "codex"), ("town:es:ctl", "codex")]  # the domain in flight finished; no other ran, on either codex
+    assert LOG == [("es:x", "codex"), ("town:es:ctl", "codex")]  # the subject matter in flight finished; no other ran, on either codex
     assert LayeredCodex[old.id].failures == {} and LayeredCodex[new.id].failures == {}
 
 
@@ -517,7 +517,7 @@ class Water(above("water")):
     def compute_t_day(self, at):
         return 1
 '''})
-    with pytest.raises(Exception, match="compute_t_day is defined in realm, water: one domain answers"):
+    with pytest.raises(Exception, match="compute_t_day is defined in realm, water: one subject matter answers"):
         op.run(codex_api.compute("t_day", {"at": 1}))
     assert failures()["x/town/realm.py"]["compute_t_day"]["count"] == 1
 
@@ -613,10 +613,10 @@ def test_spains_guard_counts_working_days_from_the_realms_local_day():
     assert ok("proposal_create", effective_at=now + 22 * 86400, **args)["proposal"]  # the 13th
 
 
-# ── Across domains (#543) and the depth limit ───────────────────────────────────────────────────────────────────
+# ── Across subject matters (#543) and the depth limit ───────────────────────────────────────────────────────────────────
 
 
-def test_what_crosses_a_domain_boundary_is_plain_data_or_the_public_view():
+def test_what_crosses_a_subject_matter_boundary_is_plain_data_or_the_public_view():
     town({(TOWN, "alpha"): ALPHA, (TOWN, "beta"): BETA, (TOWN, "gamma"): GAMMA})
     assert call("t_act", what="probe data")["error"] == "beta:gamma"  # alpha reaches beta's public members
     error = call("t_act", what="probe self")["error"]
@@ -628,15 +628,15 @@ def test_what_crosses_a_domain_boundary_is_plain_data_or_the_public_view():
 
 def test_a_uses_chain_deeper_than_eight_is_refused_at_build_and_eight_calls_run():
     sources = {}
-    for (source, domain), text in step_chapters(10).items():
+    for (source, subject_matter), text in step_chapters(10).items():
         sources[store.checksum(text)] = text
     plan = {"realm": TOWN, "layers": [TOWN], "calendars": [],
-            "chapters": [{"source": TOWN, "domain": f"step{i}", "sha256": store.checksum(step_chapters(10)[(TOWN, f"step{i}")])}
+            "chapters": [{"source": TOWN, "subject_matter": f"step{i}", "sha256": store.checksum(step_chapters(10)[(TOWN, f"step{i}")])}
                          for i in range(10)]}
     out = legislation.build(plan, sources)
     assert out["views"] == {} and out["cedar"] is None
     assert out["errors"][0].startswith("uses chain step0 → step1 → step2 → step3 → step4 → step5 → step6 → step7 → step8 → step9 "
-                                       "is 9 calls deep: calls between domains stop at depth 8")
+                                       "is 9 calls deep: calls between subject matters stop at depth 8")
     codex = layered({**step_chapters(8), (TOWN, "realm"): '''
 from realms.legislation import above
 
@@ -647,7 +647,7 @@ class Realm(above("realm")):
         return self.legislation.step0.depth()
 '''}, layers=[TOWN])
     activate(codex)
-    assert op.run(codex_api.compute("t_day", {"at": 0})) == 7  # realm → step0 → … → step7: eight calls between domains
+    assert op.run(codex_api.compute("t_day", {"at": 0})) == 7  # realm → step0 → … → step7: eight calls between subject matters
 
 
 # ── compute_tax_assess: §5.6's IBI on a parcel the codex reads, rounded as GGG rounds ───────────────────────────────
@@ -926,7 +926,7 @@ def test_build_returns_the_views_the_errors_and_the_cedar():
                 "class Procedure(above('procedure')):\n    def working_days_after(self, day, n):\n        pass\n"}
     sources = {store.checksum(t): t for t in chapters.values()} | {store.checksum(CALENDAR): CALENDAR}
     plan = {"realm": TOWN, "layers": ["eu/es", TOWN], "calendars": [{"source": "eu/es", "sha256": store.checksum(CALENDAR)}],
-            "chapters": [{"source": s, "domain": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
+            "chapters": [{"source": s, "subject_matter": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
     out = legislation.build(plan, sources)
     assert out["errors"] == ["x/town/procedure.py:3: working_days_after is fixed by eu/es/procedure.py (Ley 39/2015 Art. 30)"]
     plan["chapters"] = plan["chapters"][:1]
@@ -936,12 +936,12 @@ def test_build_returns_the_views_the_errors_and_the_cedar():
     forbid = ("from realms.legislation import F, above, forbid\nclass Tax(above('tax')):\n"
               "    cap = forbid('tax_policy_propose', (F.code == 'ibi_urban') & F.rate.is_some() & (F.rate > 1100000), each='taxes', legislation='TRLRHL Art. 72.3')\n")
     out = legislation.build({"realm": TOWN, "layers": [TOWN], "calendars": [],
-                             "chapters": [{"source": TOWN, "domain": "tax", "sha256": store.checksum(forbid)}]},
+                             "chapters": [{"source": TOWN, "subject_matter": "tax", "sha256": store.checksum(forbid)}]},
                             {store.checksum(forbid): forbid})
     assert out["errors"] == [] and '@id("x/town/tax/cap")' in out["cedar"] and "context.facts.rate > 1100000" in out["cedar"]
 
 
-def test_the_flattened_view_of_every_domain_is_a_public_read():
+def test_the_flattened_view_of_every_subject_matter_is_a_public_read():
     assert ok("codex_views", "stranger", query=True)["views"] == {}  # no layered codex is running
     town()
     views = ok("codex_views", "stranger", query=True)["views"]

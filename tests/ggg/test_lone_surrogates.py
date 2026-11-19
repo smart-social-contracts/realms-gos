@@ -249,7 +249,7 @@ def test_a_change_list_that_holds_one_fails_the_install_job_naming_the_reason():
 # after every route that brought the text has checked its size and its checksum, and the install job records the
 # refusal as the build's: so a capital that serves other bytes than its record names is still blamed for that,
 # surrogate or not.
-CALENDAR = {"chapter": "arcadia/calendar", "domain": "calendar", "source": "arcadia"}
+CALENDAR = {"chapter": "arcadia/calendar", "subject_matter": "calendar", "source": "arcadia"}
 CALENDAR_REASON = "arcadia/calendar.json holds a lone surrogate (U+D800 to U+DFFF), which is not text"
 
 

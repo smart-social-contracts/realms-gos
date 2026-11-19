@@ -38,19 +38,19 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def chapter_text(domain, version="1.0.0"):
-    return arcadia.chapter(next(r for r in arcadia.releases() if r["version"] == version)["chapters"][domain])
+def chapter_text(subject_matter, version="1.0.0"):
+    return arcadia.chapter(next(r for r in arcadia.releases() if r["version"] == version)["chapters"][subject_matter])
 
 
 def own_layer(founder, version="1.0.0"):
-    """``{chapter id: bytes}`` of arcadia's own layer: its release's chapters and the realm domain's."""
+    """``{chapter id: bytes}`` of arcadia's own layer: its release's chapters and the realm subject matter's."""
     return {f"arcadia/{d}": chapter_text(d, version) for d in ("tax", "procedure")} | {
         "arcadia/realm": (REALM_CHAPTER % {"founder": founder}).encode()}
 
 
 def expected_id(chapters, realm="arcadia"):
     """The codex id of ``chapters`` as the realm's own layer (core.layered_codex.codex_id), computed here."""
-    paths = {domain: [realm] for domain in sorted(c.rpartition("/")[2] for c in chapters)}
+    paths = {subject_matter: [realm] for subject_matter in sorted(c.rpartition("/")[2] for c in chapters)}
     sums = {c: "sha256:" + sha(body) for c, body in chapters.items()}
     canonical = json.dumps({"chapters": sums, "layer_paths": paths, "layers": [realm]}, sort_keys=True,
                            separators=(",", ":"), ensure_ascii=False)

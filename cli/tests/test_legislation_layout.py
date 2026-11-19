@@ -19,7 +19,7 @@ from realms.cli.commands.legislation import legislation_app
 from realms.cli.commands.legislation_layout import layout_problems
 
 VALENCIA = "eu/es/vc/46250-valencia"
-CHAPTER = "from realms.legislation import above\n\nclass {name}(above('{domain}')):\n    pass\n"
+CHAPTER = "from realms.legislation import above\n\nclass {name}(above('{subject_matter}')):\n    pass\n"
 CALENDAR = {
     "weekend": ["sat", "sun"],
     "years": {"2027": [{"date": "2027-01-01", "name": {"es": "Año Nuevo"}}]},
@@ -67,9 +67,9 @@ def source_json(source: str, **changes) -> dict:
     }
 
 
-def chapter(domain: str) -> str:
+def chapter(subject_matter: str) -> str:
     return CHAPTER.format(
-        name="".join(w.capitalize() for w in domain.split("_")), domain=domain
+        name="".join(w.capitalize() for w in subject_matter.split("_")), subject_matter=subject_matter
     )
 
 
@@ -167,15 +167,15 @@ def test_a_folder_name_of_lowercase_letters_digits_and_hyphens_is_kept(tree):
 
 
 @pytest.mark.parametrize("name", ["Tax.py", "__init__.py", "local-regime.py", "2027_tax.py", "a" * 65 + ".py"])
-def test_a_py_file_that_is_not_a_domain_id_is_refused(tree, name):
+def test_a_py_file_that_is_not_a_subject_matter_id_is_refused(tree, name):
     write(tree, f"eu/es/{name}", "")
-    breaks(tree, f"eu/es/{name}: {name[:-3]} is not a domain id")
+    breaks(tree, f"eu/es/{name}: {name[:-3]} is not a subject matter id")
 
 
-@pytest.mark.parametrize("domain", ["drought_measures", "tax2", "a" * 64])
-def test_a_py_file_named_after_a_domain_the_codex_chose_is_kept(tree, domain):
+@pytest.mark.parametrize("subject_matter", ["drought_measures", "tax2", "a" * 64])
+def test_a_py_file_named_after_a_subject_matter_the_codex_chose_is_kept(tree, subject_matter):
     """A codex files chapters under the ids it chooses: only the shape of the id is checked, never a list."""
-    write(tree, f"{VALENCIA}/{domain}.py", chapter(domain))
+    write(tree, f"{VALENCIA}/{subject_matter}.py", chapter(subject_matter))
     assert problems(tree) == []
 
 
@@ -337,14 +337,14 @@ def one_release(tree, **changes):
         ({"effective_from": "soon"}, "effective_from is a day"),
         ({"commit": "abc123"}, "commit is the 40 hex digits"),
         ({"commit": "A" * 40}, "commit is the 40 hex digits"),
-        ({"chapters": {}}, "chapters is {domain: sha256:<hex>}"),
+        ({"chapters": {}}, "chapters is {subject_matter: sha256:<hex>}"),
         (
             {"chapters": {"data_protection": "sha256:xyz"}},
             "chapters.data_protection is sha256:<64 hex digits>",
         ),
         (
             {"chapters": {"Mining": "sha256:" + "0" * 64}},
-            "chapters lists Mining, which is not a domain id",
+            "chapters lists Mining, which is not a subject matter id",
         ),
         ({"calendar": "sha256:short"}, "calendar is sha256:<64 hex digits>, or null"),
         ({"notes": "a release"}, "notes are text by language"),
@@ -553,7 +553,7 @@ def test_check_stops_at_the_layout_before_it_loads_a_chapter(tree, check):
     write(tree, "eu/es/Foo.py", "this is not python (")
     out = check(tree)
     assert out.exit_code == 1
-    assert "eu/es/Foo.py: Foo is not a domain id" in out.output
+    assert "eu/es/Foo.py: Foo is not a subject matter id" in out.output
     assert (
         "1 refused" in out.output
     )  # the syntax error of Foo.py is not loaded, so it is not counted

@@ -182,7 +182,7 @@ def test_a_a_legacy_realm_decides_as_before(capital, costs):
 
 def test_b_the_install_checks_the_generated_cedar_without_touching_the_policies_in_force(capital, costs):
     built = run(capital, BUILD % {"chapters": CODEX, "calendars": [], "realm": TOWN, "layers": [SPAIN, TOWN]})
-    assert built["errors"] == [] and built["domains"] == ["tax"]
+    assert built["errors"] == [] and built["subject_matters"] == ["tax"]
     assert capital.shell(IN_FORCE).strip() == "False []"  # step 5 validated them; the switch puts them in force
     costs.report("install step 5 (build) of a codex with forbids, Cedar validated", built["cost"])
     print(f"install step 5, build of a codex with forbids: {built['cost']:,} instructions")

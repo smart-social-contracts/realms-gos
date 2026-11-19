@@ -49,12 +49,12 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def chapter_text(domain, version="1.0.0"):
-    return arcadia.chapter(next(r for r in arcadia.releases() if r["version"] == version)["chapters"][domain])
+def chapter_text(subject_matter, version="1.0.0"):
+    return arcadia.chapter(next(r for r in arcadia.releases() if r["version"] == version)["chapters"][subject_matter])
 
 
 def own_layer(version="1.0.0", realm_chapter=REALM_CHAPTER):
-    """``{chapter id: bytes}`` of arcadia's own layer: its release's chapters and the realm domain's."""
+    """``{chapter id: bytes}`` of arcadia's own layer: its release's chapters and the realm subject matter's."""
     layer = {f"arcadia/{d}": chapter_text(d, version) for d in ("tax", "procedure")}
     if realm_chapter:
         layer["arcadia/realm"] = realm_chapter.encode()

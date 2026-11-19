@@ -57,9 +57,9 @@ from core.op import run
 from ggg import LayeredCodex
 chapters, layers = %(chapters)r, %(layers)r
 entries, paths = {}, {}
-for source, domain, text in chapters:
-    entries[f"{source}/{domain}"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
-    paths.setdefault(domain, []).append(source)
+for source, subject_matter, text in chapters:
+    entries[f"{source}/{subject_matter}"] = {"source": source, "sha256": store.store_chapter(store.checksum(text), text).sha256}
+    paths.setdefault(subject_matter, []).append(source)
 cid = store.codex_id(layers, paths, entries)
 row = LayeredCodex[cid] or LayeredCodex(id=cid, layers=layers, layer_paths=paths, chapters=entries, installed_at=1)
 legislation.load(row)
@@ -72,7 +72,7 @@ import json
 from core import layered_codex as store, legislation
 text = %(text)r
 plan = {"realm": "x/town", "layers": ["x/town"], "calendars": [],
-        "chapters": [{"source": "x/town", "domain": "water", "sha256": store.checksum(text)}]}
+        "chapters": [{"source": "x/town", "subject_matter": "water", "sha256": store.checksum(text)}]}
 print(json.dumps(legislation.build(plan, {store.checksum(text): text})["errors"]))
 '''
 

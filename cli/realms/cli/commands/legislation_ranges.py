@@ -40,13 +40,15 @@ def settings_read(node, found: Optional[list] = None) -> list:
 
 
 def constants(forbids: list, settings: Optional[dict] = None) -> List[int]:
-    """Every whole number the trees compare with: the literals and the folded sides. ``settings`` (by domain) replaces
-    the forbids' own, for the analysis that leaves them open."""
+    """Every whole number the trees compare with: the literals and the folded sides. ``settings`` (by subject matter)
+    replaces the forbids' own, for the analysis that leaves them open."""
     found = []
     for forbid in forbids:
         literals(forbid.expression, found)
         endpoints(
-            forbid, found, None if settings is None else settings.get(forbid.domain, {})
+            forbid,
+            found,
+            None if settings is None else settings.get(forbid.subject_matter, {}),
         )
     return sorted({n for n in found if isinstance(n, int)})
 
@@ -160,8 +162,8 @@ def pins(
             return None
         conditions.append(pinned[0])
         words.append(pinned[1])
-    for domain, values in (settings or {}).items():
-        record = attribute("context.settings", domain)
+    for subject_matter, values in (settings or {}).items():
+        record = attribute("context.settings", subject_matter)
         for name, value in values.items():
             pinned = pin(name, value, record, True)
             if pinned is None:

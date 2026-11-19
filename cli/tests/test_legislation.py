@@ -57,9 +57,9 @@ def codex(realm=VALENCIA, operations=OPERATIONS, layers=LAYERS):
     return Codex(layers, realm=realm, operations=operations)
 
 
-def refused(c, source, domain, text):
+def refused(c, source, subject_matter, text):
     with pytest.raises(Refused) as e:
-        c.load(source, domain, text)
+        c.load(source, subject_matter, text)
     return str(e.value)
 
 
@@ -458,7 +458,7 @@ class Procedure(above("procedure")):
 """
 
 
-def test_a_chapter_is_one_class_named_after_its_domain_extending_above():
+def test_a_chapter_is_one_class_named_after_its_subject_matter_extending_above():
     c = codex()
     cls = c.load("eu/es", "procedure", ES_PROCEDURE)
     assert (
@@ -726,8 +726,8 @@ def test_public_members_above_the_realm_carry_a_citation_and_the_realm_need_not(
         ("    __slots__ = ()", "no dunder names"),
         ("    now = 3", "reserved by the SDK"),
         ("    def calendar(self): pass", "reserved by the SDK"),
-        ("    uses = 'procedure'", "uses lists the domains"),
-        ("    uses = ['a', 'a']", "uses lists the domains"),
+        ("    uses = 'procedure'", "uses lists the subject matters"),
+        ("    uses = ['a', 'a']", "uses lists the subject matters"),
         (
             "    x = object()",
             "a member is a method, a setting or a forbid",
@@ -803,7 +803,7 @@ def test_chapters_load_top_to_bottom_once_per_layer_and_only_into_known_layers()
         c.load("fr", "tax", "")
     with pytest.raises(LegislationError, match="not a source id"):
         Codex(["EU"])
-    with pytest.raises(LegislationError, match="not a domain id"):
+    with pytest.raises(LegislationError, match="not a subject matter id"):
         c.load("eu", "Tax", "")
 
 
@@ -1290,7 +1290,7 @@ def test_a_forbid_names_an_operation_and_a_list():
 # ── above() (§4.2) ────────────────────────────────────────────────────────────
 
 
-def test_above_is_the_nearest_layer_above_with_a_chapter_in_the_domain():
+def test_above_is_the_nearest_layer_above_with_a_chapter_in_the_subject_matter():
     c = codex()
     es = c.load(
         "eu/es",
@@ -1434,10 +1434,10 @@ def test_every_check_up_the_chain_applies_and_the_default_passes_its_own():
         overridable(1, check=3)
 
 
-# ── Calling another domain (§4.4) ─────────────────────────────────────────────
+# ── Calling another subject matter (§4.4) ─────────────────────────────────────────────
 
 
-def with_domains():
+def with_subject_matters():
     c = codex()
     c.load("eu/es", "procedure", ES_PROCEDURE)
     c.load(
@@ -1484,7 +1484,7 @@ def with_domains():
 
 
 def test_legislation_resolves_through_every_layer_and_layer_only_down_to_its_own():
-    c = with_domains()
+    c = with_subject_matters()
     chapter = c.instance("local_regime", c.context())
     assert chapter.earliest("2026-12-31") == "2027-01-22"
     assert chapter.languages() == (
@@ -1497,8 +1497,8 @@ def test_legislation_resolves_through_every_layer_and_layer_only_down_to_its_own
     )  # CV's view: Spain and CV, not València
 
 
-def test_only_declared_domains_and_only_public_members():
-    c = with_domains()
+def test_only_declared_subject_matters_and_only_public_members():
+    c = with_subject_matters()
     chapter = c.instance("local_regime", c.context())
     with pytest.raises(LegislationError, match="does not declare 'tax' in uses"):
         chapter.undeclared()

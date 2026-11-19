@@ -143,7 +143,7 @@ def resolve_realm(
     chapters, calendars = {}, {}
     for entry in planned.chapters:
         at = commits.get(entry["source"], commit)
-        file = entry["domain"] + ".py"
+        file = entry["subject_matter"] + ".py"
         chapters[entry["sha256"]] = file_at(
             tree, at, entry["source"], file, entry["sha256"]
         )
@@ -162,7 +162,7 @@ def resolve_realm(
 
 
 def report_lines(resolution, with_cedar: bool) -> List[str]:
-    """What the command prints: the codex id, the layer paths, the flattened view of each domain (§5.9) and the
+    """What the command prints: the codex id, the layer paths, the flattened view of each subject matter (§5.9) and the
     generated Cedar (§5.8)."""
     planned = resolution.plan
     lines = [
@@ -171,12 +171,13 @@ def report_lines(resolution, with_cedar: bool) -> List[str]:
         "layer paths:",
     ]
     lines += [
-        f"  {domain}: {ARROW.join(path)}" for domain, path in planned.paths.items()
+        f"  {subject_matter}: {ARROW.join(path)}"
+        for subject_matter, path in planned.paths.items()
     ]
-    for domain, view in resolution.views().items():
+    for subject_matter, view in resolution.views().items():
         lines += [
             "",
-            f"{domain}, as it applies in {planned.realm}, path {ARROW.join(view['path'])}:",
+            f"{subject_matter}, as it applies in {planned.realm}, path {ARROW.join(view['path'])}:",
         ]
         lines += view_lines(view["members"])
     lines += ["", "Cedar:"]

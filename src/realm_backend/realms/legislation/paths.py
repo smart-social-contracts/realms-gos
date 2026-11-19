@@ -1,6 +1,6 @@
 """Layer paths from the links (layered-codex.md §3.3, §8, §9.2 step 5).
 
-A realm's layer path in a domain is the path its sync sources relay for that domain, followed by its own
+A realm's layer path in a subject matter is the path its sync sources relay for that subject matter, followed by its own
 layer. ``plan`` works that out from plain data and applies the one-chain rule. It calls no canister and
 reads no file, so the install task, ``realms legislation resolve`` and the tests run the same code.
 
@@ -11,17 +11,18 @@ as the releases it runs, top to bottom: the layers it relays and its own layer l
         {"source": "eu/es", "version": "2.4.0", "chapters": {"tax": "sha256:..."}, "calendar": "sha256:..."},
         {"source": "eu/es/vc", "version": "1.1.0", "chapters": {"procedure": "sha256:..."}, "calendar": None}]}
 
-and the realm's own layer, which needs no release (§3.2): ``{"chapters": {domain: sha256}, "calendar": sha256}``.
+and the realm's own layer, which needs no release (§3.2):
+``{"chapters": {subject_matter: sha256}, "calendar": sha256}``.
 
-A layer is on a domain's path only if its release has a chapter in that domain: empty chapters are
+A layer is on a subject matter's path only if its release has a chapter in that subject matter: empty chapters are
 skipped, so València's tax path is Spain → València (§3.3). The paths the sync sources relay in one
-domain must form one chain, each the start of the longest, which the realm uses. Paths that differ are
+subject matter must form one chain, each the start of the longest, which the realm uses. Paths that differ are
 refused unless one extends the other, and the refusal is of the whole install (§2, rule 4). The
-layers the sync sources relay must also form one chain across domains: taken together, their records
+layers the sync sources relay must also form one chain across subject matters: taken together, their records
 must put every layer with a chapter or a calendar above or below every other, with no ties.
 """
 
-from realms.legislation.codex import domain_id, source_id
+from realms.legislation.codex import source_id, subject_matter_id
 from realms.legislation.errors import LegislationError
 
 ARROW = " → "
@@ -30,9 +31,9 @@ ARROW = " → "
 class Plan:
     """What the install needs before it downloads or loads anything.
 
-    ``layers``: every layer the realm runs, top to bottom, its own last. ``paths``: for each domain, the
+    ``layers``: every layer the realm runs, top to bottom, its own last. ``paths``: for each subject matter, the
     sources that have a chapter in it, top to bottom. ``chapters``: the chapters on those paths to
-    fetch, ``{source, domain, version, sha256}`` for each, a domain at a time, top to bottom (the order
+    fetch, ``{source, subject_matter, version, sha256}`` for each, a subject matter at a time, top to bottom (the order
     ``Codex.load`` needs). ``calendars``: ``{source, version, sha256}`` for each layer that has one. The
     realm's own layer has the version ``None``.
     """
@@ -49,27 +50,31 @@ def plan(realm, relays, own=None):
     releases = _agreed(relays)
     releases[realm] = _own(realm, own)
     paths = {}
-    for domain in sorted({d for r in releases.values() for d in r["chapters"]}):
+    for subject_matter in sorted({d for r in releases.values() for d in r["chapters"]}):
         relayed = [
             (
                 relay["source"],
-                [r["source"] for r in relay["layers"] if domain in r["chapters"]],
+                [
+                    r["source"]
+                    for r in relay["layers"]
+                    if subject_matter in r["chapters"]
+                ],
             )
             for relay in relays
         ]
-        paths[domain] = _chain(domain, relayed)
-        if domain in releases[realm]["chapters"]:
-            paths[domain].append(realm)
+        paths[subject_matter] = _chain(subject_matter, relayed)
+        if subject_matter in releases[realm]["chapters"]:
+            paths[subject_matter].append(realm)
     layers = _order(relays) + [realm]
     chapters = [
         {
             "source": source,
-            "domain": domain,
+            "subject_matter": subject_matter,
             "version": releases[source]["version"],
-            "sha256": releases[source]["chapters"][domain],
+            "sha256": releases[source]["chapters"][subject_matter],
         }
-        for domain in paths
-        for source in paths[domain]
+        for subject_matter in paths
+        for source in paths[subject_matter]
     ]
     calendars = [
         {
@@ -124,14 +129,14 @@ def _own(realm, own):
     own = {} if own is None else own
     if not isinstance(own, dict) or set(own) - {"chapters", "calendar"}:
         raise LegislationError(
-            'the realm\'s own layer is {"chapters": {domain: sha256}, "calendar": sha256}, with no '
+            'the realm\'s own layer is {"chapters": {subject_matter: sha256}, "calendar": sha256}, with no '
             "version (layered-codex.md §3.2)"
         )
     return _release(dict(own, source=realm), "the realm's own layer")
 
 
 def _release(entry, where, versioned=False):
-    """A release (or the realm's own layer) checked: source id, version, chapters by domain, calendar."""
+    """A release (or the realm's own layer) checked: source id, version, chapters by subject matter, calendar."""
     if not isinstance(entry, dict):
         raise LegislationError(f"{where}: a release is an object")
     source = source_id(entry.get("source"))
@@ -140,10 +145,12 @@ def _release(entry, where, versioned=False):
         raise LegislationError(f"{where}: {source} has no version")
     chapters = entry.get("chapters", {})
     if not isinstance(chapters, dict):
-        raise LegislationError(f"{where}: {source}'s chapters are {{domain: sha256}}")
-    for domain, checksum in chapters.items():
-        domain_id(domain)
-        _checksum(checksum, f"{where}: {source}/{domain}")
+        raise LegislationError(
+            f"{where}: {source}'s chapters are {{subject_matter: sha256}}"
+        )
+    for subject_matter, checksum in chapters.items():
+        subject_matter_id(subject_matter)
+        _checksum(checksum, f"{where}: {source}/{subject_matter}")
     calendar = entry.get("calendar")
     if calendar is not None:
         _checksum(calendar, f"{where}: {source}/calendar")
@@ -182,8 +189,8 @@ def _agreed(relays):
     return {source: release for source, (release, _) in agreed.items()}
 
 
-def _chain(domain, relayed):
-    """The longest of the paths the sync sources relay in ``domain``, if each other one is the start of
+def _chain(subject_matter, relayed):
+    """The longest of the paths the sync sources relay in ``subject_matter``, if each other one is the start of
     it; otherwise a refusal naming the two sync sources."""
     longest_by, longest = max(
         relayed, key=lambda named: len(named[1]), default=(None, [])
@@ -191,7 +198,7 @@ def _chain(domain, relayed):
     for name, path in relayed:
         if path != longest[: len(path)]:
             raise LegislationError(
-                f"{domain}: sync source {longest_by} relays {_arrow(longest)} and sync source {name} "
+                f"{subject_matter}: sync source {longest_by} relays {_arrow(longest)} and sync source {name} "
                 f"relays {_arrow(path)}. Paths that differ are refused unless one extends the other "
                 "(layered-codex.md §3.3)"
             )
@@ -205,7 +212,7 @@ def _arrow(path):
 def _order(relays):
     """Every layer the sync sources relay, top to bottom, in the one order their records put them in:
     taken together, the records must put every layer above or below every other, with no ties (§3.3), so
-    ``self.layer`` can say which layer is above which across domains. Refused: records that contradict
+    ``self.layer`` can say which layer is above which across subject matters. Refused: records that contradict
     each other, and layers they leave with neither above the other."""
     runs = [
         [r["source"] for r in relay["layers"] if r["chapters"] or r["calendar"]]

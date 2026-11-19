@@ -243,9 +243,9 @@ def test_the_quarters_of_a_capital_stage_the_release_it_installs_and_switch_with
 # ---- costs: reading a record, run by hand in a realm of its own
 
 RECORD = '''
-domains = ("tax", "procedure", "register", "local_regime", "water", "data_protection", "language", "treasury", "federation")
+subject_matters = ("tax", "procedure", "register", "local_regime", "water", "data_protection", "language", "treasury", "federation")
 releases = [{"source": "eu/es", "version": f"1.{n}.0", "published": n, "effective_from": n, "commit": "c" * 40,
-             "chapters": {d: "sha256:" + f"{n % 256:02x}" * 32 for d in domains}, "calendar": None,
+             "chapters": {d: "sha256:" + f"{n % 256:02x}" * 32 for d in subject_matters}, "calendar": None,
              "notes": {"en": "x" * 200}} for n in range(COUNT)]
 '''
 

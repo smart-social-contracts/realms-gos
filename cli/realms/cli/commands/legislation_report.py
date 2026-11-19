@@ -3,8 +3,9 @@ to every realm it reaches, between two commits of the tree.
 
 ``Comparison`` loads each affected realm's codex at both commits (``legislation_load``), asks the questions of
 ``legislation_diff`` and runs the realm's test cases; ``render`` writes the result as Markdown for a pull request. A
-realm is affected when a source on its layer path changed a chapter or a calendar; a domain, when it changed or calls
-(``uses``), however far, one that changed (point 6). Every failure is listed; a warning (an overlap) does not fail.
+realm is affected when a source on its layer path changed a chapter or a calendar; a subject matter, when it changed or
+calls (``uses``), however far, one that changed (point 6). Every failure is listed; a warning (an overlap) does not
+fail.
 """
 
 import difflib
@@ -38,7 +39,9 @@ class RealmDiff:
     problems: List[str] = field(
         default_factory=list
     )  # a codex that does not load: nothing else is asked
-    domains: List[str] = field(default_factory=list)  # the domains the change reaches
+    subject_matters: List[str] = field(
+        default_factory=list
+    )  # the subject matters the change reaches
     cedar: List[str] = field(default_factory=list)  # the diff of the generated Cedar
     folded: List[ActionResult] = field(default_factory=list)
     open: List[ActionResult] = field(
@@ -46,7 +49,7 @@ class RealmDiff:
     )  # the settings left open, for a realm that is a changed source
     views: Dict[str, Tuple[List[str], List[str]]] = field(
         default_factory=dict
-    )  # domain: lines before and after
+    )  # subject matter: lines before and after
     cases: List[tuple] = field(default_factory=list)
     undecided: List[str] = field(
         default_factory=list
@@ -165,7 +168,7 @@ class Comparison:
                 result.problems.append(f"{what}: {e}")
         if result.problems:
             return result
-        result.domains = self.reached(realm, new)
+        result.subject_matters = self.reached(realm, new)
         result.cedar = cedar_diff(old, new)
         actions = sorted(
             {f.actions[0] for codex in (old, new) if codex for f in codex.forbids()}
@@ -176,7 +179,7 @@ class Comparison:
                 realm in self.changed
             ):  # the source itself: once more, for every realm that runs it
                 result.open = self.analyse(realm, old, new, actions, generic=True)
-        result.views = self.views(old, new, result.domains, result.undecided)
+        result.views = self.views(old, new, result.subject_matters, result.undecided)
         result.cases = case_results(
             self.new, new, realm, lambda ggg: self.load(self.new, realm, ggg)[0]
         )
@@ -189,8 +192,8 @@ class Comparison:
         return load_realm(files, realm, self.operations, self.facts, ggg or self.ggg)
 
     def reached(self, realm: str, new) -> List[str]:
-        """The domains the change reaches in ``realm``: those that changed, and those that call one (``uses``), however
-        far."""
+        """The subject matters the change reaches in ``realm``: those that changed, and those that call one (``uses``),
+        however far."""
         reached = {
             d
             for s in layers_of(realm, self.new.sources())
@@ -220,28 +223,28 @@ class Comparison:
         ]
 
     def views(
-        self, old, new, domains, undecided: List[str]
+        self, old, new, subject_matters, undecided: List[str]
     ) -> Dict[str, Tuple[List[str], List[str]]]:
         views = {}
-        for domain in domains:
-            views[domain] = (
-                self.view(old, domain),
-                self.view(new, domain, undecided, with_maxima=True),
+        for subject_matter in subject_matters:
+            views[subject_matter] = (
+                self.view(old, subject_matter),
+                self.view(new, subject_matter, undecided, with_maxima=True),
             )
         return views
 
     def view(
         self,
         codex,
-        domain: str,
+        subject_matter: str,
         undecided: Optional[List[str]] = None,
         with_maxima: bool = False,
     ) -> List[str]:
-        """The flattened view of ``domain`` (§5.9) in ``codex``; with the folded line under each forbid that has one. A
-        folded line the solver cannot decide is added to ``undecided``."""
-        if codex is None or domain not in codex.chapters:
+        """The flattened view of ``subject_matter`` (§5.9) in ``codex``; with the folded line under each forbid that has
+        one. A folded line the solver cannot decide is added to ``undecided``."""
+        if codex is None or subject_matter not in codex.chapters:
             return []
-        view = flatten(codex, domain)
+        view = flatten(codex, subject_matter)
         lines = view_lines(view["members"])
         if not with_maxima:
             return lines
@@ -250,7 +253,9 @@ class Comparison:
             cli, cvc5, codex.cedar_schema(context={"op": "String"}), self.deadline
         )
         bound = {
-            f.id.rsplit("/", 1)[-1]: f for f in codex.forbids() if f.domain == domain
+            f.id.rsplit("/", 1)[-1]: f
+            for f in codex.forbids()
+            if f.subject_matter == subject_matter
         }
         out = []
         for member, line in zip(view["members"], lines):
@@ -315,11 +320,11 @@ def dependencies(realms: List[RealmDiff], changed: Dict[str, Set[str]]) -> List[
         "",
     ]
     out += [
-        "| realm | domains reached (changed, or calling one that changed) |",
+        "| realm | subject matters reached (changed, or calling one that changed) |",
         "|---|---|",
     ]
     out += [
-        f"| `{r.realm}` | {', '.join(f'`{d}`' for d in r.domains) or '-'} |"
+        f"| `{r.realm}` | {', '.join(f'`{d}`' for d in r.subject_matters) or '-'} |"
         for r in realms
     ]
     return out + [""]
@@ -335,12 +340,12 @@ def section(realm: RealmDiff) -> List[str]:
     )
     out += cases_lines(realm.cases)
     out += [
-        "<details><summary>Flattened view of the changed domains, before and after</summary>",
+        "<details><summary>Flattened view of the changed subject matters, before and after</summary>",
         "",
     ]
-    for domain, (before, after) in realm.views.items():
+    for subject_matter, (before, after) in realm.views.items():
         out += [
-            f"**{domain}**",
+            f"**{subject_matter}**",
             "",
             "Before:",
             "```",

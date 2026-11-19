@@ -1,22 +1,22 @@
-"""The test cases of a chapter (docs/codices/layered-codex.md §12.1): ``<source>/<domain>.cases.json``, beside
+"""The test cases of a chapter (docs/codices/layered-codex.md §12.1): ``<source>/<subject_matter>.cases.json``, beside
 the chapter it tests, run by ``realms legislation check`` on the codex of the realm they name.
 
 A case is an object with a ``name``, an optional ``realm`` (a source id; the chapter's own source by default, seen
 with the layers above it) and one kind of test, run in-process with the library:
 
-- ``{"call": "ibi_bonus", "args": ["User:alice"], "returns": 0}``: a public member of the resolved domain, a
+- ``{"call": "ibi_bonus", "args": ["User:alice"], "returns": 0}``: a public member of the resolved subject matter, a
   helper called with plain arguments or a setting read;
 - ``{"guard": "proposal_create", "args": {...}, "approvals": [...], "now": 1800000000, "denies": "reason" | null}``:
-  the domain's ``check_<op>`` on the operation's arguments. The realm's time zone is UTC here;
+  the subject matter's ``check_<op>`` on the operation's arguments. The realm's time zone is UTC here;
 - ``{"forbid": "tax_policy_propose", "each": "taxes", "facts": {...}, "fires": ["eu/es/tax/ibi_urban_cap"]}``: the
   forbids of the realm that fire on those facts, evaluated in plain Python with the settings folded;
 - ``{"compute": "tax_assess", "args": {"entry": {...}, "subject": "Land:L-1"}, "decimals": 2, "records": {"Land":
-  [...], "Human": [...]}, "returns": [...]}``: the domain's ``compute_<op>``, run by the realm's own sandbox program
-  (``core.legislation_sandbox``) on those arguments, reading GGG's entities from ``records`` (rows with an ``id``)
-  and money in a token of ``decimals``.
+  [...], "Human": [...]}, "returns": [...]}``: the subject matter's ``compute_<op>``, run by the realm's own sandbox
+  program (``core.legislation_sandbox``) on those arguments, reading GGG's entities from ``records`` (rows with an
+  ``id``) and money in a token of ``decimals``.
 
 The shape of the file is checked with the rest of the layout (``legislation_layout.cases_reasons``); here it is run.
-A case that does not come out as written is a problem, ``<source>/<domain>.cases.json: case "<name>": <what>``.
+A case that does not come out as written is a problem, ``<source>/<subject_matter>.cases.json: case "<name>": <what>``.
 """
 
 import importlib
@@ -42,11 +42,13 @@ def case_results(files, codex: Codex, realm: str, reload: Callable) -> List[tupl
         for name in files.names(source):
             if not name.endswith(CASES_SUFFIX):
                 continue
-            domain = name[: -len(CASES_SUFFIX)]
+            subject_matter = name[: -len(CASES_SUFFIX)]
             for case in json.loads(files.text(source, name)):
                 if case.get("realm", source) == realm:
                     which = f'{source}/{name}: case "{case["name"]}"'
-                    results.append((which, run_case(codex, domain, case, reload)))
+                    results.append(
+                        (which, run_case(codex, subject_matter, case, reload))
+                    )
     return results
 
 
@@ -59,13 +61,13 @@ def case_problems(files, codex: Codex, realm: str, reload: Callable) -> List[str
     ]
 
 
-def run_case(codex: Codex, domain: str, case: dict, reload: Callable):
+def run_case(codex: Codex, subject_matter: str, case: dict, reload: Callable):
     """Why ``case`` does not come out as written, or None."""
     try:
         if "call" in case:
-            return call_case(codex, domain, case)
+            return call_case(codex, subject_matter, case)
         if "guard" in case:
-            return guard_case(codex, domain, case)
+            return guard_case(codex, subject_matter, case)
         if "compute" in case:
             return compute_case(case, reload)
         return forbid_case(codex, case)
@@ -73,20 +75,22 @@ def run_case(codex: Codex, domain: str, case: dict, reload: Callable):
         return f"raised: {e}"
 
 
-def call_case(codex: Codex, domain: str, case: dict):
-    chapter = codex.instance(domain, codex.context())
+def call_case(codex: Codex, subject_matter: str, case: dict):
+    chapter = codex.instance(subject_matter, codex.context())
     if case["call"] not in type(chapter).__members__:
-        return f"the {domain} chapter has no member {case['call']}"
+        return f"the {subject_matter} chapter has no member {case['call']}"
     member = getattr(chapter, case["call"])
     got = plain(member(*case.get("args", [])) if callable(member) else member)
     return differs(case["returns"], got, "returns")
 
 
-def guard_case(codex: Codex, domain: str, case: dict):
+def guard_case(codex: Codex, subject_matter: str, case: dict):
     context = codex.context(case.get("now", 0), case.get("approvals", ()), utc_day)
-    guard = getattr(codex.instance(domain, context), "check_" + case["guard"], None)
+    guard = getattr(
+        codex.instance(subject_matter, context), "check_" + case["guard"], None
+    )
     if guard is None:
-        return f"the {domain} chapter has no check_{case['guard']}"
+        return f"the {subject_matter} chapter has no check_{case['guard']}"
     answer = guard(Args(case.get("args", {})))
     return differs(case["denies"], None if answer is None else answer.reason, "denies")
 

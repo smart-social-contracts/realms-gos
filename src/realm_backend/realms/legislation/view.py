@@ -1,7 +1,7 @@
-"""The flattened view of one domain as it applies in a realm (layered-codex.md §5.9), as plain data: what
+"""The flattened view of one subject matter as it applies in a realm (layered-codex.md §5.9), as plain data: what
 the UI (D8) shows a member and the analysis (C4) compares before and after a change.
 
-Each row is one public member of the domain's resolved class::
+Each row is one public member of the subject matter's resolved class::
 
     {"name": "ibi_bonus", "kind": "helper", "mark": None,
      "layers": [{"source": "eu/es", "legislation": "TRLRHL Art. 74"},
@@ -17,13 +17,15 @@ comes with the ``F`` language (S2, #484).
 from realms.legislation.context import plain
 
 
-def flatten(codex, domain):
-    """``{"domain", "path", "members"}``: the layers of ``domain`` in this realm and a row for each of
+def flatten(codex, subject_matter):
+    """``{"subject_matter", "path", "members"}``: the layers of ``subject_matter`` in this realm and a row for each of
     its public members, in the order the layers declare them."""
-    lowest = codex.resolved(domain)  # refuses a domain this realm has no chapter in
-    chain = codex.chapters[domain]
+    lowest = codex.resolved(
+        subject_matter
+    )  # refuses a subject matter this realm has no chapter in
+    chain = codex.chapters[subject_matter]
     return {
-        "domain": domain,
+        "subject_matter": subject_matter,
         "path": [cls.__source__ for cls in chain],
         "members": [
             _row(name, member, chain)

@@ -549,11 +549,11 @@ def history(args):
 
 @op(None, read=True, public=True)
 def codex_views(c, args):
-    """The flattened view (§5.9) of every domain of the active layered codex, as it applies in this realm: the domain's
-    layer ``path`` and a row for each public member of its resolved chapter, with its ``name``, ``kind`` (hook, guard,
-    compute, helper, setting or forbid), ``mark`` and the ``layers`` that define it, each with the ``legislation`` it
-    cites and, for a setting, its ``value``. The chapters are as public as the legislation they hold. Returns ``views``,
-    empty when no layered codex is active."""
+    """The flattened view (§5.9) of every subject matter of the active layered codex, as it applies in this realm: the
+    subject matter's layer ``path`` and a row for each public member of its resolved chapter, with its ``name``,
+    ``kind`` (hook, guard, compute, helper, setting or forbid), ``mark`` and the ``layers`` that define it, each with
+    the ``legislation`` it cites and, for a setting, its ``value``. The chapters are as public as the legislation they
+    hold. Returns ``views``, empty when no layered codex is active."""
     return {"views": legislation.views()}
 
 

@@ -14,7 +14,7 @@ class LayeredCodex(Row):
     __version__ = 2  # 2: voting_rule
     id = String()
     layers = Json([])  # every source with a chapter or a calendar, top to bottom
-    layer_paths = Json({})  # {domain: [source, ...]}, top to bottom
+    layer_paths = Json({})  # {subject_matter: [source, ...]}, top to bottom
     # {chapter id: {source, version, sha256, vouched_by, route, fetched_at, url, size}}, and published (when a layer
     # from above's release was published, when known); a calendar is <source>/calendar
     chapters = Json({})

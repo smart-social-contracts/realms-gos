@@ -7,9 +7,10 @@ The rules:
 
 - a folder name is lowercase letters, digits and ``-``;
 - a source is a folder with a ``source.json`` (§3.1), whose ``id`` is the folder's path under the tree;
-- the only ``.py`` files in a source are ``<domain>.py``, ``<domain>`` a domain id the codex chose;
+- the only ``.py`` files in a source are ``<subject_matter>.py``, ``<subject_matter>`` a subject matter id the codex
+  chose;
 - ``calendar.json`` (§3.4) and ``releases.json`` (§3.2) have the shapes the design shows;
-- ``<domain>.cases.json`` (§12.1) tests the chapter ``<domain>.py`` beside it, and has the shape of
+- ``<subject_matter>.cases.json`` (§12.1) tests the chapter ``<subject_matter>.py`` beside it, and has the shape of
   ``legislation_cases``;
 - a release lists all of its source's chapters and its calendar, and every checksum is the sha256 of the file's
   bytes **at the release's own commit**, which is where a follower fetches them from (§7). The commit must be in the
@@ -25,7 +26,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from realms.legislation.calendar import Calendar, parse_day
-from realms.legislation.codex import DOMAIN_RULE, domain_id, source_id
+from realms.legislation.codex import SUBJECT_MATTER_RULE, subject_matter_id, source_id
 from realms.legislation.errors import LegislationError
 
 SOURCE_FILES = ("source.json", "releases.json", "calendar.json")
@@ -34,11 +35,11 @@ CASE_KINDS = ("call", "guard", "forbid", "compute")
 HEX = frozenset("0123456789abcdef")
 
 
-def is_domain(name: str) -> bool:
-    """Whether ``name`` is a domain id, by the library's one rule (``domain_id``): a codex files chapters
-    under the ids it chooses, so no list of them is kept here."""
+def is_subject_matter(name: str) -> bool:
+    """Whether ``name`` is a subject matter id, by the library's one rule (``subject_matter_id``): a codex files
+    chapters under the ids it chooses, so no list of them is kept here."""
     try:
-        domain_id(name)
+        subject_matter_id(name)
     except LegislationError:
         return False
     return True
@@ -97,9 +98,9 @@ def folder_problems(tree: Path, folder: Path, sources: set) -> List[str]:
 
 def chapter_problems(tree: Path, files: dict) -> List[str]:
     problems = [
-        f"{shown(tree, files[name])}: {name[:-3]} is not a domain id ({DOMAIN_RULE})"
+        f"{shown(tree, files[name])}: {name[:-3]} is not a subject matter id ({SUBJECT_MATTER_RULE})"
         for name in sorted(files)
-        if name.endswith(".py") and not is_domain(name[:-3])
+        if name.endswith(".py") and not is_subject_matter(name[:-3])
     ]
     # `calendar` is a layer's calendar, set under <source>/calendar, so it cannot also be a chapter.
     problems += [
@@ -172,7 +173,8 @@ def calendar_reasons(data) -> List[str]:
 
 
 def cases_reasons(data) -> List[str]:
-    """§12.1, ``<domain>.cases.json``: a list of cases, each with a name, one kind of test and what it expects."""
+    """§12.1, ``<subject_matter>.cases.json``: a list of cases, each with a name, one kind of test and what it
+    expects."""
     if not isinstance(data, list):
         return ["a list of cases"]
     reasons = []
@@ -288,13 +290,13 @@ def release_reasons(release) -> List[str]:
         reasons.append("commit is the 40 hex digits of a git commit")
     chapters = release.get("chapters")
     if not isinstance(chapters, dict) or not chapters:
-        reasons.append("chapters is {domain: sha256:<hex>}")
+        reasons.append("chapters is {subject_matter: sha256:<hex>}")
     else:
-        for domain, checksum in chapters.items():
-            if not is_domain(domain):
-                reasons.append(f"chapters lists {domain}, which is not a domain id")
+        for subject_matter, checksum in chapters.items():
+            if not is_subject_matter(subject_matter):
+                reasons.append(f"chapters lists {subject_matter}, which is not a subject matter id")
             if not is_checksum(checksum):
-                reasons.append(f"chapters.{domain} is sha256:<64 hex digits>")
+                reasons.append(f"chapters.{subject_matter} is sha256:<64 hex digits>")
     if release.get("calendar") is not None and not is_checksum(release["calendar"]):
         reasons.append("calendar is sha256:<64 hex digits>, or null")
     if "notes" in release and not by_language(release["notes"]):

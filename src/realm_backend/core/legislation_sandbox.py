@@ -4,9 +4,9 @@ core.legislation spawns one subinterpreter per active layered codex with this fi
 ``LIBRARY``, the sources of ``realms.legislation``, appended by the realm) and calls the functions below with plain
 data: ``setup`` installs the library and builds an empty ``Codex``, ``load`` adds one chapter, ``finish`` runs the
 install checks; ``views`` is the install's report and ``cedar`` the Cedar the forbids become, over GGG's fact schema
-(``ggg_facts``, which the realm appends to the library's sources); ``guard``, ``hook_domains`` with ``hook``, and
-``compute`` answer for a GGG operation. The only way out is ``rpc``: ``ggg_read`` for the read-only view of GGG's entities that chapters import,
-and ``local_day`` for the realm's local day of a timestamp.
+(``ggg_facts``, which the realm appends to the library's sources); ``guard``, ``hook_subject_matters`` with ``hook``,
+and ``compute`` answer for a GGG operation. The only way out is ``rpc``: ``ggg_read`` for the read-only view of GGG's
+entities that chapters import, and ``local_day`` for the realm's local day of a timestamp.
 
 Nothing here runs in the realm's own interpreter but ``readable``, a pure function the realm calls too so that both
 read the same fact schema: the realm otherwise reads this file's text (core.sandbox.module_source) and never runs it.
@@ -136,12 +136,12 @@ def setup(operations, layers, realm, calendars, entities, money):
     return {"ok": True}
 
 
-def load(source, domain, text):
-    """Chapter ``<source>/<domain>.py``, below the chapters of its domain loaded so far."""
+def load(source, subject_matter, text):
+    """Chapter ``<source>/<subject_matter>.py``, below the chapters of its subject matter loaded so far."""
     from realms.legislation.errors import LegislationError
 
     try:
-        cls = STATE["codex"].load(source, domain, text)
+        cls = STATE["codex"].load(source, subject_matter, text)
     except LegislationError as e:
         return {"ok": False, "error": str(e)}
     STATE["files"].add(cls.__file__)
@@ -150,7 +150,7 @@ def load(source, domain, text):
 
 def finish():
     """The checks a loaded codex passes before it is installed (§12.2): every setting's ``check=``, and the
-    ``uses`` between domains (declared, no cycle, no chain deeper than the depth limit)."""
+    ``uses`` between subject matters (declared, no cycle, no chain deeper than the depth limit)."""
     from realms.legislation.errors import LegislationError
     from realms.legislation.resolver import check_uses
 
@@ -160,14 +160,15 @@ def finish():
     except LegislationError as e:
         return {"ok": False, "error": str(e)}
     STATE["ready"] = True
-    return {"ok": True, "domains": sorted(STATE["codex"].chapters)}
+    return {"ok": True, "subject_matters": sorted(STATE["codex"].chapters)}
 
 
 def views():
-    """The flattened view of every domain (§5.9)."""
+    """The flattened view of every subject matter (§5.9)."""
     from realms.legislation.view import flatten
 
-    return {domain: flatten(STATE["codex"], domain) for domain in sorted(STATE["codex"].chapters)}
+    codex = STATE["codex"]
+    return {subject_matter: flatten(codex, subject_matter) for subject_matter in sorted(codex.chapters)}
 
 
 def readable(facts, secret):
@@ -219,14 +220,16 @@ def context(now, approvals):
     return STATE["codex"].context(now, approvals, local_day=lambda at: rpc("local_day", at=at))  # noqa: F821
 
 
-def domains_with(name):
-    """The domains whose resolved chapter has the member ``name``, by name: this design orders domains no other way."""
+def subject_matters_with(name):
+    """The subject matters whose resolved chapter has the member ``name``, by name: this design orders subject matters
+    no other way."""
     codex = STATE["codex"]
-    return [domain for domain in sorted(codex.chapters) if name in codex.resolved(domain).__members__]
+    return [subject_matter for subject_matter in sorted(codex.chapters)
+            if name in codex.resolved(subject_matter).__members__]
 
 
-def files_of(domain):
-    return [cls.__file__ for cls in STATE["codex"].chapters[domain]]
+def files_of(subject_matter):
+    return [cls.__file__ for cls in STATE["codex"].chapters[subject_matter]]
 
 
 def wrap(value):
@@ -264,18 +267,18 @@ def failure(error):
 
 
 def guard(op, args, now, approvals):
-    """Every domain's ``check_<op>`` with the operation's ``args``, by domain name; the first denial or error stops.
-    Returns one outcome per domain run: ``{"domain", "files"}`` plus ``denied`` (the reason) or ``error`` and
-    ``chapter``. A guard queues no effects and returns None or ``self.deny(reason)``."""
+    """Every subject matter's ``check_<op>`` with the operation's ``args``, by subject matter name; the first denial or
+    error stops. Returns one outcome per subject matter run: ``{"subject_matter", "files"}`` plus ``denied`` (the
+    reason) or ``error`` and ``chapter``. A guard queues no effects and returns None or ``self.deny(reason)``."""
     from realms.legislation.context import Args, Denial
 
     codex, name, facts, outcomes = STATE["codex"], f"check_{op}", Args(args), []
     ctx = context(now, approvals)
-    for domain in domains_with(name):
-        outcome = {"domain": domain, "files": files_of(domain)}
+    for subject_matter in subject_matters_with(name):
+        outcome = {"subject_matter": subject_matter, "files": files_of(subject_matter)}
         outcomes.append(outcome)
         try:
-            answer = getattr(codex.instance(domain, ctx), name)(facts)
+            answer = getattr(codex.instance(subject_matter, ctx), name)(facts)
             if ctx.effects.queued:
                 raise problem(f"{name} queued an effect: a guard only allows or denies")
             if answer is not None and not isinstance(answer, Denial):
@@ -289,19 +292,21 @@ def guard(op, args, now, approvals):
     return outcomes
 
 
-def hook_domains(op):
-    """The domains whose chapter defines ``on_<op>``, by name, each with its chapter files top to bottom."""
-    return [{"domain": domain, "files": files_of(domain)} for domain in domains_with(f"on_{op}")]
+def hook_subject_matters(op):
+    """The subject matters whose chapter defines ``on_<op>``, by name, each with its chapter files top to bottom."""
+    return [{"subject_matter": subject_matter, "files": files_of(subject_matter)}
+            for subject_matter in subject_matters_with(f"on_{op}")]
 
 
-def hook(op, domain, event, now, approvals):
-    """One domain's ``on_<op>`` with GGG's event and an effects queue of its own, as one sandbox call. Returns
+def hook(op, subject_matter, event, now, approvals):
+    """One subject matter's ``on_<op>`` with GGG's event and an effects queue of its own, as one sandbox call. Returns
     ``{"effects": [[op, args], ...]}``, or ``error`` and ``chapter``."""
     from realms.legislation.context import Event
 
     codex, name, ctx = STATE["codex"], f"on_{op}", context(now, approvals)
     try:
-        getattr(codex.instance(domain, ctx), name)(Event(event["user"], event["args"], event["result"], event["at"]))
+        getattr(codex.instance(subject_matter, ctx), name)(
+            Event(event["user"], event["args"], event["result"], event["at"]))
         if not is_plain(ctx.effects.queued):
             raise problem(f"{name} queued an effect whose arguments are not plain data")
     except Exception as e:
@@ -310,18 +315,18 @@ def hook(op, domain, event, now, approvals):
 
 
 def compute(op, kwargs, now, approvals, decimals=None):
-    """The one domain's ``compute_<op>`` with ``kwargs`` (dicts as ``Args``; the row an operation is about, ``SUBJECTS``,
-    as its view). ``decimals`` is the token the answer is in, which the ``Money`` of every view read during the call
-    carries. Returns ``{"found": False}`` when no chapter defines it, else ``{"found": True, "domain", "files"}`` plus
-    ``result`` or ``error`` and ``chapter``. Two domains defining it is an error: one domain answers what an operation
-    asks."""
+    """The one subject matter's ``compute_<op>`` with ``kwargs`` (dicts as ``Args``; the row an operation is about,
+    ``SUBJECTS``, as its view). ``decimals`` is the token the answer is in, which the ``Money`` of every view read
+    during the call carries. Returns ``{"found": False}`` when no chapter defines it, else
+    ``{"found": True, "subject_matter", "files"}`` plus ``result`` or ``error`` and ``chapter``. Two subject matters
+    defining it is an error: one subject matter answers what an operation asks."""
     codex, name = STATE["codex"], f"compute_{op}"
-    found = domains_with(name)
+    found = subject_matters_with(name)
     if not found:
         return {"found": False}
-    outcome = {"found": True, "domain": found[0], "files": files_of(found[0])}
+    outcome = {"found": True, "subject_matter": found[0], "files": files_of(found[0])}
     if len(found) > 1:
-        return {**outcome, "error": f"{name} is defined in {', '.join(found)}: one domain answers a compute",
+        return {**outcome, "error": f"{name} is defined in {', '.join(found)}: one subject matter answers a compute",
                 "chapter": None}
     ctx = context(now, approvals)
     STATE["decimals"] = decimals

@@ -211,7 +211,7 @@ class Check:
             and isinstance(base.args[0], ast.Constant)
             and isinstance(base.args[0].value, str)
         ):
-            self.refuse(node, f'{node.name} extends above("<domain>") and nothing else')
+            self.refuse(node, f'{node.name} extends above("<subject_matter>") and nothing else')
         self.identifier(node, node.name, "class body")
         body = node.body
         if (

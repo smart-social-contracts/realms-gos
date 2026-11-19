@@ -24,7 +24,7 @@ LAYERS = ["eu", "eu/es", "eu/es/vc", "eu/es/vc/emshi", VALENCIA]
 NOW = 1_800_000_000  # seconds, as the realm counts time
 DAY = 86_400
 
-# A chapter of a domain of its own, in València's layer: a guard that reports what a helper of Spain's tax chapter says.
+# A chapter of a subject matter of its own, in València's layer: a guard that reports what a helper of Spain's tax chapter says.
 PROBE = """
 from realms.legislation import above
 
@@ -50,16 +50,16 @@ def valencia():
 
 
 def guard(operation, args, approvals=()):
-    """The outcome of every domain's ``check_<operation>``: the reason it denied, or None."""
+    """The outcome of every subject matter's ``check_<operation>``: the reason it denied, or None."""
     outcomes = legislation._call("guard", op=operation, args=args, now=NOW, approvals=list(approvals))
     assert all("error" not in o for o in outcomes), outcomes
     return next((o["denied"] for o in outcomes if "denied" in o), None)
 
 
-def hook(operation, domain, args, result=None):
-    """The effects one domain's ``on_<operation>`` queues, as (operation, arguments)."""
+def hook(operation, subject_matter, args, result=None):
+    """The effects one subject matter's ``on_<operation>`` queues, as (operation, arguments)."""
     event = {"user": "alice", "args": args, "result": result or {}, "at": NOW}
-    outcome = legislation._call("hook", op=operation, domain=domain, event=event, now=NOW, approvals=[])
+    outcome = legislation._call("hook", op=operation, subject_matter=subject_matter, event=event, now=NOW, approvals=[])
     assert "error" not in outcome, outcome
     return [tuple(effect) for effect in outcome["effects"]]
 

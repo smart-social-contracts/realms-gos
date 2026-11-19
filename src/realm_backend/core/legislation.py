@@ -183,7 +183,7 @@ def build(plan, sources):
     """Install step 5 (§9.2): load every chapter of ``plan`` (realms.legislation's ``Plan``, or a dict with its
     ``realm``, ``layers``, ``chapters`` and ``calendars``) from ``sources`` (checksum to text) into a fresh sandbox,
     top to bottom, and run the in-canister checks (§12.2), among them that the realm's Cedar engine accepts the
-    forbids it generates (§9.4). Returns ``{"views", "cedar", "errors"}``: the flattened view per domain, the
+    forbids it generates (§9.4). Returns ``{"views", "cedar", "errors"}``: the flattened view per subject matter, the
     generated Cedar, and the errors (the first refusal; nothing else is loaded after it)."""
     box = None
     try:
@@ -280,8 +280,9 @@ def compute(op, decimals=None, **kwargs):
 
 
 def views():
-    """The flattened view of every domain of the running layered codex (§5.9), ``{domain: {"domain", "path",
-    "members"}}``, as the sandbox keeps it loaded; empty when no layered codex is active. It reads no row of GGG."""
+    """The flattened view of every subject matter of the running layered codex (§5.9),
+    ``{subject_matter: {"subject_matter", "path", "members"}}``, as the sandbox keeps it loaded; empty when no layered
+    codex is active. It reads no row of GGG."""
     return _call("views") if _ensure() else {}
 
 
@@ -381,25 +382,26 @@ def _guard(op, args, call, department):
 
 
 def _hooks(op, args, result, call, department):
-    """The hooks ``on_<op>`` after the operation, with GGG's event: one sandbox call per domain, so that each domain
-    has the reads budget to itself and a domain that fails never costs another its effects. A hook that raises, or
-    an effect that fails, never fails the caller: it counts against the chapter. A generator."""
+    """The hooks ``on_<op>`` after the operation, with GGG's event: one sandbox call per subject matter, so that each
+    subject matter has the reads budget to itself and a subject matter that fails never costs another its effects. A
+    hook that raises, or an effect that fails, never fails the caller: it counts against the chapter. A generator."""
     method, secret = f"on_{op}", _secret(op, args)
     event = {"user": call.user, "args": carried(_public(args, secret)), "result": carried(_public(result, secret)),
              "at": chain.now()}
     approvals = _approvals(call, department)
     try:
-        domains = _call("hook_domains", op=op)
+        subject_matters = _call("hook_subject_matters", op=op)
     except Fail as e:
         _record("codex", method, str(e))
         return
     _clear(["codex"], method)
     running = _state["codex"]
-    for entry in domains:
+    for entry in subject_matters:
         files = entry["files"]
         try:
-            outcome = _call("hook", op=op, domain=entry["domain"], event=event, now=chain.now(), approvals=approvals)
-        except Fail as e:  # the sandbox failed on this domain: its budget or its reads spent
+            outcome = _call("hook", op=op, subject_matter=entry["subject_matter"], event=event, now=chain.now(),
+                            approvals=approvals)
+        except Fail as e:  # the sandbox failed on this subject matter: its budget or its reads spent
             _record(files[-1], method, str(e))
             continue
         if "error" in outcome:
@@ -407,8 +409,9 @@ def _hooks(op, args, result, call, department):
             continue
         errors = yield from _in_own_message(outcome["effects"])
         if _state["codex"] != running:
-            # Another message switched the codex while these effects waited. The domains left, and the failure of this
-            # one, belong to the codex it replaced: the sandbox, and the record of failures, are the new one's now.
+            # Another message switched the codex while these effects waited. The subject matters left, and the
+            # failure of this one, belong to the codex it replaced: the sandbox and the record of failures are now the
+            # new one's.
             return
         if errors:
             _record(files[-1], method, "; ".join(errors))
@@ -417,13 +420,14 @@ def _hooks(op, args, result, call, department):
 
 
 def _in_own_message(effects):
-    """Apply a domain's effects in a message of their own, by calling the realm's own ``hook_effects``. An operation that
-    raises what it does not expect traps, and a trap undoes the whole message and no handler here sees it: here it
-    undoes only that message, and comes back as a rejected call, which is the chapter's failure, while the operation
-    that ran the hook, and a scheduled codex switch it belongs to, stand (§9.3). A call and not a timer: a trap in a
-    timer would erase the record of its own failure. Where nothing can wait for another canister (``awaitable``: an
-    operation that another one runs through ``core.op.call``, as ``shell.execute``, ``extension.call`` and the
-    controller's ``__shell__`` do) they run where they are, as before (§9.3). Returns the errors. A generator."""
+    """Apply a subject matter's effects in a message of their own, by calling the realm's own ``hook_effects``. An
+    operation that raises what it does not expect traps, and a trap undoes the whole message and no handler here sees
+    it: here it undoes only that message, and comes back as a rejected call, which is the chapter's failure, while the
+    operation that ran the hook, and a scheduled codex switch it belongs to, stand (§9.3). A call and not a timer: a
+    trap in a timer would erase the record of its own failure. Where nothing can wait for another canister
+    (``awaitable``: an operation that another one runs through ``core.op.call``, as ``shell.execute``,
+    ``extension.call`` and the controller's ``__shell__`` do) they run where they are, as before (§9.3). Returns the
+    errors. A generator."""
     if not effects:
         return []
     if not awaitable():
@@ -436,8 +440,9 @@ def _in_own_message(effects):
 
 
 def hook_effects(effects):
-    """The message in which a hook domain's effects run (main.hook_effects): ``effects`` as JSON, ``[name, args]`` each,
-    applied by ``_effects``; returns its errors as JSON. Only the realm calls it, from ``_in_own_message``. A generator."""
+    """The message in which a hook subject matter's effects run (main.hook_effects): ``effects`` as JSON,
+    ``[name, args]`` each, applied by ``_effects``; returns its errors as JSON. Only the realm calls it, from
+    ``_in_own_message``. A generator."""
     if chain.caller() != chain.self_id():
         chain.trap("only the realm applies the effects of its hooks")
     return json.dumps((yield from _effects(json.loads(effects))))
@@ -542,7 +547,7 @@ def _spawn(plan, sources):
                      calendars=[[c["source"], _calendar(sources, c)] for c in plan["calendars"]],
                      entities=sorted(VIEWS), money=MONEY))
         for c in plan["chapters"]:
-            _ok(box.call("load", source=c["source"], domain=c["domain"], text=_text(sources, c)))
+            _ok(box.call("load", source=c["source"], subject_matter=c["subject_matter"], text=_text(sources, c)))
         _ok(box.call("finish"))
     except RuntimeError as e:  # a chapter that spent the budget or the memory while loading, among other things
         box.close()
@@ -601,8 +606,9 @@ def _plan_of(codex):
     chapters = codex.chapters
     return {
         "realm": codex.layers[-1], "layers": codex.layers,
-        "chapters": [{"source": source, "domain": domain, "sha256": chapters[f"{source}/{domain}"]["sha256"]}
-                     for domain in sorted(codex.layer_paths) for source in codex.layer_paths[domain]],
+        "chapters": [{"source": source, "subject_matter": subject_matter,
+                      "sha256": chapters[f"{source}/{subject_matter}"]["sha256"]}
+                     for subject_matter in sorted(codex.layer_paths) for source in codex.layer_paths[subject_matter]],
         "calendars": [{"source": source, "sha256": chapters[f"{source}/calendar"]["sha256"]}
                       for source in codex.layers if f"{source}/calendar" in chapters],
     }
@@ -623,7 +629,8 @@ def _texts(codex):
 
 def _text(sources, entry):
     if entry["sha256"] not in sources:
-        raise Fail(f"{entry['source']}/{entry.get('domain', 'calendar')}: the bytes of {entry['sha256']} are missing")
+        raise Fail(f"{entry['source']}/{entry.get('subject_matter', 'calendar')}: the bytes of {entry['sha256']} are "
+                   f"missing")
     return sources[entry["sha256"]]
 
 

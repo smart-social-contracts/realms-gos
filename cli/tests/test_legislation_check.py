@@ -238,7 +238,7 @@ def kept(tree, text, path="eu/es/tax.py", realm="eu/es"):
         ),
     ],
 )
-def test_a_chapter_is_one_class_named_after_its_domain_that_extends_above_its_domain(
+def test_a_chapter_is_one_class_named_after_its_subject_matter_that_extends_above_its_subject_matter(
     tree, text, expected
 ):
     refused_with(tree, text, expected)
@@ -430,7 +430,7 @@ def test_a_chapter_hooks_a_link_notice_and_never_guards_or_computes_it(tree, pre
     kept(tree, tax_chapter(hook, "above, fixed"))
 
 
-def test_domains_that_use_each_other_are_a_cycle(tree):
+def test_subject_matters_that_use_each_other_are_a_cycle(tree):
     write(
         tree,
         "eu/es/procedure.py",
@@ -447,11 +447,11 @@ def test_domains_that_use_each_other_are_a_cycle(tree):
 @pytest.mark.parametrize(
     "uses, expected",
     [
-        ("['tax']", "eu/es/tax.py: uses its own domain, tax"),
+        ("['tax']", "eu/es/tax.py: uses its own subject matter, tax"),
         ("['water']", "eu/es/tax.py: uses water, but this realm has no water chapter"),
     ],
 )
-def test_a_chapter_uses_another_domain_the_realm_has(tree, uses, expected):
+def test_a_chapter_uses_another_subject_matter_the_realm_has(tree, uses, expected):
     refused_with(tree, tax_chapter(f"    uses = {uses}\n"), expected)
     write(
         tree,
@@ -473,7 +473,7 @@ def test_a_refusal_in_a_layer_shows_once_though_every_realm_below_runs_the_layer
     assert "1 refused" in out.output
 
 
-# ── Test cases (§12.3): <domain>.cases.json beside a chapter, run on the realm's codex ──
+# ── Test cases (§12.3): <subject_matter>.cases.json beside a chapter, run on the realm's codex ──
 
 RATE_AND_BONUS = """from realms.legislation import above, overridable, pct
 
@@ -515,7 +515,7 @@ def case_run(tree, realm="eu/es"):
     return out.exit_code, out.output
 
 
-def test_a_call_case_reads_a_setting_or_calls_a_helper_of_the_resolved_domain(tree):
+def test_a_call_case_reads_a_setting_or_calls_a_helper_of_the_resolved_subject_matter(tree):
     write(tree, "eu/es/tax.py", RATE_AND_BONUS)
     write(tree, "eu/es/vc/46250-valencia/tax.py", VALENCIA_BONUS)
     cases = [
@@ -568,7 +568,7 @@ def test_a_case_that_calls_what_the_chapter_does_not_have_says_so(tree):
     assert code == 1 and 'case "x": the tax chapter has no member nothing' in output
 
 
-def test_a_guard_case_runs_the_domains_guard_on_the_arguments_the_time_and_the_approvals(
+def test_a_guard_case_runs_the_subject_matters_guard_on_the_arguments_the_time_and_the_approvals(
     tree,
 ):
     write(tree, "eu/es/local_regime.py", GUARD)
@@ -763,7 +763,7 @@ def test_a_forbid_follows_the_f_rules(tree, rule, expected):
     assert run(str(tree), "--realm", "eu/es", "--no-analysis").exit_code == 0
 
 
-def test_a_forbid_reads_the_settings_of_its_own_domain_only(tree):
+def test_a_forbid_reads_the_settings_of_its_own_subject_matter_only(tree):
     write(
         tree,
         "eu/es/procedure.py",

@@ -67,7 +67,7 @@ def newest_release(source):
 
 def layer_files(release):
     source = release["source"]
-    return {f"{source}/{domain}": (TREE / source / f"{domain}.py").read_bytes() for domain in release["chapters"]}
+    return {f"{source}/{subject_matter}": (TREE / source / f"{subject_matter}.py").read_bytes() for subject_matter in release["chapters"]}
 
 
 def own_layer_files(source):

@@ -2,7 +2,7 @@
 evaluation in plain Python.
 
 A forbid's expression is built from ``F`` (the facts of the operation), ``S`` (the settings of the
-chapter's own domain), literals (int, str, bool, lists of those, ``pct()`` rates and Periods) and
+chapter's own subject matter), literals (int, str, bool, lists of those, ``pct()`` rates and Periods) and
 ``when(c, a, b)``::
 
     ibi_urban_cap = forbid("tax_policy_propose",
@@ -246,7 +246,7 @@ class Fact(Expr):
 
 
 class Setting(Expr):
-    """``S.<name>``: a setting of the chapter's own domain, as it resolves in this realm. The Cedar
+    """``S.<name>``: a setting of the chapter's own subject matter, as it resolves in this realm. The Cedar
     generator folds its value in, or leaves it open as ``context.settings`` in the generic mode.
     """
 

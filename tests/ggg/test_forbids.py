@@ -214,12 +214,12 @@ def test_a_forbid_cannot_read_what_an_operation_keeps_from_the_legislation(agora
     for operation, fact in (("realm_join", "code"), ("invite_create", "code"), ("request_decide", "reply")):
         chapters = {("x/town", "realm"): secret_rule(operation, f"F.{fact}.is_some()")}
         plan = {"realm": "x/town", "layers": ["x/town"], "calendars": [],
-                "chapters": [{"source": s, "domain": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
+                "chapters": [{"source": s, "subject_matter": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
         out = legislation.build(plan, {store.checksum(t): t for t in chapters.values()})
         assert out["errors"] and f"{operation} has no fact {fact}" in out["errors"][0], out["errors"]
     keys = {("x/town", "realm"): secret_rule("crypto_grant", "F.principal == 'x'", each="keys")}  # the list is secret
     out = legislation.build({"realm": "x/town", "layers": ["x/town"], "calendars": [], "chapters": [
-        {"source": "x/town", "domain": "realm", "sha256": store.checksum(keys[("x/town", "realm")])}]},
+        {"source": "x/town", "subject_matter": "realm", "sha256": store.checksum(keys[("x/town", "realm")])}]},
         {store.checksum(keys[("x/town", "realm")]): keys[("x/town", "realm")]})
     assert out["errors"] and "crypto_grant.keys" in out["errors"][0], out["errors"]
 
@@ -359,7 +359,7 @@ def test_build_validates_the_cedar_without_replacing_the_running_policies(agora,
     chapters = {(SPAIN, "tax"): SPAIN_TAX}
     sources = {store.checksum(t): t for t in chapters.values()}
     plan = {"realm": SPAIN, "layers": [SPAIN], "calendars": [],
-            "chapters": [{"source": s, "domain": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
+            "chapters": [{"source": s, "subject_matter": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
     out = legislation.build(plan, sources)
     assert out["errors"] == [] and '@id("eu/es/tax/ibi_rate_required")' in out["cedar"]
     assert auth.live == running
@@ -593,7 +593,7 @@ def test_a_codex_whose_generated_cedar_smuggles_a_permit_is_not_loaded_nor_built
         legislation.load(other)
     chapters = {(SPAIN, "tax"): SPAIN_TAX}
     plan = {"realm": SPAIN, "layers": [SPAIN], "calendars": [],
-            "chapters": [{"source": s, "domain": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
+            "chapters": [{"source": s, "subject_matter": d, "sha256": store.checksum(t)} for (s, d), t in chapters.items()]}
     built = legislation.build(plan, {store.checksum(t): t for t in chapters.values()})
     assert any("permits" in e for e in built["errors"])
     assert auth.live == running and legislation._state["codex"] == first.id
@@ -618,7 +618,7 @@ def test_the_sandbox_hands_over_policy_text_and_the_realm_builds_the_schema_and_
     legislation.load(row)
     assert auth.live["schema"] == schema and auth.live["forbids"]["types"] == types
     plan = {"realm": SPAIN, "layers": [SPAIN], "calendars": [], "chapters": [
-        {"source": SPAIN, "domain": "tax", "sha256": store.checksum(SPAIN_TAX)}]}
+        {"source": SPAIN, "subject_matter": "tax", "sha256": store.checksum(SPAIN_TAX)}]}
     assert legislation.build(plan, {store.checksum(SPAIN_TAX): SPAIN_TAX})["errors"] == []
     assert "forbidden by the legislation" in denied("tax_policy_draft", "bob", **drafted(entry("ibi_urban", CAP + 1)))
 

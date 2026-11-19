@@ -348,12 +348,12 @@ class Check(metaclass=Sealed):
     checks are those of the installed (folded) Cedar; the generic output reads the same tree.
     """
 
-    __slots__ = ("action", "settings", "domain")
+    __slots__ = ("action", "settings", "subject_matter")
 
-    def __init__(self, action, settings, domain):
+    def __init__(self, action, settings, subject_matter):
         object.__setattr__(self, "action", action)
         object.__setattr__(self, "settings", settings)
-        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "subject_matter", subject_matter)
 
     def __setattr__(self, name, value):
         raise LegislationError("a check never changes")
@@ -379,7 +379,7 @@ class Check(metaclass=Sealed):
     def setting(self, node):
         if node.name not in self.settings:
             raise LegislationError(
-                f"S.{node.name}: {self.domain} has no setting {node.name}"
+                f"S.{node.name}: {self.subject_matter} has no setting {node.name}"
             )
         return value_type(self.settings[node.name], f"S.{node.name}")
 
@@ -583,14 +583,14 @@ class Check(metaclass=Sealed):
 
 class Writer(metaclass=Sealed):
     """The canonical Cedar text of one tree, with the settings folded in, or left open as
-    ``context.settings.<domain>.<name>`` in the generic mode."""
+    ``context.settings.<subject_matter>.<name>`` in the generic mode."""
 
-    __slots__ = ("facts", "settings", "domain", "generic")
+    __slots__ = ("facts", "settings", "subject_matter", "generic")
 
-    def __init__(self, action, settings, domain, generic):
+    def __init__(self, action, settings, subject_matter, generic):
         object.__setattr__(self, "facts", action.facts)
         object.__setattr__(self, "settings", settings)
-        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "subject_matter", subject_matter)
         object.__setattr__(self, "generic", generic)
 
     def __setattr__(self, name, value):
@@ -610,7 +610,7 @@ class Writer(metaclass=Sealed):
 
     def setting(self, name):
         if self.generic:
-            return attribute(attribute("context.settings", self.domain), name)
+            return attribute(attribute("context.settings", self.subject_matter), name)
         return self.literal(self.settings[name])
 
     @staticmethod
@@ -634,7 +634,7 @@ class Writer(metaclass=Sealed):
         if isinstance(node, Literal):
             return quoted(node.value.unit), Writer.literal(node.value.count)
         if self.generic:
-            path = attribute(attribute("context.settings", self.domain), node.name)
+            path = attribute(attribute("context.settings", self.subject_matter), node.name)
             return f"{path}.unit", f"{path}.count"
         value = self.settings[node.name]
         return quoted(value.unit), Writer.literal(value.count)
@@ -745,7 +745,7 @@ class Writer(metaclass=Sealed):
 
 
 class BoundForbid(metaclass=Sealed):
-    """A forbid bound to a realm: its ``@id`` (``<source>/<domain>/<attribute>``), citation, Cedar
+    """A forbid bound to a realm: its ``@id`` (``<source>/<subject_matter>/<attribute>``), citation, Cedar
     actions, tree, the values of the settings it reads, and the ranges of the facts it bounds.
     """
 
@@ -756,20 +756,20 @@ class BoundForbid(metaclass=Sealed):
         "expression",
         "settings",
         "action",
-        "domain",
+        "subject_matter",
         "file",
         "line",
     )
 
     def __init__(self, member, action, actions, expression, settings):
         for name, value in (
-            ("id", f"{member.source}/{member.domain}/{member.name}"),
+            ("id", f"{member.source}/{member.subject_matter}/{member.name}"),
             ("legislation", member.legislation),
             ("actions", tuple(actions)),
             ("expression", expression),
             ("settings", MappingProxyType(dict(settings))),
             ("action", action),
-            ("domain", member.domain),
+            ("subject_matter", member.subject_matter),
             ("file", member.file),
             ("line", member.line),
         ):
@@ -801,7 +801,7 @@ class BoundForbid(metaclass=Sealed):
                 + ",\n                   ".join(actions)
                 + "],\n        resource)"
             )
-        body = Writer(self.action, self.settings, self.domain, generic).top(
+        body = Writer(self.action, self.settings, self.subject_matter, generic).top(
             self.expression
         )
         lines.append(f"  when {{ {body} }};")
@@ -816,7 +816,7 @@ def plain_setting(value):
 
 def bind(member, resolved, schema):
     """``member`` (a forbid of a loaded chapter) bound to the realm: its settings read from
-    ``resolved`` (the lowest class of its domain) and its tree checked against the fact schema, for
+    ``resolved`` (the lowest class of its subject matter) and its tree checked against the fact schema, for
     the folded and the generic output alike. Raises ``Refused`` with the chapter's file and line.
     """
     forbid = member.value
@@ -835,10 +835,10 @@ def bind(member, resolved, schema):
             upper = resolved.__members__.get(setting)
             if upper is None or upper.kind != "setting":
                 raise LegislationError(
-                    f"S.{setting}: {member.domain} has no setting {setting}"
+                    f"S.{setting}: {member.subject_matter} has no setting {setting}"
                 )
             settings[setting] = plain_setting(getattr(resolved, setting))
-        Check(action, settings, member.domain).run(expression)
+        Check(action, settings, member.subject_matter).run(expression)
     except LegislationError as e:
         raise Refused(f"{member.name}: {e}", member.line, member.file)
     return BoundForbid(member, action, (name,) + action.also, expression, settings)
@@ -856,13 +856,13 @@ def policies(forbids, generic=False):
 
 
 def setting_types(forbids):
-    """Per action, per domain, the Cedar type of each setting an open (generic) forbid reads."""
+    """Per action, per subject matter, the Cedar type of each setting an open (generic) forbid reads."""
     out = {}
     for forbid in forbids:
         for action in forbid.actions:
             for name, value in forbid.settings.items():
-                domains = out.setdefault(action, {})
-                domains.setdefault(forbid.domain, {})[name] = value_type(
+                subject_matters = out.setdefault(action, {})
+                subject_matters.setdefault(forbid.subject_matter, {})[name] = value_type(
                     value, f"S.{name}"
                 )
     return out
@@ -904,15 +904,15 @@ def schema(fact_schema, forbids=(), context=None, only=None):
         facts = record([(f, CEDAR_TYPES.get(t.type, t.type), t.optional) for f, t in action.facts.items()])
         fields = base + [("facts", facts, False)]
         if name in open_settings:
-            domains = [
+            subject_matters = [
                 (
-                    domain,
+                    subject_matter,
                     record([(s, t, False) for s, t in sorted(types.items())]),
                     False,
                 )
-                for domain, types in sorted(open_settings[name].items())
+                for subject_matter, types in sorted(open_settings[name].items())
             ]
-            fields.append(("settings", record(domains), False))
+            fields.append(("settings", record(subject_matters), False))
         lines.append(
             f'  action {quoted(name)} in ["call"] appliesTo {{ principal: [User], resource: [Realm], '
             f"context: {record(fields)} }};"
