@@ -18,6 +18,7 @@ API, which takes any sender, as the realms' founders.
 import base64
 import json
 import time
+import zlib
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
@@ -30,6 +31,12 @@ PATIENCE = 900  # seconds of rounds a step may take before the mundus gives up o
 TRILLION = 10**12
 FLOOR = 100 * TRILLION  # cycles every canister is topped up to: a busy capital burns about 1.6 T a day
 GAP = 8  # canister ids in a row that do not exist before the mundus stops looking for more
+
+
+def principal_text(raw: bytes) -> str:
+    """A principal's text form (``3wbuo-6d777-77775-aaasq-cai``): its CRC-32 and bytes, in base 32, by fives."""
+    found = base64.b32encode(zlib.crc32(raw).to_bytes(4, "big") + raw).decode().lower().rstrip("=")
+    return "-".join(found[at:at + 5] for at in range(0, len(found), 5))
 
 
 def descriptor_path(casals_home: Path) -> Path:
@@ -144,8 +151,6 @@ class Network:
         before, added)`` for each canister. A local network charges cycles as the IC does, and a realm the portal
         mints gets about 1.5 T, so a busy realm freezes within a day ("out of cycles"); a local network's cycles
         cost nothing."""
-        from ic.principal import Principal
-
         found = []
         for raw in self.canisters():
             before = self.cycles(raw) or 0
@@ -153,7 +158,7 @@ class Network:
             if added:
                 self._rest("post", "update/add_cycles", {"canister_id": base64.b64encode(raw).decode(),
                                                          "amount": added})
-            found.append((Principal(raw).to_str(), before, added))
+            found.append((principal_text(raw), before, added))
         return found
 
     # -- outcalls

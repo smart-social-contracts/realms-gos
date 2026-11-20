@@ -503,16 +503,14 @@ def top_up(m: Mundus, quiet: bool = False) -> None:
 
 def status(name: str = "") -> None:
     m = open_mundus(name)
-    from ic.principal import Principal
-
     from . import mundus_realms
-    from .mundus_held import FLOOR, TRILLION, Network
+    from .mundus_held import FLOOR, TRILLION, Network, principal_text
 
     print(memory(m))
     if stack_is_up(m):
         print(mundus_realms.urls(m))
         net, named = Network(m.casals_home), labels(m)
-        lowest = sorted((net.cycles(raw) or 0, Principal(raw).to_str()) for raw in net.canisters())[:3]
+        lowest = sorted((net.cycles(raw) or 0, principal_text(raw)) for raw in net.canisters())[:3]
         shown = "   ".join(f"{c / TRILLION:.2f} T {named.get(canister, canister)}" for c, canister in lowest)
         low = lowest and lowest[0][0] < FLOOR // 10
         print(f"Lowest cycles   {shown}" + ("   (low: realms mundus top-up)" if low else ""))

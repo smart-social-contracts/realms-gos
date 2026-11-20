@@ -3,7 +3,7 @@
 import base64
 
 from realms.cli.commands import mundus_held
-from realms.cli.commands.mundus_held import FLOOR, Network
+from realms.cli.commands.mundus_held import FLOOR, Network, principal_text
 
 
 def raw(index: int) -> bytes:
@@ -58,3 +58,8 @@ def test_the_search_stops_after_a_gap_of_missing_ids(monkeypatch):
     monkeypatch.setattr(mundus_held, "GAP", 3)
     server = FakeServer({0: 1, 1: None, 2: None, 3: 1, 4: None, 5: None, 6: None, 7: 1})
     assert network(server).canisters() == [raw(0), raw(3)]
+
+
+def test_a_canister_id_is_written_as_the_ic_writes_it():
+    assert principal_text(raw(0x25)) == "3wbuo-6d777-77775-aaasq-cai"  # València's capital, on the mundus
+    assert principal_text(b"\x00" * 8 + b"\x01\x01") == "rwlgt-iiaaa-aaaaa-aaaaa-cai"  # the NNS registry
