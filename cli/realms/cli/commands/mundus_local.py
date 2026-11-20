@@ -162,8 +162,12 @@ def open_mundus(name_or_path: str = "") -> Mundus:
         path = Path(remembered["file"])
         spec = json.loads(path.read_text())
     state = mundi_home() / name
-    return Mundus(name=name, spec=spec, state=state, realms_dir=realms_checkout(),
-                  sources={repo: source_dir(spec, repo) for repo in REPOS})
+    m = Mundus(name=name, spec=spec, state=state, realms_dir=realms_checkout(),
+               sources={repo: source_dir(spec, repo) for repo in REPOS})
+    # GaaS's helper (mundus_realms.platform) reads where the bindings are when it is imported.
+    if m.port:
+        os.environ.update({k: v for k, v in m.env().items() if k.startswith("CASALS_") or k in ("IDENTITY", "ENV")})
+    return m
 
 
 def source_dir(spec: dict, repo: str) -> Path:
@@ -489,7 +493,6 @@ def sign_in(mode: str, name: str = "") -> None:
     from . import mundus_realms
 
     m = open_mundus(name)
-    os.environ.update({k: v for k, v in m.env().items() if k.startswith("CASALS_") or k in ("IDENTITY", "ENV")})
     mundus_realms.sign_in(m, mode == "test")
 
 
