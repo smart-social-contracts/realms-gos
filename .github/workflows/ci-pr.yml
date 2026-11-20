@@ -63,8 +63,9 @@ jobs:
         # not environment ids). The CLI is covered too: a `--network` default
         # table there is the same bug one layer up. The only literals allowed
         # are DFINITY system canisters that are the same on every mainnet alias
-        # (Candid UI, Internet Identity, the ICP ledger, and the ckBTC, ckUSDC
-        # and ckEURC ledgers + indexes).
+        # (Candid UI, Internet Identity and its id.ai frontend, which icp-cli's
+        # local network installs at the same ids, the ICP ledger, and the ckBTC,
+        # ckUSDC and ckEURC ledgers + indexes).
         run: |
           if grep -rnoE '\b[a-z0-9]{5}(-[a-z0-9]{5}){3,10}-[a-z0-9]{3}\b' \
                scripts .github src/realm_backend src/*/static src/realm_frontend/src cli/realms dfx.json \
@@ -74,7 +75,7 @@ jobs:
                --exclude-dir=node_modules --exclude-dir=tests --exclude-dir=__pycache__ --exclude-dir=declarations --exclude-dir=dist --exclude-dir=cycleops \
                --exclude=test_identity_seed.py --exclude='*.test.ts' --exclude='*.test.js' \
              | grep -v -- '-xxxxx-' \
-             | grep -vE ':(rxs6w-5qaaa-aaaah-avp2a-cai|rdmx6-jaaaa-aaaaa-aaadq-cai|ryjl3-tyaaa-aaaaa-aaaba-cai|mxzaz-hqaaa-aaaar-qaada-cai|n5wcd-faaaa-aaaar-qaaea-cai|xevnm-gaaaa-aaaar-qafnq-cai|xrs4b-hiaaa-aaaar-qafoa-cai|pe5t5-diaaa-aaaar-qahwa-cai|pd4vj-oqaaa-aaaar-qahwq-cai)$'; then
+             | grep -vE ':(rxs6w-5qaaa-aaaah-avp2a-cai|rdmx6-jaaaa-aaaaa-aaadq-cai|uqzsh-gqaaa-aaaaq-qaada-cai|ryjl3-tyaaa-aaaaa-aaaba-cai|mxzaz-hqaaa-aaaar-qaada-cai|n5wcd-faaaa-aaaar-qaaea-cai|xevnm-gaaaa-aaaar-qafnq-cai|xrs4b-hiaaa-aaaar-qafoa-cai|pe5t5-diaaa-aaaar-qahwa-cai|pd4vj-oqaaa-aaaar-qahwq-cai)$'; then
             echo "::error::canister/principal ids belong in casals.json (read them with 'casals export')"; exit 1
           fi
 

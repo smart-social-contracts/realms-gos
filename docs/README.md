@@ -13,6 +13,7 @@ right and the page is a bug.
 | If you want to… | Read |
 |---|---|
 | Run a realm on your machine in 5 minutes | [Getting started](getting-started.md) |
+| Run a whole mundus (portal, several linked realms, quarters, simulated people) on your machine | [A mundus on your machine](development/mundus.md) |
 | Understand how a realm works | [Architecture](architecture/README.md) |
 | Know *why* it is built this way | [Design choices](architecture/design-choices.md) |
 | Look up an entity, an operation or a rule | [GGG spec](ggg/spec.md) |
@@ -56,7 +57,8 @@ docs/
 ├── deployment/README.md          Casals, environments, domains, publishing
 ├── development/
 │   ├── contributing.md           style rules and conventions
-│   └── testing.md
+│   ├── testing.md
+│   └── mundus.md                 realms mundus up: a whole mundus on your machine
 └── project/
     ├── roadmap.md
     ├── refactor-plan.md          the plan behind the current backend
