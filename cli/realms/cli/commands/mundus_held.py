@@ -34,7 +34,7 @@ GAP = 8  # canister ids in a row that do not exist before the mundus stops looki
 
 
 def principal_text(raw: bytes) -> str:
-    """A principal's text form (``3wbuo-6d777-77775-aaasq-cai``): its CRC-32 and bytes, in base 32, by fives."""
+    """A principal's text form, as the IC writes it: its CRC-32 and its bytes, in base 32, in groups of five."""
     found = base64.b32encode(zlib.crc32(raw).to_bytes(4, "big") + raw).decode().lower().rstrip("=")
     return "-".join(found[at:at + 5] for at in range(0, len(found), 5))
 
