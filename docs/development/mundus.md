@@ -43,7 +43,11 @@ included: that is the point. It needs `icp`, `dfx`, `ic-wasm`, `node`, `python3`
    the capital, a controller of each quarter, with the network held.
 7. **Layers.** The links, layers from above, own layers and publications of the realms that have a `layer` (below).
    A federation installs every layer by a change list.
-8. **Check and swarm.** The portal and every realm are opened in headless Chromium (screenshots in the mundus'
+8. **Cycles.** Every canister of the network below 90 T is topped up to 100 T. A local network charges cycles as
+   the IC does, and a realm the portal mints gets about 1.5 T: a capital the swarm lives in uses that up within a
+   day, freezes, and answers every call "out of cycles" (a person who tries to join sees it). `realms mundus status`
+   shows the lowest balances, `realms mundus top-up` tops them up again.
+9. **Check and swarm.** The portal and every realm are opened in headless Chromium (screenshots in the mundus'
    `shots/`), and the geister swarm is started (`--no-swarm` to leave it).
 
 Everything a mundus keeps is in `~/.realms/mundi/<name>/` (`REALMS_MUNDI_HOME` to move it): its network, bindings,
@@ -126,7 +130,8 @@ root department decides alone, it is installed at once; the members do not vote 
 
 | | |
 |---|---|
-| `realms mundus status` | whether the network is up, its memory, the realms |
+| `realms mundus status` | whether the network is up, its memory, the realms, the canisters lowest on cycles |
+| `realms mundus top-up` | every canister below 90 T up to 100 T cycles, as `up` does |
 | `realms mundus check` | the browser check again |
 | `realms mundus sign-in test\|internet-identity` | how people sign in, on the portal and every realm |
 | `realms mundus clock` | the network's time beside the wall clock |
@@ -135,9 +140,9 @@ root department decides alone, it is installed at once; the members do not vote 
 
 ## What a mundus does not show
 
-- **The IC.** The local Internet Identity, the signing key (`dfx_test_key`, where staging has `test_key_1`), cycle
-  costs and staging's own GaaS are only the IC's. A demo built here is rehearsed once on staging before it is given
-  there.
+- **The IC.** The local Internet Identity, the signing key (`dfx_test_key`, where staging has `test_key_1`), cycles
+  that cost something and staging's own GaaS are only the IC's. A demo built here is rehearsed once on staging
+  before it is given there.
 - **Members spread across quarters.** geister's members join the capital; only the web join page sends a person
   to a quarter. They live in the capital.
 - **Explain.** codex_viewer's Explain asks the realm's AI assistant, which answers from an outside service that

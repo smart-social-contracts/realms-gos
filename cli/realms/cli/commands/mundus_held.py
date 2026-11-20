@@ -27,6 +27,9 @@ import requests
 NANOS = 10**9
 ROUNDS = 500  # rounds an update call may take before the mundus gives up on it
 PATIENCE = 900  # seconds of rounds a step may take before the mundus gives up on it
+TRILLION = 10**12
+FLOOR = 100 * TRILLION  # cycles every canister is topped up to: a busy capital burns about 1.6 T a day
+GAP = 8  # canister ids in a row that do not exist before the mundus stops looking for more
 
 
 def descriptor_path(casals_home: Path) -> Path:
@@ -104,6 +107,54 @@ class Network:
                 raise RuntimeError(f"not reached in {limit:.0f} s of rounds")
             for _ in range(5):
                 self.tick()
+
+    # -- cycles
+
+    def canisters(self) -> list:
+        """The ids of every canister on the application subnets (the portal, the infra, the realms and their
+        quarters, their ledgers), as raw bytes. A subnet hands out its range's ids in order, so they are looked for
+        from the start of each range until ``GAP`` ids in a row do not exist."""
+        found = []
+        for subnet in self._rest("get", "_/topology")["subnet_configs"].values():
+            if subnet["subnet_kind"] != "Application":
+                continue
+            for span in subnet["canister_ranges"]:
+                first = base64.b64decode(span["start"]["canister_id"])
+                last = int.from_bytes(base64.b64decode(span["end"]["canister_id"])[:8], "big")
+                index, missing = int.from_bytes(first[:8], "big"), 0
+                while missing < GAP and index <= last:
+                    raw = index.to_bytes(8, "big") + first[8:]
+                    if self.cycles(raw) is None:
+                        missing += 1
+                    else:
+                        missing = 0
+                        found.append(raw)
+                    index += 1
+        return found
+
+    def cycles(self, raw: bytes) -> Optional[int]:
+        """A canister's cycles, or None if it does not exist."""
+        try:
+            return self._rest("post", "read/get_cycles", {"canister_id": base64.b64encode(raw).decode()})["cycles"]
+        except RuntimeError:
+            return None
+
+    def top_up(self, floor: int = FLOOR) -> list:
+        """Bring every canister below nine tenths of ``floor`` cycles up to ``floor``, and return ``(id, cycles
+        before, added)`` for each canister. A local network charges cycles as the IC does, and a realm the portal
+        mints gets about 1.5 T, so a busy realm freezes within a day ("out of cycles"); a local network's cycles
+        cost nothing."""
+        from ic.principal import Principal
+
+        found = []
+        for raw in self.canisters():
+            before = self.cycles(raw) or 0
+            added = floor - before if before < floor - floor // 10 else 0
+            if added:
+                self._rest("post", "update/add_cycles", {"canister_id": base64.b64encode(raw).decode(),
+                                                         "amount": added})
+            found.append((Principal(raw).to_str(), before, added))
+        return found
 
     # -- outcalls
 

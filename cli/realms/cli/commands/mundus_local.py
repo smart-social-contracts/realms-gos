@@ -368,6 +368,7 @@ def up(name_or_path: str, rebuild: bool, swarm: bool) -> None:
     enter_venv(["mundus", "up", name_or_path] + (["--rebuild"] if rebuild else []) + ([] if swarm else ["--no-swarm"]),
                again=installed)
     from . import mundus_layers, mundus_realms
+    from .mundus_held import FLOOR, TRILLION
 
     os.environ.update({k: v for k, v in m.env().items() if k in ("CASALS_HOME", "IDENTITY", "ENV")})
     if not m.port:
@@ -401,6 +402,8 @@ def up(name_or_path: str, rebuild: bool, swarm: bool) -> None:
         link.unlink()
     link.symlink_to(m.name)
     mundus_realms.swarm_config(m)
+    step(f"Cycles: every canister up to {FLOOR // TRILLION} T")
+    top_up(m, quiet=True)
     step("Browser check")
     check(m)
     if swarm:
@@ -471,13 +474,48 @@ def memory(m: Mundus) -> str:
     return f"network: {len(tree)} processes, {sum(int(x) for x in rss) / 1024:.0f} MB resident"
 
 
+def labels(m: Mundus) -> dict:
+    """What each canister of the mundus' realms is, by id."""
+    from . import mundus_realms
+
+    found = {}
+    for r in mundus_realms.records(m):
+        found.update({r.get("backend"): f"{r['name']} backend", r.get("frontend"): f"{r['name']} frontend"})
+        found.update({s["args"]["ledger"]: f"{r['name']} ledger"
+                      for s in r.get("launch_steps", []) if s["op"] == "token_register"})
+        found.update({q["backend"]: f"{r['name']} {q['name']}" for q in r.get("quarters") or []})
+    return found
+
+
+def top_up(m: Mundus, quiet: bool = False) -> None:
+    """Every canister of the mundus' network up to ``FLOOR`` cycles. A realm the portal mints gets about 1.5 T, as on
+    the IC, and a busy one (a capital the swarm lives in) uses it up within a day and freezes."""
+    from .mundus_held import FLOOR, TRILLION, Network
+
+    found = Network(m.casals_home).top_up()
+    named = labels(m)
+    for canister, before, added in found:
+        if added and not quiet:
+            print(f"  {canister}  {before / TRILLION:8.3f} T  +{added / TRILLION:.3f} T  {named.get(canister, '')}")
+    print(f"  {sum(1 for f in found if f[2])} of {len(found)} canisters topped up to {FLOOR // TRILLION} T"
+          " (those below 90 T)")
+
+
 def status(name: str = "") -> None:
     m = open_mundus(name)
+    from ic.principal import Principal
+
     from . import mundus_realms
+    from .mundus_held import FLOOR, TRILLION, Network
 
     print(memory(m))
     if stack_is_up(m):
         print(mundus_realms.urls(m))
+        net, named = Network(m.casals_home), labels(m)
+        lowest = sorted((net.cycles(raw) or 0, Principal(raw).to_str()) for raw in net.canisters())[:3]
+        shown = "   ".join(f"{c / TRILLION:.2f} T {named.get(canister, canister)}" for c, canister in lowest)
+        low = lowest and lowest[0][0] < FLOOR // 10
+        print(f"Lowest cycles   {shown}" + ("   (low: realms mundus top-up)" if low else ""))
         print(geister_hint(m))
 
 

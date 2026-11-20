@@ -836,7 +836,7 @@ def mundus_urls(mundus: str = _MUNDUS_OPTION) -> None:
 
 @mundus_app.command("status")
 def mundus_status(mundus: str = _MUNDUS_OPTION) -> None:
-    """Whether the mundus' network is up, its memory, and its realms."""
+    """Whether the mundus' network is up, its memory, its realms, and the canisters lowest on cycles."""
     _local_mundus().status(mundus)
 
 
@@ -845,6 +845,18 @@ def mundus_check(mundus: str = _MUNDUS_OPTION) -> None:
     """Open the portal and every realm in headless Chromium; screenshots in the mundus' shots/ folder."""
     m = _local_mundus()
     m.check(m.open_mundus(mundus))
+
+
+@mundus_app.command("top-up")
+def mundus_top_up(mundus: str = _MUNDUS_OPTION) -> None:
+    """Every canister of the mundus' network below 90 T up to 100 T cycles; `up` does it too.
+
+    \b
+    A local network charges cycles as the IC does, and a realm the portal mints gets about 1.5 T: a busy one (a
+    capital the swarm lives in) uses that up within a day, freezes, and answers every call "out of cycles".
+    """
+    m = _local_mundus()
+    m.top_up(m.open_mundus(mundus))
 
 
 @mundus_app.command("sign-in")
