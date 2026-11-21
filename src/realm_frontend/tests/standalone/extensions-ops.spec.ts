@@ -107,11 +107,13 @@ const ROWS: Row[] = [
 		path: '/extensions/member_dashboard',
 		as: 'member',
 		action: 'open my membership page as the second member',
-		expected: 'my membership steps: the passport check and the invoices',
+		expected: 'my membership steps: the passport check and the deposit to pay',
 		run: async ({ app }) => {
 			await expect(app.getByText('Membership', { exact: true }).first()).toBeVisible();
 			await expect(app.getByRole('button', { name: 'Verify passport' })).toBeVisible();
-			await expect(app.getByRole('button', { name: 'View invoices' })).toBeVisible();
+			// Syntropia bills a deposit on joining: the step offers to pay it (realms-extensions#118 names the button by
+			// what the member owes; a member never billed has no invoice step).
+			await expect(app.getByRole('button', { name: 'Pay invoice' })).toBeVisible();
 		}
 	},
 	{
