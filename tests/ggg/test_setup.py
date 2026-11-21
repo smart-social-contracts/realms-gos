@@ -7,7 +7,7 @@ import pytest
 import fake_chain
 import world
 from api import setup
-from ggg import Department, Realm, Registry
+from ggg import Department, Invoice, Realm, Registry, Token
 from kit import call, denied, direct, ok
 
 APPROVED = json.dumps({"approved": True, "approver": "market"})
@@ -27,6 +27,44 @@ def test_story_the_founder_sets_up_and_launches_agora():
     denied("realm_configure", "frank", open_registration=False)
     assert "governed" in call("setup_step", "ctl", step="branding", logo_url="x")["error"]
     assert "already launched" in call("setup_launch", "ctl")["error"]
+
+
+def test_the_tokens_step_registers_the_currency_so_a_codex_can_bill_a_joining_member():
+    """The setup wizard names the realm's currency only in its tokens step. Before, the realm then had no token of
+    that symbol, so Syntropia's deposit invoice on a member's join failed (``invoice_create``: unknown Token)."""
+    world.build()
+    ok("setup_step", "ctl", step="install", network="local", founder="frank")
+    fake_chain.state["replies"][("e2e-ledger", "icrc1_fee")] = "(10_000 : nat)"
+    ok("setup_step", "frank", step="tokens", accounting_currency="E2E", accounting_currency_decimals=8,
+       token_canister_id="e2e-ledger")
+    token = Token["E2E"]
+    assert (token.ledger, token.decimals, token.fee) == ("e2e-ledger", 8, 10_000)
+    billed = ok("invoice_create", "ctl", payer="alice", amount=1_000_000, items=[{"concept": "deposit",
+                                                                                   "amount": 1_000_000}])
+    assert Invoice[billed["invoice"]].symbol == "E2E"
+    # A later step of the same kind keeps the registry in line with the ledger, without a second entry.
+    fake_chain.state["replies"][("e2e-ledger", "icrc1_fee")] = "(20_000 : nat)"
+    tokens = Token.count()
+    ok("realm_configure_tokens", "frank", accounting_currency_decimals=6)
+    assert (Token["E2E"].decimals, Token["E2E"].fee, Token.count()) == (6, 20_000, tokens)
+
+
+def test_a_ledger_that_does_not_answer_its_fee_is_refused_before_anything_changes():
+    world.build()
+    ok("setup_step", "ctl", step="install", network="local", founder="frank")
+    fake_chain.state["replies"][("not-a-ledger", "icrc1_fee")] = Exception("method icrc1_fee not found")
+    out = call("setup_step", "frank", step="tokens", accounting_currency="E2E", token_canister_id="not-a-ledger")
+    assert not out["ok"] and "did not answer icrc1_fee" in out["error"]
+    assert (Realm["1"].accounting_currency, Realm["1"].token_canister_id, Token["E2E"]) == ("", "", None)
+    assert "tokens" not in ok("setup_state", "frank")["done"]
+
+
+def test_a_tokens_step_without_a_ledger_asks_no_ledger():
+    world.build()
+    ok("setup_step", "ctl", step="install", network="local", founder="frank")
+    fake_chain.state["calls"].clear()
+    ok("setup_step", "frank", step="tokens", accounting_currency="ckUSDC")
+    assert fake_chain.state["calls"] == [] and Token["ckUSDC"] is None
 
 
 def test_the_installer_named_at_init_keeps_admin_rights_without_being_a_controller():
