@@ -269,9 +269,48 @@ def setup_state(c, args):
 def setup_step(c, args):
     """One setup step: ``step`` (install, realm, branding, tokens, infrastructure, trust_policy) and its values.
     The values are the fields of the matching realm_configure operation; install takes network, can_test_mode
-    and founder. Returns the setup progress, as setup_state."""
-    apply_step(args["step"], {k: v for k, v in args.items() if k != "step"})
+    and founder. Returns the setup progress, as setup_state. A tokens step that leaves the realm with a currency
+    and a ledger registers the currency as a token (``register_currency``)."""
+    values = {k: v for k, v in args.items() if k != "step"}
+    fee = (yield from ledger_fee(values)) if args["step"] == "tokens" else None
+    apply_step(args["step"], values)
+    register_currency(fee)
     return setup_state(c, {})
+
+
+# The fields that name the realm's currency and the ledger it is paid through.
+CURRENCY = ("accounting_currency", "accounting_currency_decimals", "token_canister_id")
+
+
+def ledger_fee(values):
+    """The fee of the ledger the realm's currency is paid through, when ``values`` change the currency or its ledger
+    and the realm has a ledger then; else None. Asked before anything changes, because a call to another canister
+    keeps what was written before it even when the operation then fails. A generator."""
+    ledger = values.get("token_canister_id", Realm["1"].token_canister_id)
+    if not (set(values) & set(CURRENCY) and ledger):
+        return None
+    from api import treasury
+
+    try:
+        reply = yield from chain.call(ledger, "icrc1_fee")
+        return treasury.nat(reply)
+    except Exception as e:  # noqa: BLE001  any failure of the ledger's answer is the same refusal
+        raise Fail(f"the ledger {ledger} did not answer icrc1_fee, so it cannot be the realm's currency: {e}")
+
+
+def register_currency(fee):
+    """Register the realm's currency in its token registry, with its ledger, its decimals and the ledger's ``fee``
+    (from ``ledger_fee``; None leaves the registry as it is). The realm bills and pays only in registered tokens
+    (``invoice_create`` refuses any other), and the setup wizard names the currency nowhere else: without this, a
+    codex that bills a member who joins, such as Syntropia's deposit, fails until the token is registered by vote."""
+    realm = Realm["1"]
+    if fee is None or not (realm.accounting_currency and realm.token_canister_id):
+        return
+    from api import treasury
+    from ggg import Token
+
+    token = treasury.registered(Token, realm.accounting_currency)
+    token.ledger, token.decimals, token.fee = realm.token_canister_id, realm.accounting_currency_decimals, fee
 
 
 def apply_step(step, values, **noted):
@@ -392,8 +431,11 @@ def realm_configure_branding(c, args):
 def realm_configure_tokens(c, args):
     """Set any of ``accounting_currency``, ``accounting_currency_decimals``, ``token_canister_id``,
     ``nft_canister_id`` and ``shared_tokens_json``. A quarter refuses the accounting currency and its decimals: its
-    capital keeps them in sync."""
-    return configure(FIELDS["tokens"], args)
+    capital keeps them in sync. A currency with a ledger is registered as a token, as in the setup's tokens step."""
+    fee = yield from ledger_fee(args)
+    reply = configure(FIELDS["tokens"], args)
+    register_currency(fee)
+    return reply
 
 
 @op("realm.configure.infrastructure", governed=launched)
