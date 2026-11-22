@@ -1,0 +1,6 @@
+{
+  "name": "lab",
+  "version": "1.0.0",
+  "backend": true,
+  "operations": ["profile_update", "proposal_get"]
+}
