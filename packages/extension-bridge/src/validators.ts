@@ -2,7 +2,6 @@ import {
 	BRIDGE_SOURCE,
 	type CallExtensionAsyncMessage,
 	type CallExtensionMessage,
-	type CallOperationMessage,
 	type ExtToHostMessage,
 	type GetStateMessage,
 	type GoodbyeMessage,
@@ -112,29 +111,6 @@ export function validateCallExtension(data: Record<string, unknown>): ExtMessage
 		kind: 'call_extension',
 		id: data.id,
 		fn: data.fn,
-		args: (data.args as Record<string, unknown> | undefined) ?? {},
-	};
-	return { ok: true, message };
-}
-
-export function validateCallOperation(data: Record<string, unknown>): ExtMessageValidationResult {
-	if (!envelope(data) || data.kind !== 'call_operation') {
-		return { ok: false, reason: 'invalid call_operation envelope' };
-	}
-	if (!isRequestId(data.id)) {
-		return { ok: false, reason: 'call_operation.id must be a positive integer', responseId: typeof data.id === 'number' ? data.id : undefined };
-	}
-	if (!isString(data.name)) {
-		return { ok: false, reason: 'call_operation.name must be a string', responseId: data.id };
-	}
-	if (data.args !== undefined && !isPlainObject(data.args)) {
-		return { ok: false, reason: 'call_operation.args must be an object when present', responseId: data.id };
-	}
-	const message: CallOperationMessage = {
-		source: BRIDGE_SOURCE,
-		kind: 'call_operation',
-		id: data.id,
-		name: data.name,
 		args: (data.args as Record<string, unknown> | undefined) ?? {},
 		read: data.read === true,
 	};
@@ -295,7 +271,13 @@ export function validateExtToHostMessage(data: unknown): ExtMessageValidationRes
 		case 'call_extension_async':
 			return validateCallExtensionAsync(data);
 		case 'call_operation':
-			return validateCallOperation(data);
+			// A screen built against bridge 0.3, which called realm operations itself: it now reaches the realm only
+			// through its own backend, and is told so rather than left waiting for a reply.
+			return {
+				ok: false,
+				reason: 'a screen calls only its own backend (call_extension), which calls the realm operations it declares',
+				responseId: isRequestId(data.id) ? data.id : undefined,
+			};
 		case 'navigate':
 			return validateNavigate(data);
 		case 'notify':

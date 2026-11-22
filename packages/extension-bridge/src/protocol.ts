@@ -56,11 +56,14 @@ export interface HelloMessage extends BridgeEnvelope {
 	sdkVersion: string;
 }
 
+/** A function of the extension's own backend, the only way a screen reaches the realm: ``read`` runs it as a query
+ * (``extension_read``: free, it can only read), otherwise as an update (``extension_call``). */
 export interface CallExtensionMessage extends BridgeEnvelope {
 	kind: 'call_extension';
 	id: number;
 	fn: string;
 	args: Record<string, unknown>;
+	read?: boolean;
 }
 
 export interface CallExtensionAsyncMessage extends BridgeEnvelope {
@@ -68,16 +71,6 @@ export interface CallExtensionAsyncMessage extends BridgeEnvelope {
 	id: number;
 	fn: string;
 	args: Record<string, unknown>;
-}
-
-/** A realm operation, called as the user: ``read`` for queries, otherwise run. The host refuses operations the
- * extension's installed manifest does not declare. */
-export interface CallOperationMessage extends BridgeEnvelope {
-	kind: 'call_operation';
-	id: number;
-	name: string;
-	args: Record<string, unknown>;
-	read: boolean;
 }
 
 export interface NavigateMessage extends BridgeEnvelope {
@@ -129,7 +122,6 @@ export type ExtToHostMessage =
 	| HelloMessage
 	| CallExtensionMessage
 	| CallExtensionAsyncMessage
-	| CallOperationMessage
 	| NavigateMessage
 	| NotifyMessage
 	| OpenModalMessage

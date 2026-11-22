@@ -26,11 +26,14 @@ export interface CallExtensionAsyncOptions {
 export interface ExtensionClient {
 	extensionId: string;
 	capabilities: string[];
+	/** ``fn`` of the extension's own backend, as an update (``run``). */
 	callExtension<T = unknown>(fn: string, args?: Record<string, unknown>): Promise<T>;
-	/** Call a realm read operation as the user; resolves to its reply (``{ ok, ... }``). */
-	read<T = RealmReply>(name: string, args?: Record<string, unknown>): Promise<T>;
-	/** Call a realm operation that changes the realm, as the user; resolves to its reply (``{ ok, ... }``). */
-	run<T = RealmReply>(name: string, args?: Record<string, unknown>): Promise<T>;
+	/** ``fn`` of the extension's own backend as a query (``extension_read``): free, and it can only read. Resolves to
+	 * what the function returns. */
+	read<T = RealmReply>(fn: string, args?: Record<string, unknown>): Promise<T>;
+	/** ``fn`` of the extension's own backend as an update (``extension_call``), which may change the realm and wait for
+	 * other canisters. Resolves to what the function returns. */
+	run<T = RealmReply>(fn: string, args?: Record<string, unknown>): Promise<T>;
 	callExtensionAsync<T = unknown>(
 		fn: string,
 		args?: Record<string, unknown>,
@@ -249,11 +252,11 @@ export async function createExtensionClient(
 		callExtension<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
 			return sendRequest<T>({ kind: 'call_extension', fn, args });
 		},
-		read<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-			return sendRequest<T>({ kind: 'call_operation', name, args, read: true });
+		read<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
+			return sendRequest<T>({ kind: 'call_extension', fn, args, read: true });
 		},
-		run<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-			return sendRequest<T>({ kind: 'call_operation', name, args, read: false });
+		run<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
+			return sendRequest<T>({ kind: 'call_extension', fn, args });
 		},
 		async callExtensionAsync<T>(
 			fn: string,

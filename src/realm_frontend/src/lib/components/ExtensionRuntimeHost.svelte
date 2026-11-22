@@ -145,10 +145,14 @@
 			extensionBackend = marketplaceAdapter;
 		}
 
-		async function callExtension(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
+		async function callExtension(
+			fn: string,
+			args: Record<string, unknown> = {},
+			read = false
+		): Promise<unknown> {
 			let reply: Reply;
 			try {
-				reply = await callRealmExtension(id, fn, args);
+				reply = await callRealmExtension(id, fn, args, read);
 			} catch (e) {
 				const friendly = formatDelegationExpiredError(e);
 				if (friendly) throw new Error(friendly);
@@ -164,8 +168,9 @@
 			}
 			return extensionResult(reply);
 		}
-		const callSync = callExtension;
-		const callAsync = callExtension;
+		const callSync = (fn: string, args: Record<string, unknown> = {}) => callExtension(fn, args);
+		const callAsync = callSync;
+		const callRead = (fn: string, args: Record<string, unknown> = {}) => callExtension(fn, args, true);
 		const declared = new Set(((await getExtensionManifestWithRetry(id))?.operations as string[]) ?? []);
 		const operation =
 			(read: boolean) =>
@@ -186,6 +191,7 @@
 			run: operation(false),
 			callSync,
 			callAsync,
+			callRead,
 			principal,
 			isAuthenticated,
 			userProfiles,
@@ -333,14 +339,11 @@
 				mounted = await mountSandboxedExtension(id, version, mountEl, {
 					manifest: {
 						sdk_version: manifest?.sdk_version as string | undefined,
-						capabilities: manifest?.capabilities as string[] | undefined,
-						entry_access: manifest?.entry_access as
-							| { functions?: Record<string, string> }
-							| undefined,
-						operations: manifest?.operations
+						capabilities: manifest?.capabilities as string[] | undefined
 					},
 					callSync: ctx.callSync,
 					callAsync: ctx.callAsync,
+					callRead: ctx.callRead,
 					navigate: ctx.navigate,
 					getHostState: buildSandboxHostState,
 					subscribeHostState: subscribeSandboxHostState,

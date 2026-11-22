@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BRIDGE_PROTOCOL_VERSION, BRIDGE_SOURCE, createBridgeServer } from '@realmsgos/extension-bridge';
 
-function sandbox(operations: string[], onCallOperation = vi.fn(async () => ({ ok: true }))) {
+function sandbox(onCallExtension = vi.fn(async () => ({ ok: true }))) {
 	const iframe = document.createElement('iframe');
 	document.body.appendChild(iframe);
 	const replies: any[] = [];
@@ -10,35 +10,35 @@ function sandbox(operations: string[], onCallOperation = vi.fn(async () => ({ ok
 	createBridgeServer(iframe, {
 		extensionId: 'board',
 		capabilities: [],
-		operations,
-		onCallOperation,
+		onCallExtension,
 		getState: () => ({}) as any
 	});
 	const send = (data: object) =>
 		window.dispatchEvent(new MessageEvent('message', { data: { source: BRIDGE_SOURCE, ...data }, source: iframe.contentWindow }));
 	send({ kind: 'hello', sdkVersion: BRIDGE_PROTOCOL_VERSION });
-	return { replies, send, onCallOperation };
+	return { replies, send, onCallExtension };
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-describe('call_operation', () => {
-	it('reaches only the operations the installed manifest declares', async () => {
-		const { replies, send, onCallOperation } = sandbox(['proposal_list']);
-		send({ kind: 'call_operation', id: 1, name: 'proposal_list', args: { count: 5 }, read: true });
-		send({ kind: 'call_operation', id: 2, name: 'delegation_grant', args: { delegate: 'mallory' }, read: false });
+describe('a sandboxed screen reaches the realm only through its own backend', () => {
+	it('calls a backend function as a query when it reads, and as an update when it runs', async () => {
+		const { replies, send, onCallExtension } = sandbox();
+		send({ kind: 'call_extension', id: 1, fn: 'treasury', args: { count: 5 }, read: true });
+		send({ kind: 'call_extension', id: 2, fn: 'pay', args: { amount: 10 } });
 		await settle();
-		expect(onCallOperation).toHaveBeenCalledTimes(1);
-		expect(onCallOperation).toHaveBeenCalledWith('proposal_list', { count: 5 }, true);
-		expect(replies.find((m) => m.id === 1)).toMatchObject({ kind: 'call_result', result: { ok: true } });
-		expect(replies.find((m) => m.id === 2)).toMatchObject({ kind: 'error', error: { code: 'denied' } });
+		expect(onCallExtension).toHaveBeenNthCalledWith(1, 'treasury', { count: 5 }, true);
+		expect(onCallExtension).toHaveBeenNthCalledWith(2, 'pay', { amount: 10 }, false);
+		expect(replies.filter((r) => r.kind === 'call_result').map((r) => r.id)).toEqual([1, 2]);
 	});
 
-	it('refuses everything when the manifest declares no operations', async () => {
-		const { replies, send, onCallOperation } = sandbox([]);
-		send({ kind: 'call_operation', id: 1, name: 'me', read: true });
+	it('has no way to call a realm operation directly', async () => {
+		const { replies, send, onCallExtension } = sandbox();
+		send({ kind: 'call_operation', id: 1, name: 'delegation_grant', args: { delegate: 'mallory' }, read: false });
 		await settle();
-		expect(onCallOperation).not.toHaveBeenCalled();
-		expect(replies.find((m) => m.id === 1)?.error.code).toBe('denied');
+		expect(onCallExtension).not.toHaveBeenCalled();
+		const [reply] = replies.filter((r) => r.id === 1);
+		expect(reply.kind).toBe('error');
+		expect(reply.error.message).toContain('calls only its own backend');
 	});
 });

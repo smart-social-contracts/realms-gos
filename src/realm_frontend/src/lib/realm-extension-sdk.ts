@@ -12,13 +12,16 @@ import { quarter, type Reply } from '$lib/realm';
 
 // ── Host side: extension calls go through the realm's extension_call ──
 
-/** Run ``fn`` of ``extension``'s backend with ``args`` on the active quarter. */
+/** Run ``fn`` of ``extension``'s backend with ``args`` on the active quarter: as a query when ``read``
+ * (``extension_read``, free, it can only read), else as an update (``extension_call``). */
 export function callRealmExtension(
 	extension: string,
 	fn: string,
 	args: Record<string, unknown> = {},
+	read = false,
 ): Promise<Reply> {
-	return quarter.run('extension_call', { extension, function: fn, args });
+	const call = { extension, function: fn, args };
+	return read ? quarter.read('extension_read', call) : quarter.run('extension_call', call);
 }
 
 /** An ``extension_call`` result, parsed when the extension returned JSON text. */
@@ -146,6 +149,9 @@ export interface RealmExtensionContext {
 
 	/** Same as callSync; kept for bundles that call inter-canister functions this way. */
 	callAsync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+	/** An extension function as a query (the realm's `extension_read`): free, it reaches only read operations. */
+	callRead: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 	/** Call a realm read operation as the user; only the operations the extension's manifest declares. */
 	read: (name: string, args?: Record<string, unknown>) => Promise<Reply>;

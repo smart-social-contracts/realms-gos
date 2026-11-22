@@ -26,7 +26,10 @@ ctx.onStateChange((state) => {
   document.documentElement.dataset.theme = state.theme;
 });
 
-await ctx.callExtension('greet', { name: 'Ada' });
+// The screen reaches the realm only through its own backend, which the realm runs in a sandbox as the member and
+// lets call only the operations the extension declares.
+const treasury = await ctx.read('treasury');        // a query of the backend (extension_read): free, reads only
+await ctx.run('pay', { to: 'bob', amount: 10 });    // an update (extension_call): may change the realm and wait
 await ctx.callExtensionAsync('check_invoice_payment', { invoice_id: '…' });
 ctx.navigate('/extensions/other');
 ctx.notify('success', 'Saved');
@@ -53,8 +56,7 @@ const iframe = document.querySelector('iframe')!;
 const server = createBridgeServer(iframe, {
   extensionId: 'hello_sandboxed',
   requiredSdkVersion: '1',
-  capabilities: ['call_extension', 'navigate', 'notify', 'modal'],
-  entryAccessFunctions: { greet: 'member' },
+  capabilities: ['navigate', 'notify', 'modal'],
   getState: (): HostState => ({
     principal: 'aaaaa-aa',
     locale: 'en',
@@ -67,8 +69,8 @@ const server = createBridgeServer(iframe, {
       parentRealmCanisterId: '',
     },
   }),
-  onCallExtension: async (fn, args) => {
-    /* host sync RPC (extension_sync_call) */
+  onCallExtension: async (fn, args, read) => {
+    /* the extension's backend: extension_read when ``read``, else extension_call */
     return { ok: true };
   },
   onCallExtensionAsync: async (fn, args) => {
@@ -104,29 +106,26 @@ server.destroy();
 
 See [`docs/extensions/frontend.md`](../../docs/extensions/frontend.md) and [`docs/architecture/frontend.md`](../../docs/architecture/frontend.md) for the bridge and its limits.
 
+## The backend is the only way to the realm
+
+A screen has no call of a realm operation. `call_extension` (and `call_extension_async`) run a function of the
+extension's own backend: `read: true` as a query (`extension_read`, which reaches only read operations and cannot
+wait), otherwise as an update (`extension_call`). The realm runs the backend as the member, in a sandbox that lets it
+call only the operations the extension's installed manifest declares, and logs each call it makes as the extension's.
+So what a screen may do is decided by the realm, not by the bridge, which only paces the calls (30 every 10 seconds,
+10 at once).
+
 ## Capabilities
 
-Bridge operations are gated by manifest `capabilities` (closed-world: undeclared
-capabilities are denied):
+The host's own services are gated by manifest `capabilities` (closed-world: undeclared capabilities are denied):
 
 | Capability | Operations |
 |------------|------------|
-| `call_extension` | `call_extension` |
-| `call_extension` | `call_extension_async` (same capability + allowlist) |
 | `navigate` | `navigate` |
 | `notify` | `notify` |
 | `modal` | `open_modal` |
 
-`resize` and `get_state` are not capability-gated.
-
-## `entry_access.functions` (fail-closed)
-
-When the host grants `call_extension`, every `call_extension` request is checked
-against `entryAccessFunctions` (the manifest `entry_access.functions` map). If
-that allowlist is **absent**, **all** function calls are denied (fail-closed) and
-the bridge logs a console warning — the manifest must declare
-`entry_access.functions` explicitly. This prevents accidental open RPC when the
-host omits the allowlist.
+`call_extension`, `resize` and `get_state` are not capability-gated.
 
 ## Message validation
 

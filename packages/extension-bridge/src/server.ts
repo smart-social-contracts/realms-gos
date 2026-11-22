@@ -17,14 +17,11 @@ export interface BridgeServerOptions {
 	requiredSdkVersion?: string;
 	/** Declared manifest capabilities — closed-world enforcement. */
 	capabilities: string[];
-	/** Optional entry_access.functions allowlist (fn name → role). */
-	entryAccessFunctions?: Record<string, string>;
-	/** The realm operations the extension's installed manifest declares: the only ones call_operation reaches. */
-	operations?: string[];
 	getState: () => HostState;
-	/** Call a realm operation as the user (``read`` for queries); resolves to its reply. */
-	onCallOperation?: (name: string, args: Record<string, unknown>, read: boolean) => Promise<unknown>;
-	onCallExtension?: (fn: string, args: Record<string, unknown>) => Promise<unknown>;
+	/** Call ``fn`` of the extension's own backend as the user: as a query when ``read`` (``extension_read``), else as an
+	 * update (``extension_call``). The realm runs it in its sandbox, where it reaches only the operations the extension
+	 * declares; the screen has no other way to the realm. */
+	onCallExtension?: (fn: string, args: Record<string, unknown>, read: boolean) => Promise<unknown>;
 	/** Submit an async backend call; must return a task id promptly. Completion is pushed via {@link BridgeServer.pushTaskResult}. */
 	onCallExtensionAsync?: (fn: string, args: Record<string, unknown>) => Promise<{ taskId: string }>;
 	onNavigate?: (path: string) => void | Promise<void>;
@@ -121,23 +118,9 @@ export function createBridgeServer(
 		return options.capabilities.includes(cap);
 	}
 
-	function isFunctionAllowed(fn: string): boolean {
-		const allowlist = options.entryAccessFunctions;
-		if (!allowlist) {
-			if (hasCapability('call_extension')) {
-				console.warn(
-					'[extension-bridge] call_extension capability granted but entry_access.functions is missing; denying all functions (fail-closed). Declare entry_access.functions in the extension manifest.',
-				);
-			}
-			return false;
-		}
-		return Object.prototype.hasOwnProperty.call(allowlist, fn);
-	}
-
-	function gateCallExtension(
-		_requestId: number,
-		fn: string,
-	): BridgeErrorPayload | null {
+	// What the backend may do is the realm's to decide: it runs it as the user, with only the operations the
+	// extension declares. The bridge only paces the calls.
+	function gateCallExtension(): BridgeErrorPayload | null {
 		if (!handshakeDone) {
 			return deny('Handshake not complete');
 		}
@@ -146,12 +129,6 @@ export function createBridgeServer(
 		}
 		if (inFlightCallExtension >= MAX_CONCURRENT_CALL_EXTENSION) {
 			return rateLimited('Too many concurrent call_extension requests');
-		}
-		if (!hasCapability('call_extension')) {
-			return deny("Capability 'call_extension' not declared");
-		}
-		if (!isFunctionAllowed(fn)) {
-			return deny(`Function '${fn}' not in entry_access.functions allowlist`);
 		}
 		return null;
 	}
@@ -181,7 +158,7 @@ export function createBridgeServer(
 			}
 
 			case 'call_extension': {
-				const gateErr = gateCallExtension(msg.id, msg.fn);
+				const gateErr = gateCallExtension();
 				if (gateErr) {
 					replyError(msg.id, gateErr);
 					return;
@@ -192,7 +169,7 @@ export function createBridgeServer(
 				}
 				inFlightCallExtension++;
 				try {
-					const result = await options.onCallExtension(msg.fn, msg.args ?? {});
+					const result = await options.onCallExtension(msg.fn, msg.args ?? {}, msg.read === true);
 					post({ source: BRIDGE_SOURCE, kind: 'call_result', id: msg.id, result });
 				} catch (e) {
 					const message = e instanceof Error ? e.message : String(e);
@@ -203,36 +180,8 @@ export function createBridgeServer(
 				return;
 			}
 
-			case 'call_operation': {
-				const gateErr = !handshakeDone
-					? deny('Handshake not complete')
-					: !allowCallExtension()
-						? rateLimited('call_operation rate limit exceeded')
-						: inFlightCallExtension >= MAX_CONCURRENT_CALL_EXTENSION
-							? rateLimited('Too many concurrent calls')
-							: !(options.operations ?? []).includes(msg.name)
-								? deny(`Operation '${msg.name}' is not declared in the extension manifest`)
-								: !options.onCallOperation
-									? { code: 'unsupported' as const, message: 'call_operation handler not configured' }
-									: null;
-				if (gateErr) {
-					replyError(msg.id, gateErr);
-					return;
-				}
-				inFlightCallExtension++;
-				try {
-					const result = await options.onCallOperation!(msg.name, msg.args ?? {}, msg.read);
-					post({ source: BRIDGE_SOURCE, kind: 'call_result', id: msg.id, result });
-				} catch (e) {
-					replyError(msg.id, failed(e instanceof Error ? e.message : String(e)));
-				} finally {
-					inFlightCallExtension--;
-				}
-				return;
-			}
-
 			case 'call_extension_async': {
-				const gateErr = gateCallExtension(msg.id, msg.fn);
+				const gateErr = gateCallExtension();
 				if (gateErr) {
 					replyError(msg.id, gateErr);
 					return;

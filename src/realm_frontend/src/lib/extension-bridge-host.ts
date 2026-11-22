@@ -17,7 +17,6 @@ import {
 	type BridgeModalAction,
 } from '$lib/stores/bridge-modal';
 import { parseAccessError, AccessDeniedError } from '$lib/utils/errors';
-import { quarter } from '$lib/realm';
 
 const NAVIGATE_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 
@@ -44,9 +43,6 @@ export function isValidNavigatePath(path: string): boolean {
 export interface SandboxManifest {
 	sdk_version?: string;
 	capabilities?: string[];
-	entry_access?: { functions?: Record<string, string> };
-	/** The realm operations the installed extension may call (from the realm, not the published manifest). */
-	operations?: string[];
 }
 
 export interface SandboxBridgeDeps {
@@ -55,6 +51,8 @@ export interface SandboxBridgeDeps {
 	callSync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
 	/** Same backend path as in-process `ctx.callAsync` (the realm's extension_call). */
 	callAsync: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
+	/** A function of the backend as a query (the realm's extension_read): free, and it can only read. */
+	callRead: (fn: string, args?: Record<string, unknown>) => Promise<unknown>;
 	navigate: (path: string) => Promise<void>;
 	getHostState: () => HostState;
 	subscribeHostState: (onChange: (state: HostState) => void) => () => void;
@@ -114,9 +112,6 @@ export class SandboxBridgeService {
 			extensionId: deps.extensionId,
 			requiredSdkVersion: deps.manifest.sdk_version ?? BRIDGE_PROTOCOL_VERSION,
 			capabilities,
-			entryAccessFunctions: deps.manifest.entry_access?.functions,
-			operations: deps.manifest.operations ?? [],
-			onCallOperation: (name, args, read) => (read ? quarter.read(name, args) : quarter.run(name, args)),
 			getState: deps.getHostState,
 			onHandshakeComplete: () => {
 				deps.onHandshakeComplete?.();
@@ -126,9 +121,9 @@ export class SandboxBridgeService {
 				deps.onHandshakeFailed?.(reason);
 				rejectReady(new Error(reason));
 			},
-			onCallExtension: async (fn, args) => {
+			onCallExtension: async (fn, args, read) => {
 				try {
-					return await deps.callSync(fn, args);
+					return await (read ? deps.callRead(fn, args) : deps.callSync(fn, args));
 				} catch (e) {
 					throw formatCallExtensionError(e);
 				}
