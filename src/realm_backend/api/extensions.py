@@ -7,7 +7,7 @@ from core import sandbox
 from core import surrogates
 from core.db import JSON_MAX, Fail, Forbidden, Unavailable, find, page, view
 from ggg import Department, Extension, Realm, User, UserProfile
-from core.op import dispatch, on_behalf, op, run
+from core.op import dispatch, on_behalf, op, ops, run
 from api.proposals import appointed, realm_wide
 
 SIDEBAR = ("show_in_sidebar", "sidebar_label", "categories", "icon")
@@ -236,6 +236,9 @@ def extension_manifest(namespace):
     for key in ("operations", "profiles"):
         if key in manifest and not (isinstance(manifest[key], list) and all(isinstance(i, str) for i in manifest[key])):
             raise Fail(f"{namespace}/manifest.json: {key} is a list of text")
+    if len(manifest.get("operations", [])) > sandbox.MAX_ACTIONS:  # the sandbox would trap on every call of its backend
+        raise Fail(f"{namespace}/manifest.json declares {len(manifest['operations'])} operations, at most "
+                   f"{sandbox.MAX_ACTIONS}")
     fits_a_row(namespace, "manifest", manifest)  # its operations and sidebar settings are parts of it: they fit too
     return manifest
 
@@ -271,21 +274,148 @@ def extension_uninstall(c, args):
 def extension_call(c, args):
     """Run ``function`` of ``extension``'s backend with ``args`` (its keyword arguments); it can call only its declared
     operations, as you (I-EXT-1). Called by your delegate, it calls them as the delegate for you, so under the grant.
-    The extension must be available to you. Returns ``result``."""
+    The extension must be available to you. Returns ``result``.
+
+    The backend may wait for an operation that calls another canister: ``reply = yield wait("transfer_create", ...)``
+    (``BACKEND``). Each call it makes before then is kept, as a message keeps what it did before an await. A backend
+    that fails replies ``ok`` false when it changed nothing, and traps, which undoes what it did in this message, when
+    it did."""
+    return (yield from backend(c, args, reading=False))
+
+
+@op("extension.call", read=True)
+def extension_read(c, args):
+    """``extension_call`` as a query: ``function`` of ``extension``'s backend, which can call only the read operations
+    it declares, and cannot wait. Nothing it does is kept. Returns ``result``."""
+    return (yield from backend(c, args, reading=True))
+
+
+# What every backend runs before its own code. ``wait`` is what a backend yields to wait for an operation; the host
+# starts a function with ``__start`` and resumes one that waits with ``__step``. A function that is a generator waits
+# at each ``yield``: the host runs the operation it asked for and sends it the reply, or throws a PermissionError into
+# it for an operation the extension does not declare.
+BACKEND = '''
+_waiting = []
+
+
+def wait(operation, **args):
+    """What a backend yields to wait for ``operation``, run as the member: ``reply = yield wait("transfer_create",
+    fund="ROADS", to=who, amount=10)``. ``reply`` is the operation's reply, ``{"ok": ...}``."""
+    return {"operation": operation, "args": args}
+
+
+def __start(function, kwargs):
+    fn = globals().get(function)
+    if function.startswith("_") or not callable(fn):
+        raise LookupError("the backend has no function " + function)
+    out = fn(**kwargs)
+    if type(out).__name__ != "generator":
+        return {"done": out}
+    _waiting.append(out)
+    return __step(None, "")
+
+
+def __step(reply, error):
+    try:
+        asked = _waiting[-1].throw(PermissionError(error)) if error else _waiting[-1].send(reply)
+    except StopIteration as e:
+        _waiting.pop()
+        return {"done": e.value}
+    if not isinstance(asked, dict) or not isinstance(asked.get("operation"), str):
+        raise TypeError("a backend yields wait(operation, **args), not " + type(asked).__name__)
+    return {"wait": asked}
+
+'''
+# A waiting call keeps its interpreter open until the reply comes: the canister has 8 (_basilisk_sandbox), which codex
+# hooks and every other extension call need too. So at most WAITING_MAX wait at once. A call that traps after its await
+# is dropped by the replica's cleanup, which runs its ``finally`` and closes the interpreter (tests/deployed
+# test_extension_backends); one still open after WAIT_LIMIT seconds, which nothing closed, is closed by the next call.
+WAITING_MAX = 4
+WAIT_LIMIT = 15 * 60
+_open = {}  # id(Resident) -> (Resident, when it opened, whether it waits now)
+
+
+def reap(now):
+    for key, (resident, since, _) in list(_open.items()):
+        if now - since > WAIT_LIMIT:
+            _open.pop(key)
+            try:
+                resident.close()
+            except Exception:  # noqa: BLE001  already closed: nothing holds it now
+                pass
+
+
+def backend(c, args, reading):
+    """``function`` of ``extension``'s backend in a sandbox of its own, as ``c.user``; ``reading`` for a query (see
+    ``extension_call``, ``extension_read``). A generator."""
     ext = find(Extension, args["extension"])
     if not ext.source:
         raise Fail(f"{ext.id} has no backend")
     if not available(ext, holds(c.user)):
         raise Forbidden(f"{ext.id} is not available to you")
-    declared = ext.operations
+    function, kwargs = args.get("function"), args.get("args") or {}
+    if not isinstance(function, str) or not function.isidentifier() or function.startswith("_"):
+        raise Fail(f"{function!r} is not a function of {ext.id}'s backend")
+    if not isinstance(kwargs, dict):
+        raise Fail(f"the arguments of {ext.id}.{function} are a record, not {type(kwargs).__name__}")
+    declared = list(ext.operations or [])
+    if len(declared) > sandbox.MAX_ACTIONS:
+        raise Fail(f"{ext.id} declares {len(declared)} operations, more than the {sandbox.MAX_ACTIONS} a sandbox allows")
+    wrote = []
 
-    def rpc(name, payload):
+    def made(name, reply):
+        spec = ops().get(name) or {}
+        if reply.get("ok") and not (spec.get("read") or spec.get("only_reads")):
+            wrote.append(name)
+        return reply
+
+    def payload(kw):
         # It acts for the member who called it, whoever it names: it holds no power of attorney to lend.
-        args = {k: v for k, v in payload.items() if k != "on_behalf_of"}
-        return json.loads(run(dispatch(name, json.dumps(on_behalf(c.user, c.by, args)), origin="extension",
-                                       signer=c.by, declared=declared, root=c.root)))
+        kw = {k: v for k, v in kw.items() if k != "on_behalf_of"}
+        return json.dumps(on_behalf(c.user, c.by, kw))
 
-    return {"result": sandbox.execute(ext.source, args["function"], args.get("args") or {}, rpc, declared)}
+    def rpc(name, kw):
+        return made(name, json.loads(run(dispatch(name, payload(kw), origin="extension", signer=c.by,
+                                                  declared=declared, query=reading, root=c.root))))
+
+    if not reading:
+        reap(chain.now())
+    program = (sandbox.LOADER if "ggg_sdk" in ext.source else "") + BACKEND + ext.source
+    try:
+        resident = sandbox.Resident(program, rpc, declared)
+    except Exception as e:  # noqa: BLE001  the canister's 8 interpreters are all open
+        raise Unavailable(f"{ext.id} cannot start now, try again in a moment: {str(e)[:200]}")
+    key = id(resident)
+    _open[key] = (resident, chain.now(), False)
+    try:
+        step = resident.call("__start", function=function, kwargs=kwargs)
+        while "wait" in step:
+            name, kw = step["wait"]["operation"], step["wait"].get("args") or {}
+            if reading:
+                raise Fail(f"{ext.id}.{function} waits for {name}, which a read cannot: call it with extension_call")
+            if name not in declared:
+                step = resident.call("__step", reply=None, error=f"{name} is not declared by {ext.id}")
+                continue
+            if sum(waits for _, _, waits in _open.values()) >= WAITING_MAX:
+                raise Unavailable(f"{WAITING_MAX} extension calls are waiting already: try again in a moment")
+            _open[key] = (resident, _open[key][1], True)
+            reply = yield from dispatch(name, payload(kw), origin="extension", signer=c.by, declared=declared,
+                                        root=c.root)
+            _open[key] = (resident, _open[key][1], False)
+            step = resident.call("__step", reply=made(name, json.loads(reply)), error="")
+        return {"result": step["done"]}
+    except (RuntimeError, Fail) as e:  # the backend raised, or spent its budget: the text is all that crosses
+        text = str(e)[:500]
+        if "a query cannot call other canisters" in text and not reading:
+            text += " (an operation that calls another canister is waited for: reply = yield wait(operation, ...))"
+        if wrote:
+            chain.trap(f"{ext.id}.{function} failed after it called {', '.join(wrote)}: {text}")
+        if isinstance(e, Fail):
+            raise
+        raise Fail(f"{ext.id}.{function} failed: {text}")
+    finally:
+        _open.pop(key, None)
+        resident.close()
 
 
 @op("realm.configure", governed=realm_wide)

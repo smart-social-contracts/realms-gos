@@ -55,6 +55,7 @@ OWN = {
     # It belongs to no group: a grant by groups reaches it, and each operation it runs is held to the grant, as a call of
     # the delegate's own (core.op.on_behalf).
     "extension_call": ("direct", None, None, None),
+    "extension_read": ("direct", None, None, None),
     # Public reads, and an upgrade step for controllers: no member's act.
     "extension_list": ("none", None, None, None),
     "journal_issue": ("none", None, None, None),
@@ -196,6 +197,7 @@ ENABLED = LEGACY | {"payment_account_add", "payment_account_remove", "identity_s
                     "user_set_status",
                     "verdict_draft",
                     "extension_call",
+                    "extension_read",
                     "shell",
                     "task_add_schedule",
                     "task_cancel",
