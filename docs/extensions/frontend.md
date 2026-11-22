@@ -18,26 +18,30 @@ import { createExtensionClient } from '@realmsgos/extension-bridge';
 
 const realm = await createExtensionClient();          // waits for the host handshake
 
-// realm operations, as the user, if declared in the manifest's "operations"
-const { proposals } = await realm.read('proposal_list', { status: 'voting' });
-const reply = await realm.run('proposal_vote', { proposal: 'P-7', choice: 'yes' });
+// functions of the extension's own backend: the screen has no other way to the realm
+const { proposals } = await realm.read('proposal_list', { status: 'voting' });   // a query: free, reads only
+const reply = await realm.run('proposal_vote', { proposal: 'P-7', choice: 'yes' }); // an update
 if (!reply.ok) realm.notify('error', reply.error);
-
-// your own backend (capability "call_extension", function listed in entry_access.functions)
-const result = await realm.callExtension('cast_vote', { proposal: 'P-7', choice: 'yes' });
 ```
 
-`read` and `run` resolve to the realm's reply, `{ ok: true, ... }` or `{ ok: false, error }`. A
-refused bridge request (undeclared operation, rate limit, no handshake) rejects with an `Error`
-that has a `code`.
+`read(fn, args)` runs `fn` of the extension's backend as a query (`extension_read`), `run(fn, args)` as an update
+(`extension_call`); each resolves to what the function returns. The backend runs as the user, and calls only the
+operations the manifest declares ([Backend](backend.md)): a backend of one function per operation, by its name, as
+`scripts/extension_backend.py` writes it, makes `read('proposal_list')` read the proposals. A call the realm refuses
+(the backend failed, the extension is not available to the user) or the bridge refuses (rate limit, no handshake)
+rejects with an `Error` that has a `code`.
+
+An extension whose screen ran in the realm's page mounts the same component in its iframe with
+`_shared/frontend/sandbox.ts` (realms-extensions): `ctx.read`, `ctx.run`, `notify`, `navigate`, `openModal`, and the
+member's `principal`, `locale` and `userProfiles` as stores.
 
 ## The client
 
 | Member | Use |
 |---|---|
-| `read(name, args)` | A read operation (query). |
-| `run(name, args)` | An operation that changes the realm (update). |
-| `callExtension(fn, args)` | A function of the extension's backend. |
+| `read(fn, args)` | A function of the backend, as a query (`extension_read`). |
+| `run(fn, args)` | A function of the backend, as an update (`extension_call`). |
+| `callExtension(fn, args)` | The same as `run`. |
 | `callExtensionAsync(fn, args, { timeoutMs })` | The same, for long calls: the host runs it in the background and pushes the result (default timeout 60 s). |
 | `onStateChange(listener)` | Host state: `principal`, `locale`, `theme` (`light`/`dark`), `realmInfo`. Returns an unsubscribe function. |
 | `notify(level, message)` | A toast: `info`, `success` or `error`. |

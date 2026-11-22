@@ -100,27 +100,27 @@ interpreter, so the marks, the frozen settings and events and the sealed SDK cla
 
 ## Extension backends
 
-An extension backend is a Python module with plain functions. `extension_call` runs one:
+An extension backend is a Python module with plain functions. `extension_call` runs one as an update and
+`extension_read` as a query (`api/extensions.py`, `backend`): each opens a sandbox of its own, with the backend's source
+after a few lines of the realm's (`BACKEND`: `wait`, and the functions that start and resume a call), and the
+extension's declared operations as the allow-list.
 
 ```python
-@op("extension.call")
-def extension_call(c, args):
-    ext = find(Extension, args["extension"])
-    if not ext.source:
-        raise Fail(f"{ext.id} has no backend")
-    if not available(ext, holds(c.user)):
-        raise Forbidden(f"{ext.id} is not available to you")
-
-    def rpc(name, payload):
-        return json.loads(run(dispatch(name, json.dumps(payload), origin="extension", signer=c.user,
-                                       declared=ext.operations)))
-
-    return {"result": sandbox.execute(ext.source, args["function"], args.get("args") or {}, rpc, ext.operations)}
+def rpc(name, kw):  # what `rpc(...)` inside the backend reaches: an operation, as the member, at once
+    return made(name, json.loads(run(dispatch(name, payload(kw), origin="extension", signer=c.by,
+                                              declared=declared, query=reading, root=c.root))))
 ```
 
 Unlike a codex, an extension acts **as the user** who called it. Each `rpc(...)` is a full
 operation call: Cedar checks that the user holds the permission and that the extension declared
 the operation. An extension can do less than its user, never more.
+
+`rpc` cannot wait for another canister: the sandbox runs synchronously inside the realm's message. A function that
+needs to is a generator, `reply = yield wait("transfer_create", ...)`: the realm keeps its interpreter open (a
+`Resident`), runs the operation with `yield from dispatch(...)`, awaits the ledger, and resumes the function with the
+reply. At most 4 calls wait at once (`WAITING_MAX`), so the canister's 8 interpreters stay available to codex hooks
+and other calls; a call that traps after its await is dropped by the replica's cleanup, whose `finally` closes its
+interpreter, and one still open after 15 minutes is closed by the next call.
 
 ## Determinism
 
@@ -134,8 +134,9 @@ Extension UIs run in the browser, inside the realm's frontend:
 
 - **Sandboxed** (`"runtime": "sandboxed"` in the manifest): an `<iframe sandbox="allow-scripts
   allow-modals">`. It has an opaque origin, so it cannot read the realm's cookies, storage or
-  identity. It talks to the host only through a `postMessage` bridge, which allows only the
-  manifest's operations, with rate limits.
+  identity. It talks to the host only through a `postMessage` bridge, whose only way to the realm is
+  the extension's own backend (`extension_read`, `extension_call`), with rate limits. The realm, not
+  the bridge, decides what that backend may do.
 - **In-process**: an ES module mounted into the page, with full access to it. Meant for
   first-party extensions. A build sets the allow-list in `VITE_PRIVILEGED_EXTENSIONS`; any other
   extension must be sandboxed. When the variable is unset, every extension may run in-process.
