@@ -51,6 +51,10 @@ OWN = {
     "extension_uninstall": ("direct", "setup", "admin", None),
     "extension_set_access": ("direct", "setup", "admin", None),
     "sidebar_configure": ("direct", "setup", "admin", None),
+    # Study prototype: granting an extension operations to run as the realm is the admins' act, as installing it is;
+    # making it act is no member's act, so no delegate does it for one.
+    "extension_grant": ("direct", "setup", "admin", None),
+    "extension_act": ("none", None, None, None),
     "realm_configure_infrastructure": ("direct", "setup", "admin", "in_setup"),
     # It belongs to no group: a grant by groups reaches it, and each operation it runs is held to the grant, as a call of
     # the delegate's own (core.op.on_behalf).

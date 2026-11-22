@@ -13,3 +13,4 @@ class Extension(Row):
     sidebar = Json({})
     manifest = Json({})
     source = String(default="")
+    grant = Json([])  # study prototype: the operations the realm lets it run as the realm (api.extensions.extension_act)

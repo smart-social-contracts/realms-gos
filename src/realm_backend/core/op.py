@@ -114,14 +114,15 @@ def ops():
 
 
 def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, proposal="", legacy=False, prepared=None,
-             note="", bound=None, root=None):
+             note="", bound=None, root=None, extension=""):
     """Run an operation; ``query`` when called through the ``read`` endpoint, whose changes are discarded; ``legacy``
     marks a legacy codex's effect (``Call.legacy``). A delegate's call that asks the member each time is filed as a
     pending action with the delegate's ``note`` instead of run (core.pending), unless a task makes it; ``prepared`` is
     the pending action whose approval this call is, which the audit log names. A delegate acts under the grant it holds
     now, or under ``bound`` (a Delegation) when the call carries out something it wrote under that grant: a task.
     ``root`` is the origin of the outermost call that led here (``origin`` when none did): a call made through the shell
-    or an extension by a task is a task's, and asks nobody.
+    or an extension by a task is a task's, and asks nobody. ``extension`` names the extension whose grant a call of
+    origin ``granted`` runs under (study prototype, api.extensions.act): the audit names it.
 
     A refusal replies ``ok`` false with the ``error`` for people and its ``kind`` for programs: GGG's error in
     snake case (``not_found``, ``forbidden``, ``conflict``, ...), see core.db.Fail."""
@@ -149,7 +150,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         asked = pending.asked_under(user, by, spec, args) if asking else None
         if asked:
             return json.dumps({"ok": True, **pending.prepare(asked, user, by, name, spec, args, note, origin, declared)})
-        if origin == "codex":
+        if origin in ("codex", "granted"):
             it_team.refuse_change(name, args)
         grant = auth.authorize(user, by, name, spec, args, origin, declared, bound)
         # The facts of a call are its arguments as GGG defines them, and ``on_behalf_of`` is one: a forbid may refuse a
@@ -162,7 +163,8 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
         ranges.check(name, args)
         if spec["check"]:
             spec["check"](args)
-        governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex") else None
+        # A granted call's authority is the realm-wide vote that granted it, as a codex's is the vote that installed it.
+        governing = spec["governed"](args) if spec["governed"] and origin not in ("replay", "codex", "granted") else None
         from core import legislation
 
         call = Call(user, by, origin, proposal, grant, legacy, prepared.delegate if prepared else "", root)
@@ -170,7 +172,7 @@ def dispatch(fn, arg, origin="user", signer=None, declared=(), query=False, prop
 
         def audited(out):
             if not call.quiet:
-                acted(name, user, by, origin, args, out, grant, prepared)
+                acted(name, user, by, origin, args, out, grant, prepared, extension)
 
         record = None if reading else audited
         # A delegate's governed call is always a proposal: where the department decides directly, the member's own
@@ -233,10 +235,12 @@ def redacted(name, value, args=None):
     return {k: v for k, v in value.items() if k not in hidden}
 
 
-def acted(name, user, by, origin, args, out, grant, prepared=None):
+def acted(name, user, by, origin, args, out, grant, prepared=None, extension=""):
     """Record an update, and tell the member if a delegate did it. The approval of a pending action (``prepared``) is the
-    member's own act: the log names the delegate that prepared it and the grant, and the member is told nothing."""
-    audit(name, user, by, origin, args, out, grant or (prepared.grant if prepared else ""),
+    member's own act: the log names the delegate that prepared it and the grant, and the member is told nothing. An
+    extension's act under its grant is logged under ``extension:<id>``, which the index of ``Event.grant`` lists."""
+    audit(name, user, by, origin, args, out,
+          grant or (prepared.grant if prepared else "") or (f"extension:{extension}" if extension else ""),
           prepared.delegate if prepared else "")
     if grant:
         poa.notice(grant, name, args, out)

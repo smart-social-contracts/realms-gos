@@ -288,6 +288,49 @@ def extension_call(c, args):
     return {"result": sandbox.execute(ext.source, args["function"], args.get("args") or {}, rpc, declared)}
 
 
+# Study prototype (study/extension-grant-cost): an extension's own grant, under which it acts as the realm.
+@op("extension.install", governed=realm_wide)
+def extension_grant(c, args):
+    """Let ``extension`` run ``operations`` as the realm: some of those its manifest declares, never one that takes
+    the realm's own vote (``sandbox.VOTED``). An empty list revokes the grant."""
+    ext = find(Extension, args["extension"])
+    wanted = list(args.get("operations") or [])
+    undeclared = sorted(set(wanted) - set(ext.operations or []))
+    if undeclared:
+        raise Fail(f"{ext.id} does not declare {', '.join(undeclared)}")
+    voted = sorted(set(wanted) & set(sandbox.VOTED))
+    if voted:
+        raise Fail(f"{', '.join(voted)} takes the realm's vote, which no grant holds")
+    if len(wanted) > sandbox.MAX_ACTIONS:
+        raise Fail(f"a grant holds at most {sandbox.MAX_ACTIONS} operations, the sandbox's allow-list")
+    ext.grant = wanted
+
+
+@op("extension.act")
+def extension_act(c, args):
+    """Run ``function`` of ``extension``'s backend with ``args`` as the realm: it can call only the operations the realm
+    granted it (``extension_grant``). Returns ``result``."""
+    ext = find(Extension, args["extension"])
+    if not ext.source:
+        raise Fail(f"{ext.id} has no backend")
+    if not ext.grant:
+        raise Forbidden(f"{ext.id} holds no grant")
+    return {"result": act(ext, args["function"], args.get("args") or {}, c.root)}
+
+
+def act(ext, function, kwargs, root):
+    """``function(**kwargs)`` of ``ext`` in a fresh sandbox, each of its calls dispatched as the realm (origin
+    ``granted``), allowed by Cedar only when the grant names it, and audited under ``extension:<id>``."""
+    granted = list(ext.grant)
+
+    def rpc(name, payload):
+        args = {k: v for k, v in payload.items() if k != "on_behalf_of"}  # the realm acts for no one else
+        return json.loads(run(dispatch(name, json.dumps(args), origin="granted", signer=chain.self_id(),
+                                       declared=granted, root=root, extension=ext.id)))
+
+    return sandbox.execute(ext.source, function, kwargs, rpc, granted)
+
+
 @op("realm.configure", governed=realm_wide)
 def extension_set_access(c, args):
     """Who gets ``extension``: ``profiles`` and ``departments``.
