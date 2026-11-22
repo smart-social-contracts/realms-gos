@@ -656,9 +656,11 @@ def publish_command(paths: List[str], install: bool = False) -> None:
             "path": str(path),
         }
         if kind == "extension":
-            if manifest.get("runtime") == "sandboxed" and (path / "frontend").is_dir() \
-                    and not (path / "frontend" / "dist" / "index.html").is_file():
-                _fail(f"{path}: frontend/dist is missing; run `npm install && npm run build` first")
+            # A sandboxed screen is served from its built index.html: frontend-rt/dist's, which `realms files build`
+            # makes, or the older frontend/dist's.
+            built = [path / d / "dist" / "index.html" for d in ("frontend-rt", "frontend") if (path / d).is_dir()]
+            if manifest.get("runtime") == "sandboxed" and built and not any(b.is_file() for b in built):
+                _fail(f"{path}: {built[0].parent} is missing; run `npm install && npm run build` first")
             console.print(f"[bold]publish extension[/bold] {path}")
             publish_extension_command(
                 registry, str(path), network=network_url(state), identity=LOCAL_IDENTITY
