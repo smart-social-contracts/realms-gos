@@ -51,7 +51,7 @@ mounts it one of two ways:
 
 | `runtime` in the manifest | How it runs | Loaded from |
 |---|---|---|
-| `"sandboxed"` | `<iframe sandbox="allow-scripts allow-modals">`, opaque origin, talks over the bridge | `/ext/<id>/<version>/frontend/dist/index.html` |
+| `"sandboxed"` | `<iframe sandbox="allow-scripts allow-modals allow-forms">`, opaque origin, talks over the bridge | `/ext/<id>/<version>/frontend/dist/index.html` |
 | anything else | ES module in the page, `export default function mount(target, ctx)` | `/ext/<id>/<version>/frontend/dist/index.js` |
 
 In-process mounting is only for extensions on the `VITE_PRIVILEGED_EXTENSIONS` allow-list (a

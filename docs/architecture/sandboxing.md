@@ -133,7 +133,7 @@ canister, and `re` has no `compile`. Write plain Python over plain data.
 Extension UIs run in the browser, inside the realm's frontend:
 
 - **Sandboxed** (`"runtime": "sandboxed"` in the manifest): an `<iframe sandbox="allow-scripts
-  allow-modals">`. It has an opaque origin, so it cannot read the realm's cookies, storage or
+  allow-modals allow-forms">`. It has an opaque origin, so it cannot read the realm's cookies, storage or
   identity. It talks to the host only through a `postMessage` bridge, whose only way to the realm is
   the extension's own backend (`extension_read`, `extension_call`), with rate limits. The realm, not
   the bridge, decides what that backend may do.

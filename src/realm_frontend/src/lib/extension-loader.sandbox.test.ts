@@ -56,7 +56,7 @@ describe('mountSandboxedExtension', () => {
 		expect(ctor.mock.calls[0]?.[0].callAsync).toBe(callAsync);
 		expect(ctor.mock.calls[0]?.[0].callSync).toBe(callSync);
 		const iframe = container.querySelector('iframe');
-		expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts allow-modals');
+		expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts allow-modals allow-forms');
 		mounted.unmount();
 	});
 });
