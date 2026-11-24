@@ -35,6 +35,11 @@ env:
   # The release the realm-wasm job upgrades from: the latest stable one, which the realms in the field run. Pinned, so
   # that publishing a release cannot turn an unrelated PR red. Bump it when a release ships.
   REALM_PREVIOUS_RELEASE: "v0.7.0"
+  # `icp network start` resolves the network launcher through
+  # api.github.com/repos/dfinity/icp-cli-network-launcher/releases/latest. Unauthenticated that
+  # is 60 requests an hour per runner IP, and it has failed the job with a bare
+  # "403 rate limit exceeded" on unrelated PRs. The CLI reads a token from this variable.
+  ICP_CLI_GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
   lint:
