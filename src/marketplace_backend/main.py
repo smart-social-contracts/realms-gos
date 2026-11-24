@@ -2,8 +2,8 @@
 # WASI stdlib compatibility patches
 # Must run BEFORE any imports that trigger lazy module loads.
 # These fix stub modules created by basilisk's _wasi_safe_import hook.
-# Identical to the preamble in src/realm_registry_backend/main.py — keep them
-# in sync until basilisk ships these natively.
+# Adapted from the preamble of realm_registry_backend/main.py in gos-as-a-service, minus its
+# hashlib patch (basilisk provides hashlib.sha256). Drop each one once basilisk ships it natively.
 # ============================================================================
 import sys as _wsys
 
@@ -131,75 +131,6 @@ if not hasattr(_rnd, 'getrandbits'):
     if not hasattr(_rnd, 'randint'):
         _rnd.randint = lambda a, b: a + (_getrandbits(32) % (b - a + 1))
 del _rnd
-
-# -- 4. hashlib: stub has no sha256 -- pure Python SHA-256 --
-import hashlib as _hl
-if not hasattr(_hl, 'sha256'):
-    _K256 = [
-        0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-        0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-        0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-        0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-        0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-        0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-        0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-        0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,
-    ]
-    class _Sha256:
-        def __init__(self, data=b''):
-            self._h = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]
-            self._buf = b''
-            self._count = 0
-            if data:
-                self.update(data)
-        def _rr(self, x, n):
-            return ((x >> n) | (x << (32 - n))) & 0xffffffff
-        def _compress(self, block):
-            w = [int.from_bytes(block[i:i+4], 'big') for i in range(0, 64, 4)]
-            for i in range(16, 64):
-                s0 = self._rr(w[i-15], 7) ^ self._rr(w[i-15], 18) ^ (w[i-15] >> 3)
-                s1 = self._rr(w[i-2], 17) ^ self._rr(w[i-2], 19) ^ (w[i-2] >> 10)
-                w.append((w[i-16] + s0 + w[i-7] + s1) & 0xffffffff)
-            a,b,c,d,e,f,g,h = self._h
-            for i in range(64):
-                S1 = self._rr(e,6) ^ self._rr(e,11) ^ self._rr(e,25)
-                ch = (e & f) ^ ((~e) & g)
-                t1 = (h + S1 + ch + _K256[i] + w[i]) & 0xffffffff
-                S0 = self._rr(a,2) ^ self._rr(a,13) ^ self._rr(a,22)
-                mj = (a & b) ^ (a & c) ^ (b & c)
-                t2 = (S0 + mj) & 0xffffffff
-                h,g,f,e,d,c,b,a = g,f,e,(d+t1)&0xffffffff,c,b,a,(t1+t2)&0xffffffff
-            for i,v in enumerate([a,b,c,d,e,f,g,h]):
-                self._h[i] = (self._h[i] + v) & 0xffffffff
-        def update(self, data):
-            if isinstance(data, str):
-                data = data.encode('utf-8')
-            self._buf += data
-            self._count += len(data)
-            while len(self._buf) >= 64:
-                self._compress(self._buf[:64])
-                self._buf = self._buf[64:]
-        def digest(self):
-            buf = self._buf + b'\x80'
-            buf += b'\x00' * ((55 - len(self._buf)) % 64)
-            buf += (self._count * 8).to_bytes(8, 'big')
-            h = list(self._h)
-            _tmp = _Sha256.__new__(_Sha256)
-            _tmp._h = h; _tmp._buf = b''; _tmp._count = 0
-            for i in range(0, len(buf), 64):
-                _tmp._compress(buf[i:i+64])
-            return b''.join(v.to_bytes(4, 'big') for v in _tmp._h)
-        def hexdigest(self):
-            return self.digest().hex()
-        def copy(self):
-            c = _Sha256.__new__(_Sha256)
-            c._h = list(self._h); c._buf = self._buf; c._count = self._count
-            return c
-    def _sha256(data=b''):
-        return _Sha256(data)
-    _hl.sha256 = _sha256
-    _hl.new = lambda name, data=b'': _sha256(data) if name == 'sha256' else None
-del _hl
 
 # -- 5. math: stub has no ceil/floor/log/sqrt --
 import math as _ma
