@@ -78,7 +78,7 @@ def download_allowed(name, sha256, size):
 
 An extension that has nothing to check returns `allowed: True`; one without the function cannot hand out files. Files
 are text, or base64 with `{ base64: true }`, of the types `application/xml`, `text/xml`, `text/plain`, `text/csv`,
-`application/json` and `application/pdf`, and within the bridge's 256 KB message size.
+`application/json`, `application/pdf` and `image/svg+xml`, and within the bridge's 256 KB message size.
 
 ## Keeping the iframe the right size
 

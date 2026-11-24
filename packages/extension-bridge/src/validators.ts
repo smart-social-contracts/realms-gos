@@ -274,6 +274,7 @@ export const SAVE_FILE_TYPES: ReadonlySet<string> = new Set([
 	'text/csv',
 	'application/json',
 	'application/pdf',
+	'image/svg+xml',
 ]);
 
 export function validateVaultSeal(data: Record<string, unknown>): ExtMessageValidationResult {

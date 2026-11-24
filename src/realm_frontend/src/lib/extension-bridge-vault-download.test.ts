@@ -70,7 +70,11 @@ describe('capability download: the realm decides whether a file leaves', () => {
 		expect(reply(1)).toMatchObject({ kind: 'error', error: { code: 'denied' } });
 	});
 
-	it('takes a plain file name and a listed type only', () => {
+	it('takes a plain file name and a listed type only (a QR-bill as SVG is one)', () => {
+		const svg = validateExtToHostMessage({
+			source: BRIDGE_SOURCE, kind: 'save_file', id: 2, name: 'BILL-1.svg', mimeType: 'image/svg+xml', content: '<svg/>',
+		});
+		expect(svg.ok).toBe(true);
 		for (const bad of [{ name: '../order.xml' }, { name: 'a/b.xml' }, { mimeType: 'text/html' }]) {
 			const out = validateExtToHostMessage({
 				source: BRIDGE_SOURCE, kind: 'save_file', id: 1, name: 'order.xml', mimeType: 'application/xml', content: XML, ...bad,
