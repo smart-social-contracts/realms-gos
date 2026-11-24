@@ -6,6 +6,8 @@ import {
 	type ExtToHostMessage,
 	type HostToExtMessage,
 	type TaskResultPayload,
+	type VaultSealed,
+	type FileSaved,
 	isBridgeMessage,
 	bridgeVersionsCompatible,
 } from './protocol.js';
@@ -32,6 +34,12 @@ export interface BridgeServerOptions {
 		actions: Array<{ id: string; label: string; tone?: string }>;
 	}) => Promise<{ actionId: string }>;
 	onResize?: (height: number) => void;
+	/** Capability ``vault``: encrypt ``data`` for ``recipients`` with the host's vetKeys. */
+	onVaultSeal?: (recipients: string[], data: unknown) => Promise<VaultSealed>;
+	/** Capability ``vault``: open a record sealed for the member; null when they hold no key to it. */
+	onVaultOpen?: (wrappedKey: string, ciphertext: string) => Promise<unknown>;
+	/** Capability ``download``: hand the member a file, once the extension's backend allowed it (the host's job). */
+	onSaveFile?: (file: { name: string; mimeType: string; content: string; base64: boolean }) => Promise<FileSaved>;
 	onHandshakeComplete?: () => void;
 	onHandshakeFailed?: (reason: string) => void;
 }
@@ -94,6 +102,8 @@ export function createBridgeServer(
 	const allowCallExtension = createRateLimiter(30, RATE_WINDOW_MS);
 	const allowOpenModal = createRateLimiter(5, RATE_WINDOW_MS);
 	const allowGetState = createRateLimiter(30, RATE_WINDOW_MS);
+	const allowVault = createRateLimiter(60, RATE_WINDOW_MS);
+	const allowSaveFile = createRateLimiter(5, RATE_WINDOW_MS);
 
 	function targetWindow(): Window | null {
 		return iframe.contentWindow;
@@ -271,6 +281,69 @@ export function createBridgeServer(
 					kind: 'state',
 					state: options.getState(),
 				});
+				return;
+			}
+
+			case 'vault_seal':
+			case 'vault_open': {
+				if (!handshakeDone) {
+					replyError(msg.id, deny('Handshake not complete'));
+					return;
+				}
+				if (!hasCapability('vault')) {
+					replyError(msg.id, deny("Capability 'vault' not declared"));
+					return;
+				}
+				if (!allowVault()) {
+					replyError(msg.id, rateLimited(`${msg.kind} rate limit exceeded`));
+					return;
+				}
+				const handler = msg.kind === 'vault_seal' ? options.onVaultSeal : options.onVaultOpen;
+				if (!handler) {
+					replyError(msg.id, { code: 'unsupported', message: `${msg.kind} handler not configured` });
+					return;
+				}
+				try {
+					const result =
+						msg.kind === 'vault_seal'
+							? await options.onVaultSeal!(msg.recipients, msg.data)
+							: await options.onVaultOpen!(msg.wrappedKey, msg.ciphertext);
+					post({ source: BRIDGE_SOURCE, kind: 'call_result', id: msg.id, result });
+				} catch (e) {
+					replyError(msg.id, failed(e instanceof Error ? e.message : String(e)));
+				}
+				return;
+			}
+
+			case 'save_file': {
+				if (!handshakeDone) {
+					replyError(msg.id, deny('Handshake not complete'));
+					return;
+				}
+				if (!hasCapability('download')) {
+					replyError(msg.id, deny("Capability 'download' not declared"));
+					return;
+				}
+				if (!allowSaveFile()) {
+					replyError(msg.id, rateLimited('save_file rate limit exceeded'));
+					return;
+				}
+				if (!options.onSaveFile) {
+					replyError(msg.id, { code: 'unsupported', message: 'save_file handler not configured' });
+					return;
+				}
+				try {
+					const result = await options.onSaveFile({
+						name: msg.name,
+						mimeType: msg.mimeType,
+						content: msg.content,
+						base64: msg.base64 === true,
+					});
+					post({ source: BRIDGE_SOURCE, kind: 'call_result', id: msg.id, result });
+				} catch (e) {
+					const code = (e as { code?: string })?.code === 'denied' ? 'denied' : 'failed';
+					replyError(msg.id, { code, message: e instanceof Error ? e.message : String(e) });
+				}
 				return;
 			}
 

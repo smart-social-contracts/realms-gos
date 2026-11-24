@@ -44,6 +44,11 @@ const { actionId } = await ctx.openModal({
 });
 
 ctx.reportHeight(document.body.scrollHeight);
+
+// Capability `vault`: records sealed with the realm's vetKeys; capability `download`: a file the backend allows.
+const sealed = await ctx.vault.seal([treasurer, deputy], { iban: 'CH93 0076 2011 6238 5295 7' });
+const register = await ctx.vault.open(myWrappedKey, sealed.ciphertext);
+await ctx.saveFile('order.xml', xml, { mimeType: 'application/xml' });
 ```
 
 ## Host side
@@ -124,6 +129,8 @@ The host's own services are gated by manifest `capabilities` (closed-world: unde
 | `navigate` | `navigate` |
 | `notify` | `notify` |
 | `modal` | `open_modal` |
+| `vault` | `vault_seal`, `vault_open`: the host's vetKeys seal a record for principals, or open one sealed for the member; the member's key never enters the frame |
+| `download` | `save_file`: the host saves a file once the extension's backend allows it (`download_allowed(name, sha256, size)`, as a query) |
 
 `call_extension`, `resize` and `get_state` are not capability-gated.
 

@@ -110,6 +110,50 @@ export interface GoodbyeMessage extends BridgeEnvelope {
 	id?: number;
 }
 
+/** Capability ``vault``: the host encrypts ``data`` with a fresh key and wraps that key for each of ``recipients`` (their
+ * principals) with the realm's vetKeys. The screen stores what it gets back through its backend. */
+export interface VaultSealMessage extends BridgeEnvelope {
+	kind: 'vault_seal';
+	id: number;
+	recipients: string[];
+	data: unknown;
+}
+
+/** Capability ``vault``: the host opens a record sealed for the member, with the key ``wrappedKey`` wrapped for them, and
+ * returns its plaintext. The member's vetKey stays in the host: the frame only ever sees what it asked to open. */
+export interface VaultOpenMessage extends BridgeEnvelope {
+	kind: 'vault_open';
+	id: number;
+	wrappedKey: string;
+	ciphertext: string;
+}
+
+/** What ``vault_seal`` returns: the ciphertext, and the record's key wrapped for each recipient. */
+export interface VaultSealed {
+	ciphertext: string;
+	keys: Record<string, string>;
+}
+
+/** Capability ``download``: the member saves a file the screen made. The host first asks the extension's backend
+ * whether this file may leave: it calls ``download_allowed(name, sha256, size)`` as a query, and saves the file only
+ * when that returns ``{ ok: true, allowed: true }``. So an extension that must record a file before it leaves (a payment
+ * file whose hash the realm commits) has the realm, not the frame, decide. ``content`` is text, or base64 when
+ * ``base64`` is set. */
+export interface SaveFileMessage extends BridgeEnvelope {
+	kind: 'save_file';
+	id: number;
+	name: string;
+	mimeType: string;
+	content: string;
+	base64?: boolean;
+}
+
+/** What ``save_file`` returns once the host handed the file to the browser. */
+export interface FileSaved {
+	sha256: string;
+	size: number;
+}
+
 export type TaskResultStatus = 'completed' | 'failed';
 
 export interface TaskResultPayload {
@@ -127,7 +171,10 @@ export type ExtToHostMessage =
 	| OpenModalMessage
 	| ResizeMessage
 	| GetStateMessage
-	| GoodbyeMessage;
+	| GoodbyeMessage
+	| VaultSealMessage
+	| VaultOpenMessage
+	| SaveFileMessage;
 
 // ── Host → extension ────────────────────────────────────────────────────
 

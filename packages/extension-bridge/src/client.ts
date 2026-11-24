@@ -6,6 +6,8 @@ import {
 	type HostToExtMessage,
 	type ModalAction,
 	type NotifyLevel,
+	type VaultSealed,
+	type FileSaved,
 	isBridgeMessage,
 } from './protocol.js';
 
@@ -42,6 +44,17 @@ export interface ExtensionClient {
 	navigate(path: string): void;
 	notify(level: NotifyLevel, message: string): void;
 	openModal(options: OpenModalOptions): Promise<{ actionId: string }>;
+	/** Capability ``vault``: records sealed with the realm's vetKeys, without the member's key entering the frame. */
+	vault: {
+		/** ``data`` encrypted with a fresh key, wrapped for each of ``recipients`` (principals). */
+		seal(recipients: string[], data: unknown): Promise<VaultSealed>;
+		/** The record sealed for the member with ``wrappedKey``; null when it cannot be opened with it. */
+		open<T = unknown>(wrappedKey: string, ciphertext: string): Promise<T | null>;
+	};
+	/** Capability ``download``: hand the member a file to save, once the extension's backend allows it
+	 * (``download_allowed(name, sha256, size)``, run by the host as a query). Rejects with ``code: 'denied'`` when it
+	 * does not. ``content`` is text, or base64 with ``{ base64: true }``. */
+	saveFile(name: string, content: string, options?: { mimeType?: string; base64?: boolean }): Promise<FileSaved>;
 	onStateChange(listener: (state: HostState) => void): () => void;
 	reportHeight(height: number): void;
 	destroy(): void;
@@ -297,6 +310,23 @@ export async function createExtensionClient(
 				title: options.title,
 				body: options.body,
 				actions: options.actions,
+			});
+		},
+		vault: {
+			seal(recipients: string[], data: unknown): Promise<VaultSealed> {
+				return sendRequest<VaultSealed>({ kind: 'vault_seal', recipients, data });
+			},
+			open<T>(wrappedKey: string, ciphertext: string): Promise<T | null> {
+				return sendRequest<T | null>({ kind: 'vault_open', wrappedKey, ciphertext });
+			},
+		},
+		saveFile(name: string, content: string, options: { mimeType?: string; base64?: boolean } = {}): Promise<FileSaved> {
+			return sendRequest<FileSaved>({
+				kind: 'save_file',
+				name,
+				content,
+				mimeType: options.mimeType ?? 'text/plain',
+				base64: options.base64 === true,
 			});
 		},
 		onStateChange(listener: (state: HostState) => void): () => void {

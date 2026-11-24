@@ -136,7 +136,9 @@ Extension UIs run in the browser, inside the realm's frontend:
   allow-modals allow-forms">`. It has an opaque origin, so it cannot read the realm's cookies, storage or
   identity. It talks to the host only through a `postMessage` bridge, whose only way to the realm is
   the extension's own backend (`extension_read`, `extension_call`), with rate limits. The realm, not
-  the bridge, decides what that backend may do.
+  the bridge, decides what that backend may do. Two host services stand in for what the frame cannot do itself:
+  `vault` seals and opens records with the member's vetKey, which stays in the host, and `download` saves a file only
+  when the extension's backend allows it (`download_allowed`, a query over the file's sha256).
 - **In-process**: an ES module mounted into the page, with full access to it. Meant for
   first-party extensions. A build sets the allow-list in `VITE_PRIVILEGED_EXTENSIONS`; any other
   extension must be sandboxed. When the variable is unset, every extension may run in-process.

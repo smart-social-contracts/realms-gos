@@ -189,6 +189,8 @@ export async function mountSandboxedExtension(
       callAsync: deps.callAsync,
       callRead: deps.callRead,
       navigate: deps.navigate,
+      vault: deps.vault,
+      deliverFile: deps.deliverFile,
       getHostState: deps.getHostState,
       subscribeHostState: deps.subscribeHostState,
       onHandshakeComplete: () => {
