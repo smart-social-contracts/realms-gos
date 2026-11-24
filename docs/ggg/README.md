@@ -40,7 +40,13 @@ integer in the token's smallest unit, every update writes one `Event`, and no ca
 collection. §14 lists the permissions, §15 the cross-cutting invariants, and §16 the decisions
 taken.
 
-Extensions are a Realms GOS feature, not part of GGG: they are on [the Realms page](spec.md).
+Realms GOS adds three things that are not part of GGG, and another GOS may do them differently:
+
+- **Cedar** decides whether each call is allowed: see [Authorization](../architecture/authorization.md).
+- **Codices** encode a realm's legislation in Python, which the realm's codex engine runs: see [Codices](../codices/README.md).
+- **Extensions** add features to a realm: see [Extensions](../extensions/README.md).
+
+[The Realms page](spec.md#4-codices-and-extensions) has the details.
 
 Realms GOS still uses seconds, text principals and `from`/`count` paging on its `read`/`run`
 interface. [The binding](spec.md#1-how-realms-gos-binds-the-model) lists the differences.
