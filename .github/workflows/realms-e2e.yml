@@ -25,6 +25,11 @@ env:
   CASALS_E2E_ENV: local
   CASALS_E2E_IDENTITY: local-dev
   REPLICA_URL: http://127.0.0.1:8000
+  # `icp network start` resolves the network launcher through
+  # api.github.com/repos/dfinity/icp-cli-network-launcher/releases/latest. Unauthenticated that
+  # is 60 requests an hour per runner IP, and it has failed the job with a bare
+  # "403 rate limit exceeded" on unrelated PRs. The CLI reads a token from this variable.
+  ICP_CLI_GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
   realms-local-e2e:
