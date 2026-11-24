@@ -33,6 +33,11 @@ env:
   FILE_REGISTRY_VERSION: "main"
   GAAS_VERSION: "main"
   CASALS_HOME: ${{ github.workspace }}/casals-home
+  # `icp network start` resolves the network launcher through
+  # api.github.com/repos/dfinity/icp-cli-network-launcher/releases/latest. Unauthenticated that
+  # is 60 requests an hour per runner IP, and it has failed the job with a bare
+  # "403 rate limit exceeded" on unrelated PRs. The CLI reads a token from this variable.
+  ICP_CLI_GITHUB_TOKEN: ${{ github.token }}
   E2E_DIR: ${{ github.workspace }}/realms-gaas-e2e
 
 jobs:
