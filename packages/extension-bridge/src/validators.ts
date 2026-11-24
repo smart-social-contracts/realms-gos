@@ -258,6 +258,99 @@ export function validateGoodbye(data: Record<string, unknown>): ExtMessageValida
 	return { ok: true, message };
 }
 
+/** At most this many recipients for one sealed record. */
+export const VAULT_RECIPIENTS_MAX = 64;
+/** A principal in its text form: base32 groups of five, joined by dashes. */
+const PRINCIPAL_RE = /^[a-z2-7]{1,5}(-[a-z2-7]{1,5})*$/;
+/** A wrapped key in hex, and a ciphertext as the host writes it. */
+const WRAPPED_KEY_RE = /^[0-9a-f]{2,4096}$/i;
+/** A file name the browser can save as it is: no path, no control characters. */
+const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._ ()-]{0,119}$/;
+/** The kinds of file a screen may hand the member. */
+export const SAVE_FILE_TYPES: ReadonlySet<string> = new Set([
+	'application/xml',
+	'text/xml',
+	'text/plain',
+	'text/csv',
+	'application/json',
+	'application/pdf',
+]);
+
+export function validateVaultSeal(data: Record<string, unknown>): ExtMessageValidationResult {
+	if (!envelope(data) || data.kind !== 'vault_seal') {
+		return { ok: false, reason: 'invalid vault_seal envelope' };
+	}
+	if (!isRequestId(data.id)) {
+		return { ok: false, reason: 'vault_seal.id must be a positive integer', responseId: typeof data.id === 'number' ? data.id : undefined };
+	}
+	const recipients = data.recipients;
+	if (!Array.isArray(recipients) || recipients.length === 0 || recipients.length > VAULT_RECIPIENTS_MAX) {
+		return { ok: false, reason: `vault_seal.recipients must list 1 to ${VAULT_RECIPIENTS_MAX} principals`, responseId: data.id };
+	}
+	if (!recipients.every((p) => isString(p) && PRINCIPAL_RE.test(p))) {
+		return { ok: false, reason: 'vault_seal.recipients must be principals', responseId: data.id };
+	}
+	if (data.data === undefined) {
+		return { ok: false, reason: 'vault_seal.data is missing', responseId: data.id };
+	}
+	return {
+		ok: true,
+		message: { source: BRIDGE_SOURCE, kind: 'vault_seal', id: data.id, recipients: [...new Set(recipients as string[])], data: data.data },
+	};
+}
+
+export function validateVaultOpen(data: Record<string, unknown>): ExtMessageValidationResult {
+	if (!envelope(data) || data.kind !== 'vault_open') {
+		return { ok: false, reason: 'invalid vault_open envelope' };
+	}
+	if (!isRequestId(data.id)) {
+		return { ok: false, reason: 'vault_open.id must be a positive integer', responseId: typeof data.id === 'number' ? data.id : undefined };
+	}
+	if (!isString(data.wrappedKey) || !WRAPPED_KEY_RE.test(data.wrappedKey)) {
+		return { ok: false, reason: 'vault_open.wrappedKey must be a key in hex', responseId: data.id };
+	}
+	if (!isString(data.ciphertext) || !data.ciphertext) {
+		return { ok: false, reason: 'vault_open.ciphertext must be a string', responseId: data.id };
+	}
+	return {
+		ok: true,
+		message: { source: BRIDGE_SOURCE, kind: 'vault_open', id: data.id, wrappedKey: data.wrappedKey, ciphertext: data.ciphertext },
+	};
+}
+
+export function validateSaveFile(data: Record<string, unknown>): ExtMessageValidationResult {
+	if (!envelope(data) || data.kind !== 'save_file') {
+		return { ok: false, reason: 'invalid save_file envelope' };
+	}
+	if (!isRequestId(data.id)) {
+		return { ok: false, reason: 'save_file.id must be a positive integer', responseId: typeof data.id === 'number' ? data.id : undefined };
+	}
+	if (!isString(data.name) || !FILE_NAME_RE.test(data.name) || data.name.includes('..')) {
+		return { ok: false, reason: 'save_file.name must be a plain file name', responseId: data.id };
+	}
+	if (!isString(data.mimeType) || !SAVE_FILE_TYPES.has(data.mimeType)) {
+		return { ok: false, reason: `save_file.mimeType must be one of ${[...SAVE_FILE_TYPES].join(', ')}`, responseId: data.id };
+	}
+	if (!isString(data.content)) {
+		return { ok: false, reason: 'save_file.content must be a string', responseId: data.id };
+	}
+	if (data.base64 !== undefined && typeof data.base64 !== 'boolean') {
+		return { ok: false, reason: 'save_file.base64 must be a boolean when present', responseId: data.id };
+	}
+	return {
+		ok: true,
+		message: {
+			source: BRIDGE_SOURCE,
+			kind: 'save_file',
+			id: data.id,
+			name: data.name,
+			mimeType: data.mimeType,
+			content: data.content,
+			base64: data.base64 === true,
+		},
+	};
+}
+
 /** Validate an extension→host bridge message before dispatch. */
 export function validateExtToHostMessage(data: unknown): ExtMessageValidationResult {
 	if (!isPlainObject(data)) {
@@ -290,6 +383,12 @@ export function validateExtToHostMessage(data: unknown): ExtMessageValidationRes
 			return validateGetState(data);
 		case 'goodbye':
 			return validateGoodbye(data);
+		case 'vault_seal':
+			return validateVaultSeal(data);
+		case 'vault_open':
+			return validateVaultOpen(data);
+		case 'save_file':
+			return validateSaveFile(data);
 		default:
 			return { ok: false, reason: `unknown message kind: ${String(data.kind)}` };
 	}

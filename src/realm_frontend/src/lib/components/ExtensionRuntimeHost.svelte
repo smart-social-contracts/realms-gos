@@ -345,6 +345,13 @@
 					callAsync: ctx.callAsync,
 					callRead: ctx.callRead,
 					navigate: ctx.navigate,
+					vault: {
+						seal: async (recipients, data) => {
+							const plan = await ctx.crypto.encryptForRecipients(recipients, data);
+							return { ciphertext: plan.ciphertext, keys: plan.wrappedDeks };
+						},
+						open: (wrappedKey, ciphertext) => ctx.crypto.decryptWithEnvelope(wrappedKey, ciphertext),
+					},
 					getHostState: buildSandboxHostState,
 					subscribeHostState: subscribeSandboxHostState,
 					onHandshakeFailed: (reason) => {
