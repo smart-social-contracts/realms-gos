@@ -6,7 +6,6 @@ from core import op
 from core.ratio import PERCENT
 
 import pytest
-from ic_python_db import Database
 
 import fake_chain
 from api import treasury
@@ -676,13 +675,6 @@ def billed(amount):
     return ok("invoice_create", "bob", payer="alice", amount=amount, items=one_item(amount))["invoice"]
 
 
-def new_message():
-    """In a canister a message starts with an empty identity map, so a row a handler read before its ledger call is not
-    the instance another message loads. Called where one message ends and the next begins, for the tests of calls in
-    flight to see a handler that keeps a stale row."""
-    Database.get_instance().clear_registry()
-
-
 def test_a_new_realm_books_payments_into_a_fund_that_the_root_governs():
     setup_finance()
     assert treasury.treasury_config()["source_fund"] == "ROOT"
@@ -832,13 +824,9 @@ def test_two_checks_in_flight_book_a_payment_once(monkeypatch):
     inv = billed(120)
     monkeypatch.setattr(fake_chain, "call", suspended)
     first = start("invoice_check", "alice", invoice=inv)
-    new_message()
     second = start("invoice_check", "alice", invoice=inv)
-    new_message()
     first.send("(120 : nat)")  # it books the payment, and waits on moving it
-    new_message()
     assert finish(second, "(120 : nat)")["status"] == "paid"
-    new_message()
     assert finish(first, "(variant { Ok = 9 : nat })")["status"] == "paid"
     assert len({e.transaction for e in Invoice[inv].ledger_entries}) == 1 and funds()["ROOT"] == 110
     assert len(collections()) == 1
@@ -849,9 +837,7 @@ def test_a_line_added_while_a_check_waits_on_the_ledger_is_kept_and_billed(monke
     inv = billed(120)
     monkeypatch.setattr(fake_chain, "call", suspended)
     check = start("invoice_check", "alice", invoice=inv)
-    new_message()
     ok("invoice_item_add", "bob", invoice=inv, item={"concept": "late_fee", "amount": 30})
-    new_message()
     assert finish(check, "(120 : nat)")["status"] == "pending", "120 is paid of 150"
     assert Invoice[inv].amount == 150 and [i["concept"] for i in Invoice[inv].items] == ["fee", "late_fee"]
     assert not Invoice[inv].ledger_entries
@@ -862,9 +848,7 @@ def test_a_payment_read_on_a_ledger_its_token_moved_from_meanwhile_is_not_booked
     inv = billed(120)
     monkeypatch.setattr(fake_chain, "call", suspended)
     check = start("invoice_check", "alice", invoice=inv)  # reads the invoice's account on realm-ledger
-    new_message()
     ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
-    new_message()
     assert finish(check, "(120 : nat)")["status"] == "pending"
     assert not Invoice[inv].ledger_entries and funds()["ROOT"] == 0, "neither booked nor marked as on the new ledger"
 
@@ -877,9 +861,7 @@ def test_a_payment_whose_token_moved_while_its_retry_read_the_old_ledger_stays_u
     assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
     monkeypatch.setattr(fake_chain, "call", suspended)
     check = start("invoice_check", "alice", invoice=inv)  # the retry reads the account on realm-ledger
-    new_message()
     ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
-    new_message()
     assert finish(check, "(120 : nat)")["status"] == "paid"
     assert fake_chain.state["calls"][-1][1] == "icrc1_balance_of", "no move on either ledger"
     assert Invoice[inv].payment["collected"] is False and Invoice[inv].payment["ledger"] == LEDGER
