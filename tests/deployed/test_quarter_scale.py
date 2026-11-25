@@ -141,12 +141,12 @@ print(json.dumps({"spent": spent, "message": ic.performance_counter(0), "last": 
 PAY = '''
 import json
 from api import treasury
-from ggg import Invoice
+from ggg import Invoice, Token
 spent = []
 for invoice in Invoice.load_some(%(start)d, %(count)d):
     if invoice.status == "pending" and not invoice.id.endswith(%(unpaid)r):
         t = ic.performance_counter(0)
-        treasury.receive(invoice, invoice.amount)
+        treasury.receive(invoice, invoice.amount, Token[invoice.symbol].ledger)
         spent.append(ic.performance_counter(0) - t)
 print(json.dumps({"spent": spent, "message": ic.performance_counter(0)}))
 '''
