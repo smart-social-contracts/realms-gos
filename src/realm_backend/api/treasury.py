@@ -614,6 +614,8 @@ def collect(inv, held):
     Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` when this call moved it. A
     ledger that refuses or does not answer leaves it uncollected, and the next check of the invoice reads the account
     again: the money is moved once, whatever happened to an earlier answer. A generator."""
+    # A hard key on purpose: receive and invoice_collect record the fee they book on every payment that reaches here,
+    # and falling back to the token's current fee would bring back the mismatch between the move and the books.
     fee, moved = inv.payment["fee"], {}
     if held > fee:
         if find(Token, inv.symbol).fee != fee:
