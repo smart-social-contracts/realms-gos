@@ -773,9 +773,12 @@ def invoice_collect(c, args):
     what the invoice was paid with, since nothing else moves money out of it: else nothing changes, and the money is not
     on this token's ledger. A move the ledger does not make is made at the next check of the invoice. Returns ``invoice``
     and whether it is ``collected``."""
-    collectable(args)
-    held = yield from held_by(find(Invoice, args["invoice"]))
-    inv = collectable(args)  # another call may have begun moving it while the ledger answered
+    inv = collectable(args)
+    ledger = find(Token, inv.symbol).ledger
+    held = yield from held_by(inv, ledger)
+    inv = collectable(args)  # a new message: another call may have begun moving it while the ledger answered
+    if find(Token, inv.symbol).ledger != ledger:
+        raise Conflict(f"the token {inv.symbol} moved to another ledger while its ledger answered: nothing is changed")
     fee = find(Token, inv.symbol).fee
     if held < inv.amount:
         raise Conflict(f"{inv.id}'s account holds {held} {inv.symbol}, less than the {inv.amount} it was paid with: the "
@@ -785,9 +788,9 @@ def invoice_collect(c, args):
     fund = booked_into(inv)
     post(period(), [("expense", FEE, fee, 0, fund), ("asset", "cash", 0, fee, fund)], inv.symbol,
          f"moving the payment of {inv.id} into the realm's account", invoice=inv)
-    inv.payment = {**inv.payment, "ledger": find(Token, inv.symbol).ledger, "collected": False}
+    inv.payment = {**inv.payment, "ledger": ledger, "fee": fee, "collected": False}  # the fee it just booked
     yield from collect(inv, held)
-    return {"invoice": inv.id, "collected": inv.payment["collected"]}
+    return {"invoice": inv.id, "collected": find(Invoice, inv.id).payment["collected"]}  # as collect left it
 
 
 @op("self.data_view", read=True)

@@ -929,11 +929,22 @@ def test_two_calls_in_flight_move_a_payment_and_book_its_fee_once(monkeypatch):
     setup_finance()
     inv = paid_before_collection(120)
     monkeypatch.setattr(fake_chain, "call", suspended)
-    first, second = start("invoice_collect", "bob", invoice=inv), start("invoice_collect", "bob", invoice=inv)
+    first = start("invoice_collect", "bob", invoice=inv)
+    second = start("invoice_collect", "bob", invoice=inv)
     first.send("(120 : nat)")  # it books the fee, and waits on the move
     assert "invoice_check moves it" in finish(second, "(120 : nat)")["error"]
     assert finish(first, "(variant { Ok = 9 : nat })")["collected"] is True
-    assert funds()["ROOT"] == 110 and balanced()
+    assert funds()["ROOT"] == 110 and balanced() and len(collections()) == 1
+
+
+def test_a_token_moved_while_its_account_is_read_changes_nothing(monkeypatch):
+    setup_finance()
+    inv = paid_before_collection(120)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    collecting = start("invoice_collect", "bob", invoice=inv)  # reads the invoice's account on realm-ledger
+    ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
+    assert "moved to another ledger" in finish(collecting, "(120 : nat)")["error"]
+    assert funds()["ROOT"] == 120 and "collected" not in Invoice[inv].payment
 
 
 def test_reports_and_my_invoices_are_paginated():
