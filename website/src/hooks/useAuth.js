@@ -1,13 +1,27 @@
 import { useState, useEffect, useCallback } from 'react'
-import { AuthClient } from '@dfinity/auth-client'
+import { AuthClient } from '@icp-sdk/auth/client'
+
+// The session lengths @dfinity/auth-client applied by default, kept so the move
+// to @icp-sdk/auth (whose defaults are 30 days and 7 days) changes neither.
+const SESSION_TTL_NS = BigInt(8 * 60 * 60 * 1_000_000_000) // 8 hours
+const SESSION_IDLE_NS = BigInt(10 * 60 * 1_000_000_000) // 10 minutes
 
 let authClient = null
 
-async function getClient() {
-  if (!authClient) {
-    authClient = await AuthClient.create()
-  }
+function getClient() {
+  authClient ??= new AuthClient()
   return authClient
+}
+
+/** The principal this tab can act as, or null: a stored record alone is not a sign-in. */
+async function heldPrincipal() {
+  try {
+    const principal = (await getClient().getIdentity()).getPrincipal()
+    return principal.isAnonymous() ? null : principal.toText()
+  } catch (e) {
+    console.warn('Stored session is not usable:', e)
+    return null
+  }
 }
 
 export function useAuth() {
@@ -18,20 +32,11 @@ export function useAuth() {
   useEffect(() => {
     let mounted = true
     async function check() {
-      try {
-        const client = await getClient()
-        const authenticated = await client.isAuthenticated()
-        if (mounted) {
-          setIsAuthenticated(authenticated)
-          if (authenticated) {
-            const identity = client.getIdentity()
-            setPrincipal(identity.getPrincipal().toText())
-          }
-        }
-      } catch (e) {
-        console.error('Auth check failed:', e)
-      } finally {
-        if (mounted) setIsLoading(false)
+      const held = await heldPrincipal()
+      if (mounted) {
+        setIsAuthenticated(held !== null)
+        setPrincipal(held)
+        setIsLoading(false)
       }
     }
     check()
@@ -41,35 +46,26 @@ export function useAuth() {
   const login = useCallback(async () => {
     setIsLoading(true)
     try {
-      const client = await getClient()
-      await client.login({
-        identityProvider: 'https://identity.ic0.app',
-        onSuccess: () => {
-          const identity = client.getIdentity()
-          setIsAuthenticated(true)
-          setPrincipal(identity.getPrincipal().toText())
-          setIsLoading(false)
-        },
-        onError: (err) => {
-          console.error('Login failed:', err)
-          setIsLoading(false)
-        },
-      })
+      const identity = await getClient().signIn({ maxTimeToLive: SESSION_TTL_NS, maxTimeToIdle: SESSION_IDLE_NS })
+      setIsAuthenticated(true)
+      setPrincipal(identity.getPrincipal().toText())
     } catch (e) {
-      console.error('Login error:', e)
+      console.error('Login failed:', e)
+    } finally {
       setIsLoading(false)
     }
   }, [])
 
   const logout = useCallback(async () => {
     try {
-      const client = await getClient()
-      await client.logout()
-      setIsAuthenticated(false)
-      setPrincipal(null)
+      // Ends the session at Internet Identity, not only in this browser.
+      await getClient().signOut()
     } catch (e) {
-      console.error('Logout error:', e)
+      // This browser is signed out either way; the session at II lasts until it expires.
+      console.error('Internet Identity did not end the session:', e)
     }
+    setIsAuthenticated(false)
+    setPrincipal(null)
   }, [])
 
   return { isAuthenticated, principal, isLoading, login, logout }

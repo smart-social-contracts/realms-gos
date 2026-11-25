@@ -16,9 +16,9 @@
 // All uploads use the chunked path (~7x cheaper per KB than store_file on the
 // WASI Python registry; see scripts/BENCHMARK_RESULTS.md).
 
-import { Actor, HttpAgent } from '@dfinity/agent';
-import { Principal } from '@dfinity/principal';
-import { IDL } from '@dfinity/candid';
+import { Actor, HttpAgent } from '@icp-sdk/core/agent';
+import { Principal } from '@icp-sdk/core/principal';
+import { IDL } from '@icp-sdk/core/candid';
 
 import { getIdentity } from './auth';
 import { CONFIG } from './config';

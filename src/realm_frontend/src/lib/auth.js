@@ -1,6 +1,6 @@
 // src/lib/auth.js
-import { AuthClient } from '@dfinity/auth-client';
-import { Principal } from '@dfinity/principal';
+import { AuthClient } from '@icp-sdk/auth/client';
+import { Principal } from '@icp-sdk/core/principal';
 import { getTestModeIIBypass } from '$lib/config.js';
 import { isEmbeddedInPortal, getPortalDelegationIdentity } from '$lib/portal-bridge.ts';
 import { normalizePortalRedirectPath } from '$lib/portal-redirect-path.ts';
@@ -24,6 +24,30 @@ console.log(`Using Identity Provider: ${II_URL}`);
 const DERIVATION_ORIGIN = globalThis.__CANISTER_IDS?.derivation_origin || '';
 if (DERIVATION_ORIGIN) {
   console.log(`Using II derivationOrigin: ${DERIVATION_ORIGIN}`);
+}
+
+/** How long an Internet Identity sign-in lasts before the visitor signs in again. */
+const SESSION_TTL_NS = BigInt(7 * 24 * 60 * 60 * 1_000_000_000); // 7 days
+
+// Internet Identity's backend canister has this id on mainnet and on icp-cli's
+// local network (`ii: true`) alike.
+const II_BACKEND_CANISTER_ID = 'rdmx6-jaaaa-aaaaa-aaadq-cai';
+
+/**
+ * Where @icp-sdk/auth signs in. Every mainnet II domain is served by the
+ * library's default (id.ai); a local II renders its sign-in at `/authorize` and
+ * mints through the local replica, whose root key must be fetched.
+ */
+function identityProviderOptions(iiUrl) {
+  const host = new URL(iiUrl).hostname;
+  if (!host.endsWith('localhost') && host !== '127.0.0.1') return {};
+  return {
+    identityProvider: {
+      authorizeUrl: new URL('/authorize', iiUrl).href,
+      canisterId: II_BACKEND_CANISTER_ID
+    },
+    agentOptions: { host: window.location.origin, shouldFetchRootKey: true }
+  };
 }
 
 // Canonical portal page for this realm (e.g. https://staging.gos.earth/r/<slug>).
@@ -135,6 +159,35 @@ function _createPortalAuthClientMock() {
   };
 }
 
+// Internet Identity, behind the same interface as the portal and test clients.
+// Signed in means holding an identity: a stored record naming an account this
+// tab cannot act for (expired, revoked at II, held only by another tab) is not.
+function _createIIAuthClient() {
+  const client = new AuthClient({
+    ...identityProviderOptions(II_URL),
+    // Pin the derivation origin so this realm frontend yields the SAME
+    // principal as every other Realms frontend + the registry. Omitted when
+    // unset to preserve legacy per-origin behaviour.
+    ...(DERIVATION_ORIGIN ? { derivationOrigin: DERIVATION_ORIGIN } : {})
+  });
+  const heldIdentity = async () => {
+    try {
+      const identity = await client.getIdentity();
+      return identity.getPrincipal().isAnonymous() ? null : identity;
+    } catch (error) {
+      console.warn('[auth] stored session is not usable:', error);
+      return null;
+    }
+  };
+  return {
+    isAuthenticated: async () => (await heldIdentity()) !== null,
+    getIdentity: heldIdentity,
+    login: () => client.signIn({ maxTimeToLive: SESSION_TTL_NS }),
+    // Ends the session at Internet Identity, not only in this browser.
+    logout: () => client.signOut()
+  };
+}
+
 // --- Test mode support ---
 // In test mode we bypass Internet Identity entirely and use deterministic
 // Ed25519 identities (see test-identities.js) so E2E and manual QA can pick
@@ -235,7 +288,7 @@ async function _createTestIdentity({ random = false, identityIndex = null } = {}
     return _testIdentity;
   }
   if (_testIdentity && !random) return _testIdentity;
-  const { Ed25519KeyIdentity } = await import('@dfinity/identity');
+  const { Ed25519KeyIdentity } = await import('@icp-sdk/core/identity');
   const seed = new Uint8Array(32);
   if (random) {
     crypto.getRandomValues(seed);
@@ -290,10 +343,7 @@ export async function initializeAuthClient() {
     return authClient;
   }
   if (!authClient) {
-    authClient = await AuthClient.create({
-      keyType: 'Ed25519',
-      idleOptions: { disableIdle: true }
-    });
+    authClient = _createIIAuthClient();
     console.log('Auth client initialized');
   }
   return authClient;
@@ -321,7 +371,7 @@ export async function login({ random = false, identityIndex = null, preferTestMo
 
     let identity;
     if (asParam && pemParam) {
-      const { Secp256k1KeyIdentity } = await import('@dfinity/identity-secp256k1');
+      const { Secp256k1KeyIdentity } = await import('@icp-sdk/core/identity/secp256k1');
       const decodedPem = decodeURIComponent(pemParam);
       identity = Secp256k1KeyIdentity.fromPem(decodedPem);
       _testIdentity = identity;
@@ -356,9 +406,7 @@ export async function login({ random = false, identityIndex = null, preferTestMo
     let identity = getPortalDelegationIdentity();
     if (!identity) {
       const client = await initializeAuthClient();
-      if (await client.isAuthenticated()) {
-        identity = client.getIdentity();
-      }
+      identity = await client.getIdentity();
     }
     if (!identity) {
       const { redirectToPortalLogin } = await import('$lib/portal-bridge.ts');
@@ -388,11 +436,11 @@ export async function login({ random = false, identityIndex = null, preferTestMo
 
   // Reuse an existing IC session — critical in portal iframes where auth stores
   // do not persist across remounts but AuthClient/IndexedDB still holds II.
-  if (await client.isAuthenticated()) {
-    const identity = client.getIdentity();
-    const principal = identity.getPrincipal();
+  const existing = await client.getIdentity();
+  if (existing) {
+    const principal = existing.getPrincipal();
     console.log(`Reusing existing IC session: ${principal.toText()}`);
-    return { identity, principal };
+    return { identity: existing, principal };
   }
 
   // Direct visit to the raw canister origin: signing in here would fail
@@ -406,26 +454,15 @@ export async function login({ random = false, identityIndex = null, preferTestMo
     return new Promise(() => {});
   }
 
-  return new Promise((resolve) => {
-    client.login({
-      identityProvider: II_URL,
-      // Pin the derivation origin so this realm frontend yields the SAME
-      // principal as every other Realms frontend + the registry. Omitted when
-      // unset to preserve legacy per-origin behaviour.
-      ...(DERIVATION_ORIGIN ? { derivationOrigin: DERIVATION_ORIGIN } : {}),
-      maxTimeToLive: BigInt(7 * 24 * 60 * 60 * 1_000_000_000), // 7 days
-      onSuccess: () => {
-        const identity = client.getIdentity();
-        const principal = identity.getPrincipal();
-        console.log(`Logged in with principal: ${principal.toText()}`);
-        resolve({ identity, principal });
-      },
-      onError: (error) => {
-        console.error("Login failed:", error);
-        resolve({ identity: null, principal: null });
-      }
-    });
-  });
+  try {
+    const identity = await client.login();
+    const principal = identity.getPrincipal();
+    console.log(`Logged in with principal: ${principal.toText()}`);
+    return { identity, principal };
+  } catch (error) {
+    console.error('Login failed:', error);
+    return { identity: null, principal: null };
+  }
 }
 
 export async function logout() {
@@ -448,7 +485,13 @@ export async function logout() {
     return;
   }
   const client = await initializeAuthClient();
-  await client.logout();
+  try {
+    await client.logout();
+  } catch (error) {
+    // This browser is signed out either way; the session at Internet Identity
+    // was not ended and lasts until it expires.
+    console.error('[auth] Internet Identity did not end the session:', error);
+  }
 }
 
 /** Tell the UI which test identity this tab is signed in as (0 is Identity 1), or null. Test builds only. */
@@ -576,7 +619,7 @@ async function _restoreAuthSession() {
   }
 
   const client = await initializeAuthClient();
-  const identity = client.getIdentity();
+  const identity = await client.getIdentity();
   const principalText = identity.getPrincipal().toText();
 
   isAuthenticatedStore.set(true);

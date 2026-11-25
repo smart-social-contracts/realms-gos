@@ -7,10 +7,10 @@
  *   node scripts/resync-extension-frontends.mjs <backend> [--frontend <id>] [--registry <id>]
  */
 import fs from 'node:fs';
-import { HttpAgent, Actor } from '@dfinity/agent';
-import { IDL } from '@dfinity/candid';
-import { Principal } from '@dfinity/principal';
-import { Secp256k1KeyIdentity } from '@dfinity/identity-secp256k1';
+import { HttpAgent, Actor } from '@icp-sdk/core/agent';
+import { IDL } from '@icp-sdk/core/candid';
+import { Principal } from '@icp-sdk/core/principal';
+import { Secp256k1KeyIdentity } from '@icp-sdk/core/identity/secp256k1';
 
 const DEFAULT_REGISTRY = 'iebdk-kqaaa-aaaau-agoxq-cai';
 const DEFAULT_PEM = '/root/.config/dfx/identity/deployer/identity.pem';

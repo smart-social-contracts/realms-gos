@@ -33,7 +33,7 @@ async function initializeImports() {
 		throw new Error('Could not load backend declarations. Please run: dfx generate');
 	}
 
-	const agentModule = await import('@dfinity/agent');
+	const agentModule = await import('@icp-sdk/core/agent');
 	HttpAgent = agentModule.HttpAgent;
 	Actor = agentModule.Actor;
 
@@ -161,7 +161,7 @@ function initializeBackendStore() {
 			}
 
 			if (await client.isAuthenticated()) {
-				const identity = client.getIdentity();
+				const identity = await client.getIdentity();
 				agent = new HttpAgent({ identity, verifyQuerySignatures: false });
 				if (isLocalDevelopment()) {
 					await agent.fetchRootKey().catch(() => {});
@@ -218,7 +218,7 @@ export async function initBackendWithIdentity(explicitIdentity = null) {
 		const client = authClient || (await initializeAuthClient());
 
 		if (explicitIdentity || (await client.isAuthenticated())) {
-			const identity = explicitIdentity || client.getIdentity();
+			const identity = explicitIdentity || (await client.getIdentity());
 			console.log('Using authenticated identity:', identity.getPrincipal().toText());
 
 			const currentActor = get(backendStore);
@@ -310,7 +310,7 @@ export async function createQuarterActor(quarterCanisterId, explicitIdentity = n
 	if (!identity) {
 		const client = authClient || (await initializeAuthClient());
 		if (await client.isAuthenticated()) {
-			identity = client.getIdentity();
+			identity = await client.getIdentity();
 		}
 	}
 

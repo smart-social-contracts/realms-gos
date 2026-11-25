@@ -7,7 +7,7 @@
 // they see or what the realm then holds. A row that cannot run on a local realm is a `fixme` with its reason.
 import { readFileSync } from 'node:fs';
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
-import { Ed25519KeyIdentity } from '@dfinity/identity';
+import { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { openExtension, type ExtensionPage } from './fixtures/extension';
 import {
 	founderIdentity,

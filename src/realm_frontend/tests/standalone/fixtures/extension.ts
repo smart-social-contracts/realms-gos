@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type FrameLocator, type Locator, type Page } from '@playwright/test';
-import type { Ed25519KeyIdentity } from '@dfinity/identity';
+import type { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { exposeSigner, openInPortal, reloadIfInterrupted, type StandaloneRealm } from './realm';
 
 /** Where the page's controls are: the extension's mount point, or the iframe a sandboxed extension runs in. The

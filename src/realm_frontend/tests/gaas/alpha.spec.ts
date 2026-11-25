@@ -15,8 +15,8 @@
 // and the applicant's principal is that key's. The portal then runs its real sign-in path from that session.
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { Actor, HttpAgent } from '@dfinity/agent';
-import { DelegationChain, Ed25519KeyIdentity } from '@dfinity/identity';
+import { Actor, HttpAgent } from '@icp-sdk/core/agent';
+import { DelegationChain, Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { needsRootKey } from '../standalone/fixtures/realm';
 
 interface Alpha {
@@ -50,7 +50,7 @@ interface Registry {
 	request_deployment: (manifest: string) => Promise<string>;
 }
 
-const registryIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) => {
+const registryIdl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) => {
 	const text = IDL.Variant({ Ok: IDL.Text, Err: IDL.Text });
 	const credits = IDL.Variant({ Ok: IDL.Record({ balance: IDL.Nat64 }), Err: IDL.Text });
 	return IDL.Service({

@@ -5,8 +5,8 @@ import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { test, type FrameLocator, type Page } from '@playwright/test';
-import { Actor, HttpAgent } from '@dfinity/agent';
-import { DelegationChain, Ed25519KeyIdentity } from '@dfinity/identity';
+import { Actor, HttpAgent } from '@icp-sdk/core/agent';
+import { DelegationChain, Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 
 export interface StandaloneRealm {
 	network_url: string;
@@ -158,7 +158,7 @@ export async function reloadIfInterrupted(page: Page, frame: FrameLocator): Prom
 	return true;
 }
 
-const opsIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+const opsIdl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) =>
 	IDL.Service({
 		read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']),
 		run: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], [])

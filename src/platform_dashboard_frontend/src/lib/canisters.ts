@@ -1,5 +1,5 @@
 import { building } from '$app/environment';
-import { HttpAgent } from '@dfinity/agent';
+import { HttpAgent } from '@icp-sdk/core/agent';
 import { getIdentity } from './auth';
 import { CONFIG } from './config';
 

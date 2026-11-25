@@ -1,7 +1,7 @@
 // The realm's operations as a journey spec uses them: do one and expect it done, do one and expect the refusal,
 // and read what the realm holds afterwards. What a step did is read back from the realm, not from a page's text.
 import { expect } from '@playwright/test';
-import type { Ed25519KeyIdentity } from '@dfinity/identity';
+import type { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { founderIdentity, readOp, runOp, type StandaloneRealm } from './realm';
 
 export type Reply = Record<string, unknown>;

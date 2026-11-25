@@ -52,7 +52,7 @@ export async function resolveCasalsUrlLive(): Promise<string> {
   );
   if (!marketplace || typeof window === 'undefined') return '';
   try {
-    const { Actor, HttpAgent } = await import('@dfinity/agent');
+    const { Actor, HttpAgent } = await import('@icp-sdk/core/agent');
     const agent = new HttpAgent({ host: 'https://icp-api.io' });
     const actor = Actor.createActor(
       ({ IDL }) =>
