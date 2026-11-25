@@ -90,6 +90,15 @@ copy its principal and run:
 realms local add-admin <principal>
 ```
 
+The frontends sign in with `@icp-sdk/auth`, which needs an Internet Identity with revocable
+sessions (II release-2026-09-11 or later). icp-cli's built-in one (`ii: true`), which `realms
+local`, `realms mundus` and the e2e scripts use, has them. The `internet_identity` canister that
+`dfx.json` and `dfx.template.json` pin (release-2026-03-09) does not, and dfx 0.31's local replica
+refuses the newer releases ("imports function 'msg_caller_info_signer_size' … not exported by
+the runtime"). So a setup that deploys everything with dfx has no working Internet Identity
+sign-in: use test-mode sign-in there, or icp-cli. dfx 0.33.1 may run the newer releases; nobody
+has tried it yet.
+
 ## 5. Iterate
 
 After changing an extension, bump `version` in its `manifest.json`, rebuild its UI if it has one,
