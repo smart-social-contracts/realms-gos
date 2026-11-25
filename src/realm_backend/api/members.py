@@ -1,6 +1,7 @@
 import hashlib
 
 from core import auth
+from core import build_variant
 from core import chain
 from core import it_team
 from api import delegation
@@ -134,7 +135,8 @@ def joining(user, args, grant):
 
 @op("self.join", check=check_choices, secret=("code",), summary=joining, title="Join the realm with an invite code")
 def realm_join(c, args):
-    """Join with an invite ``code`` (needed unless registration is open) and an optional ``nickname``,
+    """Join with an invite ``code`` (needed unless registration is open, or a test build's ``user_self_registration``
+    flag is on) and an optional ``nickname``,
     ``language`` (a BCP 47 tag) and ``home_zone`` (a zone of the realm). A member can join again with a code to gain its profile and seat. Returns ``user``, ``status`` and ``profiles``.
     Example: ``{"code": "X7K-29Q"}`` → ``{"user": "bob", "status": "active", "profiles": ["member"]}``."""
     member, realm = Member[c.user], Realm["1"]
@@ -143,7 +145,8 @@ def realm_join(c, args):
         raise Forbidden(f"your membership is {member.status}")
     if member and inv is None:
         raise Conflict("you are already a member")
-    if inv is None and not (realm and realm.open_registration) and not chain.is_controller(c.user):
+    open_door = realm and (realm.open_registration or build_variant.self_registration(realm))
+    if inv is None and not open_door and not chain.is_controller(c.user):
         raise Fail("this realm needs an invite code to join")
     if inv and inv.position:
         orgs.fill(find(Position, inv.position), c.user)
