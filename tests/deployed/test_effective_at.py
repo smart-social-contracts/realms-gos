@@ -47,8 +47,7 @@ def realm(wasm_of, people):
         ok(realm, "realm_join", member, code=code)
     # A proposal closes as soon as its outcome is certain, instead of after the voting window.
     ok(realm, "governance_update", ctl, voting_window=0)
-    ok(realm, "fund_create", ctl, fund="ROOT", name="Root")  # the fund invoices are paid into
-    items = [{"concept": "funds", "amount": FUNDS}]
+    items = [{"concept": "funds", "amount": FUNDS}]  # paid into ROOT, the fund setup made for invoice payments
     invoice = ok(realm, "invoice_create", ctl, payer=alice, amount=FUNDS, items=items)["invoice"]
     assert ok(realm, "invoice_check", alice, invoice=invoice)["status"] == "paid"
     return realm

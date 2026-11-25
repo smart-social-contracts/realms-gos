@@ -7,7 +7,7 @@ from core import sandbox
 from api import tasks
 from core.db import CONVERT_IDS, PAGE_MAX, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
 from api.extensions import trust
-from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
+from ggg import Calendar, Department, Event, Fund, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
 from api import codex, installs
 from core.op import call, op, ops
@@ -88,6 +88,10 @@ def start(installer=""):
         # a new database holds no list saved the old way, and no leg that predates its index
         realm.manifest_data = {INDEX_CONVERSION: {"done": True}, LEG_INDEX: True}
         Department(id="Administration", is_root=True, description="The realm's root department")
+        # The fund the treasury's default source_fund names, which books every invoice payment: without it a new realm
+        # could bill a member and not book the payment (realms-gos#740). No department owns it, so the root governs it
+        # (treasury.owner_of), and a codex may still give Administration a fund of its own.
+        Fund(id=realm.treasury.config["source_fund"], name="General fund")
     installer = (installer or "").strip()
     if installer and not Realm["1"].installer_canister_id:
         Realm["1"].installer_canister_id = installer
@@ -517,11 +521,15 @@ def orchestration_decide(c, args):
 @op("realm.monitor", read=True)
 def realm_monitor(c, args):
     """Health figures: status, running and installed versions, cycles, stable ``memory`` in bytes, counts of
-    operations, events and rows per entity, and the last accepted ``upgrade``."""
+    operations, events and rows per entity, the last accepted ``upgrade``, and the ``problems`` of its settings, in
+    words: what they keep the realm from doing, such as booking a payment."""
+    from api import treasury
+
     realm = Realm["1"]
     return {"status": realm.status, "version": VERSION, "installed_version": realm.installed_version or VERSION,
             "cycles": chain.cycles(), "memory": chain.memory(), "operations": len(ops()), "events": Event.max_id(),
-            "rows": {n: getattr(ggg, n).count() for n in COUNTED}, "upgrade": realm.manifest_data.get("upgrade", {})}
+            "rows": {n: getattr(ggg, n).count() for n in COUNTED}, "upgrade": realm.manifest_data.get("upgrade", {}),
+            "problems": treasury.problems()}
 
 
 # Entities whose rows hold personal data in clear: exporting them takes their readers' permission too (I-PRV-1).

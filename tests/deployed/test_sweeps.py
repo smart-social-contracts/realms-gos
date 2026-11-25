@@ -15,8 +15,9 @@ from pic import _CANISTER, _management, CONTROLLER
 
 FUNDS = 1_000  # what the mock ledger reports every invoice paid with
 KEEP, FEE = 100, 10
-FIRST = FUNDS - KEEP - FEE  # what a quarter holding FUNDS sweeps
-AGAIN = FUNDS - FEE  # what it sweeps after that: it keeps KEEP already, and FUNDS are paid in
+PAID = FUNDS - FEE  # what such an invoice leaves in ROOT: the realm pays the fee to move it into its main account
+FIRST = PAID - KEEP - FEE  # what a quarter holding PAID sweeps
+AGAIN = PAID - FEE  # what it sweeps after that: it keeps KEEP already, and PAID comes in
 EPOCH = 30 * 86_400  # a "monthly" treasury epoch
 HOUR = 3_600
 RULE = {"fund": "ROOT", "symbol": "DOM", "into": "GENERAL", "keep": KEEP}
@@ -52,20 +53,21 @@ def ledgers(net):
             "too_old": Ledger(net.pic, mock_ledger.candid_err_too_old())}
 
 
-def with_a_fund(realm, ledger, fund):
+def with_dom(realm, ledger):
     realm.ok("token_register", "ctl", symbol="DOM", ledger=ledger.id, decimals=8, fee=FEE)
-    realm.ok("fund_create", "ctl", fund=fund)
     return realm
 
 
 @pytest.fixture(scope="module")
 def capital(net, ledgers):
-    return with_a_fund(net.realm("capital"), ledgers["ok"], "GENERAL")
+    realm = with_dom(net.realm("capital"), ledgers["ok"])
+    realm.ok("fund_create", "ctl", fund="GENERAL")
+    return realm
 
 
 @pytest.fixture(scope="module")
 def north(net, ledgers, capital):
-    quarter = with_a_fund(net.realm("north", members=("alice",)), ledgers["ok"], "ROOT")
+    quarter = with_dom(net.realm("north", members=("alice",)), ledgers["ok"])  # its ROOT is the fund setup made
     net.register_quarters(capital, quarter)
     capital.govern("treasury_configure", {"config": {"sweep": [RULE]}})
     quarter.ok("quarter_sync", "ctl")  # the rules arrive, and the timer is armed for the end of the epoch
@@ -73,7 +75,7 @@ def north(net, ledgers, capital):
 
 
 def fund(realm, people):
-    """Pay FUNDS into the quarter's ROOT fund: an invoice the mock ledger says is paid."""
+    """Pay FUNDS into the quarter's ROOT fund, which gains PAID: an invoice the mock ledger says is paid."""
     items = [{"concept": "funds", "amount": FUNDS}]
     invoice = realm.ok("invoice_create", "ctl", payer=people["alice"], amount=FUNDS, items=items)["invoice"]
     assert realm.ok("invoice_check", "alice", invoice=invoice)["status"] == "paid"
@@ -121,7 +123,7 @@ def test_a_ledger_that_does_not_answer_is_asked_again_with_the_same_transfer_and
     fund(north, people)
     ledgers["ok"].stop()
     into_the_next_epoch(net, north)
-    assert sweeps(north)["SW-3"]["status"] == "sending" and held(north, "ROOT") == KEEP + FUNDS  # nothing moved
+    assert sweeps(north)["SW-3"]["status"] == "sending" and held(north, "ROOT") == KEEP + PAID  # nothing moved
 
     ledgers["ok"].start()
     north.ok("token_register", "ctl", symbol="DOM", ledger=ledgers["duplicate"].id)  # the ledger that applied it already
@@ -163,4 +165,4 @@ def test_a_transfer_older_than_the_ledgers_window_needs_a_check_at_once_and_reso
 
     north.govern("sweep_resolve", {"sweep": "SW-5"})  # the ledger holds no such transfer
     assert sweeps(north)["SW-5"]["status"] == "failed"
-    assert held(north, "ROOT") == KEEP + FUNDS and held(capital, "GENERAL") == FIRST + 3 * AGAIN
+    assert held(north, "ROOT") == KEEP + PAID and held(capital, "GENERAL") == FIRST + 3 * AGAIN

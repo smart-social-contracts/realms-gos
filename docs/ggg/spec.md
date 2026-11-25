@@ -127,6 +127,13 @@ same rows.
 - an invoice's `items` are lines with a `concept` and a signed `amount`, optionally a `quantity`, a `unit` and the
   `legislation` that charges it; they sum to the invoice's `amount`, and `invoice_item_add` adds a line to a pending
   invoice. The invoice of a fine or a restitution has one item, named for the kind of penalty;
+- an invoice is paid into the realm's account whose subaccount is the invoice's id (`pay_to`). Once that account holds
+  the amount, the realm books the payment into the treasury's `source_fund`, `ROOT` by default, which setup creates for
+  a new realm and no department owns, and moves what the account holds into the realm's main account, from which every
+  payout is made. The move costs the ledger's fee, so the fund gains the amount less the fee (booked as `ledger_fee`),
+  and an adopted allocation rule splits what it gains. A move the ledger does not make is made at the next check of the
+  invoice, from what its account holds then. While the source fund does not exist, a check refuses with `Unavailable`
+  and the payment waits on the ledger; `realm_monitor` lists it under `problems`;
 - a budget line is `revenue` or `expense`, a category is one kind within a fund and period (`budget_draft` refuses a
   line of the other kind with `InvalidArgument`), and `budget_propose` takes the draft lines of a period together: those
   of the `fund` it names, which its owner governs under its own policy (the root when no department owns the fund), or

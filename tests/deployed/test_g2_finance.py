@@ -149,7 +149,8 @@ def realm(request, wasm_of, people):
     ok(realm, "setup_launch", founder)
     ok(realm, "token_register", ctl, symbol="DOM", ledger=people["installer"], decimals=8, fee=10_000)
     ok(realm, "realm_join", alice)
-    ok(realm, "fund_create", ctl, fund="ROOT")
+    if request.param == "previous":
+        ok(realm, "fund_create", ctl, fund="ROOT")  # a new realm of this release has it from setup
     ok(realm, "fund_create", ctl, fund="ROADS")
     ok(realm, "period_open", ctl, **FY2026)
     ok(realm, "period_open", ctl, **FY2027)

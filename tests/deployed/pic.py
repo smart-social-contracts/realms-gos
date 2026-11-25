@@ -96,13 +96,14 @@ class Wasm:
 
 
 class Canister:
-    def __init__(self, wasm_path, installer="", pic=None, wasm=None):
+    def __init__(self, wasm_path, installer="", pic=None, wasm=None, arg=None):
         """A canister running ``wasm_path`` on a PocketIC instance of its own, or on ``pic`` when given, installing
-        the already uploaded ``wasm`` if there is one."""
+        the already uploaded ``wasm`` if there is one. A realm's init argument is its ``installer``; another canister,
+        such as a ledger, takes its own ``arg``, encoded Candid."""
         self.pic = pic or new_pocket_ic()
         self.id = _new_canister(self.pic)
         self.wasm = wasm or Wasm(self.pic, wasm_path)
-        self._install({"install": None}, encode([{"type": Types.Text, "value": installer}]))
+        self._install({"install": None}, arg if arg is not None else encode([{"type": Types.Text, "value": installer}]))
 
     def upgrade(self, wasm_path=None):
         """Upgrade the canister to ``wasm_path`` (the wasm it has by default), as its controller: its stable memory stays,

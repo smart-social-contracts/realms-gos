@@ -4,7 +4,8 @@ import json
 from core import candid
 from core import chain
 from core import compliance, sync_log
-from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page, page_by, view, window
+from core.db import (DRAFTS, Conflict, Fail, Forbidden, Unavailable, each, find, first, latest, next_id, page, page_by,
+                     view, window)
 from ggg import (AllocationRule, Budget, Contract, Department, External, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, Loan, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
@@ -18,7 +19,7 @@ CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate", "sweep")
 # Realms GOS names its treasury epochs; GGG has their length.
 EPOCHS = {"monthly": 30 * 86400, "quarterly": 91 * 86400, "yearly": 365 * 86400}
 REGISTRY = 100  # tokens, and NFT collections, a realm can register: treasury_view lists them all
-REFRESH = 20  # invoices one invoice_refresh checks, one ledger call each
+REFRESH = 20  # invoices one invoice_refresh checks: one ledger call each, and one more for each it finds paid (collect)
 MIGRATE_PAGE = 500  # transfers one message of the pass after an upgrade reads
 MONEY_MAX = 2**53 - 1  # GGG's Money
 FEE = "ledger_fee"  # the category of the ledger's fee on a payment: a cost of paying, not a budgeted one
@@ -28,6 +29,10 @@ TRANSFER = ("id", "sender", "to", "symbol", "amount", "ledger_tx", "status", "at
             "contract")  # what a list of transfers shows
 LINE = ("id", "category", "kind", "planned", "reserved", "committed", "actual", "status", "proposal")  # what a line shows
 PERIOD_UNITS = ("day", "working_day", "month", "year")
+# A new realm has the fund its treasury's source_fund names (setup.start); a realm made before it did may not, and then
+# books no invoice payment (realms-gos#740). receive refuses in these words, and realm_monitor reports them.
+NO_SOURCE_FUND = ("the treasury's source fund {}, which receives invoice payments, does not exist: create it with "
+                  "fund_create, or name another fund with treasury_configure (source_fund)")
 
 
 # --- ledger calls ---------------------------------------------------------------------------------
@@ -44,13 +49,15 @@ def text(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def icrc1_arg(to, amount, memo, fee=None, created_at=None):
+def icrc1_arg(to, amount, memo, fee=None, created_at=None, from_sub=None):
     """The argument of an ICRC-1 transfer of ``amount`` to the account ``to`` (as ``account`` writes it), with ``memo``
-    and, when given, the ``fee`` and the ``created_at`` time in seconds that make it recognisable as a repeat."""
+    and, when given, the ``fee`` and the ``created_at`` time in seconds that make it recognisable as a repeat. It leaves
+    the realm's main account, or its subaccount ``from_sub``."""
     fee_text = f"opt ({fee} : nat)" if fee is not None else "null"
     time_text = f"opt ({created_at * 1_000_000_000} : nat64)" if created_at is not None else "null"
+    from_text = f"opt {blob(from_sub)}" if from_sub else "null"
     return (f"(record {{ to = {to}; amount = {amount} : nat; fee = {fee_text}; memo = opt {blob(memo)}; "
-            f"from_subaccount = null; created_at_time = {time_text} }})")
+            f"from_subaccount = {from_text}; created_at_time = {time_text} }})")
 
 
 def subaccount(invoice_id):
@@ -525,32 +532,93 @@ def owns(inv, user):
     return bool(org and user in (org.admins or []))
 
 
+def treasury_config():
+    return Treasury["1"].config if Treasury["1"] else {}
+
+
+def source_fund():
+    """The fund invoice payments are booked into, the treasury's ``source_fund``; refused, in words that say how to fix
+    it, while it does not exist."""
+    code = treasury_config().get("source_fund", "ROOT")
+    if Fund[code] is None:
+        raise Unavailable(NO_SOURCE_FUND.format(code) + ". The payment waits on the ledger until then")
+    return Fund[code]
+
+
+def problems():
+    """What the treasury's settings keep the realm from doing, in words, for realm_monitor: a source fund that does not
+    exist, which a member meets only once they have paid."""
+    code = treasury_config().get("source_fund", "ROOT")
+    return [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
+
+
 def receive(inv, received):
-    """Book a paid invoice as revenue of the source fund, then split it by the adopted allocation rule."""
+    """Book a paid invoice as revenue of the source fund, which gains it less the ledger's fee for moving it into the
+    realm's main account (``collect``), and split what it gains by the adopted allocation rule. An invoice of no more
+    than the fee cannot be moved at all, so its whole amount is the fee: no fund is credited money it cannot pay out."""
     p = period()
-    config = Treasury["1"].config if Treasury["1"] else {}
-    source = find(Fund, config.get("source_fund", "ROOT"))
+    config, source = treasury_config(), source_fund()
     category = inv.reason.partition(":")[0].lower() or "invoice"
-    lines = [("asset", "cash", inv.amount, 0, source), ("revenue", category, 0, inv.amount, source)]
+    fee = min(find(Token, inv.symbol).fee, inv.amount)
+    net = inv.amount - fee
+    lines = [("asset", "cash", net, 0, source), ("revenue", category, 0, inv.amount, source)]
+    if fee:
+        lines.append(("expense", FEE, fee, 0, source))
     rule = adopted_rule(source) if config.get("auto_allocate") else None
     for allocation in (rule.rules if rule else []):
-        code, share = allocation["fund"], inv.amount * allocation["share"] // ONE
+        code, share = allocation["fund"], net * allocation["share"] // ONE
         if share and code != source.id:
             lines += [("asset", "cash", 0, share, source), ("asset", "cash", share, 0, find(Fund, code))]
     kind, _, key = inv.payer.partition(":")
     who = {"user": key} if kind == "User" else {"organization": Organization[key]} if kind == "Organization" else {}
     post(p, lines, inv.symbol, f"payment of {inv.id}", invoice=inv, **who)
-    inv.status, inv.paid_at, inv.payment = "paid", chain.now(), {"received": received, "subaccount": pay_to(inv)}
+    inv.status, inv.paid_at = "paid", chain.now()
+    inv.payment = {"received": received, "subaccount": pay_to(inv), "collected": False}
     if inv.reason.startswith("TaxDeclaration:"):
         find(TaxDeclaration, inv.reason.partition(":")[2]).status = "settled"
 
 
+def held_by(inv):
+    """What the invoice's own account holds on the ledger. A generator."""
+    return (yield from balance_of(find(Token, inv.symbol), subaccount(inv.id)))
+
+
+def collect(inv, held):
+    """Move a paid invoice's money from its own account, where the payer sent it, into the realm's main account, which
+    every payout draws on (realms-gos#739): what the account ``held``, less the ledger's fee, which ``receive`` booked.
+    Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` when this call moved it. A
+    ledger that refuses or does not answer leaves it uncollected, and the next check of the invoice reads the account
+    again: the money is moved once, whatever happened to an earlier answer. A generator."""
+    token, moved = find(Token, inv.symbol), {}
+    if held > token.fee:
+        arg = icrc1_arg(account(chain.self_id()), held - token.fee, inv.id.encode(), token.fee,
+                        from_sub=subaccount(inv.id))
+        try:
+            reply = yield from chain.call(token.ledger, "icrc1_transfer", arg)
+        except Exception:  # noqa: BLE001  no answer: the next check reads where the money is
+            return
+        status, block = outcome(reply)
+        if status != "completed":
+            return
+        moved = {"block": block}
+    inv.payment = {**inv.payment, **moved, "collected": True}
+
+
 def refresh(inv):
+    """Check the ledger for the payment of ``inv``: book it once its account holds the amount, then collect it. A paid
+    invoice whose payment is not collected yet is collected again. A payment booked by a release before collecting has no
+    ``collected`` and is left as it is. A generator; returns the invoice's status."""
+    if inv.status == "paid" and inv.payment.get("collected") is False:
+        held = yield from held_by(inv)
+        yield from collect(inv, held)
     if inv.status not in ("pending", "overdue"):
         return inv.status
-    received = yield from balance_of(find(Token, inv.symbol), subaccount(inv.id))
+    received = yield from held_by(inv)
+    if inv.status not in ("pending", "overdue"):  # another check booked it while the ledger answered: book it once
+        return inv.status
     if received >= inv.amount:
         receive(inv, received)
+        yield from collect(inv, received)
     elif inv.due_at and chain.now() > inv.due_at:
         inv.status = "overdue"
     return inv.status
@@ -587,7 +655,8 @@ def invoice_item_add(c, args):
 
 @op("self.invoice_refresh", returns="invoice")
 def invoice_check(c, args):
-    """Check the ledger for a payment of ``invoice`` (yours or your organization's). Returns its ``status``."""
+    """Check the ledger for a payment of ``invoice`` (yours or your organization's). Once it is paid the realm moves the
+    payment into its main account, from which it pays out. Returns its ``status``."""
     inv = find(Invoice, args["invoice"])
     if not owns(inv, c.user):
         raise Forbidden(f"{inv.id} is not yours")
@@ -611,7 +680,8 @@ def open_invoices(args):
 @op("invoice.refresh")
 def invoice_refresh(c, args):
     """Check the ledger for payments of ``invoice``, or, when omitted, of one batch of pending or overdue invoices
-    (``from``, ``count``, at most 20: one ledger call each); ``next`` continues it.
+    (``from``, ``count``, at most 20: one ledger call each, and one more to collect each payment found); ``next``
+    continues it.
     Returns ``checked``, ``paid`` and each invoice's status in ``invoices``."""
     period()
     rows, nxt = ([find(Invoice, args["invoice"])], None) if args.get("invoice") else open_invoices(args)

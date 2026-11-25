@@ -8,7 +8,7 @@ from api import quarters, sweeps, treasury
 from ggg import FiscalPeriod, LedgerEntry, Quarter, Realm, Sweep
 from kit import call, direct, fire_timers, later, ok
 from test_quarters import CAPITAL
-from test_treasury import LEDGER, finish, ledger_ok, receive, setup_finance, start, suspended
+from test_treasury import LEDGER, finish, ledger_ok, payouts, receive, setup_finance, start, suspended
 
 RULE = {"fund": "ROOT", "symbol": "REALM", "into": "ROADS", "keep": 100}
 TO = {"owner": CAPITAL, "subaccount": None}
@@ -25,8 +25,9 @@ def timer_not_armed():
 
 
 def transfers():
-    """The arguments of every transfer the quarter sent to the ledger."""
-    return [c[2] for c in fake_chain.state["calls"] if c[:2] == ICRC1]
+    """The arguments of every sweep the quarter sent to the ledger: the transfers from its main account, since a payment's
+    collection leaves the invoice's (treasury.collect)."""
+    return [c[2] for c in payouts() if c[:2] == ICRC1]
 
 
 def held():

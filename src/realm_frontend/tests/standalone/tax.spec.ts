@@ -311,7 +311,8 @@ test('a member pays the residence tax and the treasury receives it', async ({ pa
 		(d) => d.invoice === invoice.id
 	);
 	expect(declaration?.status).toBe('settled');
-	expect(await treasuryBalance()).toBe(treasuryBefore + RESIDENCE);
+	// less the ledger's fee, which the realm pays to move the payment into its own account (realms-gos#739)
+	expect(await treasuryBalance()).toBe(treasuryBefore + RESIDENCE - Number(LEDGER_FEE));
 });
 
 test('a payment that falls short does not settle the invoice', async () => {
