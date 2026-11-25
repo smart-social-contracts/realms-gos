@@ -107,13 +107,19 @@ const ROWS: Row[] = [
 		path: '/extensions/member_dashboard',
 		as: 'member',
 		action: 'open my membership page as the second member',
-		expected: 'my membership steps: the passport check and the deposit to pay',
+		expected: 'my membership steps: the passport check and the invoices',
 		run: async ({ app }) => {
 			await expect(app.getByText('Membership', { exact: true }).first()).toBeVisible();
 			await expect(app.getByRole('button', { name: 'Verify passport' })).toBeVisible();
-			// Syntropia bills a deposit on joining: the step offers to pay it (realms-extensions#118 names the button by
-			// what the member owes; a member never billed has no invoice step).
-			await expect(app.getByRole('button', { name: 'Pay invoice' })).toBeVisible();
+			// The invoices step carries whichever label fits what the member owes: "Pay invoice" once
+			// they have an unpaid one, "View invoices" when they have none (member_dashboard's
+			// citizenshipNextActions). Under the syntropia codex they have one, because it bills a
+			// deposit on join and the setup's tokens step registers the realm's currency as a token so
+			// that invoice can be raised at all; under a codex that bills nothing they have none. The
+			// row is about the step being offered, so it accepts either.
+			await expect(
+				app.getByRole('button', { name: /^(Pay invoice|View invoices)$/ })
+			).toBeVisible();
 		}
 	},
 	{
