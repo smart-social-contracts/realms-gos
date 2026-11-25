@@ -235,7 +235,10 @@ Realms GOS also differs from the model in what it keeps:
   calls the steps. The host is a controller or the installer the canister was created with, and
   the marketplace, installer and Casals baton canisters go in `extra` as `realms_gos:marketplace`,
   `realms_gos:installer` and `realms_gos:baton`. `host_install`'s `registry` is kept for
-  `realm_register`;
+  `realm_register`, and the realm keeps its listing in that registry up to date: it publishes its name, members,
+  stage and (an https) logo when it launches and from a timer that looks once a day and calls only when one of them
+  changed (`api/listing.py`). `host_registry` is the Realms GOS operation that tells a realm its registry at any
+  time, for a realm made before it did; `realm_numbers` is its public count of members, proposals and votes;
 - a federal vote's title is kept inside its action;
 - calls between realms (a link's notices and reports, and the reads of the check for a cycle) are not bounded-wait:
   basilisk 0.15 has no call with a timeout, so a canister that never answers holds the message of the vote that
