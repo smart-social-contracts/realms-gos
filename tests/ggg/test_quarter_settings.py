@@ -3,8 +3,6 @@ quarters" in docs/architecture/quarters-and-federation.md). The multi-canister f
 
 import json
 
-import pytest
-
 import fake_chain
 from api import quarters
 from fake_chain import peer, rejects
@@ -148,8 +146,6 @@ def test_a_quarter_applies_the_capitals_push_and_no_one_else_s(monkeypatch):
     assert r.name == "Agora"
 
 
-@pytest.mark.xfail(strict=True, reason="realms-gos#753: take_images writes the realm it read before each read_image "
-                                       "back over the digest the previous image stored")
 def test_a_quarter_reads_each_changed_image_on_its_own_and_only_when_its_digest_changes(monkeypatch):
     quarter(monkeypatch, "south")
     capital_canister = peer(CAPITAL, realm_image=lambda args: {"ok": True, "value": "data:" + args["image"]})
@@ -172,7 +168,7 @@ def test_an_image_that_cannot_be_read_holds_up_none_of_the_other_settings(monkey
     assert (r.name, r.status, r.accounting_currency) == ("Later", "production", "AGR")
     capital_canister.answer("realm_image", {"ok": True, "value": "data:logo"})
     push({**SETTINGS, "name": "Later", "images": {"logo_url": "d3", "background_image_url": ""}})
-    assert r.logo_url == "data:logo"  # its digest was not taken, so the next push read it
+    assert Realm["1"].logo_url == "data:logo"  # its digest was not taken, so the next push read it
 
 
 def test_a_push_without_a_stage_leaves_the_stage(monkeypatch):
@@ -251,8 +247,6 @@ def test_a_quarter_that_secedes_keeps_its_last_values_and_can_change_them(monkey
 # ---- Joining
 
 
-@pytest.mark.xfail(strict=True, reason="realms-gos#761: quarter_join_federation writes the realm it read before the "
-                                       "capital answered back over the capital's settings")
 def test_a_realm_with_another_currency_cannot_join_and_a_blank_one_takes_the_capitals():
     capital_info = {"timezone": "UTC", "welcome_message": "Welcome", "accounting_currency": "AGR",
                     "accounting_currency_decimals": 2}

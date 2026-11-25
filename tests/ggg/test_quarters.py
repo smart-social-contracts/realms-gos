@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from core import auth, op
 import fake_chain
 from api import quarters
@@ -192,8 +190,6 @@ def test_harbor_joins_agora():
     assert "already belongs" in call("quarter_join_federation", "ctl", capital="other")["error"]
 
 
-@pytest.mark.xfail(strict=True, reason="realms-gos#761: quarter_join_federation writes the realm it read before the "
-                                       "capital answered back over the capital's settings")
 def test_a_new_quarter_starts_on_its_capitals_zone():
     world.build()
     reply("agora", "realm_info", realm={"timezone": "Europe/Madrid"})

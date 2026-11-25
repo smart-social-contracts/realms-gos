@@ -278,8 +278,6 @@ def test_a_sweep_the_ledger_never_applied_is_resolved_as_failed(monkeypatch):
     assert call("sweep_resolve", "ctl", sweep="SW-404")["kind"] == "not_found"
 
 
-@pytest.mark.xfail(strict=True, reason="realms-gos#766: attempt re-checks the sweep it read before the ledger call, "
-                                       "which cannot see the other call's booking: the sweep is booked twice")
 def test_two_calls_at_once_record_one_sweep_and_book_it_once(monkeypatch):
     north(monkeypatch)
     monkeypatch.setattr(fake_chain, "call", suspended)

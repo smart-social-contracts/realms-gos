@@ -415,7 +415,7 @@ def approve(c, aid, sent):
     """Run the call of the action ``aid`` as its grantor, on the grantor's own approval that sends its hash. A generator.
     Returns the action and the reply of the call; the call's own refusal fails the action, it does not undo the approval."""
     from core.op import dispatch, ops
-    from ggg import Delegation
+    from ggg import Delegation, PendingAction
 
     a = decision(c, aid)
     if a.status != "pending":
@@ -436,6 +436,7 @@ def approve(c, aid, sent):
     # Before anything awaits: a second approval that arrives while the call waits on another canister meets this.
     a.status, a.open_link = "approving", None
     out = json.loads((yield from dispatch(a.method, json.dumps(a.args), origin="confirmed", signer=a.grantor, prepared=a)))
+    a = find(PendingAction, a.id)  # read again: the call may have ended the message
     a.result, a.status = bounded(blank(a.method, out)), "done" if out["ok"] else "failed"
     return a, out
 
@@ -475,6 +476,7 @@ def collect(c, aid):
         raise Conflict(f"{a.id} is {a.status}")
     close(a, "done")  # once: nothing awaits before this
     out = json.loads((yield from dispatch(a.method, json.dumps(a.args), origin="confirmed", signer=a.grantor)))
+    a = find(PendingAction, a.id)  # read again: the call may have ended the message
     if not out["ok"]:
         a.status = "failed"
         raise refusal(out)

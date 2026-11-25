@@ -331,6 +331,7 @@ def send(t):
         reply, status, tx = str(e), "pending", None
     else:
         status, tx = outcome(reply)
+    t = find(Transfer, t.id)  # read again: the instance read before the call cannot see a reversal made meanwhile
     if t.status == "sending":
         if status == "failed":
             reverse(t, reply[:200])
@@ -1340,6 +1341,8 @@ def token_force_transfer(c, args):
     arg = (f'(record {{ from = {account(args["from"])}; to = {account(args["to"])}; amount = {amount} : nat; '
            f'memo = opt {text(ledger_memo(args))} }})')
     reply = yield from chain.call(token.ledger, "force_transfer", arg)
+    # Read again after the call: the period read before it would write back the statements booked meanwhile.
+    t, p = find(Transfer, t.id), FiscalPeriod[p.id] if p else None
     status, tx = outcome(reply)
     if status != "completed":
         t.status, t.reply = status, reply[:200]
