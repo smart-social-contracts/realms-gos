@@ -768,6 +768,52 @@ def test_a_payment_left_on_a_ledger_its_token_has_moved_from_is_never_marked_col
     assert Invoice[inv].payment["collected"] is False and funds()["ROOT"] == 110
 
 
+def test_a_payment_whose_fee_changed_before_its_move_is_not_moved_and_says_why():
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=12)
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert len(collections()) == 1, "the retry sends nothing"
+    payment = Invoice[inv].payment
+    assert payment["stuck"] == treasury.FEE_CHANGED.format(booked=10, now=12) and payment["collected"] is False
+    assert funds()["ROOT"] == 110, "the books keep the fee they were booked with"
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=10)
+    ledger_ok()
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert Invoice[inv].payment["collected"] is True and "stuck" not in Invoice[inv].payment
+
+
+def test_a_move_the_ledger_refuses_for_its_fee_names_the_fee_it_asks():
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = \
+        "(variant { Err = variant { BadFee = record { expected_fee = 12 : nat } } })"
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    payment = Invoice[inv].payment
+    assert payment["stuck"] == treasury.FEE_CHANGED.format(booked=10, now=12) and payment["collected"] is False
+
+
+def hashed(name):
+    from core import candid
+
+    return f"{candid.idl_hash(name):_}"
+
+
+@pytest.mark.parametrize("reply, fee", [
+    ("(variant { Err = variant { BadFee = record { expected_fee = 12 : nat } } })", 12),
+    (f"(variant {{ {hashed('Err')} = variant {{ {hashed('BadFee')} = record {{ {hashed('expected_fee')} = 7 : nat }} }} }})", 7),
+    ("(variant { Err = variant { InsufficientFunds = record { balance = 1 : nat } } })", None),
+    ("(variant { Ok = 9 : nat })", None),
+    ("garbage", None),
+])
+def test_asked_fee_reads_only_a_bad_fee(reply, fee):
+    assert treasury.asked_fee(reply) == fee
+
+
 def test_an_invoice_of_no_more_than_the_fee_credits_no_fund_and_moves_nothing():
     setup_finance()
     inv = billed(10)  # the fee of REALM

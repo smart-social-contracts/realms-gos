@@ -31,6 +31,9 @@ LINE = ("id", "category", "kind", "planned", "reserved", "committed", "actual", 
 PERIOD_UNITS = ("day", "working_day", "month", "year")
 # A new realm has the fund its treasury's source_fund names (setup.start); a realm made before it did may not, and then
 # books no invoice payment (realms-gos#740). receive refuses in these words, and realm_monitor reports them.
+# What a payment that cannot be moved says when its ledger fee changed after it was booked (realms-gos#781).
+FEE_CHANGED = ("the ledger fee changed since this payment was booked: it was booked with a fee of {booked}, and the fee "
+               "is now {now}. It is not moved until the difference is booked (realms-gos#781)")
 NO_SOURCE_FUND = ("the treasury's source fund {}, which receives invoice payments, does not exist: create it with "
                   "fund_create, or name another fund with treasury_configure (source_fund)")
 
@@ -78,6 +81,14 @@ def is_block_index(value):
     return type(value) is int and value >= 0
 
 
+def by_hash(value):
+    """The fields of a parsed record or variant by their Candid number: a decoder that does not know the names prints a
+    number for each."""
+    if not isinstance(value, dict):
+        return {}
+    return {candid.idl_hash(k) if isinstance(k, str) else k: v for k, v in value.items()}
+
+
 def outcome(reply):
     """How a ledger answered a payout: ``(status, ledger_tx)``. The ledger speaks the standard ICRC-1 result.
     ``completed``: ``Ok`` with the block index. ``failed``: ``Err``; only then did the ledger certainly not move the
@@ -89,14 +100,24 @@ def outcome(reply):
         return "unconfirmed", None
     if not isinstance(answer, dict):
         return "unconfirmed", None
-    # An unnamed decoder prints a field's hash for its name, so look fields up by hash.
-    fields = {candid.idl_hash(k) if isinstance(k, str) else k: v for k, v in answer.items()}
+    fields = by_hash(answer)
     ok = fields.get(candid.idl_hash("Ok"))
     if is_block_index(ok):
         return "completed", str(ok)
     if candid.idl_hash("Err") in fields:
         return "failed", None
     return "unconfirmed", None
+
+
+def asked_fee(reply):
+    """The fee a ledger asks for when it refused a transfer with ``BadFee``, else None."""
+    try:
+        (answer,) = candid.Reader(reply).args()
+    except Exception:  # noqa: BLE001  a hostile reply says nothing
+        return None
+    bad_fee = by_hash(by_hash(by_hash(answer).get(candid.idl_hash("Err"))).get(candid.idl_hash("BadFee")))
+    fee = bad_fee.get(candid.idl_hash("expected_fee"))
+    return fee if type(fee) is int and fee >= 0 else None
 
 
 # --- books ----------------------------------------------------------------------------------------
@@ -574,7 +595,8 @@ def receive(inv, received, ledger):
     who = {"user": key} if kind == "User" else {"organization": Organization[key]} if kind == "Organization" else {}
     post(p, lines, inv.symbol, f"payment of {inv.id}", invoice=inv, **who)
     inv.status, inv.paid_at = "paid", chain.now()
-    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "collected": False}
+    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "fee": find(Token, inv.symbol).fee,
+                   "collected": False}
     if inv.reason.startswith("TaxDeclaration:"):
         find(TaxDeclaration, inv.reason.partition(":")[2]).status = "settled"
 
@@ -587,24 +609,30 @@ def held_by(inv, ledger):
 def collect(inv, held):
     """Move a paid invoice's money from its own account, where the payer sent it, into the realm's main account, which
     every payout draws on (realms-gos#739): what the account ``held``, less the ledger's fee, which ``receive`` booked,
-    on the ledger the payment was found on.
+    on the ledger the payment was found on and with the fee it was booked with (``payment["fee"]``). When that fee is
+    no longer the token's, or the ledger refuses it, nothing moves, and ``payment["stuck"]`` names both fees.
     Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` when this call moved it. A
     ledger that refuses or does not answer leaves it uncollected, and the next check of the invoice reads the account
     again: the money is moved once, whatever happened to an earlier answer. A generator."""
-    token, moved = find(Token, inv.symbol), {}
-    if held > token.fee:
-        arg = icrc1_arg(account(chain.self_id()), held - token.fee, inv.id.encode(), token.fee,
-                        from_sub=subaccount(inv.id))
+    fee, moved = inv.payment["fee"], {}
+    if held > fee:
+        if find(Token, inv.symbol).fee != fee:
+            inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=find(Token, inv.symbol).fee)}
+            return
+        arg = icrc1_arg(account(chain.self_id()), held - fee, inv.id.encode(), fee, from_sub=subaccount(inv.id))
         try:
             reply = yield from chain.call(inv.payment["ledger"], "icrc1_transfer", arg)
         except Exception:  # noqa: BLE001  no answer: the next check reads where the money is
             return
+        inv = find(Invoice, inv.id)  # the row read before the ledger call belongs to that message
         status, block = outcome(reply)
         if status != "completed":
+            if asked_fee(reply) is not None:
+                inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=asked_fee(reply))}
             return
         moved = {"block": block}
-        inv = find(Invoice, inv.id)  # the row read before the ledger call belongs to that message
-    inv.payment = {**inv.payment, **moved, "collected": True}
+    unstuck = {k: v for k, v in inv.payment.items() if k != "stuck"}
+    inv.payment = {**unstuck, **moved, "collected": True}
 
 
 def to_collect(inv):
