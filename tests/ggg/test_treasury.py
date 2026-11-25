@@ -747,6 +747,19 @@ def test_a_payment_moved_by_a_transfer_whose_answer_was_lost_is_not_moved_again(
     assert funds()["ROOT"] == 110
 
 
+def test_a_payment_left_on_a_ledger_its_token_has_moved_from_is_never_marked_collected():
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
+    calls = len(fake_chain.state["calls"])
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert len(fake_chain.state["calls"]) == calls, "the new ledger's empty account is not read for the payment"
+    assert Invoice[inv].payment["collected"] is False and funds()["ROOT"] == 110
+
+
 def test_an_invoice_of_no_more_than_the_fee_credits_no_fund_and_moves_nothing():
     setup_finance()
     inv = billed(10)  # the fee of REALM

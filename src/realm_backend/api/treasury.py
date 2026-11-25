@@ -573,7 +573,8 @@ def receive(inv, received):
     who = {"user": key} if kind == "User" else {"organization": Organization[key]} if kind == "Organization" else {}
     post(p, lines, inv.symbol, f"payment of {inv.id}", invoice=inv, **who)
     inv.status, inv.paid_at = "paid", chain.now()
-    inv.payment = {"received": received, "subaccount": pay_to(inv), "collected": False}
+    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": find(Token, inv.symbol).ledger,
+                   "collected": False}
     if inv.reason.startswith("TaxDeclaration:"):
         find(TaxDeclaration, inv.reason.partition(":")[2]).status = "settled"
 
@@ -604,11 +605,19 @@ def collect(inv, held):
     inv.payment = {**inv.payment, **moved, "collected": True}
 
 
+def to_collect(inv):
+    """Whether ``inv`` is paid and its payment still waits to be moved into the realm's main account, on the ledger it
+    was paid on. A payment booked by a release before collecting has no ``collected``. One whose token has moved to
+    another ledger since stays uncollected: the money is on the old ledger, and the new one's empty account must not
+    pass for it having been moved."""
+    return (inv.status == "paid" and inv.payment.get("collected") is False
+            and inv.payment.get("ledger") == find(Token, inv.symbol).ledger)
+
+
 def refresh(inv):
-    """Check the ledger for the payment of ``inv``: book it once its account holds the amount, then collect it. A paid
-    invoice whose payment is not collected yet is collected again. A payment booked by a release before collecting has no
-    ``collected`` and is left as it is. A generator; returns the invoice's status."""
-    if inv.status == "paid" and inv.payment.get("collected") is False:
+    """Check the ledger for the payment of ``inv``: book it once its account holds the amount, then collect it, again on
+    a later check when that did not go through (``to_collect``). A generator; returns the invoice's status."""
+    if to_collect(inv):
         held = yield from held_by(inv)
         yield from collect(inv, held)
     if inv.status not in ("pending", "overdue"):
