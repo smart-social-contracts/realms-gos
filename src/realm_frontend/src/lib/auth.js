@@ -4,6 +4,7 @@ import { Principal } from '@icp-sdk/core/principal';
 import { getTestModeIIBypass } from '$lib/config.js';
 import { isEmbeddedInPortal, getPortalDelegationIdentity } from '$lib/portal-bridge.ts';
 import { normalizePortalRedirectPath } from '$lib/portal-redirect-path.ts';
+import { parseTestIdentitySearch } from '$lib/test-identity-query.ts';
 import {
   resolveEffectiveAuthChannel,
   shouldRestoreTestModeSession,
@@ -182,6 +183,9 @@ function _createIIAuthClient() {
   return {
     isAuthenticated: async () => (await heldIdentity()) !== null,
     getIdentity: heldIdentity,
+    /** Whether this browser records a sign-in, read without awaiting anything. */
+    hasSession: () => client.isAuthenticated(),
+    /** Opens the Internet Identity window: call it in the click's own tick (see login). */
     login: () => client.signIn({ maxTimeToLive: SESSION_TTL_NS }),
     // Ends the session at Internet Identity, not only in this browser.
     logout: () => client.signOut()
@@ -322,7 +326,7 @@ function _createTestAuthClientMock() {
 // Export the authClient instance for reuse
 export { authClient };
 
-export async function initializeAuthClient() {
+export function initializeAuthClient() {
   const mode = getAuthMode();
   if (authClient && authClientMode !== mode) {
     authClient = null;
@@ -349,11 +353,14 @@ export async function initializeAuthClient() {
   return authClient;
 }
 
+// @icp-sdk/auth opens the Internet Identity window only in the tick of the
+// click that asked for it, and refuses once anything has been awaited. So on
+// the way to client.login() below, an Internet Identity sign-in awaits nothing:
+// callers call login() straight from their click handler.
 export async function login({ random = false, identityIndex = null, preferTestMode = false } = {}) {
   const testBypass = getTestModeIIBypass();
   let resolvedIndex = identityIndex;
   if ((resolvedIndex == null || !Number.isFinite(Number(resolvedIndex))) && typeof window !== 'undefined') {
-    const { parseTestIdentitySearch } = await import('$lib/test-identity-query.ts');
     const fromUrl = parseTestIdentitySearch(window.location.search).identityIndex;
     if (fromUrl != null) resolvedIndex = fromUrl;
   }
@@ -432,11 +439,13 @@ export async function login({ random = false, identityIndex = null, preferTestMo
     return { identity: null, principal: null };
   }
 
-  const client = await initializeAuthClient();
+  const client = initializeAuthClient();
 
   // Reuse an existing IC session — critical in portal iframes where auth stores
   // do not persist across remounts but AuthClient/IndexedDB still holds II.
-  const existing = await client.getIdentity();
+  // The Internet Identity client answers without awaiting (see above).
+  const mayHoldSession = client.hasSession ? client.hasSession() : true;
+  const existing = mayHoldSession ? await client.getIdentity() : null;
   if (existing) {
     const principal = existing.getPrincipal();
     console.log(`Reusing existing IC session: ${principal.toText()}`);
