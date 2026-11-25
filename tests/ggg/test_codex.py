@@ -247,6 +247,24 @@ def test_story_agora_upgrade_by_realm_wide_vote_then_revert():
     assert ok("codex_status", "alice")["codex"]["version"] == "1.4.2"
 
 
+def test_a_community_adopting_agora_staffs_its_economy_department():
+    """Agora seeds Economy with a 2 of 3 policy and nobody in it, so it cannot pass a vote of its own: its first seats
+    are filled by the department above it (the root, which decides directly here), then Economy decides the rest."""
+    build()
+    ok("codex_install", "ctl", **package("agora"))
+    economy = Department["Economy"]
+    assert economy.policy["m"] == 2 and not [a for p in economy.positions for a in p.appointments]
+    assert "appointment" in ok("appoint", "ctl", position="economy.treasurer", user="alice")
+    assert "appointment" in ok("appoint", "ctl", position="economy.tax_officer", user="bob")
+    out = ok("appoint", "ctl", position="economy.tax_officer", user="dana")
+    assert Proposal[out["proposal"]].department.id == "Economy"
+    for voter in ("alice", "bob"):
+        ok("proposal_vote", voter, proposal=out["proposal"], choice="yes")
+    assert Proposal[out["proposal"]].status == "executed"
+    assert sorted(a.user for p in economy.positions for a in p.appointments if a.status == "active") == [
+        "alice", "bob", "dana"]
+
+
 @pytest.mark.parametrize("name", ["agora", "dominion", "syntropia"])
 def test_rewritten_codex_hooks_run_against_the_world(name):
     build()

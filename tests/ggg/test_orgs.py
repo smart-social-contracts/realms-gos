@@ -136,6 +136,64 @@ def test_I_ORG_7_seats_change_under_the_rules_and_reps_under_the_admins():
     assert "organization seat" in denied("appoint", "ctl", position="clinic-b.physician", user="alice")
 
 
+def treasury(m=2, n=3, **policy):
+    """A department under the root with an m of n policy and two open positions, nobody seated."""
+    ok("department_create", "ctl", department="Treasury")
+    ok("position_create", "ctl", department="Treasury", position="treasury.treasurer")
+    ok("position_create", "ctl", department="Treasury", position="treasury.officer", headcount=4)
+    ok("department_set_policy", "ctl", department="Treasury", m=m, n=n, **policy)
+
+
+def seats(position):
+    return sorted(a.user for a in Position[position].appointments if a.status == "active")
+
+
+def test_a_department_too_few_to_pass_its_vote_is_staffed_from_above():
+    """An m of n department with fewer than m seat holders cannot pass its own vote: the department above it decides
+    its appointments, until enough seats are filled for it to decide them itself."""
+    world.build()
+    treasury()
+    assert "appointment" in ok("appoint", "ctl", position="treasury.treasurer", user="alice")
+    assert "appointment" in ok("appoint", "ctl", position="treasury.officer", user="bob")
+    out = ok("appoint", "ctl", position="treasury.officer", user="dana")
+    assert out["requires_vote"] and Proposal[out["proposal"]].department.id == "Treasury"
+    pass_proposal(out["proposal"], "alice", "bob")
+    assert seats("treasury.officer") == ["bob", "dana"]
+
+
+def test_staffing_from_above_follows_the_rule_above():
+    """Where the root decides by a vote, the appointment is a realm-wide proposal, not a vote nobody may cast; a filled
+    department's own vote is untouched, and so is a department that decides directly."""
+    world.build()
+    treasury()
+    world.policy(Department["Administration"], 2, 3)
+    out = ok("appoint", "ctl", position="treasury.treasurer", user="alice")
+    assert Proposal[out["proposal"]].department.is_root
+    pass_proposal(out["proposal"], *world.PEOPLE)
+    assert seats("treasury.treasurer") == ["alice"]
+    ok("position_create", "ctl", department="Finance", position="finance.clerk")  # Finance decides directly, unseated
+    assert "appointment" in ok("appoint", "ctl", position="finance.clerk", user="carla")
+
+
+def test_staffing_from_above_skips_a_parent_that_cannot_vote_either():
+    world.build()
+    ok("department_create", "ctl", department="Treasury")
+    ok("department_create", "ctl", department="Audit", parent="Treasury")
+    ok("position_create", "ctl", department="Audit", position="audit.auditor", headcount=3)
+    for d in ("Audit", "Treasury"):
+        ok("department_set_policy", "ctl", department=d, m=2, n=3)
+    assert "appointment" in ok("appoint", "ctl", position="audit.auditor", user="carla")
+    assert seats("audit.auditor") == ["carla"]
+
+
+def test_a_department_counting_votes_cast_needs_its_quorum_of_seats():
+    world.build()
+    treasury(m=1, n=3, quorum=50 * PERCENT, threshold_of="cast")  # at least 2 of the 3 seats must vote
+    assert "appointment" in ok("appoint", "ctl", position="treasury.treasurer", user="alice")
+    assert "appointment" in ok("appoint", "ctl", position="treasury.officer", user="bob")
+    assert ok("appoint", "ctl", position="treasury.officer", user="dana")["requires_vote"]
+
+
 def test_I_ORG_8_nobody_acts_for_a_suspended_or_dissolved_organization():
     world.build()
     org_admin("dr-ana")
