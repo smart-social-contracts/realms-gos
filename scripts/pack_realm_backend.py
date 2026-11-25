@@ -29,7 +29,8 @@ DEFAULT_VARIANT = "production"
 ACTIVE_VARIANT = SRC / "core" / "build_variant.py"
 VERSION_PLACEHOLDER = 'VERSION = "VERSION_PLACEHOLDER"'
 # Defined only in scripts/build_variants/test.py: a wasm that contains them is a test build.
-TEST_ONLY_SYMBOLS = (b"REALMS_TEST_BUILD_AUTH_BYPASS", b"NON_PRODUCTION_NETWORKS")
+TEST_ONLY_SYMBOLS = (b"REALMS_TEST_BUILD_AUTH_BYPASS", b"NON_PRODUCTION_NETWORKS",
+                     b"test_mode_user_self_registration")
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from basilisk_cedar_template import apply_cedar_template_env  # noqa: E402

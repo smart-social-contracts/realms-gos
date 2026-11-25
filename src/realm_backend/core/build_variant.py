@@ -12,3 +12,8 @@ BUILD_VARIANT = "production"
 def test_flags_allowed(network, can_test_mode):
     """Whether test mode and test flags may be set: never, in this build."""
     return False
+
+
+def self_registration(realm):
+    """Whether the realm lets anyone join without an invite for a test's sake: never, in this build."""
+    return False

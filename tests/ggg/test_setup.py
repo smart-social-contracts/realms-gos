@@ -275,3 +275,23 @@ def test_shell_calls_operations_as_the_caller():
     weak = ok("shell", "bob", expr=f'ops.proposal_finalize(proposal="{p}")')["result"]
     assert not weak["ok"] and "proposal.manage" in weak["error"]
     denied("shell", "alice", expr="1")
+
+
+def test_a_test_flag_is_kept_under_the_name_the_shell_reads(test_build):
+    """The CLI, the descriptors and the installer name a flag without ``test_mode_``; the shell reads it with."""
+    world.build()
+    Realm["1"].network = "local"
+    ok("realm_configure", "ctl", test_mode=True, test_flags={
+        "ii_bypass": True, "test_mode_skip_terms": True, "demo_notice_body": {"en": "Hello"}})
+    assert Realm["1"].test_flags == {"test_mode_ii_bypass": True, "test_mode_skip_terms": True,
+                                     "demo_notice_body": {"en": "Hello"}}
+
+
+def test_a_realm_configured_with_the_bare_names_has_them_renamed_when_it_starts():
+    world.build()
+    Realm["1"].test_flags = {"ii_bypass": False, "user_self_registration": False}
+    setup.start()
+    assert Realm["1"].test_flags == {"test_mode_ii_bypass": False, "test_mode_user_self_registration": False}
+    setup.start()  # nothing left to rename
+    assert Realm["1"].test_flags == {"test_mode_ii_bypass": False, "test_mode_user_self_registration": False}
+

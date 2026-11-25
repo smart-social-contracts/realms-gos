@@ -35,6 +35,8 @@ describe('TestFlagsModal layout', () => {
 		expect(source).toContain("'demo_data'");
 		expect(source).toContain("'skip_terms'");
 		expect(source).toContain("'skip_passport_zkproof'");
+		// A toggle the dialog shows must be one it saves: self-registration was offered and then dropped on save.
+		expect(source).toMatch(/TEST_ONLY_KEYS = \[[^\]]*'user_self_registration'/);
 		expect(source).not.toMatch(/test_flags:\s*\{\s*\.\.\.values/);
 		expect(source).not.toContain('demo_notice_body: noticeBodies');
 	});

@@ -25,6 +25,7 @@
 	// Only the test-only flags are saved; realm_configure stores them as test_mode_<key>.
 	const TEST_ONLY_KEYS = [
 		'ii_bypass',
+		'user_self_registration',
 		'demo_data',
 		'skip_terms',
 		'skip_passport_zkproof'
