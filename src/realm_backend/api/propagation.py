@@ -13,7 +13,9 @@ The switch cannot be atomic across canisters: calls between quarters carry the s
 A capital that drops a staged codex (its proposal was stopped, its job failed) tells the quarters (``codex.unstage``),
 and one that reverts tells them to restore the codex it restored (``codex.revert``), which each keeps in its history:
 nothing is downloaded and no ``on_codex_activate`` runs. A quarter that reports it runs a codex the realm voted out is
-told again, so one that was down catches up at its next report.
+told again, so one that was down catches up at its next report. A quarter that reports it runs no codex, as one added
+after the capital's install does, is told to stage the codex in force whole (``bring``): no change list replaces a
+codex it runs, so no install would ever reach it (realms-gos#745).
 A quarter a message does not reach, because it is down or upgrading, is not told again: it keeps its codex and reads
 non-compliant. One that was told and is paused by an upgrade waits for an admin's ``codex_install_resume``, like any
 install job.
@@ -23,11 +25,11 @@ import json
 
 from api import codex as runtime
 from api import installs, links, quarters, tasks
-from core import chain, compliance, legislation
+from core import chain, change_list, compliance, legislation
 from core import layered_codex as store
-from core.db import JSON_MAX, Conflict, Fail, each, find, next_id, put
+from core.db import JSON_MAX, Conflict, Fail, each, find, first, next_id, put
 from core.op import op
-from ggg import FederationMessage, InstallJob, LayeredCodex, Quarter, Task, TaskSchedule
+from ggg import Codex, FederationMessage, InstallJob, LayeredCodex, Quarter, Task, TaskSchedule
 
 # The federation_message topics of this module (core.legislation lists them: no chapter, hook or forbid runs on a message
 # that carries one). A local holder of quarter.sync can relay any other topic to the quarters, but never these: only the
@@ -36,6 +38,14 @@ STAGE, UNSTAGE, REVERT = OWN = legislation.PROPAGATION
 # Seconds the capital gives the quarters that switched at T to say so before it judges the others: they report
 # within moments, and a flag raised in between would be a flag withdrawn at once.
 JUDGE_AFTER = 60
+# Seconds before the capital tells a quarter that still runs no codex to stage its codex whole again (``bring``): one that
+# could not take it, or refused it, is not told at every report it makes, which is every hour.
+BRING_AGAIN = 24 * 3600
+# On a capital, the codex it last told each quarter to stage whole, and when, by quarter id (``taken_up``). Not stored,
+# so that it is gone with an upgrade: the upgrade that brings a fix for what failed tells them again at their next report.
+_brought = {}
+NOT_WHOLE = ("a codex is sent whole to a quarter that has never run one: this one runs a codex, or voted to run none "
+             "(codex_uninstall), which its capital's codex does not overrule")
 
 
 # ---- The capital: tell the quarters.
@@ -77,15 +87,52 @@ def reverted(target):
     chain.set_timer(0, after_switch)
 
 
-def correct(quarter):
-    """A quarter that reports it runs a codex the realm voted out, and so missed the revert, is told again to restore
-    the one in force: it was down, or upgrading, when the capital told it."""
+def correct(quarter, reported):
+    """The capital's answer to a report of ``quarter`` that names the codex it runs, ``reported`` (None for a report
+    that names none). One that runs no codex is given the codex in force whole (``bring``). One that runs a codex the
+    realm voted out, and so missed the revert, is told again to restore the one in force: it was down, or upgrading,
+    when the capital told it."""
+    if reported == "":
+        bring(quarter)
+        return
     current = runtime.active()
     if current is None or quarter.codex_id in ("", current.id):
         return
     running = LayeredCodex[quarter.codex_id]
     if running is not None and running.status == "reverted":
         chain.set_timer(0, lambda cid=quarter.id, codex_id=current.id: tell(cid, REVERT, {"codex": codex_id}))
+
+
+def bring(quarter):
+    """The active ``quarter`` runs no codex while the capital requires a layered one: it is told to stage that codex
+    whole, its own layer (``own``) and the layers from above, at once (``at`` 0). A quarter added after the capital's
+    install has no codex that a change list replaces, so no install would reach it (realms-gos#745): this reaches it at
+    its first report, which adoption makes, and repairs one already left without a codex at its next. It is told again
+    after ``BRING_AGAIN``, or once the codex in force changed (``taken_up``), and refuses it if it voted to run none
+    (``on_stage``). Nothing is said when the message would be above ``JSON_MAX`` (``announce``). Until it runs the
+    codex it reads non-compliant, and the capital's ``FederationMessage`` of each try keeps its answer."""
+    target = required()
+    if target is None or quarter.status != "active":
+        return
+    told = _brought.get(quarter.id)
+    if told is not None and told[0] == target.id and chain.now() < told[1] + BRING_AGAIN:
+        return
+    realm = store.own_source()
+    body = {"codex": target.id, "at": 0, "proposal": target.proposal,
+            "layers": change_list.layers_for(installs.installed_layers(target, realm), [], None),
+            "own": {"source": realm, **installs.own_layer(target, realm)}}
+    if len(json.dumps(body)) <= JSON_MAX:
+        _brought[quarter.id] = (target.id, chain.now())
+        chain.set_timer(0, lambda cid=quarter.id: tell(cid, STAGE, body, recorded=lambda reply: taken_up(cid, reply)))
+
+
+def taken_up(cid, reply):
+    """The answer of quarter ``cid`` to the codex sent whole (``bring``), as the record keeps it. One that took it up,
+    or refused it because it runs a codex or voted to run none, is told again after ``BRING_AGAIN``; one that did not
+    answer, or could not read it (it is on the previous release), at its next report."""
+    if not reply.get("ok") and NOT_WHOLE not in str(reply.get("error")):
+        _brought.pop(cid, None)
+    return reply
 
 
 def withdraw(codex_id):
@@ -130,21 +177,28 @@ def staging(codex_id):
 def on_stage(c, body):
     """From the capital: stage the codex ``codex`` (its change list is stored under ``checksum`` there) and switch to
     it at ``at``, with the ``layers`` from above the capital staged: the capital is the quarter's authority for them, and
-    the codex id the quarter builds must still be the one announced. Asking again for a codex being staged for the same
-    time, or already active, changes nothing; a newer announcement, or the same codex for another time, replaces a
-    staging in progress; another install running here refuses it."""
+    the codex id the quarter builds must still be the one announced. A quarter that runs no codex is sent the codex
+    whole instead of a change list (``bring``): the capital's ``own`` layer, which it builds with the ``layers``.
+    Asking again for a codex being staged for the same time, or already active, changes nothing, nor does the codex
+    sent whole while it is being staged; a newer announcement, or the same codex for another time, replaces a staging
+    in progress; another install running here refuses it."""
     quarters.from_capital(c)
     codex_id, checksum, at, layers = body.get("codex"), body.get("checksum"), body.get("at"), body.get("layers")
-    if not (links.pinned(codex_id) and links.pinned(checksum) and isinstance(at, int) and at >= 0):
-        raise Fail("a codex to stage is {codex, checksum: sha256:<64 hex digits>, at: seconds}")
-    if not (layers is None or staged_layers(layers)):
+    whole = change_list.whole(body["own"]) if "own" in body else None
+    built_from = whole is not None or links.pinned(checksum)  # the codex whole, or the change list stored there
+    if not (links.pinned(codex_id) and built_from and isinstance(at, int) and at >= 0):
+        raise Fail("a codex to stage is {codex, checksum: sha256:<64 hex digits>, at: seconds}, or {codex, own, "
+                   "layers, at} for the whole codex")
+    if not ((layers is None and whole is None) or staged_layers(layers)):
         raise Fail("layers are {relays: [...], vouchers: {...}, vouching: {...} or null}")
     current = runtime.active()
     if current is not None and current.id == codex_id:
         return {"staged": "active"}
+    if whole is not None and (current is not None or uninstalled()):
+        raise Conflict(NOT_WHOLE)
     running = staging(codex_id)
     if running is not None:
-        if running.staged["announced"]["at"] == at:
+        if whole is not None or running.staged["announced"]["at"] == at:
             return {"staged": "running", "job": running.id}
         installs.fail(running, "the capital announced it again for another time")
     live = store.live_job()
@@ -153,15 +207,23 @@ def on_stage(c, body):
             raise Conflict("an install is running")
         installs.fail(live, f"the capital announced {codex_id}, which replaces it")
     # The job names no proposal: the capital's id could be the id of one of this realm's own, which would then switch it.
-    job = store.start_job("", {"url": "", "checksum": checksum})
+    job = store.start_job("", {"url": "", "checksum": checksum} if whole is None else {"codex": codex_id})
     job.staged = {"announced": {"codex": codex_id, "at": at, "capital": c.by,
                                 "proposal": str(body.get("proposal") or "")}}
     if layers is not None:  # a capital on the previous release sends none, and the job reads this realm's records
         job.staged = {**job.staged, "layers": layers}
+    if whole is not None:  # the change list the job checks, which it does not fetch (installs.fetch_change_list)
+        job.staged = {**job.staged, "listed": whole}
     if at > chain.now():
         schedule(job, at)
     installs.launch(job)
     return {"staged": "started", "job": job.id}
+
+
+def uninstalled():
+    """Whether this realm, which runs no codex, voted to run none (codex_uninstall): it has run one, and a switch and a
+    revert each leave another active."""
+    return first(LayeredCodex, "status", "inactive") is not None or first(Codex, "status", "inactive") is not None
 
 
 def staged_layers(layers):

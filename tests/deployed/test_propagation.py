@@ -318,3 +318,33 @@ def test_a_switch_time_two_days_away_still_switches_the_quarters_that_waited(net
     chief.run_at_effective_at(proposal)
     net.wait_until(lambda: active(follower) == expected_id(fourth), rounds=2)
     assert job(follower)["status"] == "done"
+
+
+@pytest.fixture(scope="module")
+def grown(net):
+    """A capital and the quarter it had before it ran a codex."""
+    seat, first = net.realm("seat"), net.realm("first", members=("alice",))
+    net.register_quarters(seat, first)
+    return seat, first
+
+
+def test_a_quarter_added_after_the_capital_runs_a_codex_takes_it_whole_and_follows_the_next_install(
+        net, site, people, grown):
+    """realms-gos#745: a quarter that joins once its capital runs a layered codex has no codex that any change list of
+    the capital replaces. Its first report says it runs none, and the capital sends it the codex whole."""
+    seat, first = grown
+    good = layer_of(people)
+    installed_everywhere(net, site, grown, good)
+    newcomer = net.realm("newcomer", members=("alice",))
+    net.register_quarters(seat, newcomer)
+    net.wait_until(lambda: active(newcomer) == expected_id(good), rounds=2)
+    assert job(newcomer)["status"] == "done"
+    assert {c["route"] for c in status(newcomer)["codex"]["chapters"].values()} == {"capital"}
+    taken = [e for e in newcomer.ok("events", "ctl", query=True)["events"] if e["op"] == "codex_taken_from_capital"]
+    assert [(e["by"], e["args"]["codex"]) for e in taken] == [(seat.cid, expected_id(good))]
+    net.wait(2)
+    assert flag(seat, newcomer) == "compliant" and titles(newcomer) == []  # no on_codex_activate in a quarter
+
+    third = {**good, "arcadia/procedure": good["arcadia/procedure"] + b"\n# third\n"}
+    installed_everywhere(net, site, (seat, first, newcomer), third, replaces=expected_id(good))
+    assert job(newcomer)["status"] == "done"  # the next install's change list replaces the codex it now runs
