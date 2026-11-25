@@ -20,6 +20,8 @@ from realms.cli.infomaniak import (
 
 CANISTER = "kv5e2-yiaaa-aaaak-qze3a-cai"
 ZONE = "realmsgos.org"
+# Written by this tool until 25 Nov 2026; it no longer accepts connections.
+RETIRED_APEX_ADDRESS = "195.5.171.242"
 
 
 class _Response:
@@ -220,40 +222,36 @@ class TestNoOp:
 
 
 class TestApex:
-    def test_the_apex_gets_the_gateway_addresses_instead_of_a_cname(self):
+    def test_the_apex_gets_the_gateway_address_instead_of_a_cname(self):
         session = _FakeSession()
 
         outcomes = _apply(session, host=ZONE)
 
-        assert [(o.record.record_type, o.record.value) for o in outcomes[:2]] == [
-            ("A", APEX_ADDRESSES[0]),
-            ("A", APEX_ADDRESSES[1]),
+        assert [(o.record.record_type, o.record.value) for o in outcomes[:1]] == [
+            ("A", "212.71.124.188")
         ]
         bodies = [body for _, _, body in session.writes()]
         assert bodies[0] == {
             "type": "A",
             "source": ".",
-            "target": "195.5.171.242",
-            "ttl": 60,
-        }
-        assert bodies[1] == {
-            "type": "A",
-            "source": ".",
             "target": "212.71.124.188",
             "ttl": 60,
         }
-        assert bodies[2]["source"] == "_canister-id"
+        assert bodies[1]["source"] == "_canister-id"
         assert not any(b["type"] == "CNAME" and b["source"] == "." for b in bodies)
 
-    def test_an_apex_with_one_address_only_gets_the_other(self):
+    def test_a_retired_gateway_address_is_reported_not_deleted(self):
         existing = [
-            {"type": "A", "source": ".", "target": APEX_ADDRESSES[0], "ttl": 60}
+            {"type": "A", "source": ".", "target": APEX_ADDRESSES[0], "ttl": 60},
+            {"type": "A", "source": ".", "target": RETIRED_APEX_ADDRESS, "ttl": 60},
         ]
         session = _FakeSession(existing)
 
         outcomes = _apply(session, host=ZONE)
 
-        assert [o.action for o in outcomes[:2]] == ["unchanged", "created"]
+        assert outcomes[0].action == "unchanged"
+        assert RETIRED_APEX_ADDRESS in outcomes[0].warning
+        assert "DELETE" not in {m for m, _, _ in session.calls}
 
     def test_a_foreign_apex_address_is_taken_over_not_deleted(self):
         existing = [{"type": "A", "source": ".", "target": "1.2.3.4", "ttl": 60}]
@@ -261,7 +259,7 @@ class TestApex:
 
         outcomes = _apply(session, host=ZONE)
 
-        assert [o.action for o in outcomes[:2]] == ["updated", "created"]
+        assert outcomes[0].action == "updated"
         assert outcomes[0].detail == f"1.2.3.4 -> {APEX_ADDRESSES[0]}"
 
 
