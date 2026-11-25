@@ -30,7 +30,9 @@ finished 15 minutes after it was armed (a step that ran out of instructions leav
 A quarter stages the codex its capital announced (api.propagation) with the same job, in staging mode: the bytes of the
 change list and of every chapter come from the capital, by checksum, as do the layers from above (the quarter reads no
 records), and the switch is at the time the capital gave.
-A quarter that is ready after that time (``confirm``) switches only if the capital still runs the codex.
+A quarter that is ready after that time (``confirm``) switches only if the capital still runs the codex. A quarter
+that runs no codex is sent the capital's whole instead of a change list (api.propagation.bring), with its own layer:
+the job checks the change list that sets it, fetches every chapter of the codex from the capital and switches at once.
 """
 
 import json
@@ -63,6 +65,8 @@ NO_OWN_LAYER = ("this realm has no layer of its own yet: its first layered codex
 # A quarter stages what its capital announces: the change list, by its checksum, and the layers the capital staged. A
 # release built from a record has no change list to announce, so a federation installs a release with one.
 FEDERATED = "a federation installs a release with a change list: its quarters cannot stage one built from a record"
+TAKEN = ("this quarter ran no codex, so no install of its capital could reach it (realms-gos#745): it runs its "
+         "capital's codex, sent whole")
 NO_ROUTE = ("no URL, and no realm vouches for it: a release that a stand-in record vouches for is installed with a change "
             "list that gives its chapters' URLs")
 
@@ -305,7 +309,10 @@ def fail(job, reason):
 
 
 def fetch_change_list(job):
-    """Step 1: the change list's bytes, unless they are stored already; for a release, the list built."""
+    """Step 1: the change list's bytes, unless they are stored already; for a release, the list built. A quarter sent
+    its capital's codex whole has its change list already (api.propagation.on_stage)."""
+    if "codex" in job.change_list:
+        return "check_change_list"
     if "release" in job.change_list:
         yield from build_release_list(job)
         return "check_change_list" if InstallJob[job.id].status == "running" else None
@@ -364,11 +371,22 @@ def fetch_chapters(job):
     if "layers" not in job.staged:
         yield from read_records(job, listed)
         return "fetch_chapters" if InstallJob[job.id].status == "running" else None
-    for entry in listed["set"]:
+    for entry in wanted(job, listed):
         if ChapterSource[entry["sha256"]] is None:
             yield from fetch_chapter(job, entry)
             return "fetch_chapters" if InstallJob[job.id].status == "running" else None
     return "check_sources"
+
+
+def wanted(job, listed):
+    """The chapters whose bytes step 3 fetches when they are not stored: those the change list sets, then, in a quarter,
+    every other chapter of the codex it builds, since all its bytes come from its capital: one sent the codex whole has
+    none of the layers from above."""
+    if not announced(job):
+        return listed["set"]
+    planned, _, _ = vouched(job)
+    codex = [{"chapter": chapter, "sha256": item["sha256"]} for chapter, item in change_list.named(planned)]
+    return listed["set"] + codex
 
 
 def read_records(job, listed):
@@ -542,7 +560,8 @@ def build(job):
     job.staged = {**job.staged, "codex": codex_id, "was": was, "replaces": listed["replaces"]}
     from api import propagation  # it imports this module
 
-    if "release" not in job.change_list:  # a release is installed only where no quarter stages it (``release_of``)
+    # A quarter has no quarters to tell, and a release is installed only where no quarter stages it (``release_of``).
+    if not announced(job) and "release" not in job.change_list:
         propagation.announce(job)
     if when > chain.now():
         return WAIT
@@ -618,6 +637,10 @@ def finish(job):
         if waiting.status != "pending":
             raise Conflict(f"{waiting.id} is {waiting.status}, not pending")
         codex.switch(waiting)
+        if "codex" in job.change_list:  # no vote of this realm's changed its legislation: the record says what did
+            capital = job.staged["announced"]["capital"]
+            audit("codex_taken_from_capital", "", capital, "install", {"codex": waiting.id, "job": job.id},
+                  {"capital": capital, "why": TAKEN})
     job.step, job.status, job.finished_at = "switch", "done", chain.now()
 
 
@@ -633,7 +656,7 @@ def prepared(job):
     """The stored change list, parsed, or the one a release install built, applied to this realm: ``(change list, the
     realm's source id, its own layer after the change)``. Steps 2 to 5 start here; it reads only stored rows, so it
     answers the same every time."""
-    if "release" in job.change_list:
+    if "listed" in job.staged:  # built from a record (a release), or sent by the capital (its codex whole)
         listed = job.staged["listed"]
     else:
         listed = change_list.parse(ChapterSource[job.change_list["checksum"]].source)
@@ -711,7 +734,7 @@ def entries_of(job, planned, vouched_by, listed):
     entries = {}
     for chapter, item in change_list.named(planned):
         sha256 = item["sha256"]
-        if chapter in urls and sha256 in fetched_now:
+        if sha256 in fetched_now and (chapter in urls or announced(job)):  # a quarter's are all from its capital
             now = fetched_now[sha256]
             route = now.get("route", "https")  # a job begun before the route was noted fetched by URL alone
             came = {"route": route, "url": urls[chapter]["urls"][now["url"]] if route == "https" else "",
