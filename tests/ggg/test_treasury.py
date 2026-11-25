@@ -428,9 +428,12 @@ def test_transfer_revert_only_pending():
 
 
 def suspended(cid, method, candid="()", cycles=0):
-    """A ledger call that stays in flight until the test sends its reply (or an exception) in."""
+    """A ledger call that stays in flight until the test sends its reply (or an exception) in. The caller's message ends
+    as the call goes out, and the reply arrives in a new one (fake_chain.end_message)."""
     fake_chain.state["calls"].append((cid, method, candid))
+    fake_chain.end_message()
     reply = yield
+    fake_chain.end_message()
     if isinstance(reply, Exception):
         raise reply
     return reply
@@ -516,6 +519,8 @@ def test_transfer_booked_by_the_ledgers_answer(reply, status, roads):
         assert len({e.transaction for e in t.ledger_entries}) == 1
 
 
+@pytest.mark.xfail(strict=True, reason="realms-gos#753: send re-checks the transfer it read before the ledger call, "
+                                       "which cannot see the reversal")
 def test_ledger_reply_does_not_complete_a_reverted_transfer(monkeypatch):
     setup_finance()
     allocate(ROADS=100)

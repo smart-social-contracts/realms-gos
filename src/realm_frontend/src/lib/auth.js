@@ -195,7 +195,7 @@ async function hydrateTestAuthStores(identity) {
 
 async function restoreTestAuthSession() {
   if (!__REALMS_TEST_BUILD__) return null;
-  if (!shouldRestoreTestModeSession(getTestModeIIBypass())) return null;
+  if (!shouldRestoreTestModeSession(getTestModeIIBypass(), readPersistedAuthChannel())) return null;
 
   if (!_testLoggedIn || !_testIdentity) {
     const persistedIndex = readPersistedTestAuthIndex();
@@ -457,8 +457,12 @@ async function publishTestIdentity() {
   testIdentityIndex.set(__REALMS_TEST_BUILD__ && _testLoggedIn ? _testIdentityIndex : null);
 }
 
+// Invariant: signed in means this tab holds an identity (or `restoreTestAuthSession` is about to give it one), not that
+// storage says so. A stored test session that this answers "yes" to must be one `restoreTestAuthSession` restores: both
+// ask `shouldRestoreTestModeSession`, so they cannot disagree (realms-gos#737: they did, and every screen read the
+// principal of an identity that was never made).
 export async function isAuthenticated() {
-  if (__REALMS_TEST_BUILD__ && (readPersistedAuthChannel() === 'test' || getTestModeIIBypass())) {
+  if (shouldRestoreTestModeSession(getTestModeIIBypass(), readPersistedAuthChannel())) {
     if (_testLoggedIn || readPersistedTestAuthIndex() != null) {
       return true;
     }

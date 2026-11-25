@@ -39,6 +39,7 @@ PATHS = """\
 layers eu → eu/es → eu/es/vc → eu/es/vc/emshi → eu/es/vc/46250-valencia
 layer paths:
   data_protection: eu → eu/es → eu/es/vc/46250-valencia
+  education: eu/es/vc
   language: eu/es → eu/es/vc
   local_regime: eu/es → eu/es/vc → eu/es/vc/46250-valencia
   procedure: eu/es → eu/es/vc/46250-valencia

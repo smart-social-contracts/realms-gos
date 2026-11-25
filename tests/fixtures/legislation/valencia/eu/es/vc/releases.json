@@ -22,5 +22,18 @@
     },
     "calendar": "sha256:7fc8a5217e2b6d4f05bf9dfa6757cef6f55a3faba629a09b5dc3c36acfad7ea0",
     "notes": {"ca-valencia": "L'avís d'una ordenança surt en totes les llengües cooficials", "es": "El aviso de una ordenanza sale en todas las lenguas cooficiales"}
+  },
+  {
+    "version": "1.3.0",
+    "published": "2026-11-25",
+    "effective_from": "2024-04-24",
+    "commit": "d7fd78feaac25a61305b3f1f2b4b36ae2d0df560",
+    "chapters": {
+      "education": "sha256:6d4c7e334a813a9b4f7875c3cdff870e256a03fe01a224b9dcf4e919e1ccaa05",
+      "language": "sha256:e8d64248ae727d105213c5fd07323bf537aae52267fbe72adb63275d9fadb4f3",
+      "local_regime": "sha256:0a6dbd485a3be2288b4aec7d70a834d4d18429cc9012c54e69d4a4ed91a474e5"
+    },
+    "calendar": "sha256:7fc8a5217e2b6d4f05bf9dfa6757cef6f55a3faba629a09b5dc3c36acfad7ea0",
+    "notes": {"ca-valencia": "L'admissió de l'alumnat en els centres públics i privats concertats (Decret 48/2024, en vigor des del 24 d'abril de 2024)", "es": "La admisión del alumnado en los centros públicos y privados concertados (Decreto 48/2024, en vigor desde el 24 de abril de 2024)"}
   }
 ]

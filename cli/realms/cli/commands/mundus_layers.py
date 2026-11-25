@@ -19,9 +19,10 @@ installed at once too: the legislation that makes an ordinance wait (Spain's loc
 after the vote) judges proposals, and there is none. Where the root department does not decide alone, the call is
 filed as a proposal and the founder votes; one that needs other votes is left open and the mundus says so.
 
-A realm with ``quarters`` asks Casals for that many quarters first (``quarter_add``), with the network live, since
-Casals builds them on its own. First, because a capital gives its quarters a codex when it installs one: a quarter
-added later gets none until the next install. A federation installs every layer by a change list.
+A realm with ``quarters`` asks Casals for that many quarters before its layers (``quarter_add``), with the network
+live, since Casals builds them on its own; they then follow each install, as a federation's quarters do. The order is
+not needed for the codex: a quarter added after its capital's install is sent the codex whole at its first report
+(realms-gos#745). A federation installs every layer by a change list.
 
 Later, ``publish`` has a source adopt and publish another of its releases, and ``install`` has a realm take what its
 sync sources relay and it does not run yet. A realm that is no federation does that by "Propose install", which its
@@ -376,9 +377,9 @@ def add_quarters(m) -> None:
         record["quarters"] = [{"name": q.get("name"), "backend": q.get("id"), "frontend": q.get("frontend_canister_id")}
                               for q in have]
         realms.save(m, record)
-        # The mundus made the quarters; one the capital grew by itself later (members join the capital, and a full
-        # capital asks for another) would run no codex: a quarter added after the capital's codex never gets one
-        # (realms-gos#745).
+        # The mundus made the quarters and furnishes them; one the capital grew by itself later (members join the
+        # capital, and a full capital asks for another) would get the capital's codex but nothing of what
+        # ``furnish_quarters`` gives, and its members would see no screens.
         off = call("quarter_configure", {"auto_scale_enabled": False})
         if not off.get("ok") or off.get("requires_vote"):
             raise SystemExit(f"{e['name']}: turning auto-scale off: {off.get('error') or off}")

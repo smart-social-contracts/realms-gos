@@ -1727,6 +1727,22 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   admin's `codex_install_resume` to ask again; the quarter reads non-compliant meanwhile. The 24 hours of the job
   cover its work, not the wait for T, however far away T is.
 - **A quarter ready after T** goes through the same confirmation before it switches.
+- **A quarter that runs no codex** ([realms-gos#745](https://github.com/smart-social-contracts/realms-gos/issues/745)).
+  A quarter added after its capital installed a layered codex has no codex that a change list replaces, so no
+  install of the capital's could reach it. When a quarter reports that it runs no codex, the capital tells it
+  `codex.stage` with the codex in force **whole**: its own layer (`own`) and the layers from above, in place of a
+  change list's checksum. The quarter checks the change list that sets that layer, takes every chapter it lacks from
+  the capital by checksum, builds the codex, which must be the one the capital named, and switches at once, after the
+  same confirmation; later installs reach it like any other quarter. Its audit log records the switch as
+  `codex_taken_from_capital`, naming the codex and the capital: no vote of the quarter changed its legislation. A
+  quarter reports when it is adopted, after every upgrade and at each catch-up, so a new quarter is governed from its
+  adoption and one already left without a codex is repaired at its next report. This restores what the realm adopted,
+  the capital's codex in force, and creates nothing else. The capital tells a quarter again after a day, or once the
+  codex in force has changed, when the quarter took it up or refused it, and at the quarter's next report when it did
+  not answer. **The repair respects a quarter's own decision:** a quarter that runs a codex, or voted to run none
+  (`codex_uninstall`), answers that it refuses the codex sent whole, and says why; its audit log (the
+  `federation_message` event) and both records of the message keep that answer. The quarter reads non-compliant until it runs the codex, and the
+  capital's `FederationMessage` of each attempt keeps its answer.
 - **Upgrading.** Upgrade a federation's capital before its quarters: a quarter confirms its switch against the
   codex the capital's `quarter_sync` names, and an older capital names its active codex only.
 - **A revert.** When the capital restores an earlier codex (`codex_revert`, `codex_revert_fast`), it tells each
@@ -2057,6 +2073,21 @@ It uses Python's parser (`ast`), so it runs only off-chain:
   without them.
 
 A refusal of a layer is printed once, though every realm below it runs the layer.
+
+**A chapter that extends nothing** is a warning, `warning: <source>/<subject_matter>.py: <why>`, printed once, which
+stops nothing ([realms-gos#735](https://github.com/smart-social-contracts/realms-gos/issues/735)). A chapter inherits
+by name (`class Tax(above("tax"))`) and a codex chooses its names, so a typo, or a name the layer above gave up, leaves a
+chapter that inherits nothing and overrides nothing. A layer that adds a subject matter of its own is common (`eu/es`
+adds `tax`, EMSHI `water`) and draws no warning, since the warning should be read every time it shows. Only two things
+draw it:
+
+- a name one letter away from a chapter above (one letter added, dropped or changed, or two swapped) whose members the
+  chapter defines again: `tx.py` setting `capital`, which `eu/es/tax.py` defines. A `taxi.py` with members of its own
+  is a subject matter of its own;
+- a name that a layer above had in its newest release and has no chapter of now, because it renamed or dropped it.
+
+`propose` (§12.5) gives the same warning for a chapter it sets, on stderr, and writes the change list all the same.
+The realm does not warn at install: by then the vote is over, and a codex is free to choose its names.
 
 **Test cases.** A chapter's cases are `<subject_matter>.cases.json`, beside it. Each is run on the codex of one realm:
 the one named by its optional `realm` (a source id), else the chapter's own source with the sources above it, in

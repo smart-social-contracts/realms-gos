@@ -1,5 +1,10 @@
 import hashlib
+import importlib.util
+from pathlib import Path
 
+import pytest
+
+from api import members
 from core import auth
 import fake_chain
 import world
@@ -335,3 +340,33 @@ def test_I_PRV_1_exporting_attributes_takes_the_reviewers_permission_too():
     assert [(r["kind"], r["value"]) for r in rows] == [("disability", "33 percent")]
     assert ok("realm_export", "ctl", entity="Attribute")["rows"] == rows
     assert "db.export" in denied("realm_export", "hector", entity="Attribute")
+
+
+@pytest.fixture
+def test_build(monkeypatch):
+    """The realm as built by ``pack_realm_backend.py --variant test``; the checked-in variant is production."""
+    source = Path(__file__).parents[2] / "scripts" / "build_variants" / "test.py"
+    spec = importlib.util.spec_from_file_location("test_build_variant", source)
+    variant = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(variant)
+    monkeypatch.setattr(members, "build_variant", variant)
+
+
+def test_the_self_registration_flag_lets_anyone_join_without_an_invite_only_in_test_mode(test_build):
+    world.build()
+    Realm["1"].open_registration = False
+    flag = {"test_mode_user_self_registration": True}
+    Realm["1"].test_mode, Realm["1"].test_flags = False, flag
+    assert "invite code" in call("realm_join", "zoe")["error"]  # the flag is read only in test mode
+    Realm["1"].test_mode = True
+    assert ok("realm_join", "zoe")["status"] == "active"
+    Realm["1"].test_flags = {"test_mode_user_self_registration": False}
+    assert "invite code" in call("realm_join", "yan")["error"]
+
+
+def test_a_production_build_ignores_the_self_registration_flag_whatever_the_row_says():
+    world.build()
+    Realm["1"].open_registration = False
+    Realm["1"].test_mode, Realm["1"].test_flags = True, {"test_mode_user_self_registration": True}
+    assert "invite code" in call("realm_join", "zoe")["error"]
+

@@ -22,7 +22,7 @@ BACKEND = REPO_ROOT / "src" / "realm_backend"
 VARIANT_SOURCES = REPO_ROOT / "scripts" / "build_variants"
 ACTIVE_VARIANT = BACKEND / "core" / "build_variant.py"
 
-VARIANT_API = ("BUILD_VARIANT", "test_flags_allowed")
+VARIANT_API = ("BUILD_VARIANT", "test_flags_allowed", "self_registration")
 
 
 def _load(path: Path, name: str):

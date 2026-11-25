@@ -240,6 +240,22 @@ def test_the_quarters_of_a_capital_stage_the_release_it_installs_and_switch_with
         assert [(r["source"], r["version"]) for r in record] == [("arcadia", "1.0.0")]
 
 
+def test_a_quarter_added_later_takes_the_layers_from_above_whole_from_its_capital(net, site):
+    """A quarter that joins once its capital runs a release has none of its chapters, and no record to read: the capital
+    sends it the codex whole, the layers from above with it (realms-gos#745)."""
+    hub = source_with(net, "hub2", "1.0.0", "x/hub2")
+    seat = net.realm("seat2")
+    link(seat, hub)
+    seat.govern("codex_install", release_args(site, "1.0.0", realm="seat2"))
+    net.wait_until(lambda: active_id(seat), rounds=2)
+    east = net.realm("east", members=("alice",))
+    net.register_quarters(seat, east)
+    net.wait_until(lambda: active_id(east), rounds=2)
+    assert active_id(east) == active_id(seat)
+    assert routes(east) == {"arcadia/tax": ("capital", "x/hub2", "1.0.0"),
+                            "arcadia/procedure": ("capital", "x/hub2", "1.0.0")}
+
+
 # ---- costs: reading a record, run by hand in a realm of its own
 
 RECORD = '''

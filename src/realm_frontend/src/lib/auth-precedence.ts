@@ -86,7 +86,15 @@ export function resolveTestIdentityIndex(
 	return index(persisted) ?? 0;
 }
 
-/** Test sessions may be restored after iframe reloads when II bypass is on. */
-export function shouldRestoreTestModeSession(testModeIIBypass: boolean): boolean {
-	return __REALMS_TEST_BUILD__ && testModeIIBypass;
+/**
+ * Test sessions are restored after a reload when II bypass is on, and also when this tab already signed in as a test
+ * identity (the pinned channel): the tab's own session does not end because the realm's flag reads off. Without the pin,
+ * a reload counted as signed in (`isAuthenticated`) while nothing restored the identity, and every screen failed
+ * reading its principal.
+ */
+export function shouldRestoreTestModeSession(
+	testModeIIBypass: boolean,
+	pinnedChannel: AuthChannel | null = null
+): boolean {
+	return __REALMS_TEST_BUILD__ && (testModeIIBypass || pinnedChannel === 'test');
 }

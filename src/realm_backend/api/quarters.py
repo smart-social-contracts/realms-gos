@@ -258,7 +258,7 @@ def record(c, args):
     if "zones" in args:  # a report keeps the realm's zones only: it is no way to store other keys
         known = q.zones  # a zone the realm defined stays defined: only the others need a look
         changed += put(q, zones={zone: int(n) for zone, n in args["zones"].items() if zone in known or held_zone(zone)})
-    propagation.correct(q)
+    propagation.correct(q, args.get("codex_id"))
     notable = bool(set(changed) & set(NOTABLE)) or drifted(q, shown)
     if notable:
         announce(q)

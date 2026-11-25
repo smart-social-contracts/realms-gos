@@ -39,6 +39,13 @@ describe('auth-precedence', () => {
 		expect(shouldRestoreTestModeSession(false)).toBe(false);
 	});
 
+	it('restores the test session this tab signed in with, whatever the realm flag reads', () => {
+		// A reload that counts as signed in must also restore the identity, or each screen fails reading its principal.
+		expect(shouldRestoreTestModeSession(false, 'test')).toBe(true);
+		expect(shouldRestoreTestModeSession(false, 'ii')).toBe(false);
+		expect(shouldRestoreTestModeSession(false, 'portal')).toBe(false);
+	});
+
 	it('pinned test channel wins over portal embed ambient precedence', () => {
 		expect(resolveEffectiveAuthChannel(true, true, 'test')).toBe('test');
 		expect(resolveEffectiveAuthChannel(true, false, 'test')).toBe('test');

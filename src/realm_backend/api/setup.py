@@ -45,6 +45,11 @@ FIELDS = {
                        "installer_canister_id", "baton_canister_id", "conductor_canister_id", "casals_stand"),
     "trust_policy": ("require_marketplace_approval", "trusted_approvers", "trusted_principals"),
 }
+# The switches a test or demo realm sets through ``test_flags``. The shell reads each as ``test_mode_<name>``, while the CLI,
+# the deployment descriptors and the installer name it without the prefix: a realm kept the name it was given, and the
+# shell never saw the switch (realms-gos#737, #738).
+TEST_FLAG_NAMES = ("ii_bypass", "user_self_registration", "demo_data", "skip_terms", "skip_passport_zkproof",
+              "disable_monetary_tokens", "demo_notice")
 # The branding images are kept in the Realm row as data URLs, and setup_step answers with the whole setup state, both
 # images included: an update's reply may not pass 2 MiB, so two images and the rest of the state must fit in it. The
 # frontend compresses an image to 700 KiB (imageDataUrl.ts), which is 955,759 characters in base64 with the
@@ -95,6 +100,9 @@ def start(installer=""):
     installer = (installer or "").strip()
     if installer and not Realm["1"].installer_canister_id:
         Realm["1"].installer_canister_id = installer
+    flags = Realm["1"].test_flags or {}
+    if shell_flags(flags) != flags:  # a realm that was configured before it renamed them
+        Realm["1"].test_flags = shell_flags(flags)
     for name, allowed in PROFILES.items():
         if UserProfile[name] is None:
             UserProfile(id=name, allowed_to=allowed)
@@ -214,6 +222,12 @@ def valid_values(values):
             raise Fail(f"{name} is above {TEXT_MAX:,} characters")
 
 
+def shell_flags(flags):
+    """``flags`` with each switch named as the shell reads it, ``test_mode_<name>``: a switch given without the prefix is
+    renamed. Any other key stays as it is."""
+    return {f"test_mode_{k}" if k in TEST_FLAG_NAMES else k: v for k, v in flags.items()}
+
+
 def configure(fields, values):
     """Set ``values``, any of ``fields``. On a capital, a change of a synced setting is pushed to its quarters; a
     quarter refuses one (api.quarters.SYNCED)."""
@@ -225,6 +239,8 @@ def configure(fields, values):
         raise Fail(f"cannot configure {', '.join(unknown)} here")
     quarters.refuse_synced(values)
     valid_values(values)
+    if "test_flags" in values:
+        values = {**values, "test_flags": shell_flags(values["test_flags"])}
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in HEX for ch in color[1:].lower())):
         raise Fail(f"primary_color must look like #1E6B52, not {color}")
     if (values.get("test_mode") or any((values.get("test_flags") or {}).values())) \

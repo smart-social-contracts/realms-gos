@@ -6,6 +6,7 @@ The tree is ``tests/fixtures/legislation/valencia`` in a throw-away git reposito
 import ast
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -442,3 +443,22 @@ def test_the_kind_the_format_and_the_limits_are_the_realms():
         **realm_constants("api/installs.py", "MAX_CHANGE_LIST"),
     }
     assert ours == theirs
+
+
+def test_a_chapter_that_extends_nothing_is_warned_of_and_its_change_list_still_written(tmp_path, git, no_network):
+    """realms-gos#735: a realm that files a chapter whose name is a typo of the one it meant to extend is told so
+    before the vote, on stderr, and the change list is written all the same (a name is the codex's to choose)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    shutil.copytree(FIXTURES / "valencia" / "eu", repo / "legislation" / "eu")
+    own = repo / "legislation" / VALENCIA
+    (own / "tx.py").write_text((own / "tax.py").read_text().replace('Tax(above("tax"))', 'Tx(above("tx"))'))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--no-verify", "-m", "a typo")
+    out = propose(repo / "legislation", tmp_path / "tx.json", "--commit", "HEAD", "--set", f"{VALENCIA}/tx",
+                  "--set", TAX, "--replaces", CODEX, *SUMMARY)
+    assert out.exit_code == 0, out.output
+    assert out.stderr == (f"warning: {VALENCIA}/tx.py: no layer above has a tx chapter, so this one extends nothing: "
+                          "eu/es/tax.py, one letter away, defines capital, ibi_bonus, surface_public_transport too\n")
+    assert "warning" not in out.stdout and (tmp_path / "tx.json").is_file()

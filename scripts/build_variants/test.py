@@ -17,3 +17,8 @@ NON_PRODUCTION_NETWORKS = ("local", "test", "demo")
 def test_flags_allowed(network, can_test_mode):
     """Whether test mode and test flags may be set: on a non-production network, or when the installer allowed it."""
     return bool(can_test_mode) or (network or "").strip().lower() in NON_PRODUCTION_NETWORKS
+
+
+def self_registration(realm):
+    """Whether the ``user_self_registration`` test flag lets anyone join without an invite: only while test mode is on."""
+    return bool(realm.test_mode and (realm.test_flags or {}).get("test_mode_user_self_registration"))

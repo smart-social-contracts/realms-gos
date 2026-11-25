@@ -16,7 +16,8 @@ from typer.testing import CliRunner
 
 from realms.cli.commands import legislation
 from realms.cli.commands.legislation import legislation_app
-from realms.cli.commands.legislation_layout import layout_problems
+from realms.cli.commands.legislation_layout import layout_problems, one_letter_apart, unextended
+from realms.cli.commands.legislation_load import WorkingFiles, layers_of
 
 VALENCIA = "eu/es/vc/46250-valencia"
 CHAPTER = "from realms.legislation import above\n\nclass {name}(above('{subject_matter}')):\n    pass\n"
@@ -529,6 +530,63 @@ def test_releases_in_a_folder_that_is_not_a_git_checkout_are_reported(tmp_path, 
     breaks(copy, "cannot be read")
 
 
+# ── Advice: a chapter that extends nothing (realms-gos#735) ──────────────────────────────────────────────────────────
+
+
+def advice(tree: Path, realm: str = VALENCIA) -> dict:
+    files = WorkingFiles(tree)
+    return unextended(files, layers_of(realm, files.sources()))
+
+
+def test_a_layer_that_adds_a_subject_matter_of_its_own_is_given_no_advice(tree):
+    write(tree, f"{VALENCIA}/water.py", chapter("water"))  # no layer above has one: a subject matter of its own
+    assert advice(tree) == {}  # nor eu/es's tax and procedure, which eu has no chapter of
+
+
+def test_the_real_codex_is_given_no_advice():
+    codex = Path(__file__).resolve().parents[2] / "codices/legislation"
+    files = WorkingFiles(codex)
+    assert {realm: unextended(files, layers_of(realm, files.sources())) for realm in files.sources()} == dict.fromkeys(
+        files.sources(), {})  # eu/es adds five subject matters and EMSHI water: none is named
+
+
+def setting(subject_matter: str, *names: str) -> str:
+    """A chapter of ``subject_matter`` that sets ``names``."""
+    lines = "".join(f"    {name} = overridable(5, legislation='an act')\n" for name in names)
+    return chapter(subject_matter).replace("    pass\n", lines).replace("import above", "import above, overridable")
+
+
+@pytest.mark.parametrize("name", ["tx", "taxx", "tqx", "atx"], ids=["dropped", "added", "changed", "swapped"])
+def test_a_chapter_one_letter_away_from_a_chapter_above_whose_members_it_sets_is_named(tree, name):
+    write(tree, "eu/es/tax.py", setting("tax", "rate"))
+    write(tree, f"{VALENCIA}/{name}.py", setting(name, "rate", "bonus"))
+    assert advice(tree) == {f"{VALENCIA}/{name}.py": f"no layer above has a {name} chapter, so this one extends "
+                                                     "nothing: eu/es/tax.py, one letter away, defines rate too"}
+
+
+def test_a_chapter_one_letter_away_that_sets_members_of_its_own_is_a_subject_matter_of_its_own(tree):
+    write(tree, "eu/es/tax.py", setting("tax", "rate"))
+    write(tree, f"{VALENCIA}/taxi.py", setting("taxi", "licence_fee"))  # a city's taxi licences, beside Spain's tax
+    write(tree, f"{VALENCIA}/tx.py", chapter("tx"))  # sets nothing: it would override nothing either
+    assert advice(tree) == {}
+
+
+def test_a_chapter_the_layer_above_gave_up_since_its_newest_release_is_named(tree):
+    write(tree, f"{VALENCIA}/procedure.py", chapter("procedure"))
+    assert advice(tree) == {}
+    (tree / "eu/es/procedure.py").rename(tree / "eu/es/process.py")  # renamed, and not released yet
+    assert advice(tree) == {f"{VALENCIA}/procedure.py": "no layer above has a procedure chapter, so this one extends "
+                                                        "nothing: eu/es had one in its release 1.0.0"}
+
+
+@pytest.mark.parametrize("a, b, apart", [
+    ("tax", "tx", True), ("tax", "taxi", True), ("tax", "tap", True), ("language", "lanugage", True),
+    ("water", "waste", False), ("register", "registry", False), ("tax", "tax", False), ("tax", "xat", False),
+])
+def test_one_letter_apart(a, b, apart):
+    assert one_letter_apart(a, b) is apart and one_letter_apart(b, a) is apart
+
+
 # ── The command ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -562,4 +620,14 @@ def test_check_stops_at_the_layout_before_it_loads_a_chapter(tree, check):
 def test_check_loads_the_chapters_once_the_layout_holds(tree, check):
     out = check(tree)
     assert out.exit_code == 0, out.output
+    assert "ok: 4 realm(s) checked" in out.output
+
+
+def test_check_warns_of_a_chapter_that_extends_nothing_once_and_stops_nothing(tree, check):
+    write(tree, "eu/es/tax.py", setting("tax", "rate"))
+    write(tree, "eu/es/vc/tx.py", setting("tx", "rate"))  # València runs eu/es/vc too: the warning still shows once
+    out = check(tree)
+    assert out.exit_code == 0, out.output
+    assert out.output.count("warning: eu/es/vc/tx.py: no layer above has a tx chapter, so this one extends nothing: "
+                            "eu/es/tax.py, one letter away, defines rate too\n") == 1
     assert "ok: 4 realm(s) checked" in out.output
