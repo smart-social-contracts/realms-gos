@@ -812,6 +812,9 @@ principal will **not** match `User.id` in the realm.
 | demo | `https://demo.realmsgos.org` |
 | test | `https://test.realmsgos.org` |
 
+Internet Identity refuses command-line sign-in until **CLI access** is switched
+on for the device (II → Settings → CLI access); switch it on once, then link.
+
 ```bash
 # 1. Link II (browser auth). Repeat if the session expired.
 icp identity link web alice --app https://staging.realmsgos.org
