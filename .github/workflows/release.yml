@@ -76,10 +76,6 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull latest extensions from main
-        if: ${{ inputs.cli_only != true }}
-        run: git submodule update --remote extensions
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
