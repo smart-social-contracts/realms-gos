@@ -594,7 +594,7 @@ def test_a_quarter_that_took_it_up_is_told_again_a_day_later_or_once_the_codex_i
 
 @pytest.mark.parametrize("answer, again", [
     ({"ok": False, "error": "a codex to stage is {codex, checksum: sha256:<64 hex digits>, at: seconds}"}, True),
-    ({"ok": False, "error": propagation.NOT_WHOLE}, False),
+    ({"ok": True, "staged": "refused", "why": propagation.NOT_WHOLE}, False),
 ], ids=["on the previous release: at its next report", "it voted to run none: a day later"])
 def test_a_quarter_that_could_not_read_it_is_told_again_at_its_next_report(federation, answer, again):
     install(change_list(own_layer()))
@@ -641,15 +641,25 @@ def test_a_quarter_takes_the_layers_from_above_of_the_codex_sent_whole_from_its_
     assert not [c for c in fake_chain.state["calls"] if c[1] == "legislation_releases"]  # it read no record
 
 
-def test_a_quarter_that_runs_a_codex_or_voted_to_run_none_refuses_the_codex_sent_whole(monkeypatch):
+def refused():
+    """What the quarter's audit log says of the codex sent whole that it refused."""
+    return [e["result"]["why"] for e in ok("events", "ctl")["events"]
+            if e["op"] == "federation_message" and e["result"].get("staged") == "refused"]
+
+
+def test_the_repair_respects_a_quarter_that_voted_to_run_no_codex_and_one_that_runs_its_own(monkeypatch):
     quarter(monkeypatch, "north")
     stored_codices()
     layer = own_layer()
-    assert call("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))["error"] == propagation.NOT_WHOLE
+    answer = ok("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))
+    assert (answer["staged"], answer["why"]) == ("refused", propagation.NOT_WHOLE)  # it runs a codex
     ok("codex_uninstall", "ctl")  # a vote of its own: it runs none now
     assert status()["codex"] is None
-    assert call("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))["error"] == propagation.NOT_WHOLE
-    assert InstallJob.count() == 0
+    answer = ok("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))
+    assert answer["staged"] == "refused" and status()["codex"] is None and InstallJob.count() == 0
+    assert refused() == [propagation.NOT_WHOLE] * 2  # "why does this quarter not take the capital's codex?"
+    kept = [m.response for m in FederationMessage.load_some(1, 50) if m and m.topic == "codex.stage"]
+    assert [r["staged"] for r in kept] == ["refused"] * 2  # its record of the messages keeps the answer too
 
 
 def test_the_codex_sent_whole_leaves_its_staging_alone_and_comes_with_its_layers(monkeypatch):

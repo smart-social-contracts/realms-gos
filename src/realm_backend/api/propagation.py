@@ -45,7 +45,7 @@ BRING_AGAIN = 24 * 3600
 # so that it is gone with an upgrade: the upgrade that brings a fix for what failed tells them again at their next report.
 _brought = {}
 NOT_WHOLE = ("a codex is sent whole to a quarter that has never run one: this one runs a codex, or voted to run none "
-             "(codex_uninstall), which its capital's codex does not overrule")
+             "(codex_uninstall), which its capital's codex does not overrule")  # an answer, recorded on both sides
 
 
 # ---- The capital: tell the quarters.
@@ -108,8 +108,8 @@ def bring(quarter):
     whole, its own layer (``own``) and the layers from above, at once (``at`` 0). A quarter added after the capital's
     install has no codex that a change list replaces, so no install would reach it (realms-gos#745): this reaches it at
     its first report, which adoption makes, and repairs one already left without a codex at its next. It is told again
-    after ``BRING_AGAIN``, or once the codex in force changed (``taken_up``), and refuses it if it voted to run none
-    (``on_stage``). Nothing is said when the message would be above ``JSON_MAX`` (``announce``). Until it runs the
+    after ``BRING_AGAIN``, or once the codex in force changed (``taken_up``); one that voted to run none refuses it
+    (``on_stage``): the repair respects a quarter's own decision. Nothing is said when the message would be above ``JSON_MAX`` (``announce``). Until it runs the
     codex it reads non-compliant, and the capital's ``FederationMessage`` of each try keeps its answer."""
     target = required()
     if target is None or quarter.status != "active":
@@ -117,20 +117,30 @@ def bring(quarter):
     told = _brought.get(quarter.id)
     if told is not None and told[0] == target.id and chain.now() < told[1] + BRING_AGAIN:
         return
+    _brought[quarter.id] = (target.id, chain.now())
+    # In a message of its own: the report it answers never depends on it.
+    chain.set_timer(0, lambda cid=quarter.id, codex_id=target.id: send_whole(cid, codex_id))
+
+
+def send_whole(cid, codex_id):
+    """Tell the quarter ``cid`` to stage the codex ``codex_id`` whole (``bring``), unless it has gone since (a pending
+    codex the capital dropped). A generator."""
+    target = LayeredCodex[codex_id]
+    if target is None:
+        return
     realm = store.own_source()
     body = {"codex": target.id, "at": 0, "proposal": target.proposal,
             "layers": change_list.layers_for(installs.installed_layers(target, realm), [], None),
             "own": {"source": realm, **installs.own_layer(target, realm)}}
     if len(json.dumps(body)) <= JSON_MAX:
-        _brought[quarter.id] = (target.id, chain.now())
-        chain.set_timer(0, lambda cid=quarter.id: tell(cid, STAGE, body, recorded=lambda reply: taken_up(cid, reply)))
+        yield from tell(cid, STAGE, body, recorded=lambda reply: taken_up(cid, reply))
 
 
 def taken_up(cid, reply):
-    """The answer of quarter ``cid`` to the codex sent whole (``bring``), as the record keeps it. One that took it up,
-    or refused it because it runs a codex or voted to run none, is told again after ``BRING_AGAIN``; one that did not
-    answer, or could not read it (it is on the previous release), at its next report."""
-    if not reply.get("ok") and NOT_WHOLE not in str(reply.get("error")):
+    """The answer of quarter ``cid`` to the codex sent whole (``bring``), as the record keeps it. One that answered,
+    taking it up or refusing it because it runs a codex or voted to run none, is told again after ``BRING_AGAIN``; one
+    that did not answer, or could not read it (it is on the previous release), at its next report."""
+    if not reply.get("ok"):
         _brought.pop(cid, None)
     return reply
 
@@ -178,7 +188,8 @@ def on_stage(c, body):
     """From the capital: stage the codex ``codex`` (its change list is stored under ``checksum`` there) and switch to
     it at ``at``, with the ``layers`` from above the capital staged: the capital is the quarter's authority for them, and
     the codex id the quarter builds must still be the one announced. A quarter that runs no codex is sent the codex
-    whole instead of a change list (``bring``): the capital's ``own`` layer, which it builds with the ``layers``.
+    whole instead of a change list (``bring``): the capital's ``own`` layer, which it builds with the ``layers``; a
+    quarter that runs a codex, or voted to run none, answers that it refuses it, and its audit log keeps why.
     Asking again for a codex being staged for the same time, or already active, changes nothing, nor does the codex
     sent whole while it is being staged; a newer announcement, or the same codex for another time, replaces a staging
     in progress; another install running here refuses it."""
@@ -195,7 +206,7 @@ def on_stage(c, body):
     if current is not None and current.id == codex_id:
         return {"staged": "active"}
     if whole is not None and (current is not None or uninstalled()):
-        raise Conflict(NOT_WHOLE)
+        return {"staged": "refused", "why": NOT_WHOLE}  # the repair respects the quarter's own decision
     running = staging(codex_id)
     if running is not None:
         if whole is not None or running.staged["announced"]["at"] == at:

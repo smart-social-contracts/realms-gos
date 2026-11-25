@@ -1739,8 +1739,9 @@ codex checksum, so a receiver can tell which legislation the sender ran.
   adoption and one already left without a codex is repaired at its next report. This restores what the realm adopted,
   the capital's codex in force, and creates nothing else. The capital tells a quarter again after a day, or once the
   codex in force has changed, when the quarter took it up or refused it, and at the quarter's next report when it did
-  not answer. A quarter refuses the codex sent whole if it runs a codex, or voted to run none (`codex_uninstall`):
-  the capital's codex does not overrule that vote. The quarter reads non-compliant until it runs the codex, and the
+  not answer. **The repair respects a quarter's own decision:** a quarter that runs a codex, or voted to run none
+  (`codex_uninstall`), answers that it refuses the codex sent whole, and says why; its audit log (the
+  `federation_message` event) and both records of the message keep that answer. The quarter reads non-compliant until it runs the codex, and the
   capital's `FederationMessage` of each attempt keeps its answer.
 - **Upgrading.** Upgrade a federation's capital before its quarters: a quarter confirms its switch against the
   codex the capital's `quarter_sync` names, and an older capital names its active codex only.
