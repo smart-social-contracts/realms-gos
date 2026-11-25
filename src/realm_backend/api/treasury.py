@@ -68,8 +68,8 @@ def nat(reply):
     return candid.number(reply)
 
 
-def balance_of(token, sub):
-    reply = yield from chain.call(token.ledger, "icrc1_balance_of", f"({account(chain.self_id(), sub)})")
+def balance_of(ledger, sub):
+    reply = yield from chain.call(ledger, "icrc1_balance_of", f"({account(chain.self_id(), sub)})")
     return nat(reply)
 
 
@@ -552,10 +552,11 @@ def problems():
     return [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
 
 
-def receive(inv, received):
+def receive(inv, received, ledger):
     """Book a paid invoice as revenue of the source fund, which gains it less the ledger's fee for moving it into the
     realm's main account (``collect``), and split what it gains by the adopted allocation rule. An invoice of no more
-    than the fee cannot be moved at all, so its whole amount is the fee: no fund is credited money it cannot pay out."""
+    than the fee cannot be moved at all, so its whole amount is the fee: no fund is credited money it cannot pay out.
+    The payment records the ``ledger`` it was found on, which the move is sent to."""
     p = period()
     config, source = treasury_config(), source_fund()
     category = inv.reason.partition(":")[0].lower() or "invoice"
@@ -573,20 +574,20 @@ def receive(inv, received):
     who = {"user": key} if kind == "User" else {"organization": Organization[key]} if kind == "Organization" else {}
     post(p, lines, inv.symbol, f"payment of {inv.id}", invoice=inv, **who)
     inv.status, inv.paid_at = "paid", chain.now()
-    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": find(Token, inv.symbol).ledger,
-                   "collected": False}
+    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "collected": False}
     if inv.reason.startswith("TaxDeclaration:"):
         find(TaxDeclaration, inv.reason.partition(":")[2]).status = "settled"
 
 
-def held_by(inv):
-    """What the invoice's own account holds on the ledger. A generator."""
-    return (yield from balance_of(find(Token, inv.symbol), subaccount(inv.id)))
+def held_by(inv, ledger):
+    """What the invoice's own account holds on ``ledger``. A generator."""
+    return (yield from balance_of(ledger, subaccount(inv.id)))
 
 
 def collect(inv, held):
     """Move a paid invoice's money from its own account, where the payer sent it, into the realm's main account, which
-    every payout draws on (realms-gos#739): what the account ``held``, less the ledger's fee, which ``receive`` booked.
+    every payout draws on (realms-gos#739): what the account ``held``, less the ledger's fee, which ``receive`` booked,
+    on the ledger the payment was found on.
     Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` when this call moved it. A
     ledger that refuses or does not answer leaves it uncollected, and the next check of the invoice reads the account
     again: the money is moved once, whatever happened to an earlier answer. A generator."""
@@ -595,13 +596,14 @@ def collect(inv, held):
         arg = icrc1_arg(account(chain.self_id()), held - token.fee, inv.id.encode(), token.fee,
                         from_sub=subaccount(inv.id))
         try:
-            reply = yield from chain.call(token.ledger, "icrc1_transfer", arg)
+            reply = yield from chain.call(inv.payment["ledger"], "icrc1_transfer", arg)
         except Exception:  # noqa: BLE001  no answer: the next check reads where the money is
             return
         status, block = outcome(reply)
         if status != "completed":
             return
         moved = {"block": block}
+        inv = find(Invoice, inv.id)  # the row read before the ledger call belongs to that message
     inv.payment = {**inv.payment, **moved, "collected": True}
 
 
@@ -616,17 +618,26 @@ def to_collect(inv):
 
 def refresh(inv):
     """Check the ledger for the payment of ``inv``: book it once its account holds the amount, then collect it, again on
-    a later check when that did not go through (``to_collect``). A generator; returns the invoice's status."""
+    a later check when that did not go through (``to_collect``). Each ledger call ends a message, so the invoice is read
+    again after it, and what the ledger answered counts only while the token is still on that ledger: a token moved to
+    another meanwhile leaves the invoice as it was. A generator; returns the invoice's status."""
     if to_collect(inv):
-        held = yield from held_by(inv)
-        yield from collect(inv, held)
+        held = yield from held_by(inv, inv.payment["ledger"])
+        inv = find(Invoice, inv.id)
+        if to_collect(inv):  # nobody collected it, and its token did not move, while the ledger answered
+            yield from collect(inv, held)
+        inv = find(Invoice, inv.id)
     if inv.status not in ("pending", "overdue"):
         return inv.status
-    received = yield from held_by(inv)
+    ledger = find(Token, inv.symbol).ledger
+    received = yield from held_by(inv, ledger)
+    inv = find(Invoice, inv.id)
     if inv.status not in ("pending", "overdue"):  # another check booked it while the ledger answered: book it once
         return inv.status
+    if find(Token, inv.symbol).ledger != ledger:  # the token moved to another ledger while this one answered
+        return inv.status
     if received >= inv.amount:
-        receive(inv, received)
+        receive(inv, received, ledger)
         yield from collect(inv, received)
     elif inv.due_at and chain.now() > inv.due_at:
         inv.status = "overdue"
@@ -696,7 +707,8 @@ def invoice_refresh(c, args):
     rows, nxt = ([find(Invoice, args["invoice"])], None) if args.get("invoice") else open_invoices(args)
     statuses = {}
     for inv in rows:
-        statuses[inv.id] = yield from refresh(inv)
+        # a row read before an earlier invoice's ledger call belongs to that message: read it again
+        statuses[inv.id] = yield from refresh(find(Invoice, inv.id))
     return {"checked": len(rows), "paid": sum(s == "paid" for s in statuses.values()), "invoices": statuses,
             "next": nxt}
 
