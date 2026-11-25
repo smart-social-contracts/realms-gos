@@ -2058,6 +2058,21 @@ It uses Python's parser (`ast`), so it runs only off-chain:
 
 A refusal of a layer is printed once, though every realm below it runs the layer.
 
+**A chapter that extends nothing** is a warning, `warning: <source>/<subject_matter>.py: <why>`, printed once, which
+stops nothing ([realms-gos#735](https://github.com/smart-social-contracts/realms-gos/issues/735)). A chapter inherits
+by name (`class Tax(above("tax"))`) and a codex chooses its names, so a typo, or a name the layer above gave up, leaves a
+chapter that inherits nothing and overrides nothing. A layer that adds a subject matter of its own is common (`eu/es`
+adds `tax`, EMSHI `water`) and draws no warning, since the warning should be read every time it shows. Only two things
+draw it:
+
+- a name one letter away from a chapter above (one letter added, dropped or changed, or two swapped) whose members the
+  chapter defines again: `tx.py` setting `capital`, which `eu/es/tax.py` defines. A `taxi.py` with members of its own
+  is a subject matter of its own;
+- a name that a layer above had in its newest release and has no chapter of now, because it renamed or dropped it.
+
+`propose` (§12.5) gives the same warning for a chapter it sets, on stderr, and writes the change list all the same.
+The realm does not warn at install: by then the vote is over, and a codex is free to choose its names.
+
 **Test cases.** A chapter's cases are `<subject_matter>.cases.json`, beside it. Each is run on the codex of one realm:
 the one named by its optional `realm` (a source id), else the chapter's own source with the sources above it, in
 UTC. A case has a `name` and one kind of test, evaluated in-process with the library, and says what it expects:

@@ -20,15 +20,15 @@ own ``realm.py``: the one a source above keeps beside its releases is that sourc
 
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import typer
 from rich.console import Console
 
 from realms.cli.commands.legislation_analysis import Analysis, MissingTools, cedar_tools
 from realms.cli.commands.legislation_cases import case_problems
-from realms.cli.commands.legislation_layout import commit_of, layout_problems
-from realms.cli.commands.legislation_load import WorkingFiles, load_realm
+from realms.cli.commands.legislation_layout import commit_of, layout_problems, unextended
+from realms.cli.commands.legislation_load import CommitFiles, WorkingFiles, layers_of, load_realm
 from realms.cli.commands.legislation_report import (
     Comparison,
     change_list_commit,
@@ -149,6 +149,13 @@ def check_realm(
     return problems
 
 
+def warn(advice: Dict[str, str], err: bool = False) -> None:
+    """Print each piece of ``advice`` (``legislation_layout.unextended``) as ``warning: <path>: <why>``: it stops
+    nothing."""
+    for path, why in advice.items():
+        typer.echo(f"warning: {path}: {why}", err=err)
+
+
 def refuse(problems: List[str]) -> None:
     """Print ``problems``, one a line, and stop with exit code 1; nothing to print, carry on."""
     for problem in problems:
@@ -187,6 +194,10 @@ def check_command(
     if realm and realm not in known:
         console.print(f"[red]{realm} has no source.json under {tree}[/red]")
         raise typer.Exit(2)
+    advice: Dict[str, str] = {}  # a layer's advice shows once, though every realm below it runs the layer
+    for one in realms:
+        advice.update(unextended(files, layers_of(one, known)))
+    warn(advice)
     try:
         operations = ggg_operations()
     except ImportError as e:
@@ -368,6 +379,9 @@ def propose_command(
         )
     except LegislationError as e:
         refuse([str(e)])
+    files = CommitFiles(tree, at)
+    advice = unextended(files, layers_of(realm, files.sources()))
+    warn({f"{c}.py": advice[f"{c}.py"] for c in set_chapters if f"{c}.py" in advice}, err=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(data)
     typer.echo(f"wrote {out} ({len(data)} bytes)")

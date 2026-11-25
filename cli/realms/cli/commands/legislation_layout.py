@@ -17,13 +17,17 @@ The rules:
   history of ``HEAD``: a commit on a side branch or a fork is not what the tree's history vouches for. The tree holds
   only the current files, so history is read with git; a chapter edited after its release is a proposal in progress,
   not a broken release.
+
+Beside the rules, advice that refuses nothing (``unextended``): a chapter that extends nothing where a layer above
+shows it was meant to, by a typo or a name the layer above gave up.
 """
 
+import ast
 import json
 import subprocess
 from hashlib import sha256
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from realms.legislation.calendar import Calendar, parse_day
 from realms.legislation.codex import SUBJECT_MATTER_RULE, subject_matter_id, source_id
@@ -114,6 +118,97 @@ def chapter_problems(tree: Path, files: dict) -> List[str]:
         if name.endswith(CASES_SUFFIX)
         and name[: -len(CASES_SUFFIX)] + ".py" not in files
     ]
+
+
+# ── Advice: a chapter that extends nothing ───────────────────────────────────────────────────────────────────────
+
+
+def unextended(files, layers: List[str]) -> Dict[str, str]:
+    """Advice, never a refusal: the chapters of ``layers`` (a realm's, top to bottom, as ``files`` holds them) that
+    extend nothing where a layer above shows they were meant to, as ``{"<source>/<subject_matter>.py": why}``.
+
+    A chapter inherits by name (``class Tax(above("tax"))``) and a codex chooses its names, so a typo, or a name the
+    layer above has given up, leaves a chapter that silently inherits nothing and overrides nothing (realms-gos#735).
+    A layer that adds a subject matter of its own is common and legitimate (``eu/es`` adds ``tax``, EMSHI ``water``),
+    so a name no layer above has is not enough. It takes a name one letter away from a chapter above whose members
+    this chapter defines again (``tx.py`` with the ``compute_tax_assess`` of ``tax.py``; a ``taxi`` chapter of its own
+    is left alone), or a name that a layer above had in its newest release and has no chapter of now (it renamed or
+    dropped it).
+    """
+    advice: Dict[str, str] = {}
+    above: Dict[str, List[str]] = {}  # subject matter: the layers above with a chapter of it, top to bottom
+    given_up: Dict[str, str] = {}  # subject matter: the layer above whose newest release had it, and that release
+    for source in layers:
+        names = [name[:-3] for name in files.names(source) if name.endswith(".py")]
+        for name in names:
+            if above and name not in above:
+                why = misnamed(files, source, name, above) or given_up.get(name)
+                if why:
+                    advice[f"{source}/{name}.py"] = (
+                        f"no layer above has a {name} chapter, so this one extends nothing: {why}"
+                    )
+        for name in names:
+            above.setdefault(name, []).append(source)
+        release = newest_release(files, source)
+        for name in release["chapters"] if release else []:
+            if name not in names:
+                given_up[name] = f"{source} had one in its release {release['version']}"
+    return advice
+
+
+def misnamed(files, source: str, name: str, above: Dict[str, List[str]]) -> Optional[str]:
+    """Why the chapter ``name`` of ``source`` reads as a typo of a chapter above: one letter away, and defining again
+    members that chapter defines. None when nothing above is both."""
+    mine = members(files.text(source, f"{name}.py"))
+    for other in sorted(above):
+        if not one_letter_apart(name, other):
+            continue
+        theirs = set().union(*(members(files.text(layer, f"{other}.py")) for layer in above[other]))
+        shared = sorted(mine & theirs)
+        if shared:
+            return f"{above[other][-1]}/{other}.py, one letter away, defines {', '.join(shared)} too"
+    return None
+
+
+def members(text: str) -> set:
+    """The names the classes of a chapter define: its hooks, guards, computes, helpers and settings; none for a text
+    that does not parse, which the check refuses on its own."""
+    try:
+        module = ast.parse(text)
+    except SyntaxError:
+        return set()
+    names = set()
+    for cls in (node for node in module.body if isinstance(node, ast.ClassDef)):
+        for item in cls.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                names.add(item.name)
+            elif isinstance(item, ast.Assign):
+                names.update(target.id for target in item.targets if isinstance(target, ast.Name))
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                names.add(item.target.id)
+    return names
+
+
+def one_letter_apart(a: str, b: str) -> bool:
+    """Whether ``b`` is ``a`` with one letter added, dropped or changed, or two neighbours swapped."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) != len(b):
+        short, long = sorted((a, b), key=len)
+        return any(long[:i] + long[i + 1 :] == short for i in range(len(long)))
+    differ = [i for i in range(len(a)) if a[i] != b[i]]
+    if len(differ) == 2:
+        first, second = differ
+        return second == first + 1 and (a[first], a[second]) == (b[second], b[first])
+    return len(differ) == 1
+
+
+def newest_release(files, source: str) -> Optional[dict]:
+    """The newest release in the source's ``releases.json`` (newest last; its shape passed the layout rules), or None."""
+    if "releases.json" not in files.names(source):
+        return None
+    releases = json.loads(files.text(source, "releases.json"))
+    return releases[-1] if releases else None
 
 
 # ── The shape of each JSON file ──────────────────────────────────────────────────────────────────────────────────
