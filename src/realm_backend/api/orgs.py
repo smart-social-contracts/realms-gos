@@ -4,7 +4,7 @@ from api import members
 from core.db import Conflict, Fail, Forbidden, NotFound, deref, each, find, next_id, page, ref, view
 from ggg import Appointment, Authority, Department, Organization, Position, Proposal, Realm, User, UserProfile
 from ggg.identity.organization import KINDS
-from core.op import op
+from core.op import direct, op
 from core.pending import held, principal, principals, quoted
 from core.ratio import ONE, refuse_renamed
 from api.proposals import BASES, PENDING, holders, launched, realm_wide, root
@@ -258,20 +258,42 @@ def position_close(c, args):
     pos.status = "closed"
 
 
+def seats_to_decide(department):
+    """The fewest seat holders who can pass a vote of ``department`` under its own policy (proposals.default_rule): the
+    m approvals of its m of n, or, where it counts the votes cast, its quorum of the n seats, and at least one."""
+    p = department.policy or {}
+    if p.get("threshold_of") == "cast":
+        return max(1, -(-int(p.get("quorum", 0)) * int(p.get("n", 1)) // ONE))
+    return int(p.get("m", 1))
+
+
+def appointing(args):
+    """The department that decides an appointment to department seat ``position``: its own, unless it decides by a vote
+    it has too few seat holders to pass, as a department seeded with an m of n policy and no one in it does. Then the
+    department above it decides, and so on up to the root. That department could already appoint there by a proposal of
+    its own (check_scope), so no one gains a power: only where the call goes changes, and only until enough seats are
+    filled for the department to decide for itself."""
+    d = dept_seat(args).department
+    while not d.is_root and not direct(d) and len(holders(d)) < seats_to_decide(d):
+        d = d.parent or root()
+    return d
+
+
 def appoint_as(args, kind):
     if not args.get("agent") and not User[args["user"]]:
         raise NotFound(f"{args['user']} is not a user of this realm")
     return fill(dept_seat(args), args["user"], kind, args.get("agent", False), args.get("supervisor", ""))
 
 
-@op("org.appoint", governed=lambda a: dept_seat(a).department, returns="appointment")
+@op("org.appoint", governed=appointing, returns="appointment")
 def appoint(c, args):
     """Seat ``user`` (a user of the realm, unless an agent) in department seat ``position``; ``agent`` true (default
-    false) needs a ``supervisor`` holding a non-agent seat in the same department. Returns ``appointment``."""
+    false) needs a ``supervisor`` holding a non-agent seat in the same department. The department decides, or the one
+    above it while it has too few seat holders to pass its own vote (see appointing). Returns ``appointment``."""
     return appoint_as(args, "substantive")
 
 
-@op("org.appoint", governed=lambda a: dept_seat(a).department, returns="appointment")
+@op("org.appoint", governed=appointing, returns="appointment")
 def appoint_acting(c, args):
     """Like appoint, but as an acting holder: ``user`` in ``position``, with ``agent`` and ``supervisor`` as there.
     Returns ``appointment``."""
