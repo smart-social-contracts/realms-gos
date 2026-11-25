@@ -302,7 +302,7 @@ def test_a_cv_installs_the_eus_and_spains_releases_from_the_stand_in_record_then
                                   "name": "Spain"})
     install_layer(net, site, cv, newest(EU))
     install_layer(net, site, cv, newest(SPAIN))
-    install_own(net, site, cv, own_layer_files(CV, ["language", "local_regime"]))
+    install_own(net, site, cv, own_layer_files(CV, ["education", "language", "local_regime"]))
     assert layers_of(cv) == [EU, SPAIN, CV]
     cv.govern("legislation_release_publish", publication(newest(CV)))
     assert released(cv) == in_tree(EU, SPAIN, CV)  # what it relays, then its own
@@ -330,7 +330,7 @@ def test_c_valencia_takes_the_layers_from_cv_and_emshi_and_installs_its_own_on_t
     codex = status(valencia)["codex"]
     assert codex["layers"] == [EU, SPAIN, CV, EMSHI, VALENCIA]
     assert codex["layer_paths"] == {  # §3.3: València has no chapter in tax or water of its own yet, and EMSHI writes water
-        "data_protection": [EU, SPAIN, VALENCIA], "language": [SPAIN, CV], "register": [SPAIN],
+        "data_protection": [EU, SPAIN, VALENCIA], "education": [CV], "language": [SPAIN, CV], "register": [SPAIN],
         "local_regime": [SPAIN, CV, VALENCIA], "procedure": [SPAIN, VALENCIA], "tax": [SPAIN], "water": [EMSHI]}
     routes = {c: v["route"] for c, v in codex["chapters"].items() if v["source"] != VALENCIA}
     assert set(routes.values()) == {"capital"}  # the capitals serve every chapter by checksum, ahead of the URLs

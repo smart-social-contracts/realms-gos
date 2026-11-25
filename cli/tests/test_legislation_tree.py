@@ -94,6 +94,7 @@ def test_valencias_layer_paths_are_what_its_sync_sources_relay_then_its_own_laye
 ):
     assert valencia.plan.paths == {
         "data_protection": ["eu", "eu/es", VALENCIA],
+        "education": ["eu/es/vc"],
         "language": ["eu/es", "eu/es/vc"],
         "local_regime": ["eu/es", "eu/es/vc", VALENCIA],
         "procedure": ["eu/es", VALENCIA],
