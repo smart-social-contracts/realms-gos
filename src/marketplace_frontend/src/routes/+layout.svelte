@@ -8,7 +8,7 @@ import "../index.scss";
 import { bootstrapAuth, isAuthenticated, login, logout, principalStore } from "$lib/auth";
 import { invalidateActor, marketplace } from "$lib/canisters";
 import { shortPrincipal } from "$lib/format";
-import { resolveCasalsUrlLive } from "$lib/config";
+import { CONFIG, resolveCasalsUrlLive } from "$lib/config";
 import { CONTACT_EMAIL, CONTACT_MAILTO } from "$lib/contact";
 
 let casalsUrl = "";
@@ -146,6 +146,12 @@ $: routeIsActive = (path) => {
     </form>
 
     <nav class="actions" aria-label="Account and tools">
+      {#if CONFIG.forum_url}
+        <a class="icon-btn" href={CONFIG.forum_url} aria-label={$_('nav.forum')} title={$_('nav.forum')}>
+          <i class="ti ti-messages" aria-hidden="true"></i>
+        </a>
+      {/if}
+
       {#if isController}
         <a class="icon-btn" href="/admin" class:active={routeIsActive('/admin')} aria-label={$_('nav.admin')} title={$_('nav.admin')}>
           <i class="ti ti-shield-lock" aria-hidden="true"></i>

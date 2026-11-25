@@ -37,6 +37,24 @@
     }
   },
   {
+    // GET /.well-known/ii-alternative-origins — the origins that may sign in
+    // with derivationOrigin https://realmsgos.org and so get the same principal
+    // as here. II refuses an origin that is not listed ("Unverified origin").
+    // II reads it cross-origin, so it needs CORS; placed after `.well-known/*`
+    // so the JSON content-type wins.
+    // Slots: II accepts at most 10 origins. 2 of 10 used:
+    //   https://forum.realmsgos.org — the community forum (ic-community-forum)
+    //   https://gos.earth           — the realms portal, where realm members sign in
+    //                                 (gos-as-a-service; it must pin this derivation
+    //                                 origin too, or listing it changes nothing)
+    "match": ".well-known/ii-alternative-origins",
+    "ignore": false,
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    }
+  },
+  {
     "match": "logo.png",
     "headers": {
       "Access-Control-Allow-Origin": "*"

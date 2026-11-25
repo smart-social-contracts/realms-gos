@@ -11,7 +11,8 @@
     "admin": "管理",
     "sign_in": "登录",
     "sign_out": "退出登录",
-    "about": "关于"
+    "about": "关于",
+    "forum": "论坛"
   },
   "footer": {
     "open_source": "Realms 市场 · 开源",

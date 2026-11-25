@@ -98,6 +98,23 @@ test.describe('marketplace_frontend smoke', () => {
     await expect(footerCard).toHaveCSS('border-left-width', '0px');
   });
 
+  test('nav links the forum only when /canister_ids.js names one', async ({ page }) => {
+    const nav = page.locator('nav.actions');
+
+    await page.goto('/about');
+    await expect(nav.getByRole('button', { name: 'Sign in' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Forum' })).toHaveCount(0);
+
+    await page.route('**/canister_ids.js', (route) =>
+      route.fulfill({
+        contentType: 'application/javascript',
+        body: 'globalThis.__CANISTER_IDS = {"forum_url": "https://forum.realmsgos.org"};',
+      })
+    );
+    await page.goto('/about');
+    await expect(nav.getByRole('link', { name: 'Forum' })).toHaveAttribute('href', 'https://forum.realmsgos.org');
+  });
+
   test('extensions page renders search input, sort dropdown, and verified-only filter', async ({ page }) => {
     await page.goto('/extensions');
     await expect(page.getByRole('heading', { name: 'Extensions' })).toBeVisible();

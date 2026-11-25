@@ -11,7 +11,8 @@
     "admin": "Admin",
     "sign_in": "Sign in",
     "sign_out": "Sign out",
-    "about": "About"
+    "about": "About",
+    "forum": "Forum"
   },
   "footer": {
     "open_source": "Realms Marketplace · open source",
