@@ -71,7 +71,8 @@ jobs:
           path: coverage-ggg.xml
       - name: tests/backend
         # Source scans and contracts of the extensions, codices, build variants and the marketplace
-        # (the realm backend and the marketplace both pin ic-python-db 0.14.0).
+        # (all in the realm's environment: the marketplace pins its own ic-python-db and ic-basilisk, which these do
+        # not run on).
         run: pytest -q tests/backend
       - name: The Cedar template the realm backend is packed with
         # Its pinned sha256 is the only check the template gets (realms-gos#793). The rest of
