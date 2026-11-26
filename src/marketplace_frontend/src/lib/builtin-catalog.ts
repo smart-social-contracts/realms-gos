@@ -220,7 +220,7 @@ export const builtinCodices: CodexListing[] = [
   codex(
     'agora', 'agora',
     'Agora',
-    'A direct democracy funded by monthly membership dues. Citizens verify identity via ZK passport, pay monthly bills, submit and vote on proposals, with real-time double-entry accounting.',
+    'A migration codex for an existing public administration moving its IT to Realms GOS. The population already exists, so citizens join by registration code or bulk import; once live, the realm runs direct democracy, justice, procurement, welfare and real-time double-entry accounting.',
     '1.0.0', '🏛️', 'governance',
     'agora',
   ),
