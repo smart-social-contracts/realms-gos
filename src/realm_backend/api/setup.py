@@ -8,7 +8,7 @@ from api import tasks
 from core.db import CONVERT_IDS, PAGE_MAX, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
 from api.extensions import trust
 from ggg import Calendar, Department, Event, Fund, Member, Realm, Registry, Treasury, User, UserProfile
-from ic_python_db import Entity
+from ic_python_db import Database, Entity
 from api import codex, installs
 from core.op import call, op, ops
 from core.pending import quoted, without_secrets
@@ -80,6 +80,27 @@ ops = _Ops()
 def main():
     return (%s)
 """
+
+
+# The realms the releases built, v0.1.1 to v0.8.0-rc3, run the realm backend this one replaced (legacy/realm_backend),
+# over the same stable memory but with other fields, types and versions, so nothing here can read their rows or convert
+# them: they are end of life (docs/deployment/README.md, "Realms of the releases up to v0.8.0-rc3"). Every build of this
+# backend writes its Realm row at install, with an ``id`` field (its alias, "1"). The releases tell themselves apart by
+# lacking it: from v0.3.5 this backend reads their Realm row, which has no ``id``; before, it reads none of their rows,
+# so it finds no Realm row at all, and would otherwise start a new realm over theirs.
+RELEASE_REALM = (
+    "Upgrade refused, and nothing was changed: the realm keeps the release it runs and all of its data. It holds no "
+    "realm of this backend: a realm of a release tagged v0.8.0-rc3 or earlier cannot be upgraded to this release, "
+    "which replaced their data model. See \"Realms of the releases up to v0.8.0-rc3\" in docs/deployment/README.md of "
+    "smart-social-contracts/realms-gos.")
+
+
+def refuse_release_realm():
+    """Trap the upgrade of a canister that holds no realm of this backend, before anything reads its rows: the replica
+    rolls the upgrade back, and the canister keeps its wasm and its memory. ``post_upgrade`` calls it first."""
+    stored = Database.get_instance().load("Realm", "1")  # the raw row: no migrate() runs on it
+    if stored is None or "id" not in stored:
+        chain.trap(RELEASE_REALM)
 
 
 def start(installer=""):
