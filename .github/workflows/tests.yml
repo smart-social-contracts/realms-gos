@@ -1,8 +1,8 @@
 # tests.yml — the unit gate: no canister, no replica, no secrets.
 #
 # Runs on every pull request to main or a feat/** branch, and on every push to main or
-# feat/layered-codex. It is the one place the unit suites run: tests/ggg, tests/backend, the layered
-# codex library, the sandbox ratchet and the GGG checks. ci-pr.yml (on pull requests too) and
+# feat/layered-codex. It is the one place the unit suites run: tests/ggg, tests/backend, tests/scripts,
+# the layered codex library, the sandbox ratchet and the GGG checks. ci-pr.yml (on pull requests too) and
 # ci-main.yml (by hand only) keep what the full mundus bring-up needs: lint, the packed wasms, e2e,
 # the frontend and the CLI.
 
@@ -74,10 +74,12 @@ jobs:
         # (all in the realm's environment: the marketplace pins its own ic-python-db and ic-basilisk, which these do
         # not run on).
         run: pytest -q tests/backend
-      - name: The Cedar template the realm backend is packed with
-        # Its pinned sha256 is the only check the template gets (realms-gos#793). The rest of
-        # tests/scripts is stale and does not run yet (realms-gos#797).
-        run: pytest -q tests/scripts/test_basilisk_cedar_template.py
+      - name: tests/scripts
+        # The build and publish scripts: the Cedar template's pinned sha256 (the only check the
+        # template gets, realms-gos#793), the methods a packed realm must export, and where the
+        # publish scripts find the extensions. The whole directory, so that a new file in it runs
+        # too: until 26 Nov nothing ran it, and it had been failing unseen for a month (realms-gos#797).
+        run: pytest -q tests/scripts
       # The pinned Cedar CLI 4.14.1 (experimental, with symcc) and cvc5 1.3.1 prove that every
       # generated forbid never errors (docs/codices/layered-codex.md §6 rule 9); the library's tests
       # below need them, and cedarpy 4.12 (the canister's Cedar line) for validation and decisions.
