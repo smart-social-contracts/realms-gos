@@ -1,5 +1,6 @@
 {
  "AllocationRule": {
+  "alias": "id",
   "fields": {
    "id": {
     "has_default": false,
@@ -35,6 +36,7 @@
   "version": 2
  },
  "Appeal": {
+  "alias": "id",
   "fields": {
    "appellant": {
     "default": "",
@@ -98,6 +100,7 @@
   "version": 1
  },
  "Appointment": {
+  "alias": "id",
   "fields": {
    "agent": {
     "default": false,
@@ -157,6 +160,7 @@
   "version": 1
  },
  "Attribute": {
+  "alias": "id",
   "fields": {
    "expires_at": {
     "default": 0,
@@ -208,6 +212,7 @@
   "version": 1
  },
  "Authority": {
+  "alias": "id",
   "fields": {
    "id": {
     "has_default": false,
@@ -240,6 +245,7 @@
   "version": 1
  },
  "Bid": {
+  "alias": "id",
   "fields": {
    "id": {
     "has_default": false,
@@ -308,6 +314,7 @@
   "version": 1
  },
  "BidScore": {
+  "alias": "id",
   "fields": {
    "criterion": {
     "default": "",
@@ -347,6 +354,7 @@
   "version": 1
  },
  "Budget": {
+  "alias": "id",
   "fields": {
    "actual": {
     "default": 0,
@@ -419,6 +427,7 @@
   "version": 2
  },
  "Calendar": {
+  "alias": "id",
   "fields": {
    "benefit_cycle": {
     "default": 2592000,
@@ -481,6 +490,7 @@
   "version": 1
  },
  "Call": {
+  "alias": null,
   "fields": {
    "is_async": {
     "has_default": false,
@@ -507,6 +517,7 @@
   "version": 1
  },
  "Case": {
+  "alias": "id",
   "fields": {
    "closed_at": {
     "default": 0,
@@ -599,6 +610,7 @@
   "version": 1
  },
  "ChapterSource": {
+  "alias": "sha256",
   "fields": {
    "sha256": {
     "has_default": false,
@@ -615,6 +627,7 @@
   "version": 1
  },
  "Codex": {
+  "alias": "name",
   "fields": {
    "checksum": {
     "has_default": false,
@@ -644,6 +657,7 @@
   "version": 1
  },
  "Contract": {
+  "alias": "id",
   "fields": {
    "ends_at": {
     "default": 0,
@@ -762,6 +776,7 @@
   "version": 2
  },
  "ContractAmendment": {
+  "alias": "id",
   "fields": {
    "after": {
     "constraints": {
@@ -804,6 +819,7 @@
   "version": 1
  },
  "Court": {
+  "alias": "id",
   "fields": {
    "id": {
     "has_default": false,
@@ -881,6 +897,7 @@
   "version": 1
  },
  "Delegation": {
+  "alias": "id",
   "fields": {
    "accepted_at": {
     "default": 0,
@@ -975,6 +992,7 @@
   "version": 1
  },
  "DelegationRequest": {
+  "alias": "id",
   "fields": {
    "delegate": {
     "has_default": false,
@@ -1029,6 +1047,7 @@
   "version": 1
  },
  "Department": {
+  "alias": "id",
   "fields": {
    "description": {
     "default": "",
@@ -1150,6 +1169,7 @@
   "version": 2
  },
  "Dispatch": {
+  "alias": "id",
   "fields": {
    "body": {
     "constraints": {
@@ -1219,6 +1239,7 @@
   "version": 1
  },
  "Dispute": {
+  "alias": "id",
   "fields": {
    "case": {
     "default": "",
@@ -1265,6 +1286,7 @@
   "version": 1
  },
  "Document": {
+  "alias": "id",
   "fields": {
    "at": {
     "default": 0,
@@ -1343,6 +1365,7 @@
   "version": 1
  },
  "Event": {
+  "alias": "id",
   "fields": {
    "args": {
     "constraints": {
@@ -1406,6 +1429,7 @@
   "version": 1
  },
  "Extension": {
+  "alias": "id",
   "fields": {
    "access": {
     "constraints": {
@@ -1464,6 +1488,7 @@
   "version": 1
  },
  "External": {
+  "alias": "id",
   "fields": {
    "channel": {
     "default": "manual",
@@ -1490,6 +1515,7 @@
   "version": 1
  },
  "FXPair": {
+  "alias": "name",
   "fields": {
    "base_class": {
     "constraints": {
@@ -1559,6 +1585,7 @@
   "version": 1
  },
  "FederalVote": {
+  "alias": "id",
   "fields": {
    "action": {
     "constraints": {
@@ -1623,6 +1650,7 @@
   "version": 2
  },
  "FederalVoteLeg": {
+  "alias": "id",
   "fields": {
    "abstain": {
     "default": 0,
@@ -1697,6 +1725,7 @@
   "version": 1
  },
  "FederationMessage": {
+  "alias": "id",
   "fields": {
    "body": {
     "constraints": {
@@ -1744,6 +1773,7 @@
   "version": 1
  },
  "FinancialReport": {
+  "alias": "id",
   "fields": {
    "as_of": {
     "default": 0,
@@ -1796,6 +1826,7 @@
   "version": 1
  },
  "FiscalPeriod": {
+  "alias": "id",
   "fields": {
    "ends_at": {
     "default": 0,
@@ -1862,6 +1893,7 @@
   "version": 1
  },
  "Follower": {
+  "alias": "id",
   "fields": {
    "checking": {
     "default": false,
@@ -1921,6 +1953,7 @@
   "version": 1
  },
  "Forward": {
+  "alias": "id",
   "fields": {
    "codex": {
     "default": "",
@@ -1967,6 +2000,7 @@
   "version": 1
  },
  "FoundRelease": {
+  "alias": "id",
   "fields": {
    "effective_from": {
     "default": 0,
@@ -2016,6 +2050,7 @@
   "version": 1
  },
  "Fund": {
+  "alias": "id",
   "fields": {
    "allocation_rule": {
     "default": "",
@@ -2072,6 +2107,7 @@
   "version": 1
  },
  "GuestUser": {
+  "alias": "id",
   "fields": {
    "home_quarter": {
     "default": "",
@@ -2096,6 +2132,7 @@
   "version": 1
  },
  "Human": {
+  "alias": "id",
   "fields": {
    "date_of_birth": {
     "default": "",
@@ -2130,6 +2167,7 @@
   "version": 1
  },
  "Identity": {
+  "alias": "id",
   "fields": {
    "category": {
     "default": "",
@@ -2184,6 +2222,7 @@
   "version": 1
  },
  "InstallJob": {
+  "alias": "id",
   "fields": {
    "change_list": {
     "constraints": {
@@ -2241,6 +2280,7 @@
   "version": 1
  },
  "Invite": {
+  "alias": "id",
   "fields": {
    "created_by": {
     "default": "",
@@ -2300,6 +2340,7 @@
   "version": 1
  },
  "Invoice": {
+  "alias": "id",
   "fields": {
    "amount": {
     "default": 0,
@@ -2386,6 +2427,7 @@
   "version": 2
  },
  "JournalEntry": {
+  "alias": "id",
   "fields": {
    "at": {
     "default": 0,
@@ -2420,6 +2462,7 @@
   "version": 1
  },
  "Judge": {
+  "alias": "id",
   "fields": {
    "appointed_at": {
     "default": 0,
@@ -2475,6 +2518,7 @@
   "version": 1
  },
  "KeyEnvelope": {
+  "alias": "id",
   "fields": {
    "at": {
     "default": 0,
@@ -2511,6 +2555,7 @@
   "version": 1
  },
  "Land": {
+  "alias": "id",
   "fields": {
    "area": {
     "has_default": false,
@@ -2617,6 +2662,7 @@
   "version": 2
  },
  "LayeredCodex": {
+  "alias": "id",
   "fields": {
    "activates_at": {
     "default": 0,
@@ -2702,6 +2748,7 @@
   "version": 2
  },
  "LedgerEntry": {
+  "alias": "id",
   "fields": {
    "at": {
     "default": 0,
@@ -2829,6 +2876,7 @@
   "version": 1
  },
  "License": {
+  "alias": "id",
   "fields": {
    "applied_at": {
     "default": 0,
@@ -2901,6 +2949,7 @@
   "version": 1
  },
  "Loan": {
+  "alias": "id",
   "fields": {
    "amount": {
     "default": 0,
@@ -2963,6 +3012,7 @@
   "version": 1
  },
  "Mandate": {
+  "alias": "id",
   "fields": {
    "expires_at": {
     "default": 0,
@@ -3017,6 +3067,7 @@
   "version": 1
  },
  "Member": {
+  "alias": "id",
   "fields": {
    "id": {
     "has_default": false,
@@ -3038,6 +3089,7 @@
   "version": 1
  },
  "NFTToken": {
+  "alias": "id",
   "fields": {
    "canister": {
     "default": "",
@@ -3084,6 +3136,7 @@
   "version": 1
  },
  "Notification": {
+  "alias": "id",
   "fields": {
    "at": {
     "default": 0,
@@ -3152,6 +3205,7 @@
   "version": 2
  },
  "Organization": {
+  "alias": "id",
   "fields": {
    "admins": {
     "constraints": {
@@ -3208,6 +3262,7 @@
   "version": 1
  },
  "PaymentAccount": {
+  "alias": "id",
   "fields": {
    "address": {
     "default": "",
@@ -3249,6 +3304,7 @@
   "version": 1
  },
  "Penalty": {
+  "alias": "id",
   "fields": {
    "amount": {
     "default": 0,
@@ -3315,6 +3371,7 @@
   "version": 1
  },
  "PendingAction": {
+  "alias": "id",
   "fields": {
    "args": {
     "constraints": {
@@ -3410,6 +3467,7 @@
   "version": 1
  },
  "Permission": {
+  "alias": "id",
   "fields": {
    "category": {
     "default": "",
@@ -3464,6 +3522,7 @@
   "version": 1
  },
  "Position": {
+  "alias": "id",
   "fields": {
    "headcount": {
     "default": 1,
@@ -3534,6 +3593,7 @@
   "version": 1
  },
  "Procedure": {
+  "alias": "id",
   "fields": {
    "decision_deadline": {
     "constraints": {
@@ -3581,6 +3641,7 @@
   "version": 1
  },
  "Proposal": {
+  "alias": "id",
   "fields": {
    "action": {
     "constraints": {
@@ -3746,6 +3807,7 @@
   "version": 4
  },
  "ProposalEdge": {
+  "alias": "id",
   "fields": {
    "id": {
     "has_default": false,
@@ -3772,6 +3834,7 @@
   "version": 1
  },
  "Quarter": {
+  "alias": "id",
   "fields": {
    "codex_id": {
     "default": "",
@@ -3841,6 +3904,7 @@
   "version": 1
  },
  "Realm": {
+  "alias": "id",
   "fields": {
    "accounting_currency": {
     "default": "",
@@ -4120,6 +4184,7 @@
   "version": 2
  },
  "Registry": {
+  "alias": "id",
   "fields": {
    "description": {
     "default": "",
@@ -4141,6 +4206,7 @@
   "version": 1
  },
  "Release": {
+  "alias": "id",
   "fields": {
    "calendar": {
     "default": "",
@@ -4208,6 +4274,7 @@
   "version": 1
  },
  "Request": {
+  "alias": "id",
   "fields": {
    "body": {
     "constraints": {
@@ -4272,11 +4339,13 @@
   "version": 1
  },
  "Row": {
+  "alias": null,
   "fields": {},
   "relationships": {},
   "version": 1
  },
  "SignedDocument": {
+  "alias": "id",
   "fields": {
    "canonical": {
     "default": "",
@@ -4321,6 +4390,7 @@
   "version": 1
  },
  "SourceRecord": {
+  "alias": "id",
   "fields": {
    "checked_at": {
     "default": 0,
@@ -4350,6 +4420,7 @@
   "version": 1
  },
  "Sweep": {
+  "alias": "id",
   "fields": {
    "amount": {
     "default": 0,
@@ -4442,6 +4513,7 @@
   "version": 1
  },
  "SyncChange": {
+  "alias": "id",
   "fields": {
    "at": {
     "default": 0,
@@ -4478,6 +4550,7 @@
   "version": 1
  },
  "SyncSource": {
+  "alias": "id",
   "fields": {
    "check_error": {
     "default": "",
@@ -4560,6 +4633,7 @@
   "version": 1
  },
  "Task": {
+  "alias": "name",
   "fields": {
    "metadata": {
     "constraints": {
@@ -4617,6 +4691,7 @@
   "version": 1
  },
  "TaskExecution": {
+  "alias": "name",
   "fields": {
    "completed_at": {
     "default": 0,
@@ -4665,6 +4740,7 @@
   "version": 1
  },
  "TaskSchedule": {
+  "alias": "name",
   "fields": {
    "disabled": {
     "has_default": false,
@@ -4707,6 +4783,7 @@
   "version": 1
  },
  "TaskStep": {
+  "alias": null,
   "fields": {
    "run_next_after": {
     "default": 0,
@@ -4746,6 +4823,7 @@
   "version": 1
  },
  "TaxDeclaration": {
+  "alias": "id",
   "fields": {
    "amount": {
     "default": 0,
@@ -4792,6 +4870,7 @@
   "version": 1
  },
  "TaxPolicy": {
+  "alias": "id",
   "fields": {
    "adopted_at": {
     "default": 0,
@@ -4840,6 +4919,7 @@
   "version": 3
  },
  "Tender": {
+  "alias": "id",
   "fields": {
    "closes_at": {
     "default": 0,
@@ -4941,6 +5021,7 @@
   "version": 4
  },
  "Token": {
+  "alias": "name",
   "fields": {
    "decimals": {
     "default": 8,
@@ -5003,6 +5084,7 @@
   "version": 1
  },
  "Trade": {
+  "alias": "id",
   "fields": {
    "id": {
     "has_default": false,
@@ -5037,6 +5119,7 @@
   "version": 1
  },
  "Transfer": {
+  "alias": "id",
   "fields": {
    "amount": {
     "default": 0,
@@ -5129,6 +5212,7 @@
   "version": 2
  },
  "Treasury": {
+  "alias": "id",
   "fields": {
    "config": {
     "constraints": {
@@ -5166,6 +5250,7 @@
   "version": 1
  },
  "User": {
+  "alias": "id",
   "fields": {
    "avatar": {
     "default": "",
@@ -5226,6 +5311,7 @@
   "version": 1
  },
  "UserProfile": {
+  "alias": "id",
   "fields": {
    "allowed_to": {
     "constraints": {
@@ -5276,6 +5362,7 @@
   "version": 1
  },
  "Verdict": {
+  "alias": "id",
   "fields": {
    "contract": {
     "default": "",
@@ -5334,6 +5421,7 @@
   "version": 1
  },
  "Vote": {
+  "alias": "id",
   "fields": {
    "cast_at": {
     "default": 0,
@@ -5378,6 +5466,7 @@
   "version": 1
  },
  "WalletBalance": {
+  "alias": null,
   "fields": {
    "amount": {
     "default": 0,
@@ -5405,6 +5494,7 @@
   "version": 1
  },
  "WalletSubaccount": {
+  "alias": "label",
   "fields": {
    "balance": {
     "default": 0,
@@ -5440,6 +5530,7 @@
   "version": 1
  },
  "WalletTransfer": {
+  "alias": null,
   "fields": {
    "amount": {
     "default": 0,
@@ -5501,6 +5592,7 @@
   "version": 1
  },
  "Zone": {
+  "alias": "id",
   "fields": {
    "defined": {
     "default": false,

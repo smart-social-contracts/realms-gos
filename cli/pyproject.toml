@@ -33,7 +33,9 @@ dependencies = [
     "requests>=2.28.0",
     "click>=8.0.0",
     "prompt-toolkit>=3.0.0",
-    "ic-basilisk-toolkit",
+    # Exact, as requirements.txt: the CLI packs realm backends, which bundle these
+    "ic-basilisk-toolkit==0.6.1",
+    "ic-python-db==0.17.0",
     "pyyaml>=6.0",
 ]
 
