@@ -1,2 +1,4 @@
-ic-basilisk-toolkit
+# Pinned: a release bundles the toolkit into the realm wasm, so it moves only by a PR CI tests, never by what PyPI
+# holds on the day of a cut (as the extensions pin, #779).
+ic-basilisk-toolkit==0.5.4
 setuptools<71

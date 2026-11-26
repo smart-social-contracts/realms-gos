@@ -1,6 +1,6 @@
 ic-basilisk==0.15.1
     # via ic-basilisk-toolkit
-ic-basilisk-toolkit>=0.5.3
+ic-basilisk-toolkit==0.5.4
     # via -r realms/requirements.in
 ic-python-db==0.14.0
     # via ic-basilisk-toolkit
