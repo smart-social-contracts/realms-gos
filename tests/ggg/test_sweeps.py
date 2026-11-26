@@ -8,7 +8,7 @@ from api import quarters, sweeps, treasury
 from ggg import FiscalPeriod, LedgerEntry, Quarter, Realm, Sweep
 from kit import call, direct, fire_timers, later, ok
 from test_quarters import CAPITAL
-from test_treasury import LEDGER, finish, ledger_ok, receive, setup_finance, start, suspended
+from test_treasury import LEDGER, finish, ledger_ok, payouts, receive, setup_finance, start, suspended
 
 RULE = {"fund": "ROOT", "symbol": "REALM", "into": "ROADS", "keep": 100}
 TO = {"owner": CAPITAL, "subaccount": None}
@@ -25,8 +25,9 @@ def timer_not_armed():
 
 
 def transfers():
-    """The arguments of every transfer the quarter sent to the ledger."""
-    return [c[2] for c in fake_chain.state["calls"] if c[:2] == ICRC1]
+    """The arguments of every sweep the quarter sent to the ledger: the transfers from its main account, since a payment's
+    collection leaves the invoice's (treasury.collect)."""
+    return [c[2] for c in payouts() if c[:2] == ICRC1]
 
 
 def held():
@@ -216,8 +217,8 @@ def test_a_capital_that_does_not_answer_leaves_the_sweep_sent_and_the_quarter_re
     assert held() == 100  # the quarter booked it: the money is on the capital's account
 
     capital.answer("quarter_sweep_report", {"ok": True})
-    (again,) = sweep_now()
-    assert again is s and s.status == "booked"
+    (again,) = sweep_now()  # a new message: the sweep it touched is the same row, never the same instance
+    assert again.id == s.id and Sweep[s.id].status == "booked"
     assert len(transfers()) == 1 and LedgerEntry.count() > 0
     assert len([e for e in LedgerEntry.load_some(1, LedgerEntry.max_id()) if e.sweep]) == 3  # booked once
 
@@ -244,7 +245,7 @@ def test_a_ledger_that_does_not_answer_gets_the_same_transfer_again_and_a_duplic
     later(3_600)
     fake_chain.state["replies"][ICRC1] = DUPLICATE  # the ledger applied the first one
     assert [x.status for x in sweep_now()] == ["booked"]
-    assert (s.block, held()) == ("77", 100)
+    assert (Sweep[s.id].block, held()) == ("77", 100)
     first, second = transfers()
     assert first == second
 
@@ -262,7 +263,7 @@ def test_a_sweep_still_unknown_after_23_hours_is_never_sent_again_until_a_person
     assert len(transfers()) == 1
 
     out = ok("sweep_resolve", "ctl", sweep=s.id, block=90_877)
-    assert out["status"] == "sent" and (s.block, held()) == ("90877", 100)
+    assert out["status"] == "sent" and (Sweep[s.id].block, held()) == ("90877", 100)
     assert [x.status for x in sweep_now()] == ["booked"]  # reported at the next sweep
     assert len(transfers()) == 1
 

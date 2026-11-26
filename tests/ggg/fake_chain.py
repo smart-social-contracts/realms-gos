@@ -3,10 +3,14 @@
 Calls to other canisters are answered by a scripted peer (``peer``), or, for a canister that is not one, by
 ``state["replies"]``, a fixed reply per ``(canister, method)``. HTTPS outcalls are answered from ``state["web"]``
 (``serve``); a URL nobody serves is a 404.
+
+Each of these ends the realm's message, as it does in a canister (``end_message``).
 """
 
 import json
 from collections import namedtuple
+
+from ic_python_db import Database
 
 from core import surrogates
 
@@ -138,16 +142,27 @@ def peer(cid, **replies):
     return state["peers"][cid]
 
 
+def end_message():
+    """In a canister the code after an inter-canister call or an HTTPS outcall, answered or rejected, runs in a new
+    message, and ic-python-db empties its identity map when a new message starts. A row read before the call is then
+    no longer the instance a load returns after it, and writing it puts back every field it read. Outside a canister
+    nothing empties the map, so each await point here does, or the tests cannot see a handler that writes a stale row."""
+    Database.get_instance().clear_registry()
+
+
 def send(cid, method, recorded, given, default):
-    """One call to another canister. ``recorded`` is what ``state["calls"]`` keeps and ``given`` what a peer is
-    handed; a canister that is no peer answers with ``state["replies"]``, or ``default``."""
+    """One call to another canister, which ends the message. ``recorded`` is what ``state["calls"]`` keeps and
+    ``given`` what a peer is handed; a canister that is no peer answers with ``state["replies"]``, or ``default``."""
     state["calls"].append((cid, method, recorded))
-    if cid in state["peers"]:
-        return state["peers"][cid].receive(method, given)
-    reply = state["replies"].get((cid, method), default)
-    if isinstance(reply, Exception):
-        raise reply
-    return reply
+    try:
+        if cid in state["peers"]:
+            return state["peers"][cid].receive(method, given)
+        reply = state["replies"].get((cid, method), default)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+    finally:
+        end_message()
 
 
 def call(cid, method, candid="()", cycles=0):
@@ -169,18 +184,21 @@ def replied(reply, cid, method):
 
 
 def own_hook_effects(effects):
-    """The realm's own ``hook_effects`` (main.py), called by the realm: a trap in it, which ends only that message,
-    is the reject its caller sees, as ``Peer`` makes of a peer's."""
+    """The realm's own ``hook_effects`` (main.py), called by the realm: a message of its own, between the caller's
+    message that calls it and the one that resumes after it. A trap in it, which ends only that message, is the reject
+    its caller sees, as ``Peer`` makes of a peer's."""
     from core import legislation
 
     state["calls"].append((SELF, "hook_effects", effects))
     caller, state["caller"] = state["caller"], SELF
+    end_message()
     try:
         return (yield from legislation.hook_effects(effects))
     except Trap as t:
         raise Exception(f"hook_effects on {SELF} failed: Canister {SELF} trapped explicitly: {t}")
     finally:
         state["caller"] = caller
+        end_message()
 
 
 def call_op(cid, name, args):
@@ -198,8 +216,10 @@ def serve(url, body, status=200):
 
 
 def http_get(url, max_bytes):
-    """An HTTPS outcall, answered from ``serve``; recorded in ``state["calls"]`` as ``("https", url, max_bytes)``."""
+    """An HTTPS outcall, answered from ``serve``, which ends the message; recorded in ``state["calls"]`` as
+    ``("https", url, max_bytes)``."""
     state["calls"].append(("https", url, max_bytes))
+    end_message()
     answer = state["web"].get(url, (404, b"not found"))
     if isinstance(answer, Failure):
         raise Exception(f"GET {url} failed: {answer.message}")

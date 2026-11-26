@@ -99,3 +99,32 @@ def test_a_canister_that_is_no_peer_still_answers_from_the_fixed_replies():
     peer("other", ping="pong")
     assert op.run(fake_chain.call("ledger", "icrc1_balance_of")) == "(5 : nat)"
     assert op.run(fake_chain.call("ledger", "unscripted")) == "()"
+
+
+def rejected(cid, method):
+    fake_chain.state["replies"][(cid, method)] = Exception(f"{method} on {cid} failed: no answer")
+    return fake_chain.call(cid, method)
+
+
+@pytest.mark.parametrize("await_point", [
+    lambda: fake_chain.call("elsewhere", "ping"),
+    lambda: rejected("elsewhere", "ping"),
+    lambda: fake_chain.call_text("elsewhere", "ping", "x"),
+    lambda: fake_chain.call_op("elsewhere", "ping", {}),
+    lambda: fake_chain.http_get("https://nobody.example.test/", 100),
+    lambda: fake_chain.call_text(fake_chain.SELF, "hook_effects", "[]"),
+], ids=["call", "rejected call", "call_text", "call_op", "http_get", "own hook_effects"])
+def test_every_await_point_ends_the_message_as_in_a_canister(await_point):
+    """The code after a call runs in a new message, which ic-python-db starts with an empty identity map: a row read
+    before the call is no longer the instance a load returns after it (realms-gos#760)."""
+    Quarter(id="north")
+
+    def held_across():
+        before = Quarter["north"]
+        try:
+            yield from await_point()
+        except Exception:  # noqa: BLE001  a rejected call ends the message too
+            pass
+        return Quarter["north"] is before
+
+    assert op.run(held_across()) is False

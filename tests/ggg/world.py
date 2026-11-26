@@ -63,7 +63,6 @@ def build():
     Organization(id="buildco", description="BuildCo, contractor", admins=["bob"])
     seat("clinic-b.physician", "dr-ana", clinic, "credential.sign")
     seat("clinic-b.records_agent", "records-bot", clinic, agent=True, supervisor="dr-ana")
-    Fund(id="ROOT", name="General fund", department=root)
     Fund(id="ROADS", name="Roads", kind="special_revenue", department=depts["Infrastructure"])
     Token(id="REALM", ledger="realm-ledger", indexer="realm-indexer", decimals=8, fee=10)
     return depts

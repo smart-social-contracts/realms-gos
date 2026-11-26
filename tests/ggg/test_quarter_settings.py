@@ -168,7 +168,7 @@ def test_an_image_that_cannot_be_read_holds_up_none_of_the_other_settings(monkey
     assert (r.name, r.status, r.accounting_currency) == ("Later", "production", "AGR")
     capital_canister.answer("realm_image", {"ok": True, "value": "data:logo"})
     push({**SETTINGS, "name": "Later", "images": {"logo_url": "d3", "background_image_url": ""}})
-    assert r.logo_url == "data:logo"  # its digest was not taken, so the next push read it
+    assert Realm["1"].logo_url == "data:logo"  # its digest was not taken, so the next push read it
 
 
 def test_a_push_without_a_stage_leaves_the_stage(monkeypatch):

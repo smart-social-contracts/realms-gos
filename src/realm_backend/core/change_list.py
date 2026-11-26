@@ -359,6 +359,28 @@ def of_release(realm, replaces, release):
             "release": {"source": source, "version": release["version"]}, "summary": {}}
 
 
+def whole(own):
+    """The change list of a quarter that runs no codex and takes its capital's whole (api.propagation.bring), as
+    ``parse`` returns one: it replaces no codex and sets ``own``, the capital's own layer ``{source, chapters: {subject
+    matter: sha256}, calendar}``; the layers from above come with the capital's message. Its chapters have no URLs and
+    no size: a quarter takes every byte from its capital, by checksum."""
+    if not (isinstance(own, dict) and isinstance(own.get("chapters"), dict)):
+        raise Fail("own is {source, chapters: {subject matter: sha256}, calendar}")
+    source = source_name(own.get("source"))
+    sums = dict(own["chapters"])
+    if own.get("calendar") is not None:
+        sums[CALENDAR] = own["calendar"]
+    entries = []
+    for subject_matter, sha256 in sorted(sums.items()):
+        chapter = f"{source}/{subject_matter}"
+        chapter_id(chapter)
+        if not (isinstance(sha256, str) and sha256.startswith("sha256:") and len(sha256) == 71
+                and all(ch in HEX for ch in sha256[7:])):
+            raise Fail(f"{chapter}: sha256 is sha256:<64 hex digits>")
+        entries.append({"chapter": chapter, "source": source, "urls": [], "sha256": sha256, "size": None})
+    return {"realm": source, "replaces": None, "set": entries, "remove": [], "release": None, "summary": {}}
+
+
 def named(planned):
     """``(chapter id, plan entry)`` of every chapter and calendar of ``planned``, chapters first."""
     return [(f"{c['source']}/{c['subject_matter']}", c) for c in planned.chapters] + [

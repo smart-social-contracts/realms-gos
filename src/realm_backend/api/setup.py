@@ -7,7 +7,7 @@ from core import sandbox
 from api import tasks
 from core.db import CONVERT_IDS, PAGE_MAX, Conflict, Fail, Forbidden, Unavailable, convert_legacy_indexes, page, view
 from api.extensions import trust
-from ggg import Calendar, Department, Event, Member, Realm, Registry, Treasury, User, UserProfile
+from ggg import Calendar, Department, Event, Fund, Member, Realm, Registry, Treasury, User, UserProfile
 from ic_python_db import Entity
 from api import codex, installs
 from core.op import call, op, ops
@@ -93,6 +93,10 @@ def start(installer=""):
         # a new database holds no list saved the old way, and no leg that predates its index
         realm.manifest_data = {INDEX_CONVERSION: {"done": True}, LEG_INDEX: True}
         Department(id="Administration", is_root=True, description="The realm's root department")
+        # The fund the treasury's default source_fund names, which books every invoice payment: without it a new realm
+        # could bill a member and not book the payment (realms-gos#740). No department owns it, so the root governs it
+        # (treasury.owner_of), and a codex may still give Administration a fund of its own.
+        Fund(id=realm.treasury.config["source_fund"], name="General fund")
     installer = (installer or "").strip()
     if installer and not Realm["1"].installer_canister_id:
         Realm["1"].installer_canister_id = installer
@@ -115,9 +119,10 @@ def start(installer=""):
     legislation.warm()  # the active layered codex's sandbox is gone after an upgrade, and a query could not keep one
     installs.pause_after_upgrade()
     tasks.rearm()
-    from api import links, proposals, quarters, sync_checks, treasury
+    from api import links, listing, proposals, quarters, sync_checks, treasury
 
     links.resume()
+    listing.resume()
     proposals.resume()
     proposals.relist_tags()
     quarters.resume()
@@ -362,12 +367,28 @@ HOSTED = {"frontend": "frontend_canister_id", "file_registry": "file_registry_ca
 @op("realm.host")
 def host_install(c, args):
     """The host's install, once and before anything else: the ``founder``, the ``network``, the ``registry`` that
-    lists the realm (kept for realm_register) and whether ``test_mode`` may be turned on. Returns the setup
-    progress, as setup_state."""
+    lists the realm (kept for realm_register, and the realm keeps its listing there up to date, api.listing) and
+    whether ``test_mode`` may be turned on. Returns the setup progress, as setup_state."""
+    from api import listing
+
     hosted(c)
     values = {"founder": args["founder"], "network": args["network"], "can_test_mode": bool(args.get("test_mode"))}
     apply_step("install", values, **({"registry": args["registry"]} if args.get("registry") else {}))
+    if args.get("registry"):
+        listing.join(args["registry"])  # the registry that lists the realm also takes its figures, once it has launched
     return setup_state(c, {})
+
+
+@op("realm.host")
+def host_registry(c, args):
+    """The host's word, at any time, of the ``registry`` (a canister id) that lists the realm: from now on the realm keeps its
+    listing there up to date, and publishes it at once if it has launched (api.listing). For a realm that was made before it
+    did; the installer says it of a new one. Returns ``registry``."""
+    from api import listing
+
+    hosted(c)
+    listing.join(args["registry"])
+    return {"registry": args["registry"]}
 
 
 @op("realm.host")
@@ -387,7 +408,7 @@ def host_infrastructure(c, args):
 def setup_launch(c, args):
     """Open the realm (status ``alpha``; a quarter takes its capital's stage). The founder's setup rights end;
     configuration is governed from now on. Returns ``realm`` and its ``status``."""
-    from api import quarters  # it imports this module
+    from api import listing, quarters  # they import this module
 
     realm, d = Realm["1"], draft()
     if realm.status != "setup":
@@ -401,6 +422,7 @@ def setup_launch(c, args):
     realm.status = stage
     remember("setup", {**d, "launched_at": chain.now()})
     quarters.push_settings()
+    listing.publish_soon()
     yield from codex.hook("on_stage_change", {"stage": stage})
     return {"realm": realm.id, "status": realm.status}
 
@@ -474,7 +496,10 @@ def text(value):
 
 @op("realm.register", governed=launched, returns="registry")
 def realm_register(c, args):
-    """List the realm in a realm registry: ``registry`` (canister id), optional ``url`` and ``backend_url``."""
+    """List the realm in a realm registry: ``registry`` (canister id), optional ``url`` and ``backend_url``. The realm then
+    keeps its listing there up to date (api.listing)."""
+    from api import listing
+
     realm = Realm["1"]
     ids = "|".join((realm.frontend_canister_id, realm.token_canister_id, realm.nft_canister_id))
     fields = (realm.name, args.get("url", ""), "", args.get("backend_url", ""), ids)
@@ -482,6 +507,7 @@ def realm_register(c, args):
     if "Err" in reply:
         raise Fail(f"the registry refused: {reply}")
     Registry[args["registry"]] or Registry(id=args["registry"], principal_id=args["registry"], description=realm.name)
+    listing.publish_soon()
     return {"registry": args["registry"]}
 
 
@@ -533,11 +559,15 @@ def orchestration_decide(c, args):
 @op("realm.monitor", read=True)
 def realm_monitor(c, args):
     """Health figures: status, running and installed versions, cycles, stable ``memory`` in bytes, counts of
-    operations, events and rows per entity, and the last accepted ``upgrade``."""
+    operations, events and rows per entity, the last accepted ``upgrade``, and the ``problems`` of its settings, in
+    words: what they keep the realm from doing, such as booking a payment."""
+    from api import treasury
+
     realm = Realm["1"]
     return {"status": realm.status, "version": VERSION, "installed_version": realm.installed_version or VERSION,
             "cycles": chain.cycles(), "memory": chain.memory(), "operations": len(ops()), "events": Event.max_id(),
-            "rows": {n: getattr(ggg, n).count() for n in COUNTED}, "upgrade": realm.manifest_data.get("upgrade", {})}
+            "rows": {n: getattr(ggg, n).count() for n in COUNTED}, "upgrade": realm.manifest_data.get("upgrade", {}),
+            "problems": treasury.problems()}
 
 
 # Entities whose rows hold personal data in clear: exporting them takes their readers' permission too (I-PRV-1).

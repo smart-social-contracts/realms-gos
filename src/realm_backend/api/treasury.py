@@ -4,7 +4,8 @@ import json
 from core import candid
 from core import chain
 from core import compliance, sync_log
-from core.db import DRAFTS, Conflict, Fail, Forbidden, each, find, first, latest, next_id, page, page_by, view, window
+from core.db import (DRAFTS, Conflict, Fail, Forbidden, Unavailable, each, find, first, latest, next_id, page, page_by,
+                     view, window)
 from ggg import (AllocationRule, Budget, Contract, Department, External, FinancialReport, FiscalPeriod, Fund, Invoice,
                  LedgerEntry, Loan, NFTToken, Organization, PaymentAccount, Realm, TaxDeclaration, Token,
                  Transfer, Treasury)
@@ -18,7 +19,7 @@ CONFIG = ("epoch", "anchor_month", "source_fund", "auto_allocate", "sweep")
 # Realms GOS names its treasury epochs; GGG has their length.
 EPOCHS = {"monthly": 30 * 86400, "quarterly": 91 * 86400, "yearly": 365 * 86400}
 REGISTRY = 100  # tokens, and NFT collections, a realm can register: treasury_view lists them all
-REFRESH = 20  # invoices one invoice_refresh checks, one ledger call each
+REFRESH = 20  # invoices one invoice_refresh checks: one ledger call each, and one more for each it finds paid (collect)
 MIGRATE_PAGE = 500  # transfers one message of the pass after an upgrade reads
 MONEY_MAX = 2**53 - 1  # GGG's Money
 FEE = "ledger_fee"  # the category of the ledger's fee on a payment: a cost of paying, not a budgeted one
@@ -28,6 +29,13 @@ TRANSFER = ("id", "sender", "to", "symbol", "amount", "ledger_tx", "status", "at
             "contract")  # what a list of transfers shows
 LINE = ("id", "category", "kind", "planned", "reserved", "committed", "actual", "status", "proposal")  # what a line shows
 PERIOD_UNITS = ("day", "working_day", "month", "year")
+# A new realm has the fund its treasury's source_fund names (setup.start); a realm made before it did may not, and then
+# books no invoice payment (realms-gos#740). receive refuses in these words, and realm_monitor reports them.
+# What a payment that cannot be moved says when its ledger fee changed after it was booked (realms-gos#781).
+FEE_CHANGED = ("the ledger fee changed since this payment was booked: it was booked with a fee of {booked}, and the fee "
+               "is now {now}. It is not moved until the difference is booked (realms-gos#781)")
+NO_SOURCE_FUND = ("the treasury's source fund {}, which receives invoice payments, does not exist: create it with "
+                  "fund_create, or name another fund with treasury_configure (source_fund)")
 
 
 # --- ledger calls ---------------------------------------------------------------------------------
@@ -44,13 +52,15 @@ def text(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def icrc1_arg(to, amount, memo, fee=None, created_at=None):
+def icrc1_arg(to, amount, memo, fee=None, created_at=None, from_sub=None):
     """The argument of an ICRC-1 transfer of ``amount`` to the account ``to`` (as ``account`` writes it), with ``memo``
-    and, when given, the ``fee`` and the ``created_at`` time in seconds that make it recognisable as a repeat."""
+    and, when given, the ``fee`` and the ``created_at`` time in seconds that make it recognisable as a repeat. It leaves
+    the realm's main account, or its subaccount ``from_sub``."""
     fee_text = f"opt ({fee} : nat)" if fee is not None else "null"
     time_text = f"opt ({created_at * 1_000_000_000} : nat64)" if created_at is not None else "null"
+    from_text = f"opt {blob(from_sub)}" if from_sub else "null"
     return (f"(record {{ to = {to}; amount = {amount} : nat; fee = {fee_text}; memo = opt {blob(memo)}; "
-            f"from_subaccount = null; created_at_time = {time_text} }})")
+            f"from_subaccount = {from_text}; created_at_time = {time_text} }})")
 
 
 def subaccount(invoice_id):
@@ -61,14 +71,22 @@ def nat(reply):
     return candid.number(reply)
 
 
-def balance_of(token, sub):
-    reply = yield from chain.call(token.ledger, "icrc1_balance_of", f"({account(chain.self_id(), sub)})")
+def balance_of(ledger, sub):
+    reply = yield from chain.call(ledger, "icrc1_balance_of", f"({account(chain.self_id(), sub)})")
     return nat(reply)
 
 
 def is_block_index(value):
     # bool is an int in Python, but ``true`` is not a block index
     return type(value) is int and value >= 0
+
+
+def by_hash(value):
+    """The fields of a parsed record or variant by their Candid number: a decoder that does not know the names prints a
+    number for each."""
+    if not isinstance(value, dict):
+        return {}
+    return {candid.idl_hash(k) if isinstance(k, str) else k: v for k, v in value.items()}
 
 
 def outcome(reply):
@@ -82,14 +100,24 @@ def outcome(reply):
         return "unconfirmed", None
     if not isinstance(answer, dict):
         return "unconfirmed", None
-    # An unnamed decoder prints a field's hash for its name, so look fields up by hash.
-    fields = {candid.idl_hash(k) if isinstance(k, str) else k: v for k, v in answer.items()}
+    fields = by_hash(answer)
     ok = fields.get(candid.idl_hash("Ok"))
     if is_block_index(ok):
         return "completed", str(ok)
     if candid.idl_hash("Err") in fields:
         return "failed", None
     return "unconfirmed", None
+
+
+def asked_fee(reply):
+    """The fee a ledger asks for when it refused a transfer with ``BadFee``, else None."""
+    try:
+        (answer,) = candid.Reader(reply).args()
+    except Exception:  # noqa: BLE001  a hostile reply says nothing
+        return None
+    bad_fee = by_hash(by_hash(by_hash(answer).get(candid.idl_hash("Err"))).get(candid.idl_hash("BadFee")))
+    fee = bad_fee.get(candid.idl_hash("expected_fee"))
+    return fee if type(fee) is int and fee >= 0 else None
 
 
 # --- books ----------------------------------------------------------------------------------------
@@ -331,6 +359,7 @@ def send(t):
         reply, status, tx = str(e), "pending", None
     else:
         status, tx = outcome(reply)
+    t = find(Transfer, t.id)  # read again: the instance read before the call cannot see a reversal made meanwhile
     if t.status == "sending":
         if status == "failed":
             reverse(t, reply[:200])
@@ -525,32 +554,122 @@ def owns(inv, user):
     return bool(org and user in (org.admins or []))
 
 
-def receive(inv, received):
-    """Book a paid invoice as revenue of the source fund, then split it by the adopted allocation rule."""
+def treasury_config():
+    return Treasury["1"].config if Treasury["1"] else {}
+
+
+def source_fund():
+    """The fund invoice payments are booked into, the treasury's ``source_fund``; refused, in words that say how to fix
+    it, while it does not exist."""
+    code = treasury_config().get("source_fund", "ROOT")
+    if Fund[code] is None:
+        raise Unavailable(NO_SOURCE_FUND.format(code) + ". The payment waits on the ledger until then")
+    return Fund[code]
+
+
+def problems():
+    """What the treasury's settings keep the realm from doing, in words, for realm_monitor: a source fund that does not
+    exist, which a member meets only once they have paid."""
+    code = treasury_config().get("source_fund", "ROOT")
+    return [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
+
+
+def receive(inv, received, ledger):
+    """Book a paid invoice as revenue of the source fund, which gains it less the ledger's fee for moving it into the
+    realm's main account (``collect``), and split what it gains by the adopted allocation rule. An invoice of no more
+    than the fee cannot be moved at all, so its whole amount is the fee: no fund is credited money it cannot pay out.
+    The payment records the ``ledger`` it was found on, which the move is sent to."""
     p = period()
-    config = Treasury["1"].config if Treasury["1"] else {}
-    source = find(Fund, config.get("source_fund", "ROOT"))
+    config, source = treasury_config(), source_fund()
     category = inv.reason.partition(":")[0].lower() or "invoice"
-    lines = [("asset", "cash", inv.amount, 0, source), ("revenue", category, 0, inv.amount, source)]
+    fee = min(find(Token, inv.symbol).fee, inv.amount)
+    net = inv.amount - fee
+    lines = [("asset", "cash", net, 0, source), ("revenue", category, 0, inv.amount, source)]
+    if fee:
+        lines.append(("expense", FEE, fee, 0, source))
     rule = adopted_rule(source) if config.get("auto_allocate") else None
     for allocation in (rule.rules if rule else []):
-        code, share = allocation["fund"], inv.amount * allocation["share"] // ONE
+        code, share = allocation["fund"], net * allocation["share"] // ONE
         if share and code != source.id:
             lines += [("asset", "cash", 0, share, source), ("asset", "cash", share, 0, find(Fund, code))]
     kind, _, key = inv.payer.partition(":")
     who = {"user": key} if kind == "User" else {"organization": Organization[key]} if kind == "Organization" else {}
     post(p, lines, inv.symbol, f"payment of {inv.id}", invoice=inv, **who)
-    inv.status, inv.paid_at, inv.payment = "paid", chain.now(), {"received": received, "subaccount": pay_to(inv)}
+    inv.status, inv.paid_at = "paid", chain.now()
+    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "fee": find(Token, inv.symbol).fee,
+                   "collected": False}
     if inv.reason.startswith("TaxDeclaration:"):
         find(TaxDeclaration, inv.reason.partition(":")[2]).status = "settled"
 
 
+def held_by(inv, ledger):
+    """What the invoice's own account holds on ``ledger``. A generator."""
+    return (yield from balance_of(ledger, subaccount(inv.id)))
+
+
+def collect(inv, held):
+    """Move a paid invoice's money from its own account, where the payer sent it, into the realm's main account, which
+    every payout draws on (realms-gos#739): what the account ``held``, less the ledger's fee, which ``receive`` booked,
+    on the ledger the payment was found on and with the fee it was booked with (``payment["fee"]``). When that fee is
+    no longer the token's, or the ledger refuses it, nothing moves, and ``payment["stuck"]`` names both fees.
+    Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` when this call moved it. A
+    ledger that refuses or does not answer leaves it uncollected, and the next check of the invoice reads the account
+    again: the money is moved once, whatever happened to an earlier answer. A generator."""
+    # A hard key on purpose: receive and invoice_collect record the fee they book on every payment that reaches here,
+    # and falling back to the token's current fee would bring back the mismatch between the move and the books.
+    fee, moved = inv.payment["fee"], {}
+    if held > fee:
+        if find(Token, inv.symbol).fee != fee:
+            inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=find(Token, inv.symbol).fee)}
+            return
+        arg = icrc1_arg(account(chain.self_id()), held - fee, inv.id.encode(), fee, from_sub=subaccount(inv.id))
+        try:
+            reply = yield from chain.call(inv.payment["ledger"], "icrc1_transfer", arg)
+        except Exception:  # noqa: BLE001  no answer: the next check reads where the money is
+            return
+        inv = find(Invoice, inv.id)  # the row read before the ledger call belongs to that message
+        status, block = outcome(reply)
+        if status != "completed":
+            if asked_fee(reply) is not None:
+                inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=asked_fee(reply))}
+            return
+        moved = {"block": block}
+    unstuck = {k: v for k, v in inv.payment.items() if k != "stuck"}
+    inv.payment = {**unstuck, **moved, "collected": True}
+
+
+def to_collect(inv):
+    """Whether ``inv`` is paid and its payment still waits to be moved into the realm's main account, on the ledger it
+    was paid on. A payment booked by a release before collecting has no ``collected``. One whose token has moved to
+    another ledger since stays uncollected: the money is on the old ledger, and the new one's empty account must not
+    pass for it having been moved."""
+    return (inv.status == "paid" and inv.payment.get("collected") is False
+            and inv.payment.get("ledger") == find(Token, inv.symbol).ledger)
+
+
 def refresh(inv):
+    """Check the ledger for the payment of ``inv``: book it once its account holds the amount, then collect it, again on
+    a later check when that did not go through (``to_collect``). Each ledger call ends a message, so the invoice is read
+    again after it, and what the ledger answered counts only while the token is still on that ledger: a token moved to
+    another meanwhile leaves the invoice as it was. A generator; returns the invoice's status."""
+    if to_collect(inv):
+        held = yield from held_by(inv, inv.payment["ledger"])
+        inv = find(Invoice, inv.id)
+        if to_collect(inv):  # nobody collected it, and its token did not move, while the ledger answered
+            yield from collect(inv, held)
+        inv = find(Invoice, inv.id)
     if inv.status not in ("pending", "overdue"):
         return inv.status
-    received = yield from balance_of(find(Token, inv.symbol), subaccount(inv.id))
+    ledger = find(Token, inv.symbol).ledger
+    received = yield from held_by(inv, ledger)
+    inv = find(Invoice, inv.id)
+    if inv.status not in ("pending", "overdue"):  # another check booked it while the ledger answered: book it once
+        return inv.status
+    if find(Token, inv.symbol).ledger != ledger:  # the token moved to another ledger while this one answered
+        return inv.status
     if received >= inv.amount:
-        receive(inv, received)
+        receive(inv, received, ledger)
+        yield from collect(inv, received)
     elif inv.due_at and chain.now() > inv.due_at:
         inv.status = "overdue"
     return inv.status
@@ -587,7 +706,8 @@ def invoice_item_add(c, args):
 
 @op("self.invoice_refresh", returns="invoice")
 def invoice_check(c, args):
-    """Check the ledger for a payment of ``invoice`` (yours or your organization's). Returns its ``status``."""
+    """Check the ledger for a payment of ``invoice`` (yours or your organization's). Once it is paid the realm moves the
+    payment into its main account, from which it pays out. Returns its ``status``."""
     inv = find(Invoice, args["invoice"])
     if not owns(inv, c.user):
         raise Forbidden(f"{inv.id} is not yours")
@@ -611,13 +731,15 @@ def open_invoices(args):
 @op("invoice.refresh")
 def invoice_refresh(c, args):
     """Check the ledger for payments of ``invoice``, or, when omitted, of one batch of pending or overdue invoices
-    (``from``, ``count``, at most 20: one ledger call each); ``next`` continues it.
+    (``from``, ``count``, at most 20: one ledger call each, and one more to collect each payment found); ``next``
+    continues it.
     Returns ``checked``, ``paid`` and each invoice's status in ``invoices``."""
     period()
     rows, nxt = ([find(Invoice, args["invoice"])], None) if args.get("invoice") else open_invoices(args)
     statuses = {}
     for inv in rows:
-        statuses[inv.id] = yield from refresh(inv)
+        # a row read before an earlier invoice's ledger call belongs to that message: read it again
+        statuses[inv.id] = yield from refresh(find(Invoice, inv.id))
     return {"checked": len(rows), "paid": sum(s == "paid" for s in statuses.values()), "invoices": statuses,
             "next": nxt}
 
@@ -1340,6 +1462,8 @@ def token_force_transfer(c, args):
     arg = (f'(record {{ from = {account(args["from"])}; to = {account(args["to"])}; amount = {amount} : nat; '
            f'memo = opt {text(ledger_memo(args))} }})')
     reply = yield from chain.call(token.ledger, "force_transfer", arg)
+    # Read again after the call: the period read before it would write back the statements booked meanwhile.
+    t, p = find(Transfer, t.id), FiscalPeriod[p.id] if p else None
     status, tx = outcome(reply)
     if status != "completed":
         t.status, t.reply = status, reply[:200]

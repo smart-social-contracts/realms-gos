@@ -537,6 +537,146 @@ def test_a_quarter_drifts_when_its_layered_codex_is_not_its_capitals(monkeypatch
     assert quarters.drifting(quarters.codex()["version"])
 
 
+# ---- A quarter that runs no codex is sent the capital's whole (realms-gos#745).
+
+
+def whole_of(layer, proposal=""):
+    """What the capital tells a quarter that runs no codex when its own codex is ``layer``, an own layer only."""
+    return {"codex": expected_id(layer), "at": 0, "proposal": proposal,
+            "layers": {"relays": [], "vouchers": {}, "vouching": None},
+            "own": {"source": "arcadia", "chapters": {c.rpartition("/")[2]: "sha256:" + sha(body)
+                                                      for c, body in layer.items()}, "calendar": None}}
+
+
+def staged(quarter_peer):
+    """The bodies of the ``codex.stage`` messages the capital sent ``quarter_peer``."""
+    return [m["body"] for m in quarter_peer.sent("federation_message") if m["topic"] == "codex.stage"]
+
+
+def test_a_quarter_that_reports_it_runs_no_codex_is_told_to_stage_the_codex_in_force_whole(federation):
+    report("south", "")
+    fire_due()
+    assert staged(federation[1]) == []  # the capital runs no layered codex: there is nothing to give
+    layer = own_layer()
+    install(change_list(layer))
+    for quarter_peer in federation:
+        quarter_peer.calls.clear()
+    report("south", "")  # it joined after the install: no change list of the capital replaces a codex it runs
+    fire_due()
+    assert staged(federation[1]) == [whole_of(layer, proposal=LayeredCodex[expected_id(layer)].proposal)]
+    assert staged(federation[0]) == []
+    report("north", expected_id(layer))
+    ok("quarter_report", "north", population=1)  # it says nothing of its codex: nothing to answer
+    fire_due()
+    assert staged(federation[0]) == []
+
+
+def test_a_quarter_that_took_it_up_is_told_again_a_day_later_or_once_the_codex_in_force_changed(federation):
+    first, second = own_layer(), {**own_layer(), "arcadia/tax": own_layer("2.0.0")["arcadia/tax"]}
+    install(change_list(first))
+    federation[1].calls.clear()  # the install's own announcement
+    report("south", "")
+    fire_due()
+    later(HOUR)
+    report("south", "")  # its next report: it is staging, or its staging failed
+    fire_due()
+    assert [body["codex"] for body in staged(federation[1])] == [expected_id(first)]
+    later(propagation.BRING_AGAIN)
+    report("south", "")
+    fire_due()
+    assert [body["codex"] for body in staged(federation[1])] == [expected_id(first)] * 2
+    install(change_list(second, replaces=expected_id(first), url="https://legislation.example.test/changes/second.json"))
+    federation[1].calls.clear()
+    report("south", "")
+    fire_due()
+    assert [body["codex"] for body in staged(federation[1])] == [expected_id(second)]
+
+
+@pytest.mark.parametrize("answer, again", [
+    ({"ok": False, "error": "a codex to stage is {codex, checksum: sha256:<64 hex digits>, at: seconds}"}, True),
+    ({"ok": True, "staged": "refused", "why": propagation.NOT_WHOLE}, False),
+], ids=["on the previous release: at its next report", "it voted to run none: a day later"])
+def test_a_quarter_that_could_not_read_it_is_told_again_at_its_next_report(federation, answer, again):
+    install(change_list(own_layer()))
+    south = peer("south", federation_message=answer)
+    report("south", "")
+    fire_due()
+    report("south", "")
+    fire_due()
+    assert len(staged(south)) == (2 if again else 1)
+    told = [m for m in FederationMessage.load_some(1, 50) if m and m.topic == "codex.stage"]
+    assert told[-1].response == {"south": answer}  # the capital's record keeps the answer
+
+
+def test_a_quarter_that_runs_no_codex_builds_the_codex_sent_whole_and_switches_at_once(monkeypatch):
+    quarter(monkeypatch, "north")
+    layer = own_layer()
+    listed = change_list(layer)
+    serving = capital_serving(layer, listed, running=expected_id(layer))
+    assert call("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))["staged"] == "started"
+    run_job()
+    seen = status()
+    assert (seen["codex"]["id"], seen["job"]["status"], seen["pending"]) == (expected_id(layer), "done", None)
+    assert {c["route"] for c in seen["codex"]["chapters"].values()} == {"capital"}
+    assert sorted(sent["chapter"] for sent in serving.sent("legislation_chapter")) == sorted(
+        "sha256:" + sha(body) for body in layer.values())  # no change list to read
+    assert TaskSchedule.count() == 0
+    taken = [e for e in ok("events", "ctl")["events"] if e["op"] == "codex_taken_from_capital"]
+    assert [(e["by"], e["args"]["codex"], e["result"]["capital"]) for e in taken] == [
+        (CAPITAL, expected_id(layer), CAPITAL)]  # its rules changed by no vote of its own: the log says why
+    assert call("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))["staged"] == "active"
+
+
+def test_a_quarter_takes_the_layers_from_above_of_the_codex_sent_whole_from_its_capital(monkeypatch):
+    quarter(monkeypatch, "north")
+    chapters, listed, layers = release_from_capital()
+    capital_serving(chapters, listed, running=release_id())
+    body = {"codex": release_id(), "at": 0, "layers": {**layers, "vouching": None},
+            "own": {"source": "town", "chapters": {}, "calendar": None}}
+    assert call("federation_message", CAPITAL, topic="codex.stage", body=body)["staged"] == "started"
+    run_job()
+    seen = status()
+    assert (seen["codex"]["id"], seen["job"]["status"]) == (release_id(), "done")
+    assert {(c["route"], c["vouched_by"]) for c in seen["codex"]["chapters"].values()} == {("capital", "src/town")}
+    assert not [c for c in fake_chain.state["calls"] if c[1] == "legislation_releases"]  # it read no record
+
+
+def refused():
+    """What the quarter's audit log says of the codex sent whole that it refused."""
+    return [e["result"]["why"] for e in ok("events", "ctl")["events"]
+            if e["op"] == "federation_message" and e["result"].get("staged") == "refused"]
+
+
+def test_the_repair_respects_a_quarter_that_voted_to_run_no_codex_and_one_that_runs_its_own(monkeypatch):
+    quarter(monkeypatch, "north")
+    stored_codices()
+    layer = own_layer()
+    answer = ok("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))
+    assert (answer["staged"], answer["why"]) == ("refused", propagation.NOT_WHOLE)  # it runs a codex
+    ok("codex_uninstall", "ctl")  # a vote of its own: it runs none now
+    assert status()["codex"] is None
+    answer = ok("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))
+    assert answer["staged"] == "refused" and status()["codex"] is None and InstallJob.count() == 0
+    assert refused() == [propagation.NOT_WHOLE] * 2  # "why does this quarter not take the capital's codex?"
+    kept = [m.response for m in FederationMessage.load_some(1, 50) if m and m.topic == "codex.stage"]
+    assert [r["staged"] for r in kept] == ["refused"] * 2  # its record of the messages keeps the answer too
+
+
+def test_the_codex_sent_whole_leaves_its_staging_alone_and_comes_with_its_layers(monkeypatch):
+    quarter(monkeypatch, "north")
+    layer = own_layer()
+    listed = change_list(layer)
+    capital_serving(layer, listed, running=expected_id(layer))
+    started = announce(layer, listed, fake_chain.now() + HOUR)
+    run_job()
+    again = call("federation_message", CAPITAL, topic="codex.stage", body=whole_of(layer))
+    assert (again["staged"], again["job"]) == ("running", started["job"]) and job()["step"] == "wait"
+    assert "layers are" in call("federation_message", CAPITAL, topic="codex.stage",
+                                body={**whole_of(layer), "layers": None})["error"]
+    assert "own is" in call("federation_message", CAPITAL, topic="codex.stage",
+                            body={**whole_of(layer), "own": {"source": "arcadia"}})["error"]
+
+
 # ---- A revert on the capital reaches the quarters.
 
 

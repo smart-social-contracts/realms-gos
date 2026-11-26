@@ -208,6 +208,34 @@ def test_a_release_may_set_the_realms_own_chapters_too_and_only_those_of_its_sou
     assert own["chapters"]["water"] == SHA["water"]
 
 
+# ---- the change list of a quarter that runs no codex and takes its capital's whole (realms-gos#745)
+
+
+def test_the_codex_sent_whole_sets_the_capitals_own_layer_and_replaces_no_codex():
+    listed = change_list.whole({"source": "town", "chapters": {"tax": SHA["tax"], "water": SHA["water"]},
+                                "calendar": SHA["calendar"]})
+    assert (listed["realm"], listed["replaces"], listed["remove"], listed["release"]) == ("town", None, [], None)
+    assert [(e["chapter"], e["sha256"], e["urls"], e["size"]) for e in listed["set"]] == [
+        ("town/calendar", SHA["calendar"], [], None), ("town/tax", SHA["tax"], [], None),
+        ("town/water", SHA["water"], [], None)]  # no URL: every byte comes from the capital
+    realm, own = change_list.apply(listed, None, None, {"chapters": {}, "calendar": None})
+    assert realm == "town" and own == {"chapters": {"tax": SHA["tax"], "water": SHA["water"]}, "calendar": SHA["calendar"]}
+    empty = change_list.whole({"source": "town", "chapters": {}, "calendar": None})  # every chapter is from above
+    assert empty["set"] == []
+
+
+@pytest.mark.parametrize("own, match", [
+    (None, "own is"),
+    ({"source": "town"}, "own is"),
+    ({"chapters": {}}, "source"),
+    ({"source": "town", "chapters": {"tax": SHA["tax"][7:]}}, "town/tax: sha256 is sha256:<64 hex digits>"),
+    ({"source": "town", "chapters": {"Tax": SHA["tax"]}}, "not a chapter id"),
+    ({"source": "town", "chapters": {}, "calendar": "sha256:x"}, "town/calendar: sha256 is"),
+])
+def test_what_the_codex_sent_whole_refuses(own, match):
+    refused(change_list.whole, own, match=match)
+
+
 # ---- vouch (step 4)
 
 

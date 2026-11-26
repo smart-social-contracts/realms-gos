@@ -29,7 +29,6 @@ import os
 import shutil
 import subprocess
 import sys
-import urllib.request
 import zlib
 from pathlib import Path
 
@@ -41,16 +40,13 @@ sys.path.insert(0, str(ROOT / "cli"))
 
 from realms.cli.commands.extension import _dfx_call, latest_version  # noqa: E402
 from realms.cli.realm_api import call_op  # noqa: E402
+from token_ledger import LEDGER_WASM, fetch_ledger_wasm  # noqa: E402
 
 ORCHESTRA = "realms-product"
 # The realm's own list, so every extension the wizard's launch installs is installed here with its frontend.
 CORE_EXTENSIONS = tuple(json.loads((ROOT / "core-extensions.json").read_text())["core_extensions"])
-# The ledger the realm's treasury pays through: ic-python-token, the token realms use. Its test mode lets the e2e mint
-# into any account. To test another ledger, change these settings: where its wasm is downloaded from, the path it is kept
-# at (under the repository root), its sha256 and its candid init argument.
-LEDGER_URL = "https://github.com/smart-social-contracts/ic-python-token/releases/download/v0.6.0/token_backend.wasm"
-LEDGER_WASM = ".wasm/ic-python-token-v0.6.0.wasm"
-LEDGER_SHA256 = "4944db4ed1b5670e51912a1fff71a46f905a60da4faede10ac6cf47e33e10950"
+# The ledger the realm's treasury pays through is the test token ledger (scripts/token_ledger.py pins its release); to test
+# another, change it there and its candid init argument here.
 LEDGER_INIT = (
     '(record { name = "E2E token"; symbol = "E2E"; decimals = 8 : nat8; total_supply = 0 : nat; '
     "fee = 10_000 : nat; test = opt true })"
@@ -101,17 +97,6 @@ def founder_key():
     public = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     principal = principal_text(hashlib.sha224(ED25519_DER_PREFIX + public).digest() + b"\x02")
     return seed.hex(), principal
-
-
-def fetch_ledger_wasm(path: Path) -> None:
-    """Download the ledger wasm unless the file is there, and refuse (and delete) one that is not LEDGER_SHA256."""
-    if not path.exists():
-        path.parent.mkdir(exist_ok=True)
-        urllib.request.urlretrieve(LEDGER_URL, path)
-    found = hashlib.sha256(path.read_bytes()).hexdigest()
-    if found != LEDGER_SHA256:
-        path.unlink()  # a truncated or replaced download must not stay for the next run
-        sys.exit(f"{LEDGER_URL} is sha256 {found}, not {LEDGER_SHA256}: deleted {path}, run again")
 
 
 def icp(project: Path, *args: str, timeout: int = 900) -> str:

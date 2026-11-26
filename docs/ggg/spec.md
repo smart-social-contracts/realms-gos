@@ -127,6 +127,13 @@ same rows.
 - an invoice's `items` are lines with a `concept` and a signed `amount`, optionally a `quantity`, a `unit` and the
   `legislation` that charges it; they sum to the invoice's `amount`, and `invoice_item_add` adds a line to a pending
   invoice. The invoice of a fine or a restitution has one item, named for the kind of penalty;
+- an invoice is paid into the realm's account whose subaccount is the invoice's id (`pay_to`). Once that account holds
+  the amount, the realm books the payment into the treasury's `source_fund`, `ROOT` by default, which setup creates for
+  a new realm and no department owns, and moves what the account holds into the realm's main account, from which every
+  payout is made. The move costs the ledger's fee, so the fund gains the amount less the fee (booked as `ledger_fee`),
+  and an adopted allocation rule splits what it gains. A move the ledger does not make is made at the next check of the
+  invoice, from what its account holds then. While the source fund does not exist, a check refuses with `Unavailable`
+  and the payment waits on the ledger; `realm_monitor` lists it under `problems`;
 - a budget line is `revenue` or `expense`, a category is one kind within a fund and period (`budget_draft` refuses a
   line of the other kind with `InvalidArgument`), and `budget_propose` takes the draft lines of a period together: those
   of the `fund` it names, which its owner governs under its own policy (the root when no department owns the fund), or
@@ -228,7 +235,10 @@ Realms GOS also differs from the model in what it keeps:
   calls the steps. The host is a controller or the installer the canister was created with, and
   the marketplace, installer and Casals baton canisters go in `extra` as `realms_gos:marketplace`,
   `realms_gos:installer` and `realms_gos:baton`. `host_install`'s `registry` is kept for
-  `realm_register`;
+  `realm_register`, and the realm keeps its listing in that registry up to date: it publishes its name, members,
+  stage and (an https) logo when it launches and from a timer that looks once a day and calls only when one of them
+  changed (`api/listing.py`). `host_registry` is the Realms GOS operation that tells a realm its registry at any
+  time, for a realm made before it did; `realm_numbers` is its public count of members, proposals and votes;
 - a federal vote's title is kept inside its action;
 - calls between realms (a link's notices and reports, and the reads of the check for a cycle) are not bounded-wait:
   basilisk 0.15 has no call with a timeout, so a canister that never answers holds the message of the vote that
@@ -341,6 +351,8 @@ each time. These operations get their tier and group in `core/poa.py` (`OWN`), a
 | `realm_image` | — (public) | read | One branding image (`logo_url` or `background_image_url`): what a quarter reads of its capital's when it changes, one a call, since two may not fit in one reply |
 | `token_catalog` | — (public) | read | The ICRC-1 ledgers this GOS ships with, not the realm's registered tokens |
 | `scale_status` | — (public) | read | Quarter populations against this GOS's auto-scale capacity |
+| `realm_numbers` | — (public) | read | The realm's own count of its members (every quarter's), proposals and votes: what the public dashboard shows |
+| `host_registry` | `realm.host` (the host only) | | The host names a realm registry that lists the realm, at any time: the realm keeps its listing there up to date and publishes it at once (the installer says it of a new realm, `host_install`'s `registry` does too) |
 | `quarter_add` (on the capital: Casals grows the realm's stand by <stand>-quarter-<n>, then the capital makes that canister a quarter and registers it; filed by the realm itself once a quarter is wanted) | `quarter.register` | governed, delegable | The members vote for a fourth quarter → Casals builds `agora-quarter-4` |
 | `realm_configure_infrastructure` | `realm.configure.infrastructure` | governed, delegable | Frontend, file-registry, marketplace, installer and Casals baton canister ids |
 | `realm_export` | `db.export` | read, delegable | One page of an entity's rows, as stored, for a backup. An entity with large rows (`ChapterSource`: up to 256 KB each) returns fewer rows than `count` asks for: follow `next` |

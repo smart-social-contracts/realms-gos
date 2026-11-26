@@ -266,9 +266,11 @@ test('the allocation rule is adopted by the finance role only', async () => {
 });
 
 // The fund is filled the way proposals.spec.ts fills TREASURY: an invoice is billed and paid into the account the
-// realm names, and the realm books it, now splitting it by the adopted rule.
+// realm names, and the realm books it, now splitting it by the adopted rule. The realm pays the ledger's fee to move
+// the payment into its own account, so the invoice adds it and the rule splits `amount`.
 test('a payment into the treasury is split between the department funds', async () => {
 	const amount = 1_000_000;
+	const billedAmount = amount + FEE;
 	const before = {
 		source: await held(SOURCE),
 		roads: await held(ROADS),
@@ -279,18 +281,15 @@ test('a payment into the treasury is split between the department funds', async 
 		'invoice_create',
 		{
 			payer: realm.founder,
-			amount,
-			items: [{ concept: 'tax', amount }],
+			amount: billedAmount,
+			items: [{ concept: 'tax', amount: billedAmount }],
 			symbol: SYMBOL,
 			reason: `Tax: budget ${RUN}`
 		},
 		founder()
 	);
 	const payTo = billed.pay_to as { owner: string; subaccount: string };
-	await mint(realm, payTo, BigInt(amount));
-	// WORKAROUND for realms-gos #450: a fund pays out of the realm's own (default) account, and what an invoice
-	// receives sits in its subaccount, which nothing sweeps. Without this second mint the payout would find no tokens.
-	await mint(realm, { owner: payTo.owner }, BigInt(amount));
+	await mint(realm, payTo, BigInt(billedAmount));
 	await done('invoice_refresh', { invoice: billed.invoice }, founder());
 
 	expect(

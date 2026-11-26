@@ -42,15 +42,21 @@ def open_vote(action, proposer, by, origin, prepared_by=""):
     rule = quarters.published_rule()
     deadline = chain.now() + rule["window"]
     vid, h = next_id(FederalVote, "FV"), freeze(action, rule, deadline)
+    # Recorded before the first call, so that a vote opened while the quarters answer takes the next id, not this one.
+    FederalVote(id=vid, origin_quarter=origin, action=action, rule=rule, hash=h, deadline=deadline)
     body = {"vote": vid, "action": action, "rule": rule, "deadline": deadline, "hash": h, "proposer": proposer,
             "origin": origin, "prepared_by": prepared_by}
     legs = {}
-    for cid in [q.id for q in each(Quarter, "status", "active")]:
-        reply = yield from quarters.ask(cid, "federation_message", {"topic": "federal_vote.open", "body": body})
-        if not reply.get("ok"):
-            raise Fail(f"{cid} refused {vid}: {reply.get('error')}")
-        legs[cid] = reply["proposal"]
-    v = FederalVote(id=vid, origin_quarter=origin, action=action, rule=rule, hash=h, deadline=deadline)
+    try:
+        for cid in [q.id for q in each(Quarter, "status", "active")]:
+            reply = yield from quarters.ask(cid, "federation_message", {"topic": "federal_vote.open", "body": body})
+            if not reply.get("ok"):
+                raise Fail(f"{cid} refused {vid}: {reply.get('error')}")
+            legs[cid] = reply["proposal"]
+    except Exception:
+        find(FederalVote, vid).status = "cancelled"  # it never opened: its id stays taken
+        raise
+    v = find(FederalVote, vid)
     legs[chain.self_id()] = ballot(vid, action, deadline, proposer, by, prepared_by).id
     for cid, pid in legs.items():
         FederalVoteLeg(id=leg_id(vid, cid), vote=v, quarter=cid, proposal_id=pid, hash=h)
@@ -185,7 +191,9 @@ def federal_vote_finalize(c, args):
     status, tally = count(v)
     v.status, v.tally = status, tally
     if status == "passed":
-        v.tally = {**tally, "result": (yield from execute(v))}
+        result = yield from execute(v)
+        v = find(FederalVote, v.id)  # read again: the action may have called other canisters
+        v.tally = {**tally, "result": result}
     for cid in [leg.quarter for leg in v.legs if leg.quarter != here]:
         yield from quarters.ask(cid, "federation_message",
                                 {"topic": "federal_vote.result", "body": {"vote": v.id, "status": status, "hash": v.hash}})

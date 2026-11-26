@@ -318,3 +318,58 @@ def test_a_switch_time_two_days_away_still_switches_the_quarters_that_waited(net
     chief.run_at_effective_at(proposal)
     net.wait_until(lambda: active(follower) == expected_id(fourth), rounds=2)
     assert job(follower)["status"] == "done"
+
+
+@pytest.fixture(scope="module")
+def grown(net):
+    """A capital and the quarter it had before it ran a codex."""
+    seat, first = net.realm("seat"), net.realm("first", members=("alice",))
+    net.register_quarters(seat, first)
+    return seat, first
+
+
+def test_a_quarter_added_after_the_capital_runs_a_codex_takes_it_whole_and_follows_the_next_install(
+        net, site, people, grown):
+    """realms-gos#745: a quarter Casals builds once its capital runs a layered codex has no codex that any change list
+    of the capital replaces. Its first report, which adoption makes before it launches, says it runs none, and the
+    capital sends it the codex whole."""
+    from test_quarter_settings import ADOPT  # it imports this module
+
+    seat, first = grown
+    good = layer_of(people)
+    installed_everywhere(net, site, grown, good)
+    newcomer = net.realm("newcomer", launch=False)  # as Casals builds it
+    newcomer.add_controller(seat.cid)
+    out = seat.shell(ADOPT % ({"member": "seat-quarter-2", "name": "Newcomer", "canister": newcomer.cid},))
+    assert "Traceback" not in out, out
+    net.wait_until(lambda: active(newcomer) == expected_id(good), rounds=2)
+    assert job(newcomer)["status"] == "done"
+    assert seat.ok("scale_status", None, query=True)["pending"] is None  # adopted, and launched
+    assert newcomer.ok("realm_info", None, query=True)["realm"]["status"] != "setup"
+    assert {c["route"] for c in status(newcomer)["codex"]["chapters"].values()} == {"capital"}
+    taken = [e for e in newcomer.ok("events", "ctl", query=True)["events"] if e["op"] == "codex_taken_from_capital"]
+    assert [(e["by"], e["args"]["codex"]) for e in taken] == [(seat.cid, expected_id(good))]
+    net.wait(2)
+    assert flag(seat, newcomer) == "compliant" and titles(newcomer) == []  # no on_codex_activate in a quarter
+
+    third = {**good, "arcadia/procedure": good["arcadia/procedure"] + b"\n# third\n"}
+    installed_everywhere(net, site, (seat, first, newcomer), third, replaces=expected_id(good))
+    assert job(newcomer)["status"] == "done"  # the next install's change list replaces the codex it now runs
+
+
+def test_the_repair_respects_a_quarter_that_voted_to_run_no_codex(net, grown):
+    """Beside the test above: a quarter that runs no codex because its own members voted it out (codex_uninstall) is
+    sent the capital's codex whole at its next report too, and refuses it. Its audit log, and the capital's record of
+    the message, say why."""
+    seat, first = grown
+    first.govern("codex_uninstall", {})
+    assert active(first) is None
+    first.ok("quarter_sync", "ctl")  # it reports that it runs none
+    net.wait(5)
+    assert active(first) is None and job(first)["status"] == "done"  # no job was started for it
+    why = [e["result"]["why"] for e in first.ok("events", "ctl", query=True)["events"]
+           if e["op"] == "federation_message" and e["result"].get("staged") == "refused"]
+    assert len(why) == 1 and "voted to run none (codex_uninstall)" in why[0]
+    told = [m["response"][first.cid] for m in rows(seat, "FederationMessage", "topic", "response")
+            if m["topic"] == "codex.stage" and first.cid in m["response"]]
+    assert told[-1]["staged"] == "refused"

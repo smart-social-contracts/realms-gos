@@ -2,17 +2,32 @@ name: Live-site smoke
 
 # Read-only browser check of the deployed sites (src/realm_frontend/tests/smoke).
 # Runs the same command anyone can run locally: npm run test:smoke.
+#
+# Production and staging are separate jobs, so a fault in one does not turn the other red.
+# A red job opens (or updates) one issue and a green job closes it (scripts/smoke_issue.sh):
+# a red tick nobody is told about gets ignored, and a real fault then hides behind it.
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 5 * * *"
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   smoke:
+    name: smoke (${{ matrix.env }})
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [production, staging]
     # Playwright 1.55 has no chromium for ubuntu-latest (26.04).
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      SMOKE_ENV: ${{ matrix.env }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,9 +48,20 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-results
+          name: smoke-results-${{ matrix.env }}
           path: |
             src/realm_frontend/test-results/smoke
             src/realm_frontend/playwright-report/smoke
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Open, update or close the tracking issue
+        if: always() && job.status != 'cancelled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ENVIRONMENT: ${{ matrix.env }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPORT: src/realm_frontend/test-results/smoke/report.json
+        run: scripts/smoke_issue.sh

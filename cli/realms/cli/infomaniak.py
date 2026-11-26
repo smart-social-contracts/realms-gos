@@ -7,7 +7,7 @@ repo, and is never logged. It needs the ``dns:read`` and ``dns:write`` scopes.
 
 Two things differ from Cloudflare:
 
-* An apex cannot be a CNAME, so it gets the A records of the ``icp1.io``
+* An apex cannot be a CNAME, so it gets the A record of the ``icp1.io``
   gateway instead.
 * This module never deletes. Infomaniak records carry no owner, so there is no
   telling which ones this tool made; a record that holds a stale value is
@@ -32,8 +32,12 @@ DEFAULT_TOKEN_ENV = "INFOMANIAK_API_TOKEN"
 # The API refuses a TTL below 60 seconds.
 DEFAULT_TTL = 60
 
-# The addresses behind icp1.io, for a host that cannot be a CNAME.
-APEX_ADDRESSES = ("195.5.171.242", "212.71.124.188")
+# The address behind icp1.io, for a host that cannot be a CNAME. Every IC gateway name
+# (icp1.io, icp0.io, ic0.app, boundary.dfinity.network) resolves to this one address
+# (`dig +short A icp1.io`, 25 Nov 2026). This tool used to write a second one,
+# 195.5.171.242: it accepts no connection on any port, and a browser that tried it
+# first waited 30 to 45 seconds before falling back. Run `dig` again before adding one.
+APEX_ADDRESSES = ("212.71.124.188",)
 
 APEX_SOURCE = "."
 

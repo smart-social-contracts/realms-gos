@@ -186,7 +186,7 @@ def vote_link(cls, key, cycle, **fields):
             raise Conflict(f"{key} and this realm would take legislation from each other, directly or through other "
                            f"realms: a cycle")
     except Exception:  # noqa: BLE001  whatever stops the vote, the record written before the first call goes
-        undo(link, before)
+        undo(cls[key], before)  # read again: the walk's calls ended the message
         raise
     cls[key].checking = False
     yield from tell(cls[key])  # their vote is in or it is not: this notice completes the link in either order

@@ -49,7 +49,7 @@ for path in sorted(glob.glob(os.path.join(SRC, "*", "*.py"))):
 
 import ggg_api  # noqa: E402
 import kit  # noqa: E402
-from api import assets, quarters  # noqa: E402
+from api import assets, propagation, quarters  # noqa: E402
 import mirror  # noqa: E402
 
 ggg_api.Principal = mirror.FakePrincipal
@@ -65,6 +65,7 @@ def fresh():
     fake_chain.reset()
     quarters._synced.update(since_start=False, at=0)  # what a heap of a canister knows of its syncs, which a test starts without
     quarters._scale["check"] = True
+    propagation._brought.clear()
     assets.census.update(held=None, generation=1, taken=0)
     fake_chain.state["mirror"] = MIRROR
     yield

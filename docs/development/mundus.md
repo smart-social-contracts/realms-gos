@@ -33,10 +33,11 @@ included: that is the point. It needs `icp`, `dfx`, `ic-wasm`, `node`, `python3`
    signed by its founder, geister's key for its seed), then launched by the founder as the setup wizard does:
    extensions, branding, tokens, a short voting window, the sign-in the file asks for, two invite codes.
 6. **Quarters.** A realm with `quarters` asks Casals for them (`quarter_add`) and waits until it has registered
-   them. Quarters come before layers: a capital gives its quarters a codex when it installs one, and a quarter
-   added after it never gets one ([realms-gos#745](https://github.com/smart-social-contracts/realms-gos/issues/745)).
-   For the same reason the mundus turns the capital's auto-scale off: the swarm's members join the capital, and a
-   full capital would grow quarters of its own. Then it gives each quarter what no step of its adoption does, and
+   them. Quarters come before layers, so that they follow each install; the codex does not need that order any more,
+   since a quarter added after its capital's install is sent the codex whole at its first report
+   ([realms-gos#745](https://github.com/smart-social-contracts/realms-gos/issues/745)). The mundus turns the
+   capital's auto-scale off: the swarm's members join the capital, and a full capital would grow quarters of its own,
+   which nobody would furnish. Then it gives each quarter what no step of its adoption does, and
    only a controller can: the capital's invite codes (a person joins the quarter of their choice from the capital's
    join page, with an invite that is the quarter's own), the platform's file registry, the capital's trust policy and
    the capital's extensions (a member sees the screens of the extensions their quarter has). The mundus does it as

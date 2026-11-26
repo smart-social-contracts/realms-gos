@@ -50,10 +50,18 @@ def ledger_ok(tx=18_234):
 
 
 def receive(amount, payer="alice"):
-    inv = ok("invoice_create", "bob", payer=payer, amount=amount, items=one_item(amount), reason=f"User:{payer}")["invoice"]
-    balance_reply(amount)
+    """Bill ``payer``, who pays: the source fund gains ``amount``. The invoice adds the ledger's fee, which the realm pays
+    to move the payment into its main account (treasury.collect)."""
+    billed = amount + Token["REALM"].fee
+    inv = ok("invoice_create", "bob", payer=payer, amount=billed, items=one_item(billed), reason=f"User:{payer}")["invoice"]
+    balance_reply(billed)
     assert ok("invoice_check", payer, invoice=inv)["status"] == "paid"
     return inv
+
+
+def payouts():
+    """The ledger transfers that paid someone, from the realm's main account: a collection leaves an invoice's account."""
+    return [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer" and "from_subaccount = null" in c[2]]
 
 
 def allocate(**percents):
@@ -151,7 +159,7 @@ def test_a_delegates_transfer_is_a_proposal_even_where_the_fund_pays_directly():
        expires_in=86400)
     out = ok("transfer_create", "claude-conn", on_behalf_of="carla", fund="ROADS", to="buildco", amount=500)
     assert out["requires_vote"] and Transfer.count() == 0
-    assert not [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer"]
+    assert not payouts()
     p = out["proposal"]
     assert "filed" in denied("proposal_vote", "claude-conn", proposal=p, choice="yes", on_behalf_of="carla")
     assert adopt(p, voter="carla")["status"] == "completed"
@@ -170,7 +178,7 @@ def test_I_FIN_2_money_leaves_a_fund_only_by_transfer_under_the_owners_policy():
     world.policy(depts["Infrastructure"], 2, 3)
     out = ok("transfer_create", "carla", fund="ROADS", to="buildco", amount=500)
     assert out["requires_vote"] and Transfer.count() == 0
-    assert not [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer"]
+    assert not payouts()
 
 
 def test_transfer_create_is_delegable():
@@ -200,8 +208,9 @@ def test_I_FIN_3_invoice_paid_only_when_ledger_shows_amount():
     balance_reply(120)
     assert ok("invoice_refresh", "bob", invoice=inv)["paid"] == 1
     assert Invoice[inv].status == "paid" and Invoice[inv].paid_at == fake_chain.now()
-    entries = {(e.kind, e.debit, e.credit) for e in Invoice[inv].ledger_entries}
-    assert entries == {("asset", 120, 0), ("revenue", 0, 120)}
+    entries = {(e.kind, e.category, e.debit, e.credit) for e in Invoice[inv].ledger_entries}
+    # the fund gains the payment less the ledger's fee for moving it into the realm's main account
+    assert entries == {("asset", "cash", 110, 0), ("expense", treasury.FEE, 10, 0), ("revenue", "user", 0, 120)}
     assert "needs invoice.refresh" in denied("invoice_refresh", "alice")
 
 
@@ -391,11 +400,14 @@ def test_I_FIN_6_the_realm_never_moves_a_members_own_funds():
     setup_finance()
     assert "unknown Fund 'alice'" in call("transfer_create", "ctl", fund="alice", to="bob", amount=1)["error"]
     allocate(ROADS=100)
-    receive(100)
+    inv = receive(100)
     ledger_ok()
     ok("transfer_create", "ctl", fund="ROADS", to="bob", amount=10)
+    # icrc1_transfer moves only the caller's own money: the realm's main account, or an invoice's, which the payer paid
+    # into (treasury.collect); and the realm takes nothing from another account with ICRC-2
+    realm_own = ("from_subaccount = null", f"from_subaccount = opt {treasury.blob(treasury.subaccount(inv))}")
     transfers = [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer"]
-    assert transfers and all("from_subaccount = null" in c[2] for c in transfers)
+    assert transfers and all(any(own in c[2] for own in realm_own) for c in transfers)
     assert "transfer_from" not in inspect.getsource(treasury)
 
 
@@ -415,9 +427,12 @@ def test_transfer_revert_only_pending():
 
 
 def suspended(cid, method, candid="()", cycles=0):
-    """A ledger call that stays in flight until the test sends its reply (or an exception) in."""
+    """A ledger call that stays in flight until the test sends its reply (or an exception) in. The caller's message ends
+    as the call goes out, and the reply arrives in a new one (fake_chain.end_message)."""
     fake_chain.state["calls"].append((cid, method, candid))
+    fake_chain.end_message()
     reply = yield
+    fake_chain.end_message()
     if isinstance(reply, Exception):
         raise reply
     return reply
@@ -645,6 +660,209 @@ def test_invoice_refresh_makes_at_most_twenty_ledger_calls():
     out = ok("invoice_refresh", "bob", count=100)
     assert out["checked"] == 20 and out["next"]
     assert ok("invoice_refresh", "bob", **{"from": out["next"]})["checked"] == 5
+
+
+# --- a payment reaches the account the realm pays from (realms-gos#739, #740) ----------------------
+
+def collections():
+    """The ledger transfers that moved a payment out of an invoice's account (treasury.collect)."""
+    return [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer" and "from_subaccount = opt" in c[2]]
+
+
+def billed(amount):
+    return ok("invoice_create", "bob", payer="alice", amount=amount, items=one_item(amount))["invoice"]
+
+
+def test_a_new_realm_books_payments_into_a_fund_that_the_root_governs():
+    setup_finance()
+    assert treasury.treasury_config()["source_fund"] == "ROOT"
+    fund = Fund["ROOT"]
+    assert fund.department is None and treasury.owner_of(fund).id == "Administration"
+    assert ok("realm_monitor", "ctl")["problems"] == []
+    # a codex may still give the root department a fund of its own, as Agora's and Syntropia's seeds do
+    ok("fund_create", "bob", fund="DEPT-ADMIN", department="Administration")
+
+
+def test_a_realm_without_its_source_fund_refuses_the_payment_in_words_and_books_it_once_the_fund_exists():
+    setup_finance()
+    Fund["ROOT"].delete()  # a realm made before setup created the fund
+    assert ok("realm_monitor", "ctl")["problems"] == [treasury.NO_SOURCE_FUND.format("ROOT")]
+    inv = billed(120)
+    balance_reply(120)
+    refused = call("invoice_check", "alice", invoice=inv)
+    assert refused["kind"] == "unavailable" and "fund_create" in refused["error"] and "treasury_configure" in refused["error"]
+    assert Invoice[inv].status == "pending" and not collections(), "the payment waits in the invoice's account"
+    ok("fund_create", "bob", fund="ROOT")
+    ledger_ok()
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert funds()["ROOT"] == 110 and ok("realm_monitor", "ctl")["problems"] == []
+
+
+def test_a_source_fund_configured_elsewhere_takes_the_payments_and_root_none():
+    setup_finance()
+    ok("treasury_configure", "bob", config={"source_fund": "ROADS"})
+    ledger_ok()
+    balance_reply(120)
+    assert ok("invoice_check", "alice", invoice=billed(120))["status"] == "paid"
+    assert funds() == {"ROOT": 0, "ROADS": 110}
+
+
+def test_a_payment_moves_into_the_realms_main_account_less_the_fee():
+    setup_finance()
+    inv = billed(120)
+    balance_reply(125)  # paid 5 over
+    ledger_ok(tx=55)
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    # all the invoice's account holds leaves it, less the fee; the 5 over reach the main account unbooked
+    moved = treasury.icrc1_arg(treasury.account(fake_chain.SELF), 115, inv.encode(), 10, from_sub=treasury.subaccount(inv))
+    assert [c[2] for c in collections()] == [moved]
+    assert (Invoice[inv].payment["collected"], Invoice[inv].payment["block"]) == (True, "55")
+    assert funds()["ROOT"] == 110 and balanced()
+    calls = len(fake_chain.state["calls"])
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert len(fake_chain.state["calls"]) == calls, "a collected payment needs no more calls"
+
+
+@pytest.mark.parametrize("answer", [Exception("canister stopped"), "(variant { Err = variant { TemporarilyUnavailable } })"])
+def test_a_payment_the_ledger_did_not_move_is_moved_at_the_next_check(answer):
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = answer
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert Invoice[inv].payment["collected"] is False and funds()["ROOT"] == 110
+    ledger_ok(tx=56)  # the invoice's account still holds the payment
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert len(collections()) == 2 and Invoice[inv].payment["block"] == "56"
+    assert funds()["ROOT"] == 110, "booked once"
+
+
+def test_a_payment_moved_by_a_transfer_whose_answer_was_lost_is_not_moved_again():
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = "garbage"  # an answer that says nothing
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert Invoice[inv].payment["collected"] is False
+    balance_reply(0)  # the transfer had gone through: the next check reads the account, not what it meant to move
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert len(collections()) == 1 and Invoice[inv].payment["collected"] is True and "block" not in Invoice[inv].payment
+    assert funds()["ROOT"] == 110
+
+
+def test_a_payment_left_on_a_ledger_its_token_has_moved_from_is_never_marked_collected():
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
+    calls = len(fake_chain.state["calls"])
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert len(fake_chain.state["calls"]) == calls, "the new ledger's empty account is not read for the payment"
+    assert Invoice[inv].payment["collected"] is False and funds()["ROOT"] == 110
+
+
+def test_a_payment_whose_fee_changed_before_its_move_is_not_moved_and_says_why():
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=12)
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert len(collections()) == 1, "the retry sends nothing"
+    payment = Invoice[inv].payment
+    assert payment["stuck"] == treasury.FEE_CHANGED.format(booked=10, now=12) and payment["collected"] is False
+    assert funds()["ROOT"] == 110, "the books keep the fee they were booked with"
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=10)
+    ledger_ok()
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert Invoice[inv].payment["collected"] is True and "stuck" not in Invoice[inv].payment
+
+
+def test_a_move_the_ledger_refuses_for_its_fee_names_the_fee_it_asks():
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = \
+        "(variant { Err = variant { BadFee = record { expected_fee = 12 : nat } } })"
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    payment = Invoice[inv].payment
+    assert payment["stuck"] == treasury.FEE_CHANGED.format(booked=10, now=12) and payment["collected"] is False
+
+
+def hashed(name):
+    from core import candid
+
+    return f"{candid.idl_hash(name):_}"
+
+
+@pytest.mark.parametrize("reply, fee", [
+    ("(variant { Err = variant { BadFee = record { expected_fee = 12 : nat } } })", 12),
+    (f"(variant {{ {hashed('Err')} = variant {{ {hashed('BadFee')} = record {{ {hashed('expected_fee')} = 7 : nat }} }} }})", 7),
+    ("(variant { Err = variant { InsufficientFunds = record { balance = 1 : nat } } })", None),
+    ("(variant { Ok = 9 : nat })", None),
+    ("garbage", None),
+])
+def test_asked_fee_reads_only_a_bad_fee(reply, fee):
+    assert treasury.asked_fee(reply) == fee
+
+
+def test_an_invoice_of_no_more_than_the_fee_credits_no_fund_and_moves_nothing():
+    setup_finance()
+    inv = billed(10)  # the fee of REALM
+    balance_reply(10)
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert funds()["ROOT"] == 0 and not collections() and Invoice[inv].payment["collected"] is True and balanced()
+
+
+def test_two_checks_in_flight_book_a_payment_once(monkeypatch):
+    setup_finance()
+    inv = billed(120)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    first = start("invoice_check", "alice", invoice=inv)
+    second = start("invoice_check", "alice", invoice=inv)
+    first.send("(120 : nat)")  # it books the payment, and waits on moving it
+    assert finish(second, "(120 : nat)")["status"] == "paid"
+    assert finish(first, "(variant { Ok = 9 : nat })")["status"] == "paid"
+    assert len({e.transaction for e in Invoice[inv].ledger_entries}) == 1 and funds()["ROOT"] == 110
+    assert len(collections()) == 1
+
+
+def test_a_line_added_while_a_check_waits_on_the_ledger_is_kept_and_billed(monkeypatch):
+    setup_finance()
+    inv = billed(120)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    check = start("invoice_check", "alice", invoice=inv)
+    ok("invoice_item_add", "bob", invoice=inv, item={"concept": "late_fee", "amount": 30})
+    assert finish(check, "(120 : nat)")["status"] == "pending", "120 is paid of 150"
+    assert Invoice[inv].amount == 150 and [i["concept"] for i in Invoice[inv].items] == ["fee", "late_fee"]
+    assert not Invoice[inv].ledger_entries
+
+
+def test_a_payment_read_on_a_ledger_its_token_moved_from_meanwhile_is_not_booked(monkeypatch):
+    setup_finance()
+    inv = billed(120)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    check = start("invoice_check", "alice", invoice=inv)  # reads the invoice's account on realm-ledger
+    ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
+    assert finish(check, "(120 : nat)")["status"] == "pending"
+    assert not Invoice[inv].ledger_entries and funds()["ROOT"] == 0, "neither booked nor marked as on the new ledger"
+
+
+def test_a_payment_whose_token_moved_while_its_retry_read_the_old_ledger_stays_uncollected(monkeypatch):
+    setup_finance()
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    check = start("invoice_check", "alice", invoice=inv)  # the retry reads the account on realm-ledger
+    ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
+    assert finish(check, "(120 : nat)")["status"] == "paid"
+    assert fake_chain.state["calls"][-1][1] == "icrc1_balance_of", "no move on either ledger"
+    assert Invoice[inv].payment["collected"] is False and Invoice[inv].payment["ledger"] == LEDGER
 
 
 def test_reports_and_my_invoices_are_paginated():

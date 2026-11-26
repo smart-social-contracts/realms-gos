@@ -33,6 +33,7 @@ def registry(monkeypatch):
 
     def call_text(cid, method, arg=None):
         fake_chain.state["calls"].append((cid, method, arg))
+        fake_chain.end_message()  # as fake_chain's own call_text does
         if method == "get_namespace_approval_icc":
             return json.dumps(approvals.get(arg, {"approved": False, "status": "unapproved"}))
         return json.dumps({"content_b64": base64.b64encode(files[json.loads(arg)["path"]].encode()).decode()})
@@ -66,6 +67,7 @@ def test_a_frontend_only_extension_installs_without_a_backend(registry, monkeypa
     fetched = []
 
     def call_text(cid, method, arg=None):
+        fake_chain.end_message()
         if method == "get_namespace_approval_icc":
             return json.dumps(approvals[arg])
         fetched.append(json.loads(arg)["path"])
@@ -89,6 +91,7 @@ def test_install_copies_the_frontend_files_to_the_realms_frontend(registry, monk
              "frontend/dist/index.js": bundle, "README.md": b"not copied"}
 
     def call_text(cid, method, arg=None):
+        fake_chain.end_message()
         if method == "get_namespace_approval_icc":
             return json.dumps(approvals[arg])
         if method == "list_files":
