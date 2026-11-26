@@ -58,6 +58,7 @@ class Realm(Row):
 
     @classmethod
     def migrate(cls, obj, from_version, to_version):
+        obj.setdefault("languages", [])  # a Json field a stored row lacks reads as the text of its default
         manifest = obj.get("manifest_data") or {}
         rules = manifest.get("governance", {})
         # The old names show a rule still in whole percents.
