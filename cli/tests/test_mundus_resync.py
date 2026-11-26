@@ -1,10 +1,11 @@
-"""Mundus post-deploy: realm configuration and /ext/ bundles after a frontend deploy."""
+"""Mundus post-deploy: realm configuration, /ext/ bundles after a frontend deploy, and the problems a realm reports."""
 
 from unittest.mock import patch
 
 from realms.cli.commands.mundus import (
     _pin_frontend_directories,
     _post_deploy_config,
+    _report_problems,
     _resync_extension_frontends_after_deploy,
     _should_resync_extension_frontends,
 )
@@ -55,3 +56,20 @@ def test_post_deploy_config_refusal_is_a_warning(_op, _pin, _store, capsys):
     realm = {"canister_id": "backend-id", "frontend_canister_id": "frontend-id"}
     _post_deploy_config(realm, "test", "1.2.3")
     assert "needs realm.configure" in capsys.readouterr().out
+
+
+NO_SOURCE_FUND = "the treasury's source fund ROOT, which receives invoice payments, does not exist"
+
+
+@patch("realms.cli.commands.mundus.call_op", return_value={"ok": True, "problems": [NO_SOURCE_FUND]})
+def test_a_realm_deployed_prints_the_problems_it_reports(mock_op, capsys):
+    _report_problems("backend-id", "ic")
+    assert mock_op.call_args.args[:2] == ("backend-id", "realm_monitor")
+    assert mock_op.call_args.kwargs == {"network": "ic", "read": True}
+    assert NO_SOURCE_FUND in " ".join(capsys.readouterr().out.split())  # rich wraps the line
+
+
+@patch("realms.cli.commands.mundus.call_op", side_effect=RuntimeError("no realm_monitor"))
+def test_a_realm_that_cannot_be_asked_for_its_problems_prints_none(_op, capsys):
+    _report_problems("backend-id", "ic")
+    assert capsys.readouterr().out == ""

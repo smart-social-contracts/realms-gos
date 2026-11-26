@@ -750,6 +750,20 @@ def _post_deploy_config(realm: dict, network: str, version: str, parameters: dic
             _resync_extension_frontends_after_deploy(realm, network, infra)
 
 
+def _report_problems(backend_id: str, network: str) -> None:
+    """Print what the realm's settings keep it from doing, from ``realm_monitor``'s ``problems``: a treasury source fund
+    that does not exist, for one, which a member would otherwise meet only once they had paid. They are warnings, and
+    the deploy stands. A realm whose release reports none, or a caller without realm.monitor, prints nothing."""
+    if not backend_id:
+        return
+    try:
+        reply = call_op(backend_id, "realm_monitor", network=network, read=True)
+    except Exception:  # noqa: BLE001  the deploy is done: a realm that does not answer this read is not a failure
+        return
+    for problem in reply.get("problems") or []:
+        console.print(f"  [yellow]⚠ {problem}[/yellow]")
+
+
 def _submit_and_poll(manifest: dict, network: str) -> bool:
     """Submit deployment request and poll for completion."""
     realm_name = manifest.get("name", "unknown")
@@ -1054,6 +1068,8 @@ def mundus_deploy_descriptor_command(
             except Exception as e:
                 console.print(f"[red]  post-deploy failed: {e}[/red]")
                 ok = False
+        if ok:
+            _report_problems(realm.get("canister_id", ""), network)
         results.append((name, ok))
         console.print()
 

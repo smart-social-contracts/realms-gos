@@ -677,6 +677,11 @@ def status(
         if reply.get("ok"):
             console.print("  ✅ Backend canister is responding")
             console.print(f"  ✅ Backend status: {reply.get('status') or 'healthy'} (version {reply.get('version')})")
+            # What the realm's settings keep it from doing; realm_monitor needs realm.monitor, so a caller without it
+            # sees nothing here.
+            monitor = realm_op(effective_canister, "realm_monitor", network=effective_network, read=True, timeout=10)
+            for problem in monitor.get("problems") or []:
+                console.print(f"  ⚠️  {problem}")
         else:
             console.print("  ❌ Backend canister not responding")
             if reply.get("error"):
