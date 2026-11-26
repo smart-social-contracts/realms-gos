@@ -135,6 +135,30 @@ casals -e production --identity <id> upgrade casals.json --wasm <family>        
 casals -e production --identity <id> upgrade casals.json --content <namespace>    # a frontend bundle
 ```
 
+#### Realms of the releases up to v0.8.0-rc3
+
+Every release of realms-gos up to `v0.8.0-rc3` runs the realm backend that this one replaced on 25 October 2026 (it is
+kept in `legacy/realm_backend`): the same entity names over the same stable memory, with other fields, other types and
+other versions, behind another API. This backend cannot read their rows, and nothing converts them: **the realms of
+those releases are end of life.** `v0.8.0-rc3` is the last build of that backend, and it gets no fixes.
+
+- **Their upgrade is refused** before any of their rows is read. `post_upgrade` traps with "Upgrade refused, and
+  nothing was changed: the realm keeps the release it runs and all of its data. …", the replica rolls the upgrade
+  back, and the realm is as it was before the attempt (one that was stopped for the upgrade stays stopped until it is
+  started again).
+- **The way on is a new realm** on a current release, which the members join and where the realm's records are entered
+  again. Nothing imports an old realm's data.
+- **Why there is no migration:** it would have to convert some fifty entity types whose fields, types and meanings
+  differ, and move the realm, its quarters, its frontend and its extensions to a new API, a new federation protocol and
+  a new codex model in one step, by a route nothing tests. When this was decided (November 2026), no production realm
+  ran such a release.
+- **How a realm is told apart:** every build of this backend writes a `Realm` row with an `id` field when it is
+  installed. A release's realm has a `Realm` row without one (v0.3.5 and later), or none that this backend can read
+  (the releases before, whose stable memory it reads as empty). Both are refused: without the second rule, such a realm
+  would be started over as a new, empty one. The wasm of every release that publishes one (39 of 44 tags) was
+  installed and upgraded to this backend: each was refused, and kept its module and its `Realm` row unchanged.
+  `tests/deployed/test_upgrade_chain.py` does the same for `REALM_PREVIOUS_RELEASE`.
+
 #### After an upgrade from ic-python-db 0.12
 
 A realm backend built with ic-python-db 0.12 or earlier saved each index list (the members with a status, the votes of
