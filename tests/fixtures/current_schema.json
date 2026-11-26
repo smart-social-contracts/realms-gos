@@ -5143,6 +5143,16 @@
     "kind": "property",
     "type": "Integer"
    },
+   "fee_differences": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
+   "fee_differences_epoch": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
+   },
    "id": {
     "default": "1",
     "kind": "property",

@@ -40,6 +40,7 @@ OWN = {
     "realm_export": ("direct", "admin", None, None),
     "quarter_add": ("direct", "admin", None, None),
     "invoice_collect": ("direct", "money", None, None),  # moves an invoice's payment into the realm's account, like sweep_resolve
+    "invoice_fee_rebook": ("direct", "money", None, None),  # books a fee difference on a fund, and moves the payment
     "orchestration_decide": ("confirm", "admin", None, None),
     # Resuming an install the realm voted for changes nothing the vote did not approve: as codex_install is.
     "codex_install_resume": ("direct", "setup", "admin", None),
