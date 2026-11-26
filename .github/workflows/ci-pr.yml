@@ -20,10 +20,6 @@ on:
         description: "Release tag whose realm wasm the realm-wasm upgrade tests start from (empty: REALM_PREVIOUS_RELEASE)"
         required: false
         default: ""
-      previous_commit:
-        description: "Commit whose realm backend test_upgrade_chain upgrades from (empty: REALM_PREVIOUS_COMMIT)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -42,8 +38,13 @@ env:
   # refusal. Bump it when a release ships.
   REALM_PREVIOUS_RELEASE: "v0.7.0"
   # The build of this realm backend that test_upgrade_chain upgrades from, until a release of it exists: the oldest any
-  # realm runs (local-a5135eb6, staging, November 2026). Move it on when no realm runs it any more.
+  # realm runs (local-a5135eb6, staging, November 2026), packed byte for byte as it was built for them. Its
+  # requirements leave the toolkit open (>=0.5.3), so the version it was built with is pinned here, and the packed wasm,
+  # gzipped as `gzip -n -9`, must have the module hash those realms report (`icp canister status --public`). The test's
+  # seed is written for this build's API: moving it on means a new seed, not only a new commit.
   REALM_PREVIOUS_COMMIT: "a5135eb631c71c6772aa95051b17f181642bbbe5"
+  REALM_PREVIOUS_TOOLKIT: "0.5.3"
+  REALM_PREVIOUS_MODULE: "b0bfada748b8c45003933c9dc0c56eb2a57d3bf34f79f5a00c2d859a3c42a0db"
   # `icp network start` resolves the network launcher through
   # api.github.com/repos/dfinity/icp-cli-network-launcher/releases/latest. Unauthenticated that
   # is 60 requests an hour per runner IP, and it has failed the job with a bare
@@ -171,26 +172,29 @@ jobs:
           gunzip "realm-backend-$TAG.wasm.gz"
           echo "REALM_PREVIOUS_WASM=$dir/realm-backend-$TAG.wasm" >> "$GITHUB_ENV"
       # The wasm of the earlier build test_upgrade_chain upgrades from (REALM_PREVIOUS_BUILD_WASM), packed from its own
-      # tree with the dependencies it pinned, as it was built for the realms that run it. A commit's wasm does not
-      # change, so it is packed once and kept in the cache.
+      # tree with the dependencies it was built with, and checked against the module its realms run. It does not
+      # change, so it is packed once and kept in the cache; the check runs on a cached copy too.
       - name: The previous build's realm wasm, cached
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/previous-build/realm_backend.wasm
-          key: realm-previous-build-${{ inputs.previous_commit || env.REALM_PREVIOUS_COMMIT }}
+          key: realm-previous-build-${{ env.REALM_PREVIOUS_COMMIT }}-toolkit-${{ env.REALM_PREVIOUS_TOOLKIT }}
       - name: The previous build's realm wasm
-        env:
-          COMMIT: ${{ inputs.previous_commit || env.REALM_PREVIOUS_COMMIT }}
         run: |
           dir="$RUNNER_TEMP/previous-build"
           if [ ! -f "$dir/realm_backend.wasm" ]; then
-            git fetch --no-tags --depth=1 origin "$COMMIT"
+            git fetch --no-tags --depth=1 origin "$REALM_PREVIOUS_COMMIT"
             mkdir -p "$dir/tree"
-            git archive "$COMMIT" | tar -x -C "$dir/tree"
+            git archive "$REALM_PREVIOUS_COMMIT" | tar -x -C "$dir/tree"
             python -m venv "$dir/venv"
-            "$dir/venv/bin/pip" install -q -r "$dir/tree/requirements.txt"
-            (cd "$dir/tree" && "$dir/venv/bin/python" scripts/pack_realm_backend.py --version "local-${COMMIT:0:8}")
+            "$dir/venv/bin/pip" install -q -r "$dir/tree/requirements.txt" "ic-basilisk-toolkit==$REALM_PREVIOUS_TOOLKIT"
+            (cd "$dir/tree" && "$dir/venv/bin/python" scripts/pack_realm_backend.py --version "local-${REALM_PREVIOUS_COMMIT:0:8}")
             cp "$dir/tree/.basilisk/realm_backend/realm_backend.wasm" "$dir/realm_backend.wasm"
+          fi
+          module=$(gzip -n -9 -c "$dir/realm_backend.wasm" | sha256sum | cut -d' ' -f1)
+          if [ "$module" != "$REALM_PREVIOUS_MODULE" ]; then
+            echo "::error::the packed previous build is module $module, not $REALM_PREVIOUS_MODULE, which its realms run"
+            exit 1
           fi
           echo "REALM_PREVIOUS_BUILD_WASM=$dir/realm_backend.wasm" >> "$GITHUB_ENV"
       # Not run against the previous release, whose realms this release refuses: they seed a realm through the read
