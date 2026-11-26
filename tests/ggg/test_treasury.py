@@ -810,6 +810,132 @@ def test_asked_fee_reads_only_a_bad_fee(reply, fee):
     assert treasury.asked_fee(reply) == fee
 
 
+def waiting():
+    """What realm_monitor says of the payments not yet moved into the realm's account, and their count."""
+    said = [p for p in ok("realm_monitor", "ctl")["problems"] if "not yet moved" in p]
+    return said, treasury.Treasury["1"].uncollected
+
+
+def test_realm_monitor_counts_the_payments_that_wait_to_be_moved():
+    setup_finance()
+    assert waiting() == ([], 0)
+    first, second = billed(120), billed(130)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    ok("invoice_check", "alice", invoice=first)
+    balance_reply(130)
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting() == ([treasury.UNCOLLECTED.format(count=2)], 2)
+    ledger_ok()
+    ok("invoice_check", "alice", invoice=first)
+    assert waiting() == ([treasury.UNCOLLECTED.format(count=1)], 1)
+    balance_reply(0)  # the second's move had gone through: its next check finds the account empty
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting() == ([], 0)
+
+
+def test_a_payment_moved_at_once_or_too_small_to_move_never_counts():
+    setup_finance()
+    ledger_ok()
+    balance_reply(120)
+    ok("invoice_check", "alice", invoice=billed(120))
+    balance_reply(10)
+    ok("invoice_check", "alice", invoice=billed(10))  # no more than the fee: nothing to move
+    assert waiting() == ([], 0)
+
+
+def test_a_move_answered_after_another_check_marked_it_collected_takes_it_off_the_count_once(monkeypatch):
+    setup_finance()
+    first, second = billed(120), billed(130)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    balance_reply(120)
+    ok("invoice_check", "alice", invoice=first)
+    balance_reply(130)
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting()[1] == 2
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    moving = start("invoice_check", "alice", invoice=first)
+    moving.send("(120 : nat)")  # its retry reads the account and sends the move, which stays in flight
+    checking = start("invoice_check", "alice", invoice=first)
+    assert finish(checking, "(0 : nat)")["status"] == "paid"  # the move has applied: it marks the payment collected
+    assert finish(moving, "(variant { Ok = 9 : nat })")["status"] == "paid"
+    assert waiting()[1] == 1, "the second still waits; the first came off once"
+
+
+def test_a_payment_the_count_never_held_is_not_taken_off_it():
+    setup_finance()
+    inv = Invoice[billed(120)]
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    ok("invoice_check", "alice", invoice=inv.id)
+    # as a build that kept no count left it: waiting, and not in the count
+    inv.payment = {k: v for k, v in inv.payment.items() if k != "counted"}
+    treasury.Treasury["1"].uncollected = 0
+    ledger_ok()
+    ok("invoice_check", "alice", invoice=inv.id)
+    assert Invoice[inv.id].payment["collected"] is True and waiting() == ([], 0)
+
+
+def test_a_count_below_zero_is_reported_as_broken_not_hidden():
+    setup_finance()
+    treasury.Treasury["1"].uncollected = -1
+    assert ok("realm_monitor", "ctl")["problems"] == [treasury.COUNT_BROKEN.format(count=-1)]
+
+
+def waiting_by_scan():
+    """The payments that wait to be moved, found by reading every invoice: what the count stands for."""
+    return sum(1 for i in rows(Invoice) if i.payment.get("collected") is False and i.payment.get("counted"))
+
+
+def test_the_count_is_the_number_of_payments_that_wait(monkeypatch):
+    """The count is a cache of what the invoices say. Through receipts, moves that fail, retries, a lost answer, a move
+    interrupted by another check and invoice_collect, it stays equal to a scan of the invoices."""
+    setup_finance()
+
+    def agrees():
+        assert treasury.Treasury["1"].uncollected == waiting_by_scan()
+
+    refuse = Exception("canister stopped")
+    ok_now, failing, lost, tiny = billed(120), billed(130), billed(140), billed(10)
+    ledger_ok(tx=70)
+    balance_reply(120)
+    ok("invoice_check", "alice", invoice=ok_now)  # moved at once
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = refuse
+    balance_reply(130)
+    ok("invoice_check", "alice", invoice=failing)  # waits
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = "garbage"
+    balance_reply(140)
+    ok("invoice_check", "alice", invoice=lost)  # the move went through, its answer said nothing: waits
+    balance_reply(10)
+    ok("invoice_check", "alice", invoice=tiny)  # nothing to move
+    agrees()
+    assert waiting_by_scan() == 2
+
+    balance_reply(0)
+    ok("invoice_check", "alice", invoice=lost)  # the account is empty: marked collected, nothing sent
+    agrees()
+
+    old = paid_before_collection(150)
+    balance_reply(150)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = refuse
+    assert ok("invoice_collect", "bob", invoice=old)["collected"] is False
+    agrees()
+    assert waiting_by_scan() == 2
+
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    moving = start("invoice_check", "alice", invoice=failing)
+    moving.send("(130 : nat)")  # the retry sends the move, which stays in flight
+    checking = start("invoice_check", "alice", invoice=failing)
+    finish(checking, "(0 : nat)")  # the move has applied: this check marks it collected
+    finish(moving, "(variant { Ok = 71 : nat })")
+    agrees()
+    retry = start("invoice_check", "alice", invoice=old)
+    retry.send("(150 : nat)")
+    finish(retry, "(variant { Ok = 72 : nat })")
+    agrees()
+    assert waiting_by_scan() == 0 and waiting() == ([], 0)
+
+
 def test_an_invoice_of_no_more_than_the_fee_credits_no_fund_and_moves_nothing():
     setup_finance()
     inv = billed(10)  # the fee of REALM
@@ -829,6 +955,7 @@ def test_two_checks_in_flight_book_a_payment_once(monkeypatch):
     assert finish(first, "(variant { Ok = 9 : nat })")["status"] == "paid"
     assert len({e.transaction for e in Invoice[inv].ledger_entries}) == 1 and funds()["ROOT"] == 110
     assert len(collections()) == 1
+    assert waiting() == ([], 0), "counted once, and taken away once"
 
 
 def test_a_line_added_while_a_check_waits_on_the_ledger_is_kept_and_billed(monkeypatch):
@@ -942,8 +1069,10 @@ def test_a_move_the_ledger_does_not_make_is_made_at_the_next_check():
     balance_reply(120)
     fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
     assert ok("invoice_collect", "bob", invoice=inv)["collected"] is False
+    assert waiting()[1] == 1
     ledger_ok(tx=61)
     assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert waiting() == ([], 0)
     assert Invoice[inv].payment["block"] == "61" and len(collections()) == 2 and funds()["ROOT"] == 110
     assert Invoice[inv].payment["moved"] == 110, "the move the retry made records what it moved"
 

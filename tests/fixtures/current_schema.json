@@ -5147,6 +5147,11 @@
     "default": "1",
     "kind": "property",
     "type": "String"
+   },
+   "uncollected": {
+    "default": 0,
+    "kind": "property",
+    "type": "Integer"
    }
   },
   "relationships": {
