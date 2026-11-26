@@ -9,9 +9,10 @@ realm keeps the wasm and the data it had. The release's wasm is named by ``REALM
 ``REALM_PREVIOUS_BUILD_WASM`` (CI packs it from ``REALM_PREVIOUS_COMMIT``, as the module those realms run), and is
 seeded through that build's own API, which the seed is written for. It is upgraded over itself first, which stores its
 entity schema, so that ic-python-db's schema check runs as on a realm upgraded before: a realm installed fresh stores
-none, and a staging realm, upgraded many times, does. Then every row is exported through ``realm_export``, the realm is upgraded, its index lists converted, and the rows exported again:
-none is missing, none differs but by what a ``migrate()`` of this release says it converts, and the lists members read
-list what they did. No Json field reads as text, which the export cannot show (it parses such text back).
+none, and a staging realm, upgraded many times, does. Then every row is exported through ``realm_export``, the realm is
+upgraded, its index lists converted, and the rows exported again: none is missing, none differs but by what a
+``migrate()`` of this release says it converts, and the lists members read list what they did. No Json field reads as
+text, which the export cannot show (it parses such text back).
 What it does not reach: 14 entity types change their version between that build and this release, and the seed has rows
 of 5 of them (Realm, Department, Proposal, Invoice, Notification). The migrate()s of AllocationRule, Budget, Codex,
 Contract, FederalVote, Land, TaxPolicy, Tender and Transfer run on no row here.
