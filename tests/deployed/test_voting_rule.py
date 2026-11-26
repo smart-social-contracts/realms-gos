@@ -10,7 +10,7 @@ from ic.candid import Types
 from ic.principal import Principal
 from pic import CONTROLLER, Canister
 
-PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
 PERCENT = 1_000_000
 ONE = 100 * PERCENT
 LINK = Types.Record({"kind": Types.Variant({"Replaces": Types.Null, "RelatesTo": Types.Null}), "proposal": Types.Text})
@@ -204,17 +204,20 @@ def as_last_release_saved(proposal, **fields):
 
 
 @pytest.fixture(scope="module", params=[
-    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
+    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")),
     "rewritten"])
 def upgraded(request, wasm_of, people):
     """A realm with a realm-wide and a department proposal open, filed under the last release's rules, then upgraded:
-    by the previous release's own wasm, named by ``REALM_PREVIOUS_WASM`` (skipped when unset), or by this release's, whose
-    two rows are rewritten as that release saved them, which CI can always build."""
+    by the earlier build's own wasm, named by ``REALM_PREVIOUS_BUILD_WASM`` (skipped when unset), or by this release's,
+    whose two rows are rewritten as that release saved them, which CI can always build."""
     current = wasm_of("production")
     realm = Canister(PREVIOUS if request.param == "previous" else current, installer=people["installer"])
     launch(realm, people)
     alice = people["alice"]
-    ok(realm, "governance_update", people["ctl"], voting_threshold=60 * PERCENT, voting_quorum=10 * PERCENT)
+    # The earlier build takes whole percents under its own names, and ignores names it does not know.
+    rules = ({"threshold": 60, "quorum_percent": 10} if request.param == "previous"
+             else {"voting_threshold": 60 * PERCENT, "voting_quorum": 10 * PERCENT})
+    ok(realm, "governance_update", people["ctl"], **rules)
     wide, department = (ok(realm, "proposal_create", alice, title=t, **d)["proposal"] for t, d in (
         ("wide", {}), ("department", {"department": "Panel"})))
     vote(realm, alice, department, "yes")

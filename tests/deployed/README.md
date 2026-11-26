@@ -7,10 +7,16 @@ the dfx cache. Create instances with `pic.new_pocket_ic()` (the classes below do
 answers 409 "busy" to anything sent during a slow round, such as the install of an 11 MB wasm, and it waits instead
 of failing.
 
-The upgrade tests that start from the previous release's own wasm (`test_upgrade_chain.py`, and the `previous` case
-of others) read its path from `REALM_PREVIOUS_WASM` and skip without it. CI sets it to the `realm-backend-<tag>.wasm.gz`
-asset of `REALM_PREVIOUS_RELEASE` in `.github/workflows/ci-pr.yml`, unpacked; set it the same way to run them
-locally, or to a canister's own release to rehearse that canister's upgrade.
+The upgrade tests start from an earlier wasm, and skip without it:
+
+- **`REALM_PREVIOUS_BUILD_WASM`**, an earlier build of this backend: `test_upgrade_chain.py` and the `previous` case of
+  the others. CI packs it from `REALM_PREVIOUS_COMMIT` (a5135eb6, the oldest build any realm runs), as the module those
+  realms run, in `.github/workflows/ci-pr.yml`. A case that needs what a5135eb6 lacks (a layered codex, the journal, a
+  grant on events, ic-python-db 0.13) is skipped from it when `REALM_PREVIOUS_COMMIT` names it, with the reason. Set
+  `REALM_PREVIOUS_BUILD_WASM` to another build's wasm, such as 1297f512's, to run those cases from it.
+- **`REALM_PREVIOUS_WASM`**, a release's own wasm: only `test_upgrade_chain.py`, which checks that the upgrade of a
+  release's realm is refused. CI sets it to the `realm-backend-<tag>.wasm.gz` asset of `REALM_PREVIOUS_RELEASE`,
+  unpacked.
 
 | File | What it gives a test |
 |---|---|
