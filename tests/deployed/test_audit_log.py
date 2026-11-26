@@ -3,8 +3,8 @@ one drops the oldest, and that must cost an update next to nothing. It cost abou
 cheapest updates (Entity.delete looks through the relations of all 93 entity classes, and the row is loaded first):
 profile_update was 26 M at 1,990 events and 47 M at 2,030.
 
-The upgrade runs from the previous release's own wasm, named by ``REALM_PREVIOUS_WASM`` (skipped when unset), and from
-this release's, which CI can always build.
+The upgrade runs from the earlier build's own wasm, named by ``REALM_PREVIOUS_BUILD_WASM`` (skipped when unset), and
+from this release's, which CI can always build.
 """
 
 import json
@@ -14,7 +14,12 @@ import pytest
 from pic import CONTROLLER, Canister
 from test_delegation_groups import launch, ok
 
-PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
+# The earlier build CI packs (REALM_PREVIOUS_COMMIT) is a5135eb6, which records events without a grant (Event.grant came
+# after it, #587): the log the "previous" case starts from, its oldest events those of a grant, cannot be made on it.
+# That build's events are read back after the upgrade by test_upgrade_chain; the cost of dropping events after an
+# upgrade is the "current" case (realms-gos#792).
+FROM_A5135EB6 = os.environ.get("REALM_PREVIOUS_COMMIT", "").startswith("a5135eb6")
 KEPT = 2000
 BELOW, ABOVE, FAR_ABOVE = 1900, 2030, 3020  # events recorded when an update is measured
 # What an update may cost more in a full log than in one that is not, in instructions. Measured: profile_update is
@@ -132,7 +137,9 @@ def test_dropping_an_event_from_a_full_log_costs_a_fraction_of_an_update(realm, 
 
 
 @pytest.fixture(scope="module", params=[
-    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
+    pytest.param("previous", marks=[
+        pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm"),
+        pytest.mark.skipif(FROM_A5135EB6, reason="the earlier build, a5135eb6, records no grant on events")]),
     "current"])
 def upgraded(request, wasm_of, people):
     """A realm of the previous release, or of this one, whose log is full, the oldest rows of it three events of a grant,

@@ -1,7 +1,7 @@
 """Power of attorney by groups on the real wasm (realms-gos#557, phase 3): a grant that names groups through GGG's Candid
 methods, the vocabulary a plain member reads, and the upgrade of a realm whose grants were made before groups.
 
-The upgrade runs from the previous release's own wasm, named by ``REALM_PREVIOUS_WASM`` (skipped when unset): its
+The upgrade runs from the earlier build's own wasm, named by ``REALM_PREVIOUS_BUILD_WASM`` (skipped when unset): its
 grants name permissions, its events have no ``grant``, and its delegated updates are what the instruction budget of
 this release is measured against.
 """
@@ -13,7 +13,7 @@ import pytest
 from ic.candid import Types
 from pic import CONTROLLER, Canister
 
-PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
 DAY = 86400
 NS = 10**9
 CHOICE = Types.Variant({"Yes": Types.Null, "No": Types.Null, "Abstain": Types.Null})
@@ -173,7 +173,7 @@ def test_the_instructions_of_a_delegated_vote_stay_within_budget(realm, people):
     assert max(spent["delegated"]) < DELEGATED_VOTE_BUDGET and max(spent["own"]) < DELEGATED_VOTE_BUDGET
 
 
-@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")
+@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")
 def test_a_grant_made_before_groups_works_as_it_did(upgraded, people):
     alice, claude = people["alice"], people["claude-conn"]
     ok(upgraded, "proposal_vote", claude, proposal="P-1", choice="no", on_behalf_of=alice)
@@ -187,14 +187,14 @@ def test_a_grant_made_before_groups_works_as_it_did(upgraded, people):
     assert card["scope"] == {"operations": ["proposal.vote", "proposal.create"]} and card["status"] == "active"
 
 
-@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")
+@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")
 def test_events_written_before_the_upgrade_read_grant_as_empty(upgraded, people):
     alice = people["alice"]
     events = ok(upgraded, "events", CONTROLLER, query=True, count=500)["events"]
     before = [e for e in events if int(e["id"]) <= upgraded.last_event and e["by"] == people["claude-conn"]]
     if any(e.get("grant") for e in before):
-        pytest.skip("REALM_PREVIOUS_WASM already records the grant on events (it is from after #587): this test needs "
-                    "a release from before, whose events have none")
+        pytest.skip("REALM_PREVIOUS_BUILD_WASM already records the grant on events (it is from after #587): this test "
+                    "needs a build from before, whose events have none")
     assert before and all(not e.get("grant") for e in before)
     ok(upgraded, "proposal_vote", people["claude-conn"], proposal="P-1", choice="yes", on_behalf_of=alice)
     after = ok(upgraded, "events", CONTROLLER, query=True)["events"][0]
@@ -205,7 +205,7 @@ def test_events_written_before_the_upgrade_read_grant_as_empty(upgraded, people)
     assert len(notices) == 1
 
 
-@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")
+@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")
 def test_what_the_upgrade_adds_to_a_delegated_vote(upgraded, people):
     after = measured(upgraded, people)
     print("instructions before the upgrade", upgraded.before, "after", after)

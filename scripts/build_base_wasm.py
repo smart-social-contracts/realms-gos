@@ -66,7 +66,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from basilisk_cedar_template import apply_cedar_template_env  # noqa: E402
+from basilisk_cedar_template import apply_cedar_template_env, require_cedar_build  # noqa: E402
 
 
 # ── Stub source — must stay in sync with what ─────────────────────────────────
@@ -179,6 +179,7 @@ def _run_basilisk(repo_root: Path, *, dry_run: bool) -> Path:
     wasm_path = repo_root / ".basilisk" / "realm_backend" / "realm_backend.wasm"
     if not wasm_path.is_file():
         raise SystemExit(f"basilisk did not produce {wasm_path}")
+    require_cedar_build(wasm_path)
 
     did_path = Path(env.get("CANISTER_CANDID_PATH") or wasm_path.with_suffix(".did"))
     if not did_path.is_file():

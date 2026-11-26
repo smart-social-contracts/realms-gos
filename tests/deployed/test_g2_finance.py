@@ -1,10 +1,10 @@
 """A realm that holds taxes, budgets and invoices in the form of the last release keeps them across an upgrade to GGG's
 G2 finance (realms-gos#547), and the new finance works on the real wasm.
 
-The upgrade is from the previous release's own wasm, named by ``REALM_PREVIOUS_WASM`` (skipped when unset), or from this
-release's, whose rows are written back through the controller's ``__shell__`` as the last release saved them, which CI can
-always build. An entity migrates when it is read from storage, and only an upgrade, which empties the canister's heap,
-makes the next read come from there.
+The upgrade is from the earlier build's own wasm, named by ``REALM_PREVIOUS_BUILD_WASM`` (skipped when unset), or from
+this release's, whose rows are written back through the controller's ``__shell__`` as the last release saved them, which
+CI can always build. An entity migrates when it is read from storage, and only an upgrade, which empties the canister's
+heap, makes the next read come from there.
 """
 
 import json
@@ -14,19 +14,20 @@ import mock_ledger
 import pytest
 from pic import Canister
 
-PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
 
 BASIS_POINT = 10_000
 UNIT = 10**8  # one token of the realm's currency, which has 8 decimals: a cent is 10**6 of the smallest unit
 FY2026 = {"period": "FY2026", "starts_at": 1_767_225_600, "ends_at": 1_798_761_600}
 FY2027 = {"period": "FY2027", "starts_at": 1_798_761_600, "ends_at": 1_830_297_600}
 
-# The taxes as the last release held them in the policy's document.
+# The taxes as the earlier build held them in the policy's document (TaxPolicy version 1): its rates in basis points
+# under rate_bp, which is what that build's tax_policy_draft takes. 150 basis points are 1_500_000 hundred-millionths.
 OLD_DOCUMENT = {"symbol": "DOM", "taxes": [
-    {"code": "ibi", "base": "land_area", "method": "proportional", "rate": 1_500_000, "unit_value": UNIT, "due_days": 60},
+    {"code": "ibi", "base": "land_area", "method": "proportional", "rate_bp": 150, "unit_value": UNIT, "due_days": 60},
     {"code": "residence", "base": "flat", "method": "fixed", "amount": 5 * 10**6},
     {"code": "turnover", "base": "declared", "method": "progressive",
-     "brackets": [{"up_to": 1_000 * UNIT, "rate": 200 * BASIS_POINT}, {"up_to": None, "rate": 300 * BASIS_POINT}]}]}
+     "brackets": [{"up_to": 1_000 * UNIT, "rate_bp": 200}, {"up_to": None, "rate_bp": 300}]}]}
 # The versions the entities are saved at, where this release moved them on.
 VERSION = {"TaxPolicy": 3, "Budget": 2, "Invoice": 2}
 # The same taxes as this release holds them.
@@ -134,7 +135,7 @@ def seed_current(realm, ctl, alice):
 
 
 @pytest.fixture(scope="module", params=[
-    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
+    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")),
     "rewritten"])
 def realm(request, wasm_of, people):
     """A realm with an adopted tax policy, two budget lines, two invoices and a parcel, in the form of the last release,

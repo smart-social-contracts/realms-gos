@@ -104,6 +104,7 @@ def test_a_member_pays_an_invoice_and_the_money_reaches_the_account_the_realm_pa
     # The realm moved the payment into its main account, which cost it the ledger's fee, and booked what it holds there.
     assert balance(ledger, realm.id.to_str(), pay_to) == 0
     assert balance(ledger, realm.id.to_str()) == BILL - FEE == books(realm, people)
+    assert ok(realm, "realm_monitor", people["ctl"], query=True)["problems"] == [], "no payment waits to be moved"
 
 
 def test_the_realm_pays_out_what_it_received(realm, ledger, people):

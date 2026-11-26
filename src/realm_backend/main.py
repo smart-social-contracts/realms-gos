@@ -37,6 +37,7 @@ def init_(installer: text) -> void:
 
 @post_upgrade
 def post_upgrade_() -> void:
+    setup.refuse_release_realm()  # before any row is read: basilisk's schema check runs after this function
     setup.start()
     journal_signing.resume()  # timers do not survive an upgrade
 

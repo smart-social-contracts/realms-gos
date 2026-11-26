@@ -13,8 +13,12 @@ import os
 import pytest
 from pic import Canister
 
-# The realm wasm before this change, packed from feat/layered-codex: the test of the upgrade is skipped without it.
-PREVIOUS_WASM = os.environ.get("REALM_PREVIOUS_WASM")
+# An earlier build of the realm wasm, before this change: the test of the upgrade is skipped without it.
+PREVIOUS_WASM = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
+# The one CI packs (REALM_PREVIOUS_COMMIT) is a5135eb6, which has no layered codex, so no codex id an upgrade could
+# change: the test is skipped from it. Staging's realms of 1297f512 have one and the stub json, so this is their
+# upgrade; it runs from a wasm of that build (realms-gos#792).
+FROM_A5135EB6 = os.environ.get("REALM_PREVIOUS_COMMIT", "").startswith("a5135eb6")
 RATE_LIMIT = 600  # seconds the replica wants between install_code messages as dear as installing this wasm
 IMAGE_MAX = 960_000  # api.setup.IMAGE_MAX, written out: a test that follows its constant would follow a wrong one
 # realm_info with both images at the most allowed costs 0.31 billion instructions (measured on PocketIC); a query may
@@ -209,7 +213,8 @@ def test_a_layered_codex_id_is_the_same_with_the_stub_and_with_the_fast_json(ful
     assert out == {"same_text": True, "id": codex_id_on_the_host()}
 
 
-@pytest.mark.skipif(not PREVIOUS_WASM, reason="REALM_PREVIOUS_WASM names no wasm")
+@pytest.mark.skipif(not PREVIOUS_WASM, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")
+@pytest.mark.skipif(FROM_A5135EB6, reason="the earlier build, a5135eb6, has no layered codex")
 def test_a_layered_codex_id_does_not_change_across_the_upgrade_to_the_fast_json(wasm_of, people):
     realm = launched(PREVIOUS_WASM, people)
     before = json.loads(run(realm, CODEX_ID_BEFORE))

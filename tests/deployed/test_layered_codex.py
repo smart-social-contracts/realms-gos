@@ -14,7 +14,7 @@ from pic import Canister
 
 CODICES = pathlib.Path(__file__).resolve().parents[2] / "codices" / "codices"
 # The realm wasm of feat/layered-codex before this change, packed from that commit: the test is skipped without it.
-PREVIOUS_WASM = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS_WASM = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
 
 LAYERS = ["eu/es", "eu/es/vc"]
 PATHS = {"tax": ["eu/es", "eu/es/vc"]}
@@ -61,7 +61,7 @@ def run(realm, code):
     return out
 
 
-@pytest.mark.skipif(not PREVIOUS_WASM, reason="REALM_PREVIOUS_WASM names no wasm")
+@pytest.mark.skipif(not PREVIOUS_WASM, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")
 def test_a_legacy_codex_stays_active_and_installable_across_the_upgrade(wasm_of, people):
     founder = people["founder"]
     realm = new_realm(PREVIOUS_WASM, people)

@@ -1,4 +1,6 @@
-ic-basilisk
-# Sorted indexes (Entity.top_by) for the rankings
-ic-python-db>=0.16.0
-ic-python-logging
+# Pinned exactly, for the reason the realm's requirements.in gives: a release bundles these into the marketplace
+# wasm, so each moves only by a PR CI tests. ic-python-db 0.16 is needed for the sorted indexes (Entity.top_by) the
+# rankings read.
+ic-basilisk==0.17.0
+ic-python-db==0.16.0
+ic-python-logging==0.3.4

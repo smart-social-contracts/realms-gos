@@ -32,8 +32,19 @@ PERIOD_UNITS = ("day", "working_day", "month", "year")
 # A new realm has the fund its treasury's source_fund names (setup.start); a realm made before it did may not, and then
 # books no invoice payment (realms-gos#740). receive refuses in these words, and realm_monitor reports them.
 # What a payment that cannot be moved says when its ledger fee changed after it was booked (realms-gos#781).
-FEE_CHANGED = ("the ledger fee changed since this payment was booked: it was booked with a fee of {booked}, and the fee "
-               "is now {now}. It is not moved until the difference is booked (realms-gos#781)")
+FEE_CHANGED = ("the ledger fee changed since this payment was booked: it was booked with a fee of {booked}, and the "
+               "fee is now {now}. It is not moved until the difference is booked (invoice_fee_rebook, realms-gos#781)")
+# What realm_monitor reports once a fund has paid a fee difference: a decided spend, and a pattern worth seeing.
+FEE_DIFFERENCES = ("ledger fee differences booked on funds this treasury epoch, to move invoice payments at another "
+                   "fee than the one they were booked with: {count}, each by its fund owner's decision; each payment "
+                   "keeps its record (invoice_fee_rebook, realms-gos#781)")
+# What realm_monitor reports while booked payments wait in their invoices' accounts (realms-gos#755).
+UNCOLLECTED = ("invoice payments booked but not yet moved into the realm's account, from which it pays out: {count}. "
+               "Each is moved at the next invoice_refresh naming its invoice, unless its payment says why it is stuck "
+               "(realms-gos#755)")
+# What realm_monitor reports if the count above ever falls below zero: a write path took off a payment it never held.
+COUNT_BROKEN = ("the count of invoice payments waiting to be moved is {count}, below zero: a payment was taken off it "
+                "that it never held, so it no longer says how many wait (realms-gos#755)")
 NO_SOURCE_FUND = ("the treasury's source fund {}, which receives invoice payments, does not exist: create it with "
                   "fund_create, or name another fund with treasury_configure (source_fund)")
 
@@ -568,10 +579,46 @@ def source_fund():
 
 
 def problems():
-    """What the treasury's settings keep the realm from doing, in words, for realm_monitor: a source fund that does not
-    exist, which a member meets only once they have paid."""
+    """What keeps the treasury from paying out what its books hold, in words, for realm_monitor: a source fund that does
+    not exist, which a member meets only once they have paid, and payments booked but not yet moved into the realm's
+    account. Both are read in constant time."""
     code = treasury_config().get("source_fund", "ROOT")
-    return [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
+    found = [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
+    t = Treasury["1"]
+    if t is None:
+        return found
+    if t.uncollected < 0:
+        found.append(COUNT_BROKEN.format(count=t.uncollected))
+    elif t.uncollected:
+        found.append(UNCOLLECTED.format(count=t.uncollected))
+    if t.fee_differences and t.fee_differences_epoch == this_epoch():
+        found.append(FEE_DIFFERENCES.format(count=t.fee_differences))
+    return found
+
+
+def this_epoch():
+    """The start of the treasury epoch now (sweeps.epoch_start): a fee difference is reported until its epoch ends."""
+    from api import sweeps  # it imports this module
+
+    return sweeps.epoch_start(chain.now())
+
+
+def wait_to_be_moved(inv):
+    """Mark the payment of ``inv`` as waiting to be moved, and count it: ``counted`` says the count holds it, so only a
+    payment it holds is taken off it again. A payment left waiting by a build that kept no count has no ``counted``, and
+    leaves the count as it is. The count is not clamped: below zero, realm_monitor says it is broken."""
+    inv.payment = {**inv.payment, "collected": False, "counted": True}
+    t = Treasury["1"]
+    if t is not None:
+        t.uncollected += 1
+
+
+def moved_off_the_count(inv):
+    """Take the payment of ``inv`` off the count, if the count holds it and it still waits: another call may have
+    marked it collected while this one's ledger call was out."""
+    t = Treasury["1"]
+    if t is not None and inv.payment.get("collected") is False and inv.payment.get("counted"):
+        t.uncollected -= 1
 
 
 def receive(inv, received, ledger):
@@ -596,8 +643,8 @@ def receive(inv, received, ledger):
     who = {"user": key} if kind == "User" else {"organization": Organization[key]} if kind == "Organization" else {}
     post(p, lines, inv.symbol, f"payment of {inv.id}", invoice=inv, **who)
     inv.status, inv.paid_at = "paid", chain.now()
-    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "fee": find(Token, inv.symbol).fee,
-                   "collected": False}
+    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "fee": find(Token, inv.symbol).fee}
+    wait_to_be_moved(inv)
     if inv.reason.startswith("TaxDeclaration:"):
         find(TaxDeclaration, inv.reason.partition(":")[2]).status = "settled"
 
@@ -612,12 +659,13 @@ def collect(inv, held):
     every payout draws on (realms-gos#739): what the account ``held``, less the ledger's fee, which ``receive`` booked,
     on the ledger the payment was found on and with the fee it was booked with (``payment["fee"]``). When that fee is
     no longer the token's, or the ledger refuses it, nothing moves, and ``payment["stuck"]`` names both fees.
-    Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` when this call moved it. A
+    Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` and the amount ``moved`` out
+    of the invoice's account when this call moved it. A
     ledger that refuses or does not answer leaves it uncollected, and the next check of the invoice reads the account
     again: the money is moved once, whatever happened to an earlier answer. A generator."""
     # A hard key on purpose: receive and invoice_collect record the fee they book on every payment that reaches here,
     # and falling back to the token's current fee would bring back the mismatch between the move and the books.
-    fee, moved = inv.payment["fee"], {}
+    fee, done = inv.payment["fee"], {}
     if held > fee:
         if find(Token, inv.symbol).fee != fee:
             inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=find(Token, inv.symbol).fee)}
@@ -633,9 +681,10 @@ def collect(inv, held):
             if asked_fee(reply) is not None:
                 inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=asked_fee(reply))}
             return
-        moved = {"block": block}
+        done = {"block": block, "moved": held - fee}
+    moved_off_the_count(inv)
     unstuck = {k: v for k, v in inv.payment.items() if k != "stuck"}
-    inv.payment = {**unstuck, **moved, "collected": True}
+    inv.payment = {**unstuck, **done, "collected": True}
 
 
 def to_collect(inv):
@@ -742,6 +791,129 @@ def invoice_refresh(c, args):
         statuses[inv.id] = yield from refresh(find(Invoice, inv.id))
     return {"checked": len(rows), "paid": sum(s == "paid" for s in statuses.values()), "invoices": statuses,
             "next": nxt}
+
+
+def booked_into(inv):
+    """The fund the payment of ``inv`` was booked into: the fund of its revenue. Refused when no entry names one: a bare
+    StopIteration inside an operation's generator would become a RuntimeError, and a trap."""
+    fund = next((e.fund for e in inv.ledger_entries if e.kind == "revenue" and e.fund is not None), None)
+    if fund is None:
+        raise Conflict(f"{inv.id} has no revenue entry naming the fund its payment was booked into: nothing is moved")
+    return fund
+
+
+def collectable(args):
+    """What an invoice_collect call meets whatever the vote decides: its ``invoice`` is paid, booked by a release before
+    the realm moved payments itself (its payment has no ``collected``), and the fund it was booked into can bear the
+    ledger's fee for moving it. Returns the invoice."""
+    inv = find(Invoice, args["invoice"])
+    if inv.status != "paid":
+        raise Conflict(f"{inv.id} is {inv.status}: only the payment of a paid invoice is moved")
+    if "collected" in inv.payment:
+        raise Conflict(f"{inv.id} was paid since the realm moves payments itself: an officer moves it with "
+                       f"invoice_refresh naming the invoice, its payer with invoice_check")
+    fund, fee = booked_into(inv), find(Token, inv.symbol).fee
+    if balance(fund, inv.symbol) < fee:
+        raise Conflict(f"fund {fund.id} holds {balance(fund, inv.symbol)} {inv.symbol}, less than the ledger's fee of "
+                       f"{fee} for moving the payment of {inv.id}")
+    return inv
+
+
+@op("treasury.manage", governed=lambda a: owner_of(booked_into(collectable(a))), check=collectable, returns="invoice")
+def invoice_collect(c, args):
+    """Move the payment of the paid ``invoice`` from the invoice's own account into the realm's main account, from which
+    it pays out, for an invoice paid before the realm did so itself (realms-gos#739). Governed by the owner of the fund
+    the payment was booked into, which bears the ledger's fee (``ledger_fee``). The invoice's account must still hold
+    what the invoice was paid with, since nothing else moves money out of it: else nothing changes, and the money is not
+    on this token's ledger. A move the ledger does not make is made at the next check of the invoice. The payment keeps
+    who collected it (``collected_by``) and the ``proposal`` that decided it, which outlive the audit log. A delegate
+    never calls this directly: its governed call is a proposal, replayed as the proposer. So the delegate is recorded
+    permanently through that proposal: ``Proposal.filed_under`` (the grant) leads to ``Delegation.delegate``, and
+    ``Proposal.on_behalf_of`` names the member. Returns ``invoice``, whether it is ``collected``, the amount ``moved``
+    (0 until the ledger makes the move) and the ``fee`` booked."""
+    inv = collectable(args)
+    ledger = find(Token, inv.symbol).ledger
+    held = yield from held_by(inv, ledger)
+    inv = collectable(args)  # a new message: another call may have begun moving it while the ledger answered
+    if find(Token, inv.symbol).ledger != ledger:
+        raise Conflict(f"the token {inv.symbol} moved to another ledger while its ledger answered: nothing is changed")
+    fee = find(Token, inv.symbol).fee
+    if held < inv.amount:
+        raise Conflict(f"{inv.id}'s account holds {held} {inv.symbol}, less than the {inv.amount} it was paid with: the "
+                       f"payment is not on this token's ledger, or has left by other means. Nothing is changed")
+    if held <= fee:
+        raise Conflict(f"{inv.id}'s account holds {held} {inv.symbol}, no more than the ledger's fee: nothing can be moved")
+    fund = booked_into(inv)
+    post(period(), [("expense", FEE, fee, 0, fund), ("asset", "cash", 0, fee, fund)], inv.symbol,
+         f"moving the payment of {inv.id} into the realm's account", invoice=inv)
+    who = {"collected_by": c.user, **({"proposal": c.proposal} if c.proposal else {})}
+    inv.payment = {**inv.payment, "ledger": ledger, "fee": fee, **who}  # the fee it just booked
+    wait_to_be_moved(inv)
+    yield from collect(inv, held)
+    payment = find(Invoice, inv.id).payment  # as collect left it
+    return {"invoice": inv.id, "collected": payment["collected"], "moved": payment.get("moved", 0), "fee": fee}
+
+
+def rebookable(args):
+    """What an invoice_fee_rebook call meets whatever the vote decides: its ``invoice`` waits to be moved on the ledger it
+    was paid on; the token's fee is no longer the one its payment was booked with; the new ``fee`` and the ``difference``
+    it names are that change exactly, so a vote authorises the change it reads and no later one of the same size; the new
+    fee is less than the invoice's amount, so moving the payment leaves the fund something; and the fund the payment was
+    booked into holds what the difference costs it. Returns the invoice."""
+    inv = find(Invoice, args["invoice"])
+    for key in ("fee", "difference"):
+        if type(args.get(key)) is not int:
+            raise Fail(f"{key} is a whole number of the token's smallest unit: the token's fee now, and that fee less the "
+                       f"one the payment was booked with")
+    if not to_collect(inv):
+        raise Conflict(f"{inv.id} does not wait to be moved on its token's ledger: there is no fee difference to book")
+    booked, now = inv.payment["fee"], find(Token, inv.symbol).fee
+    if now == booked:
+        raise Conflict(f"{inv.id} was booked with the token's fee of {booked}: there is no difference to book. If the "
+                       f"ledger asks another fee, register it first (token_register)")
+    if (args["fee"], args["difference"]) != (now, now - booked):
+        raise Conflict(f"{inv.id} was booked with a fee of {booked}, and the fee is now {now}: the difference is "
+                       f"{now - booked}, not a fee of {args['fee']} and a difference of {args['difference']}")
+    if now >= inv.amount:
+        raise Conflict(f"the fee of {now} is no less than {inv.id}'s amount of {inv.amount}: moving its payment would "
+                       f"leave its fund nothing, so no difference is booked and the payment waits")
+    fund = booked_into(inv)
+    if balance(fund, inv.symbol) < now - booked:
+        raise Conflict(f"fund {fund.id} holds {balance(fund, inv.symbol)} {inv.symbol}, less than the fee difference of "
+                       f"{now - booked} for moving the payment of {inv.id}")
+    return inv
+
+
+@op("treasury.manage", governed=lambda a: owner_of(booked_into(rebookable(a))), check=rebookable, returns="invoice")
+def invoice_fee_rebook(c, args):
+    """Book the ``difference`` between the ledger fee the waiting payment of ``invoice`` was booked with and the token's
+    ``fee`` now on the fund it was booked into, and move the payment at the new fee (realms-gos#781). A payment whose fee
+    changed waits until then (its payment says so: ``stuck``). The fund pays a higher fee and gets back what a lower one
+    saves, so it is governed by the fund's owner, and the call names the change it authorises: one whose ``fee`` and
+    ``difference`` are not the token's fee now and its change is refused, and so is a fee no less than the invoice's
+    amount, which would leave the fund nothing. The payment keeps each difference booked, with who decided it and when;
+    realm_monitor counts the ones booked this treasury epoch. Returns ``invoice``, the ``difference``, whether it is
+    ``collected`` and the amount ``moved``."""
+    inv = rebookable(args)
+    booked, now = inv.payment["fee"], find(Token, inv.symbol).fee
+    difference, fund = now - booked, booked_into(inv)
+    paid, back = (difference, 0) if difference > 0 else (0, -difference)
+    post(period(), [("expense", FEE, paid, back, fund), ("asset", "cash", back, paid, fund)], inv.symbol,
+         f"fee difference for moving the payment of {inv.id}: booked with a fee of {booked}, the fee is now {now}",
+         invoice=inv)
+    decided = {"booked": booked, "now": now, "difference": difference, "by": c.user, "at": chain.now(),
+               **({"proposal": c.proposal} if c.proposal else {})}
+    unstuck = {k: v for k, v in inv.payment.items() if k != "stuck"}
+    inv.payment = {**unstuck, "fee": now, "fee_differences": [*inv.payment.get("fee_differences", []), decided]}
+    treasury = Treasury["1"]
+    if treasury is not None:
+        if treasury.fee_differences_epoch != this_epoch():  # the first of a new epoch
+            treasury.fee_differences_epoch, treasury.fee_differences = this_epoch(), 0
+        treasury.fee_differences += 1
+    yield from refresh(find(Invoice, inv.id))  # a payment that waits to be moved, at the fee it is now booked with
+    payment = find(Invoice, inv.id).payment
+    return {"invoice": inv.id, "difference": difference, "collected": payment["collected"],
+            "moved": payment.get("moved", 0)}
 
 
 @op("self.data_view", read=True)

@@ -80,6 +80,7 @@ def packed_tree(packer, tmp_path, monkeypatch):
     monkeypatch.setattr(packer, "apply_cedar_template_env", dict)
     monkeypatch.setattr(packer, "select_build_variant", lambda variant: None)
     monkeypatch.setattr(packer, "verify_build_variant", lambda wasm, variant: None)
+    monkeypatch.setattr(packer, "require_cedar_build", lambda wasm: None)
     return src / "api" / "setup.py"
 
 

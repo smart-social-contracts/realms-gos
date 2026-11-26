@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { Ed25519KeyIdentity } from '@dfinity/identity';
-import { openExtension, type ExtensionPage } from './fixtures/extension';
+import { extensionVersion, openExtension, type ExtensionPage } from './fixtures/extension';
 import {
 	founderIdentity,
 	loadRealm,
@@ -107,10 +107,10 @@ const ROWS: Row[] = [
 		path: '/extensions/member_dashboard',
 		as: 'member',
 		action: 'open my membership page as the second member',
-		expected: 'my membership steps: the passport check and the invoices',
+		expected:
+			'my membership steps: the invoices, and no passport check in a realm without the extension',
 		run: async ({ app }) => {
 			await expect(app.getByText('Membership', { exact: true }).first()).toBeVisible();
-			await expect(app.getByRole('button', { name: 'Verify passport' })).toBeVisible();
 			// The invoices step carries whichever label fits what the member owes: "Pay invoice" once
 			// they have an unpaid one, "View invoices" when they have none (member_dashboard's
 			// citizenshipNextActions). Under the syntropia codex they have one, because it bills a
@@ -120,6 +120,10 @@ const ROWS: Row[] = [
 			await expect(
 				app.getByRole('button', { name: /^(Pay invoice|View invoices)$/ })
 			).toBeVisible();
+			// The card is drawn once the invoices step is there. The realm has no passport_verification yet (its
+			// row below adds it), so the page offers no passport check: it used to be step 1 for every citizen,
+			// a dead end whenever the outside verifier was down.
+			await expect(app.getByRole('button', { name: 'Verify passport' })).toHaveCount(0);
 		}
 	},
 	{
@@ -242,8 +246,17 @@ const ROWS: Row[] = [
 	{
 		id: 'passport_verification',
 		path: '/extensions/passport_verification',
-		action: 'start the passport check (the realm skips the outside ZK proof for the e2e)',
+		action:
+			'add the extension to the realm, then start the passport check (the realm skips the outside ZK proof for the e2e)',
 		expected: 'the page says verified; the realm holds a passport identity for the founder',
+		// No codex installs it: a realm that wants ZK passport proofs adds it, as an administrator does here.
+		setup: async () => {
+			const id = 'passport_verification';
+			const args = { extension: id, version: extensionVersion(id) };
+			const reply = await runOp(realm, 'extension_install', args, founderIdentity(realm));
+			expect(reply, 'extension_install').toMatchObject({ ok: true });
+			expect(Object.keys(await installedExtensions())).toContain(id);
+		},
 		run: async ({ app }) => {
 			await app.getByRole('button', { name: 'Start' }).click();
 			await expect(app.getByText('Passport Verified Successfully!')).toBeVisible({

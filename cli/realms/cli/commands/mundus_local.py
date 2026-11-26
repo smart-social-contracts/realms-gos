@@ -215,10 +215,12 @@ def venv() -> Path:
 
 def requirements(m: Mundus) -> list:
     """What the mundus' Python environment installs, in order: Casals's, GaaS's, then realms-gos's last (the three pin
-    different ic-basilisk versions, and the canisters are built with realms-gos's), this CLI, and geister."""
+    different ic-basilisk versions, and the canisters are built with realms-gos's), this CLI, and geister.
+    ``cryptography`` is for scripts/e2e_standalone_realm.py, which each realm's token ledger is made with."""
     return [["-r", m.sources["Casals"] / "requirements-dev.txt"],
             ["-r", m.sources["gos-as-a-service"] / "requirements-dev.txt"],
-            ["-r", m.realms_dir / "requirements.txt", "ic-py>=1.0.1", "pillow>=10", "pyyaml", "requests"],
+            ["-r", m.realms_dir / "requirements.txt", "ic-py>=1.0.1", "pillow>=10", "pyyaml", "requests",
+             "cryptography"],
             ["-e", m.realms_dir / "cli"],
             ["-e", m.sources["geister"]]]
 

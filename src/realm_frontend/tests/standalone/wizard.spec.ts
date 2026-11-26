@@ -83,9 +83,14 @@ test('the founder sets up and launches a realm through the wizard', async ({ pag
 			const installed = (listed.extensions as { id: string }[]).map((e) => e.id);
 			const expected = Object.keys(realm.extensions ?? {});
 			expect(expected, 'the ported extensions are in the realm').toEqual(
-				expect.arrayContaining(['import_export', 'mundus_explorer', 'passport_verification'])
+				expect.arrayContaining(['import_export', 'mundus_explorer'])
 			);
 			expect(installed).toEqual(expect.arrayContaining(expected));
+			// No codex sends its citizens to an outside verifier (syntropia 1.1.0 dropped it): a realm that wants
+			// ZK passport proofs adds passport_verification itself, as extensions-ops.spec.ts does.
+			expect(installed, 'a codex installs no passport verifier').not.toContain(
+				'passport_verification'
+			);
 		});
 
 		await test.step('the public dashboard', async () => {

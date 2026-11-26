@@ -32,9 +32,19 @@ env:
   PYTHON_VERSION: "3.10"
   NODE_VERSION: "20"
   DFX_VERSION: "0.32.0"
-  # The release the realm-wasm job upgrades from: the latest stable one, which the realms in the field run. Pinned, so
-  # that publishing a release cannot turn an unrelated PR red. Bump it when a release ships.
+  # The release the realm-wasm job upgrades from: the latest stable one. Pinned, so that publishing a release cannot
+  # turn an unrelated PR red. Every release so far runs the realm backend this one replaced, whose realms are refused
+  # an upgrade (docs/deployment/README.md, "Realms of the releases up to v0.8.0-rc3"): test_upgrade_chain checks the
+  # refusal. Bump it when a release ships.
   REALM_PREVIOUS_RELEASE: "v0.7.0"
+  # The build of this realm backend that test_upgrade_chain upgrades from, until a release of it exists: the oldest any
+  # realm runs (local-a5135eb6, staging, November 2026), packed byte for byte as it was built for them. Its
+  # requirements leave the toolkit open (>=0.5.3), so the version it was built with is pinned here, and the packed wasm,
+  # gzipped as `gzip -n -9`, must have the module hash those realms report (`icp canister status --public`). The test's
+  # seed is written for this build's API: moving it on means a new seed, not only a new commit.
+  REALM_PREVIOUS_COMMIT: "a5135eb631c71c6772aa95051b17f181642bbbe5"
+  REALM_PREVIOUS_TOOLKIT: "0.5.3"
+  REALM_PREVIOUS_MODULE: "b0bfada748b8c45003933c9dc0c56eb2a57d3bf34f79f5a00c2d859a3c42a0db"
   # `icp network start` resolves the network launcher through
   # api.github.com/repos/dfinity/icp-cli-network-launcher/releases/latest. Unauthenticated that
   # is 60 requests an hour per runner IP, and it has failed the job with a bare
@@ -144,10 +154,9 @@ jobs:
           sudo tar -xzf /tmp/dfx.tar.gz -C /usr/local/bin
           dfx cache install
           echo "POCKET_IC_BIN=$(dfx cache show)/pocket-ic" >> "$GITHUB_ENV"
-      # The upgrade tests that start from the previous release's own wasm (test_upgrade_chain, and the "previous" case
-      # of the others) read it from REALM_PREVIOUS_WASM and skip without it, which they did on every run until this
-      # step. A release without the asset fails here rather than letting them skip again. A dispatch may name another
-      # release, such as the one a given canister runs.
+      # test_upgrade_chain reads the previous release's own wasm from REALM_PREVIOUS_WASM, to check that the upgrade of
+      # its realms is refused, and would skip without it. A release without the asset fails here rather than letting it
+      # skip. A dispatch may name another release, such as the one a given canister runs.
       - name: The previous release's realm wasm
         env:
           TAG: ${{ inputs.previous_release || env.REALM_PREVIOUS_RELEASE }}
@@ -161,61 +170,36 @@ jobs:
           sha256sum --check --ignore-missing "checksums-$TAG.txt"
           gunzip "realm-backend-$TAG.wasm.gz"
           echo "REALM_PREVIOUS_WASM=$dir/realm-backend-$TAG.wasm" >> "$GITHUB_ENV"
-      # Not run against the previous release yet, tracked in realms-gos#727: delete a line once its test passes there.
-      # - test_upgrade_chain upgrades a realm of the release to this one, and a migration traps in post_upgrade.
-      # - The others seed the release's realm through the read and run endpoints, which no release has yet (they came
-      #   after v0.8.0-rc3), so they fail before they reach the upgrade.
+      # The wasm of the earlier build test_upgrade_chain upgrades from (REALM_PREVIOUS_BUILD_WASM), packed from its own
+      # tree with the dependencies it was built with, and checked against the module its realms run. It does not
+      # change, so it is packed once and kept in the cache; the check runs on a cached copy too.
+      - name: The previous build's realm wasm, cached
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/previous-build/realm_backend.wasm
+          key: realm-previous-build-${{ env.REALM_PREVIOUS_COMMIT }}-toolkit-${{ env.REALM_PREVIOUS_TOOLKIT }}
+      - name: The previous build's realm wasm
+        run: |
+          dir="$RUNNER_TEMP/previous-build"
+          if [ ! -f "$dir/realm_backend.wasm" ]; then
+            git fetch --no-tags --depth=1 origin "$REALM_PREVIOUS_COMMIT"
+            mkdir -p "$dir/tree"
+            git archive "$REALM_PREVIOUS_COMMIT" | tar -x -C "$dir/tree"
+            python -m venv "$dir/venv"
+            "$dir/venv/bin/pip" install -q -r "$dir/tree/requirements.txt" "ic-basilisk-toolkit==$REALM_PREVIOUS_TOOLKIT"
+            (cd "$dir/tree" && "$dir/venv/bin/python" scripts/pack_realm_backend.py --version "local-${REALM_PREVIOUS_COMMIT:0:8}")
+            cp "$dir/tree/.basilisk/realm_backend/realm_backend.wasm" "$dir/realm_backend.wasm"
+          fi
+          module=$(gzip -n -9 -c "$dir/realm_backend.wasm" | sha256sum | cut -d' ' -f1)
+          if [ "$module" != "$REALM_PREVIOUS_MODULE" ]; then
+            echo "::error::the packed previous build is module $module, not $REALM_PREVIOUS_MODULE, which its realms run"
+            exit 1
+          fi
+          echo "REALM_PREVIOUS_BUILD_WASM=$dir/realm_backend.wasm" >> "$GITHUB_ENV"
+      # The upgrade tests start from REALM_PREVIOUS_BUILD_WASM. A case that needs what that build lacks says so in its
+      # own skip, with the reason (realms-gos#792).
       - name: Realm wasms on PocketIC
-        run: >-
-          pytest -q tests/deployed
-          --deselect 'tests/deployed/test_upgrade_chain.py::test_a_realm_upgraded_before_upgrades_to_this_release'
-          --deselect 'tests/deployed/test_audit_log.py::test_the_log_of_the_previous_release_is_read_as_before_after_the_upgrade[previous]'
-          --deselect 'tests/deployed/test_audit_log.py::test_updates_after_the_upgrade_drop_its_events_cheaply_and_leave_nothing_of_them[previous]'
-          --deselect 'tests/deployed/test_delegation_groups.py::test_a_grant_made_before_groups_works_as_it_did'
-          --deselect 'tests/deployed/test_delegation_groups.py::test_events_written_before_the_upgrade_read_grant_as_empty'
-          --deselect 'tests/deployed/test_delegation_groups.py::test_what_the_upgrade_adds_to_a_delegated_vote'
-          --deselect 'tests/deployed/test_fastjson.py::test_a_layered_codex_id_does_not_change_across_the_upgrade_to_the_fast_json'
-          --deselect 'tests/deployed/test_g2_finance.py::test_a_budget_is_proposed_per_period_with_its_totals_as_facts[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_a_budget_whose_total_is_out_of_range_is_refused_and_files_nothing[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_activating_a_codex_needs_a_pending_one[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_a_line_joins_a_pending_invoice[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_a_loan_is_the_debt_of_the_realm_until_repaid[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_a_number_outside_its_range_is_refused_before_anything_is_written[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_a_scheduled_transfer_is_owed_until_it_is_paid_or_cancelled[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_a_second_upgrade_changes_nothing[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_a_transfer_of_the_release_before_is_found_by_its_contract_once_the_upgrade_has_read_it[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_budget_extend_carries_the_budget_of_the_period_before_and_only_once[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_each_invoice_has_one_item_for_its_whole_amount[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_money_is_staged_on_a_line_and_charged_to_it_from_the_committed_money_or_the_credit[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_tax_assess_bills_the_items_of_the_migrated_policy_rounded_to_the_cent[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_tax_declare_adds_up_the_brackets_of_a_progressive_tax_and_rounds_the_total_once[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_the_budget_lines_are_revenue_or_expense_by_what_they_were_called[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_the_payments_on_a_contract_never_exceed_its_value[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_the_rows_start_in_the_form_of_the_last_release[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_the_tax_policy_keeps_its_taxes_as_typed_entries[previous]'
-          --deselect 'tests/deployed/test_g2_finance.py::test_the_treasury_owes_nothing_and_the_parcel_is_not_assessed[previous]'
-          --deselect 'tests/deployed/test_index_upgrade.py::test_a_converted_list_is_read_and_paged_in_few_instructions[previous]'
-          --deselect 'tests/deployed/test_index_upgrade.py::test_a_finished_realm_answers_at_once_and_only_the_host_runs_it[previous]'
-          --deselect 'tests/deployed/test_index_upgrade.py::test_a_query_before_the_conversion_runs_out_of_instructions[previous]'
-          --deselect 'tests/deployed/test_index_upgrade.py::test_a_rollback_to_the_previous_release_reads_the_converted_lists_as_empty[previous]'
-          --deselect 'tests/deployed/test_index_upgrade.py::test_members_votes_and_proposals_are_the_same_after_the_conversion[previous]'
-          --deselect 'tests/deployed/test_index_upgrade.py::test_the_lists_start_in_the_form_of_the_earlier_release[previous]'
-          --deselect 'tests/deployed/test_index_upgrade.py::test_the_op_converts_every_list_in_batches_and_loses_no_id[previous]'
-          --deselect 'tests/deployed/test_installs.py::test_l_an_install_begun_on_the_previous_release_finishes_after_the_upgrade'
-          --deselect 'tests/deployed/test_journal_signing.py::test_n_a_realm_upgraded_from_the_release_that_signed_every_day_keeps_its_signed_days_and_stops_signing_by_itself'
-          --deselect 'tests/deployed/test_layered_codex.py::test_a_legacy_codex_stays_active_and_installable_across_the_upgrade'
-          --deselect 'tests/deployed/test_legislation_runtime.py::test_l_a_federal_revert_in_flight_across_the_upgrade_keeps_its_leg_reserved'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_an_upgrade_after_a_rollback_puts_right_what_the_release_before_filed_and_retagged[previous]'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_a_page_of_a_common_tag_and_the_pages_after_it_follow_the_order_of_an_unfiltered_list[previous]'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_a_page_of_the_rare_tag_is_full_in_one_call_and_costs_what_it_holds[previous]'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_a_tag_of_64_four_byte_characters_is_filed_and_found[previous]'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_a_tag_that_ends_like_an_index_entry_hides_no_proposal[previous]'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_filing_a_proposal_costs_the_lists_of_its_tags[previous]'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_the_pass_lists_every_proposal_a_message_at_a_time_and_then_stops[previous]'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_the_realm_answers_by_tag_whether_or_not_the_pass_has_listed_the_proposals[previous]'
-          --deselect 'tests/deployed/test_proposal_tag_index.py::test_with_a_status_the_tags_pages_are_still_full_and_read_from_the_shorter_list[previous]'
-          --deselect 'tests/deployed/test_quarter_sync_rollback.py::test_a_quarter_whose_capital_was_rolled_back_and_upgraded_again_catches_up_in_one_sync'
-          --deselect 'tests/deployed/test_voting_rule.py::test_the_proposals_of_the_last_release_are_decided_by_the_rule_they_were_filed_under[previous]'
+        run: pytest -q tests/deployed
 
   # casals up from an empty replica, one extension put on the marketplace and verified, then the
   # standalone realm UI suite in a browser. The job body is realms-e2e.yml (also runnable by hand via

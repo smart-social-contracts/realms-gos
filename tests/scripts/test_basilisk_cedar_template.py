@@ -7,6 +7,7 @@ recipe, dfx/CLI build lines, and docker setup to
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -20,9 +21,14 @@ import basilisk_cedar_template as bct  # noqa: E402
 import pack_realm_backend as pack  # noqa: E402
 
 
-def _write_fake_cedar(path: Path) -> Path:
+FAKE_TEMPLATE = b"fake-wasm cedar"
+
+
+def _write_fake_cedar(path: Path, monkeypatch) -> Path:
+    """A stand-in template, and the pin set to its hash for this test."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"fake-wasm " + bct._SANDBOX_SHA256_SYMBOL + b" cedar")
+    path.write_bytes(FAKE_TEMPLATE)
+    monkeypatch.setattr(bct, "CEDAR_TEMPLATE_SHA256", hashlib.sha256(FAKE_TEMPLATE).hexdigest())
     return path
 
 
@@ -35,20 +41,20 @@ def test_plain_template_name_is_detected():
 
 def test_require_cedar_rejects_plain_template(tmp_path):
     plain = tmp_path / bct.PLAIN_TEMPLATE_NAME
-    plain.write_bytes(bct._SANDBOX_SHA256_SYMBOL)
+    plain.write_bytes(FAKE_TEMPLATE)
     with pytest.raises(SystemExit, match="not a realm_backend pack path"):
         bct._require_cedar_template(plain)
 
 
 def test_require_cedar_rejects_other_template_name(tmp_path):
     other = tmp_path / "some_other_template.wasm"
-    other.write_bytes(bct._SANDBOX_SHA256_SYMBOL)
+    other.write_bytes(FAKE_TEMPLATE)
     with pytest.raises(SystemExit, match="must pack with"):
         bct._require_cedar_template(other)
 
 
 def test_apply_cedar_overwrites_plain_template_env(tmp_path, monkeypatch):
-    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME)
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
     monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
     env = bct.apply_cedar_template_env(
         {"BASILISK_TEMPLATE_WASM": str(tmp_path / bct.PLAIN_TEMPLATE_NAME)}
@@ -58,28 +64,105 @@ def test_apply_cedar_overwrites_plain_template_env(tmp_path, monkeypatch):
     assert not bct.is_plain_cpython_template(env["BASILISK_TEMPLATE_WASM"])
 
 
-def test_leftover_free_pack_forces_cedar(tmp_path, monkeypatch):
-    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME)
-    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
-    monkeypatch.setenv("BASILISK_TEMPLATE_WASM", str(tmp_path / bct.PLAIN_TEMPLATE_NAME))
+class _BasiliskRan(Exception):
+    """Raised by the stub in place of running basilisk: pack() stops there."""
 
+
+def _stub_basilisk(monkeypatch):
     captured = {}
 
-    def fake_run(cmd, cwd=None, env=None):
+    def fake_run(cmd, cwd=None, env=None, check=False):
         captured["cmd"] = cmd
         captured["env"] = env
-
-        class _R:
-            returncode = 0
-
-        return _R()
+        raise _BasiliskRan
 
     monkeypatch.setattr(pack.subprocess, "run", fake_run)
-    assert pack.pack_realm_backend(REPO_ROOT) == 0
-    assert captured["cmd"][-2:] == ["realm_backend", str(REPO_ROOT / "src" / "realm_backend" / "main.py")]
+    return captured
+
+
+def test_the_pack_runs_basilisk_with_the_checked_cedar_template(tmp_path, monkeypatch):
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    monkeypatch.setenv("BASILISK_TEMPLATE_WASM", str(tmp_path / bct.PLAIN_TEMPLATE_NAME))
+    captured = _stub_basilisk(monkeypatch)
+    with pytest.raises(_BasiliskRan):
+        pack.pack(version="test")
+    assert captured["cmd"][-2:] == ["realm_backend", str(pack.SRC / "main.py")]
     assert captured["env"]["BASILISK_TEMPLATE_WASM"] == str(dest)
-    assert Path(captured["env"]["BASILISK_TEMPLATE_WASM"]).name == bct.CEDAR_TEMPLATE_NAME
     assert captured["env"]["CANISTER_CANDID_PATH"].endswith("src/realm_backend/realm_backend.did")
+
+
+def test_the_pack_stops_before_basilisk_on_a_template_that_does_not_match(tmp_path, monkeypatch):
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
+    dest.write_bytes(FAKE_TEMPLATE + b" replaced")
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    captured = _stub_basilisk(monkeypatch)
+    with pytest.raises(SystemExit, match="refusing to pack"):
+        pack.pack(version="test")
+    assert captured == {}  # basilisk never ran
+
+
+def test_the_pin_is_a_sha256():
+    assert len(bct.CEDAR_TEMPLATE_SHA256) == 64
+    assert set(bct.CEDAR_TEMPLATE_SHA256) <= set("0123456789abcdef")
+
+
+def test_a_template_with_other_bytes_is_refused(tmp_path, monkeypatch):
+    """The name and the version are right, the bytes are not (realms-gos#793:
+    any bytes that held the symbol name used to be accepted)."""
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
+    dest.write_bytes(b"NOT A BASILISK TEMPLATE ... sandbox_sha256 ...")
+    with pytest.raises(SystemExit, match="refusing to pack"):
+        bct._require_cedar_template(dest)
+
+
+def test_a_cached_template_is_checked_on_every_use(tmp_path, monkeypatch):
+    """A cache that was right when fetched and changed since is refused: the
+    check is not only on download."""
+    dest = _write_fake_cedar(tmp_path / "cache" / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    assert bct.ensure_cedar_template() == str(dest)
+    dest.write_bytes(FAKE_TEMPLATE + b" changed")
+    with pytest.raises(SystemExit, match="refusing to pack"):
+        bct.ensure_cedar_template()
+    with pytest.raises(SystemExit, match="refusing to pack"):
+        bct.apply_cedar_template_env({})
+
+
+def _serve(monkeypatch, payload: bytes):
+    import urllib.request
+
+    fetched = []
+
+    def fake_urlretrieve(url, filename):
+        fetched.append(url)
+        Path(filename).write_bytes(payload)
+
+    monkeypatch.setattr(urllib.request, "urlretrieve", fake_urlretrieve)
+    return fetched
+
+
+def test_a_download_that_does_not_match_never_reaches_the_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(bct, "CEDAR_TEMPLATE_SHA256", hashlib.sha256(FAKE_TEMPLATE).hexdigest())
+    dest = tmp_path / "cache" / bct.CEDAR_TEMPLATE_NAME
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    fetched = _serve(monkeypatch, b"NOT A BASILISK TEMPLATE ... sandbox_sha256 ...")
+    with pytest.raises(SystemExit, match="refusing to pack"):
+        bct.ensure_cedar_template()
+    assert fetched == [bct.CEDAR_TEMPLATE_URL]
+    assert not dest.exists()
+    assert list(dest.parent.iterdir()) == []  # no partial file left behind
+
+
+def test_a_download_that_matches_is_cached_and_used(tmp_path, monkeypatch):
+    monkeypatch.setattr(bct, "CEDAR_TEMPLATE_SHA256", hashlib.sha256(FAKE_TEMPLATE).hexdigest())
+    dest = tmp_path / "cache" / bct.CEDAR_TEMPLATE_NAME
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    fetched = _serve(monkeypatch, FAKE_TEMPLATE)
+    assert bct.ensure_cedar_template() == str(dest)
+    assert dest.read_bytes() == FAKE_TEMPLATE
+    assert bct.ensure_cedar_template() == str(dest)  # the second use reads the cache
+    assert fetched == [bct.CEDAR_TEMPLATE_URL]
 
 
 def test_dfx_json_realm_backend_uses_cedar_pack():
@@ -129,7 +212,7 @@ def test_agents_leftover_free_recipe_uses_cedar_pack():
 
 
 def test_build_base_wasm_dry_run_still_pins_cedar(tmp_path, monkeypatch):
-    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME)
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
     monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
     monkeypatch.setenv("BASILISK_TEMPLATE_WASM", str(tmp_path / bct.PLAIN_TEMPLATE_NAME))
 
@@ -138,3 +221,76 @@ def test_build_base_wasm_dry_run_still_pins_cedar(tmp_path, monkeypatch):
     monkeypatch.setattr(bbw, "apply_cedar_template_env", bct.apply_cedar_template_env)
     out = bbw._run_basilisk(REPO_ROOT, dry_run=True)
     assert out.name == "realm_backend.wasm"
+
+
+# What a realm packed on the plain template holds, measured on a real fallback pack (26 Nov 2026): the
+# sandbox_sha256 symbol and the bundled Python's _basilisk_cedar, but no Cedar engine.
+PLAIN_BUILD = b"\0asm sandbox_sha256 _basilisk_cedar"
+CEDAR_BUILD = PLAIN_BUILD + b" cedar-policy-core-4.12.0/src/ast/request.rs"
+
+
+def test_a_wasm_without_the_cedar_engine_is_refused(tmp_path):
+    wasm = tmp_path / "realm_backend.wasm"
+    wasm.write_bytes(PLAIN_BUILD)
+    with pytest.raises(SystemExit, match="has no Cedar engine"):
+        bct.require_cedar_build(wasm)
+    wasm.write_bytes(CEDAR_BUILD)
+    bct.require_cedar_build(wasm)
+
+
+def _stub_basilisk_writing(wasm: Path, payload: bytes):
+    def fake_run(cmd, cwd=None, env=None, check=False):
+        wasm.parent.mkdir(parents=True, exist_ok=True)
+        wasm.write_bytes(payload)
+        return type("Done", (), {"returncode": 0})()
+
+    return fake_run
+
+
+@pytest.mark.parametrize("payload, refused", [(PLAIN_BUILD, True), (CEDAR_BUILD, False)], ids=["plain", "cedar"])
+def test_the_pack_checks_the_wasm_basilisk_built(tmp_path, monkeypatch, payload, refused):
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    wasm = tmp_path / ".basilisk" / "realm_backend" / "realm_backend.wasm"
+    monkeypatch.setattr(pack, "WASM", wasm)
+    monkeypatch.setattr(pack.subprocess, "run", _stub_basilisk_writing(wasm, payload))
+    if refused:
+        with pytest.raises(SystemExit, match="has no Cedar engine"):
+            pack.pack(version="test")
+    else:
+        assert pack.pack(version="test") == wasm
+
+
+@pytest.mark.parametrize(
+    "payload, stops_at", [(PLAIN_BUILD, "has no Cedar engine"), (CEDAR_BUILD, "candid file")], ids=["plain", "cedar"]
+)
+def test_build_base_wasm_checks_the_wasm_basilisk_built(tmp_path, monkeypatch, payload, stops_at):
+    """A Cedar wasm passes the check and stops later, at the candid file this stub does not write."""
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    monkeypatch.delenv("CANISTER_CANDID_PATH", raising=False)
+    root = tmp_path / "repo"
+    (root / "src" / "realm_backend").mkdir(parents=True)
+    (root / "src" / "realm_backend" / "main.py").write_text("")
+    wasm = root / ".basilisk" / "realm_backend" / "realm_backend.wasm"
+
+    import build_base_wasm as bbw
+
+    monkeypatch.setattr(bbw, "apply_cedar_template_env", bct.apply_cedar_template_env)
+    monkeypatch.setattr(bbw.subprocess, "run", _stub_basilisk_writing(wasm, payload))
+    with pytest.raises(SystemExit, match=stops_at):
+        bbw._run_basilisk(root, dry_run=False)
+
+
+def test_no_python_a_realm_bundles_names_the_cedar_engine_marker():
+    """Otherwise a realm packed on the plain template would carry the marker in its Python and pass the check."""
+    import importlib.util
+
+    roots = [REPO_ROOT / "src" / "realm_backend"]
+    for name in ("ic_basilisk_toolkit", "ic_python_db", "ic_python_logging", "basilisk"):
+        spec = importlib.util.find_spec(name)
+        if spec and spec.submodule_search_locations:
+            roots += [Path(p) for p in spec.submodule_search_locations]
+    marker = bct.CEDAR_ENGINE_MARKER
+    named = [str(f) for root in roots for f in root.rglob("*.py") if marker in f.read_bytes()]
+    assert named == []

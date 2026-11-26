@@ -10,8 +10,8 @@ import pytest
 import fake_chain
 from api import treasury
 import world
-from ggg import (Proposal, AllocationRule, Budget, Delegation, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
-                 LedgerEntry, Position, Token, Transfer)
+from ggg import (Proposal, AllocationRule, Budget, Delegation, Department, Event, FinancialReport, FiscalPeriod, Fund,
+                 Invoice, LedgerEntry, Position, Token, Transfer)
 from kit import call, denied, ok, rows
 
 LEDGER = "realm-ledger"
@@ -716,7 +716,8 @@ def test_a_payment_moves_into_the_realms_main_account_less_the_fee():
     # all the invoice's account holds leaves it, less the fee; the 5 over reach the main account unbooked
     moved = treasury.icrc1_arg(treasury.account(fake_chain.SELF), 115, inv.encode(), 10, from_sub=treasury.subaccount(inv))
     assert [c[2] for c in collections()] == [moved]
-    assert (Invoice[inv].payment["collected"], Invoice[inv].payment["block"]) == (True, "55")
+    assert (Invoice[inv].payment["collected"], Invoice[inv].payment["block"], Invoice[inv].payment["moved"]) == \
+        (True, "55", 115)
     assert funds()["ROOT"] == 110 and balanced()
     calls = len(fake_chain.state["calls"])
     assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
@@ -792,6 +793,209 @@ def test_a_move_the_ledger_refuses_for_its_fee_names_the_fee_it_asks():
     assert payment["stuck"] == treasury.FEE_CHANGED.format(booked=10, now=12) and payment["collected"] is False
 
 
+def stuck_on_a_fee_change(fee):
+    """An invoice of 120 paid, booked with a fee of 10, whose move failed; the token's fee is then registered as ``fee``,
+    and its retry is not sent."""
+    inv = billed(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    ok("invoice_check", "alice", invoice=inv)
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=fee)
+    ok("invoice_check", "alice", invoice=inv)
+    assert "stuck" in Invoice[inv].payment
+    return inv
+
+
+def test_a_fee_difference_booked_under_the_owners_direct_policy_lets_the_payment_move():
+    """The root owns ROOT and decides directly here, so Bob's call, as a holder of treasury.manage, is its decision."""
+    setup_finance()
+    inv = stuck_on_a_fee_change(12)
+    ledger_ok(tx=80)
+    reply = ok("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=2)
+    assert reply == {"ok": True, "invoice": inv, "difference": 2, "collected": True, "moved": 108}
+    moved = treasury.icrc1_arg(treasury.account(fake_chain.SELF), 108, inv.encode(), 12, from_sub=treasury.subaccount(inv))
+    assert collections()[-1][2] == moved, "sent at the new fee"
+    payment = Invoice[inv].payment
+    assert "stuck" not in payment and payment["fee"] == 12 and payment["block"] == "80"
+    assert payment["fee_differences"] == [{"booked": 10, "now": 12, "difference": 2, "by": "bob", "at": fake_chain.now()}]
+    assert funds()["ROOT"] == 108 and balanced(), "ROOT paid the difference"
+    entry = [e for e in Invoice[inv].ledger_entries if e.description.startswith("fee difference")]
+    assert [(e.kind, e.debit, e.description) for e in entry if e.kind == "expense"] == [
+        ("expense", 2, f"fee difference for moving the payment of {inv}: booked with a fee of 10, the fee is now 12")]
+    assert treasury.FEE_DIFFERENCES.format(count=1) in ok("realm_monitor", "ctl")["problems"], "seen after it is booked"
+
+
+def test_a_lower_fee_gives_the_fund_back_what_it_saves():
+    setup_finance()
+    inv = stuck_on_a_fee_change(8)
+    ledger_ok()
+    assert ok("invoice_fee_rebook", "bob", invoice=inv, fee=8, difference=-2)["moved"] == 112
+    assert funds()["ROOT"] == 112 and balanced()
+
+
+def test_a_fee_difference_is_booked_only_as_the_amount_it_is_and_only_when_there_is_one():
+    setup_finance()
+    inv = stuck_on_a_fee_change(12)
+    wrong = call("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=3)
+    assert wrong["kind"] == "conflict" and "the difference is 2, not a fee of 12 and a difference of 3" in wrong["error"]
+    assert "not a fee of 13" in call("invoice_fee_rebook", "bob", invoice=inv, fee=13, difference=2)["error"]
+    assert call("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference="2")["kind"] == "invalid_argument"
+    assert call("invoice_fee_rebook", "bob", invoice=inv, difference=2)["kind"] == "invalid_argument", "it names the fee"
+    Fund["ROOT"].balances = {"REALM": 1}
+    assert "less than the fee difference of 2" in call("invoice_fee_rebook", "bob", invoice=inv, fee=12,
+                                                       difference=2)["error"]
+    assert "stuck" in Invoice[inv].payment and not [e for e in Invoice[inv].ledger_entries
+                                                    if e.description.startswith("fee difference")]
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=10)  # the ledger asks 12, nobody registered it
+    nothing = call("invoice_fee_rebook", "bob", invoice=inv, fee=10, difference=0)
+    assert "no difference to book" in nothing["error"] and "token_register" in nothing["error"]
+    ledger_ok()
+    ok("invoice_check", "alice", invoice=inv)
+    assert "does not wait to be moved" in call("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=2)["error"]
+
+
+def test_where_the_root_decides_by_vote_a_fee_difference_is_a_proposal_that_names_it():
+    setup_finance()
+    inv = stuck_on_a_fee_change(12)
+    world.policy(Department["Administration"], 2, 3)
+    p = ok("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=2)["proposal"]
+    assert Proposal[p].action == {"op": "invoice_fee_rebook", "args": {"invoice": inv, "fee": 12, "difference": 2}}
+    assert funds()["ROOT"] == 110 and "stuck" in Invoice[inv].payment, "nothing is booked before the vote"
+    ledger_ok()
+    for voter in world.PEOPLE:
+        if Proposal[p].status == "voting":
+            ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert Proposal[p].result["collected"] is True and funds()["ROOT"] == 108
+    assert Invoice[inv].payment["fee_differences"][0]["proposal"] == p
+
+
+def test_a_vote_for_a_fee_difference_the_fee_has_changed_since_books_nothing():
+    setup_finance()
+    inv = stuck_on_a_fee_change(12)
+    world.policy(Department["Administration"], 2, 3)
+    p = ok("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=2)["proposal"]
+    world.policy(Department["Administration"], 0, 0)
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=13)  # the fee moved again before the vote
+    world.policy(Department["Administration"], 2, 3)
+    for voter in world.PEOPLE:
+        if Proposal[p].status == "voting":
+            ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert Proposal[p].status == "failed" and "is 3" in Proposal[p].result["error"], "the vote read 2"
+    assert funds()["ROOT"] == 110 and "stuck" in Invoice[inv].payment
+
+
+def test_a_fee_no_less_than_the_payment_books_no_difference_and_the_payment_waits():
+    """A fee that would take the whole payment leaves nothing to move: booking a difference for it would charge the fund
+    for a move that never happens, and mark the payment collected with its money still in the invoice's account."""
+    setup_finance()
+    inv = stuck_on_a_fee_change(120)
+    for fee in (120, 130):
+        ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=fee)
+        refused = call("invoice_fee_rebook", "bob", invoice=inv, fee=fee, difference=fee - 10)
+        assert refused["kind"] == "conflict" and f"the fee of {fee} is no less than {inv}'s amount of 120" in refused["error"]
+    assert funds()["ROOT"] == 110 and Invoice[inv].payment["collected"] is False and not collections()[1:]
+    assert "fee_differences" not in Invoice[inv].payment
+
+
+def test_a_stale_proposal_cannot_book_a_later_change_of_the_same_size():
+    """A proposal names the fee it moves to as well as the difference: one filed for 10 to 12 cannot book 12 to 14."""
+    setup_finance()
+    inv = stuck_on_a_fee_change(12)
+    world.policy(Department["Administration"], 2, 3)
+    first = ok("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=2)["proposal"]
+    stale = ok("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=2)["proposal"]
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    for voter in world.PEOPLE:
+        if Proposal[first].status == "voting":
+            ok("proposal_vote", voter, proposal=first, choice="yes")
+    world.policy(Department["Administration"], 0, 0)
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=14)  # 12 to 14: the same size as 10 to 12
+    world.policy(Department["Administration"], 2, 3)
+    for voter in world.PEOPLE:
+        if Proposal[stale].status == "voting":
+            ok("proposal_vote", voter, proposal=stale, choice="yes")
+    assert Proposal[stale].status == "failed" and "not a fee of 12" in Proposal[stale].result["error"]
+    assert funds()["ROOT"] == 108 and len(Invoice[inv].payment["fee_differences"]) == 1
+
+
+def test_the_fee_difference_report_clears_when_its_treasury_epoch_ends():
+    """A decided spend is reported for the epoch it was booked in, not for ever: a line that never clears teaches people
+    to read past realm_monitor. Each payment keeps its record."""
+    setup_finance()
+    first = stuck_on_a_fee_change(12)
+    ledger_ok()
+    ok("invoice_fee_rebook", "bob", invoice=first, fee=12, difference=2)
+    assert treasury.FEE_DIFFERENCES.format(count=1) in ok("realm_monitor", "ctl")["problems"]
+    fake_chain.state["now"] += treasury.EPOCHS["monthly"]
+    assert not [p for p in ok("realm_monitor", "ctl")["problems"] if "fee differences" in p]
+    assert len(Invoice[first].payment["fee_differences"]) == 1, "the record stays on the payment"
+    second = stuck_on_a_fee_change(14)
+    ledger_ok()
+    ok("invoice_fee_rebook", "bob", invoice=second, fee=14, difference=2)
+    assert treasury.FEE_DIFFERENCES.format(count=1) in ok("realm_monitor", "ctl")["problems"], "a new epoch counts anew"
+
+
+def test_two_proposals_for_one_fee_difference_book_it_once():
+    """A difference is booked before the operation's first ledger call, and the booking makes the token's fee the
+    payment's own: a second proposal for the same change, filed while the fee still differed, is refused when it applies."""
+    setup_finance()
+    inv = stuck_on_a_fee_change(12)
+    world.policy(Department["Administration"], 2, 3)
+    first = ok("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=2)["proposal"]
+    second = ok("invoice_fee_rebook", "bob", invoice=inv, fee=12, difference=2)["proposal"]
+    # the first one's move fails too, so the payment still waits when the second applies: only the fee guards it
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    for p in (first, second):
+        for voter in world.PEOPLE:
+            if Proposal[p].status == "voting":
+                ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert (Proposal[first].status, Proposal[second].status) == ("executed", "failed")
+    assert "no difference to book" in Proposal[second].result["error"]
+    assert funds()["ROOT"] == 108 and len(Invoice[inv].payment["fee_differences"]) == 1
+
+
+def test_the_fee_difference_count_is_the_number_of_differences_the_payments_record():
+    """Treasury.fee_differences is a cache of what the payments record in this treasury epoch: through a rise, a fall, a
+    refused amount, a vote the fee overtook and a second proposal for one change, it stays equal to a scan of them."""
+    setup_finance()
+
+    def agrees():
+        from api import sweeps
+
+        recorded = sum(1 for i in rows(Invoice) for r in i.payment.get("fee_differences", [])
+                       if sweeps.epoch_start(r["at"]) == treasury.this_epoch())
+        assert treasury.Treasury["1"].fee_differences == recorded
+        return recorded
+
+    up = stuck_on_a_fee_change(12)
+    assert "a difference of 3" in call("invoice_fee_rebook", "bob", invoice=up, fee=12, difference=3)["error"]
+    assert agrees() == 0
+    ledger_ok()
+    ok("invoice_fee_rebook", "bob", invoice=up, fee=12, difference=2)
+    assert agrees() == 1
+    down = stuck_on_a_fee_change(9)
+    ledger_ok()
+    ok("invoice_fee_rebook", "bob", invoice=down, fee=9, difference=-3)
+    assert agrees() == 2
+    late = stuck_on_a_fee_change(11)
+    world.policy(Department["Administration"], 2, 3)
+    overtaken = ok("invoice_fee_rebook", "bob", invoice=late, fee=11, difference=2)["proposal"]
+    again = ok("invoice_fee_rebook", "bob", invoice=late, fee=11, difference=2)["proposal"]
+    world.policy(Department["Administration"], 0, 0)
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=12)  # the fee moves before the votes
+    world.policy(Department["Administration"], 2, 3)
+    for p in (overtaken, again):
+        for voter in world.PEOPLE:
+            if Proposal[p].status == "voting":
+                ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert (Proposal[overtaken].status, Proposal[again].status) == ("failed", "failed")
+    assert agrees() == 2
+    ledger_ok()
+    world.policy(Department["Administration"], 0, 0)
+    ok("invoice_fee_rebook", "bob", invoice=late, fee=12, difference=3)
+    assert agrees() == 3
+
+
 def hashed(name):
     from core import candid
 
@@ -807,6 +1011,135 @@ def hashed(name):
 ])
 def test_asked_fee_reads_only_a_bad_fee(reply, fee):
     assert treasury.asked_fee(reply) == fee
+
+
+def waiting():
+    """What realm_monitor says of the payments not yet moved into the realm's account, and their count."""
+    said = [p for p in ok("realm_monitor", "ctl")["problems"] if "not yet moved" in p]
+    return said, treasury.Treasury["1"].uncollected
+
+
+def test_realm_monitor_counts_the_payments_that_wait_to_be_moved():
+    setup_finance()
+    assert waiting() == ([], 0)
+    first, second = billed(120), billed(130)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    ok("invoice_check", "alice", invoice=first)
+    balance_reply(130)
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting() == ([treasury.UNCOLLECTED.format(count=2)], 2)
+    ledger_ok()
+    ok("invoice_check", "alice", invoice=first)
+    assert waiting() == ([treasury.UNCOLLECTED.format(count=1)], 1)
+    balance_reply(0)  # the second's move had gone through: its next check finds the account empty
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting() == ([], 0)
+
+
+def test_a_payment_moved_at_once_or_too_small_to_move_never_counts():
+    setup_finance()
+    ledger_ok()
+    balance_reply(120)
+    ok("invoice_check", "alice", invoice=billed(120))
+    balance_reply(10)
+    ok("invoice_check", "alice", invoice=billed(10))  # no more than the fee: nothing to move
+    assert waiting() == ([], 0)
+
+
+def test_a_move_answered_after_another_check_marked_it_collected_takes_it_off_the_count_once(monkeypatch):
+    setup_finance()
+    first, second = billed(120), billed(130)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    balance_reply(120)
+    ok("invoice_check", "alice", invoice=first)
+    balance_reply(130)
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting()[1] == 2
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    moving = start("invoice_check", "alice", invoice=first)
+    moving.send("(120 : nat)")  # its retry reads the account and sends the move, which stays in flight
+    checking = start("invoice_check", "alice", invoice=first)
+    assert finish(checking, "(0 : nat)")["status"] == "paid"  # the move has applied: it marks the payment collected
+    assert finish(moving, "(variant { Ok = 9 : nat })")["status"] == "paid"
+    assert waiting()[1] == 1, "the second still waits; the first came off once"
+
+
+def test_a_payment_the_count_never_held_is_not_taken_off_it():
+    setup_finance()
+    inv = Invoice[billed(120)]
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    ok("invoice_check", "alice", invoice=inv.id)
+    # as a build that kept no count left it: waiting, and not in the count. Loaded again: the check was another
+    # message, and a write through the instance held from before it would put back the invoice as it was then.
+    inv = Invoice[inv.id]
+    inv.payment = {k: v for k, v in inv.payment.items() if k != "counted"}
+    assert inv.status == "paid" and inv.payment["collected"] is False
+    treasury.Treasury["1"].uncollected = 0
+    ledger_ok()
+    ok("invoice_check", "alice", invoice=inv.id)
+    assert Invoice[inv.id].payment["collected"] is True and waiting() == ([], 0)
+
+
+def test_a_count_below_zero_is_reported_as_broken_not_hidden():
+    setup_finance()
+    treasury.Treasury["1"].uncollected = -1
+    assert ok("realm_monitor", "ctl")["problems"] == [treasury.COUNT_BROKEN.format(count=-1)]
+
+
+def waiting_by_scan():
+    """The payments that wait to be moved, found by reading every invoice: what the count stands for."""
+    return sum(1 for i in rows(Invoice) if i.payment.get("collected") is False and i.payment.get("counted"))
+
+
+def test_the_count_is_the_number_of_payments_that_wait(monkeypatch):
+    """The count is a cache of what the invoices say. Through receipts, moves that fail, retries, a lost answer, a move
+    interrupted by another check and invoice_collect, it stays equal to a scan of the invoices."""
+    setup_finance()
+
+    def agrees():
+        assert treasury.Treasury["1"].uncollected == waiting_by_scan()
+
+    refuse = Exception("canister stopped")
+    ok_now, failing, lost, tiny = billed(120), billed(130), billed(140), billed(10)
+    ledger_ok(tx=70)
+    balance_reply(120)
+    ok("invoice_check", "alice", invoice=ok_now)  # moved at once
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = refuse
+    balance_reply(130)
+    ok("invoice_check", "alice", invoice=failing)  # waits
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = "garbage"
+    balance_reply(140)
+    ok("invoice_check", "alice", invoice=lost)  # the move went through, its answer said nothing: waits
+    balance_reply(10)
+    ok("invoice_check", "alice", invoice=tiny)  # nothing to move
+    agrees()
+    assert waiting_by_scan() == 2
+
+    balance_reply(0)
+    ok("invoice_check", "alice", invoice=lost)  # the account is empty: marked collected, nothing sent
+    agrees()
+
+    old = paid_before_collection(150)
+    balance_reply(150)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = refuse
+    assert ok("invoice_collect", "bob", invoice=old)["collected"] is False
+    agrees()
+    assert waiting_by_scan() == 2
+
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    moving = start("invoice_check", "alice", invoice=failing)
+    moving.send("(130 : nat)")  # the retry sends the move, which stays in flight
+    checking = start("invoice_check", "alice", invoice=failing)
+    finish(checking, "(0 : nat)")  # the move has applied: this check marks it collected
+    finish(moving, "(variant { Ok = 71 : nat })")
+    agrees()
+    retry = start("invoice_check", "alice", invoice=old)
+    retry.send("(150 : nat)")
+    finish(retry, "(variant { Ok = 72 : nat })")
+    agrees()
+    assert waiting_by_scan() == 0 and waiting() == ([], 0)
 
 
 def test_an_invoice_of_no_more_than_the_fee_credits_no_fund_and_moves_nothing():
@@ -828,6 +1161,7 @@ def test_two_checks_in_flight_book_a_payment_once(monkeypatch):
     assert finish(first, "(variant { Ok = 9 : nat })")["status"] == "paid"
     assert len({e.transaction for e in Invoice[inv].ledger_entries}) == 1 and funds()["ROOT"] == 110
     assert len(collections()) == 1
+    assert waiting() == ([], 0), "counted once, and taken away once"
 
 
 def test_a_line_added_while_a_check_waits_on_the_ledger_is_kept_and_billed(monkeypatch):
@@ -863,6 +1197,112 @@ def test_a_payment_whose_token_moved_while_its_retry_read_the_old_ledger_stays_u
     assert finish(check, "(120 : nat)")["status"] == "paid"
     assert fake_chain.state["calls"][-1][1] == "icrc1_balance_of", "no move on either ledger"
     assert Invoice[inv].payment["collected"] is False and Invoice[inv].payment["ledger"] == LEDGER
+
+
+# --- moving the payment of an invoice paid before the realm did so itself -------------------------
+
+def paid_before_collection(amount):
+    """An invoice paid and booked as the release before collection did: ROOT credited the whole amount, the money left in
+    the invoice's own account, and a payment that names no ``collected``."""
+    inv = Invoice[billed(amount)]
+    root = Fund["ROOT"]
+    treasury.post(treasury.period(), [("asset", "cash", amount, 0, root), ("revenue", "invoice", 0, amount, root)],
+                  "REALM", f"payment of {inv.id}", invoice=inv, user="alice")
+    inv.status, inv.payment = "paid", {"received": amount, "subaccount": treasury.pay_to(inv)}
+    return inv.id
+
+
+def test_the_payment_of_an_invoice_paid_before_collection_is_moved_by_a_governed_call():
+    setup_finance()
+    inv = paid_before_collection(120)
+    balance_reply(120)
+    ledger_ok(tx=60)
+    reply = ok("invoice_collect", "bob", invoice=inv)
+    assert reply == {"ok": True, "invoice": inv, "collected": True, "moved": 110, "fee": 10}
+    moved = treasury.icrc1_arg(treasury.account(fake_chain.SELF), 110, inv.encode(), 10, from_sub=treasury.subaccount(inv))
+    assert [c[2] for c in collections()] == [moved]
+    payment = Invoice[inv].payment
+    assert (payment["block"], payment["moved"], payment["collected_by"]) == ("60", 110, "bob")
+    assert "proposal" not in payment, "bob acted himself, without a vote"
+    assert funds()["ROOT"] == 110 and balanced(), "ROOT bears the ledger's fee"
+    fee = [e for e in Invoice[inv].ledger_entries if e.category == treasury.FEE]
+    assert [(e.debit, e.description) for e in fee] == [(10, f"moving the payment of {inv} into the realm's account")]
+    events = [e for e in rows(Event) if e.op == "invoice_collect"]
+    assert [(e.user, e.result["moved"], e.result["fee"]) for e in events] == [("bob", 110, 10)]
+    again = call("invoice_collect", "bob", invoice=inv)
+    assert again["kind"] == "conflict" and "invoice_refresh naming the invoice" in again["error"]
+
+
+def test_where_the_root_decides_by_vote_moving_a_payment_is_a_proposal():
+    setup_finance()
+    inv = paid_before_collection(120)
+    world.policy(Department["Administration"], 2, 3)
+    p = ok("invoice_collect", "bob", invoice=inv)["proposal"]
+    assert not collections() and "collected" not in Invoice[inv].payment
+    balance_reply(120)
+    ledger_ok(tx=62)
+    for voter in world.PEOPLE:
+        if Proposal[p].status == "voting":
+            ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert Proposal[p].result["moved"] == 110
+    payment = Invoice[inv].payment
+    assert (payment["collected_by"], payment["proposal"], payment["block"]) == ("bob", p, "62"), "who filed it, the vote"
+
+
+def test_a_payment_whose_fund_no_entry_names_is_refused_in_words():
+    setup_finance()
+    inv = Invoice[billed(120)]
+    inv.status, inv.payment = "paid", {"received": 120, "subaccount": treasury.pay_to(inv)}  # booked nowhere
+    refused = call("invoice_collect", "bob", invoice=inv.id)
+    assert refused["kind"] == "conflict" and "no revenue entry" in refused["error"]
+
+
+def test_only_a_payment_booked_before_collection_and_still_in_its_account_is_moved():
+    setup_finance()
+    assert "only the payment of a paid invoice" in call("invoice_collect", "bob", invoice=billed(5))["error"]
+    inv = paid_before_collection(120)
+    balance_reply(119)  # less than it was paid with: not on this token's ledger, or moved by other means
+    refused = call("invoice_collect", "bob", invoice=inv)
+    assert refused["kind"] == "conflict" and "not on this token's ledger" in refused["error"]
+    assert funds()["ROOT"] == 120 and not collections() and "collected" not in Invoice[inv].payment
+    Fund["ROOT"].balances = {"REALM": 9}  # spent below the fee since
+    assert "less than the ledger's fee" in call("invoice_collect", "bob", invoice=inv)["error"]
+
+
+def test_a_move_the_ledger_does_not_make_is_made_at_the_next_check():
+    setup_finance()
+    inv = paid_before_collection(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    assert ok("invoice_collect", "bob", invoice=inv)["collected"] is False
+    assert waiting()[1] == 1
+    ledger_ok(tx=61)
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert waiting() == ([], 0)
+    assert Invoice[inv].payment["block"] == "61" and len(collections()) == 2 and funds()["ROOT"] == 110
+    assert Invoice[inv].payment["moved"] == 110, "the move the retry made records what it moved"
+
+
+def test_two_calls_in_flight_move_a_payment_and_book_its_fee_once(monkeypatch):
+    setup_finance()
+    inv = paid_before_collection(120)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    first = start("invoice_collect", "bob", invoice=inv)
+    second = start("invoice_collect", "bob", invoice=inv)
+    first.send("(120 : nat)")  # it books the fee, and waits on the move
+    assert "invoice_refresh naming the invoice" in finish(second, "(120 : nat)")["error"]
+    assert finish(first, "(variant { Ok = 9 : nat })")["collected"] is True
+    assert funds()["ROOT"] == 110 and balanced() and len(collections()) == 1
+
+
+def test_a_token_moved_while_its_account_is_read_changes_nothing(monkeypatch):
+    setup_finance()
+    inv = paid_before_collection(120)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    collecting = start("invoice_collect", "bob", invoice=inv)  # reads the invoice's account on realm-ledger
+    ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
+    assert "moved to another ledger" in finish(collecting, "(120 : nat)")["error"]
+    assert funds()["ROOT"] == 120 and "collected" not in Invoice[inv].payment
 
 
 def test_reports_and_my_invoices_are_paginated():

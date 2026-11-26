@@ -1,5 +1,5 @@
 """A capital rolled back to the previous release and upgraded again keeps its quarters right (core.sync_log.restart), on the
-previous release's own wasm named by ``REALM_PREVIOUS_WASM`` (skipped when unset).
+earlier build's own wasm, named by ``REALM_PREVIOUS_BUILD_WASM`` (skipped when unset).
 
 The previous release has no log of changes: rolled back to it, a capital changes what it serves and notes nothing. Upgraded
 again, its log reads as it did when a quarter last synced, so a cursor from before the rollback must not be trusted: the
@@ -13,9 +13,14 @@ from network import Network
 from test_quarter_sync_cost import CATCH_UP, heap
 from test_quarter_sync_deltas import ZONE, directory
 
-PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
 RATE_LIMIT = 600  # seconds the replica wants between install_code messages as dear as installing this wasm
-pytestmark = pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")
+# The earlier build CI packs (REALM_PREVIOUS_COMMIT) is a5135eb6, and a realm cannot be rolled back to it: its
+# ic-python-db 0.12 reads the lists 0.13 and later keep as empty (docs/deployment/README.md, "This is one way"). The
+# rollback this module makes is not one a realm of that build can make, so it is skipped from it (realms-gos#792).
+FROM_A5135EB6 = os.environ.get("REALM_PREVIOUS_COMMIT", "").startswith("a5135eb6")
+pytestmark = [pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm"),
+              pytest.mark.skipif(FROM_A5135EB6, reason="a rollback to the earlier build, a5135eb6, is not supported")]
 
 
 def catch_up(net, quarter):
