@@ -34,7 +34,7 @@ def test_an_existing_venv_gets_the_pins_installed_again(publish_build, commands,
 
     assert publish_build._basilisk_python(tmp_path, "realm_backend") == str(python)
 
-    assert commands == [[str(python.parent / "pip"), "install", "-q", *publish_build._BASILISK_REQUIREMENTS]]
+    assert commands == [[str(python.parent / "pip"), "install", "-q", "-r", str(tmp_path / "requirements.txt")]]
 
 
 def test_a_new_venv_is_created_and_gets_the_pins(publish_build, commands, tmp_path):
@@ -43,7 +43,7 @@ def test_a_new_venv_is_created_and_gets_the_pins(publish_build, commands, tmp_pa
     venv = tmp_path / ".venv-basilisk"
     pip = str(venv / "bin" / "pip")
     assert [c[1:] for c in commands] == [["-m", "venv", str(venv)], ["install", "-q", "--upgrade", "pip"],
-                                         ["install", "-q", *publish_build._BASILISK_REQUIREMENTS]]
+                                         ["install", "-q", "-r", str(tmp_path / "requirements.txt")]]
     assert commands[1][0] == commands[2][0] == pip
 
 
@@ -58,3 +58,11 @@ def test_a_canister_with_its_own_pins_has_its_own_venv(publish_build, commands, 
     assert publish_build._basilisk_python(tmp_path, "marketplace_backend") == str(python)
 
     assert commands == [[str(python.parent / "pip"), "install", "-q", "-r", str(pinned)]]
+
+
+def test_the_realm_is_published_on_the_pins_its_release_is_packed_with(publish_build, commands):
+    """release.yml packs the release asset after ``pip install -r requirements.txt``; the registry's build must match."""
+    release = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    assert "pip install -r requirements.txt" in release
+    publish_build._basilisk_python(REPO_ROOT, "realm_backend")
+    assert commands[-1][-2:] == ["-r", str(REPO_ROOT / "requirements.txt")]

@@ -72,12 +72,11 @@ FAMILIES = {
     },
 }
 
-_BASILISK_REQUIREMENTS = [
-    "ic-basilisk==0.15.1",
-    "ic-basilisk-toolkit==0.5.3",
-    "ic-python-db==0.14.0",
-    "ic-python-logging==0.3.4",
-]
+# The realm backend builds from the root requirements.txt, the pins release.yml packs its release asset with, so the
+# realm the registry serves bundles the same libraries as the release. It had a list of its own here, which drifted
+# (toolkit 0.5.3 here, 0.5.4 in requirements.txt) and would have kept every realm on ic-python-db 0.14.0 after a pin
+# bump.
+_REALM_REQUIREMENTS = "requirements.txt"
 
 
 def _root() -> Path:
@@ -101,14 +100,15 @@ def _basilisk_python(root: Path, canister: str) -> str:
 
     A canister that pins its own dependencies (``src/<canister>/requirements.txt``,
     e.g. the marketplace on a newer ic-python-db) builds in a venv of its own.
+    The realm backend builds on the root ``requirements.txt``, as its release does.
     """
     pinned = root / "src" / canister / "requirements.txt"
     if pinned.is_file():
         venv = root / f".venv-basilisk-{canister}"
-        requirements = ["-r", str(pinned)]
     else:
         venv = root / ".venv-basilisk"
-        requirements = _BASILISK_REQUIREMENTS
+        pinned = root / _REALM_REQUIREMENTS
+    requirements = ["-r", str(pinned)]
     py = venv / "bin" / "python"
     if not py.is_file():
         print(f"  creating basilisk venv at {venv}")
