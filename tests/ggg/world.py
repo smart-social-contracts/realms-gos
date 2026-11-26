@@ -28,9 +28,11 @@ def profile(name, *perms):
 
 def seat(key, holder, owner, *perms, agent=False, supervisor="", title=""):
     """Give ``holder`` an active appointment to the position ``key`` of ``owner`` (department or organization).
-    Seating them again returns the appointment they hold: one seat, not two."""
+    Seating them again returns the appointment they hold: one seat, not two. An ended one is not a seat they hold, and a
+    test handed it would assert against a seat nobody holds, so that is refused."""
     appointment = Appointment[f"{key}:{holder}"]
     if appointment is not None:
+        assert appointment.status == "active", f"{appointment.id} has ended: seat() cannot hand it back as a seat"
         return appointment
     pos = Position[key]
     if pos is None:

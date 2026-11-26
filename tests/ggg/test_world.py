@@ -1,5 +1,7 @@
 """The test world itself (``world.py``): Agora as every other test builds it."""
 
+import pytest
+
 import world
 from ggg import Appointment, Department, Fund, Organization, Position, Token
 
@@ -16,3 +18,10 @@ def test_building_agora_twice_leaves_one_of_each():
     once = census()
     world.build()
     assert census() == once
+
+
+def test_an_ended_seat_is_not_handed_back_as_one():
+    depts = world.build()
+    Appointment["civil-registry.clerk:bob"].status = "ended"
+    with pytest.raises(AssertionError, match="has ended"):
+        world.seat("civil-registry.clerk", "bob", depts["Civil Registry"], "user.view")
