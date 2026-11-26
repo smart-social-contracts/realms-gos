@@ -18,8 +18,8 @@
  * (__REALMS_TEST_BUILD__ === false).
  */
 
-import { Ed25519KeyIdentity } from '@dfinity/identity';
-import { Secp256k1KeyIdentity } from '@dfinity/identity-secp256k1';
+import { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
+import { Secp256k1KeyIdentity } from '@icp-sdk/core/identity/secp256k1';
 
 /** Scanned by scripts/check_frontend_variant.py — test builds only. */
 export const TEST_BUILD_AUTH_SENTINEL = __REALMS_TEST_BUILD__

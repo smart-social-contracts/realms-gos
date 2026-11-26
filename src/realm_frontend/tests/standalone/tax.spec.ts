@@ -14,7 +14,7 @@
 // member and the officer are billed; an outsider never joined. What a step did is read back from the realm (its
 // rows, the treasury, the ledger), not from a page's text.
 import { expect, test, type Page } from '@playwright/test';
-import { Ed25519KeyIdentity } from '@dfinity/identity';
+import { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { extensionVersion, openExtension } from './fixtures/extension';
 import { balanceOf, mint, transfer } from './fixtures/ledger';
 import { done, leavesUnchanged, refused, row, rows } from './fixtures/ops';

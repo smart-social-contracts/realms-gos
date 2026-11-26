@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { IDL } from '@dfinity/candid';
+import { IDL } from '@icp-sdk/core/candid';
 
 const poll = vi.fn();
 vi.mock('$lib/canisters', () => ({ backend: {}, quarterBackend: {} }));
-vi.mock('@dfinity/agent', () => ({
+vi.mock('@icp-sdk/core/agent', () => ({
 	Actor: { agentOf: () => 'agent', canisterIdOf: () => 'realm-id' },
 	pollForResponse: (...args: unknown[]) => poll(...args),
 	requestIdOf: () => 'request-id'

@@ -31,7 +31,7 @@ async function buildActor() {
   // Dynamic imports so the build step doesn't crash if declarations
   // haven't been generated yet (e.g. first dev install).
   const { createActor, canisterId } = await import('declarations/marketplace_backend');
-  const { HttpAgent } = await import('@dfinity/agent');
+  const { HttpAgent } = await import('@icp-sdk/core/agent');
 
   const identity = await getIdentity();
   const agentOptions: any = identity ? { identity } : {};

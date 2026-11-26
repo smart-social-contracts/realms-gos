@@ -7,7 +7,7 @@
  * Candid API to the older method names the extension UI was written against.
  */
 
-import { Actor, HttpAgent } from '@dfinity/agent';
+import { Actor, HttpAgent } from '@icp-sdk/core/agent';
 import { get } from 'svelte/store';
 import { backendReady, backendStore } from '$lib/canisters';
 import { principal } from '$lib/stores/auth';

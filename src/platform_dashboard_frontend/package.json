@@ -11,11 +11,8 @@
     "format": "prettier --write \"src/**/*.{json,js,jsx,ts,tsx,css,svelte}\""
   },
   "dependencies": {
-    "@dfinity/agent": "^3.2.4",
-    "@dfinity/auth-client": "^3.2.4",
-    "@dfinity/candid": "^3.2.4",
-    "@dfinity/identity": "^3.2.4",
-    "@dfinity/principal": "^3.2.4"
+    "@icp-sdk/auth": "11.2.0",
+    "@icp-sdk/core": "6.1.1"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.4",

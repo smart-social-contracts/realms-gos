@@ -16,7 +16,7 @@
 // The tests share one realm and run in this order. A realm has one fiscal period open at a time: a second run on
 // the same realm books into the first run's period, and its funds keep what the first run left.
 import { expect, test } from '@playwright/test';
-import { Ed25519KeyIdentity } from '@dfinity/identity';
+import { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { extensionVersion, openExtension } from './fixtures/extension';
 import {
 	founderIdentity,

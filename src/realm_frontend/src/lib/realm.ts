@@ -8,8 +8,8 @@
  * ``quarter.read`` / ``quarter.run`` call the active quarter instead (see setActiveQuarter);
  * ``on(actor)`` calls the realm canister behind any other actor (e.g. a join target).
  */
-import { Actor, pollForResponse, requestIdOf } from '@dfinity/agent';
-import { IDL } from '@dfinity/candid';
+import { Actor, pollForResponse, requestIdOf } from '@icp-sdk/core/agent';
+import { IDL } from '@icp-sdk/core/candid';
 // @ts-expect-error canisters.js has no type declarations
 import { backend, quarterBackend } from '$lib/canisters';
 import { noteIfSent } from '$lib/stores/approvalSent';

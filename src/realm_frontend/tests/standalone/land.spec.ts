@@ -12,7 +12,7 @@
 //
 // The tests share one parcel after the other and run in this order.
 import { expect, test, type Page } from '@playwright/test';
-import { Ed25519KeyIdentity } from '@dfinity/identity';
+import { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { openExtension, type ExtensionPage } from './fixtures/extension';
 import {
 	founderIdentity,

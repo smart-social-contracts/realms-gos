@@ -1,7 +1,7 @@
 /**
  * Federation portal iframe bridge (realm frontend side).
  */
-import { DelegationIdentity, DelegationChain, Ed25519KeyIdentity } from '@dfinity/identity';
+import { DelegationIdentity, DelegationChain, Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { portalLoginHref, markPortalSigningIn } from '$lib/portal-redirect-path.ts';
 import type { AssistantPromptContext } from '$lib/host-bridge';
 

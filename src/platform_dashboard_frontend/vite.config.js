@@ -105,10 +105,7 @@ export default defineConfig({
         find: 'declarations',
         replacement: fileURLToPath(new URL('../declarations', import.meta.url)),
       },
-      { find: '@icp-sdk/core/agent', replacement: '@dfinity/agent' },
-      { find: '@icp-sdk/core/principal', replacement: '@dfinity/principal' },
-      { find: '@icp-sdk/core/candid', replacement: '@dfinity/candid' },
     ],
-    dedupe: ['@dfinity/agent'],
+    dedupe: ['@icp-sdk/core'],
   },
 });

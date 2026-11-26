@@ -3,7 +3,7 @@
 // The founder signs in through the portal bridge, walks every wizard step, launches the realm and
 // lands on its public dashboard. The realm's own state is then checked through its read operations.
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { Actor, HttpAgent } from '@dfinity/agent';
+import { Actor, HttpAgent } from '@icp-sdk/core/agent';
 import {
 	exposeSigner,
 	founderIdentity,
@@ -30,7 +30,7 @@ test.beforeAll(() => {
 
 async function ledgerSymbol(ledger: string): Promise<string> {
 	const agent = await HttpAgent.create({ host: realm.network_url, shouldFetchRootKey: true });
-	const idl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+	const idl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) =>
 		IDL.Service({ icrc1_symbol: IDL.Func([], [IDL.Text], ['query']) });
 	const actor = Actor.createActor<{ icrc1_symbol: () => Promise<string> }>(idl as never, {
 		agent,

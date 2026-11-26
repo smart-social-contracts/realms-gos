@@ -55,13 +55,7 @@ export default defineConfig({
         find: 'declarations',
         replacement: fileURLToPath(new URL('../declarations', import.meta.url)),
       },
-      // dfx 0.31 emits `@icp-sdk/core/...` imports in generated declarations.
-      // Map those to the equivalent `@dfinity/...` packages so the build
-      // resolves without an extra dep.
-      { find: '@icp-sdk/core/agent', replacement: '@dfinity/agent' },
-      { find: '@icp-sdk/core/principal', replacement: '@dfinity/principal' },
-      { find: '@icp-sdk/core/candid', replacement: '@dfinity/candid' },
     ],
-    dedupe: ['@dfinity/agent'],
+    dedupe: ['@icp-sdk/core'],
   },
 });

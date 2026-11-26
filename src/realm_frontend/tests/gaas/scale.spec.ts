@@ -10,8 +10,8 @@
 // GAAS_JSON may name an https network_url (a live replica: no root key is fetched).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Browser, type FrameLocator, type Page } from '@playwright/test';
-import { Actor, HttpAgent } from '@dfinity/agent';
-import { Ed25519KeyIdentity } from '@dfinity/identity';
+import { Actor, HttpAgent } from '@icp-sdk/core/agent';
+import { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { exposeSigner, needsRootKey, openInPortal, readOp, type StandaloneRealm } from '../standalone/fixtures/realm';
 import { LAUNCH_TIMEOUT, launchThroughWizard } from '../standalone/fixtures/wizard';
 
@@ -62,7 +62,7 @@ async function agentAs(identity?: Ed25519KeyIdentity) {
 
 /** Whether the asset canister ``canister`` answers /index.html. */
 async function frontendServes(canister: string): Promise<boolean> {
-	const idl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+	const idl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) =>
 		IDL.Service({
 			http_request: IDL.Func(
 				[
@@ -87,7 +87,7 @@ async function frontendServes(canister: string): Promise<boolean> {
 }
 
 async function redeemVoucher(founder: Ed25519KeyIdentity, code: string) {
-	const idl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+	const idl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) =>
 		IDL.Service({ redeem_voucher: IDL.Func([IDL.Text], [IDL.Text], []) });
 	const registry = Actor.createActor<{ redeem_voucher: (c: string) => Promise<string> }>(idl as never, {
 		agent: await agentAs(founder),
@@ -104,7 +104,7 @@ interface Job {
 }
 
 async function job(id: string): Promise<Job> {
-	const idl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) => {
+	const idl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) => {
 		const record = IDL.Record({
 			status: IDL.Text,
 			backend_canister_id: IDL.Text,
@@ -161,7 +161,7 @@ async function launchFromPortal(page: Page, realmName: string): Promise<string> 
 
 let realm: StandaloneRealm;
 
-const readIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+const readIdl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) =>
 	IDL.Service({ read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']) });
 
 /** A read operation of ``canister`` (the realm or one of its quarters), signed as ``identity``. */
@@ -494,7 +494,7 @@ test('#58: a realm is live only after its frontend has finished uploading', asyn
 });
 
 async function ledgerSymbol(): Promise<string> {
-	const idl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
+	const idl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) =>
 		IDL.Service({ icrc1_symbol: IDL.Func([], [IDL.Text], ['query']) });
 	const ledger = Actor.createActor<{ icrc1_symbol: () => Promise<string> }>(idl as never, {
 		agent: await agentAs(),

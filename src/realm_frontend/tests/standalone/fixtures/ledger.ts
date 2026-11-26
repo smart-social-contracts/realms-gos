@@ -1,7 +1,7 @@
 // The realm's token ledger, ic-python-token in test mode (scripts/e2e_standalone_realm.py): anyone may mint.
-import { Actor, HttpAgent } from '@dfinity/agent';
-import type { Ed25519KeyIdentity } from '@dfinity/identity';
-import { Principal } from '@dfinity/principal';
+import { Actor, HttpAgent } from '@icp-sdk/core/agent';
+import type { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
+import { Principal } from '@icp-sdk/core/principal';
 import type { StandaloneRealm } from './realm';
 
 interface Account {
@@ -10,7 +10,7 @@ interface Account {
 	subaccount?: string;
 }
 
-const ledgerIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) => {
+const ledgerIdl = ({ IDL }: { IDL: typeof import('@icp-sdk/core/candid').IDL }) => {
 	const Account = IDL.Record({ owner: IDL.Principal, subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)) });
 	const TransferError = IDL.Variant({
 		GenericError: IDL.Record({ message: IDL.Text, error_code: IDL.Nat }),

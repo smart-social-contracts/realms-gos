@@ -12,7 +12,7 @@
 // The tests share one case after the other and run in this order. A verdict can only be made final, and a penalty
 // carried out, after a 14-day appeal window the realm fixes; the spec stops where that window begins.
 import { expect, test, type Page } from '@playwright/test';
-import { Ed25519KeyIdentity } from '@dfinity/identity';
+import { Ed25519KeyIdentity } from '@icp-sdk/core/identity';
 import { openExtension, type ExtensionPage } from './fixtures/extension';
 import {
 	founderIdentity,

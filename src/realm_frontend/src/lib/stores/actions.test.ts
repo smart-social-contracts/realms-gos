@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const realm = vi.hoisted(() => ({ read: vi.fn(), run: vi.fn() }));
 vi.mock('$lib/stores/delegation.js', () => ({ resolveDelegationRealm: async () => realm }));
 vi.mock('$lib/canisters', () => ({ backend: {}, quarterBackend: {} }));
-vi.mock('@dfinity/agent', () => ({ Actor: {}, pollForResponse: vi.fn(), requestIdOf: vi.fn() }));
+vi.mock('@icp-sdk/core/agent', () => ({ Actor: {}, pollForResponse: vi.fn(), requestIdOf: vi.fn() }));
 
 import {
 	approveAction,

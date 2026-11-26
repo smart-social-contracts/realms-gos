@@ -74,11 +74,11 @@ export default defineConfig(({ command }) => {
       },
     },
     include: [
-      '@dfinity/agent',
-      '@dfinity/principal',
-      '@dfinity/auth-client',
-      '@dfinity/identity',
-      '@dfinity/candid'
+      '@icp-sdk/core/agent',
+      '@icp-sdk/core/principal',
+      '@icp-sdk/auth/client',
+      '@icp-sdk/core/identity',
+      '@icp-sdk/core/candid'
     ]
   },
   plugins: [
@@ -94,11 +94,8 @@ export default defineConfig(({ command }) => {
           new URL("../declarations", import.meta.url)
         ),
       },
-      { find: '@icp-sdk/core/agent', replacement: '@dfinity/agent' },
-      { find: '@icp-sdk/core/principal', replacement: '@dfinity/principal' },
-      { find: '@icp-sdk/core/candid', replacement: '@dfinity/candid' },
     ],
-    dedupe: ['@dfinity/agent'],
+    dedupe: ['@icp-sdk/core'],
   },
   server: {
     fs: {
