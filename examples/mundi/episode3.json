@@ -1,0 +1,82 @@
+{
+  "$comment": "The capture environment for Episode 3, the Realms GOS walkthrough video: València's layered codex (EU > España > Comunitat Valenciana > EMSHI > València), a city without quarters, and the extensions every scene of the walkthrough opens. Every realm keeps its accounts in DEMO, a test token, and none has simulated members: the people and what they did are seeded by name. `realms mundus up episode3`. See docs/development/mundus.md.",
+  "name": "episode3",
+  "sources": {
+    "gos-as-a-service": "main",
+    "Casals": "main",
+    "file-registry": "main",
+    "geister": "main"
+  },
+  "voting_window": 180,
+  "test_sign_in": false,
+  "day_seconds": 60,
+  "realms": [
+    {
+      "name": "eu",
+      "display_name": "European Union",
+      "layer": "eu",
+      "release": "1.0.0",
+      "seed": 101,
+      "manifesto": "The European Union's legislation that applies to the realms below it: data protection (GDPR).",
+      "currency": "DEMO"
+    },
+    {
+      "name": "espana",
+      "display_name": "España",
+      "layer": "eu/es",
+      "follows": [
+        "eu"
+      ],
+      "seed": 102,
+      "manifesto": "Spain's legislation for local government: tax, administrative procedure, the municipal register, local regime, data protection and languages.",
+      "currency": "DEMO"
+    },
+    {
+      "name": "comunitat-valenciana",
+      "display_name": "Comunitat Valenciana",
+      "layer": "eu/es/vc",
+      "follows": [
+        "espana"
+      ],
+      "seed": 103,
+      "manifesto": "La Generalitat: the Comunitat Valenciana's own local regime and languages, on top of Spain's.",
+      "currency": "DEMO"
+    },
+    {
+      "name": "emshi",
+      "display_name": "EMSHI",
+      "layer": "eu/es/vc/emshi",
+      "follows": [
+        "comunitat-valenciana"
+      ],
+      "seed": 104,
+      "manifesto": "Entitat Metropolitana de Serveis Hidràulics: the metropolitan water authority, created by Llei 2/2001.",
+      "currency": "DEMO"
+    },
+    {
+      "name": "valencia",
+      "display_name": "València",
+      "layer": "eu/es/vc/46250-valencia",
+      "follows": [
+        "comunitat-valenciana",
+        "emshi"
+      ],
+      "seed": 105,
+      "manifesto": "The city of València. Its ordinances sit on the legislation of the EU, Spain, the Comunitat Valenciana and EMSHI.",
+      "extensions": [
+        "tax_manager",
+        "budget_manager",
+        "metrics",
+        "procurement",
+        "justice_litigation",
+        "land_registry",
+        "zone_selector",
+        "department_docs",
+        "passport_verification",
+        "package_manager",
+        "notifications"
+      ],
+      "currency": "DEMO"
+    }
+  ]
+}

@@ -57,7 +57,7 @@ commands act on; `--mundus NAME` picks another. Two mundi can run side by side, 
 
 ## The mundus file
 
-`examples/mundi/valencia.json` and `examples/mundi/proof.json` are the two in this repository.
+`examples/mundi/valencia.json` and `examples/mundi/proof.json` are the two in this repository, and `examples/mundi/episode3.json`, València's chain as the Episode 3 walkthrough films it: every realm in the test token DEMO, no quarters and no simulated people, whose names and records a seed script adds instead.
 
 | Field | |
 |---|---|
