@@ -75,6 +75,7 @@ def mint(collection, owner, meta):
     pairs = "; ".join(f"record {{ {quote(k)}; {value(v)} }}" for k, v in meta.items())
     arg = f"(record {{ token_id = null; owner = {account(owner)}; metadata = opt vec {{ {pairs} }} }})"
     token_id = yield from ledger(collection, "mint", arg)
+    collection = find(NFTToken, collection.id)  # read again: another mint may have counted itself while this one was out
     collection.total_supply += 1
     return token_id
 
@@ -191,6 +192,7 @@ def land_transfer(c, args):
         arg = (f"(record {{ token_id = {land.token_id} : nat; to = {account(wallet(to))}; "
                f"memo = opt {quote(args['order'])} }})")
         yield from ledger(find(NFTToken, LAND), "force_transfer", arg)
+        land = find(Land, land.id)  # read again after the call: the row read before it would undo what others wrote
     land.owner = to
     return {"land": land.id, "owner": to}
 
@@ -229,6 +231,7 @@ def land_mint_nft(c, args):
                      prepared_by=args.get("prepared_by", "")),
             "x": land.x, "y": land.y, "width": land.width, "height": land.height, "kind": land.kind}
     token_id = yield from mint(collection, wallet(land.owner), meta)
+    land = find(Land, land.id)  # read again after the call
     land.token_id = str(token_id)
     return {"land": land.id, "token_id": token_id}
 
@@ -270,6 +273,7 @@ def freeze(args, on):
         arg = (f"(record {{ token_id = {land.token_id} : nat; reason = opt {quote(args.get('reason', ''))} }})" if on
                else f"({land.token_id} : nat)")
         yield from ledger(find(NFTToken, LAND), "freeze_token" if on else "unfreeze_token", arg)
+        land = find(Land, land.id)  # read again after the call
     land.status = "disputed" if on else "active"
     return {"land": land.id, "status": land.status}
 

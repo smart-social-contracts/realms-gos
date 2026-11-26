@@ -216,3 +216,30 @@ def test_a_passed_federal_vote_can_assign_a_role():
         leg(q, v, "passed", 10, 1)
     assert ok("federal_vote_finalize", ANON, vote=v)["status"] == "passed"
     assert "clerk" in [p.id for p in User["carla"].profiles], FederalVote[v].tally
+
+
+def test_a_vote_opened_while_the_quarters_answer_another_takes_the_next_id():
+    """The capital asks every quarter to open a vote before it answers: another vote opened meanwhile must not take the
+    same id (realms-gos#753)."""
+    capital("north")
+    second = {}
+
+    def opens(args):
+        if not second:  # while north answers the first vote, another message opens a second one
+            second["asked"] = True
+            second["vote"] = ok("federal_vote_propose", "alice", title="Second", action=ACTION)["vote"]
+        return {"ok": True, "proposal": "P-1"}
+
+    fake_chain.peer("north", federation_message=opens)
+    first = ok("federal_vote_propose", "alice", title="First", action=ACTION)["vote"]
+    assert first != second["vote"] and [FederalVote[v].status for v in (first, second["vote"])] == ["open", "open"]
+
+
+def test_a_vote_a_quarter_refuses_is_cancelled_and_keeps_its_id():
+    capital("north")
+    fake_chain.peer("north", federation_message={"ok": False, "error": "not now"})
+    assert "north refused FV-1: not now" in denied("federal_vote_propose", "alice", title="x", action=ACTION)
+    assert FederalVote["FV-1"].status == "cancelled"
+    reply("north", "federation_message", proposal="P-1")
+    fake_chain.state["peers"].clear()
+    assert ok("federal_vote_propose", "alice", title="y", action=ACTION)["vote"] == "FV-2"

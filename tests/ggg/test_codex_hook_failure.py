@@ -285,3 +285,35 @@ def test_a_codex_of_the_registry_the_realm_does_not_trust_is_refused_for_that_an
     out = call("codex_install", "ctl", codex="test", version="1.0.0")
     assert not out["ok"] and "which the code does not define" not in out["error"]  # the trust policy's reason
     assert compiles == [] and Codex["test@1.0.0"] is None and state() == NO_CODEX
+
+
+@op.op("treasury.manage")
+def t_ask_elsewhere(c, args):
+    """A hook's effect that calls another canister: the message of the hook ends there."""
+    yield from fake_chain.call("elsewhere", "ping")
+    return {}
+
+
+AFTER_A_CALL = '''
+from ggg_sdk import hook, realm
+
+
+@hook
+def act(args):
+    realm.effect("t_ask_elsewhere")
+    realm.effect("realm_configure", welcome_message="From the hook")
+    realm.effect("t_note", text="undeclared")
+    return {}
+'''
+
+
+def test_a_failing_hook_whose_effects_called_another_canister_keeps_what_the_later_effects_wrote():
+    """The hook records its problem on the realm after its effects ran, the last in a message after a call: it writes
+    the realm as it is then, not as it was before the hook, which would undo the welcome message (realms-gos#753)."""
+    build()
+    ok("codex_install", "ctl", manifest=manifest(hooks=["act"], capabilities=["t_ask_elsewhere", "realm_configure"]),
+       source=AFTER_A_CALL)
+    out = op.run(codex.hook("act"))
+    assert [(e["op"], e["ok"]) for e in out["effects"]] == [
+        ("t_ask_elsewhere", True), ("realm_configure", True), ("t_note", False)]
+    assert (Realm["1"].welcome_message, state()[2]) == ("From the hook", "act")

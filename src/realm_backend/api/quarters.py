@@ -598,6 +598,7 @@ def quarter_configure(c, args):
     local = local_settings(args)
     if local:  # first: what this message writes before an await is kept even if the quarter then refuses
         yield from set_for_quarter(q, local)
+        q = find(Quarter, q.id)  # read again after the call: the quarter's own sync may have written its row
     if q is not None and set(put(q, name=args.get("name", q.name), status=status or q.status)) & set(NOTABLE):
         announce(q)
     r = realm()
@@ -638,12 +639,13 @@ def quarter_join_federation(c, args):
     or from a follower, cannot join: a quarter makes no call to another realm. Nor can a realm whose accounting
     currency differs from the capital's. The join reads the capital's ``realm_info``: a realm that has not chosen its
     time zone, welcome message or currency starts on the capital's. Returns ``capital``."""
-    r, cid = realm(), args["capital"]
+    cid = args["capital"]
     refuse_join(cid)
     profile = yield from capital_profile(cid)
     refuse_join(cid)  # again: the realm may have changed while the capital answered
     refuse_currency(profile)
     take_defaults(profile)
+    r = realm()  # after take_defaults: a row read before it would write the capital's settings back over (#761)
     r.is_quarter, r.is_capital, r.federation_realm_id = True, False, cid
     # The capital becomes a known quarter so its calls are accepted (I-FED-4).
     Quarter(id=cid, name=args.get("name", "capital"), index=0, status="active")
@@ -781,9 +783,14 @@ def self_change_quarter(c, args):
         raise Fail(f"{dest} refused the move: {reply.get('error')}")
     f = Forward(id=next_id(Forward, "FWD"), subject=subject, origin=here, destination=dest, moved_at=moved_at,
                 signature=signature, codex=codex()["id"], compliance=q.compliance)
-    member.delete()
-    assets.leave_home(user)
-    user.home_quarter, user.profiles = dest, []
+    # The destination has taken the user: record the move on the rows as they are now, read again after the call. A
+    # removal decided while the call was out may have deleted them already; refusing now would undo nothing there.
+    member, user = Member[c.user], User[c.user]
+    if member is not None:
+        member.delete()
+    if user is not None:
+        assets.leave_home(user)
+        user.home_quarter, user.profiles = dest, []
     guest = GuestUser[c.user] or GuestUser(id=c.user)
     guest.home_quarter, guest.permissions = dest, GUEST
     return {"forward": f.id, "home_quarter": dest}
@@ -999,15 +1006,15 @@ def take_images(digests):
     """Take each of the capital's images whose digest differs from the one this quarter last took, one read a call
     (``realm_image``). An image that cannot be read keeps its old digest, so the next sync tries again. Returns the
     first error, "" when every image is the capital's. A generator."""
-    r = realm()
     for image in SYNCED_IMAGES:
-        digest, state = digests.get(image, ""), r.sync_state or {}
-        if (state.get("images") or {}).get(image) == digest:
+        digest = digests.get(image, "")
+        if ((realm().sync_state or {}).get("images") or {}).get(image) == digest:
             continue
         try:
             value = (yield from read_image(image)) if digest else ""
         except Fail as e:
             return f"{image}: {e}"
+        r = realm()  # after the read, which ended the message: a row read before it would write back the old digests
         put(r, **{image: value})
         forget_digests((image,))  # a quarter that secedes and becomes a capital takes them again
         remember(images={**((r.sync_state or {}).get("images") or {}), image: digest})

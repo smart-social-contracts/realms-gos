@@ -97,8 +97,7 @@ def hook(name, context=None):
     codex = active_legacy()
     if codex is None or name not in (codex.manifest or {}).get("hooks", []):
         return None
-    realm = Realm["1"]
-    facts = {"codex": codex.id, "config": config(codex), "now": chain.now(), "realm": view(realm, *REALM_FIELDS)}
+    facts = {"codex": codex.id, "config": config(codex), "now": chain.now(), "realm": view(Realm["1"], *REALM_FIELDS)}
     try:
         out = yield from sandbox.call(codex.source, name, context or {}, facts, codex.capabilities or [])
     except Exception as e:  # noqa: BLE001  the hook's own failure, whatever it is, is the codex's: never the caller's
@@ -110,6 +109,9 @@ def hook(name, context=None):
         if out.get("error"):  # the caller's reply (an install's ``init``, then a proposal's result) is cut as well
             out = {**out, "error": error}
     problem = {"codex": codex.id, "hook": name, "error": error, "at": chain.now()} if error else {}
+    # Read after the effects: one that called another canister ended the message, and a row read before it would write
+    # back what the later effects changed.
+    realm = Realm["1"]
     if realm.codex_install_state != problem:
         realm.codex_install_state = problem
     return out

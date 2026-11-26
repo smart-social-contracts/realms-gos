@@ -184,6 +184,7 @@ def attempt(s):
         reply = yield from chain.call(token.ledger, "icrc1_transfer", arg)
     except Exception:  # noqa: BLE001  no answer: the outcome is unknown, and the same transfer is sent again at the next sweep
         return s
+    s = Sweep[s.id]  # read again: the instance read before the call cannot see what another message wrote meanwhile
     if s.status != "sending":  # another call settled it while the ledger answered
         return s
     status, detail = answer(reply)
@@ -244,6 +245,7 @@ def report(s):
                                         {**view(s, *SWEEP), "block": int(s.block)})
     except Exception:  # noqa: BLE001  the capital cannot be reached
         return s
+    s = Sweep[s.id]  # read again after the call, as in attempt
     if reply.get("ok") and s.status == "sent":
         s.status, s.reported_at = "booked", chain.now()
     return s
