@@ -82,6 +82,7 @@ Each realm:
 | `follows` | the realms it takes legislation from (each must have a `layer`) |
 | `release` | which release of its `releases.json` it adopts and publishes (default: the newest) |
 | `quarters` | how many quarters it has, besides the capital |
+| `currency` | the symbol it keeps its accounts in, on a test ledger of its own (default: the one its codex bills in, else GST) |
 | `population` | geister's people, by persona: `compliant`, `watchful`, `exploiter`, `apathetic` |
 
 ## Layers: the network held still

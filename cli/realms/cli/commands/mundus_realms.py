@@ -252,8 +252,12 @@ def install_extensions(m, call, codex: str, extra: list) -> list:
     return results
 
 
-def currency(m, codex: str) -> str:
-    """The symbol the codex bills in, from its manifest; GST for a realm without one."""
+def currency(m, name: str) -> str:
+    """The symbol realm ``name`` keeps its accounts in: the mundus file's ``currency``, else the one its codex bills in
+    (its manifest), else GST."""
+    if entry(m, name).get("currency"):
+        return entry(m, name)["currency"]
+    codex = load(m, name)["codex"]
     manifest = m.realms_dir / "codices" / "codices" / codex / "manifest.json"
     symbol = json.loads(manifest.read_text()).get("currency", {}).get("symbol") if codex and manifest.exists() else None
     return symbol or DEFAULT_CURRENCY
@@ -299,7 +303,7 @@ def token_ledger(m, name: str) -> str:
     pinned.fetch_ledger_wasm(source)  # downloads it once, and checks its sha256
     shutil.copy(source, bank / "ledger.wasm")
     (bank / "icp.yaml").write_text(BANK_YAML.format(url=network_url(m), canisters="".join(
-        LEDGER_YAML.format(realm=r, symbol=currency(m, load(m, r)["codex"])) for r in sorted(set(ids) | {name}))))
+        LEDGER_YAML.format(realm=r, symbol=currency(m, r)) for r in sorted(set(ids) | {name}))))
 
     def icp(*args):
         out = subprocess.run(["icp", *args, "-e", "local", "--identity", m.identity], cwd=bank,
@@ -331,7 +335,7 @@ def launch(m, name: str) -> bool:
     todo = do("setup_state").get("todo") or []
     if "trust_policy" in todo:
         do("setup_step", step="trust_policy", require_marketplace_approval=False)
-    symbol = currency(m, record["codex"])
+    symbol = currency(m, name)
     if "tokens" in todo:
         do("setup_step", step="tokens", accounting_currency=symbol, accounting_currency_decimals=8)
     # A codex bills in its own token (dominion: DOM): unregistered, its hooks fail ("unknown Token 'DOM'").
