@@ -236,8 +236,12 @@ For each host, `apply` makes sure the zone holds:
 | `TXT _canister-id.<host>` | the frontend canister id |
 | `CNAME _acme-challenge.<host>` | `_acme-challenge.<host>.icp2.io` |
 
-An apex host (the host equals the zone) cannot be a CNAME at Infomaniak, so it gets `A 195.5.171.242` and
-`A 212.71.124.188` instead. A record that holds a stale value (a re-minted canister id, say) is updated in
+An apex host (the host equals the zone) cannot be a CNAME at Infomaniak, so it gets `A 212.71.124.188`
+instead: the one address every IC gateway name (`icp1.io`, `icp0.io`, `ic0.app`, `boundary.dfinity.network`)
+resolves to (`dig +short A icp1.io`). Until 25 Nov 2026 it also wrote `A 195.5.171.242`; that address accepts no
+connection on any port, so a browser that tried it first stalled for 30 to 45 seconds before falling back. A
+zone that still holds it needs it deleted by hand in the manager; `apply` reports it ("left other value(s)
+alone") and never deletes. A record that holds a stale value (a re-minted canister id, say) is updated in
 place. Nothing is ever deleted: Infomaniak records carry no owner, so any other record on the same name is
 left alone and reported, and a stray second `_canister-id` TXT has to be removed by hand in the manager
 (the IC rejects a domain with two).
