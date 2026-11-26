@@ -7,10 +7,12 @@ or layered pack must set that variable to the Cedar image
 (``cpython_canister_template_cedar.wasm`` from the pinned ic-basilisk release,
 see ``CEDAR_TEMPLATE_BASILISK_VERSION``).
 
-This module does not inspect a finished realm WASM. It only pins the
-template used to pack one, by version and by sha256: the template is checked
-against ``CEDAR_TEMPLATE_SHA256`` every time it is used, downloaded or cached,
-and a mismatch stops the pack.
+The template is pinned by version and by sha256: it is checked against
+``CEDAR_TEMPLATE_SHA256`` every time it is used, downloaded or cached, and a
+mismatch stops the pack. That check is on basilisk's input only. basilisk
+uses ``BASILISK_TEMPLATE_WASM`` only when that path exists, and otherwise
+falls back to its plain template without saying so. So every pack also
+checks its finished wasm with ``require_cedar_build``.
 """
 
 from __future__ import annotations
@@ -44,6 +46,17 @@ CEDAR_TEMPLATE_URL = (
 # Change it only with CEDAR_TEMPLATE_BASILISK_VERSION, taking the new value
 # from that release's signed checksums.txt.
 CEDAR_TEMPLATE_SHA256 = "fe33dc809ca8e936945196fce57b31ec081507ae41d6e693fa75f0a59af2a3ef"
+
+# What the Cedar engine leaves in a wasm: the source paths its panic messages
+# carry. Do not check for ``sandbox_sha256`` instead: the plain template
+# has that symbol too, so a check on it passes on either template. Measured on
+# ic-basilisk 0.15.1 (26 Nov 2026):
+# - 36 of these in the Cedar template and in a realm packed on it;
+# - none in the plain template;
+# - none in a realm packed on the plain template, the way basilisk's fallback
+#   packs it.
+# A test checks that the Python a realm bundles never contains it.
+CEDAR_ENGINE_MARKER = b"cedar-policy-core-"
 
 
 def is_plain_cpython_template(path: PathLike) -> bool:
@@ -138,3 +151,18 @@ def apply_cedar_template_env(
     out: MutableMapping[str, str] = dict(os.environ if env is None else env)
     out["BASILISK_TEMPLATE_WASM"] = ensure_cedar_template()
     return out
+
+
+def require_cedar_build(wasm: PathLike) -> None:
+    """Fail unless the finished *wasm* was packed on the Cedar template.
+
+    The template is checked before the pack. Only the output shows whether
+    basilisk used it or fell back to the plain template.
+    """
+    if CEDAR_ENGINE_MARKER not in Path(wasm).read_bytes():
+        raise SystemExit(
+            f"{wasm} has no Cedar engine, so it was not packed on "
+            f"{CEDAR_TEMPLATE_NAME}. basilisk falls back to its plain "
+            f"template, silently, when BASILISK_TEMPLATE_WASM names no file. "
+            f"Refusing the build."
+        )

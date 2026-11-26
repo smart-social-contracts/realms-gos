@@ -221,3 +221,76 @@ def test_build_base_wasm_dry_run_still_pins_cedar(tmp_path, monkeypatch):
     monkeypatch.setattr(bbw, "apply_cedar_template_env", bct.apply_cedar_template_env)
     out = bbw._run_basilisk(REPO_ROOT, dry_run=True)
     assert out.name == "realm_backend.wasm"
+
+
+# What a realm packed on the plain template holds, measured on a real fallback pack (26 Nov 2026): the
+# sandbox_sha256 symbol and the bundled Python's _basilisk_cedar, but no Cedar engine.
+PLAIN_BUILD = b"\0asm sandbox_sha256 _basilisk_cedar"
+CEDAR_BUILD = PLAIN_BUILD + b" cedar-policy-core-4.12.0/src/ast/request.rs"
+
+
+def test_a_wasm_without_the_cedar_engine_is_refused(tmp_path):
+    wasm = tmp_path / "realm_backend.wasm"
+    wasm.write_bytes(PLAIN_BUILD)
+    with pytest.raises(SystemExit, match="has no Cedar engine"):
+        bct.require_cedar_build(wasm)
+    wasm.write_bytes(CEDAR_BUILD)
+    bct.require_cedar_build(wasm)
+
+
+def _stub_basilisk_writing(wasm: Path, payload: bytes):
+    def fake_run(cmd, cwd=None, env=None, check=False):
+        wasm.parent.mkdir(parents=True, exist_ok=True)
+        wasm.write_bytes(payload)
+        return type("Done", (), {"returncode": 0})()
+
+    return fake_run
+
+
+@pytest.mark.parametrize("payload, refused", [(PLAIN_BUILD, True), (CEDAR_BUILD, False)], ids=["plain", "cedar"])
+def test_the_pack_checks_the_wasm_basilisk_built(tmp_path, monkeypatch, payload, refused):
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    wasm = tmp_path / ".basilisk" / "realm_backend" / "realm_backend.wasm"
+    monkeypatch.setattr(pack, "WASM", wasm)
+    monkeypatch.setattr(pack.subprocess, "run", _stub_basilisk_writing(wasm, payload))
+    if refused:
+        with pytest.raises(SystemExit, match="has no Cedar engine"):
+            pack.pack(version="test")
+    else:
+        assert pack.pack(version="test") == wasm
+
+
+@pytest.mark.parametrize(
+    "payload, stops_at", [(PLAIN_BUILD, "has no Cedar engine"), (CEDAR_BUILD, "candid file")], ids=["plain", "cedar"]
+)
+def test_build_base_wasm_checks_the_wasm_basilisk_built(tmp_path, monkeypatch, payload, stops_at):
+    """A Cedar wasm passes the check and stops later, at the candid file this stub does not write."""
+    dest = _write_fake_cedar(tmp_path / bct.CEDAR_TEMPLATE_NAME, monkeypatch)
+    monkeypatch.setattr(bct, "cedar_template_cache_path", lambda: dest)
+    monkeypatch.delenv("CANISTER_CANDID_PATH", raising=False)
+    root = tmp_path / "repo"
+    (root / "src" / "realm_backend").mkdir(parents=True)
+    (root / "src" / "realm_backend" / "main.py").write_text("")
+    wasm = root / ".basilisk" / "realm_backend" / "realm_backend.wasm"
+
+    import build_base_wasm as bbw
+
+    monkeypatch.setattr(bbw, "apply_cedar_template_env", bct.apply_cedar_template_env)
+    monkeypatch.setattr(bbw.subprocess, "run", _stub_basilisk_writing(wasm, payload))
+    with pytest.raises(SystemExit, match=stops_at):
+        bbw._run_basilisk(root, dry_run=False)
+
+
+def test_no_python_a_realm_bundles_names_the_cedar_engine_marker():
+    """Otherwise a realm packed on the plain template would carry the marker in its Python and pass the check."""
+    import importlib.util
+
+    roots = [REPO_ROOT / "src" / "realm_backend"]
+    for name in ("ic_basilisk_toolkit", "ic_python_db", "ic_python_logging", "basilisk"):
+        spec = importlib.util.find_spec(name)
+        if spec and spec.submodule_search_locations:
+            roots += [Path(p) for p in spec.submodule_search_locations]
+    marker = bct.CEDAR_ENGINE_MARKER
+    named = [str(f) for root in roots for f in root.rglob("*.py") if marker in f.read_bytes()]
+    assert named == []
