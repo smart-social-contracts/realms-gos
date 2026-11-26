@@ -85,19 +85,34 @@ def test_the_look_survives_an_upgrade_and_a_realm_upgraded_publishes_within_minu
     assert listed(realm.registry)[0] == 3  # and the look it armed goes on without calling when nothing changed
 
 
-def test_a_registry_that_is_not_one_is_survived_and_tried_again(realm, people):
+@pytest.fixture
+def no_registry(realm):
+    """A canister that is no registry (the realm itself: it has no ``listing_publish``), listed as one for the test and
+    forgotten after it, so that no test depends on the one before it."""
+    yield realm.id.to_str()
+    out = realm.shell("from ggg import Realm, Registry\n"
+                      f"Registry[{realm.id.to_str()!r}].delete()\n"
+                      "data = Realm['1'].manifest_data\n"
+                      f"data['listing'] = {{k: v for k, v in data['listing'].items() if k != {realm.id.to_str()!r}}}\n"
+                      "Realm['1'].manifest_data = data\n"
+                      "print('forgotten')")
+    assert "forgotten" in out, out
+
+
+def test_a_registry_that_is_not_one_is_survived_and_tried_again(realm, people, no_registry):
     """A canister that has no ``listing_publish``: the call fails, the realm keeps going, the look comes round again."""
-    ok(realm, "host_registry", people["installer"], registry=realm.id.to_str())  # itself: it has no such method
+    ok(realm, "host_registry", people["installer"], registry=no_registry)
     realm.wait(1)
     told = json.loads(realm.shell("import json\nfrom api import listing\nprint(json.dumps(listing.kept()))").strip())
-    assert told[realm.id.to_str()]["error"] != "" and "sent" not in told[realm.id.to_str()]
+    assert told[no_registry]["error"] != "" and "sent" not in told[no_registry]
     assert ok(realm, "realm_numbers", people["alice"], query=True)["members"] == 5
-    realm.wait(DAY)  # still alive: the next look runs
+    realm.wait(DAY)  # still alive: the next look runs, and the registry that works is not called again
     assert listed(realm.registry)[0] == 3
 
 
 def test_a_daily_look_with_nothing_to_say_costs_little(realm, costs):
-    """What every realm pays every day: its figures, compared with what each registry last took."""
-    spent = costs.measure(realm, "listing: a daily look that makes no call (one registry)",
-                          "from api import listing\nlist(listing.publish())")
+    """What every realm pays every day when nothing changed: its figures (the members of every quarter, the stage, the
+    name), which it compares with what each registry took. The call itself is left out: a shell makes none."""
+    spent = costs.measure(realm, "listing: the figures of a daily look that makes no call",
+                          "from api import listing\nlisting.figures()\nlisting.registries()\nlisting.kept()")
     assert spent < 50_000_000
