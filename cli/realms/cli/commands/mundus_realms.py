@@ -287,7 +287,7 @@ def token_ledger(m, name: str) -> str:
     """The realm's own token ledger, made on first use. The product orchestra's ledger is not in test mode, so nobody
     but its owner can mint there, and a simulated member needs an income."""
     sys.path.insert(0, str(m.realms_dir / "scripts"))
-    import e2e_standalone_realm as standalone  # the ledger's release and its checksum
+    import token_ledger as pinned  # the release of the ledger and its checksum
 
     bank = m.state / "bank"
     ids_file = bank / "ledgers.json"
@@ -295,8 +295,8 @@ def token_ledger(m, name: str) -> str:
     if name in ids:
         return ids[name]
     bank.mkdir(exist_ok=True)
-    source = m.realms_dir / standalone.LEDGER_WASM
-    standalone.fetch_ledger_wasm(source)  # downloads it once, and checks its sha256
+    source = m.realms_dir / pinned.LEDGER_WASM
+    pinned.fetch_ledger_wasm(source)  # downloads it once, and checks its sha256
     shutil.copy(source, bank / "ledger.wasm")
     (bank / "icp.yaml").write_text(BANK_YAML.format(url=network_url(m), canisters="".join(
         LEDGER_YAML.format(realm=r, symbol=currency(m, load(m, r)["codex"])) for r in sorted(set(ids) | {name}))))

@@ -112,8 +112,7 @@ def realm(wasm_of, people):
     ok(realm, "setup_launch", founder)
     ok(realm, "realm_join", alice)
     ok(realm, "department_create", ctl, department="Finance")
-    for fund in ("ROOT", "ROADS"):
-        ok(realm, "fund_create", ctl, fund=fund)
+    ok(realm, "fund_create", ctl, fund="ROADS")  # ROOT is the fund setup made
     ok(realm, "governance_update", ctl, voting_window=0)  # a proposal closes when its outcome is certain
     ok(realm, "proposal_create", alice, title="Bike lane")
     ok(realm, "proposal_create", alice, title="More for the roads", action={

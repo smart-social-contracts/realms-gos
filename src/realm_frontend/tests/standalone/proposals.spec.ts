@@ -273,9 +273,7 @@ test('a treasury transaction is voted and executed', async ({ page }) => {
 	});
 	const payTo = billed.pay_to as { owner: string; subaccount: string };
 	await mint(realm, payTo, 2_000_000n);
-	// WORKAROUND for realms-gos #450: a fund pays out of the realm's own (default) account, and what an invoice
-	// receives sits in its subaccount, which nothing sweeps. Without this second mint the payout would find no tokens.
-	await mint(realm, { owner: payTo.owner }, 2_000_000n);
+	// The realm moves the payment into its own account, which the fund pays out of (realms-gos#739).
 	await run('invoice_refresh', { invoice: billed.invoice });
 
 	const member = memberIdentity().getPrincipal().toText();

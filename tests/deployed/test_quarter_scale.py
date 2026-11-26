@@ -141,12 +141,12 @@ print(json.dumps({"spent": spent, "message": ic.performance_counter(0), "last": 
 PAY = '''
 import json
 from api import treasury
-from ggg import Invoice
+from ggg import Invoice, Token
 spent = []
 for invoice in Invoice.load_some(%(start)d, %(count)d):
     if invoice.status == "pending" and not invoice.id.endswith(%(unpaid)r):
         t = ic.performance_counter(0)
-        treasury.receive(invoice, invoice.amount)
+        treasury.receive(invoice, invoice.amount, Token[invoice.symbol].ledger)
         spent.append(ic.performance_counter(0) - t)
 print(json.dumps({"spent": spent, "message": ic.performance_counter(0)}))
 '''
@@ -318,7 +318,6 @@ def city(request, wasm_of, people, costs):
     quarter.ok("quarter_sync", "ctl")
     for realm in (capital, quarter):
         realm.ok("token_register", "ctl", symbol="DOM", ledger=ledger, decimals=8, fee=10_000)
-        realm.ok("fund_create", "ctl", fund="ROOT")
         now = realm.now()
         realm.ok("period_open", "ctl", period="FY", starts_at=now - 86400, ends_at=now + 400 * 86400)
         install(realm, [("eu/es", "tax", ES_TAX), (TOWN, "tax", VALENCIA_TAX)], layers=("eu/es", TOWN), calendars=())

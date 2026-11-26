@@ -9,7 +9,7 @@ from ggg import Budget, Department, Fund, FiscalPeriod, LedgerEntry, Proposal, T
 from ic_python_db import Database
 from kit import call, fire_timers, later, ok
 from test_ratios import stored_as_version_1
-from test_treasury import LEDGER, draft, finish, fund_roads_with_budget, ledger_ok, propose, start, suspended
+from test_treasury import LEDGER, draft, finish, fund_roads_with_budget, ledger_ok, payouts, propose, start, suspended
 
 DAY = 86_400
 ICRC1 = (LEDGER, "icrc1_transfer")
@@ -123,7 +123,7 @@ def test_a_scheduled_transfer_is_owed_until_it_is_paid_and_cancelling_it_gives_i
     cancelled = ok("transfer_create", "ctl", fund="ROADS", to="buildco", amount=30, category="capital", committed=True,
                    due_at=due)["transfer"]
     assert figures(b) == (100, 20, 30), "charged when the obligation is recognised"
-    assert not [c for c in fake_chain.state["calls"] if c[1] == "icrc1_transfer"], "no money moves"
+    assert not payouts(), "no money moves"
     owed = ok("transfer_list", "bob", fund="ROADS", status="scheduled")["transfers"]
     assert [(t["id"], t["due_at"], t["committed"]) for t in owed] == [(cancelled, due, True)]
 
