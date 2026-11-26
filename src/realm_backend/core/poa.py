@@ -24,6 +24,8 @@ INBOX_GROUPS = {"Department": "office", "Organization": "orgs"}
 # (tier, group, group once the realm has launched, condition under which it asks each time), as in OPERATIONS, for
 # the operations Realms GOS adds to GGG's: the tasks, the shell, extensions and the host's and the operator's own.
 OWN = {
+    "realm_numbers": ("none", None, None, None),
+    "host_registry": ("none", None, None, None),
     "budget_view": ("direct", "see", None, None),
     "contract_list": ("direct", "see", None, None),
     "tax_policy_view": ("direct", "see", None, None),
