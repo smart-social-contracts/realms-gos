@@ -147,8 +147,9 @@ $: routeIsActive = (path) => {
 
     <nav class="actions" aria-label="Account and tools">
       {#if CONFIG.forum_url}
-        <a class="icon-btn" href={CONFIG.forum_url} aria-label={$_('nav.forum')} title={$_('nav.forum')}>
+        <a class="icon-btn labelled" href={CONFIG.forum_url} title={$_('nav.forum')}>
           <i class="ti ti-messages" aria-hidden="true"></i>
+          <span>{$_('nav.forum')}</span>
         </a>
       {/if}
 
@@ -425,6 +426,20 @@ $: routeIsActive = (path) => {
     transition: all 0.15s ease;
   }
   .icon-btn .ti { font-size: 1.25rem; line-height: 1; }
+  /* A labelled icon button: the word beside the glyph, so the forum is findable
+     rather than guessable. Collapses to the icon alone on narrow screens. */
+  .icon-btn.labelled {
+    width: auto;
+    gap: 0.4rem;
+    padding: 0 0.7rem;
+    color: var(--text);
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  @media (max-width: 640px) {
+    .icon-btn.labelled { width: 38px; padding: 0; }
+    .icon-btn.labelled span { display: none; }
+  }
   .icon-btn:hover { background: var(--surface-2); color: var(--text); }
   .icon-btn.active { background: var(--surface-3); color: var(--text); }
   .search .icon-btn { border-color: var(--border); }
