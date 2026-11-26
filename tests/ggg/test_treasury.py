@@ -10,8 +10,8 @@ import pytest
 import fake_chain
 from api import treasury
 import world
-from ggg import (Proposal, AllocationRule, Budget, Delegation, Department, FinancialReport, FiscalPeriod, Fund, Invoice,
-                 LedgerEntry, Position, Token, Transfer)
+from ggg import (Proposal, AllocationRule, Budget, Delegation, Department, Event, FinancialReport, FiscalPeriod, Fund,
+                 Invoice, LedgerEntry, Position, Token, Transfer)
 from kit import call, denied, ok, rows
 
 LEDGER = "realm-ledger"
@@ -716,7 +716,8 @@ def test_a_payment_moves_into_the_realms_main_account_less_the_fee():
     # all the invoice's account holds leaves it, less the fee; the 5 over reach the main account unbooked
     moved = treasury.icrc1_arg(treasury.account(fake_chain.SELF), 115, inv.encode(), 10, from_sub=treasury.subaccount(inv))
     assert [c[2] for c in collections()] == [moved]
-    assert (Invoice[inv].payment["collected"], Invoice[inv].payment["block"]) == (True, "55")
+    assert (Invoice[inv].payment["collected"], Invoice[inv].payment["block"], Invoice[inv].payment["moved"]) == \
+        (True, "55", 115)
     assert funds()["ROOT"] == 110 and balanced()
     calls = len(fake_chain.state["calls"])
     assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
@@ -863,6 +864,110 @@ def test_a_payment_whose_token_moved_while_its_retry_read_the_old_ledger_stays_u
     assert finish(check, "(120 : nat)")["status"] == "paid"
     assert fake_chain.state["calls"][-1][1] == "icrc1_balance_of", "no move on either ledger"
     assert Invoice[inv].payment["collected"] is False and Invoice[inv].payment["ledger"] == LEDGER
+
+
+# --- moving the payment of an invoice paid before the realm did so itself -------------------------
+
+def paid_before_collection(amount):
+    """An invoice paid and booked as the release before collection did: ROOT credited the whole amount, the money left in
+    the invoice's own account, and a payment that names no ``collected``."""
+    inv = Invoice[billed(amount)]
+    root = Fund["ROOT"]
+    treasury.post(treasury.period(), [("asset", "cash", amount, 0, root), ("revenue", "invoice", 0, amount, root)],
+                  "REALM", f"payment of {inv.id}", invoice=inv, user="alice")
+    inv.status, inv.payment = "paid", {"received": amount, "subaccount": treasury.pay_to(inv)}
+    return inv.id
+
+
+def test_the_payment_of_an_invoice_paid_before_collection_is_moved_by_a_governed_call():
+    setup_finance()
+    inv = paid_before_collection(120)
+    balance_reply(120)
+    ledger_ok(tx=60)
+    reply = ok("invoice_collect", "bob", invoice=inv)
+    assert reply == {"ok": True, "invoice": inv, "collected": True, "moved": 110, "fee": 10}
+    moved = treasury.icrc1_arg(treasury.account(fake_chain.SELF), 110, inv.encode(), 10, from_sub=treasury.subaccount(inv))
+    assert [c[2] for c in collections()] == [moved]
+    payment = Invoice[inv].payment
+    assert (payment["block"], payment["moved"], payment["collected_by"]) == ("60", 110, "bob")
+    assert "proposal" not in payment, "bob acted himself, without a vote"
+    assert funds()["ROOT"] == 110 and balanced(), "ROOT bears the ledger's fee"
+    fee = [e for e in Invoice[inv].ledger_entries if e.category == treasury.FEE]
+    assert [(e.debit, e.description) for e in fee] == [(10, f"moving the payment of {inv} into the realm's account")]
+    events = [e for e in rows(Event) if e.op == "invoice_collect"]
+    assert [(e.user, e.result["moved"], e.result["fee"]) for e in events] == [("bob", 110, 10)]
+    again = call("invoice_collect", "bob", invoice=inv)
+    assert again["kind"] == "conflict" and "invoice_refresh naming the invoice" in again["error"]
+
+
+def test_where_the_root_decides_by_vote_moving_a_payment_is_a_proposal():
+    setup_finance()
+    inv = paid_before_collection(120)
+    world.policy(Department["Administration"], 2, 3)
+    p = ok("invoice_collect", "bob", invoice=inv)["proposal"]
+    assert not collections() and "collected" not in Invoice[inv].payment
+    balance_reply(120)
+    ledger_ok(tx=62)
+    for voter in world.PEOPLE:
+        if Proposal[p].status == "voting":
+            ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert Proposal[p].result["moved"] == 110
+    payment = Invoice[inv].payment
+    assert (payment["collected_by"], payment["proposal"], payment["block"]) == ("bob", p, "62"), "who filed it, the vote"
+
+
+def test_a_payment_whose_fund_no_entry_names_is_refused_in_words():
+    setup_finance()
+    inv = Invoice[billed(120)]
+    inv.status, inv.payment = "paid", {"received": 120, "subaccount": treasury.pay_to(inv)}  # booked nowhere
+    refused = call("invoice_collect", "bob", invoice=inv.id)
+    assert refused["kind"] == "conflict" and "no revenue entry" in refused["error"]
+
+
+def test_only_a_payment_booked_before_collection_and_still_in_its_account_is_moved():
+    setup_finance()
+    assert "only the payment of a paid invoice" in call("invoice_collect", "bob", invoice=billed(5))["error"]
+    inv = paid_before_collection(120)
+    balance_reply(119)  # less than it was paid with: not on this token's ledger, or moved by other means
+    refused = call("invoice_collect", "bob", invoice=inv)
+    assert refused["kind"] == "conflict" and "not on this token's ledger" in refused["error"]
+    assert funds()["ROOT"] == 120 and not collections() and "collected" not in Invoice[inv].payment
+    Fund["ROOT"].balances = {"REALM": 9}  # spent below the fee since
+    assert "less than the ledger's fee" in call("invoice_collect", "bob", invoice=inv)["error"]
+
+
+def test_a_move_the_ledger_does_not_make_is_made_at_the_next_check():
+    setup_finance()
+    inv = paid_before_collection(120)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    assert ok("invoice_collect", "bob", invoice=inv)["collected"] is False
+    ledger_ok(tx=61)
+    assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert Invoice[inv].payment["block"] == "61" and len(collections()) == 2 and funds()["ROOT"] == 110
+    assert Invoice[inv].payment["moved"] == 110, "the move the retry made records what it moved"
+
+
+def test_two_calls_in_flight_move_a_payment_and_book_its_fee_once(monkeypatch):
+    setup_finance()
+    inv = paid_before_collection(120)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    first = start("invoice_collect", "bob", invoice=inv)
+    second = start("invoice_collect", "bob", invoice=inv)
+    first.send("(120 : nat)")  # it books the fee, and waits on the move
+    assert "invoice_refresh naming the invoice" in finish(second, "(120 : nat)")["error"]
+    assert finish(first, "(variant { Ok = 9 : nat })")["collected"] is True
+    assert funds()["ROOT"] == 110 and balanced() and len(collections()) == 1
+
+
+def test_a_token_moved_while_its_account_is_read_changes_nothing(monkeypatch):
+    setup_finance()
+    inv = paid_before_collection(120)
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    collecting = start("invoice_collect", "bob", invoice=inv)  # reads the invoice's account on realm-ledger
+    ok("token_register", "bob", symbol="REALM", ledger="new-ledger")
+    assert "moved to another ledger" in finish(collecting, "(120 : nat)")["error"]
+    assert funds()["ROOT"] == 120 and "collected" not in Invoice[inv].payment
 
 
 def test_reports_and_my_invoices_are_paginated():
