@@ -868,8 +868,11 @@ def test_a_payment_the_count_never_held_is_not_taken_off_it():
     balance_reply(120)
     fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
     ok("invoice_check", "alice", invoice=inv.id)
-    # as a build that kept no count left it: waiting, and not in the count
+    # as a build that kept no count left it: waiting, and not in the count. Loaded again: the check was another
+    # message, and a write through the instance held from before it would put back the invoice as it was then.
+    inv = Invoice[inv.id]
     inv.payment = {k: v for k, v in inv.payment.items() if k != "counted"}
+    assert inv.status == "paid" and inv.payment["collected"] is False
     treasury.Treasury["1"].uncollected = 0
     ledger_ok()
     ok("invoice_check", "alice", invoice=inv.id)
