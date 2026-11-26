@@ -38,6 +38,9 @@ FEE_CHANGED = ("the ledger fee changed since this payment was booked: it was boo
 UNCOLLECTED = ("invoice payments booked but not yet moved into the realm's account, from which it pays out: {count}. "
                "Each is moved at the next invoice_refresh naming its invoice, unless its payment says why it is stuck "
                "(realms-gos#755)")
+# What realm_monitor reports if the count above ever falls below zero: a write path took off a payment it never held.
+COUNT_BROKEN = ("the count of invoice payments waiting to be moved is {count}, below zero: a payment was taken off it that "
+                "it never held, so it no longer says how many wait (realms-gos#755)")
 NO_SOURCE_FUND = ("the treasury's source fund {}, which receives invoice payments, does not exist: create it with "
                   "fund_create, or name another fund with treasury_configure (source_fund)")
 
@@ -578,15 +581,27 @@ def problems():
     code = treasury_config().get("source_fund", "ROOT")
     found = [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
     waiting = Treasury["1"].uncollected if Treasury["1"] else 0
+    if waiting < 0:
+        return found + [COUNT_BROKEN.format(count=waiting)]
     return found + ([UNCOLLECTED.format(count=waiting)] if waiting else [])
 
 
-def count_uncollected(change):
-    """Keep ``Treasury.uncollected``: a payment that waits to be moved adds one, and one that is moved takes it away. A
-    payment left waiting by a build that kept no count is not in it, so the count stops at zero rather than below."""
+def wait_to_be_moved(inv):
+    """Mark the payment of ``inv`` as waiting to be moved, and count it: ``counted`` says the count holds it, so only a
+    payment it holds is taken off it again. A payment left waiting by a build that kept no count has no ``counted``, and
+    leaves the count as it is. The count is not clamped: below zero, realm_monitor says it is broken."""
+    inv.payment = {**inv.payment, "collected": False, "counted": True}
     t = Treasury["1"]
     if t is not None:
-        t.uncollected = max(0, t.uncollected + change)
+        t.uncollected += 1
+
+
+def moved_off_the_count(inv):
+    """Take the payment of ``inv`` off the count, if the count holds it and it still waits: another call may have
+    marked it collected while this one's ledger call was out."""
+    t = Treasury["1"]
+    if t is not None and inv.payment.get("collected") is False and inv.payment.get("counted"):
+        t.uncollected -= 1
 
 
 def receive(inv, received, ledger):
@@ -611,9 +626,8 @@ def receive(inv, received, ledger):
     who = {"user": key} if kind == "User" else {"organization": Organization[key]} if kind == "Organization" else {}
     post(p, lines, inv.symbol, f"payment of {inv.id}", invoice=inv, **who)
     inv.status, inv.paid_at = "paid", chain.now()
-    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "fee": find(Token, inv.symbol).fee,
-                   "collected": False}
-    count_uncollected(1)
+    inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "fee": find(Token, inv.symbol).fee}
+    wait_to_be_moved(inv)
     if inv.reason.startswith("TaxDeclaration:"):
         find(TaxDeclaration, inv.reason.partition(":")[2]).status = "settled"
 
@@ -651,8 +665,7 @@ def collect(inv, held):
                 inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=asked_fee(reply))}
             return
         done = {"block": block, "moved": held - fee}
-    if inv.payment.get("collected") is False:  # once: another call may have marked it while the ledger answered
-        count_uncollected(-1)
+    moved_off_the_count(inv)
     unstuck = {k: v for k, v in inv.payment.items() if k != "stuck"}
     inv.payment = {**unstuck, **done, "collected": True}
 
@@ -817,8 +830,8 @@ def invoice_collect(c, args):
     post(period(), [("expense", FEE, fee, 0, fund), ("asset", "cash", 0, fee, fund)], inv.symbol,
          f"moving the payment of {inv.id} into the realm's account", invoice=inv)
     who = {"collected_by": c.user, **({"proposal": c.proposal} if c.proposal else {})}
-    inv.payment = {**inv.payment, "ledger": ledger, "fee": fee, "collected": False, **who}  # the fee it just booked
-    count_uncollected(1)
+    inv.payment = {**inv.payment, "ledger": ledger, "fee": fee, **who}  # the fee it just booked
+    wait_to_be_moved(inv)
     yield from collect(inv, held)
     payment = find(Invoice, inv.id).payment  # as collect left it
     return {"invoice": inv.id, "collected": payment["collected"], "moved": payment.get("moved", 0), "fee": fee}
