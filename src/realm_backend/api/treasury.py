@@ -612,12 +612,13 @@ def collect(inv, held):
     every payout draws on (realms-gos#739): what the account ``held``, less the ledger's fee, which ``receive`` booked,
     on the ledger the payment was found on and with the fee it was booked with (``payment["fee"]``). When that fee is
     no longer the token's, or the ledger refuses it, nothing moves, and ``payment["stuck"]`` names both fees.
-    Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` when this call moved it. A
+    Once nothing is left to move the payment is ``collected``, with the ledger's ``block`` and the amount ``moved`` out
+    of the invoice's account when this call moved it. A
     ledger that refuses or does not answer leaves it uncollected, and the next check of the invoice reads the account
     again: the money is moved once, whatever happened to an earlier answer. A generator."""
     # A hard key on purpose: receive and invoice_collect record the fee they book on every payment that reaches here,
     # and falling back to the token's current fee would bring back the mismatch between the move and the books.
-    fee, moved = inv.payment["fee"], {}
+    fee, done = inv.payment["fee"], {}
     if held > fee:
         if find(Token, inv.symbol).fee != fee:
             inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=find(Token, inv.symbol).fee)}
@@ -633,9 +634,9 @@ def collect(inv, held):
             if asked_fee(reply) is not None:
                 inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=asked_fee(reply))}
             return
-        moved = {"block": block}
+        done = {"block": block, "moved": held - fee}
     unstuck = {k: v for k, v in inv.payment.items() if k != "stuck"}
-    inv.payment = {**unstuck, **moved, "collected": True}
+    inv.payment = {**unstuck, **done, "collected": True}
 
 
 def to_collect(inv):
@@ -745,8 +746,12 @@ def invoice_refresh(c, args):
 
 
 def booked_into(inv):
-    """The fund the payment of ``inv`` was booked into: the fund of its revenue."""
-    return next(e.fund for e in inv.ledger_entries if e.kind == "revenue")
+    """The fund the payment of ``inv`` was booked into: the fund of its revenue. Refused when no entry names one: a bare
+    StopIteration inside an operation's generator would become a RuntimeError, and a trap."""
+    fund = next((e.fund for e in inv.ledger_entries if e.kind == "revenue" and e.fund is not None), None)
+    if fund is None:
+        raise Conflict(f"{inv.id} has no revenue entry naming the fund its payment was booked into: nothing is moved")
+    return fund
 
 
 def collectable(args):
@@ -757,7 +762,8 @@ def collectable(args):
     if inv.status != "paid":
         raise Conflict(f"{inv.id} is {inv.status}: only the payment of a paid invoice is moved")
     if "collected" in inv.payment:
-        raise Conflict(f"{inv.id} was paid since the realm moves payments itself: invoice_check moves it")
+        raise Conflict(f"{inv.id} was paid since the realm moves payments itself: an officer moves it with "
+                       f"invoice_refresh naming the invoice, its payer with invoice_check")
     fund, fee = booked_into(inv), find(Token, inv.symbol).fee
     if balance(fund, inv.symbol) < fee:
         raise Conflict(f"fund {fund.id} holds {balance(fund, inv.symbol)} {inv.symbol}, less than the ledger's fee of "
@@ -771,8 +777,12 @@ def invoice_collect(c, args):
     it pays out, for an invoice paid before the realm did so itself (realms-gos#739). Governed by the owner of the fund
     the payment was booked into, which bears the ledger's fee (``ledger_fee``). The invoice's account must still hold
     what the invoice was paid with, since nothing else moves money out of it: else nothing changes, and the money is not
-    on this token's ledger. A move the ledger does not make is made at the next check of the invoice. Returns ``invoice``
-    and whether it is ``collected``."""
+    on this token's ledger. A move the ledger does not make is made at the next check of the invoice. The payment keeps
+    who collected it (``collected_by``) and the ``proposal`` that decided it, which outlive the audit log. A delegate
+    never calls this directly: its governed call is a proposal, replayed as the proposer. So the delegate is recorded
+    permanently through that proposal: ``Proposal.filed_under`` (the grant) leads to ``Delegation.delegate``, and
+    ``Proposal.on_behalf_of`` names the member. Returns ``invoice``, whether it is ``collected``, the amount ``moved``
+    (0 until the ledger makes the move) and the ``fee`` booked."""
     inv = collectable(args)
     ledger = find(Token, inv.symbol).ledger
     held = yield from held_by(inv, ledger)
@@ -788,9 +798,11 @@ def invoice_collect(c, args):
     fund = booked_into(inv)
     post(period(), [("expense", FEE, fee, 0, fund), ("asset", "cash", 0, fee, fund)], inv.symbol,
          f"moving the payment of {inv.id} into the realm's account", invoice=inv)
-    inv.payment = {**inv.payment, "ledger": ledger, "fee": fee, "collected": False}  # the fee it just booked
+    who = {"collected_by": c.user, **({"proposal": c.proposal} if c.proposal else {})}
+    inv.payment = {**inv.payment, "ledger": ledger, "fee": fee, "collected": False, **who}  # the fee it just booked
     yield from collect(inv, held)
-    return {"invoice": inv.id, "collected": find(Invoice, inv.id).payment["collected"]}  # as collect left it
+    payment = find(Invoice, inv.id).payment  # as collect left it
+    return {"invoice": inv.id, "collected": payment["collected"], "moved": payment.get("moved", 0), "fee": fee}
 
 
 @op("self.data_view", read=True)

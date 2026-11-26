@@ -716,7 +716,8 @@ def test_a_payment_moves_into_the_realms_main_account_less_the_fee():
     # all the invoice's account holds leaves it, less the fee; the 5 over reach the main account unbooked
     moved = treasury.icrc1_arg(treasury.account(fake_chain.SELF), 115, inv.encode(), 10, from_sub=treasury.subaccount(inv))
     assert [c[2] for c in collections()] == [moved]
-    assert (Invoice[inv].payment["collected"], Invoice[inv].payment["block"]) == (True, "55")
+    assert (Invoice[inv].payment["collected"], Invoice[inv].payment["block"], Invoice[inv].payment["moved"]) == \
+        (True, "55", 115)
     assert funds()["ROOT"] == 110 and balanced()
     calls = len(fake_chain.state["calls"])
     assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
@@ -883,23 +884,44 @@ def test_the_payment_of_an_invoice_paid_before_collection_is_moved_by_a_governed
     inv = paid_before_collection(120)
     balance_reply(120)
     ledger_ok(tx=60)
-    assert ok("invoice_collect", "bob", invoice=inv) == {"ok": True, "invoice": inv, "collected": True}
+    reply = ok("invoice_collect", "bob", invoice=inv)
+    assert reply == {"ok": True, "invoice": inv, "collected": True, "moved": 110, "fee": 10}
     moved = treasury.icrc1_arg(treasury.account(fake_chain.SELF), 110, inv.encode(), 10, from_sub=treasury.subaccount(inv))
-    assert [c[2] for c in collections()] == [moved] and Invoice[inv].payment["block"] == "60"
+    assert [c[2] for c in collections()] == [moved]
+    payment = Invoice[inv].payment
+    assert (payment["block"], payment["moved"], payment["collected_by"]) == ("60", 110, "bob")
+    assert "proposal" not in payment, "bob acted himself, without a vote"
     assert funds()["ROOT"] == 110 and balanced(), "ROOT bears the ledger's fee"
     fee = [e for e in Invoice[inv].ledger_entries if e.category == treasury.FEE]
     assert [(e.debit, e.description) for e in fee] == [(10, f"moving the payment of {inv} into the realm's account")]
-    assert [(e.op, e.user) for e in rows(Event) if e.op == "invoice_collect"] == [("invoice_collect", "bob")]
+    events = [e for e in rows(Event) if e.op == "invoice_collect"]
+    assert [(e.user, e.result["moved"], e.result["fee"]) for e in events] == [("bob", 110, 10)]
     again = call("invoice_collect", "bob", invoice=inv)
-    assert again["kind"] == "conflict" and "invoice_check moves it" in again["error"]
+    assert again["kind"] == "conflict" and "invoice_refresh naming the invoice" in again["error"]
 
 
 def test_where_the_root_decides_by_vote_moving_a_payment_is_a_proposal():
     setup_finance()
     inv = paid_before_collection(120)
     world.policy(Department["Administration"], 2, 3)
-    assert ok("invoice_collect", "bob", invoice=inv)["requires_vote"]
+    p = ok("invoice_collect", "bob", invoice=inv)["proposal"]
     assert not collections() and "collected" not in Invoice[inv].payment
+    balance_reply(120)
+    ledger_ok(tx=62)
+    for voter in world.PEOPLE:
+        if Proposal[p].status == "voting":
+            ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert Proposal[p].result["moved"] == 110
+    payment = Invoice[inv].payment
+    assert (payment["collected_by"], payment["proposal"], payment["block"]) == ("bob", p, "62"), "who filed it, the vote"
+
+
+def test_a_payment_whose_fund_no_entry_names_is_refused_in_words():
+    setup_finance()
+    inv = Invoice[billed(120)]
+    inv.status, inv.payment = "paid", {"received": 120, "subaccount": treasury.pay_to(inv)}  # booked nowhere
+    refused = call("invoice_collect", "bob", invoice=inv.id)
+    assert refused["kind"] == "conflict" and "no revenue entry" in refused["error"]
 
 
 def test_only_a_payment_booked_before_collection_and_still_in_its_account_is_moved():
@@ -923,6 +945,7 @@ def test_a_move_the_ledger_does_not_make_is_made_at_the_next_check():
     ledger_ok(tx=61)
     assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
     assert Invoice[inv].payment["block"] == "61" and len(collections()) == 2 and funds()["ROOT"] == 110
+    assert Invoice[inv].payment["moved"] == 110, "the move the retry made records what it moved"
 
 
 def test_two_calls_in_flight_move_a_payment_and_book_its_fee_once(monkeypatch):
@@ -932,7 +955,7 @@ def test_two_calls_in_flight_move_a_payment_and_book_its_fee_once(monkeypatch):
     first = start("invoice_collect", "bob", invoice=inv)
     second = start("invoice_collect", "bob", invoice=inv)
     first.send("(120 : nat)")  # it books the fee, and waits on the move
-    assert "invoice_check moves it" in finish(second, "(120 : nat)")["error"]
+    assert "invoice_refresh naming the invoice" in finish(second, "(120 : nat)")["error"]
     assert finish(first, "(variant { Ok = 9 : nat })")["collected"] is True
     assert funds()["ROOT"] == 110 and balanced() and len(collections()) == 1
 
