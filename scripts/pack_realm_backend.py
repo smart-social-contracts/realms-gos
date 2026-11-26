@@ -33,7 +33,7 @@ TEST_ONLY_SYMBOLS = (b"REALMS_TEST_BUILD_AUTH_BYPASS", b"NON_PRODUCTION_NETWORKS
                      b"test_mode_user_self_registration")
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from basilisk_cedar_template import apply_cedar_template_env  # noqa: E402
+from basilisk_cedar_template import apply_cedar_template_env, require_cedar_build  # noqa: E402
 from embed_candid_metadata import embed_candid_service_metadata  # noqa: E402
 
 
@@ -88,6 +88,7 @@ def pack(version=None, variant=DEFAULT_VARIANT):
     missing = [e for e in ENDPOINTS if e not in did]
     if missing:
         sys.exit(f"not exported: {missing}")
+    require_cedar_build(WASM)
     verify_build_variant(WASM, variant)
     return WASM
 
