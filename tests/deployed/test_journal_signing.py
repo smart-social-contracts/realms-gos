@@ -11,7 +11,7 @@ with ``cryptography`` (verify_page.reference_valid), by the verify page's own sc
 and, for the key, by asking the IC through another canister, which may ask for any canister's key.
 
 The tests of this module run in order on one network: the clock only goes forward. One test starts from the release before
-this one (``REALM_PREVIOUS_WASM``) and is skipped without it, as tests/deployed/test_upgrade_chain.py is."""
+this one (``REALM_PREVIOUS_BUILD_WASM``) and is skipped without it, as tests/deployed/test_upgrade_chain.py is."""
 
 import json
 import os
@@ -25,7 +25,10 @@ from verify_page import NODE, code, page, reference_valid
 DAY = 86400
 HOUR = 3600
 ANONYMOUS = "2vxsx-fae"
-PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
+# The earlier build CI packs (REALM_PREVIOUS_COMMIT) is a5135eb6, which has no journal, so nothing it signed to keep:
+# test_n is skipped from it. Staging's realms of 1297f512 have the journal (realms-gos#792).
+FROM_A5135EB6 = os.environ.get("REALM_PREVIOUS_COMMIT", "").startswith("a5135eb6")
 RULES = ("import ggg\nggg.Extension(id='journal', manifest={'config': {'personal_data': {'entry_fields': "
          "['codex', 'layers', 'proposal', 'activates_at', 'reverted', 'source', 'version', 'effective_from']}}})")
 RECORD = "from core import journal\njournal.record('codex_installed', codex='sha256:{n}')"
@@ -390,7 +393,8 @@ def test_m_an_upgrade_keeps_the_documents_signed_or_not_and_the_setting_and_the_
     assert document(newest)["prev"] == kept[-1]["digest"] and newest["signature"] == ""
 
 
-@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")
+@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")
+@pytest.mark.skipif(FROM_A5135EB6, reason="the earlier build, a5135eb6, has no journal")
 def test_n_a_realm_upgraded_from_the_release_that_signed_every_day_keeps_its_signed_days_and_stops_signing_by_itself(wasm_of, people):
     old = Network(PREVIOUS, people, SubnetConfig(application=1, fiduciary=True))
     realm = old.realm("signed-daily", members=("alice",))

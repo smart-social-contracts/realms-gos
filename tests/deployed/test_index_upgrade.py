@@ -6,7 +6,7 @@ vote. 0.13 stores an entry per id and converts an array the first time its index
 discarded, so every query pays for it again until an update touches the list. ``db_convert_indexes`` converts them
 a batch at a time. The realm is run two ways:
 
-- from the previous release's own wasm, named by ``REALM_PREVIOUS_WASM`` (skipped when unset): its lists are what
+- from the earlier build's own wasm, named by ``REALM_PREVIOUS_BUILD_WASM`` (skipped when unset): its lists are what
   that release saved;
 - from this release's wasm, whose lists are rewritten as arrays through the controller's ``__shell__``: the form
   an earlier release saved, which CI can always build.
@@ -22,7 +22,7 @@ import pytest
 from pic import Canister
 
 PHANTOM = 20_000
-PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
 
 # Rewrites the lists of P-1, and the members', as arrays of ids: the real ones first, then PHANTOM more.
 LEGACY = f'''
@@ -137,7 +137,7 @@ def convert(realm, who, **args):
 
 
 @pytest.fixture(scope="module", params=[
-    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")),
+    pytest.param("previous", marks=pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")),
     "rewritten"])
 def realm(request, wasm_of, people):
     """A realm with an open proposal, a vote and members, whose lists are those of an earlier release, then upgraded."""

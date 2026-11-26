@@ -288,10 +288,14 @@ def test_i_a_job_paused_for_more_than_24_hours_fails_when_resumed(net, town, sit
     assert (job["status"], job["error"]) == ("failed", "not done within 24 hours") and active_id(town) == current
 
 
-PREVIOUS = os.environ.get("REALM_PREVIOUS_WASM")
+PREVIOUS = os.environ.get("REALM_PREVIOUS_BUILD_WASM")
+# The earlier build CI packs (REALM_PREVIOUS_COMMIT) is a5135eb6, which has no layered codex: no install of one can have
+# begun on it, so test_l is skipped from it. Staging's realms of 1297f512 have it (realms-gos#792).
+FROM_A5135EB6 = os.environ.get("REALM_PREVIOUS_COMMIT", "").startswith("a5135eb6")
 
 
-@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_WASM names no wasm")
+@pytest.mark.skipif(not PREVIOUS, reason="REALM_PREVIOUS_BUILD_WASM names no wasm")
+@pytest.mark.skipif(FROM_A5135EB6, reason="the earlier build, a5135eb6, has no layered codex to install")
 def test_l_an_install_begun_on_the_previous_release_finishes_after_the_upgrade(wasm_of, people):
     """What the previous release staged for a job has chapters fetched without a route and no layers: the upgrade keeps
     the job, and an admin's resume finishes it, with the chapters fetched by URL. The last chapter is held back (the
