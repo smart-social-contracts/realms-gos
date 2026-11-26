@@ -69,7 +69,7 @@ def test_the_same_legislation_fetched_by_two_routes_at_two_times_has_the_same_id
     there = two_chapters(route="capital", fetched_at=1_000, vouched_by="eu/es/vc", url="")
     here = two_chapters(route="https", fetched_at=9_000_000, vouched_by="eu/es", url="https://mirror.example/tax.py")
     assert there != here
-    assert layered(there).id == layered(here).id
+    assert store.codex_id(LAYERS, PATHS, there) == store.codex_id(LAYERS, PATHS, here)
 
 
 def test_the_clis_canonical_json_and_codex_id_are_the_realms():

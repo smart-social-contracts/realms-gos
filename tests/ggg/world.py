@@ -27,7 +27,13 @@ def profile(name, *perms):
 
 
 def seat(key, holder, owner, *perms, agent=False, supervisor="", title=""):
-    """Give ``holder`` an active appointment to the position ``key`` of ``owner`` (department or organization)."""
+    """Give ``holder`` an active appointment to the position ``key`` of ``owner`` (department or organization).
+    Seating them again returns the appointment they hold: one seat, not two. An ended one is not a seat they hold, and a
+    test handed it would assert against a seat nobody holds, so that is refused."""
+    appointment = Appointment[f"{key}:{holder}"]
+    if appointment is not None:
+        assert appointment.status == "active", f"{appointment.id} has ended: seat() cannot hand it back as a seat"
+        return appointment
     pos = Position[key]
     if pos is None:
         pos = Position(id=key, title=title or key.split(".")[-1], profile=profile(key, *perms))
@@ -47,9 +53,11 @@ def grant(department, *perms):
 
 
 def build():
+    """Agora. A test may build it twice, through an autouse fixture and a helper of its own: the second build finds
+    every row the first made, so the world still holds one of each (realms-gos#770)."""
     setup.start()
     root = Department["Administration"]
-    depts = {name: Department(id=name, parent=root) for name in DEPARTMENTS}
+    depts = {name: Department[name] or Department(id=name, parent=root) for name in DEPARTMENTS}
     for p in PEOPLE:
         person(p)
     depts["Civil Registry"].head = "dana"
@@ -59,12 +67,13 @@ def build():
     seat("infrastructure.planning_officer", "carla", depts["Infrastructure"], "bid.evaluate", "tender.manage")
     seat("justice.judge", "elena", depts["Justice"], "dispute.accept", "dispute.reject", "evidence.evaluate",
          "resolution.draft", "resolution.issue", "resolution.finalize", "appeal.allow")
-    clinic = Organization(id="clinic-b", description="Clinic B, health provider", admins=["dr-ana"])
-    Organization(id="buildco", description="BuildCo, contractor", admins=["bob"])
+    clinic = Organization["clinic-b"] or Organization(id="clinic-b", description="Clinic B, health provider",
+                                                      admins=["dr-ana"])
+    Organization["buildco"] or Organization(id="buildco", description="BuildCo, contractor", admins=["bob"])
     seat("clinic-b.physician", "dr-ana", clinic, "credential.sign")
     seat("clinic-b.records_agent", "records-bot", clinic, agent=True, supervisor="dr-ana")
-    Fund(id="ROADS", name="Roads", kind="special_revenue", department=depts["Infrastructure"])
-    Token(id="REALM", ledger="realm-ledger", indexer="realm-indexer", decimals=8, fee=10)
+    Fund["ROADS"] or Fund(id="ROADS", name="Roads", kind="special_revenue", department=depts["Infrastructure"])
+    Token["REALM"] or Token(id="REALM", ledger="realm-ledger", indexer="realm-indexer", decimals=8, fee=10)
     return depts
 
 
