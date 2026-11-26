@@ -1,0 +1,39 @@
+name: Submodule pin lag
+
+# Once a day, whether a submodule pin lags its repository's main (scripts/pin_lag.py): more than 10 commits behind,
+# or main has held work the pin lacks for more than 2 days. That work is merged and not in the product.
+#
+# A lagging pin opens (or updates) one issue and a run where none lags closes it (scripts/pin_lag_issue.sh), as
+# prod-smoke.yml does. The submodules are public repositories, read without a token; a main the run cannot read
+# turns it red, never "up to date".
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 5 * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  pin-lag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare each pin with its repository's main
+        # bash runs this with pipefail, so the step fails when the script does, not when tee succeeds.
+        shell: bash
+        run: python3 scripts/pin_lag.py | tee pin-lag.md
+
+      - name: Open, update or close the tracking issue
+        if: always() && job.status != 'cancelled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPORT: pin-lag.md
+        run: scripts/pin_lag_issue.sh
