@@ -1,4 +1,8 @@
-# Pinned: a release bundles the toolkit into the realm wasm, so it moves only by a PR CI tests, never by what PyPI
-# holds on the day of a cut (as the extensions pin, #779).
+# Pinned: a release bundles these into the realm wasm, so each moves only by a PR CI tests, never by what PyPI holds
+# on the day of a cut (as the extensions pin, #779). The toolkit allows ic-python-db>=0.9.0, so ic-python-db needs a
+# pin of its own here: without it, a pip-compile run after a new release would move the realm to it.
+ic-basilisk==0.15.1
 ic-basilisk-toolkit==0.5.4
+ic-python-db==0.14.0
+ic-python-logging==0.3.4
 setuptools<71
