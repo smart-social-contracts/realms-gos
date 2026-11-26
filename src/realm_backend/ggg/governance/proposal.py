@@ -104,6 +104,7 @@ class Proposal(Row):
     @classmethod
     def migrate(cls, obj, from_version, to_version):
         obj.setdefault("tags", [])  # a Json field a stored row lacks reads as the text of its default
+        obj.setdefault("links", [])
         obj.setdefault("first_vote", None)
         # quorum_percent, the old field, shows a row still in whole percents: a row without it is converted already.
         if "quorum_percent" in obj:
