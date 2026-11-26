@@ -880,6 +880,64 @@ def test_a_vote_for_a_fee_difference_the_fee_has_changed_since_books_nothing():
     assert funds()["ROOT"] == 110 and "stuck" in Invoice[inv].payment
 
 
+def test_two_proposals_for_one_fee_difference_book_it_once():
+    """A difference is booked before the operation's first ledger call, and the booking makes the token's fee the
+    payment's own: a second proposal for the same change, filed while the fee still differed, is refused when it applies."""
+    setup_finance()
+    inv = stuck_on_a_fee_change(12)
+    world.policy(Department["Administration"], 2, 3)
+    first = ok("invoice_fee_rebook", "bob", invoice=inv, difference=2)["proposal"]
+    second = ok("invoice_fee_rebook", "bob", invoice=inv, difference=2)["proposal"]
+    # the first one's move fails too, so the payment still waits when the second applies: only the fee guards it
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    for p in (first, second):
+        for voter in world.PEOPLE:
+            if Proposal[p].status == "voting":
+                ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert (Proposal[first].status, Proposal[second].status) == ("executed", "failed")
+    assert "no difference to book" in Proposal[second].result["error"]
+    assert funds()["ROOT"] == 108 and len(Invoice[inv].payment["fee_differences"]) == 1
+
+
+def test_the_fee_difference_count_is_the_number_of_differences_the_payments_record():
+    """Treasury.fee_differences is a cache of what the payments record: through a rise, a fall, a refused amount, a vote
+    the fee overtook and a second proposal for one change, it stays equal to a scan of the invoices."""
+    setup_finance()
+
+    def agrees():
+        recorded = sum(len(i.payment.get("fee_differences", [])) for i in rows(Invoice))
+        assert treasury.Treasury["1"].fee_differences == recorded
+        return recorded
+
+    up = stuck_on_a_fee_change(12)
+    assert "not 3" in call("invoice_fee_rebook", "bob", invoice=up, difference=3)["error"]
+    assert agrees() == 0
+    ledger_ok()
+    ok("invoice_fee_rebook", "bob", invoice=up, difference=2)
+    assert agrees() == 1
+    down = stuck_on_a_fee_change(9)
+    ledger_ok()
+    ok("invoice_fee_rebook", "bob", invoice=down, difference=-3)
+    assert agrees() == 2
+    late = stuck_on_a_fee_change(11)
+    world.policy(Department["Administration"], 2, 3)
+    overtaken = ok("invoice_fee_rebook", "bob", invoice=late, difference=2)["proposal"]
+    again = ok("invoice_fee_rebook", "bob", invoice=late, difference=2)["proposal"]
+    world.policy(Department["Administration"], 0, 0)
+    ok("token_register", "bob", symbol="REALM", ledger=LEDGER, fee=12)  # the fee moves before the votes
+    world.policy(Department["Administration"], 2, 3)
+    for p in (overtaken, again):
+        for voter in world.PEOPLE:
+            if Proposal[p].status == "voting":
+                ok("proposal_vote", voter, proposal=p, choice="yes")
+    assert (Proposal[overtaken].status, Proposal[again].status) == ("failed", "failed")
+    assert agrees() == 2
+    ledger_ok()
+    world.policy(Department["Administration"], 0, 0)
+    ok("invoice_fee_rebook", "bob", invoice=late, difference=3)
+    assert agrees() == 3
+
+
 def hashed(name):
     from core import candid
 
