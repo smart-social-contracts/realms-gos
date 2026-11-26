@@ -29,6 +29,7 @@ CALLED = (
     "service : (text) -> {",
     '"read" : (text, text) -> (text) query;',
     '"run" : (text, text) -> (text);',
+    '"enter_setup" : (principal, text, text) -> (text);',  # DELIBERATE BREAK, reverted next commit (#797)
 )
 
 
