@@ -1,2 +1,6 @@
-ic-basilisk
-ic-basilisk-toolkit
+# Pinned as the root requirements.in, which the realm wasm is packed from: the CLI packs realm backends too
+# (mundus), so it must bundle the same versions, never what PyPI holds on the day.
+ic-basilisk==0.15.1
+ic-basilisk-toolkit==0.6.1
+ic-python-db==0.17.0
+ic-python-logging==0.3.4
