@@ -25,18 +25,19 @@ function pick(...keys: string[]): string {
 }
 
 /**
- * Canister id written at deploy time into ``/canister_ids.js``
+ * A setting written at deploy time into ``/canister_ids.js``
  * (``globalThis.__CANISTER_IDS``, loaded synchronously by app.html before the
- * bundle). One dist serves every environment, so this wins over whatever the
- * build had in its env — which, under Casals, is nothing.
+ * bundle): a canister id, or the forum's URL. One dist serves every
+ * environment, so this wins over whatever the build had in its env — which,
+ * under Casals, is nothing.
  */
-export function runtimeCanisterId(key: string, ids: unknown = (globalThis as any).__CANISTER_IDS): string {
+export function runtimeSetting(key: string, ids: unknown = (globalThis as any).__CANISTER_IDS): string {
   const v = ids && typeof ids === 'object' ? (ids as Record<string, unknown>)[key] : undefined;
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : '';
 }
 
 function canisterId(runtimeKey: string, ...envKeys: string[]): string {
-  return runtimeCanisterId(runtimeKey) || pick(...envKeys);
+  return runtimeSetting(runtimeKey) || pick(...envKeys);
 }
 
 /**
@@ -96,6 +97,11 @@ export const CONFIG = {
   env_name: pick('VITE_ENV_NAME'),
   portal_url: pick('VITE_PORTAL_URL'),
   realms_version: pick('VITE_REALMS_VERSION'),
+
+  // The community forum (forum.realmsgos.org), linked from the nav only when the
+  // sheet's canister_ids.js names it: the forum is deployed on its own schedule,
+  // and a link to an origin that is not live yet is a broken link.
+  forum_url: runtimeSetting('forum_url'),
 };
 
 /** Account pages stay visible but inert. On for staging/demo/test unless overridden. */
