@@ -34,6 +34,10 @@ PERIOD_UNITS = ("day", "working_day", "month", "year")
 # What a payment that cannot be moved says when its ledger fee changed after it was booked (realms-gos#781).
 FEE_CHANGED = ("the ledger fee changed since this payment was booked: it was booked with a fee of {booked}, and the fee "
                "is now {now}. It is not moved until the difference is booked (realms-gos#781)")
+# What realm_monitor reports while booked payments wait in their invoices' accounts (realms-gos#755).
+UNCOLLECTED = ("invoice payments booked but not yet moved into the realm's account, from which it pays out: {count}. "
+               "Each is moved at the next invoice_refresh naming its invoice, unless its payment says why it is stuck "
+               "(realms-gos#755)")
 NO_SOURCE_FUND = ("the treasury's source fund {}, which receives invoice payments, does not exist: create it with "
                   "fund_create, or name another fund with treasury_configure (source_fund)")
 
@@ -568,10 +572,21 @@ def source_fund():
 
 
 def problems():
-    """What the treasury's settings keep the realm from doing, in words, for realm_monitor: a source fund that does not
-    exist, which a member meets only once they have paid."""
+    """What keeps the treasury from paying out what its books hold, in words, for realm_monitor: a source fund that does
+    not exist, which a member meets only once they have paid, and payments booked but not yet moved into the realm's
+    account. Both are read in constant time."""
     code = treasury_config().get("source_fund", "ROOT")
-    return [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
+    found = [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
+    waiting = Treasury["1"].uncollected if Treasury["1"] else 0
+    return found + ([UNCOLLECTED.format(count=waiting)] if waiting else [])
+
+
+def count_uncollected(change):
+    """Keep ``Treasury.uncollected``: a payment that waits to be moved adds one, and one that is moved takes it away. A
+    payment left waiting by a build that kept no count is not in it, so the count stops at zero rather than below."""
+    t = Treasury["1"]
+    if t is not None:
+        t.uncollected = max(0, t.uncollected + change)
 
 
 def receive(inv, received, ledger):
@@ -598,6 +613,7 @@ def receive(inv, received, ledger):
     inv.status, inv.paid_at = "paid", chain.now()
     inv.payment = {"received": received, "subaccount": pay_to(inv), "ledger": ledger, "fee": find(Token, inv.symbol).fee,
                    "collected": False}
+    count_uncollected(1)
     if inv.reason.startswith("TaxDeclaration:"):
         find(TaxDeclaration, inv.reason.partition(":")[2]).status = "settled"
 
@@ -635,6 +651,8 @@ def collect(inv, held):
                 inv.payment = {**inv.payment, "stuck": FEE_CHANGED.format(booked=fee, now=asked_fee(reply))}
             return
         done = {"block": block, "moved": held - fee}
+    if inv.payment.get("collected") is False:  # once: another call may have marked it while the ledger answered
+        count_uncollected(-1)
     unstuck = {k: v for k, v in inv.payment.items() if k != "stuck"}
     inv.payment = {**unstuck, **done, "collected": True}
 
@@ -800,6 +818,7 @@ def invoice_collect(c, args):
          f"moving the payment of {inv.id} into the realm's account", invoice=inv)
     who = {"collected_by": c.user, **({"proposal": c.proposal} if c.proposal else {})}
     inv.payment = {**inv.payment, "ledger": ledger, "fee": fee, "collected": False, **who}  # the fee it just booked
+    count_uncollected(1)
     yield from collect(inv, held)
     payment = find(Invoice, inv.id).payment  # as collect left it
     return {"invoice": inv.id, "collected": payment["collected"], "moved": payment.get("moved", 0), "fee": fee}

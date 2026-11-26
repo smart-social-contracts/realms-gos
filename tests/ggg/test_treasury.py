@@ -810,6 +810,70 @@ def test_asked_fee_reads_only_a_bad_fee(reply, fee):
     assert treasury.asked_fee(reply) == fee
 
 
+def waiting():
+    """What realm_monitor says of the payments not yet moved into the realm's account, and their count."""
+    said = [p for p in ok("realm_monitor", "ctl")["problems"] if "not yet moved" in p]
+    return said, treasury.Treasury["1"].uncollected
+
+
+def test_realm_monitor_counts_the_payments_that_wait_to_be_moved():
+    setup_finance()
+    assert waiting() == ([], 0)
+    first, second = billed(120), billed(130)
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    ok("invoice_check", "alice", invoice=first)
+    balance_reply(130)
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting() == ([treasury.UNCOLLECTED.format(count=2)], 2)
+    ledger_ok()
+    ok("invoice_check", "alice", invoice=first)
+    assert waiting() == ([treasury.UNCOLLECTED.format(count=1)], 1)
+    balance_reply(0)  # the second's move had gone through: its next check finds the account empty
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting() == ([], 0)
+
+
+def test_a_payment_moved_at_once_or_too_small_to_move_never_counts():
+    setup_finance()
+    ledger_ok()
+    balance_reply(120)
+    ok("invoice_check", "alice", invoice=billed(120))
+    balance_reply(10)
+    ok("invoice_check", "alice", invoice=billed(10))  # no more than the fee: nothing to move
+    assert waiting() == ([], 0)
+
+
+def test_a_move_answered_after_another_check_marked_it_collected_takes_it_off_the_count_once(monkeypatch):
+    setup_finance()
+    first, second = billed(120), billed(130)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    balance_reply(120)
+    ok("invoice_check", "alice", invoice=first)
+    balance_reply(130)
+    ok("invoice_check", "alice", invoice=second)
+    assert waiting()[1] == 2
+    monkeypatch.setattr(fake_chain, "call", suspended)
+    moving = start("invoice_check", "alice", invoice=first)
+    moving.send("(120 : nat)")  # its retry reads the account and sends the move, which stays in flight
+    checking = start("invoice_check", "alice", invoice=first)
+    assert finish(checking, "(0 : nat)")["status"] == "paid"  # the move has applied: it marks the payment collected
+    assert finish(moving, "(variant { Ok = 9 : nat })")["status"] == "paid"
+    assert waiting()[1] == 1, "the second still waits; the first came off once"
+
+
+def test_the_count_never_falls_below_zero_for_a_payment_it_never_counted():
+    setup_finance()
+    inv = Invoice[billed(120)]
+    balance_reply(120)
+    fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
+    ok("invoice_check", "alice", invoice=inv.id)
+    treasury.Treasury["1"].uncollected = 0  # as a build that kept no count left it
+    ledger_ok()
+    ok("invoice_check", "alice", invoice=inv.id)
+    assert waiting() == ([], 0)
+
+
 def test_an_invoice_of_no_more_than_the_fee_credits_no_fund_and_moves_nothing():
     setup_finance()
     inv = billed(10)  # the fee of REALM
@@ -829,6 +893,7 @@ def test_two_checks_in_flight_book_a_payment_once(monkeypatch):
     assert finish(first, "(variant { Ok = 9 : nat })")["status"] == "paid"
     assert len({e.transaction for e in Invoice[inv].ledger_entries}) == 1 and funds()["ROOT"] == 110
     assert len(collections()) == 1
+    assert waiting() == ([], 0), "counted once, and taken away once"
 
 
 def test_a_line_added_while_a_check_waits_on_the_ledger_is_kept_and_billed(monkeypatch):
@@ -942,8 +1007,10 @@ def test_a_move_the_ledger_does_not_make_is_made_at_the_next_check():
     balance_reply(120)
     fake_chain.state["replies"][(LEDGER, "icrc1_transfer")] = Exception("canister stopped")
     assert ok("invoice_collect", "bob", invoice=inv)["collected"] is False
+    assert waiting()[1] == 1
     ledger_ok(tx=61)
     assert ok("invoice_check", "alice", invoice=inv)["status"] == "paid"
+    assert waiting() == ([], 0)
     assert Invoice[inv].payment["block"] == "61" and len(collections()) == 2 and funds()["ROOT"] == 110
     assert Invoice[inv].payment["moved"] == 110, "the move the retry made records what it moved"
 

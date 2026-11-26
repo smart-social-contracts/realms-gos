@@ -133,7 +133,8 @@ same rows.
   payout is made. The move costs the ledger's fee, so the fund gains the amount less the fee (booked as `ledger_fee`),
   and an adopted allocation rule splits what it gains. A move the ledger does not make is made at the next check of the
   invoice, from what its account holds then. While the source fund does not exist, a check refuses with `Unavailable`
-  and the payment waits on the ledger; `realm_monitor` lists it under `problems`;
+  and the payment waits on the ledger; `realm_monitor` lists it under `problems`, and also counts the payments booked
+  but not yet moved (`Treasury.uncollected`, read in constant time);
 - a budget line is `revenue` or `expense`, a category is one kind within a fund and period (`budget_draft` refuses a
   line of the other kind with `InvalidArgument`), and `budget_propose` takes the draft lines of a period together: those
   of the `fund` it names, which its owner governs under its own policy (the root when no department owns the fund), or
