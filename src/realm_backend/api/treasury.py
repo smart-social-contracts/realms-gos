@@ -32,18 +32,19 @@ PERIOD_UNITS = ("day", "working_day", "month", "year")
 # A new realm has the fund its treasury's source_fund names (setup.start); a realm made before it did may not, and then
 # books no invoice payment (realms-gos#740). receive refuses in these words, and realm_monitor reports them.
 # What a payment that cannot be moved says when its ledger fee changed after it was booked (realms-gos#781).
-FEE_CHANGED = ("the ledger fee changed since this payment was booked: it was booked with a fee of {booked}, and the fee "
-               "is now {now}. It is not moved until the difference is booked (invoice_fee_rebook, realms-gos#781)")
+FEE_CHANGED = ("the ledger fee changed since this payment was booked: it was booked with a fee of {booked}, and the "
+               "fee is now {now}. It is not moved until the difference is booked (invoice_fee_rebook, realms-gos#781)")
 # What realm_monitor reports once a fund has paid a fee difference: a decided spend, and a pattern worth seeing.
-FEE_DIFFERENCES = ("invoice payments moved at another ledger fee than the one they were booked with: {count}. Each "
-                   "difference was booked on its fund by its owner's decision (invoice_fee_rebook, realms-gos#781)")
+FEE_DIFFERENCES = ("ledger fee differences booked on funds this treasury epoch, to move invoice payments at another "
+                   "fee than the one they were booked with: {count}, each by its fund owner's decision; each payment "
+                   "keeps its record (invoice_fee_rebook, realms-gos#781)")
 # What realm_monitor reports while booked payments wait in their invoices' accounts (realms-gos#755).
 UNCOLLECTED = ("invoice payments booked but not yet moved into the realm's account, from which it pays out: {count}. "
                "Each is moved at the next invoice_refresh naming its invoice, unless its payment says why it is stuck "
                "(realms-gos#755)")
 # What realm_monitor reports if the count above ever falls below zero: a write path took off a payment it never held.
-COUNT_BROKEN = ("the count of invoice payments waiting to be moved is {count}, below zero: a payment was taken off it that "
-                "it never held, so it no longer says how many wait (realms-gos#755)")
+COUNT_BROKEN = ("the count of invoice payments waiting to be moved is {count}, below zero: a payment was taken off it "
+                "that it never held, so it no longer says how many wait (realms-gos#755)")
 NO_SOURCE_FUND = ("the treasury's source fund {}, which receives invoice payments, does not exist: create it with "
                   "fund_create, or name another fund with treasury_configure (source_fund)")
 
@@ -584,12 +585,22 @@ def problems():
     code = treasury_config().get("source_fund", "ROOT")
     found = [] if Fund[code] else [NO_SOURCE_FUND.format(code)]
     t = Treasury["1"]
-    waiting, rebooked = (t.uncollected, t.fee_differences) if t else (0, 0)
-    if waiting < 0:
-        found.append(COUNT_BROKEN.format(count=waiting))
-    elif waiting:
-        found.append(UNCOLLECTED.format(count=waiting))
-    return found + ([FEE_DIFFERENCES.format(count=rebooked)] if rebooked else [])
+    if t is None:
+        return found
+    if t.uncollected < 0:
+        found.append(COUNT_BROKEN.format(count=t.uncollected))
+    elif t.uncollected:
+        found.append(UNCOLLECTED.format(count=t.uncollected))
+    if t.fee_differences and t.fee_differences_epoch == this_epoch():
+        found.append(FEE_DIFFERENCES.format(count=t.fee_differences))
+    return found
+
+
+def this_epoch():
+    """The start of the treasury epoch now (sweeps.epoch_start): a fee difference is reported until its epoch ends."""
+    from api import sweeps  # it imports this module
+
+    return sweeps.epoch_start(chain.now())
 
 
 def wait_to_be_moved(inv):
@@ -845,21 +856,27 @@ def invoice_collect(c, args):
 
 def rebookable(args):
     """What an invoice_fee_rebook call meets whatever the vote decides: its ``invoice`` waits to be moved on the ledger it
-    was paid on; the token's fee is no longer the one its payment was booked with; the ``difference`` it names is that
-    change exactly, so a vote authorises the amount it reads; and the fund the payment was booked into holds what the
-    difference costs it. Returns the invoice."""
+    was paid on; the token's fee is no longer the one its payment was booked with; the new ``fee`` and the ``difference``
+    it names are that change exactly, so a vote authorises the change it reads and no later one of the same size; the new
+    fee is less than the invoice's amount, so moving the payment leaves the fund something; and the fund the payment was
+    booked into holds what the difference costs it. Returns the invoice."""
     inv = find(Invoice, args["invoice"])
-    if type(args.get("difference")) is not int:
-        raise Fail("difference is a whole number of the token's smallest unit: the token's fee now less the booked one")
+    for key in ("fee", "difference"):
+        if type(args.get(key)) is not int:
+            raise Fail(f"{key} is a whole number of the token's smallest unit: the token's fee now, and that fee less the "
+                       f"one the payment was booked with")
     if not to_collect(inv):
         raise Conflict(f"{inv.id} does not wait to be moved on its token's ledger: there is no fee difference to book")
     booked, now = inv.payment["fee"], find(Token, inv.symbol).fee
     if now == booked:
         raise Conflict(f"{inv.id} was booked with the token's fee of {booked}: there is no difference to book. If the "
                        f"ledger asks another fee, register it first (token_register)")
-    if args["difference"] != now - booked:
-        raise Conflict(f"the fee difference for {inv.id} is {now - booked} (booked with a fee of {booked}, the fee is now "
-                       f"{now}), not {args['difference']}")
+    if (args["fee"], args["difference"]) != (now, now - booked):
+        raise Conflict(f"{inv.id} was booked with a fee of {booked}, and the fee is now {now}: the difference is "
+                       f"{now - booked}, not a fee of {args['fee']} and a difference of {args['difference']}")
+    if now >= inv.amount:
+        raise Conflict(f"the fee of {now} is no less than {inv.id}'s amount of {inv.amount}: moving its payment would "
+                       f"leave its fund nothing, so no difference is booked and the payment waits")
     fund = booked_into(inv)
     if balance(fund, inv.symbol) < now - booked:
         raise Conflict(f"fund {fund.id} holds {balance(fund, inv.symbol)} {inv.symbol}, less than the fee difference of "
@@ -870,11 +887,13 @@ def rebookable(args):
 @op("treasury.manage", governed=lambda a: owner_of(booked_into(rebookable(a))), check=rebookable, returns="invoice")
 def invoice_fee_rebook(c, args):
     """Book the ``difference`` between the ledger fee the waiting payment of ``invoice`` was booked with and the token's
-    fee now on the fund it was booked into, and move the payment at the new fee (realms-gos#781). A payment whose fee
+    ``fee`` now on the fund it was booked into, and move the payment at the new fee (realms-gos#781). A payment whose fee
     changed waits until then (its payment says so: ``stuck``). The fund pays a higher fee and gets back what a lower one
-    saves, so it is governed by the fund's owner, and the call names the amount it authorises: one whose ``difference``
-    is not the change in the fee is refused. The payment keeps each difference booked, with who decided it; realm_monitor
-    counts them. Returns ``invoice``, the ``difference``, whether it is ``collected`` and the amount ``moved``."""
+    saves, so it is governed by the fund's owner, and the call names the change it authorises: one whose ``fee`` and
+    ``difference`` are not the token's fee now and its change is refused, and so is a fee no less than the invoice's
+    amount, which would leave the fund nothing. The payment keeps each difference booked, with who decided it and when;
+    realm_monitor counts the ones booked this treasury epoch. Returns ``invoice``, the ``difference``, whether it is
+    ``collected`` and the amount ``moved``."""
     inv = rebookable(args)
     booked, now = inv.payment["fee"], find(Token, inv.symbol).fee
     difference, fund = now - booked, booked_into(inv)
@@ -882,12 +901,14 @@ def invoice_fee_rebook(c, args):
     post(period(), [("expense", FEE, paid, back, fund), ("asset", "cash", back, paid, fund)], inv.symbol,
          f"fee difference for moving the payment of {inv.id}: booked with a fee of {booked}, the fee is now {now}",
          invoice=inv)
-    decided = {"booked": booked, "now": now, "difference": difference, "by": c.user,
+    decided = {"booked": booked, "now": now, "difference": difference, "by": c.user, "at": chain.now(),
                **({"proposal": c.proposal} if c.proposal else {})}
     unstuck = {k: v for k, v in inv.payment.items() if k != "stuck"}
     inv.payment = {**unstuck, "fee": now, "fee_differences": [*inv.payment.get("fee_differences", []), decided]}
     treasury = Treasury["1"]
     if treasury is not None:
+        if treasury.fee_differences_epoch != this_epoch():  # the first of a new epoch
+            treasury.fee_differences_epoch, treasury.fee_differences = this_epoch(), 0
         treasury.fee_differences += 1
     yield from refresh(find(Invoice, inv.id))  # a payment that waits to be moved, at the fee it is now booked with
     payment = find(Invoice, inv.id).payment
