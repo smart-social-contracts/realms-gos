@@ -1,7 +1,7 @@
 [
-	{ "name": "gos.earth portal", "kind": "portal", "url": "https://gos.earth/" },
-	{ "name": "realmsgos.org marketplace", "kind": "marketplace", "url": "https://realmsgos.org/" },
-	{ "name": "staging.gos.earth portal", "kind": "portal", "url": "https://staging.gos.earth/" },
-	{ "name": "staging.realmsgos.org marketplace", "kind": "marketplace", "url": "https://staging.realmsgos.org/" },
-	{ "name": "staging.gos.earth realm valencia", "kind": "realm", "url": "https://staging.gos.earth/r/valencia" }
+	{ "name": "gos.earth portal", "kind": "portal", "env": "production", "url": "https://gos.earth/" },
+	{ "name": "realmsgos.org marketplace", "kind": "marketplace", "env": "production", "url": "https://realmsgos.org/" },
+	{ "name": "staging.gos.earth portal", "kind": "portal", "env": "staging", "url": "https://staging.gos.earth/" },
+	{ "name": "staging.realmsgos.org marketplace", "kind": "marketplace", "env": "staging", "url": "https://staging.realmsgos.org/" },
+	{ "name": "staging.gos.earth realm valencia", "kind": "realm", "env": "staging", "url": "https://staging.gos.earth/r/valencia" }
 ]
