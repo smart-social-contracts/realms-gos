@@ -519,12 +519,12 @@ class Register(above("register")):
 @pytest.mark.parametrize("what,error", [
     ("directly", "department_set_policy: department_set_policy changes the IT admin team: no codex may"),
     ("in a proposal", "proposal_create: department_set_policy changes the IT admin team: no codex may")])
-@pytest.mark.parametrize("written", ["__ID__", '"__ID__"'], ids=["an integer", "text"])
+@pytest.mark.parametrize("written", ["{id}", '"{id}"'], ids=["an integer", "text"])
 def test_a_chapter_that_names_the_team_by_its_internal_id_changes_nothing(written, what, error):
     build()
     team = it_team(("bob",))
     world.policy(team, 2, 2)
-    town({(TOWN, "register"): CHANGE_THE_TEAM_BY_ID.replace('"__ID__"', written).replace("__ID__", str(team._id))})
+    town({(TOWN, "register"): CHANGE_THE_TEAM_BY_ID.replace("__ID__", written.format(id=team._id))})
     ok("t_codex_poke", what=what)
     assert failures()["x/town/register.py"]["on_t_codex_poke"]["error"] == error
     assert Department["IT"].policy == {"m": 2, "n": 2, "quorum": 0, "veto": []} and Proposal.max_id() == 0
