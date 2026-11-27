@@ -10,6 +10,8 @@ import { invalidateActor, marketplace } from "$lib/canisters";
 import { shortPrincipal } from "$lib/format";
 import { resolveCasalsUrlLive } from "$lib/config";
 import { CONTACT_EMAIL, CONTACT_MAILTO } from "$lib/contact";
+import { PRIVACY_URL, TERMS_URL, showsDemoNotice } from "$lib/demo-notice";
+import DemoNotice from "$lib/components/DemoNotice.svelte";
 
 let casalsUrl = "";
 $: isHome = $page.url.pathname === "/";
@@ -20,6 +22,7 @@ let searchTerm = "";
 let i18nReady = false;
 let showLanguageMenu = false;
 let heroScrolled = false;
+let demoNotice = false;
 function submitSearch() {
   const q = searchTerm.trim();
   if (!q) return;
@@ -30,6 +33,7 @@ function onWindowScroll() {
 }
 onMount(async () => {
   if (!browser) return;
+  demoNotice = showsDemoNotice(window.location.hostname);
   await initI18n();
   i18nReady = true;
   await bootstrapAuth();
@@ -245,6 +249,13 @@ $: routeIsActive = (path) => {
         <i class="ti ti-mail" aria-hidden="true"></i>
       </a>
     </div>
+    {#if demoNotice}
+      <div class="legal">
+        <a href={PRIVACY_URL} target="_blank" rel="noreferrer">{$_('demo_notice.privacy')}</a>
+        <span aria-hidden="true">·</span>
+        <a href={TERMS_URL} target="_blank" rel="noreferrer">{$_('demo_notice.terms')}</a>
+      </div>
+    {/if}
     <div class="build-line">{$_('footer.open_source')}</div>
     <div class="build-meta">{$_('footer.build', { values: { version: __BUILD_VERSION__, commit: __BUILD_COMMIT__ } })}</div>
     <a class="icp" href="https://internetcomputer.org" target="_blank" rel="noreferrer">
@@ -253,6 +264,9 @@ $: routeIsActive = (path) => {
     </a>
   </div>
 </footer>
+{#if demoNotice}
+  <DemoNotice />
+{/if}
 {:else}
 <div class="loading-screen"><div class="spinner"></div></div>
 {/if}
@@ -560,6 +574,17 @@ $: routeIsActive = (path) => {
     font-size: 28px;
     line-height: 1;
   }
+  .footer-card .legal {
+    display: flex;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .footer-card .legal a {
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .footer-card .legal a:hover { color: var(--text); text-decoration: underline; }
   .footer-card .build-line {
     font-size: 0.75rem;
     color: var(--text-faint);
