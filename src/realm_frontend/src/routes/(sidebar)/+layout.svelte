@@ -4,6 +4,7 @@
 	import Sidebar from './Sidebar.svelte';
 	import Footer from './Footer.svelte';
 	import DemoBanner from '$lib/components/DemoBanner.svelte';
+	import DemoDataBanner from '$lib/components/DemoDataBanner.svelte';
 	import DelegationBanner from '$lib/components/DelegationBanner.svelte';
 	import ApprovalSentNotice from '$lib/components/ApprovalSentNotice.svelte';
 	import PageBreadcrumb from '$lib/components/PageBreadcrumb.svelte';
@@ -257,6 +258,7 @@
 		{$_('chrome.skip_to_content')}
 	</a>
 	<div bind:this={bannerEl} class="shrink-0">
+		<DemoDataBanner />
 		<DemoBanner />
 	</div>
 	<header

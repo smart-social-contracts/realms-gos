@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { resolveDemoNoticeView, type DemoNoticeBodies } from '$lib/config/hostTestFlags';
 	import { localeLabel } from '$lib/i18n/realmLocales';
+	import { _ } from 'svelte-i18n';
+	import DemoLegalLinks from './DemoLegalLinks.svelte';
 
 	interface Props {
 		bodies?: DemoNoticeBodies | null;
@@ -32,6 +34,10 @@
 		<h2 class="text-2xl font-bold text-gray-900 mb-2">Notice</h2>
 	{/if}
 	<div class="demo-notice__body" lang="en">{view.english}</div>
+
+	<p class="mt-4 text-sm text-gray-700" data-testid="demo-notice-statement">
+		{$_('demo_data_banner.join_statement')} <DemoLegalLinks />
+	</p>
 
 	<label
 		class="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors mt-6"

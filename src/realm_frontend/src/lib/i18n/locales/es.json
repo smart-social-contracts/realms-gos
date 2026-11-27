@@ -216,6 +216,17 @@
     "description": "Esta aplicación se ejecuta en modo de prueba. Algunas funciones pueden comportarse de forma distinta a la de producción.",
     "dismiss_label": "Descartar aviso de modo de prueba"
   },
+  "demo_data_banner": {
+    "title": "Demo con datos simulados.",
+    "body": "Aquí {name} es simulado, no un servicio de ninguna ciudad ni organismo público real. Los importes en EUR y todos los tokens son dinero de juego sin valor. Por favor, no introduzcas datos personales reales.",
+    "this_realm": "este realm",
+    "privacy": "Privacidad",
+    "terms": "Condiciones",
+    "report": "Denunciar contenido",
+    "collapse": "Ocultar detalles",
+    "expand": "Mostrar detalles",
+    "join_statement": "Esto es una demo. Tus votos y propuestas son visibles para los demás miembros y se borran en el próximo reinicio."
+  },
   "categories": {
     "home": "Inicio",
     "public_services": "Servicios públicos",

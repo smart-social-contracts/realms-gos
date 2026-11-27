@@ -216,6 +216,17 @@
     "description": "此应用程序正在测试模式下运行。某些功能可能与生产环境不同。",
     "dismiss_label": "关闭测试模式通知"
   },
+  "demo_data_banner": {
+    "title": "Demo with simulated data.",
+    "body": "{name} here is simulated, not a service of any real city or public body. Amounts in EUR and all tokens are play money with no value. Please don't enter real personal data.",
+    "this_realm": "This realm",
+    "privacy": "Privacy",
+    "terms": "Terms",
+    "report": "Report content",
+    "collapse": "Hide details",
+    "expand": "Show details",
+    "join_statement": "This is a demo. Your votes and proposals are visible to other members and are deleted at the next reset."
+  },
   "categories": {
     "home": "首页",
     "public_services": "公共服务",
