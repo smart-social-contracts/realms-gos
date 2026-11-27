@@ -10,7 +10,7 @@ import { invalidateActor, marketplace } from "$lib/canisters";
 import { shortPrincipal } from "$lib/format";
 import { resolveCasalsUrlLive } from "$lib/config";
 import { CONTACT_EMAIL, CONTACT_MAILTO } from "$lib/contact";
-import { PRIVACY_URL, TERMS_URL, showsDemoNotice } from "$lib/demo-notice";
+import { legalLinks, showsDemoNotice } from "$lib/demo-notice";
 import DemoNotice from "$lib/components/DemoNotice.svelte";
 
 let casalsUrl = "";
@@ -23,6 +23,7 @@ let i18nReady = false;
 let showLanguageMenu = false;
 let heroScrolled = false;
 let demoNotice = false;
+let legal: { privacy: string; terms: string } | null = null;
 function submitSearch() {
   const q = searchTerm.trim();
   if (!q) return;
@@ -34,6 +35,7 @@ function onWindowScroll() {
 onMount(async () => {
   if (!browser) return;
   demoNotice = showsDemoNotice(window.location.hostname);
+  legal = legalLinks(window.location.hostname);
   await initI18n();
   i18nReady = true;
   await bootstrapAuth();
@@ -249,11 +251,11 @@ $: routeIsActive = (path) => {
         <i class="ti ti-mail" aria-hidden="true"></i>
       </a>
     </div>
-    {#if demoNotice}
+    {#if legal}
       <div class="legal">
-        <a href={PRIVACY_URL} target="_blank" rel="noreferrer">{$_('demo_notice.privacy')}</a>
+        <a href={legal.privacy} target="_blank" rel="noreferrer">{$_('demo_notice.privacy')}</a>
         <span aria-hidden="true">·</span>
-        <a href={TERMS_URL} target="_blank" rel="noreferrer">{$_('demo_notice.terms')}</a>
+        <a href={legal.terms} target="_blank" rel="noreferrer">{$_('demo_notice.terms')}</a>
       </div>
     {/if}
     <div class="build-line">{$_('footer.open_source')}</div>

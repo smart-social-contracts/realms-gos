@@ -1,8 +1,11 @@
 import { CONTACT_MAILTO } from './contact.ts';
 
-// The demo's legal pages live on the portal; the marketplace has none of its own.
+// The legal pages live on the portal; the marketplace has none of its own. Both texts cover gos.earth and
+// realmsgos.org, so each marketplace links its own environment's portal.
 export const PRIVACY_URL = 'https://demo.gos.earth/privacy';
 export const TERMS_URL = 'https://demo.gos.earth/terms';
+export const PRODUCTION_PRIVACY_URL = 'https://gos.earth/privacy';
+export const PRODUCTION_TERMS_URL = 'https://gos.earth/terms';
 export const REPORT_URL = CONTACT_MAILTO;
 
 /**
@@ -12,8 +15,19 @@ export const REPORT_URL = CONTACT_MAILTO;
  */
 const PRODUCTION_HOSTS = ['realmsgos.org', 'www.realmsgos.org'];
 
+function isProductionHost(hostname: string): boolean {
+	return PRODUCTION_HOSTS.includes(hostname.toLowerCase());
+}
+
 export function showsDemoNotice(hostname: string): boolean {
-	return !PRODUCTION_HOSTS.includes(hostname.toLowerCase());
+	return !isProductionHost(hostname);
+}
+
+/** The footer's legal links, on every host: production's own pages there, the demo's everywhere else. */
+export function legalLinks(hostname: string): { privacy: string; terms: string } {
+	return isProductionHost(hostname)
+		? { privacy: PRODUCTION_PRIVACY_URL, terms: PRODUCTION_TERMS_URL }
+		: { privacy: PRIVACY_URL, terms: TERMS_URL };
 }
 
 // Collapsed is the only state a visitor can keep. There is no dismissed state: the notice always renders.

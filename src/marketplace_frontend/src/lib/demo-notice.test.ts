@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import { PRIVACY_URL, REPORT_URL, TERMS_URL, readCollapsed, showsDemoNotice, writeCollapsed } from './demo-notice.ts';
+import { PRIVACY_URL, REPORT_URL, TERMS_URL, legalLinks, readCollapsed, showsDemoNotice, writeCollapsed } from './demo-notice.ts';
 
 function memoryStorage(): Storage {
 	const items = new Map<string, string>();
@@ -40,6 +40,20 @@ describe('demo notice links', () => {
 		assert.equal(PRIVACY_URL, 'https://demo.gos.earth/privacy');
 		assert.equal(TERMS_URL, 'https://demo.gos.earth/terms');
 		assert.equal(REPORT_URL, 'mailto:contact@realmsgos.org');
+	});
+});
+
+describe('footer legal links', () => {
+	it("point at production's portal on production", () => {
+		for (const host of ['realmsgos.org', 'www.realmsgos.org']) {
+			assert.deepEqual(legalLinks(host), { privacy: 'https://gos.earth/privacy', terms: 'https://gos.earth/terms' }, host);
+		}
+	});
+
+	it("point at the demo's portal everywhere else", () => {
+		for (const host of ['staging.realmsgos.org', 'demo.realmsgos.org', 'localhost']) {
+			assert.deepEqual(legalLinks(host), { privacy: PRIVACY_URL, terms: TERMS_URL }, host);
+		}
 	});
 });
 

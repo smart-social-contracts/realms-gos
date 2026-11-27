@@ -1,6 +1,8 @@
 /**
- * The demo notice (CLFO requirement 1): on every page outside production, with Privacy, Terms and Report links.
- * It may collapse; it must never disappear for good. The spec runs on localhost, which is not production.
+ * The demo notice (CLFO requirement 1): on every page outside production, with Privacy, Terms and Report links;
+ * the footer links the legal pages everywhere, production's own on production.
+ * It may collapse; it must never disappear for good. The spec runs on localhost, which is not production, except
+ * the one test that serves the build under production's host name.
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -66,6 +68,21 @@ test.describe('demo notice', () => {
     await page.reload();
     await expect(notice(page)).toBeVisible();
     await expect(notice(page).getByRole('link', { name: 'Report content' })).toBeVisible();
+  });
+
+  test("is not on production, whose footer links production's legal pages", async ({ page, baseURL }) => {
+    // The same build, served under production's host name: the host is all that tells production apart.
+    await page.route('http://realmsgos.org/**', async (route) => {
+      const url = new URL(route.request().url());
+      const response = await route.fetch({ url: new URL(url.pathname + url.search, baseURL).toString() });
+      await route.fulfill({ response });
+    });
+    await page.goto('http://realmsgos.org/extensions');
+    const footer = page.locator('.footer-card');
+    // The links and the notice are decided in the same onMount, so once the links are there the notice is settled.
+    await expect(footer.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', 'https://gos.earth/privacy');
+    await expect(footer.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://gos.earth/terms');
+    await expect(page.locator('.demo-notice')).toHaveCount(0);
   });
 
   test('is in Spanish for Spanish visitors', async ({ page }) => {
