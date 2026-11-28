@@ -5,7 +5,7 @@ import fake_chain
 from api import quarters
 from core.ratio import ONE
 import world
-from ggg import Codex, Department, Forward, GuestUser, Member, Proposal, Quarter, Realm, User, Zone
+from ggg import Codex, Department, Extension, Forward, GuestUser, Member, Proposal, Quarter, Realm, User, Zone
 from kit import call, denied, ok, rows
 
 CAPITAL = fake_chain.SELF
@@ -290,9 +290,16 @@ def built(member, cid, status="ready"):
         {"ok": True, "canisters": [{"name": member, "canister_id": cid, "status": status}]})
 
 
-def adoptable(cid):
-    for method in ("quarter_join_federation", "setup_step", "quarter_sync", "setup_launch"):
+def adoptable(cid, has=()):
+    """The quarter ``cid`` answers every step of its adoption; it lists the extensions ``has`` ((id, version) pairs)."""
+    for method in ("quarter_join_federation", "setup_step", "quarter_sync", "realm_configure_infrastructure",
+                   "realm_configure_trust_policy", "extension_install", "setup_launch"):
         reply(cid, method)
+    reply(cid, "extension_list", extensions=[{"id": i, "version": v} for i, v in has], next=None)
+
+
+TRUST = {"require_marketplace_approval": True, "trusted_approvers": [], "trusted_principals": []}
+FURNISHING = [("realm_configure_trust_policy", TRUST), ("extension_list", {"count": 500})]
 
 
 def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
@@ -315,7 +322,7 @@ def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
     to_south = [(m, json.loads(a)) for cid, m, a in fake_chain.state["calls"] if cid == "south-id"]
     assert to_south == [("quarter_join_federation", {"capital": CAPITAL}),
                         ("setup_step", {"step": "realm", "open_registration": True}),  # the realm's name comes by sync
-                        ("quarter_sync", {}), ("setup_launch", {})]
+                        ("quarter_sync", {}), *FURNISHING, ("setup_launch", {})]
     south = Quarter["south-id"]
     assert (south.name, south.index, south.status) == ("South", 2, "setup")
     s = ok("scale_status", fake_chain.ANONYMOUS)
@@ -354,8 +361,57 @@ def test_a_quarter_whose_first_sync_fails_stays_pending_and_is_synced_and_launch
     reply("east-id", "quarter_sync")
     fake_chain.state["calls"].clear()
     fire_timers()
-    assert [m for cid, m, _ in fake_chain.state["calls"] if cid == "east-id"] == ["quarter_sync", "setup_launch"]
+    assert [m for cid, m, _ in fake_chain.state["calls"] if cid == "east-id"] == [
+        "quarter_sync", "realm_configure_trust_policy", "extension_list", "setup_launch"]
     assert ok("scale_status", fake_chain.ANONYMOUS)["pending"] is None and fake_chain.state["timers"] == []
+
+
+def test_a_quarter_is_furnished_from_its_capital_before_it_launches():
+    """A quarter the realm grew by itself gets what its members need to see the realm's screens: the capital's file
+    registry and marketplace, its trust policy and its extensions at the capital's versions, all before it launches,
+    while its root department still decides alone. One it already has at that version is not installed again."""
+    on_casals()
+    r = Realm["1"]
+    r.file_registry_canister_id, r.marketplace_canister_id = "registry-id", "market-id"
+    r.require_marketplace_approval, r.trusted_approvers = False, ["approver-id"]
+    Extension(id="voting", version="2.1.0")
+    Extension(id="vault", version="0.3.0")
+    Extension(id="retired", version="1.0.0", status="uninstalled")
+    reply(CONDUCTOR, "stand_grow")
+    ok("quarter_add", "ctl", name="East")
+    built("agora-quarter-1", "east-id")
+    adoptable("east-id", has=[("vault", "0.3.0"), ("voting", "2.0.0")])
+    fire_timers()
+    to_east = [(m, json.loads(a)) for cid, m, a in fake_chain.state["calls"] if cid == "east-id"]
+    furnishing = to_east[to_east.index(("quarter_sync", {})) + 1:]
+    assert furnishing == [
+        ("realm_configure_infrastructure", {"file_registry_canister_id": "registry-id",
+                                            "marketplace_canister_id": "market-id"}),
+        ("realm_configure_trust_policy", {"require_marketplace_approval": False, "trusted_approvers": ["approver-id"],
+                                          "trusted_principals": []}),
+        ("extension_list", {"count": 500}),
+        ("extension_install", {"extension": "voting", "version": "2.1.0"}),  # an older one is brought up to date
+        ("setup_launch", {})]
+    assert ok("scale_status", fake_chain.ANONYMOUS)["pending"] is None
+
+
+def test_a_furnishing_the_quarter_files_as_a_proposal_is_not_done_and_is_retried():
+    """A quarter whose root department does not decide alone files the call as a proposal: that is not furnished, so
+    the quarter is not launched, and the step runs again at the next look."""
+    on_casals()
+    Extension(id="voting", version="2.1.0")
+    reply(CONDUCTOR, "stand_grow")
+    ok("quarter_add", "ctl", name="East")
+    built("agora-quarter-1", "east-id")
+    adoptable("east-id")
+    reply("east-id", "extension_install", proposal="7", requires_vote=True)
+    fire_timers()
+    p = ok("scale_status", fake_chain.ANONYMOUS)["pending"]
+    assert p["done"] == ["join", "configure", "register", "sync"] and "did not furnish extension_install" in p["error"]
+    assert "setup_launch" not in [m for cid, m, _ in fake_chain.state["calls"] if cid == "east-id"]
+    reply("east-id", "extension_install")
+    fire_timers()
+    assert ok("scale_status", fake_chain.ANONYMOUS)["pending"] is None
 
 
 def test_a_quarter_still_being_built_is_looked_for_after_an_upgrade():

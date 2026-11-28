@@ -6,7 +6,7 @@ from core import chain
 from core import compliance
 from core import sandbox, sync_log
 from api import assets, proposals
-from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, put, view
+from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, page, put, view
 from core.ic_keys import TEST_NETWORKS
 from ggg import Forward, GuestUser, LayeredCodex, Member, Quarter, Realm, User, UserProfile, Zone
 from api import codex as runtime
@@ -34,7 +34,10 @@ POPULATION_STEP = 100  # a quarter's population is told when it has moved by one
 # Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
 ADOPT_EVERY = 60
 # What adopt() does for a quarter Casals has built, in order.
-ADOPTION = ("join", "configure", "register", "sync", "launch")
+ADOPTION = ("join", "configure", "register", "sync", "furnish", "launch")
+# The canisters a quarter installs code from, which ``furnish`` gives it from its capital's own settings. The others of
+# realm_configure_infrastructure (frontend, installer, baton, conductor, stand) are the quarter's own.
+FURNISHED_INFRASTRUCTURE = ("file_registry_canister_id", "marketplace_canister_id")
 # A quarter's own settings that the realm may also set for it by a realm-wide vote (quarter_configure). The capital
 # sends them to the quarter in a federation_message of this topic, which only the capital's quarter_configure sends. A
 # new quarter starts from its capital's where it still has the default, which means not yet chosen.
@@ -480,7 +483,10 @@ def adoption_step(step, cid, name):
         if not Quarter[cid]:
             register(cid, name)
         return
-    registration = {"step": "realm", "open_registration": bool(realm().open_registration)}
+    if step == "furnish":
+        yield from furnish(cid)
+        return
+    registration ={"step": "realm", "open_registration": bool(realm().open_registration)}
     operation, args = {"join": ("quarter_join_federation", {"capital": chain.self_id()}),
                        "configure": ("setup_step", registration),
                        "sync": ("quarter_sync", {}),
@@ -488,6 +494,43 @@ def adoption_step(step, cid, name):
     reply = json.loads((yield from chain.call_op(cid, operation, args)) or "{}")
     if not reply.get("ok") and not (step == "join" and "already belongs" in str(reply.get("error"))):
         raise Fail(f"{cid} did not {step}: {reply.get('error')}")
+
+
+def furnish(cid):
+    """Give the quarter ``cid`` what its capital has and no other step of ``adopt`` gives it: the file registry and
+    marketplace it installs code from, the capital's trust policy, and every extension the capital has installed, at the
+    capital's version. Without it the quarter's members see none of the realm's screens. It runs before the quarter
+    launches, while its root department still decides alone, so that each call runs at once instead of becoming a
+    proposal in a quarter that has no members yet. An extension the quarter already has at that version is left as it
+    is, so a retried step installs only what is missing. A generator."""
+    from ggg import Extension
+
+    r = realm()
+    infrastructure = {k: getattr(r, k) for k in FURNISHED_INFRASTRUCTURE if getattr(r, k, "")}
+    trust = {"require_marketplace_approval": bool(r.require_marketplace_approval),
+             "trusted_approvers": list(r.trusted_approvers or []),
+             "trusted_principals": list(r.trusted_principals or [])}
+    for operation, args in (("realm_configure_infrastructure", infrastructure),
+                            ("realm_configure_trust_policy", trust)):
+        if args:
+            yield from furnished(cid, operation, args)
+    listed = yield from furnished(cid, "extension_list", {"count": 500})
+    has = {e["id"]: e.get("version") for e in listed.get("extensions") or []}
+    start = 1
+    while start is not None:
+        rows, start = page(Extension, {"from": start, "count": 500})
+        for e in rows:
+            if e.status == "installed" and e.version and has.get(e.id) != e.version:
+                yield from furnished(cid, "extension_install", {"extension": e.id, "version": e.version})
+
+
+def furnished(cid, operation, args):
+    """Run ``operation`` on the quarter ``cid`` for ``furnish``; it fails unless the quarter says it is done, and a call
+    the quarter filed as a proposal is not done. A generator that returns the reply."""
+    reply = json.loads((yield from chain.call_op(cid, operation, args)) or "{}")
+    if not reply.get("ok") or reply.get("requires_vote"):
+        raise Fail(f"{cid} did not furnish {operation}: {reply.get('error') or reply}")
+    return reply
 
 
 def resume():

@@ -458,6 +458,16 @@ test('a realm born in the portal grows a quarter through a realm-wide vote', asy
 			.toBe('active');
 		const info = (await readOp({ ...realm, realm_backend: quarter }, 'realm_info')) as any;
 		expect(info.realm.is_capital, 'the new canister runs as a quarter').toBe(false);
+		// Adoption furnishes it: without the capital's extensions its members would see none of the realm's screens.
+		const installed = async (canister: string) =>
+			((((await readOp({ ...realm, realm_backend: canister }, 'extension_list', { count: 500 })) as any)
+				.extensions ?? []) as { id: string; version: string; status: string }[])
+				.filter((e) => e.status === 'installed')
+				.map((e) => `${e.id}@${e.version}`)
+				.sort();
+		const capitalHas = await installed(realm.realm_backend);
+		expect(capitalHas.length, 'the capital has extensions to give').toBeGreaterThan(0);
+		expect(await installed(quarter), "the new quarter has the capital's extensions").toEqual(capitalHas);
 		quarterIds = [quarter, realm.realm_backend];
 		await asMember(browser, 0, '/extensions/realm_settings', async (p, frame) => {
 			await frame.locator('.chrome-tab', { hasText: 'Advanced' }).click({ timeout: 120_000 });
