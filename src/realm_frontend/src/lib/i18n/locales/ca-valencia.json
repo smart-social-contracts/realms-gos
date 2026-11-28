@@ -216,6 +216,17 @@
     "description": "Esta aplicació s'executa en mode de prova. Algunes funcions poden comportar-se de manera diferent a la de producció.",
     "dismiss_label": "Descarta l'avís del mode de prova"
   },
+  "demo_data_banner": {
+    "title": "Demo with simulated data.",
+    "body": "{name} here is simulated, not a service of any real city or public body. Amounts in EUR and all tokens are play money with no value. Please don't enter real personal data.",
+    "this_realm": "This realm",
+    "privacy": "Privacy",
+    "terms": "Terms",
+    "report": "Report content",
+    "collapse": "Hide details",
+    "expand": "Show details",
+    "join_statement": "This is a demo. Your votes and proposals are visible to other members and are deleted at the next reset."
+  },
   "categories": {
     "home": "Inici",
     "public_services": "Serveis públics",

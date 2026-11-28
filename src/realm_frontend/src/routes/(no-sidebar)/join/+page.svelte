@@ -717,7 +717,7 @@
   <title>{$_('join.join_title', { values: { name: realmName } })}</title>
 </svelte:head>
 
-<div class="min-h-viewport md:h-viewport grid grid-cols-1 md:grid-cols-2" style="transform: none !important;">
+<div class="min-h-full md:h-full grid grid-cols-1 md:grid-cols-2" style="transform: none !important;">
   <!-- Left Brand Panel with Background Image -->
   <div class={cn('hidden md:flex md:col-start-1 flex-col justify-between relative', coverFailed ? 'text-gray-900' : 'text-white')} style={panelStyle}>
     <!-- Background Image - no overlay, full opacity -->

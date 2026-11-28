@@ -6,6 +6,7 @@
   import { resolveRealmMarkSrc } from '$lib/branding/realmMark';
   import { realmInfo, realmName, realmWelcomeMessage, realmManifesto } from '$lib/stores/realmInfo';
   import { isAuthenticated } from '$lib/stores/auth';
+  import DemoDataBanner from '$lib/components/DemoDataBanner.svelte';
   
   // Fetch realm info on mount
   onMount(() => {
@@ -17,6 +18,7 @@
   <title>{$realmName || $_('extensions.welcome.page_title')}</title>
 </svelte:head>
 
+<DemoDataBanner />
 <div class="welcome-container">
   {#if browser}
     <div class="background-photo-container">

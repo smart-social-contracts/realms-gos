@@ -216,6 +216,17 @@
     "description": "This application is running in test mode. Some features may behave differently than in production.",
     "dismiss_label": "Dismiss test mode notice"
   },
+  "demo_data_banner": {
+    "title": "Demo with simulated data.",
+    "body": "{name} here is simulated, not a service of any real city or public body. Amounts in EUR and all tokens are play money with no value. Please don't enter real personal data.",
+    "this_realm": "This realm",
+    "privacy": "Privacy",
+    "terms": "Terms",
+    "report": "Report content",
+    "collapse": "Hide details",
+    "expand": "Show details",
+    "join_statement": "This is a demo. Your votes and proposals are visible to other members and are deleted at the next reset."
+  },
   "categories": {
     "home": "Home",
     "public_services": "Public Services",
