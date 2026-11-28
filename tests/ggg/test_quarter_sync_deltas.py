@@ -9,7 +9,7 @@ import world
 from api import assets, propagation, quarters, sweeps
 from core import op, sync_log
 from fake_chain import rejects
-from ggg import Codex, Event, LayeredCodex, Quarter, Realm, SyncChange, Zone
+from ggg import Codex, Event, LayeredCodex, Member, Quarter, Realm, SyncChange, Zone
 from ic_python_db import Entity
 from kit import call, ok
 from sites import Site
@@ -410,6 +410,34 @@ def test_a_quarter_asks_for_everything_in_its_first_sync_and_for_the_changes_aft
     north.catch_up()
     with north.here():
         assert "have" not in sent()[-1]
+
+
+def test_a_quarter_that_fills_reports_to_its_capital_at_once_and_only_once():
+    """Its capital's answer carries the mark (``scale_at``); members added past it have the quarter sync now, not at the
+    next catch-up up to an hour away, so the capital stops sending joiners there and can grow the next quarter. Once a
+    report said it is full, more members do not report again."""
+    capital_site, north = pair()
+    with capital_site.here():
+        Realm["1"].network = "test"  # a quarter takes 10 members: full at 9
+    north.catch_up()
+    with north.here():
+        assert Realm["1"].sync_state["scale_at"] == 9
+        fake_chain.state["timers"].clear()  # the next catch-up's
+        room = 9 - Member.count_by("status", "active")
+        ok("user_import", "ctl", users=[{"user": f"resident-{n}"} for n in range(room - 1)])
+        assert fake_chain.state["timers"] == []  # one short of full
+        ok("user_import", "ctl", users=[{"user": "resident-last"}])
+        ok("user_add", "ctl", user="resident-more")
+        assert [cb for _, cb in fake_chain.state["timers"]] == [quarters.report_full]  # one, however many are added
+        (_, report), = fake_chain.state["timers"]
+        fake_chain.state["timers"].clear()
+        op.run(report())
+        assert Realm["1"].sync_state["reported"] == Member.count_by("status", "active")
+    with capital_site.here():
+        assert Quarter["north"].population >= 9 and Realm["1"].scale_in_flight  # no quarter has room: it asks
+    with north.here():
+        ok("user_add", "ctl", user="resident-after")
+        assert quarters.report_full not in [cb for _, cb in fake_chain.state["timers"]]  # its last report said full
 
 
 def test_a_quarter_that_took_every_change_one_at_a_time_holds_what_one_that_took_them_all_at_once_does(monkeypatch):

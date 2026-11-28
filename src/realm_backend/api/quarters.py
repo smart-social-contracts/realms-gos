@@ -57,6 +57,8 @@ _catch_up = {"armed": False}
 # What a heap knows of its own syncs, not stored, so that it is gone with an upgrade: whether this quarter has synced since
 # it started (its first sync is a full one), and when it last did.
 _synced = {"since_start": False, "at": 0}
+# Whether this heap has armed a report of a quarter that just filled (``report_if_full``): one at a time.
+_full_report = {"armed": False}
 # On a capital, whether the next report has it check if a new quarter is wanted, whatever the quarter reports: it starts
 # true, and a change of the capacity or of auto-scaling (``quarter_configure``) sets it again.
 _scale = {"check": True}
@@ -112,6 +114,43 @@ def codex():
 
 def capital_codex():
     return (realm().sync_state or {}).get("codex", {}) if federated() else codex()
+
+
+def report_if_full():
+    """On a quarter, once members were added: when that makes it full by its capital's measure (``scale_at``, which each
+    sync answer carries) and its last report did not say so, sync with the capital now rather than at the next catch-up,
+    up to an hour away. Until then the capital keeps sending joiners here and does not grow the next quarter. Once a
+    report said it is full, more members do not report again: the catch-up carries them."""
+    if not federated() or _full_report["armed"]:
+        return
+    state = realm().sync_state or {}
+    at = int(state.get("scale_at") or 0)
+    if at and population() >= at > int(state.get("reported") or 0):
+        _full_report["armed"] = True
+        chain.set_timer(0, report_full)
+
+
+def report_full():
+    """The sync ``report_if_full`` asked for. A sync that fails is tried again by the next members added, or by the
+    catch-up; its error is kept as the catch-up's is."""
+    _full_report["armed"] = False
+    if not federated():
+        return
+    try:
+        yield from sync()
+        error = ""
+    except Exception as e:  # noqa: BLE001  a capital that is down or upgrading
+        error = str(e)[:300]
+    remember(catch_up_error=error)
+
+
+def joined():
+    """Members were added to this realm, by a join or by an import: a capital checks whether it needs another quarter,
+    a quarter whether it has just filled."""
+    if federated():
+        report_if_full()
+    else:
+        want_quarter()
 
 
 def drifting(version):
@@ -339,7 +378,8 @@ def apply_reply(reply):
         sweeps.keep(reply["sweep"])
     remember(codex=reply["codex"], index=index, compliance=flag, label=label,
              sync_every=reply.get("sync_every", SYNC_EVERY),
-             official_timezone=reply.get("official_timezone", ""))  # a capital on the previous release sends none
+             official_timezone=reply.get("official_timezone", ""),  # a capital on the previous release sends none
+             scale_at=reply.get("scale_at", 0))  # and none of this
 
 
 def apply_directory(reply, state):
@@ -872,7 +912,7 @@ def answer(q, have):
     from api import sweeps  # it imports this module
 
     reply = {"rev": sync_log.cursor(), "codex": propagation.in_force(), "index": q.index, "sync_every": sync_every(),
-             "official_timezone": realm().timezone}
+             "official_timezone": realm().timezone, "scale_at": scale_at(capacity())}
     changes = sync_log.since(have, reply["rev"])
     if changes is None:
         return {**reply, "directory": [flagged(me())] + [announced(q) for q in known()],
@@ -914,6 +954,7 @@ def sync():
     if "rev" in reply and not taken.get("images_error"):  # an image not read is asked for again: from the old cursor
         remember(rev=reply["rev"])
     _synced.update(since_start=True, at=chain.now())
+    remember(reported=request["population"])
     return reply
 
 

@@ -156,9 +156,7 @@ def realm_join(c, args):
         give(user, find(UserProfile, inv.profile))
         inv.uses, inv.redeemed_by = inv.uses + 1, inv.redeemed_by + [c.user]
     yield from codex.hook("on_user_register", {"user": c.user})
-    from api import quarters
-
-    quarters.want_quarter()
+    joined()
     return {"user": c.user, "status": Member[c.user].status, "profiles": [p.id for p in user.profiles]}
 
 
@@ -239,12 +237,12 @@ def user_import(c, args):
 
 
 def joined():
-    """Members were added here, as a join adds one: on a capital, the realm checks whether it needs another quarter.
-    An import that fills the capital would otherwise never ask for one, since only a join or a quarter's report
-    checks."""
+    """Members were added here, as a join adds one: a capital checks whether it needs another quarter, a quarter whether
+    it has just filled (``quarters.joined``). An import that filled the capital would otherwise never ask for one, since
+    only a join or a quarter's report checked."""
     from api import quarters  # it imports this module
 
-    quarters.want_quarter()
+    quarters.joined()
 
 
 @op("user.edit", check=check_choices, returns="user")
