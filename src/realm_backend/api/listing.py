@@ -10,10 +10,13 @@ publishes, and what that costs is bounded:
 - Never on a join. A realm publishes when it launches, when it is told a registry (``host_registry``, ``realm_register``),
   and from one timer that looks once a day (``DAY``) and calls a registry only if the figures it holds now differ from the
   ones that registry last took. A realm that has not changed makes no call, and a busy one makes one a day to each
-  registry. The call costs the realm a few million cycles, and the registry one update.
+  registry. The call costs the realm a few million cycles, and the registry one update. A look reads every zone the realm
+  defined, some 1.5 million instructions a zone.
 - Only what the registry takes: the name, the members, the stage and an https logo (the registry refuses any other, and the
   realm keeps its images as data URLs). ``last_activity_at`` is the time of the last change in those figures, never the
   clock's, so it is not one of the figures that are compared.
+- The zones the realm defined, which put it on the registry's globe: each one's h3 cell and name, never a member's home
+  cell and never how many live in a zone (``zones``).
 - A quarter publishes nothing: its capital is the listing, with the members of every quarter.
 - A registry that refuses, or does not answer, is told again at the next look, and what it said is kept in
   ``manifest_data["listing"]``.
@@ -21,8 +24,8 @@ publishes, and what that costs is bounded:
 
 import json
 
-from api import quarters
-from core import chain
+from api import assets, quarters
+from core import chain, sandbox
 from core.db import Fail, page
 from core.op import op
 from ggg import Proposal, Realm, Registry, Vote
@@ -30,7 +33,9 @@ from ggg import Proposal, Realm, Registry, Vote
 DAY = 86400
 FIRST = 120  # seconds from the start of the canister to its first look; its id adds up to SPREAD, so that realms do not call together
 SPREAD = 600
-NAME_MAX, LOGO_MAX = 128, 512  # the longest a registry takes
+NAME_MAX, LOGO_MAX, ZONE_NAME_MAX = 128, 512, 80  # the longest a registry takes
+ZONES_MAX = 1000  # the most zones a registry takes: it refuses a listing with more
+HEX = frozenset("0123456789abcdef")
 MAX_REGISTRIES = 10
 KEY = "listing"
 # Whether this heap has armed the look. Timers do not survive an upgrade, which empties the heap too.
@@ -51,11 +56,31 @@ def realm_numbers(c, args):
 def figures():
     """What the realm shows a registry of itself; the registry keeps what is left out."""
     realm = Realm["1"]
-    shown = {"name": (realm.name or "")[:NAME_MAX], "users_count": members(), "stage": realm.status}
+    shown = {"name": (realm.name or "")[:NAME_MAX], "users_count": members(), "stage": realm.status, "zones": zones()}
     logo = realm.logo_url or ""
     if logo.startswith("https://") and len(logo) <= LOGO_MAX:
         shown["logo"] = logo
     return shown
+
+
+def zones():
+    """The zones the realm defined, as the registry's globe paints them: each one's h3 cell and name. No count of who
+    lives in a zone, since a small count singles out a person (``quarters.zones_of``), and never a member's home cell,
+    which is personal. Only ids the registry takes as h3 cells, and no more zones than it takes: it refuses the whole
+    listing for one it does not."""
+    cells = sorted((z for z in assets.defined_zones() if is_h3(z.id)), key=lambda z: z.id)
+    return [{"h3_index": z.id, "name": (z.name or "")[:ZONE_NAME_MAX]} for z in cells[:ZONES_MAX]]
+
+
+def is_h3(zone_id):
+    """Whether the registry takes ``zone_id`` as an h3 cell: 15 or 16 hex digits, in either case."""
+    return 15 <= len(zone_id) <= 16 and set(zone_id.lower()) <= HEX
+
+
+def kept_as(shown):
+    """What the realm keeps of the figures it sent, to compare with the next: the zones as their checksum, since a
+    thousand of them would fill the realm's ``manifest_data``, where it keeps them."""
+    return {**shown, "zones": sandbox.sha256(json.dumps(shown["zones"], sort_keys=True))}
 
 
 def listed():
@@ -83,8 +108,9 @@ def publish():
     if not listed():
         return
     shown = figures()
+    held = kept_as(shown)
     for registry in registries():
-        if kept().get(registry, {}).get("sent") == shown:
+        if kept().get(registry, {}).get("sent") == held:
             continue
         try:
             reply = yield from chain.call_text(registry, "listing_publish",
@@ -93,7 +119,7 @@ def publish():
             error = "" if said.get("success") else str(said.get("error"))[:300]
         except Exception as e:  # noqa: BLE001  a registry that is down, or has no such method: the next look tells it again
             error = str(e)[:300]
-        keep(registry, at=chain.now(), error=error, **({} if error else {"sent": shown}))
+        keep(registry, at=chain.now(), error=error, **({} if error else {"sent": held}))
 
 
 def publish_soon():

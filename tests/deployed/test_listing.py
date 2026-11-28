@@ -16,6 +16,7 @@ from pic import Canister
 
 DAY = 86400
 LOOK = 800  # seconds: more than the first look takes after a start (api.listing.FIRST + SPREAD)
+HILLSIDE, RIVERSIDE = "881f1d4881fffff", "881f1d4887fffff"  # h3 cells of resolution 8
 
 
 def ok(realm, op, who, query=False, **args):
@@ -36,14 +37,16 @@ def listed(registry):
 
 @pytest.fixture(scope="module")
 def realm(wasm_of, people):
-    """A launched realm of three members, and the registry that lists it, which it has not been told of yet."""
+    """A launched realm of three members with one zone, where alice lives, and the registry that lists it, which it has
+    not been told of yet."""
     realm = Canister(wasm_of("production"), installer=people["installer"])
     founder = people["founder"]
     ok(realm, "setup_step", people["installer"], step="install", network="local", founder=founder)
     ok(realm, "setup_step", founder, step="realm", name="Agora", open_registration=True)
+    ok(realm, "zone_define", founder, zone=HILLSIDE, name="Hillside", kind="district")
     ok(realm, "setup_launch", founder)
-    for member in ("alice", "bob"):
-        ok(realm, "realm_join", people[member])
+    ok(realm, "realm_join", people["alice"], home_zone=HILLSIDE)
+    ok(realm, "realm_join", people["bob"])
     realm.registry = SimpleNamespace(pic=realm.pic, id=mock_registry.install(realm.pic))
     return realm
 
@@ -55,6 +58,7 @@ def test_a_launched_realm_told_its_registry_publishes_what_it_holds_at_once(real
     assert calls == 1
     assert {k: sent[k] for k in ("name", "users_count", "stage")} == {"name": "Agora", "users_count": 3, "stage": "alpha"}
     assert "logo" not in sent  # the realm has none, or one that is not an https URL
+    assert sent["zones"] == [{"h3_index": HILLSIDE, "name": "Hillside"}]  # and not that alice lives there
 
 
 def test_a_realm_that_does_not_change_calls_nobody_for_a_week(realm):
@@ -110,9 +114,29 @@ def test_a_registry_that_is_not_one_is_survived_and_tried_again(realm, people, n
     assert listed(realm.registry)[0] == 3
 
 
+def test_a_zone_defined_after_the_launch_reaches_the_registry_at_the_next_daily_look(realm):
+    """What the realm compares its zones by is their checksum, which the canister takes with its own sha256: the
+    interpreter's stdlib has no hashlib."""
+    out = realm.shell(f"from api import assets\nassets.define_zone({RIVERSIDE!r}, 'Riverside', 'district')\nprint('defined')")
+    assert "defined" in out, out
+    realm.wait(DAY)
+    calls, sent = listed(realm.registry)
+    assert (calls, [z["h3_index"] for z in sent["zones"]]) == (4, [HILLSIDE, RIVERSIDE])
+    realm.wait(DAY)
+    assert listed(realm.registry)[0] == 4
+
+
 def test_a_daily_look_with_nothing_to_say_costs_little(realm, costs):
     """What every realm pays every day when nothing changed: its figures (the members of every quarter, the stage, the
-    name), which it compares with what each registry took. The call itself is left out: a shell makes none."""
-    spent = costs.measure(realm, "listing: the figures of a daily look that makes no call",
-                          "from api import listing\nlisting.figures()\nlisting.registries()\nlisting.kept()")
+    name, the zones), which it compares with what each registry took. The call itself is left out: a shell makes none."""
+    look = "from api import listing\nlisting.kept_as(listing.figures())\nlisting.registries()\nlisting.kept()"
+    spent = costs.measure(realm, "listing: the figures of a daily look that makes no call", look)
     assert spent < 50_000_000
+    for first in range(0, 1000, 250):  # as many zones as a registry takes, defined a batch per message
+        out = realm.shell("from api import assets\n"
+                          f"for n in range({first}, {first + 250}):\n"
+                          "    assets.define_zone(f'89{n:013x}', f'Zone {n}', 'district')\n"
+                          "print('defined')")
+        assert "defined" in out, out
+    spent = costs.measure(realm, "listing: the figures of a daily look that makes no call, 1000 zones", look)
+    assert spent < 2_000_000_000  # 1.5 billion on 28 Nov 2026: reading the rows, some 1.5 million a zone
