@@ -454,6 +454,36 @@ def test_the_members_vote_the_realms_own_proposal_and_casals_is_asked():
     assert ok("scale_status", fake_chain.ANONYMOUS)["pending"]["member"] == "agora-quarter-2"
 
 
+def quarter_proposals():
+    return [(p.id, p.status) for p in rows(Proposal) if (p.action or {}).get("op") == "quarter_add"]
+
+
+def test_a_quarter_the_members_turn_down_is_asked_for_again_at_the_next_check():
+    """The realm asks for one quarter at a time. Until 28 Nov 2026 it then stayed "in flight" for good once its own
+    quarter_add closed without running, rejected, expired or failed: one vote against a quarter ended auto-scale (a
+    local mundus' swarm voted the first one down). Now the next check after such a close asks again."""
+    on_casals("north")
+    r = Realm["1"]
+    r.network, r.auto_scale_enabled = "test", True
+    ok("governance_update", "ctl", voting_window=0)
+    ok("quarter_report", "north", population=9)
+    ok("quarter_report", "north", population=10)
+    [(first, status)] = quarter_proposals()
+    assert status == "voting"  # still open: a second report asks for none
+    for voter in ("alice", "bob", "carla", "dana"):
+        ok("proposal_vote", voter, proposal=first, choice="no")
+    assert quarter_proposals() == [(first, "rejected")]
+    ok("quarter_report", "north", population=10)
+    second = quarter_proposals()[-1][0]
+    assert second != first and ok("scale_status", fake_chain.ANONYMOUS)["in_flight"]
+    fake_chain.state["replies"][(CONDUCTOR, "stand_grow")] = json.dumps({"ok": False, "error": "no cycles"})
+    for voter in ("alice", "bob", "carla", "dana"):
+        ok("proposal_vote", voter, proposal=second, choice="yes")
+    assert quarter_proposals()[-1] == (second, "failed")  # Casals refused: no quarter is coming
+    ok("quarter_report", "north", population=10)
+    assert len(quarter_proposals()) == 3 and quarter_proposals()[-1][1] == "voting"
+
+
 def test_a_join_that_fills_the_capital_makes_the_realm_propose_a_quarter():
     on_casals()
     r = Realm["1"]

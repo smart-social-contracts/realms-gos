@@ -8,7 +8,7 @@ from core import sandbox, sync_log
 from api import assets, proposals
 from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, page, put, view
 from core.ic_keys import TEST_NETWORKS
-from ggg import Forward, GuestUser, LayeredCodex, Member, Quarter, Realm, User, UserProfile, Zone
+from ggg import Forward, GuestUser, LayeredCodex, Member, Proposal, Quarter, Realm, User, UserProfile, Zone
 from api import codex as runtime
 from core.op import filing, op, run
 from core.pending import quoted
@@ -252,7 +252,8 @@ def scale():
     at = scale_at(n)
     return {"populations": pops, "capacity": n, "scale_at": at, "enabled": r.auto_scale_enabled,
             "wanted": r.auto_scale_enabled and emptiest_open() >= at,
-            "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at, "pending": pending()}
+            "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at, "pending": pending(),
+            "request": scaling().get("request")}
 
 
 def ask(cid, name, payload):
@@ -356,11 +357,28 @@ def want_quarter():
     empty, and a realm kept growing quarters nobody was sent to."""
     _scale["check"] = False
     r = realm()
+    if r.scale_in_flight and not pending() and not asking():
+        r.scale_in_flight = False  # its proposal closed and brought no quarter: ask again if none has room
     if federated() or r.scale_in_flight or not r.auto_scale_enabled:
         return
     if emptiest_open() >= scale_at(capacity()):
         r.scale_in_flight, r.scale_requested_at = True, chain.now()
-        proposals.file_replay(filing("quarter_add", {}, proposals.root()), chain.self_id(), chain.self_id())
+        filed = proposals.file_replay(filing("quarter_add", {}, proposals.root()), chain.self_id(), chain.self_id())
+        set_scaling("request", filed["proposal"])
+
+
+OPEN = ("draft", "voting", "accepted", "execution_scheduled")
+
+
+def asking():
+    """Whether the quarter_add the realm filed for its next quarter may still bring one: it is open, or accepted and
+    not yet run. One that closed without running it (rejected, expired, failed, withdrawn) brings none, nor does one
+    that ran (Casals' build is then ``pending``). Until 28 Nov 2026 ``scale_in_flight`` stayed set after such a close,
+    and a realm whose members turned down one quarter never asked for another. A realm that filed before then kept no
+    proposal id: it asks again too."""
+    asked = scaling().get("request")
+    p = Proposal[asked] if asked else None
+    return p is not None and p.status in OPEN
 
 
 def apply_reply(reply):
@@ -454,14 +472,22 @@ def casals():
 
 
 def pending():
-    return ((realm().manifest_data or {}).get("scaling") or {}).get("pending")
+    return scaling().get("pending")
+
+
+def scaling():
+    return (realm().manifest_data or {}).get("scaling") or {}
+
+
+def set_scaling(key, value):
+    r = realm()
+    data = r.manifest_data or {}
+    data["scaling"] = {**(data.get("scaling") or {}), key: value}
+    r.manifest_data = data
 
 
 def set_pending(value):
-    r = realm()
-    data = r.manifest_data or {}
-    data["scaling"] = {**data.get("scaling", {}), "pending": value}
-    r.manifest_data = data
+    set_scaling("pending", value)
 
 
 @op("quarter.register", governed=proposals.realm_wide, returns="member")
