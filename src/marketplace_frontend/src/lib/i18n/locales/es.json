@@ -21,6 +21,15 @@
     "contact": "Contacto",
     "build": "Realms GOS {version} ({commit})"
   },
+  "demo_notice": {
+    "title": "Demo con datos simulados.",
+    "body": "Aquí València es una ciudad simulada, no un servicio del Ayuntamiento de València. Los importes en EUR y todos los tokens son dinero de juego sin valor. Todo lo que introduzcas es público y se borra en el próximo reinicio. Por favor, no introduzcas datos personales reales.",
+    "privacy": "Privacidad",
+    "terms": "Condiciones",
+    "report": "Denunciar contenido",
+    "collapse": "Ocultar detalles",
+    "expand": "Mostrar detalles"
+  },
   "kind": {
     "extensions": "Extensiones",
     "codices": "Códices",
