@@ -30,12 +30,8 @@
     "",
     "Core/system extensions are not listed: they are never sandboxed by design."
   ],
-  "exempt": {
-    "demo_simulator": "_cdk, core, ggg"
-  },
-  "tracking_issues": {
-    "demo_simulator": 270
-  },
+  "exempt": {},
+  "tracking_issues": {},
   "_async_bridge_issue": 279,
   "_promoted_to_core": {
     "_comment": [
