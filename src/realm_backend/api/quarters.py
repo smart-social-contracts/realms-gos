@@ -212,7 +212,7 @@ def scale():
     pops = {row["id"]: row["population"] for row in directory()}
     at = scale_at(n)
     return {"populations": pops, "capacity": n, "scale_at": at, "enabled": r.auto_scale_enabled,
-            "wanted": r.auto_scale_enabled and max(pops.values()) >= at,
+            "wanted": r.auto_scale_enabled and emptiest_open() >= at,
             "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at, "pending": pending()}
 
 
@@ -293,9 +293,14 @@ def held_zone(zone_id):
     return z is not None and z.defined
 
 
-def fullest():
-    """The population of the fullest quarter, this realm's own and each one's last report."""
-    return max([population()] + [q.population for q in known()])
+def emptiest_open():
+    """The population of the quarter joiners are sent to: the least populated active quarter, the capital only until
+    sub-quarters exist (``join_targets``), counting one still being set up, which takes joiners once it is active. Once
+    it is full, no quarter has room, and that is when the realm needs another. A quarter that is full while another has
+    room needs none: the next joiners go to the one with room."""
+    rows = [q for q in directory() if q["status"] in ("active", "setup")]
+    pool = [q for q in rows if not q["capital"]] or rows
+    return min(q["population"] for q in pool) if pool else 0
 
 
 def scale_at(n):
@@ -304,16 +309,17 @@ def scale_at(n):
 
 
 def want_quarter():
-    """On the capital, once its fullest quarter is full: the realm proposes its next quarter itself and the members
-    decide (quarter_add). Checked when a member joins the capital, whenever a quarter or the capital reports itself full (a
-    full quarter that is still there once the next is built asks for another at its next report), and when what decides it
-    changes (``_scale``). A report of less than full, with the capital not full, cannot make another quarter full, so it does
-    not have the capital read every quarter."""
+    """On the capital, once no quarter has room (``emptiest_open`` is full): the realm proposes its next quarter itself
+    and the members decide (quarter_add). Checked when a member joins or is added to the capital, whenever a quarter or
+    the capital reports itself full, and when what decides it changes (``_scale``). A report of less than full, with the
+    capital not full, cannot make every quarter full, so it does not have the capital read every quarter. Until
+    28 Nov 2026 the fullest quarter decided, so a full quarter asked for another at each report while a new one stood
+    empty, and a realm kept growing quarters nobody was sent to."""
     _scale["check"] = False
     r = realm()
     if federated() or r.scale_in_flight or not r.auto_scale_enabled:
         return
-    if fullest() >= scale_at(capacity()):
+    if emptiest_open() >= scale_at(capacity()):
         r.scale_in_flight, r.scale_requested_at = True, chain.now()
         proposals.file_replay(filing("quarter_add", {}, proposals.root()), chain.self_id(), chain.self_id())
 

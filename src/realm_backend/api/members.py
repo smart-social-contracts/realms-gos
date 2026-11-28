@@ -220,6 +220,7 @@ def user_add(c, args):
     if User[args["user"]]:
         raise Conflict(f"{args['user']} is already a user")
     enroll(args["user"], args.get("nickname", ""))
+    joined()
     return {"user": args["user"]}
 
 
@@ -233,7 +234,17 @@ def user_import(c, args):
         raise Conflict(f"already known or repeated: {', '.join(taken)}")
     for u in args["users"]:
         enroll(u["user"], u.get("nickname", ""))
+    joined()
     return {"added": len(ids)}
+
+
+def joined():
+    """Members were added here, as a join adds one: on a capital, the realm checks whether it needs another quarter.
+    An import that fills the capital would otherwise never ask for one, since only a join or a quarter's report
+    checks."""
+    from api import quarters  # it imports this module
+
+    quarters.want_quarter()
 
 
 @op("user.edit", check=check_choices, returns="user")

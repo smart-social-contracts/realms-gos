@@ -315,7 +315,7 @@ def scaling_capital(*names):
 def test_a_report_of_less_than_full_does_not_have_the_capital_read_every_quarter(monkeypatch):
     scaling_capital("north", "south")
     read = []
-    monkeypatch.setattr(quarters, "fullest", lambda: read.append(1) or 0)
+    monkeypatch.setattr(quarters, "emptiest_open", lambda: read.append(1) or 0)
     assert not quarters._scale["check"]  # what an earlier report had to look at, it has looked at
     ok("quarter_report", "north", population=8)
     assert read == []
@@ -323,34 +323,42 @@ def test_a_report_of_less_than_full_does_not_have_the_capital_read_every_quarter
     assert read == [1]
 
 
-def test_a_full_quarter_asks_for_another_at_each_report_once_the_one_before_is_registered():
+def test_a_full_quarter_asks_for_no_other_while_the_one_before_has_room():
+    """Joiners go to the least populated quarter, so a full one beside a quarter with room needs no new quarter: until
+    28 Nov 2026 it asked for one at each report, and a realm grew quarters nobody was sent to. Once the newer quarter
+    is full too, no quarter has room, and the realm asks again."""
     scaling_capital("north")
     ok("quarter_report", "north", population=9)
     assert Realm["1"].scale_in_flight
     ok("quarter_register", "ctl", quarter="east")
     assert not Realm["1"].scale_in_flight
-    ok("quarter_report", "north", population=9)  # nothing changed, and north is still full
+    ok("quarter_report", "north", population=9)  # north is still full, but east, still being set up, has room
+    assert not Realm["1"].scale_in_flight
+    ok("quarter_report", "east", population=4)
+    ok("quarter_report", "north", population=9)
+    assert not Realm["1"].scale_in_flight
+    ok("quarter_report", "east", population=9)  # now no quarter has room
     assert Realm["1"].scale_in_flight
 
 
-def test_a_capital_that_is_full_itself_has_the_next_report_of_a_quarter_check():
+def test_a_capital_that_is_full_itself_asks_for_no_quarter_while_a_quarter_has_room():
+    """Once sub-quarters exist the capital takes no joins (``join_targets``), so its own members do not decide: until
+    28 Nov 2026 a full capital beside an empty quarter asked for another quarter at each report."""
     scaling_capital("north")
     ok("quarter_configure", "ctl", capacity=5)  # the capital's own members are more than that
     ok("quarter_report", "north", population=0)
-    assert Realm["1"].scale_in_flight
-    ok("quarter_register", "ctl", quarter="east")
     assert not Realm["1"].scale_in_flight
-    ok("quarter_report", "north", population=0)  # nothing changed, and the capital is still full
+    ok("quarter_report", "north", population=5)  # the quarter joiners go to is full: no quarter has room
     assert Realm["1"].scale_in_flight
 
 
-def test_a_change_of_the_capacity_has_the_next_report_check_whatever_it_reports():
+def test_a_lower_capacity_that_leaves_no_quarter_with_room_makes_the_next_report_ask_for_one():
     scaling_capital("north", "south")
     ok("quarter_report", "south", population=8)
-    ok("quarter_report", "north", population=1)
-    assert not Realm["1"].scale_in_flight
-    ok("quarter_configure", "ctl", capacity=8)  # south is full now
-    ok("quarter_report", "north", population=1)
+    ok("quarter_report", "north", population=8)
+    assert not Realm["1"].scale_in_flight  # 8 of 10 each: both have room
+    ok("quarter_configure", "ctl", capacity=8)  # now neither has
+    ok("quarter_report", "north", population=8)
     assert Realm["1"].scale_in_flight
 
 

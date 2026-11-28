@@ -461,3 +461,17 @@ def test_a_join_that_fills_the_capital_makes_the_realm_propose_a_quarter():
     for n in range(9 - Member.count_by("status", "active")):
         ok("realm_join", f"newcomer-{n}")
     assert [p.action["op"] for p in rows(Proposal) if p.action] == ["quarter_add"]
+
+
+def test_members_imported_into_a_full_capital_make_the_realm_propose_a_quarter():
+    """user_import and user_add add members as a join does, so an import that fills the capital asks for a quarter
+    too; one that leaves room does not."""
+    on_casals()
+    r = Realm["1"]
+    r.network, r.auto_scale_enabled = "test", True
+    room = 9 - Member.count_by("status", "active")
+    ok("user_import", "ctl", users=[{"user": f"imported-{n}"} for n in range(room - 2)])
+    ok("user_add", "ctl", user="added-0")
+    assert not [p for p in rows(Proposal) if (p.action or {}).get("op") == "quarter_add"]
+    ok("user_import", "ctl", users=[{"user": "imported-last"}])
+    assert [p.action["op"] for p in rows(Proposal) if p.action] == ["quarter_add"]
