@@ -156,9 +156,7 @@ def realm_join(c, args):
         give(user, find(UserProfile, inv.profile))
         inv.uses, inv.redeemed_by = inv.uses + 1, inv.redeemed_by + [c.user]
     yield from codex.hook("on_user_register", {"user": c.user})
-    from api import quarters
-
-    quarters.want_quarter()
+    joined()
     return {"user": c.user, "status": Member[c.user].status, "profiles": [p.id for p in user.profiles]}
 
 
@@ -220,6 +218,7 @@ def user_add(c, args):
     if User[args["user"]]:
         raise Conflict(f"{args['user']} is already a user")
     enroll(args["user"], args.get("nickname", ""))
+    joined()
     return {"user": args["user"]}
 
 
@@ -233,7 +232,17 @@ def user_import(c, args):
         raise Conflict(f"already known or repeated: {', '.join(taken)}")
     for u in args["users"]:
         enroll(u["user"], u.get("nickname", ""))
+    joined()
     return {"added": len(ids)}
+
+
+def joined():
+    """Members were added here, as a join adds one: a capital checks whether it needs another quarter, a quarter whether
+    it has just filled (``quarters.joined``). An import that filled the capital would otherwise never ask for one, since
+    only a join or a quarter's report checked."""
+    from api import quarters  # it imports this module
+
+    quarters.joined()
 
 
 @op("user.edit", check=check_choices, returns="user")

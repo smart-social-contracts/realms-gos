@@ -6,9 +6,9 @@ from core import chain
 from core import compliance
 from core import sandbox, sync_log
 from api import assets, proposals
-from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, put, view
+from core.db import Conflict, Fail, Forbidden, Unavailable, each, find, next_id, page, put, view
 from core.ic_keys import TEST_NETWORKS
-from ggg import Forward, GuestUser, LayeredCodex, Member, Quarter, Realm, User, UserProfile, Zone
+from ggg import Forward, GuestUser, LayeredCodex, Member, Proposal, Quarter, Realm, User, UserProfile, Zone
 from api import codex as runtime
 from core.op import filing, op, run
 from core.pending import quoted
@@ -34,7 +34,10 @@ POPULATION_STEP = 100  # a quarter's population is told when it has moved by one
 # Seconds between looks at the conductor while Casals builds a quarter quarter_add asked for.
 ADOPT_EVERY = 60
 # What adopt() does for a quarter Casals has built, in order.
-ADOPTION = ("join", "configure", "register", "sync", "launch")
+ADOPTION = ("join", "configure", "register", "sync", "furnish", "launch")
+# The canisters a quarter installs code from, which ``furnish`` gives it from its capital's own settings. The others of
+# realm_configure_infrastructure (frontend, installer, baton, conductor, stand) are the quarter's own.
+FURNISHED_INFRASTRUCTURE = ("file_registry_canister_id", "marketplace_canister_id")
 # A quarter's own settings that the realm may also set for it by a realm-wide vote (quarter_configure). The capital
 # sends them to the quarter in a federation_message of this topic, which only the capital's quarter_configure sends. A
 # new quarter starts from its capital's where it still has the default, which means not yet chosen.
@@ -54,6 +57,8 @@ _catch_up = {"armed": False}
 # What a heap knows of its own syncs, not stored, so that it is gone with an upgrade: whether this quarter has synced since
 # it started (its first sync is a full one), and when it last did.
 _synced = {"since_start": False, "at": 0}
+# Whether this heap has armed a report of a quarter that just filled (``report_if_full``): one at a time.
+_full_report = {"armed": False}
 # On a capital, whether the next report has it check if a new quarter is wanted, whatever the quarter reports: it starts
 # true, and a change of the capacity or of auto-scaling (``quarter_configure``) sets it again.
 _scale = {"check": True}
@@ -109,6 +114,43 @@ def codex():
 
 def capital_codex():
     return (realm().sync_state or {}).get("codex", {}) if federated() else codex()
+
+
+def report_if_full():
+    """On a quarter, once members were added: when that makes it full by its capital's measure (``scale_at``, which each
+    sync answer carries) and its last report did not say so, sync with the capital now rather than at the next catch-up,
+    up to an hour away. Until then the capital keeps sending joiners here and does not grow the next quarter. Once a
+    report said it is full, more members do not report again: the catch-up carries them."""
+    if not federated() or _full_report["armed"]:
+        return
+    state = realm().sync_state or {}
+    at = int(state.get("scale_at") or 0)
+    if at and population() >= at > int(state.get("reported") or 0):
+        _full_report["armed"] = True
+        chain.set_timer(0, report_full)
+
+
+def report_full():
+    """The sync ``report_if_full`` asked for. A sync that fails is tried again by the next members added, or by the
+    catch-up; its error is kept as the catch-up's is."""
+    _full_report["armed"] = False
+    if not federated():
+        return
+    try:
+        yield from sync()
+        error = ""
+    except Exception as e:  # noqa: BLE001  a capital that is down or upgrading
+        error = str(e)[:300]
+    remember(catch_up_error=error)
+
+
+def joined():
+    """Members were added to this realm, by a join or by an import: a capital checks whether it needs another quarter,
+    a quarter whether it has just filled."""
+    if federated():
+        report_if_full()
+    else:
+        want_quarter()
 
 
 def drifting(version):
@@ -209,8 +251,9 @@ def scale():
     pops = {row["id"]: row["population"] for row in directory()}
     at = scale_at(n)
     return {"populations": pops, "capacity": n, "scale_at": at, "enabled": r.auto_scale_enabled,
-            "wanted": r.auto_scale_enabled and max(pops.values()) >= at,
-            "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at, "pending": pending()}
+            "wanted": r.auto_scale_enabled and emptiest_open() >= at,
+            "in_flight": r.scale_in_flight, "requested_at": r.scale_requested_at, "pending": pending(),
+            "request": scaling().get("request")}
 
 
 def ask(cid, name, payload):
@@ -290,9 +333,14 @@ def held_zone(zone_id):
     return z is not None and z.defined
 
 
-def fullest():
-    """The population of the fullest quarter, this realm's own and each one's last report."""
-    return max([population()] + [q.population for q in known()])
+def emptiest_open():
+    """The population of the quarter joiners are sent to: the least populated active quarter, the capital only until
+    sub-quarters exist (``join_targets``), counting one still being set up, which takes joiners once it is active. Once
+    it is full, no quarter has room, and that is when the realm needs another. A quarter that is full while another has
+    room needs none: the next joiners go to the one with room."""
+    rows = [q for q in directory() if q["status"] in ("active", "setup")]
+    pool = [q for q in rows if not q["capital"]] or rows
+    return min(q["population"] for q in pool) if pool else 0
 
 
 def scale_at(n):
@@ -301,18 +349,36 @@ def scale_at(n):
 
 
 def want_quarter():
-    """On the capital, once its fullest quarter is full: the realm proposes its next quarter itself and the members
-    decide (quarter_add). Checked when a member joins the capital, whenever a quarter or the capital reports itself full (a
-    full quarter that is still there once the next is built asks for another at its next report), and when what decides it
-    changes (``_scale``). A report of less than full, with the capital not full, cannot make another quarter full, so it does
-    not have the capital read every quarter."""
+    """On the capital, once no quarter has room (``emptiest_open`` is full): the realm proposes its next quarter itself
+    and the members decide (quarter_add). Checked when a member joins or is added to the capital, whenever a quarter or
+    the capital reports itself full, and when what decides it changes (``_scale``). A report of less than full, with the
+    capital not full, cannot make every quarter full, so it does not have the capital read every quarter. Until
+    28 Nov 2026 the fullest quarter decided, so a full quarter asked for another at each report while a new one stood
+    empty, and a realm kept growing quarters nobody was sent to."""
     _scale["check"] = False
     r = realm()
+    if r.scale_in_flight and not pending() and not asking():
+        r.scale_in_flight = False  # its proposal closed and brought no quarter: ask again if none has room
     if federated() or r.scale_in_flight or not r.auto_scale_enabled:
         return
-    if fullest() >= scale_at(capacity()):
+    if emptiest_open() >= scale_at(capacity()):
         r.scale_in_flight, r.scale_requested_at = True, chain.now()
-        proposals.file_replay(filing("quarter_add", {}, proposals.root()), chain.self_id(), chain.self_id())
+        filed = proposals.file_replay(filing("quarter_add", {}, proposals.root()), chain.self_id(), chain.self_id())
+        set_scaling("request", filed["proposal"])
+
+
+OPEN = ("draft", "voting", "accepted", "execution_scheduled")
+
+
+def asking():
+    """Whether the quarter_add the realm filed for its next quarter may still bring one: it is open, or accepted and
+    not yet run. One that closed without running it (rejected, expired, failed, withdrawn) brings none, nor does one
+    that ran (Casals' build is then ``pending``). Until 28 Nov 2026 ``scale_in_flight`` stayed set after such a close,
+    and a realm whose members turned down one quarter never asked for another. A realm that filed before then kept no
+    proposal id: it asks again too."""
+    asked = scaling().get("request")
+    p = Proposal[asked] if asked else None
+    return p is not None and p.status in OPEN
 
 
 def apply_reply(reply):
@@ -330,7 +396,8 @@ def apply_reply(reply):
         sweeps.keep(reply["sweep"])
     remember(codex=reply["codex"], index=index, compliance=flag, label=label,
              sync_every=reply.get("sync_every", SYNC_EVERY),
-             official_timezone=reply.get("official_timezone", ""))  # a capital on the previous release sends none
+             official_timezone=reply.get("official_timezone", ""),  # a capital on the previous release sends none
+             scale_at=reply.get("scale_at", 0))  # and none of this
 
 
 def apply_directory(reply, state):
@@ -405,14 +472,22 @@ def casals():
 
 
 def pending():
-    return ((realm().manifest_data or {}).get("scaling") or {}).get("pending")
+    return scaling().get("pending")
+
+
+def scaling():
+    return (realm().manifest_data or {}).get("scaling") or {}
+
+
+def set_scaling(key, value):
+    r = realm()
+    data = r.manifest_data or {}
+    data["scaling"] = {**(data.get("scaling") or {}), key: value}
+    r.manifest_data = data
 
 
 def set_pending(value):
-    r = realm()
-    data = r.manifest_data or {}
-    data["scaling"] = {**data.get("scaling", {}), "pending": value}
-    r.manifest_data = data
+    set_scaling("pending", value)
 
 
 @op("quarter.register", governed=proposals.realm_wide, returns="member")
@@ -480,7 +555,10 @@ def adoption_step(step, cid, name):
         if not Quarter[cid]:
             register(cid, name)
         return
-    registration = {"step": "realm", "open_registration": bool(realm().open_registration)}
+    if step == "furnish":
+        yield from furnish(cid)
+        return
+    registration ={"step": "realm", "open_registration": bool(realm().open_registration)}
     operation, args = {"join": ("quarter_join_federation", {"capital": chain.self_id()}),
                        "configure": ("setup_step", registration),
                        "sync": ("quarter_sync", {}),
@@ -488,6 +566,43 @@ def adoption_step(step, cid, name):
     reply = json.loads((yield from chain.call_op(cid, operation, args)) or "{}")
     if not reply.get("ok") and not (step == "join" and "already belongs" in str(reply.get("error"))):
         raise Fail(f"{cid} did not {step}: {reply.get('error')}")
+
+
+def furnish(cid):
+    """Give the quarter ``cid`` what its capital has and no other step of ``adopt`` gives it: the file registry and
+    marketplace it installs code from, the capital's trust policy, and every extension the capital has installed, at the
+    capital's version. Without it the quarter's members see none of the realm's screens. It runs before the quarter
+    launches, while its root department still decides alone, so that each call runs at once instead of becoming a
+    proposal in a quarter that has no members yet. An extension the quarter already has at that version is left as it
+    is, so a retried step installs only what is missing. A generator."""
+    from ggg import Extension
+
+    r = realm()
+    infrastructure = {k: getattr(r, k) for k in FURNISHED_INFRASTRUCTURE if getattr(r, k, "")}
+    trust = {"require_marketplace_approval": bool(r.require_marketplace_approval),
+             "trusted_approvers": list(r.trusted_approvers or []),
+             "trusted_principals": list(r.trusted_principals or [])}
+    for operation, args in (("realm_configure_infrastructure", infrastructure),
+                            ("realm_configure_trust_policy", trust)):
+        if args:
+            yield from furnished(cid, operation, args)
+    listed = yield from furnished(cid, "extension_list", {"count": 500})
+    has = {e["id"]: e.get("version") for e in listed.get("extensions") or []}
+    start = 1
+    while start is not None:
+        rows, start = page(Extension, {"from": start, "count": 500})
+        for e in rows:
+            if e.status == "installed" and e.version and has.get(e.id) != e.version:
+                yield from furnished(cid, "extension_install", {"extension": e.id, "version": e.version})
+
+
+def furnished(cid, operation, args):
+    """Run ``operation`` on the quarter ``cid`` for ``furnish``; it fails unless the quarter says it is done, and a call
+    the quarter filed as a proposal is not done. A generator that returns the reply."""
+    reply = json.loads((yield from chain.call_op(cid, operation, args)) or "{}")
+    if not reply.get("ok") or reply.get("requires_vote"):
+        raise Fail(f"{cid} did not furnish {operation}: {reply.get('error') or reply}")
+    return reply
 
 
 def resume():
@@ -823,7 +938,7 @@ def answer(q, have):
     from api import sweeps  # it imports this module
 
     reply = {"rev": sync_log.cursor(), "codex": propagation.in_force(), "index": q.index, "sync_every": sync_every(),
-             "official_timezone": realm().timezone}
+             "official_timezone": realm().timezone, "scale_at": scale_at(capacity())}
     changes = sync_log.since(have, reply["rev"])
     if changes is None:
         return {**reply, "directory": [flagged(me())] + [announced(q) for q in known()],
@@ -865,6 +980,7 @@ def sync():
     if "rev" in reply and not taken.get("images_error"):  # an image not read is asked for again: from the old cursor
         remember(rev=reply["rev"])
     _synced.update(since_start=True, at=chain.now())
+    remember(reported=request["population"])
     return reply
 
 

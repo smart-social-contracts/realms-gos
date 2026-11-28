@@ -5,7 +5,7 @@ import fake_chain
 from api import quarters
 from core.ratio import ONE
 import world
-from ggg import Codex, Department, Forward, GuestUser, Member, Proposal, Quarter, Realm, User, Zone
+from ggg import Codex, Department, Extension, Forward, GuestUser, Member, Proposal, Quarter, Realm, User, Zone
 from kit import call, denied, ok, rows
 
 CAPITAL = fake_chain.SELF
@@ -290,9 +290,16 @@ def built(member, cid, status="ready"):
         {"ok": True, "canisters": [{"name": member, "canister_id": cid, "status": status}]})
 
 
-def adoptable(cid):
-    for method in ("quarter_join_federation", "setup_step", "quarter_sync", "setup_launch"):
+def adoptable(cid, has=()):
+    """The quarter ``cid`` answers every step of its adoption; it lists the extensions ``has`` ((id, version) pairs)."""
+    for method in ("quarter_join_federation", "setup_step", "quarter_sync", "realm_configure_infrastructure",
+                   "realm_configure_trust_policy", "extension_install", "setup_launch"):
         reply(cid, method)
+    reply(cid, "extension_list", extensions=[{"id": i, "version": v} for i, v in has], next=None)
+
+
+TRUST = {"require_marketplace_approval": True, "trusted_approvers": [], "trusted_principals": []}
+FURNISHING = [("realm_configure_trust_policy", TRUST), ("extension_list", {"count": 500})]
 
 
 def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
@@ -315,7 +322,7 @@ def test_quarter_add_asks_casals_and_adopts_the_quarter_it_builds():
     to_south = [(m, json.loads(a)) for cid, m, a in fake_chain.state["calls"] if cid == "south-id"]
     assert to_south == [("quarter_join_federation", {"capital": CAPITAL}),
                         ("setup_step", {"step": "realm", "open_registration": True}),  # the realm's name comes by sync
-                        ("quarter_sync", {}), ("setup_launch", {})]
+                        ("quarter_sync", {}), *FURNISHING, ("setup_launch", {})]
     south = Quarter["south-id"]
     assert (south.name, south.index, south.status) == ("South", 2, "setup")
     s = ok("scale_status", fake_chain.ANONYMOUS)
@@ -354,8 +361,57 @@ def test_a_quarter_whose_first_sync_fails_stays_pending_and_is_synced_and_launch
     reply("east-id", "quarter_sync")
     fake_chain.state["calls"].clear()
     fire_timers()
-    assert [m for cid, m, _ in fake_chain.state["calls"] if cid == "east-id"] == ["quarter_sync", "setup_launch"]
+    assert [m for cid, m, _ in fake_chain.state["calls"] if cid == "east-id"] == [
+        "quarter_sync", "realm_configure_trust_policy", "extension_list", "setup_launch"]
     assert ok("scale_status", fake_chain.ANONYMOUS)["pending"] is None and fake_chain.state["timers"] == []
+
+
+def test_a_quarter_is_furnished_from_its_capital_before_it_launches():
+    """A quarter the realm grew by itself gets what its members need to see the realm's screens: the capital's file
+    registry and marketplace, its trust policy and its extensions at the capital's versions, all before it launches,
+    while its root department still decides alone. One it already has at that version is not installed again."""
+    on_casals()
+    r = Realm["1"]
+    r.file_registry_canister_id, r.marketplace_canister_id = "registry-id", "market-id"
+    r.require_marketplace_approval, r.trusted_approvers = False, ["approver-id"]
+    Extension(id="voting", version="2.1.0")
+    Extension(id="vault", version="0.3.0")
+    Extension(id="retired", version="1.0.0", status="uninstalled")
+    reply(CONDUCTOR, "stand_grow")
+    ok("quarter_add", "ctl", name="East")
+    built("agora-quarter-1", "east-id")
+    adoptable("east-id", has=[("vault", "0.3.0"), ("voting", "2.0.0")])
+    fire_timers()
+    to_east = [(m, json.loads(a)) for cid, m, a in fake_chain.state["calls"] if cid == "east-id"]
+    furnishing = to_east[to_east.index(("quarter_sync", {})) + 1:]
+    assert furnishing == [
+        ("realm_configure_infrastructure", {"file_registry_canister_id": "registry-id",
+                                            "marketplace_canister_id": "market-id"}),
+        ("realm_configure_trust_policy", {"require_marketplace_approval": False, "trusted_approvers": ["approver-id"],
+                                          "trusted_principals": []}),
+        ("extension_list", {"count": 500}),
+        ("extension_install", {"extension": "voting", "version": "2.1.0"}),  # an older one is brought up to date
+        ("setup_launch", {})]
+    assert ok("scale_status", fake_chain.ANONYMOUS)["pending"] is None
+
+
+def test_a_furnishing_the_quarter_files_as_a_proposal_is_not_done_and_is_retried():
+    """A quarter whose root department does not decide alone files the call as a proposal: that is not furnished, so
+    the quarter is not launched, and the step runs again at the next look."""
+    on_casals()
+    Extension(id="voting", version="2.1.0")
+    reply(CONDUCTOR, "stand_grow")
+    ok("quarter_add", "ctl", name="East")
+    built("agora-quarter-1", "east-id")
+    adoptable("east-id")
+    reply("east-id", "extension_install", proposal="7", requires_vote=True)
+    fire_timers()
+    p = ok("scale_status", fake_chain.ANONYMOUS)["pending"]
+    assert p["done"] == ["join", "configure", "register", "sync"] and "did not furnish extension_install" in p["error"]
+    assert "setup_launch" not in [m for cid, m, _ in fake_chain.state["calls"] if cid == "east-id"]
+    reply("east-id", "extension_install")
+    fire_timers()
+    assert ok("scale_status", fake_chain.ANONYMOUS)["pending"] is None
 
 
 def test_a_quarter_still_being_built_is_looked_for_after_an_upgrade():
@@ -398,10 +454,54 @@ def test_the_members_vote_the_realms_own_proposal_and_casals_is_asked():
     assert ok("scale_status", fake_chain.ANONYMOUS)["pending"]["member"] == "agora-quarter-2"
 
 
+def quarter_proposals():
+    return [(p.id, p.status) for p in rows(Proposal) if (p.action or {}).get("op") == "quarter_add"]
+
+
+def test_a_quarter_the_members_turn_down_is_asked_for_again_at_the_next_check():
+    """The realm asks for one quarter at a time. Until 28 Nov 2026 it then stayed "in flight" for good once its own
+    quarter_add closed without running, rejected, expired or failed: one vote against a quarter ended auto-scale (a
+    local mundus' swarm voted the first one down). Now the next check after such a close asks again."""
+    on_casals("north")
+    r = Realm["1"]
+    r.network, r.auto_scale_enabled = "test", True
+    ok("governance_update", "ctl", voting_window=0)
+    ok("quarter_report", "north", population=9)
+    ok("quarter_report", "north", population=10)
+    [(first, status)] = quarter_proposals()
+    assert status == "voting"  # still open: a second report asks for none
+    for voter in ("alice", "bob", "carla", "dana"):
+        ok("proposal_vote", voter, proposal=first, choice="no")
+    assert quarter_proposals() == [(first, "rejected")]
+    ok("quarter_report", "north", population=10)
+    second = quarter_proposals()[-1][0]
+    assert second != first and ok("scale_status", fake_chain.ANONYMOUS)["in_flight"]
+    fake_chain.state["replies"][(CONDUCTOR, "stand_grow")] = json.dumps({"ok": False, "error": "no cycles"})
+    for voter in ("alice", "bob", "carla", "dana"):
+        ok("proposal_vote", voter, proposal=second, choice="yes")
+    assert quarter_proposals()[-1] == (second, "failed")  # Casals refused: no quarter is coming
+    ok("quarter_report", "north", population=10)
+    assert len(quarter_proposals()) == 3 and quarter_proposals()[-1][1] == "voting"
+
+
 def test_a_join_that_fills_the_capital_makes_the_realm_propose_a_quarter():
     on_casals()
     r = Realm["1"]
     r.network, r.auto_scale_enabled, r.open_registration = "test", True, True
     for n in range(9 - Member.count_by("status", "active")):
         ok("realm_join", f"newcomer-{n}")
+    assert [p.action["op"] for p in rows(Proposal) if p.action] == ["quarter_add"]
+
+
+def test_members_imported_into_a_full_capital_make_the_realm_propose_a_quarter():
+    """user_import and user_add add members as a join does, so an import that fills the capital asks for a quarter
+    too; one that leaves room does not."""
+    on_casals()
+    r = Realm["1"]
+    r.network, r.auto_scale_enabled = "test", True
+    room = 9 - Member.count_by("status", "active")
+    ok("user_import", "ctl", users=[{"user": f"imported-{n}"} for n in range(room - 2)])
+    ok("user_add", "ctl", user="added-0")
+    assert not [p for p in rows(Proposal) if (p.action or {}).get("op") == "quarter_add"]
+    ok("user_import", "ctl", users=[{"user": "imported-last"}])
     assert [p.action["op"] for p in rows(Proposal) if p.action] == ["quarter_add"]
