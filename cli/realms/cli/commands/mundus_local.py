@@ -183,7 +183,10 @@ def source_dir(spec: dict, repo: str) -> Path:
 
 def fetch_sources(m: Mundus) -> None:
     """Clone each source the mundus file names by ref, and check that ref out (detached: a build tree, not a branch
-    anyone works on). A source the file points at by path is used as it is."""
+    anyone works on). The checkout is forced: a build rewrites tracked files in these clones (gos-as-a-service's
+    ``realm_registry_backend.did``, Casals's ``casals_backend.did``), and a plain checkout then refuses the next ``up``
+    with "Your local changes … would be overwritten". Nobody edits a clone of ``sources/``, so nothing is lost. A source
+    the file points at by path is someone's own checkout, and is used as it is."""
     for repo in REPOS:
         ref = (m.spec.get("sources") or {}).get(repo, "main")
         path = m.sources[repo]
@@ -196,7 +199,7 @@ def fetch_sources(m: Mundus) -> None:
             subprocess.run(["git", "clone", "--quiet", f"{GITHUB}/{repo}.git", str(path)], check=True)
         subprocess.run(["git", "-C", str(path), "fetch", "--quiet", "origin"], check=True)
         target = ref if ref_exists(path, ref) and not ref_exists(path, f"origin/{ref}") else f"origin/{ref}"
-        subprocess.run(["git", "-C", str(path), "checkout", "--quiet", "--detach", target], check=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "--quiet", "--force", "--detach", target], check=True)
         subprocess.run(["git", "-C", str(path), "submodule", "update", "--init", "--recursive", "--quiet"], check=True)
     for sub in ("extensions", "codices", "ggg"):
         if not any((m.realms_dir / sub).iterdir()):

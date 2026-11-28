@@ -1,0 +1,12 @@
+{
+  "$comment": "One realm whose capital grows its own quarters: auto-scale stays on (no `quarters` field, so the mundus does not turn it off) and a local realm's quarter takes 10 members, so the swarm's 15 people fill the capital and the realm asks Casals for a quarter by itself. `realms mundus up autoscale`. See docs/development/mundus.md for every field.",
+  "name": "autoscale",
+  "sources": {"gos-as-a-service": "main", "Casals": "main", "file-registry": "main", "geister": "main"},
+  "voting_window": 180,
+  "test_sign_in": false,
+  "day_seconds": 60,
+  "realms": [
+    {"name": "ardenia", "codex": "dominion", "seed": 11, "demo": "examples/demo/realm1",
+     "population": {"compliant": 10, "watchful": 3, "apathetic": 2}}
+  ]
+}
