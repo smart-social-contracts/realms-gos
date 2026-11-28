@@ -6,7 +6,7 @@ import pytest
 
 import fake_chain
 import world
-from api import listing, quarters, setup
+from api import assets, listing, quarters, setup
 from ggg import Member, Quarter, Realm, Registry
 from core import op
 from kit import call, denied, later, ok
@@ -90,11 +90,12 @@ def test_the_members_of_a_federation_are_those_of_every_quarter():
 def test_a_realm_told_its_registry_publishes_what_it_holds(registry):
     host_says()
     (first,) = sent(registry)
-    assert first == {"name": "Agora", "users_count": quarters.population(), "stage": "alpha",
+    assert first == {"name": "Agora", "users_count": quarters.population(), "stage": "alpha", "zones": [],
                      "last_activity_at": fake_chain.now()}
     assert Registry[REGISTRY].principal_id == REGISTRY
     told = listing.kept()[REGISTRY]
-    assert told["sent"] == {"name": "Agora", "users_count": quarters.population(), "stage": "alpha"}
+    assert {k: told["sent"][k] for k in ("name", "users_count", "stage")} == {
+        "name": "Agora", "users_count": quarters.population(), "stage": "alpha"}
     assert told["error"] == ""
 
 
@@ -205,6 +206,69 @@ def test_a_realm_registered_in_a_registry_keeps_its_listing_there_too():
     ok("realm_register", "ctl", registry=REGISTRY)
     publish_now()
     assert len(sent(taken)) == 1
+
+
+# ---- the zones, which put the realm on the registry's globe
+
+CELLS = ("881f1d4881fffff", "881f1d4887fffff")  # h3 cells of resolution 8, in the order the realm sends them
+
+
+def zones_sent(registry):
+    return sent(registry)[-1]["zones"]
+
+
+def test_the_zones_the_realm_defined_reach_the_registry_with_their_cell_and_name_and_nothing_else(registry):
+    ok("zone_define", "ctl", zone=CELLS[1], name="Riverside", kind="district")
+    ok("zone_define", "ctl", zone=CELLS[0], name="Hillside", kind="district")
+    ok("user_edit", "ctl", user="alice", home_zone=CELLS[1])  # how many live in a zone is no one else's business
+    ok("zone_set", "bob", zone="881f1d488bfffff", name="Flat 4")  # nor is a member's home cell
+    host_says()
+    assert zones_sent(registry) == [{"h3_index": CELLS[0], "name": "Hillside"},
+                                    {"h3_index": CELLS[1], "name": "Riverside"}]
+
+
+def test_a_zone_defined_or_renamed_reaches_the_registry_at_the_next_look_and_an_unchanged_one_makes_no_call(registry):
+    host_says()
+    assert zones_sent(registry) == []
+    ok("zone_define", "ctl", zone=CELLS[0], name="Hillside", kind="district")
+    next_look()
+    assert len(sent(registry)) == 2 and zones_sent(registry) == [{"h3_index": CELLS[0], "name": "Hillside"}]
+    ok("zone_define", "ctl", zone=CELLS[0], name="Upper Hillside", kind="district")
+    next_look()
+    assert len(sent(registry)) == 3 and zones_sent(registry)[0]["name"] == "Upper Hillside"
+    next_look()
+    assert len(sent(registry)) == 3
+
+
+def test_a_zone_the_registry_would_refuse_is_left_out_since_one_refused_zone_loses_the_whole_listing(registry):
+    ok("zone_define", "ctl", zone="harbour", name="Harbour", kind="district")  # a district by name, on no map
+    ok("zone_define", "ctl", zone=CELLS[0].upper(), name="Hillside", kind="district")  # the registry takes either case
+    host_says()
+    assert zones_sent(registry) == [{"h3_index": CELLS[0].upper(), "name": "Hillside"}]
+
+
+def test_no_more_zones_are_sent_than_a_registry_takes(registry, monkeypatch):
+    monkeypatch.setattr(listing, "ZONES_MAX", 2)
+    for cell in CELLS + ("881f1d488dfffff",):
+        ok("zone_define", "ctl", zone=cell, name="Zone", kind="district")
+    host_says()
+    assert [z["h3_index"] for z in zones_sent(registry)] == list(CELLS)
+
+
+def test_what_the_realm_keeps_of_a_thousand_zones_it_sent_is_a_checksum_not_the_zones(registry):
+    """The realm keeps what it sent in its ``manifest_data``, one field of at most 64 KiB: the zones in full would fill it."""
+    for n in range(listing.ZONES_MAX):
+        assets.define_zone(f"88{n:013x}", f"Zone {n}", "district")
+    host_says()
+    assert len(zones_sent(registry)) == listing.ZONES_MAX
+    assert len(json.dumps(Realm["1"].manifest_data)) < 1000
+
+
+def test_a_realm_publishes_only_as_itself(registry):
+    """The registry takes a listing with no ``id`` as the caller's own: a realm's zones are never another's."""
+    ok("zone_define", "ctl", zone=CELLS[0], name="Hillside", kind="district")
+    host_says()
+    assert "id" not in sent(registry)[0]
 
 
 # ---- who may tell the realm its registry
